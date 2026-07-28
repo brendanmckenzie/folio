@@ -11,11 +11,11 @@
   },
   "exports": {
     "./core": "./src/core/index.ts",
+    "./engine": "./src/core/engine.ts",
     "./server": "./src/server/index.tsx",
     "./preview": "./src/preview/mount.tsx",
     "./vite": "./src/vite/index.ts",
-    "./admin-entry": "./src/admin/main.tsx",
-    "./schema.sql": "./schema.sql"
+    "./admin-entry": "./src/admin/main.tsx"
   },
   "peerDependencies": {
     "react": "^19",

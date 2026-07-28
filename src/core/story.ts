@@ -2,7 +2,7 @@ import { compareSiblings } from './doc'
 
 /**
  * Story *structure*. Page metadata lives in the document's root block, not
- * here — see schema.sql. The only content field mirrored into this table is
+ * here — see migrations/0001_initial.sql. The only content field mirrored into this table is
  * `title`, cached so the tree renders without loading every Durable Object.
  */
 export interface StoryMeta {

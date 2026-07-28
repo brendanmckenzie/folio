@@ -1,3 +1,11 @@
+/**
+ * Public surface for block authors and hosts: schema, fields, resolution and
+ * rendering helpers, story utilities. Nothing here touches the mutation log —
+ * a host wiring up blocks and rendering resolved values never needs to reach
+ * further than this file; anything that mutates or syncs a `Doc` lives in
+ * `folio/engine` instead.
+ */
+
 export { defineBlock, toRegistry, toSchemaIndex, toManifest } from './block'
 export type { AnyBlockDef, BlockDef, Registry } from './block'
 
@@ -30,6 +38,7 @@ export type { AssetValue, FocalPoint, LinkKind, LinkValue } from './values'
 
 export {
   asRichtext,
+  EMPTY_DOC,
   fromPlainText,
   isRichtextEmpty,
   richtextToText,
@@ -67,18 +76,16 @@ export type {
   StoryRef,
 } from './resolve'
 
-export { ancestorsOf, childrenOf, compareSiblings, keyAtIndex, newUid, subtree } from './doc'
+// Reader types only: `Doc`/`Blok` describe the shape a resolver or renderer
+// reads, but walking or mutating one is engine work (see `folio/engine`).
 export type { Blok, Doc, Json } from './doc'
-
-export { apply, applyAll, invert, invertAll, mutationError } from './mutations'
-export type { Mutation } from './mutations'
-
-export { deepEqual, diff, summariseDiff } from './diff'
 
 export { buildTree, derivePaths, descendants, joinPath, newStoryId, slugify } from './story'
 export type { StoryMeta, StoryNode } from './story'
 
-export { blankBlok, indexManifest, slotsOf, summarise } from './schema'
 export type { BlockSchema, Manifest, SchemaIndex } from './schema'
 
-export type { ClientMsg, Delta, Presence, ServerMsg } from './protocol'
+// The activity trail is a read model (who changed what, when), not a mutation
+// primitive, so it ships with the public API even though it is defined
+// alongside the sync wire in `protocol.ts`.
+export type { ActivityEntry } from './protocol'
