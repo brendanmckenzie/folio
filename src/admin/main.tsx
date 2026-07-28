@@ -26,7 +26,7 @@ function App({ boot }: { boot: Boot }) {
   useEffect(() => {
     fetch(`${boot.apiBase}/schema`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`schema ${r.status}`))))
-      .then((m: Manifest) => setSchema(indexManifest(m)))
+      .then((m) => setSchema(indexManifest(m as Manifest)))
       .catch((e: Error) => setError(e.message))
   }, [boot.apiBase])
 
