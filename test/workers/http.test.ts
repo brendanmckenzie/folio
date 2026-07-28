@@ -1,9 +1,14 @@
-import { SELF } from 'cloudflare:test'
+import { env, runInDurableObject, SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 import { diff } from '../../src/core/diff'
 import type { Doc } from '../../src/core/doc'
 import type { Mutation } from '../../src/core/mutations'
-import type { ActivityEntry, ClientMsg, ServerMsg } from '../../src/core/protocol'
+import {
+  type ActivityEntry,
+  type ClientMsg,
+  PROTOCOL_VERSION,
+  type ServerMsg,
+} from '../../src/core/protocol'
 import type { StoryMeta, StoryNode } from '../../src/core/story'
 import type { VersionMeta } from '../../src/server/versions'
 
@@ -128,7 +133,8 @@ async function connect(storyId: string): Promise<Socket> {
     ws,
     async hello(actor) {
       const msg: ClientMsg = { type: 'hello', actor, name: actor, colour: '#000', lastSyncId: 0 }
-      ws.send(JSON.stringify(msg))
+      // The object refuses a handshake that does not name the wire version.
+      ws.send(JSON.stringify({ ...msg, v: PROTOCOL_VERSION }))
       const reply = await expectMsg(
         (m): m is Extract<ServerMsg, { type: 'bootstrap' }> => m.type === 'bootstrap',
       )
@@ -199,6 +205,78 @@ describe('stories: CRUD over /folio/stories', () => {
 
     const tree = await getJson<StoryNode[]>('/folio/stories')
     expect(flatten(tree).some((n) => n.id === parent.id)).toBe(false)
+  })
+
+  it('purges the Durable Object on delete, so a reused id reseeds blank instead of resurrecting the old draft', async () => {
+    const story = await createStory('Delete And Resurrect')
+    const conn = await connect(story.id)
+    const doc = await conn.hello('alice')
+    await conn.tx('resurrect1', [
+      { t: 'set', uid: doc.root, field: 'title', value: 'About to be deleted' },
+    ])
+    conn.close()
+
+    const res = await SELF.fetch(`${API}/stories/${story.id}`, { method: 'DELETE' })
+    expect((await res.json<{ deleted: string[] }>()).deleted).toContain(story.id)
+
+    // Bypasses the route (which now 404s: D1 no longer knows this id) to reach
+    // the object directly, exactly as a stale or reused id eventually would.
+    // Without the purge, this finds the row `getOrInit` wrote before the
+    // delete and returns the edited title instead of the fresh seed.
+    const freshSeed: Doc = {
+      root: 'reseeded0',
+      bloks: {
+        reseeded0: {
+          uid: 'reseeded0',
+          type: 'page',
+          parent: null,
+          slot: null,
+          order: 'a0',
+          data: { title: 'Fresh Seed' },
+        },
+      },
+    }
+    const stub = env.STORY.get(env.STORY.idFromName(story.id))
+    const blank = await runInDurableObject(stub, (instance) => instance.getOrInit(freshSeed))
+    expect(blank).toEqual(freshSeed)
+  })
+})
+
+describe('purge races a live editor', () => {
+  it('closes an already-open editing session on delete, and a fresh connection afterwards gets the same terminal close instead of a 404 that would loop forever', async () => {
+    const story = await createStory('Purged While Editing')
+    const conn = await connect(story.id)
+    await conn.hello('alice')
+
+    const closes: number[] = []
+    conn.ws.addEventListener('close', (event) => {
+      closes.push(event.code)
+    })
+
+    const res = await SELF.fetch(`${API}/stories/${story.id}`, { method: 'DELETE' })
+    expect((await res.json<{ deleted: string[] }>()).deleted).toContain(story.id)
+
+    await wait(50)
+    // 4002: the same application close code story-do.ts's purge() uses.
+    expect(closes).toEqual([4002])
+
+    // The socket route upgrades even for a story D1 no longer has, closing
+    // with that same code rather than 404ing the upgrade: a plain 404 is
+    // indistinguishable on the wire from a dropped connection, and a client
+    // would reconnect on a backoff against an id that can never come back.
+    const retry = await SELF.fetch(`${API}/story/${story.id}/socket`, {
+      headers: { Upgrade: 'websocket' },
+    })
+    expect(retry.status).toBe(101)
+    const retryWs = retry.webSocket!
+    retryWs.accept()
+    const retryCloses: number[] = []
+    retryWs.addEventListener('close', (event) => {
+      retryCloses.push(event.code)
+    })
+
+    await wait(50)
+    expect(retryCloses).toEqual([4002])
   })
 })
 
@@ -291,6 +369,22 @@ describe('versions and restore', () => {
     ).toBe(true)
 
     conn.close()
+  })
+})
+
+describe('activity', () => {
+  it('clamps a non-numeric limit to the default instead of binding NaN', async () => {
+    const story = await createStory('Activity Limit')
+    const conn = await connect(story.id)
+    const doc = await conn.hello('alice')
+    await conn.tx('act1', [{ t: 'set', uid: doc.root, field: 'title', value: 'Active' }])
+    conn.close()
+
+    const res = await SELF.fetch(`${API}/story/${story.id}/activity?limit=not-a-number`)
+    expect(res.status).toBe(200)
+
+    const activity = await res.json<ActivityEntry[]>()
+    expect(activity.length).toBeGreaterThan(0)
   })
 })
 

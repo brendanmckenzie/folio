@@ -79,6 +79,11 @@ export async function uploadAsset(
   const contentType = input.contentType || 'application/octet-stream'
   const dims = imageSize(new Uint8Array(input.bytes))
 
+  // R2 first: the alternative (row first) can leave a library entry pointing at
+  // an object that never made it into the bucket, which is the worse failure —
+  // a broken image nobody can explain. Putting the object first only risks the
+  // narrow window below, where the insert fails and an orphaned object is left
+  // behind; that window is closed immediately by the compensating delete.
   await bucket.put(key, input.bytes, {
     httpMetadata: { contentType, cacheControl: 'public, max-age=31536000, immutable' },
   })
@@ -95,22 +100,36 @@ export async function uploadAsset(
     createdAt: Date.now(),
   }
 
-  await db
-    .prepare(
-      `insert into assets (id, key, filename, content_type, size, width, height, alt, created_at)
-       values (?, ?, ?, ?, ?, ?, ?, '', ?)`,
-    )
-    .bind(
-      row.id,
-      row.key,
-      row.filename,
-      row.contentType,
-      row.size,
-      row.width,
-      row.height,
-      row.createdAt,
-    )
-    .run()
+  try {
+    await db
+      .prepare(
+        `insert into assets (id, key, filename, content_type, size, width, height, alt, created_at)
+         values (?, ?, ?, ?, ?, ?, ?, '', ?)`,
+      )
+      .bind(
+        row.id,
+        row.key,
+        row.filename,
+        row.contentType,
+        row.size,
+        row.width,
+        row.height,
+        row.createdAt,
+      )
+      .run()
+  } catch (e) {
+    // Compensate: the object must not outlive the row that was supposed to
+    // describe it. The compensating delete gets its own try/catch so a
+    // failure in it can never displace `e` — the D1 failure is the one the
+    // caller needs to see and debug; a failed cleanup is a secondary, orphaned
+    // object, not the reportable error.
+    try {
+      await bucket.delete(key)
+    } catch {
+      // Best-effort: nothing else to do with a cleanup failure here.
+    }
+    throw e
+  }
 
   return row
 }
@@ -130,8 +149,21 @@ export async function updateAsset(db: D1Database, id: string, patch: { alt?: str
 export async function deleteAsset(db: D1Database, bucket: R2Bucket, id: string): Promise<boolean> {
   const row = await assetById(db, id)
   if (!row) return false
-  await bucket.delete(row.key)
+  // D1 before R2: if the row survives (the delete throws), the asset is still
+  // listed and still resolves, so a retry is exactly a retry. Deleting the
+  // object first and then failing the D1 delete would leave a row that points
+  // at nothing, silently breaking whatever still references it.
   await db.prepare('delete from assets where id = ?').bind(id).run()
+  try {
+    await bucket.delete(row.key)
+  } catch {
+    // The row is already committed gone by this point, so there is no longer
+    // a "retry" that can reach this object: a second call 404s (assetById
+    // finds nothing). Swallow rather than throw — the delete already
+    // succeeded from the caller's perspective, and reporting a 500 on an
+    // operation that in fact committed is worse than the alternative, an
+    // orphaned R2 object with nothing left pointing at it.
+  }
   return true
 }
 

@@ -50,18 +50,17 @@ export async function getVersion(
   return { meta, doc: JSON.parse(doc) as Doc }
 }
 
-export async function writeVersion(
-  db: D1Database,
-  input: {
-    storyId: string
-    kind: VersionKind
-    doc: Doc
-    label?: string | null
-    actor?: string | null
-    fallbackTitle: string
-  },
-): Promise<VersionMeta> {
-  const meta: VersionMeta = {
+export interface WriteVersionInput {
+  storyId: string
+  kind: VersionKind
+  doc: Doc
+  label?: string | null
+  actor?: string | null
+  fallbackTitle: string
+}
+
+function buildVersionMeta(input: WriteVersionInput): VersionMeta {
+  return {
     id: newVersionId(),
     storyId: input.storyId,
     kind: input.kind,
@@ -70,8 +69,12 @@ export async function writeVersion(
     actor: input.actor ?? null,
     createdAt: Date.now(),
   }
+}
 
-  await db
+/** The insert, unrun: lets a caller batch it alongside another write it must
+ * land atomically with (see `versionStatement` below and the publish route). */
+function versionStatement(db: D1Database, meta: VersionMeta, doc: Doc): D1PreparedStatement {
+  return db
     .prepare(
       `insert into versions (id, story_id, kind, label, title, actor, doc, created_at)
        values (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -83,22 +86,45 @@ export async function writeVersion(
       meta.label,
       meta.title,
       meta.actor,
-      JSON.stringify(input.doc),
+      JSON.stringify(doc),
       meta.createdAt,
     )
-    .run()
+}
 
+/**
+ * Builds the version row's statement without running it, for a caller that must
+ * batch it together with another write (publish's stories-row update) so the two
+ * can never land disagreeing with each other.
+ */
+export function buildVersionWrite(
+  db: D1Database,
+  input: WriteVersionInput,
+): { meta: VersionMeta; statement: D1PreparedStatement } {
+  const meta = buildVersionMeta(input)
+  return { meta, statement: versionStatement(db, meta, input.doc) }
+}
+
+export async function writeVersion(db: D1Database, input: WriteVersionInput): Promise<VersionMeta> {
+  const { meta, statement } = buildVersionWrite(db, input)
+  await statement.run()
   return meta
+}
+
+/** The delete, unrun, or null when there is nothing to remove: a caller batches
+ * this alongside the stories-row delete so a story and its version history
+ * disappear together. */
+export function deleteVersionsStatement(
+  db: D1Database,
+  storyIds: readonly string[],
+): D1PreparedStatement | null {
+  if (!storyIds.length) return null
+  const placeholders = storyIds.map(() => '?').join(', ')
+  return db.prepare(`delete from versions where story_id in (${placeholders})`).bind(...storyIds)
 }
 
 export async function deleteVersionsFor(
   db: D1Database,
   storyIds: readonly string[],
 ): Promise<void> {
-  if (!storyIds.length) return
-  const placeholders = storyIds.map(() => '?').join(', ')
-  await db
-    .prepare(`delete from versions where story_id in (${placeholders})`)
-    .bind(...storyIds)
-    .run()
+  await deleteVersionsStatement(db, storyIds)?.run()
 }
