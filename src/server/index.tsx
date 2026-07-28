@@ -30,7 +30,9 @@ import {
 import {
   deleteAsset,
   listAssets,
+  MAX_UPLOAD_BYTES,
   parseTransform,
+  readCappedBody,
   serveAsset,
   toAssetValue,
   updateAsset,
@@ -44,9 +46,27 @@ import {
   listVersions,
   writeVersion,
 } from './versions'
+import { envelope, FolioError, INTERNAL, rethrow } from './errors'
+import {
+  actorHeader,
+  AssetPatchBody,
+  assetKeyParam,
+  CheckpointBody,
+  contentLengthHeader,
+  filenameQuery,
+  idParam,
+  isId,
+  limitParam,
+  parseBody,
+  parseOptionalBody,
+  StoryCreateBody,
+  StoryPatchBody,
+} from './validate'
 
 export { StoryDO }
 export type { VersionKind, VersionMeta } from './versions'
+export { FolioError } from './errors'
+export type { ErrorEnvelope, FolioErrorCode } from './errors'
 export { FolioDoc } from '../preview/Render'
 export { Shell, serializeJson } from './Document'
 export type { StoryMeta, StoryNode } from '../core/story'
@@ -200,6 +220,21 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
 
   const app = new Hono<{ Bindings: never }>().basePath(base)
 
+  /**
+   * Every failed request answers `{ error: { code, message } }`.
+   *
+   * A FolioError carries a message a route wrote deliberately. Anything else is
+   * a bug or a platform failure: it is logged with the route that raised it —
+   * the library's first observability hook, and the only place an internal
+   * message is allowed to appear — and the client is told nothing beyond a
+   * generic 500, so raw D1 text never travels.
+   */
+  app.onError((err, c) => {
+    if (err instanceof FolioError) return c.json(envelope(err), err.status)
+    console.error(`folio: unhandled error in ${c.req.method} ${c.req.path}`, err)
+    return c.json(INTERNAL, 500)
+  })
+
   app.get('/schema', (c) => c.json(manifest))
 
   app.get('/stories', async (c) => {
@@ -209,41 +244,35 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
 
   app.post('/stories', async (c) => {
     const db = config.bindings(c.env as Env).db
-    const body = await c.req.json<{ title?: string; slug?: string; parentId?: string | null }>()
-    if (!body.title?.trim()) return c.json({ error: 'title is required' }, 400)
+    const body = await parseBody(c.req, StoryCreateBody)
     try {
-      return c.json(
-        withUrls(
-          await createStory(db, { title: body.title, slug: body.slug, parentId: body.parentId }),
-        ),
-      )
+      return c.json(withUrls(await createStory(db, body)))
     } catch (e) {
-      return c.json({ error: String((e as Error).message) }, 400)
+      // `Unknown parent` is the client's mistake; a path collision is a
+      // conflict; a D1 failure is nobody's business but the log's.
+      rethrow(e)
     }
   })
 
   app.patch('/stories/:id', async (c) => {
     const db = config.bindings(c.env as Env).db
-    const body = await c.req.json<{
-      title?: string
-      slug?: string
-      parentId?: string | null
-      index?: number
-    }>()
+    const id = idParam('id', c.req.param('id'))
+    const body = await parseBody(c.req, StoryPatchBody)
     try {
-      return c.json(withUrls(await updateStory(db, c.req.param('id'), body)))
+      return c.json(withUrls(await updateStory(db, id, body)))
     } catch (e) {
-      return c.json({ error: String((e as Error).message) }, 400)
+      rethrow(e)
     }
   })
 
   app.delete('/stories/:id', async (c) => {
     const env = c.env as Env
     const db = config.bindings(env).db
+    const target = idParam('id', c.req.param('id'))
 
     let found: Awaited<ReturnType<typeof deleteStoryStatement>>
     try {
-      found = await deleteStoryStatement(db, c.req.param('id'))
+      found = await deleteStoryStatement(db, target)
       if (!found) return c.json({ deleted: [] })
 
       // One batch for the story rows and their version history: either both
@@ -255,8 +284,9 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       await db.batch(versions ? [found.statement, versions] : [found.statement])
     } catch (e) {
       // Nothing has committed yet at this point, so reporting a failure here
-      // is accurate.
-      return c.json({ error: String((e as Error).message) }, 400)
+      // is accurate. `Cannot delete the root story` is a conflict; a failed
+      // batch is internal.
+      rethrow(e)
     }
 
     // The Durable Object is purged only once that batch has committed.
@@ -287,7 +317,9 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     if (c.req.header('Upgrade') !== 'websocket') return c.text('Expected websocket', 426)
     const env = c.env as Env
     const id = c.req.param('id')
-    if (!(await storyById(config.bindings(env).db, id))) {
+    // A malformed id cannot name a story, so it takes the close path below
+    // rather than a 400, for the reason documented there.
+    if (!isId(id) || !(await storyById(config.bindings(env).db, id))) {
       // A plain HTTP 404 here is indistinguishable, on the wire, from a
       // dropped upgrade: the client's WebSocket only ever sees a failed
       // handshake either way, and reconnects on a backoff forever — a
@@ -310,9 +342,12 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
   app.post('/story/:id/publish', async (c) => {
     const env = c.env as Env
     const db = config.bindings(env).db
-    const id = c.req.param('id')
+    const id = idParam('id', c.req.param('id'))
+    // Both inputs are checked before any work happens: neither the Durable
+    // Object nor D1 should be touched on a request that cannot land.
+    const actor = actorHeader(c.req.header('x-folio-actor'))
     const meta = await storyById(db, id)
-    if (!meta) return c.json({ error: 'Unknown story' }, 404)
+    if (!meta) throw new FolioError('not_found', 'Unknown story')
 
     const doc = await draft(env, id)
     // Every publish is a retained version, so "restore what was live before" is
@@ -324,7 +359,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       storyId: id,
       kind: 'publish',
       doc,
-      actor: c.req.header('x-folio-actor') ?? null,
+      actor,
       fallbackTitle: meta.title,
     })
     const { publishedAt, statement: publishStatement } = publishStoryStatement(
@@ -347,9 +382,9 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
    */
   app.get('/story/:id/document', async (c) => {
     const env = c.env as Env
-    const id = c.req.param('id')
+    const id = idParam('id', c.req.param('id'))
     if (!(await storyById(config.bindings(env).db, id)))
-      return c.json({ error: 'Unknown story' }, 404)
+      throw new FolioError('not_found', 'Unknown story')
     return c.json({ doc: await draft(env, id) })
   })
 
@@ -367,36 +402,39 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
    */
   app.post('/assets', async (c) => {
     const { db, media } = config.bindings(c.env as Env)
-    if (!media) return c.json({ error: 'No media bucket is configured' }, 501)
+    if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
 
-    const filename = c.req.query('filename')
-    if (!filename) return c.json({ error: 'filename is required' }, 400)
-
-    const bytes = await c.req.arrayBuffer()
+    const filename = filenameQuery(c.req.query('filename'))
+    // A declared length already over the cap is refused before a byte is
+    // read. That is the fast path, not the guarantee: `readCappedBody` is what
+    // makes the cap hold for a request with no Content-Length, or a lying one.
+    contentLengthHeader(c.req.header('content-length'), MAX_UPLOAD_BYTES)
     try {
-      const row = await uploadAsset(db, media, {
-        bytes,
-        filename,
-        contentType: c.req.header('content-type') ?? '',
-      })
+      const bytes = await readCappedBody(c.req.raw.body, MAX_UPLOAD_BYTES)
+      const row = await uploadAsset(db, media, { bytes, filename })
       return c.json({ asset: row, value: toAssetValue(row) }, 201)
     } catch (e) {
-      return c.json({ error: (e as Error).message }, 400)
+      // An empty upload is a bad request; one over either size ceiling is
+      // `too_large`; a failed R2 put or D1 insert is internal.
+      rethrow(e)
     }
   })
 
   app.patch('/assets/:id', async (c) => {
     const db = config.bindings(c.env as Env).db
-    const body = await c.req.json<{ alt?: string }>().catch(() => ({}))
-    const row = await updateAsset(db, c.req.param('id'), body)
-    return row ? c.json(row) : c.json({ error: 'Unknown asset' }, 404)
+    const id = idParam('id', c.req.param('id'))
+    const body = await parseOptionalBody(c.req, AssetPatchBody)
+    const row = await updateAsset(db, id, body)
+    if (!row) throw new FolioError('not_found', 'Unknown asset')
+    return c.json(row)
   })
 
   app.delete('/assets/:id', async (c) => {
     const { db, media } = config.bindings(c.env as Env)
-    if (!media) return c.json({ error: 'No media bucket is configured' }, 501)
-    const gone = await deleteAsset(db, media, c.req.param('id'))
-    return gone ? c.json({ deleted: true }) : c.json({ error: 'Unknown asset' }, 404)
+    if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
+    const gone = await deleteAsset(db, media, idParam('id', c.req.param('id')))
+    if (!gone) throw new FolioError('not_found', 'Unknown asset')
+    return c.json({ deleted: true })
   })
 
   /**
@@ -405,12 +443,13 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
    */
   app.get('/asset/:key', async (c) => {
     const { media, images } = config.bindings(c.env as Env)
-    if (!media) return c.text('No media bucket is configured', 501)
+    if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
     return serveAsset(
       media,
       images,
-      c.req.param('key'),
+      assetKeyParam(c.req.param('key')),
       parseTransform(new URL(c.req.url).searchParams),
+      c.req.raw,
     )
   })
 
@@ -418,19 +457,17 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
 
   app.get('/story/:id/versions', async (c) => {
     const db = config.bindings(c.env as Env).db
-    return c.json(await listVersions(db, c.req.param('id')))
+    return c.json(await listVersions(db, idParam('id', c.req.param('id'))))
   })
 
   app.post('/story/:id/versions', async (c) => {
     const env = c.env as Env
     const db = config.bindings(env).db
-    const id = c.req.param('id')
+    const id = idParam('id', c.req.param('id'))
     const story = await storyById(db, id)
-    if (!story) return c.json({ error: 'Unknown story' }, 404)
+    if (!story) throw new FolioError('not_found', 'Unknown story')
 
-    const body: { label?: string; actor?: string } = await c.req
-      .json<{ label?: string; actor?: string }>()
-      .catch(() => ({}))
+    const body = await parseOptionalBody(c.req, CheckpointBody)
     const doc = await draft(env, id)
     return c.json(
       await writeVersion(db, {
@@ -451,22 +488,25 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
    */
   app.get('/versions/:versionId', async (c) => {
     const db = config.bindings(c.env as Env).db
-    const found = await getVersion(db, c.req.param('versionId'))
-    return found ? c.json(found) : c.json({ error: 'Unknown version' }, 404)
+    const found = await getVersion(db, idParam('versionId', c.req.param('versionId')))
+    if (!found) throw new FolioError('not_found', 'Unknown version')
+    return c.json(found)
   })
 
   app.get('/story/:id/activity', async (c) => {
     const env = c.env as Env
-    const id = c.req.param('id')
+    const id = idParam('id', c.req.param('id'))
     if (!(await storyById(config.bindings(env).db, id)))
-      return c.json({ error: 'Unknown story' }, 404)
-    return c.json(await stub(env, id).recent(clampLimit(c.req.query('limit'), 60, 200)))
+      throw new FolioError('not_found', 'Unknown story')
+    return c.json(await stub(env, id).recent(limitParam(c.req.query('limit'), 60, 200)))
   })
 
   app.get('/edit/:id', async (c) => {
     const env = c.env as Env
     const id = c.req.param('id')
-    const meta = await storyById(config.bindings(env).db, id)
+    // An HTML route: an id nothing is behind — malformed or simply gone — is a
+    // 404 page, not a JSON envelope.
+    const meta = isId(id) ? await storyById(config.bindings(env).db, id) : null
     if (!meta) return c.notFound()
 
     return html(
@@ -547,19 +587,6 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       <FolioDoc doc={doc} registry={registry} edit={opts?.edit} resolution={opts?.resolution} />
     ),
   }
-}
-
-/**
- * A query-string limit, defaulted and bounded. `Number(undefined)` and
- * `Number('not-a-number')` both produce `NaN`, which must never reach the SQL
- * bind inside the Durable Object (`Math.max(NaN, 1)` is itself `NaN`, not 1) —
- * so absent or non-numeric input falls back to `fallback` here, before the
- * clamp, rather than trusting the DO's own bound to catch it.
- */
-function clampLimit(raw: string | undefined, fallback: number, max: number): number {
-  const n = Number(raw)
-  if (!Number.isFinite(n)) return fallback
-  return Math.min(Math.max(Math.trunc(n), 1), max)
 }
 
 function entries<Env>(config: FolioConfig<Env>, which: 'admin' | 'preview'): string[] {

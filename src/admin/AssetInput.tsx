@@ -35,10 +35,9 @@ async function upload(
     body: file,
   })
   if (!res.ok) {
-    throw new Error(
-      ((await res.json().catch(() => ({}))) as { error?: string }).error ??
-        `Upload failed (${res.status})`,
-    )
+    // Every Folio failure is `{ error: { code, message } }` (see server/errors.ts).
+    const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
+    throw new Error(body.error?.message ?? `Upload failed (${res.status})`)
   }
   return (await res.json()) as { asset: AssetRow; value: AssetValue }
 }

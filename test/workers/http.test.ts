@@ -1,5 +1,5 @@
 import { env, runInDurableObject, SELF } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { diff } from '../../src/core/diff'
 import type { Doc } from '../../src/core/doc'
 import type { Mutation } from '../../src/core/mutations'
@@ -10,6 +10,7 @@ import {
   type ServerMsg,
 } from '../../src/core/protocol'
 import type { StoryMeta, StoryNode } from '../../src/core/story'
+import type { AssetRow } from '../../src/server/assets'
 import type { VersionMeta } from '../../src/server/versions'
 
 /**
@@ -59,6 +60,26 @@ async function htmlOf(path: string): Promise<string> {
 function createStory(title: string, parentId?: string): Promise<StoryMeta> {
   return postJson<StoryMeta>('/folio/stories', { title, parentId })
 }
+
+interface ErrorEnvelope {
+  error: { code: string; message: string }
+}
+
+/** Status, the parsed envelope, and the raw text a client would actually see. */
+async function failureOf(
+  path: string,
+  init?: RequestInit,
+): Promise<{ status: number; text: string; body: ErrorEnvelope }> {
+  const res = await SELF.fetch(`${ORIGIN}${path}`, init)
+  const text = await res.text()
+  return { status: res.status, text, body: JSON.parse(text) as ErrorEnvelope }
+}
+
+const jsonPost = (body: string): RequestInit => ({
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body,
+})
 
 function flatten(nodes: readonly StoryNode[]): StoryNode[] {
   return nodes.flatMap((n) => [n, ...flatten(n.children)])
@@ -142,7 +163,8 @@ async function connect(storyId: string): Promise<Socket> {
     },
     async tx(txId, mutations) {
       const msg: ClientMsg = { type: 'tx', txId, mutations }
-      ws.send(JSON.stringify(msg))
+      // The object refuses any frame that omits the wire version, not only `hello`.
+      ws.send(JSON.stringify({ ...msg, v: PROTOCOL_VERSION }))
       await expectMsg(
         (m): m is Extract<ServerMsg, { type: 'delta' }> => m.type === 'delta' && m.txId === txId,
       )
@@ -460,5 +482,283 @@ describe('preview and host fallthrough', () => {
     const res = await SELF.fetch(`${ORIGIN}/nothing-lives-here?_folio=preview`)
     expect(res.status).toBe(404)
     expect(await res.text()).toBe('host: not found')
+  })
+})
+
+/**
+ * Every failure answers `{ error: { code, message } }`. The codes are the
+ * contract (a client switches on them); the messages are only ever ones the
+ * server wrote on purpose — raw D1 text and internal `Error` messages stop at
+ * `app.onError`.
+ */
+describe('validation and the error envelope', () => {
+  it('rejects a body with the wrong type for a field, naming the field it refused', async () => {
+    const { status, body } = await failureOf(
+      '/folio/stories',
+      jsonPost(JSON.stringify({ title: 7 })),
+    )
+
+    expect(status).toBe(400)
+    expect(body.error.code).toBe('bad_request')
+    expect(body.error.message).toContain('title')
+  })
+
+  it('rejects a body that is not JSON at all, rather than letting it become a 500', async () => {
+    const { status, body } = await failureOf('/folio/stories', jsonPost('{"title": '))
+
+    expect(status).toBe(400)
+    expect(body.error.code).toBe('bad_request')
+  })
+
+  it('rejects a title past the cap, and writes no row', async () => {
+    const title = 'x'.repeat(301)
+    const { status, body } = await failureOf('/folio/stories', jsonPost(JSON.stringify({ title })))
+
+    expect(status).toBe(400)
+    expect(body.error.code).toBe('bad_request')
+    expect(body.error.message).toContain('300')
+
+    // The cap exists to stop the write, not to describe it after the fact.
+    const tree = await getJson<StoryNode[]>('/folio/stories')
+    expect(flatten(tree).every((n) => n.title.length <= 300)).toBe(true)
+  })
+
+  it('rejects an id that could not name a row', async () => {
+    const { status, body } = await failureOf('/folio/story/not%20an%20id/document')
+
+    expect(status).toBe(400)
+    expect(body.error.code).toBe('bad_request')
+  })
+
+  it('rejects an actor header past the cap on publish', async () => {
+    const story = await createStory('Actor Header Cap')
+    const { status, body } = await failureOf(`/folio/story/${story.id}/publish`, {
+      method: 'POST',
+      headers: { 'x-folio-actor': 'a'.repeat(65) },
+    })
+
+    expect(status).toBe(400)
+    expect(body.error.code).toBe('bad_request')
+    expect(body.error.message).toContain('x-folio-actor')
+  })
+
+  it('refuses a body that is valid JSON but not an object, without echoing it back', async () => {
+    // valibot's default object message stringifies what it received, which would
+    // make this route a reflection channel for whatever a client sent. Every
+    // body schema passes its own message for that reason.
+    const marker = 'LEAK-ME-BACK'
+    const { status, text, body } = await failureOf(
+      '/folio/stories',
+      jsonPost(JSON.stringify(`<img src=x onerror=alert(1)>${marker}`)),
+    )
+
+    expect(status).toBe(400)
+    expect(body.error.code).toBe('bad_request')
+    expect(body.error.message).toBe('body must be a JSON object')
+    expect(text).not.toContain(marker)
+  })
+
+  it('accepts a title containing a multi-codepoint emoji', async () => {
+    // ZWJ (U+200D) is `\p{Cf}`, so screening all of `\p{C}` would 400 every
+    // emoji a person can type: a flag, a family, a job title.
+    for (const title of ['Meet the team 👨‍💻', 'Pride 🏳️‍🌈', 'Family 👨‍👩‍👧‍👦']) {
+      const story = await createStory(title)
+      expect(story.title).toBe(title)
+    }
+  })
+
+  it('still refuses a lone surrogate and a bidi override in a title', async () => {
+    // A well-formed pair is a single non-`Cs` code point under `/u` (the emoji
+    // above prove it passes); half of one is not, and cannot round-trip through
+    // a D1 column. U+202E reorders a rendered title away from what was stored.
+    for (const title of ['broken \ud800 half', 'invoice\u202egnp.exe']) {
+      const { status, body } = await failureOf(
+        '/folio/stories',
+        jsonPost(JSON.stringify({ title })),
+      )
+      expect(status).toBe(400)
+      expect(body.error.message).toContain('unsupported characters')
+    }
+  })
+
+  it('404s a story that does not exist, as an envelope rather than a bare status', async () => {
+    const { status, body } = await failureOf('/folio/story/sty_nothing/document')
+
+    expect(status).toBe(404)
+    expect(body.error.code).toBe('not_found')
+    expect(body.error.message).toBe('Unknown story')
+  })
+
+  it('404s an unknown version the same way', async () => {
+    const { status, body } = await failureOf('/folio/versions/ver_nothing')
+
+    expect(status).toBe(404)
+    expect(body.error.code).toBe('not_found')
+  })
+
+  it('reports a path collision as a conflict, without D1s constraint text', async () => {
+    // `uniqueSlug` only dedupes against siblings, so a child of the root story
+    // (whose path is '') can still derive a path a top-level story already
+    // owns — 'about', seeded in schema.sql. D1's `path` unique index is what
+    // refuses it, and its message names the table and the column.
+    const { status, text, body } = await failureOf(
+      '/folio/stories',
+      jsonPost(JSON.stringify({ title: 'About', parentId: 'sty_home' })),
+    )
+
+    expect(status).toBe(409)
+    expect(body.error.code).toBe('conflict')
+    expect(text).not.toMatch(/UNIQUE|constraint|SQLITE|stories\.path/i)
+  })
+
+  it('rejects moving a story into its own subtree with the reason, not a 500', async () => {
+    const parent = await createStory('Cycle Parent')
+    const child = await createStory('Cycle Child', parent.id)
+
+    const res = await SELF.fetch(`${API}/stories/${parent.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ parentId: child.id }),
+    })
+    const body = await res.json<ErrorEnvelope>()
+
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('bad_request')
+    expect(body.error.message).toBe('Cannot move a story into its own subtree')
+  })
+
+  it('reports refusing to delete the root story as a conflict', async () => {
+    const { status, body } = await failureOf('/folio/stories/sty_home', { method: 'DELETE' })
+
+    expect(status).toBe(409)
+    expect(body.error.code).toBe('conflict')
+    expect(body.error.message).toBe('Cannot delete the root story')
+  })
+
+  it('answers a corrupted persisted row with a generic 500, logging the route and nothing else', async () => {
+    // A row that cannot have come from `writeVersion`: the closest reachable
+    // stand-in for the class of failure onError exists for — a bug or a
+    // platform fault mid-request, where the only honest thing to tell a client
+    // is that it failed.
+    const id = 'ver_corrupt1'
+    await env.DB.prepare(
+      `insert into versions (id, story_id, kind, label, title, actor, doc, created_at)
+       values (?, 'sty_home', 'checkpoint', null, 'Corrupt', null, 'not json', ?)`,
+    )
+      .bind(id, Date.now())
+      .run()
+
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const { status, text, body } = await failureOf(`/folio/versions/${id}`)
+
+      expect(status).toBe(500)
+      expect(body.error.code).toBe('internal')
+      // Nothing about the parse, the table or the row travels.
+      expect(text).not.toMatch(/JSON|SyntaxError|versions|token/i)
+      // The route is the context the log line owes whoever reads it.
+      expect(String(logged.mock.calls[0]?.[0])).toContain(`GET /folio/versions/${id}`)
+    } finally {
+      logged.mockRestore()
+    }
+  })
+})
+
+/** 1×1 transparent PNG: the smallest upload `imageSize` can read dimensions from. */
+const PNG_1X1 = Uint8Array.from(
+  atob(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  ),
+  (ch) => ch.charCodeAt(0),
+)
+
+function upload(filename: string, contentType: string, body: BodyInit): Promise<Response> {
+  return SELF.fetch(`${API}/assets?filename=${encodeURIComponent(filename)}`, {
+    method: 'POST',
+    headers: { 'content-type': contentType },
+    body,
+  })
+}
+
+/**
+ * `POST /folio/assets` takes a raw body from a client that (until auth lands) is
+ * anyone, and `GET /folio/asset/:key` serves it back from the site's own origin
+ * — the URL published pages carry in their `<img>` tags. What the first route
+ * agrees to store is therefore what the second is willing to execute.
+ */
+describe('asset uploads and serving', () => {
+  it('keeps a served image type, with nosniff', async () => {
+    const res = await upload('photo.png', 'image/png', PNG_1X1)
+    expect(res.status).toBe(201)
+    const { asset } = await res.json<{ asset: AssetRow }>()
+    expect(asset.contentType).toBe('image/png')
+    expect(asset.width).toBe(1)
+
+    const served = await SELF.fetch(`${API}/asset/${asset.key}`)
+    expect(served.headers.get('content-type')).toBe('image/png')
+    expect(served.headers.get('x-content-type-options')).toBe('nosniff')
+  })
+
+  it('stores a script-bearing upload as a download rather than as HTML on this origin', async () => {
+    const script = '<script>alert(document.domain)</script>'
+    const res = await upload('payload.html', 'text/html', script)
+
+    // Kept, not refused: the file is the client's, only the type it claimed is
+    // not honoured.
+    expect(res.status).toBe(201)
+    const { asset } = await res.json<{ asset: AssetRow }>()
+    expect(asset.contentType).toBe('application/octet-stream')
+
+    const served = await SELF.fetch(`${API}/asset/${asset.key}`)
+    expect(served.headers.get('content-type')).toBe('application/octet-stream')
+    expect(served.headers.get('x-content-type-options')).toBe('nosniff')
+    // Decoded rather than `.text()`: the response is deliberately not text now.
+    expect(new TextDecoder().decode(await served.arrayBuffer())).toBe(script)
+  })
+
+  it('does not serve an uploaded SVG as an image', async () => {
+    // The transform path excludes SVG on purpose, so an allowed `image/svg+xml`
+    // would be streamed back verbatim — a script with an image's content type.
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+    const { asset } = await (await upload('logo.svg', 'image/svg+xml', svg)).json<{
+      asset: AssetRow
+    }>()
+
+    expect(asset.contentType).toBe('application/octet-stream')
+    const served = await SELF.fetch(`${API}/asset/${asset.key}`)
+    expect(served.headers.get('content-type')).toBe('application/octet-stream')
+  })
+
+  it('ignores a charset parameter on an otherwise served type', async () => {
+    const { asset } = await (await upload('shot.png', 'IMAGE/PNG; charset=binary', PNG_1X1)).json<{
+      asset: AssetRow
+    }>()
+
+    expect(asset.contentType).toBe('image/png')
+  })
+
+  it('refuses an oversized upload on the declared length, before reading the body', async () => {
+    const { status, body } = await failureOf('/folio/assets?filename=huge.png', {
+      method: 'POST',
+      headers: { 'content-type': 'image/png', 'content-length': String(21 * 1024 * 1024) },
+      body: PNG_1X1,
+    })
+
+    expect(status).toBe(413)
+    expect(body.error.code).toBe('too_large')
+    // The same wording the post-read check in assets.ts produces.
+    expect(body.error.message).toBe('File is larger than 20MB')
+  })
+
+  it('refuses a filename past the cap', async () => {
+    const { status, body } = await failureOf(`/folio/assets?filename=${'a'.repeat(201)}.png`, {
+      method: 'POST',
+      headers: { 'content-type': 'image/png' },
+      body: PNG_1X1,
+    })
+
+    expect(status).toBe(400)
+    expect(body.error.code).toBe('bad_request')
+    expect(body.error.message).toContain('filename')
   })
 })
