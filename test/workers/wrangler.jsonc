@@ -1,0 +1,37 @@
+{
+  // Bindings for the `workers` vitest project. Mirrors examples/demo/wrangler.jsonc,
+  // which is the configuration src/server is written against.
+  //
+  // Nothing here is deployed; miniflare serves every binding locally and the
+  // database_id / bucket_name values are never dereferenced.
+  "name": "folio-test",
+  // Relative to this file. Must stay in sync with the `main` passed to
+  // cloudflareTest() in vitest.config.ts, which is relative to the project root.
+  "main": "./worker.ts",
+  "compatibility_date": "2026-07-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "folio-test",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "STORY", "class_name": "StoryDO" }]
+  },
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "folio-test-media"
+    }
+  ],
+  // No "images" binding on purpose. FolioBindings.images is optional and
+  // src/server/assets.ts falls back to serving the original object when it is
+  // absent, which is the path a bare `wrangler dev` takes, so it is the path
+  // tests should cover. Add an env/override rather than binding it here.
+  //
+  // StoryDO keeps its draft in ctx.storage.sql, so the class has to be created
+  // as SQLite-backed. Without this migration every `sql.exec` throws.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StoryDO"] }]
+}
