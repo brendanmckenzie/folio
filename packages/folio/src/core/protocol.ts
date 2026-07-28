@@ -1,5 +1,6 @@
 import type { Blok, Doc } from './doc'
 import type { Mutation } from './mutations'
+import type { Resolution } from './resolve'
 
 /**
  * Wire format version, carried by every frame in both directions. Persisted logs
@@ -289,5 +290,73 @@ export function parseClientFrame(raw: string | ArrayBuffer): ClientFrame | null 
       return { type: 'tx', txId: value.txId, mutations: value.mutations, ...version }
     case 'presence':
       return { type: 'presence', selection: normalizeSelection(value.selection), ...version }
+  }
+}
+
+/*
+ * ---------------------------------------------------------------------------
+ * Admin <-> preview postMessage protocol.
+ *
+ * A second, unrelated wire: the admin and its preview iframe, talking over
+ * `window.postMessage` instead of a socket. Same-origin is a hard requirement
+ * here, not a courtesy check — both sides post with an explicit target origin
+ * of `window.location.origin` and refuse anything whose `event.origin` is not
+ * that origin, so a `previewUrl` (see core/story.ts, computed in a host's
+ * `route` config) pointed at a different origin does not degrade gracefully,
+ * it simply never talks to the editor at all. `v` rides on every frame for
+ * the same reason it rides the socket: a mismatch should be visible, not
+ * silently misapplied, even though in practice both ends of this channel are
+ * the same deploy loaded a moment apart.
+ * ---------------------------------------------------------------------------
+ */
+
+/** What the admin pushes into the preview: document state and where it stands. */
+export type AdminToPreviewMsg =
+  | { type: 'apply'; mutations: Mutation[] }
+  | { type: 'replace'; doc: Doc }
+  | { type: 'resolve'; resolution: Resolution }
+  | { type: 'select'; uid: string | null }
+
+/** What the preview reports back: handshake, picks, and add-block requests. */
+export type PreviewToAdminMsg =
+  | { type: 'ready' }
+  | { type: 'select'; uid: string }
+  | { type: 'add'; parent: string; slot: string }
+
+/** Every shape that can cross the iframe boundary, in either direction. */
+export type PreviewMsg = AdminToPreviewMsg | PreviewToAdminMsg
+
+/** Tag on every frame identifying which side of the iframe sent it. */
+export type PreviewMsgSource = 'folio-admin' | 'folio-preview'
+
+/** A postMessage frame as it actually crosses the iframe boundary. */
+export type PreviewFrame = Framed<PreviewMsg> & { source: PreviewMsgSource }
+
+/**
+ * Total over `unknown`, same discipline as `isClientMsg`: `event.data` on a
+ * `message` listener is whatever the other side's JS handed to `postMessage`,
+ * not JSON, so nothing here throws on a shape neither end would ever send.
+ */
+export function isPreviewMsg(x: unknown): x is PreviewMsg {
+  if (!isRecord(x)) return false
+  if (x.v !== undefined && !isNumber(x.v)) return false
+  switch (x.type) {
+    case 'apply':
+      return Array.isArray(x.mutations) && x.mutations.every(isMutation)
+    case 'replace':
+      return isRecord(x.doc)
+    case 'resolve':
+      return isRecord(x.resolution)
+    case 'select':
+      // Admin-to-preview select may clear the selection; preview-to-admin
+      // select always names a clicked block. One guard covers both: the
+      // narrower requirement (a real uid) is enforced by direction, not shape.
+      return x.uid === null || isString(x.uid)
+    case 'ready':
+      return true
+    case 'add':
+      return isString(x.parent) && isString(x.slot)
+    default:
+      return false
   }
 }

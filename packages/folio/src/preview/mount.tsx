@@ -3,7 +3,13 @@ import { useEffect, useState } from 'react'
 import { hydrateRoot } from 'react-dom/client'
 import { toRegistry, type AnyBlockDef, type Registry } from '../core/block'
 import type { Doc } from '../core/doc'
-import { applyAll, type Mutation } from '../core/mutations'
+import { applyAll } from '../core/mutations'
+import {
+  isPreviewMsg,
+  PROTOCOL_VERSION,
+  type PreviewFrame,
+  type PreviewToAdminMsg,
+} from '../core/protocol'
 import { EMPTY_RESOLUTION, type Resolution } from '../core/resolve'
 import { FolioDoc } from './Render'
 
@@ -13,15 +19,14 @@ declare global {
   }
 }
 
-type FromAdmin =
-  | { type: 'apply'; mutations: Mutation[] }
-  | { type: 'replace'; doc: Doc }
-  | { type: 'select'; uid: string | null }
-  /** Story structure changed, so ids may now resolve to different URLs. */
-  | { type: 'resolve'; resolution: Resolution }
-
-function post(msg: Record<string, unknown>) {
-  window.parent?.postMessage({ source: 'folio-preview', ...msg }, window.location.origin)
+function post(msg: PreviewToAdminMsg) {
+  window.parent?.postMessage(
+    { source: 'folio-preview', v: PROTOCOL_VERSION, ...msg },
+    // Same-origin is a hard requirement, not a courtesy check — see
+    // core/protocol.ts. A preview whose `previewUrl` lands on a different
+    // origin than the admin does not degrade, it just never gets here.
+    window.location.origin,
+  )
 }
 
 function PreviewApp({
@@ -39,8 +44,14 @@ function PreviewApp({
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return
-      const msg = e.data as ({ source?: string } & FromAdmin) | null
-      if (msg?.source !== 'folio-admin') return
+      // Same hardening as the admin's side of this seam (see usePreviewBridge):
+      // origin alone only proves the sender is same-origin, not that it is the
+      // parent frame this preview was embedded in.
+      if (e.source !== window.parent) return
+      const data = e.data as Partial<PreviewFrame> | null
+      if (data?.source !== 'folio-admin') return
+      if (!isPreviewMsg(data)) return
+      const msg = data
 
       switch (msg.type) {
         case 'apply':
@@ -90,7 +101,11 @@ function attachBridge() {
       const slot = target?.closest<HTMLElement>('[data-folio-slot]')
       if (slot) {
         e.preventDefault()
-        post({ type: 'add', parent: slot.dataset.folioParent, slot: slot.dataset.folioSlot })
+        const { folioParent: parent, folioSlot } = slot.dataset
+        // Both attributes are set together wherever a slot is rendered
+        // (see Render.tsx); a slot missing either is not a message worth
+        // sending rather than one worth sending malformed.
+        if (parent && folioSlot) post({ type: 'add', parent, slot: folioSlot })
         return
       }
       const block = target?.closest<HTMLElement>('[data-folio-uid]')
