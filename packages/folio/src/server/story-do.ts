@@ -1,10 +1,23 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { Doc } from '../core/doc'
-import { applyAll } from '../core/mutations'
-import type { ActivityEntry, ClientMsg, Delta, Presence, ServerMsg } from '../core/protocol'
+import { apply, mutationError } from '../core/mutations'
+import {
+  type ActivityEntry,
+  type Delta,
+  parseClientFrame,
+  type Presence,
+  PROTOCOL_VERSION,
+  type ServerMsg,
+} from '../core/protocol'
 
 /** Beyond this many missed deltas it is cheaper to re-send the whole document. */
 const MAX_CATCHUP = 200
+
+/** Application close code: the peer speaks a wire version we do not implement. */
+const CLOSE_VERSION = 4001
+
+/** Application close code: the story this object backs has been deleted. */
+const CLOSE_PURGED = 4002
 
 interface Attachment {
   actor: string
@@ -12,6 +25,8 @@ interface Attachment {
   colour: string
   selection: string | null
 }
+
+const encode = (msg: ServerMsg): string => JSON.stringify({ ...msg, v: PROTOCOL_VERSION })
 
 /**
  * One instance per story. Holds the authoritative draft, an append-only
@@ -47,6 +62,14 @@ export class StoryDO extends DurableObject {
     } catch {
       // Column already present.
     }
+    // Dedupe key: a resent transaction must find the row it already produced,
+    // and must be unable to write a second one.
+    try {
+      this.sql.exec('create unique index if not exists log_tx_id on log (tx_id)')
+    } catch {
+      // An object that logged a duplicate txId before this index existed keeps
+      // its log; the lookup below still answers a resend with the first row.
+    }
   }
 
   /** Creates the document on first touch. Returns the current draft. */
@@ -55,6 +78,26 @@ export class StoryDO extends DurableObject {
     if (row) return row.doc
     this.sql.exec('insert into doc (id, json, sync_id) values (1, ?, 0)', JSON.stringify(seed))
     return seed
+  }
+
+  /**
+   * Clears the log and doc tables and evicts any open sockets. Called after the
+   * host's D1 delete for this story has committed: purging first would leave a
+   * window where a concurrent `getOrInit` re-seeds this object from a story that
+   * D1 still thinks exists. A `getOrInit` after `purge()` finds no doc row and
+   * reseeds from scratch, which is the point — a reused or resurrected id must
+   * never see the deleted story's content.
+   */
+  async purge(): Promise<void> {
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        socket.close(CLOSE_PURGED, 'story deleted')
+      } catch {
+        // Already closing.
+      }
+    }
+    this.sql.exec('delete from log')
+    this.sql.exec('delete from doc')
   }
 
   private read(): { doc: Doc; syncId: number } | null {
@@ -75,9 +118,35 @@ export class StoryDO extends DurableObject {
     return new Response(null, { status: 101, webSocket: pair[0] })
   }
 
+  /**
+   * The only door a mutation arrives by. Parsing, shape validation and dispatch
+   * all happen inside here: a frame this object cannot read is answered and
+   * discarded, never thrown, because an exception out of a hibernatable handler
+   * takes the connection with it.
+   */
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
-    if (typeof raw !== 'string') return
-    const msg = JSON.parse(raw) as ClientMsg
+    const msg = parseClientFrame(raw)
+    if (!msg) {
+      this.sendTo(ws, { type: 'error', reason: 'unreadable frame' })
+      return
+    }
+    // Version discipline covers every frame, not only the handshake: a peer that
+    // claims a version this object does not implement is refused whatever it
+    // sends, so one whose hello was refused cannot go on writing. An absent
+    // version refuses only `hello`, which is where a peer's vintage is
+    // established — a refused hello is closed before it can send anything else,
+    // so the unversioned frames that reach the arms below are the ones from a
+    // socket that never handshook at all (see the `unknown` actor in `tx`).
+    const mismatch = msg.v === undefined ? msg.type === 'hello' : msg.v !== PROTOCOL_VERSION
+    if (mismatch) {
+      this.sendTo(ws, {
+        type: 'error',
+        reason: `protocol version ${msg.v ?? 'unset'}, this object speaks ${PROTOCOL_VERSION}`,
+      })
+      ws.close(CLOSE_VERSION, 'unsupported protocol version')
+      return
+    }
+
     const current = this.read()
     if (!current) return
 
@@ -111,6 +180,34 @@ export class StoryDO extends DurableObject {
       case 'tx': {
         const who = ws.deserializeAttachment() as Attachment | null
         const actor = who?.actor ?? 'unknown'
+
+        // Already logged: answer with the delta this txId produced the first
+        // time. Sender only, no re-apply, no new syncId — that idempotent ack is
+        // what makes a client's resend after a dropped acknowledgement safe. It
+        // is flagged as a replay because its syncId is old: a client that has
+        // already drained this tx must recognise the frame instead of applying
+        // stale mutations over a newer base.
+        const logged = this.logged(msg.txId)
+        if (logged) {
+          this.sendTo(ws, { type: 'delta', ...logged, replay: true })
+          return
+        }
+
+        // Atomic at the door: one violation refuses the whole transaction, since
+        // a half-applied tx cannot be undone. Each mutation is checked against
+        // the document the ones before it produced, so a tx that inserts a
+        // parent and moves an existing blok into it is legal — which the restore
+        // path (diff(live, target)) depends on.
+        let next = current.doc
+        for (const m of msg.mutations) {
+          const reason = mutationError(next, m)
+          if (reason) {
+            this.sendTo(ws, { type: 'reject', txId: msg.txId, reason })
+            return
+          }
+          next = apply(next, m)
+        }
+
         this.sql.exec(
           'insert into log (tx_id, actor, actor_name, mutations, at) values (?, ?, ?, ?, ?)',
           msg.txId,
@@ -124,11 +221,21 @@ export class StoryDO extends DurableObject {
         )
         this.sql.exec(
           'update doc set json = ?, sync_id = ? where id = 1',
-          JSON.stringify(applyAll(current.doc, msg.mutations)),
+          JSON.stringify(next),
           syncId,
         )
-        // Echoed to the sender too, where it serves as the acknowledgement.
-        this.broadcast({ type: 'delta', syncId, txId: msg.txId, actor, mutations: msg.mutations })
+        const delta: ServerMsg = {
+          type: 'delta',
+          syncId,
+          txId: msg.txId,
+          actor,
+          mutations: msg.mutations,
+        }
+        // The sender's echo is its acknowledgement, so it is sent directly rather
+        // than through the fan-out: the pre-hello quarantine withholds edits a
+        // socket did not ask for, never the answer to one it did.
+        this.sendTo(ws, delta)
+        this.broadcast(delta, ws)
         break
       }
 
@@ -144,6 +251,15 @@ export class StoryDO extends DurableObject {
   }
 
   async webSocketClose(ws: WebSocket) {
+    this.departed(ws)
+  }
+
+  /** A socket that fails is gone just as thoroughly as one that closes cleanly. */
+  async webSocketError(ws: WebSocket) {
+    this.departed(ws)
+  }
+
+  private departed(ws: WebSocket) {
     const attachment = ws.deserializeAttachment() as Attachment | null
     if (attachment) this.broadcast({ type: 'presence', peer: { ...attachment }, gone: true }, ws)
   }
@@ -175,6 +291,23 @@ export class StoryDO extends DurableObject {
       }))
   }
 
+  /** The delta a txId already produced, or null if this transaction is new. */
+  private logged(txId: string): Delta | null {
+    const row = this.sql
+      .exec<{ sync_id: number; tx_id: string; actor: string; mutations: string }>(
+        'select sync_id, tx_id, actor, mutations from log where tx_id = ? order by sync_id limit 1',
+        txId,
+      )
+      .toArray()[0]
+    if (!row) return null
+    return {
+      syncId: row.sync_id,
+      txId: row.tx_id,
+      actor: row.actor,
+      mutations: JSON.parse(row.mutations),
+    }
+  }
+
   private since(syncId: number): Delta[] {
     return this.sql
       .exec<{ sync_id: number; tx_id: string; actor: string; mutations: string }>(
@@ -201,13 +334,21 @@ export class StoryDO extends DurableObject {
   }
 
   private sendTo(ws: WebSocket, msg: ServerMsg) {
-    ws.send(JSON.stringify(msg))
+    ws.send(encode(msg))
   }
 
+  /**
+   * Fan-out is quarantined to sockets that have said hello. A connection still
+   * waiting to identify itself has no watermark to place a delta against, so
+   * delivering one there is exactly how a client ends up with a gap it cannot
+   * see; the hello attachment is the membership test, and it survives
+   * hibernation for free.
+   */
   private broadcast(msg: ServerMsg, exclude?: WebSocket) {
-    const payload = JSON.stringify(msg)
+    const payload = encode(msg)
     for (const socket of this.ctx.getWebSockets()) {
       if (socket === exclude) continue
+      if (!socket.deserializeAttachment()) continue
       try {
         socket.send(payload)
       } catch {
