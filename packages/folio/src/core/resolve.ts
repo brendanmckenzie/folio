@@ -1,0 +1,264 @@
+/**
+ * Turning stored ids into things a block can render.
+ *
+ * A document is deliberately self-contained and portable: it stores a story's
+ * `id`, not its URL. That leaves the renderer needing a little context from
+ * outside the document, and this is it.
+ *
+ * The awkward constraint is the preview client, which re-renders on every
+ * keystroke with no network in the loop. So resolution can never be a per-render
+ * fetch. Instead a `Resolution` is built once from data both sides already have
+ * — D1 on the server, the story tree the admin has already loaded — and pushed
+ * alongside the document. It is refreshed when *structure* changes, which is
+ * rare and already an event both sides handle.
+ */
+import type { ReactNode } from 'react'
+import type { Doc, Json } from './doc'
+import type { Field } from './fields'
+import type { SchemaIndex } from './schema'
+import type { StoryMeta } from './story'
+import {
+  asAsset,
+  asAssets,
+  asLink,
+  isImageAsset,
+  type AssetValue,
+  type LinkKind,
+  type LinkValue,
+} from './values'
+
+/** What a story id resolves to. Derived, never stored inside a document. */
+export interface StoryRef {
+  id: string
+  path: string
+  url: string
+  title: string
+}
+
+export interface Resolution {
+  stories: Record<string, StoryRef>
+  /**
+   * Where the asset route is mounted. Held here rather than baked into stored
+   * values so remounting Folio under a different base path does not invalidate
+   * every asset reference in the database.
+   */
+  assetBase: string
+  /**
+   * Documents pulled in by `reference` fields, keyed by story id. Populated only
+   * for the ids a document actually points at, and only one level deep — the same
+   * bound Storyblok's `resolve_relations` has, and what stops a story that
+   * references itself from rendering forever.
+   */
+  docs?: Record<string, Doc>
+}
+
+export const DEFAULT_ASSET_BASE = '/folio/asset'
+
+export const EMPTY_RESOLUTION: Resolution = { stories: {}, assetBase: DEFAULT_ASSET_BASE }
+
+export function buildResolution(
+  stories: readonly StoryMeta[],
+  assetBase: string = DEFAULT_ASSET_BASE,
+): Resolution {
+  const out: Record<string, StoryRef> = {}
+  for (const s of stories) {
+    out[s.id] = { id: s.id, path: s.path, url: s.url ?? `/${s.path}`, title: s.title }
+  }
+  return { stories: out, assetBase }
+}
+
+/** What a `multilink` field hands to `render`. Null when nothing is set. */
+export interface ResolvedLink {
+  kind: LinkKind
+  href: string
+  target?: '_blank'
+  rel?: string
+  /** The link points at a story that has since been deleted. */
+  broken?: boolean
+  /** Title of the linked story, handy as a default label. */
+  title?: string
+}
+
+export function resolveLink(value: Json | undefined, resolution: Resolution): ResolvedLink | null {
+  const link = asLink(value)
+  if (!link) return null
+
+  switch (link.kind) {
+    case 'story': {
+      const story = resolution.stories[link.id]
+      // A deleted story leaves the link in place rather than dropping it, so an
+      // editor can see what broke instead of the link quietly vanishing.
+      if (!story) return { kind: 'story', href: '#', broken: true, ...windowing(link) }
+      return {
+        kind: 'story',
+        href: `${story.url}${hash(link.anchor)}`,
+        title: story.title,
+        ...windowing(link),
+      }
+    }
+    case 'url':
+      return { kind: 'url', href: link.url, ...windowing(link) }
+    case 'email': {
+      const query = link.subject ? `?subject=${encodeURIComponent(link.subject)}` : ''
+      return { kind: 'email', href: `mailto:${link.email}${query}` }
+    }
+    case 'anchor':
+      return { kind: 'anchor', href: hash(link.anchor) }
+    case 'asset':
+      return { kind: 'asset', href: decorateAsset(link.asset, resolution).src, ...windowing(link) }
+  }
+}
+
+export interface AssetTransform {
+  width?: number
+  height?: number
+  fit?: 'cover' | 'contain' | 'scale-down'
+  format?: 'webp' | 'avif' | 'jpeg' | 'png'
+  /** 1..100. */
+  quality?: number
+}
+
+/** What an `asset` field hands to `render`. */
+export interface ResolvedAsset extends AssetValue {
+  /** The original, unresized. */
+  src: string
+  /** `object-position` for the focal point, or `50% 50%` when none is set. */
+  objectPosition: string
+  isImage: boolean
+  /**
+   * URL for a resized variant. Assets we do not host come back untouched — Folio
+   * will not proxy a third party's image.
+   */
+  srcFor: (transform: AssetTransform) => string
+}
+
+export function resolveAsset(value: Json | undefined, resolution: Resolution): ResolvedAsset | null {
+  const asset = asAsset(value)
+  return asset ? decorateAsset(asset, resolution) : null
+}
+
+export function resolveAssets(value: Json | undefined, resolution: Resolution): ResolvedAsset[] {
+  return asAssets(value).map((a) => decorateAsset(a, resolution))
+}
+
+function decorateAsset(asset: AssetValue, resolution: Resolution): ResolvedAsset {
+  const src = asset.key ? `${resolution.assetBase}/${asset.key}` : asset.url!
+  const focal = asset.focal
+
+  return {
+    ...asset,
+    src,
+    isImage: isImageAsset(asset),
+    objectPosition: focal ? `${pct(focal.x)} ${pct(focal.y)}` : '50% 50%',
+    srcFor: (t) => {
+      if (!asset.key) return src
+      const p = new URLSearchParams()
+      if (t.width) p.set('w', String(Math.round(t.width)))
+      if (t.height) p.set('h', String(Math.round(t.height)))
+      if (t.fit) p.set('fit', t.fit)
+      if (t.format) p.set('f', t.format)
+      if (t.quality) p.set('q', String(Math.round(t.quality)))
+      // Cropping to a new aspect ratio has to know what to keep in frame.
+      if (focal && (t.width || t.height)) p.set('fp', `${round(focal.x)},${round(focal.y)}`)
+      const query = p.toString()
+      return query ? `${src}?${query}` : src
+    },
+  }
+}
+
+const pct = (n: number) => `${Math.round(n * 1000) / 10}%`
+const round = (n: number) => Math.round(n * 1000) / 1000
+
+/**
+ * Story ids a document points at through `reference` fields.
+ *
+ * The caller loads exactly these and nothing else, so a page with no references
+ * costs no extra reads at all.
+ */
+export function referencedIds(doc: Doc, schema: SchemaIndex): string[] {
+  const out = new Set<string>()
+  for (const blok of Object.values(doc.bloks)) {
+    const fields = schema[blok.type]?.fields
+    if (!fields) continue
+    for (const [name, field] of Object.entries(fields)) {
+      if (field.kind !== 'reference') continue
+      const id = blok.data[name]
+      if (typeof id === 'string' && id) out.add(id)
+    }
+  }
+  return [...out]
+}
+
+/** The metadata half of a resolved reference. The renderer adds the rendered content. */
+export interface ReferenceTarget {
+  id: string
+  title: string
+  path: string
+  url: string
+  /** Root block data of the referenced document, for reading its fields directly. */
+  data: Record<string, Json>
+  doc: Doc
+}
+
+/**
+ * What a `reference` field hands to `render`. Either read `data` and build your
+ * own UI from it, or drop `content` in to inline the referenced page wholesale.
+ */
+export interface ResolvedReference extends ReferenceTarget {
+  content: ReactNode
+}
+
+export function resolveReference(
+  value: Json | undefined,
+  resolution: Resolution,
+): ReferenceTarget | null {
+  if (typeof value !== 'string' || !value) return null
+  const story = resolution.stories[value]
+  const doc = resolution.docs?.[value]
+  // Unresolvable either because the story is gone or because nothing loaded its
+  // document. Both are the caller's cue to render nothing.
+  if (!story || !doc) return null
+  return {
+    id: value,
+    title: story.title,
+    path: story.path,
+    url: story.url,
+    data: doc.bloks[doc.root]?.data ?? {},
+    doc,
+  }
+}
+
+/**
+ * A stored field value as `render` should receive it. `blocks` is absent because
+ * children are separate bloks and the renderer turns them into elements itself.
+ */
+export function resolveValue(field: Field, value: Json | undefined, resolution: Resolution): unknown {
+  switch (field.kind) {
+    case 'multilink':
+      return resolveLink(value, resolution)
+    case 'asset':
+      return resolveAsset(value, resolution)
+    case 'multiasset':
+      return resolveAssets(value, resolution)
+    default:
+      return value ?? ''
+  }
+}
+
+function hash(anchor: string | undefined): string {
+  if (!anchor) return ''
+  return anchor.startsWith('#') ? anchor : `#${anchor}`
+}
+
+/**
+ * `rel` is defaulted rather than left to each block author: a new-window link
+ * without `noopener` hands the opener a live `window` reference, and that is not
+ * a mistake a CMS should let a block make.
+ */
+function windowing(link: LinkValue): { target?: '_blank'; rel?: string } {
+  if (!('target' in link) || link.target !== '_blank') {
+    return 'rel' in link && link.rel ? { rel: link.rel } : {}
+  }
+  const rel = ('rel' in link && link.rel) || 'noopener noreferrer'
+  return { target: '_blank', rel }
+}

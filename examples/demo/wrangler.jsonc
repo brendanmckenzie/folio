@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "folio-demo",
+  "main": "./src/index.tsx",
+  "compatibility_date": "2026-07-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "folio",
+      // Replace with the id from `wrangler d1 create folio` before deploying.
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "STORY", "class_name": "StoryDO" }]
+  },
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "folio-media"
+    }
+  ],
+  // Without this, assets serve at their original size. `wrangler dev` supports
+  // it locally and does not bill transformations there.
+  "images": {
+    "binding": "IMAGES"
+  },
+  // SQLite-backed DOs must be declared as such at creation; this cannot be
+  // changed for an already-deployed class.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StoryDO"] }]
+}

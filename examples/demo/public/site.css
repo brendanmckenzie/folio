@@ -1,0 +1,190 @@
+/* Styles for this project's own blocks. Folio has no opinion about these. */
+
+:root {
+  --ink: #14171c;
+  --muted: #5b626d;
+  --line: #e4e7eb;
+  --accent: #0b5fff;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3 { line-height: 1.15; text-wrap: balance; }
+p { text-wrap: pretty; }
+
+/* --------------------------------------------------------------- hero ---- */
+
+.hero {
+  display: grid;
+  place-items: center;
+  padding: clamp(3rem, 9vw, 7rem) 1.5rem;
+  background: #0e1116;
+  background-size: cover;
+  background-position: center;
+  color: #fff;
+}
+.hero--left { place-items: start; }
+.hero--left .hero__inner { text-align: left; }
+.hero__inner { max-width: 44rem; text-align: center; }
+.hero__eyebrow {
+  margin: 0 0 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+.hero__heading { margin: 0; font-size: clamp(2rem, 5.5vw, 3.5rem); letter-spacing: -0.02em; }
+.hero__body { margin: 1rem 0 0; font-size: 1.0625rem; opacity: 0.82; }
+.hero__actions { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: inherit; margin-top: 1.75rem; }
+.hero--center .hero__actions { justify-content: center; }
+
+/* -------------------------------------------------------------- prose ---- */
+
+.prose { padding: clamp(2.5rem, 6vw, 4.5rem) 1.5rem; margin-inline: auto; }
+.prose--narrow { max-width: 42rem; }
+.prose--wide { max-width: 62rem; }
+.prose__heading { margin: 0 0 1rem; font-size: clamp(1.5rem, 3vw, 2rem); letter-spacing: -0.015em; }
+.prose__p { margin: 0 0 1rem; color: #2a2f38; }
+
+/* ----------------------------------------------------------- features ---- */
+
+.features { max-width: 68rem; padding: clamp(2.5rem, 6vw, 4.5rem) 1.5rem; margin-inline: auto; }
+.features__heading { margin: 0 0 2rem; font-size: clamp(1.5rem, 3vw, 2rem); letter-spacing: -0.015em; }
+.features__grid {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+}
+@media (min-width: 60rem) {
+  .features__grid { grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr)); }
+}
+.feature { padding: 1.5rem; border: 1px solid var(--line); border-radius: 12px; }
+.feature__icon { font-size: 1.5rem; }
+.feature__title { margin: 0.5rem 0 0.4rem; font-size: 1.0625rem; }
+.feature__body { margin: 0; color: var(--muted); font-size: 0.9375rem; }
+
+/* ---------------------------------------------------------------- cta ---- */
+
+.cta { padding: clamp(2.5rem, 6vw, 4.5rem) 1.5rem; background: #f4f6f9; text-align: center; }
+.cta__inner { max-width: 38rem; margin-inline: auto; }
+.cta__heading { margin: 0; font-size: clamp(1.4rem, 3vw, 2rem); letter-spacing: -0.015em; }
+.cta__body { margin: 0.75rem 0 0; color: var(--muted); }
+.cta__actions { display: flex; flex-wrap: wrap; gap: 0.6rem; justify-content: center; margin-top: 1.5rem; }
+
+/* ------------------------------------------------------------- button ---- */
+
+.btn {
+  display: inline-block;
+  padding: 0.6rem 1.15rem;
+  font-size: 0.9375rem;
+  font-weight: 550;
+  text-decoration: none;
+  border-radius: 8px;
+  transition: opacity 120ms ease;
+}
+.btn:hover { opacity: 0.85; }
+.btn--primary { color: #fff; background: var(--accent); }
+.btn--ghost { color: inherit; border: 1px solid currentColor; }
+.hero .btn--ghost { color: #fff; }
+
+/* -------------------------------------------------------------- index ---- */
+
+.index { max-width: 38rem; padding: 4rem 1.5rem; margin-inline: auto; }
+.index__lede { color: var(--muted); }
+.index__list { padding: 0; margin-top: 2rem; list-style: none; }
+.index__list li {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--line);
+}
+.index__slug { flex: 1; font-family: ui-monospace, monospace; font-size: 0.875rem; }
+.index__list a { color: var(--accent); font-size: 0.875rem; }
+
+/* -------------------------------------------------------------- media ---- */
+
+.image { max-width: 55rem; padding: 2rem 1.5rem; margin-inline: auto; }
+.image img { display: block; width: 100%; height: auto; border-radius: 10px; }
+.image--wide img { aspect-ratio: 16 / 9; height: auto; object-fit: cover; }
+.image--square img { aspect-ratio: 1; height: auto; object-fit: cover; }
+.image figcaption { margin-top: 0.6rem; color: var(--muted); font-size: 0.875rem; }
+.image--empty { color: var(--muted); font-size: 0.875rem; }
+
+.gallery { max-width: 62rem; padding: 2rem 1.5rem; margin-inline: auto; }
+.gallery__heading { margin: 0 0 1rem; font-size: 1.5rem; }
+.gallery__grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+.gallery__grid img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.gallery__empty { color: var(--muted); font-size: 0.875rem; }
+
+/* ------------------------------------------------------- prose richtext ---- */
+
+.prose__body > :first-child { margin-top: 0; }
+.prose__body > :last-child { margin-bottom: 0; }
+.prose__body p { margin: 0 0 1rem; }
+.prose__body :is(h2, h3) { margin: 2rem 0 0.75rem; line-height: 1.25; }
+.prose__body h2 { font-size: 1.5rem; }
+.prose__body h3 { font-size: 1.1875rem; }
+.prose__body ul, .prose__body ol { margin: 0 0 1rem; padding-left: 1.4rem; }
+.prose__body li { margin-bottom: 0.35rem; }
+.prose__body a { color: var(--accent); text-underline-offset: 2px; }
+.prose__body blockquote {
+  padding-left: 1rem;
+  margin: 0 0 1rem;
+  color: var(--muted);
+  border-left: 3px solid var(--line);
+}
+.prose__body pre {
+  padding: 0.85rem 1rem;
+  margin: 0 0 1rem;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  background: #f4f6f8;
+  border-radius: 8px;
+}
+.prose__body hr { margin: 2rem 0; border: 0; border-top: 1px solid var(--line); }
+/* A broken internal link should be obvious to an editor, not invisible. */
+.prose__body a[data-broken='true'] { color: #e5484d; text-decoration-style: wavy; }
+
+.pullquote { max-width: 42rem; padding: 2rem 1.5rem; margin-inline: auto; }
+.pullquote__body {
+  padding: 0;
+  margin: 0;
+  font-size: 1.5rem;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+.pullquote__body p { margin: 0; }
+.pullquote__by { margin-top: 0.75rem; color: var(--muted); font-size: 0.875rem; }
+
+/* -------------------------------------------------------------- embeds ---- */
+
+.embed { max-width: 55rem; padding: 2rem 1.5rem; margin-inline: auto; }
+.embed__heading { margin: 0 0 0.75rem; font-size: 1.5rem; }
+.embed__summary { color: var(--muted); }
+/* A visible seam, so it is obvious the content below belongs to another page. */
+.embed__content {
+  padding: 1rem 0 0;
+  border-top: 1px solid var(--line);
+}
+.embed--empty { color: var(--muted); font-size: 0.875rem; }
+.section__heading { max-width: 55rem; padding: 0 1.5rem; margin: 2rem auto 0; font-size: 1.75rem; }
