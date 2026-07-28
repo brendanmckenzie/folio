@@ -1,7 +1,14 @@
 import { env, runInDurableObject } from 'cloudflare:test'
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { Doc } from '../../src/core/doc'
-import type { ClientMsg, Delta, Presence, ServerMsg } from '../../src/core/protocol'
+import {
+  type ClientMsg,
+  type Delta,
+  type Presence,
+  PROTOCOL_VERSION,
+  type ServerFrame,
+  type ServerMsg,
+} from '../../src/core/protocol'
 import type { StoryDO } from '../../src/server'
 
 /**
@@ -82,11 +89,17 @@ function ghost(peer: Presence | null): WebSocket {
 
 interface Peer {
   ws: WebSocket
-  /** Every frame the object has sent this socket, in arrival order. */
+  /** Every frame the object has sent this socket, in arrival order, minus `v`. */
   inbox: ServerMsg[]
   send(msg: ClientMsg): void
 }
 
+/**
+ * Both directions carry the wire version: `send` stamps it, and every arriving
+ * frame is checked for it here — once, so the per-frame assertions below stay
+ * about content — and then stripped, since the version is a property of the
+ * transport rather than of any message.
+ */
 async function connect(stub: DurableObjectStub<StoryDO>): Promise<Peer> {
   const res = await stub.fetch('https://story.test/ws', { headers: { Upgrade: 'websocket' } })
   expect(res.status).toBe(101)
@@ -95,9 +108,11 @@ async function connect(stub: DurableObjectStub<StoryDO>): Promise<Peer> {
   ws.accept()
   const inbox: ServerMsg[] = []
   ws.addEventListener('message', (event) => {
-    inbox.push(JSON.parse(event.data as string) as ServerMsg)
+    const { v, ...msg } = JSON.parse(event.data as string) as ServerFrame
+    expect(v).toBe(PROTOCOL_VERSION)
+    inbox.push(msg as ServerMsg)
   })
-  return { ws, inbox, send: (msg) => ws.send(JSON.stringify(msg)) }
+  return { ws, inbox, send: (msg) => ws.send(JSON.stringify({ ...msg, v: PROTOCOL_VERSION })) }
 }
 
 /** Connects and says hello, returning the socket and the first reply frame. */
@@ -475,11 +490,10 @@ describe('StoryDO: multiplayer', () => {
   })
 })
 
-describe('StoryDO: known bugs', () => {
-  // SPEC(tx-dedupe): a txId already in the log must be acknowledged without being
-  // applied again. Currently fails: every tx frame is inserted and broadcast, so a
-  // client retrying after a flaky send doubles the transaction.
-  it.fails('ignores a tx whose txId is already in the log', async () => {
+describe('StoryDO: protocol discipline', () => {
+  // SPEC(tx-dedupe): a txId already in the log is acknowledged with the delta it
+  // produced the first time, never applied or broadcast again.
+  it('ignores a tx whose txId is already in the log', async () => {
     const stub = story('dedupe')
     await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
     const peer = await join(stub, { actor: 'usr_ada', name: 'Ada', colour: '#f0f' })
@@ -500,8 +514,17 @@ describe('StoryDO: known bugs', () => {
       actor: 'usr_ada',
       mutations: setTitle('Renamed'),
     })
-    // Re-acknowledging with the syncId the tx already has would be fine; handing
-    // it a second one would not, and neither would a second row in the log.
+    // Re-acknowledged with the syncId the tx already has, marked as a replay so a
+    // client that has moved on does not apply the stale mutations a second time.
+    // Handing it a fresh syncId would not be fine, nor would a second log row.
+    expect(deltas[1]).toEqual({
+      type: 'delta',
+      replay: true,
+      syncId: 1,
+      txId: 'tx-1',
+      actor: 'usr_ada',
+      mutations: setTitle('Renamed'),
+    })
     expect([...new Set(deltas.map((d) => d.syncId))]).toEqual([1])
     const trail = await runInDurableObject(stub, (instance) => instance.recent())
     expect(trail.map((e) => e.syncId)).toEqual([1])
@@ -510,10 +533,9 @@ describe('StoryDO: known bugs', () => {
     peer.ws.close()
   })
 
-  // SPEC(pre-hello): a socket that has not said hello yet must not be sent deltas.
-  // Currently fails: broadcast walks every accepted socket, so a connection still
-  // waiting to identify itself receives edits it cannot place.
-  it.fails('keeps deltas away from a socket that has not said hello', async () => {
+  // SPEC(pre-hello): a socket that has not said hello is not in the broadcast set,
+  // so it cannot be handed an edit it has no watermark to place.
+  it('keeps deltas away from a socket that has not said hello', async () => {
     const stub = story('pre-hello')
     await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
     const ada = await join(stub, { actor: 'usr_ada', name: 'Ada', colour: '#f0f' })
@@ -530,11 +552,27 @@ describe('StoryDO: known bugs', () => {
     lurker.ws.close()
   })
 
+  it('still answers a tx from a socket the quarantine covers', async () => {
+    const stub = story('pre-hello-tx')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    const ada = await join(stub, { actor: 'usr_ada', name: 'Ada', colour: '#f0f' })
+    await frame(ada, 'bootstrap')
+    const lurker = await connect(stub)
+
+    lurker.send({ type: 'tx', txId: 'tx-1', mutations: setTitle('Renamed') })
+
+    // The quarantine withholds fan-out this socket did not ask for; the echo of
+    // its own tx is the only acknowledgement it will ever get, so it is not
+    // withheld — otherwise the first send goes unanswered and a resend does not.
+    expect((await frame(lurker, 'delta')).txId).toBe('tx-1')
+    expect((await frame(ada, 'delta')).actor).toBe('unknown')
+    ada.ws.close()
+    lurker.ws.close()
+  })
+
   // SPEC(malformed-frame): a frame that is not JSON, or a tx that is not a valid
-  // mutation, must be dropped with the connection and the draft intact. Currently
-  // fails: JSON.parse throws on the first, and applyAll dereferences the missing
-  // blok on the second, out of the handler and into the runtime.
-  it.fails('survives a malformed frame and an invalid mutation', async () => {
+  // mutation, leaves the draft and the connection intact.
+  it('survives a malformed frame and an invalid mutation', async () => {
     const stub = story('malformed')
     await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
     const peer = await join(stub, { actor: 'usr_ada', name: 'Ada', colour: '#f0f' })
@@ -557,5 +595,178 @@ describe('StoryDO: known bugs', () => {
     peer.send({ type: 'tx', txId: 'tx-good', mutations: setTitle('Renamed') })
     expect((await frame(peer, 'delta')).txId).toBe('tx-good')
     peer.ws.close()
+  })
+
+  it('names an unreadable frame in an error frame back to its sender', async () => {
+    const stub = story('frame-error')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    const peer = await join(stub, { actor: 'usr_ada', name: 'Ada', colour: '#f0f' })
+    await frame(peer, 'bootstrap')
+
+    peer.ws.send('not json at all {{{')
+    expect((await frame(peer, 'error')).reason).toBe('unreadable frame')
+    // A type the object does not implement is unreadable too, not silently dropped.
+    peer.ws.send(JSON.stringify({ type: 'nonsense', v: PROTOCOL_VERSION }))
+    expect((await frame(peer, 'error', 2)).reason).toBe('unreadable frame')
+    peer.ws.close()
+  })
+
+  it('rejects a whole transaction when one of its mutations cannot apply', async () => {
+    const stub = story('tx-reject')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    const ada = await join(stub, { actor: 'usr_ada', name: 'Ada', colour: '#f0f' })
+    await frame(ada, 'bootstrap')
+    const bo = await join(stub, { actor: 'usr_bo', name: 'Bo', colour: '#0ff' })
+    await frame(bo, 'bootstrap')
+
+    // The set would apply; removing the root never can.
+    ada.send({
+      type: 'tx',
+      txId: 'tx-bad',
+      mutations: [...setTitle('Renamed'), { t: 'remove', uid: 'root0000' }],
+    })
+
+    const reject = await frame(ada, 'reject')
+    expect(reject.txId).toBe('tx-bad')
+    expect(reject.reason).toContain('root remove')
+    await settle()
+    // Atomic: the half that could have applied did not, nothing was logged, and
+    // no peer was told about an edit that does not exist.
+    expect(await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))).toEqual(seed())
+    expect(await runInDurableObject(stub, (instance) => instance.recent())).toEqual([])
+    expect(framesOf(ada, 'delta')).toEqual([])
+    expect(framesOf(bo, 'delta')).toEqual([])
+    ada.ws.close()
+    bo.ws.close()
+  })
+
+  it('accepts a tx that moves an existing blok under one the same tx inserted', async () => {
+    const stub = story('tx-compound')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    const peer = await join(stub, { actor: 'usr_ada', name: 'Ada', colour: '#f0f' })
+    await frame(peer, 'bootstrap')
+    const blok = (uid: string, parent: string) => ({
+      uid,
+      type: 'box',
+      parent,
+      slot: 'body',
+      order: 'a0',
+      data: {},
+    })
+
+    peer.send({
+      type: 'tx',
+      txId: 'tx-1',
+      mutations: [{ t: 'insert', blok: blok('kid00001', 'root0000') }],
+    })
+    await frame(peer, 'delta')
+    // The shape diff() produces when a version restore reparents a survivor: the
+    // new parent is only valid once the insert before it in the same tx lands.
+    peer.send({
+      type: 'tx',
+      txId: 'tx-2',
+      mutations: [
+        { t: 'insert', blok: blok('box00001', 'root0000') },
+        { t: 'move', uid: 'kid00001', parent: 'box00001', slot: 'body', order: 'a0' },
+      ],
+    })
+
+    expect((await frame(peer, 'delta', 2)).txId).toBe('tx-2')
+    const doc = await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    expect(doc.bloks.kid00001?.parent).toBe('box00001')
+    peer.ws.close()
+  })
+
+  it('refuses a hello whose protocol version is missing or unknown', async () => {
+    const stub = story('version')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+
+    // A client from before the protocol carried a version.
+    const stale = await connect(stub)
+    const closes: number[] = []
+    stale.ws.addEventListener('close', (event) => {
+      closes.push(event.code)
+    })
+    stale.ws.send(
+      JSON.stringify({ type: 'hello', actor: 'a1', name: 'Ada', colour: '#f0f', lastSyncId: 0 }),
+    )
+
+    const err = await frame(stale, 'error')
+    expect(err.reason).toContain('unset')
+    expect(err.reason).toContain(String(PROTOCOL_VERSION))
+    await settle()
+    // Refused, not tolerated: no state crosses to a peer we cannot understand.
+    expect(framesOf(stale, 'bootstrap')).toEqual([])
+    expect(closes).toEqual([4001])
+
+    const future = await connect(stub)
+    future.ws.send(
+      JSON.stringify({
+        type: 'hello',
+        actor: 'a2',
+        name: 'Bo',
+        colour: '#0ff',
+        lastSyncId: 0,
+        v: PROTOCOL_VERSION + 98,
+      }),
+    )
+
+    expect((await frame(future, 'error')).reason).toContain(String(PROTOCOL_VERSION + 98))
+    await settle()
+    expect(framesOf(future, 'bootstrap')).toEqual([])
+  })
+
+  it('refuses a later frame that claims an unknown version, not just the hello', async () => {
+    const stub = story('version-tx')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    const peer = await join(stub, { actor: 'usr_ada', name: 'Ada', colour: '#f0f' })
+    await frame(peer, 'bootstrap')
+    const closes: number[] = []
+    peer.ws.addEventListener('close', (event) => {
+      closes.push(event.code)
+    })
+
+    // A handshake this object understood does not license every later frame: the
+    // version is a claim about the peer, so a frame that changes it is refused.
+    peer.ws.send(
+      JSON.stringify({
+        type: 'tx',
+        txId: 'tx-1',
+        mutations: setTitle('FromV99'),
+        v: PROTOCOL_VERSION + 98,
+      }),
+    )
+
+    expect((await frame(peer, 'error')).reason).toContain(String(PROTOCOL_VERSION + 98))
+    await settle()
+    expect(framesOf(peer, 'delta')).toEqual([])
+    expect(await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))).toEqual(seed())
+    expect(await runInDurableObject(stub, (instance) => instance.recent())).toEqual([])
+    expect(closes).toEqual([4001])
+  })
+
+  it('announces a departure when a socket errors, exactly as a close does', async () => {
+    const stub = story('ws-error')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    const ada = await join(stub, { actor: 'usr_ada', name: 'Ada', colour: '#f0f' })
+    await frame(ada, 'bootstrap')
+    const bo = await join(stub, { actor: 'usr_bo', name: 'Bo', colour: '#0ff' })
+    await frame(bo, 'bootstrap')
+    await frame(ada, 'presence')
+
+    await runInDurableObject(stub, async (instance, state) => {
+      const adaSide = state
+        .getWebSockets()
+        .find((s) => (s.deserializeAttachment() as Presence | null)?.actor === 'usr_ada')
+      await instance.webSocketError(adaSide!)
+    })
+
+    expect(await frame(bo, 'presence')).toEqual({
+      type: 'presence',
+      peer: { actor: 'usr_ada', name: 'Ada', colour: '#f0f', selection: null },
+      gone: true,
+    })
+    ada.ws.close()
+    bo.ws.close()
   })
 })
