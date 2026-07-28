@@ -13,6 +13,8 @@
  */
 import type { AssetValue } from '../core/values'
 import type { AssetTransform } from '../core/resolve'
+import { FolioError } from './errors'
+import { DOWNLOAD_CONTENT_TYPE, SERVED_CONTENT_TYPES } from './validate'
 
 /** Matches the Images binding's own input ceiling, so failures happen up front. */
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -61,10 +63,54 @@ export function toAssetValue(row: AssetRow): AssetValue {
   }
 }
 
+/**
+ * Reads a request body under a hard byte cap, without ever buffering past it.
+ *
+ * `contentLengthHeader` (validate.ts) rejects a declared length over the cap
+ * before a byte is read, but a declared length is only ever a claim: absent
+ * entirely, or understated, it would otherwise let `uploadAsset`'s own
+ * post-buffer check catch an oversized file only *after* the whole body sat in
+ * memory. Reading incrementally and cancelling the moment the running total
+ * passes `max` is what makes the cap real regardless of what the client
+ * declared.
+ */
+export async function readCappedBody(
+  body: ReadableStream<Uint8Array> | null,
+  max: number,
+): Promise<ArrayBuffer> {
+  if (!body) return new ArrayBuffer(0)
+
+  const reader = body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > max) {
+        await reader.cancel()
+        throw new FolioError('too_large', `File is larger than ${Math.floor(max / 1024 / 1024)}MB`)
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    out.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return out.buffer
+}
+
 export async function uploadAsset(
   db: D1Database,
   bucket: R2Bucket,
-  input: { bytes: ArrayBuffer; filename: string; contentType: string },
+  input: { bytes: ArrayBuffer; filename: string },
 ): Promise<AssetRow> {
   if (input.bytes.byteLength === 0) throw new Error('Empty upload')
   if (input.bytes.byteLength > MAX_UPLOAD_BYTES) {
@@ -76,8 +122,15 @@ export async function uploadAsset(
   // The filename rides along in the key so a download keeps its name and the URL
   // stays legible. The id prefix makes collisions impossible.
   const key = `${id}-${filename}`
-  const contentType = input.contentType || 'application/octet-stream'
-  const dims = imageSize(new Uint8Array(input.bytes))
+  const view = new Uint8Array(input.bytes)
+  // The client's Content-Type header is a hint only, never trusted: what gets
+  // stored — and later served back on this origin — is whatever the bytes
+  // themselves say they are. A lying header is overridden; bytes matching no
+  // known signature fall back to the download type, same as an explicit
+  // mismatch would.
+  const sniffed = sniffContentType(view)
+  const contentType = sniffed && SERVED_CONTENT_TYPES.has(sniffed) ? sniffed : DOWNLOAD_CONTENT_TYPE
+  const dims = imageSize(view)
 
   // R2 first: the alternative (row first) can leave a library entry pointing at
   // an object that never made it into the bucket, which is the worse failure —
@@ -169,52 +222,197 @@ export async function deleteAsset(db: D1Database, bucket: R2Bucket, id: string):
 
 /* -------------------------------------------------------------- serving --- */
 
+/**
+ * Bounds on `w`/`h`. The transform query is public and uncapped otherwise:
+ * every distinct `w`/`h`/`q` mints its own Images transformation and its own
+ * immutable cache entry, so an unclamped number is an unbounded number of
+ * billable variants behind one URL. `MIN` rules out a variant too small to be
+ * worth its own Images invocation; both ends snap rather than refuse, so a
+ * page whose markup asks for something out of range still renders.
+ */
+export const MIN_TRANSFORM_DIMENSION = 16
+export const MAX_TRANSFORM_DIMENSION = 2400
+
+/** Bounds on `q`. Below 30 is not a usable image; above 90 is not a visibly
+ * better one, just another billable variant nobody asked for. */
+export const MIN_TRANSFORM_QUALITY = 30
+export const MAX_TRANSFORM_QUALITY = 90
+
+/**
+ * A query param clamped into `[min, max]`. `null` (the param was never given)
+ * stays `undefined` — the caller must not default an absent transform into a
+ * requested one — but any parseable number, including one out of range, zero,
+ * negative or fractional, snaps into range rather than being dropped. Only a
+ * value `Number()` cannot make sense of at all is treated as absent.
+ */
+function clampedParam(raw: string | null, min: number, max: number): number | undefined {
+  if (raw === null) return undefined
+  const n = Number(raw)
+  return Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), min), max) : undefined
+}
+
+/** Clamps a focal-point coordinate into `[0, 1]` — the normalised range the
+ * Images binding's `gravity` expects. Same snap-don't-reject rule as `w`/`h`/`q`:
+ * an out-of-range `fp` (or one a page's own markup never validated) still
+ * produces a servable crop instead of throwing the transform into its catch,
+ * which would otherwise serve the full-size original at full R2 egress cost,
+ * repeatably, since a thrown transform is never written to the Cache API. */
+function clampFocal(n: number): number {
+  return Math.min(Math.max(n, 0), 1)
+}
+
 export function parseTransform(
   params: URLSearchParams,
 ): AssetTransform & { focal?: { x: number; y: number } } {
-  const num = (key: string) => {
-    const raw = Number(params.get(key))
-    return Number.isFinite(raw) && raw > 0 ? raw : undefined
-  }
   const fit = params.get('fit')
   const format = params.get('f')
   const [fx, fy] = (params.get('fp') ?? '').split(',').map(Number)
 
   return {
-    width: num('w'),
-    height: num('h'),
-    quality: num('q'),
+    width: clampedParam(params.get('w'), MIN_TRANSFORM_DIMENSION, MAX_TRANSFORM_DIMENSION),
+    height: clampedParam(params.get('h'), MIN_TRANSFORM_DIMENSION, MAX_TRANSFORM_DIMENSION),
+    quality: clampedParam(params.get('q'), MIN_TRANSFORM_QUALITY, MAX_TRANSFORM_QUALITY),
     ...(fit === 'cover' || fit === 'contain' || fit === 'scale-down' ? { fit } : {}),
     ...(format === 'webp' || format === 'avif' || format === 'jpeg' || format === 'png'
       ? { format }
       : {}),
-    ...(Number.isFinite(fx) && Number.isFinite(fy) ? { focal: { x: fx!, y: fy! } } : {}),
+    ...(Number.isFinite(fx) && Number.isFinite(fy)
+      ? { focal: { x: clampFocal(fx!), y: clampFocal(fy!) } }
+      : {}),
   }
 }
 
 const IMMUTABLE = 'public, max-age=31536000, immutable'
+/**
+ * Cache-control for a response that is *not* the variant a transform query
+ * asked for — no Images binding, a non-GET request, or a transform that threw.
+ * `immutable` on one of these pins the wrong bytes (wrong content-type, wrong
+ * dimensions) in every downstream cache for a year with revalidation
+ * suppressed; a short, revalidatable max-age lets the next request try again
+ * instead of being stuck.
+ */
+const DEGRADED = 'public, max-age=60'
+
+/**
+ * `sandbox` forbids scripts, forms, and origin-privileged execution outright,
+ * so even a signature that slips past `sniffContentType` (or an object put into
+ * the bucket by something other than `uploadAsset`) cannot run as this origin —
+ * a second layer behind `nosniff`, not a replacement for it.
+ */
+const CSP = "default-src 'none'; sandbox"
+
+/**
+ * Headers common to every response this route returns. `nosniff` and the CSP
+ * apply regardless of branch: the content type is derived from a value a
+ * client supplied at upload, on a route published pages link to from the
+ * site's own origin, so the browser must never be allowed to improve on it,
+ * and a mis-sniffed upload must still not be able to run. `content-disposition`
+ * is explicit in both directions rather than left to the browser's default:
+ * `inline` for the five raster types this route renders, `attachment` for
+ * everything else — svg included, since rendering it is a script-execution
+ * vector on this origin the moment a browser is allowed to try.
+ */
+function serveHeaders(cacheControl: string, contentType: string): Record<string, string> {
+  return {
+    'content-type': contentType,
+    'cache-control': cacheControl,
+    'x-content-type-options': 'nosniff',
+    'content-security-policy': CSP,
+    'content-disposition': contentType === DOWNLOAD_CONTENT_TYPE ? 'attachment' : 'inline',
+  }
+}
+
+/**
+ * The Cache API key for a transform response: origin, path, and the *clamped*
+ * query — never the raw incoming request. `parseTransform` snaps every numeric
+ * param into range, but that only bounds the set of distinct outputs; keying
+ * the cache on the raw URL leaves every distinct raw query string (`w=99999`,
+ * `w=3000`, `w=100&cachebust=1`, `w=+100`, all clamping to the same width) as
+ * its own billable Images invocation and its own cache entry, which is exactly
+ * the unbounded-cost hole the clamp was supposed to close. Building the key
+ * from the transform Folio actually computed collapses all of those onto one
+ * entry, and always as a fresh GET request — the only method the Cache API can
+ * write a response against — regardless of the method the client used.
+ */
+function canonicalTransformRequest(
+  url: string,
+  transform: AssetTransform & { focal?: { x: number; y: number } },
+): Request {
+  const { origin, pathname } = new URL(url)
+  const params = new URLSearchParams()
+  if (transform.width) params.set('w', String(transform.width))
+  if (transform.height) params.set('h', String(transform.height))
+  if (transform.quality) params.set('q', String(transform.quality))
+  if (transform.fit) params.set('fit', transform.fit)
+  if (transform.format) params.set('f', transform.format)
+  if (transform.focal) params.set('fp', `${transform.focal.x},${transform.focal.y}`)
+  const query = params.toString()
+  return new Request(`${origin}${pathname}${query ? `?${query}` : ''}`)
+}
 
 export async function serveAsset(
   bucket: R2Bucket,
   images: ImagesBinding | undefined,
   key: string,
   transform: AssetTransform & { focal?: { x: number; y: number } },
+  request: Request,
 ): Promise<Response> {
   const object = await bucket.get(key)
-  if (!object) return new Response('Not found', { status: 404 })
+  if (!object) throw new FolioError('not_found', 'No such asset')
 
-  const wanted = transform.width || transform.height || transform.format
-  const contentType = object.httpMetadata?.contentType ?? 'application/octet-stream'
+  // Second gate on the same allowlist the upload applies (validate.ts): only the
+  // types this route is willing to serve inline are echoed back, so an object
+  // written by anything other than `uploadAsset` — or before that allowlist
+  // existed — downloads rather than rendering as HTML or SVG on this origin.
+  const stored = object.httpMetadata?.contentType ?? ''
+  const contentType = SERVED_CONTENT_TYPES.has(stored) ? stored : DOWNLOAD_CONTENT_TYPE
 
-  // No Images binding, or nothing to do: hand back the original. Folio stays
-  // usable with only an R2 bucket configured, which is the point of not putting
-  // the resizing strategy into stored values.
-  if (!images || !wanted || !contentType.startsWith('image/') || contentType === 'image/svg+xml') {
+  const wantsTransform = Boolean(transform.width || transform.height || transform.format)
+  // A transform only ever runs for a GET: the Cache API can only ever hold a
+  // GET response, and HEAD is routable to this same path (an uptime monitor or
+  // link-preview bot does exactly that) — running the transform anyway would
+  // mint a billable Images invocation, and writing its result under a HEAD-keyed
+  // request is what used to throw and get logged as a transform *failure* for a
+  // transform that had, in fact, just succeeded.
+  const canTransform =
+    Boolean(images) &&
+    wantsTransform &&
+    contentType !== DOWNLOAD_CONTENT_TYPE &&
+    request.method === 'GET'
+
+  if (!canTransform) {
+    // Nothing here was ever going to be transformed — the type isn't one this
+    // route reads, or no transform was requested at all — is the correct,
+    // stable response for the URL it answers and can be pinned for a year. A
+    // request that *did* ask for a transform but isn't getting one right now
+    // (no Images binding configured, or a non-GET method choosing not to spend
+    // one) is a degraded response and must not be.
+    const stable = !wantsTransform || contentType === DOWNLOAD_CONTENT_TYPE
     return new Response(object.body, {
-      headers: { 'content-type': contentType, 'cache-control': IMMUTABLE, etag: object.httpEtag },
+      headers: {
+        ...serveHeaders(stable ? IMMUTABLE : DEGRADED, contentType),
+        etag: object.httpEtag,
+      },
     })
   }
 
+  // Every distinct clamped transform below is its own billable Images
+  // invocation; the canonical request built above — not the raw request — is
+  // the key, so a repeated request for the identical transform is a free hit
+  // regardless of what cache-busting or out-of-range query string it arrived
+  // under.
+  //
+  // Cast rather than typed directly off the global: `lib.dom.d.ts`'s own
+  // `CacheStorage` (this project's tsconfig pulls in "DOM" for react-dom/server)
+  // shadows the Workers one and has no `default` property, though the runtime
+  // object underneath is the same either way.
+  const cache = (caches as unknown as { default: Cache }).default
+  const canonical = canonicalTransformRequest(request.url, transform)
+  const cached = await cache.match(canonical)
+  if (cached) return cached
+
+  let bytes: ArrayBuffer
+  let outContentType: string
   try {
     const op: ImageTransform = {
       ...(transform.width ? { width: transform.width } : {}),
@@ -222,12 +420,14 @@ export async function serveAsset(
       ...(transform.fit ? { fit: transform.fit } : {}),
       // Only meaningful when cropping, and `remainder` is the behaviour the
       // documented `XxY` gravity has: put the focal point of the output where it
-      // sits in the original.
+      // sits in the original. `parseTransform` has already clamped both
+      // coordinates into `[0, 1]`, which is what keeps an out-of-range `fp`
+      // from throwing here and falling through to the degraded branch below.
       ...(transform.focal && transform.fit === 'cover'
         ? { gravity: { x: transform.focal.x, y: transform.focal.y, mode: 'remainder' as const } }
         : {}),
     }
-    const result = await images
+    const result = await images!
       .input(object.body)
       .transform(op)
       .output({
@@ -240,22 +440,33 @@ export async function serveAsset(
     // through would put a silently broken image on the page — the worst
     // available failure mode. Transformed variants are small and cached
     // immutably, so this is paid once per variant.
-    const bytes = await result.response().arrayBuffer()
+    bytes = await result.response().arrayBuffer()
     if (bytes.byteLength === 0) throw new Error('Transform produced no output')
-
-    return new Response(bytes, {
-      headers: { 'content-type': result.contentType(), 'cache-control': IMMUTABLE },
-    })
-  } catch {
+    outContentType = result.contentType()
+  } catch (e) {
+    // Never silent: a transform failure that goes unlogged is indistinguishable
+    // from "nobody ever requested this variant".
+    console.error(`folio: asset transform failed for ${key}`, e)
     // A transform failing is not a reason to show a broken image. Re-fetch,
-    // because `object.body` was consumed by the attempt.
+    // because `object.body` was consumed by the attempt. Short-lived rather
+    // than immutable: this is the original standing in for a variant that
+    // failed, not the variant itself, and the failure may well be transient.
     const original = await bucket.get(key)
-    return original
-      ? new Response(original.body, {
-          headers: { 'content-type': contentType, 'cache-control': IMMUTABLE },
-        })
-      : new Response('Not found', { status: 404 })
+    if (!original) throw new FolioError('not_found', 'No such asset')
+    return new Response(original.body, { headers: serveHeaders(DEGRADED, contentType) })
   }
+
+  const response = new Response(bytes, { headers: serveHeaders(IMMUTABLE, outContentType) })
+  // Deliberately outside the transform's own try/catch, and never allowed to
+  // turn a successful transform into a reported failure: the transform above
+  // already succeeded, so a cache-write failure only costs the next request
+  // its cache hit, not this one its correct response.
+  try {
+    await cache.put(canonical, response.clone())
+  } catch (e) {
+    console.error(`folio: asset cache write failed for ${key}`, e)
+  }
+  return response
 }
 
 function safeFilename(name: string): string {
@@ -267,6 +478,66 @@ function safeFilename(name: string): string {
       .replace(/^-+|-+$/g, '')
       .slice(0, 80) || 'file'
   )
+}
+
+/* ------------------------------------------------------------- sniffing --- */
+
+const ascii4 = (bytes: Uint8Array, offset: number): string =>
+  bytes.length >= offset + 4
+    ? String.fromCharCode(
+        bytes[offset]!,
+        bytes[offset + 1]!,
+        bytes[offset + 2]!,
+        bytes[offset + 3]!,
+      )
+    : ''
+
+/**
+ * The upload's real content type, off its own magic bytes. Covers exactly
+ * `SERVED_CONTENT_TYPES` (validate.ts) — the formats `imageSize` already reads
+ * (png, jpeg, gif, webp) plus avif, cheap to add since its signature is a
+ * fixed 12-byte `ftyp` box. Returns `undefined` for anything else, which
+ * `uploadAsset` stores as `DOWNLOAD_CONTENT_TYPE`.
+ *
+ * Every signature below checks its *full* length rather than a short, cheaper
+ * prefix: this function's output becomes the stored — and later served —
+ * content-type on a route with `nosniff` as its only other defence, so a
+ * partial match (a 4-byte PNG prefix, a 2-byte JPEG SOI, a 3-byte "GIF" with no
+ * version) is a gap wide enough for an attacker-chosen payload with a matching
+ * prefix to be stored and echoed back as that content-type.
+ */
+export function sniffContentType(bytes: Uint8Array): string | undefined {
+  if (
+    bytes.length >= 8 &&
+    new DataView(bytes.buffer, bytes.byteOffset).getUint32(0) === 0x89504e47 &&
+    new DataView(bytes.buffer, bytes.byteOffset).getUint32(4) === 0x0d0a1a0a
+  ) {
+    return 'image/png'
+  }
+  // SOI (FF D8) is always immediately followed by another marker, which always
+  // starts with FF: without that third byte, "FF D8" alone is not a JPEG
+  // signature, just its first two bytes.
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg'
+  }
+  // The full 6-byte header, not just the 3-byte "GIF" that precedes it: either
+  // version string, "GIF87a" or "GIF89a".
+  if (
+    bytes.length >= 6 &&
+    ascii4(bytes, 0).slice(0, 3) === 'GIF' &&
+    bytes[3] === 0x38 &&
+    (bytes[4] === 0x37 || bytes[4] === 0x39) &&
+    bytes[5] === 0x61
+  ) {
+    return 'image/gif'
+  }
+  if (bytes.length >= 12 && ascii4(bytes, 0) === 'RIFF' && ascii4(bytes, 8) === 'WEBP') {
+    return 'image/webp'
+  }
+  if (bytes.length >= 12 && ascii4(bytes, 4) === 'ftyp' && ascii4(bytes, 8) === 'avif') {
+    return 'image/avif'
+  }
+  return undefined
 }
 
 /* ------------------------------------------------------------ dimensions --- */
