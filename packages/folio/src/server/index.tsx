@@ -17,9 +17,9 @@ import { FolioDoc } from '../preview/Render'
 import { Bootstrap, ReactRefreshPreamble, Shell } from './Document'
 import {
   createStory,
-  deleteStory,
+  deleteStoryStatement,
   listStories,
-  publishStory,
+  publishStoryStatement,
   publishedDoc,
   publishedDocsByIds,
   storyById,
@@ -37,7 +37,13 @@ import {
   uploadAsset,
 } from './assets'
 import { StoryDO } from './story-do'
-import { deleteVersionsFor, getVersion, listVersions, writeVersion } from './versions'
+import {
+  buildVersionWrite,
+  deleteVersionsStatement,
+  getVersion,
+  listVersions,
+  writeVersion,
+} from './versions'
 
 export { StoryDO }
 export type { VersionKind, VersionMeta } from './versions'
@@ -62,6 +68,7 @@ export interface FolioBindings {
 interface StoryStub {
   getOrInit(seed: Doc): Promise<Doc>
   recent(limit?: number): Promise<ActivityEntry[]>
+  purge(): Promise<void>
   fetch(req: Request): Promise<Response>
 }
 
@@ -113,6 +120,14 @@ export interface Folio<Env> {
 }
 
 const DEFAULT_BASE = '/folio'
+
+/**
+ * Application close code: the story this object backed has been deleted.
+ * Mirrors story-do.ts's own (private) constant by hand — a wire constant, not
+ * shared code — so a reconnect that discovers the deletion here closes with
+ * the identical code a live purge closes with.
+ */
+const CLOSE_PURGED = 4002
 
 export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
   const registry = toRegistry(config.blocks)
@@ -223,21 +238,69 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
   })
 
   app.delete('/stories/:id', async (c) => {
-    const db = config.bindings(c.env as Env).db
+    const env = c.env as Env
+    const db = config.bindings(env).db
+
+    let found: Awaited<ReturnType<typeof deleteStoryStatement>>
     try {
-      const deleted = await deleteStory(db, c.req.param('id'))
-      await deleteVersionsFor(db, deleted)
-      return c.json({ deleted })
+      found = await deleteStoryStatement(db, c.req.param('id'))
+      if (!found) return c.json({ deleted: [] })
+
+      // One batch for the story rows and their version history: either both
+      // disappear or neither does, so a reader never finds versions for a story
+      // that is already gone (or vice versa). `found.ids` always contains at
+      // least the target's own id, so `versions` is never actually null here;
+      // the guard stays because the helper's signature allows it.
+      const versions = deleteVersionsStatement(db, found.ids)
+      await db.batch(versions ? [found.statement, versions] : [found.statement])
     } catch (e) {
+      // Nothing has committed yet at this point, so reporting a failure here
+      // is accurate.
       return c.json({ error: String((e as Error).message) }, 400)
     }
+
+    // The Durable Object is purged only once that batch has committed.
+    // Purging first and then failing the D1 write would leave this id
+    // deletable-again while its object already has a blank doc — the
+    // opposite of the bug this guards against, but a data-loss bug all the
+    // same. Purging after means a crash between the two leaves an orphaned
+    // object rather than a resurrected one, which is the safer side to fail on.
+    //
+    // This runs outside the try/catch above on purpose: the D1 rows are
+    // already gone by now, so a purge failure must never be reported back as
+    // a failed delete — the caller already got what it asked for. It is
+    // best-effort cleanup of an object that a reused id would otherwise
+    // resurrect from; an object left un-purged here still cannot be reached
+    // under this id (D1 no longer has it), only under a *reused* one, which is
+    // the narrow, already-documented window above.
+    await Promise.all(
+      found.ids.map((id) =>
+        stub(env, id)
+          .purge()
+          .catch(() => {}),
+      ),
+    )
+    return c.json({ deleted: found.ids })
   })
 
   app.get('/story/:id/socket', async (c) => {
     if (c.req.header('Upgrade') !== 'websocket') return c.text('Expected websocket', 426)
     const env = c.env as Env
     const id = c.req.param('id')
-    if (!(await storyById(config.bindings(env).db, id))) return c.text('Unknown story', 404)
+    if (!(await storyById(config.bindings(env).db, id))) {
+      // A plain HTTP 404 here is indistinguishable, on the wire, from a
+      // dropped upgrade: the client's WebSocket only ever sees a failed
+      // handshake either way, and reconnects on a backoff forever — a
+      // deleted story never comes back, so that backoff never ends. Upgrading
+      // anyway and closing with the same application code a live purge uses
+      // (see story-do.ts's `purge()`) lets the client's existing terminal
+      // handling for that code cover this path too, whether the purge raced a
+      // still-open socket or a reconnect discovers the deletion afterwards.
+      const pair = new WebSocketPair()
+      pair[1].accept()
+      pair[1].close(CLOSE_PURGED, 'story deleted')
+      return new Response(null, { status: 101, webSocket: pair[0] })
+    }
     await draft(env, id)
     // TODO: validate the session here and hand the verified identity to the DO
     // rather than letting the client self-report it in `hello`.
@@ -253,19 +316,26 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
 
     const doc = await draft(env, id)
     // Every publish is a retained version, so "restore what was live before" is
-    // always possible.
-    const version = await writeVersion(db, {
+    // always possible. The version row and the stories.published_doc update
+    // land in one batch: run separately, a failure between the two could leave
+    // a retained version nothing points at, or a live page with no version to
+    // restore it from — the two are no longer allowed to disagree.
+    const { meta: version, statement: versionStatement } = buildVersionWrite(db, {
       storyId: id,
       kind: 'publish',
       doc,
       actor: c.req.header('x-folio-actor') ?? null,
       fallbackTitle: meta.title,
     })
-    return c.json({
-      ok: true,
-      publishedAt: await publishStory(db, id, doc, meta.title),
-      version,
-    })
+    const { publishedAt, statement: publishStatement } = publishStoryStatement(
+      db,
+      id,
+      doc,
+      meta.title,
+    )
+    await db.batch([versionStatement, publishStatement])
+
+    return c.json({ ok: true, publishedAt, version })
   })
 
   /**
@@ -390,7 +460,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     const id = c.req.param('id')
     if (!(await storyById(config.bindings(env).db, id)))
       return c.json({ error: 'Unknown story' }, 404)
-    return c.json(await stub(env, id).recent(Number(c.req.query('limit') ?? 60)))
+    return c.json(await stub(env, id).recent(clampLimit(c.req.query('limit'), 60, 200)))
   })
 
   app.get('/edit/:id', async (c) => {
@@ -477,6 +547,19 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       <FolioDoc doc={doc} registry={registry} edit={opts?.edit} resolution={opts?.resolution} />
     ),
   }
+}
+
+/**
+ * A query-string limit, defaulted and bounded. `Number(undefined)` and
+ * `Number('not-a-number')` both produce `NaN`, which must never reach the SQL
+ * bind inside the Durable Object (`Math.max(NaN, 1)` is itself `NaN`, not 1) —
+ * so absent or non-numeric input falls back to `fallback` here, before the
+ * clamp, rather than trusting the DO's own bound to catch it.
+ */
+function clampLimit(raw: string | undefined, fallback: number, max: number): number {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return fallback
+  return Math.min(Math.max(Math.trunc(n), 1), max)
 }
 
 function entries<Env>(config: FolioConfig<Env>, which: 'admin' | 'preview'): string[] {

@@ -1,9 +1,13 @@
 import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
+import type { Doc } from '../../src/core/doc'
 import {
   createStory,
   deleteStory,
+  deleteStoryStatement,
   listStories,
+  publishStoryStatement,
+  storyById,
   storyByPath,
   updateStory,
 } from '../../src/server/stories'
@@ -201,6 +205,65 @@ describe('deleteStory', () => {
 
   it('returns an empty array deleting an unknown id', async () => {
     expect(await deleteStory(env.DB, 'sty_nope')).toEqual([])
+  })
+})
+
+describe('publishStoryStatement', () => {
+  it('returns an unrun statement; publish batches it alongside the version insert', async () => {
+    const doc: Doc = {
+      root: 'r1',
+      bloks: {
+        r1: {
+          uid: 'r1',
+          type: 'page',
+          parent: null,
+          slot: null,
+          order: 'a0',
+          data: { title: 'Batched Publish' },
+        },
+      },
+    }
+    const { statement, publishedAt, title } = publishStoryStatement(
+      env.DB,
+      'sty_about',
+      doc,
+      'About',
+    )
+    expect(title).toBe('Batched Publish')
+
+    // Nothing has run yet: the point is that a caller can batch this with
+    // another write before executing either.
+    expect((await storyById(env.DB, 'sty_about'))?.publishedAt).toBeNull()
+
+    await statement.run()
+
+    const row = await storyById(env.DB, 'sty_about')
+    expect(row?.publishedAt).toBe(publishedAt)
+    expect(row?.title).toBe('Batched Publish')
+  })
+})
+
+describe('deleteStoryStatement', () => {
+  it('returns the affected ids and an unrun statement', async () => {
+    const found = await deleteStoryStatement(env.DB, 'sty_about')
+
+    expect([...(found?.ids ?? [])].sort()).toEqual(['sty_about', 'sty_team'])
+
+    // Still there: the statement has not been executed yet.
+    expect(await storyByPath(env.DB, 'about')).not.toBeNull()
+
+    await found?.statement.run()
+    expect(await storyByPath(env.DB, 'about')).toBeNull()
+  })
+
+  it('returns null for an unknown id, without preparing a statement', async () => {
+    expect(await deleteStoryStatement(env.DB, 'sty_nope')).toBeNull()
+  })
+
+  it('rejects deleting the root story', async () => {
+    await expect(deleteStoryStatement(env.DB, 'sty_home')).rejects.toThrow(
+      'Cannot delete the root story',
+    )
   })
 })
 

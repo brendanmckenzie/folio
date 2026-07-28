@@ -1,5 +1,4 @@
-import { generateKeyBetween } from 'fractional-indexing'
-import type { Doc } from '../core/doc'
+import { compareSiblings, type Doc, keyAtIndex } from '../core/doc'
 import {
   buildTree,
   derivePaths,
@@ -61,7 +60,13 @@ export async function publishedDocsByIds(
   return out
 }
 
-/** Fractional key placing a story at `index` among the children of `parentId`. */
+/**
+ * Fractional key placing a story at `index` among the children of `parentId`.
+ *
+ * Sorted through `compareSiblings`, the comparator `buildTree` uses, so the sibling
+ * list an index counts into is the one the user was looking at. A raw comparator
+ * returns 0 on tied `ord` values and leaves the two orders free to disagree.
+ */
 function orderAt(
   rows: readonly StoryMeta[],
   parentId: string | null,
@@ -70,10 +75,11 @@ function orderAt(
 ) {
   const sibs = rows
     .filter((r) => r.parentId === parentId && r.id !== ignore)
-    .sort((a, b) => (a.ord < b.ord ? -1 : a.ord > b.ord ? 1 : 0))
-  const before = index > 0 ? (sibs[index - 1]?.ord ?? null) : null
-  const after = sibs[index]?.ord ?? null
-  return generateKeyBetween(before, after)
+    .sort((a, b) => compareSiblings(a.ord, a.id, b.ord, b.id))
+  return keyAtIndex(
+    sibs.map((r) => r.ord),
+    index,
+  )
 }
 
 function uniqueSlug(
@@ -177,20 +183,56 @@ export async function updateStory(
   return { ...next, path: paths.get(id) ?? next.path }
 }
 
-/** Removes the story and everything beneath it. */
-export async function deleteStory(db: D1Database, id: string): Promise<string[]> {
+/**
+ * What deleting `id` would remove, and the statement that does it, unrun: a
+ * caller batches this alongside the versions cleanup so a story's rows and its
+ * version history disappear in one transaction rather than one succeeding
+ * while the other fails. Null when there is no such story.
+ */
+export async function deleteStoryStatement(
+  db: D1Database,
+  id: string,
+): Promise<{ ids: string[]; statement: D1PreparedStatement } | null> {
   const rows = await listStories(db)
   const target = rows.find((r) => r.id === id)
-  if (!target) return []
+  if (!target) return null
   if (target.path === '') throw new Error('Cannot delete the root story')
 
   const ids = descendants(rows, id)
   const placeholders = ids.map(() => '?').join(', ')
-  await db
-    .prepare(`delete from stories where id in (${placeholders})`)
-    .bind(...ids)
-    .run()
-  return ids
+  const statement = db.prepare(`delete from stories where id in (${placeholders})`).bind(...ids)
+  return { ids, statement }
+}
+
+/** Removes the story and everything beneath it. */
+export async function deleteStory(db: D1Database, id: string): Promise<string[]> {
+  const found = await deleteStoryStatement(db, id)
+  if (!found) return []
+  await found.statement.run()
+  return found.ids
+}
+
+/**
+ * The stories-row update for a publish, unrun: a caller batches it alongside the
+ * version-row insert (see versions.ts's `buildVersionWrite`) so a publish either
+ * lands both writes or neither — `published_doc` and the retained version can no
+ * longer disagree about what "the last publish" was.
+ */
+export function publishStoryStatement(
+  db: D1Database,
+  id: string,
+  doc: Doc,
+  fallbackTitle: string,
+): { publishedAt: number; title: string; statement: D1PreparedStatement } {
+  const title = String(doc.bloks[doc.root]?.data.title ?? '').trim() || fallbackTitle
+  const publishedAt = Date.now()
+  const statement = db
+    .prepare(
+      `update stories set published_doc = ?, published_at = ?, title = ?, updated_at = ?
+       where id = ?`,
+    )
+    .bind(JSON.stringify(doc), publishedAt, title, publishedAt, id)
+  return { publishedAt, title, statement }
 }
 
 /** Snapshot a draft into D1, caching the document's title for the tree. */
@@ -200,14 +242,7 @@ export async function publishStory(
   doc: Doc,
   fallbackTitle: string,
 ): Promise<number> {
-  const title = String(doc.bloks[doc.root]?.data.title ?? '').trim() || fallbackTitle
-  const now = Date.now()
-  await db
-    .prepare(
-      `update stories set published_doc = ?, published_at = ?, title = ?, updated_at = ?
-       where id = ?`,
-    )
-    .bind(JSON.stringify(doc), now, title, now, id)
-    .run()
-  return now
+  const { publishedAt, statement } = publishStoryStatement(db, id, doc, fallbackTitle)
+  await statement.run()
+  return publishedAt
 }

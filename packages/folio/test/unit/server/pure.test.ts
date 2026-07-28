@@ -522,9 +522,11 @@ describe('serializeJson', () => {
     expect(serializeJson(null)).toBe('null')
   })
 
-  // SPEC(undefined-crash): serializeJson should handle undefined gracefully, returning 'undefined' or throwing a clear error. Currently fails: JSON.stringify(undefined) returns undefined (not a string), causing .replace() to crash.
-  it.fails('serializes undefined values', () => {
-    expect(serializeJson(undefined)).toBe('undefined')
+  // SPEC(undefined-crash): serializeJson is total over its input. undefined
+  // normalises to JSON null rather than crashing .replace() on the non-string
+  // JSON.stringify(undefined) returns.
+  it('serializes undefined as null', () => {
+    expect(serializeJson(undefined)).toBe('null')
   })
 
   it('serializes boolean values', () => {

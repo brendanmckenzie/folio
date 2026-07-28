@@ -3,9 +3,15 @@ import type { ReactNode } from 'react'
 /**
  * JSON that is safe to embed inside a <script> tag. Only `<` needs escaping:
  * U+2028/U+2029 have been legal in JS string literals since ES2019.
+ *
+ * Total over its input: `JSON.stringify(undefined)` returns `undefined` itself
+ * (not a string), which would otherwise crash `.replace` below. `undefined`
+ * normalises to `null`, the same value a `set` mutation's own absent-field
+ * normalisation already uses (see docs/sync-design.md), rather than a bespoke
+ * sentinel just for this call site.
  */
 export function serializeJson(value: unknown): string {
-  return JSON.stringify(value).replace(/</g, '\\u003c')
+  return JSON.stringify(value ?? null).replace(/</g, '\\u003c')
 }
 
 export function Bootstrap({ global, value }: { global: string; value: unknown }) {
