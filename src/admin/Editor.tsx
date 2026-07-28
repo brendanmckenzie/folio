@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { diff, summariseDiff } from '../core/diff'
 import { ancestorsOf, childrenOf, type Doc, type Json, keyAtIndex } from '../core/doc'
-import type { ActivityEntry } from '../core/protocol'
+import { type ActivityEntry, MAX_TX_MUTATIONS } from '../core/protocol'
 import { buildResolution, referencedIds } from '../core/resolve'
 import { blankBlok, type SchemaIndex } from '../core/schema'
 import type { StoryNode } from '../core/story'
@@ -372,10 +372,27 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
           setNotice('Already identical to that version.')
           return
         }
+        // A restore is one transaction so it lands and undoes as a single step;
+        // that means it is also one shot at the wire caps, with no chunking to
+        // fall back on (see MAX_TX_MUTATIONS in core/protocol). A restore this
+        // large is rare enough that refusing it up front, rather than splitting
+        // it into several separately-undoable transactions, is the simpler and
+        // more honest failure.
+        if (mutations.length > MAX_TX_MUTATIONS) {
+          setNotice(
+            `This restore touches ${mutations.length} things at once, over the ` +
+              `${MAX_TX_MUTATIONS} the sync engine allows in one step. Try restoring a ` +
+              'version with a smaller difference from the live page.',
+          )
+          return
+        }
         // Leave preview first so the live document flows to the iframe again.
         setViewing(null)
         viewingRef.current = null
-        store.tx(mutations)
+        if (!store.tx(mutations)) {
+          setNotice('That restore could not be sent: it is too large to sync. Nothing changed.')
+          return
+        }
         const s = summariseDiff(mutations)
         setNotice(
           `Restored: ${[

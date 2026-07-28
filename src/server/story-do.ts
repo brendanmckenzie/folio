@@ -4,10 +4,13 @@ import { apply, mutationError } from '../core/mutations'
 import {
   type ActivityEntry,
   type Delta,
+  docCapError,
+  MAX_FRAME_BYTES,
   parseClientFrame,
   type Presence,
   PROTOCOL_VERSION,
   type ServerMsg,
+  txCapError,
 } from '../core/protocol'
 
 /** Beyond this many missed deltas it is cheaper to re-send the whole document. */
@@ -125,19 +128,38 @@ export class StoryDO extends DurableObject {
    * takes the connection with it.
    */
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
+    // Checked ahead of parsing: a frame this large would cost a JSON.parse over
+    // attacker-controlled input before anything else gets a chance to refuse it,
+    // and it stays a bounded, nameable error rather than an unreadable frame.
+    //
+    // Measured in UTF-8 bytes, not `.length`: a string's `.length` counts UTF-16
+    // code units, so a frame padded with 3-byte-in-UTF-8 characters can be three
+    // times MAX_FRAME_BYTES on the wire while reading well under the cap here -
+    // exactly the value size (`set.value` at 64KB) this cap stands in for.
+    const size = typeof raw === 'string' ? new TextEncoder().encode(raw).byteLength : raw.byteLength
+    if (size > MAX_FRAME_BYTES) {
+      const reason = `frame too large: ${size} exceeds ${MAX_FRAME_BYTES} bytes`
+      this.sendTo(ws, { type: 'error', reason })
+      return
+    }
+
     const msg = parseClientFrame(raw)
     if (!msg) {
       this.sendTo(ws, { type: 'error', reason: 'unreadable frame' })
       return
     }
     // Version discipline covers every frame, not only the handshake: a peer that
-    // claims a version this object does not implement is refused whatever it
-    // sends, so one whose hello was refused cannot go on writing. An absent
-    // version refuses only `hello`, which is where a peer's vintage is
-    // established — a refused hello is closed before it can send anything else,
-    // so the unversioned frames that reach the arms below are the ones from a
-    // socket that never handshook at all (see the `unknown` actor in `tx`).
-    const mismatch = msg.v === undefined ? msg.type === 'hello' : msg.v !== PROTOCOL_VERSION
+    // claims a version this object does not implement, or claims none at all, is
+    // refused whatever it sends. An absent `v` is a mismatch for every type, not
+    // only `hello` — every frame this store's own client sends stamps `v`
+    // (store.ts's `send`), so an unversioned frame is either a stale client from
+    // before the wire carried a version or one bypassing the client entirely, and
+    // either way it must not be able to write. Refusing only `hello` on a missing
+    // version would let a tx or presence frame with the field simply dropped sail
+    // through unversioned, attributed to whatever actor its socket happens to
+    // have attached (or `unknown`, if none) — the exact hole versioning exists to
+    // close, one omitted field away.
+    const mismatch = msg.v !== PROTOCOL_VERSION
     if (mismatch) {
       this.sendTo(ws, {
         type: 'error',
@@ -193,6 +215,15 @@ export class StoryDO extends DurableObject {
           return
         }
 
+        // Same envelope as an invalid mutation: oversized is refused at the door
+        // exactly like malformed, and the sender still gets its txId back to drop
+        // the tx from `pending` rather than wait forever for a delta.
+        const capError = txCapError(msg.mutations)
+        if (capError) {
+          this.sendTo(ws, { type: 'reject', txId: msg.txId, reason: capError })
+          return
+        }
+
         // Atomic at the door: one violation refuses the whole transaction, since
         // a half-applied tx cannot be undone. Each mutation is checked against
         // the document the ones before it produced, so a tx that inserts a
@@ -208,6 +239,18 @@ export class StoryDO extends DurableObject {
           next = apply(next, m)
         }
 
+        // Bounds what an unbounded run of individually-legal txs can grow the
+        // document to; each admitted mutation above is already legal on its own,
+        // so this is checked once against the tx's net effect rather than per
+        // mutation. `nextJson` is reused below for the doc row instead of
+        // serialising the document twice.
+        const nextJson = JSON.stringify(next)
+        const docReason = docCapError(next, nextJson)
+        if (docReason) {
+          this.sendTo(ws, { type: 'reject', txId: msg.txId, reason: docReason })
+          return
+        }
+
         this.sql.exec(
           'insert into log (tx_id, actor, actor_name, mutations, at) values (?, ?, ?, ?, ?)',
           msg.txId,
@@ -219,11 +262,7 @@ export class StoryDO extends DurableObject {
         const syncId = Number(
           this.sql.exec<{ id: number }>('select last_insert_rowid() as id').toArray()[0]?.id ?? 0,
         )
-        this.sql.exec(
-          'update doc set json = ?, sync_id = ? where id = 1',
-          JSON.stringify(next),
-          syncId,
-        )
+        this.sql.exec('update doc set json = ?, sync_id = ? where id = 1', nextJson, syncId)
         const delta: ServerMsg = {
           type: 'delta',
           syncId,

@@ -3,6 +3,8 @@ import { applyAll, invertAll, type Mutation } from '../core/mutations'
 import {
   type ClientMsg,
   type Delta,
+  MAX_FRAME_BYTES,
+  MAX_TX_MUTATIONS,
   type Presence,
   PROTOCOL_VERSION,
   type ServerFrame,
@@ -78,6 +80,27 @@ export interface StoryStoreOptions {
    * WebSocket resolved against `window.location`.
    */
   createSocket?: (path: string) => WebSocketLike
+}
+
+/**
+ * Why `mutations` cannot be sent as one tx frame, or null when both wire caps
+ * allow it — the producing side's mirror of `txCapError` and the frame-bytes
+ * check in story-do.ts's `webSocketMessage`. Checked before a tx ever reaches
+ * `pending`, not after: the object's own oversized-frame refusal is answered
+ * before anything has been parsed, so it cannot carry the txId a client needs to
+ * drop the tx from its queue, and a rejection that never arrives is a tx that
+ * never leaves `pending` — a permanent "Saving…" and a resend on every
+ * reconnect. Catching it here means it is never sent at all.
+ */
+function frameCapError(txId: string, mutations: Mutation[]): string | null {
+  if (mutations.length > MAX_TX_MUTATIONS) {
+    return `too many changes in one edit: ${mutations.length} exceeds the ${MAX_TX_MUTATIONS} cap`
+  }
+  const frame = JSON.stringify({ type: 'tx', txId, mutations, v: PROTOCOL_VERSION })
+  const bytes = new TextEncoder().encode(frame).byteLength
+  return bytes > MAX_FRAME_BYTES
+    ? `too large to sync: ${bytes} bytes exceeds the ${MAX_FRAME_BYTES} byte cap`
+    : null
 }
 
 function browserSocket(path: string): WebSocketLike {
@@ -397,24 +420,34 @@ export class StoryStore {
 
   /**
    * Apply locally, forward to the preview, then send. Never blocks on the network.
+   * Returns false when the tx was refused before it ever reached `pending` (see
+   * `frameCapError`) — callers roll back whatever undo/redo bookkeeping they did
+   * on the assumption the tx would be sent.
    *
    * `txId` is 64 bits of entropy, not a uuid slice: it is the log's unique dedupe
    * key, so a collision would answer this transaction with a stranger's delta and
    * lose the edit silently. The log is never trimmed, so 32 bits was not enough.
    */
-  private dispatch(mutations: Mutation[], seq: number) {
-    if (!this.base || mutations.length === 0) return
+  private dispatch(mutations: Mutation[], seq: number): boolean {
+    if (!this.base || mutations.length === 0) return false
     const txId = newUid()
+    const capError = frameCapError(txId, mutations)
+    if (capError) {
+      this.patch({ notice: `Edit not sent: ${capError}` })
+      return false
+    }
     this.pending.set(txId, { mutations, seq })
     this.commit({ notice: null })
     this.onMutations(mutations)
     // Dropped while the socket is down; `pending` holds it until a reconnect.
     this.send({ type: 'tx', txId, mutations })
+    return true
   }
 
-  tx(mutations: Mutation[]) {
+  /** Returns false when the edit was refused locally for its size; see `dispatch`. */
+  tx(mutations: Mutation[]): boolean {
     const doc = this.state.doc
-    if (!doc || mutations.length === 0) return
+    if (!doc || mutations.length === 0) return false
 
     // Typing produces one `set` per keystroke. Collapse a run on the same field
     // into a single undo entry rather than one per character.
@@ -427,31 +460,58 @@ export class StoryStore {
       now - this.lastEdit.at < COALESCE_MS
 
     const seq = ++this.seq
-    if (!coalesce) this.undoStack.push({ mutations: invertAll(doc, mutations), seq })
+    const pushedUndo = !coalesce
+    if (pushedUndo) this.undoStack.push({ mutations: invertAll(doc, mutations), seq })
+    const priorRedo = this.redoStack
+    const priorLastEdit = this.lastEdit
     this.redoStack = []
     this.lastEdit = only?.t === 'set' ? { uid: only.uid, field: only.field, at: now } : null
 
-    this.dispatch(mutations, seq)
+    const sent = this.dispatch(mutations, seq)
+    if (!sent) {
+      // Refused before anything reached the wire: leave undo/redo/coalesce state
+      // exactly as this call found it, or a later undo would invert a
+      // transaction the object never saw.
+      if (pushedUndo) this.undoStack.pop()
+      this.redoStack = priorRedo
+      this.lastEdit = priorLastEdit
+      this.seq--
+    }
+    return sent
   }
 
-  undo() {
+  /** Returns false when the undo was refused locally for its size; see `dispatch`. */
+  undo(): boolean {
     const doc = this.state.doc
     const entry = this.undoStack.pop()
-    if (!doc || !entry) return
+    if (!doc || !entry) return false
     const seq = ++this.seq
     this.redoStack.push({ mutations: invertAll(doc, entry.mutations), seq })
     this.lastEdit = null
-    this.dispatch(entry.mutations, seq)
+    const sent = this.dispatch(entry.mutations, seq)
+    if (!sent) {
+      this.redoStack.pop()
+      this.undoStack.push(entry)
+      this.seq--
+    }
+    return sent
   }
 
-  redo() {
+  /** Returns false when the redo was refused locally for its size; see `dispatch`. */
+  redo(): boolean {
     const doc = this.state.doc
     const entry = this.redoStack.pop()
-    if (!doc || !entry) return
+    if (!doc || !entry) return false
     const seq = ++this.seq
     this.undoStack.push({ mutations: invertAll(doc, entry.mutations), seq })
     this.lastEdit = null
-    this.dispatch(entry.mutations, seq)
+    const sent = this.dispatch(entry.mutations, seq)
+    if (!sent) {
+      this.undoStack.pop()
+      this.redoStack.push(entry)
+      this.seq--
+    }
+    return sent
   }
 
   select(uid: string | null) {
