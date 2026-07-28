@@ -32,8 +32,9 @@ const MAX_MESSAGE = 200
 /**
  * A row id arriving as a path param or inside a body.
  *
- * Ids are minted server-side (`sty_`/`ver_`/`ast_` plus hex) but schema.sql's
- * seed rows use readable names, so this bounds and screens rather than matching
+ * Ids are minted server-side (`sty_`/`ver_`/`ast_` plus hex) but the demo
+ * seed's rows (examples/demo/seed.sql) use readable names, so this bounds and
+ * screens rather than matching
  * a mint format: no control characters, no path separators, and short enough
  * that junk can never become a large bind.
  */

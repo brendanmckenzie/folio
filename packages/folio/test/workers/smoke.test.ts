@@ -1,7 +1,23 @@
 import { env } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import type { Doc } from '../../src/core/doc'
 import type { ActivityEntry } from '../../src/core/protocol'
+import { applySeedFixture } from './seed-fixture'
+
+/**
+ * Migrations (packages/folio/migrations/**) are structure only — no seed rows
+ * ship with them, unlike the old drop-and-reseed schema.sql — so this file
+ * seeds its own fixture by running the actual examples/demo/seed.sql (see
+ * seed-fixture.ts), the same file `pnpm db:seed` runs. That is what makes the
+ * next test below a real assertion rather than a tautological one: a wrong
+ * column order or a typo in seed.sql fails here, instead of only being
+ * catchable by hand in a browser. Runs once for the whole file, same as
+ * apply-schema.ts's own `beforeAll` (registered first, since it comes from
+ * `setupFiles`), so every test below still starts from this exact tree.
+ */
+beforeAll(async () => {
+  await applySeedFixture(env.DB)
+})
 
 const seed: Doc = {
   root: 'root0000',
@@ -23,18 +39,21 @@ async function storyCount(): Promise<number> {
 }
 
 describe('workers harness: D1', () => {
-  it('applies schema.sql, tables and all', async () => {
+  it('applies the migrations, tables and all', async () => {
     // Miniflare keeps its own `_cf_METADATA` table in the same database.
+    // `d1_migrations` is `applyD1Migrations`'s own bookkeeping table (see
+    // apply-schema.ts), the same one a real `wrangler d1 migrations apply` run
+    // creates in production.
     const { results } = await env.DB.prepare(
       `select name from sqlite_master
        where type = 'table' and name not like 'sqlite_%' and name not like '_cf_%'
        order by name`,
     ).all<{ name: string }>()
 
-    expect(results.map((r) => r.name)).toEqual(['assets', 'stories', 'versions'])
+    expect(results.map((r) => r.name)).toEqual(['assets', 'd1_migrations', 'stories', 'versions'])
   })
 
-  it('has the seed stories, including the root story serving /', async () => {
+  it('has the seed stories from examples/demo/seed.sql, including the root story serving /', async () => {
     const { results } = await env.DB.prepare(
       'select id, parent_id, slug, path, ord, title from stories order by path',
     ).all<{
@@ -90,9 +109,9 @@ describe('workers harness: D1', () => {
  * compile with TS2589 ("type instantiation is excessively deep"): the RPC type
  * mapper cannot chew through `Doc`, whose `Json` field type is recursive.
  *
- * src/server/index.tsx hits the same wall and works around it the same way, with
- * a hand-written stub interface and a cast, so tests are not inventing anything
- * here. Keep this in step with the `StoryStub` interface over there.
+ * src/server/types.ts hits the same wall and works around it with a
+ * `Pick<StoryDO, ...>` derived from the class, so tests are not inventing
+ * anything here. Keep this in step with the pick over there.
  */
 interface StoryStub {
   getOrInit(seed: Doc): Promise<Doc>
