@@ -3,6 +3,7 @@ import {
   docCapError,
   fallbackColour,
   isClientMsg,
+  isPreviewMsg,
   MAX_ACTOR_LEN,
   MAX_DOC_BLOKS,
   MAX_DOC_BYTES,
@@ -301,6 +302,92 @@ describe('parseClientFrame: junk and framing', () => {
 
   it('rejects a v that is present but not a number', () => {
     expect(isClientMsg({ type: 'presence', selection: null, v: 'one' })).toBe(false)
+  })
+})
+
+/**
+ * The admin <-> preview postMessage protocol. `isPreviewMsg` is total over
+ * `unknown` the same way `isClientMsg` is: `event.data` on a `message`
+ * listener is never something either side threw first, and this guard has to
+ * say so without throwing either.
+ */
+describe('isPreviewMsg', () => {
+  const doc = { root: 'root0000', bloks: {} }
+  const resolution = { stories: {}, assetBase: '/folio/asset' }
+
+  it('accepts an apply carrying only well-formed mutations', () => {
+    expect(isPreviewMsg({ type: 'apply', mutations: [setMutation()], v: PROTOCOL_VERSION })).toBe(
+      true,
+    )
+    expect(isPreviewMsg({ type: 'apply', mutations: [] })).toBe(true)
+  })
+
+  it('rejects an apply carrying even one malformed mutation', () => {
+    expect(isPreviewMsg({ type: 'apply', mutations: [setMutation(), { t: 'bogus' }] })).toBe(false)
+  })
+
+  it('rejects an apply whose mutations is not an array', () => {
+    expect(isPreviewMsg({ type: 'apply', mutations: 'nope' })).toBe(false)
+  })
+
+  it('accepts a replace carrying any object as the document', () => {
+    expect(isPreviewMsg({ type: 'replace', doc })).toBe(true)
+  })
+
+  it('rejects a replace whose doc is not an object', () => {
+    expect(isPreviewMsg({ type: 'replace', doc: null })).toBe(false)
+    expect(isPreviewMsg({ type: 'replace' })).toBe(false)
+  })
+
+  it('accepts a resolve carrying any object as the resolution', () => {
+    expect(isPreviewMsg({ type: 'resolve', resolution })).toBe(true)
+  })
+
+  it('rejects a resolve whose resolution is not an object', () => {
+    expect(isPreviewMsg({ type: 'resolve', resolution: 'nope' })).toBe(false)
+  })
+
+  it('accepts a select with a uid or with null, either direction', () => {
+    expect(isPreviewMsg({ type: 'select', uid: 'blk_1' })).toBe(true)
+    expect(isPreviewMsg({ type: 'select', uid: null })).toBe(true)
+  })
+
+  it('rejects a select whose uid is missing or the wrong type', () => {
+    expect(isPreviewMsg({ type: 'select' })).toBe(false)
+    expect(isPreviewMsg({ type: 'select', uid: 42 })).toBe(false)
+  })
+
+  it('accepts a bare ready with no other fields', () => {
+    expect(isPreviewMsg({ type: 'ready' })).toBe(true)
+  })
+
+  it('accepts an add naming both a parent and a slot', () => {
+    expect(isPreviewMsg({ type: 'add', parent: 'blk_1', slot: 'body' })).toBe(true)
+  })
+
+  it('rejects an add missing either half of the slot reference', () => {
+    expect(isPreviewMsg({ type: 'add', parent: 'blk_1' })).toBe(false)
+    expect(isPreviewMsg({ type: 'add', slot: 'body' })).toBe(false)
+  })
+
+  it('rejects an unknown type', () => {
+    expect(isPreviewMsg({ type: 'nonsense' })).toBe(false)
+  })
+
+  it('rejects non-record input without throwing', () => {
+    expect(isPreviewMsg(null)).toBe(false)
+    expect(isPreviewMsg(undefined)).toBe(false)
+    expect(isPreviewMsg('ready')).toBe(false)
+    expect(isPreviewMsg([1, 2, 3])).toBe(false)
+  })
+
+  it('rejects a v that is present but not a number', () => {
+    expect(isPreviewMsg({ type: 'ready', v: 'one' })).toBe(false)
+  })
+
+  it('accepts a v that is absent or a number', () => {
+    expect(isPreviewMsg({ type: 'ready', v: PROTOCOL_VERSION })).toBe(true)
+    expect(isPreviewMsg({ type: 'ready' })).toBe(true)
   })
 })
 
