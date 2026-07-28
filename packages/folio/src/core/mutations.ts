@@ -1,4 +1,4 @@
-import { type Blok, type Doc, type Json, subtree } from './doc'
+import { ancestorsOf, type Blok, type Doc, type Json, subtree } from './doc'
 
 /**
  * Every edit in the system is one of these. Nothing writes to a document
@@ -10,7 +10,47 @@ export type Mutation =
   | { t: 'move'; uid: string; parent: string; slot: string; order: string }
   | { t: 'remove'; uid: string }
 
+/**
+ * Why `m` cannot be applied to `doc`, or null when it can. Naming the violation
+ * is what lets the Durable Object answer an invalid transaction with a reason
+ * instead of silently dropping it.
+ *
+ * A mutation that targets a uid the document does not have is not a violation:
+ * it is an ordinary no-op, and rejecting a whole transaction over one is how a
+ * legitimate concurrent remove would start refusing everyone's edits.
+ *
+ * Cost matters — this runs per mutation over a whole log replay — so the cycle
+ * check walks ancestors (O(depth)) rather than the moved subtree (O(n)).
+ */
+export function mutationError(doc: Doc, m: Mutation): string | null {
+  switch (m.t) {
+    case 'set':
+      return null
+    case 'insert':
+      return doc.bloks[m.blok.uid] ? `duplicate uid: ${m.blok.uid} already exists` : null
+    case 'move': {
+      if (!doc.bloks[m.uid]) return null
+      if (m.uid === doc.root) return 'root move: the root cannot be given a parent'
+      if (m.uid === m.parent) return 'self-parent: a blok cannot be its own parent'
+      if (!doc.bloks[m.parent]) return `missing parent: ${m.parent} does not exist`
+      if (ancestorsOf(doc, m.parent).includes(m.uid)) {
+        return `cycle: ${m.parent} is a descendant of ${m.uid}`
+      }
+      return null
+    }
+    case 'remove':
+      return m.uid === doc.root ? 'root remove: the root cannot be removed' : null
+    default:
+      return `unknown kind: ${(m as { t: string }).t}`
+  }
+}
+
 export function apply(doc: Doc, m: Mutation): Doc {
+  // Applying an invalid mutation is a structural no-op, independently of the
+  // server's validation: client and server replay the same log through here, and
+  // logs written before these guards existed must still land on a sane document.
+  if (mutationError(doc, m)) return doc
+
   switch (m.t) {
     case 'set': {
       const b = doc.bloks[m.uid]
@@ -52,6 +92,10 @@ export function applyAll(doc: Doc, ms: readonly Mutation[]): Doc {
  * *before* `m` was applied.
  */
 export function invert(doc: Doc, m: Mutation): Mutation[] {
+  // A refused mutation changed nothing, so it undoes to nothing. The server
+  // never logs one, but an undo stack built over an older log can still see it.
+  if (mutationError(doc, m)) return []
+
   switch (m.t) {
     case 'set': {
       const b = doc.bloks[m.uid]

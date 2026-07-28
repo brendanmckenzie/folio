@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { type Blok, type Doc, type Json, newUid } from '../../../src/core/doc'
-import { type Mutation, apply, applyAll, invert, invertAll } from '../../../src/core/mutations'
+import {
+  type Mutation,
+  apply,
+  applyAll,
+  invert,
+  invertAll,
+  mutationError,
+} from '../../../src/core/mutations'
 
 const b = (
   uid: string,
@@ -91,9 +98,9 @@ describe('apply — insert', () => {
     expect(doc).toEqual(makeDoc())
   })
 
-  // SPEC(insert-collision): inserting a blok whose uid already exists must be a no-op.
-  // Currently fails: the existing blok is silently replaced by the incoming one.
-  it.fails('refuses to insert over an existing uid', () => {
+  // SPEC(insert-collision): inserting a blok whose uid already exists is a no-op — the
+  // incoming blok never replaces the one that is already there.
+  it('refuses to insert over an existing uid', () => {
     const doc = makeDoc()
     const collide = b('text', 'quote', 'root', 'body', 'a9', { body: 'clobbered' })
     expect(apply(doc, { t: 'insert', blok: collide })).toEqual(makeDoc())
@@ -132,9 +139,8 @@ describe('apply — move', () => {
     )
   })
 
-  // SPEC(move-self): a move whose parent is the moved uid itself must be a no-op.
-  // Currently fails: the blok becomes its own parent, so it disappears from the tree.
-  it.fails('refuses to make a blok its own parent', () => {
+  // SPEC(move-self): a move whose parent is the moved uid itself is a no-op.
+  it('refuses to make a blok its own parent', () => {
     const doc = makeDoc()
     const m: Mutation = {
       t: 'move',
@@ -147,9 +153,9 @@ describe('apply — move', () => {
     expect(apply(doc, m)).toEqual(makeDoc())
   })
 
-  // SPEC(move-cycle): moving a node under one of its own descendants must be a no-op.
-  // Currently fails: the cycle is applied, after which subtree() recurses forever.
-  it.fails('refuses to move a node under its own descendant', () => {
+  // SPEC(move-cycle): moving a node under one of its own descendants is a no-op, so no
+  // replay can put a cycle into a document.
+  it('refuses to move a node under its own descendant', () => {
     const doc = makeDoc()
     // Deliberately no subtree()/childrenOf() call in here: once the cycle lands they never
     // terminate, so this test asserts on the parents map only and fails cleanly.
@@ -164,18 +170,17 @@ describe('apply — move', () => {
     expect(applyAll(doc, [cycleMove])).toEqual(makeDoc())
   })
 
-  // SPEC(move-root): giving doc.root a parent must be a no-op.
-  // Currently fails: the root is reparented, leaving the document with no root-anchored tree.
-  it.fails('refuses to give doc.root a parent', () => {
+  // SPEC(move-root): giving doc.root a parent is a no-op; the tree always stays anchored.
+  it('refuses to give doc.root a parent', () => {
     const doc = makeDoc()
     const m: Mutation = { t: 'move', uid: 'root', parent: 'section', slot: 'children', order: 'a0' }
     expect(parents(apply(doc, m))).toEqual(parents(doc))
     expect(apply(doc, m)).toEqual(makeDoc())
   })
 
-  // SPEC(move-orphan): moving a blok under a parent uid that does not exist must be a no-op.
-  // Currently fails: the move is applied and the blok (plus its subtree) leaks as an orphan.
-  it.fails('refuses to move a blok under a nonexistent parent', () => {
+  // SPEC(move-orphan): moving a blok under a parent uid that does not exist is a no-op, so
+  // no blok (or subtree) can leak out of the tree as an orphan.
+  it('refuses to move a blok under a nonexistent parent', () => {
     const doc = makeDoc()
     const m: Mutation = { t: 'move', uid: 'text', parent: 'ghost', slot: 'children', order: 'a0' }
     expect(apply(doc, m)).toEqual(makeDoc())
@@ -391,13 +396,104 @@ describe('invertAll round trip', () => {
   })
 })
 
+/**
+ * The reason strings are the DO's `reject { txId, reason }` payload, so each
+ * violation has to be nameable. Matched loosely: the wording is not the contract.
+ */
+describe('mutationError', () => {
+  const doc = makeDoc()
+
+  it('names each structural violation', () => {
+    expect(
+      mutationError(doc, { t: 'insert', blok: b('text', 'quote', 'root', 'body', 'a9') }),
+    ).toMatch(/duplicate uid/)
+    expect(
+      mutationError(doc, {
+        t: 'move',
+        uid: 'root',
+        parent: 'section',
+        slot: 'children',
+        order: 'a0',
+      }),
+    ).toMatch(/root move/)
+    expect(
+      mutationError(doc, {
+        t: 'move',
+        uid: 'section',
+        parent: 'section',
+        slot: 'children',
+        order: 'a0',
+      }),
+    ).toMatch(/self-parent/)
+    expect(
+      mutationError(doc, {
+        t: 'move',
+        uid: 'text',
+        parent: 'ghost',
+        slot: 'children',
+        order: 'a0',
+      }),
+    ).toMatch(/missing parent/)
+    expect(
+      mutationError(doc, {
+        t: 'move',
+        uid: 'section',
+        parent: 'img',
+        slot: 'children',
+        order: 'a0',
+      }),
+    ).toMatch(/cycle/)
+    expect(mutationError(doc, { t: 'remove', uid: 'root' })).toMatch(/root remove/)
+    expect(mutationError(doc, { t: 'nonsense' } as unknown as Mutation)).toMatch(/unknown kind/)
+  })
+
+  it('accepts every mutation that applies, and every plain no-op', () => {
+    const ok: Mutation[] = [
+      { t: 'set', uid: 'text', field: 'body', value: 'two' },
+      { t: 'insert', blok: b('card', 'card', 'section', 'children', 'a2') },
+      { t: 'move', uid: 'img', parent: 'root', slot: 'body', order: 'a2' },
+      { t: 'remove', uid: 'section' },
+    ]
+    for (const m of ok) expect(mutationError(doc, m)).toBeNull()
+
+    // A mutation aimed at a uid this document does not have is an ordinary no-op,
+    // not a violation: rejecting a whole tx over one would make a peer's remove
+    // start refusing everybody's edits.
+    const absent: Mutation[] = [
+      { t: 'set', uid: 'nope', field: 'x', value: 1 },
+      { t: 'move', uid: 'nope', parent: 'root', slot: 'body', order: 'a0' },
+      { t: 'remove', uid: 'nope' },
+    ]
+    for (const m of absent) expect(mutationError(doc, m)).toBeNull()
+  })
+})
+
 describe('newUid', () => {
-  // PIN: 8 hex chars today (the first block of a uuid). Widening this is planned, so this
-  // test is expected to be updated rather than deleted when the uid format changes.
-  it('returns 8 lowercase hex characters', () => {
+  // PIN: 16 hex chars (64 bits). 8 chars collided at ~77k ids, which insert-collision turns
+  // from a silent overwrite into a refusal; the width is what stops it happening at all.
+  it('returns 16 lowercase hex characters', () => {
     for (let i = 0; i < 50; i++) {
-      expect(newUid()).toMatch(/^[0-9a-f]{8}$/)
+      expect(newUid()).toMatch(/^[0-9a-f]{16}$/)
     }
+  })
+
+  // Uids written at 8 chars stay valid: nothing parses a uid, everything compares it.
+  it('keeps accepting an 8-char uid everywhere a uid is used', () => {
+    const doc: Doc = {
+      root: 'root',
+      bloks: {
+        root: b('root', 'page', null, null, 'a0'),
+        deadbeef: b('deadbeef', 'text', 'root', 'body', 'a0'),
+      },
+    }
+    const out = apply(doc, {
+      t: 'move',
+      uid: 'deadbeef',
+      parent: 'root',
+      slot: 'body',
+      order: 'a1',
+    })
+    expect(out.bloks.deadbeef!.order).toBe('a1')
   })
 
   it('does not repeat across a small sample', () => {

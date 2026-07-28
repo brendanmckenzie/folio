@@ -402,13 +402,10 @@ describe('resolveValue', () => {
     expect((resolved as { src: string }[])[0]?.src).toBe('/folio/asset/a.jpg')
   })
 
-  // SPEC(valueof-defaults): resolveValue for an absent number field must yield a
-  // number (its schema default, 0) and for an absent boolean field a boolean
-  // (false), matching the `ValueOf<Field>` contract in fields.ts. Currently
-  // fails: neither 'number' nor 'boolean' is handled by resolveValue's switch,
-  // so both fall through to the default arm's `value ?? ''` and hand back an
-  // empty string.
-  it.fails('SPEC(valueof-defaults): resolves absent number/boolean fields to their typed defaults, not ""', () => {
+  // SPEC(valueof-defaults): resolveValue dispatches on every field kind, so an absent
+  // number field yields its schema default (0) and an absent boolean field yields false,
+  // matching the `ValueOf<Field>` contract in fields.ts.
+  it('SPEC(valueof-defaults): resolves absent number/boolean fields to their typed defaults, not ""', () => {
     const resolvedNumber = resolveValue(number(), undefined, EMPTY_RESOLUTION)
     expect(typeof resolvedNumber).toBe('number')
     expect(resolvedNumber).toBe(0)
@@ -422,21 +419,29 @@ describe('resolveValue', () => {
 describe('known bugs', () => {
   const resolution: Resolution = { stories: {}, assetBase: '/folio/asset' }
 
-  // SPEC(href-scheme): a multilink whose stored value is a `javascript:` URL
-  // must not resolve to a clickable href. Currently fails: the 'url' case in
-  // resolveLink emits `link.url` verbatim, so a stored `javascript:` URI reaches
-  // the DOM unchanged and would execute on click.
-  it.fails('SPEC(href-scheme): does not resolve a javascript: URL to a clickable href', () => {
+  // SPEC(href-scheme): every href resolveLink emits has passed the scheme allow-list, so a
+  // stored `javascript:` URL never reaches the DOM.
+  it('SPEC(href-scheme): does not resolve a javascript: URL to a clickable href', () => {
     const resolved = resolveLink({ kind: 'url', url: 'javascript:alert(1)' }, resolution)
-    expect(resolved?.href).not.toMatch(/^javascript:/i)
+    // Refused outright: there is no href at all, which is stronger than a neutralised one.
+    // Stringified because `.toMatch` cannot be handed the resulting `undefined`.
+    expect(resolved).toBeNull()
+    expect(String(resolved?.href ?? '')).not.toMatch(/^javascript:/i)
   })
 
-  // SPEC(asset-url-encoding): an asset key containing spaces or a `#` must
-  // produce an encoded, valid src URL: parsing it must not read part of the key
-  // back as a URL fragment, and the original key must round-trip through
-  // decoding. Currently fails: decorateAsset interpolates the raw key into the
-  // URL, so a space breaks the URL and a `#` truncates it at the fragment.
-  it.fails('SPEC(asset-url-encoding): encodes spaces and # in an asset key so the URL is not truncated', () => {
+  it('refuses an asset whose only location is an href the allow-list rejects', () => {
+    // The same stored string must not be safe through a multilink and executable
+    // through an asset field: `src` and `srcFor` come off the same value.
+    const unsafe = assetValue({ url: 'javascript:alert(1)', key: undefined })
+    expect(resolveAsset(unsafe, resolution)).toBeNull()
+    expect(resolveAssets([unsafe], resolution)).toEqual([])
+    expect(resolveLink({ kind: 'asset', asset: unsafe }, resolution)).toBeNull()
+  })
+
+  // SPEC(asset-url-encoding): an asset key is encoded per path segment, so a space or a `#`
+  // in a key produces a valid src URL: nothing is read back as a fragment, and the original
+  // key round-trips through decoding.
+  it('SPEC(asset-url-encoding): encodes spaces and # in an asset key so the URL is not truncated', () => {
     const key = 'my photos/a #1.jpg'
     const resolved = resolveAsset(assetValue({ key }), resolution)
     const url = new URL(resolved!.src, 'https://example.test')

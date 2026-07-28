@@ -1,3 +1,5 @@
+import { generateKeyBetween } from 'fractional-indexing'
+
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json }
 
 /**
@@ -23,8 +25,53 @@ export interface Doc {
   bloks: Record<string, Blok>
 }
 
+/**
+ * 16 hex chars of full entropy (64 bits). 32 bits collided at ~77k ids, and a
+ * collision meant an insert replacing an unrelated blok; uuid slices were the old
+ * source and waste bits on a version nibble. Uids written at 8 chars stay valid:
+ * nothing parses a uid, everything compares it.
+ */
 export function newUid(): string {
-  return crypto.randomUUID().slice(0, 8)
+  const bytes = crypto.getRandomValues(new Uint8Array(8))
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+/**
+ * Sibling order: fractional key first, uid as the tiebreak.
+ *
+ * Two clients inserting between the same neighbours can generate the same key.
+ * Without the tiebreak the comparator returns 0 and the rendered sequence falls
+ * back to object/array insertion order, which differs per client. Story rows
+ * (ord, id) sort through here too, so the tree and the document agree.
+ */
+export function compareSiblings(
+  aOrder: string,
+  aUid: string,
+  bOrder: string,
+  bUid: string,
+): number {
+  if (aOrder !== bOrder) return aOrder < bOrder ? -1 : 1
+  if (aUid === bUid) return 0
+  return aUid < bUid ? -1 : 1
+}
+
+/**
+ * Fractional key placing a new sibling at `index` among `keys`, which must already
+ * be sorted by `compareSiblings`.
+ *
+ * The write half of the tie rule. `generateKeyBetween` throws when its two bounds
+ * are equal, and equal keys are reachable by design — two clients inserting between
+ * the same neighbours produce the same key, and the tiebreak makes that render.
+ * Rendering a tie is no use if the next drop next to it throws out of a click
+ * handler, so a tied run is treated as one position and the new key lands after it:
+ * strictly between two equal keys is not a representable place.
+ */
+export function keyAtIndex(keys: readonly string[], index: number): string {
+  const at = index < 0 ? 0 : index > keys.length ? keys.length : index
+  const before = at > 0 ? keys[at - 1]! : null
+  let after = at
+  while (after < keys.length && keys[after] === before) after++
+  return generateKeyBetween(before, keys[after] ?? null)
 }
 
 export function childrenOf(doc: Doc, parent: string, slot: string): Blok[] {
@@ -32,14 +79,22 @@ export function childrenOf(doc: Doc, parent: string, slot: string): Blok[] {
   for (const b of Object.values(doc.bloks)) {
     if (b.parent === parent && b.slot === slot) out.push(b)
   }
-  out.sort((a, b) => (a.order < b.order ? -1 : a.order > b.order ? 1 : 0))
+  out.sort((a, b) => compareSiblings(a.order, a.uid, b.order, b.uid))
   return out
 }
 
-/** The uid plus every descendant, parents before children. */
-export function subtree(doc: Doc, root: string): string[] {
+/**
+ * The uid plus every descendant, parents before children.
+ *
+ * `visited` makes the walk total over a cyclic document. Logs written before
+ * `apply` refused cycles can still contain one, and a replay of such a log must
+ * degrade (visit each blok once) rather than recurse forever.
+ */
+export function subtree(doc: Doc, root: string, visited = new Set<string>()): string[] {
   const out: string[] = []
   const walk = (uid: string) => {
+    if (visited.has(uid)) return
+    visited.add(uid)
     out.push(uid)
     for (const b of Object.values(doc.bloks)) {
       if (b.parent === uid) walk(b.uid)
@@ -49,10 +104,13 @@ export function subtree(doc: Doc, root: string): string[] {
   return out
 }
 
-export function ancestorsOf(doc: Doc, uid: string): string[] {
+/** Immediate parent up to the root. Terminates on a cyclic document; see `subtree`. */
+export function ancestorsOf(doc: Doc, uid: string, visited = new Set<string>()): string[] {
   const out: string[] = []
+  visited.add(uid)
   let cur = doc.bloks[uid]?.parent
-  while (cur) {
+  while (cur && !visited.has(cur)) {
+    visited.add(cur)
     out.push(cur)
     cur = doc.bloks[cur]?.parent
   }

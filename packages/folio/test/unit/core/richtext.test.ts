@@ -138,7 +138,7 @@ describe('richtextToText', () => {
 })
 
 describe('sanitiseRichtext', () => {
-  it('returns the same doc reference when no limits are configured', () => {
+  it('returns the same doc reference when no limits are configured and nothing to strip', () => {
     const doc = {
       type: 'doc' as const,
       content: [{ type: 'paragraph', content: [{ type: 'text', text: 'x' }] }],
@@ -318,29 +318,26 @@ describe('sanitiseRichtext', () => {
 })
 
 describe('sanitiseRichtext known bugs', () => {
-  // SPEC(heading-empty-levels): headingLevels: [] must not leave a heading with an invalid
-  // (undefined/NaN) level; the heading should keep a valid numeric level or be unwrapped
-  // entirely. Currently fails: `[...levels].sort((a, b) => ...)[0]!` reads index 0 of an
-  // empty array, so `nearest` is `undefined` and that is written straight into `attrs.level`.
-  it.fails('does not produce an invalid heading level when headingLevels is empty', () => {
+  // SPEC(heading-empty-levels): headingLevels: [] leaves no representable heading, so the
+  // heading is unwrapped (keeping its words) rather than snapped to a level that does not
+  // exist. A heading that survives always carries a finite numeric level.
+  it('does not produce an invalid heading level when headingLevels is empty', () => {
     const doc = {
       type: 'doc' as const,
       content: [{ type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: 'Hi' }] }],
     }
     const result = sanitiseRichtext(doc, { headingLevels: [] })
-    const node = result?.content?.[0]
-    if (node?.type === 'heading') {
-      expect(typeof node.attrs?.level).toBe('number')
-      expect(Number.isFinite(node.attrs?.level)).toBe(true)
-    }
-    // else: the heading was unwrapped entirely, which also satisfies the spec.
+    // Asserted as a whole shape, not guarded on `type === 'heading'`: the guard is
+    // vacuous once the heading is gone, and the words surviving is half the rule.
+    expect(result).toEqual({
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hi' }] }],
+    })
   })
 
-  // SPEC(link-mark-href): a link mark carrying a javascript: URL must not survive sanitisation
-  // with that URL intact — it should be dropped or have its href neutralised. Currently fails:
-  // marks are filtered by `type` only (`marks.has(m.type)`), so a permitted mark's `attrs`
-  // (including `href`) pass through completely unchecked.
-  it.fails('does not let a javascript: URL survive in a permitted link mark', () => {
+  // SPEC(link-mark-href): a link mark's `attrs.href` goes through the same scheme allow-list
+  // as a `multilink`, so a javascript: URL loses the mark however the mark allow-list is set.
+  it('does not let a javascript: URL survive in a permitted link mark', () => {
     const doc = {
       type: 'doc' as const,
       content: [
@@ -356,26 +353,27 @@ describe('sanitiseRichtext known bugs', () => {
         },
       ],
     }
-    const result = sanitiseRichtext(doc, { marks: ['link'] })
-    const textNode = result?.content?.[0]?.content?.[0]
-    const linkMark = textNode?.marks?.find((m) => m.type === 'link')
-    expect(String(linkMark?.attrs?.href ?? '')).not.toMatch(/^javascript:/i)
+    const hrefIn = (result: RichtextDoc) => {
+      const marks = result?.content?.[0]?.content?.[0]?.marks
+      return String(marks?.find((m) => m.type === 'link')?.attrs?.href ?? '')
+    }
+    expect(hrefIn(sanitiseRichtext(doc, { marks: ['link'] }))).not.toMatch(/^javascript:/i)
+    // However the mark allow-list is set, including not set at all: `richtext()` takes
+    // no limits and is the shape the renderer passes, so it cannot be the exempt case.
+    expect(hrefIn(sanitiseRichtext(doc, {}))).not.toMatch(/^javascript:/i)
+    expect(hrefIn(sanitiseRichtext(doc, { nodes: ['paragraph'] }))).not.toMatch(/^javascript:/i)
   })
 
-  // SPEC(sanitise-non-array-content): sanitiseRichtext must not throw when `doc.content` is
-  // present but not an array (e.g. corrupted storage or a hand-rolled API call) — it should be
-  // treated as a doc with no usable content. Currently fails: `walk` calls `list.flatMap`
-  // directly with no `Array.isArray` guard, so a non-array `content` throws a TypeError.
-  it.fails('does not throw when doc.content is not an array', () => {
+  // SPEC(sanitise-non-array-content): a `content` that is present but not an array (corrupted
+  // storage, a hand-rolled API call) is treated as a doc with no usable content.
+  it('does not throw when doc.content is not an array', () => {
     const doc = { type: 'doc', content: 'not-an-array' } as unknown as RichtextDoc
     expect(() => sanitiseRichtext(doc, { nodes: ['paragraph'] })).not.toThrow()
   })
 
-  // SPEC(sanitise-junk-entries): sanitiseRichtext must not throw when the content array holds
-  // non-object entries (null, undefined, primitives) — malformed entries should be skipped
-  // rather than crashing the whole document. Currently fails: `walk` destructures
-  // `node.content`/`node.type` for every entry with no per-entry guard.
-  it.fails('does not throw when the content array holds non-object entries', () => {
+  // SPEC(sanitise-junk-entries): non-object entries in a content array (null, undefined,
+  // primitives) are skipped, so one malformed entry cannot take the document with it.
+  it('does not throw when the content array holds non-object entries', () => {
     const doc = {
       type: 'doc',
       content: [null, undefined, 42, 'garbage', { type: 'text', text: 'ok' }],
@@ -385,10 +383,9 @@ describe('sanitiseRichtext known bugs', () => {
 })
 
 describe('richtextToText known bugs', () => {
-  // SPEC(text-junk-entries): richtextToText must not throw when the content array holds
-  // non-object entries — it should skip them and still return the text that is present.
-  // Currently fails: its `walk` reads `node.type` for every entry with no per-entry guard.
-  it.fails('does not throw when the content array holds non-object entries', () => {
+  // SPEC(text-junk-entries): richtextToText skips non-object entries in a content array and
+  // still returns the text that is present.
+  it('does not throw when the content array holds non-object entries', () => {
     const doc = {
       type: 'doc',
       content: [null, { type: 'text', text: 'ok' }],
