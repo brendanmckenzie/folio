@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { imageSize, parseTransform } from '../../../src/server/assets'
+import {
+  imageSize,
+  MAX_TRANSFORM_DIMENSION,
+  MAX_TRANSFORM_QUALITY,
+  MIN_TRANSFORM_DIMENSION,
+  MIN_TRANSFORM_QUALITY,
+  parseTransform,
+  sniffContentType,
+} from '../../../src/server/assets'
 import { serializeJson } from '../../../src/server/Document'
 
 // ---------------------------------------------------------------------------
@@ -321,6 +329,67 @@ describe('imageSize', () => {
 })
 
 // ---------------------------------------------------------------------------
+// sniffContentType
+// ---------------------------------------------------------------------------
+
+describe('sniffContentType', () => {
+  it('recognises a PNG signature', () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    expect(sniffContentType(png)).toBe('image/png')
+  })
+
+  it('recognises a JPEG signature', () => {
+    expect(sniffContentType(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg')
+  })
+
+  it('recognises a GIF signature, either version', () => {
+    expect(sniffContentType(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x37, 0x61]))).toBe('image/gif')
+    expect(sniffContentType(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]))).toBe('image/gif')
+  })
+
+  it('recognises a WEBP signature', () => {
+    const webp = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
+    ])
+    expect(sniffContentType(webp)).toBe('image/webp')
+  })
+
+  it('does not mistake another RIFF container for WEBP', () => {
+    const avi = new Uint8Array([
+      0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x41, 0x56, 0x49, 0x20,
+    ])
+    expect(sniffContentType(avi)).toBeUndefined()
+  })
+
+  it('recognises an AVIF ftyp box', () => {
+    const avif = new Uint8Array([
+      0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66,
+    ])
+    expect(sniffContentType(avif)).toBe('image/avif')
+  })
+
+  it('does not mistake another ftyp brand for AVIF', () => {
+    const heic = new Uint8Array([
+      0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63,
+    ])
+    expect(sniffContentType(heic)).toBeUndefined()
+  })
+
+  it('returns undefined for bytes matching no known signature, including truncated ones', () => {
+    expect(sniffContentType(new Uint8Array([0x00, 0x01, 0x02, 0x03]))).toBeUndefined()
+    expect(sniffContentType(new Uint8Array([0x89, 0x50]))).toBeUndefined()
+    expect(sniffContentType(new Uint8Array([]))).toBeUndefined()
+  })
+
+  it('is not fooled by a claimed type: only the bytes decide', () => {
+    // The scenario uploadAsset relies on: a client-supplied header is never
+    // consulted here at all, only the buffer.
+    const html = new TextEncoder().encode('<script>alert(1)</script>')
+    expect(sniffContentType(html)).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
 // parseTransform
 // ---------------------------------------------------------------------------
 
@@ -334,9 +403,12 @@ describe('parseTransform', () => {
       })
     })
 
-    it('ignores width/height zero or negative', () => {
+    it('snaps width/height zero or negative up to the minimum, rather than dropping them', () => {
       const params = new URLSearchParams('w=0&h=-10')
-      expect(parseTransform(params)).toEqual({})
+      expect(parseTransform(params)).toEqual({
+        width: MIN_TRANSFORM_DIMENSION,
+        height: MIN_TRANSFORM_DIMENSION,
+      })
     })
 
     it('ignores non-numeric width/height', () => {
@@ -354,8 +426,22 @@ describe('parseTransform', () => {
       expect(parseTransform(params)).toEqual({})
     })
 
-    // NOTE: No upper bound checking on width/height dimensions.
-    // This could allow arbitrarily large requests.
+    it('clamps width and height to the largest dimension the route serves', () => {
+      // The query is public and every distinct value mints its own Images
+      // transformation and its own immutable cache entry.
+      const params = new URLSearchParams('w=1000000&h=999999')
+      expect(parseTransform(params)).toEqual({
+        width: MAX_TRANSFORM_DIMENSION,
+        height: MAX_TRANSFORM_DIMENSION,
+      })
+    })
+
+    it('collapses fractional dimensions onto whole pixels, then clamps', () => {
+      const params = new URLSearchParams('w=800.6&h=0.5')
+      // trunc(0.5) is 0, which then snaps up to the minimum rather than
+      // surviving as a 0-pixel image.
+      expect(parseTransform(params)).toEqual({ width: 800, height: MIN_TRANSFORM_DIMENSION })
+    })
   })
 
   describe('quality parsing', () => {
@@ -364,12 +450,15 @@ describe('parseTransform', () => {
       expect(parseTransform(params)).toEqual({ quality: 80 })
     })
 
-    it('ignores quality zero or negative', () => {
+    it('snaps quality zero or negative up to the minimum, rather than dropping it', () => {
       const params = new URLSearchParams('q=0&w=100')
-      expect(parseTransform(params)).toEqual({ width: 100 })
+      expect(parseTransform(params)).toEqual({ width: 100, quality: MIN_TRANSFORM_QUALITY })
     })
 
-    // NOTE: No upper bound checking on quality parameter.
+    it('clamps quality to the decided ceiling', () => {
+      const params = new URLSearchParams('q=99999')
+      expect(parseTransform(params)).toEqual({ quality: MAX_TRANSFORM_QUALITY })
+    })
   })
 
   describe('fit parameter', () => {
@@ -447,9 +536,17 @@ describe('parseTransform', () => {
       expect(result.focal).toBeUndefined()
     })
 
-    it('accepts integer focal point values', () => {
+    it('clamps an out-of-range focal point into [0, 1] rather than passing it through', () => {
+      // The Images binding's `gravity` expects normalised 0..1 coordinates;
+      // handing it 100/200 unclamped throws the transform, which used to fall
+      // through to serving the full-size original, repeatably.
       const params = new URLSearchParams('fp=100,200')
-      expect(parseTransform(params)).toHaveProperty('focal', { x: 100, y: 200 })
+      expect(parseTransform(params)).toHaveProperty('focal', { x: 1, y: 1 })
+    })
+
+    it('clamps a negative focal point up to 0', () => {
+      const params = new URLSearchParams('fp=-5,-0.5')
+      expect(parseTransform(params)).toHaveProperty('focal', { x: 0, y: 0 })
     })
   })
 
