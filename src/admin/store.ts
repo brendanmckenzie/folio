@@ -16,6 +16,40 @@ export interface StoreState {
 const COLOURS = ['#e5484d', '#0090ff', '#30a46c', '#f76b15', '#8e4ec6', '#e5b100']
 const COALESCE_MS = 700
 
+/** `WebSocket.readyState` values, spelled out so the store needs no global WebSocket. */
+const CONNECTING = 0
+const OPEN = 1
+
+/**
+ * The slice of the WebSocket API this store uses. Narrowing the dependency to an
+ * interface is what lets the store run outside a browser (tests drive a fake).
+ */
+export interface WebSocketLike {
+  readonly readyState: number
+  send(data: string): void
+  close(): void
+  onopen: ((ev: unknown) => void) | null
+  onmessage: ((ev: { data: unknown }) => void) | null
+  onclose: ((ev: unknown) => void) | null
+  onerror: ((ev: unknown) => void) | null
+}
+
+export interface StoryStoreOptions {
+  /**
+   * Opens the socket for `path` (a page-relative URL). Defaults to a real
+   * WebSocket resolved against `window.location`.
+   */
+  createSocket?: (path: string) => WebSocketLike
+}
+
+function browserSocket(path: string): WebSocketLike {
+  const url = new URL(path, window.location.href)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  // A real WebSocket has exactly this surface; only its handler signatures are
+  // narrower (Event/MessageEvent) than the structural type, hence the cast.
+  return new WebSocket(url) as unknown as WebSocketLike
+}
+
 export class StoryStore {
   readonly actor = crypto.randomUUID().slice(0, 8)
   readonly name: string
@@ -35,11 +69,12 @@ export class StoryStore {
   private undoStack: Mutation[][] = []
   private redoStack: Mutation[][] = []
   private pending = new Map<string, Mutation[]>()
-  private ws: WebSocket | null = null
+  private ws: WebSocketLike | null = null
   private lastSyncId = 0
   private backoff = 0
   private closed = false
   private lastEdit: { uid: string; field: string; at: number } | null = null
+  private createSocket: (path: string) => WebSocketLike
 
   /** Called with every mutation applied locally, for forwarding to the preview iframe. */
   onMutations: (mutations: Mutation[]) => void = () => {}
@@ -48,9 +83,11 @@ export class StoryStore {
   constructor(
     readonly storyId: string,
     readonly apiBase: string,
+    options: StoryStoreOptions = {},
   ) {
     this.name = `Editor ${this.actor.slice(0, 3)}`
     this.colour = COLOURS[Math.floor(Math.random() * COLOURS.length)]!
+    this.createSocket = options.createSocket ?? browserSocket
   }
 
   subscribe = (fn: () => void): (() => void) => {
@@ -68,7 +105,7 @@ export class StoryStore {
   }
 
   private send(msg: ClientMsg) {
-    if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg))
+    if (this.ws?.readyState === OPEN) this.ws.send(JSON.stringify(msg))
   }
 
   connect() {
@@ -76,14 +113,9 @@ export class StoryStore {
     // disconnect must not permanently disable the store.
     this.closed = false
     const existing = this.ws?.readyState
-    if (existing === WebSocket.OPEN || existing === WebSocket.CONNECTING) return
+    if (existing === OPEN || existing === CONNECTING) return
 
-    const url = new URL(
-      `${this.apiBase}/story/${encodeURIComponent(this.storyId)}/socket`,
-      window.location.href,
-    )
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-    const ws = new WebSocket(url)
+    const ws = this.createSocket(`${this.apiBase}/story/${encodeURIComponent(this.storyId)}/socket`)
     this.ws = ws
 
     ws.onopen = () => {
