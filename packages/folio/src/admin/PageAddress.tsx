@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { descendants, slugify, type StoryNode } from '../core/story'
+import { useFolio } from './FolioContext'
 
 interface Props {
   story: StoryNode
-  all: StoryNode[]
   onChange: (patch: { slug?: string; parentId?: string | null }) => Promise<void>
 }
 
@@ -12,7 +12,8 @@ interface Props {
  * lives in D1 rather than the document, because it is the routing index and
  * needs uniqueness and tree queries.
  */
-export function PageAddress({ story, all, onChange }: Props) {
+export function PageAddress({ story, onChange }: Props) {
+  const { stories } = useFolio()
   const isRoot = story.path === ''
   const [slug, setSlug] = useState(story.slug)
   const [busy, setBusy] = useState(false)
@@ -22,8 +23,8 @@ export function PageAddress({ story, all, onChange }: Props) {
     setSlug(story.slug)
   }, [story.id, story.slug])
 
-  const blocked = new Set(descendants(all, story.id))
-  const parents = all.filter((s) => !blocked.has(s.id))
+  const blocked = new Set(descendants(stories, story.id))
+  const parents = stories.filter((s) => !blocked.has(s.id))
 
   const commit = async (patch: { slug?: string; parentId?: string | null }) => {
     setBusy(true)
