@@ -101,10 +101,43 @@ an unsorted flat list, which stops working somewhere around 15.
 
 ## Known smaller issues
 
-- No auth anywhere. Anyone reaching `/folio/edit/*` can edit and publish.
+- No auth anywhere. Anyone reaching `/folio/edit/*` can edit and publish. Now
+  the single biggest gap: validation, the error envelope and the versioned wire
+  protocol were built with it in mind, and `publish()` no longer needs a
+  Request, so the auth layer has clean seams to land on.
 - The library ships TypeScript source; the host compiles it. Fine for now, wrong
-  for a release.
-- Publishing overwrites `published_doc` in place, so not even the previously
-  live version is retained. See versioning below.
+  for a release. (The `folio/core` / `folio/engine` export split is done; build
+  artifacts and `.d.ts` generation are not.)
 - The DO mutation log grows without bound. Fine against the 10GB per-object
-  limit, but it wants compaction eventually.
+  limit, but it wants compaction eventually. The `tx_id` unique index and
+  contiguous syncIds make a compaction watermark straightforward now.
+- `versions` also grows without bound: every publish stores a full doc copy and
+  nothing prunes checkpoints. Wants a retention policy.
+- a11y in the admin: click-only tree rows, no keyboard reorder, no focus trap in
+  the media library, no aria-live on toasts. Biome's a11y rules are deliberately
+  off until this is done properly (see biome.json).
+- `MultiAssetInput` keys cards by index, so reordering drops focus; needs stable
+  local ids (noted inline where the suppression lives).
+
+## Fixed 2026-07-29 (the hardening pass)
+
+Everything below was a "known issue" or review finding before this date;
+recorded here so the list above stays honest. Tests: 584 across unit (Node) and
+workers (workerd). CI runs typecheck, Biome, both suites and the demo build.
+
+- Publishing is atomic (version row + `published_doc` in one batch) and every
+  publish retains a version.
+- Deleting a story purges its Durable Object; drafts no longer resurrect.
+- The sync engine converges: clients rebase pending txs over server order,
+  offline edits queue and replay with txId dedupe, the watermark is contiguous,
+  invalid mutations (cycles, orphans, root moves, uid collisions) are rejected
+  at the door and no-ops on replay. See docs/sync-design.md.
+- `diff()` emits inserts → moves → sets → removes, so version restore cannot
+  destroy rescued children (property-tested).
+- Every HTTP input is validated (valibot) and every failure is one envelope
+  shape; wire frames are versioned, size-capped and shape-checked.
+- Uploads are typed by magic bytes and size-capped before buffering; SVG and
+  unknown types download instead of executing; transforms are clamped and
+  cached.
+- `javascript:` URLs die in `asLink`, richtext link marks and `resolveLink`.
+- D1 has real migrations; `db:remote` can no longer drop tables.
