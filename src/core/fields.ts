@@ -64,11 +64,13 @@ export const multilink = <const T extends readonly LinkKind[]>(
 export const richtext = (o: Opts<'richtext'> = {}) => ({ kind: 'richtext' as const, ...o })
 export const reference = (o: Opts<'reference'> = {}) => ({ kind: 'reference' as const, ...o })
 
-export const select = <const T extends readonly SelectOption[]>(o: Omit<Opts<'select'>, 'options'> & { options: T }) =>
-  ({ kind: 'select' as const, ...o })
+export const select = <const T extends readonly SelectOption[]>(
+  o: Omit<Opts<'select'>, 'options'> & { options: T },
+) => ({ kind: 'select' as const, ...o })
 
-export const blocks = <const T extends readonly string[]>(o: Omit<Opts<'blocks'>, 'allow'> & { allow: T }) =>
-  ({ kind: 'blocks' as const, ...o })
+export const blocks = <const T extends readonly string[]>(
+  o: Omit<Opts<'blocks'>, 'allow'> & { allow: T },
+) => ({ kind: 'blocks' as const, ...o })
 
 /**
  * What a field hands to `render`. A `blocks` field arrives already rendered, so

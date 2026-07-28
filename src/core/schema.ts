@@ -62,7 +62,9 @@ export function blankBlok(
 }
 
 /** Slots (blocks-kind fields) declared by a block type. */
-export function slotsOf(schema: BlockSchema | undefined): [string, Extract<Field, { kind: 'blocks' }>][] {
+export function slotsOf(
+  schema: BlockSchema | undefined,
+): [string, Extract<Field, { kind: 'blocks' }>][] {
   if (!schema) return []
   return Object.entries(schema.fields).filter(
     (entry): entry is [string, Extract<Field, { kind: 'blocks' }>] => entry[1].kind === 'blocks',

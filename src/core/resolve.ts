@@ -132,7 +132,10 @@ export interface ResolvedAsset extends AssetValue {
   srcFor: (transform: AssetTransform) => string
 }
 
-export function resolveAsset(value: Json | undefined, resolution: Resolution): ResolvedAsset | null {
+export function resolveAsset(
+  value: Json | undefined,
+  resolution: Resolution,
+): ResolvedAsset | null {
   const asset = asAsset(value)
   return asset ? decorateAsset(asset, resolution) : null
 }
@@ -232,7 +235,11 @@ export function resolveReference(
  * A stored field value as `render` should receive it. `blocks` is absent because
  * children are separate bloks and the renderer turns them into elements itself.
  */
-export function resolveValue(field: Field, value: Json | undefined, resolution: Resolution): unknown {
+export function resolveValue(
+  field: Field,
+  value: Json | undefined,
+  resolution: Resolution,
+): unknown {
   switch (field.kind) {
     case 'multilink':
       return resolveLink(value, resolution)

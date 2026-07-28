@@ -41,7 +41,10 @@ export function RenderBlok({
     // link resolution.
     if (field.kind === 'richtext') {
       props[name] = (
-        <RichText doc={sanitiseRichtext(asRichtext(blok.data[name]), field)} resolution={resolution} />
+        <RichText
+          doc={sanitiseRichtext(asRichtext(blok.data[name]), field)}
+          resolution={resolution}
+        />
       )
       continue
     }
@@ -111,7 +114,12 @@ export function RenderBlok({
 /** Rendered into an empty `blocks` field so the slot is reachable in the preview. */
 function EmptySlot({ parent, slot, label }: { parent: string; slot: string; label: string }) {
   return (
-    <button type="button" className="folio-empty-slot" data-folio-slot={slot} data-folio-parent={parent}>
+    <button
+      type="button"
+      className="folio-empty-slot"
+      data-folio-slot={slot}
+      data-folio-parent={parent}
+    >
       Add to {label.toLowerCase()}
     </button>
   )

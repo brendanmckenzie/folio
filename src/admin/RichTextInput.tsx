@@ -1,4 +1,4 @@
-import { Mark, mergeAttributes, type Editor } from '@tiptap/core'
+import { Mark, mergeAttributes, type ChainedCommands, type Editor } from '@tiptap/core'
 import { EditorContent, useEditor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Subscript from '@tiptap/extension-subscript'
@@ -16,7 +16,7 @@ import {
   type RichtextMarkName,
   type RichtextNodeName,
 } from '../core/richtext'
-import { asLink, type LinkValue } from '../core/values'
+import { asLink } from '../core/values'
 import { LinkInput } from './LinkInput'
 
 /**
@@ -165,13 +165,21 @@ export function RichTextInput({ value, limits, stories, apiBase, onChange }: Pro
   return (
     <div className="rt">
       <div className="rt__bar">
-        {marks.has('bold') ? <Tool ed={editor} name="bold" label="B" run={(c) => c.toggleBold()} /> : null}
-        {marks.has('italic') ? <Tool ed={editor} name="italic" label="I" run={(c) => c.toggleItalic()} /> : null}
+        {marks.has('bold') ? (
+          <Tool ed={editor} name="bold" label="B" run={(c) => c.toggleBold()} />
+        ) : null}
+        {marks.has('italic') ? (
+          <Tool ed={editor} name="italic" label="I" run={(c) => c.toggleItalic()} />
+        ) : null}
         {marks.has('underline') ? (
           <Tool ed={editor} name="underline" label="U" run={(c) => c.toggleUnderline()} />
         ) : null}
-        {marks.has('strike') ? <Tool ed={editor} name="strike" label="S" run={(c) => c.toggleStrike()} /> : null}
-        {marks.has('code') ? <Tool ed={editor} name="code" label="‹›" run={(c) => c.toggleCode()} /> : null}
+        {marks.has('strike') ? (
+          <Tool ed={editor} name="strike" label="S" run={(c) => c.toggleStrike()} />
+        ) : null}
+        {marks.has('code') ? (
+          <Tool ed={editor} name="code" label="‹›" run={(c) => c.toggleCode()} />
+        ) : null}
         {marks.has('superscript') ? (
           <Tool ed={editor} name="superscript" label="x²" run={(c) => c.toggleSuperscript()} />
         ) : null}
@@ -185,7 +193,13 @@ export function RichTextInput({ value, limits, stories, apiBase, onChange }: Pro
                 key={level}
                 type="button"
                 className={editor.isActive('heading', { level }) ? 'is-active' : ''}
-                onClick={() => editor.chain().focus().toggleHeading({ level: level as never }).run()}
+                onClick={() =>
+                  editor
+                    .chain()
+                    .focus()
+                    .toggleHeading({ level: level as never })
+                    .run()
+                }
               >
                 H{level}
               </button>
@@ -257,8 +271,7 @@ function Tool({
   ed: Editor
   name: string
   label: string
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  run: (chain: any) => { run: () => boolean }
+  run: (chain: ChainedCommands) => { run: () => boolean }
 }) {
   return (
     <button

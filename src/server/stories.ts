@@ -62,7 +62,12 @@ export async function publishedDocsByIds(
 }
 
 /** Fractional key placing a story at `index` among the children of `parentId`. */
-function orderAt(rows: readonly StoryMeta[], parentId: string | null, index: number, ignore?: string) {
+function orderAt(
+  rows: readonly StoryMeta[],
+  parentId: string | null,
+  index: number,
+  ignore?: string,
+) {
   const sibs = rows
     .filter((r) => r.parentId === parentId && r.id !== ignore)
     .sort((a, b) => (a.ord < b.ord ? -1 : a.ord > b.ord ? 1 : 0))
@@ -71,7 +76,12 @@ function orderAt(rows: readonly StoryMeta[], parentId: string | null, index: num
   return generateKeyBetween(before, after)
 }
 
-function uniqueSlug(rows: readonly StoryMeta[], parentId: string | null, wanted: string, ignore?: string) {
+function uniqueSlug(
+  rows: readonly StoryMeta[],
+  parentId: string | null,
+  wanted: string,
+  ignore?: string,
+) {
   const taken = new Set(
     rows.filter((r) => r.parentId === parentId && r.id !== ignore).map((r) => r.slug),
   )
@@ -132,8 +142,7 @@ export async function updateStory(
   const isRoot = current.path === ''
   const subtree = new Set(descendants(rows, id))
 
-  const parentId =
-    patch.parentId !== undefined && !isRoot ? patch.parentId : current.parentId
+  const parentId = patch.parentId !== undefined && !isRoot ? patch.parentId : current.parentId
   if (parentId && subtree.has(parentId)) throw new Error('Cannot move a story into its own subtree')
   if (parentId && !rows.some((r) => r.id === parentId)) throw new Error('Unknown parent')
 
@@ -177,7 +186,10 @@ export async function deleteStory(db: D1Database, id: string): Promise<string[]>
 
   const ids = descendants(rows, id)
   const placeholders = ids.map(() => '?').join(', ')
-  await db.prepare(`delete from stories where id in (${placeholders})`).bind(...ids).run()
+  await db
+    .prepare(`delete from stories where id in (${placeholders})`)
+    .bind(...ids)
+    .run()
   return ids
 }
 

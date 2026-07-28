@@ -1,7 +1,13 @@
 import { Hono } from 'hono'
 import type { ReactElement, ReactNode } from 'react'
 import { renderToReadableStream } from 'react-dom/server.edge'
-import { toManifest, toRegistry, toSchemaIndex, type AnyBlockDef, type Registry } from '../core/block'
+import {
+  toManifest,
+  toRegistry,
+  toSchemaIndex,
+  type AnyBlockDef,
+  type Registry,
+} from '../core/block'
 import type { Doc } from '../core/doc'
 import type { ActivityEntry } from '../core/protocol'
 import { buildResolution, referencedIds, type Resolution } from '../core/resolve'
@@ -191,7 +197,11 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     const body = await c.req.json<{ title?: string; slug?: string; parentId?: string | null }>()
     if (!body.title?.trim()) return c.json({ error: 'title is required' }, 400)
     try {
-      return c.json(withUrls(await createStory(db, { title: body.title, slug: body.slug, parentId: body.parentId })))
+      return c.json(
+        withUrls(
+          await createStory(db, { title: body.title, slug: body.slug, parentId: body.parentId }),
+        ),
+      )
     } catch (e) {
       return c.json({ error: String((e as Error).message) }, 400)
     }
@@ -268,7 +278,8 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
   app.get('/story/:id/document', async (c) => {
     const env = c.env as Env
     const id = c.req.param('id')
-    if (!(await storyById(config.bindings(env).db, id))) return c.json({ error: 'Unknown story' }, 404)
+    if (!(await storyById(config.bindings(env).db, id)))
+      return c.json({ error: 'Unknown story' }, 404)
     return c.json({ doc: await draft(env, id) })
   })
 
@@ -325,7 +336,12 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
   app.get('/asset/:key', async (c) => {
     const { media, images } = config.bindings(c.env as Env)
     if (!media) return c.text('No media bucket is configured', 501)
-    return serveAsset(media, images, c.req.param('key'), parseTransform(new URL(c.req.url).searchParams))
+    return serveAsset(
+      media,
+      images,
+      c.req.param('key'),
+      parseTransform(new URL(c.req.url).searchParams),
+    )
   })
 
   /* ---------------------------------------------------------- history --- */
@@ -372,7 +388,8 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
   app.get('/story/:id/activity', async (c) => {
     const env = c.env as Env
     const id = c.req.param('id')
-    if (!(await storyById(config.bindings(env).db, id))) return c.json({ error: 'Unknown story' }, 404)
+    if (!(await storyById(config.bindings(env).db, id)))
+      return c.json({ error: 'Unknown story' }, 404)
     return c.json(await stub(env, id).recent(Number(c.req.query('limit') ?? 60)))
   })
 

@@ -29,7 +29,9 @@ export async function listVersions(
   limit = 50,
 ): Promise<VersionMeta[]> {
   const { results } = await db
-    .prepare(`select ${META} from versions where story_id = ? order by created_at desc, id desc limit ?`)
+    .prepare(
+      `select ${META} from versions where story_id = ? order by created_at desc, id desc limit ?`,
+    )
     .bind(storyId, limit)
     .all<VersionMeta>()
   return results
@@ -89,8 +91,14 @@ export async function writeVersion(
   return meta
 }
 
-export async function deleteVersionsFor(db: D1Database, storyIds: readonly string[]): Promise<void> {
+export async function deleteVersionsFor(
+  db: D1Database,
+  storyIds: readonly string[],
+): Promise<void> {
   if (!storyIds.length) return
   const placeholders = storyIds.map(() => '?').join(', ')
-  await db.prepare(`delete from versions where story_id in (${placeholders})`).bind(...storyIds).run()
+  await db
+    .prepare(`delete from versions where story_id in (${placeholders})`)
+    .bind(...storyIds)
+    .run()
 }

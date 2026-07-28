@@ -83,14 +83,24 @@ export class StoryDO extends DurableObject {
 
     switch (msg.type) {
       case 'hello': {
-        const attachment: Attachment = { actor: msg.actor, name: msg.name, colour: msg.colour, selection: null }
+        const attachment: Attachment = {
+          actor: msg.actor,
+          name: msg.name,
+          colour: msg.colour,
+          selection: null,
+        }
         ws.serializeAttachment(attachment)
 
         const behind = current.syncId - msg.lastSyncId
         const peers = this.peers(ws)
 
         if (msg.lastSyncId > 0 && behind >= 0 && behind <= MAX_CATCHUP) {
-          this.sendTo(ws, { type: 'catchup', deltas: this.since(msg.lastSyncId), syncId: current.syncId, peers })
+          this.sendTo(ws, {
+            type: 'catchup',
+            deltas: this.since(msg.lastSyncId),
+            syncId: current.syncId,
+            peers,
+          })
         } else {
           this.sendTo(ws, { type: 'bootstrap', doc: current.doc, syncId: current.syncId, peers })
         }

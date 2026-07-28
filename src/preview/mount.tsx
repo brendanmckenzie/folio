@@ -40,7 +40,7 @@ function PreviewApp({
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return
       const msg = e.data as ({ source?: string } & FromAdmin) | null
-      if (!msg || msg.source !== 'folio-admin') return
+      if (msg?.source !== 'folio-admin') return
 
       switch (msg.type) {
         case 'apply':

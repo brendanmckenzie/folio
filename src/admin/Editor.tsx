@@ -164,7 +164,10 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
   }, [current])
 
   const toFrame = useCallback((msg: Record<string, unknown>) => {
-    frame.current?.contentWindow?.postMessage({ source: 'folio-admin', ...msg }, window.location.origin)
+    frame.current?.contentWindow?.postMessage(
+      { source: 'folio-admin', ...msg },
+      window.location.origin,
+    )
   }, [])
 
   const keyAt = useCallback(
@@ -172,7 +175,10 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
       const doc = store.getSnapshot().doc
       if (!doc) return generateKeyBetween(null, null)
       const sibs = childrenOf(doc, parent, slot).filter((b) => b.uid !== ignore)
-      return generateKeyBetween(index > 0 ? (sibs[index - 1]?.order ?? null) : null, sibs[index]?.order ?? null)
+      return generateKeyBetween(
+        index > 0 ? (sibs[index - 1]?.order ?? null) : null,
+        sibs[index]?.order ?? null,
+      )
     },
     [store],
   )
@@ -218,7 +224,13 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin) return
-      const msg = e.data as { source?: string; type?: string; uid?: string; parent?: string; slot?: string }
+      const msg = e.data as {
+        source?: string
+        type?: string
+        uid?: string
+        parent?: string
+        slot?: string
+      }
       if (msg?.source !== 'folio-preview') return
 
       if (msg.type === 'ready') {
@@ -230,7 +242,8 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
         if (!viewingRef.current) setRail('blocks')
       } else if (msg.type === 'add' && msg.parent && msg.slot) {
         if (viewingRef.current) return
-        const field = schema[store.getSnapshot().doc?.bloks[msg.parent]?.type ?? '']?.fields[msg.slot]
+        const field =
+          schema[store.getSnapshot().doc?.bloks[msg.parent]?.type ?? '']?.fields[msg.slot]
         const first = field?.kind === 'blocks' ? field.allow[0] : undefined
         if (first) addBlock(msg.parent, msg.slot, first, 0)
       }
@@ -460,7 +473,12 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
 
         <div className="topbar__mid">
           {(Object.keys(VIEWPORTS) as Viewport[]).map((v) => (
-            <button key={v} type="button" className={viewport === v ? 'is-active' : ''} onClick={() => setViewport(v)}>
+            <button
+              key={v}
+              type="button"
+              className={viewport === v ? 'is-active' : ''}
+              onClick={() => setViewport(v)}
+            >
               {v}
             </button>
           ))}
@@ -468,15 +486,34 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
 
         <div className="topbar__right">
           <div className="peers">
-            <span className="peer peer--me" style={{ background: store.colour }} title={`${store.name} (you)`} />
+            <span
+              className="peer peer--me"
+              style={{ background: store.colour }}
+              title={`${store.name} (you)`}
+            />
             {state.peers.map((p) => (
-              <span key={p.actor} className="peer" style={{ background: p.colour }} title={p.name} />
+              <span
+                key={p.actor}
+                className="peer"
+                style={{ background: p.colour }}
+                title={p.name}
+              />
             ))}
           </div>
-          <button type="button" disabled={!state.canUndo} onClick={() => store.undo()} title="Undo (Cmd+Z)">
+          <button
+            type="button"
+            disabled={!state.canUndo}
+            onClick={() => store.undo()}
+            title="Undo (Cmd+Z)"
+          >
             Undo
           </button>
-          <button type="button" disabled={!state.canRedo} onClick={() => store.redo()} title="Redo (Shift+Cmd+Z)">
+          <button
+            type="button"
+            disabled={!state.canRedo}
+            onClick={() => store.redo()}
+            title="Redo (Shift+Cmd+Z)"
+          >
             Redo
           </button>
           {current ? (
@@ -501,13 +538,25 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
       <div className="editor__body">
         <div className="rail">
           <div className="rail__tabs">
-            <button type="button" className={rail === 'content' ? 'is-active' : ''} onClick={() => setRail('content')}>
+            <button
+              type="button"
+              className={rail === 'content' ? 'is-active' : ''}
+              onClick={() => setRail('content')}
+            >
               Content
             </button>
-            <button type="button" className={rail === 'blocks' ? 'is-active' : ''} onClick={() => setRail('blocks')}>
+            <button
+              type="button"
+              className={rail === 'blocks' ? 'is-active' : ''}
+              onClick={() => setRail('blocks')}
+            >
               Blocks
             </button>
-            <button type="button" className={rail === 'history' ? 'is-active' : ''} onClick={() => setRail('history')}>
+            <button
+              type="button"
+              className={rail === 'history' ? 'is-active' : ''}
+              onClick={() => setRail('history')}
+            >
               History
             </button>
           </div>
@@ -560,7 +609,8 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
               <span className="viewbar__text">
                 Viewing{' '}
                 <strong>
-                  {viewing.version.label || (viewing.version.kind === 'publish' ? 'a published version' : 'a checkpoint')}
+                  {viewing.version.label ||
+                    (viewing.version.kind === 'publish' ? 'a published version' : 'a checkpoint')}
                 </strong>{' '}
                 from {formatWhen(viewing.version.createdAt)}
                 <span className="viewbar__delta">
@@ -582,7 +632,10 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
             </div>
           ) : null}
 
-          <div className={`stage__frame ${viewing ? 'is-viewing' : ''}`} style={{ width: VIEWPORTS[viewport] }}>
+          <div
+            className={`stage__frame ${viewing ? 'is-viewing' : ''}`}
+            style={{ width: VIEWPORTS[viewport] }}
+          >
             {current ? (
               <iframe key={current.id} ref={frame} title="Preview" src={current.previewUrl} />
             ) : null}
