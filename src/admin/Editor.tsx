@@ -1,7 +1,6 @@
-import { generateKeyBetween } from 'fractional-indexing'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { diff, summariseDiff } from '../core/diff'
-import { childrenOf, type Doc, type Json } from '../core/doc'
+import { ancestorsOf, childrenOf, type Doc, type Json, keyAtIndex } from '../core/doc'
 import type { ActivityEntry } from '../core/protocol'
 import { buildResolution, referencedIds } from '../core/resolve'
 import { blankBlok, type SchemaIndex } from '../core/schema'
@@ -173,11 +172,11 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
   const keyAt = useCallback(
     (parent: string, slot: string, index: number, ignore?: string) => {
       const doc = store.getSnapshot().doc
-      if (!doc) return generateKeyBetween(null, null)
+      if (!doc) return keyAtIndex([], 0)
       const sibs = childrenOf(doc, parent, slot).filter((b) => b.uid !== ignore)
-      return generateKeyBetween(
-        index > 0 ? (sibs[index - 1]?.order ?? null) : null,
-        sibs[index]?.order ?? null,
+      return keyAtIndex(
+        sibs.map((b) => b.order),
+        index,
       )
     },
     [store],
@@ -196,9 +195,9 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
     (uid: string, parent: string, slot: string, index: number) => {
       const doc = store.getSnapshot().doc
       if (!doc) return
-      for (let cur: string | null = parent; cur; cur = doc.bloks[cur]?.parent ?? null) {
-        if (cur === uid) return
-      }
+      // Same rule and the same primitive the server-side guard uses: `ancestorsOf`
+      // terminates on a cyclic document, a hand-rolled walk up `parent` does not.
+      if (parent === uid || ancestorsOf(doc, parent).includes(uid)) return
       const field = schema[doc.bloks[parent]?.type ?? '']?.fields[slot]
       if (field?.kind !== 'blocks' || !field.allow.includes(doc.bloks[uid]?.type ?? '')) return
       store.tx([{ t: 'move', uid, parent, slot, order: keyAt(parent, slot, index, uid) }])
@@ -270,6 +269,9 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'z') return
       const el = document.activeElement
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return
+      // A rich text field keeps its own history: TipTap must undo the keystroke,
+      // not the document store, which would revert the whole field instead.
+      if (e.target instanceof HTMLElement && e.target.isContentEditable) return
       // Undo would edit the live document while the screen shows a version.
       if (viewingRef.current) return
       e.preventDefault()
@@ -400,6 +402,17 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
     const t = setTimeout(() => setNotice(null), 6000)
     return () => clearTimeout(t)
   }, [notice])
+
+  /**
+   * The object's refusals — a rejected transaction, an unreadable or wrongly
+   * versioned frame — reach the screen through the same toast as local failures.
+   * Without this the only sign of a refused edit is the value snapping back. Each
+   * refusal follows a dispatch, which clears the store's notice, so a repeat of
+   * the same reason still shows.
+   */
+  useEffect(() => {
+    if (state.notice) setNotice(state.notice)
+  }, [state.notice])
 
   const patchStory = useCallback(
     async (id: string, patch: Record<string, unknown>) => {
