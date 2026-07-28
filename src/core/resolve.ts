@@ -14,7 +14,7 @@
  */
 import type { ReactNode } from 'react'
 import type { Doc, Json } from './doc'
-import type { Field } from './fields'
+import { defaultValue, type Field } from './fields'
 import type { SchemaIndex } from './schema'
 import type { StoryMeta } from './story'
 import {
@@ -22,6 +22,7 @@ import {
   asAssets,
   asLink,
   isImageAsset,
+  isSafeHref,
   type AssetValue,
   type LinkKind,
   type LinkValue,
@@ -96,16 +97,21 @@ export function resolveLink(value: Json | undefined, resolution: Resolution): Re
         ...windowing(link),
       }
     }
+    // Both hrefs below come from a stored string. `asLink` already applied the
+    // allow-list to `url`; re-checking here makes it true of everything this
+    // function emits, whoever hands it a value.
     case 'url':
-      return { kind: 'url', href: link.url, ...windowing(link) }
+      return isSafeHref(link.url) ? { kind: 'url', href: link.url, ...windowing(link) } : null
     case 'email': {
       const query = link.subject ? `?subject=${encodeURIComponent(link.subject)}` : ''
       return { kind: 'email', href: `mailto:${link.email}${query}` }
     }
     case 'anchor':
       return { kind: 'anchor', href: hash(link.anchor) }
-    case 'asset':
-      return { kind: 'asset', href: decorateAsset(link.asset, resolution).src, ...windowing(link) }
+    case 'asset': {
+      const href = decorateAsset(link.asset, resolution).src
+      return isSafeHref(href) ? { kind: 'asset', href, ...windowing(link) } : null
+    }
   }
 }
 
@@ -144,8 +150,15 @@ export function resolveAssets(value: Json | undefined, resolution: Resolution): 
   return asAssets(value).map((a) => decorateAsset(a, resolution))
 }
 
+/**
+ * R2 keys are free-form: a space, a `#` or a `?` in one truncates or breaks the
+ * URL it is pasted into. Each path segment is encoded, `/` left alone, so the
+ * route still sees the key's shape.
+ */
+const encodeKey = (key: string) => key.split('/').map(encodeURIComponent).join('/')
+
 function decorateAsset(asset: AssetValue, resolution: Resolution): ResolvedAsset {
-  const src = asset.key ? `${resolution.assetBase}/${asset.key}` : asset.url!
+  const src = asset.key ? `${resolution.assetBase}/${encodeKey(asset.key)}` : asset.url!
   const focal = asset.focal
 
   return {
@@ -232,8 +245,14 @@ export function resolveReference(
 }
 
 /**
- * A stored field value as `render` should receive it. `blocks` is absent because
- * children are separate bloks and the renderer turns them into elements itself.
+ * A stored field value as `render` should receive it, per `ValueOf<Field>`: an
+ * absent value resolves to its kind's empty value, not to `''` for everything.
+ *
+ * The dispatch is exhaustive on purpose. A new field kind should fail to compile
+ * here rather than fall through and hand a block author the wrong type.
+ *
+ * `richtext` and `blocks` resolve to `ReactNode`, which needs the registry: the
+ * renderer builds those itself and never asks for them here.
  */
 export function resolveValue(
   field: Field,
@@ -247,8 +266,23 @@ export function resolveValue(
       return resolveAsset(value, resolution)
     case 'multiasset':
       return resolveAssets(value, resolution)
-    default:
+    case 'reference':
+      return resolveReference(value, resolution)
+    case 'number':
+      return typeof value === 'number' ? value : defaultValue(field)
+    case 'boolean':
+      return typeof value === 'boolean' ? value : false
+    case 'richtext':
+    case 'blocks':
+      return null
+    case 'text':
+    case 'textarea':
+    case 'select':
       return value ?? ''
+    default: {
+      const unhandled: never = field
+      throw new Error(`Unhandled field kind: ${(unhandled as Field).kind}`)
+    }
   }
 }
 

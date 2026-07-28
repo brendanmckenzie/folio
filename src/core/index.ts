@@ -17,7 +17,15 @@ export {
 } from './fields'
 export type { Field, PropsOf, SelectOption, ValueOf } from './fields'
 
-export { asAsset, asAssets, asLink, isImageAsset, isLinkEmpty, LINK_KINDS } from './values'
+export {
+  asAsset,
+  asAssets,
+  asLink,
+  isImageAsset,
+  isLinkEmpty,
+  isSafeHref,
+  LINK_KINDS,
+} from './values'
 export type { AssetValue, FocalPoint, LinkKind, LinkValue } from './values'
 
 export {
@@ -59,10 +67,10 @@ export type {
   StoryRef,
 } from './resolve'
 
-export { ancestorsOf, childrenOf, newUid, subtree } from './doc'
+export { ancestorsOf, childrenOf, compareSiblings, keyAtIndex, newUid, subtree } from './doc'
 export type { Blok, Doc, Json } from './doc'
 
-export { apply, applyAll, invert, invertAll } from './mutations'
+export { apply, applyAll, invert, invertAll, mutationError } from './mutations'
 export type { Mutation } from './mutations'
 
 export { deepEqual, diff, summariseDiff } from './diff'

@@ -20,8 +20,61 @@ import {
   asLink,
   isImageAsset,
   isLinkEmpty,
+  isSafeHref,
   LINK_KINDS,
 } from '../../../src/core/values'
+
+describe('isSafeHref', () => {
+  it('accepts the safe schemes and everything with no scheme at all', () => {
+    for (const url of [
+      'https://example.com/path?x=1',
+      'http://example.com',
+      'HTTPS://example.com',
+      'mailto:person@example.com',
+      'tel:+61400000000',
+      '/relative/path',
+      '//cdn.example.com/asset.js',
+      '#section-2',
+      'page/child',
+    ]) {
+      expect(isSafeHref(url)).toBe(true)
+    }
+  })
+
+  it('rejects executable schemes whatever their case', () => {
+    for (const url of ['javascript:alert(1)', 'jAvAsCrIpT:alert(1)', 'DATA:text/html,x']) {
+      expect(isSafeHref(url)).toBe(false)
+    }
+  })
+
+  it('rejects an empty href, and one made only of ignorable characters', () => {
+    expect(isSafeHref('')).toBe(false)
+    expect(isSafeHref('  \t\n')).toBe(false)
+  })
+
+  it('rejects a scheme hidden behind control characters or whitespace, as a browser would', () => {
+    // Browsers strip these before reading the scheme, so a check that does not strip
+    // them first sees a relative URL where the DOM sees `javascript:`.
+    for (const url of [
+      ' javascript:alert(1)',
+      '\njavascript:alert(1)',
+      'java\tscript:alert(1)',
+      'java\0script:alert(1)',
+      'JAVA\tSCRIPT:alert(1)',
+      'java\x7fscript:alert(1)',
+    ]) {
+      expect(isSafeHref(url)).toBe(false)
+    }
+  })
+
+  it('treats a colon as a scheme only when everything before it is a scheme token', () => {
+    // Nothing here is a scheme, so nothing here needs to be on the allow-list.
+    expect(isSafeHref('#a:b')).toBe(true)
+    expect(isSafeHref('page/a:b')).toBe(true)
+    expect(isSafeHref('?q=a:b')).toBe(true)
+    expect(isSafeHref('1abc:x')).toBe(true)
+  })
+})
 
 describe('asLink', () => {
   it('rejects anything that is not a plain object', () => {
@@ -111,11 +164,9 @@ describe('asLink', () => {
       }
     })
 
-    // SPEC(url-scheme): asLink must reject (or neutralise) javascript:, data:, and
-    // vbscript: schemes for kind 'url', since this value is trusted straight into an
-    // href. Currently fails: the check is only `typeof v.url === 'string' && v.url`,
-    // so any non-empty string is accepted regardless of scheme.
-    it.fails('rejects javascript:, data:, and vbscript: schemes', () => {
+    // SPEC(url-scheme): a stored `url` is trusted straight into an href, so kind 'url'
+    // passes a scheme allow-list: javascript:, data: and vbscript: are refused outright.
+    it('rejects javascript:, data:, and vbscript: schemes', () => {
       expect(asLink({ kind: 'url', url: 'javascript:alert(1)' })).toBeNull()
       expect(asLink({ kind: 'url', url: 'JAVASCRIPT:alert(1)' })).toBeNull()
       expect(asLink({ kind: 'url', url: 'data:text/html,<script>alert(1)</script>' })).toBeNull()
@@ -252,6 +303,21 @@ describe('asAsset', () => {
 
     it('rejects an object where key and url are both blank strings', () => {
       expect(asAsset({ key: '', url: '' })).toBeNull()
+    })
+
+    it('refuses a url the href allow-list rejects, in either stored form', () => {
+      // An asset `url` reaches an `href` through an asset link and a `src` through
+      // resolveAsset, so it goes through the one allow-list like any other href.
+      expect(asAsset('javascript:alert(1)')).toBeNull()
+      expect(asAsset({ url: 'javascript:alert(1)' })).toBeNull()
+      expect(asAsset({ url: 'data:text/html,<script>alert(1)</script>' })).toBeNull()
+    })
+
+    it('keeps a key-only asset when the accompanying url is refused', () => {
+      // The key is where the src comes from, so the asset is still renderable.
+      const asset = asAsset({ key: 'library/pic.png', url: 'javascript:alert(1)' })
+      expect(asset).toMatchObject({ key: 'library/pic.png' })
+      expect(asset).not.toHaveProperty('url')
     })
   })
 

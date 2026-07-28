@@ -61,6 +61,35 @@ export const LINK_KINDS: readonly LinkKind[] = ['story', 'url', 'email', 'anchor
 const LINK_KIND_SET: ReadonlySet<string> = new Set(LINK_KINDS)
 
 /**
+ * Schemes an href may carry. Anything without a scheme — relative,
+ * protocol-relative, a bare `#anchor` — is fine; anything that can execute is
+ * not, and there is no safe way to escape it once it is in an `href`.
+ */
+const SAFE_SCHEMES: ReadonlySet<string> = new Set(['http', 'https', 'mailto', 'tel'])
+
+/**
+ * A colon only starts a scheme when everything before it is a scheme token, so
+ * `page/a:b` and `#a:b` are relative. Control characters and surrounding
+ * whitespace are stripped first because browsers ignore them when reading the
+ * scheme — `java\tscript:` and ` javascript:` both execute.
+ */
+const SCHEME = /^([a-z][a-z0-9+.-]*):/i
+
+/** Control characters and spaces, by code point: a regex class of these is unreadable. */
+const ignorable = (ch: string): boolean => {
+  const code = ch.charCodeAt(0)
+  return code <= 0x20 || code === 0x7f
+}
+
+/** Whether a stored string is safe to put in an `href`. The one allow-list. */
+export function isSafeHref(url: string): boolean {
+  const clean = [...url].filter((ch) => !ignorable(ch)).join('')
+  if (!clean) return false
+  const scheme = SCHEME.exec(clean)?.[1]
+  return !scheme || SAFE_SCHEMES.has(scheme.toLowerCase())
+}
+
+/**
  * A stored value is only as trustworthy as the last thing that wrote it: an
  * older document, a half-finished edit, or a Storyblok import can all leave
  * something that is not a `LinkValue`. Everything reading a link goes through
@@ -77,7 +106,8 @@ export function asLink(value: unknown): LinkValue | null {
         ? { kind: 'story', id: v.id, ...str(v, 'anchor'), ...blank(v) }
         : null
     case 'url':
-      return typeof v.url === 'string' && v.url
+      // The one field whose stored value reaches an `href` untouched.
+      return typeof v.url === 'string' && v.url && isSafeHref(v.url)
         ? { kind: 'url', url: v.url, ...str(v, 'rel'), ...blank(v) }
         : null
     case 'email':
@@ -100,17 +130,23 @@ const IMAGE_EXT = /\.(avif|gif|jpe?g|png|svg|webp)$/i
  * Tolerates the URL string that `asset()` used to store, so documents written
  * before the field grew up keep rendering. Durable Object state outlives a
  * schema change, so this is not hypothetical.
+ *
+ * `url` goes through the same allow-list as a link's: it reaches an `href` through
+ * an asset link and a `src` through `resolveAsset`, and an import or an API write
+ * can put anything there. A key-only asset is unaffected — its src is built from
+ * `assetBase`. An asset whose only location is refused is not renderable, so it
+ * reads as absent, like one with neither key nor url.
  */
 export function asAsset(value: unknown): AssetValue | null {
   if (typeof value === 'string') {
-    if (!value) return null
+    if (!value || !isSafeHref(value)) return null
     const filename = value.split('?')[0]!.split('/').pop() || 'image'
     return { url: value, filename, contentType: guessType(filename), size: 0, alt: '' }
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const v = value as Record<string, unknown>
   const key = typeof v.key === 'string' && v.key ? v.key : undefined
-  const url = typeof v.url === 'string' && v.url ? v.url : undefined
+  const url = typeof v.url === 'string' && v.url && isSafeHref(v.url) ? v.url : undefined
   if (!key && !url) return null
 
   return {

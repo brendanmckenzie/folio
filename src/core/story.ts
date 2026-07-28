@@ -1,3 +1,5 @@
+import { compareSiblings } from './doc'
+
 /**
  * Story *structure*. Page metadata lives in the document's root block, not
  * here — see schema.sql. The only content field mirrored into this table is
@@ -38,7 +40,7 @@ export function buildTree(rows: readonly StoryMeta[]): StoryNode[] {
   }
 
   const sort = (nodes: StoryNode[]) => {
-    nodes.sort((a, b) => (a.ord < b.ord ? -1 : a.ord > b.ord ? 1 : 0))
+    nodes.sort((a, b) => compareSiblings(a.ord, a.id, b.ord, b.id))
     for (const n of nodes) sort(n.children)
   }
   sort(roots)
@@ -70,7 +72,14 @@ export function derivePaths(rows: readonly StoryMeta[]): Map<string, string> {
   return out
 }
 
-/** `id` plus every descendant. */
+/**
+ * `id` plus every descendant.
+ *
+ * Visits each row once, so a `parent_id` cycle degrades instead of overflowing the
+ * stack — the same reason `derivePaths` carries a guard. Concurrent moves in D1 are
+ * last-write-wins, and the two operations that could clean a cycle up (`updateStory`
+ * and `deleteStory`) both walk through here.
+ */
 export function descendants(rows: readonly StoryMeta[], id: string): string[] {
   const children = new Map<string, string[]>()
   for (const r of rows) {
@@ -80,7 +89,10 @@ export function descendants(rows: readonly StoryMeta[], id: string): string[] {
     else children.set(r.parentId, [r.id])
   }
   const out: string[] = []
+  const seen = new Set<string>()
   const walk = (cur: string) => {
+    if (seen.has(cur)) return
+    seen.add(cur)
     out.push(cur)
     for (const child of children.get(cur) ?? []) walk(child)
   }

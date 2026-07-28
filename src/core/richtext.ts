@@ -12,6 +12,8 @@
  * editor would be absurd.
  */
 
+import { isSafeHref } from './values'
+
 /** Node names, matching TipTap's own. */
 export type RichtextNodeName =
   | 'paragraph'
@@ -129,27 +131,40 @@ export function fromPlainText(text: string): RichtextDoc {
  *
  * A disallowed node is unwrapped rather than deleted, so its text survives. That
  * matters for paste: dropping a heading should leave the words behind, not a hole.
+ *
+ * The href scheme pass is not a limit and cannot be configured away: `richtext()`
+ * with no arguments is the common field shape, and it is the `limits` the renderer
+ * passes, so a fast path keyed on limits alone would exempt exactly the default
+ * field from the check.
  */
 export function sanitiseRichtext(doc: RichtextDoc, limits: RichtextLimits = {}): RichtextDoc {
   const marks = limits.marks ? new Set<string>(limits.marks) : null
   const nodes = limits.nodes ? new Set<string>(limits.nodes) : null
   const levels = limits.headingLevels ? new Set(limits.headingLevels) : null
-  if (!marks && !nodes && !levels) return doc
+  if (!marks && !nodes && !levels && !hasUnsafeHref(doc)) return doc
   if (!doc?.content) return doc
 
   // Allowing a list implies allowing its items.
   if (nodes && (nodes.has('bulletList') || nodes.has('orderedList'))) nodes.add('listItem')
 
-  const walk = (list: readonly RichtextNode[]): RichtextNode[] =>
+  // No permitted level leaves no representable heading, so it is unwrapped like
+  // any other disallowed node rather than snapped to a level that does not exist.
+  const noLevels = levels !== null && levels.size === 0
+  const paragraphOk = !nodes || nodes.has('paragraph')
+
+  const walk = (list: unknown): RichtextNode[] =>
     mergeText(
-      list.flatMap((node): RichtextNode[] => {
+      entries<RichtextNode>(list).flatMap((node): RichtextNode[] => {
         const kids = node.content ? walk(node.content) : undefined
 
-        if (nodes && !STRUCTURAL.has(node.type) && !nodes.has(node.type)) {
+        const unlisted = nodes !== null && !nodes.has(node.type)
+        const banned =
+          !STRUCTURAL.has(node.type) && (unlisted || (noLevels && node.type === 'heading'))
+        if (banned) {
           // Unwrap: keep the words, lose the container. Inline children get a
           // paragraph to live in when one is permitted, matching what the editor
           // does with a pasted heading and avoiding bare text in a block slot.
-          if (kids?.length && nodes.has('paragraph') && kids.every(isInline)) {
+          if (kids?.length && paragraphOk && kids.every(isInline)) {
             return [{ type: 'paragraph', content: kids }]
           }
           return kids ?? []
@@ -159,8 +174,12 @@ export function sanitiseRichtext(doc: RichtextDoc, limits: RichtextLimits = {}):
         if (kids) next.content = kids
         else if (next.content) delete next.content
 
-        if (marks && node.marks) {
-          const kept = node.marks.filter((m) => marks.has(m.type))
+        if (node.marks) {
+          // Scheme filtering applies whatever the mark allow-list says: a link
+          // mark's `href` is an href, and `attrs` are as untrusted as the rest.
+          const kept = entries<RichtextMark>(node.marks).filter(
+            (m) => (!marks || marks.has(m.type)) && safeMark(m),
+          )
           if (kept.length) next.marks = kept
           else delete next.marks
         }
@@ -183,6 +202,38 @@ export function sanitiseRichtext(doc: RichtextDoc, limits: RichtextLimits = {}):
 
   const content = walk(doc.content)
   return content.length ? { type: 'doc', content } : null
+}
+
+/**
+ * Walkable entries of a `content` field. Stored documents come from imports, old
+ * writers and the API as well as the editor, so `content` may not be an array
+ * and its entries may not be nodes. Junk is skipped, never thrown on.
+ */
+function entries<T>(list: unknown): T[] {
+  if (!Array.isArray(list)) return []
+  return list.filter((n): n is T => Boolean(n) && typeof n === 'object')
+}
+
+/** A link mark keeps its `href` only if the href allow-list accepts it. */
+function safeMark(mark: RichtextMark): boolean {
+  if (mark.type !== 'link') return true
+  const href = mark.attrs?.href
+  return typeof href === 'string' && isSafeHref(href)
+}
+
+/**
+ * Whether any mark in the document would be stripped by the href allow-list. This
+ * is what the unconfigured fast path tests: with no limits there is nothing else
+ * to do, so returning the input document is only correct while every href passes.
+ */
+function hasUnsafeHref(doc: RichtextDoc): boolean {
+  const walk = (nodes: unknown): boolean =>
+    entries<RichtextNode>(nodes).some(
+      (n) =>
+        entries<RichtextMark>(n.marks).some((m) => !safeMark(m)) ||
+        (n.content ? walk(n.content) : false),
+    )
+  return walk(doc?.content)
 }
 
 const isInline = (node: RichtextNode) => node.type === 'text' || node.type === 'hardBreak'
@@ -218,9 +269,9 @@ function mergeText(nodes: RichtextNode[]): RichtextNode[] {
 export function richtextToText(doc: RichtextDoc): string {
   if (!doc?.content) return ''
   const out: string[] = []
-  const walk = (nodes: readonly RichtextNode[]) => {
-    for (const node of nodes) {
-      if (node.type === 'text' && node.text) out.push(node.text)
+  const walk = (nodes: unknown) => {
+    for (const node of entries<RichtextNode>(nodes)) {
+      if (node.type === 'text' && typeof node.text === 'string') out.push(node.text)
       else if (node.type === 'hardBreak') out.push(' ')
       if (node.content) {
         walk(node.content)
@@ -239,7 +290,9 @@ export function isRichtextEmpty(doc: RichtextDoc): boolean {
 function hasNode(doc: RichtextDoc, types: readonly string[]): boolean {
   if (!doc?.content) return false
   const wanted = new Set(types)
-  const walk = (nodes: readonly RichtextNode[]): boolean =>
-    nodes.some((n) => wanted.has(n.type) || (n.content ? walk(n.content) : false))
+  const walk = (nodes: unknown): boolean =>
+    entries<RichtextNode>(nodes).some(
+      (n) => wanted.has(n.type) || (n.content ? walk(n.content) : false),
+    )
   return walk(doc.content)
 }

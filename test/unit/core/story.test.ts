@@ -52,11 +52,10 @@ describe('buildTree', () => {
     expect(buildTree(rows).map((n) => n.id)).toEqual(['orphan'])
   })
 
-  // SPEC(tree-tiebreak): siblings with an identical `ord` must sort in a deterministic sequence
-  // (uid tiebreak) regardless of the order the rows were passed in. Currently fails: the comparator
-  // returns 0 for ties, so buildTree relies on Array#sort's stability over the `rows` insertion
-  // order, and reversing that order reverses the resulting sibling order.
-  it.fails('breaks ord ties deterministically regardless of row insertion order', () => {
+  // SPEC(tree-tiebreak): siblings with an identical `ord` sort in a deterministic sequence (id
+  // tiebreak) regardless of the order the rows were passed in — the same comparator the document
+  // uses for (order, uid).
+  it('breaks ord ties deterministically regardless of row insertion order', () => {
     const a = meta({ id: 'a', ord: 'tie' })
     const b = meta({ id: 'b', ord: 'tie' })
     const forward = buildTree([a, b]).map((n) => n.id)
@@ -132,6 +131,13 @@ describe('descendants', () => {
   it('returns just the id for a leaf with no children', () => {
     const rows = [meta({ id: 'root' }), meta({ id: 'lonely', parentId: 'root' })]
     expect(descendants(rows, 'lonely')).toEqual(['lonely'])
+  })
+
+  // Story-tree writes in D1 are last-write-wins, so a parent_id cycle is reachable, and
+  // updateStory/deleteStory — the only ways to clear one — both walk through here.
+  it('visits each row once on a parent_id cycle rather than overflowing the stack', () => {
+    const rows = [meta({ id: 'a', parentId: 'b' }), meta({ id: 'b', parentId: 'a' })]
+    expect(descendants(rows, 'a')).toEqual(['a', 'b'])
   })
 })
 

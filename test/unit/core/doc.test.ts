@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ancestorsOf, childrenOf, subtree } from '../../../src/core/doc'
+import { ancestorsOf, childrenOf, keyAtIndex, subtree } from '../../../src/core/doc'
 import type { Blok, Doc } from '../../../src/core/doc'
 import { boolean, multiasset, number, richtext, select, text } from '../../../src/core/fields'
 import { blankBlok } from '../../../src/core/schema'
@@ -37,11 +37,9 @@ describe('childrenOf', () => {
     expect(childrenOf(doc, 'root', 'body')).toEqual([])
   })
 
-  // SPEC(order-tiebreak): siblings with an identical `order` key must sort deterministically (uid
-  // tiebreak), independent of the order their bloks happen to appear in `doc.bloks`. Currently
-  // fails: the comparator returns 0 for ties, so childrenOf relies on Object.values() insertion
-  // order, and reversing that insertion order reverses the result.
-  it.fails('breaks order ties deterministically regardless of blok insertion order', () => {
+  // SPEC(order-tiebreak): siblings with an identical `order` key sort deterministically (uid
+  // tiebreak), independent of the order their bloks happen to appear in `doc.bloks`.
+  it('breaks order ties deterministically regardless of blok insertion order', () => {
     const docA: Doc = {
       root: 'root',
       bloks: {
@@ -61,6 +59,43 @@ describe('childrenOf', () => {
     const seqA = childrenOf(docA, 'root', 'body').map((b) => b.uid)
     const seqB = childrenOf(docB, 'root', 'body').map((b) => b.uid)
     expect(seqA).toEqual(seqB)
+  })
+})
+
+describe('keyAtIndex', () => {
+  it('places a key at the front, in the middle, and at the end of a sibling list', () => {
+    const keys = ['a0', 'a1', 'a2']
+    expect(keyAtIndex(keys, 0) < 'a0').toBe(true)
+    const middle = keyAtIndex(keys, 1)
+    expect(middle > 'a0' && middle < 'a1').toBe(true)
+    expect(keyAtIndex(keys, 3) > 'a2').toBe(true)
+  })
+
+  it('produces a key for an empty sibling list', () => {
+    expect(typeof keyAtIndex([], 0)).toBe('string')
+  })
+
+  it('clamps an index past either end rather than producing a stray key', () => {
+    const keys = ['a0', 'a1']
+    expect(keyAtIndex(keys, 99) > 'a1').toBe(true)
+    expect(keyAtIndex(keys, -1) < 'a0').toBe(true)
+  })
+
+  // Tied keys are reachable by design (see compareSiblings), and generateKeyBetween throws
+  // on equal bounds, so every drop position around a tied run has to stay writable.
+  it('lands after a tied run instead of throwing on equal bounds', () => {
+    const keys = ['a0', 'a2', 'a2', 'a4']
+    for (let i = 0; i <= keys.length; i++) {
+      expect(() => keyAtIndex(keys, i)).not.toThrow()
+    }
+    const inside = keyAtIndex(keys, 2)
+    expect(inside > 'a2' && inside < 'a4').toBe(true)
+  })
+
+  it('stays writable when every sibling is tied', () => {
+    const keys = ['a2', 'a2', 'a2']
+    expect(keyAtIndex(keys, 1) > 'a2').toBe(true)
+    expect(keyAtIndex(keys, 0) < 'a2').toBe(true)
   })
 })
 
@@ -85,6 +120,19 @@ describe('subtree', () => {
     }
     expect(subtree(doc, 'leaf')).toEqual(['leaf'])
   })
+
+  // `apply` refuses cycles now, but a log written before it did can still replay one.
+  it('visits each blok once on a cyclic document rather than recursing forever', () => {
+    const doc: Doc = {
+      root: 'root',
+      bloks: {
+        root: blok({ uid: 'root' }),
+        a: blok({ uid: 'a', parent: 'b' }),
+        b: blok({ uid: 'b', parent: 'a' }),
+      },
+    }
+    expect(subtree(doc, 'a')).toEqual(['a', 'b'])
+  })
 })
 
 describe('ancestorsOf', () => {
@@ -108,6 +156,18 @@ describe('ancestorsOf', () => {
   it('returns an empty array for a uid that is not in the doc', () => {
     const doc: Doc = { root: 'root', bloks: { root: blok({ uid: 'root' }) } }
     expect(ancestorsOf(doc, 'ghost')).toEqual([])
+  })
+
+  it('stops on a cyclic document rather than walking forever', () => {
+    const doc: Doc = {
+      root: 'root',
+      bloks: {
+        root: blok({ uid: 'root' }),
+        a: blok({ uid: 'a', parent: 'b' }),
+        b: blok({ uid: 'b', parent: 'a' }),
+      },
+    }
+    expect(ancestorsOf(doc, 'a')).toEqual(['b'])
   })
 })
 

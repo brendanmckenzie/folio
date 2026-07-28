@@ -215,10 +215,10 @@ describe('diff', () => {
     expect(applyAll(from, diff(from, to)).bloks.a?.type).toBe('text')
   })
 
-  // SPEC(diff-order): applying diff(from,to) must produce to even when a child is
-  // rescued out of a removed subtree. Currently fails: removals are emitted before
-  // moves, cascading over the rescued child.
-  it.fails('keeps a child that is rescued out of a removed subtree', () => {
+  // SPEC(diff-order): applying diff(from,to) produces to even when a child is rescued out
+  // of a removed subtree — removals are emitted last, after the moves that carry the
+  // survivors out of them.
+  it('keeps a child that is rescued out of a removed subtree', () => {
     const from = mkDoc([
       rootBlk(),
       blk('s', { type: 'section', order: 'a1' }),
@@ -354,10 +354,10 @@ function cloneDoc(doc: Doc): Doc {
  * Derive `to` from `from` with random edits: subtree removal, subtree addition,
  * reparenting, reordering and field add/change/remove.
  *
- * Removals run first and always take a whole subtree, so no surviving blok is
- * ever left with a removed ancestor. That is the "rescue" shape the engine gets
- * wrong today (see SPEC(diff-order)); the general property has to steer clear of
- * it, and it is covered by an explicit example instead.
+ * A removal may rescue descendants out of the doomed subtree instead of taking
+ * them with it, which is the shape `diff(live, target)` hits whenever a restore
+ * keeps a block its old parent no longer holds. It is the whole reason removals
+ * are emitted last, so the property has to generate it.
  */
 function deriveTo(from: Doc, rand: Rand): Doc {
   const to = cloneDoc(from)
@@ -365,7 +365,24 @@ function deriveTo(from: Doc, rand: Rand): Doc {
   for (let i = int(rand, 3); i > 0; i--) {
     const victims = Object.keys(to.bloks).filter((uid) => uid !== to.root)
     if (victims.length === 0) break
-    for (const uid of subtree(to, pick(rand, victims))) delete to.bloks[uid]
+    const condemned = subtree(to, pick(rand, victims))
+    const doomed = new Set(condemned)
+    // Top-down, so rescuing a node takes its own descendants out of the doomed
+    // set with it and they are not offered again.
+    for (const uid of condemned.slice(1)) {
+      if (!doomed.has(uid) || int(rand, 3) !== 0) continue
+      const kin = new Set(subtree(to, uid))
+      const hosts = Object.keys(to.bloks).filter((u) => !doomed.has(u) && !kin.has(u))
+      if (hosts.length === 0) continue
+      for (const k of kin) doomed.delete(k)
+      to.bloks[uid] = {
+        ...to.bloks[uid]!,
+        parent: pick(rand, hosts),
+        slot: pick(rand, SLOTS),
+        order: pick(rand, ORDERS),
+      }
+    }
+    for (const uid of doomed) delete to.bloks[uid]
   }
 
   const usable = FRESH_UIDS.filter((uid) => !from.bloks[uid])
@@ -440,6 +457,22 @@ function hasFieldRemoval(from: Doc, to: Doc): boolean {
   return false
 }
 
+/**
+ * True when a blok survives into `to` out of a subtree `from` no longer has: the
+ * rescue shape, which only lands if the diff moves it before the cascade.
+ */
+function hasRescue(from: Doc, to: Doc): boolean {
+  for (const uid of Object.keys(to.bloks)) {
+    if (!from.bloks[uid]) continue
+    let cur = from.bloks[uid]!.parent
+    while (cur) {
+      if (!to.bloks[cur]) return true
+      cur = from.bloks[cur]?.parent ?? null
+    }
+  }
+  return false
+}
+
 /** Drops null-valued fields so "cleared" and "absent" compare equal. */
 function normalise(doc: Doc): Doc {
   const bloks: Record<string, Blok> = {}
@@ -451,7 +484,7 @@ function normalise(doc: Doc): Doc {
   return { root: doc.root, bloks }
 }
 
-const CASES = 200
+const CASES = 300
 
 function makeCase(seed: number): { from: Doc; to: Doc } {
   const rand = mulberry32(seed)
@@ -464,7 +497,7 @@ function makeCase(seed: number): { from: Doc; to: Doc } {
 // ---------------------------------------------------------------------------
 
 describe('diff/applyAll round trip (seeded property)', () => {
-  it('reproduces `to` for 200 generated document pairs', () => {
+  it('reproduces `to` for 300 generated document pairs', () => {
     for (let seed = 1; seed <= CASES; seed++) {
       const { from, to } = makeCase(seed)
       expect(isTree(from), `seed ${seed}: generated \`from\` is not a tree`).toBe(true)
@@ -491,6 +524,7 @@ describe('diff/applyAll round trip (seeded property)', () => {
     const totals = { added: 0, removed: 0, moved: 0, edited: 0, total: 0 }
     let empty = 0
     let fieldRemovals = 0
+    let rescues = 0
     for (let seed = 1; seed <= CASES; seed++) {
       const { from, to } = makeCase(seed)
       const s = summariseDiff(diff(from, to))
@@ -501,6 +535,7 @@ describe('diff/applyAll round trip (seeded property)', () => {
       totals.total += s.total
       if (s.total === 0) empty++
       if (hasFieldRemoval(from, to)) fieldRemovals++
+      if (hasRescue(from, to)) rescues++
     }
 
     expect(totals.added).toBeGreaterThan(20)
@@ -508,6 +543,9 @@ describe('diff/applyAll round trip (seeded property)', () => {
     expect(totals.moved).toBeGreaterThan(20)
     expect(totals.edited).toBeGreaterThan(20)
     expect(fieldRemovals).toBeGreaterThan(5)
+    // Rescues are the shape the emission order exists for; without them the
+    // property would pass on a diff that emits removals first.
+    expect(rescues).toBeGreaterThan(5)
     expect(empty).toBeLessThan(CASES / 4)
   })
 })
