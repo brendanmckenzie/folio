@@ -17,6 +17,7 @@ export function PageAddress({ story, all, onChange }: Props) {
   const [slug, setSlug] = useState(story.slug)
   const [busy, setBusy] = useState(false)
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: story.id is deliberate — switching to a story with an identical slug must still discard a half-typed local edit
   useEffect(() => {
     setSlug(story.slug)
   }, [story.id, story.slug])

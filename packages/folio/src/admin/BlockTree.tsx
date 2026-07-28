@@ -37,7 +37,12 @@ export function BlockTree(props: Props) {
   )
 }
 
-function Slot({ parent, slot, depth, ...props }: Props & { parent: string; slot: string; depth: number }) {
+function Slot({
+  parent,
+  slot,
+  depth,
+  ...props
+}: Props & { parent: string; slot: string; depth: number }) {
   const { doc, schema, selection, peers, onSelect, onAdd, onMove } = props
   const [dropIndex, setDropIndex] = useState<number | null>(null)
 
@@ -95,12 +100,23 @@ function Slot({ parent, slot, depth, ...props }: Props & { parent: string; slot:
                 <span className="tree__type">{def?.label ?? blok.type}</span>
                 <span className="tree__summary">{summarise(def, blok.data)}</span>
                 {watchers.map((p) => (
-                  <span key={p.actor} className="tree__peer" style={{ background: p.colour }} title={p.name} />
+                  <span
+                    key={p.actor}
+                    className="tree__peer"
+                    style={{ background: p.colour }}
+                    title={p.name}
+                  />
                 ))}
               </div>
 
               {slotsOf(def).map(([childSlot]) => (
-                <Slot key={childSlot} {...props} parent={blok.uid} slot={childSlot} depth={depth + 1} />
+                <Slot
+                  key={childSlot}
+                  {...props}
+                  parent={blok.uid}
+                  slot={childSlot}
+                  depth={depth + 1}
+                />
               ))}
             </li>
             <li
@@ -115,7 +131,11 @@ function Slot({ parent, slot, depth, ...props }: Props & { parent: string; slot:
 
       {allow.length > 0 && !full ? (
         <li className="tree__add">
-          <AddMenu allow={allow} schema={schema} onPick={(type) => onAdd(parent, slot, type, kids.length)} />
+          <AddMenu
+            allow={allow}
+            schema={schema}
+            onPick={(type) => onAdd(parent, slot, type, kids.length)}
+          />
         </li>
       ) : null}
     </ul>

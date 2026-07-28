@@ -170,7 +170,9 @@ export function sanitiseRichtext(doc: RichtextDoc, limits: RichtextLimits = {}):
           if (!levels.has(level)) {
             // Snap to the nearest permitted level rather than discarding the
             // heading, so document structure survives.
-            const nearest = [...levels].sort((a, b) => Math.abs(a - level) - Math.abs(b - level))[0]!
+            const nearest = [...levels].sort(
+              (a, b) => Math.abs(a - level) - Math.abs(b - level),
+            )[0]!
             next.attrs = { ...node.attrs, level: nearest }
           }
         }

@@ -9,6 +9,7 @@ export function serializeJson(value: unknown): string {
 }
 
 export function Bootstrap({ global, value }: { global: string; value: unknown }) {
+  // biome-ignore lint/security/noDangerouslySetInnerHtml: value goes through serializeJson (escapes `<`); `global` is only ever a library literal
   return <script dangerouslySetInnerHTML={{ __html: `window.${global}=${serializeJson(value)}` }} />
 }
 
@@ -21,6 +22,7 @@ export function ReactRefreshPreamble() {
   return (
     <script
       type="module"
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: static literal script, no interpolation
       dangerouslySetInnerHTML={{
         __html: [
           `import RefreshRuntime from "/@react-refresh"`,

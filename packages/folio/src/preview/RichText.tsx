@@ -57,7 +57,11 @@ function renderNode(node: RichtextNode, res: Resolution, key: string): ReactNode
       const language = node.attrs?.language
       return (
         <pre key={key}>
-          <code className={typeof language === 'string' && language ? `language-${language}` : undefined}>
+          <code
+            className={
+              typeof language === 'string' && language ? `language-${language}` : undefined
+            }
+          >
             {kids}
           </code>
         </pre>
@@ -126,7 +130,12 @@ function wrap(mark: RichtextMark, inner: ReactNode, res: Resolution): ReactNode 
       const link = linkOf(mark, res)
       if (!link) return inner
       return (
-        <a href={link.href} target={link.target} rel={link.rel} data-broken={link.broken ? 'true' : undefined}>
+        <a
+          href={link.href}
+          target={link.target}
+          rel={link.rel}
+          data-broken={link.broken ? 'true' : undefined}
+        >
           {inner}
         </a>
       )

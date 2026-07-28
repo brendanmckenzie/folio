@@ -191,7 +191,13 @@ function Level({
   )
 }
 
-function NewPage({ onSubmit, onCancel }: { onSubmit: (title: string) => void; onCancel: () => void }) {
+function NewPage({
+  onSubmit,
+  onCancel,
+}: {
+  onSubmit: (title: string) => void
+  onCancel: () => void
+}) {
   const [title, setTitle] = useState('')
   return (
     <form

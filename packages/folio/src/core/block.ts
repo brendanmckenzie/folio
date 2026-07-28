@@ -6,7 +6,8 @@ import type { BlockSchema, Manifest, SchemaIndex } from './schema'
  * Schema and renderer in one place. The admin form, the TypeScript prop types
  * and the rendered HTML all derive from `fields`, so they cannot drift.
  */
-export interface BlockDef<F extends Record<string, Field> = Record<string, Field>> extends BlockSchema {
+export interface BlockDef<F extends Record<string, Field> = Record<string, Field>>
+  extends BlockSchema {
   fields: F
   /** Field name used to label this block in the editor's tree. */
   summary?: Extract<keyof F, string>
@@ -23,7 +24,7 @@ export function defineBlock<const F extends Record<string, Field>>(def: BlockDef
  * to `BlockDef<Record<string, Field>>`. Authors keep full inference at the
  * `defineBlock` call site; only the collection type is loose.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// biome-ignore lint/suspicious/noExplicitAny: see doc comment above
 export type AnyBlockDef = BlockDef<any>
 
 export type Registry = Record<string, AnyBlockDef>
@@ -38,7 +39,12 @@ export function toSchemaIndex(registry: Registry): SchemaIndex {
   return Object.fromEntries(
     Object.entries(registry).map(([name, def]) => [
       name,
-      { name: def.name, label: def.label, summary: def.summary, fields: def.fields } satisfies BlockSchema,
+      {
+        name: def.name,
+        label: def.label,
+        summary: def.summary,
+        fields: def.fields,
+      } satisfies BlockSchema,
     ]),
   )
 }

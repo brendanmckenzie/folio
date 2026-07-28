@@ -73,7 +73,10 @@ function Page({ doc, resolution }: { doc: Doc; resolution: Resolution }) {
           {meta.noindex ? <meta name="robots" content="noindex" /> : null}
           <meta property="og:title" content={title} />
           {social ? (
-            <meta property="og:image" content={social.srcFor({ width: 1200, height: 630, fit: 'cover' })} />
+            <meta
+              property="og:image"
+              content={social.srcFor({ width: 1200, height: 630, fit: 'cover' })}
+            />
           ) : null}
         </>
       }

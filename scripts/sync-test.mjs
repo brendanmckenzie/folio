@@ -57,7 +57,11 @@ check('A sees B join', !!peerSeen)
 // --- a mutation from A must reach B, and echo back to A as an ack ---
 const root = boot.doc.root
 const TITLE = 'Renamed by A'
-a.send({ type: 'tx', txId: 'tx1', mutations: [{ t: 'set', uid: root, field: 'title', value: TITLE }] })
+a.send({
+  type: 'tx',
+  txId: 'tx1',
+  mutations: [{ t: 'set', uid: root, field: 'title', value: TITLE }],
+})
 
 const deltaB = await b.expect((m) => m.type === 'delta' && m.txId === 'tx1')
 check('B receives A mutation', deltaB.mutations[0].value === TITLE, `syncId=${deltaB.syncId}`)
@@ -78,7 +82,11 @@ check('draft persisted in DO', previewHtml.includes(TITLE))
 // --- catchup: B disconnects, misses a tx, reconnects with its watermark ---
 b.ws.close()
 await wait(200)
-a.send({ type: 'tx', txId: 'tx2', mutations: [{ t: 'set', uid: root, field: 'title', value: 'While B was away' }] })
+a.send({
+  type: 'tx',
+  txId: 'tx2',
+  mutations: [{ t: 'set', uid: root, field: 'title', value: 'While B was away' }],
+})
 const d2 = await a.expect((m) => m.type === 'delta' && m.txId === 'tx2')
 
 const c = client('C')
@@ -94,11 +102,17 @@ check(
 check('catchup watermark advanced', catchup.syncId === d2.syncId)
 
 // --- publish snapshots draft to D1 ---
-const pub = await fetch(`${HTTP}/folio/story/sty_home/publish`, { method: 'POST' }).then((r) => r.json())
+const pub = await fetch(`${HTTP}/folio/story/sty_home/publish`, { method: 'POST' }).then((r) =>
+  r.json(),
+)
 check('publish returns ok', pub.ok === true)
 const liveHtml = await fetch(`${HTTP}/`).then((r) => r.text())
 check('published page serves latest', liveHtml.includes('While B was away'))
-check('published page ships no JS', !liveHtml.includes('<script'), liveHtml.match(/<script/g)?.length ?? 0)
+check(
+  'published page ships no JS',
+  !liveHtml.includes('<script'),
+  liveHtml.match(/<script/g)?.length ?? 0,
+)
 
 a.ws.close()
 c.ws.close()

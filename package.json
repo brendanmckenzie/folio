@@ -5,6 +5,12 @@
   "scripts": {
     "dev": "pnpm --filter demo dev",
     "build": "pnpm --filter demo build",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter folio test",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.5"
   }
 }

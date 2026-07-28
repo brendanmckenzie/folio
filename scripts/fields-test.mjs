@@ -48,7 +48,9 @@ function client(name) {
     ws,
     async hello() {
       await new Promise((r) => ws.addEventListener('open', r, { once: true }))
-      ws.send(JSON.stringify({ type: 'hello', actor: name, name, colour: '#0090ff', lastSyncId: 0 }))
+      ws.send(
+        JSON.stringify({ type: 'hello', actor: name, name, colour: '#0090ff', lastSyncId: 0 }),
+      )
       return (await this.expect((m) => m.type === 'bootstrap')).doc
     },
     send: (m) => ws.send(JSON.stringify(m)),
@@ -78,7 +80,10 @@ const root = doc0.root
 // Durable Object state outlives a D1 reseed, so start from a known-empty page.
 const leftovers = Object.values(doc0.bloks).filter((b) => b.parent === root)
 if (leftovers.length) {
-  await ed.tx('f0', leftovers.map((b) => ({ t: 'remove', uid: b.uid })))
+  await ed.tx(
+    'f0',
+    leftovers.map((b) => ({ t: 'remove', uid: b.uid })),
+  )
 }
 
 /* --- a CTA with four buttons, one per link kind -------------------------- */
@@ -118,7 +123,11 @@ const html1 = await preview()
 const hrefOf = (uid, doc) =>
   doc.match(new RegExp(`<a[^>]*>${uid}</a>`))?.[0]?.match(/href="([^"]*)"/)?.[1] ?? null
 
-check('story link resolves to the current path', hrefOf('lstory', html1) === '/about', hrefOf('lstory', html1))
+check(
+  'story link resolves to the current path',
+  hrefOf('lstory', html1) === '/about',
+  hrefOf('lstory', html1),
+)
 check('external url passes through', hrefOf('lurl', html1) === 'https://example.com')
 check(
   'email becomes a mailto with an encoded subject',
@@ -151,7 +160,11 @@ await json(`${API}/stories/sty_about`, {
 })
 
 const html2 = await preview()
-check('rename updates every link to that page', hrefOf('lstory', html2) === '/partners', hrefOf('lstory', html2))
+check(
+  'rename updates every link to that page',
+  hrefOf('lstory', html2) === '/partners',
+  hrefOf('lstory', html2),
+)
 
 const docAfter = (await client('probe-b').hello()).bloks
 check(
@@ -178,18 +191,29 @@ check('rename back restores the href', hrefOf('lstory', await preview()) === '/a
 
 /* --- a deleted target is reported, not silently dropped ----------------- */
 
-await ed.tx('f2', [{ t: 'set', uid: 'lstory', field: 'href', value: { kind: 'story', id: 'sty_gone' } }])
+await ed.tx('f2', [
+  { t: 'set', uid: 'lstory', field: 'href', value: { kind: 'story', id: 'sty_gone' } },
+])
 const html3 = await preview()
-check('a link to a missing story is flagged broken', /<a[^>]*data-broken="true"[^>]*>lstory<\/a>/.test(html3))
+check(
+  'a link to a missing story is flagged broken',
+  /<a[^>]*data-broken="true"[^>]*>lstory<\/a>/.test(html3),
+)
 
-await ed.tx('f3', [{ t: 'set', uid: 'lstory', field: 'href', value: { kind: 'story', id: 'sty_about' } }])
+await ed.tx('f3', [
+  { t: 'set', uid: 'lstory', field: 'href', value: { kind: 'story', id: 'sty_about' } },
+])
 
 /* --- publish resolves too, and still ships no JS ------------------------ */
 
 const pub = await json(`${API}/story/${STORY}/publish`, { method: 'POST' })
 check('publish ok', pub.ok === true)
 const live = await fetch(`${HTTP}/`).then((r) => r.text())
-check('published page resolves story links', hrefOf('lstory', live) === '/about', hrefOf('lstory', live))
+check(
+  'published page resolves story links',
+  hrefOf('lstory', live) === '/about',
+  hrefOf('lstory', live),
+)
 check('published page still ships no JS', !live.includes('<script'))
 
 /* --- assets: upload, render, focal point, legacy values ----------------- */
@@ -222,12 +246,19 @@ check(
   one.asset?.width === 64 && one.asset?.height === 48,
   `${one.asset?.width}x${one.asset?.height}`,
 )
-check('the R2 key keeps the filename', String(one.asset?.key).endsWith('-probe-one.png'), one.asset?.key)
+check(
+  'the R2 key keeps the filename',
+  String(one.asset?.key).endsWith('-probe-one.png'),
+  one.asset?.key,
+)
 
 const two = await uploadOne('probe-two.png')
 
 const served = await fetch(`${HTTP}${'/folio/asset/'}${one.asset.key}`)
-check('asset serves from R2', served.status === 200 && served.headers.get('content-type') === 'image/png')
+check(
+  'asset serves from R2',
+  served.status === 200 && served.headers.get('content-type') === 'image/png',
+)
 check(
   'asset is cached immutably',
   (served.headers.get('cache-control') ?? '').includes('immutable'),
@@ -295,17 +326,36 @@ await ed.tx('f4', [
 const assetHtml = await preview()
 // The renderer injects data-folio-uid, so the opening tag carries extra
 // attributes after the class.
-const figure = assetHtml.match(/<figure class="image image--wide"[^>]*>[\s\S]*?<\/figure>/)?.[0] ?? ''
+const figure =
+  assetHtml.match(/<figure class="image image--wide"[^>]*>[\s\S]*?<\/figure>/)?.[0] ?? ''
 
-check('asset renders an img pointing at the asset route', figure.includes(`/folio/asset/${one.asset.key}`))
-check('alt text comes from the field, per usage', figure.includes('alt="A described image"'), figure.slice(0, 200))
-check('intrinsic width and height are emitted', /width="64"/.test(figure) && /height="48"/.test(figure))
-check('a focal point becomes object-position', /object-position:\s*25%\s+75%/.test(figure), figure.match(/style="[^"]*"/)?.[0])
+check(
+  'asset renders an img pointing at the asset route',
+  figure.includes(`/folio/asset/${one.asset.key}`),
+)
+check(
+  'alt text comes from the field, per usage',
+  figure.includes('alt="A described image"'),
+  figure.slice(0, 200),
+)
+check(
+  'intrinsic width and height are emitted',
+  /width="64"/.test(figure) && /height="48"/.test(figure),
+)
+check(
+  'a focal point becomes object-position',
+  /object-position:\s*25%\s+75%/.test(figure),
+  figure.match(/style="[^"]*"/)?.[0],
+)
 check('srcset offers multiple widths', (figure.match(/\d+w/g) ?? []).length >= 3)
 check('a cropping request carries the focal point', /fp=0\.25%2C0\.75|fp=0\.25,0\.75/.test(figure))
 
 const galleryHtml = assetHtml.match(/<section class="gallery"[^>]*>[\s\S]*?<\/section>/)?.[0] ?? ''
-check('multiasset renders every image', (galleryHtml.match(/<img/g) ?? []).length === 2, String((galleryHtml.match(/<img/g) ?? []).length))
+check(
+  'multiasset renders every image',
+  (galleryHtml.match(/<img/g) ?? []).length === 2,
+  String((galleryHtml.match(/<img/g) ?? []).length),
+)
 
 check(
   'a legacy asset stored as a plain URL still renders',
@@ -313,10 +363,7 @@ check(
 )
 
 // Reordering a multiasset is one field write, not a per-item shuffle.
-const reorder = diffOf(
-  { images: [one.value, two.value] },
-  { images: [two.value, one.value] },
-)
+const reorder = diffOf({ images: [one.value, two.value] }, { images: [two.value, one.value] })
 check('reordering a multiasset is a single set', reorder.length === 1 && reorder[0].t === 'set')
 
 const libraryBefore = await json(`${API}/assets`)
@@ -324,7 +371,8 @@ await fetch(`${API}/assets/${two.asset.id}`, { method: 'DELETE' })
 const libraryAfter = await json(`${API}/assets`)
 check(
   'deleting removes the library row',
-  libraryBefore.length - libraryAfter.length === 1 && !libraryAfter.some((a) => a.id === two.asset.id),
+  libraryBefore.length - libraryAfter.length === 1 &&
+    !libraryAfter.some((a) => a.id === two.asset.id),
 )
 check(
   'deleting an asset leaves referencing documents alone',
@@ -403,13 +451,25 @@ await ed.tx('f5', [
 
 const rtHtml = await preview()
 const bodyOf = (uid) =>
-  rtHtml.match(new RegExp(`<section class="prose[^"]*" data-folio-uid="${uid}"[^>]*>[\\s\\S]*?</section>`))?.[0] ?? ''
+  rtHtml.match(
+    new RegExp(`<section class="prose[^"]*" data-folio-uid="${uid}"[^>]*>[\\s\\S]*?</section>`),
+  )?.[0] ?? ''
 const proseHtml = bodyOf('rt1')
 
 check('richtext renders headings', /<h2>A heading<\/h2>/.test(proseHtml))
-check('richtext renders marks', /<strong>bold<\/strong>/.test(proseHtml) && /<em>italic<\/em>/.test(proseHtml))
-check('richtext renders lists', /<ul><li><p>one<\/p><\/li><li><p>two<\/p><\/li><\/ul>/.test(proseHtml), proseHtml.match(/<ul>[\s\S]*?<\/ul>/)?.[0])
-check('richtext renders blockquotes and rules', /<blockquote>/.test(proseHtml) && /<hr\/?>/.test(proseHtml))
+check(
+  'richtext renders marks',
+  /<strong>bold<\/strong>/.test(proseHtml) && /<em>italic<\/em>/.test(proseHtml),
+)
+check(
+  'richtext renders lists',
+  /<ul><li><p>one<\/p><\/li><li><p>two<\/p><\/li><\/ul>/.test(proseHtml),
+  proseHtml.match(/<ul>[\s\S]*?<\/ul>/)?.[0],
+)
+check(
+  'richtext renders blockquotes and rules',
+  /<blockquote>/.test(proseHtml) && /<hr\/?>/.test(proseHtml),
+)
 check(
   'a link inside richtext resolves to the story path',
   /<a href="\/about"[^>]*>An internal link<\/a>/.test(proseHtml),
@@ -422,24 +482,31 @@ check(
 )
 
 const pqHtml = rtHtml.match(/<figure class="pullquote"[^>]*>[\s\S]*?<\/figure>/)?.[0] ?? ''
-check('a constrained field drops a disallowed node', !/Smuggled heading<\/h1>/.test(pqHtml) && !/<h1>/.test(pqHtml))
+check(
+  'a constrained field drops a disallowed node',
+  !/Smuggled heading<\/h1>/.test(pqHtml) && !/<h1>/.test(pqHtml),
+)
 check(
   'unwrapping a node rehouses its text in a paragraph',
   pqHtml.includes('<p>Smuggled heading</p>'),
   pqHtml,
 )
-check('a constrained field drops a disallowed mark', !/<s>struck<\/s>/.test(pqHtml) && pqHtml.includes('struck'))
+check(
+  'a constrained field drops a disallowed mark',
+  !/<s>struck<\/s>/.test(pqHtml) && pqHtml.includes('struck'),
+)
 check(
   'text runs left adjacent by a dropped mark are merged',
   pqHtml.includes('<p>kept struck text</p>'),
   pqHtml.match(/<p>kept[\s\S]{0,60}/)?.[0],
 )
 
-check('legacy plain-text richtext still renders', bodyOf('rt2').includes('<p>First para.</p>'), bodyOf('rt2'))
 check(
-  'legacy plain text splits on blank lines',
-  bodyOf('rt2').includes('<p>Second para.</p>'),
+  'legacy plain-text richtext still renders',
+  bodyOf('rt2').includes('<p>First para.</p>'),
+  bodyOf('rt2'),
 )
+check('legacy plain text splits on blank lines', bodyOf('rt2').includes('<p>Second para.</p>'))
 
 // The sanitiser is the second line of defence; the editor schema is the first.
 check(
@@ -456,7 +523,11 @@ check(
     { nodes: ['bulletList', 'paragraph'] },
   ).content[0].content[0].type === 'listItem',
 )
-check('richtextToText flattens for excerpts', richtextToText(BODY).startsWith('A heading Plain, bold and italic'), richtextToText(BODY).slice(0, 60))
+check(
+  'richtextToText flattens for excerpts',
+  richtextToText(BODY).startsWith('A heading Plain, bold and italic'),
+  richtextToText(BODY).slice(0, 60),
+)
 check('asRichtext rejects a non-doc object', asRichtext({ type: 'paragraph' }) === null)
 check('asRichtext treats an empty doc as null', asRichtext({ type: 'doc', content: [] }) === null)
 
@@ -521,7 +592,15 @@ const aboutDoc = await new Promise((resolve) => {
     if (msg.type === 'bootstrap') resolve({ ws, doc: msg.doc })
   })
   ws.addEventListener('open', () =>
-    ws.send(JSON.stringify({ type: 'hello', actor: 'about', name: 'about', colour: '#000', lastSyncId: 0 })),
+    ws.send(
+      JSON.stringify({
+        type: 'hello',
+        actor: 'about',
+        name: 'about',
+        colour: '#000',
+        lastSyncId: 0,
+      }),
+    ),
   )
 })
 about.ws.close()
@@ -590,8 +669,14 @@ await ed.tx('f8', [
 
 const refHtml = await preview()
 const embedOf = (uid) =>
-  refHtml.match(new RegExp(`<section class="embed" data-folio-uid="${uid}"[^>]*>[\\s\\S]*?</section></section>`))?.[0] ??
-  refHtml.match(new RegExp(`<section class="embed" data-folio-uid="${uid}"[^>]*>[\\s\\S]*?</section>`))?.[0] ??
+  refHtml.match(
+    new RegExp(
+      `<section class="embed" data-folio-uid="${uid}"[^>]*>[\\s\\S]*?</section></section>`,
+    ),
+  )?.[0] ??
+  refHtml.match(
+    new RegExp(`<section class="embed" data-folio-uid="${uid}"[^>]*>[\\s\\S]*?</section>`),
+  )?.[0] ??
   ''
 
 check(
@@ -624,7 +709,10 @@ check(
 await ed.tx('f9', [{ t: 'set', uid: 'emb1', field: 'source', value: STORY }])
 const selfRes = await fetch(`${HTTP}/?_folio=preview`)
 const selfHtml = await selfRes.text()
-check('a story referencing itself still renders', selfRes.status === 200 && selfHtml.includes('<section'))
+check(
+  'a story referencing itself still renders',
+  selfRes.status === 200 && selfHtml.includes('<section'),
+)
 check(
   'a self-reference is bounded to one level',
   // The embed appears twice: once as itself, once inside the inlined copy. A

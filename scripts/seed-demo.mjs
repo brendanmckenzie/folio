@@ -94,7 +94,15 @@ async function seed(storyId, build) {
       }
     })
     ws.addEventListener('open', () =>
-      ws.send(JSON.stringify({ type: 'hello', actor: 'seed', name: 'Seed', colour: '#0090ff', lastSyncId: 0 })),
+      ws.send(
+        JSON.stringify({
+          type: 'hello',
+          actor: 'seed',
+          name: 'Seed',
+          colour: '#0090ff',
+          lastSyncId: 0,
+        }),
+      ),
     )
   })
 
@@ -129,14 +137,22 @@ const blok = (uid, type, parent, slot, order, data) => ({
 
 const doc_ = (...content) => ({ type: 'doc', content })
 const para = (...content) => ({ type: 'paragraph', content })
-const h = (level, text) => ({ type: 'heading', attrs: { level }, content: [{ type: 'text', text }] })
+const h = (level, text) => ({
+  type: 'heading',
+  attrs: { level },
+  content: [{ type: 'text', text }],
+})
 const txt = (text, ...marks) => ({ type: 'text', text, ...(marks.length ? { marks } : {}) })
 const li = (...content) => ({ type: 'listItem', content })
 const storyLink = (id) => ({ type: 'link', attrs: { link: { kind: 'story', id } } })
 
 /* ------------------------------------------------------------------ main --- */
 
-if (!(await fetch(`${HTTP}/health`).then((r) => r.ok).catch(() => false))) {
+if (
+  !(await fetch(`${HTTP}/health`)
+    .then((r) => r.ok)
+    .catch(() => false))
+) {
   console.error(`No server on ${HTTP}. Run \`pnpm dev\` in examples/demo first.`)
   process.exit(1)
 }
@@ -168,7 +184,9 @@ await seed(details.id, (root) => [
       para(
         txt('This paragraph lives on '),
         txt('a different story', { type: 'bold' }),
-        txt(' and is pulled in at render time. Editing it here changes it wherever it is embedded.'),
+        txt(
+          ' and is pulled in at render time. Editing it here changes it wherever it is embedded.',
+        ),
       ),
     ),
   }),
@@ -230,14 +248,30 @@ await seed(showcase.id, (root) => [
         txt('This links to '),
         txt('the referenced page', storyLink(details.id)),
         txt(' by id, so renaming that page rewrites this href without touching the document. '),
-        txt('An external one', { type: 'link', attrs: { link: { kind: 'url', url: 'https://example.com', target: '_blank' } } }),
+        txt('An external one', {
+          type: 'link',
+          attrs: { link: { kind: 'url', url: 'https://example.com', target: '_blank' } },
+        }),
         txt(' opens in a new tab with rel="noopener noreferrer" added for you.'),
       ),
       h(2, 'Blocks'),
-      { type: 'bulletList', content: [li(para(txt('Bulleted lists'))), li(para(txt('…with several items')))] },
-      { type: 'orderedList', content: [li(para(txt('Numbered lists'))), li(para(txt('…also work')))] },
-      { type: 'blockquote', content: [para(txt('A blockquote, rendered as a real blockquote element.'))] },
-      { type: 'codeBlock', attrs: { language: 'ts' }, content: [txt('render: ({ body }) => <div>{body}</div>')] },
+      {
+        type: 'bulletList',
+        content: [li(para(txt('Bulleted lists'))), li(para(txt('…with several items')))],
+      },
+      {
+        type: 'orderedList',
+        content: [li(para(txt('Numbered lists'))), li(para(txt('…also work')))],
+      },
+      {
+        type: 'blockquote',
+        content: [para(txt('A blockquote, rendered as a real blockquote element.'))],
+      },
+      {
+        type: 'codeBlock',
+        attrs: { language: 'ts' },
+        content: [txt('render: ({ body }) => <div>{body}</div>')],
+      },
       { type: 'horizontalRule' },
       para(txt('Everything above came out of one field value.')),
     ),
@@ -249,7 +283,9 @@ await seed(showcase.id, (root) => [
       para(
         txt('This field permits '),
         txt('bold', { type: 'bold' }),
-        txt(', italic and links only. Its toolbar shrinks to match, and pasted formatting is stripped on the way in.'),
+        txt(
+          ', italic and links only. Its toolbar shrinks to match, and pasted formatting is stripped on the way in.',
+        ),
       ),
     ),
     attribution: 'A caption-style field',
@@ -257,8 +293,13 @@ await seed(showcase.id, (root) => [
 
   /* asset: intrinsic size, alt text, focal point ------------------------ */
   blok('img', 'image', root, 'body', 'a3', {
-    file: { ...tall, alt: 'A tall gradient, cropped wide around its focal point', focal: { x: 0.5, y: 0.22 } },
-    caption: 'Cropped 16:9 from a portrait source, held to its focal point. Resized behind /folio/asset.',
+    file: {
+      ...tall,
+      alt: 'A tall gradient, cropped wide around its focal point',
+      focal: { x: 0.5, y: 0.22 },
+    },
+    caption:
+      'Cropped 16:9 from a portrait source, held to its focal point. Resized behind /folio/asset.',
     ratio: 'wide',
   }),
 

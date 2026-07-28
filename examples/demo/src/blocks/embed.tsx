@@ -33,8 +33,7 @@ export const embed = defineBlock({
         {mode === 'summary' ? (
           <p className="embed__summary">
             {/* Reading the referenced document's own fields directly. */}
-            {String(source.data.description ?? '')}{' '}
-            <a href={source.url}>{source.title}</a>
+            {String(source.data.description ?? '')} <a href={source.url}>{source.title}</a>
           </p>
         ) : (
           // Inlining it wholesale. Rendered without edit markers, because this

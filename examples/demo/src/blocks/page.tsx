@@ -23,7 +23,17 @@ export const page = defineBlock({
     noindex: boolean({ label: 'Hide from search engines' }),
     body: blocks({
       label: 'Body',
-      allow: ['hero', 'prose', 'pullquote', 'image', 'gallery', 'features', 'cta', 'embed', 'section'],
+      allow: [
+        'hero',
+        'prose',
+        'pullquote',
+        'image',
+        'gallery',
+        'features',
+        'cta',
+        'embed',
+        'section',
+      ],
     }),
   },
   render: ({ body }) => <main className="page">{body}</main>,

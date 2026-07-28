@@ -100,7 +100,16 @@ export async function uploadAsset(
       `insert into assets (id, key, filename, content_type, size, width, height, alt, created_at)
        values (?, ?, ?, ?, ?, ?, ?, '', ?)`,
     )
-    .bind(row.id, row.key, row.filename, row.contentType, row.size, row.width, row.height, row.createdAt)
+    .bind(
+      row.id,
+      row.key,
+      row.filename,
+      row.contentType,
+      row.size,
+      row.width,
+      row.height,
+      row.createdAt,
+    )
     .run()
 
   return row
@@ -128,7 +137,9 @@ export async function deleteAsset(db: D1Database, bucket: R2Bucket, id: string):
 
 /* -------------------------------------------------------------- serving --- */
 
-export function parseTransform(params: URLSearchParams): AssetTransform & { focal?: { x: number; y: number } } {
+export function parseTransform(
+  params: URLSearchParams,
+): AssetTransform & { focal?: { x: number; y: number } } {
   const num = (key: string) => {
     const raw = Number(params.get(key))
     return Number.isFinite(raw) && raw > 0 ? raw : undefined
@@ -240,8 +251,7 @@ export function imageSize(bytes: Uint8Array): { width: number; height: number } 
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const u16 = (o: number, le = false) => view.getUint16(o, le)
   const u32 = (o: number, le = false) => view.getUint32(o, le)
-  const ascii = (o: number, n: number) =>
-    String.fromCharCode(...bytes.subarray(o, o + n))
+  const ascii = (o: number, n: number) => String.fromCharCode(...bytes.subarray(o, o + n))
 
   if (bytes.length >= 24 && u32(0) === 0x89504e47 && ascii(12, 4) === 'IHDR') {
     return { width: u32(16), height: u32(20) }

@@ -100,15 +100,15 @@ export function LinkInput({ id, value, allow, stories, apiBase, onChange }: Prop
               </option>
             ))}
           </select>
-          {missing ? (
-            <p className="link__warn">That page has been deleted. Pick another.</p>
-          ) : null}
+          {missing ? <p className="link__warn">That page has been deleted. Pick another.</p> : null}
           <input
             type="text"
             placeholder="Anchor on that page (optional)"
             value={link?.kind === 'story' ? (link.anchor ?? '') : ''}
             onChange={(e) =>
-              link?.kind === 'story' ? patch({ ...link, anchor: e.target.value || undefined }) : undefined
+              link?.kind === 'story'
+                ? patch({ ...link, anchor: e.target.value || undefined })
+                : undefined
             }
           />
         </>
@@ -121,7 +121,11 @@ export function LinkInput({ id, value, allow, stories, apiBase, onChange }: Prop
           onChange={(e) =>
             patch(
               e.target.value
-                ? { kind: 'url', url: e.target.value, ...(link?.kind === 'url' && link.target ? { target: link.target } : {}) }
+                ? {
+                    kind: 'url',
+                    url: e.target.value,
+                    ...(link?.kind === 'url' && link.target ? { target: link.target } : {}),
+                  }
                 : null,
             )
           }
@@ -135,7 +139,11 @@ export function LinkInput({ id, value, allow, stories, apiBase, onChange }: Prop
             const asset = asAsset(next)
             patch(
               asset
-                ? { kind: 'asset', asset, ...(link?.kind === 'asset' && link.target ? { target: link.target } : {}) }
+                ? {
+                    kind: 'asset',
+                    asset,
+                    ...(link?.kind === 'asset' && link.target ? { target: link.target } : {}),
+                  }
                 : null,
             )
           }}
@@ -176,7 +184,9 @@ export function LinkInput({ id, value, allow, stories, apiBase, onChange }: Prop
           type="text"
           placeholder="section-id"
           value={link?.kind === 'anchor' ? link.anchor : ''}
-          onChange={(e) => patch(e.target.value ? { kind: 'anchor', anchor: e.target.value } : null)}
+          onChange={(e) =>
+            patch(e.target.value ? { kind: 'anchor', anchor: e.target.value } : null)
+          }
         />
       )}
 

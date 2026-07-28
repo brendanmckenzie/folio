@@ -3,7 +3,7 @@ import path from 'node:path'
 import type { Plugin } from 'vite'
 
 const VIRTUAL_PREVIEW = 'virtual:folio/preview'
-const RESOLVED_PREVIEW = '\0' + VIRTUAL_PREVIEW
+const RESOLVED_PREVIEW = `\0${VIRTUAL_PREVIEW}`
 
 export interface FolioPluginOptions {
   /**

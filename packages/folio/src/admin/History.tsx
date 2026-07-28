@@ -71,7 +71,9 @@ export function History({
             <li key={v.id} className={`version ${v.id === viewingId ? 'is-viewing' : ''}`}>
               <span className={`version__kind version__kind--${v.kind}`} title={v.kind} />
               <span className="version__body">
-                <span className="version__label">{v.label || (v.kind === 'publish' ? 'Published' : 'Checkpoint')}</span>
+                <span className="version__label">
+                  {v.label || (v.kind === 'publish' ? 'Published' : 'Checkpoint')}
+                </span>
                 <span className="version__meta">
                   {formatWhen(v.createdAt)}
                   {v.actor ? ` · ${v.actor}` : ''}
@@ -82,7 +84,12 @@ export function History({
                   Close
                 </button>
               ) : (
-                <button type="button" disabled={busy} onClick={() => void onView(v)} title="Preview without changing anything">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void onView(v)}
+                  title="Preview without changing anything"
+                >
                   View
                 </button>
               )}

@@ -116,7 +116,10 @@ export function asAsset(value: unknown): AssetValue | null {
   return {
     ...(key ? { key } : {}),
     ...(url ? { url } : {}),
-    filename: typeof v.filename === 'string' && v.filename ? v.filename : (key ?? url ?? '').split('/').pop()!,
+    filename:
+      typeof v.filename === 'string' && v.filename
+        ? v.filename
+        : (key ?? url ?? '').split('/').pop()!,
     contentType: typeof v.contentType === 'string' ? v.contentType : '',
     size: typeof v.size === 'number' ? v.size : 0,
     ...(typeof v.width === 'number' ? { width: v.width } : {}),

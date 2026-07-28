@@ -64,7 +64,13 @@ export function diff(from: Doc, to: Doc): Mutation[] {
       prev.parent !== blok.parent || prev.slot !== blok.slot || prev.order !== blok.order
     // The root has no parent and never moves.
     if (moved && blok.parent !== null && blok.slot !== null) {
-      out.push({ t: 'move', uid: blok.uid, parent: blok.parent, slot: blok.slot, order: blok.order })
+      out.push({
+        t: 'move',
+        uid: blok.uid,
+        parent: blok.parent,
+        slot: blok.slot,
+        order: blok.order,
+      })
     }
 
     for (const field of new Set([...Object.keys(prev.data), ...Object.keys(blok.data)])) {

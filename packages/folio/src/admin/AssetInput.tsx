@@ -20,17 +20,25 @@ const thumb = (apiBase: string, asset: AssetValue, width = 320) => {
 }
 
 const humanSize = (bytes: number) =>
-  bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} kB`
+  bytes >= 1024 * 1024
+    ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} kB`
 
 /** Shared upload, so the library and the "upload straight into this field" path agree. */
-async function upload(apiBase: string, file: File): Promise<{ asset: AssetRow; value: AssetValue }> {
+async function upload(
+  apiBase: string,
+  file: File,
+): Promise<{ asset: AssetRow; value: AssetValue }> {
   const res = await fetch(`${apiBase}/assets?filename=${encodeURIComponent(file.name)}`, {
     method: 'POST',
     headers: { 'content-type': file.type || 'application/octet-stream' },
     body: file,
   })
   if (!res.ok) {
-    throw new Error(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `Upload failed (${res.status})`)
+    throw new Error(
+      ((await res.json().catch(() => ({}))) as { error?: string }).error ??
+        `Upload failed (${res.status})`,
+    )
   }
   return (await res.json()) as { asset: AssetRow; value: AssetValue }
 }
@@ -174,6 +182,7 @@ export function MultiAssetInput({
 
       {assets.map((asset, i) => (
         <AssetCard
+          // biome-ignore lint/suspicious/noArrayIndexKey: the same asset can appear twice so the index disambiguates; stable local ids are tracked follow-up work
           key={`${asset.key ?? asset.url}:${i}`}
           asset={asset}
           apiBase={apiBase}
@@ -247,7 +256,12 @@ function AssetCard({
   return (
     <div className="asset__card">
       {image ? (
-        <button type="button" className="asset__thumb" onClick={setFocal} title="Click to set the focal point">
+        <button
+          type="button"
+          className="asset__thumb"
+          onClick={setFocal}
+          title="Click to set the focal point"
+        >
           <img src={thumb(apiBase, asset)} alt="" />
           {focal ? (
             <span
@@ -257,7 +271,9 @@ function AssetCard({
           ) : null}
         </button>
       ) : (
-        <div className="asset__file">{asset.filename.split('.').pop()?.toUpperCase() ?? 'FILE'}</div>
+        <div className="asset__file">
+          {asset.filename.split('.').pop()?.toUpperCase() ?? 'FILE'}
+        </div>
       )}
 
       <div className="asset__meta">
@@ -430,7 +446,11 @@ function MediaLibrary({
                     )}
                     <span className="library__name">{row.filename}</span>
                   </button>
-                  <button type="button" className="library__del" onClick={() => void remove(row.id)}>
+                  <button
+                    type="button"
+                    className="library__del"
+                    onClick={() => void remove(row.id)}
+                  >
                     Delete
                   </button>
                 </li>

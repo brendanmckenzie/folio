@@ -67,7 +67,9 @@ export function Inspector({
 
       {address}
 
-      {readOnly ? <p className="inspector__note">Read-only. Close the version preview to edit.</p> : null}
+      {readOnly ? (
+        <p className="inspector__note">Read-only. Close the version preview to edit.</p>
+      ) : null}
 
       <fieldset className="inspector__fields" disabled={readOnly}>
         {entries.map(([name, field]) => (
@@ -176,7 +178,13 @@ function FieldInput({
           onChange={onChange}
         />
       ) : field.kind === 'asset' ? (
-        <AssetInput id={id} value={value} apiBase={apiBase} accept={field.accept} onChange={onChange} />
+        <AssetInput
+          id={id}
+          value={value}
+          apiBase={apiBase}
+          accept={field.accept}
+          onChange={onChange}
+        />
       ) : field.kind === 'multiasset' ? (
         <MultiAssetInput
           id={id}

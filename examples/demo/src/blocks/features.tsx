@@ -13,7 +13,10 @@ export const features = defineBlock({
   render: ({ heading, columns, items }) => (
     <section className="features">
       {heading ? <h2 className="features__heading">{heading}</h2> : null}
-      <div className="features__grid" style={{ '--cols': Math.min(Math.max(columns || 3, 1), 4) } as CSSProperties}>
+      <div
+        className="features__grid"
+        style={{ '--cols': Math.min(Math.max(columns || 3, 1), 4) } as CSSProperties}
+      >
         {items}
       </div>
     </section>
