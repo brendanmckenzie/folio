@@ -89,7 +89,7 @@ Do not report something as working until you have seen it work.
 ```bash
 pnpm install
 cd examples/demo
-pnpm exec wrangler d1 execute folio --local --file=../../packages/folio/schema.sql
+pnpm db:local && pnpm db:seed   # (was a raw schema.sql execute when this prompt was written)
 pnpm dev                      # serves on 5199
 ```
 

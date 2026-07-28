@@ -1,0 +1,35 @@
+-- Deferred defensive constraint (docs/sync-design.md: "Story-tree writes in D1
+-- are last-write-wins under concurrency"). `createStory` (src/server/stories.ts)
+-- dedupes a slug against an in-memory snapshot of `listStories`, taken before
+-- it writes; two concurrent creates under the same parent can both pass that
+-- check against the same snapshot and then both insert. `path` is already
+-- unique and catches most of that race (path is derived from parent path +
+-- slug), but this index enforces the sibling-slug invariant directly, which is
+-- what a caller actually violated, and is what makes a bad rename/move race
+-- fail the same way a bad create does. errors.ts already maps any UNIQUE
+-- violation to a `conflict` envelope, so no server change accompanies this.
+--
+-- Indexed on `coalesce(parent_id, '')` rather than `parent_id` directly: SQLite
+-- treats NULL as distinct from every other NULL in a UNIQUE index, so two
+-- top-level stories (both storing `parent_id = null`) would never collide
+-- under a plain `unique(parent_id, slug)` even when they share a slug — and
+-- top-level siblings are exactly the case `uniqueSlug` groups together when
+-- `parentId` is null. `coalesce` folds every null onto the same key so root
+-- level siblings are compared like any other sibling group. The root story
+-- itself (parent_id null, slug '') falls under this index too, but `path` is
+-- already unique and only one row can ever have path = '', so this adds no
+-- extra restriction there.
+--
+-- The one precondition: this fails on an existing database that already holds
+-- two sibling rows sharing a slug. A unique index cannot be made idempotent
+-- over data the way 0001's `create table` can be made idempotent over
+-- structure, and inventing a dedupe here would rename or delete a live page
+-- behind the operator's back. Such a pair can only exist in a database written
+-- before this index did, by exactly the race described above; find them with
+--
+--   select coalesce(parent_id, ''), slug, count(*) from stories
+--   group by 1, 2 having count(*) > 1;
+--
+-- and rename one of each pair (which also rewrites its `path`) before applying.
+create unique index if not exists stories_parent_slug
+  on stories (coalesce(parent_id, ''), slug);

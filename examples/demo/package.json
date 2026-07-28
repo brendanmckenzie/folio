@@ -8,8 +8,9 @@
     "build": "vite build",
     "deploy": "vite build && wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "db:local": "wrangler d1 execute folio --local --file=../../packages/folio/schema.sql",
-    "db:remote": "wrangler d1 execute folio --remote --file=../../packages/folio/schema.sql",
+    "db:local": "wrangler d1 migrations apply folio --local",
+    "db:remote": "wrangler d1 migrations apply folio --remote",
+    "db:seed": "wrangler d1 execute folio --local --file=./seed.sql",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {

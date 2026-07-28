@@ -331,6 +331,7 @@ packages/folio/
   src/preview/   renderer + the client that hydrates a previewed page
   src/admin/     the editor SPA (prebuilt, schema-driven)
   src/vite/      the plugin
+  migrations/    the D1 schema, as ordered migrations
 examples/demo/   a consuming project
 ```
 
@@ -339,13 +340,34 @@ examples/demo/   a consuming project
 ```bash
 pnpm install
 cd examples/demo
-pnpm exec wrangler d1 execute folio --local --file=../../packages/folio/schema.sql
+pnpm db:local    # wrangler d1 migrations apply folio --local
+pnpm db:seed     # a root story and one nested page, so the editor has somewhere to open
 pnpm dev
 ```
 
-- `/` index of stories
-- `/folio/edit/home` the editor
-- `/home` the published page (after you hit Publish)
+Two steps, because the schema and the content are not the same thing.
+`packages/folio/migrations/` is the schema, and a consuming project points
+`migrations_dir` at it (see the demo's `wrangler.jsonc`) so it shares one
+migration history with the package. `wrangler d1 migrations apply` records what
+it ran, so it is re-runnable and never drops a table. Deploying is the same
+command with `--remote`: `pnpm db:remote`.
+
+`seed.sql` is local-dev convenience only, with fixed ids and no `on conflict`, so
+run it once and never against a real deployment. `node scripts/seed-demo.mjs`
+adds the field-type showcase through the running dev server's API afterwards, and
+is safe to rerun because it creates its own stories.
+
+If you have a database from before migrations existed — created by the old
+`packages/folio/schema.sql` — it has no `d1_migrations` table, so the first apply
+runs the whole history against it. `0001_initial.sql` is written to adopt exactly
+that database untouched; `0002_slug_unique.sql` adds a unique index over sibling
+slugs and will refuse a database that already contains a duplicate pair (its own
+comment has the query that finds them). Locally, deleting `.wrangler/state` and
+starting from `pnpm db:local` is the shorter route.
+
+- `/folio/edit` the editor (redirects to the root story)
+- `/` the root story's published page — 404 until you hit Publish
+- `/about/team` a nested page, same rule: published only after you publish it
 
 Open the editor in two windows to see multiplayer.
 
@@ -353,8 +375,9 @@ R2 and Images need no setup locally: `wrangler dev` simulates the bucket, and
 without an Images binding assets simply serve at their original size.
 
 Before deploying, run `wrangler d1 create folio` and put the real id in
-`wrangler.jsonc`, and `wrangler r2 bucket create folio-media` for uploads. Note
-that `new_sqlite_classes` cannot be changed for an already-deployed Durable Object
+`wrangler.jsonc`, then `pnpm db:remote` to apply the migrations against it, and
+`wrangler r2 bucket create folio-media` for uploads. Note that
+`new_sqlite_classes` cannot be changed for an already-deployed Durable Object
 class.
 
 ## History

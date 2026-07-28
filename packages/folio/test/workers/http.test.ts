@@ -1,5 +1,5 @@
 import { env, runInDurableObject, SELF } from 'cloudflare:test'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { diff } from '../../src/core/diff'
 import type { Doc } from '../../src/core/doc'
 import type { Mutation } from '../../src/core/mutations'
@@ -12,6 +12,7 @@ import {
 import type { StoryMeta, StoryNode } from '../../src/core/story'
 import type { AssetRow } from '../../src/server/assets'
 import type { VersionMeta } from '../../src/server/versions'
+import { applySeedFixture } from './seed-fixture'
 
 /**
  * Integration tests over the real HTTP surface, dispatched through
@@ -174,6 +175,21 @@ async function connect(storyId: string): Promise<Socket> {
     },
   }
 }
+
+/**
+ * Migrations (packages/folio/migrations/**) are structure only — no seed
+ * rows, unlike the old drop-and-reseed schema.sql — so this suite seeds its
+ * own fixture once, up front, by running the actual examples/demo/seed.sql
+ * (see seed-fixture.ts) rather than a hand-typed insert that could drift from
+ * it. Every test below assumes this exact tree: the root story ('sty_home',
+ * path '') and a top-level sibling at 'about', so a story created under the
+ * root that also derives the slug 'about' collides with a *different* branch
+ * than `uniqueSlug` checks (see the path-collision test), the same scenario
+ * schema.sql used to set up.
+ */
+beforeAll(async () => {
+  await applySeedFixture(env.DB)
+})
 
 describe('stories: CRUD over /folio/stories', () => {
   it('creates a story with a slug derived from the title and resolved urls', async () => {
@@ -589,6 +605,23 @@ describe('validation and the error envelope', () => {
     expect(body.error.message).toBe('Unknown story')
   })
 
+  it('404s an unknown story before it judges the body, not after', async () => {
+    // Precedence, pinned: a checkpoint on a story that does not exist is a 404
+    // whether or not the body is also wrong, because the id is the first thing
+    // wrong with the request. Validating first would answer this exact request
+    // with a 400 about `label` instead — a different answer to an unchanged
+    // request, and the reason `loadStory` runs ahead of the body parse in
+    // routes/history.ts rather than letting the workflow do the lookup.
+    const { status, body } = await failureOf(
+      '/folio/story/sty_abcdefgh/versions',
+      jsonPost(JSON.stringify({ label: 12345 })),
+    )
+
+    expect(status).toBe(404)
+    expect(body.error.code).toBe('not_found')
+    expect(body.error.message).toBe('Unknown story')
+  })
+
   it('404s an unknown version the same way', async () => {
     const { status, body } = await failureOf('/folio/versions/ver_nothing')
 
@@ -599,8 +632,9 @@ describe('validation and the error envelope', () => {
   it('reports a path collision as a conflict, without D1s constraint text', async () => {
     // `uniqueSlug` only dedupes against siblings, so a child of the root story
     // (whose path is '') can still derive a path a top-level story already
-    // owns — 'about', seeded in schema.sql. D1's `path` unique index is what
-    // refuses it, and its message names the table and the column.
+    // owns — 'about', seeded in this file's fixture, above. D1's `path`
+    // unique index is what refuses it, and its message names the table and
+    // the column.
     const { status, text, body } = await failureOf(
       '/folio/stories',
       jsonPost(JSON.stringify({ title: 'About', parentId: 'sty_home' })),

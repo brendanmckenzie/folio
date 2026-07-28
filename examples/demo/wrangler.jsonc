@@ -15,7 +15,17 @@
       "binding": "DB",
       "database_name": "folio",
       // Replace with the id from `wrangler d1 create folio` before deploying.
-      "database_id": "00000000-0000-0000-0000-000000000000"
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      // Structure only, no seed rows: `wrangler d1 migrations apply` runs these
+      // in order and records what it applied, so it never re-runs a migration
+      // and never drops a table, which the old schema.sql did every time. Seed
+      // rows live in ./seed.sql and are applied separately, by `pnpm db:seed`.
+      // Points at the folio package's copy so this project and any other
+      // consumer share one migration history. A database created by the old
+      // schema.sql has no bookkeeping table, so the first apply against it runs
+      // every migration: 0001 is written to adopt it, and 0002 has one data
+      // precondition — see the notes in those two files.
+      "migrations_dir": "../../packages/folio/migrations"
     }
   ],
   "durable_objects": {
