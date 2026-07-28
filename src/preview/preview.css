@@ -1,0 +1,53 @@
+/* Editing chrome injected into the previewed page. Never loaded on a published page. */
+
+.folio-editing [data-folio-uid] {
+  position: relative;
+  cursor: default;
+}
+
+.folio-editing [data-folio-hover]::after,
+.folio-editing [data-folio-selected]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2147483000;
+}
+
+.folio-editing [data-folio-hover]::after {
+  outline: 1px dashed rgba(0, 144, 255, 0.85);
+  outline-offset: -1px;
+}
+
+.folio-editing [data-folio-selected]::after {
+  outline: 2px solid #0090ff;
+  outline-offset: -2px;
+  box-shadow: 0 0 0 4px rgba(0, 144, 255, 0.14);
+}
+
+.folio-empty-slot {
+  display: block;
+  width: 100%;
+  padding: 1.25rem;
+  margin: 0.5rem 0;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: #0090ff;
+  background: rgba(0, 144, 255, 0.05);
+  border: 1px dashed rgba(0, 144, 255, 0.5);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.folio-empty-slot:hover {
+  background: rgba(0, 144, 255, 0.11);
+}
+
+.folio-unknown {
+  padding: 1rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8125rem;
+  color: #9a2020;
+  background: #fdecec;
+  border: 1px solid #f2c0c0;
+}
