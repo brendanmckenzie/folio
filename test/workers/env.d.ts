@@ -7,7 +7,7 @@ import type { StoryDO } from '../../src/server'
  *
  * `wrangler types` would generate this, but it needs a real project; hand-writing
  * the augmentation keeps the test tree self-contained. Shapes must match
- * FolioBindings in src/server/index.tsx.
+ * FolioBindings in src/server/types.ts.
  */
 declare global {
   namespace Cloudflare {
