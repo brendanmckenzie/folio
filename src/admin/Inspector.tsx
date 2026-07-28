@@ -1,37 +1,29 @@
 import type { ReactNode } from 'react'
 import type { Blok, Json } from '../core/doc'
 import type { Field } from '../core/fields'
-import type { SchemaIndex } from '../core/schema'
-import type { StoryMeta } from '../core/story'
 import { AssetInput, MultiAssetInput } from './AssetInput'
+import { useFolio } from './FolioContext'
 import { LinkInput } from './LinkInput'
 import { RichTextInput } from './RichTextInput'
 
 interface Props {
   blok: Blok | null
-  schema: SchemaIndex
-  onChange: (field: string, value: Json) => void
+  /**
+   * Names the block as well as the field. An input can issue its write long
+   * after it rendered — an upload finishing is the case — so the target cannot
+   * be the selection at that moment.
+   */
+  onChange: (uid: string, field: string, value: Json) => void
   onRemove: (uid: string) => void
-  /** Every story, so a `multilink` can offer internal pages by name. */
-  stories: readonly StoryMeta[]
-  /** Where Folio's routes are mounted, for uploads and the media library. */
-  apiBase: string
   /** Rendered above the fields. Used for page routing on the root block. */
   address?: ReactNode
   /** True while a past version is being previewed. */
   readOnly?: boolean
 }
 
-export function Inspector({
-  blok,
-  schema,
-  onChange,
-  onRemove,
-  stories,
-  apiBase,
-  address,
-  readOnly = false,
-}: Props) {
+export function Inspector({ blok, onChange, onRemove, address, readOnly = false }: Props) {
+  const { schema } = useFolio()
+
   if (!blok) {
     return (
       <aside className="inspector">
@@ -78,9 +70,7 @@ export function Inspector({
             name={name}
             field={field}
             value={blok.data[name] ?? null}
-            stories={stories}
-            apiBase={apiBase}
-            onChange={(v) => onChange(name, v)}
+            onChange={(v) => onChange(blok.uid, name, v)}
           />
         ))}
       </fieldset>
@@ -92,17 +82,14 @@ function FieldInput({
   name,
   field,
   value,
-  stories,
-  apiBase,
   onChange,
 }: {
   name: string
   field: Field
   value: Json
-  stories: readonly StoryMeta[]
-  apiBase: string
   onChange: (v: Json) => void
 }) {
+  const { stories } = useFolio()
   const label = field.label ?? name
   const id = `f-${name}`
 
@@ -146,14 +133,7 @@ function FieldInput({
           onChange={(e) => onChange(e.target.valueAsNumber || 0)}
         />
       ) : field.kind === 'multilink' ? (
-        <LinkInput
-          id={id}
-          value={value}
-          allow={field.allow}
-          stories={stories}
-          apiBase={apiBase}
-          onChange={onChange}
-        />
+        <LinkInput id={id} value={value} allow={field.allow} onChange={onChange} />
       ) : field.kind === 'reference' ? (
         <select
           id={id}
@@ -170,26 +150,13 @@ function FieldInput({
             ))}
         </select>
       ) : field.kind === 'richtext' ? (
-        <RichTextInput
-          value={value}
-          limits={field}
-          stories={stories}
-          apiBase={apiBase}
-          onChange={onChange}
-        />
+        <RichTextInput value={value} limits={field} onChange={onChange} />
       ) : field.kind === 'asset' ? (
-        <AssetInput
-          id={id}
-          value={value}
-          apiBase={apiBase}
-          accept={field.accept}
-          onChange={onChange}
-        />
+        <AssetInput id={id} value={value} accept={field.accept} onChange={onChange} />
       ) : field.kind === 'multiasset' ? (
         <MultiAssetInput
           id={id}
           value={value}
-          apiBase={apiBase}
           accept={field.accept}
           max={field.max}
           onChange={onChange}

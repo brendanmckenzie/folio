@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import type { Json } from '../core/doc'
-import type { StoryMeta } from '../core/story'
 import { asAsset, asLink, LINK_KINDS, type LinkKind, type LinkValue } from '../core/values'
 import { AssetInput } from './AssetInput'
+import { useFolio } from './FolioContext'
 
 const LABELS: Record<LinkKind, string> = {
   story: 'Page',
@@ -16,9 +16,6 @@ interface Props {
   id: string
   value: Json
   allow?: readonly LinkKind[]
-  /** Every story, so an internal link can be picked by name rather than by id. */
-  stories: readonly StoryMeta[]
-  apiBase: string
   onChange: (value: Json) => void
 }
 
@@ -30,7 +27,8 @@ interface Props {
  * Every change writes the whole link object back as one value, so a link edit is
  * an ordinary `set` mutation and needs nothing special from the sync engine.
  */
-export function LinkInput({ id, value, allow, stories, apiBase, onChange }: Props) {
+export function LinkInput({ id, value, allow, onChange }: Props) {
+  const { stories } = useFolio()
   const kinds = allow?.length ? LINK_KINDS.filter((k) => allow.includes(k)) : LINK_KINDS
   const link = asLink(value)
 
@@ -134,7 +132,6 @@ export function LinkInput({ id, value, allow, stories, apiBase, onChange }: Prop
         <AssetInput
           id={id}
           value={(link?.kind === 'asset' ? link.asset : null) as unknown as Json}
-          apiBase={apiBase}
           onChange={(next) => {
             const asset = asAsset(next)
             patch(

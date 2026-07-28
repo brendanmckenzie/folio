@@ -5,7 +5,6 @@ import Subscript from '@tiptap/extension-subscript'
 import Superscript from '@tiptap/extension-superscript'
 import { useEffect, useRef, useState } from 'react'
 import type { Json } from '../core/doc'
-import type { StoryMeta } from '../core/story'
 import {
   asRichtext,
   RICHTEXT_MARKS,
@@ -114,12 +113,10 @@ function extensionsFor(limits: RichtextLimits) {
 interface Props {
   value: Json
   limits: RichtextLimits
-  stories: readonly StoryMeta[]
-  apiBase: string
   onChange: (value: Json) => void
 }
 
-export function RichTextInput({ value, limits, stories, apiBase, onChange }: Props) {
+export function RichTextInput({ value, limits, onChange }: Props) {
   const [linking, setLinking] = useState(false)
 
   /**
@@ -242,8 +239,6 @@ export function RichTextInput({ value, limits, stories, apiBase, onChange }: Pro
           <LinkInput
             id="rt-link"
             value={activeLink ?? null}
-            stories={stories}
-            apiBase={apiBase}
             onChange={(next) => {
               const link = asLink(next)
               if (link) editor.chain().focus().setMark('link', { link }).run()

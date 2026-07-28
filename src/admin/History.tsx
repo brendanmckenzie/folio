@@ -4,12 +4,12 @@ import type { Mutation } from '../core/mutations'
 import type { ActivityEntry } from '../core/protocol'
 import type { SchemaIndex } from '../core/schema'
 import type { VersionMeta } from '../server/versions'
+import { useFolio } from './FolioContext'
 
 interface Props {
   versions: VersionMeta[]
   activity: ActivityEntry[]
   doc: Doc
-  schema: SchemaIndex
   busy: boolean
   /** Version currently being previewed, if any. */
   viewingId: string | null
@@ -27,7 +27,6 @@ export function History({
   versions,
   activity,
   doc,
-  schema,
   busy,
   viewingId,
   onCheckpoint,
@@ -35,6 +34,7 @@ export function History({
   onExitView,
   onRefresh,
 }: Props) {
+  const { schema } = useFolio()
   const [naming, setNaming] = useState(false)
 
   return (

@@ -1,11 +1,11 @@
 import { Fragment, useState, type CSSProperties, type DragEvent } from 'react'
 import { childrenOf, type Doc } from '../core/doc'
 import type { Presence } from '../core/protocol'
-import { slotsOf, summarise, type SchemaIndex } from '../core/schema'
+import { slotsOf, summarise } from '../core/schema'
+import { useFolio } from './FolioContext'
 
 interface Props {
   doc: Doc
-  schema: SchemaIndex
   selection: string | null
   peers: Presence[]
   onSelect: (uid: string) => void
@@ -14,8 +14,9 @@ interface Props {
 }
 
 export function BlockTree(props: Props) {
+  const { schema } = useFolio()
   const root = props.doc.bloks[props.doc.root]
-  const rootDef = props.schema[root?.type ?? '']
+  const rootDef = schema[root?.type ?? '']
   return (
     <nav className="tree">
       {/*
@@ -43,7 +44,8 @@ function Slot({
   depth,
   ...props
 }: Props & { parent: string; slot: string; depth: number }) {
-  const { doc, schema, selection, peers, onSelect, onAdd, onMove } = props
+  const { schema } = useFolio()
+  const { doc, selection, peers, onSelect, onAdd, onMove } = props
   const [dropIndex, setDropIndex] = useState<number | null>(null)
 
   const kids = childrenOf(doc, parent, slot)
@@ -131,26 +133,15 @@ function Slot({
 
       {allow.length > 0 && !full ? (
         <li className="tree__add">
-          <AddMenu
-            allow={allow}
-            schema={schema}
-            onPick={(type) => onAdd(parent, slot, type, kids.length)}
-          />
+          <AddMenu allow={allow} onPick={(type) => onAdd(parent, slot, type, kids.length)} />
         </li>
       ) : null}
     </ul>
   )
 }
 
-function AddMenu({
-  allow,
-  schema,
-  onPick,
-}: {
-  allow: readonly string[]
-  schema: SchemaIndex
-  onPick: (type: string) => void
-}) {
+function AddMenu({ allow, onPick }: { allow: readonly string[]; onPick: (type: string) => void }) {
+  const { schema } = useFolio()
   const [open, setOpen] = useState(false)
   if (!open) {
     return (
