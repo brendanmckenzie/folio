@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StoryStore, type WebSocketLike } from '../../../src/admin/store'
 import type { Doc } from '../../../src/core/doc'
 import type { Mutation } from '../../../src/core/mutations'
-import type { ClientMsg, Presence, ServerMsg } from '../../../src/core/protocol'
+import {
+  type ClientMsg,
+  type Presence,
+  PROTOCOL_VERSION,
+  type ServerMsg,
+} from '../../../src/core/protocol'
 
 type HelloMsg = Extract<ClientMsg, { type: 'hello' }>
 type TxMsg = Extract<ClientMsg, { type: 'tx' }>
@@ -42,14 +47,20 @@ class FakeSocket implements WebSocketLike {
     this.onopen?.({})
   }
 
+  /** A server frame, versioned exactly as the object encodes it. */
   emit(msg: ServerMsg) {
-    this.onmessage?.({ data: JSON.stringify(msg) })
+    this.onmessage?.({ data: JSON.stringify({ ...msg, v: PROTOCOL_VERSION }) })
+  }
+
+  /** Whatever the peer on the other end actually put on the wire. */
+  deliver(data: string) {
+    this.onmessage?.({ data })
   }
 
   /** The transport going away underneath the store. */
-  drop() {
+  drop(code?: number, reason?: string) {
     this.readyState = CLOSED
-    this.onclose?.({})
+    this.onclose?.(code === undefined ? {} : { code, reason })
   }
 
   client(): ClientMsg[] {
@@ -58,6 +69,13 @@ class FakeSocket implements WebSocketLike {
 
   hello(): HelloMsg | undefined {
     return this.client().find((m): m is HelloMsg => m.type === 'hello')
+  }
+
+  /** The watermark every hello on this socket asked from, in order. */
+  hellos(): number[] {
+    return this.client()
+      .filter((m): m is HelloMsg => m.type === 'hello')
+      .map((m) => m.lastSyncId)
   }
 
   txs(): TxMsg[] {
@@ -158,6 +176,7 @@ describe('admin sync store', () => {
 
       expect(h.last().hello()).toEqual({
         type: 'hello',
+        v: PROTOCOL_VERSION,
         actor: h.store.actor,
         name: h.store.name,
         colour: h.store.colour,
@@ -329,6 +348,18 @@ describe('admin sync store', () => {
       expect(h.store.getSnapshot().inflight).toBe(0)
     })
 
+    it('stamps a transaction with a 64-bit id', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.store.tx([set('hero', 'heading', 'Edited')])
+
+      // The log's unique dedupe key. A collision answers this tx with the delta of
+      // a stranger's transaction, which drains the queue without applying anything
+      // — so the id is full entropy, not a uuid slice.
+      expect(h.last().txs()[0]!.txId).toMatch(/^[0-9a-f]{16}$/)
+    })
+
     it('ignores a transaction before there is a document', () => {
       const h = setup()
       h.store.connect()
@@ -446,15 +477,41 @@ describe('admin sync store', () => {
       expect(value(h.store, 'hero', 'heading')).toBe('Hi')
     })
 
-    it('bootstrap clears the undo history', () => {
+    it('bootstrap clears the history a new base has absorbed', () => {
       const h = setup()
       boot(h)
 
       h.store.tx([set('hero', 'heading', 'X')])
-      expect(h.store.getSnapshot().canUndo).toBe(true)
+      const tx = h.last().txs()[0]!
+      h.last().emit({
+        type: 'delta',
+        syncId: 1,
+        txId: tx.txId,
+        actor: h.store.actor,
+        mutations: tx.mutations,
+      })
+      expect(h.store.getSnapshot()).toMatchObject({ inflight: 0, canUndo: true })
 
+      // Confirmed, so nothing in the history can be placed against the new base.
       h.last().emit({ type: 'bootstrap', doc: fixture(), syncId: 9, peers: [] })
       expect(h.store.getSnapshot()).toMatchObject({ canUndo: false, canRedo: false })
+    })
+
+    it('bootstrap keeps the history entry of a transaction it left pending', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.last().drop()
+      h.store.tx([set('hero', 'heading', 'Offline')])
+
+      const next = reconnect(h)
+      next.emit({ type: 'bootstrap', doc: fixture(), syncId: 3, peers: [] })
+
+      // The edit is on screen and in flight, so it stays undoable: the entries that
+      // go are the ones the new base absorbed, not the queue's.
+      expect(h.store.getSnapshot()).toMatchObject({ inflight: 1, canUndo: true })
+      h.store.undo()
+      expect(value(h.store, 'hero', 'heading')).toBe('Hi')
     })
   })
 
@@ -472,18 +529,348 @@ describe('admin sync store', () => {
           .client()
           .filter((m) => m.type === 'presence'),
       ).toEqual([
-        { type: 'presence', selection: 'root' },
-        { type: 'presence', selection: 'hero' },
+        { type: 'presence', v: PROTOCOL_VERSION, selection: 'root' },
+        { type: 'presence', v: PROTOCOL_VERSION, selection: 'hero' },
       ])
       expect(h.store.getSnapshot().selection).toBe('hero')
     })
   })
 
-  describe('known bugs', () => {
-    // SPEC(offline-queue): txs made while the socket is down are queued, sent on reconnect, and
-    // still reflected in the doc afterwards. Currently fails: send() silently drops the frame and
-    // bootstrap clears pending.
-    it.fails('queues transactions made while offline and replays them on reconnect', () => {
+  describe('rebase and rejection', () => {
+    it('drops a rejected transaction, its history entry and nothing else', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.store.tx([set('hero', 'heading', 'Refused')])
+      const tx = h.last().txs()[0]!
+      expect(h.store.getSnapshot()).toMatchObject({ inflight: 1, canUndo: true })
+
+      h.last().emit({ type: 'reject', txId: tx.txId, reason: 'no such blok' })
+
+      // The tx never landed, so the view goes back to base and the entry that
+      // would have undone it is gone with it.
+      expect(value(h.store, 'hero', 'heading')).toBe('Hi')
+      expect(h.store.getSnapshot()).toMatchObject({
+        inflight: 0,
+        canUndo: false,
+        canRedo: false,
+        notice: 'Edit refused: no such blok',
+      })
+
+      h.store.undo()
+      expect(h.last().txs()).toHaveLength(1)
+    })
+
+    it('drops the history entries taken after a refused transaction', () => {
+      const h = setup()
+      boot(h, 3)
+
+      // Locally the set applies and the move no-ops against a missing parent; the
+      // object refuses the whole transaction, so this view never existed there.
+      h.store.tx([
+        set('hero', 'heading', 'A'),
+        { t: 'move', uid: 'hero', parent: 'gone', slot: 'body', order: 'a1' },
+      ])
+      const refused = h.last().txs()[0]!
+      h.store.tx([set('hero', 'heading', 'B')])
+
+      h.last().emit({ type: 'reject', txId: refused.txId, reason: 'missing parent' })
+
+      expect(value(h.store, 'hero', 'heading')).toBe('B')
+      // The later entry inverts to 'A' — a value no server state will ever hold —
+      // so it leaves with the refusal instead of putting 'A' back on the wire.
+      expect(h.store.getSnapshot().canUndo).toBe(false)
+      const sent = h.last().txs().length
+      h.store.undo()
+      expect(h.last().txs()).toHaveLength(sent)
+    })
+
+    it('keeps the history from before a refused transaction', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.store.tx([set('hero', 'sub', 'Kept')])
+      const kept = h.last().txs()[0]!
+      h.last().emit({
+        type: 'delta',
+        syncId: 4,
+        txId: kept.txId,
+        actor: h.store.actor,
+        mutations: kept.mutations,
+      })
+      h.store.tx([set('hero', 'heading', 'Refused')])
+      const refused = h.last().txs()[1]!
+
+      h.last().emit({ type: 'reject', txId: refused.txId, reason: 'no such blok' })
+
+      // That entry inverts against confirmed state only, so it is still reachable.
+      expect(h.store.getSnapshot().canUndo).toBe(true)
+      h.store.undo()
+      expect(value(h.store, 'hero', 'sub')).toBe('There')
+    })
+
+    it('cannot redo a transaction the server refused', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.store.tx([set('hero', 'heading', 'Refused')])
+      const tx = h.last().txs()[0]!
+      // Undone before the verdict arrives: the redo entry would put 'Refused' back.
+      h.store.undo()
+      expect(h.store.getSnapshot().canRedo).toBe(true)
+
+      h.last().emit({ type: 'reject', txId: tx.txId, reason: 'no such blok' })
+
+      expect(h.store.getSnapshot().canRedo).toBe(false)
+      h.store.redo()
+      expect(value(h.store, 'hero', 'heading')).toBe('Hi')
+    })
+
+    it('re-runs the handshake when a delta arrives past a gap', () => {
+      const h = setup()
+      boot(h, 2)
+
+      h.last().emit({
+        type: 'delta',
+        syncId: 5,
+        txId: 'r5',
+        actor: 'bee',
+        mutations: [set('hero', 'heading', 'five')],
+      })
+
+      // Not applied, and the handshake is re-run from the watermark to fill the hole
+      // (the first hello on this socket predates the bootstrap, hence the 0).
+      expect(value(h.store, 'hero', 'heading')).toBe('Hi')
+      expect(h.last().hellos()).toEqual([0, 2])
+
+      h.last().emit({
+        type: 'catchup',
+        syncId: 5,
+        peers: [],
+        deltas: [
+          { syncId: 3, txId: 'r3', actor: 'bee', mutations: [set('hero', 'sub', 'three')] },
+          { syncId: 4, txId: 'r4', actor: 'bee', mutations: [set('root', 'title', 'four')] },
+          { syncId: 5, txId: 'r5', actor: 'bee', mutations: [set('hero', 'heading', 'five')] },
+        ],
+      })
+      expect(value(h.store, 'hero', 'heading')).toBe('five')
+      h.last().drop()
+      expect(reconnect(h).hello()?.lastSyncId).toBe(5)
+    })
+
+    it('asks for a bootstrap when the catchup cannot bridge the gap', () => {
+      const h = setup()
+      boot(h, 2)
+
+      h.last().emit({
+        type: 'delta',
+        syncId: 5,
+        txId: 'r5',
+        actor: 'bee',
+        mutations: [set('hero', 'heading', 'five')],
+      })
+      // The log could not fill 3 and 4, so the catchup still starts past the gap.
+      h.last().emit({
+        type: 'catchup',
+        syncId: 5,
+        peers: [],
+        deltas: [
+          { syncId: 5, txId: 'r5', actor: 'bee', mutations: [set('hero', 'heading', 'five')] },
+        ],
+      })
+
+      // lastSyncId 0 is the only way to ask this protocol for the whole document.
+      expect(h.last().hellos()).toEqual([0, 2, 0])
+      expect(value(h.store, 'hero', 'heading')).toBe('Hi')
+    })
+
+    it('does not re-send a queued transaction the catchup already confirmed', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.store.tx([set('hero', 'heading', 'Landed')])
+      const tx = h.last().txs()[0]!
+      h.last().drop()
+
+      const next = reconnect(h)
+      next.emit({
+        type: 'catchup',
+        syncId: 4,
+        peers: [],
+        deltas: [{ syncId: 4, txId: tx.txId, actor: h.store.actor, mutations: tx.mutations }],
+      })
+
+      expect(next.txs()).toEqual([])
+      expect(h.store.getSnapshot().inflight).toBe(0)
+      expect(value(h.store, 'hero', 'heading')).toBe('Landed')
+    })
+
+    it('drains a resent transaction on the replayed acknowledgement', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.store.tx([set('hero', 'heading', 'Landed')])
+      const tx = h.last().txs()[0]!
+      h.last().drop()
+
+      // It did land before the socket went away, so the bootstrap already has it.
+      const landed = fixture()
+      landed.bloks.hero = { ...landed.bloks.hero!, data: { heading: 'Landed', sub: 'There' } }
+      const next = reconnect(h)
+      next.emit({ type: 'bootstrap', doc: landed, syncId: 4, peers: [] })
+      expect(next.txs().map((t) => t.txId)).toEqual([tx.txId])
+
+      next.emit({
+        type: 'delta',
+        replay: true,
+        syncId: 4,
+        txId: tx.txId,
+        actor: h.store.actor,
+        mutations: tx.mutations,
+      })
+
+      // The stale mutations are not applied over the newer base; the tx just drains.
+      expect(h.store.getSnapshot().inflight).toBe(0)
+      expect(value(h.store, 'hero', 'heading')).toBe('Landed')
+    })
+
+    it('re-seeds the preview when a replayed acknowledgement changes the view', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.store.tx([set('hero', 'heading', 'Mine')])
+      const tx = h.last().txs()[0]!
+      h.last().drop()
+
+      // It landed at 4 and a peer overwrote the field at 5, so the fresh base does
+      // not contain it and replaying the queue puts it back on screen.
+      const newer = fixture()
+      newer.bloks.hero = { ...newer.bloks.hero!, data: { heading: 'Peer', sub: 'There' } }
+      const next = reconnect(h)
+      next.emit({ type: 'bootstrap', doc: newer, syncId: 5, peers: [] })
+      expect(value(h.store, 'hero', 'heading')).toBe('Mine')
+
+      const seen = h.resets.length
+      next.emit({
+        type: 'delta',
+        replay: true,
+        syncId: 4,
+        txId: tx.txId,
+        actor: h.store.actor,
+        mutations: tx.mutations,
+      })
+
+      // Draining the queue changed the view, so the preview cannot be left holding
+      // the replayed one: the acknowledgement re-seeds it with the whole document.
+      expect(value(h.store, 'hero', 'heading')).toBe('Peer')
+      expect(h.resets.slice(seen).map((d) => d.bloks.hero!.data.heading)).toEqual(['Peer'])
+    })
+
+    it('a mid-session bootstrap keeps a selection the document still has', () => {
+      const h = setup()
+      boot(h, 2)
+      h.store.select('hero')
+
+      // A gap the log could not bridge sends the document mid-edit; the cursor
+      // must not move, and no third presence frame goes out.
+      h.last().emit({ type: 'bootstrap', doc: fixture(), syncId: 6, peers: [] })
+
+      expect(h.store.getSnapshot().selection).toBe('hero')
+      expect(
+        h
+          .last()
+          .client()
+          .filter((m) => m.type === 'presence'),
+      ).toEqual([
+        { type: 'presence', v: PROTOCOL_VERSION, selection: 'root' },
+        { type: 'presence', v: PROTOCOL_VERSION, selection: 'hero' },
+      ])
+    })
+
+    it('a bootstrap that lost the selected blok falls back to the root', () => {
+      const h = setup()
+      boot(h, 2)
+      h.store.select('hero')
+
+      const withoutHero = fixture()
+      delete withoutHero.bloks.hero
+      h.last().emit({ type: 'bootstrap', doc: withoutHero, syncId: 6, peers: [] })
+
+      expect(h.store.getSnapshot().selection).toBe('root')
+    })
+  })
+
+  describe('wire discipline', () => {
+    it('reports an unreadable frame instead of throwing out of the handler', () => {
+      const h = setup()
+      boot(h, 3)
+
+      expect(() => h.last().deliver('{ not json')).not.toThrow()
+      expect(h.store.getSnapshot().notice).toBe('Unreadable frame from the server.')
+
+      // The socket is still live: the next readable frame applies as usual.
+      h.last().emit({
+        type: 'delta',
+        syncId: 4,
+        txId: 'r4',
+        actor: 'bee',
+        mutations: [set('hero', 'sub', 'ok')],
+      })
+      expect(value(h.store, 'hero', 'sub')).toBe('ok')
+    })
+
+    it('refuses a frame that claims a version it does not implement', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.last().deliver(
+        JSON.stringify({
+          type: 'delta',
+          v: PROTOCOL_VERSION + 1,
+          syncId: 4,
+          txId: 'r4',
+          actor: 'bee',
+          mutations: [set('hero', 'heading', 'from the future')],
+        }),
+      )
+
+      // Applying a frame of an unknown vintage is how a document diverges silently.
+      expect(value(h.store, 'hero', 'heading')).toBe('Hi')
+      expect(h.store.getSnapshot().notice).toContain('protocol version 2')
+      // Terminal: a reconnect would meet the same two versions.
+      expect(h.last().closedByStore).toBe(true)
+      vi.advanceTimersByTime(60_000)
+      expect(h.sockets).toHaveLength(1)
+    })
+
+    it('does not retry a connection the object refused', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.last().drop(4001, 'unsupported protocol version')
+
+      vi.advanceTimersByTime(60_000)
+      expect(h.sockets).toHaveLength(1)
+      expect(h.store.getSnapshot().notice).toBe('unsupported protocol version')
+    })
+
+    it('does not retry after the story has been purged', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.last().drop(4002, 'story deleted')
+
+      vi.advanceTimersByTime(60_000)
+      expect(h.sockets).toHaveLength(1)
+      expect(h.store.getSnapshot().notice).toBe('story deleted')
+    })
+  })
+
+  describe('pinned behaviour', () => {
+    // SPEC(offline-queue): txs made while the socket is down are queued in `pending`, re-sent with
+    // their original txIds once the reconnect has resolved `base`, and replayed on top of it — a
+    // bootstrap replaces `base` only.
+    it('queues transactions made while offline and replays them on reconnect', () => {
       const h = setup()
       boot(h, 3)
 
@@ -501,10 +888,10 @@ describe('admin sync store', () => {
       expect(value(h.store, 'hero', 'heading')).toBe('Offline edit')
     })
 
-    // SPEC(echo-rebase): when the server logs a remote tx before this client's pending tx, every
-    // client must converge on the server's log order. Currently fails: the echo is swallowed as a
-    // bare ack, so the remote value applied over the optimistic one is what sticks.
-    it.fails('converges on the server order when a remote tx is logged first', () => {
+    // SPEC(echo-rebase): every delta, a peer's or our own echo, applies to `base` in syncId order
+    // and the view is `base` with `pending` replayed on top, so every client converges on the
+    // server's log order.
+    it('converges on the server order when a remote tx is logged first', () => {
       const h = setup()
       boot(h, 10)
 
@@ -531,9 +918,9 @@ describe('admin sync store', () => {
       expect(value(h.store, 'root', 'title')).toBe('mine')
     })
 
-    // SPEC(reconnect-timer): a reconnect scheduled before disconnect() must never fire.
-    // Currently fails: the timer is not cancelled and connect() resets `closed`.
-    it.fails('never reconnects after disconnect()', () => {
+    // SPEC(reconnect-timer): disconnect() cancels the scheduled reconnect, so a retry queued before
+    // it can never fire.
+    it('never reconnects after disconnect()', () => {
       const h = setup()
       boot(h)
 
@@ -544,9 +931,9 @@ describe('admin sync store', () => {
       expect(h.sockets).toHaveLength(1)
     })
 
-    // SPEC(watermark): lastSyncId must stop at the first gap so a missed delta is still replayed.
-    // Currently fails: integrate() takes max(), so syncId 5 hides the missing 4.
-    it.fails('does not advance the watermark past a gap', () => {
+    // SPEC(watermark): lastSyncId advances only contiguously, so it stops at the first gap and a
+    // missed delta is still replayed.
+    it('does not advance the watermark past a gap', () => {
       const h = setup()
       boot(h, 2)
 
