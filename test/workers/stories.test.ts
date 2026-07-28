@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Doc } from '../../src/core/doc'
+import { envelope, FolioError, rethrow } from '../../src/server/errors'
 import {
   createStory,
   deleteStory,
@@ -11,43 +12,24 @@ import {
   storyByPath,
   updateStory,
 } from '../../src/server/stories'
+import { applySeedFixture } from './seed-fixture'
 
 /**
- * Mirrors the seed rows inserted by schema.sql. The pool's storage is
- * isolated per test *file* but not per test (see apply-schema.ts / the
- * vitest.config.ts sharp-edges note and smoke.test.ts, which pins that writes
- * persist from one test to the next in the same file), so every test here
- * restores this exact seed itself instead of relying on rollback.
+ * Migrations (packages/folio/migrations/**) are structure only, so this file
+ * seeds its own fixture rather than inheriting one, by re-running the actual
+ * examples/demo/seed.sql each time (see seed-fixture.ts) instead of a hand-
+ * typed insert that could drift from it and from the same three rows in
+ * smoke.test.ts / http.test.ts. The pool's storage is isolated per test *file*
+ * but not per test (see apply-schema.ts / the vitest.config.ts sharp-edges
+ * note and smoke.test.ts, which pins that writes persist from one test to the
+ * next in the same file), so every test here restores this exact seed itself
+ * instead of relying on rollback. Tests below still refer to its rows by the
+ * ids seed.sql assigns them: sty_home (path ''), sty_about (path 'about') and
+ * sty_team (path 'about/team').
  */
-const SEED = [
-  { id: 'sty_home', parentId: null as string | null, slug: '', path: '', ord: 'a0', title: 'Home' },
-  {
-    id: 'sty_about',
-    parentId: null as string | null,
-    slug: 'about',
-    path: 'about',
-    ord: 'a1',
-    title: 'About',
-  },
-  {
-    id: 'sty_team',
-    parentId: 'sty_about' as string | null,
-    slug: 'team',
-    path: 'about/team',
-    ord: 'a0',
-    title: 'Our team',
-  },
-]
-
 async function resetStories(): Promise<void> {
   await env.DB.prepare('delete from stories').run()
-  for (const row of SEED) {
-    await env.DB.prepare(
-      `insert into stories (id, parent_id, slug, path, ord, title) values (?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(row.id, row.parentId, row.slug, row.path, row.ord, row.title)
-      .run()
-  }
+  await applySeedFixture(env.DB)
 }
 
 beforeEach(async () => {
@@ -317,5 +299,85 @@ describe('listStories', () => {
       ]),
     )
     for (const row of rows) expect(typeof row.updatedAt).toBe('number')
+  })
+})
+
+describe('concurrent creates and the conflict envelope', () => {
+  it('surfaces a same-tick duplicate slug as a conflict envelope, not a 500', async () => {
+    // `createStory` snapshots `listStories` before it picks a slug, so two
+    // calls that both read that snapshot before either has inserted can both
+    // land on the same (parentId, slug) pair — `uniqueSlug`'s in-memory check
+    // never sees the other's write. Firing both with `Promise.all`, rather
+    // than awaiting one before starting the next, is what makes both read the
+    // pre-insert snapshot.
+    //
+    // `createStory` always derives `path` as `${parentPath}/${slug}` (or bare
+    // `slug` at the root), so two calls racing to the same (parentId, slug)
+    // also race to the same `path` — the pre-existing `path text not null
+    // unique` already refuses the loser here, and would with or without
+    // `stories_parent_slug` (migrations/0002_slug_unique.sql) existing. What
+    // this test actually pins down is the translation: whichever index D1
+    // reports, `rethrow` maps a raw UNIQUE violation to the same conflict
+    // envelope. See the next describe block for a case only 0002 catches.
+    const results = await Promise.allSettled([
+      createStory(env.DB, { title: 'Race', parentId: null }),
+      createStory(env.DB, { title: 'Race', parentId: null }),
+    ])
+
+    const fulfilled = results.filter((r) => r.status === 'fulfilled')
+    const rejected = results.filter((r) => r.status === 'rejected')
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+
+    // `rethrow` is the same translation the /folio/stories route applies to
+    // whatever `createStory` throws (routes/stories.ts): the point of this
+    // test is that D1's raw constraint violation lands on the client as the
+    // ordinary conflict envelope, never as an unhandled 500.
+    let caught: unknown
+    try {
+      rethrow((rejected[0] as PromiseRejectedResult).reason)
+    } catch (e) {
+      caught = e
+    }
+    expect(caught).toBeInstanceOf(FolioError)
+    const err = caught as FolioError
+    expect(err.code).toBe('conflict')
+    expect(err.status).toBe(409)
+    expect(envelope(err)).toEqual({ error: { code: 'conflict', message: err.message } })
+    // Nothing about the index or the raw SQLite message travels to the client.
+    expect(err.message).not.toMatch(/UNIQUE|constraint|SQLITE|stories_parent_slug/i)
+  })
+})
+
+describe('migrations/0002_slug_unique.sql: stories_parent_slug', () => {
+  it('refuses two rows sharing (parent_id, slug) even when their paths differ', async () => {
+    // Every write this codebase makes (createStory/updateStory,
+    // src/server/stories.ts) derives `path` as `${parentPath}/${slug}`, so a
+    // (parent_id, slug) collision reached through the API always collides on
+    // `path` too — the pre-existing `path text not null unique` already
+    // catches every one of those, with or without this index. The only way to
+    // reach the state 0002 alone refuses is to write a row the way nothing in
+    // src/ ever does: matching (parent_id, slug) with a *different* path,
+    // which only a hand-written statement (a fixup query, an import, a bug in
+    // a future write path) can produce.
+    await env.DB.prepare(
+      `insert into stories (id, parent_id, slug, path, ord, title) values (?, ?, ?, ?, ?, ?)`,
+    )
+      .bind('sty_raw1', null, 'raw-dup', 'raw-dup', 'a9', 'Raw dup one')
+      .run()
+
+    await expect(
+      env.DB.prepare(
+        `insert into stories (id, parent_id, slug, path, ord, title) values (?, ?, ?, ?, ?, ?)`,
+      )
+        // Same (parent_id, slug) as above; `path` deliberately does not match,
+        // so the pre-existing unique index on `path` cannot be what refuses this.
+        .bind('sty_raw2', null, 'raw-dup', 'somewhere-else', 'aa', 'Raw dup two')
+        .run(),
+    ).rejects.toThrow(/UNIQUE constraint failed/i)
+
+    // Confirms it was actually refused, not merely that a promise rejected.
+    const row = await env.DB.prepare('select id from stories where id = ?').bind('sty_raw2').first()
+    expect(row).toBeNull()
   })
 })

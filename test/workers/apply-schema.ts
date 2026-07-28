@@ -1,36 +1,53 @@
-import { env } from 'cloudflare:test'
+import { applyD1Migrations, env } from 'cloudflare:test'
 import { beforeAll } from 'vitest'
-// The very file examples/demo hands to `wrangler d1 execute --file`, so the test
-// database and a real deployment can never drift.
-import schema from '../../schema.sql?raw'
+import { compareMigrationFilenames, splitSqlStatements } from './sql-split'
 
 /**
- * Splits schema.sql into executable statements.
+ * The same directory `wrangler d1 migrations apply` reads for examples/demo
+ * and any real deployment, so the test database and a production one can
+ * never drift onto different schema histories.
  *
- * Comments are stripped *before* splitting on ';' because schema.sql has `--`
- * comments that contain semicolons ("...without loading every Durable Object;
- * the document is the source of truth"), and a naive split tears both the
- * comment and the statement that follows it in half. No string literal in the
- * file contains '--', which is what makes the blunt regex safe.
+ * `applyD1Migrations` (from `cloudflare:test`) is the pool's own helper for
+ * this, and normally pairs with a `readD1Migrations(path)` that reads the
+ * directory from disk on the Node side and hands the array across as a
+ * binding. That doesn't fit here: `readD1Migrations` is documented as living
+ * at `@cloudflare/vitest-pool-workers/config`, but this pool version (0.18)
+ * doesn't publish that subpath — it exports straight off the package root,
+ * which is a Node/Vite-config module that pulls in workerd's own binary and
+ * cannot be imported from code that gets bundled *into* the worker, which
+ * this setup file is. Wiring it through a binding also means editing
+ * vitest.config.ts, outside this file's ownership.
+ *
+ * Vite's `import.meta.glob` sidesteps both problems the way the old single-
+ * file `?raw` import did: `eager` + `query: '?raw'` inlines every migration's
+ * text as a plain string at build time, so no filesystem read happens inside
+ * workerd at all.
+ *
+ * Splitting the file into statements and ordering the files both go through
+ * sql-split.ts rather than a blunt strip-then-split and a plain string sort:
+ * see that file for why (wrangler 4.114's own parser is quote- and
+ * BEGIN/END-aware, and orders on the numeric migration prefix, not the
+ * filename string).
  */
-function statementsOf(sql: string): string[] {
-  return sql
-    .replace(/--[^\n]*/g, '')
-    .split(';')
-    .map((statement) => statement.trim())
-    .filter((statement) => statement.length > 0)
-}
+const modules = import.meta.glob('../../migrations/*.sql', {
+  eager: true,
+  query: '?raw',
+  import: 'default',
+}) as Record<string, string>
+
+const migrations = Object.entries(modules)
+  .map(([path, sql]) => ({ name: path.split('/').at(-1) ?? path, sql }))
+  .sort((a, b) => compareMigrationFilenames(a.name, b.name))
+  .map(({ name, sql }) => ({ name, queries: splitSqlStatements(sql) }))
 
 /**
- * D1's `exec()` is line-oriented and rejects a multi-line `create table`, and
- * `batch()` wraps everything in one transaction, so statements go one at a time.
- *
  * Runs once per test file. The pool's isolated storage undoes writes made by
  * each test but keeps what setup files and `beforeAll` wrote, so every file
- * starts from exactly the seed rows in schema.sql.
+ * starts from exactly the structure the migrations produce — no seed rows,
+ * since migrations are structure only. Tests that need a story on hand seed
+ * one explicitly (see the fixtures in smoke.test.ts, http.test.ts and
+ * stories.test.ts's `resetStories`).
  */
 beforeAll(async () => {
-  for (const statement of statementsOf(schema)) {
-    await env.DB.prepare(statement).run()
-  }
+  await applyD1Migrations(env.DB, migrations)
 })

@@ -230,8 +230,8 @@ describe('transform query: clamped, never rejected', () => {
  * wrangler.jsonc) — the fallback path it exercises is itself a load-bearing
  * scenario. Caching a real Images invocation needs a binding to spy on, so
  * these tests call `serveAsset` directly with a stub rather than adding one to
- * the shared test worker, exactly as the wiring in src/server/index.tsx does
- * at the route.
+ * the shared test worker, exactly as the wiring in src/server/routes/assets.ts
+ * does at the route.
  */
 describe('transform responses are wrapped in the Cache API, keyed on the full URL', () => {
   function fakeImages(outputBytes: ArrayBuffer, contentType: string) {
