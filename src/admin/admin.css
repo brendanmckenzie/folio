@@ -425,6 +425,104 @@ button.tree__menu-heading {
   outline: 2px solid rgb(0 144 255 / 20%);
 }
 
+/* --------------------------------------------------------- localisation ---- */
+/* content-model/localisation.md phase 3. Three visual states per field, matching
+   `fieldMode`: the source locale (nothing added), a translation (a read-only
+   source column beneath the input), and a shared field (the control disabled and
+   labelled). */
+
+/* The wrapper that carries `disabled` for a shared field. Border-free so it is
+   invisible when it is not doing anything. */
+.field__control {
+  display: contents;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.field__shared {
+  margin-left: 0.4rem;
+  font-weight: 400;
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+.field--shared :is(input, textarea, select) {
+  background: var(--bg-soft, #f6f6f7);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* The second read-only column: the source value a translator translates from.
+   A column rather than a placeholder, because a placeholder cannot show
+   richtext formatting (the spec's resolved open question). */
+.field__source {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.35rem 0.45rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+  background: var(--bg-soft, #f6f6f7);
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+}
+.field__source-label {
+  flex: none;
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding-top: 0.1rem;
+}
+.field__source-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.field__source-body :is(p, ul, ol, h1, h2, h3, h4):first-child {
+  margin-top: 0;
+}
+.field__source-body :is(p, ul, ol, h1, h2, h3, h4):last-child {
+  margin-bottom: 0;
+}
+.inspector__note--locale strong {
+  color: inherit;
+}
+
+/* The editing-language switcher, beside the viewport buttons. */
+.topbar__locale {
+  padding: 0.25rem 0.4rem;
+  font: inherit;
+  font-size: 0.75rem;
+  color: inherit;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+/* Named gaps in the publish confirmation (checkpoint 3's mitigation). */
+.publish-gaps {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+.publish-gaps strong {
+  color: var(--fg, inherit);
+}
+
+/* The tree's per-locale completeness badge. */
+.stories__i18n {
+  flex: none;
+  padding: 0.05rem 0.3rem;
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  background: var(--bg-soft, #f6f6f7);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.stories__i18n.is-complete {
+  color: var(--ok, #30a46c);
+}
+
 /* ------------------------------------------------------------ multilink ---- */
 
 .link {

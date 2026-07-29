@@ -22,7 +22,7 @@ interface Props {
 }
 
 export function BlockTree(props: Props) {
-  const { schema } = useFolio()
+  const { schema, localeCtx } = useFolio()
   const root = props.doc.bloks[props.doc.root]
   const rootDef = schema[root?.type ?? '']
   return (
@@ -42,7 +42,7 @@ export function BlockTree(props: Props) {
             component is given a document and nothing else — and a type and its
             root block always share a label in practice. */}
         <span className="tree__type">{rootSettingsLabel(rootDef)}</span>
-        <span className="tree__summary">{rootDef ? summarise(rootDef, root) : ''}</span>
+        <span className="tree__summary">{rootDef ? summarise(rootDef, root, localeCtx) : ''}</span>
       </div>
       {slotsOf(rootDef).map(([slot]) => (
         <Slot key={slot} {...props} parent={props.doc.root} slot={slot} depth={0} />
@@ -57,7 +57,7 @@ function Slot({
   depth,
   ...props
 }: Props & { parent: string; slot: string; depth: number }) {
-  const { schema } = useFolio()
+  const { schema, localeCtx } = useFolio()
   const { doc, selection, peers, onSelect, onAdd, onMove, onDuplicate, onCopy } = props
   const [dropIndex, setDropIndex] = useState<number | null>(null)
 
@@ -115,7 +115,7 @@ function Slot({
                   ⠿
                 </span>
                 <span className="tree__type">{def?.label ?? blok.type}</span>
-                <span className="tree__summary">{summarise(def, blok)}</span>
+                <span className="tree__summary">{summarise(def, blok, localeCtx)}</span>
                 {watchers.map((p) => (
                   <span
                     key={p.actor}

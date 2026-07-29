@@ -61,6 +61,34 @@ export function dropRefusal(
   return `A ${type.label} can only go under: ${allowed || 'nothing'}`
 }
 
+/**
+ * A row's label in the active locale
+ * (`../../../docs/specs/content-model/localisation.md` architecture decision 7):
+ * `stories.title_i18n`'s entry, or the source-locale `title`.
+ *
+ * A cache of a cache, and the fallback is the point — the entry is written by
+ * publish, so a page whose French title exists only in the draft reads in the
+ * source language until it goes live. A wrong label in a tree is the accepted
+ * cost of rendering the tree without opening every Durable Object; wrong
+ * *content* on a page is not, and this never touches that.
+ *
+ * Pure and exported so the fallback is tested without mounting the tree.
+ */
+export function localeTitle(node: StoryNode, locale: string, isSourceLocale: boolean): string {
+  if (isSourceLocale) return node.title
+  return node.titleI18n?.[locale] || node.title
+}
+
+/**
+ * "80%" for the tree's badge. A page with nothing translatable reads 100%: there
+ * is no work owed, and calling it 0% would put a permanent warning on a page that
+ * cannot be translated any further.
+ */
+export function translationPercent(status: { total: number; translated: number }): number {
+  if (status.total === 0) return 100
+  return Math.round((status.translated / status.total) * 100)
+}
+
 /** The chip a row wears when the site has more than one document type. A row
  * whose type is no longer declared says so rather than being hidden or deleted:
  * removing rows because the code changed is worse. */
@@ -245,7 +273,7 @@ function Level({
   Props,
   'currentId' | 'onOpen' | 'onCreate' | 'onMove' | 'onDelete' | 'onDuplicate' | 'onNotice'
 >) {
-  const { types, stories } = useFolio()
+  const { types, stories, locale, isSourceLocale, translation } = useFolio()
   const [dropIndex, setDropIndex] = useState<number | null>(null)
 
   const chipOf = (node: StoryNode) => typeChip(types, node.type)
@@ -316,7 +344,23 @@ function Level({
                 ⠿
               </span>
             )}
-            <span className="stories__title">{node.title}</span>
+            <span className="stories__title">{localeTitle(node, locale, isSourceLocale)}</span>
+            {/* How much of this page is translated, for the open row only: it is
+                computed from the draft already in the store, so it costs nothing
+                and moves per keystroke. See `FolioContextValue.translation` for
+                why every other row is left unbadged. */}
+            {translation && node.id === currentId ? (
+              <span
+                className={`stories__i18n ${translation.missing.length === 0 ? 'is-complete' : ''}`}
+                title={
+                  translation.missing.length === 0
+                    ? 'Fully translated'
+                    : `${translation.missing.length} field${translation.missing.length === 1 ? '' : 's'} untranslated`
+                }
+              >
+                {translationPercent(translation)}%
+              </span>
+            ) : null}
             {/* Only once the site has more than one document type: a chip that
                 always reads "Page" is noise (`document-types.md` phase 3). */}
             {chipOf(node) ? (

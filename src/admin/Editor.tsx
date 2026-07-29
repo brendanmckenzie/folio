@@ -1,4 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  type LocaleConfig,
+  localeContext,
+  translationGaps,
+  translationStatus,
+} from '../core/locales'
 import { buildResolution } from '../core/resolve'
 import { type DocumentType, type SchemaIndex, singletonId, typeByName } from '../core/schema'
 import type { StoryNode } from '../core/story'
@@ -29,6 +35,7 @@ import { Inspector } from './Inspector'
 import { canEdit, canManageAccess, canManageContent, type Me, whyNot } from './me'
 import { MigrationBanner, Migrations } from './Migrations'
 import { PageAddress } from './PageAddress'
+import { PublishDialog } from './PublishDialog'
 import { Redirects } from './Redirects'
 import { StoryStore } from './store'
 import { StoryTree } from './StoryTree'
@@ -43,6 +50,10 @@ interface Props {
   types: readonly DocumentType[]
   /** `FolioConfig.globals`, off the manifest (`content-model/globals.md`). */
   globals: readonly string[]
+  /** `FolioConfig.locales`, off the manifest (`content-model/localisation.md`).
+   * Undefined for a single-locale site, and every locale affordance in the editor
+   * is absent in that case rather than present-and-trivial. */
+  locales?: LocaleConfig
   /** Who is signed in, from `GET /folio/me` (`identity-and-access.md`). */
   me: Me
   apiBase: string
@@ -56,9 +67,23 @@ type Rail = 'content' | 'data' | 'blocks' | 'history' | 'redirects' | 'model' | 
  * under hooks/, and everything the panels share reaches them through
  * FolioProvider rather than as props.
  */
-export function Editor({ storyId: initialStoryId, schema, types, globals, me, apiBase }: Props) {
+export function Editor({
+  storyId: initialStoryId,
+  schema,
+  types,
+  globals,
+  locales,
+  me,
+  apiBase,
+}: Props) {
   const [rail, setRail] = useState<Rail>('blocks')
   const [viewport, setViewport] = useState<Viewport>('Desktop')
+  // The active locale, defaulting to the source. Editor state rather than a URL
+  // parameter: it is a property of this editing session, and the *preview* URL is
+  // what carries it into the iframe (`localisation.md` decision 6).
+  const [locale, setLocale] = useState(locales?.default ?? '')
+  const isSourceLocale = !locales || locale === locales.default
+  const localeCtx = useMemo(() => localeContext(locales, locale), [locales, locale])
 
   const { notice, notify } = useNotice()
   const stories = useStories(apiBase, initialStoryId, notify)
@@ -119,6 +144,35 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, me, ap
   // story is open, and that view itself closes on navigation — but the same
   // "confirming, not just open" shape keeps it consistent with them.
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+
+  /**
+   * Which locales are incomplete on the document as it stands, computed from the
+   * draft the store already holds — no request, so it is right at the instant
+   * Publish is clicked rather than as of the last fetch.
+   */
+  const gaps = useMemo(
+    () => (state.doc ? translationGaps(state.doc, schema, locales) : []),
+    [locales, schema, state.doc],
+  )
+  const [confirmingPublish, setConfirmingPublish] = useState(false)
+
+  /** The open story's own completeness, for the tree's badge. Free and live: the
+   * draft is already in the store, so this needs no request. */
+  const translation = useMemo(
+    () => (state.doc && !isSourceLocale ? translationStatus(state.doc, schema, locale) : null),
+    [isSourceLocale, locale, schema, state.doc],
+  )
+
+  /**
+   * Publish, warning first when a locale is incomplete (checkpoint 3's
+   * mitigation). A complete page — and every page on a single-locale site —
+   * publishes on one click, exactly as before: a confirmation that always appears
+   * is a confirmation nobody reads.
+   */
+  const requestPublish = useCallback(() => {
+    if (gaps.length > 0) setConfirmingPublish(true)
+    else void publish.publish()
+  }, [gaps.length, publish])
 
   const redirects = useRedirects(apiBase, notify, rail === 'redirects')
   // Loaded on every story load, not lazily like `redirects` above: the banner
@@ -212,8 +266,35 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, me, ap
   const isRootBlok = Boolean(!readOnly && state.doc && state.selection === state.doc.root)
 
   const context = useMemo(
-    () => ({ store, schema, types, globals, apiBase, stories: flat }),
-    [apiBase, flat, globals, schema, store, types],
+    () => ({
+      store,
+      schema,
+      types,
+      globals,
+      apiBase,
+      stories: flat,
+      locales,
+      locale,
+      localeCtx,
+      isSourceLocale,
+      setLocale,
+      resolution,
+      translation,
+    }),
+    [
+      apiBase,
+      flat,
+      globals,
+      isSourceLocale,
+      locale,
+      localeCtx,
+      locales,
+      resolution,
+      schema,
+      store,
+      translation,
+      types,
+    ],
   )
 
   // A record or a singleton has no URL, so there is no page to preview and no
@@ -224,6 +305,18 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, me, ap
   // type declares (`content-model/globals.md` decision 4) — the one carve-out
   // from "no preview" an unrouted document otherwise gets.
   const routed = current ? current.path !== null : true
+  /**
+   * The preview URL for the active locale, falling back to the source one.
+   *
+   * Keyed into the iframe below alongside the story id, which is what makes
+   * switching locale a **reload** rather than a pushed frame (decision 6): the
+   * host's own chrome, its `<html lang>` and possibly its stylesheet all change,
+   * and no postMessage reaches those. Everything after the reload is
+   * per-keystroke as usual.
+   */
+  const previewUrl = current
+    ? ((isSourceLocale ? current.previewUrl : current.previewUrls?.[locale]) ?? current.previewUrl)
+    : undefined
   const currentType = current ? typeByName(types, current.type) : undefined
   const globalPreview =
     current && currentType?.kind === 'singleton'
@@ -245,7 +338,7 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, me, ap
           mode={versions.source.mode}
           publishing={publish.publishing}
           published={publish.published}
-          onPublish={() => void publish.publish()}
+          onPublish={requestPublish}
           onRequestUnpublish={() => setConfirmingUnpublishFor(storyId)}
           everPublished={published.version !== null}
           delta={published.delta}
@@ -295,6 +388,18 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, me, ap
                 setDuplicating(false)
                 setConfirmingDuplicateFor(null)
               })
+            }}
+          />
+        ) : null}
+
+        {confirmingPublish ? (
+          <PublishDialog
+            gaps={gaps}
+            locales={locales}
+            busy={publish.publishing}
+            onCancel={() => setConfirmingPublish(false)}
+            onConfirm={() => {
+              void publish.publish().then(() => setConfirmingPublish(false))
             }}
           />
         ) : null}
@@ -503,8 +608,13 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, me, ap
               className={`stage__frame ${readOnly ? 'is-viewing' : ''}`}
               style={{ width: VIEWPORTS[viewport] }}
             >
-              {current && routed && current.previewUrl ? (
-                <iframe key={current.id} ref={frame} title="Preview" src={current.previewUrl} />
+              {current && routed && previewUrl ? (
+                <iframe
+                  key={`${current.id}:${locale}`}
+                  ref={frame}
+                  title="Preview"
+                  src={previewUrl}
+                />
               ) : current && globalPreview ? (
                 <iframe key={current.id} ref={frame} title="Preview" src={globalPreview} />
               ) : current && !routed ? (

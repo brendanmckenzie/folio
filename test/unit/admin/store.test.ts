@@ -515,6 +515,114 @@ describe('admin sync store', () => {
     })
   })
 
+  /**
+   * `localisation.md`'s "two locales, one document, no conflict" and "each
+   * editor's Cmd+Z reverts only their own locale".
+   *
+   * The store learns nothing about locales: a locale-scoped `set` is an ordinary
+   * mutation, so it inherits the optimistic apply, the coalescing window, the
+   * undo stack and the wire discipline for free. These tests exist to pin that
+   * it really is free.
+   */
+  describe('locale-scoped transactions', () => {
+    const setIn = (uid: string, field: string, value: string, locale: string): Mutation => ({
+      t: 'set',
+      uid,
+      field,
+      value,
+      locale,
+    })
+
+    const translated = (store: StoryStore, uid: string, field: string, locale: string) =>
+      store.getSnapshot().doc?.bloks[uid]?.i18n?.[locale]?.[field]
+
+    it('applies a translation locally and leaves the source alone', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.store.tx([setIn('hero', 'heading', 'Bonjour', 'fr')])
+
+      expect(translated(h.store, 'hero', 'heading', 'fr')).toBe('Bonjour')
+      expect(value(h.store, 'hero', 'heading')).toBe('Hi')
+      // The locale rides on the wire unchanged, so the object writes the same key.
+      expect(h.last().txs()[0]?.mutations).toEqual([setIn('hero', 'heading', 'Bonjour', 'fr')])
+    })
+
+    it('lets two locales edit the same field with neither overwriting the other', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.store.tx([setIn('hero', 'heading', 'Bonjour', 'fr')])
+      // The other translator's delta arrives from the object.
+      const ours = h.last().txs()[0]!
+      h.last().emit({
+        type: 'delta',
+        syncId: 4,
+        txId: ours.txId,
+        actor: h.store.actor,
+        mutations: ours.mutations,
+      })
+      h.last().emit({
+        type: 'delta',
+        syncId: 5,
+        txId: 'tx-de',
+        actor: 'someone-else',
+        mutations: [setIn('hero', 'heading', 'Hallo', 'de')],
+      })
+
+      expect(translated(h.store, 'hero', 'heading', 'fr')).toBe('Bonjour')
+      expect(translated(h.store, 'hero', 'heading', 'de')).toBe('Hallo')
+      expect(value(h.store, 'hero', 'heading')).toBe('Hi')
+    })
+
+    it('undoes only its own locale', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.store.tx([setIn('hero', 'heading', 'Bonjour', 'fr')])
+      h.store.tx([setIn('hero', 'heading', 'Hallo', 'de')])
+      // Two entries, not one: different fields as far as coalescing is concerned
+      // would be wrong here — it is the same field, so this pins that a locale
+      // change is not coalesced into the previous locale's edit.
+      h.store.undo()
+
+      expect(translated(h.store, 'hero', 'heading', 'de')).toBeNull()
+      expect(translated(h.store, 'hero', 'heading', 'fr')).toBe('Bonjour')
+      expect(value(h.store, 'hero', 'heading')).toBe('Hi')
+    })
+
+    it('undoes a source-locale edit without touching a translation', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.store.tx([setIn('hero', 'heading', 'Bonjour', 'fr')])
+      h.store.tx([set('hero', 'heading', 'Edited')])
+      h.store.undo()
+
+      expect(value(h.store, 'hero', 'heading')).toBe('Hi')
+      expect(translated(h.store, 'hero', 'heading', 'fr')).toBe('Bonjour')
+    })
+
+    /**
+     * The coalescing window keys on `(uid, field)` and deliberately not on the
+     * locale: a translator typing into the French heading produces one undo step
+     * per run of keystrokes, which is the behaviour every other field already has.
+     * Switching locale mid-run is not a case worth a second key — the switch
+     * reloads the preview, which takes longer than the window.
+     */
+    it('coalesces a run of keystrokes in one locale into one undo step', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.store.tx([setIn('hero', 'heading', 'B', 'fr')])
+      h.store.tx([setIn('hero', 'heading', 'Bo', 'fr')])
+      h.store.tx([setIn('hero', 'heading', 'Bon', 'fr')])
+      h.store.undo()
+
+      expect(translated(h.store, 'hero', 'heading', 'fr')).toBeNull()
+    })
+  })
+
   describe('selection', () => {
     it('announces a change once and ignores a repeat', () => {
       const h = setup()

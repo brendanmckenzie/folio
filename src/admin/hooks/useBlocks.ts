@@ -161,8 +161,14 @@ export interface Blocks {
   /**
    * Writes a field on `uid`. The block is named by the caller and never read
    * from the selection: a write can be started and land much later.
+   *
+   * `locale` is the one door every translation goes through
+   * (`../../../docs/specs/content-model/localisation.md` phase 3): absent means
+   * the source locale, exactly as the mutation does. Putting it here rather than
+   * on each input is what makes every field kind — text, richtext, asset, link —
+   * translatable with no per-input work.
    */
-  setField: (uid: string, field: string, value: Json) => void
+  setField: (uid: string, field: string, value: Json, locale?: string) => void
   /** Clones `uid`'s whole subtree with fresh uids, immediately after the
    * original in the same slot, as one transaction (duplicate-and-paste.md). */
   duplicate: (uid: string) => void
@@ -260,8 +266,14 @@ export function useBlocks(
    * been deleted is a no-op in `applyAll`, not a write to its replacement.
    */
   const setField = useCallback(
-    (uid: string, field: string, value: Json) => {
-      store.tx([{ t: 'set', uid, field, value }])
+    (uid: string, field: string, value: Json, locale?: string) => {
+      // The locale key is omitted rather than set to undefined for a source-locale
+      // write, so the frame on the wire is byte-identical to a pre-v3 one.
+      store.tx([
+        locale === undefined
+          ? { t: 'set', uid, field, value }
+          : { t: 'set', uid, field, value, locale },
+      ])
     },
     [store],
   )

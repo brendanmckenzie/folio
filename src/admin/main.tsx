@@ -1,6 +1,7 @@
 import './admin.css'
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import type { LocaleConfig } from '../core/locales'
 import { type DocumentType, indexManifest, type Manifest, type SchemaIndex } from '../core/schema'
 import { onUnauthorized, signInUrl } from './api'
 import { Editor } from './Editor'
@@ -29,6 +30,10 @@ interface Loaded {
   types: DocumentType[]
   /** `FolioConfig.globals` (`content-model/globals.md`). */
   globals: string[]
+  /** `FolioConfig.locales` (`content-model/localisation.md`). Undefined for a
+   * single-locale site, which is what makes every locale affordance absent
+   * rather than present and trivial. */
+  locales?: LocaleConfig
 }
 
 function App({ boot }: { boot: Boot }) {
@@ -59,6 +64,7 @@ function App({ boot }: { boot: Boot }) {
           schema: indexManifest(manifest),
           types: manifest.types ?? [],
           globals: manifest.globals ?? [],
+          ...(manifest.locales ? { locales: manifest.locales } : {}),
         })
         setMe(who)
       })
@@ -110,6 +116,7 @@ function App({ boot }: { boot: Boot }) {
       schema={loaded.schema}
       types={loaded.types}
       globals={loaded.globals}
+      locales={loaded.locales}
       me={me}
       apiBase={boot.apiBase}
     />
