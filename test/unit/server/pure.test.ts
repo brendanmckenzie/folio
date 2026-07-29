@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   imageSize,
   MAX_TRANSFORM_DIMENSION,
@@ -9,7 +9,14 @@ import {
   sniffContentType,
 } from '../../../src/server/assets'
 import { serializeJson } from '../../../src/server/Document'
+import {
+  createHookRunner,
+  type FolioHooks,
+  type HookRunnerCtx,
+  validateHooks,
+} from '../../../src/server/hooks'
 import { normalisePath, redirectStatements } from '../../../src/server/redirects'
+import { alarmHookCtx } from '../../../src/server/runtime'
 
 // ---------------------------------------------------------------------------
 // imageSize
@@ -786,5 +793,334 @@ describe('redirectStatements', () => {
     redirectStatements(db, { from: 'a', to: 'b', storyId: null, status: 302, source: 'manual' })
     expect(calls[2]?.args?.[2]).toBe(302)
     expect(calls[2]?.args?.[3]).toBe('manual')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// createHookRunner / validateHooks (publish-hooks.md)
+// ---------------------------------------------------------------------------
+
+interface Env {
+  marker: 'env'
+}
+
+const STORY = {
+  id: 'sty_x',
+  parentId: null,
+  slug: 'x',
+  path: 'x',
+  ord: 'a0',
+  title: 'X',
+  publishedAt: null,
+  unpublishedAt: null,
+  updatedAt: 0,
+  draftSyncId: 0,
+  draftUpdatedAt: null,
+  publishedSyncId: 0,
+  state: 'draft' as const,
+  hasUnpublishedChanges: false,
+}
+
+const DOC = { root: 'blk_x', bloks: {} }
+
+const VERSION = {
+  id: 'ver_x',
+  storyId: 'sty_x',
+  kind: 'publish' as const,
+  label: null,
+  title: 'X',
+  actor: null,
+  createdAt: 0,
+}
+
+const PUBLISHED_EXTRA = { story: STORY, doc: DOC, version: VERSION, publishedAt: 1, actor: null }
+
+/** A `waitUntil` that records every task handed to it instead of running it on
+ * a platform timer, so a test can assert both whether the runner called it
+ * and, separately, drain the tasks itself. */
+function fakeCtx(): { ctx: HookRunnerCtx<Env>; tasks: Promise<unknown>[] } {
+  const tasks: Promise<unknown>[] = []
+  const ctx: HookRunnerCtx<Env> = {
+    env: { marker: 'env' },
+    waitUntil: (p) => {
+      tasks.push(p)
+    },
+  }
+  return { ctx, tasks }
+}
+
+describe('createHookRunner', () => {
+  it('fires the hook exactly once, with env and waitUntil injected alongside the caller-supplied fields', async () => {
+    const calls: unknown[] = []
+    const hooks: FolioHooks<Env> = {
+      created: (e) => {
+        calls.push(e)
+      },
+    }
+    const { ctx, tasks } = fakeCtx()
+    const runner = createHookRunner(hooks, ctx)
+
+    await runner.run('created', { story: STORY, actor: 'alice' })
+    await Promise.all(tasks)
+
+    expect(calls).toEqual([
+      { story: STORY, actor: 'alice', env: ctx.env, waitUntil: ctx.waitUntil },
+    ])
+  })
+
+  it('rides waitUntil by default: run() does not wait for the hook to finish', async () => {
+    let resolveHook: () => void = () => {}
+    const hookDone = new Promise<void>((r) => {
+      resolveHook = r
+    })
+    let hookStarted = false
+    const hooks: FolioHooks<Env> = {
+      published: async () => {
+        hookStarted = true
+        await hookDone
+      },
+    }
+    const { ctx, tasks } = fakeCtx()
+    const runner = createHookRunner(hooks, ctx)
+
+    await runner.run('published', PUBLISHED_EXTRA)
+
+    expect(hookStarted).toBe(true)
+    expect(tasks).toHaveLength(1) // handed to waitUntil, not awaited by run() itself
+    resolveHook()
+    await tasks[0]
+  })
+
+  it('await: ["published"] blocks run() until the hook settles, and still swallows a throw', async () => {
+    const order: string[] = []
+    const hooks: FolioHooks<Env> = {
+      await: ['published'],
+      published: async () => {
+        order.push('hook-start')
+        await Promise.resolve()
+        order.push('hook-end')
+        throw new Error('boom')
+      },
+    }
+    const { ctx, tasks } = fakeCtx()
+    const runner = createHookRunner(hooks, ctx)
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    order.push('before-run')
+    await runner.run('published', PUBLISHED_EXTRA)
+    order.push('after-run')
+
+    expect(order).toEqual(['before-run', 'hook-start', 'hook-end', 'after-run'])
+    expect(tasks).toHaveLength(0) // awaited events never touch waitUntil
+    expect(logged.mock.calls[0]?.[0]).toBe('folio: hook published failed')
+    logged.mockRestore()
+  })
+
+  it('a throwing, non-awaited hook is caught and logged with the event name; run() never rejects', async () => {
+    const hooks: FolioHooks<Env> = {
+      deleted: () => {
+        throw new Error('boom')
+      },
+    }
+    const { ctx, tasks } = fakeCtx()
+    const runner = createHookRunner(hooks, ctx)
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await expect(
+      runner.run('deleted', { ids: ['sty_a'], paths: ['a'], actor: null }),
+    ).resolves.toBeUndefined()
+    await Promise.all(tasks)
+
+    expect(logged.mock.calls[0]?.[0]).toBe('folio: hook deleted failed')
+    logged.mockRestore()
+  })
+
+  it('costs nothing when a hook is configured, but not for this event', async () => {
+    const hooks: FolioHooks<Env> = { published: () => {} }
+    const { ctx, tasks } = fakeCtx()
+    const runner = createHookRunner(hooks, ctx)
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    await runner.run('deleted', { ids: [], paths: [], actor: null })
+
+    expect(tasks).toHaveLength(0)
+    expect(logged).not.toHaveBeenCalled()
+    logged.mockRestore()
+  })
+
+  it('costs nothing when hooks is undefined and no internal consumer is registered either', async () => {
+    const { ctx, tasks } = fakeCtx()
+    const runner = createHookRunner(undefined, ctx)
+
+    await runner.run('created', { story: STORY, actor: null })
+
+    expect(tasks).toHaveLength(0)
+  })
+
+  // The seam ../editing/live-collaboration.md's space-channel broadcast hangs
+  // its own entry off (decision 5): an internal consumer is a plain
+  // FolioHooks<Env> literal, pushed onto the same list a host hook is looked
+  // up from, and always runs first.
+  describe('internal hooks (the spec 16 seam)', () => {
+    it('run before the host hook for the same event', async () => {
+      const order: string[] = []
+      const internal: FolioHooks<Env>[] = [
+        {
+          published: () => {
+            order.push('internal-1')
+          },
+        },
+        {
+          published: () => {
+            order.push('internal-2')
+          },
+        },
+      ]
+      const hooks: FolioHooks<Env> = {
+        await: ['published'],
+        published: () => {
+          order.push('host')
+        },
+      }
+      const { ctx } = fakeCtx()
+      const runner = createHookRunner(hooks, ctx, internal)
+
+      await runner.run('published', PUBLISHED_EXTRA)
+
+      expect(order).toEqual(['internal-1', 'internal-2', 'host'])
+    })
+
+    it('fire even when the host configures no hook at all for that event', async () => {
+      const calls: string[] = []
+      const internal: FolioHooks<Env>[] = [
+        {
+          deleted: () => {
+            calls.push('internal')
+          },
+        },
+      ]
+      const { ctx, tasks } = fakeCtx()
+      const runner = createHookRunner(undefined, ctx, internal)
+
+      await runner.run('deleted', { ids: [], paths: [], actor: null })
+      await Promise.all(tasks)
+
+      expect(calls).toEqual(['internal'])
+    })
+
+    it("an internal hook's failure does not stop the host hook from running", async () => {
+      const calls: string[] = []
+      const internal: FolioHooks<Env>[] = [
+        {
+          published: () => {
+            throw new Error('internal boom')
+          },
+        },
+      ]
+      const hooks: FolioHooks<Env> = {
+        await: ['published'],
+        published: () => {
+          calls.push('host')
+        },
+      }
+      const { ctx } = fakeCtx()
+      const runner = createHookRunner(hooks, ctx, internal)
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      await runner.run('published', PUBLISHED_EXTRA)
+
+      expect(calls).toEqual(['host'])
+      expect(logged).toHaveBeenCalledTimes(1)
+      logged.mockRestore()
+    })
+  })
+})
+
+// A scheduled publish (a Durable Object alarm, "next on the roadmap" per
+// publish.ts's own header) has no ExecutionContext to take a waitUntil from.
+// alarmHookCtx is the fallback publishDeps builds instead (runtime.ts) — the
+// same runner, fired the same way, just with nothing native catching an
+// unawaited hook's rejection for it.
+describe('alarmHookCtx', () => {
+  it('runs a hook exactly like an HTTP call site would, with the same env', async () => {
+    const calls: unknown[] = []
+    const hooks: FolioHooks<Env> = {
+      created: (e) => {
+        calls.push(e)
+      },
+    }
+    const ctx = alarmHookCtx<Env>({ marker: 'env' })
+    const runner = createHookRunner(hooks, ctx)
+
+    await runner.run('created', { story: STORY, actor: null })
+
+    expect(calls).toEqual([
+      { story: STORY, actor: null, env: { marker: 'env' }, waitUntil: ctx.waitUntil },
+    ])
+  })
+
+  it("catches an unawaited hook's rejection itself, so it cannot escape into the alarm handler", async () => {
+    const hooks: FolioHooks<Env> = {
+      created: () => {
+        throw new Error('boom from an alarm-fired hook')
+      },
+    }
+    const ctx = alarmHookCtx<Env>({ marker: 'env' })
+    const runner = createHookRunner(hooks, ctx)
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    // The fallback waitUntil never receives the task here (run() only awaits
+    // it when the event is listed), so this proves the whole chain — runner
+    // catch, then the fallback's own catch — never surfaces as a rejection.
+    await expect(runner.run('created', { story: STORY, actor: null })).resolves.toBeUndefined()
+    await new Promise((r) => setTimeout(r, 0)) // let the fallback's own catch settle
+
+    expect(logged.mock.calls.some((c) => c[0] === 'folio: hook created failed')).toBe(true)
+    logged.mockRestore()
+  })
+
+  it('still awaits a listed event under the fallback', async () => {
+    const order: string[] = []
+    const hooks: FolioHooks<Env> = {
+      await: ['created'],
+      created: async () => {
+        order.push('start')
+        await Promise.resolve()
+        order.push('end')
+      },
+    }
+    const ctx = alarmHookCtx<Env>({ marker: 'env' })
+    const runner = createHookRunner(hooks, ctx)
+
+    order.push('before')
+    await runner.run('created', { story: STORY, actor: null })
+    order.push('after')
+
+    expect(order).toEqual(['before', 'start', 'end', 'after'])
+  })
+})
+
+describe('validateHooks', () => {
+  it('does nothing when hooks is undefined', () => {
+    expect(() => validateHooks(undefined)).not.toThrow()
+  })
+
+  it('accepts every real event, plus await', () => {
+    const hooks: FolioHooks<Env> = {
+      published: () => {},
+      unpublished: () => {},
+      pathsChanged: () => {},
+      created: () => {},
+      deleted: () => {},
+      checkpointed: () => {},
+      await: ['published'],
+    }
+    expect(() => validateHooks(hooks)).not.toThrow()
+  })
+
+  it('throws naming an unknown key and listing the valid ones', () => {
+    expect(() => validateHooks({ publish: () => {} } as unknown as FolioHooks<Env>)).toThrow(
+      /unknown hook "publish"/,
+    )
   })
 })

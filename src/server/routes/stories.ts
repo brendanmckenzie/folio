@@ -2,9 +2,12 @@
  * The content tree: CRUD over stories, the draft a `reference` field resolves
  * against, and publishing.
  */
+import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { cloneDoc } from '../../core/clone'
+import type { StoryMeta } from '../../core/story'
 import { rethrow } from '../errors'
+import type { HookRunnerCtx } from '../hooks'
 import { loadStory } from '../middleware'
 import { publish, unpublish } from '../publish'
 import type { FolioRuntime } from '../runtime'
@@ -13,7 +16,7 @@ import {
   deleteStoryStatement,
   duplicateStory,
   storyTree,
-  updateStory,
+  updateStoryStatement,
 } from '../stories'
 import type { FolioEnv } from '../types'
 import {
@@ -27,6 +30,13 @@ import {
 } from '../validate'
 import { deleteVersionsStatement } from '../versions'
 
+/** `c.env` and a `waitUntil` built from `c.executionCtx`, the two things
+ * every hook-firing route needs alongside `rt.publishDeps`
+ * (`../../../docs/specs/platform/publish-hooks.md` decision 3). */
+function hookCtx<Env>(c: Context<FolioEnv<Env>>): HookRunnerCtx {
+  return { env: c.env, waitUntil: (p) => c.executionCtx.waitUntil(p) }
+}
+
 export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
 
@@ -34,23 +44,48 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
   app.post('/stories', async (c) => {
     const body = await parseBody(c.req, StoryCreateBody)
+    const bindings = c.var.bindings()
+
+    let story: StoryMeta
     try {
-      return c.json(rt.withUrls(await createStory(c.var.bindings().db, body)))
+      story = await createStory(bindings.db, body)
     } catch (e) {
       // `Unknown parent` is the client's mistake; a path collision is a
       // conflict; a D1 failure is nobody's business but the log's.
       rethrow(e)
     }
+
+    const actor = actorHeader(c.req.header('x-folio-actor'))
+    await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('created', { story, actor })
+
+    return c.json(rt.withUrls(story))
   })
 
   app.patch('/stories/:id', async (c) => {
     const id = idParam('id', c.req.param('id'))
     const body = await parseBody(c.req, StoryPatchBody)
+    const bindings = c.var.bindings()
+
+    let next: StoryMeta
+    let changes: { id: string; from: string; to: string }[]
     try {
-      return c.json(rt.withUrls(await updateStory(c.var.bindings().db, id, body)))
+      const result = await updateStoryStatement(bindings.db, id, body)
+      next = result.next
+      changes = result.changes
+      if (result.statements.length) await bindings.db.batch(result.statements)
     } catch (e) {
       rethrow(e)
     }
+
+    // Nothing renamed or moved (a plain title edit, say) has no old path for
+    // a host to purge, so `pathsChanged` stays silent rather than firing an
+    // empty `changes` array.
+    if (changes.length) {
+      const actor = actorHeader(c.req.header('x-folio-actor'))
+      await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('pathsChanged', { changes, actor })
+    }
+
+    return c.json(rt.withUrls(next))
   })
 
   /**
@@ -78,6 +113,12 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     } catch (e) {
       rethrow(e)
     }
+
+    // Fired the moment the row exists, same as a plain create: the D1 insert
+    // already committed, and a story with no draft seeded yet is a state this
+    // system already understands (a page someone created and never filled in).
+    const actor = actorHeader(c.req.header('x-folio-actor'))
+    await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('created', { story: created, actor })
 
     const draft = await rt.draftFor(bindings, source)
     await rt.stub(bindings, created.id).getOrInit(cloneDoc(draft))
@@ -136,6 +177,16 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           .catch(() => {}),
       ),
     )
+
+    // Fires even if a purge above failed: the rows are gone regardless, and a
+    // host's cache must be purged regardless (`publish-hooks.md`'s edge case
+    // "partial success in the delete path"). The purge failure is swallowed
+    // above, as it already was before this hook existed.
+    const actor = actorHeader(c.req.header('x-folio-actor'))
+    await rt
+      .publishDeps(bindings, hookCtx(c))
+      .hooks?.run('deleted', { ids: found.ids, paths: found.paths, actor })
+
     return c.json({ deleted: found.ids })
   })
 
@@ -150,7 +201,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const actor = actorHeader(c.req.header('x-folio-actor'))
 
     const { publishedAt, publishedSyncId, version } = await publish(
-      rt.publishDeps(c.var.bindings()),
+      rt.publishDeps(c.var.bindings(), hookCtx(c)),
       id,
       actor,
     )
@@ -164,7 +215,11 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.post('/story/:id/unpublish', loadStory<Env>(), async (c) => {
     const actor = actorHeader(c.req.header('x-folio-actor'))
-    const { unpublishedAt } = await unpublish(rt.publishDeps(c.var.bindings()), c.var.story, actor)
+    const { unpublishedAt } = await unpublish(
+      rt.publishDeps(c.var.bindings(), hookCtx(c)),
+      c.var.story,
+      actor,
+    )
     return c.json({ ok: true, unpublishedAt })
   })
 
