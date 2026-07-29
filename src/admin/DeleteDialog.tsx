@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { descendants, type StoryMeta, type StoryNode } from '../core/story'
+import type { DocumentUsage } from './hooks/useDocumentUsage'
 
 export interface DeleteConfirmation {
   /** The path about to stop existing, `/`-prefixed. */
@@ -9,6 +10,13 @@ export interface DeleteConfirmation {
   /** Descendants beyond the story itself, so the confirmation can say what
    * else goes with it. */
   descendantCount: number
+  /**
+   * True for an unrouted document — a record or a singleton
+   * (`../../../docs/specs/content-model/data-documents.md`). There is no path to
+   * vacate, so there is no redirect to offer and nothing beneath it to warn
+   * about; what matters instead is what *points* at it.
+   */
+  unrouted: boolean
 }
 
 /**
@@ -23,11 +31,27 @@ export function deleteConfirmation(
   rows: readonly StoryMeta[],
 ): DeleteConfirmation {
   const parent = story.parentId ? rows.find((r) => r.id === story.parentId) : undefined
+  const unrouted = story.path === null
   return {
-    label: `/${story.path}`,
-    parentLabel: parent ? `/${parent.path}` : '/',
-    descendantCount: descendants(rows, story.id).length - 1,
+    // A record's own title, since it has no path to name it by.
+    label: unrouted ? story.title : `/${story.path}`,
+    parentLabel: parent?.path ? `/${parent.path}` : '/',
+    descendantCount: unrouted ? 0 : descendants(rows, story.id).length - 1,
+    unrouted,
   }
+}
+
+/**
+ * The sentence the usage warning leads with (decision 4). Pure and exported so
+ * the wording and the singular/plural are tested without mounting.
+ *
+ * Null when there is nothing to say — nothing points at it, or the count could
+ * not be fetched. A dialog that says "used on 0 published pages" is noise; one
+ * that says it because a request failed is worse than noise.
+ */
+export function usageSentence(usage: DocumentUsage | null): string | null {
+  if (!usage || usage.total === 0) return null
+  return `Used on ${usage.total} published ${usage.total === 1 ? 'document' : 'documents'}.`
 }
 
 interface Props {
@@ -36,6 +60,9 @@ interface Props {
    * parent and descendant count from it. */
   tree: readonly StoryMeta[]
   busy: boolean
+  /** What points at this document, from `GET {base}/documents/:id/usage`. Null
+   * while it is in flight, and null if the request failed. */
+  usage?: DocumentUsage | null
   onCancel: () => void
   /** `redirect` is the checkbox's value at the moment of confirming. */
   onConfirm: (redirect: boolean) => void
@@ -45,13 +72,20 @@ interface Props {
  * redirects.md's architecture decision 4: deleting a page offers a redirect
  * to its parent, checked by default — unwanted, the cost is deleting one row;
  * unchecked, the escape hatch for a page that should genuinely 404.
+ *
+ * data-documents.md's architecture decision 4 adds the other half: a document
+ * something else points at **warns with a count and proceeds**. Blocking would
+ * mean maintaining referential integrity across draft documents nobody can see,
+ * and a broken reference already degrades safely — `resolveReference` returns null
+ * and the block renders its empty state.
  */
-export function DeleteDialog({ story, tree, busy, onCancel, onConfirm }: Props) {
-  const { label, parentLabel, descendantCount } = deleteConfirmation(story, tree)
+export function DeleteDialog({ story, tree, busy, usage, onCancel, onConfirm }: Props) {
+  const { label, parentLabel, descendantCount, unrouted } = deleteConfirmation(story, tree)
   const [redirect, setRedirect] = useState(true)
+  const sentence = usageSentence(usage ?? null)
 
   return (
-    <div className="delete-story" role="dialog" aria-label="Delete page">
+    <div className="delete-story" role="dialog" aria-label="Delete document">
       {/* Clicking the backdrop cancels, matching the unpublish confirmation. */}
       <button
         type="button"
@@ -71,14 +105,40 @@ export function DeleteDialog({ story, tree, busy, onCancel, onConfirm }: Props) 
           This cannot be undone.
         </p>
 
-        <label className="delete-story__redirect">
-          <input
-            type="checkbox"
-            checked={redirect}
-            onChange={(e) => setRedirect(e.target.checked)}
-          />
-          Redirect <code>{label}</code> to <code>{parentLabel}</code>
-        </label>
+        {sentence ? (
+          <div className="delete-story__usage">
+            <p className="delete-story__usage-lead">{sentence}</p>
+            <ul>
+              {usage?.published.slice(0, 8).map((ref) => (
+                <li key={`${ref.id}:${ref.kind}`}>
+                  {ref.url ? <code>{ref.url}</code> : <span>{ref.title}</span>}
+                  <span className="delete-story__usage-kind">{ref.kind}</span>
+                </li>
+              ))}
+            </ul>
+            {usage && usage.published.length > 8 ? (
+              <p className="delete-story__usage-more">…and {usage.published.length - 8} more.</p>
+            ) : null}
+            {/* The caveat, stated rather than implied: `content_refs` is written
+                at publish, so a draft that references this is not counted here. */}
+            <p className="delete-story__usage-note">
+              Published references only. A draft that points here is not counted. Those blocks will
+              render their empty state.
+            </p>
+          </div>
+        ) : null}
+
+        {/* No path to vacate means no redirect to offer. */}
+        {unrouted ? null : (
+          <label className="delete-story__redirect">
+            <input
+              type="checkbox"
+              checked={redirect}
+              onChange={(e) => setRedirect(e.target.checked)}
+            />
+            Redirect <code>{label}</code> to <code>{parentLabel}</code>
+          </label>
+        )}
 
         <div className="delete-story__actions">
           <button type="button" onClick={onCancel} disabled={busy}>
@@ -87,7 +147,7 @@ export function DeleteDialog({ story, tree, busy, onCancel, onConfirm }: Props) 
           <button
             type="button"
             className="btn-danger"
-            onClick={() => onConfirm(redirect)}
+            onClick={() => onConfirm(unrouted ? false : redirect)}
             disabled={busy}
           >
             {busy ? 'Deleting…' : 'Delete'}

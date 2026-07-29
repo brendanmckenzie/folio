@@ -1871,13 +1871,54 @@ button.tree__menu-heading {
 
 /* --------------------------------------------------------------- data ---- */
 
-/* document-types.md's Data rail: records and singletons, which by construction
-   are not in the page tree. Deliberately thin — data-documents.md replaces this
-   list with a real table. */
+/* data-documents.md decision 2: the Data rail is an index of types with counts,
+   and selecting one opens a real table in the stage. */
 .data {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
+  padding: 0.5rem;
+}
+.data__types {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.data__type {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+}
+.data__type:hover {
+  background: #f0f2f5;
+}
+.data__type.is-current {
+  background: #e6f2ff;
+  border-color: #b8dcff;
+}
+.data__type-label {
+  font-weight: 550;
+}
+.data__type-count {
+  min-width: 1.6rem;
+  padding: 0 0.35rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.data__type-kind {
+  color: var(--muted);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 .data__head {
   display: flex;
@@ -1905,9 +1946,12 @@ button.tree__menu-heading {
   display: flex;
   align-items: center;
   gap: 0.4rem;
+  width: 100%;
   padding: 0.35rem 0.45rem;
   border: 1px solid transparent;
   border-radius: 6px;
+  background: transparent;
+  text-align: left;
   cursor: pointer;
 }
 .data__row:hover {
@@ -1939,21 +1983,292 @@ button.tree__menu-heading {
   font-size: 0.75rem;
 }
 
-/* An unrouted document has no page to show in the stage. */
-.stage__nopreview {
+/* Form mode (data-documents.md checkpoint 3): a record is edited full width with
+   no preview, so the stage is gone and the two rails take the space. The
+   inspector is the form, so it gets the room rather than staying 300px. */
+.editor__body.is-form {
+  grid-template-columns: 280px minmax(0, 1fr);
+}
+.editor__body.is-form .inspector {
+  padding-right: max(0px, calc((100% - 46rem) / 2));
+  padding-left: max(0px, calc((100% - 46rem) / 2));
+}
+
+/* ---------------------------------------------------------- data table ---- */
+
+/* data-documents.md decision 2: one type's documents, with columns from its root
+   block's `indexed` fields. Sorted, searched and paginated client-side over the
+   list GET /folio/documents already returned in full. */
+.stage--list {
+  align-items: stretch;
+  padding: 0;
+}
+.datatable {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  background: var(--panel);
+}
+.datatable__head {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  height: 100%;
-  padding: 2rem;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+.datatable__head h2 {
+  margin: 0;
+  font-size: 0.9375rem;
+}
+.datatable__count {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.datatable__search {
+  flex: 1;
+  max-width: 22rem;
+  margin-left: auto;
+}
+.datatable__new {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem;
+  background: #f6f8fb;
+  border-bottom: 1px solid var(--line);
+}
+.datatable__new input {
+  flex: 1;
+  max-width: 22rem;
+}
+.datatable__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.datatable__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+.datatable__table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+.datatable__table th button {
+  width: 100%;
+  padding: 0.45rem 0.6rem;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  letter-spacing: 0.06em;
+  text-align: left;
+  text-transform: uppercase;
+}
+.datatable__table th button:hover {
+  color: var(--text);
+  background: #f0f2f5;
+}
+.datatable__table td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid #eef0f3;
+  vertical-align: middle;
+}
+.datatable__table tr.is-current td {
+  background: #e6f2ff;
+}
+.datatable__open {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 550;
+  text-align: left;
+}
+.datatable__open:hover {
+  text-decoration: underline;
+}
+.datatable__blank,
+.datatable__live {
+  color: var(--muted);
+}
+.datatable__actions-head {
+  width: 4.5rem;
+}
+.datatable__actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.datatable__actions button {
+  padding: 0.1rem 0.35rem;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+}
+.datatable__actions button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--line);
+}
+.datatable__empty {
+  padding: 1.5rem 0.6rem;
   color: var(--muted);
   text-align: center;
 }
-.stage__nopreview p {
-  max-width: 34rem;
+.datatable__foot {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.datatable__pager {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.datatable__pager button {
+  padding: 0.15rem 0.45rem;
+  font-size: 0.75rem;
+}
+.datatable__note {
+  margin-left: auto;
+  text-align: right;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------- references ---- */
+
+/* data-documents.md decision 3: a hand-picked, ordered list. Cards are keyed by
+   story id in the component, not by index — MultiAssetInput's index keys are the
+   bug this must not reuse. */
+.refs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.refs__list {
   margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.refs__card {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.4rem;
+  background: #f8f9fb;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.refs__card--missing {
+  background: #fdf3f3;
+  border-color: #f2c0c0;
+}
+.refs__ord {
+  min-width: 1.1rem;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+.refs__meta {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  flex: 1;
+}
+.refs__title {
+  overflow: hidden;
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.refs__where {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.refs__actions {
+  display: flex;
+  gap: 2px;
+}
+.refs__actions button {
+  padding: 0.05rem 0.3rem;
+  border-color: transparent;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.refs__actions button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--line);
+}
+.refs__remove:hover:not(:disabled) {
+  color: var(--danger);
+}
+.refs__empty {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+.refs__warn {
+  margin: 0;
+  color: #9a6a20;
+  font-size: 0.75rem;
+}
+
+/* ------------------------------------------------------- delete usage ---- */
+
+/* data-documents.md decision 4: warns with a count, and proceeds. */
+.delete-story__usage {
+  padding: 0.5rem 0.6rem;
+  background: #fffaf0;
+  border: 1px solid #f0dcb0;
+  border-radius: 6px;
+  font-size: 0.8125rem;
+}
+.delete-story__usage-lead {
+  margin: 0 0 0.35rem;
+  font-weight: 600;
+}
+.delete-story__usage ul {
+  margin: 0;
+  padding: 0 0 0 1rem;
+}
+.delete-story__usage li {
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+}
+.delete-story__usage-kind {
+  color: var(--muted);
+  font-size: 0.6875rem;
+}
+.delete-story__usage-more,
+.delete-story__usage-note {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
 }
 
 /* ------------------------------------------------------------- access ---- */
