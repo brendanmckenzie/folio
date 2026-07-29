@@ -755,6 +755,104 @@ describe('admin sync store', () => {
     })
   })
 
+  /**
+   * `live-collaboration.md` decision 5: last write still wins, and this is what
+   * makes it **visible** rather than silent. Through the existing notice channel,
+   * not a second one.
+   */
+  describe('overwrite notice', () => {
+    const remote = (uid: string, field: string, locale?: string) => ({
+      type: 'delta' as const,
+      syncId: 1,
+      txId: 'r1',
+      actor: 'bee',
+      mutations: [
+        { t: 'set' as const, uid, field, value: 'Theirs', ...(locale ? { locale } : {}) },
+      ],
+    })
+
+    it('names the peer who changed the focused field', () => {
+      const h = setup()
+      boot(h, 0, [peer('bee')])
+      h.store.select('hero', 'heading')
+
+      h.last().emit(remote('hero', 'heading'))
+
+      expect(h.store.getSnapshot().notice).toBe('Editor bee changed this field')
+      // The value still lands: nothing here changes last-write-wins.
+      expect(value(h.store, 'hero', 'heading')).toBe('Theirs')
+    })
+
+    it('says nothing about another field, or another blok', () => {
+      const h = setup()
+      boot(h, 0, [peer('bee')])
+      h.store.select('hero', 'heading')
+
+      h.last().emit({ ...remote('hero', 'sub'), syncId: 1 })
+      expect(h.store.getSnapshot().notice).toBeNull()
+      h.last().emit({ ...remote('root', 'heading'), syncId: 2, txId: 'r2' })
+      expect(h.store.getSnapshot().notice).toBeNull()
+    })
+
+    it('says nothing while no field is focused', () => {
+      const h = setup()
+      boot(h, 0, [peer('bee')])
+      h.store.select('hero')
+
+      h.last().emit(remote('hero', 'heading'))
+      expect(h.store.getSnapshot().notice).toBeNull()
+    })
+
+    /** A different locale is a different key, so it is not an overwrite at all. */
+    it('says nothing about a peer editing another locale', () => {
+      const h = setup()
+      boot(h, 0, [peer('bee')])
+      h.store.select('hero', 'heading')
+
+      h.last().emit(remote('hero', 'heading', 'fr'))
+      expect(h.store.getSnapshot().notice).toBeNull()
+
+      // ...and does notice once this client is in that locale too.
+      h.store.setLocale('fr')
+      h.last().emit({ ...remote('hero', 'heading', 'fr'), syncId: 2, txId: 'r2' })
+      expect(h.store.getSnapshot().notice).toBe('Editor bee changed this field')
+    })
+
+    /**
+     * `ours` is the test for "somebody else", not the actor id: under session auth
+     * this store's own `actor` is the advisory pair the object ignores, so an id
+     * comparison would notify about every one of your own keystrokes.
+     */
+    it('never fires for this client’s own echo', () => {
+      const h = setup()
+      boot(h, 0, [peer('bee')])
+      h.store.select('hero', 'heading')
+      h.store.tx([set('hero', 'heading', 'Mine')])
+      const tx = h.last().txs()[0]!
+
+      h.last().emit({
+        type: 'delta',
+        syncId: 1,
+        txId: tx.txId,
+        // The object attributes it to the *session*, which is not this store's
+        // advisory actor — the id comparison this test exists to forbid.
+        actor: 'usr_me',
+        mutations: tx.mutations,
+      })
+
+      expect(h.store.getSnapshot().notice).toBeNull()
+    })
+
+    it('falls back when the peer is not in the list', () => {
+      const h = setup()
+      boot(h)
+      h.store.select('hero', 'heading')
+
+      h.last().emit(remote('hero', 'heading'))
+      expect(h.store.getSnapshot().notice).toBe('Somebody else changed this field')
+    })
+  })
+
   describe('rebase and rejection', () => {
     it('drops a rejected transaction, its history entry and nothing else', () => {
       const h = setup()

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fieldWatchers, visibleEntries, watcherLabel } from '../../../src/admin/Inspector'
 import type { Field } from '../../../src/core/fields'
+import { externalUpdate } from '../../../src/admin/RichTextInput'
 import type { Presence } from '../../../src/core/protocol'
 
 // conditional-fields.md's architecture decision 2: the filter happens once,
@@ -166,5 +167,36 @@ describe('watcherLabel', () => {
     expect(watcherLabel(ann({ uid: 'hero', field: 'heading' }), 'fr')).toBe(
       'Ann is here in the source language',
     )
+  })
+})
+
+/*
+ * editing/live-collaboration.md phase 4, step 1: the richtext hazard. An external
+ * value pushed in with `setContent` resets the caret, so a peer typing in the same
+ * prose field would yank your cursor out of mid-sentence. Deferring while focused
+ * is the honest fix inside a last-write-wins model — it does not pretend to merge.
+ */
+describe('externalUpdate', () => {
+  const A = '{"type":"doc","content":[1]}'
+  const B = '{"type":"doc","content":[2]}'
+
+  it('ignores this editor’s own round trip', () => {
+    expect(externalUpdate(A, A, A, false)).toBe('ignore')
+    // And still ignores it while focused, which is the per-keystroke case.
+    expect(externalUpdate(A, A, A, true)).toBe('ignore')
+  })
+
+  it('ignores a value the surface already shows', () => {
+    expect(externalUpdate(A, B, A, false)).toBe('ignore')
+  })
+
+  it('applies an external value when nobody is typing here', () => {
+    expect(externalUpdate(B, A, A, false)).toBe('apply')
+  })
+
+  /** The acceptance criterion: Ann's caret does not move and her in-progress text
+   * is not replaced while she is in the field. */
+  it('defers an external value while this field has focus', () => {
+    expect(externalUpdate(B, A, A, true)).toBe('defer')
   })
 })
