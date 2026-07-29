@@ -143,6 +143,15 @@ matching documents, and resolution re-checks, because content also arrives from 
 importer or over the API. A wrong-type value resolves to `null` and the block
 renders its empty state.
 
+**The plural is done too: `references()`.** A hand-picked, *ordered* list of
+documents, resolving to one `ResolvedReference` per entry with the same `types`
+filtering. Storyblok's answer here is a multi-option field pointing at stories,
+which is what a "leadership team" or an "authors in this issue" section actually
+needs and which no query can express — a query has no way to say "these three, in
+this order", and the records' own `ord` is one global order rather than a per-usage
+one. An unresolvable entry is dropped rather than rendered as a hole, and the
+editor's input names it as missing instead. `docs/specs/content-model/data-documents.md`.
+
 ### Deferred, and not blocking Phase 2
 
 - Richtext tables and a text colour mark.
@@ -177,6 +186,15 @@ The site has at least five root types: `Page`, `Insights`, `Resources`,
   uniqueness constraint, because there is no other id a second one could be
   created under. The document itself is editable and publishable like any
   other, and refuses to be deleted or duplicated.
+- **Records, as an editing experience: done.** Document types made a person
+  *storable*; this made one usable. `render` is optional (`defineRecord`), so a
+  record root no longer returns `null` from a mandatory function; the Data rail
+  lists each non-page type with a count and opens a real table with columns from
+  the type's `indexed` fields; a record opens as a **form** with no preview iframe,
+  because there is nothing to preview and previewing it inside one of the pages
+  that reference it is ambiguous the moment two of them do so differently. Deleting
+  one warns with a count of the published documents that point at it, from
+  `content_refs`, and proceeds. `docs/specs/content-model/data-documents.md`.
 - **Globals: done.** `Config`-style host-side reading — `folio.global(env,
   'settings')`, and `FolioConfig.globals` for the subset loaded into every
   page's `Resolution` for free, alongside whatever `reference` fields already

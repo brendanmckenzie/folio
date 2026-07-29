@@ -796,6 +796,138 @@ In the admin, referenced documents are fetched when the *set* of referenced ids
 changes — never per render, because the preview re-renders on every keystroke with
 no network in the loop. Selecting a story that is already loaded costs nothing.
 
+## Data documents
+
+Some content is not a page and is not a block: a person, an office, a product
+specification, a partner logo with a link and an alt text. It has fields, it is
+edited by editors, it is referenced from many places, and it has **no layout of its
+own**.
+
+A `kind: 'record'` type (see *Document types* above) makes such a thing storable —
+no route, out of the page tree. Two things make it usable.
+
+### `render` is optional, and `defineRecord` says so
+
+```tsx
+export const officeRecord = defineRecord({
+  name: 'officeRecord',
+  label: 'Office',
+  summary: 'city',
+  fields: {
+    city:    text({ required: true, indexed: true }),
+    address: text(),
+    phone:   text({ indexed: true }),
+  },
+  // No `render`. There is no layout for an office; every page shows one
+  // differently.
+})
+```
+
+`defineRecord` is `defineBlock` with a name that says what the definition is for —
+`render` is optional on every `BlockDef` now, so there is no second definition kind
+and no fork in the schema pipeline. A record root still flows through
+`toSchemaIndex`, `blankBlok`, the manifest and the inspector unchanged.
+
+A block with no renderer draws **nothing at all** on a published page and a neutral
+`folio-unrendered` placeholder in the editor, naming the type. That is the same
+posture as an unknown block type, and the same reason: an editor must be able to
+see that something is there and not renderable, and a published page must never
+show scaffolding.
+
+A record **may** still have a renderer, and then it is what `reference.content`
+renders. A "Person card" is genuinely useful — a block referencing a person drops
+`{person.content}` and gets a consistent card wherever a person appears. A record
+without one gives `content: null`, and blocks read `data`:
+
+```tsx
+render: ({ office }) =>
+  office ? (
+    <section>
+      {office.content ?? <h3>{String(office.data.city)}</h3>}
+    </section>
+  ) : null
+```
+
+`content` is **literally null**, not an element that renders nothing, so that `??`
+means what it looks like it means.
+
+### `references()` — a hand-picked, ordered list
+
+```tsx
+fields: { team: references({ types: ['person'], min: 1, max: 6 }) },
+render: ({ team }) => <ul>{team.map((p) => <li key={p.id}>{p.content}</li>)}</ul>
+```
+
+Stored as an array of story ids in the editor's chosen order. Resolves to
+`ResolvedReference[]` — the same shape `reference` hands back, one per entry — so a
+block author who can render a reference can render a list of them.
+
+**An unresolvable entry is dropped, not left as a hole.** A person since deleted
+should not render an empty card, and `team.map(…)` should need no per-item guard.
+The editor's input shows that entry as "missing (deleted)" with a remove action, so
+the list does not silently get shorter with nobody able to say why. Renderer hides
+the damage; editor surfaces it — the same split `multilink`'s `broken` flag makes.
+
+`types` narrows the picker and is re-checked at resolution, exactly like
+`reference`'s. `max` is enforced by the input; `min` only warns, because `required`
+is declared-and-ignored across the whole field system and this field should not
+invent its own enforcement ahead of the rest. A reorder is one `set` of the whole
+array, so it is one undo step.
+
+Why not a collection with a manual filter: **order**. A query cannot express "these
+three, in this order", and `ord` on the records themselves is one global order, not
+a per-usage one — a leadership section and an "authors in this issue" section want
+different orders over the same people.
+
+### The Data section
+
+The admin's left rail gains a Data tab listing every non-page type with a count.
+Selecting one opens a **table**: the type's title, its root block's `indexed`
+fields, its draft state and when it was last touched. Sortable, searchable, twenty
+rows a page — all client-side, over the list `GET /folio/documents` already
+returned in full.
+
+It lists **documents, not published content**, so a person nobody has published yet
+is in it with a `draft` badge. The consequence is stated in the footer rather than
+hidden: the *columns* come from `content_index`, which is written at publish, so a
+draft document's cells stay blank until it is published.
+
+Selecting a record opens the editor in **form mode**: full width, no preview iframe,
+no viewport switcher, no "View live". There is nothing to preview, and previewing
+the record inside a page that references it is ambiguous the moment two pages
+reference it differently. (A singleton is the exception, via its type's
+`previewPath` — a header genuinely renders in one place; a person does not.)
+Publish, History, undo, presence and multiplayer are unchanged; none of them ever
+depended on there being a preview. A record whose root has a `blocks` field still
+shows the block tree, so "a person with a list of accreditations" works exactly
+like a page's body.
+
+### Deleting one
+
+```
+GET /folio/documents/:id/usage
+→ { published: [{ id, title, path, url, kind }], total, links, references }
+```
+
+The delete confirmation reads "Used on 4 published documents", lists them, and
+**proceeds**. It warns; it does not block. Maintaining referential integrity across
+draft documents nobody can see would be a large feature, and the failure it would
+prevent already degrades safely: a broken reference resolves to nothing and the
+block renders its own empty state.
+
+The count comes from `content_refs`, which is written inside the publish batch, so
+it is **published references only** — and the dialog says so, because a draft
+pointing at the record is genuinely not counted. `total` is distinct documents; a
+page that both links to and references the same target is two rows and one
+document.
+
+Everything else about a record is ordinary. It has a Durable Object, so drafts,
+multiplayer, undo and the activity trail work. It publishes into `published_doc`
+with a retained version, which is why a live page referencing it renders published
+values while a preview renders the draft. It is indexed by the query API, so it is
+queryable. It carries per-locale values for free. The only thing it does not have
+is a URL, and that is the point.
+
 ## Collections
 
 An insights index, a news list, a team grid, a paginated archive and a sitemap are

@@ -189,6 +189,41 @@ as the explicit opt-in for a host that wants the full map. `content_refs` record
 the outbound edges in the same batch, which is what "used by N documents" and, later,
 a cache purge set will read. Spec: `docs/specs/content-model/collections.md`.
 
+**Data documents.** Document types made a person *storable*; this made one usable.
+`BlockDef.render` is now optional and `defineRecord` is the sugar that omits it, so
+a record root no longer returns `null` from a mandatory function — deliberately
+optional on every block rather than on a new definition kind, because the type
+system cannot tell a record root from any other block and a marker to enforce it
+would buy nothing. Absent renders nothing on a published page and a neutral
+`folio-unrendered` note in the editor. A record **may** keep a renderer, and then it
+is what `reference.content` renders; without one, `content` is **literally null** so
+a block's `office.content ?? <own markup>` is not dead code.
+
+`references()` is the plural of `reference`: a hand-picked, ordered array of story
+ids resolving to one `ResolvedReference` each, with the same `types` filtering
+re-checked at resolution. Not a collection with a filter — a query cannot express
+"these three, in this order", and the records' own `ord` is one global order rather
+than a per-usage one. An unresolvable entry is **dropped rather than left as a
+hole**, so a deleted person shortens the list instead of rendering an empty card,
+while the editor's input names it as "missing (deleted)" — renderer hides the
+damage, editor surfaces it. Both ref walks (`referencedIds`,
+`referencedIdsAllLocales`) see both kinds, which is what makes a hand-picked list
+count as a usage.
+
+The admin's Data rail is now an index of non-page types with counts, and selecting
+one opens a table: the title, the root block's `indexed` fields, the draft state and
+when it was last touched — sortable, searchable, twenty rows a page, all client-side
+over the list `GET /folio/documents` already returns in full. It lists *documents*,
+not published content, so an unpublished person appears with a draft badge; the
+columns come from `content_index` and are therefore published values, which the
+footer says out loud rather than leaving a blank cell to be misread as an empty
+field. A record opens **full width with no preview**: there is nothing to preview,
+and previewing it inside a page that references it is ambiguous the moment two pages
+reference it differently. `GET /folio/documents/:id/usage` is what the delete
+confirmation reads — it names the published documents pointing here, states that
+drafts are not counted, and **proceeds**, because a broken reference already degrades
+safely. Spec: `docs/specs/content-model/data-documents.md`.
+
 ## Next
 
 ### 1. Scheduled publishing
@@ -292,10 +327,20 @@ an unsorted flat list, which stops working somewhere around 15.
 - A collection's `order` takes a single field. One was enough everywhere it was
   looked at, and a second is additive — but it has to be threaded through the
   canonical form, the query string and the SQL, so it is not free.
-- The admin's Data section still lists documents from `stories` with no filtering,
-  sorting or paging over content fields. That is the right *source* (the index is
-  published-only, and an editor's list must show drafts), but it wants the list view
-  `docs/specs/content-model/data-documents.md` describes.
+- The Data list view sorts, searches and pages **client-side**, over the whole list
+  `GET /folio/documents` returns in one request. Correct and free at the scale
+  examined, and the same ceiling collections sets — but a type with thousands of
+  documents wants the paging pushed into SQL, which means a `stories`-sourced query
+  that can also `order by` a joined `content_index` row.
+- The Data list view's columns are **published** values, source locale. A draft
+  document's cells are blank (the footer says so), and a translated value is not a
+  column. Both would want the same server-side query as the point above.
+- `references()` reorders with ↑ ↓ buttons rather than drag-and-drop. Keyed by story
+  id, so it does not have `MultiAssetInput`'s focus bug — but the spec asked for
+  drag, and that is the same a11y-shaped work as the tree's keyboard reordering.
+- `min` on a `references()` field warns in the editor and is not enforced on write.
+  Consistent with `required` across the whole field system, and it should be fixed
+  in one place for every field rather than here first.
 - Nothing prunes `content_refs` rows pointing *at* a deleted story. Another
   document still names it, which is the fact "used by N" reads, and the row is
   rewritten when that document is next published — but a site that never republishes

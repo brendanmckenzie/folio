@@ -3,7 +3,7 @@
 > **Group:** content model
 > **Build order:** 14
 > **Size:** M
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** none — uses `0006` (types) and `0010` (`content_refs`)
 > **Last updated:** 2026-07-29
@@ -435,6 +435,163 @@ the survivor and the usage count warned first.
 
 ## Open questions
 
-- Should the Data list view show draft state per row (from
-  `../editing/unpublished-changes.md`'s watermark)? It is free once that column
-  exists, and probably belongs there rather than here.
+Resolved. The Data list view **does** show draft state per row, as a sortable
+`Status` column drawn with the same `badgeLabel` the page tree uses — free now
+that `../editing/unpublished-changes.md`'s watermark exists, since `state`
+already rides on every `StoryMeta` the list request returns.
+
+## Implementation notes
+
+Built 2026-07-29 in five commits. 1566 tests → 1651 (63 files); typecheck,
+`biome ci`, `vitest` and the demo build all exit 0. New e2e
+`scripts/records-test.mjs` at **38/38**, run live against a fresh database.
+
+### What landed
+
+**Core.** `BlockDef.render` is optional and `defineRecord` is exported from
+`folio/core` (checkpoint 1). It is `defineBlock` under the skin, as the
+checkpoint's own wording implies — the value is the name at the call site, and
+the return type is the same `BlockDef<F>`, so nothing downstream forks.
+`RenderBlok` guards the absence *above* its props loop, so a block with nothing
+to render also does no resolution work, and does not descend into children — the
+same posture as an unknown type, because a placeholder that then drew its slots
+would be scaffolding pretending to be a layout.
+
+**One thing the spec did not say, and it matters.** The acceptance criteria say
+`reference.content` **is null** for a record with no renderer. The existing code
+would have produced an *element* that renders nothing, which is truthy — so
+`{person.content ?? <MyOwnCard/>}` would have been dead code. A shared
+`referenceContent` helper in `preview/Render.tsx` now returns literal `null` when
+the target's root block has no renderer, for both `reference` and `references`.
+The demo's `officeCard` is the demonstration and the e2e asserts it.
+
+**`references()`** is a new `Field` kind with `types`/`min`/`max`, `ValueOf` →
+`ResolvedReference[]`, `defaultValue` → `[]`, and a `resolveValue` case (the
+switch is exhaustive, per spec 13). `asStoryIds` in `core/values.ts` is the
+reader: stored order preserved, junk dropped, **duplicates dropped** (the same
+document twice has no sensible rendering, and keeping both would make `max` count
+something the editor cannot see), and a bare string tolerated so a `reference`
+widened by a content migration reads as one entry. `resolveReferences` drops
+unresolvable entries. Both ref walks see both kinds — `referencedIds`
+(resolve.ts, source locale) and `referencedIdsAllLocales` (refs.ts, every
+locale). The second is load-bearing for decision 4: without it a `references()`
+usage would have been invisible to the very warning this spec is about.
+
+**Server.** `GET /folio/documents/:id/usage` at `EDIT` (editor+, as the route
+table says). `documentUsage(db, id)` in `server/stories.ts` composes spec 13's
+`countReferencesTo` and `referencesTo`, returns whole story rows rather than a
+projection so the route can decorate with `rt.withUrls` (the URL shape is the
+host's), drops a row whose source story has since been deleted, and reports
+`total` as **distinct documents** — a page that both links to and references one
+target is two rows and one document, and appears twice in `published` so the list
+can say which. `links`/`references` stay row counts.
+
+`GET /folio/documents` additionally carries `indexed`: one `content_index` query
+for the whole list, giving each document's indexed values as
+`{ text, num }` per field. `text` is what a cell shows; `num` is what a numeric
+sort uses, which is the only way a publish-date column sorts chronologically
+rather than lexicographically. Skipped entirely when nothing is `indexed`, so the
+payload is byte-identical on a site that marks nothing.
+
+**Admin.** The Data rail is now an index of non-page types with counts
+(`DataList.tsx`); selecting one opens `DataTable.tsx` in the stage. Form mode is
+a class plus a conditional on `Editor.tsx`, as the Ground truth predicted.
+`ReferencesInput.tsx` reuses `referenceCandidates` (the picker) and
+`MultiAssetInput`'s card shape, keyed by story id rather than by index — the bug
+the spec explicitly told it not to reuse. `useDocumentUsage` fetches only while a
+confirmation is open, and a failed fetch shows **nothing** rather than "used on 0
+documents": reporting no usage because a request failed is the one way this
+dialog could do harm.
+
+### Deliberate deviations, all small
+
+1. **The usage route lives in `routes/stories.ts`**, not a new
+   `routes/documents.ts` as phase 3 step 1 sketched. `GET /documents` is already
+   there (it is the listing that ensures a singleton into existence), and one
+   route is not worth splitting the `/documents` prefix across two files.
+2. **Phase 3 was built before phase 2.** The admin's delete confirmation consumes
+   the usage route, so building the route second would have left one commit with
+   an admin fetching a 404.
+3. **The list view sorts, searches and pages client-side**, over the flat list
+   `GET /folio/documents` already returns in full — not over
+   `GET /folio/content?type=…&status=draft` as decision 2 wrote. There is no
+   `status` parameter on that route, and there should not be: it queries
+   `content_index`, which is published-only, so it can never satisfy the resolved
+   open question that an unpublished person appears in the list. Client-side is
+   free at this scale, needs no route, and keeps the source at `stories` exactly
+   as the resolved open question requires. Recorded in ROADMAP as wanting SQL
+   paging for a type with thousands of documents.
+4. **The columns are published values, source locale**, from `content_index`. The
+   spec assumed the values would arrive with the list and did not say where from;
+   this is the only source that costs one query rather than one Durable Object
+   read per row. A draft document's cells are blank beside its own draft badge,
+   and the table footer states it rather than leaving it to be misread.
+5. **Two extra columns beyond "indexed fields plus its title":** `Status` (the
+   resolved open question) and `Updated`. Both are free from `StoryMeta` and both
+   are what an editor scanning a list of twenty-four people actually sorts by.
+   The type's `titleField` is *skipped* as a field column, because its value
+   already is the title column and a table printing a name twice looks like a
+   feature.
+6. **`references()` reorders with ↑ ↓ buttons, not drag** (phase 2 step 4 said
+   drag). Keyed by story id so it has none of `MultiAssetInput`'s focus problem;
+   drag is the same a11y-shaped work as the tree's keyboard reordering and is in
+   ROADMAP.
+7. **Orphaned documents stay a plain list in the rail**, with no table. The
+   columns come from a declared type's root block, and an orphan has no declared
+   type to read them from — which is the "a record type renamed in code" edge
+   case seen from the UI side.
+8. **Two things form mode needed that the spec did not mention.** The migration
+   banner lived inside the stage, and there is no stage in form mode, so it moves
+   above the body there — otherwise a record behind the model stops explaining
+   itself. And the root block is auto-selected once the document arrives, because
+   with no preview to click nothing would ever select it and the inspector would
+   sit asking to be clicked in a pane that does not exist.
+9. **A singleton keeps its preview**, so form mode is records (and
+   unknown-type documents) only. That is `globals.md`'s decision 4 standing, and
+   consistent with checkpoint 3's own aside about `previewPath`.
+
+### Where the spec's Ground truth had drifted
+
+- `summary`/`blankBlok`/`BlockSchema` live in `core/schema.ts`, not
+  `core/block.ts` (spec 4 recorded this).
+- Field reads go through `fieldValue`/`dataOf` from `core/locales.ts`; a
+  `references` value is read that way in `RenderBlok`, so a translation can pick a
+  different list.
+- `deleteStoryStatement` returns four fields including `indexStatements`, and
+  `Field` gained a `collection` kind whose `resolveValue` switch is exhaustive —
+  both accounted for.
+- `DataList.tsx` already existed, as spec 8's deliberately thin placeholder, and
+  said so in its own header comment. It was replaced rather than extended.
+
+### Deliberately not built
+
+- **Bulk editing, CSV import/export, a generic relational model with declared
+  inverses, records-as-taxonomy filtering, field-level `required`** — all named
+  out of scope by the spec and all still out.
+- **`min` enforcement on write.** Warns in the editor only, per the spec's own
+  edge case: `required` is declared-and-ignored site-wide and this field should
+  not invent its own enforcement ahead of the rest.
+
+### Tests added
+
+- `test/unit/core/records.test.ts` — 20: `asStoryIds`, `resolveReferences`
+  (order, dropping, type filter, empty, the one-level bound), `resolveValue`'s
+  new case, both ref walks including i18n and self-edges, `defineRecord`.
+- `test/unit/preview/records-render.test.tsx` — 11: the missing renderer in both
+  modes, `reference.content` null vs. a card, `references()` order, a deleted
+  target leaving no hole, wrong-type dropping, no uid markers on inlined content.
+- `test/unit/admin/records.test.ts` — 37: column derivation, cells, six sort
+  behaviours (including numeric and ISO-date columns, and blanks sorting last
+  either way), search, pagination at the spec's own 24-at-20 example, the
+  references input's entries and candidates, the usage sentence, and
+  `deleteConfirmation` for an unrouted document.
+- `test/workers/records.test.ts` — 14: the usage route against real D1
+  (a `references()` member as a usage, one document counted once across two
+  reference fields, an unpublished referrer excluded, an unknown id answering
+  200/zero), the `indexed` map, a record publishing twice and versioning with no
+  path, duplication, and a referenced record deleting while its referrer stays
+  live.
+- `scripts/records-test.mjs` — 38 checks, live: rendered order, reorder, the
+  no-renderer fallback, usage counts and their URL decoration, the unpublished
+  referrer, delete-and-survive with exactly one figure remaining and no
+  `<script>`, and the two facts the resolved open question turns on.
