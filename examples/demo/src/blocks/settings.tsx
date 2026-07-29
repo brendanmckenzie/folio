@@ -2,7 +2,10 @@ import { blocks, defineBlock, text, textarea } from 'folio/core'
 
 /**
  * Root block for the `settings` **singleton** (`document-types.md` architecture
- * decision 4 and 7).
+ * decision 4 and 7), also a **global** (`content-model/globals.md`): it is in
+ * `globals` in `src/index.tsx`, so every page's shell renders it as the site
+ * footer via `folio.renderGlobal(resolution, 'settings')`, right there in the
+ * host's own `<Page>` component — Folio never wraps the page in a layout.
  *
  * There is exactly one of these, and it does not need a uniqueness constraint to
  * stay that way: its id is *derived* from the type name (`sng_settings`), so
@@ -10,11 +13,6 @@ import { blocks, defineBlock, text, textarea } from 'folio/core'
  * creates or deletes it either — it exists because this schema says so, and the
  * admin's Data rail is what brings the row into being on first access
  * (`ensureSingleton`).
- *
- * Reading it from *host* code — `folio.global('settings')` in a page's shell —
- * is `docs/specs/content-model/globals.md`'s job, not this spec's. Until that
- * lands, this demonstrates the admin half: the document exists, it is editable
- * and publishable like any other, and it refuses to be deleted or duplicated.
  */
 export const settingsRoot = defineBlock({
   name: 'settingsRoot',

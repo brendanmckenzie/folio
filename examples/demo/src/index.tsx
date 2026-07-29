@@ -43,6 +43,11 @@ const folio = createFolio<Env>({
     // Unrouted, and exactly one — enforced by the derived id `sng_settings`
     // rather than by a constraint. Created on first access, never by an editor.
     { name: 'settings', label: 'Site settings', kind: 'singleton', root: 'settingsRoot' },
+    // A second singleton, also a global (below): the site header. `previewPath:
+    // ''` is what lets the admin preview it sitting on the homepage instead of
+    // a blank background (`content-model/globals.md` decision 4) — opening it
+    // points the iframe at `/?_folio=preview&as=header`.
+    { name: 'header', label: 'Header', kind: 'singleton', root: 'headerRoot', previewPath: '' },
   ],
   bindings: (env) => ({ db: env.DB, story: env.STORY, media: env.MEDIA, images: env.IMAGES }),
   basePath: '/folio',
@@ -50,6 +55,10 @@ const folio = createFolio<Env>({
   route: (path) => (path ? `/${path}` : '/'),
   previewCss: ['/site.css'],
   assets: __FOLIO_ASSETS__,
+  // Loaded into every page's Resolution, so any render can place them
+  // (`content-model/globals.md`). `settings` doubles as the footer here —
+  // its root block already renders a `<footer>`.
+  globals: ['header', 'settings'],
   // publish-hooks.md: an after-commit callback, not a webhook -- the host and
   // Folio are the same Worker, so a cache purge or a notification is a typed
   // function call rather than an HTTP round trip to itself. This demo has no
@@ -137,8 +146,17 @@ function Page({ doc, resolution }: { doc: Doc; resolution: Resolution }) {
         </>
       }
     >
+      {/*
+        The host places globals in its own shell (`content-model/globals.md`
+        decision 2) — Folio never wraps the page in a layout, so this project
+        decides the header goes above the content and the footer below it,
+        not Folio. Both come from the same `resolve()` call `doc` already
+        needed, so this costs no extra request.
+      */}
+      {folio.renderGlobal(resolution, 'header')}
       {/* No client entry, so a published page ships zero JavaScript. */}
       <div id="folio-root">{folio.render(doc, { resolution })}</div>
+      {folio.renderGlobal(resolution, 'settings')}
     </Shell>
   )
 }

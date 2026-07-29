@@ -2,6 +2,7 @@ import { button } from './button'
 import { cta } from './cta'
 import { embed, section } from './embed'
 import { feature, features } from './features'
+import { headerRoot } from './header'
 import { hero } from './hero'
 import { insightPage } from './insight'
 import { gallery, image } from './media'
@@ -23,6 +24,7 @@ export const blocks = [
   insightPage,
   personRecord,
   settingsRoot,
+  headerRoot,
   // Content blocks.
   hero,
   prose,

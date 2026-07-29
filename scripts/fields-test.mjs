@@ -817,16 +817,22 @@ await ed.tx('f12', [{ t: 'set', uid: 'emb1', field: 'source', value: 'sty_about'
 aboutDoc.ws.close()
 
 /* --- document types: a record has no URL, and type filtering bites ------ */
-// docs/specs/foundation/document-types.md. The demo declares four types (see
+// docs/specs/foundation/document-types.md. The demo declares five types (see
 // examples/demo/src/index.tsx): `page`, a second routable `insight`, an
-// unrouted `person` record, and a `settings` singleton.
+// unrouted `person` record, and two singletons — `settings` and `header`,
+// both globals (content-model/globals.md).
 
 const schema = await json(`${API}/schema`)
 check(
   'the manifest carries every declared document type',
   schema.types?.map((t) => `${t.name}:${t.kind}`).join(',') ===
-    'page:page,insight:page,person:record,settings:singleton',
+    'page:page,insight:page,person:record,settings:singleton,header:singleton',
   schema.types?.map((t) => `${t.name}:${t.kind}`).join(','),
+)
+check(
+  'the manifest carries the configured globals',
+  schema.globals?.slice().sort().join(',') === 'header,settings',
+  schema.globals?.join(','),
 )
 check(
   'the manifest keeps `root` as the default page type’s root block',
