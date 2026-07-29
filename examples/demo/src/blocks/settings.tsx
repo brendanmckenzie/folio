@@ -20,8 +20,8 @@ export const settingsRoot = defineBlock({
   summary: 'siteName',
   fields: {
     siteName: text({ label: 'Site name', default: 'Folio demo' }),
-    tagline: text({ label: 'Tagline' }),
-    footerNote: textarea({ label: 'Footer note', rows: 2 }),
+    tagline: text({ label: 'Tagline', translatable: true }),
+    footerNote: textarea({ label: 'Footer note', rows: 2, translatable: true }),
     footerLinks: blocks({ label: 'Footer links', allow: ['button'], max: 4 }),
   },
   render: ({ siteName, tagline, footerNote, footerLinks }) => (

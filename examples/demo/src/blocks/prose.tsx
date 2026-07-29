@@ -5,13 +5,17 @@ export const prose = defineBlock({
   label: 'Prose',
   summary: 'heading',
   fields: {
-    heading: text({ label: 'Heading' }),
+    heading: text({ label: 'Heading', translatable: true }),
     // Arrives already rendered, so there is no way to reach the page without
     // going through sanitising and link resolution.
+    // Translatable, so two whole ProseMirror trees can live in one blok — one per
+    // locale (`content-model/localisation.md`). Last-write-wins per locale, as it
+    // already is per field.
     body: richtext({
       label: 'Body',
       headingLevels: [2, 3],
       help: 'Links to other pages follow them when those pages are renamed.',
+      translatable: true,
     }),
     width: select({
       label: 'Measure',
@@ -39,7 +43,12 @@ export const pullquote = defineBlock({
   label: 'Pull quote',
   summary: 'credit',
   fields: {
-    quote: richtext({ label: 'Quote', marks: ['bold', 'italic', 'link'], nodes: ['paragraph'] }),
+    quote: richtext({
+      label: 'Quote',
+      marks: ['bold', 'italic', 'link'],
+      nodes: ['paragraph'],
+      translatable: true,
+    }),
     /**
      * Renamed from `attribution` (`src/migrations.ts`, `0001`). The old key is
      * still sitting in every document written before the rename, which is
@@ -47,7 +56,7 @@ export const pullquote = defineBlock({
      * to solve: nothing reads it, nothing renders it, and the field the admin
      * now draws is empty.
      */
-    credit: text({ label: 'Credit' }),
+    credit: text({ label: 'Credit', translatable: true }),
     /**
      * Added after the block already existed, so documents written before it
      * have no `tone` key at all — `Field.default` is read at *creation* only.

@@ -6,7 +6,7 @@ export const features = defineBlock({
   label: 'Feature grid',
   summary: 'heading',
   fields: {
-    heading: text({ label: 'Heading' }),
+    heading: text({ label: 'Heading', translatable: true }),
     columns: number({ label: 'Columns', min: 2, max: 4 }),
     items: blocks({ label: 'Features', allow: ['feature'] }),
   },
@@ -29,8 +29,8 @@ export const feature = defineBlock({
   summary: 'title',
   fields: {
     icon: text({ label: 'Icon', help: 'Any emoji or short glyph' }),
-    title: text({ label: 'Title', required: true }),
-    body: textarea({ label: 'Body', rows: 3 }),
+    title: text({ label: 'Title', required: true, translatable: true }),
+    body: textarea({ label: 'Body', rows: 3, translatable: true }),
   },
   render: ({ icon, title, body }) => (
     <article className="feature">

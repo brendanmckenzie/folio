@@ -5,9 +5,13 @@ export const hero = defineBlock({
   label: 'Hero',
   summary: 'heading',
   fields: {
-    eyebrow: text({ label: 'Eyebrow', placeholder: 'Small label above the heading' }),
-    heading: text({ label: 'Heading', required: true }),
-    body: textarea({ label: 'Body', rows: 3 }),
+    eyebrow: text({
+      label: 'Eyebrow',
+      placeholder: 'Small label above the heading',
+      translatable: true,
+    }),
+    heading: text({ label: 'Heading', required: true, translatable: true }),
+    body: textarea({ label: 'Body', rows: 3, translatable: true }),
     image: asset({ label: 'Background image', accept: 'image/*' }),
     align: select({
       label: 'Alignment',

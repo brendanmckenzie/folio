@@ -1,5 +1,5 @@
 import { createFolio, magicLink, Shell } from 'folio/server'
-import { resolveAsset, type Doc, type Resolution } from 'folio/core'
+import { dataOf, resolveAsset, type Doc, type Resolution } from 'folio/core'
 import type { ReactElement } from 'react'
 import { renderToReadableStream } from 'react-dom/server.edge'
 import { blocks } from './blocks'
@@ -77,8 +77,29 @@ const folio = createFolio<Env>({
     ],
   },
   basePath: '/folio',
+  // content-model/localisation.md: two languages, one document per story.
+  // `default` is the *source* locale — the one `Blok.data` holds — and everything
+  // else is a per-field override in `Blok.i18n`. Marking a field
+  // `translatable: true` is what puts it in front of a translator; see
+  // src/blocks/*.tsx, and `GET /folio/audit` for the ones nobody marked.
+  locales: {
+    default: 'en',
+    available: [
+      { code: 'en', label: 'English' },
+      { code: 'fr', label: 'Français' },
+    ],
+  },
   // '' is the root story, which serves '/'.
-  route: (path) => (path ? `/${path}` : '/'),
+  //
+  // The locale reaches the URL *here*, and only here (decision 5): Folio owns no
+  // URL shape, so this project decides French lives under `/fr` rather than on a
+  // subdomain or behind `?lang=`. Paths are locale-independent (checkpoint 4) —
+  // `/about` and `/fr/about` are the same story — so the prefix is all there is
+  // to it, and `parseLocale` below is the one-line inverse.
+  route: (path, locale) => {
+    const prefix = locale && locale !== 'en' ? `/${locale}` : ''
+    return path ? `${prefix}/${path}` : prefix || '/'
+  },
   previewCss: ['/site.css'],
   assets: __FOLIO_ASSETS__,
   // Loaded into every page's Resolution, so any render can place them
@@ -146,8 +167,15 @@ export default {
     if (handled) return handled
 
     // --- published pages -------------------------------------------------
-    const path = url.pathname.replace(/^\/+|\/+$/g, '')
-    const doc = await folio.published(env, path)
+    // The inverse of `route` above, and this project's job rather than Folio's:
+    // only the host knows how it encoded the locale (`localisation.md` decision
+    // 5). One line, as the spec promised.
+    const { locale, path } = parseLocale(url.pathname)
+    // `locale` does not choose a document — there is one per story, holding every
+    // language — but it *is* checked: `/xx/about` answers null here and falls
+    // through to the 404 below rather than serving English under a URL that means
+    // nothing.
+    const doc = await folio.published(env, path, locale)
     if (!doc) {
       // A live story always wins: folio.published is checked first, and
       // creating a story at a redirected path deletes the row anyway, so the
@@ -167,14 +195,47 @@ export default {
 
     // Story links store an id, so hrefs are resolved per render rather than
     // frozen at publish time. Renaming a page fixes every link to it.
-    const resolution = await folio.resolve(env, doc)
-    return html(<Page doc={doc} resolution={resolution} />)
+    //
+    // The locale rides on the resolution, which is what makes the whole render
+    // French: every field read in `folio.render` goes through it, and an
+    // untranslated field falls back to the source rather than leaving a hole.
+    const resolution = await folio.resolve(env, doc, { locale })
+    return html(<Page doc={doc} resolution={resolution} locale={locale} />)
   },
 } satisfies ExportedHandler<Env>
 
+/** The locales this site serves, mirroring `locales.available` above. */
+const LOCALES = ['en', 'fr'] as const
+
+/**
+ * The locale a URL names, and the story path underneath it — the inverse of the
+ * `route` config above.
+ *
+ * Deliberately host code (`localisation.md` decision 5): Folio only ever needs
+ * this for its own preview branch, where it derives the answer by calling `route`
+ * itself, so a host that changed its mind about the URL shape would change one
+ * function here and one there and nothing else.
+ *
+ * An unrecognised first segment is a path, not a locale, so `/energy/about` is a
+ * page rather than a language nobody declared.
+ */
+function parseLocale(pathname: string): { locale: string; path: string } {
+  const clean = pathname.replace(/^\/+|\/+$/g, '')
+  const [first, ...rest] = clean.split('/')
+  if (first && first !== 'en' && (LOCALES as readonly string[]).includes(first)) {
+    return { locale: first, path: rest.join('/') }
+  }
+  return { locale: 'en', path: clean }
+}
+
 /** Page metadata comes off the document's root block. */
-function Page({ doc, resolution }: { doc: Doc; resolution: Resolution }) {
-  const meta = doc.bloks[doc.root]?.data ?? {}
+function Page({ doc, resolution, locale }: { doc: Doc; resolution: Resolution; locale: string }) {
+  const root = doc.bloks[doc.root]
+  // `dataOf` rather than `.data`: metadata is read straight off the root block
+  // rather than through `render`, so reading it in the active locale is this
+  // page's job (`content-model/localisation.md`). A `title` translated into
+  // French belongs in `<title>` and in `og:title`, not only in the body.
+  const meta = root ? dataOf(root, resolution.locale) : {}
   const title = String(meta.title ?? 'Untitled')
   // Metadata is read straight off the root block rather than through `render`,
   // so resolving the asset is this page's job.
@@ -183,6 +244,9 @@ function Page({ doc, resolution }: { doc: Doc; resolution: Resolution }) {
   return (
     <Shell
       title={title}
+      // The one bit of chrome only the host can set, and the reason switching
+      // locale in the editor reloads the preview rather than pushing a frame.
+      lang={locale}
       stylesheets={['/site.css']}
       head={
         <>
@@ -220,7 +284,14 @@ function sitemap(stories: Awaited<ReturnType<typeof folio.stories>>, origin: str
     // all, so it is not a sitemap entry — filtering on `publishedAt` alone
     // would have emitted `/null`.
     .filter((s) => s.publishedAt && s.path !== null)
-    .map((s) => `  <url><loc>${origin}${s.url ?? `/${s.path}`}</loc></url>`)
+    // Every language, because publishing publishes them all at once
+    // (`localisation.md` checkpoint 3): a French page is live the moment its
+    // English one is, with fallbacks wherever it is untranslated, so leaving it
+    // out of the sitemap would be a lie. `urls` is the host's own `route` called
+    // once per declared locale, so this needs no knowledge of the URL shape —
+    // and is absent entirely on a site with no locales, hence the fallback.
+    .flatMap((s) => Object.values(s.urls ?? { en: s.url ?? `/${s.path}` }))
+    .map((url) => `  <url><loc>${origin}${url}</loc></url>`)
     .join('\n')
 
   return new Response(

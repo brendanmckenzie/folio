@@ -19,18 +19,19 @@ export const insightPage = defineBlock({
   label: 'Insight',
   summary: 'title',
   fields: {
-    title: text({ label: 'Title', required: true }),
+    title: text({ label: 'Title', required: true, translatable: true }),
     standfirst: textarea({
       label: 'Standfirst',
       rows: 2,
       help: 'The opening line, shown above the body.',
+      translatable: true,
     }),
     author: reference({
       label: 'Author',
       types: ['person'],
       help: 'A Person record. Pages are not offered.',
     }),
-    description: textarea({ label: 'Meta description', rows: 3 }),
+    description: textarea({ label: 'Meta description', rows: 3, translatable: true }),
     socialImage: asset({ label: 'Social share image', accept: 'image/*' }),
     noindex: boolean({ label: 'Hide from search engines' }),
     body: blocks({

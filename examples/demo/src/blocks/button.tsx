@@ -5,7 +5,7 @@ export const button = defineBlock({
   label: 'Button',
   summary: 'label',
   fields: {
-    label: text({ label: 'Label', required: true }),
+    label: text({ label: 'Label', required: true, translatable: true }),
     // Arrives resolved: `href` is already the target's current path, so renaming
     // the page this points at updates the button without touching the document.
     href: multilink({ label: 'Link' }),

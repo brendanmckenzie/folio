@@ -26,6 +26,7 @@ export const personRecord = defineBlock({
       label: 'Short bio',
       marks: ['bold', 'italic', 'link'],
       nodes: ['paragraph'],
+      translatable: true,
     }),
   },
   // A record is still an ordinary document: it renders through the same

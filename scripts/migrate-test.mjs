@@ -90,7 +90,10 @@ function client(name, storyId) {
   }
 }
 
-check('the wire version is 2', PROTOCOL_VERSION === 2, String(PROTOCOL_VERSION))
+// v3 since content-model/localisation.md: `set` gained an optional `locale` and
+// `hello` shed its top-level identity fields. `retype`, this spec's own addition,
+// is unaffected — it was v2's.
+check('the wire version is 3', PROTOCOL_VERSION === 3, String(PROTOCOL_VERSION))
 
 /* --- what the config declares -------------------------------------------- */
 
@@ -355,10 +358,19 @@ check(
   !audit1.missingFields?.some((f) => f.type === 'pullquote'),
   JSON.stringify(audit1.missingFields?.filter((f) => f.type === 'pullquote')),
 )
+// Narrowed to this spec's own two checks. `not-translatable`
+// (content-model/localisation.md) is a *third* schema check with legitimate
+// findings against the demo — a person's `role`, a feature's emoji `icon` — which
+// is the entire point of it: it finds the unmarked fields and a host decides
+// which ones it meant. Asserting the whole array were empty would have made this
+// script fail every time somebody added a check.
+const structural = (audit1.schema ?? []).filter((f) =>
+  ['unknown-condition-field', 'hidden-summary-field', 'unknown-summary-field'].includes(f.check),
+)
 check(
   'the demo schema itself is clean: no unknown showIf field, no hidden summary',
-  audit1.schema?.length === 0,
-  JSON.stringify(audit1.schema),
+  structural.length === 0,
+  JSON.stringify(structural),
 )
 
 edA.ws.close()

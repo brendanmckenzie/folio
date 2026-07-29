@@ -5,8 +5,8 @@ export const cta = defineBlock({
   label: 'Call to action',
   summary: 'heading',
   fields: {
-    heading: text({ label: 'Heading', required: true }),
-    body: textarea({ label: 'Body', rows: 2 }),
+    heading: text({ label: 'Heading', required: true, translatable: true }),
+    body: textarea({ label: 'Body', rows: 2, translatable: true }),
     actions: blocks({ label: 'Actions', allow: ['button'], max: 2 }),
   },
   render: ({ heading, body, actions }) => (

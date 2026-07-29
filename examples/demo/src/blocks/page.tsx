@@ -13,11 +13,12 @@ export const page = defineBlock({
   label: 'Page',
   summary: 'title',
   fields: {
-    title: text({ label: 'Title', required: true }),
+    title: text({ label: 'Title', required: true, translatable: true }),
     description: textarea({
       label: 'Meta description',
       rows: 3,
       help: 'Shown in search results. Around 150 characters.',
+      translatable: true,
     }),
     socialImage: asset({ label: 'Social share image', accept: 'image/*' }),
     noindex: boolean({ label: 'Hide from search engines' }),

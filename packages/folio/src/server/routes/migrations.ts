@@ -78,9 +78,16 @@ export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     )
   })
 
-  /** The drift report. Read-only; no document is modified. */
+  /**
+   * The drift report. Read-only; no document is modified.
+   *
+   * `locales` is passed for the same reason `folio.audit(env)` passes it: the
+   * locale checks (`../content-model/localisation.md`) are config-dependent, and
+   * a route that answered differently from the method would be a report nobody
+   * could trust.
+   */
   app.get('/audit', requireAccess<Env>(rt, ADMIN), async (c) =>
-    c.json(await audit(c.var.bindings().db, rt.schema)),
+    c.json(await audit(c.var.bindings().db, rt.schema, { locales: rt.locales })),
   )
 
   return app

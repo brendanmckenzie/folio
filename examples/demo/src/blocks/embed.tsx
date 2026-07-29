@@ -13,7 +13,7 @@ export const embed = defineBlock({
   label: 'Embedded page',
   summary: 'heading',
   fields: {
-    heading: text({ label: 'Heading' }),
+    heading: text({ label: 'Heading', translatable: true }),
     source: reference({ label: 'Page to embed', help: 'Its content is pulled in at render time.' }),
     mode: select({
       label: 'Show',
@@ -54,7 +54,7 @@ export const section = defineBlock({
   label: 'Section',
   summary: 'heading',
   fields: {
-    heading: text({ label: 'Heading' }),
+    heading: text({ label: 'Heading', translatable: true }),
     body: blocks({ label: 'Body', allow: ['embed', 'prose', 'image'] }),
   },
   render: ({ heading, body }) => (

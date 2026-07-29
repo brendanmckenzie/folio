@@ -18,7 +18,7 @@ export const image = defineBlock({
   summary: 'caption',
   fields: {
     file: asset({ label: 'Image', accept: 'image/*', required: true }),
-    caption: text({ label: 'Caption' }),
+    caption: text({ label: 'Caption', translatable: true }),
     ratio: select({
       label: 'Crop',
       options: [
@@ -60,7 +60,7 @@ export const gallery = defineBlock({
   label: 'Gallery',
   summary: 'heading',
   fields: {
-    heading: text({ label: 'Heading' }),
+    heading: text({ label: 'Heading', translatable: true }),
     images: multiasset({ label: 'Images', accept: 'image/*', max: 12 }),
   },
   render: ({ heading, images }) => (

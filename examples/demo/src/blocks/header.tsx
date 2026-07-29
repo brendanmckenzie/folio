@@ -16,7 +16,7 @@ export const headerRoot = defineBlock({
   name: 'headerRoot',
   label: 'Header',
   fields: {
-    logoText: text({ label: 'Logo text', default: 'Folio demo' }),
+    logoText: text({ label: 'Logo text', default: 'Folio demo', translatable: true }),
     nav: blocks({ label: 'Navigation', allow: ['button'], max: 6 }),
   },
   render: ({ logoText, nav }) => (
