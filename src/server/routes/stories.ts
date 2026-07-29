@@ -97,7 +97,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         ? [wanted]
         : []
       : rt.types.filter((t) => t.kind === 'singleton')
-    for (const type of singletons) await ensureSingleton(bindings.db, type)
+    for (const type of singletons) await ensureSingleton(bindings.db, type, rt.schemaId)
 
     const documents = await listDocuments(bindings.db, wanted?.name)
     return c.json({ documents: documents.map(rt.withUrls) })
@@ -119,7 +119,11 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     let story: StoryMeta
     try {
-      story = await createStory(bindings.db, { ...body, type }, rt.types)
+      // Born up to date: `blankSubtree` seeds the document from the current
+      // schema, so stamping the latest migration is the true answer and keeps a
+      // page created five seconds ago out of the behind-the-model banner
+      // (`schema-migrations.md`).
+      story = await createStory(bindings.db, { ...body, type, schemaId: rt.schemaId }, rt.types)
     } catch (e) {
       // `Unknown parent` is the client's mistake; a path collision is a
       // conflict; a D1 failure is nobody's business but the log's.

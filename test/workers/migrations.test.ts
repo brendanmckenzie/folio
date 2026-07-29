@@ -75,6 +75,8 @@ describe('0006: the rebuilt `stories` table', () => {
       'draft_sync_id',
       'draft_updated_at',
       'published_sync_id',
+      // 0008_schema_migrations.sql
+      'schema_id',
     ])
   })
 
@@ -324,6 +326,76 @@ describe('0007: identity', () => {
   it('leaves `stories` exactly as 0006 left it', async () => {
     // The regression 0007 could have been: a second rebuild. It is not one.
     expect((await columns()).map((c) => c.name)).toContain('published_sync_id')
+    expect(await indexNames()).toEqual([
+      'stories_draft_updated',
+      'stories_parent_ord',
+      'stories_parent_slug',
+      'stories_path',
+      'stories_type',
+      'stories_type_slug',
+    ])
+  })
+})
+
+/**
+ * `0008_schema_migrations.sql` (`schema-migrations.md`). Additive again: two
+ * `alter table`s and one new table, and `stories` is *not* rebuilt — 0006 was
+ * the one rebuild in the series and a second one is a second chance to drop a
+ * column silently.
+ *
+ * The load-bearing property is that both new columns are **nullable with no
+ * default**, because null is the value that means "before the first migration".
+ * A `default ''` would make every pre-existing row read as having had a
+ * migration whose id sorts before everything, so `pendingFor` would hand back
+ * nothing and the whole feature would no-op on exactly the rows it exists for.
+ */
+describe('0008: content migrations', () => {
+  const columnsOf = async (table: string): Promise<ColumnInfo[]> => {
+    const { results } = await env.DB.prepare('select * from pragma_table_info(?)')
+      .bind(table)
+      .all<ColumnInfo>()
+    return results
+  }
+
+  it('creates `schema_migrations` with the counts and the failure list', async () => {
+    expect((await columnsOf('schema_migrations')).map((c) => c.name)).toEqual([
+      'id',
+      'applied_at',
+      'actor',
+      'stories_seen',
+      'stories_changed',
+      'mutations',
+      'failed',
+    ])
+    // The migration's own id is the key: one row per migration, and a re-run
+    // updates it rather than appending a second history of the same thing.
+    expect((await columnsOf('schema_migrations')).find((c) => c.name === 'id')?.pk).toBe(1)
+  })
+
+  it('adds a nullable `stories.schema_id` with no default', async () => {
+    const col = (await columns()).find((c) => c.name === 'schema_id')
+    expect(col?.notnull).toBe(0)
+    expect(col?.dflt_value).toBeNull()
+  })
+
+  it('adds a nullable `versions.schema_id` with no default', async () => {
+    const col = (await columnsOf('versions')).find((c) => c.name === 'schema_id')
+    expect(col?.notnull).toBe(0)
+    expect(col?.dflt_value).toBeNull()
+  })
+
+  it('reads null for a row inserted without it, which means "before the first migration"', async () => {
+    await env.DB.prepare(
+      `insert into stories (id, type, parent_id, slug, path, ord, title)
+       values ('sty_pre0008', 'page', null, 'pre', 'pre', 'a0', 'Pre')`,
+    ).run()
+    const row = await env.DB.prepare('select schema_id from stories where id = ?')
+      .bind('sty_pre0008')
+      .first<{ schema_id: string | null }>()
+    expect(row?.schema_id).toBeNull()
+  })
+
+  it('leaves `stories` unrebuilt: 0006’s six indexes and nothing else', async () => {
     expect(await indexNames()).toEqual([
       'stories_draft_updated',
       'stories_parent_ord',

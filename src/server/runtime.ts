@@ -9,12 +9,14 @@
  */
 import { toManifest, toRegistry, toSchemaIndex, type Registry } from '../core/block'
 import type { Doc } from '../core/doc'
+import { latestMigrationId, type Migration, validateMigrations } from '../core/migrate'
 import { buildResolution, referencedIds, type Resolution } from '../core/resolve'
 import {
   blankSubtree,
   defaultType,
   type DocumentType,
   type Manifest,
+  type SchemaIndex,
   singletonId,
   titleFieldOf,
   titleOf,
@@ -40,12 +42,23 @@ export interface PageAssets {
 
 export interface FolioRuntime {
   registry: Registry
+  /** The block schemas, indexed by name. What a migration and the audit both walk. */
+  schema: SchemaIndex
   /** What `GET {base}/schema` answers. Contains no functions. */
   manifest: Manifest
   /** Every declared document type, with `root` sugar already expanded. */
   types: readonly DocumentType[]
   /** `FolioConfig.globals`, validated. Every name is a declared `singleton`. */
   globals: readonly string[]
+  /** `FolioConfig.migrations`, validated, in run order (`schema-migrations.md`). */
+  migrations: readonly Migration[]
+  /**
+   * The id a fully-migrated document carries: the last configured migration, or
+   * null when there are none. Stamped on every document and version row created
+   * from now on, so a document born from the current schema is never reported
+   * behind it.
+   */
+  schemaId: string | null
   /**
    * `FolioConfig.auth`, resolved and validated
    * (`../../../docs/specs/foundation/identity-and-access.md`). `mode: 'open'` is
@@ -142,12 +155,19 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // singleton one is a config mistake, not a runtime surprise the first page
   // render discovers (`../../../docs/specs/content-model/globals.md`).
   validateGlobals(config.globals, types)
+  // Same timing, same reason: a duplicate migration id, or a set whose declared
+  // order and lexicographic order disagree, would migrate documents in an order
+  // that depends on which comparison happened to be used
+  // (`../foundation/schema-migrations.md`).
+  validateMigrations(config.migrations)
   // Same timing, one rung more insistent: `auth` has no default at all, so an
   // absent key throws here rather than quietly leaving the CMS open
   // (`identity-and-access.md` checkpoint 2). The widening cast is explained on
   // `FolioRuntime.auth`.
   const auth = resolveAuth(config.auth) as ResolvedAuth<unknown>
   const globals = config.globals ?? []
+  const migrations = config.migrations ?? []
+  const schemaId = latestMigrationId(migrations)
   const typeOf = (name: string | undefined) => typeByName(types, name)
   const fallbackType = defaultType(types)
   const base = config.basePath ?? DEFAULT_BASE
@@ -251,7 +271,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         Promise.all(
           globals.map(async (name) => {
             const type = typeOf(name)!
-            const meta = await ensureSingleton(db, type)
+            const meta = await ensureSingleton(db, type, schemaId)
             return [name, await draftFor(bindings, meta)] as const
           }),
         ),
@@ -323,9 +343,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
 
   return {
     registry,
+    schema,
     manifest: toManifest(registry, types, globals),
     types,
     globals,
+    migrations,
+    schemaId,
     auth,
     typeOf,
     defaultType: fallbackType,

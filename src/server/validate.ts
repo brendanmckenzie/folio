@@ -192,6 +192,32 @@ export const RedirectCreateBody = v.object(
   OBJECT,
 )
 
+/**
+ * `POST /folio/migrate` (`schema-migrations.md`). Every field is optional, so an
+ * empty body means "run everything from the start in default-sized batches",
+ * which is what a deploy step wants to be able to write.
+ *
+ * `batch` is bounded here as well as clamped by the runner: this bounds what
+ * reaches the D1 `limit`, the runner bounds what one request will actually
+ * attempt, and neither is redundant with the other.
+ */
+export const MigrateBody = v.object(
+  {
+    dryRun: v.optional(v.boolean('must be true or false')),
+    /** The previous call's `continueFrom`, so it is a story id. */
+    continueFrom: v.nullish(ID),
+    batch: v.optional(
+      v.pipe(
+        v.number('must be a number'),
+        v.integer('must be a whole number'),
+        v.minValue(1, 'must be at least 1'),
+        v.maxValue(200, 'must be 200 or fewer'),
+      ),
+    ),
+  },
+  OBJECT,
+)
+
 /* ------------------------------------------------- identity and access --- */
 
 /**

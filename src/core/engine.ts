@@ -24,6 +24,24 @@ export type { Mutation } from './mutations'
 
 export { deepEqual, diff, summariseDiff } from './diff'
 
+/**
+ * Content migrations (`../../../docs/specs/foundation/schema-migrations.md`) —
+ * the use case this entry point's own doc comment already named. A host writes
+ * `defineMigration({ id, description, up })` and reaches for `field` / `block`
+ * for the ordinary cases, `ctx.each` plus `Blok`/`Mutation` by hand for the rest.
+ */
+export {
+  block,
+  defineMigration,
+  field,
+  latestMigrationId,
+  migrateDoc,
+  migrationContext,
+  pendingFor,
+  validateMigrations,
+} from './migrate'
+export type { Migration, MigrationContext } from './migrate'
+
 // `cloneSubtree`/`cloneDoc` (duplicate-and-paste.md) build on `allocateSubtree`
 // below: fresh uids and orders for an existing subtree, rather than a preset's
 // recipe. `parseClipboard` validates untrusted clipboard text the same way a
