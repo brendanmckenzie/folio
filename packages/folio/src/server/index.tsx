@@ -1,6 +1,8 @@
 import { singletonId } from '../core/schema'
 import { FolioDoc, renderGlobalNode } from '../preview/Render'
 import { createApp } from './app'
+import { credentialOf, resolveActor } from './auth/resolve'
+import { allows, READ_DRAFT } from './auth/roles'
 import { previewPage } from './pages'
 import { lookupRedirect } from './redirects'
 import { createRuntime } from './runtime'
@@ -87,6 +89,22 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
 
     if (url.searchParams.get('_folio') === 'preview') {
       const bindings = config.bindings(env)
+
+      // A preview renders the *draft*, so it needs the same gate the API routes
+      // got in identity-and-access.md — and it is the one such surface that lives
+      // outside `basePath`, so the app's own middleware never sees it. Without
+      // this, appending `?_folio=preview` to any URL would read unpublished
+      // content on a site that had otherwise closed its editor entirely.
+      //
+      // Refused by handing the request *back* rather than by answering 401: to
+      // an unauthenticated visitor the flag then means nothing at all and the
+      // host serves its ordinary published page, which is both the safe answer
+      // and the least surprising one.
+      if (rt.auth.mode === 'session') {
+        const actor = await resolveActor(() => bindings.db, rt.auth, credentialOf(req))
+        if (!allows(actor, READ_DRAFT)) return null
+      }
+
       const path = url.pathname.replace(/^\/+|\/+$/g, '')
       const story = await storyByPath(bindings.db, path)
       // Not a story: hand it back so the host's own routing wins. An unrouted

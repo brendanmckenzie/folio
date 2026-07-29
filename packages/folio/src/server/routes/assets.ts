@@ -15,7 +15,10 @@ import {
   updateAsset,
   uploadAsset,
 } from '../assets'
+import { ASSETS, READ } from '../auth/roles'
 import { FolioError, rethrow } from '../errors'
+import { requireAccess } from '../middleware'
+import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
 import {
   AssetPatchBody,
@@ -26,17 +29,19 @@ import {
   parseOptionalBody,
 } from '../validate'
 
-export function assetRoutes<Env>(): Hono<FolioEnv<Env>> {
+export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
 
-  app.get('/assets', async (c) => c.json(await listAssets(c.var.bindings().db)))
+  app.get('/assets', requireAccess<Env>(rt, READ), async (c) =>
+    c.json(await listAssets(c.var.bindings().db)),
+  )
 
   /**
    * Raw body upload with the filename in a query parameter, rather than
    * multipart: it keeps the Worker out of the business of parsing form data, and
    * the browser sets Content-Type and Content-Length from the File for free.
    */
-  app.post('/assets', async (c) => {
+  app.post('/assets', requireAccess<Env>(rt, ASSETS), async (c) => {
     const { db, media } = c.var.bindings()
     if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
 
@@ -56,7 +61,7 @@ export function assetRoutes<Env>(): Hono<FolioEnv<Env>> {
     }
   })
 
-  app.patch('/assets/:id', async (c) => {
+  app.patch('/assets/:id', requireAccess<Env>(rt, ASSETS), async (c) => {
     const id = idParam('id', c.req.param('id'))
     const body = await parseOptionalBody(c.req, AssetPatchBody)
     const row = await updateAsset(c.var.bindings().db, id, body)
@@ -64,7 +69,7 @@ export function assetRoutes<Env>(): Hono<FolioEnv<Env>> {
     return c.json(row)
   })
 
-  app.delete('/assets/:id', async (c) => {
+  app.delete('/assets/:id', requireAccess<Env>(rt, ASSETS), async (c) => {
     const { db, media } = c.var.bindings()
     if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
     const gone = await deleteAsset(db, media, idParam('id', c.req.param('id')))
@@ -73,8 +78,14 @@ export function assetRoutes<Env>(): Hono<FolioEnv<Env>> {
   })
 
   /**
-   * Public: published pages point their `<img>` tags here. Resizing lives behind
+   * Public, and the one deliberate hole in the auth posture: published pages
+   * point their `<img>` tags here, so it is exactly as public as the page that
+   * embeds it (`identity-and-access.md`'s route table). Resizing lives behind
    * this route so a stored value never names a resizing service.
+   *
+   * The narrowness of `assetKeyParam` is what makes that acceptable: it is
+   * anchored to Folio's own mint format rather than being a charset screen, so
+   * this route cannot be turned into a read primitive for a co-tenanted key.
    */
   app.get('/asset/:key', async (c) => {
     const { media, images } = c.var.bindings()

@@ -4,8 +4,9 @@
  * mutation log (fine-grained, not restorable).
  */
 import { Hono } from 'hono'
+import { actorString, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
 import { FolioError } from '../errors'
-import { loadStory } from '../middleware'
+import { loadStory, requireAccess } from '../middleware'
 import { checkpoint } from '../publish'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
@@ -17,7 +18,7 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
   // Deliberately no existence check: a story with no versions and a story that
   // never existed both have an empty history.
-  app.get('/story/:id/versions', async (c) =>
+  app.get('/story/:id/versions', requireAccess<Env>(rt, READ), async (c) =>
     c.json(await listVersions(c.var.bindings().db, idParam('id', c.req.param('id')))),
   )
 
@@ -33,13 +34,18 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * caller only has one (a scheduled checkpoint has no route to have loaded it)
    * and the row when the caller already does.
    */
-  app.post('/story/:id/versions', loadStory<Env>(), async (c) => {
+  app.post('/story/:id/versions', requireAccess<Env>(rt, PUBLISH), loadStory<Env>(), async (c) => {
     const body = await parseOptionalBody(c.req, CheckpointBody)
     const deps = rt.publishDeps(c.var.bindings(), {
       env: c.env,
       waitUntil: (p) => c.executionCtx.waitUntil(p),
     })
-    return c.json(await checkpoint(deps, c.var.story, body))
+    // `actor` comes off the session, never off the body: the client used to
+    // send its own display name here, which made "who checkpointed this" a
+    // field anybody could type into.
+    return c.json(
+      await checkpoint(deps, c.var.story, { label: body.label, actor: actorString(c.var.actor) }),
+    )
   })
 
   /**
@@ -47,7 +53,7 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * the live document against this one and applies the result as a single
    * transaction, so a restore syncs to other editors and can be undone.
    */
-  app.get('/versions/:versionId', async (c) => {
+  app.get('/versions/:versionId', requireAccess<Env>(rt, READ_DRAFT), async (c) => {
     const found = await getVersion(
       c.var.bindings().db,
       idParam('versionId', c.req.param('versionId')),
@@ -56,7 +62,7 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return c.json(found)
   })
 
-  app.get('/story/:id/activity', loadStory<Env>(), async (c) =>
+  app.get('/story/:id/activity', requireAccess<Env>(rt, READ), loadStory<Env>(), async (c) =>
     c.json(
       await rt
         .stub(c.var.bindings(), c.var.story.id)
