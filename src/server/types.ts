@@ -101,6 +101,15 @@ export interface FolioConfig<Env> {
    * to veto or rewrite a publish. Validated for unknown keys at construction.
    */
   hooks?: FolioHooks<Env>
+  /**
+   * The `singleton` types loaded into every page's `Resolution` — a header, a
+   * footer, site settings (`../../../docs/specs/content-model/globals.md`). An
+   * explicit list rather than every declared singleton: a singleton read once
+   * by the host at boot (`folio.global`) has no business in a per-request
+   * resolution, so declaring it here is what makes the read set obvious.
+   * Validated at construction — every name must name a declared `singleton`.
+   */
+  globals?: readonly string[]
 }
 
 export interface Folio<Env> {
@@ -150,6 +159,24 @@ export interface Folio<Env> {
    */
   resolve: (env: Env, doc?: Doc) => Promise<Resolution>
   render: (doc: Doc, opts?: { edit?: boolean; resolution?: Resolution }) => ReactNode
+  /**
+   * Published document for a global, or null — `name` is not required to be
+   * one of `FolioConfig.globals`, since a host may read a singleton by name
+   * (the "SEO defaults read once at boot" case) without wanting it fetched on
+   * every page render (`globals.md`). Null for an unknown name, a non-singleton
+   * type, or a singleton nothing has published yet — the same "nothing to show,
+   * no error" shape as `published`.
+   */
+  global: (env: Env, name: string) => Promise<Doc | null>
+  /**
+   * A global, rendered from an already-built `Resolution` — never fetches, so
+   * it is safe to call per keystroke in the preview. Null when the resolution
+   * carries nothing for `name`: a global nobody has published yet, or a name
+   * that was never in `FolioConfig.globals`. Passing `edit: true` outside a
+   * Folio-owned preview leaks `data-folio-uid` markers onto a published page;
+   * a host's own render call should not set it (`globals.md` edge case).
+   */
+  renderGlobal: (resolution: Resolution, name: string, opts?: { edit?: boolean }) => ReactNode
 }
 
 /**

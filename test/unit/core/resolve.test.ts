@@ -463,6 +463,51 @@ describe('resolveReference (one level deep)', () => {
   })
 })
 
+// content-model/globals.md architecture decision 2: `globals` is a separate
+// field from `docs`, populated by the same query but with a different
+// lifetime — `RenderBlok`'s one-level bound (Render.tsx) empties `docs` on
+// the way down into a `reference`'s content so a self-referencing story
+// cannot render forever, but a global rendered inside that referenced
+// document still needs its own content, so `globals` must survive the exact
+// spread that clears `docs`.
+describe('Resolution.globals: survives the one-level reference bound', () => {
+  it('is untouched by the same spread that empties docs one level down', () => {
+    const targetDoc: Doc = {
+      root: 'about-root',
+      bloks: {
+        'about-root': {
+          uid: 'about-root',
+          type: 'page',
+          parent: null,
+          slot: null,
+          order: 'a0',
+          data: { title: 'About us' },
+        },
+      },
+    }
+    const headerDoc: Doc = {
+      root: 'hdr',
+      bloks: {
+        hdr: { uid: 'hdr', type: 'headerRoot', parent: null, slot: null, order: 'a0', data: {} },
+      },
+    }
+    const resolution: Resolution = {
+      stories: {},
+      assetBase: '/folio/asset',
+      docs: { sty_about: targetDoc },
+      globals: { header: headerDoc },
+    }
+
+    // The exact operation Render.tsx performs when recursing into a
+    // `reference`'s own content.
+    const oneLevelDown: Resolution = { ...resolution, docs: {} }
+
+    expect(oneLevelDown.docs).toEqual({})
+    expect(oneLevelDown.globals).toBe(resolution.globals)
+    expect(oneLevelDown.globals?.header).toEqual(headerDoc)
+  })
+})
+
 describe('buildResolution: type and routable', () => {
   it('carries the document type through and marks a routed story routable', () => {
     const res = buildResolution([story({ id: 'sty_a', type: 'insight', path: 'insights/one' })])

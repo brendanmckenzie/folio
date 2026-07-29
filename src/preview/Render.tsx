@@ -131,3 +131,29 @@ export function FolioDoc({ doc, registry, edit, resolution }: Omit<Props, 'uid'>
     <RenderBlok doc={doc} registry={registry} uid={doc.root} edit={edit} resolution={resolution} />
   )
 }
+
+/**
+ * A global, rendered — the one function behind both `Folio.renderGlobal` (a
+ * host's own shell) and Folio's internal preview page, so the wrapper is
+ * identical markup wherever it appears (`../../../docs/specs/content-model/
+ * globals.md` decision 3): a hydration mismatch between a published page and
+ * a preview is a header that flickers for the first person to notice.
+ *
+ * Null — no wrapper at all — when `resolution.globals` has nothing for `name`:
+ * a global nobody has published yet renders nothing, in both modes, with
+ * nothing to catch.
+ */
+export function renderGlobalNode(
+  registry: Registry,
+  resolution: Resolution,
+  name: string,
+  opts?: { edit?: boolean },
+): ReactNode {
+  const doc = resolution.globals?.[name]
+  if (!doc) return null
+  return (
+    <div data-folio-global={name}>
+      <FolioDoc doc={doc} registry={registry} edit={opts?.edit} resolution={resolution} />
+    </div>
+  )
+}

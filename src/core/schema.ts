@@ -75,6 +75,16 @@ export interface DocumentType {
   under?: readonly string[]
   /** The type a bare "New page" creates. Implicitly the first `page` type. */
   default?: boolean
+  /**
+   * Where a `singleton` is seen in context, since it has no URL of its own to
+   * preview (`../../../docs/specs/content-model/globals.md`): the *path* of a
+   * routed document whose preview the admin loads with `&as=<name>` appended,
+   * so the singleton's draft renders on top of a real page instead of a blank
+   * background. `''` means the root story. Undefined gets a bare preview — the
+   * singleton alone, on the host's stylesheet, with a note that no host page
+   * was configured. `singleton` kinds only.
+   */
+  previewPath?: string
 }
 
 export interface Manifest {
@@ -86,6 +96,12 @@ export interface Manifest {
    * hosts and tests reading `manifest.root` from before `types` existed.
    */
   root: string
+  /**
+   * `FolioConfig.globals`, so the admin can draw a Globals section without a
+   * second request. A subset of the declared `singleton` types — not every
+   * singleton needs to be a global (`globals.md`'s resolved open question).
+   */
+  globals: string[]
 }
 
 export function indexManifest(manifest: Manifest): SchemaIndex {
@@ -290,6 +306,28 @@ function grounded(
     const parent = typeByName(types, name)
     return parent ? grounded(parent, types, chain) : false
   })
+}
+
+/**
+ * Construction-time check for `FolioConfig.globals` (`globals.md`): every name
+ * must be a declared `singleton` type. `globals` is deliberately an explicit
+ * list rather than a default of "every singleton" — a "SEO defaults" singleton
+ * read once by the host at boot has no business in a per-request resolution,
+ * and explicit costs one line of config for a read set that stays obvious.
+ */
+export function validateGlobals(
+  globals: readonly string[] | undefined,
+  types: readonly DocumentType[],
+): void {
+  for (const name of globals ?? []) {
+    const type = typeByName(types, name)
+    if (!type) throw new Error(`folio: 'globals' names unknown document type '${name}'`)
+    if (type.kind !== 'singleton') {
+      throw new Error(
+        `folio: 'globals' names '${name}', which is kind '${type.kind}', not 'singleton'`,
+      )
+    }
+  }
 }
 
 /**

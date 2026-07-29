@@ -63,6 +63,18 @@ export interface Resolution {
    * references itself from rendering forever.
    */
   docs?: Record<string, Doc>
+  /**
+   * A site's singletons — headers, footers, settings — keyed by *type name*
+   * rather than story id, because a caller says `'header'` and should not have
+   * to know the `sng_<type>` id convention (`../../../docs/specs/content-model/
+   * globals.md`). Populated by the same query `docs` is, from `FolioConfig.globals`.
+   *
+   * Deliberately a separate field rather than merged into `docs`: `RenderBlok`
+   * empties `docs` one level down so a story referencing itself renders once,
+   * but a global rendered inside a referenced document still needs its own
+   * content, so `globals` has to survive that emptying.
+   */
+  globals?: Record<string, Doc>
 }
 
 export const DEFAULT_ASSET_BASE = '/folio/asset'
