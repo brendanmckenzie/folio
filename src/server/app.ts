@@ -8,6 +8,7 @@ import { withActor, withBindings } from './middleware'
 import { accessRoutes } from './routes/access'
 import { assetRoutes } from './routes/assets'
 import { authRoutes } from './routes/auth'
+import { contentRoutes } from './routes/content'
 import { editorRoutes } from './routes/editor'
 import { historyRoutes } from './routes/history'
 import { migrationRoutes } from './routes/migrations'
@@ -71,6 +72,7 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   app.route('/', editorRoutes<Env>(rt))
   app.route('/', redirectRoutes<Env>(rt))
   app.route('/', migrationRoutes<Env>(rt))
+  app.route('/', contentRoutes<Env>(rt))
 
   return app
 }

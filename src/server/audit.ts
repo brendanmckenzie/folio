@@ -33,8 +33,9 @@
  * names them.
  */
 import type { Blok } from '../core/doc'
+import { isIndexableKind } from '../core/index-projection'
 import { isTranslatable, type LocaleConfig } from '../core/locales'
-import { type BlockSchema, type SchemaIndex, slotsOf } from '../core/schema'
+import { type BlockSchema, type DocumentType, type SchemaIndex, slotsOf } from '../core/schema'
 import { publishedDocsAll } from './stories'
 
 /**
@@ -47,6 +48,13 @@ export interface AuditContext {
   /** `FolioConfig.locales` (`../content-model/localisation.md`). Absent for a
    * single-locale site, and every locale check reads that as "nothing to say". */
   locales?: LocaleConfig
+  /**
+   * The declared document types (`../content-model/collections.md`). Needed by one
+   * check and one check only: whether a block carrying an `indexed` field is any
+   * type's **root**, which is a property of the config rather than of the schema.
+   * Absent means "cannot judge", not "no block is a root".
+   */
+  types?: readonly DocumentType[]
 }
 
 const NO_CONTEXT: AuditContext = {}
@@ -326,11 +334,63 @@ const untranslatableText: SchemaCheck = (schema, ctx) => {
   return out
 }
 
+/**
+ * An `indexed` flag that can never take effect
+ * (`../content-model/collections.md` architecture decision 2).
+ *
+ * Two ways to write one, both silent without this check:
+ *
+ *   - **On a kind that has no scalar to index.** The field builders make this
+ *     unrepresentable — `richtext({ indexed: true })` does not compile — so it only
+ *     reaches here from a hand-written schema or an importer. The projection
+ *     stores nothing, and `where` on the field 400s as if it were never declared.
+ *   - **On a block that is no document type's root.** The index is a *fixed*
+ *     projection of a document, so only the root block is read: a field on a
+ *     nested block would make the row set depend on which blocks happen to be
+ *     inside the document. This is the honest failure of that rule — the flag
+ *     looks like it works and does nothing at all.
+ *
+ * Needs `ctx.types`, which is why `AuditContext` carries it: "is this block a
+ * document root" is a property of the *config*, not of the schema.
+ */
+const unusableIndex: SchemaCheck = (schema, ctx) => {
+  const roots = new Set((ctx.types ?? []).map((t) => t.root))
+  const out: SchemaFinding[] = []
+  for (const def of Object.values(schema)) {
+    for (const [name, field] of Object.entries(def.fields)) {
+      // `indexed` is only on the five scalar kinds, so anything else carrying one
+      // arrived untyped; read it off the record rather than through `Field`.
+      if ((field as { indexed?: unknown }).indexed !== true) continue
+      if (!isIndexableKind(field)) {
+        out.push({
+          check: 'indexed-unsupported',
+          block: def.name,
+          field: name,
+          detail: `'${name}' is a ${field.kind} field marked 'indexed' — only text, textarea, number, boolean and select project to a scalar, so nothing is indexed`,
+        })
+        continue
+      }
+      // No declared types at all means nothing can be judged, not that every
+      // block is a root: `auditSchema` is callable with a bare schema in a test.
+      if (roots.size > 0 && !roots.has(def.name)) {
+        out.push({
+          check: 'indexed-not-root',
+          block: def.name,
+          field: name,
+          detail: `'${name}' is marked 'indexed' on '${def.name}', which is no document type's root block — only a root block is projected, so this does nothing`,
+        })
+      }
+    }
+  }
+  return out
+}
+
 /** See "Adding a check" in the file header. */
 export const SCHEMA_CHECKS: readonly SchemaCheck[] = [
   unknownConditionField,
   hiddenSummaryField,
   untranslatableText,
+  unusableIndex,
 ]
 
 /* ------------------------------------------------------------- the walk --- */

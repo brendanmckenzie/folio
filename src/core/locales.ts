@@ -226,11 +226,15 @@ export function validateLocales(locales: LocaleConfig | undefined): void {
  * every schema into a translation surface nobody asked for.
  *
  * A `blocks` field can never be: children are separate bloks, not a value, and
- * per-locale structure is exactly what decision 1 trades away. The type says so
- * as well, so `blocks({ translatable: true })` does not compile.
+ * per-locale structure is exactly what decision 1 trades away. Nor can a
+ * `collection`: the locale belongs on the *query* it runs, taken from the
+ * resolution, never on the configuration. The type says so for both, so neither
+ * `blocks({ translatable: true })` nor `collection({ translatable: true })`
+ * compiles.
  */
 export function isTranslatable(field: Field): boolean {
-  return field.kind !== 'blocks' && field.translatable === true
+  if (field.kind === 'blocks' || field.kind === 'collection') return false
+  return field.translatable === true
 }
 
 /** A block's translatable fields, in declaration order. */

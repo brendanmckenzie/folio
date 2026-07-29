@@ -19,6 +19,7 @@ import {
   type StoryMeta,
   type StoryNode,
 } from '../core/story'
+import { clearIndexStatements } from './content-index'
 import { clearRedirectAtStatement, redirectStatements } from './redirects'
 
 const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18n,
@@ -28,13 +29,24 @@ const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18
               schema_id as schemaId`
 
 /**
+ * `COLS`, for the one module that assembles its own `select` over `stories`:
+ * `query.ts`, which joins `content_index` and therefore cannot go through any of
+ * the readers here. Exported rather than duplicated so a column added to a story
+ * row appears in a query result without anybody remembering to add it twice.
+ *
+ * Unqualified on purpose — `query.ts` uses `from stories` with no table alias, and
+ * `content_index` shares none of these names, so there is nothing to qualify.
+ */
+export const STORY_COLS = COLS
+
+/**
  * A `COLS` row before `state`/`hasUnpublishedChanges` are derived onto it.
  *
  * `title_i18n` keeps its column name rather than being aliased, because it is
  * JSON in D1 and a `string` here — `withState` is what turns it into the
  * `titleI18n` record callers see, so the parse happens once for every reader.
  */
-type StoryRow = Omit<StoryMeta, 'state' | 'hasUnpublishedChanges' | 'titleI18n'> & {
+export type StoryRow = Omit<StoryMeta, 'state' | 'hasUnpublishedChanges' | 'titleI18n'> & {
   title_i18n?: string | null
 }
 
@@ -81,8 +93,54 @@ function parseTitleI18n(raw: string | null | undefined): Record<string, string> 
   return Object.keys(out).length > 0 ? out : null
 }
 
-export async function listStories(db: D1Database): Promise<StoryMeta[]> {
-  const { results } = await db.prepare(`select ${COLS} from stories`).all<StoryRow>()
+/** `withState`, for `query.ts`. See `STORY_COLS`. */
+export const toStoryMeta = withState
+
+/**
+ * Every story row.
+ *
+ * `opts` is `folio.stories(env, { page, perPage })`
+ * (`../content-model/collections.md` decision 6): the unpaginated form still
+ * answers everything, because a sitemap of 40 pages should not have to page, and a
+ * sitemap of 2,000 now can. Ordered by `id` when paged, so the pages partition the
+ * set — without an ORDER BY, SQLite's row order is not something to page over.
+ */
+export async function listStories(
+  db: D1Database,
+  opts?: { limit: number; offset: number },
+): Promise<StoryMeta[]> {
+  const { results } = opts
+    ? await db
+        .prepare(`select ${COLS} from stories order by id limit ? offset ?`)
+        .bind(opts.limit, opts.offset)
+        .all<StoryRow>()
+    : await db.prepare(`select ${COLS} from stories`).all<StoryRow>()
+  return results.map(withState)
+}
+
+/**
+ * The story rows a narrowed resolution needs: some by id (a link's or a
+ * reference's target), some by path (the rendered story's ancestors, for
+ * breadcrumbs) — in **one** query, which is the whole reason ancestors are
+ * addressed by path rather than walked up `parent_id`
+ * (`../content-model/collections.md` decision 6, and `ancestorPaths`).
+ *
+ * Empty in, empty out: `in ()` is not valid SQL, and a document with no links,
+ * no references and no ancestors should cost no read at all.
+ */
+export async function storiesFor(
+  db: D1Database,
+  ids: readonly string[],
+  paths: readonly string[] = [],
+): Promise<StoryMeta[]> {
+  if (ids.length === 0 && paths.length === 0) return []
+  const clauses: string[] = []
+  if (ids.length > 0) clauses.push(`id in (${ids.map(() => '?').join(', ')})`)
+  if (paths.length > 0) clauses.push(`path in (${paths.map(() => '?').join(', ')})`)
+  const { results } = await db
+    .prepare(`select ${COLS} from stories where ${clauses.join(' or ')}`)
+    .bind(...ids, ...paths)
+    .all<StoryRow>()
   return results.map(withState)
 }
 
@@ -281,6 +339,34 @@ export async function publishedDocsAll(
 ): Promise<{ id: string; type: string; doc: Doc }[]> {
   const { results } = await db
     .prepare('select id, type, published_doc from stories where published_doc is not null')
+    .all<{ id: string; type: string; published_doc: string }>()
+  return results.map((row) => ({
+    id: row.id,
+    type: row.type,
+    doc: JSON.parse(row.published_doc) as Doc,
+  }))
+}
+
+/**
+ * One batch of published documents, in `id` order, starting after `after` —
+ * `POST /folio/reindex`'s resumable read (`../content-model/collections.md`).
+ *
+ * Ordered by the primary key and resumed by a cursor rather than by OFFSET, the
+ * same reasoning `storiesBehind` above spells out: the rows are the rows the
+ * batch is about to write, and an OFFSET over a set something else is publishing
+ * into skips documents.
+ */
+export async function publishedDocsAfter(
+  db: D1Database,
+  after: string | null,
+  limit: number,
+): Promise<{ id: string; type: string; doc: Doc }[]> {
+  const { results } = await db
+    .prepare(
+      `select id, type, published_doc from stories
+       where published_doc is not null and id > ? order by id limit ?`,
+    )
+    .bind(after ?? '', limit)
     .all<{ id: string; type: string; published_doc: string }>()
   return results.map((row) => ({
     id: row.id,
@@ -732,6 +818,15 @@ export async function deleteStoryStatement(
   paths: (string | null)[]
   statement: D1PreparedStatement
   redirectStatements: D1PreparedStatement[]
+  /**
+   * `content_index` / `content_refs` rows for the same ids
+   * (`../content-model/collections.md`), for the same batch: a deleted story must
+   * leave every collection in the same transaction it leaves the tree, or a query
+   * returns an id with no document behind it. Outbound edges only — a row where
+   * this story is the *target* is another document's fact, and is what
+   * `data-documents.md`'s "used by N" warning reads.
+   */
+  indexStatements: D1PreparedStatement[]
 } | null> {
   const rows = await listStories(db)
   const target = rows.find((r) => r.id === id)
@@ -765,7 +860,13 @@ export async function deleteStoryStatement(
     }
   }
 
-  return { ids, paths, statement, redirectStatements: redirects }
+  return {
+    ids,
+    paths,
+    statement,
+    redirectStatements: redirects,
+    indexStatements: clearIndexStatements(db, ids),
+  }
 }
 
 /** Removes the story and everything beneath it. */
@@ -776,7 +877,7 @@ export async function deleteStory(
 ): Promise<string[]> {
   const found = await deleteStoryStatement(db, id, {}, types)
   if (!found) return []
-  await found.statement.run()
+  await db.batch([found.statement, ...found.indexStatements])
   return found.ids
 }
 

@@ -53,6 +53,8 @@ describe('workers harness: D1', () => {
     expect(results.map((r) => r.name)).toEqual([
       'api_tokens',
       'assets',
+      'content_index',
+      'content_refs',
       'd1_migrations',
       'login_challenges',
       'redirects',

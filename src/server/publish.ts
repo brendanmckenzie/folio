@@ -9,6 +9,7 @@
  */
 import type { Doc } from '../core/doc'
 import { draftState, type StoryMeta } from '../core/story'
+import { clearIndexStatements, type ContentProjection, indexStatements } from './content-index'
 import { FolioError } from './errors'
 import type { HookRunner } from './hooks'
 import { publishStoryStatement, storyById, unpublishStoryStatement } from './stories'
@@ -49,6 +50,20 @@ export interface PublishDeps<Env = unknown> {
    * rather than clear a cache it knows nothing about.
    */
   titlesFor?: (story: StoryMeta, doc: Doc) => Record<string, string> | undefined
+  /**
+   * The document's `content_index` / `content_refs` rows
+   * (`../content-model/collections.md` architecture decision 3). Injected for the
+   * same reason `titleFor` is: the projection needs the block schema, the
+   * document type and the locale config, and only `createRuntime` has all three.
+   *
+   * Optional, unlike `titleFor`, and it is the absence that is interesting: a
+   * caller without one publishes with no index rows, which is exactly what every
+   * caller did before collections existed. The index is rebuildable from
+   * `published_doc` at any time (`POST /folio/reindex`), so a missing projection
+   * is a stale index rather than lost content — the reason this could be optional
+   * where a wrong cached title could not.
+   */
+  projection?: (story: StoryMeta, doc: Doc) => ContentProjection
   /**
    * Fires the after-commit lifecycle hooks (`publish-hooks.md`). Absent only in
    * tests that exercise a workflow directly with no `createRuntime` behind it —
@@ -131,7 +146,16 @@ export async function publish(
     syncId,
     deps.titlesFor?.(meta, doc),
   )
-  await deps.db.batch([versionStatement, publishStatement])
+  // The query index joins the same batch (`collections.md` decision 3), so it
+  // cannot describe a document that is not published and a failed publish leaves
+  // neither. Delete-then-insert, because the row set shrinks when a field is
+  // cleared or a locale is dropped.
+  const projection = deps.projection?.(meta, doc)
+  await deps.db.batch([
+    versionStatement,
+    publishStatement,
+    ...(projection ? indexStatements(deps.db, storyId, projection) : []),
+  ])
 
   // Built from `meta` plus the writes just committed, rather than re-read: the
   // batch above is the only truth this function needs, and re-querying D1
@@ -178,8 +202,13 @@ export async function unpublish(
     return { unpublishedAt: meta.unpublishedAt }
   }
 
+  // The index rows go with it, in one batch: an unpublished page must leave every
+  // collection that listed it, and a row surviving here would keep it in the list
+  // with no document behind it. This is the batching `unpublishStoryStatement`'s
+  // own doc comment anticipated — before collections it was the one workflow with
+  // nothing to batch against.
   const { unpublishedAt, statement } = unpublishStoryStatement(deps.db, meta.id, actor)
-  await statement.run()
+  await deps.db.batch([statement, ...clearIndexStatements(deps.db, [meta.id])])
 
   const updated: StoryMeta = {
     ...meta,

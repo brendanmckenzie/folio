@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { FieldCondition } from './conditions'
 import type { Json } from './doc'
+import type { ResolvedCollection } from './query'
 import type { ResolvedAsset, ResolvedLink, ResolvedReference } from './resolve'
 import type { RichtextMarkName, RichtextNodeName } from './richtext'
 import type { LinkKind } from './values'
@@ -47,17 +48,42 @@ interface Common {
   translatable?: boolean
 }
 
+/**
+ * Projected into `content_index` on publish, so a `collection` field (and
+ * `folio.query`) can filter and sort on it
+ * (`../../../docs/specs/content-model/collections.md` architecture decision 2).
+ *
+ * Declared on the field, colocated with every other constraint in Folio, so the
+ * admin can show that a field is filterable and the audit can report an
+ * `indexed` flag that can never take effect.
+ *
+ * **Deliberately not on `Common`.** Only the five scalar kinds below carry it, so
+ * `richtext({ indexed: true })` does not compile: the table exists to filter and
+ * sort, and an asset, a link or a prose document has no scalar to sort by. The
+ * escape hatch for "sort by publication date" is a root `text` field holding an
+ * ISO 8601 string, which is what a publish-date field is anyway.
+ *
+ * **Root block only.** A field on a nested block would make the index depend on
+ * which blocks exist inside a document, so a block insert would change the index
+ * and the publish-time write would no longer be a fixed projection. An `indexed`
+ * flag on a block that is no document type's root is reported by `/folio/audit`
+ * rather than silently doing nothing.
+ */
+interface Indexable {
+  indexed?: boolean
+}
+
 export interface SelectOption {
   label: string
   value: string
 }
 
 export type Field =
-  | ({ kind: 'text'; placeholder?: string } & Common)
-  | ({ kind: 'textarea'; rows?: number; placeholder?: string } & Common)
-  | ({ kind: 'number'; min?: number; max?: number } & Common)
-  | ({ kind: 'boolean' } & Common)
-  | ({ kind: 'select'; options: readonly SelectOption[] } & Common)
+  | ({ kind: 'text'; placeholder?: string } & Common & Indexable)
+  | ({ kind: 'textarea'; rows?: number; placeholder?: string } & Common & Indexable)
+  | ({ kind: 'number'; min?: number; max?: number } & Common & Indexable)
+  | ({ kind: 'boolean' } & Common & Indexable)
+  | ({ kind: 'select'; options: readonly SelectOption[] } & Common & Indexable)
   /** `accept` is passed to the file picker, e.g. `'image/*'` or `'.pdf'`. */
   | ({ kind: 'asset'; accept?: string } & Common)
   | ({ kind: 'multiasset'; accept?: string; max?: number } & Common)
@@ -100,6 +126,35 @@ export type Field =
       Common,
       'default' | 'translatable'
     >)
+  /**
+   * A list of published documents, described as a query the editor narrows
+   * (`../../../docs/specs/content-model/collections.md` architecture decision 5).
+   *
+   * The field declares the shape of the query — which type, which fields the
+   * editor may filter by, how many per page, how it sorts by default — and the
+   * stored value is only the editor's choices within it. Both are enforced on the
+   * way in *and* on the way out, the same double enforcement `richtext`'s `marks`
+   * has, because a value can also arrive from an importer or over the API.
+   *
+   * Not `translatable`, and the type says so: the locale belongs on the *query*
+   * (which locale's index rows to filter and sort against, taken from the
+   * resolution), never on the configuration. A French index page and an English
+   * one are the same collection read in two languages.
+   *
+   * Items arrive as `ReferenceTarget`s — the shape `reference` already resolves to
+   * — so a block author who can render a reference can render a collection item
+   * with no new knowledge.
+   */
+  | ({
+      kind: 'collection'
+      /** Document type(s) to list. Absent lists every type. */
+      type?: string | readonly string[]
+      /** Fields the editor may narrow by. Each must be `indexed` on a root block. */
+      filterable?: readonly string[]
+      /** Ceiling on the editor's count, itself capped at 100. */
+      maxPerPage?: number
+      defaultOrder?: { field: string; dir: 'asc' | 'desc' }
+    } & Omit<Common, 'translatable'>)
 
 type Opts<K extends Field['kind']> = Omit<Extract<Field, { kind: K }>, 'kind'>
 
@@ -131,6 +186,8 @@ export const blocks = <const T extends readonly string[]>(
   o: Omit<Opts<'blocks'>, 'allow'> & { allow: T },
 ) => ({ kind: 'blocks' as const, ...o })
 
+export const collection = (o: Opts<'collection'> = {}) => ({ kind: 'collection' as const, ...o })
+
 /**
  * What a field hands to `render`. A `blocks` field arrives already rendered, so
  * a block author just drops `{body}` into their JSX; a `multilink` arrives
@@ -153,11 +210,16 @@ export type ValueOf<F extends Field> = F extends { kind: 'blocks' | 'richtext' }
             ? ResolvedAsset[]
             : F extends { kind: 'reference' }
               ? ResolvedReference | null
-              : F extends { kind: 'select'; options: readonly (infer O)[] }
-                ? O extends SelectOption
-                  ? O['value']
+              : // Never null: an empty page is a page, so a block writes
+                // `list.items.map(…)` without a guard and an empty collection
+                // renders its own empty state rather than crashing.
+                F extends { kind: 'collection' }
+                ? ResolvedCollection
+                : F extends { kind: 'select'; options: readonly (infer O)[] }
+                  ? O extends SelectOption
+                    ? O['value']
+                    : string
                   : string
-                : string
 
 export type PropsOf<F extends Record<string, Field>> = { [K in keyof F]: ValueOf<F[K]> }
 
@@ -172,6 +234,10 @@ export function defaultValue(f: Field): Json {
     case 'blocks':
       // Children are separate bloks, not a value on the parent.
       return null
+    case 'collection':
+      // An empty object, not null: the value is the editor's choices, and `{}`
+      // means "the field's own defaults", which is what a fresh block wants.
+      return {}
     case 'multilink':
     case 'asset':
     case 'richtext':

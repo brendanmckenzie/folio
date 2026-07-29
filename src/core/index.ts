@@ -16,6 +16,7 @@ export {
   asset,
   blocks,
   boolean,
+  collection,
   multiasset,
   multilink,
   number,
@@ -27,6 +28,44 @@ export {
   defaultValue,
 } from './fields'
 export type { Field, PropsOf, SelectOption, ValueOf } from './fields'
+
+// Collections (`../../../docs/specs/content-model/collections.md`). A block author
+// needs `ResolvedCollection` to type what `collection()` hands `render`; a host
+// writing its own filtered archive route needs `ContentQuery` and `ContentPage`.
+// The SQL is `folio/server`'s.
+export {
+  BUILT_IN_ORDERS,
+  DEFAULT_PER_PAGE,
+  MAX_PER_PAGE,
+  collectionQueries,
+  collectionQuery,
+  emptyContentPage,
+  isRangeOp,
+  isTextOp,
+  normaliseQuery,
+  queryKey,
+  WHERE_OPS,
+} from './query'
+export type {
+  CollectionField,
+  CollectionValue,
+  ContentOrder,
+  ContentOrderSpec,
+  ContentPage,
+  ContentQuery,
+  ContentWhere,
+  RangeOp,
+  ResolvedCollection,
+  TextOp,
+} from './query'
+
+// The publish-time projection and the outbound-edge walk. Exported because a host
+// importer or a one-off script that writes `published_doc` directly has to be able
+// to write the same index rows a publish would.
+export { indexedFieldNames, indexedFields, indexRowsFor, isIndexed } from './index-projection'
+export type { IndexRow } from './index-projection'
+export { linkedIds, outboundRefs, referencedIdsAllLocales } from './refs'
+export type { OutboundRef } from './refs'
 
 export {
   asAsset,
@@ -65,6 +104,7 @@ export {
   referencedIds,
   resolveAsset,
   resolveAssets,
+  resolveCollection,
   resolveLink,
   resolveReference,
   resolveValue,
@@ -105,7 +145,15 @@ export type {
   TranslationStatus,
 } from './locales'
 
-export { buildTree, derivePaths, descendants, joinPath, newStoryId, slugify } from './story'
+export {
+  ancestorPaths,
+  buildTree,
+  derivePaths,
+  descendants,
+  joinPath,
+  newStoryId,
+  slugify,
+} from './story'
 export type { StoryMeta, StoryNode } from './story'
 
 // Document types (`document-types.md`) are core, not server, config: the admin

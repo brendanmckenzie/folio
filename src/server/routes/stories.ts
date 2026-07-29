@@ -222,14 +222,16 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       found = await deleteStoryStatement(bindings.db, target, { redirect }, rt.types)
       if (!found) return c.json({ deleted: [] })
 
-      // One batch for the story rows, their version history and (optionally)
-      // the redirect to the parent: all three disappear or land together, so a
-      // reader never finds versions for a story that is already gone, or a
-      // redirect for a delete that never actually committed.
+      // One batch for the story rows, their version history, their query-index
+      // rows and (optionally) the redirect to the parent: all four disappear or
+      // land together, so a reader never finds versions for a story that is
+      // already gone, a collection that still lists it, or a redirect for a
+      // delete that never actually committed.
       const versions = deleteVersionsStatement(bindings.db, found.ids)
       await bindings.db.batch([
         found.statement,
         ...found.redirectStatements,
+        ...found.indexStatements,
         ...(versions ? [versions] : []),
       ])
     } catch (e) {

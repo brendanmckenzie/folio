@@ -8,6 +8,7 @@ import { allows, READ_DRAFT } from './auth/roles'
 import { runMigrations } from './migrate'
 import { previewPage } from './pages'
 import { lookupRedirect } from './redirects'
+import { reindex } from './reindex'
 import { createRuntime } from './runtime'
 import {
   listStories,
@@ -38,6 +39,20 @@ export type {
   MigrationStatus,
 } from './migrate'
 export type { AuditReport, ContentFinding, SchemaFinding } from './audit'
+/**
+ * Collections (`../../../docs/specs/content-model/collections.md`): the query
+ * shapes a host writes and reads. `collection()` itself, and the resolved value a
+ * block renders, ship from `folio/core` with the rest of the field builders.
+ */
+export type { ReindexOptions, ReindexReport } from './reindex'
+export type {
+  ContentOrder,
+  ContentPage,
+  ContentQuery,
+  ContentWhere,
+  ResolvedCollection,
+} from '../core/query'
+export { countReferencesTo, referencesTo } from './content-index'
 export type {
   CheckpointedHookPayload,
   CreatedHookPayload,
@@ -180,10 +195,33 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     status: (env, path) => storyStatus(config.bindings(env).db, path),
     redirect: (env, path) => lookupRedirect(config.bindings(env).db, path),
     draft: (env, id) => rt.draft(config.bindings(env), id),
-    stories: async (env) => (await listStories(config.bindings(env).db)).map(rt.withUrls),
+    /**
+     * `opts` pages this (`collections.md` decision 6). Absent still answers
+     * everything: a sitemap of 40 pages should not have to page, and one of 2,000
+     * now can. `folio.query(env, …)` is what reports `pages`.
+     */
+    stories: async (env, opts) => {
+      const page = Math.max(Math.trunc(opts?.page ?? 1), 1)
+      const perPage =
+        opts?.perPage === undefined ? undefined : Math.max(Math.trunc(opts.perPage), 1)
+      const window =
+        perPage === undefined ? undefined : { limit: perPage, offset: (page - 1) * perPage }
+      return (await listStories(config.bindings(env).db, window)).map(rt.withUrls)
+    },
     tree: async (env) => rt.decorate(await storyTree(config.bindings(env).db)),
     registry: rt.registry,
-    resolve: (env, doc, opts) => rt.resolve(config.bindings(env), doc, { locale: opts?.locale }),
+    resolve: (env, doc, opts) => rt.resolve(config.bindings(env), doc, opts),
+    query: (env, q) => rt.query(config.bindings(env), q),
+    reindex: (env, opts) =>
+      reindex(
+        {
+          db: config.bindings(env).db,
+          schema: rt.schema,
+          typeOf: rt.typeOf,
+          locales: rt.locales,
+        },
+        opts,
+      ),
     render: (doc, opts) => (
       <FolioDoc doc={doc} registry={rt.registry} edit={opts?.edit} resolution={opts?.resolution} />
     ),
@@ -214,6 +252,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         opts,
       )
     },
-    audit: (env) => audit(config.bindings(env).db, rt.schema, { locales: rt.locales }),
+    audit: (env) =>
+      audit(config.bindings(env).db, rt.schema, { locales: rt.locales, types: rt.types }),
   }
 }
