@@ -206,8 +206,22 @@ work, but Folio must expose access rules to the renderer. **M**
 
 Real scale breaks the current UI:
 
-- The "+ Add block" menu is an unsorted flat list. Needs grouping, search, and
-  probably icons or thumbnails. **M**
+- The "+ Add block" menu is an unsorted flat list. **Grouping is done**: one
+  entry per allowed type, in declaration order, with that type's presets
+  nested beneath it (`field-defaults-and-presets.md`). Search and icons or
+  thumbnails are still open, and matter more once presets have multiplied the
+  menu's entries. **M** (down from a flat list to search/icons remaining)
+- **Field defaults and presets** (`default`, `presets`, `presetsOnly`) —
+  done. A block starts as its kind's zero value unless a field declares a
+  `default`, layered under a named `preset`'s own override — and a preset can
+  carry children, so "Hero — with button" inserts both as one transaction.
+  This is very likely the honest answer to a meaningful chunk of the 87 block
+  schemas: several of those are near-identical variants (`HeroDark`,
+  `HeroLight`, `HeroVideo`) that collapse into one block plus three presets,
+  which is one schema to maintain instead of three and one design change
+  instead of three edits. Worth an explicit pass over
+  `components.3001038.json` once Phase 6's stub generator exists, rather than
+  guessing here. See `docs/specs/editing/field-defaults-and-presets.md`.
 - **Duplicate a block**, and copy/paste blocks between pages. Editors will ask
   within a day. **S**
 - **Collapse/expand** in the block tree, which gets unusable deep in a

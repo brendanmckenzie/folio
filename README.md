@@ -33,7 +33,10 @@ export const hero = defineBlock({
   summary: 'heading',
   fields: {
     heading: text({ required: true }),
-    align: select({ options: [{ label: 'Left', value: 'left' }, { label: 'Centre', value: 'center' }] }),
+    align: select({
+      options: [{ label: 'Left', value: 'left' }, { label: 'Centre', value: 'center' }],
+      default: 'center', // a new hero starts centred, not on the first option by accident
+    }),
     actions: blocks({ allow: ['button'], max: 2 }),
   },
   // `align` is typed 'left' | 'center'; `actions` arrives already rendered.
@@ -157,6 +160,59 @@ import { matches } from 'folio/core'
 render: ({ layout, image }) =>
   matches({ field: 'layout', eq: 'split' }, { layout }) ? <img src={image?.url} alt="" /> : null
 ```
+
+### Field defaults and presets
+
+A new block starts as its kind's zero value — `''`, `0`, the first select
+option — unless a field says otherwise:
+
+```tsx
+fields: {
+  label: text({ default: 'Read more' }),
+  variant: select({ options: [{ label: 'Primary', value: 'primary' }, { label: 'Ghost', value: 'ghost' }], default: 'ghost' }),
+}
+```
+
+`default` is written once, when the block is created, never at render: adding
+one to a field does not change what an already-published page says, because
+nothing re-reads the schema for a document that already exists. Backfilling
+existing documents is a content migration (`field.default(blok, name, value)`),
+not this.
+
+A **preset** is a named, reusable variant — field values layered over the
+field defaults, optionally with children of its own:
+
+```tsx
+export const hero = defineBlock({
+  name: 'hero',
+  label: 'Hero',
+  fields: {
+    heading: text(),
+    theme: select({ options: THEMES, default: 'light' }),
+    actions: blocks({ allow: ['button'], max: 2 }),
+  },
+  presets: [
+    { name: 'dark', label: 'Hero — dark', data: { theme: 'dark' } },
+    {
+      name: 'cta',
+      label: 'Hero — with button',
+      children: [{ slot: 'actions', type: 'button', preset: 'primary' }],
+    },
+  ],
+  render: /* … */,
+})
+```
+
+Picking "Hero — with button" in the add menu inserts the hero *and* the
+button as one transaction — one undo step, one delta, one activity entry. A
+preset naming an unknown type, an unknown slot, a type its slot's `allow`
+forbids, or a field the block does not declare fails at startup, not from
+inside a request. `presetsOnly: true` hides a block's bare version from the
+add menu, for a block that must always be one of its named variants.
+
+A document's starting content is nothing new: it is the root block's own
+preset named `'default'`. A root block with no such preset seeds a bare root,
+exactly as before this feature existed.
 
 ## Stories, paths and page metadata
 
