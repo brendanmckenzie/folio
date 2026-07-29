@@ -92,7 +92,10 @@ function Slot({
       />
       {kids.map((blok, i) => {
         const def = schema[blok.type]
-        const watchers = peers.filter((p) => p.selection === blok.uid)
+        // Derived by ignoring `field` (v4, `live-collaboration.md` decision 3):
+        // one dot per block whoever the peer has focus in, because the tree's
+        // grain is the block and the field ring lives in the inspector.
+        const watchers = peers.filter((p) => p.selection?.uid === blok.uid)
 
         return (
           <Fragment key={blok.uid}>

@@ -9,6 +9,7 @@ import {
   MAX_FRAME_BYTES,
   parseClientFrame,
   type Presence,
+  type PresenceSelection,
   PROTOCOL_VERSION,
   type ServerMsg,
   txCapError,
@@ -87,7 +88,10 @@ interface Attachment {
    * dressed up as a login change. Hence an explicit flag.
    */
   joined: boolean
-  selection: string | null
+  /** Which blok, and which field inside it (v4). See `PresenceSelection`. */
+  selection: PresenceSelection | null
+  /** Which locale this socket is editing in; null on the source locale. */
+  locale: string | null
 }
 
 /** A fresh attachment for a socket that has just upgraded, before any frame. */
@@ -103,6 +107,7 @@ function attach(identity: SocketIdentity | null): Attachment {
     checkedAt: identity ? Date.now() : 0,
     joined: false,
     selection: null,
+    locale: null,
   }
 }
 
@@ -121,6 +126,7 @@ function presenceOf(a: Attachment): Presence {
     name: a.name || 'Anonymous',
     colour: a.colour || fallbackColour(actor),
     selection: a.selection,
+    locale: a.locale,
   }
 }
 
@@ -666,7 +672,10 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
           // hello has no identity to announce, and announcing one under
           // `auth: 'open'` would mean broadcasting an empty peer.
           if (!who?.joined) return
-          const next: Attachment = { ...who, selection: msg.selection }
+          // `locale` is normalised to null by `parseClientFrame` when absent, so
+          // a client that never sends one reads as "the source locale" rather
+          // than as "unknown".
+          const next: Attachment = { ...who, selection: msg.selection, locale: msg.locale ?? null }
           ws.serializeAttachment(next)
           this.broadcast({ type: 'presence', peer: presenceOf(next) }, ws)
           break

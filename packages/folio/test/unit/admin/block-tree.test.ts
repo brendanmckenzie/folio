@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { menuGroups } from '../../../src/admin/BlockTree'
+import type { Presence } from '../../../src/core/protocol'
 import type { BlockSchema, SchemaIndex } from '../../../src/core/schema'
 
 // field-defaults-and-presets.md's architecture decision 5: one group per
@@ -59,5 +60,32 @@ describe('menuGroups', () => {
   it('uses the block’s label, not its type name, as the group label', () => {
     const [group] = menuGroups(schema, ['button'])
     expect(group!.label).toBe('Button')
+  })
+})
+
+/*
+ * editing/live-collaboration.md decision 3: the block tree keeps one dot per
+ * *block*, derived by ignoring `Presence.selection.field`. The field-level ring
+ * belongs to the inspector; the tree's grain is the block.
+ */
+describe('per-block presence dots', () => {
+  const peer = (uid: string | null, field: string | null = null): Presence => ({
+    actor: `usr_${uid ?? 'nowhere'}`,
+    name: 'Ann',
+    colour: '#e5484d',
+    selection: uid === null ? null : { uid, field },
+    locale: null,
+  })
+
+  /** Exactly the derivation `Slot` performs. Kept in step with BlockTree.tsx. */
+  const watchers = (peers: Presence[], uid: string) => peers.filter((p) => p.selection?.uid === uid)
+
+  it('shows a dot for a peer in the block whether or not they hold a field', () => {
+    const peers = [peer('hero'), peer('hero', 'heading')]
+    expect(watchers(peers, 'hero')).toHaveLength(2)
+  })
+
+  it('shows nothing for a peer elsewhere or nowhere', () => {
+    expect(watchers([peer('other', 'heading'), peer(null)], 'hero')).toEqual([])
   })
 })

@@ -452,6 +452,32 @@ button.tree__menu-heading {
   cursor: not-allowed;
 }
 
+/* ------------------------------------------------- field-level presence ---- */
+/* editing/live-collaboration.md decision 3 and 5. A ring and a name on a field
+   somebody else has focused. Advisory, never a lock (checkpoint 2): the control
+   stays live and both people may type. A ring rather than a disabled input is
+   the whole of that decision, made visible. */
+
+.field.is-watched :is(input, textarea, select, .rt) {
+  border-color: var(--peer, var(--accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--peer, var(--accent)) 25%, transparent);
+}
+.field__peer {
+  margin-left: 0.4rem;
+  padding: 0 0.3rem;
+  font-weight: 500;
+  font-size: 0.625rem;
+  color: #fff;
+  border-radius: 999px;
+  /* Names are user data and a long one must not push the label off the panel. */
+  max-width: 10ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: bottom;
+}
+
 /* The second read-only column: the source value a translator translates from.
    A column rather than a placeholder, because a placeholder cannot show
    richtext formatting (the spec's resolved open question). */

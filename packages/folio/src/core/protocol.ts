@@ -26,14 +26,53 @@ import type { Resolution } from './resolve'
  *       needed even so: a v2 *client* handed a locale-scoped delta would drop
  *       the locale and write the value into `data`, which is silent divergence,
  *       so it must be refused at the handshake instead. |
+ * | 4 | `presence` carries a **field** and a locale, and a second, space-level
+ *       channel appears (`live-collaboration.md`). **Nothing in this bump
+ *       touches a mutation**, which is what makes it the cheapest one there has
+ *       been: presence is never persisted and the space channel stores nothing
+ *       at all, so there is no old log entry whose meaning could shift. The
+ *       bump is still needed, because a v3 client handed
+ *       `selection: { uid, field }` would fail its own shape guard and drop
+ *       every presence frame silently — a peer dot that simply stops appearing
+ *       is exactly the failure the handshake exists to make visible. |
  */
-export const PROTOCOL_VERSION = 3
+export const PROTOCOL_VERSION = 4
+
+/**
+ * Where a peer's caret is: which blok, and which field inside it (v4,
+ * `live-collaboration.md` architecture decision 3).
+ *
+ * `field: null` means "this blok, no particular field" — a click in the tree or
+ * the preview — so the per-block dots the block tree already drew keep working
+ * by ignoring `field` entirely. A structured pair rather than a `uid:field`
+ * string on purpose: encoding a second value into the uid would make every
+ * reader parse it, and a field name containing a colon would quietly break the
+ * parse rather than the guard.
+ */
+export interface PresenceSelection {
+  uid: string
+  /** The focused field on `uid`, or null for the blok as a whole. */
+  field: string | null
+}
 
 export interface Presence {
   actor: string
   name: string
   colour: string
-  selection: string | null
+  selection: PresenceSelection | null
+  /**
+   * Which locale this peer is editing in, or null on the source locale and on a
+   * site with no locales at all.
+   *
+   * Carried so the inspector's peer ring can say *which* language somebody is
+   * typing in: two editors in the same field in different locales are writing
+   * different keys and are not in conflict at all
+   * (`live-collaboration.md`'s edge case), and a ring that does not say so
+   * reports a clash that does not exist. It rides the story channel rather than
+   * being cross-referenced from the space channel so that the label is right
+   * even for a host that never declared the space binding.
+   */
+  locale: string | null
 }
 
 /**
@@ -60,7 +99,7 @@ export interface HelloIdentity {
 export type ClientMsg =
   | { type: 'hello'; lastSyncId: number; identity?: HelloIdentity }
   | { type: 'tx'; txId: string; mutations: Mutation[] }
-  | { type: 'presence'; selection: string | null }
+  | { type: 'presence'; selection: PresenceSelection | null; locale?: string | null }
 
 export type ServerMsg =
   /** Full state. Sent when the client has no watermark or has fallen too far behind. */
@@ -124,8 +163,15 @@ export const MAX_NAME_LEN = 64
 /** Same cap for `actor`: both ride on every presence broadcast for the life of the socket. */
 export const MAX_ACTOR_LEN = 64
 
-/** A presence `selection` is a uid reference; generous headroom over the 16-hex-char uids in use. */
+/**
+ * A presence `selection` is a uid reference; generous headroom over the
+ * 16-hex-char uids in use. Applied to **each part** of the pair at v4: a field
+ * name is a schema key, so the same bound is the right one for it.
+ */
 export const MAX_SELECTION_LEN = 64
+
+/** Same cap for a presence `locale`: a locale code is a BCP 47 tag, not prose. */
+export const MAX_LOCALE_LEN = 32
 
 /**
  * Beyond this many mutations, one tx is refused at the door rather than admitted:
@@ -243,9 +289,33 @@ function isHelloIdentity(x: unknown): x is HelloIdentity {
   return isRecord(x) && isString(x.actor) && isString(x.name) && isString(x.colour)
 }
 
-/** Bounds a presence selection; `null` (no selection) passes through unchanged. */
-function normalizeSelection(selection: string | null): string | null {
-  return selection === null ? null : selection.slice(0, MAX_SELECTION_LEN)
+/**
+ * Bounds a presence selection; `null` (no selection) passes through unchanged.
+ *
+ * Both parts are capped, and the object is rebuilt rather than spread, for the
+ * same reason `parseClientFrame` rebuilds every message: a selection travels
+ * verbatim to every other editor, so a junk key riding along inside it would
+ * reach a broadcast.
+ */
+function normalizeSelection(selection: PresenceSelection | null): PresenceSelection | null {
+  if (selection === null) return null
+  return {
+    uid: selection.uid.slice(0, MAX_SELECTION_LEN),
+    field: selection.field === null ? null : selection.field.slice(0, MAX_SELECTION_LEN),
+  }
+}
+
+/** Shape guard for a presence selection; `null` is handled by the caller. */
+function isPresenceSelection(x: unknown): x is PresenceSelection {
+  return isRecord(x) && isString(x.uid) && (x.field === null || isString(x.field))
+}
+
+/** Bounds a presence locale. An absent one and an explicit null both mean "the
+ * source locale", and both normalise to null so a reader has one case. */
+function normalizeLocale(locale: string | null | undefined): string | null {
+  if (locale === null || locale === undefined) return null
+  const trimmed = stripControlChars(locale).trim().slice(0, MAX_LOCALE_LEN)
+  return trimmed.length > 0 ? trimmed : null
 }
 
 /**
@@ -328,7 +398,10 @@ export function isClientMsg(x: unknown): x is ClientFrame {
     case 'tx':
       return isString(x.txId) && Array.isArray(x.mutations) && x.mutations.every(isMutation)
     case 'presence':
-      return x.selection === null || isString(x.selection)
+      return (
+        (x.selection === null || isPresenceSelection(x.selection)) &&
+        (x.locale === undefined || x.locale === null || isString(x.locale))
+      )
     default:
       return false
   }
@@ -367,7 +440,12 @@ export function parseClientFrame(raw: string | ArrayBuffer): ClientFrame | null 
     case 'tx':
       return { type: 'tx', txId: value.txId, mutations: value.mutations, ...version }
     case 'presence':
-      return { type: 'presence', selection: normalizeSelection(value.selection), ...version }
+      return {
+        type: 'presence',
+        selection: normalizeSelection(value.selection),
+        locale: normalizeLocale(value.locale),
+        ...version,
+      }
   }
 }
 

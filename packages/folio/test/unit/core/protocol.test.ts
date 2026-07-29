@@ -40,8 +40,8 @@ const send = (body: Record<string, unknown>) => JSON.stringify({ ...body, v: PRO
  * talking to a deployed worker.
  */
 describe('PROTOCOL_VERSION', () => {
-  it('is 3 — `set` gained an optional `locale` and `hello` shed its identity fields (localisation.md)', () => {
-    expect(PROTOCOL_VERSION).toBe(3)
+  it('is 4 — `presence` carries a field and a locale, and a space channel appears (live-collaboration.md)', () => {
+    expect(PROTOCOL_VERSION).toBe(4)
   })
 })
 
@@ -339,32 +339,102 @@ describe('docCapError', () => {
 
 describe('parseClientFrame: presence', () => {
   it('parses a selection through unchanged when within the cap', () => {
-    const frame = parseClientFrame(send({ type: 'presence', selection: 'blk00001' }))
-    expect(frame).toEqual({ type: 'presence', selection: 'blk00001', v: PROTOCOL_VERSION })
+    const frame = parseClientFrame(
+      send({ type: 'presence', selection: { uid: 'blk00001', field: 'heading' } }),
+    )
+    expect(frame).toEqual({
+      type: 'presence',
+      selection: { uid: 'blk00001', field: 'heading' },
+      locale: null,
+      v: PROTOCOL_VERSION,
+    })
+  })
+
+  /** `field: null` is the pre-v4 meaning: this blok, no particular field. */
+  it('accepts a blok-only selection', () => {
+    const frame = parseClientFrame(
+      send({ type: 'presence', selection: { uid: 'blk00001', field: null } }),
+    )
+    expect(frame).toEqual({
+      type: 'presence',
+      selection: { uid: 'blk00001', field: null },
+      locale: null,
+      v: PROTOCOL_VERSION,
+    })
   })
 
   it('passes null through unchanged', () => {
     const frame = parseClientFrame(send({ type: 'presence', selection: null }))
-    expect(frame).toEqual({ type: 'presence', selection: null, v: PROTOCOL_VERSION })
+    expect(frame).toEqual({
+      type: 'presence',
+      selection: null,
+      locale: null,
+      v: PROTOCOL_VERSION,
+    })
   })
 
-  it('caps an oversized selection at MAX_SELECTION_LEN', () => {
-    const selection = 'x'.repeat(MAX_SELECTION_LEN + 40)
-    const frame = parseClientFrame(send({ type: 'presence', selection }))
-    expect((frame as { selection: string }).selection).toBe('x'.repeat(MAX_SELECTION_LEN))
+  it('caps both parts of an oversized selection at MAX_SELECTION_LEN', () => {
+    const long = 'x'.repeat(MAX_SELECTION_LEN + 40)
+    const frame = parseClientFrame(
+      send({ type: 'presence', selection: { uid: long, field: long } }),
+    )
+    expect((frame as { selection: { uid: string; field: string } }).selection).toEqual({
+      uid: 'x'.repeat(MAX_SELECTION_LEN),
+      field: 'x'.repeat(MAX_SELECTION_LEN),
+    })
+  })
+
+  it('carries a locale, capped and control-stripped', () => {
+    const frame = parseClientFrame(send({ type: 'presence', selection: null, locale: ` fr-CA ` }))
+    expect((frame as { locale: string | null }).locale).toBe('fr-CA')
+  })
+
+  /** An absent locale and an explicit null both mean the source locale, so a
+   * reader has one case rather than three. */
+  it('normalises an absent, null or empty locale to null', () => {
+    for (const body of [
+      { type: 'presence', selection: null },
+      { type: 'presence', selection: null, locale: null },
+      { type: 'presence', selection: null, locale: '   ' },
+    ]) {
+      expect((parseClientFrame(send(body)) as { locale: string | null }).locale).toBeNull()
+    }
   })
 
   it('drops unknown extra keys instead of rejecting the frame', () => {
     const frame = parseClientFrame(
-      send({ type: 'presence', selection: 'blk00001', actor: 'spoofed', evil: true }),
+      send({
+        type: 'presence',
+        selection: { uid: 'blk00001', field: null, evil: true },
+        actor: 'spoofed',
+        evil: true,
+      }),
     )
-    expect(frame).toEqual({ type: 'presence', selection: 'blk00001', v: PROTOCOL_VERSION })
+    expect(frame).toEqual({
+      type: 'presence',
+      selection: { uid: 'blk00001', field: null },
+      locale: null,
+      v: PROTOCOL_VERSION,
+    })
     expect(frame).not.toHaveProperty('evil')
     expect(frame).not.toHaveProperty('actor')
+    // Junk inside the selection is dropped too: it would otherwise ride a
+    // broadcast to every other editor.
+    expect(
+      (frame as unknown as { selection: Record<string, unknown> }).selection,
+    ).not.toHaveProperty('evil')
   })
 
-  it('rejects a presence frame whose selection is the wrong type', () => {
+  it('rejects a presence frame whose selection is the wrong shape', () => {
+    // The pre-v4 bare string is refused rather than upgraded: a v3 client is
+    // already refused at the handshake, so this can only be something hand-made.
+    expect(parseClientFrame(send({ type: 'presence', selection: 'blk00001' }))).toBeNull()
     expect(parseClientFrame(send({ type: 'presence', selection: 42 }))).toBeNull()
+    expect(parseClientFrame(send({ type: 'presence', selection: { field: 'heading' } }))).toBeNull()
+    expect(
+      parseClientFrame(send({ type: 'presence', selection: { uid: 'blk00001', field: 7 } })),
+    ).toBeNull()
+    expect(parseClientFrame(send({ type: 'presence', selection: null, locale: 7 }))).toBeNull()
   })
 })
 

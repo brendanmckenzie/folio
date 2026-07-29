@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { visibleEntries } from '../../../src/admin/Inspector'
+import { fieldWatchers, visibleEntries, watcherLabel } from '../../../src/admin/Inspector'
 import type { Field } from '../../../src/core/fields'
+import type { Presence } from '../../../src/core/protocol'
 
 // conditional-fields.md's architecture decision 2: the filter happens once,
 // in the parent. `FieldInput` never learns about visibility, so these tests
@@ -106,5 +107,64 @@ describe('visibleEntries', () => {
     const unknown: Field = { kind: 'text', showIf: { field: 'nope', eq: 'x' } }
     expect(() => visibleEntries({ unknown }, {})).not.toThrow()
     expect(visibleEntries({ unknown }, {}).map(([n]) => n)).not.toContain('unknown')
+  })
+})
+
+/*
+ * editing/live-collaboration.md decision 3 and 5: field-level presence, drawn
+ * from `Presence.selection`'s `{ uid, field }` pair. Advisory, never a lock
+ * (checkpoint 2) — these pin what the ring *says*, since nothing it draws is
+ * allowed to disable anything.
+ */
+
+const ann = (selection: Presence['selection'], locale: string | null = null): Presence => ({
+  actor: 'usr_ann',
+  name: 'Ann',
+  colour: '#e5484d',
+  selection,
+  locale,
+})
+
+describe('fieldWatchers', () => {
+  it('finds a peer holding this exact field', () => {
+    const peers = [ann({ uid: 'hero', field: 'heading' })]
+    expect(fieldWatchers(peers, 'hero', 'heading')).toEqual(peers)
+  })
+
+  /**
+   * The block tree's dot already says where somebody is. A ring on every field
+   * of the block they clicked would claim they are in all of them at once.
+   */
+  it('does not treat a blok-level selection as holding any field', () => {
+    const peers = [ann({ uid: 'hero', field: null })]
+    expect(fieldWatchers(peers, 'hero', 'heading')).toEqual([])
+  })
+
+  it('ignores the same field on another blok, and a peer with nothing selected', () => {
+    const peers = [ann({ uid: 'other', field: 'heading' }), ann(null)]
+    expect(fieldWatchers(peers, 'hero', 'heading')).toEqual([])
+  })
+})
+
+describe('watcherLabel', () => {
+  it('says nothing about language when both editors are in the same one', () => {
+    expect(watcherLabel(ann({ uid: 'hero', field: 'heading' }, 'fr'), 'fr')).toBe(
+      'Ann is in this field',
+    )
+    expect(watcherLabel(ann({ uid: 'hero', field: 'heading' }), null)).toBe('Ann is in this field')
+  })
+
+  /**
+   * The spec's edge case: two people in one field in different locales are
+   * writing different keys and are not in conflict at all, so a bare "Ann is
+   * here" would report a clash that does not exist.
+   */
+  it('names the peer’s language when it differs from this editor’s', () => {
+    expect(watcherLabel(ann({ uid: 'hero', field: 'heading' }, 'fr'), null)).toBe(
+      'Ann is here in fr',
+    )
+    expect(watcherLabel(ann({ uid: 'hero', field: 'heading' }), 'fr')).toBe(
+      'Ann is here in the source language',
+    )
   })
 })

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { StoryStore, type WebSocketLike } from '../../../src/admin/store'
+import { PRESENCE_THROTTLE_MS, StoryStore, type WebSocketLike } from '../../../src/admin/store'
 import type { Doc } from '../../../src/core/doc'
 import type { Mutation } from '../../../src/core/mutations'
 import {
@@ -107,8 +107,23 @@ function fixture(): Doc {
   }
 }
 
-function peer(actor: string, selection: string | null = null): Presence {
-  return { actor, name: `Editor ${actor}`, colour: '#0090ff', selection }
+/**
+ * A peer as the object broadcasts one. `selection` takes a bare uid for brevity
+ * and is widened to v4's `{ uid, field }` pair here — a blok with no particular
+ * field, which is what a tree or preview click means.
+ */
+function peer(
+  actor: string,
+  selection: string | null = null,
+  field: string | null = null,
+): Presence {
+  return {
+    actor,
+    name: `Editor ${actor}`,
+    colour: '#0090ff',
+    selection: selection === null ? null : { uid: selection, field },
+    locale: null,
+  }
 }
 
 function set(uid: string, field: string, value: string): Mutation {
@@ -144,6 +159,15 @@ function boot(h: Harness, syncId = 0, peers: Presence[] = []): FakeSocket {
 function value(store: StoryStore, uid: string, field: string) {
   return store.getSnapshot().doc?.bloks[uid]?.data[field]
 }
+
+type PresenceMsg = Extract<ClientMsg, { type: 'presence' }>
+
+/** Every presence frame this socket carried, in order. */
+const presence = (socket: FakeSocket): PresenceMsg[] =>
+  socket.client().filter((m): m is PresenceMsg => m.type === 'presence')
+
+/** v4's selection pair, spelled short. */
+const sel = (uid: string, field: string | null = null) => ({ uid, field })
 
 /** Let the backoff timer fire and open whatever socket the store made. */
 function reconnect(h: Harness): FakeSocket {
@@ -630,17 +654,104 @@ describe('admin sync store', () => {
 
       h.store.select('hero')
       h.store.select('hero')
+      // The throttle's trailing send (`PRESENCE_THROTTLE_MS`).
+      vi.advanceTimersByTime(PRESENCE_THROTTLE_MS)
 
-      expect(
-        h
-          .last()
-          .client()
-          .filter((m) => m.type === 'presence'),
-      ).toEqual([
-        { type: 'presence', v: PROTOCOL_VERSION, selection: 'root' },
-        { type: 'presence', v: PROTOCOL_VERSION, selection: 'hero' },
+      expect(presence(h.last())).toEqual([
+        // Bootstrap opens the root block, which is itself an announcement.
+        { type: 'presence', v: PROTOCOL_VERSION, selection: sel('root'), locale: null },
+        { type: 'presence', v: PROTOCOL_VERSION, selection: sel('hero'), locale: null },
       ])
       expect(h.store.getSnapshot().selection).toBe('hero')
+    })
+
+    /**
+     * v4's whole point: the wire carries which *field* somebody is in, and
+     * `select(uid)` with no field still means "this blok" — which is what the
+     * block tree's per-block dot is derived from.
+     */
+    it('reports the focused field, and clears it when the blok changes', () => {
+      const h = setup()
+      boot(h)
+
+      h.store.focusField('heading')
+      vi.advanceTimersByTime(PRESENCE_THROTTLE_MS)
+      expect(h.store.getSnapshot()).toMatchObject({ selection: 'root', focus: 'heading' })
+
+      h.store.select('hero')
+      vi.advanceTimersByTime(PRESENCE_THROTTLE_MS)
+      expect(h.store.getSnapshot()).toMatchObject({ selection: 'hero', focus: null })
+
+      expect(presence(h.last()).map((m) => m.selection)).toEqual([
+        sel('root'),
+        sel('root', 'heading'),
+        sel('hero'),
+      ])
+    })
+
+    /** A field cannot be focused without its blok being on screen. */
+    it('ignores a focus report while nothing is selected', () => {
+      const h = setup()
+      h.store.connect()
+      h.last().open()
+
+      h.store.focusField('heading')
+      vi.advanceTimersByTime(PRESENCE_THROTTLE_MS)
+
+      expect(presence(h.last())).toEqual([])
+      expect(h.store.getSnapshot().focus).toBeNull()
+    })
+
+    /**
+     * The chattiness bound (`live-collaboration.md`'s acceptance criterion): a
+     * drag across ten blocks inside one throttle window collapses to **one**
+     * frame, and that frame carries the block the drag ended on rather than the
+     * one it started from — the reason the throttle is trailing, not leading.
+     */
+    it('collapses a burst of selections into one trailing frame', () => {
+      const h = setup()
+      boot(h)
+      // The bootstrap's own announcement has already gone out; start the clock
+      // past it so the burst below is entirely inside one window.
+      const before = presence(h.last()).length
+
+      for (const uid of ['hero', 'root', 'hero', 'root', 'hero']) h.store.select(uid)
+      expect(presence(h.last())).toHaveLength(before)
+
+      vi.advanceTimersByTime(PRESENCE_THROTTLE_MS)
+      const sent = presence(h.last()).slice(before)
+      expect(sent).toHaveLength(1)
+      expect(sent[0]?.selection).toEqual(sel('hero'))
+    })
+
+    /** The locale rides presence so a peer ring can name it. Null on the source. */
+    it('announces the editing locale and dedupes an unchanged one', () => {
+      const h = setup()
+      boot(h)
+
+      h.store.setLocale('fr')
+      vi.advanceTimersByTime(PRESENCE_THROTTLE_MS)
+      h.store.setLocale('fr')
+      vi.advanceTimersByTime(PRESENCE_THROTTLE_MS)
+
+      expect(presence(h.last()).map((m) => m.locale)).toEqual([null, 'fr'])
+    })
+
+    /**
+     * A reconnect is a new socket and a new attachment, which starts with no
+     * selection — so the dedupe has to forget what the old socket was told, or
+     * this client sits in every peer's list with no dot.
+     */
+    it('re-announces its selection on a reconnect', () => {
+      const h = setup()
+      boot(h)
+      h.store.select('hero')
+      vi.advanceTimersByTime(PRESENCE_THROTTLE_MS)
+
+      h.last().drop()
+      const next = reconnect(h)
+
+      expect(presence(next).map((m) => m.selection)).toEqual([sel('hero')])
     })
   })
 
@@ -882,16 +993,12 @@ describe('admin sync store', () => {
       // A gap the log could not bridge sends the document mid-edit; the cursor
       // must not move, and no third presence frame goes out.
       h.last().emit({ type: 'bootstrap', doc: fixture(), syncId: 6, peers: [] })
+      vi.advanceTimersByTime(PRESENCE_THROTTLE_MS)
 
       expect(h.store.getSnapshot().selection).toBe('hero')
-      expect(
-        h
-          .last()
-          .client()
-          .filter((m) => m.type === 'presence'),
-      ).toEqual([
-        { type: 'presence', v: PROTOCOL_VERSION, selection: 'root' },
-        { type: 'presence', v: PROTOCOL_VERSION, selection: 'hero' },
+      expect(presence(h.last())).toEqual([
+        { type: 'presence', v: PROTOCOL_VERSION, selection: sel('root'), locale: null },
+        { type: 'presence', v: PROTOCOL_VERSION, selection: sel('hero'), locale: null },
       ])
     })
 
