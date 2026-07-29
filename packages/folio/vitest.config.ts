@@ -47,7 +47,7 @@ export default defineConfig({
         ],
         test: {
           name: 'workers',
-          include: ['test/workers/**/*.test.ts'],
+          include: ['test/workers/**/*.test.{ts,tsx}'],
           setupFiles: ['./test/workers/apply-schema.ts'],
         },
       },

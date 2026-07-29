@@ -52,15 +52,22 @@ export function adminPage(rt: FolioRuntime, story: StoryMeta): Promise<Response>
  * `opts.bare` is for a singleton with no `previewPath` declared: there is no
  * host page to render at all, so no context globals are drawn around it and a
  * note says why.
+ *
+ * `opts.locale` is the `?locale=` the admin's switcher put on the URL
+ * (`../../../docs/specs/content-model/localisation.md` decision 6). It reaches
+ * the `Resolution` and nothing else: the *document* is the same one in every
+ * language, so switching locale is a reload of this page rather than a new frame
+ * pushed into a live iframe — the host's own chrome and `<html lang>` change too,
+ * and no postMessage can reach those.
  */
 export async function previewPage(
   rt: FolioRuntime,
   bindings: FolioBindings,
   story: StoryMeta,
-  opts?: { as?: string; bare?: boolean },
+  opts?: { as?: string; bare?: boolean; locale?: string },
 ): Promise<Response> {
   const doc = await rt.draftFor(bindings, story)
-  const resolution = await rt.resolve(bindings, doc, { draft: true })
+  const resolution = await rt.resolve(bindings, doc, { draft: true, locale: opts?.locale })
   const { entries, stylesheets } = rt.page('preview')
 
   const editingName = opts?.as
@@ -83,6 +90,9 @@ export async function previewPage(
       title={`Preview · ${story.title}`}
       stylesheets={stylesheets}
       bodyClass="folio-editing"
+      // The one piece of chrome Folio's own preview shell can get right about a
+      // locale. A host's real page sets its own.
+      lang={resolution.locale?.code}
       head={
         <>
           {rt.dev ? <ReactRefreshPreamble /> : null}

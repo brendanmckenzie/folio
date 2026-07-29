@@ -9,6 +9,12 @@
  */
 import { toManifest, toRegistry, toSchemaIndex, type Registry } from '../core/block'
 import type { Doc } from '../core/doc'
+import {
+  type LocaleConfig,
+  type LocaleContext,
+  localeContext,
+  validateLocales,
+} from '../core/locales'
 import { latestMigrationId, type Migration, validateMigrations } from '../core/migrate'
 import { buildResolution, referencedIds, type Resolution } from '../core/resolve'
 import {
@@ -50,6 +56,32 @@ export interface FolioRuntime {
   types: readonly DocumentType[]
   /** `FolioConfig.globals`, validated. Every name is a declared `singleton`. */
   globals: readonly string[]
+  /**
+   * `FolioConfig.locales`, validated, or undefined for a single-locale site
+   * (`localisation.md`). Undefined is the case that must stay free: no locale
+   * reaches a `Resolution`, no URL grows a prefix, no story row grows a `urls`
+   * map.
+   */
+  locales: LocaleConfig | undefined
+  /**
+   * The `LocaleContext` for a code, or undefined for the source locale, an
+   * undeclared code, or no locales at all. The one place a string turns into the
+   * fallback chain the renderer reads.
+   */
+  localeOf: (code: string | undefined) => LocaleContext | undefined
+  /**
+   * The story path a locale-decorated URL names, per the host's **own** `route`.
+   *
+   * Folio builds its preview URLs by calling `route(path, locale)`, so it can
+   * recover the path by asking the same function rather than by assuming a
+   * convention: for each candidate produced by dropping leading segments, does
+   * `route(candidate, locale)` equal the pathname we were given? The first match
+   * is the answer, exactly. A host that encodes the locale as a subdomain or a
+   * query parameter has no prefix to drop and gets the pathname back unchanged,
+   * with no special case written for it (decision 5's "the host owns the URL
+   * shape").
+   */
+  pathForLocale: (pathname: string, locale: string | undefined) => string
   /** `FolioConfig.migrations`, validated, in run order (`schema-migrations.md`). */
   migrations: readonly Migration[]
   /**
@@ -77,6 +109,13 @@ export interface FolioRuntime {
   defaultType: DocumentType
   /** What a document is called, per its type's `titleField`. */
   titleFor: (story: StoryMeta, doc: Doc) => string
+  /**
+   * The same title in every declared non-source locale, for `stories.title_i18n`
+   * (`localisation.md` architecture decision 7). Undefined — not an empty object
+   * — when there are no locales, which is what tells `publishStoryStatement` to
+   * leave the column alone rather than clear it.
+   */
+  titlesFor: (story: StoryMeta, doc: Doc) => Record<string, string> | undefined
   /** Where the routes are mounted, with no trailing slash. */
   base: string
   /** True when a Vite dev client is configured, so the pages ship the preamble. */
@@ -97,7 +136,11 @@ export interface FolioRuntime {
     bindings: FolioBindings,
     story: StoryMeta,
   ) => Promise<{ doc: Doc; syncId: number }>
-  resolve: (bindings: FolioBindings, doc?: Doc, opts?: { draft?: boolean }) => Promise<Resolution>
+  resolve: (
+    bindings: FolioBindings,
+    doc?: Doc,
+    opts?: { draft?: boolean; locale?: string },
+  ) => Promise<Resolution>
   /**
    * What the publish workflows need, assembled from bindings alone — the one
    * place that assembly lives, for a route today and a Durable Object alarm next
@@ -160,12 +203,18 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // that depends on which comparison happened to be used
   // (`../foundation/schema-migrations.md`).
   validateMigrations(config.migrations)
+  // Same timing, same reason: a default locale that is not available, a duplicate
+  // code, a fallback that does not exist or one that cycles would each turn into
+  // a page rendered in the wrong language rather than an error
+  // (`../content-model/localisation.md`).
+  validateLocales(config.locales)
   // Same timing, one rung more insistent: `auth` has no default at all, so an
   // absent key throws here rather than quietly leaving the CMS open
   // (`identity-and-access.md` checkpoint 2). The widening cast is explained on
   // `FolioRuntime.auth`.
   const auth = resolveAuth(config.auth) as ResolvedAuth<unknown>
   const globals = config.globals ?? []
+  const locales = config.locales
   const migrations = config.migrations ?? []
   const schemaId = latestMigrationId(migrations)
   const typeOf = (name: string | undefined) => typeByName(types, name)
@@ -174,9 +223,27 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const route = config.route ?? ((path: string) => `/${path}`)
   const assetBase = `${base}/asset`
 
-  const previewUrlFor = (path: string) => {
-    const url = route(path)
-    return `${url}${url.includes('?') ? '&' : '?'}_folio=preview`
+  const localeOf = (code: string | undefined) => localeContext(locales, code)
+  /** Declared locales other than the source, in declaration order. */
+  const otherLocales = (locales?.available ?? [])
+    .map((l) => l.code)
+    .filter((code) => code !== locales?.default)
+
+  /**
+   * `route`'s URL with the preview flag on it, and — for a non-source locale —
+   * the locale as a query parameter as well.
+   *
+   * The locale is in the query rather than inferred from the path because
+   * `handle()` has to read it back and the path is the host's shape, not Folio's.
+   * Omitted for the source locale, so a site with locales configured and viewing
+   * its default produces the byte-identical preview URL it always did.
+   */
+  const previewUrlFor = (path: string, locale?: string) => {
+    const url = route(path, locale)
+    const flagged = `${url}${url.includes('?') ? '&' : '?'}_folio=preview`
+    return locale === undefined || locale === locales?.default
+      ? flagged
+      : `${flagged}&locale=${encodeURIComponent(locale)}`
   }
 
   /**
@@ -184,11 +251,49 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    * no public URL and no preview URL to build (`document-types.md` architecture
    * decision 2). `url`/`previewUrl` stay absent rather than becoming `''`, so
    * nothing can accidentally navigate to one.
+   *
+   * `urls`/`previewUrls` appear only when locales are configured, so a
+   * single-locale site's payload is unchanged (`localisation.md`). `url` remains
+   * the source locale's, which keeps every existing consumer — a sitemap, the
+   * admin's "View live" — reading the same value it always did.
    */
-  const withUrls = <T extends StoryMeta>(story: T): T =>
-    story.path === null
-      ? story
-      : { ...story, url: route(story.path), previewUrl: previewUrlFor(story.path) }
+  const withUrls = <T extends StoryMeta>(story: T): T => {
+    if (story.path === null) return story
+    const path = story.path
+    const decorated: T = {
+      ...story,
+      url: route(path),
+      previewUrl: previewUrlFor(path),
+    }
+    if (!locales) return decorated
+    return {
+      ...decorated,
+      urls: Object.fromEntries(locales.available.map((l) => [l.code, route(path, l.code)])),
+      previewUrls: Object.fromEntries(
+        locales.available.map((l) => [l.code, previewUrlFor(path, l.code)]),
+      ),
+    }
+  }
+
+  /**
+   * The inverse of `route`, for the one place Folio needs it: its own preview
+   * branch, which is handed a URL the *admin* built from `previewUrls` and has to
+   * find the story behind it. See `FolioRuntime.pathForLocale`.
+   */
+  const trim = (path: string) => path.split('?')[0]!.replace(/^\/+|\/+$/g, '')
+
+  const pathForLocale = (pathname: string, locale: string | undefined): string => {
+    const clean = trim(pathname)
+    if (locale === undefined || locale === locales?.default) return clean
+    const segments = clean ? clean.split('/') : []
+    for (let i = 0; i <= segments.length; i++) {
+      const candidate = segments.slice(i).join('/')
+      if (trim(route(candidate, locale)) === clean) return candidate
+    }
+    // No candidate reproduces this URL, so the host encodes its locale somewhere
+    // other than the path. The pathname is the path.
+    return clean
+  }
 
   const decorate = (nodes: StoryNode[]): StoryNode[] =>
     nodes.map((n) => ({ ...withUrls(n), children: decorate(n.children) }))
@@ -237,6 +342,25 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     titleOf(doc, typeOf(story.type), schema, story.title)
 
   /**
+   * The title in every non-source locale, for the tree's per-locale label cache.
+   *
+   * A locale whose title field is untranslated is **omitted** rather than
+   * recorded with the source value: the admin falls back to `title` for a missing
+   * entry anyway, and storing the English under `fr` would make a stale cache
+   * indistinguishable from a real translation the moment somebody added one.
+   */
+  const titlesFor = (story: StoryMeta, doc: Doc): Record<string, string> | undefined => {
+    if (!locales) return undefined
+    const source = titleFor(story, doc)
+    const out: Record<string, string> = {}
+    for (const code of otherLocales) {
+      const translated = titleOf(doc, typeOf(story.type), schema, source, localeOf(code))
+      if (translated !== source) out[code] = translated
+    }
+    return out
+  }
+
+  /**
    * One D1 query for the story map, the same one the tree already runs, plus one
    * more only if the document actually has `reference` fields pointing somewhere
    * — and now, every configured global rides along in that same second query
@@ -257,10 +381,18 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const resolve = async (
     bindings: FolioBindings,
     doc?: Doc,
-    opts?: { draft?: boolean },
+    opts?: { draft?: boolean; locale?: string },
   ): Promise<Resolution> => {
     const db = bindings.db
-    const resolution = buildResolution((await listStories(db)).map(withUrls), assetBase)
+    const active = localeOf(opts?.locale)
+    // Absent for the source locale, so a default-locale resolution is byte-
+    // identical to a pre-localisation one (`localisation.md` decision 5). Every
+    // read in `RenderBlok` goes through this one value.
+    const localeField = active ? { locale: active } : {}
+    const resolution: Resolution = {
+      ...buildResolution((await listStories(db)).map(withUrls), assetBase),
+      ...localeField,
+    }
 
     const refIds = doc ? referencedIds(doc, schema).filter((id) => resolution.stories[id]) : []
     if (refIds.length === 0 && globals.length === 0) return resolution
@@ -314,6 +446,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     draft: (story) => draftFor(bindings, story),
     draftWithSyncId: (story) => draftForWithSyncId(bindings, story),
     titleFor,
+    titlesFor,
     hooks: createHookRunner<Env>(
       config.hooks,
       { env: hookCtx.env as Env, waitUntil: hookCtx.waitUntil },
@@ -344,15 +477,19 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   return {
     registry,
     schema,
-    manifest: toManifest(registry, types, globals),
+    manifest: toManifest(registry, types, globals, locales),
     types,
     globals,
+    locales,
+    localeOf,
+    pathForLocale,
     migrations,
     schemaId,
     auth,
     typeOf,
     defaultType: fallbackType,
     titleFor,
+    titlesFor,
     base,
     dev: Boolean(config.assets?.devClient),
     withUrls,

@@ -21,14 +21,22 @@ import {
 } from '../core/story'
 import { clearRedirectAtStatement, redirectStatements } from './redirects'
 
-const COLS = `id, type, parent_id as parentId, slug, path, ord, title,
+const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18n,
               published_at as publishedAt, unpublished_at as unpublishedAt,
               updated_at as updatedAt, draft_sync_id as draftSyncId,
               draft_updated_at as draftUpdatedAt, published_sync_id as publishedSyncId,
               schema_id as schemaId`
 
-/** A `COLS` row before `state`/`hasUnpublishedChanges` are derived onto it. */
-type StoryRow = Omit<StoryMeta, 'state' | 'hasUnpublishedChanges'>
+/**
+ * A `COLS` row before `state`/`hasUnpublishedChanges` are derived onto it.
+ *
+ * `title_i18n` keeps its column name rather than being aliased, because it is
+ * JSON in D1 and a `string` here — `withState` is what turns it into the
+ * `titleI18n` record callers see, so the parse happens once for every reader.
+ */
+type StoryRow = Omit<StoryMeta, 'state' | 'hasUnpublishedChanges' | 'titleI18n'> & {
+  title_i18n?: string | null
+}
 
 /**
  * `state` is derived here, once, rather than stored: the four columns it needs
@@ -39,8 +47,38 @@ type StoryRow = Omit<StoryMeta, 'state' | 'hasUnpublishedChanges'>
  * callers that only want the yes/no (`unpublished-changes.md`).
  */
 function withState(row: StoryRow): StoryMeta {
+  const { title_i18n, ...rest } = row
   const state = draftState(row.publishedAt, row.unpublishedAt, row.draftSyncId, row.publishedSyncId)
-  return { ...row, state, hasUnpublishedChanges: state === 'changed' }
+  return {
+    ...rest,
+    titleI18n: parseTitleI18n(title_i18n),
+    state,
+    hasUnpublishedChanges: state === 'changed',
+  }
+}
+
+/**
+ * `stories.title_i18n` as a record, or null.
+ *
+ * Total over its input, deliberately: this is a cache, and a row whose JSON was
+ * hand-edited into nonsense must degrade to "no translated titles" — a tree
+ * label falling back to the source locale — rather than throw out of every
+ * story read on the site. Non-string values are dropped for the same reason.
+ */
+function parseTitleI18n(raw: string | null | undefined): Record<string, string> | null {
+  if (!raw) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+  const out: Record<string, string> = {}
+  for (const [code, title] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof title === 'string') out[code] = title
+  }
+  return Object.keys(out).length > 0 ? out : null
 }
 
 export async function listStories(db: D1Database): Promise<StoryMeta[]> {
@@ -764,6 +802,14 @@ export async function deleteStory(
  * architecture decision 3), and only the caller has the type to hand. This used
  * to read `doc.bloks[doc.root].data.title` directly, which cached an empty title
  * for any root block that had no such field.
+ *
+ * `titleI18n` is the same fact per locale (`localisation.md` architecture
+ * decision 7), and publish is the natural place to write it: it is the one path
+ * holding the whole document, so every language's title is resolvable in one
+ * pass. **Optional, and `undefined` leaves the column alone** — a caller with no
+ * locales configured writes nothing rather than clobbering a cache it knows
+ * nothing about. `null` clears it, which is what a site that has removed its
+ * locales wants.
  */
 export function publishStoryStatement(
   db: D1Database,
@@ -771,15 +817,26 @@ export function publishStoryStatement(
   doc: Doc,
   title: string,
   publishedSyncId: number,
+  titleI18n?: Record<string, string> | null,
 ): { publishedAt: number; title: string; statement: D1PreparedStatement } {
   const publishedAt = Date.now()
-  const statement = db
-    .prepare(
-      `update stories set published_doc = ?, published_at = ?, title = ?, updated_at = ?,
-       unpublished_at = null, unpublished_by = null, published_sync_id = ?
-       where id = ?`,
-    )
-    .bind(JSON.stringify(doc), publishedAt, title, publishedAt, publishedSyncId, id)
+  const i18nJson = titleI18n && Object.keys(titleI18n).length > 0 ? JSON.stringify(titleI18n) : null
+  const statement =
+    titleI18n === undefined
+      ? db
+          .prepare(
+            `update stories set published_doc = ?, published_at = ?, title = ?, updated_at = ?,
+             unpublished_at = null, unpublished_by = null, published_sync_id = ?
+             where id = ?`,
+          )
+          .bind(JSON.stringify(doc), publishedAt, title, publishedAt, publishedSyncId, id)
+      : db
+          .prepare(
+            `update stories set published_doc = ?, published_at = ?, title = ?, title_i18n = ?,
+             updated_at = ?, unpublished_at = null, unpublished_by = null, published_sync_id = ?
+             where id = ?`,
+          )
+          .bind(JSON.stringify(doc), publishedAt, title, i18nJson, publishedAt, publishedSyncId, id)
   return { publishedAt, title, statement }
 }
 
@@ -790,6 +847,7 @@ export async function publishStory(
   doc: Doc,
   fallbackTitle: string,
   publishedSyncId: number,
+  titleI18n?: Record<string, string> | null,
 ): Promise<number> {
   const { publishedAt, statement } = publishStoryStatement(
     db,
@@ -797,6 +855,7 @@ export async function publishStory(
     doc,
     fallbackTitle,
     publishedSyncId,
+    titleI18n,
   )
   await statement.run()
   return publishedAt

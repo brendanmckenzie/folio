@@ -52,16 +52,21 @@ export function Shell({
   stylesheets = [],
   bodyClass,
   head,
+  lang = 'en',
   children,
 }: {
   title: string
   stylesheets?: string[]
   bodyClass?: string
   head?: ReactNode
+  /** `<html lang>`. Defaults to `'en'`, which is what this was hard-coded to
+   * before locales existed (`localisation.md`); a host rendering its own
+   * document sets its own. */
+  lang?: string
   children: ReactNode
 }) {
   return (
-    <html lang="en">
+    <html lang={lang}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

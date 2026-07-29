@@ -9,6 +9,7 @@
 import type { ReactNode } from 'react'
 import type { AnyBlockDef, Registry } from '../core/block'
 import type { Doc } from '../core/doc'
+import type { LocaleConfig } from '../core/locales'
 import type { Migration } from '../core/migrate'
 import type { Resolution } from '../core/resolve'
 import type { DocumentType } from '../core/schema'
@@ -101,8 +102,31 @@ export interface FolioConfig<Env> {
    * silently; a `route` that points a story at a different origin does not
    * degrade to a broken preview, the iframe just never talks to the editor
    * at all.
+   *
+   * `locale` is the second parameter and the only place a locale reaches a URL
+   * (`../../../docs/specs/content-model/localisation.md` architecture decision
+   * 5). **The host owns the URL shape** — a path prefix, a subdomain, a query
+   * parameter — because only the host knows how it encoded it; Folio needs the
+   * inverse only for its own preview route, and derives that by asking this
+   * function rather than by assuming a convention (see `pathForLocale` in
+   * server/runtime.ts). Optional, so every existing `(path) => …` still
+   * compiles and still means "the source locale".
    */
-  route?: (path: string) => string
+  route?: (path: string, locale?: string) => string
+  /**
+   * The languages this site is available in
+   * (`../../../docs/specs/content-model/localisation.md`). Absent means a
+   * single-locale site: no locale reaches a `Resolution`, every read is the
+   * source locale, and nothing about any document or any URL changes.
+   *
+   * `default` is the **source** locale — the one `Blok.data` holds. Everything
+   * else is a per-field override in `Blok.i18n`, so one document holds every
+   * language and publishing publishes all of them at once (checkpoint 3).
+   *
+   * Validated at construction: a default that is not available, a duplicate
+   * code, a fallback that does not exist, and a fallback cycle all throw.
+   */
+  locales?: LocaleConfig
   adminCss?: string[]
   previewCss?: string[]
   /** Pass the `__FOLIO_ASSETS__` global the Vite plugin defines. */
@@ -154,8 +178,18 @@ export interface Folio<Env> {
    * not own, so the host's own routes always win.
    */
   handle: (req: Request, env: Env, ctx: ExecutionContext) => Promise<Response | null>
-  /** Published document for a URL path, or null. */
-  published: (env: Env, path: string) => Promise<Doc | null>
+  /**
+   * Published document for a URL path, or null. `path` is locale-*independent*
+   * (`localisation.md` checkpoint 4): `/about` and `/fr/about` are the same
+   * story, so the host strips its own locale prefix before calling this.
+   *
+   * `locale` does not choose a document — there is only one, holding every
+   * language, and the locale rides on the `Resolution` instead. What it does do
+   * is **refuse a locale this site has not declared**, so `/xx/about` answers
+   * null (and the host's own 404) rather than serving English under a URL that
+   * means nothing. Absent, or the source locale, behaves exactly as before.
+   */
+  published: (env: Env, path: string, locale?: string) => Promise<Doc | null>
   /**
    * What a path answers when it is not currently live: `'unpublished'` for a
    * story that was live and has been taken down, `'unknown'` for a path with
@@ -181,7 +215,12 @@ export interface Folio<Env> {
   redirect: (env: Env, path: string) => Promise<{ to: string; status: number } | null>
   /** Live draft for a story id, creating it on first touch. */
   draft: (env: Env, id: string) => Promise<Doc>
-  /** Every story, for sitemaps and static generation. */
+  /**
+   * Every story, for sitemaps and static generation. With `locales` configured
+   * each routed row also carries `urls` and `previewUrls` — the host's own
+   * `route` called once per locale — so a sitemap covering every language needs
+   * no second call and no knowledge of the URL shape.
+   */
   stories: (env: Env) => Promise<StoryMeta[]>
   tree: (env: Env) => Promise<StoryNode[]>
   registry: Registry
@@ -192,8 +231,13 @@ export interface Folio<Env> {
    * Resolution happens per render rather than being baked in at publish, because
    * a link stores a story id: renaming the linked-to page has to change every
    * href pointing at it, and a snapshot taken at publish time could not.
+   *
+   * `opts.locale` is what makes the whole render French: it becomes
+   * `Resolution.locale`, which every field read goes through. An undeclared code
+   * — or the source locale — leaves it absent, which is the source-locale read
+   * path unchanged.
    */
-  resolve: (env: Env, doc?: Doc) => Promise<Resolution>
+  resolve: (env: Env, doc?: Doc, opts?: { locale?: string }) => Promise<Resolution>
   render: (doc: Doc, opts?: { edit?: boolean; resolution?: Resolution }) => ReactNode
   /**
    * Published document for a global, or null — `name` is not required to be

@@ -15,6 +15,7 @@
 import type { ReactNode } from 'react'
 import type { Doc, Json } from './doc'
 import { defaultValue, type Field } from './fields'
+import { dataOf, type LocaleContext } from './locales'
 import type { SchemaIndex } from './schema'
 import type { StoryMeta } from './story'
 import {
@@ -75,6 +76,22 @@ export interface Resolution {
    * content, so `globals` has to survive that emptying.
    */
   globals?: Record<string, Doc>
+  /**
+   * Which language this render is in (`../../../docs/specs/content-model/
+   * localisation.md` architecture decision 5).
+   *
+   * The locale rides here rather than being a second argument to `render`,
+   * because "which language" then lives in exactly one place — the same place
+   * `assetBase` and the story map already live, built once and pushed alongside
+   * the document. `published()` hands back the same document whatever the
+   * locale; this is what makes it read as French.
+   *
+   * **Absent means the source locale**, including on a site that has locales
+   * configured and is looking at its default. So a default-locale render takes
+   * the identical path it did before localisation existed, rather than a
+   * fallback chain that happens to land in the same place.
+   */
+  locale?: LocaleContext
 }
 
 export const DEFAULT_ASSET_BASE = '/folio/asset'
@@ -296,12 +313,16 @@ export function resolveReference(
   // document. Both are the caller's cue to render nothing.
   if (!story || !doc) return null
   if (types && !types.includes(story.type)) return null
+  const root = doc.bloks[doc.root]
   return {
     id: value,
     title: story.title,
     path: story.path,
     url: story.url,
-    data: doc.bloks[doc.root]?.data ?? {},
+    // Read in the resolution's own locale (`localisation.md`): a referenced
+    // person card inlined into a French page shows the French bio, and a block
+    // author reading `data` directly gets the same answer `content` renders.
+    data: root ? dataOf(root, resolution.locale) : {},
     doc,
   }
 }

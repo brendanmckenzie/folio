@@ -53,6 +53,21 @@ export interface StoryMeta {
    * hand-built `StoryMeta` literal in the tree for no gain at either.
    */
   schemaId?: string | null
+  /**
+   * Translated titles by locale code, from `stories.title_i18n`
+   * (`localisation.md` architecture decision 7) — so a translator's tree is not
+   * in English.
+   *
+   * A cache of a cache, and best-effort by definition: `title` is already the
+   * denormalised source-locale title and the *document* is the truth for both.
+   * Written by publish, which is the one path holding the whole document and
+   * therefore every locale's title at once. A stale entry costs a wrong label in
+   * a tree, never wrong content on a page.
+   *
+   * Optional for the same reason `schemaId` is: making it required would mean
+   * touching every hand-built `StoryMeta` literal in the tree for no gain.
+   */
+  titleI18n?: Record<string, string> | null
   /** Derived, not stored — see `draftState`. */
   state: StoryState
   /** Derived, not stored: `state === 'changed'`, named for callers that only
@@ -61,6 +76,19 @@ export interface StoryMeta {
   /** Filled server-side from the host's `route` config. */
   url?: string
   previewUrl?: string
+  /**
+   * The same two, per locale, filled only when `FolioConfig.locales` is
+   * configured — the host's own `route(path, locale)` called once per declared
+   * language (`localisation.md`). Absent on a single-locale site, so its payload
+   * is byte-identical to what it was.
+   *
+   * `previewUrls` is what the admin's locale switcher navigates the iframe to
+   * (decision 6): switching language reloads the preview rather than pushing a
+   * new resolution, because the host's own chrome and `<html lang>` are part of
+   * what changes and no postMessage can reach them.
+   */
+  urls?: Record<string, string>
+  previewUrls?: Record<string, string>
 }
 
 export interface StoryNode extends StoryMeta {

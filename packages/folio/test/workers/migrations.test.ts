@@ -77,6 +77,8 @@ describe('0006: the rebuilt `stories` table', () => {
       'published_sync_id',
       // 0008_schema_migrations.sql
       'schema_id',
+      // 0009_locales.sql
+      'title_i18n',
     ])
   })
 

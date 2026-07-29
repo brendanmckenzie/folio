@@ -42,6 +42,14 @@ export interface PublishDeps<Env = unknown> {
    */
   titleFor: (story: StoryMeta, doc: Doc) => string
   /**
+   * The same title per declared non-source locale, for `stories.title_i18n`
+   * (`localisation.md` architecture decision 7). Optional, unlike `titleFor`: a
+   * caller with no locales configured has nothing to write, and returning
+   * `undefined` is what tells `publishStoryStatement` to leave the column alone
+   * rather than clear a cache it knows nothing about.
+   */
+  titlesFor?: (story: StoryMeta, doc: Doc) => Record<string, string> | undefined
+  /**
    * Fires the after-commit lifecycle hooks (`publish-hooks.md`). Absent only in
    * tests that exercise a workflow directly with no `createRuntime` behind it —
    * every real caller gets one from `FolioRuntime.publishDeps`.
@@ -112,7 +120,17 @@ export async function publish(
     publishedAt,
     title,
     statement: publishStatement,
-  } = publishStoryStatement(deps.db, storyId, doc, resolvedTitle, syncId)
+    // Every locale at once, in the same statement (`localisation.md` checkpoint
+    // 3): one document, one snapshot, one atomic publish. A half-translated page
+    // goes live with fallbacks, and the admin is what warns before it happens.
+  } = publishStoryStatement(
+    deps.db,
+    storyId,
+    doc,
+    resolvedTitle,
+    syncId,
+    deps.titlesFor?.(meta, doc),
+  )
   await deps.db.batch([versionStatement, publishStatement])
 
   // Built from `meta` plus the writes just committed, rather than re-read: the
