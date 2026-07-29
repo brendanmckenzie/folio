@@ -1,5 +1,13 @@
-import { env, runDurableObjectAlarm, runInDurableObject, SELF } from 'cloudflare:test'
+import {
+  createExecutionContext,
+  env,
+  runDurableObjectAlarm,
+  runInDurableObject,
+  SELF,
+  waitOnExecutionContext,
+} from 'cloudflare:test'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { defineBlock, text } from '../../src/core'
 import { diff } from '../../src/core/diff'
 import type { Doc } from '../../src/core/doc'
 import type { Mutation } from '../../src/core/mutations'
@@ -11,7 +19,17 @@ import {
 } from '../../src/core/protocol'
 import type { StoryMeta, StoryNode } from '../../src/core/story'
 import type { AssetRow } from '../../src/server/assets'
+import type {
+  CheckpointedHookPayload,
+  CreatedHookPayload,
+  DeletedHookPayload,
+  FolioHooks,
+  PathsChangedHookPayload,
+  PublishedHookPayload,
+  UnpublishedHookPayload,
+} from '../../src/server/hooks'
 import type { Redirect } from '../../src/server/redirects'
+import { createFolio } from '../../src/server'
 import type { VersionMeta } from '../../src/server/versions'
 import { applySeedFixture } from './seed-fixture'
 
@@ -739,6 +757,271 @@ describe('DELETE /folio/stories/:id and the redirect option (redirects.md)', () 
 
     const list = await getJson<{ rows: Redirect[] }>('/folio/redirects')
     expect(list.rows.some((r) => r.from === child.path)).toBe(false)
+  })
+})
+
+/**
+ * Every event at its real call site (`publish-hooks.md`). `SELF.fetch` always
+ * dispatches into `test/workers/worker.ts`'s own `folio`, which configures no
+ * hooks at all — so every test here builds its *own* `createFolio` instance
+ * (same pattern as `app.test.ts`'s `folioWith`), with only the hook it cares
+ * about, and calls `.handle()` on it directly rather than going through `SELF`.
+ * That instance shares the same D1 database and the same Durable Object
+ * namespace as the rest of the suite (both come off the ambient `env`), so a
+ * story created or edited through the ordinary `SELF.fetch` helpers above is
+ * exactly what a hook fired through this second instance sees.
+ *
+ * `waitOnExecutionContext` drains whatever a non-awaited hook handed to
+ * `waitUntil` before a test inspects its recorded calls — the timing mechanics
+ * themselves (waitUntil by default, `await` opt-in) are proven in isolation by
+ * `test/unit/server/pure.test.ts`; this suite only has to prove that the real
+ * routes fire the right event, once, with the right payload, after the write.
+ */
+const hookPage = defineBlock({
+  name: 'page',
+  label: 'Page',
+  summary: 'title',
+  fields: { title: text({ label: 'Title', required: true }) },
+  render: () => null,
+})
+
+function folioWithHooks(hooks: FolioHooks<Cloudflare.Env>) {
+  return createFolio<Cloudflare.Env>({
+    blocks: [hookPage],
+    root: 'page',
+    bindings: (e) => ({ db: e.DB, story: e.STORY, media: e.MEDIA, images: e.IMAGES }),
+    basePath: '/folio',
+    hooks,
+  })
+}
+
+async function callHooked(
+  folio: ReturnType<typeof folioWithHooks>,
+  path: string,
+  init?: RequestInit,
+): Promise<Response> {
+  const ctx = createExecutionContext()
+  const res = await folio.handle(new Request(`${ORIGIN}${path}`, init), env, ctx)
+  await waitOnExecutionContext(ctx)
+  return res!
+}
+
+describe('lifecycle hooks (publish-hooks.md)', () => {
+  it('published fires after the commit, with the story, doc, version, publishedAt and actor', async () => {
+    const story = await createStory('Hook Publish Target')
+    const conn = await connect(story.id)
+    const doc = await conn.hello('alice')
+    await conn.tx('hookpub1', [{ t: 'set', uid: doc.root, field: 'title', value: 'Hooked Title' }])
+    conn.close()
+
+    const calls: PublishedHookPayload<Cloudflare.Env>[] = []
+    const folio2 = folioWithHooks({
+      published: (e) => {
+        calls.push(e)
+      },
+    })
+
+    const res = await callHooked(folio2, `/folio/story/${story.id}/publish`, {
+      method: 'POST',
+      headers: { 'x-folio-actor': 'alice' },
+    })
+    const pub = await res.json<{ publishedAt: number; version: VersionMeta }>()
+
+    expect(calls).toHaveLength(1)
+    const e = calls[0]!
+    expect(e.story.id).toBe(story.id)
+    expect(e.story.publishedAt).toBe(pub.publishedAt)
+    expect(e.doc.bloks[e.doc.root]?.data.title).toBe('Hooked Title')
+    expect(e.version.id).toBe(pub.version.id)
+    expect(e.publishedAt).toBe(pub.publishedAt)
+    expect(e.actor).toBe('alice')
+  })
+
+  it('a throwing hook does not fail the publish: the response is normal and the event is logged once', async () => {
+    const story = await createStory('Hook Publish Throws')
+    const conn = await connect(story.id)
+    await conn.hello('alice')
+    conn.close()
+
+    const folio2 = folioWithHooks({
+      published: () => {
+        throw new Error('boom from a published hook')
+      },
+    })
+
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await callHooked(folio2, `/folio/story/${story.id}/publish`, { method: 'POST' })
+    const body = await res.json<{ ok: boolean }>()
+
+    expect(res.status).toBe(200)
+    expect(body.ok).toBe(true)
+    expect(logged.mock.calls.some((c) => c[0] === 'folio: hook published failed')).toBe(true)
+    logged.mockRestore()
+  })
+
+  it('a failed publish (an unknown story) fires nothing', async () => {
+    const calls: unknown[] = []
+    const folio2 = folioWithHooks({ published: (e) => calls.push(e) })
+
+    const res = await callHooked(folio2, '/folio/story/sty_hook_nope/publish', { method: 'POST' })
+
+    expect(res.status).toBe(404)
+    expect(calls).toEqual([])
+  })
+
+  it('checkpointed fires after the version row is written', async () => {
+    const story = await createStory('Hook Checkpoint Target')
+    const conn = await connect(story.id)
+    const doc = await conn.hello('alice')
+    await conn.tx('hookcp1', [
+      { t: 'set', uid: doc.root, field: 'title', value: 'Checkpoint Title' },
+    ])
+    conn.close()
+
+    const calls: CheckpointedHookPayload<Cloudflare.Env>[] = []
+    const folio2 = folioWithHooks({ checkpointed: (e) => calls.push(e) })
+
+    const res = await callHooked(
+      folio2,
+      `/folio/story/${story.id}/versions`,
+      jsonPost(JSON.stringify({ label: 'hook checkpoint', actor: 'alice' })),
+    )
+    const version = await res.json<VersionMeta>()
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.story.id).toBe(story.id)
+    expect(calls[0]!.version.id).toBe(version.id)
+    expect(calls[0]!.actor).toBe('alice')
+  })
+
+  it('unpublished fires with the story, and deleted fires with the removed ids and paths, after the objects are purged', async () => {
+    const parent = await createStory('Hook Lifecycle Parent')
+    const child = await createStory('Hook Lifecycle Child', parent.id)
+    const conn = await connect(parent.id)
+    await conn.hello('alice')
+    const pubRes = await SELF.fetch(`${API}/story/${parent.id}/publish`, { method: 'POST' })
+    expect(pubRes.ok).toBe(true)
+    conn.close()
+
+    const unpublishedCalls: UnpublishedHookPayload<Cloudflare.Env>[] = []
+    const deletedCalls: DeletedHookPayload<Cloudflare.Env>[] = []
+    const folio2 = folioWithHooks({
+      unpublished: (e) => unpublishedCalls.push(e),
+      deleted: (e) => deletedCalls.push(e),
+    })
+
+    const unpubRes = await callHooked(folio2, `/folio/story/${parent.id}/unpublish`, {
+      method: 'POST',
+      headers: { 'x-folio-actor': 'bob' },
+    })
+    const unpub = await unpubRes.json<{ unpublishedAt: number }>()
+
+    expect(unpublishedCalls).toHaveLength(1)
+    expect(unpublishedCalls[0]!.story.id).toBe(parent.id)
+    expect(unpublishedCalls[0]!.story.unpublishedAt).toBe(unpub.unpublishedAt)
+    expect(unpublishedCalls[0]!.actor).toBe('bob')
+
+    const delRes = await callHooked(folio2, `/folio/stories/${parent.id}?redirect=false`, {
+      method: 'DELETE',
+      headers: { 'x-folio-actor': 'carol' },
+    })
+    const del = await delRes.json<{ deleted: string[] }>()
+
+    expect(deletedCalls).toHaveLength(1)
+    expect(new Set(deletedCalls[0]!.ids)).toEqual(new Set(del.deleted))
+    expect(new Set(deletedCalls[0]!.ids)).toEqual(new Set([parent.id, child.id]))
+    expect(deletedCalls[0]!.paths).toContain(parent.path)
+    expect(deletedCalls[0]!.paths).toContain(child.path)
+    expect(deletedCalls[0]!.actor).toBe('carol')
+  })
+
+  it('unpublishing an already-unpublished story is a no-op and fires nothing', async () => {
+    const story = await createStory('Hook Unpublish Idempotent')
+    const conn = await connect(story.id)
+    await conn.hello('alice')
+    const pubRes = await SELF.fetch(`${API}/story/${story.id}/publish`, { method: 'POST' })
+    expect(pubRes.ok).toBe(true)
+    conn.close()
+    await SELF.fetch(`${API}/story/${story.id}/unpublish`, { method: 'POST' })
+
+    const calls: unknown[] = []
+    const folio2 = folioWithHooks({ unpublished: (e) => calls.push(e) })
+    await callHooked(folio2, `/folio/story/${story.id}/unpublish`, { method: 'POST' })
+
+    expect(calls).toEqual([])
+  })
+
+  it('pathsChanged carries every affected id with its old and new path, after the rename batch commits', async () => {
+    const section = await createStory('Hook Section')
+    const descendant = await createStory('Hook Descendant', section.id)
+
+    const calls: PathsChangedHookPayload<Cloudflare.Env>[] = []
+    const folio2 = folioWithHooks({ pathsChanged: (e) => calls.push(e) })
+
+    const res = await callHooked(folio2, `/folio/stories/${section.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ slug: 'hook-section-renamed' }),
+    })
+    const renamed = await res.json<StoryMeta>()
+
+    expect(calls).toHaveLength(1)
+    const changes = calls[0]!.changes
+    expect(changes).toHaveLength(2)
+    expect(changes.find((c) => c.id === section.id)).toEqual({
+      id: section.id,
+      from: section.path,
+      to: renamed.path,
+    })
+    expect(changes.find((c) => c.id === descendant.id)?.to).toBe(`${renamed.path}/hook-descendant`)
+  })
+
+  it('does not fire pathsChanged for an update with no path change', async () => {
+    const story = await createStory('Hook No Rename')
+
+    const calls: unknown[] = []
+    const folio2 = folioWithHooks({ pathsChanged: (e) => calls.push(e) })
+    // `slug` pinned to its current value: leaving it out would fall back to
+    // the new title (`updateStoryStatement`'s own rule) and move the path
+    // anyway, which is not the "nothing moved" case this test wants.
+    await callHooked(folio2, `/folio/stories/${story.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Hook No Rename Retitled', slug: story.slug }),
+    })
+
+    expect(calls).toEqual([])
+  })
+
+  it('created fires after the insert, for a plain create and for a duplicate', async () => {
+    const calls: CreatedHookPayload<Cloudflare.Env>[] = []
+    const folio2 = folioWithHooks({ created: (e) => calls.push(e) })
+
+    const res = await callHooked(
+      folio2,
+      '/folio/stories',
+      jsonPost(JSON.stringify({ title: 'Hook Created Target' })),
+    )
+    const story = await res.json<StoryMeta>()
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.story.id).toBe(story.id)
+
+    const dupRes = await callHooked(folio2, `/folio/stories/${story.id}/duplicate`, jsonPost('{}'))
+    const { story: dup } = await dupRes.json<{ story: StoryMeta }>()
+
+    expect(calls).toHaveLength(2)
+    expect(calls[1]!.story.id).toBe(dup.id)
+  })
+
+  it('a failed create never fires the hook', async () => {
+    const calls: unknown[] = []
+    const folio2 = folioWithHooks({ created: (e) => calls.push(e) })
+
+    const res = await callHooked(folio2, '/folio/stories', jsonPost(JSON.stringify({})))
+
+    expect(res.status).toBe(400)
+    expect(calls).toEqual([])
   })
 })
 
