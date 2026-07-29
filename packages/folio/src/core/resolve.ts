@@ -269,6 +269,10 @@ export function resolveValue(
     case 'reference':
       return resolveReference(value, resolution)
     case 'number':
+      // Deliberately `defaultValue(field)`, never `field.default`: this runs on
+      // every render, and a schema edit must not retroactively change what an
+      // already-published page says (`field-defaults-and-presets.md`, decision
+      // 4). `field.default` is consulted only at creation, in `blankSubtree`.
       return typeof value === 'number' ? value : defaultValue(field)
     case 'boolean':
       return typeof value === 'boolean' ? value : false
