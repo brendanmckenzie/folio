@@ -9,6 +9,7 @@ import {
   sniffContentType,
 } from '../../../src/server/assets'
 import { serializeJson } from '../../../src/server/Document'
+import { normalisePath, redirectStatements } from '../../../src/server/redirects'
 
 // ---------------------------------------------------------------------------
 // imageSize
@@ -659,5 +660,131 @@ describe('serializeJson', () => {
     const result = serializeJson(nested)
     expect(result).toContain('\\u003c')
     expect(JSON.parse(result)).toEqual(nested)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// normalisePath / redirectStatements (redirects.md)
+// ---------------------------------------------------------------------------
+
+/**
+ * The narrowest possible D1Database: `redirectStatements` only ever calls
+ * `.prepare(sql).bind(...args)` and never runs a statement, so recording the
+ * two is enough to test the builder without workerd or a real database.
+ */
+function fakeDb(): { db: D1Database; calls: { sql: string; args: unknown[] }[] } {
+  const calls: { sql: string; args: unknown[] }[] = []
+  const db = {
+    prepare(sql: string) {
+      return {
+        bind: (...args: unknown[]) => {
+          calls.push({ sql, args })
+          return { sql, args }
+        },
+      }
+    },
+  } as unknown as D1Database
+  return { db, calls }
+}
+
+describe('normalisePath', () => {
+  it('strips a single leading and trailing slash', () => {
+    expect(normalisePath('/about/')).toBe('about')
+  })
+
+  it('strips repeated leading and trailing slashes', () => {
+    expect(normalisePath('///about///')).toBe('about')
+  })
+
+  it('lowercases the path, so case variants hit the same row', () => {
+    expect(normalisePath('/Summer-Sale')).toBe('summer-sale')
+  })
+
+  it('strips a query string, which is preserved on the redirect by the host instead', () => {
+    expect(normalisePath('/old?utm_source=x')).toBe('old')
+    expect(normalisePath('old?a=1&b=2')).toBe('old')
+  })
+
+  it('is the empty string for the root, with or without a slash', () => {
+    expect(normalisePath('')).toBe('')
+    expect(normalisePath('/')).toBe('')
+  })
+
+  it('leaves an already-normalised path untouched', () => {
+    expect(normalisePath('about/team')).toBe('about/team')
+  })
+})
+
+describe('redirectStatements', () => {
+  it('builds exactly three statements, in order: delete, collapse, insert', () => {
+    const { db, calls } = fakeDb()
+    const statements = redirectStatements(db, {
+      from: 'about',
+      to: 'about-us',
+      storyId: 'sty_about',
+    })
+
+    expect(statements).toHaveLength(3)
+    expect(calls[0]?.sql).toMatch(/^delete from redirects where from_path = \?/)
+    expect(calls[0]?.args).toEqual(['about-us'])
+
+    expect(calls[1]?.sql).toMatch(/^update redirects set to_path = \? where to_path = \?/)
+    expect(calls[1]?.args).toEqual(['about-us', 'about'])
+
+    expect(calls[2]?.sql).toMatch(/insert or replace into redirects/)
+    expect(calls[2]?.args).toEqual([
+      'about',
+      'about-us',
+      301,
+      'auto',
+      'sty_about',
+      expect.any(Number),
+    ])
+  })
+
+  it('normalises both from and to before any statement is built', () => {
+    const { db, calls } = fakeDb()
+    redirectStatements(db, { from: '/About/', to: '/About-Us/', storyId: null })
+
+    expect(calls[0]?.args).toEqual(['about-us'])
+    expect(calls[1]?.args).toEqual(['about-us', 'about'])
+    expect(calls[2]?.args?.slice(0, 2)).toEqual(['about', 'about-us'])
+  })
+
+  it('returns no statements when the path did not actually change', () => {
+    const { db, calls } = fakeDb()
+    expect(redirectStatements(db, { from: 'about', to: 'about', storyId: 'sty_about' })).toEqual([])
+    expect(calls).toHaveLength(0)
+  })
+
+  it('returns no statements for the root, which never has a path to vacate', () => {
+    const { db, calls } = fakeDb()
+    expect(redirectStatements(db, { from: '', to: '', storyId: 'sty_home' })).toEqual([])
+    expect(calls).toHaveLength(0)
+  })
+
+  it('accepts an absolute URL as the target without lowercasing or slash-stripping it', () => {
+    const { db, calls } = fakeDb()
+    redirectStatements(db, {
+      from: 'old-microsite',
+      to: 'https://Example.com/Path/',
+      storyId: null,
+    })
+
+    expect(calls[2]?.args?.[1]).toBe('https://Example.com/Path/')
+  })
+
+  it('defaults status to 301 and source to auto', () => {
+    const { db, calls } = fakeDb()
+    redirectStatements(db, { from: 'a', to: 'b', storyId: 'sty_a' })
+    expect(calls[2]?.args?.[2]).toBe(301)
+    expect(calls[2]?.args?.[3]).toBe('auto')
+  })
+
+  it('honours an explicit status and source', () => {
+    const { db, calls } = fakeDb()
+    redirectStatements(db, { from: 'a', to: 'b', storyId: null, status: 302, source: 'manual' })
+    expect(calls[2]?.args?.[2]).toBe(302)
+    expect(calls[2]?.args?.[3]).toBe('manual')
   })
 })
