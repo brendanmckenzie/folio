@@ -44,6 +44,8 @@ export function toSchemaIndex(registry: Registry): SchemaIndex {
         label: def.label,
         summary: def.summary,
         fields: def.fields,
+        presets: def.presets,
+        presetsOnly: def.presetsOnly,
       } satisfies BlockSchema,
     ]),
   )

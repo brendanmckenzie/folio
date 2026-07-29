@@ -29,6 +29,13 @@ export { deepEqual, diff, summariseDiff } from './diff'
 export type { SchemaIndex } from './schema'
 export { blankBlok } from './schema'
 
+// `allocateSubtree` is the uid-and-fractional-order primitive shared by a
+// preset's recipe (`blankSubtree`, schema-aware) and `duplicate-and-paste.md`
+// (an existing subtree's recipe) — engine work, since both allocate uids and
+// orders rather than read a schema.
+export { allocateSubtree, blankSubtree, validatePresets } from './schema'
+export type { SubtreeBlok } from './schema'
+
 export {
   PROTOCOL_VERSION,
   docCapError,

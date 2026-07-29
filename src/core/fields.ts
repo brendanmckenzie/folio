@@ -17,6 +17,14 @@ interface Common {
   showIf?: FieldCondition
   /** Admin-only. Never draw this input; its stored value is untouched. */
   hidden?: boolean
+  /**
+   * Written into a blok's data at creation (`blankSubtree`/`blankBlok`) only.
+   * Never consulted at render (`resolveValue`): a schema edit must not change
+   * what an already-published page says (`field-defaults-and-presets.md`,
+   * decision 4). The retroactive case is a content migration
+   * (`field.default(blok, name, value)`), not this key.
+   */
+  default?: Json
 }
 
 export interface SelectOption {
@@ -55,14 +63,23 @@ export type Field =
    * not have yet, so every story is offered.
    */
   | ({ kind: 'reference' } & Common)
-  | ({ kind: 'blocks'; allow: readonly string[]; max?: number } & Common)
+  // Children are separate bloks, not a value on the parent, so `blocks` is the
+  // one kind that cannot carry a `default` — a preset's `children` is the
+  // equivalent (`field-defaults-and-presets.md`, decision 1).
+  | ({ kind: 'blocks'; allow: readonly string[]; max?: number } & Omit<Common, 'default'>)
 
 type Opts<K extends Field['kind']> = Omit<Extract<Field, { kind: K }>, 'kind'>
 
-export const text = (o: Opts<'text'> = {}) => ({ kind: 'text' as const, ...o })
+/** `default`, when given, is typed to the field's own value, not just `Json`. */
+type Defaulted<K extends Field['kind'], V> = Omit<Opts<K>, 'default'> & { default?: V }
+
+export const text = (o: Defaulted<'text', string> = {}) => ({ kind: 'text' as const, ...o })
 export const textarea = (o: Opts<'textarea'> = {}) => ({ kind: 'textarea' as const, ...o })
-export const number = (o: Opts<'number'> = {}) => ({ kind: 'number' as const, ...o })
-export const boolean = (o: Opts<'boolean'> = {}) => ({ kind: 'boolean' as const, ...o })
+export const number = (o: Defaulted<'number', number> = {}) => ({ kind: 'number' as const, ...o })
+export const boolean = (o: Defaulted<'boolean', boolean> = {}) => ({
+  kind: 'boolean' as const,
+  ...o,
+})
 export const asset = (o: Opts<'asset'> = {}) => ({ kind: 'asset' as const, ...o })
 export const multiasset = (o: Opts<'multiasset'> = {}) => ({ kind: 'multiasset' as const, ...o })
 
@@ -74,7 +91,7 @@ export const richtext = (o: Opts<'richtext'> = {}) => ({ kind: 'richtext' as con
 export const reference = (o: Opts<'reference'> = {}) => ({ kind: 'reference' as const, ...o })
 
 export const select = <const T extends readonly SelectOption[]>(
-  o: Omit<Opts<'select'>, 'options'> & { options: T },
+  o: Omit<Opts<'select'>, 'options' | 'default'> & { options: T; default?: T[number]['value'] },
 ) => ({ kind: 'select' as const, ...o })
 
 export const blocks = <const T extends readonly string[]>(

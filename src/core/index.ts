@@ -86,7 +86,7 @@ export type { Blok, Doc, Json } from './doc'
 export { buildTree, derivePaths, descendants, joinPath, newStoryId, slugify } from './story'
 export type { StoryMeta, StoryNode } from './story'
 
-export type { BlockSchema, Manifest, SchemaIndex } from './schema'
+export type { BlockPreset, BlockSchema, Manifest, SchemaIndex } from './schema'
 
 // The activity trail is a read model (who changed what, when), not a mutation
 // primitive, so it ships with the public API even though it is defined
