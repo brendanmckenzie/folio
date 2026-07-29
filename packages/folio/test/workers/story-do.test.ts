@@ -606,7 +606,10 @@ describe('StoryDO: protocol discipline', () => {
     await frame(peer, 'delta')
     // The same frame, verbatim: a client resending after a dropped acknowledgement.
     peer.send(tx)
-    await settle()
+    // Wait for the re-acknowledgement itself rather than a fixed number of ticks.
+    // settle() is for asserting nothing arrived; here a second delta is expected,
+    // and 20 ticks was occasionally not enough for it, which made this test flake.
+    await frame(peer, 'delta', 2)
 
     const deltas = framesOf(peer, 'delta')
     expect(deltas[0]).toEqual({
