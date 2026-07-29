@@ -3,7 +3,7 @@
 > **Group:** editing
 > **Build order:** 5
 > **Size:** S
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** none
 > **Last updated:** 2026-07-29
@@ -423,3 +423,90 @@ admin, and the unit tests are the honest coverage.
 - **Document duplication as a way to get a starting shape** — that is
   `duplicate-and-paste.md`, and the two are complementary: templates for "always start
   like this", duplication for "start like that one".
+
+## Implementation notes
+
+Built as planned, in the three phases above. No Open questions section existed
+to resolve.
+
+**Ground truth correction inherited from `conditional-fields.md`:** `blankBlok`,
+`summarise`, `slotsOf`, `BlockSchema`, `Manifest` and `SchemaIndex` already lived
+in `core/schema.ts`, not `core/block.ts`, before this spec started — this
+document's own Ground truth section had already been corrected to say so, and
+the code matched it.
+
+**`allocateSubtree` — the primitive `duplicate-and-paste.md` shares:**
+
+```ts
+export interface SubtreeBlok {
+  /** Local to one call; links a child's `parent` to another entry's `key` here. */
+  key: string
+  type: string
+  data: Record<string, Json>
+  parent: string | null   // another entry's `key`, or null for the recipe's one root
+  slot: string | null
+}
+
+export function allocateSubtree(
+  bloks: readonly SubtreeBlok[],
+  parent: string | null,
+  slot: string | null,
+  order: string,
+): Blok[]
+```
+
+In `packages/folio/src/core/schema.ts`, exported from `folio/engine`
+(`packages/folio/src/core/engine.ts`) alongside `blankSubtree` and
+`validatePresets`. It is schema-agnostic on purpose: given a flat recipe (one
+entry per node, `parent: null` marking the single root, everything else
+pointing at another entry's `key`), it assigns every node a fresh uid via
+`newUid()` and, per `(parent, slot)` group, a fresh fractional order via
+`keyAtIndex` walked in the recipe's own array order — every slot in a freshly
+allocated subtree is new, so there is nothing existing to collide with.
+Returns parents before children, matching `diff.ts`'s insert rule, so the
+array is one `store.tx(...)` call.
+
+`blankSubtree(schema, type, parent, slot, order, preset?)` is the schema-aware
+caller: it resolves kind defaults, `field.default` and a preset's `data`/
+`children` into exactly this recipe shape, then hands it to `allocateSubtree`.
+`duplicate-and-paste.md` does not need schema at all for its own case — it
+already has concrete field values from the document it is copying — so it
+builds its own `SubtreeBlok[]` from an existing subtree (stripped of old uids,
+old parents remapped to local `key`s) and calls `allocateSubtree` directly,
+never `blankSubtree`.
+
+**Preset data shape**, in `core/schema.ts`, reaching the admin unchanged
+through the manifest (`BlockSchema.presets`/`presetsOnly`):
+
+```ts
+export interface BlockPreset {
+  name: string
+  label: string
+  data?: Record<string, Json>
+  children?: readonly { slot: string; type: string; preset?: string }[]
+}
+```
+
+**Deliberate divergence from the spec's own sketch of `validatePresets`'s call
+site:** the spec's Ground truth said "`createFolio` already validates its
+config before serving a request" as the reason this joins that check — no such
+pre-existing validation actually existed to join; `validatePresets(schema)` is
+the first one, called from `createRuntime` immediately after the schema index
+is built, which still satisfies the acceptance criterion (throws before any
+request is served, since `createRuntime` runs synchronously during setup).
+
+**Nothing deferred.** The cycle/depth bound uses `MAX_PRESET_DEPTH = 5` exactly
+as the spec proposed, walking `(type, preset)` pairs. `resolveValue`'s guard
+(decision 4) has a pinned test for `number`, `text` and `select`.
+
+**Incidental fix, not caused by this spec:** `pnpm exec biome ci .` failed on
+seven files at the start of this work (line-wrapping only, no logic) — fixed
+in its own commit before phase 1, since "Biome clean" is part of every spec's
+definition of done.
+
+**Tests added:** 33 in `test/unit/core/schema.test.ts` (layering, subtree
+construction, every validation throw, the `resolveValue` guard), 12 across two
+new files in `test/unit/admin` (`menuGroups`, `subtreeInsert`), 4 in
+`test/workers/schema.test.ts` (seeded document with a root preset's children,
+the bare-root fallback, and the defaults/presets manifest round-trip). 716 ->
+764 tests, 29 -> 32 files.
