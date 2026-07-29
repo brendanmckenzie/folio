@@ -24,6 +24,15 @@ export type { Mutation } from './mutations'
 
 export { deepEqual, diff, summariseDiff } from './diff'
 
+// `cloneSubtree`/`cloneDoc` (duplicate-and-paste.md) build on `allocateSubtree`
+// below: fresh uids and orders for an existing subtree, rather than a preset's
+// recipe. `parseClipboard` validates untrusted clipboard text the same way a
+// socket frame is validated — total over malformed input, refusing rather
+// than throwing.
+export { cloneDoc, cloneSubtree } from './clone'
+export { parseClipboard } from './clipboard'
+export type { ClipboardPayload, ParsedClipboard } from './clipboard'
+
 // `blankBlok` needs `SchemaIndex` to look up a type's field defaults; re-exported
 // here for the same reason `Doc`/`Blok`/`Json` are.
 export type { SchemaIndex } from './schema'
