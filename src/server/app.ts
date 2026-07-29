@@ -6,6 +6,7 @@ import { Hono } from 'hono'
 import { envelope, FolioError, INTERNAL } from './errors'
 import { withBindings } from './middleware'
 import { assetRoutes } from './routes/assets'
+import { authRoutes } from './routes/auth'
 import { editorRoutes } from './routes/editor'
 import { historyRoutes } from './routes/history'
 import { redirectRoutes } from './routes/redirects'
@@ -44,6 +45,12 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // The manifest is derived from the config alone: no bindings, no I/O, no way
   // for the host's environment to turn this into a 500.
   app.get('/schema', (c) => c.json(rt.manifest))
+
+  // Ahead of the resource routes: `/login/verify` must not be read as
+  // `/login/:provider`, and neither may be shadowed by a `:id` pattern further
+  // down. Nothing in here needs a credential, which is what makes it safe to
+  // mount before any gate exists (identity-and-access.md).
+  app.route('/', authRoutes<Env>(rt))
 
   app.route('/', storyRoutes<Env>(rt))
   app.route('/', historyRoutes<Env>(rt))

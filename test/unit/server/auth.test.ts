@@ -29,6 +29,7 @@ import {
   type Role,
 } from '../../../src/server/auth/roles'
 import { bearerToken } from '../../../src/server/auth/tokens'
+import { safeNext } from '../../../src/server/validate'
 
 /**
  * The pure half of identity and access: the cookie-name rule, the role and scope
@@ -196,6 +197,34 @@ describe('bearer parsing', () => {
     expect(bearerToken('Basic folio_abc')).toBeNull()
     expect(bearerToken('folio_abc')).toBeNull()
     expect(bearerToken(null)).toBeNull()
+  })
+})
+
+describe('safeNext: the login page cannot be turned into an open redirect', () => {
+  const FALLBACK = '/folio/edit'
+
+  it('keeps a same-origin path', () => {
+    expect(safeNext('/folio/edit/sty_home', FALLBACK)).toBe('/folio/edit/sty_home')
+    expect(safeNext('/folio/edit?rail=history', FALLBACK)).toBe('/folio/edit?rail=history')
+  })
+
+  it('refuses anything that could leave the site', () => {
+    // The case a bare startsWith('/') check waves through: browsers read this as
+    // a protocol-relative URL to another host.
+    expect(safeNext('//evil.example/steal', FALLBACK)).toBe(FALLBACK)
+    expect(safeNext('https://evil.example', FALLBACK)).toBe(FALLBACK)
+    // Some browsers normalise a backslash to a slash, so this is the same trick
+    // wearing a different character.
+    expect(safeNext('/\\evil.example', FALLBACK)).toBe(FALLBACK)
+    expect(safeNext('folio/edit', FALLBACK)).toBe(FALLBACK)
+    expect(safeNext('javascript:alert(1)', FALLBACK)).toBe(FALLBACK)
+  })
+
+  it('falls back for absent, empty and absurdly long values', () => {
+    expect(safeNext(undefined, FALLBACK)).toBe(FALLBACK)
+    expect(safeNext(null, FALLBACK)).toBe(FALLBACK)
+    expect(safeNext('', FALLBACK)).toBe(FALLBACK)
+    expect(safeNext(`/${'x'.repeat(600)}`, FALLBACK)).toBe(FALLBACK)
   })
 })
 

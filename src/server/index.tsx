@@ -31,6 +31,8 @@ export type {
 } from './hooks'
 export { FolioError } from './errors'
 export type { ErrorEnvelope, FolioErrorCode } from './errors'
+export { magicLink } from './auth/magic-link'
+export { oidc } from './auth/oidc'
 export {
   ADMIN,
   ASSETS,
