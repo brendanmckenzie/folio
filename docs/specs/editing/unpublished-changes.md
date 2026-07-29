@@ -3,7 +3,7 @@
 > **Group:** editing
 > **Build order:** 3
 > **Size:** S (phase 1) + S (phase 2)
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** `0005_draft_watermark.sql` (phase 2 only)
 > **Last updated:** 2026-07-29
@@ -405,5 +405,70 @@ and the discard is undoable.
 ## Open questions
 
 - Should the comparison view be reachable from the tree (compare any page without
-  opening it), or only from the open story's top bar? Cheap either way; the top
-  bar alone is the smaller first cut.
+  opening it), or only from the open story's top bar? **Resolved: the top bar
+  only.** The comparison view opens from the "N unpublished changes" state in
+  `TopBar.tsx` (`onCompare`, aimed at the newest publish version via
+  `useVersions.view()`); the tree has no comparison entry point of its own.
+
+## Implementation notes
+
+Both phases landed, in the reverse of the order they are written above: the
+watermark plumbing (phase 2) came first here because `core/story.ts`'s
+`StoryMeta` needed its final shape — `draftSyncId`, `draftUpdatedAt`,
+`publishedSyncId`, `hasUnpublishedChanges` — before the open-story delta (phase
+1) could be built against it without a second pass. Both phases are complete;
+this reordering did not change what either phase delivers.
+
+**What landed, roughly as specified:**
+- `draftState` (`core/story.ts`) widens `storyState` into the `'changed'` case
+  the type already reserved for it, from the watermark pair.
+- `StoryDO` became `createStoryDO<Env>({ db })`; `export { StoryDO }` is that
+  factory pre-applied to `env => env.DB`, so no existing host needs to change.
+  A debounced (~2s) alarm mirrors the log position into D1 once per burst.
+- `publish()` reads the draft and its syncId in one atomic call
+  (`getOrInitWithSyncId`), not two — a real race the acceptance criteria named
+  and a workers test now pins.
+- `usePublishedDoc` (new hook) computes `summariseDiff(diff(published, draft))`
+  against the newest publish version; its pure half (`publishedDelta`) is
+  exported and unit-tested directly, no React runtime required.
+- `TopBar.tsx`'s bare "Synced" label became the five-state machine the plan
+  named (`publishStatus`, also a pure, unit-tested function).
+- Discard reuses `restore()` outright, per architecture decision 5. The one
+  new piece of UI is `DiscardDialog.tsx`; `ViewingBar`'s existing "Restore this
+  version" swaps to "Discard changes" only when the version on screen is the
+  newest publish version reached via the compare button, not an arbitrary
+  History checkpoint.
+- `useVersions` no longer owns the version list fetch — `useVersionsList` is
+  new, loads unconditionally, and both `useVersions` and `usePublishedDoc` read
+  it from `Editor.tsx`, per the spec's own note on this.
+
+**Where the spec's ground truth had drifted or needed filling in:**
+- `liveDescendants` (`unpublish.md`'s helper, `core/story.ts`) filtered on
+  `state === 'live'` alone. Making `'changed'` reachable would have silently
+  dropped a page with unpublished changes from "these stay live" in the
+  unpublish confirmation — fixed to treat `'changed'` as live too, with a test
+  pinning it.
+- The spec does not say what "nothing to publish" means for a story that is
+  currently `'unpublished'` (taken down) but content-identical to its last
+  publish. Disabling Publish there would trap an editor who wants to bring the
+  page back live with no further edits, so `publishStatus`'s
+  `nothingToPublish` only fires while the story's current state is `'live'`;
+  `'unpublished'` always leaves Publish enabled. Documented in `TopBar.tsx` and
+  `top-bar.test.ts`.
+- `publishStoryStatement`/`publishStory` gained a required `publishedSyncId`
+  parameter rather than a defaulted one: a wrong watermark is a silently
+  hidden bug (a row reads "clean" when it is not), not a loud one, so every
+  call site — including every pre-existing test — now passes one explicitly.
+
+**Deferred:** the per-row `head()` RPC the owner decision rejected was not
+built at all (the alarm approach was accepted as written). Scheduled
+publishing itself is still out of scope, per this spec's own "Out of scope".
+
+**Tests added:** 26 (659 → 685): 20 unit (`core/story.test.ts`'s `draftState`
+and the `liveDescendants`/`unpublishConfirmation` "changed" cases;
+`published-doc.test.ts`'s four delta states; `top-bar.test.ts`'s
+`publishStatus` cases; `viewing-bar.test.ts`'s `discardSummary` cases), 6
+workers (`story-do.test.ts`'s watermark alarm block, `stories.test.ts`'s
+derived-state and `publishedSyncId` cases, `http.test.ts`'s publish-race
+case), plus `scripts/history-test.mjs` grew from 29 to 41 checks, run live
+against a real dev server from a fresh database.
