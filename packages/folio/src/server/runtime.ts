@@ -166,6 +166,19 @@ export interface FolioRuntime {
   withUrls: <T extends StoryMeta>(story: T) => T
   /** `withUrls` over a whole tree. */
   decorate: (nodes: StoryNode[]) => StoryNode[]
+  /**
+   * A starting document for one document type: its root block's `'default'`
+   * preset, with the title written into the type's own title field.
+   *
+   * Exposed because `../platform/content-api.md`'s create is two writes across two
+   * stores and the order matters: it validates the caller's content against this
+   * seed *before* the D1 row exists, then seeds the object with the finished
+   * document in one `getOrInit` rather than seeding blank and committing after —
+   * so a refused payload writes nothing at all, and a created document's initial
+   * content lands with it rather than as a separate transaction. `duplicate`
+   * already does the same thing with `cloneDoc`.
+   */
+  seed: (type: DocumentType | undefined, title: string) => Doc
   stub: (bindings: FolioBindings, id: string) => StoryStub
   /**
    * The live draft for a story whose row the caller already has. Preferred over
@@ -682,6 +695,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     dev: Boolean(config.assets?.devClient),
     withUrls,
     decorate,
+    seed,
     stub,
     draftFor,
     draftForWithSyncId,

@@ -121,15 +121,26 @@ export function contentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
 
   /**
-   * `READ`, not public, and that is a deliberate narrowing of the spec's route
-   * table.
+   * `READ`, and `../platform/content-api.md` — which owns this route's auth —
+   * **decided to leave it there**. Three reasons, in the order they mattered:
    *
-   * The spec says "public for published; draft needs a scope" and, two paragraphs
-   * later, that `../platform/content-api.md` **owns the auth and the envelope of
-   * this route**. Published content is public by definition, so opening this later
-   * costs nothing; opening it now and having spec 15 decide otherwise would mean
-   * taking a public surface away. A published page needs no gate either way — its
-   * collections resolve server-side inside `resolve()`, with no HTTP in the loop.
+   *   1. This route is *internal*. It is what the admin's collection input fetches,
+   *      and it is free to change shape whenever the editor needs it to. The
+   *      public, documented, versioned equivalent is `GET /folio/api/v1/documents`
+   *      (content-api.md decision 2), which is the same `queryFromParams` over the
+   *      same `rt.query`. Declaring this one public as well would freeze it as a
+   *      second contract nobody asked for.
+   *   2. `content:read` is the weakest scope a token can hold, so "let a script read
+   *      published content" is one token away — and that is the door, rather than an
+   *      unauthenticated one.
+   *   3. `content_index` holds every indexed field value across the whole site, so
+   *      an open query route is a bulk-extraction primitive whatever the rows say
+   *      about themselves. Opening it later costs nothing; un-leaking does not.
+   *
+   * A published **page** is unaffected either way, and always was: its collections
+   * resolve server-side inside `resolve()`, with no HTTP in the loop. A host that
+   * wants an open read surface writes one, the way the demo's `/archive` route
+   * already does over `folio.query`.
    */
   app.get('/content', requireAccess<Env>(rt, READ), async (c) => {
     const url = new URL(c.req.url)

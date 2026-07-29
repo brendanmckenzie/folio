@@ -65,6 +65,24 @@ export function typeNameQuery(raw: string | undefined): string {
 }
 
 /**
+ * A locale code, as a body field or a query param. Bounded and screened here;
+ * whether the code is *declared* is `isKnownLocale`'s answer, and the route
+ * answers `unsupported` for one that is not — the request is well-formed, the
+ * server simply has no such locale (`localisation.md`).
+ */
+const LOCALE_CODE = v.pipe(
+  v.string('must be a string'),
+  v.trim(),
+  v.minLength(1, 'is required'),
+  v.maxLength(32, 'must be 32 characters or fewer'),
+  v.regex(/^[A-Za-z0-9_-]+$/, 'contains unsupported characters'),
+)
+
+export function localeQuery(raw: string): string {
+  return parseOrThrow(LOCALE_CODE, raw, 'locale')
+}
+
+/**
  * What a person can type into a CMS: everything except the characters that make
  * a stored string lie about itself.
  *
@@ -241,6 +259,96 @@ export const ReindexBody = v.object(
 )
 
 export type ReindexInput = v.InferOutput<typeof ReindexBody>
+
+/* ------------------------------------------------------------ content API --- */
+
+/**
+ * The nested content trees `PUT /content` and `POST /documents` carry
+ * (`../../../docs/specs/platform/content-api.md`).
+ *
+ * Deliberately **`v.unknown()`**, and that is not a gap. The shape a payload has
+ * to satisfy is the *schema's* — which block types nest where, which field names
+ * exist, what JSON shape each kind stores — and none of that is expressible in a
+ * valibot schema written here, because it is derived from the host's config at
+ * construction. `fromNested` (core/nested.ts) is the validator, it names the path
+ * that failed, and `rethrow` turns its refusal into the same `bad_request`
+ * envelope everything in this file produces. A second, weaker shape check here
+ * would only be able to disagree with it.
+ *
+ * What this file still owns is the wrapper: the `mode`, the locale, the caps.
+ */
+const CONTENT = v.unknown()
+
+/** `merge` (the default) leaves absent fields alone; `replace` makes the payload whole. */
+const WRITE_MODE = v.optional(v.picklist(['merge', 'replace'], "must be 'merge' or 'replace'"))
+
+export const ContentPutBody = v.object({ content: CONTENT, mode: WRITE_MODE }, OBJECT)
+
+/**
+ * `PATCH /documents/:id/fields` — the targeted write, which skips the diff
+ * entirely and becomes one `set` per field.
+ *
+ * `fields` addresses the root blok by name (where a document's own metadata
+ * lives); `bloks` addresses any other by uid. `locale` scopes every `set` in the
+ * request to one language, which is what a translation job wants to be able to
+ * say once rather than per field.
+ *
+ * The per-field values are `unknown` for the same reason `CONTENT` is: `fieldShapeError`
+ * checks them against the block's own declaration, which this file cannot see.
+ */
+export const FieldsPatchBody = v.object(
+  {
+    fields: v.optional(v.record(bounded(120), v.unknown())),
+    bloks: v.optional(
+      v.pipe(
+        v.array(
+          v.object(
+            { uid: ID, fields: v.record(bounded(120), v.unknown()) },
+            'each entry must be a JSON object',
+          ),
+        ),
+        v.maxLength(500, 'must name 500 blocks or fewer'),
+      ),
+    ),
+    locale: v.optional(LOCALE_CODE),
+  },
+  OBJECT,
+)
+
+/** `POST /api/v1/documents` — `StoryCreateBody` plus optional starting content. */
+export const DocumentCreateBody = v.object(
+  {
+    title: required(300),
+    slug: v.optional(bounded(200)),
+    parentId: v.nullish(ID),
+    type: v.optional(TYPE_NAME),
+    content: v.optional(CONTENT),
+  },
+  OBJECT,
+)
+
+export type ContentPutInput = v.InferOutput<typeof ContentPutBody>
+export type FieldsPatchInput = v.InferOutput<typeof FieldsPatchBody>
+export type DocumentCreateInput = v.InferOutput<typeof DocumentCreateBody>
+
+/**
+ * The `Idempotency-Key` header, bounded before it is hashed. Opaque to Folio: it
+ * is the *identity of the write*, chosen by the caller, and the only thing done
+ * with it is `txIdFromKey`.
+ */
+export function idempotencyKeyHeader(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined
+  return parseOrThrow(required(200), raw, 'Idempotency-Key')
+}
+
+/**
+ * A URL path from `GET /api/v1/documents/by-path/*`. `''` is the root story, so
+ * empty is legal — unlike every other screened value here, where empty is the
+ * mistake.
+ */
+export function storyPathParam(raw: string | undefined): string {
+  return parseOrThrow(bounded(500), raw ?? '', 'path')
+}
 
 /* ------------------------------------------------- identity and access --- */
 
