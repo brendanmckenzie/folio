@@ -9,14 +9,23 @@
  */
 import { toManifest, toRegistry, toSchemaIndex, type Registry } from '../core/block'
 import type { Doc } from '../core/doc'
+import { indexedFieldNames } from '../core/index-projection'
 import {
+  dataOf,
   type LocaleConfig,
   type LocaleContext,
   localeContext,
   validateLocales,
 } from '../core/locales'
 import { latestMigrationId, type Migration, validateMigrations } from '../core/migrate'
-import { buildResolution, referencedIds, type Resolution } from '../core/resolve'
+import {
+  collectionQueries,
+  type ContentPage,
+  type ContentQuery,
+  type ResolvedCollection,
+} from '../core/query'
+import { linkedIds, referencedIdsAllLocales } from '../core/refs'
+import { buildResolution, type Resolution } from '../core/resolve'
 import {
   blankSubtree,
   defaultType,
@@ -31,11 +40,13 @@ import {
   validatePresets,
   validateTypes,
 } from '../core/schema'
-import type { StoryMeta, StoryNode } from '../core/story'
+import { ancestorPaths, type StoryMeta, type StoryNode } from '../core/story'
 import { type ResolvedAuth, resolveAuth } from './auth/config'
+import { type ContentProjection, contentProjection } from './content-index'
 import { createHookRunner, type FolioHooks, type HookRunnerCtx, validateHooks } from './hooks'
 import type { PublishDeps } from './publish'
-import { ensureSingleton, listStories, publishedDocsByIds, storyById } from './stories'
+import { type QueryDeps, runQuery } from './query'
+import { ensureSingleton, listStories, publishedDocsByIds, storiesFor, storyById } from './stories'
 import type { FolioBindings, FolioConfig, StoryStub } from './types'
 
 const DEFAULT_BASE = '/folio'
@@ -44,6 +55,37 @@ const DEFAULT_BASE = '/folio'
 export interface PageAssets {
   entries: string[]
   stylesheets: string[]
+}
+
+/**
+ * What a render needs beyond the document
+ * (`../content-model/collections.md` decision 6).
+ *
+ * Everything here is optional and every default is the cheapest answer, which is
+ * the point: `resolve(bindings, doc)` now costs one bounded query instead of a
+ * full table scan, and a caller opts *up* from there.
+ */
+export interface ResolveOptions {
+  /** Resolve pulled-in documents from their live drafts. The preview's mode. */
+  draft?: boolean
+  locale?: string
+  /** 1-based page for every `collection` field in the document. */
+  page?: number
+  /**
+   * The story being rendered. Two things need it: its ancestors join the
+   * resolution (a breadcrumb has to resolve), and in `draft` mode its draft values
+   * are patched over its published row in any collection that lists it.
+   *
+   * A subset of `StoryMeta` rather than the row, so a host that has an id, a path
+   * and a type can pass a literal.
+   */
+  story?: Pick<StoryMeta, 'id' | 'path' | 'type' | 'title'>
+  /**
+   * `'all'` loads every story, exactly as this function did before collections —
+   * the full map a navigation built from the tree wants. Default `'needed'`: the
+   * document's own links, references, ancestors and the documents it pulls in.
+   */
+  stories?: 'needed' | 'all'
 }
 
 export interface FolioRuntime {
@@ -136,11 +178,15 @@ export interface FolioRuntime {
     bindings: FolioBindings,
     story: StoryMeta,
   ) => Promise<{ doc: Doc; syncId: number }>
-  resolve: (
-    bindings: FolioBindings,
-    doc?: Doc,
-    opts?: { draft?: boolean; locale?: string },
-  ) => Promise<Resolution>
+  resolve: (bindings: FolioBindings, doc?: Doc, opts?: ResolveOptions) => Promise<Resolution>
+  /** `ContentQuery` over published content (`../content-model/collections.md`). */
+  query: (bindings: FolioBindings, q: ContentQuery) => Promise<ContentPage>
+  /**
+   * Field names marked `indexed: true` on some declared type's root block — what a
+   * `where` or an `order` is checked against before it reaches SQL, and what the
+   * admin's collection input offers as filters.
+   */
+  indexedFields: ReadonlySet<string>
   /**
    * What the publish workflows need, assembled from bindings alone — the one
    * place that assembly lives, for a route today and a Durable Object alarm next
@@ -219,6 +265,11 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const schemaId = latestMigrationId(migrations)
   const typeOf = (name: string | undefined) => typeByName(types, name)
   const fallbackType = defaultType(types)
+  // Root blocks only (`../content-model/collections.md` decision 2): the index is
+  // a *fixed* projection of a document, so which fields it holds cannot depend on
+  // which blocks happen to be inside it. `/folio/audit` reports an `indexed` flag
+  // on a block that is no type's root, which would otherwise do nothing silently.
+  const indexed = indexedFieldNames(schema, types)
   const base = config.basePath ?? DEFAULT_BASE
   const route = config.route ?? ((path: string) => `/${path}`)
   const assetBase = `${base}/asset`
@@ -361,11 +412,29 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   }
 
   /**
-   * One D1 query for the story map, the same one the tree already runs, plus one
-   * more only if the document actually has `reference` fields pointing somewhere
-   * — and now, every configured global rides along in that same second query
-   * (`globals.md` architecture decision 1), so a site with globals costs no
-   * extra D1 read over one with references alone.
+   * The context a document needs that the document itself cannot hold.
+   *
+   * **This used to load every story in the site, on every page render**
+   * (`../content-model/collections.md` decision 6). Invisible at 40 pages and
+   * fatal at 800, and collections are what made it urgent — an insights index is
+   * exactly the site that has 800 rows. It now loads the ids the document actually
+   * needs:
+   *
+   *   - the targets of its `multilink` fields **and of the link marks inside its
+   *     richtext**. The second half is not optional and is the trap: a Folio-native
+   *     link mark stores a structured `attrs.link` and has no `href` at all,
+   *     because the href is derived from the resolution at render time. Miss those
+   *     ids and every internal link inside prose renders as unstyled text with no
+   *     `<a>` around it (see `core/refs.ts`).
+   *   - the targets of its `reference` fields, across every locale.
+   *   - the same two sets again for each document it pulls in — a referenced person
+   *     card and a global header both contain links of their own, and `RenderBlok`
+   *     empties `docs` on the way down but never `stories`.
+   *   - its own ancestors, by path, for a breadcrumb (`opts.story`).
+   *
+   * `opts.stories: 'all'` is the escape hatch: every story, exactly as before, for
+   * a host that wants the full map (a navigation built from the tree). A sitemap
+   * should call `folio.stories(env)` or `folio.query(env, …)` instead.
    *
    * `draft` is what the preview passes: an editor looking at a page that
    * references a form should see the form as they just edited it, not the last
@@ -381,7 +450,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const resolve = async (
     bindings: FolioBindings,
     doc?: Doc,
-    opts?: { draft?: boolean; locale?: string },
+    opts?: ResolveOptions,
   ): Promise<Resolution> => {
     const db = bindings.db
     const active = localeOf(opts?.locale)
@@ -389,48 +458,166 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     // identical to a pre-localisation one (`localisation.md` decision 5). Every
     // read in `RenderBlok` goes through this one value.
     const localeField = active ? { locale: active } : {}
-    const resolution: Resolution = {
-      ...buildResolution((await listStories(db)).map(withUrls), assetBase),
-      ...localeField,
+    const pageField = opts?.page !== undefined ? { page: opts.page } : {}
+    const globalIds = globals.map((name) => singletonId(typeOf(name)!))
+
+    // A caller with no document at all wants the map and nothing else, so it gets
+    // every story: there is no document to narrow to, and answering with an empty
+    // map would be a silent behaviour change for `folio.resolve(env)`.
+    const wantAll = opts?.stories === 'all' || !doc
+
+    /** Pass one: what `doc` itself points at, plus the ancestors of its story. */
+    const directIds = doc
+      ? [...linkedIds(doc, schema), ...referencedIdsAllLocales(doc, schema)]
+      : []
+    const refIds = doc ? referencedIdsAllLocales(doc, schema) : []
+
+    const known = new Map<string, StoryMeta>()
+    const remember = (rows: readonly StoryMeta[]) => {
+      for (const row of rows) known.set(row.id, row)
     }
+    remember(
+      wantAll
+        ? await listStories(db)
+        : await storiesFor(
+            db,
+            [...new Set([...directIds, ...globalIds])],
+            ancestorPaths(opts?.story?.path ?? null),
+          ),
+    )
 
-    const refIds = doc ? referencedIds(doc, schema).filter((id) => resolution.stories[id]) : []
-    if (refIds.length === 0 && globals.length === 0) return resolution
+    /** Pass two: the documents this one pulls in — references, and every global. */
+    let docs: Record<string, Doc> = {}
+    let globalDocs: Record<string, Doc> | undefined
+    // A reference to an id with no story row is unresolvable, and in draft mode
+    // asking for its draft would *create* a Durable Object for a deleted story.
+    const liveRefIds = refIds.filter((id) => known.has(id))
 
-    if (opts?.draft) {
-      const [refEntries, globalEntries] = await Promise.all([
-        Promise.all(refIds.map(async (id) => [id, await draft(bindings, id)] as const)),
-        Promise.all(
-          globals.map(async (name) => {
-            const type = typeOf(name)!
-            const meta = await ensureSingleton(db, type, schemaId)
-            return [name, await draftFor(bindings, meta)] as const
-          }),
-        ),
-      ])
-      return {
-        ...resolution,
-        docs: Object.fromEntries(refEntries),
-        globals: globals.length ? Object.fromEntries(globalEntries) : undefined,
+    if (globals.length > 0 || liveRefIds.length > 0) {
+      if (opts?.draft) {
+        const [refEntries, globalEntries] = await Promise.all([
+          Promise.all(liveRefIds.map(async (id) => [id, await draft(bindings, id)] as const)),
+          Promise.all(
+            globals.map(async (name) => {
+              const type = typeOf(name)!
+              const meta = await ensureSingleton(db, type, schemaId)
+              return [name, await draftFor(bindings, meta)] as const
+            }),
+          ),
+        ])
+        docs = Object.fromEntries(refEntries)
+        globalDocs = globals.length ? Object.fromEntries(globalEntries) : undefined
+      } else {
+        const combined = await publishedDocsByIds(db, [...liveRefIds, ...globalIds])
+        docs = Object.fromEntries(
+          liveRefIds.filter((id) => combined[id]).map((id) => [id, combined[id]!]),
+        )
+        globalDocs = globals.length
+          ? Object.fromEntries(
+              globals
+                .map((name, i) => [name, combined[globalIds[i]!]] as const)
+                .filter((entry): entry is [string, Doc] => Boolean(entry[1])),
+            )
+          : undefined
       }
     }
 
-    const globalIds = globals.map((name) => singletonId(typeOf(name)!))
-    const combined = await publishedDocsByIds(db, [...refIds, ...globalIds])
-    const docs = Object.fromEntries(
-      refIds.filter((id) => combined[id]).map((id) => [id, combined[id]!]),
-    )
-    const globalDocs = Object.fromEntries(
-      globals
-        .map((name, i) => [name, combined[globalIds[i]!]] as const)
-        .filter((entry): entry is [string, Doc] => Boolean(entry[1])),
-    )
-    return {
-      ...resolution,
-      docs,
-      globals: globals.length ? globalDocs : undefined,
+    /**
+     * Pass three: the ids those documents point at. One level, matching the bound
+     * `RenderBlok` already enforces on `docs` — but `stories` survives that
+     * emptying, so a link inside a global's navigation or inside a referenced card
+     * has to resolve. Skipped entirely when the whole map is already loaded, and
+     * when nothing new turned up, which is the ordinary case.
+     */
+    if (!wantAll) {
+      const nested = new Set<string>()
+      for (const pulled of [...Object.values(docs), ...Object.values(globalDocs ?? {})]) {
+        for (const id of linkedIds(pulled, schema)) if (!known.has(id)) nested.add(id)
+        for (const id of referencedIdsAllLocales(pulled, schema)) {
+          if (!known.has(id)) nested.add(id)
+        }
+      }
+      if (nested.size > 0) remember(await storiesFor(db, [...nested]))
     }
+
+    const resolution: Resolution = {
+      ...buildResolution([...known.values()].map(withUrls), assetBase),
+      ...localeField,
+      ...pageField,
+      // Absent rather than `{}` when there is nothing to pull in, so a document
+      // with no references bootstraps the byte-identical payload it always did.
+      ...(Object.keys(docs).length > 0 ? { docs } : {}),
+      ...(globalDocs ? { globals: globalDocs } : {}),
+    }
+
+    /** Pass four: the collection queries this document contains, run once each. */
+    const queries = doc
+      ? collectionQueries(doc, schema, opts?.page, active)
+      : new Map<string, ContentQuery>()
+    if (queries.size === 0) return resolution
+
+    const answers = await Promise.all(
+      [...queries].map(
+        async ([key, q]) => [key, await runQuery(queryDeps(db), q, { locale: active })] as const,
+      ),
+    )
+    const collections: Record<string, ResolvedCollection> = Object.fromEntries(answers)
+
+    // Decision 3: a preview resolves collections against **published** content.
+    // Querying drafts would mean opening every candidate Durable Object on every
+    // keystroke. So the list is marked `stale` — a block can say "this list shows
+    // published items" — and the open story's own draft is patched over its
+    // published row where it is a member, which is the one difference an editor
+    // looking at an index page actually notices.
+    if (opts?.draft) {
+      const open = opts.story
+      const root = doc?.bloks[doc.root]
+      for (const key of Object.keys(collections)) {
+        const answer = collections[key]!
+        collections[key] = {
+          ...answer,
+          stale: true,
+          items:
+            doc && open && root
+              ? answer.items.map((item) =>
+                  item.id === open.id
+                    ? {
+                        ...item,
+                        doc,
+                        data: dataOf(root, active),
+                        title: titleOf(doc, typeOf(open.type), schema, item.title, active),
+                      }
+                    : item,
+                )
+              : answer.items,
+        }
+      }
+    }
+
+    return { ...resolution, collections }
   }
+
+  /** What `runQuery` needs, assembled from this runtime. */
+  const queryDeps = (db: D1Database): QueryDeps => ({
+    db,
+    indexed,
+    // `''` for the source locale, an undeclared code, or a site with no locales —
+    // exactly what `indexRowsFor` writes for the same three cases.
+    localeKey: (code) => localeOf(code)?.code ?? '',
+    withUrls,
+  })
+
+  const query = (bindings: FolioBindings, q: ContentQuery): Promise<ContentPage> =>
+    runQuery(queryDeps(bindings.db), q, { locale: localeOf(q.locale) })
+
+  /**
+   * The `content_index` / `content_refs` rows a publish writes
+   * (`../content-model/collections.md`). Here rather than inside `publish()` for
+   * the same reason `titleFor` is: the projection needs the schema, the document
+   * type and the locale config, which only this factory has.
+   */
+  const projection = (story: StoryMeta, doc: Doc): ContentProjection =>
+    contentProjection(story.id, doc, typeOf(story.type), schema, locales)
 
   /**
    * Hooks Folio registers on itself, run before any host hook for the same
@@ -447,6 +634,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     draftWithSyncId: (story) => draftForWithSyncId(bindings, story),
     titleFor,
     titlesFor,
+    projection,
     hooks: createHookRunner<Env>(
       config.hooks,
       { env: hookCtx.env as Env, waitUntil: hookCtx.waitUntil },
@@ -499,6 +687,8 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     draftForWithSyncId,
     draft,
     resolve,
+    query,
+    indexedFields: indexed,
     publishDeps,
     page,
   }

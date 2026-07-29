@@ -11,6 +11,7 @@ import type { AnyBlockDef, Registry } from '../core/block'
 import type { Doc } from '../core/doc'
 import type { LocaleConfig } from '../core/locales'
 import type { Migration } from '../core/migrate'
+import type { ContentPage, ContentQuery } from '../core/query'
 import type { Resolution } from '../core/resolve'
 import type { DocumentType } from '../core/schema'
 import type { StoryMeta, StoryNode } from '../core/story'
@@ -19,7 +20,15 @@ import type { Actor } from './auth/roles'
 import type { FolioHooks } from './hooks'
 import type { AuditReport } from './audit'
 import type { MigrateOptions, MigrateReport } from './migrate'
+import type { ReindexOptions, ReindexReport } from './reindex'
+import type { ResolveOptions } from './runtime'
 import type { StoryDO } from './story-do'
+
+/**
+ * `ResolveOptions` minus `draft`, which is Folio's own preview mode and not
+ * something a host chooses: a published render always resolves published content.
+ */
+export type HostResolveOptions = Omit<ResolveOptions, 'draft'>
 
 export interface FolioBindings {
   db: D1Database
@@ -221,8 +230,34 @@ export interface Folio<Env> {
    * `route` called once per locale — so a sitemap covering every language needs
    * no second call and no knowledge of the URL shape.
    */
-  stories: (env: Env) => Promise<StoryMeta[]>
+  stories: (env: Env, opts?: { page?: number; perPage?: number }) => Promise<StoryMeta[]>
   tree: (env: Env) => Promise<StoryNode[]>
+  /**
+   * Published documents matching a query
+   * (`../../../docs/specs/content-model/collections.md`): filter, sort, page.
+   *
+   * The primitive an insights index, a news list, a team grid and a paginated
+   * archive all turn out to be. Filters and sorts read `content_index`, which is
+   * written inside the publish batch, so a query can never return a document that
+   * is not live. `where`/`order` may only name a field a root block declares
+   * `indexed: true`; anything else is a `bad_request` naming the field, never a
+   * silent empty result.
+   *
+   * Two D1 statements: a `count(*)` for `total`, and the page itself with its
+   * documents. Offset pagination, so a page can render "page 4 of 9".
+   */
+  query: (env: Env, q: ContentQuery) => Promise<ContentPage>
+  /**
+   * Rebuilds `content_index` and `content_refs` from `published_doc`
+   * (`collections.md` architecture decision 3).
+   *
+   * Publish writes these rows, so this exists for the one case that cannot: a
+   * schema change that marks an existing field `indexed`, where nothing
+   * republishes. Batched and resumable — re-call with the previous answer's
+   * `continueFrom` until it is null — and idempotent, so racing a publish is
+   * harmless.
+   */
+  reindex: (env: Env, opts?: ReindexOptions) => Promise<ReindexReport>
   registry: Registry
   /**
    * Context the document deliberately does not contain: story ids to their
@@ -236,8 +271,16 @@ export interface Folio<Env> {
    * `Resolution.locale`, which every field read goes through. An undeclared code
    * — or the source locale — leaves it absent, which is the source-locale read
    * path unchanged.
+   *
+   * **This used to load every story in the site on every render**
+   * (`collections.md` decision 6). It now loads the ids the document needs: the
+   * targets of its links (`multilink` fields *and* the link marks inside its
+   * richtext), of its references, of the documents those pull in, and the
+   * ancestors of `opts.story` when one is given. `opts.stories: 'all'` is the
+   * escape hatch for a host that wants the full map — a navigation built from the
+   * tree — and is exactly the old behaviour.
    */
-  resolve: (env: Env, doc?: Doc, opts?: { locale?: string }) => Promise<Resolution>
+  resolve: (env: Env, doc?: Doc, opts?: HostResolveOptions) => Promise<Resolution>
   render: (doc: Doc, opts?: { edit?: boolean; resolution?: Resolution }) => ReactNode
   /**
    * Published document for a global, or null — `name` is not required to be

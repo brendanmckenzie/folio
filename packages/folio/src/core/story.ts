@@ -150,6 +150,26 @@ export function joinPath(parentPath: string, slug: string): string {
 }
 
 /**
+ * Every ancestor path of a routed path, nearest last, including the root (`''`).
+ *
+ * Derived from the path rather than walked up `parent_id`, and that is the whole
+ * point: `resolve()` narrows itself to the ids a document needs
+ * (`../../../docs/specs/content-model/collections.md` decision 6) and a breadcrumb
+ * needs its ancestors, so it has to reach them in **one** query alongside
+ * everything else — which a recursive parent walk cannot do. A path *is* the
+ * ancestor chain, so `where path in (?, ?)` is the whole lookup.
+ *
+ * `''` for the root story's own path, which has no ancestors.
+ */
+export function ancestorPaths(path: string | null): string[] {
+  if (path === null || path === '') return []
+  const segments = path.split('/')
+  const out: string[] = ['']
+  for (let i = 1; i < segments.length; i++) out.push(segments.slice(0, i).join('/'))
+  return out
+}
+
+/**
  * The page tree. Unrouted rows (`path === null`) are skipped entirely rather
  * than surfacing as extra top-level nodes: they are not in the tree, which is
  * the whole of `document-types.md` checkpoint 2, and `GET /folio/stories`

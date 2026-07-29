@@ -16,6 +16,14 @@ import type { ReactNode } from 'react'
 import type { Doc, Json } from './doc'
 import { defaultValue, type Field } from './fields'
 import { dataOf, type LocaleContext } from './locales'
+import {
+  type CollectionField,
+  collectionQuery,
+  emptyContentPage,
+  maxPerPageOf,
+  queryKey,
+  type ResolvedCollection,
+} from './query'
 import type { SchemaIndex } from './schema'
 import type { StoryMeta } from './story'
 import {
@@ -92,6 +100,28 @@ export interface Resolution {
    * fallback chain that happens to land in the same place.
    */
   locale?: LocaleContext
+  /**
+   * Answers to the `collection` queries this document contains, keyed by
+   * `queryKey` (`../../../docs/specs/content-model/collections.md` decision 5).
+   *
+   * The same treatment `docs` gets, one level up: the queries are collected from
+   * the document, run once each, and their answers pushed alongside it — so a page
+   * with no collection field costs no extra reads, two blocks with the same
+   * configuration cost one read between them, and the preview client re-renders
+   * per keystroke against data it already holds.
+   */
+  collections?: Record<string, ResolvedCollection>
+  /**
+   * Which page every collection field in this document is showing (1-based).
+   *
+   * Rides on the resolution rather than being a second argument to `render` for
+   * exactly the reason `locale` does: it is part of the key `resolveValue` has to
+   * compute to find its answer, so it has to be somewhere both the code that ran
+   * the queries and the code that reads them can see. A host reads `?page=` and
+   * passes it to `folio.resolve`. A page with two *independently* paginated lists
+   * is out of scope — `?page` is one number.
+   */
+  page?: number
 }
 
 export const DEFAULT_ASSET_BASE = '/folio/asset'
@@ -328,6 +358,27 @@ export function resolveReference(
 }
 
 /**
+ * What a `collection` field hands to `render`: the answer the resolution already
+ * holds for this field's query, or an empty page.
+ *
+ * An empty page rather than null (and never a throw) because the miss is
+ * ordinary: a host that renders a document without running its queries, a preview
+ * frame that arrived before the fetch settled, or a collection whose document type
+ * has been removed from the config. A block iterating `items` renders its own
+ * empty state in every one of those cases, which is the right answer for all of
+ * them.
+ */
+export function resolveCollection(
+  field: CollectionField,
+  value: Json | undefined,
+  resolution: Resolution,
+): ResolvedCollection {
+  const q = collectionQuery(field, value, resolution.page)
+  const key = queryKey(q, maxPerPageOf(field))
+  return resolution.collections?.[key] ?? emptyContentPage(q.page, q.perPage)
+}
+
+/**
  * A stored field value as `render` should receive it, per `ValueOf<Field>`: an
  * absent value resolves to its kind's empty value, not to `''` for everything.
  *
@@ -351,6 +402,8 @@ export function resolveValue(
       return resolveAssets(value, resolution)
     case 'reference':
       return resolveReference(value, resolution, field.types)
+    case 'collection':
+      return resolveCollection(field, value, resolution)
     case 'number':
       // Deliberately `defaultValue(field)`, never `field.default`: this runs on
       // every render, and a schema edit must not retroactively change what an

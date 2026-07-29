@@ -218,6 +218,30 @@ export const MigrateBody = v.object(
   OBJECT,
 )
 
+/**
+ * `POST /folio/reindex` (`../content-model/collections.md`). Shaped exactly like
+ * `MigrateBody` above, because it is the same kind of run: batched, resumable by an
+ * id cursor, and safe to dry-run. An empty body means "sweep the first batch from
+ * the start", which is what a one-off `curl` wants to be able to write.
+ */
+export const ReindexBody = v.object(
+  {
+    dryRun: v.optional(v.boolean('must be true or false')),
+    continueFrom: v.nullish(ID),
+    batch: v.optional(
+      v.pipe(
+        v.number('must be a number'),
+        v.integer('must be a whole number'),
+        v.minValue(1, 'must be at least 1'),
+        v.maxValue(200, 'must be 200 or fewer'),
+      ),
+    ),
+  },
+  OBJECT,
+)
+
+export type ReindexInput = v.InferOutput<typeof ReindexBody>
+
 /* ------------------------------------------------- identity and access --- */
 
 /**

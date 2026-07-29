@@ -117,7 +117,14 @@ describe('resolve(): query count', () => {
     expect(count()).toBe(2)
   })
 
-  it('stays at one query when nothing is configured as a global', async () => {
+  /**
+   * Zero, not one: `collections.md` decision 6 narrowed the story map to the ids a
+   * document actually needs, and this document needs none — no links, no
+   * references, no `opts.story` to take ancestors from, and no global to fetch. The
+   * assertion was `1` while `resolve()` unconditionally loaded every story in the
+   * site, which is the read this spec exists to stop making.
+   */
+  it('costs no query at all for a document that needs nothing and has no globals', async () => {
     const withoutGlobal = makeFolio(
       [pageType, { name: 'gqwithout', label: 'Header', kind: 'singleton', root: 'headerRoot' }],
       [],
@@ -126,6 +133,21 @@ describe('resolve(): query count', () => {
 
     const { db, count } = countedDb(env.DB)
     await withoutGlobal.resolve({ ...env, DB: db } as Cloudflare.Env, pageDoc())
+    expect(count()).toBe(0)
+  })
+
+  /** And `stories: 'all'` is still the one query it always was. */
+  it('costs one query for the full map when a host asks for it', async () => {
+    const withoutGlobal = makeFolio(
+      [pageType, { name: 'gqall', label: 'Header', kind: 'singleton', root: 'headerRoot' }],
+      [],
+    )
+    await insertPage('sty_gqall', 'gqall', 'Query Count All')
+
+    const { db, count } = countedDb(env.DB)
+    await withoutGlobal.resolve({ ...env, DB: db } as Cloudflare.Env, pageDoc(), {
+      stories: 'all',
+    })
     expect(count()).toBe(1)
   })
 })
