@@ -277,6 +277,47 @@ describe('sanitiseRichtext', () => {
     ])
   })
 
+  // A Folio-native link mark stores a structured `link` and no `href`, because
+  // the href is derived from the resolution at render time. Judging safety on the
+  // `href` string alone stripped every internal link, so prose rendered the text
+  // with no anchor around it and a link inside richtext silently stopped working.
+  it('keeps a link mark that carries a structured link and no href', () => {
+    const link = { kind: 'story', id: 'sty_about' }
+    const doc = {
+      type: 'doc' as const,
+      content: [
+        {
+          type: 'paragraph',
+          content: [{ type: 'text', text: 'x', marks: [{ type: 'link', attrs: { link } }] }],
+        },
+      ],
+    }
+    const result = sanitiseRichtext(doc, { marks: ['link'] })
+    expect(result?.content?.[0]?.content?.[0]?.marks).toEqual([{ type: 'link', attrs: { link } }])
+  })
+
+  it('strips a structured link mark whose value is not a usable link', () => {
+    const doc = {
+      type: 'doc' as const,
+      content: [
+        {
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: 'x',
+              marks: [{ type: 'link', attrs: { link: { kind: 'url', url: 'javascript:alert(1)' } } }],
+            },
+          ],
+        },
+      ],
+    }
+    // Stripping the only mark drops the `marks` key rather than leaving it empty.
+    const result = sanitiseRichtext(doc, { marks: ['link'] })
+    expect(result?.content?.[0]?.content?.[0]?.marks).toBeUndefined()
+    expect(result?.content?.[0]?.content?.[0]?.text).toBe('x')
+  })
+
   it('merges adjacent text nodes that end up with equal marks', () => {
     const doc = {
       type: 'doc' as const,
