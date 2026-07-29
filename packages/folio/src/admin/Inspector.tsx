@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { matches } from '../core/conditions'
 import type { Blok, Json } from '../core/doc'
 import type { Field } from '../core/fields'
 import { AssetInput, MultiAssetInput } from './AssetInput'
@@ -21,6 +22,30 @@ interface Props {
   readOnly?: boolean
 }
 
+/**
+ * The fields a block's form actually draws: `blocks`-kind fields never reach
+ * the inspector (they render as tree slots, see `BlockTree.tsx`'s `slotsOf`),
+ * `hidden: true` fields never draw (conditional-fields.md's `showIf: false`
+ * shorthand, for a field kept only so a later migration can still read it),
+ * and a `showIf` field draws only when its condition matches the *same
+ * blok's* own data.
+ *
+ * Filtering here, once, in the parent, means `FieldInput` keeps its current
+ * props and learns nothing about visibility. Declaration order is preserved
+ * (`Object.entries` order), so a field's React key
+ * (`${blok.uid}:${name}`, set where this is consumed) never moves when a
+ * sibling appears or disappears — an in-flight upload in one field survives a
+ * condition revealing another.
+ */
+export function visibleEntries(
+  fields: Record<string, Field>,
+  data: Record<string, Json>,
+): [string, Field][] {
+  return Object.entries(fields).filter(
+    ([, f]) => f.kind !== 'blocks' && !f.hidden && (!f.showIf || matches(f.showIf, data)),
+  )
+}
+
 export function Inspector({ blok, onChange, onRemove, address, readOnly = false }: Props) {
   const { schema } = useFolio()
 
@@ -41,7 +66,7 @@ export function Inspector({ blok, onChange, onRemove, address, readOnly = false 
     )
   }
 
-  const entries = Object.entries(def.fields).filter(([, f]) => f.kind !== 'blocks')
+  const entries = visibleEntries(def.fields, blok.data)
 
   return (
     <aside className="inspector">
