@@ -81,7 +81,21 @@ export const insightPage = defineBlock({
     noindex: boolean({ label: 'Hide from search engines' }),
     body: blocks({
       label: 'Body',
-      allow: ['hero', 'prose', 'pullquote', 'image', 'gallery', 'cta', 'personCard'],
+      allow: [
+        'hero',
+        'prose',
+        'pullquote',
+        'image',
+        'gallery',
+        'cta',
+        'personCard',
+        // "Related insights" at the end of an article. Permitted deliberately even
+        // though a list on an insight can include the insight it sits on: that is
+        // allowed and does not recurse (`content-model/collections.md`'s edge case
+        // "a collection pointing at its own page"), because items are
+        // `ReferenceTarget`s and `RenderBlok` empties `docs` one level down.
+        'insightList',
+      ],
     }),
   },
   render: ({ title, topic, published, standfirst, author, body }) => (
