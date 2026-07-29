@@ -110,6 +110,112 @@ export async function previewPage(
   )
 }
 
+/* ------------------------------------------------------------------ login --- */
+
+/** Styles for the login page, inline for the reason `loginPage` documents. */
+const LOGIN_STYLE = `
+  body.folio-login { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: #111;
+    background: #f6f6f7; display: grid; place-items: center; min-height: 100vh; }
+  .folio-login__card { background: #fff; border: 1px solid #e3e3e6; border-radius: 10px;
+    padding: 28px 32px; width: 340px; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+  .folio-login__card h1 { font-size: 17px; margin: 0 0 4px; }
+  .folio-login__card p { margin: 0 0 18px; color: #666; font-size: 13px; }
+  .folio-login__card label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 5px; }
+  .folio-login__card input { width: 100%; box-sizing: border-box; padding: 8px 10px;
+    border: 1px solid #ccc; border-radius: 6px; font: inherit; }
+  .folio-login__card button, .folio-login__provider { display: block; width: 100%;
+    box-sizing: border-box; margin-top: 12px; padding: 9px 12px; border-radius: 6px;
+    border: 1px solid transparent; background: #111; color: #fff; font: inherit;
+    font-weight: 600; text-align: center; text-decoration: none; cursor: pointer; }
+  .folio-login__provider { background: #fff; color: #111; border-color: #ccc; }
+  .folio-login__notice { margin: 0 0 16px; padding: 9px 11px; border-radius: 6px;
+    font-size: 13px; background: #eef6ff; border: 1px solid #cfe4fb; color: #14477d; }
+  .folio-login__notice--bad { background: #fff0f0; border-color: #f6c9c9; color: #8a1f1f; }
+  .folio-login__rule { margin: 18px 0 0; border: 0; border-top: 1px solid #eee; }
+`
+
+export interface LoginPageOptions {
+  /** Where to send the browser once signed in. Already screened same-origin. */
+  next: string
+  /** Shown in a blue banner: "check your email". */
+  sent?: string | null
+  /** Shown in a red banner: a refused or expired link. */
+  error?: string | null
+}
+
+/**
+ * The sign-in page. Server-rendered, and deliberately ships **no JavaScript**
+ * (architecture decision 7): a CMS login page that cannot work without a client
+ * bundle is a worse failure than an ugly one, and it is the same rule this
+ * project already applies to published pages.
+ *
+ * That is also why the styling is an inline `<style>` rather than the admin
+ * stylesheet: the admin's CSS is a Vite-built asset at a hashed URL, so a page
+ * that depended on it would render unstyled in exactly the situation — a broken
+ * or unbuilt bundle — where someone needs to sign in and look at the CMS to find
+ * out what is wrong.
+ *
+ * Providers are rendered from the config, so the page shows the email form only
+ * when a `send`-style provider is configured and a button per redirect provider.
+ */
+export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Response> {
+  const providers = rt.auth.mode === 'session' ? rt.auth.config.providers : []
+  const mail = providers.filter((p) => !p.redirect)
+  const redirects = providers.filter((p) => p.redirect)
+  const next = opts.next
+
+  return html(
+    <Shell
+      title="Sign in · Folio"
+      bodyClass="folio-login"
+      head={
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: a static literal stylesheet, no interpolation
+        <style dangerouslySetInnerHTML={{ __html: LOGIN_STYLE }} />
+      }
+    >
+      <div className="folio-login__card">
+        <h1>Sign in to Folio</h1>
+        <p>You need an account to edit this site.</p>
+
+        {opts.error ? (
+          <p className="folio-login__notice folio-login__notice--bad">{opts.error}</p>
+        ) : null}
+        {opts.sent ? <p className="folio-login__notice">{opts.sent}</p> : null}
+
+        {mail.length > 0 ? (
+          <form method="post" action={`${rt.base}/login/email`}>
+            <input type="hidden" name="next" value={next} />
+            <label htmlFor="folio-login-email">Email address</label>
+            <input
+              id="folio-login-email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+              placeholder="you@example.com"
+            />
+            <button type="submit">{mail[0]?.label ?? 'Email me a sign-in link'}</button>
+          </form>
+        ) : null}
+
+        {mail.length > 0 && redirects.length > 0 ? <hr className="folio-login__rule" /> : null}
+
+        {redirects.map((provider) => (
+          <a
+            key={provider.id}
+            className="folio-login__provider"
+            href={`${rt.base}/login/${provider.id}?next=${encodeURIComponent(next)}`}
+          >
+            {provider.label}
+          </a>
+        ))}
+      </div>
+    </Shell>,
+    // No client entry: that is the point.
+    [],
+  )
+}
+
 async function html(node: ReactElement, bootstrapModules: string[]) {
   const stream = await renderToReadableStream(node, { bootstrapModules })
   return new Response(stream, { headers: { 'content-type': 'text/html; charset=utf-8' } })

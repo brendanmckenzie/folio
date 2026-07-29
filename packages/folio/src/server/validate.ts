@@ -190,6 +190,105 @@ export const RedirectCreateBody = v.object(
   OBJECT,
 )
 
+/* ------------------------------------------------- identity and access --- */
+
+/**
+ * An email address, bounded and screened rather than pattern-matched against a
+ * grammar. 254 is the RFC 5321 ceiling on a path; the shape check is deliberately
+ * only "one `@`, something either side" because every stricter regex in
+ * circulation refuses addresses that genuinely exist, and the address is
+ * *verified* by whether the sign-in link is ever clicked, not by this schema.
+ */
+const EMAIL = v.pipe(
+  v.string('must be a string'),
+  v.trim(),
+  v.toLowerCase(),
+  v.minLength(3, 'is required'),
+  v.maxLength(254, 'must be 254 characters or fewer'),
+  v.regex(/^[^@\s]+@[^@\s]+\.[^@\s]+$/, 'must be an email address'),
+)
+
+/** `POST /folio/login/email`. `next` is screened by `safeNext`, not here: this
+ * only bounds it, since where it may point is a URL question. */
+export const LoginEmailBody = v.object({ email: EMAIL, next: v.optional(bounded(500)) }, OBJECT)
+
+export const UserCreateBody = v.object(
+  {
+    email: EMAIL,
+    name: v.optional(bounded(120)),
+    role: v.optional(v.picklist(['viewer', 'editor', 'publisher', 'admin'])),
+  },
+  OBJECT,
+)
+
+export const UserPatchBody = v.object(
+  {
+    name: v.optional(required(120)),
+    role: v.optional(v.picklist(['viewer', 'editor', 'publisher', 'admin'])),
+  },
+  OBJECT,
+)
+
+/**
+ * `POST /folio/tokens`. `scopes` is checked against the picklist here rather
+ * than silently filtered, so asking for a scope that does not exist is a 400
+ * naming it instead of a token quietly weaker than requested.
+ */
+export const TokenCreateBody = v.object(
+  {
+    name: required(80),
+    scopes: v.pipe(
+      v.array(
+        v.picklist(
+          [
+            'content:read',
+            'content:read:draft',
+            'content:write',
+            'publish',
+            'assets:write',
+            'admin',
+          ],
+          'is not a scope',
+        ),
+      ),
+      v.minLength(1, 'must name at least one scope'),
+    ),
+    /** Days from now. Absent means no expiry. */
+    expiresInDays: v.optional(
+      v.pipe(
+        v.number('must be a number'),
+        v.integer('must be a whole number'),
+        v.minValue(1, 'must be 1 or greater'),
+        v.maxValue(3650, 'must be 3650 or fewer'),
+      ),
+    ),
+  },
+  OBJECT,
+)
+
+export type LoginEmailInput = v.InferOutput<typeof LoginEmailBody>
+export type UserCreateInput = v.InferOutput<typeof UserCreateBody>
+export type UserPatchInput = v.InferOutput<typeof UserPatchBody>
+export type TokenCreateInput = v.InferOutput<typeof TokenCreateBody>
+
+/**
+ * Where to send a browser after signing in, screened to a same-origin path.
+ *
+ * The `?next=` parameter is attacker-controllable — it is in a link anyone can
+ * write — so anything that is not a plain absolute path on this site falls back
+ * to the editor. `//evil.example` is the case a naive `startsWith('/')` misses:
+ * browsers read it as a protocol-relative URL to another host, which is an open
+ * redirect out of a login page, the single most useful kind.
+ */
+export function safeNext(raw: string | null | undefined, fallback: string): string {
+  if (!raw) return fallback
+  if (!raw.startsWith('/') || raw.startsWith('//')) return fallback
+  // A backslash is normalised to a slash by some browsers, so `/\evil.example`
+  // is the same trick wearing a different character.
+  if (raw.includes('\\')) return fallback
+  return raw.length > 500 ? fallback : raw
+}
+
 export type StoryCreateInput = v.InferOutput<typeof StoryCreateBody>
 export type StoryPatchInput = v.InferOutput<typeof StoryPatchBody>
 export type StoryDuplicateInput = v.InferOutput<typeof StoryDuplicateBody>
