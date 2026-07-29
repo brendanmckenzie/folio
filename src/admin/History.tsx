@@ -4,6 +4,7 @@ import type { Mutation } from '../core/mutations'
 import type { ActivityEntry } from '../core/protocol'
 import type { SchemaIndex } from '../core/schema'
 import type { VersionMeta } from '../server/versions'
+import { rootSettingsLabel } from './BlockTree'
 import { useFolio } from './FolioContext'
 
 interface Props {
@@ -164,7 +165,7 @@ function describe(mutations: readonly Mutation[], doc: Doc, schema: SchemaIndex)
   const labelFor = (uid: string) => {
     const blok = doc.bloks[uid]
     if (!blok) return 'a block'
-    if (uid === doc.root) return 'Page settings'
+    if (uid === doc.root) return rootSettingsLabel(schema[blok.type])
     return schema[blok.type]?.label ?? blok.type
   }
 

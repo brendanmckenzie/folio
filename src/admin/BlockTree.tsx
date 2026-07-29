@@ -1,7 +1,7 @@
 import { Fragment, useState, type CSSProperties, type DragEvent } from 'react'
 import { childrenOf, type Doc } from '../core/doc'
 import type { Presence } from '../core/protocol'
-import { slotsOf, summarise, type SchemaIndex } from '../core/schema'
+import { type BlockSchema, slotsOf, summarise, type SchemaIndex } from '../core/schema'
 import { useFolio } from './FolioContext'
 import { fullSlotMessage } from './hooks/useBlocks'
 
@@ -36,7 +36,12 @@ export function BlockTree(props: Props) {
         className={`tree__row tree__row--root ${props.selection === props.doc.root ? 'is-selected' : ''}`}
         onClick={() => props.onSelect(props.doc.root)}
       >
-        <span className="tree__type">Page settings</span>
+        {/* The document type's own label rather than "Page": a person record's
+            root block is not page settings (`document-types.md` phase 3). Read
+            off the root *block* rather than the story's type, because this
+            component is given a document and nothing else — and a type and its
+            root block always share a label in practice. */}
+        <span className="tree__type">{rootSettingsLabel(rootDef)}</span>
         <span className="tree__summary">{rootDef ? summarise(rootDef, root?.data ?? {}) : ''}</span>
       </div>
       {slotsOf(rootDef).map(([slot]) => (
@@ -174,6 +179,14 @@ function Slot({
       ) : null}
     </ul>
   )
+}
+
+/**
+ * What the root block's row is called: "Page settings", "Person settings", and
+ * plain "Settings" when the root block type is not in the schema at all.
+ */
+export function rootSettingsLabel(rootDef: BlockSchema | undefined): string {
+  return rootDef?.label ? `${rootDef.label} settings` : 'Settings'
 }
 
 export interface MenuGroup {

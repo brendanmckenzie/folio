@@ -1,7 +1,7 @@
 import './admin.css'
 import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { indexManifest, type Manifest, type SchemaIndex } from '../core/schema'
+import { type DocumentType, indexManifest, type Manifest, type SchemaIndex } from '../core/schema'
 import { Editor } from './Editor'
 
 /**
@@ -19,14 +19,25 @@ declare global {
   }
 }
 
+/** The manifest, split into what the panels actually consume. */
+interface Loaded {
+  schema: SchemaIndex
+  /** Every declared document type (`document-types.md`). Never empty: the
+   * server refuses to construct without one. */
+  types: DocumentType[]
+}
+
 function App({ boot }: { boot: Boot }) {
-  const [schema, setSchema] = useState<SchemaIndex | null>(null)
+  const [loaded, setLoaded] = useState<Loaded | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     fetch(`${boot.apiBase}/schema`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`schema ${r.status}`))))
-      .then((m) => setSchema(indexManifest(m as Manifest)))
+      .then((m) => {
+        const manifest = m as Manifest
+        setLoaded({ schema: indexManifest(manifest), types: manifest.types ?? [] })
+      })
       .catch((e: Error) => setError(e.message))
   }, [boot.apiBase])
 
@@ -37,14 +48,21 @@ function App({ boot }: { boot: Boot }) {
       </div>
     )
   }
-  if (!schema) {
+  if (!loaded) {
     return (
       <div className="boot">
         <p>Loading schema…</p>
       </div>
     )
   }
-  return <Editor storyId={boot.storyId} schema={schema} apiBase={boot.apiBase} />
+  return (
+    <Editor
+      storyId={boot.storyId}
+      schema={loaded.schema}
+      types={loaded.types}
+      apiBase={boot.apiBase}
+    />
+  )
 }
 
 const boot = window.__FOLIO_ADMIN__

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { buildResolution } from '../core/resolve'
-import type { SchemaIndex } from '../core/schema'
+import type { DocumentType, SchemaIndex } from '../core/schema'
 import type { StoryNode } from '../core/story'
 import { BlockTree } from './BlockTree'
+import { DataList } from './DataList'
 import { DeleteDialog } from './DeleteDialog'
 import { DiscardDialog } from './DiscardDialog'
 import { DuplicateDialog } from './DuplicateDialog'
@@ -31,10 +32,12 @@ import { ViewingBar } from './ViewingBar'
 interface Props {
   storyId: string
   schema: SchemaIndex
+  /** Every declared document type, off the manifest (`document-types.md`). */
+  types: readonly DocumentType[]
   apiBase: string
 }
 
-type Rail = 'content' | 'blocks' | 'history' | 'redirects'
+type Rail = 'content' | 'data' | 'blocks' | 'history' | 'redirects'
 
 /**
  * Composition and layout only. Every domain — the story tree, versions, the
@@ -42,7 +45,7 @@ type Rail = 'content' | 'blocks' | 'history' | 'redirects'
  * under hooks/, and everything the panels share reaches them through
  * FolioProvider rather than as props.
  */
-export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
+export function Editor({ storyId: initialStoryId, schema, types, apiBase }: Props) {
   const [rail, setRail] = useState<Rail>('blocks')
   const [viewport, setViewport] = useState<Viewport>('Desktop')
 
@@ -150,9 +153,16 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
   const isRootBlok = Boolean(!readOnly && state.doc && state.selection === state.doc.root)
 
   const context = useMemo(
-    () => ({ store, schema, apiBase, stories: flat }),
-    [apiBase, flat, schema, store],
+    () => ({ store, schema, types, apiBase, stories: flat }),
+    [apiBase, flat, schema, store, types],
   )
+
+  // A record or a singleton has no URL, so there is no page to preview and no
+  // address to edit. The real record-editing UI (a form rather than an iframe)
+  // is `../../../docs/specs/content-model/data-documents.md`'s; until then the
+  // block tree and the inspector are the whole editor for one.
+  const routed = current ? current.path !== null : true
+  const hasDataTypes = types.some((t) => t.kind !== 'page')
 
   return (
     <FolioProvider value={context}>
@@ -243,6 +253,17 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
               >
                 Content
               </button>
+              {/* Only when the site actually has records or singletons: an
+                  empty Data tab on a pages-only site is noise. */}
+              {hasDataTypes ? (
+                <button
+                  type="button"
+                  className={rail === 'data' ? 'is-active' : ''}
+                  onClick={() => setRail('data')}
+                >
+                  Data
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={rail === 'blocks' ? 'is-active' : ''}
@@ -273,6 +294,16 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
                 onOpen={(story) => stories.open(story.id)}
                 onCreate={stories.create}
                 onMove={(id, parentId, index) => stories.patch(id, { parentId, index })}
+                onDelete={(story) => setConfirmingDeleteFor(story)}
+                onDuplicate={(story) => setConfirmingDuplicateFor(story)}
+                onNotice={notify}
+              />
+            ) : rail === 'data' ? (
+              <DataList
+                documents={stories.documents}
+                currentId={storyId}
+                onOpen={(story) => stories.open(story.id)}
+                onCreate={stories.create}
                 onDelete={(story) => setConfirmingDeleteFor(story)}
                 onDuplicate={(story) => setConfirmingDuplicateFor(story)}
               />
@@ -335,8 +366,18 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
               className={`stage__frame ${readOnly ? 'is-viewing' : ''}`}
               style={{ width: VIEWPORTS[viewport] }}
             >
-              {current ? (
+              {current && routed && current.previewUrl ? (
                 <iframe key={current.id} ref={frame} title="Preview" src={current.previewUrl} />
+              ) : current && !routed ? (
+                <div className="stage__nopreview">
+                  <p>
+                    <strong>{current.title}</strong> has no page of its own.
+                  </p>
+                  <p>
+                    Edit its fields on the right. Records and singletons are content other pages
+                    pull in, so there is nothing to preview here.
+                  </p>
+                </div>
               ) : null}
             </div>
           </div>
@@ -348,7 +389,7 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
             onRemove={blocks.remove}
             onDuplicate={blocks.duplicate}
             address={
-              isRootBlok && current ? (
+              isRootBlok && current && routed ? (
                 <PageAddress
                   story={current}
                   onChange={(patch) => stories.patch(current.id, patch)}

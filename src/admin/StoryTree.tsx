@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { canNest, type DocumentType, typeByName } from '../core/schema'
 import type { StoryNode, StoryState } from '../core/story'
+import { useFolio } from './FolioContext'
 import { formatWhen } from './History'
 
 /**
@@ -18,11 +20,64 @@ export function badgeLabel(state: StoryState): string | null {
   return null
 }
 
+/**
+ * The page types a document may be created under — or dragged onto — a parent of
+ * `parentType` (`undefined` for the top level). `under` constrains both, per
+ * `document-types.md`'s resolved open question.
+ *
+ * Only `page` kinds are ever offered: nothing else is in the tree.
+ *
+ * Pure and exported so both the create menu and the drop check are tested
+ * without mounting the tree.
+ */
+export function creatableUnder(
+  types: readonly DocumentType[],
+  parentType: string | undefined,
+): DocumentType[] {
+  const parent = typeByName(types, parentType)
+  return types.filter((t) => t.kind === 'page' && canNest(t, parent))
+}
+
+/**
+ * Whether a drag may land, and why not when it may not. A refusal notice rather
+ * than a silent no-op: a drop that quietly springs back is indistinguishable
+ * from a bug.
+ *
+ * Returns `null` when the move is allowed. The dragged row's own type may be
+ * unknown (its type was removed from the config) — that is not a reason to
+ * freeze the tree, so an unresolvable type is allowed through and the server has
+ * the final say either way.
+ */
+export function dropRefusal(
+  types: readonly DocumentType[],
+  dragged: StoryNode | undefined,
+  parentType: string | undefined,
+): string | null {
+  const type = typeByName(types, dragged?.type)
+  if (!type || canNest(type, typeByName(types, parentType))) return null
+  const allowed = (type.under ?? [])
+    .map((name) => typeByName(types, name)?.label ?? name)
+    .join(', ')
+  return `A ${type.label} can only go under: ${allowed || 'nothing'}`
+}
+
+/** The chip a row wears when the site has more than one document type. A row
+ * whose type is no longer declared says so rather than being hidden or deleted:
+ * removing rows because the code changed is worse. */
+export function typeChip(
+  types: readonly DocumentType[],
+  name: string,
+): { label: string; unknown: boolean } | null {
+  if (types.length < 2) return null
+  const type = typeByName(types, name)
+  return type ? { label: type.label, unknown: false } : { label: 'Unknown type', unknown: true }
+}
+
 interface Props {
   tree: StoryNode[]
   currentId: string
   onOpen: (story: StoryNode) => void
-  onCreate: (title: string, parentId: string | null) => Promise<void>
+  onCreate: (title: string, parentId: string | null, type?: string) => Promise<void>
   onMove: (id: string, parentId: string | null, index: number) => Promise<void>
   /** Requests the delete confirmation (redirects.md); the editor owns whether
    * it is showing and what actually happens next. */
@@ -31,6 +86,9 @@ interface Props {
    * owns whether it is showing and what actually happens next, same as
    * `onDelete`. */
   onDuplicate: (story: StoryNode) => void
+  /** Shows a refused drop (`document-types.md`). The server refuses it too; this
+   * is so an editor is told before the request rather than by it. */
+  onNotice: (message: string) => void
 }
 
 export function StoryTree({
@@ -41,24 +99,51 @@ export function StoryTree({
   onMove,
   onDelete,
   onDuplicate,
+  onNotice,
 }: Props) {
+  const { types } = useFolio()
+  /**
+   * Which parent the inline "new page" form is open under (`null` = top level,
+   * `undefined` = closed), and which type it will create. Two pieces of state
+   * rather than one encoded string: the parent and the type are independent, and
+   * the type is simply ignored while the form is closed.
+   */
   const [addingTo, setAddingTo] = useState<string | null | undefined>(undefined)
+  const [addingType, setAddingType] = useState<string | undefined>(undefined)
+  const openForm = (parentId: string | null, type?: string) => {
+    setAddingTo(parentId)
+    setAddingType(type)
+  }
+  const closeForm = () => setAddingTo(undefined)
+
+  const topLevel = creatableUnder(types, undefined)
 
   return (
     <div className="stories">
       <header className="stories__head">
         <h2>Pages</h2>
-        <button type="button" onClick={() => setAddingTo(null)} title="New top-level page">
-          + New
-        </button>
+        {/* One affordance while there is one thing it could mean; a menu the
+            moment there is a choice (`document-types.md` phase 3). */}
+        {topLevel.length > 1 ? (
+          <NewMenu options={topLevel} onPick={(type) => openForm(null, type)} />
+        ) : (
+          <button
+            type="button"
+            onClick={() => openForm(null, topLevel[0]?.name)}
+            title="New top-level page"
+            disabled={topLevel.length === 0}
+          >
+            + New
+          </button>
+        )}
       </header>
 
       {addingTo === null ? (
         <NewPage
-          onCancel={() => setAddingTo(undefined)}
+          onCancel={closeForm}
           onSubmit={async (title) => {
-            await onCreate(title, null)
-            setAddingTo(undefined)
+            await onCreate(title, null, addingType)
+            closeForm()
           }}
         />
       ) : null}
@@ -67,15 +152,64 @@ export function StoryTree({
         nodes={tree}
         depth={0}
         parentId={null}
+        parentType={undefined}
         currentId={currentId}
         addingTo={addingTo}
-        setAddingTo={setAddingTo}
+        addingType={addingType}
+        openForm={openForm}
+        closeForm={closeForm}
         onOpen={onOpen}
         onCreate={onCreate}
         onMove={onMove}
         onDelete={onDelete}
         onDuplicate={onDuplicate}
+        onNotice={onNotice}
       />
+    </div>
+  )
+}
+
+/** The per-type create menu, shown only when more than one page type could be
+ * created here. */
+function NewMenu({
+  options,
+  onPick,
+  label = '+ New',
+}: {
+  options: readonly DocumentType[]
+  onPick: (type: string) => void
+  label?: string
+}) {
+  const [open, setOpen] = useState(false)
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen(true)
+        }}
+        title="New page"
+      >
+        {label}
+      </button>
+    )
+  }
+  return (
+    <div className="stories__menu" onMouseLeave={() => setOpen(false)}>
+      {options.map((type) => (
+        <button
+          key={type.name}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onPick(type.name)
+            setOpen(false)
+          }}
+        >
+          {type.label}
+        </button>
+      ))}
     </div>
   )
 }
@@ -84,22 +218,57 @@ function Level({
   nodes,
   depth,
   parentId,
+  parentType,
   currentId,
   addingTo,
-  setAddingTo,
+  addingType,
+  openForm,
+  closeForm,
   onOpen,
   onCreate,
   onMove,
   onDelete,
   onDuplicate,
+  onNotice,
 }: {
   nodes: StoryNode[]
   depth: number
   parentId: string | null
+  /** The type of the document this level's rows sit under, for `under`.
+   * `undefined` at the top level, which has no type to match. */
+  parentType: string | undefined
   addingTo: string | null | undefined
-  setAddingTo: (v: string | null | undefined) => void
-} & Pick<Props, 'currentId' | 'onOpen' | 'onCreate' | 'onMove' | 'onDelete' | 'onDuplicate'>) {
+  addingType: string | undefined
+  openForm: (parentId: string | null, type?: string) => void
+  closeForm: () => void
+} & Pick<
+  Props,
+  'currentId' | 'onOpen' | 'onCreate' | 'onMove' | 'onDelete' | 'onDuplicate' | 'onNotice'
+>) {
+  const { types, stories } = useFolio()
   const [dropIndex, setDropIndex] = useState<number | null>(null)
+
+  const chipOf = (node: StoryNode) => typeChip(types, node.type)
+  const childTypes = (node: StoryNode) => creatableUnder(types, node.type)
+
+  /**
+   * A drop into *this* level, refused with a notice when `under` forbids it.
+   * Checked here as well as server-side so the editor is told before the request
+   * rather than by it — the resolved open question's "refusal notice rather than
+   * a silent no-op".
+   */
+  const drop = (index: number, id: string) => {
+    const refusal = dropRefusal(
+      types,
+      stories.find((s) => s.id === id),
+      parentType,
+    )
+    if (refusal) {
+      onNotice(refusal)
+      return
+    }
+    void onMove(id, parentId, index)
+  }
 
   return (
     <ul className="stories__level" style={{ paddingLeft: depth ? 12 : 0 }}>
@@ -119,7 +288,7 @@ function Level({
               e.stopPropagation()
               setDropIndex(null)
               const id = e.dataTransfer.getData('text/folio-story')
-              if (id) void onMove(id, parentId, i)
+              if (id) drop(i, id)
             }}
           />
 
@@ -148,6 +317,20 @@ function Level({
               </span>
             )}
             <span className="stories__title">{node.title}</span>
+            {/* Only once the site has more than one document type: a chip that
+                always reads "Page" is noise (`document-types.md` phase 3). */}
+            {chipOf(node) ? (
+              <span
+                className={`stories__chip ${chipOf(node)?.unknown ? 'is-unknown' : ''}`}
+                title={
+                  chipOf(node)?.unknown
+                    ? `The type '${node.type}' is no longer declared in the schema`
+                    : undefined
+                }
+              >
+                {chipOf(node)?.label}
+              </span>
+            ) : null}
             <code className="stories__path">/{node.path}</code>
             {badgeLabel(node.state) ? (
               <span
@@ -162,16 +345,32 @@ function Level({
               </span>
             ) : null}
             <span className="stories__actions">
-              <button
-                type="button"
-                title="Add child page"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setAddingTo(node.id)
-                }}
-              >
-                +
-              </button>
+              {/* `under` narrows what can be created here, not just what a drag
+                  may drop into: an empty list disables the affordance rather
+                  than offering a create the server would refuse. */}
+              {childTypes(node).length > 1 ? (
+                <NewMenu
+                  label="+"
+                  options={childTypes(node)}
+                  onPick={(type) => openForm(node.id, type)}
+                />
+              ) : (
+                <button
+                  type="button"
+                  title={
+                    childTypes(node).length === 0
+                      ? 'No document type may be created here'
+                      : `Add ${childTypes(node)[0]?.label ?? 'page'}`
+                  }
+                  disabled={childTypes(node).length === 0}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    openForm(node.id, childTypes(node)[0]?.name)
+                  }}
+                >
+                  +
+                </button>
+              )}
               <button
                 type="button"
                 title="Duplicate page"
@@ -199,10 +398,10 @@ function Level({
 
           {addingTo === node.id ? (
             <NewPage
-              onCancel={() => setAddingTo(undefined)}
+              onCancel={closeForm}
               onSubmit={async (title) => {
-                await onCreate(title, node.id)
-                setAddingTo(undefined)
+                await onCreate(title, node.id, addingType)
+                closeForm()
               }}
             />
           ) : null}
@@ -212,14 +411,18 @@ function Level({
               nodes={node.children}
               depth={depth + 1}
               parentId={node.id}
+              parentType={node.type}
               currentId={currentId}
               addingTo={addingTo}
-              setAddingTo={setAddingTo}
+              addingType={addingType}
+              openForm={openForm}
+              closeForm={closeForm}
               onOpen={onOpen}
               onCreate={onCreate}
               onMove={onMove}
               onDelete={onDelete}
               onDuplicate={onDuplicate}
+              onNotice={onNotice}
             />
           ) : null}
         </li>
@@ -239,7 +442,7 @@ function Level({
           e.stopPropagation()
           setDropIndex(null)
           const id = e.dataTransfer.getData('text/folio-story')
-          if (id) void onMove(id, parentId, nodes.length)
+          if (id) drop(nodes.length, id)
         }}
       />
     </ul>
