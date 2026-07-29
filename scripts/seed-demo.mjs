@@ -6,6 +6,12 @@
 
 import zlib from 'node:zlib'
 
+// Imported directly: Node strips types natively and the module has only
+// type-only imports, so there is nothing to compile.
+const { PROTOCOL_VERSION } = await import(
+  new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
+)
+
 const HTTP = 'http://localhost:5199'
 const API = `${HTTP}/folio`
 
@@ -101,6 +107,7 @@ async function seed(storyId, build) {
           name: 'Seed',
           colour: '#0090ff',
           lastSyncId: 0,
+          v: PROTOCOL_VERSION,
         }),
       ),
     )
@@ -122,7 +129,7 @@ async function seed(storyId, build) {
         setTimeout(resolve, 200)
       }
     })
-    ws.send(JSON.stringify({ type: 'tx', txId: 'seed', mutations }))
+    ws.send(JSON.stringify({ type: 'tx', txId: 'seed', mutations, v: PROTOCOL_VERSION }))
   })
   ws.close()
   await fetch(`${API}/story/${storyId}/publish`, { method: 'POST' })

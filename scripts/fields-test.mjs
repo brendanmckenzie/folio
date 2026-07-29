@@ -4,11 +4,15 @@
 // links store an id, so a path change has to reach the rendered href without
 // anything rewriting the document.
 
-// Imported directly: Node strips types natively and these modules have only
-// type-only imports, so there is nothing to resolve at runtime. Modules with real
-// value imports cannot be loaded this way, since the library uses extensionless
-// specifiers that only a bundler resolves — those are covered over HTTP instead.
+// Library source is imported directly. ./lib/ts-resolve.mjs teaches Node to
+// resolve the extensionless relative specifiers the library uses, so a module
+// with real value imports (richtext.ts → values.ts) loads like any other.
+import './lib/ts-resolve.mjs'
+
 const { diff } = await import(new URL('../packages/folio/src/core/diff.ts', import.meta.url))
+const { PROTOCOL_VERSION } = await import(
+  new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
+)
 
 const HTTP = 'http://localhost:5199'
 const API = `${HTTP}/folio`
@@ -49,11 +53,20 @@ function client(name) {
     async hello() {
       await new Promise((r) => ws.addEventListener('open', r, { once: true }))
       ws.send(
-        JSON.stringify({ type: 'hello', actor: name, name, colour: '#0090ff', lastSyncId: 0 }),
+        JSON.stringify({
+          type: 'hello',
+          actor: name,
+          name,
+          colour: '#0090ff',
+          lastSyncId: 0,
+          v: PROTOCOL_VERSION,
+        }),
       )
       return (await this.expect((m) => m.type === 'bootstrap')).doc
     },
-    send: (m) => ws.send(JSON.stringify(m)),
+    // Every frame carries the wire version, not only `hello` — the object
+    // refuses any frame that omits it (test/workers/story-do.test.ts).
+    send: (m) => ws.send(JSON.stringify({ ...m, v: PROTOCOL_VERSION })),
     /** Send a transaction and wait for the Durable Object to echo it back. */
     async tx(txId, mutations) {
       this.send({ type: 'tx', txId, mutations })
@@ -88,35 +101,41 @@ if (leftovers.length) {
 
 /* --- a CTA with four buttons, one per link kind -------------------------- */
 
+// Two CTAs rather than one: the demo's cta caps its actions slot at two buttons
+// (examples/demo/src/blocks/cta.tsx), and a transaction is all-or-nothing, so
+// four buttons in one slot rejects the whole tx — including the valid cta insert.
 const CTA = 'ctalink1'
-const btn = (uid, order, href) => ({
+const CTA2 = 'ctalink2'
+const btn = (uid, parent, order, href) => ({
   t: 'insert',
   blok: {
     uid,
     type: 'button',
-    parent: CTA,
+    parent,
     slot: 'actions',
     order,
     data: { label: uid, href, variant: 'primary' },
   },
 })
+const cta = (uid, order, heading) => ({
+  t: 'insert',
+  blok: {
+    uid,
+    type: 'cta',
+    parent: root,
+    slot: 'body',
+    order,
+    data: { heading, body: '' },
+  },
+})
 
 await ed.tx('f1', [
-  {
-    t: 'insert',
-    blok: {
-      uid: CTA,
-      type: 'cta',
-      parent: root,
-      slot: 'body',
-      order: 'a0',
-      data: { heading: 'Links', body: '' },
-    },
-  },
-  btn('lstory', 'a0', { kind: 'story', id: 'sty_about' }),
-  btn('lurl', 'a1', { kind: 'url', url: 'https://example.com', target: '_blank' }),
-  btn('lmail', 'a2', { kind: 'email', email: 'hi@example.com', subject: 'A & B' }),
-  btn('lanch', 'a3', { kind: 'anchor', anchor: 'section-two' }),
+  cta(CTA, 'a0', 'Links'),
+  cta(CTA2, 'a1', 'More links'),
+  btn('lstory', CTA, 'a0', { kind: 'story', id: 'sty_about' }),
+  btn('lurl', CTA, 'a1', { kind: 'url', url: 'https://example.com', target: '_blank' }),
+  btn('lmail', CTA2, 'a0', { kind: 'email', email: 'hi@example.com', subject: 'A & B' }),
+  btn('lanch', CTA2, 'a1', { kind: 'anchor', anchor: 'section-two' }),
 ])
 
 const html1 = await preview()
@@ -279,7 +298,17 @@ check(
   resizedBytes.byteLength > 0 && resizedBytes.byteLength < one.asset.size,
   `${resizedBytes.byteLength} < ${one.asset.size}`,
 )
-check('an unknown key is a 404', (await fetch(`${HTTP}/folio/asset/nope`)).status === 404)
+// Two different refusals, deliberately: a key that cannot be an asset key is
+// rejected by validation before any lookup (400), while a well-formed key that
+// simply is not there is a miss (404). `nope` exercises the former only.
+check(
+  'a malformed asset key is refused by validation',
+  (await fetch(`${HTTP}/folio/asset/nope`)).status === 400,
+)
+check(
+  'a well-formed but unknown key is a 404',
+  (await fetch(`${HTTP}/folio/asset/ast_000000000000-missing.png`)).status === 404,
+)
 
 await ed.tx('f4', [
   {
@@ -599,6 +628,7 @@ const aboutDoc = await new Promise((resolve) => {
         name: 'about',
         colour: '#000',
         lastSyncId: 0,
+        v: PROTOCOL_VERSION,
       }),
     ),
   )
@@ -616,7 +646,7 @@ const send = (ws, txId, mutations) =>
       }
     }
     ws.addEventListener('message', onMsg)
-    ws.send(JSON.stringify({ type: 'tx', txId, mutations }))
+    ws.send(JSON.stringify({ type: 'tx', txId, mutations, v: PROTOCOL_VERSION }))
   })
 
 // Published and draft copies are given different text on purpose, so which one a

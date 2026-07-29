@@ -199,8 +199,18 @@ const beforeVersions = await json(`${API}/story/${STORY}/versions`)
 const unpub = await json(`${API}/story/${STORY}/unpublish`, { method: 'POST' })
 check('unpublish reports ok and a timestamp', unpub.ok === true && unpub.unpublishedAt > 0)
 
+// 410, not 404: the demo consults folio.status in its miss branch, so a page
+// taken down on purpose is Gone rather than merely absent. A path that never
+// existed still answers 404 — that is the distinction folio.status buys.
 const down = await fetch(`${HTTP}/`)
-check('the published page 404s once unpublished', down.status === 404, `status=${down.status}`)
+check('the unpublished page answers 410 Gone', down.status === 410, `status=${down.status}`)
+
+const neverExisted = await fetch(`${HTTP}/no-such-page-ever`)
+check(
+  'a path that never existed still answers 404',
+  neverExisted.status === 404,
+  `status=${neverExisted.status}`,
+)
 
 const afterUnpublishVersions = await json(`${API}/story/${STORY}/versions`)
 check(

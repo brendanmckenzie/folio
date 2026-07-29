@@ -1,3 +1,9 @@
+// Imports protocol.ts directly: Node strips types natively and the module has
+// only type-only imports, so there is nothing to compile.
+const { PROTOCOL_VERSION } = await import(
+  new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
+)
+
 const BASE = 'ws://localhost:5199/folio/story/sty_home/socket'
 const HTTP = 'http://localhost:5199'
 
@@ -19,7 +25,9 @@ function client(name) {
     ws,
     inbox,
     open: () => new Promise((r) => ws.addEventListener('open', r, { once: true })),
-    send: (m) => ws.send(JSON.stringify(m)),
+    // Every frame carries the wire version, not only `hello` — the object
+    // refuses any frame that omits it (test/workers/story-do.test.ts).
+    send: (m) => ws.send(JSON.stringify({ ...m, v: PROTOCOL_VERSION })),
     expect(match, ms = 3000) {
       const hit = inbox.find(match)
       if (hit) return Promise.resolve(hit)
