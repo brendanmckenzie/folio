@@ -12,7 +12,7 @@
  * editor would be absurd.
  */
 
-import { isSafeHref } from './values'
+import { asLink, isSafeHref } from './values'
 
 /** Node names, matching TipTap's own. */
 export type RichtextNodeName =
@@ -214,9 +214,23 @@ function entries<T>(list: unknown): T[] {
   return list.filter((n): n is T => Boolean(n) && typeof n === 'object')
 }
 
-/** A link mark keeps its `href` only if the href allow-list accepts it. */
+/**
+ * A link mark survives if it carries something that can become a safe href.
+ *
+ * Two shapes are legitimate. A Folio-native mark stores a structured `link`
+ * (`{ kind: 'story', id }`) and has **no** `href` at all, because the href is
+ * derived from the resolution at render time — that is what lets an internal
+ * link inside prose survive a page being renamed. A mark from an import or
+ * TipTap's own Link extension stores an `href` string instead.
+ *
+ * Judging only the `href` string stripped every internal link, so prose rendered
+ * the text with no anchor around it. `asLink` applies the same scheme filtering
+ * to the structured shape (a `url` kind is checked with `isSafeHref` there), so
+ * accepting it here does not widen what can reach the page.
+ */
 function safeMark(mark: RichtextMark): boolean {
   if (mark.type !== 'link') return true
+  if (mark.attrs?.link !== undefined) return asLink(mark.attrs.link) !== null
   const href = mark.attrs?.href
   return typeof href === 'string' && isSafeHref(href)
 }
