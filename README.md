@@ -66,6 +66,9 @@ const folio = createFolio<Env>({
     { name: 'person', label: 'Person', kind: 'record', root: 'personRecord', titleField: 'fullName' },
     { name: 'settings', label: 'Site settings', kind: 'singleton', root: 'settingsRoot' },
   ],
+  // Loaded into every page's Resolution, so any render can place them. See
+  // "Globals" below.
+  globals: ['settings'],
   bindings: (env) => ({ db: env.DB, story: env.STORY }),
   assets: __FOLIO_ASSETS__,
 })
@@ -101,7 +104,12 @@ export default {
       return new Response('Not found', { status: status === 'unpublished' ? 410 : 404 })
     }
     const resolution = await folio.resolve(env, doc)
-    return render(<Shell title={title}>{folio.render(doc, { resolution })}</Shell>)
+    return render(
+      <Shell title={title}>
+        {folio.renderGlobal(resolution, 'settings')}
+        {folio.render(doc, { resolution })}
+      </Shell>,
+    )
   },
 }
 ```
@@ -325,6 +333,74 @@ heading — deleting rows because the code changed is worse.
 served: an unknown root block, a duplicate name, two defaults, a `titleField`
 the root block lacks, an `under` chain that never reaches the top level, or both
 `types` and `root` at once.
+
+## Globals
+
+A header, a footer, a bag of site-wide settings: content that is on every
+page but is not itself a page. A global is a `singleton` document — nothing
+new — plus a way for a host's shell to render one and a way to edit one when
+it has no page of its own to be previewed in.
+
+```ts
+const folio = createFolio<Env>({
+  types: [
+    { name: 'page', label: 'Page', kind: 'page', root: 'page' },
+    { name: 'header', label: 'Header', kind: 'singleton', root: 'headerRoot',
+      previewPath: '' },   // the root story, so an edit previews in context
+    { name: 'footer', label: 'Footer', kind: 'singleton', root: 'footerRoot' },
+  ],
+  // Loaded into every page's Resolution — a subset of the declared
+  // singletons, explicit rather than "every one of them", so a singleton
+  // read once at boot (folio.global) costs nothing on the hot path.
+  globals: ['header', 'footer'],
+})
+```
+
+`resolve()` folds each configured global's id into the same query
+`reference` fields already run, so a site with globals costs no extra D1
+read. The result rides on `Resolution.globals`, keyed by *type name* rather
+than story id, next to (never merged into) `Resolution.docs`: `RenderBlok`'s
+one-level bound empties `docs` on the way into a reference's own content so
+a self-referencing story cannot recurse forever, but a header rendered
+inside a referenced document still needs its own content.
+
+The host places a global in its own shell — Folio never wraps a page in a
+layout:
+
+```tsx
+<Shell>
+  {folio.renderGlobal(resolution, 'header')}
+  <div id="folio-root">{folio.render(doc, { resolution })}</div>
+  {folio.renderGlobal(resolution, 'footer')}
+</Shell>
+```
+
+`renderGlobal` returns the same `<div data-folio-global="header">` wrapper
+in every mode — a published page, an ordinary page preview, or the
+in-context editor below — so a client hydrating into it never meets a
+markup mismatch. A global nothing has been published for renders nothing,
+with no error. `folio.global(env, name)` is the plain server-side read: a
+singleton's published document by name, whether or not it is a configured
+global — for a "read once at boot" singleton that has no business in a
+per-request resolution.
+
+A singleton has no URL of its own to be previewed at, so its type declares
+`previewPath` — a routed document's own path (`''` for the root story) — and
+opening the singleton in the admin loads that page's own preview with
+`&as=<name>` appended. The named global becomes the one editable document on
+screen, hydrated into its own wrapper; the page around it stays static and
+is not clickable. Every other configured global still renders read-only,
+with the ordinary edit markers, so clicking a block inside one from an
+ordinary page preview offers "Edit `<name>` →" instead of selecting it —
+there is exactly one editable document at a time. A singleton with no
+`previewPath` gets a bare preview instead: itself, alone, with a note that
+no host page was configured.
+
+A global is a document like any other: it drafts, versions, undoes and
+publishes the same way, through the same inspector. What it does not do is
+string interpolation — `{{ settings.phone }}` inside a text field is out of
+scope; a block that needs the phone number reads it off the settings global
+directly.
 
 ## Stories, paths and page metadata
 

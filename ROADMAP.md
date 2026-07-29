@@ -68,9 +68,20 @@ the page that needs it. A singleton's id is *derived* from its type name, so
 per-type routing rules, since Folio derives a path from the tree and a
 `pathPrefix` would only be a second derivation to keep in step. `reference` and
 `multilink` can now be narrowed by type, enforced in the picker and again at
-resolve. Host-side reading of a singleton (`folio.global`) is still to come;
-see `docs/specs/content-model/globals.md`. Spec:
-`docs/specs/foundation/document-types.md`.
+resolve. Spec: `docs/specs/foundation/document-types.md`.
+
+**Globals: a singleton loaded into every page, rendered by the host's own
+shell.** `FolioConfig.globals` names the subset of declared singletons a page
+render pulls in; `resolve()` folds their ids into the same query `reference`
+fields already run, so a site with a header and a footer costs no extra D1
+read. `folio.renderGlobal(resolution, name)` emits the same
+`data-folio-global` wrapper in every mode, host-placed rather than
+Folio-laid-out, and `folio.global(env, name)` is the plain "read a singleton
+by name" call for one read once at boot. A singleton previews in the context
+of a real page via its type's `previewPath` and `?_folio=preview&as=<name>`;
+one with none gets a bare preview instead. Deliberately **not** built:
+template interpolation (`{{ settings.phone }}` inside a field) — a block that
+needs it reads the global directly. Spec: `docs/specs/content-model/globals.md`.
 
 ## Next
 
@@ -98,7 +109,10 @@ keys, or a cached page outlives the row that served it. The seam now exists
 `hooks.unpublished` fire after each write commits, with the story and, for
 `published`, the document. What is still missing is only the cache layer
 itself (Cache API or KV in front of D1) for a hook to purge — this item is
-now "pick a cache", not "invent a mechanism".
+now "pick a cache", not "invent a mechanism". One wrinkle globals.md adds:
+publishing a global has to purge *every* page that rendered it, not one, so
+the purge key for a page must include the globals it rendered, not just its
+own path.
 
 **Per-story access control.** The reference has an `access_level` field on story
 content and gates rendering on the user's roles. With metadata now living on the

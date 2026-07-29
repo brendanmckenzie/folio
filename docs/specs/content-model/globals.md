@@ -3,7 +3,7 @@
 > **Group:** content model
 > **Build order:** 9
 > **Size:** S
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none (the preview *bootstrap* shape changes; the postMessage protocol does not)
 > **Migration:** none — uses `type` from `../foundation/document-types.md`
 > **Last updated:** 2026-07-29
@@ -433,7 +433,97 @@ assert it lands as one transaction.
 
 ## Open questions
 
-- Should `globals` default to *every* declared singleton rather than an explicit
-  list? Explicit costs one line of config and makes the per-request read set
-  obvious, which is why it is the proposal — but if in practice every singleton
-  ends up listed, the default is wrong.
+- ~~Should `globals` default to *every* declared singleton rather than an
+  explicit list?~~ Resolved by the owner: explicit. `FolioConfig.globals` is a
+  list of type names, validated at construction against the declared
+  `singleton` types (`validateGlobals`, `core/schema.ts`). A singleton not
+  listed is unaffected — it is still a document, browsable in the Data rail
+  and readable via `folio.global(env, name)` — it is just not fetched on
+  every page render. In practice the demo lists two of its own singletons
+  (`header`, `settings`) and nothing suggests every singleton would end up
+  listed, so the explicit list is not just cheaper here, it is doing real
+  work: `settings`'s footer content and `header`'s nav are both globals, but
+  a hypothetical "SEO defaults" singleton read once at boot would not be.
+
+## Implementation notes
+
+**Landed as specced**, across three phases matching the plan above, plus a
+fourth for docs and the demo:
+
+- `Resolution.globals?: Record<string, Doc>`, populated by `resolve()`
+  alongside `docs` from the *same* `publishedDocsByIds` call (published mode)
+  or per-id `draftFor` calls (preview mode) — one extra D1 read for a whole
+  site's globals, not one per global, and zero extra reads for a live page
+  with no references and no globals configured. Preview mode additionally
+  calls `ensureSingleton` for each configured global before reading its
+  draft; the published path deliberately does not, so a global nobody has
+  ever opened in the admin costs nothing on a live page render.
+- `renderGlobalNode` (`preview/Render.tsx`) is the one function behind both
+  `Folio.renderGlobal` and Folio's own internal preview page, so the
+  `data-folio-global="<name>"` wrapper is identical markup wherever a global
+  appears. `folio.global(env, name)` is a plain by-name read, independent of
+  `FolioConfig.globals` membership, for the "read once at boot" case the
+  spec calls out.
+- `DocumentType.previewPath` (`''` for the root story) plus
+  `?_folio=preview&as=<name>` on that page's own preview URL is what lets a
+  singleton preview in the context of a real page. `previewPage` gained an
+  optional `as`/`bare` pair of options: `as` bootstraps
+  `{ editing: { global, mount } }` and renders the host page's own document
+  static (no edit markers); `bare` (the new `{base}/preview/global/:name`
+  route, for a singleton with no `previewPath`) renders the singleton alone
+  with a note. Every configured global still renders read-only alongside
+  either mode, with the ordinary edit markers, which is what makes "Edit
+  `<name>` →" reachable from an *ordinary* page preview too.
+- The admin: a Globals section above the rail's tabs (`GlobalsList.tsx`,
+  `globalTypes`/`globalPreviewUrl`, both pure and unit-tested); opening one
+  points its iframe at the computed preview URL; `usePreviewBridge`'s
+  `select` handler runs the new pure `globalOwning` first and calls
+  `onGlobalClick` instead of `store.select` when a clicked uid belongs to a
+  global rather than the open document; `Inspector` shows "Edit `<name>` →"
+  in that case. `useGlobalDocs` fetches each configured global's own
+  document once (never per keystroke) purely so `globalOwning` has a uid set
+  to check against.
+- The demo declares a second singleton, `header` (logo + nav), alongside the
+  existing `settings` (which already rendered a `<footer>` but was never
+  called from anywhere until now), lists both in `globals`, and wraps
+  `#folio-root` with `folio.renderGlobal` calls in its own `<Page>` — header
+  above, footer below, a decision the *host* makes, not Folio.
+
+**What the spec's Ground truth got right, and where it was silent:** the
+Ground truth section's read of `resolve()`, `publishedDocsByIds` and
+`previewPage` was accurate as of build order 8 landing; nothing had moved.
+The one thing the spec did not spell out and this build had to decide:
+Folio's own internal preview shell has no knowledge of a host's real
+layout, so it draws every configured global above `#folio-root`, in
+declared order, rather than trying to infer header-above/footer-below —
+documented as a known simplification of Folio's *generic* preview, not a
+claim that it visually mirrors the host's own render.
+
+**Deferred, on purpose:**
+
+- Live propagation of a header edit into another open page's preview — spec
+  16 (live collaboration) hydrates globals read-only and refreshes them on a
+  space-channel event. Until then, `useGlobalDocs`'s fetch-once cache is
+  correct for detecting *which* global a uid belongs to (a uid never changes
+  when only a field's value does) but does not refresh a passively-rendered
+  global's *content* live; reopening the preview picks it up, same as any
+  other cross-story staleness today.
+- Cache purge on global publish (decision 5) — there is no cache layer yet
+  at all (`ROADMAP.md`); the requirement that a page's purge key include the
+  globals it rendered is recorded there for when one lands.
+- Template interpolation, datasources, per-locale globals — all out of scope
+  as written.
+
+**Test counts added:** 27 unit/workers tests (9 workers: query count,
+published-vs-draft resolution, `as=` refusals, the bare preview route,
+`folio.global`, construction-time validation; 5 for `renderGlobalNode`; 5 for
+`globalOwning`; 8 for `globalTypes`/`globalPreviewUrl`; 1 pinning that
+`Resolution.globals` survives the one-level reference bound) plus
+`scripts/globals-test.mjs` (16 checks, run live against a fresh database):
+publish a header onto two pages from one D1 read; a page's preview shows the
+header's draft while its live render still shows the last publish;
+publishing updates every live page at once; restoring an older version lands
+as one minimal transaction. `fields-test.mjs` and `history-test.mjs` /
+`redirects-test.mjs` / `sync-test.mjs` were re-run live and still pass
+(107/41/8/16), `fields-test.mjs`'s manifest assertion updated for the demo's
+fifth document type.

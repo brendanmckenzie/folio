@@ -175,10 +175,15 @@ The site has at least five root types: `Page`, `Insights`, `Resources`,
 - **Singletons: done.** A singleton is a document with a *derived* id
   (`sng_settings`), created on first access — no `singleton boolean` column and no
   uniqueness constraint, because there is no other id a second one could be
-  created under. `Config`-style host-side reading (`folio.global('settings')`,
-  fetched once and cached) is `docs/specs/content-model/globals.md`; what exists
-  today is the document itself, editable and publishable like any other, and
-  refusing to be deleted or duplicated.
+  created under. The document itself is editable and publishable like any
+  other, and refuses to be deleted or duplicated.
+- **Globals: done.** `Config`-style host-side reading — `folio.global(env,
+  'settings')`, and `FolioConfig.globals` for the subset loaded into every
+  page's `Resolution` for free, alongside whatever `reference` fields already
+  fetch. `folio.renderGlobal(resolution, name)` is the host's own shell
+  placing one; a singleton previews in the context of a real page via its
+  type's `previewPath`. Not built: template interpolation inside a field —
+  a block reads a global directly instead. `docs/specs/content-model/globals.md`.
 - **Query API** — this is the sleeper. `sitemap.ts` pages through every story;
   the insights index filters by topic and paginates. Storyblok gives
   `getStories({ content_type, filter_query, per_page, page, sort_by })`. Folio has
