@@ -83,6 +83,27 @@ one with none gets a bare preview instead. Deliberately **not** built:
 template interpolation (`{{ settings.phone }}` inside a field) — a block that
 needs it reads the global directly. Spec: `docs/specs/content-model/globals.md`.
 
+**Identity and access: the CMS is closed.** `FolioConfig.auth` is **required**
+with no default — either it names sign-in providers or it says `auth: 'open'` in
+as many words, and `createFolio` throws otherwise, because a host that simply
+forgot the key used to get a publicly editable CMS silently. Sessions are rows
+in D1 behind an opaque 32-byte cookie stored as a SHA-256: no HMAC secret to
+rotate, revocation is a `delete`, and a dumped database yields no usable
+cookies. Two providers ship — `magicLink({ send })`, where the *host* sends the
+mail because only the host has the binding and the from-address, and
+`oidc({ issuer, clientId, clientSecret })` with PKCE, whose id tokens are
+verified against the JWKS rather than decoded. Roles are global —
+`viewer | editor | publisher | admin` — and each route declares its own minimum
+at its mount; API tokens carry scopes instead, because a token is not a person.
+Editor identity is no longer self-reported: the Worker validates the session
+before the upgrade and hands the verified identity to the Durable Object as a
+header, which is trustworthy because a DO namespace is not publicly
+addressable. `hello`'s `actor`/`name`/`colour` survive as advisory fields and
+are ignored. A revoked session closes an open socket within a bounded window —
+the expiry rides in the attachment and the D1 re-check is once a minute per
+socket, deliberately not per keystroke. The login page ships no JavaScript.
+Spec: `docs/specs/foundation/identity-and-access.md`.
+
 ## Next
 
 ### 1. Scheduled publishing
@@ -114,17 +135,21 @@ publishing a global has to purge *every* page that rendered it, not one, so
 the purge key for a page must include the globals it rendered, not just its
 own path.
 
-**Per-story access control.** The reference has an `access_level` field on story
-content and gates rendering on the user's roles. With metadata now living on the
-root block, this is just another field — the gap is the auth layer beneath it.
+**Per-story access control, for site visitors.** The reference has an
+`access_level` field on story content and gates *rendering* on the visitor's
+roles. CMS auth is now built, and this is deliberately not the same problem:
+identity-and-access.md scoped itself to who may edit, and reading a published
+page still needs no account. It attaches in two places when wanted — a field on
+the root block, which document types already make per-type, and a host check
+before `folio.published()`. Per-story *editor* permissions are the other half,
+and want a way to name a set of stories: revisit after
+`docs/specs/content-model/collections.md`.
 
-**Editor identity is currently self-reported.** The client sends its own `name`
-and `colour` in the `hello` message, which is trivially spoofable. The Worker
-must validate the session *before* the WebSocket upgrade and pass the verified
-user into the Durable Object. Sessions in D1 behind a signed httpOnly cookie:
-OIDC against Microsoft 365 for staff, magic link for client editors. Cloudflare
-Access is deliberately not the plan — it is IdP-shaped and awkward for
-per-space editor roles.
+**SSO group → role mapping.** `oidc({ provision })` sets a default role for a
+staff account on first sign-in; mapping IdP groups onto Folio roles needs claims
+configuration per tenant and is a follow-up. So is an `auth_events` table: the
+activity trail and version rows already record who changed content, but sign-ins,
+role changes and token creation are not recorded anywhere.
 
 **Story enumeration.** `sitemap.ts` and `generateStaticParams` both page through
 every story. Folio needs a public list/query API, not just the tree.
@@ -138,10 +163,14 @@ an unsorted flat list, which stops working somewhere around 15.
 
 ## Known smaller issues
 
-- No auth anywhere. Anyone reaching `/folio/edit/*` can edit and publish. Now
-  the single biggest gap: validation, the error envelope and the versioned wire
-  protocol were built with it in mind, and `publish()` no longer needs a
-  Request, so the auth layer has clean seams to land on.
+- Login rate limiting is a partial answer, and says so: sign-in links are capped
+  per address per hour out of `login_challenges`, but the IP dimension needs a
+  Cloudflare rate-limiting rule at the zone, which is not Folio's to configure.
+- No way to bootstrap the first admin over HTTP, on purpose: an endpoint that
+  creates an admin is an endpoint that creates an admin. The first `users` row is
+  a `wrangler d1 execute` deploy step.
+- Passkeys, TOTP and password login are all out. Magic link plus OIDC covers both
+  audiences, and a password store is a liability nobody asked for.
 - The library ships TypeScript source; the host compiles it. Fine for now, wrong
   for a release. (The `folio/core` / `folio/engine` export split is done; build
   artifacts and `.d.ts` generation are not.)

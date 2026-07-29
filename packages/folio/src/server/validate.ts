@@ -166,13 +166,15 @@ export const StoryDuplicateBody = v.object(
   OBJECT,
 )
 
-export const CheckpointBody = v.object(
-  {
-    label: v.optional(bounded(120)),
-    actor: v.optional(bounded(64)),
-  },
-  OBJECT,
-)
+/**
+ * `actor` used to be a field here. It is gone (`identity-and-access.md` phase 5):
+ * the client sent its own display name, which made "who checkpointed this" a
+ * value anybody could type. The route reads `c.var.actor` instead. Undeclared
+ * rather than declared-and-refused, unlike `StoryPatchBody.type`: a client that
+ * still sends one is a stale tab, not a caller asking for something the server
+ * will not do, and valibot strips an undeclared key silently.
+ */
+export const CheckpointBody = v.object({ label: v.optional(bounded(120)) }, OBJECT)
 
 export const AssetPatchBody = v.object({ alt: v.optional(bounded(500)) }, OBJECT)
 
@@ -448,16 +450,6 @@ export function contentLengthHeader(raw: string | undefined, max: number): void 
     // refused a request is not something a client can tell apart.
     throw new FolioError('too_large', `File is larger than ${Math.floor(max / 1024 / 1024)}MB`)
   }
-}
-
-/**
- * `x-folio-actor`, recorded on every version row and shown in history.
- * Self-reported until auth lands, so it is bounded and screened like any other
- * client input; absent or blank is `null`, which is what the column stores.
- */
-export function actorHeader(raw: string | undefined): string | null {
-  if (raw === undefined) return null
-  return parseOrThrow(bounded(64), raw, 'x-folio-actor') || null
 }
 
 /**

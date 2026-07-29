@@ -1,4 +1,4 @@
-import { createFolio, Shell } from 'folio/server'
+import { createFolio, magicLink, Shell } from 'folio/server'
 import { resolveAsset, type Doc, type Resolution } from 'folio/core'
 import type { ReactElement } from 'react'
 import { renderToReadableStream } from 'react-dom/server.edge'
@@ -50,10 +50,31 @@ const folio = createFolio<Env>({
     { name: 'header', label: 'Header', kind: 'singleton', root: 'headerRoot', previewPath: '' },
   ],
   bindings: (env) => ({ db: env.DB, story: env.STORY, media: env.MEDIA, images: env.IMAGES }),
-  // identity-and-access.md checkpoint 2: `auth` has no default, so this key is
-  // required and a host that forgets it fails at construction rather than
-  // serving a publicly editable CMS. Flipped to a real provider below.
-  auth: 'open',
+  // identity-and-access.md: `auth` has no default (checkpoint 2), so a host that
+  // forgets this key fails at construction rather than serving a publicly
+  // editable CMS. `auth: 'open'` is the one-line escape hatch for a throwaway
+  // local instance and is what this demo used to say; a real deployment names
+  // providers, so this one does.
+  //
+  // Folio renders the sign-in URL and owns the session; the *host* sends the
+  // mail, because only the host has the binding and the from-address
+  // (architecture decision 2). This project has no mail binding at all, so
+  // `send` logs the link — which is a perfectly good local-dev flow, and is
+  // exactly what makes the provider exercisable with no external credentials.
+  // A real deployment calls Cloudflare Email Sending here instead.
+  //
+  // Editors are seeded in seed.sql: a CMS with accounts cannot bootstrap its
+  // first admin over HTTP, so that row is a deploy step.
+  auth: {
+    providers: [
+      magicLink({
+        send: (_env, { email, url }) => {
+          console.log(`\nfolio: sign-in link for ${email}\n  ${url}\n`)
+          lastSignInUrl = url
+        },
+      }),
+    ],
+  },
   basePath: '/folio',
   // '' is the root story, which serves '/'.
   route: (path) => (path ? `/${path}` : '/'),
@@ -79,6 +100,16 @@ const folio = createFolio<Env>({
   },
 })
 
+/**
+ * The last sign-in link this worker "sent", for `/dev/last-signin` below.
+ *
+ * Module state in a Worker is per-isolate and is not something to rely on in
+ * production — which is the point: this exists so a local dev server and
+ * `scripts/auth-test.mjs` can finish a flow that would otherwise need a mailbox,
+ * and the route that reads it refuses anything but localhost.
+ */
+let lastSignInUrl: string | null = null
+
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url)
@@ -86,6 +117,15 @@ export default {
     // --- this project's own non-CMS routes, which always win -------------
     if (url.pathname === '/health') {
       return Response.json({ ok: true, service: 'demo' })
+    }
+    // Local development only: the link `send` above logged, so a script can do
+    // what a person would do with their inbox. Not a Folio route and not a
+    // pattern to copy into a real host — it is a stand-in for a mailbox.
+    if (url.pathname === '/dev/last-signin') {
+      if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
+        return new Response('Not found', { status: 404 })
+      }
+      return Response.json({ url: lastSignInUrl })
     }
     if (url.pathname === '/sitemap.xml') {
       return sitemap(await folio.stories(env), url.origin)

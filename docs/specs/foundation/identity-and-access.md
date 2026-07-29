@@ -3,7 +3,7 @@
 > **Group:** foundation
 > **Build order:** 10
 > **Size:** L
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none (`hello`'s identity fields become advisory; they are removed at v3 with localisation)
 > **Migration:** `0007_identity.sql`
 > **Last updated:** 2026-07-29
@@ -600,8 +600,105 @@ serve while signed out.
 
 ## Open questions
 
-- Should a `viewer` be allowed to open the sync socket at all? Read-only via the
-  socket is how they see live changes, so yes as specified — but it means a viewer
-  holds an editing session and appears in presence. Alternative: viewers get a
-  draft-mode preview cookie (`ROADMAP.md`'s *Cookie-based draft mode*) and no
-  socket, which is cheaper and arguably more honest about what they are.
+Resolved as built.
+
+- **A `viewer` does get the sync socket, read-only.** Watching live changes is the
+  point of read access, and the alternative (a draft-mode preview cookie and no
+  socket) would have made "read access" mean something different from what the
+  role table says it means. The accepted cost stands: a viewer holds an editing
+  session and appears in presence. The object answers their `tx` frames with the
+  existing `reject` envelope — `read-only: your role may not edit` — which the
+  client already handles by dropping the transaction and surfacing the reason, so
+  a read-only editor degrades into a read-only editor rather than a broken one.
+  `scripts/auth-test.mjs` and `test/workers/auth-http.test.ts` both pin it.
+
+## Implementation notes
+
+Built in five commits, one per phase, in the order the plan names them.
+
+**What landed as specified.** All four tables in `0007_identity.sql`, additive —
+`stories` is untouched, and `migrations.test.ts` now asserts that too. Opaque
+32-byte credentials stored as SHA-256 (`auth/secrets.ts` is the only place one is
+minted or hashed). Cookie name chosen per request by scheme, both names read on
+the way in and both cleared on sign-out. `auth` required on `FolioConfig` with
+`resolveAuth` throwing at construction. Global roles as a total order, so a route
+declares one minimum; scopes for tokens, with an explicit implication table.
+`magicLink({ send })` with the host sending the mail, and `oidc()` with PKCE,
+discovery, and id tokens verified against the JWKS rather than decoded. A login
+page with no JavaScript. `withActor` + `requireAccess` per route. Identity handed
+to the Durable Object as an upgrade header. The `joined` flag. 4003/4004 as
+upgrade-and-close. The bounded revocation re-check. `x-folio-actor` and the
+checkpoint body's `actor` deleted.
+
+**Five places this went further than the spec, all deliberate.**
+
+1. **`?_folio=preview` is gated.** The spec's route table covers everything under
+   `/folio`, and this surface is not under it — but it renders a *draft*, so
+   without a check of its own, appending the flag to any URL read unpublished
+   content on a site that had otherwise closed its editor completely. It refuses
+   by handing the request *back* to the host (so a visitor sees the ordinary
+   published page) rather than by answering 401.
+2. **`/users` and `/tokens` 404 under `auth: 'open'`** rather than standing open
+   behind a role check that always passes. There is no admin there and no way to
+   become one.
+3. **A role change revokes that user's sessions.** The bounded window checkpoint 5
+   accepts for a *revocation* is not one worth accepting for a downgrade an admin
+   just made deliberately.
+4. **`GET /folio/me` redacts the session id and expiry** from the actor it
+   returns. Not a credential leak — the stored value is a hash and cannot be
+   presented as the token — but internal detail with no reader.
+5. **`presenceOf` is an explicit projection.** Presence used to be a spread of the
+   socket attachment; the attachment now holds `role`, `session` and `expiresAt`,
+   so spreading it would have broadcast a session id to every other editor. This
+   is a second, quieter version of the same trap `joined` is about.
+
+**One place the spec was wrong about its own design.** Phase 4 step 2 asked to
+drop the admin store's generated `actor`/`name`/`colour` and read them from
+`/folio/me`. Doing that would leave `auth: 'open'` with no presence at all: there
+are no accounts on such a deployment, so that random pair is the only thing
+distinguishing two anonymous tabs. They stay, documented as advisory — the object
+ignores them whenever the Worker vouched for an identity — and `TopBar` prefers
+the verified name and colour whenever there is one. The same reasoning runs through
+the whole build: `auth: 'open'` is a supported deployment shape, not a stub, so
+every gate short-circuits on the *mode* rather than on the absence of an actor.
+
+**Two narrowings to the origin check** (decision 4), both to avoid refusing
+something legitimate: it applies only to *cookie*-authenticated mutations, since a
+cookie is the only credential a browser attaches ambiently, and an absent `Origin`
+passes, since that is `curl`, a script or a server rather than a page that can
+borrow anyone's cookie.
+
+**Deliberately deferred.** Everything in *Out of scope* stands, plus: no bootstrap
+route for the first admin (an endpoint that creates an admin is an endpoint that
+creates an admin — it is a `wrangler d1 execute` deploy step, documented in the
+README), and login rate limiting is per-address only, with the IP dimension named
+as a zone rule rather than pretended complete.
+
+**Ground truth that had moved.** `createFolio` did already validate its config at
+construction by the time this was built — `validatePresets`, `validateTypes`,
+`validateHooks` and `validateGlobals` are all there — so `resolveAuth` follows an
+established pattern rather than introducing one. `StoryDO` is a factory
+(`createStoryDO<Env>({ db })`) and can write to D1, which is what made the
+socket's own revocation re-check possible at all; the spec assumed the object had
+no database handle.
+
+**Tests: 138 added, 1035 → 1173** (46 files). Unit: `test/unit/server/auth.test.ts`
+(cookie names, roles, scopes, `allows`, `safeNext`, `resolveAuth`),
+`test/unit/admin/me.test.ts`, plus new blocks in `test/unit/admin/api.test.ts` (the
+401 handler) and `test/unit/admin/store.test.ts` (4003 terminal, and the unsent
+queue surviving it). Workers: `test/workers/auth-session.test.ts`,
+`test/workers/auth-login.test.ts` (including a full OIDC round trip against a
+stand-in IdP with a real RS256 key generated in the test), and
+`test/workers/auth-http.test.ts` (every route gate, both socket refusal codes, the
+pre-hello quarantine *with* an attachment present, and the inverse revocation test
+that stops the D1 re-check from silently becoming per-frame). New
+`test/workers/migrations.test.ts` block for `0007`.
+
+**End to end: `scripts/auth-test.mjs`, 42 checks, all green**, run live against a
+fresh database. The other five were affected — every route now needs a session —
+and all pass: sync 16/16, history 43/43, fields 107/107, redirects 8/8,
+globals 16/16. They sign in through the new `scripts/lib/auth.mjs`, which wraps the
+process's `fetch` and `WebSocket` so both carry the cookie the way a browser does.
+`sync-test.mjs` now signs its second peer in as a *different* seeded editor, since
+identity on the socket is server-supplied and two sockets on one account are one
+person in presence.

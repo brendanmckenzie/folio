@@ -3,6 +3,14 @@
 //
 // Imports diff.ts and protocol.ts directly: Node strips types natively and
 // both modules have only type-only imports, so there is nothing to compile.
+// The demo now configures a real sign-in provider (identity-and-access.md), so
+// every route here needs a session. This signs in as the seeded admin and makes
+// this process's `fetch` and `WebSocket` carry the cookie, exactly as a browser
+// does — see scripts/lib/auth.mjs.
+import { signInGlobally } from './lib/auth.mjs'
+
+await signInGlobally()
+
 const { diff } = await import(new URL('../packages/folio/src/core/diff.ts', import.meta.url))
 const { PROTOCOL_VERSION } = await import(
   new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
@@ -90,13 +98,21 @@ alice.send({
 await alice.expect((m) => m.type === 'delta' && m.txId === 't1')
 await wait(120)
 
+// No `actor` in the body: it is read off the session now
+// (identity-and-access.md phase 5), so a client can no longer name whoever it
+// likes as the person who checkpointed this.
 const cp = await json(`${API}/story/${STORY}/versions`, {
   method: 'POST',
   headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ label: 'before rewrite', actor: 'Alice' }),
+  body: JSON.stringify({ label: 'before rewrite', actor: 'Somebody Else' }),
 })
 check('checkpoint created', cp.kind === 'checkpoint' && cp.label === 'before rewrite')
 check('checkpoint captured the title', cp.title === 'Version One', cp.title)
+check(
+  'the checkpoint records the signed-in user, not the body’s actor',
+  cp.actor === 'usr_demoadmin1',
+  cp.actor,
+)
 
 /* --- change the title and add a block ----------------------------------- */
 
@@ -184,9 +200,19 @@ check('diff of identical docs is empty', diff(target, target).length === 0)
 const activity = await json(`${API}/story/${STORY}/activity`)
 check('activity records transactions', activity.length >= 3, `n=${activity.length}`)
 check('activity is newest first', activity[0].syncId > activity.at(-1).syncId)
+// The socket's identity is server-supplied now: `hello` still carries actor,
+// name and colour, and the object ignores all three whenever the Worker vouched
+// for a session. The client below says hello as "Alice"; the trail says who
+// actually signed in.
 check(
-  'activity carries the editor name',
-  activity.some((e) => e.actorName === 'Alice'),
+  'activity names the signed-in user, not what hello claimed',
+  activity.every((e) => e.actor === 'usr_demoadmin1'),
+  activity.map((e) => e.actor).join(','),
+)
+check(
+  'activity carries that user’s display name',
+  activity.some((e) => e.actorName === 'Demo Admin'),
+  activity.map((e) => e.actorName).join(','),
 )
 
 /* --- unpublish takes the page down; the draft and history survive ------- */

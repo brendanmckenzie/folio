@@ -7,6 +7,14 @@
 // Imported directly: Node strips types natively and this module has only a
 // runtime const with no value imports of its own, so there is nothing to
 // resolve at runtime.
+// The demo now configures a real sign-in provider (identity-and-access.md), so
+// every route here needs a session. This signs in as the seeded admin and makes
+// this process's `fetch` and `WebSocket` carry the cookie, exactly as a browser
+// does — see scripts/lib/auth.mjs.
+import { signInGlobally } from './lib/auth.mjs'
+
+await signInGlobally()
+
 const { PROTOCOL_VERSION } = await import(
   new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
 )

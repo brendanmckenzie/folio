@@ -12,6 +12,14 @@
 
 import './lib/ts-resolve.mjs'
 
+// The demo now configures a real sign-in provider (identity-and-access.md), so
+// every route here needs a session. This signs in as the seeded admin and makes
+// this process's `fetch` and `WebSocket` carry the cookie, exactly as a browser
+// does — see scripts/lib/auth.mjs.
+import { signInGlobally } from './lib/auth.mjs'
+
+await signInGlobally()
+
 const { diff } = await import(new URL('../packages/folio/src/core/diff.ts', import.meta.url))
 const { PROTOCOL_VERSION } = await import(
   new URL('../packages/folio/src/core/protocol.ts', import.meta.url)

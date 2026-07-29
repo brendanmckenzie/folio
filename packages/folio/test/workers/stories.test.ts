@@ -70,6 +70,10 @@ async function resetStories(): Promise<void> {
   // never leak into the next (see the file-level comment on why writes here
   // are not rolled back per test).
   await env.DB.prepare('delete from redirects').run()
+  // Same reason, one table further: seed.sql also seeds the three demo editors
+  // (identity-and-access.md), and `users.email` is unique — so re-applying the
+  // fixture without clearing them first collides on the second test in the file.
+  await env.DB.prepare('delete from users').run()
   await applySeedFixture(env.DB)
 }
 

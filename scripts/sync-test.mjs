@@ -4,6 +4,19 @@
 // imports of its own.
 import './lib/ts-resolve.mjs'
 
+// The demo now configures a real sign-in provider (identity-and-access.md), so
+// every route here needs a session. This signs in as the seeded admin and makes
+// this process's `fetch` and `WebSocket` carry the cookie, exactly as a browser
+// does — see scripts/lib/auth.mjs.
+import { DEMO_EDITOR, signIn, signInGlobally } from './lib/auth.mjs'
+
+await signInGlobally()
+// A second, different editor for peer B: identity on the socket is server-
+// supplied now (identity-and-access.md), so two sockets held by the same account
+// are the same person in presence. Two peers means two people.
+const EDITOR_COOKIE = await signIn(undefined, DEMO_EDITOR)
+const EDITOR_ID = 'usr_demoeditor'
+
 const { PROTOCOL_VERSION } = await import(
   new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
 )
@@ -17,8 +30,10 @@ const HTTP = 'http://localhost:5199'
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
-function client(name) {
-  const ws = new WebSocket(BASE)
+function client(name, cookie) {
+  // A caller-supplied cookie wins over the one signInGlobally injects; see
+  // scripts/lib/auth.mjs.
+  const ws = cookie ? new WebSocket(BASE, { headers: { cookie } }) : new WebSocket(BASE)
   const inbox = []
   const waiters = []
   ws.addEventListener('message', (e) => {
@@ -57,9 +72,13 @@ const check = (label, ok, detail = '') => {
 await fetch(`${HTTP}/?_folio=preview`)
 
 const a = client('A')
-const b = client('B')
+const b = client('B', EDITOR_COOKIE)
 await Promise.all([a.open(), b.open()])
 
+// `hello` still carries actor/name/colour and the object still accepts them —
+// they are simply ignored whenever the Worker vouched for a session, which it
+// has here. Left as-is on purpose: an old tab that still asserts an identity
+// must keep working.
 a.send({ type: 'hello', actor: 'aaa', name: 'A', colour: '#f00', lastSyncId: 0 })
 const boot = await a.expect((m) => m.type === 'bootstrap')
 check('A receives bootstrap', !!boot.doc?.root, `syncId=${boot.syncId}`)
@@ -67,8 +86,8 @@ check('A receives bootstrap', !!boot.doc?.root, `syncId=${boot.syncId}`)
 b.send({ type: 'hello', actor: 'bbb', name: 'B', colour: '#00f', lastSyncId: 0 })
 await b.expect((m) => m.type === 'bootstrap')
 
-const peerSeen = await a.expect((m) => m.type === 'presence' && m.peer?.actor === 'bbb')
-check('A sees B join', !!peerSeen)
+const peerSeen = await a.expect((m) => m.type === 'presence' && m.peer?.actor === EDITOR_ID)
+check('A sees B join as the signed-in editor, not as what B claimed', !!peerSeen)
 
 // --- a mutation from A must reach B, and echo back to A as an ack ---
 const root = boot.doc.root
@@ -105,7 +124,8 @@ a.send({
 })
 const d2 = await a.expect((m) => m.type === 'delta' && m.txId === 'tx2')
 
-const c = client('C')
+// B reconnecting: the same editor, so the same cookie.
+const c = client('C', EDITOR_COOKIE)
 await c.open()
 c.send({ type: 'hello', actor: 'bbb', name: 'B', colour: '#00f', lastSyncId: deltaB.syncId })
 const catchup = await c.expect((m) => m.type === 'catchup' || m.type === 'bootstrap')

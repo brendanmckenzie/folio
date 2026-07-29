@@ -70,6 +70,10 @@ const folio = createFolio<Env>({
   // "Globals" below.
   globals: ['settings'],
   bindings: (env) => ({ db: env.DB, story: env.STORY }),
+  // Required, with no default. Either name sign-in providers or say 'open' —
+  // there is no third option, because a host that forgets this key would
+  // otherwise be serving a publicly editable CMS. See "Auth" below.
+  auth: 'open',
   assets: __FOLIO_ASSETS__,
 })
 
@@ -790,6 +794,131 @@ delays the response; a cache purge that must land before the next read opts in w
 ordering between hooks. A host that needs that writes one line to a Cloudflare Queue
 inside the hook, which is the right tool for it.
 
+## Auth
+
+`auth` is a **required** key on `createFolio`. Either it names sign-in providers,
+or it says `auth: 'open'` — one line, deliberately — and construction throws if
+it says neither. Folio is a library, and a host that simply forgot the key used
+to get a publicly editable CMS silently, whose failure mode is a defaced site. So
+the mistake is not representable.
+
+```ts
+import { createFolio, magicLink, oidc } from 'folio/server'
+
+const folio = createFolio<Env>({
+  blocks, types,
+  bindings: (env) => ({ db: env.DB, story: env.STORY, media: env.MEDIA }),
+  auth: {
+    providers: [
+      // Folio renders the URL and stores the challenge; the host sends the mail,
+      // because only the host has the binding and the from-address. In local dev,
+      // `send` can simply log the link — which is what examples/demo does.
+      magicLink({
+        send: (env, { email, url, expiresAt }) => sendEmail(env, email, url, expiresAt),
+      }),
+      // OIDC with PKCE, driven by the discovery document, so one shape covers
+      // Entra ID, Google and Okta. A verified email matching no user row is
+      // refused by default: access is a list someone maintains, not a
+      // consequence of holding an account at the provider.
+      oidc({
+        issuer: 'https://login.microsoftonline.com/<tenant>/v2.0',
+        clientId: (env) => env.OIDC_CLIENT_ID,
+        clientSecret: (env) => env.OIDC_CLIENT_SECRET,
+        provision: 'refuse',
+      }),
+    ],
+    sessionDays: 30,
+  },
+})
+```
+
+**Sessions are rows in D1 behind an opaque cookie.** 32 bytes from
+`crypto.getRandomValues`, handed out once, stored only as a SHA-256. There is no
+HMAC secret to configure, rotate or leak; revocation is a `delete` rather than a
+blocklist; and a dumped database yields no usable cookies. A signed or JWT cookie
+would be stateless and could not be revoked, which is the wrong trade for a CMS
+where "remove that person's access now" is the whole point. The cookie is
+`HttpOnly`, `SameSite=Lax`, `Path=/`, and named `__Host-folio_session` over HTTPS
+or plain `folio_session` otherwise — both are read on the way in, so moving
+between `wrangler dev` on localhost and a deployed worker never leaves you
+holding a cookie the server will not accept.
+
+**Roles are global**, on the user row, and each route declares its own minimum:
+
+| | read drafts | edit | publish / checkpoint | create / delete / move | manage access |
+| --- | --- | --- | --- | --- | --- |
+| `viewer` | yes | no | no | no | no |
+| `editor` | yes | yes | no | no | no |
+| `publisher` | yes | yes | yes | yes | no |
+| `admin` | yes | yes | yes | yes | yes |
+
+Create, delete, move and rename are `publisher` rather than `editor` because all
+four change what URLs the site serves, which is a publishing act even when
+nothing is published in the same breath.
+
+A `viewer` **does** get the sync socket, read-only: watching live changes is the
+point of read access, and the object answers their `tx` frames with the ordinary
+`reject` envelope, so a read-only editor degrades into a read-only editor rather
+than a broken one. `GET /folio/asset/:key` stays public — published pages point
+`<img>` tags at it, so it is exactly as public as the page that embeds it.
+
+**Editor identity is server-supplied.** The Worker validates the session before
+the WebSocket upgrade and hands the verified identity to the Durable Object as a
+request header. That header is trustworthy for one specific reason: a Durable
+Object namespace is not publicly addressable, so the only way to reach the object
+is through the Worker that set it. `hello`'s `actor`, `name` and `colour` are
+still accepted and are now ignored — an old tab keeps working, it just cannot lie
+— so the activity trail, the version list and the presence dots all name a real
+person. `versions.actor` stores `usr_<id>`, or `token:<name>` for a script, or
+null under `auth: 'open'`, where there is genuinely nobody to attribute a change
+to.
+
+**A revoked session closes an open socket within a bounded window.** The
+session's expiry rides in the socket attachment and is checked on every frame,
+which costs nothing; an explicit revocation is picked up by a D1 re-check that
+runs at most once a minute per socket. A query per frame would put a database
+read in the keystroke path. A socket refused for any reason is *accepted and then
+closed* with an application code — 4003 for no session, 4004 for a credential
+that may not hold an editing session — because a failed HTTP upgrade is
+indistinguishable on the wire from a dropped connection, and the client would
+reconnect on a backoff forever. The admin's queue of unsent edits survives a
+4003 by design, and the notice says so.
+
+**API tokens** carry scopes rather than a role, because a token is not a person:
+`content:read`, `content:read:draft`, `content:write`, `publish`, `assets:write`,
+`admin`. Presented as `Authorization: Bearer folio_<hex>`, stored as a hash, and
+`POST /folio/tokens` is the only response in the server that ever contains the
+raw value. A token cannot open the sync socket (4004): a script is not a person
+with a cursor.
+
+**CSRF is handled by three overlapping defences and no token plumbing.** Every
+mutating route is a JSON `POST`/`PATCH`/`DELETE`, the cookie is `SameSite=Lax`,
+and the middleware additionally refuses a mutating request whose `Origin` is not
+the worker's own — narrowed to cookie-authenticated requests, since a cookie is
+the only credential a browser attaches ambiently, and allowing an absent `Origin`,
+since that is a script rather than a page that can borrow anyone's cookie.
+
+`GET /folio/login` is server-rendered and ships **no JavaScript**: a login page
+that cannot work without a client bundle is a worse failure than an ugly one.
+
+**Bootstrapping the first admin is a deploy step, not a route.** An endpoint that
+creates the first admin is an endpoint that creates an admin, and no check it
+could make would be worth more than:
+
+```sh
+wrangler d1 execute folio --remote --command \
+  "insert into users (id, email, name, role, created_at)
+   values ('usr_first', 'you@example.com', 'You', 'admin', unixepoch() * 1000)"
+```
+
+After that, an `admin` manages editors and tokens from the **Access** rail in the
+editor. Adding an editor sends no mail: the row *is* the invitation, and they
+sign in through whichever provider the site configured.
+
+Out of scope, deliberately: **site-visitor auth** — who may *read* a published
+page. That is a different problem (`ROADMAP.md` has it), and reading a published
+page still needs no account at all.
+
 ## Verified
 
 `scripts/sync-test.mjs` (16 checks) exercises the engine against both `vite dev`
@@ -814,8 +943,22 @@ correctly. Two are load-bearing:
   richtext — while leaving the linking documents byte-for-byte unchanged, and
 - a story that references itself renders once rather than forever.
 
-All three run against a live dev server on port 5199, and against the production
-build via `vite preview`.
+`scripts/auth-test.mjs` (42 checks) covers identity and access against the demo's
+own `magicLink` provider: the editor redirecting when signed out and the API
+answering 401, an unauthenticated socket upgrading and then closing 4003, an
+unknown address answered byte-identically to a known one with no link sent, a
+sign-in link that works exactly once, a transaction and a publish attributed to
+the session rather than to what `hello` and `x-folio-actor` claimed, an editor
+refused a publish and a create, a viewer given a read-only socket whose `tx` comes
+back as a `reject`, a read-only token refused a write and refused a socket
+entirely, a cross-origin mutation refused, and — after signing out — the editor and
+the socket both refused while the published page carries on serving to anyone.
+
+Every script runs against a live dev server on port 5199 (and the engine tests
+against the production build via `vite preview`). They sign in first, through
+`scripts/lib/auth.mjs`: the demo's `send` logs the link and stashes it at a
+localhost-only `/dev/last-signin`, which is the stand-in for a mailbox that lets
+these run with no mail credentials at all.
 
 ## Content tree
 
@@ -837,9 +980,14 @@ not migrating the document model:
 
 ## Not built yet
 
-Auth (there is none — anyone can edit), i18n, custom field types defined by a host
-project, and a real package build (the library currently ships TypeScript source
-and the host compiles it).
+i18n, custom field types defined by a host project, and a real package build (the
+library currently ships TypeScript source and the host compiles it).
+
+Within auth: site-visitor access control (who may *read* a published page — see
+`ROADMAP.md`), per-story editor permissions, multi-tenant spaces, SSO group → role
+mapping, passwords/passkeys/TOTP, and a separate `auth_events` audit log. Sign-in
+link rate limiting is per address only; the IP dimension wants a Cloudflare
+rate-limiting rule at the zone.
 
 Within the field types: no tables in richtext, no text colour mark, and no
 embedded bloks inside richtext. Host projects cannot override how a richtext node

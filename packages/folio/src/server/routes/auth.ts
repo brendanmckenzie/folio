@@ -328,7 +328,24 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     if (rt.auth.mode === 'session' && !actor) {
       throw new FolioError('unauthorized', 'Not signed in')
     }
-    return c.json({ mode: rt.auth.mode, actor, loginUrl: `${rt.base}/login` })
+    // Redacted, not the actor verbatim: `session` is the SHA-256 of the cookie's
+    // token and `expiresAt` is bookkeeping, and neither is any use to the admin.
+    // Handing a browser its own session id is not a credential leak — the hash
+    // cannot be presented as the token — but it is internal detail with no
+    // reader, and the smallest response is the one that cannot leak later.
+    const safe =
+      actor === null
+        ? null
+        : actor.kind === 'user'
+          ? {
+              kind: 'user' as const,
+              id: actor.id,
+              name: actor.name,
+              colour: actor.colour,
+              role: actor.role,
+            }
+          : { kind: 'token' as const, id: actor.id, name: actor.name, scopes: actor.scopes }
+    return c.json({ mode: rt.auth.mode, actor: safe, loginUrl: `${rt.base}/login` })
   })
 
   return app
