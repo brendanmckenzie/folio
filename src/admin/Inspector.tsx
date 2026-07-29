@@ -26,6 +26,14 @@ interface Props {
   address?: ReactNode
   /** True while a past version is being previewed. */
   readOnly?: boolean
+  /**
+   * A block belonging to this global was just clicked while previewing
+   * something else (`../../../docs/specs/content-model/globals.md` checkpoint
+   * 3): offer to switch rather than pretend a selection happened. Takes
+   * priority over `blok`, which does not change when this fires.
+   */
+  globalHint?: { name: string; label: string } | null
+  onEditGlobal?: (name: string) => void
 }
 
 /**
@@ -80,8 +88,23 @@ export function Inspector({
   onDuplicate,
   address,
   readOnly = false,
+  globalHint,
+  onEditGlobal,
 }: Props) {
   const { schema } = useFolio()
+
+  if (globalHint) {
+    return (
+      <aside className="inspector">
+        <p className="inspector__empty">
+          This block belongs to <strong>{globalHint.label}</strong>, not this document.
+        </p>
+        <button type="button" onClick={() => onEditGlobal?.(globalHint.name)}>
+          Edit {globalHint.label} →
+        </button>
+      </aside>
+    )
+  }
 
   if (!blok) {
     return (

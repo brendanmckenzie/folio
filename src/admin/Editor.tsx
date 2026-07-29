@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { buildResolution } from '../core/resolve'
-import type { DocumentType, SchemaIndex } from '../core/schema'
+import { type DocumentType, type SchemaIndex, singletonId, typeByName } from '../core/schema'
 import type { StoryNode } from '../core/story'
 import { BlockTree } from './BlockTree'
 import { DataList } from './DataList'
@@ -8,9 +8,11 @@ import { DeleteDialog } from './DeleteDialog'
 import { DiscardDialog } from './DiscardDialog'
 import { DuplicateDialog } from './DuplicateDialog'
 import { FolioProvider, useStoreState } from './FolioContext'
+import { globalPreviewUrl, GlobalsList } from './GlobalsList'
 import { History } from './History'
 import { useBlocks } from './hooks/useBlocks'
 import { useClipboardShortcuts } from './hooks/useClipboardShortcuts'
+import { useGlobalDocs } from './hooks/useGlobalDocs'
 import { useNotice } from './hooks/useNotice'
 import { usePreviewBridge } from './hooks/usePreviewBridge'
 import { usePublish } from './hooks/usePublish'
@@ -34,6 +36,8 @@ interface Props {
   schema: SchemaIndex
   /** Every declared document type, off the manifest (`document-types.md`). */
   types: readonly DocumentType[]
+  /** `FolioConfig.globals`, off the manifest (`content-model/globals.md`). */
+  globals: readonly string[]
   apiBase: string
 }
 
@@ -45,7 +49,7 @@ type Rail = 'content' | 'data' | 'blocks' | 'history' | 'redirects'
  * under hooks/, and everything the panels share reaches them through
  * FolioProvider rather than as props.
  */
-export function Editor({ storyId: initialStoryId, schema, types, apiBase }: Props) {
+export function Editor({ storyId: initialStoryId, schema, types, globals, apiBase }: Props) {
   const [rail, setRail] = useState<Rail>('blocks')
   const [viewport, setViewport] = useState<Viewport>('Desktop')
 
@@ -118,7 +122,22 @@ export function Editor({ storyId: initialStoryId, schema, types, apiBase }: Prop
    */
   const base = useMemo(() => buildResolution(flat, `${apiBase}/asset`), [apiBase, flat])
   const docs = useReferencedDocs(apiBase, state.doc, schema)
-  const resolution = useMemo(() => ({ ...base, docs }), [base, docs])
+  // Fetched once per global, not per keystroke: the admin's own copy exists
+  // only so a clicked uid can be traced back to the global it belongs to
+  // (`globals.md` checkpoint 3), never to render anything itself — the
+  // preview iframe renders every global server-side, fresh, on its own.
+  const globalDocs = useGlobalDocs(apiBase, types, globals)
+  const resolution = useMemo(
+    () => ({ ...base, docs, globals: globalDocs }),
+    [base, docs, globalDocs],
+  )
+
+  // A block inside a global was clicked while previewing something else: the
+  // name of the global to offer "Edit `<name>` →" for, until the next normal
+  // selection or a story switch clears it.
+  const [globalHint, setGlobalHint] = useState<string | null>(null)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: storyId and state.selection are deliberate — neither is read in the body, both are what should clear a stale hint
+  useEffect(() => setGlobalHint(null), [storyId, state.selection])
 
   const showBlocks = useCallback(() => setRail('blocks'), [])
   const frame = usePreviewBridge({
@@ -129,6 +148,7 @@ export function Editor({ storyId: initialStoryId, schema, types, apiBase }: Prop
     root: state.doc?.root,
     blocks,
     onPick: showBlocks,
+    onGlobalClick: setGlobalHint,
   })
 
   useUndoShortcut(store, versions.source.mode === 'live')
@@ -153,15 +173,23 @@ export function Editor({ storyId: initialStoryId, schema, types, apiBase }: Prop
   const isRootBlok = Boolean(!readOnly && state.doc && state.selection === state.doc.root)
 
   const context = useMemo(
-    () => ({ store, schema, types, apiBase, stories: flat }),
-    [apiBase, flat, schema, store, types],
+    () => ({ store, schema, types, globals, apiBase, stories: flat }),
+    [apiBase, flat, globals, schema, store, types],
   )
 
   // A record or a singleton has no URL, so there is no page to preview and no
   // address to edit. The real record-editing UI (a form rather than an iframe)
   // is `../../../docs/specs/content-model/data-documents.md`'s; until then the
-  // block tree and the inspector are the whole editor for one.
+  // block tree and the inspector are the whole editor for one. A singleton
+  // gets a real preview after all when it is a *global*, in the context its
+  // type declares (`content-model/globals.md` decision 4) — the one carve-out
+  // from "no preview" an unrouted document otherwise gets.
   const routed = current ? current.path !== null : true
+  const currentType = current ? typeByName(types, current.type) : undefined
+  const globalPreview =
+    current && currentType?.kind === 'singleton'
+      ? globalPreviewUrl(currentType, flat, apiBase)
+      : undefined
   const hasDataTypes = types.some((t) => t.kind !== 'page')
 
   return (
@@ -245,6 +273,12 @@ export function Editor({ storyId: initialStoryId, schema, types, apiBase }: Prop
 
         <div className="editor__body">
           <div className="rail">
+            <GlobalsList
+              documents={stories.documents}
+              currentId={storyId}
+              onOpen={(id) => stories.open(id)}
+            />
+
             <div className="rail__tabs">
               <button
                 type="button"
@@ -368,6 +402,8 @@ export function Editor({ storyId: initialStoryId, schema, types, apiBase }: Prop
             >
               {current && routed && current.previewUrl ? (
                 <iframe key={current.id} ref={frame} title="Preview" src={current.previewUrl} />
+              ) : current && globalPreview ? (
+                <iframe key={current.id} ref={frame} title="Preview" src={globalPreview} />
               ) : current && !routed ? (
                 <div className="stage__nopreview">
                   <p>
@@ -388,6 +424,12 @@ export function Editor({ storyId: initialStoryId, schema, types, apiBase }: Prop
             onChange={blocks.setField}
             onRemove={blocks.remove}
             onDuplicate={blocks.duplicate}
+            globalHint={
+              globalHint
+                ? { name: globalHint, label: typeByName(types, globalHint)?.label ?? globalHint }
+                : null
+            }
+            onEditGlobal={(name) => stories.open(singletonId(name))}
             address={
               isRootBlok && current && routed ? (
                 <PageAddress
