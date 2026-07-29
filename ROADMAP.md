@@ -49,13 +49,23 @@ Richtext is TipTap in the admin and a JSON walker everywhere else, so published
 pages still ship nothing. See `PARITY.md` for what was deliberately left
 out.
 
+**Unpublish.** Publish's missing pair: one nullable-column write
+(`published_doc`/`published_at` cleared, `unpublished_at`/`unpublished_by` set)
+rather than the only previous route off "live", which was delete — cascading
+the subtree, dropping every version and purging the Durable Object. No
+cascade, idempotent, the draft and history untouched, one click to reverse.
+`folio.status(env, path)` lets a host answer `410 Gone` for a page taken down
+on purpose instead of guessing at `404`. See `docs/specs/editing/unpublish.md`.
+
 ## Next
 
 ### 1. Scheduled publishing
 
 A DO alarm per story. Small, and a real Cloudflare advantage: no cron worker, no
 queue, no polling. Now unblocked: a scheduled publish writes a version like any
-other.
+other. Scheduled *un*publishing (an expiry date) is a one-line addition to the
+same alarm once this exists: `unpublish()` (`server/publish.ts`) already takes
+no `Request` and no `Env`, for exactly this reason.
 
 ## Uncovered from the reference project
 
@@ -64,10 +74,12 @@ Editors also need to browse the *real* site in draft, across navigations. The
 reference does this with `/api/preview` + `/api/exit-preview` setting a signed
 cookie. We should do the same; it also makes share-a-preview-link work.
 
-**Cache invalidation on publish.** The reference runs `revalidate = 60` plus a
-Storyblok webhook hitting `/api/revalidate` with a shared secret. We own both
-sides, so publish can purge directly — no webhook, no secret, no eventual
-consistency window. Needs a cache layer first (Cache API or KV in front of D1).
+**Cache invalidation on publish (and unpublish).** The reference runs
+`revalidate = 60` plus a Storyblok webhook hitting `/api/revalidate` with a
+shared secret. We own both sides, so publish can purge directly — no webhook,
+no secret, no eventual consistency window. Unpublish has to purge the same
+keys, or a cached page outlives the row that served it. Needs a cache layer
+first (Cache API or KV in front of D1).
 
 **Per-story access control.** The reference has an `access_level` field on story
 content and gates rendering on the user's roles. With metadata now living on the

@@ -1,9 +1,12 @@
 // Exercises versioning end to end, including that a restore is expressed as a
 // minimal set of mutations rather than a document overwrite.
 //
-// Imports diff.ts directly: Node strips types natively and that module has only
-// type-only imports, so there is nothing to compile.
+// Imports diff.ts and protocol.ts directly: Node strips types natively and
+// both modules have only type-only imports, so there is nothing to compile.
 const { diff } = await import(new URL('../packages/folio/src/core/diff.ts', import.meta.url))
+const { PROTOCOL_VERSION } = await import(
+  new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
+)
 
 const HTTP = 'http://localhost:5199'
 const API = `${HTTP}/folio`
@@ -34,11 +37,20 @@ function client(name, colour) {
     async hello() {
       await new Promise((r) => ws.addEventListener('open', r, { once: true }))
       ws.send(
-        JSON.stringify({ type: 'hello', actor: name.toLowerCase(), name, colour, lastSyncId: 0 }),
+        JSON.stringify({
+          type: 'hello',
+          actor: name.toLowerCase(),
+          name,
+          colour,
+          lastSyncId: 0,
+          v: PROTOCOL_VERSION,
+        }),
       )
       return (await this.expect((m) => m.type === 'bootstrap')).doc
     },
-    send: (m) => ws.send(JSON.stringify(m)),
+    // Every frame carries the wire version, not only `hello` — the object
+    // refuses any frame that omits it (test/workers/story-do.test.ts).
+    send: (m) => ws.send(JSON.stringify({ ...m, v: PROTOCOL_VERSION })),
     expect(match, ms = 4000) {
       const hit = inbox.find(match)
       if (hit) return Promise.resolve(hit)
@@ -175,6 +187,56 @@ check('activity is newest first', activity[0].syncId > activity.at(-1).syncId)
 check(
   'activity carries the editor name',
   activity.some((e) => e.actorName === 'Alice'),
+)
+
+/* --- unpublish takes the page down; the draft and history survive ------- */
+
+const stillLive = await fetch(`${HTTP}/`)
+check('the page serves before unpublish', stillLive.status !== 404, `status=${stillLive.status}`)
+
+const beforeVersions = await json(`${API}/story/${STORY}/versions`)
+
+const unpub = await json(`${API}/story/${STORY}/unpublish`, { method: 'POST' })
+check('unpublish reports ok and a timestamp', unpub.ok === true && unpub.unpublishedAt > 0)
+
+const down = await fetch(`${HTTP}/`)
+check('the published page 404s once unpublished', down.status === 404, `status=${down.status}`)
+
+const afterUnpublishVersions = await json(`${API}/story/${STORY}/versions`)
+check(
+  'unpublish writes no version: it is not a document snapshot',
+  afterUnpublishVersions.length === beforeVersions.length,
+  `before=${beforeVersions.length} after=${afterUnpublishVersions.length}`,
+)
+
+const draftAfterUnpublish = await fetch(`${HTTP}/?_folio=preview`).then((r) => r.text())
+check(
+  'the draft survives unpublish, still previewable with the restored title',
+  draftAfterUnpublish.includes('Version One'),
+)
+
+const secondUnpub = await json(`${API}/story/${STORY}/unpublish`, { method: 'POST' })
+check(
+  'unpublish is idempotent: a second call reports the same timestamp',
+  secondUnpub.unpublishedAt === unpub.unpublishedAt,
+)
+
+/* --- publishing again is an ordinary publish ----------------------------- */
+
+const pub3 = await json(`${API}/story/${STORY}/publish`, { method: 'POST' })
+check(
+  'republishing after unpublish writes a version like any other',
+  pub3.version?.kind === 'publish',
+)
+
+const backUp = await fetch(`${HTTP}/`)
+check('the page serves again once republished', backUp.status !== 404, `status=${backUp.status}`)
+
+const finalVersions = await json(`${API}/story/${STORY}/versions`)
+check(
+  'republishing retained a further version',
+  finalVersions.length === afterUnpublishVersions.length + 1,
+  `n=${finalVersions.length}`,
 )
 
 const failed = results.filter((r) => !r.ok)

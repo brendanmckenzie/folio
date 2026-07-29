@@ -74,6 +74,13 @@ export default {
     // Published pages look however you want them to. `resolve` supplies the
     // context a document deliberately lacks — story ids to current URLs.
     const doc = await folio.published(env, path)
+    if (!doc) {
+      // folio.status tells apart a page taken down on purpose from one that
+      // never existed, so a host can answer 410 for the former and 404 for
+      // the latter instead of guessing. Folio itself never assumes either.
+      const status = await folio.status(env, path)
+      return new Response('Not found', { status: status === 'unpublished' ? 410 : 404 })
+    }
     const resolution = await folio.resolve(env, doc)
     return render(<Shell title={title}>{folio.render(doc, { resolution })}</Shell>)
   },
@@ -387,6 +394,17 @@ The **History** tab lists versions and recent activity.
 A **version** is coarse and meaningful: every publish writes one, and editors can
 name a checkpoint at any time. They live in D1, so listing them is a cheap query
 that does not touch the Durable Object.
+
+**Unpublish is publish's pair, not delete's.** It clears `published_doc` and
+`published_at` — the entire liveness switch — and leaves the draft, the version
+history and the Durable Object untouched, so taking a page down costs nothing
+you cannot get back with one more click of Publish. There is no cascade: paths
+are independent, so `/about/team` keeps serving whether or not `/about` does,
+and the confirmation names the descendants that stay live rather than
+surprising anyone. It is idempotent, because taking a page down is exactly the
+kind of action someone double-clicks. `folio.status(env, path)` (see "Mount it
+in your Worker" above) lets a host tell a page taken down on purpose apart from
+one that never existed, and answer `410 Gone` instead of guessing at `404`.
 
 **Activity** is the fine-grained trail, read from the DO's mutation log and
 summarised ("Changed Hero · Heading +2 more"). Useful for finding who changed
