@@ -42,7 +42,7 @@ export interface FolioBindings {
  */
 export type StoryStub = Pick<
   StoryDO,
-  'getOrInit' | 'getOrInitWithSyncId' | 'head' | 'recent' | 'purge' | 'fetch'
+  'getOrInit' | 'getOrInitWithSyncId' | 'head' | 'recent' | 'purge' | 'commit' | 'fetch'
 >
 
 export interface FolioConfig<Env> {

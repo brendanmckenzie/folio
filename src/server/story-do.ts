@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers'
 import type { Doc } from '../core/doc'
-import { apply, mutationError } from '../core/mutations'
+import { apply, type Mutation, mutationError } from '../core/mutations'
 import {
   type ActivityEntry,
   type Delta,
@@ -125,6 +125,35 @@ function presenceOf(a: Attachment): Presence {
 }
 
 const encode = (msg: ServerMsg): string => JSON.stringify({ ...msg, v: PROTOCOL_VERSION })
+
+/**
+ * What `commit` answers — the second door into the log
+ * (`schema-migrations.md` architecture decision 4).
+ *
+ * A refusal is a value, not a throw: the runner records it per story and carries
+ * on, so one document whose mutations the object will not take must not abort a
+ * run over a hundred others.
+ */
+export type CommitResult =
+  | {
+      syncId: number
+      txId: string
+      /**
+       * True when this txId was already in the log, so nothing new was written
+       * and nothing was broadcast. The idempotent ack the socket path already
+       * gives a resend, in the shape an RPC caller can read.
+       */
+      replay?: true
+    }
+  | { rejected: string }
+
+/** A commit's own txId when the caller does not supply one. */
+function newTxId(): string {
+  return `tx_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`
+}
+
+/** What `applyTransaction` hands back: the delta it logged, or why it refused. */
+type TransactionResult = { ok: true; delta: Delta; replay: boolean } | { ok: false; reason: string }
 
 export interface StoryDOConfig<Env> {
   /**
@@ -352,10 +381,139 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
     }
 
     /**
-     * The only door a mutation arrives by. Parsing, shape validation and dispatch
-     * all happen inside here: a frame this object cannot read is answered and
-     * discarded, never thrown, because an exception out of a hibernatable handler
-     * takes the connection with it.
+     * Every guarantee a transaction has, in one place: txId dedupe, the frame's
+     * mutation cap, atomic per-mutation validation, the document cap, the log
+     * append, the doc row update and the debounced watermark alarm.
+     *
+     * Extracted because there are now two doors — the socket's `tx` frame and
+     * the `commit` RPC (`schema-migrations.md` architecture decision 4) — and
+     * two copies of this would drift, with the untested copy being the one that
+     * drifted. What each door does *not* share is the fan-out and the role
+     * check: a socket echoes to its sender and excludes it from the broadcast,
+     * a commit has no sender at all.
+     */
+    private async applyTransaction(
+      current: { doc: Doc; syncId: number },
+      mutations: readonly Mutation[],
+      who: { actor: string; name: string | null },
+      txId: string,
+    ): Promise<TransactionResult> {
+      // Already logged: hand back the delta this txId produced the first time.
+      // That idempotent ack is what makes a client's resend after a dropped
+      // acknowledgement safe, and it is checked first so a resend never gets as
+      // far as re-validating against a document that has since moved.
+      const logged = this.logged(txId)
+      if (logged) return { ok: true, delta: logged, replay: true }
+
+      const capError = txCapError(mutations as Mutation[])
+      if (capError) return { ok: false, reason: capError }
+
+      // Atomic at the door: one violation refuses the whole transaction, since
+      // a half-applied tx cannot be undone. Each mutation is checked against
+      // the document the ones before it produced, so a tx that inserts a
+      // parent and moves an existing blok into it is legal — which the restore
+      // path (diff(live, target)) depends on.
+      let next = current.doc
+      for (const m of mutations) {
+        const reason = mutationError(next, m)
+        if (reason) return { ok: false, reason }
+        next = apply(next, m)
+      }
+
+      // Bounds what an unbounded run of individually-legal txs can grow the
+      // document to; each admitted mutation above is already legal on its own,
+      // so this is checked once against the tx's net effect rather than per
+      // mutation. `nextJson` is reused below for the doc row instead of
+      // serialising the document twice.
+      const nextJson = JSON.stringify(next)
+      const docReason = docCapError(next, nextJson)
+      if (docReason) return { ok: false, reason: docReason }
+
+      this.sql.exec(
+        'insert into log (tx_id, actor, actor_name, mutations, at) values (?, ?, ?, ?, ?)',
+        txId,
+        who.actor,
+        who.name,
+        JSON.stringify(mutations),
+        Date.now(),
+      )
+      const syncId = Number(
+        this.sql.exec<{ id: number }>('select last_insert_rowid() as id').toArray()[0]?.id ?? 0,
+      )
+      this.sql.exec('update doc set json = ?, sync_id = ? where id = 1', nextJson, syncId)
+      // Debounced watermark: mirror this log position into D1 a couple of
+      // seconds after the last logged tx, so the tree can show which pages
+      // have unpublished changes without opening every object
+      // (unpublished-changes.md's architecture decision 4). One alarm per
+      // burst, not one per keystroke — `getAlarm` is the "already scheduled"
+      // check.
+      try {
+        if ((await this.ctx.storage.getAlarm()) === null) {
+          await this.ctx.storage.setAlarm(Date.now() + WATERMARK_DEBOUNCE_MS)
+        }
+      } catch {
+        // Scheduling failure is not fatal to the transaction that triggered
+        // it, which has already been logged and is about to be acknowledged.
+      }
+
+      return {
+        ok: true,
+        delta: { syncId, txId, actor: who.actor, mutations: mutations as Mutation[] },
+        replay: false,
+      }
+    }
+
+    /**
+     * The second door into the log, for a caller with no socket
+     * (`schema-migrations.md` architecture decision 4). A content migration
+     * lands through here, and so does `../platform/content-api.md`'s write path.
+     *
+     * **Not a new write path.** It runs the same `applyTransaction` the `tx`
+     * frame does, so it inherits every guard: the cap, atomic validation, the
+     * document ceiling, dedupe, the log append and the watermark alarm. What it
+     * adds is a fan-out with no sender to exclude — every joined socket gets the
+     * delta, which is what makes a migration appear in an open editor live, in
+     * the activity trail, and under Cmd+Z.
+     *
+     * `txId` is optional and generated when absent. A caller that supplies one
+     * gets the log's dedupe: the same txId twice is answered `replay` and
+     * written once. The migration runner deliberately does *not* reuse a txId
+     * across runs — see `server/migrate.ts` for why value-idempotence, not
+     * dedupe, is what protects two concurrent runs.
+     *
+     * Refuses rather than throws when the object has no document yet: the
+     * caller's job is to `getOrInit` first, and inventing a seed here would mean
+     * this object knowing what a document type looks like.
+     */
+    async commit(
+      mutations: Mutation[],
+      actor: { id: string; name: string },
+      txId: string = newTxId(),
+    ): Promise<CommitResult> {
+      const current = this.read()
+      if (!current) {
+        return { rejected: 'no document: this story has never been opened' }
+      }
+
+      const result = await this.applyTransaction(
+        current,
+        mutations,
+        { actor: actor.id, name: actor.name || null },
+        txId,
+      )
+      if (!result.ok) return { rejected: result.reason }
+
+      if (!result.replay) this.broadcast({ type: 'delta', ...result.delta })
+
+      const { syncId, txId: logged } = result.delta
+      return result.replay ? { syncId, txId: logged, replay: true } : { syncId, txId: logged }
+    }
+
+    /**
+     * The only door a mutation arrives by over the wire. Parsing, shape
+     * validation and dispatch all happen inside here: a frame this object cannot
+     * read is answered and discarded, never thrown, because an exception out of
+     * a hibernatable handler takes the connection with it.
      */
     async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
       // Checked ahead of parsing: a frame this large would cost a JSON.parse over
@@ -450,6 +608,10 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
           // read-only editor rather than into a broken one. Checked before the
           // dedupe lookup: a viewer's resend must not be answered with somebody
           // else's delta either.
+          //
+          // Deliberately outside `applyTransaction`: it is a property of *this
+          // door*, not of the log. `commit` has no role to check — the route
+          // that reaches it is gated on `admin` before the RPC is made.
           if (who?.role === 'viewer') {
             this.sendTo(ws, {
               type: 'reject',
@@ -459,87 +621,29 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
             return
           }
 
-          // Already logged: answer with the delta this txId produced the first
-          // time. Sender only, no re-apply, no new syncId — that idempotent ack is
-          // what makes a client's resend after a dropped acknowledgement safe. It
-          // is flagged as a replay because its syncId is old: a client that has
-          // already drained this tx must recognise the frame instead of applying
-          // stale mutations over a newer base.
-          const logged = this.logged(msg.txId)
-          if (logged) {
-            this.sendTo(ws, { type: 'delta', ...logged, replay: true })
-            return
-          }
-
-          // Same envelope as an invalid mutation: oversized is refused at the door
-          // exactly like malformed, and the sender still gets its txId back to drop
-          // the tx from `pending` rather than wait forever for a delta.
-          const capError = txCapError(msg.mutations)
-          if (capError) {
-            this.sendTo(ws, { type: 'reject', txId: msg.txId, reason: capError })
-            return
-          }
-
-          // Atomic at the door: one violation refuses the whole transaction, since
-          // a half-applied tx cannot be undone. Each mutation is checked against
-          // the document the ones before it produced, so a tx that inserts a
-          // parent and moves an existing blok into it is legal — which the restore
-          // path (diff(live, target)) depends on.
-          let next = current.doc
-          for (const m of msg.mutations) {
-            const reason = mutationError(next, m)
-            if (reason) {
-              this.sendTo(ws, { type: 'reject', txId: msg.txId, reason })
-              return
-            }
-            next = apply(next, m)
-          }
-
-          // Bounds what an unbounded run of individually-legal txs can grow the
-          // document to; each admitted mutation above is already legal on its own,
-          // so this is checked once against the tx's net effect rather than per
-          // mutation. `nextJson` is reused below for the doc row instead of
-          // serialising the document twice.
-          const nextJson = JSON.stringify(next)
-          const docReason = docCapError(next, nextJson)
-          if (docReason) {
-            this.sendTo(ws, { type: 'reject', txId: msg.txId, reason: docReason })
-            return
-          }
-
-          this.sql.exec(
-            'insert into log (tx_id, actor, actor_name, mutations, at) values (?, ?, ?, ?, ?)',
+          const result = await this.applyTransaction(
+            current,
+            msg.mutations,
+            { actor, name: who?.name || null },
             msg.txId,
-            actor,
-            who?.name || null,
-            JSON.stringify(msg.mutations),
-            Date.now(),
           )
-          const syncId = Number(
-            this.sql.exec<{ id: number }>('select last_insert_rowid() as id').toArray()[0]?.id ?? 0,
-          )
-          this.sql.exec('update doc set json = ?, sync_id = ? where id = 1', nextJson, syncId)
-          // Debounced watermark: mirror this log position into D1 a couple of
-          // seconds after the last logged tx, so the tree can show which pages
-          // have unpublished changes without opening every object
-          // (unpublished-changes.md's architecture decision 4). One alarm per
-          // burst, not one per keystroke — `getAlarm` is the "already scheduled"
-          // check.
-          try {
-            if ((await this.ctx.storage.getAlarm()) === null) {
-              await this.ctx.storage.setAlarm(Date.now() + WATERMARK_DEBOUNCE_MS)
-            }
-          } catch {
-            // Scheduling failure is not fatal to the transaction that triggered
-            // it, which has already been logged and is about to be acknowledged.
+          if (!result.ok) {
+            // Same envelope for every refusal — oversized, malformed, or over
+            // the document cap — and the sender always gets its txId back so it
+            // can drop the tx from `pending` rather than wait for a delta that
+            // will never come.
+            this.sendTo(ws, { type: 'reject', txId: msg.txId, reason: result.reason })
+            return
           }
-          const delta: ServerMsg = {
-            type: 'delta',
-            syncId,
-            txId: msg.txId,
-            actor,
-            mutations: msg.mutations,
+          if (result.replay) {
+            // Sender only, no re-apply, no new syncId. Flagged as a replay
+            // because its syncId is old: a client that has already drained this
+            // tx must recognise the frame instead of applying stale mutations
+            // over a newer base.
+            this.sendTo(ws, { type: 'delta', ...result.delta, replay: true })
+            return
           }
+          const delta: ServerMsg = { type: 'delta', ...result.delta }
           // The sender's echo is its acknowledgement, so it is sent directly rather
           // than through the fan-out: the pre-hello quarantine withholds edits a
           // socket did not ask for, never the answer to one it did.
