@@ -1,4 +1,6 @@
 import type { Doc } from '../core/doc'
+import { migrateDoc, type Migration, pendingFor } from '../core/migrate'
+import type { DocumentType, SchemaIndex } from '../core/schema'
 
 export type VersionKind = 'publish' | 'checkpoint'
 
@@ -10,9 +12,25 @@ export interface VersionMeta {
   title: string
   actor: string | null
   createdAt: number
+  /**
+   * Which content migration this document was written at
+   * (`schema-migrations.md`), or null for "before the first migration" — the
+   * correct reading for every row written before the column existed.
+   *
+   * The row itself is never rewritten (checkpoint 3): `getVersion` applies the
+   * migrations it is missing on the way out. History stays byte-true, and a
+   * restore across a migration diffs two documents in the same shape rather
+   * than reintroducing pre-migration keys.
+   */
+  schemaId: string | null
 }
 
-const META = `id, story_id as storyId, kind, label, title, actor, created_at as createdAt`
+const META = `id, story_id as storyId, kind, label, title, actor,
+              created_at as createdAt, schema_id as schemaId`
+
+/** `META` qualified, for the one query that joins `stories` (see `getVersion`). */
+const V_META = `v.id, v.story_id as storyId, v.kind, v.label, v.title, v.actor,
+                v.created_at as createdAt, v.schema_id as schemaId`
 
 function newVersionId(): string {
   return `ver_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
@@ -33,17 +51,55 @@ export async function listVersions(
   return results
 }
 
+/**
+ * What `getVersion` needs to bring an old version document up to the current
+ * model on the way out (`schema-migrations.md` checkpoint 3).
+ *
+ * Optional at the call site: a caller with no migrations configured, and every
+ * existing test, gets the stored bytes unchanged.
+ */
+export interface VersionMigrations {
+  migrations: readonly Migration[]
+  schema: SchemaIndex
+  typeOf: (name: string | undefined) => DocumentType | undefined
+}
+
+/**
+ * A version's metadata and its document, **migrated on read**.
+ *
+ * The stored row is never rewritten. That keeps history byte-true — the record
+ * of what was actually published survives a schema change — and it is what makes
+ * a restore across a migration correct: the admin computes `diff(live, target)`,
+ * so a target still holding pre-migration keys would reintroduce them into the
+ * live draft. This is the subtle bug the whole decision exists to avoid.
+ *
+ * The story's *type* comes off a join rather than a second query: it is what
+ * `MigrationContext.type` needs, and a version whose story has since been
+ * deleted has no type to migrate against, so it is handed back as stored.
+ */
 export async function getVersion(
   db: D1Database,
   id: string,
-): Promise<{ meta: VersionMeta; doc: Doc } | null> {
+  migrate?: VersionMigrations,
+): Promise<{ meta: VersionMeta; doc: Doc; migrated: string[] } | null> {
   const row = await db
-    .prepare(`select ${META}, doc from versions where id = ?`)
+    .prepare(
+      `select ${V_META}, v.doc, s.type as storyType
+       from versions v left join stories s on s.id = v.story_id
+       where v.id = ?`,
+    )
     .bind(id)
-    .first<VersionMeta & { doc: string }>()
+    .first<VersionMeta & { doc: string; storyType: string | null }>()
   if (!row) return null
-  const { doc, ...meta } = row
-  return { meta, doc: JSON.parse(doc) as Doc }
+  const { doc: json, storyType, ...meta } = row
+  const stored = JSON.parse(json) as Doc
+
+  const due = migrate ? pendingFor(meta.schemaId, migrate.migrations) : []
+  const type = migrate && storyType !== null ? migrate.typeOf(storyType) : undefined
+  if (due.length === 0 || !type || !migrate) return { meta, doc: stored, migrated: [] }
+
+  const { doc } = migrateDoc(stored, due, migrate.schema, type)
+  return { meta, doc, migrated: due.map((m) => m.id) }
 }
 
 export interface WriteVersionInput {
@@ -61,6 +117,13 @@ export interface WriteVersionInput {
    * what `stories.title` caches.
    */
   title: string
+  /**
+   * The migration this document is written at — `FolioRuntime.schemaId`, the
+   * last configured migration. Stamped so `getVersion` knows what this row is
+   * *missing*: a version written today needs nothing applied, and one written
+   * before the first migration reads null and gets the lot.
+   */
+  schemaId?: string | null
 }
 
 function buildVersionMeta(input: WriteVersionInput): VersionMeta {
@@ -72,6 +135,7 @@ function buildVersionMeta(input: WriteVersionInput): VersionMeta {
     title: input.title.trim() || 'Untitled',
     actor: input.actor ?? null,
     createdAt: Date.now(),
+    schemaId: input.schemaId ?? null,
   }
 }
 
@@ -80,8 +144,8 @@ function buildVersionMeta(input: WriteVersionInput): VersionMeta {
 function versionStatement(db: D1Database, meta: VersionMeta, doc: Doc): D1PreparedStatement {
   return db
     .prepare(
-      `insert into versions (id, story_id, kind, label, title, actor, doc, created_at)
-       values (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `insert into versions (id, story_id, kind, label, title, actor, doc, created_at, schema_id)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       meta.id,
@@ -92,6 +156,7 @@ function versionStatement(db: D1Database, meta: VersionMeta, doc: Doc): D1Prepar
       meta.actor,
       JSON.stringify(doc),
       meta.createdAt,
+      meta.schemaId,
     )
 }
 

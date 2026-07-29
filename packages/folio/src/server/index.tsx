@@ -1,8 +1,10 @@
 import { singletonId } from '../core/schema'
 import { FolioDoc, renderGlobalNode } from '../preview/Render'
 import { createApp } from './app'
+import { audit } from './audit'
 import { credentialOf, resolveActor } from './auth/resolve'
 import { allows, READ_DRAFT } from './auth/roles'
+import { runMigrations } from './migrate'
 import { previewPage } from './pages'
 import { lookupRedirect } from './redirects'
 import { createRuntime } from './runtime'
@@ -19,8 +21,22 @@ import type { Folio, FolioConfig } from './types'
 
 export { StoryDO }
 export type { DocumentKind, DocumentType } from '../core/schema'
+export type { Migration } from '../core/migrate'
 export type { VersionKind, VersionMeta } from './versions'
 export type { Redirect } from './redirects'
+/**
+ * The migration and audit surface a host reads off a report. The *authoring*
+ * side (`defineMigration`, `field`, `block`) lives in `folio/engine`, where the
+ * rest of the document tooling is.
+ */
+export type {
+  MigrateFailure,
+  MigrateOptions,
+  MigrateOversized,
+  MigrateReport,
+  MigrationStatus,
+} from './migrate'
+export type { AuditReport, ContentFinding, SchemaFinding } from './audit'
 export type {
   CheckpointedHookPayload,
   CreatedHookPayload,
@@ -152,5 +168,25 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       return docs[id] ?? null
     },
     renderGlobal: (resolution, name, opts) => renderGlobalNode(rt.registry, resolution, name, opts),
+    /**
+     * Explicit, never automatic (`schema-migrations.md` checkpoint 5). Assembled
+     * from bindings alone, exactly as `publishDeps` is, so a deploy script and
+     * the `POST {base}/migrate` route reach the identical runner.
+     */
+    migrate: (env, opts) => {
+      const bindings = config.bindings(env)
+      return runMigrations(
+        {
+          db: bindings.db,
+          schema: rt.schema,
+          migrations: rt.migrations,
+          typeOf: rt.typeOf,
+          draft: (story) => rt.draftFor(bindings, story),
+          stub: (id) => rt.stub(bindings, id),
+        },
+        opts,
+      )
+    },
+    audit: (env) => audit(config.bindings(env).db, rt.schema),
   }
 }

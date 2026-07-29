@@ -24,7 +24,8 @@ import { clearRedirectAtStatement, redirectStatements } from './redirects'
 const COLS = `id, type, parent_id as parentId, slug, path, ord, title,
               published_at as publishedAt, unpublished_at as unpublishedAt,
               updated_at as updatedAt, draft_sync_id as draftSyncId,
-              draft_updated_at as draftUpdatedAt, published_sync_id as publishedSyncId`
+              draft_updated_at as draftUpdatedAt, published_sync_id as publishedSyncId,
+              schema_id as schemaId`
 
 /** A `COLS` row before `state`/`hasUnpublishedChanges` are derived onto it. */
 type StoryRow = Omit<StoryMeta, 'state' | 'hasUnpublishedChanges'>
@@ -151,6 +152,105 @@ export async function publishedDocsByIds(
   return out
 }
 
+/* ---------------------------------------------- content migrations (0008) --- */
+
+/** One document the migration runner has work to consider (`schema-migrations.md`). */
+export interface BehindStory {
+  story: StoryMeta
+  /** The published snapshot as stored, or null when nothing is live. */
+  publishedDoc: Doc | null
+}
+
+/**
+ * The predicate for "this document has not had every migration": null reads as
+ * "before the first migration", which is what makes a row written before 0008
+ * pick up the whole set.
+ */
+const BEHIND = '(schema_id is null or schema_id < ?)'
+
+/**
+ * Documents behind `latestId`, in `id` order, starting after `after` — the
+ * runner's batch (`schema-migrations.md` architecture decision 5).
+ *
+ * Ordered by the primary key and resumed by a cursor rather than by OFFSET,
+ * because the rows this returns are the rows the batch is about to *change*: an
+ * OFFSET over a set that shrinks as you walk it skips documents.
+ */
+export async function storiesBehind(
+  db: D1Database,
+  latestId: string,
+  after: string | null,
+  limit: number,
+): Promise<BehindStory[]> {
+  const { results } = await db
+    .prepare(
+      `select ${COLS}, published_doc from stories
+       where ${BEHIND} and id > ? order by id limit ?`,
+    )
+    .bind(latestId, after ?? '', limit)
+    .all<StoryRow & { published_doc: string | null }>()
+
+  return results.map(({ published_doc, ...row }) => ({
+    story: withState(row),
+    publishedDoc: published_doc ? (JSON.parse(published_doc) as Doc) : null,
+  }))
+}
+
+/**
+ * How many documents are still behind. The runner's completion test, and the
+ * admin's "N documents to migrate" — asked directly rather than accumulated
+ * across batches, so it is right however many calls a run took and however many
+ * runs there have been.
+ */
+export async function countBehind(db: D1Database, latestId: string): Promise<number> {
+  const row = await db
+    .prepare(`select count(*) as n from stories where ${BEHIND}`)
+    .bind(latestId)
+    .first<{ n: number }>()
+  return row?.n ?? 0
+}
+
+/**
+ * Stamps a document's migration watermark, and its migrated published snapshot
+ * when there is one, unrun.
+ *
+ * Unrun so the caller can batch the two writes together: a `published_doc` in
+ * the new shape with a `schema_id` still claiming the old one would make the
+ * next run migrate it twice — harmless, since migrations are idempotent, but
+ * only by luck. `undefined` leaves `published_doc` alone, which is the case for
+ * a document that has never been published.
+ */
+export function stampSchemaStatement(
+  db: D1Database,
+  id: string,
+  schemaId: string,
+  publishedDoc?: Doc,
+): D1PreparedStatement {
+  return publishedDoc === undefined
+    ? db.prepare('update stories set schema_id = ? where id = ?').bind(schemaId, id)
+    : db
+        .prepare('update stories set schema_id = ?, published_doc = ? where id = ?')
+        .bind(schemaId, JSON.stringify(publishedDoc), id)
+}
+
+/**
+ * Every published document, for the drift audit (`schema-migrations.md`
+ * decision 7). One query, no Durable Objects: the audit reports on what the
+ * site is *serving*, which is the copy an operator can see is wrong.
+ */
+export async function publishedDocsAll(
+  db: D1Database,
+): Promise<{ id: string; type: string; doc: Doc }[]> {
+  const { results } = await db
+    .prepare('select id, type, published_doc from stories where published_doc is not null')
+    .all<{ id: string; type: string; published_doc: string }>()
+  return results.map((row) => ({
+    id: row.id,
+    type: row.type,
+    doc: JSON.parse(row.published_doc) as Doc,
+  }))
+}
+
 /**
  * The set of rows a document's `slug` must be unique within and its `ord` is
  * ordered against — the two things that differ between a routed and an unrouted
@@ -225,6 +325,18 @@ export interface CreateStoryInput {
    * both null.
    */
   type: DocumentType
+  /**
+   * The content-migration watermark to stamp (`schema-migrations.md`). Callers
+   * pass `FolioRuntime.schemaId` — the last configured migration — because a
+   * document created now is seeded by `blankSubtree` from the *current* schema
+   * and is therefore already in the target shape. Leaving it null would put a
+   * "this page has not been updated for the latest content model" banner on a
+   * page created five seconds ago, and make every run re-read it.
+   *
+   * `undefined` writes null, which is the honest answer for a caller that has no
+   * migrations to speak of.
+   */
+  schemaId?: string | null
 }
 
 /**
@@ -269,6 +381,7 @@ export async function createStory(
     draftSyncId: 0,
     draftUpdatedAt: null,
     publishedSyncId: 0,
+    schemaId: input.schemaId ?? null,
     state: 'draft',
     hasUnpublishedChanges: false,
     updatedAt: Date.now(),
@@ -281,8 +394,8 @@ export async function createStory(
   // An unrouted document claims no path, so there is nothing to clear.
   const insert = db
     .prepare(
-      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at)
-       values (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, schema_id)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       story.id,
@@ -293,6 +406,7 @@ export async function createStory(
       story.ord,
       story.title,
       story.updatedAt,
+      story.schemaId ?? null,
     )
   await db.batch(
     story.path === null ? [insert] : [insert, clearRedirectAtStatement(db, story.path)],
@@ -313,7 +427,13 @@ export async function createStory(
  * `on conflict do nothing` handles two concurrent first accesses: the loser's
  * insert is a no-op and both then read the same row.
  */
-export async function ensureSingleton(db: D1Database, type: DocumentType): Promise<StoryMeta> {
+export async function ensureSingleton(
+  db: D1Database,
+  type: DocumentType,
+  /** The migration watermark to stamp on a freshly created row; see
+   * `CreateStoryInput.schemaId` for why a new document is born up to date. */
+  schemaId: string | null = null,
+): Promise<StoryMeta> {
   if (type.kind !== 'singleton') {
     throw new Error(`Document type '${type.name}' is not a singleton`)
   }
@@ -324,11 +444,11 @@ export async function ensureSingleton(db: D1Database, type: DocumentType): Promi
   const now = Date.now()
   await db
     .prepare(
-      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at)
-       values (?, ?, null, ?, null, 'a0', ?, ?)
+      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, schema_id)
+       values (?, ?, null, ?, null, 'a0', ?, ?, ?)
        on conflict (id) do nothing`,
     )
-    .bind(id, type.name, type.name, type.label, now)
+    .bind(id, type.name, type.name, type.label, now, schemaId)
     .run()
 
   const row = await storyById(db, id)
@@ -389,6 +509,11 @@ export async function duplicateStory(
       // refuses a parent for it anyway, so this is only ever read for a page.
       parentId: patch.parentId !== undefined ? patch.parentId : source.parentId,
       type,
+      // The source's own watermark, not the latest: the copy's *document* is a
+      // clone of the source's draft, so it is in exactly the shape the source is
+      // in. Claiming otherwise would leave a duplicate of a behind page
+      // permanently unmigrated (`schema-migrations.md`).
+      schemaId: source.schemaId ?? null,
     },
     types,
   )

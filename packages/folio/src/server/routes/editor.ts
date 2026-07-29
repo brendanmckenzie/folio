@@ -129,7 +129,7 @@ export function editorRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const type = rt.typeOf(name)
     if (type?.kind !== 'singleton') return c.notFound()
     const bindings = c.var.bindings()
-    const story = await ensureSingleton(bindings.db, type)
+    const story = await ensureSingleton(bindings.db, type, rt.schemaId)
     return previewPage(rt, bindings, story, { bare: true })
   })
 

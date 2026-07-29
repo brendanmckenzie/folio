@@ -9,12 +9,15 @@
 import type { ReactNode } from 'react'
 import type { AnyBlockDef, Registry } from '../core/block'
 import type { Doc } from '../core/doc'
+import type { Migration } from '../core/migrate'
 import type { Resolution } from '../core/resolve'
 import type { DocumentType } from '../core/schema'
 import type { StoryMeta, StoryNode } from '../core/story'
 import type { AuthConfig, OpenAuth } from './auth/config'
 import type { Actor } from './auth/roles'
 import type { FolioHooks } from './hooks'
+import type { AuditReport } from './audit'
+import type { MigrateOptions, MigrateReport } from './migrate'
 import type { StoryDO } from './story-do'
 
 export interface FolioBindings {
@@ -126,6 +129,23 @@ export interface FolioConfig<Env> {
    * Validated at construction — every name must name a declared `singleton`.
    */
   globals?: readonly string[]
+  /**
+   * Content migrations, in run order
+   * (`../../../docs/specs/foundation/schema-migrations.md`). Each is a pure
+   * function from a document to a list of mutations, written with
+   * `defineMigration` from `folio/engine`.
+   *
+   * Declared here rather than discovered, because the order is the contract:
+   * `stories.schema_id` records how far a document has come and compares
+   * lexicographically, so the ids must sort in run order. `createFolio` checks
+   * that (`validateMigrations`) rather than assuming it — a set of ids whose
+   * declared order and sort order disagree would migrate documents in an order
+   * that depends on which comparison happened to be used.
+   *
+   * Nothing runs automatically. `folio.migrate(env)` from a script, a deploy
+   * step, or `POST {base}/migrate` (checkpoint 5).
+   */
+  migrations?: readonly Migration[]
 }
 
 export interface Folio<Env> {
@@ -193,6 +213,30 @@ export interface Folio<Env> {
    * a host's own render call should not set it (`globals.md` edge case).
    */
   renderGlobal: (resolution: Resolution, name: string, opts?: { edit?: boolean }) => ReactNode
+  /**
+   * Runs the pending content migrations
+   * (`../../../docs/specs/foundation/schema-migrations.md`). Explicit, never on
+   * boot: a migration that runs itself on the first request after a deploy runs
+   * inside a request whose CPU limit it can exceed, on a cold Worker, with
+   * nobody watching (checkpoint 5).
+   *
+   * One call sweeps up to `opts.batch` documents and answers `continueFrom`;
+   * re-call with it until it is null. `{ dryRun: true }` computes everything and
+   * writes nothing — including no ledger row — and answers the same shape.
+   *
+   * Safe to run twice: migrations are idempotent, so a second run over a
+   * migrated document produces zero mutations and reports it `unchanged`. That
+   * is also how you check the first one worked.
+   */
+  migrate: (env: Env, opts?: MigrateOptions) => Promise<MigrateReport>
+  /**
+   * The drift report (`schema-migrations.md` decision 7): orphaned keys, unknown
+   * block types and missing fields across every *published* document, plus the
+   * schema-only checks. Read-only — nothing is modified, and it is deliberately
+   * not part of the migrate path, since an audit that runs as a side effect of a
+   * write is an audit nobody reads.
+   */
+  audit: (env: Env) => Promise<AuditReport>
 }
 
 /**

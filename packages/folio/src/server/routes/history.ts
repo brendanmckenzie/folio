@@ -52,11 +52,18 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * Returns the version's document. Restoring happens on the client: it diffs
    * the live document against this one and applies the result as a single
    * transaction, so a restore syncs to other editors and can be undone.
+   *
+   * The document is **migrated on read** (`schema-migrations.md` checkpoint 3):
+   * the stored row is never rewritten, so history stays byte-true, and the
+   * restore's `diff(live, target)` is computed between two documents in the same
+   * shape. Without it a restore across a migration would reintroduce
+   * pre-migration keys — the subtle bug that decision exists to avoid.
    */
   app.get('/versions/:versionId', requireAccess<Env>(rt, READ_DRAFT), async (c) => {
     const found = await getVersion(
       c.var.bindings().db,
       idParam('versionId', c.req.param('versionId')),
+      { migrations: rt.migrations, schema: rt.schema, typeOf: rt.typeOf },
     )
     if (!found) throw new FolioError('not_found', 'Unknown version')
     return c.json(found)

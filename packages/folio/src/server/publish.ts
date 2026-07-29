@@ -101,6 +101,12 @@ export async function publish(
     doc,
     actor,
     title: resolvedTitle,
+    // The story's *own* watermark, not the latest configured migration
+    // (`schema-migrations.md`). The bytes going into this row are the draft as it
+    // stands, so a version of a page that has not been migrated yet must say so —
+    // otherwise `getVersion` would hand it back unmigrated while claiming it was
+    // current, and a restore from it would reintroduce pre-migration keys.
+    schemaId: meta.schemaId ?? null,
   })
   const {
     publishedAt,
@@ -191,6 +197,9 @@ export async function checkpoint(
     label: input.label ?? null,
     actor,
     title: deps.titleFor(meta, doc),
+    // Same as publish: the shape of the document this row holds, not the shape
+    // the code currently wants.
+    schemaId: meta.schemaId ?? null,
   })
   await deps.hooks?.run('checkpointed', { story: meta, version, actor })
 

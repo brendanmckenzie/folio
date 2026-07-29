@@ -10,6 +10,7 @@ import { assetRoutes } from './routes/assets'
 import { authRoutes } from './routes/auth'
 import { editorRoutes } from './routes/editor'
 import { historyRoutes } from './routes/history'
+import { migrationRoutes } from './routes/migrations'
 import { redirectRoutes } from './routes/redirects'
 import { storyRoutes } from './routes/stories'
 import type { FolioRuntime } from './runtime'
@@ -69,6 +70,7 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   app.route('/', assetRoutes<Env>(rt))
   app.route('/', editorRoutes<Env>(rt))
   app.route('/', redirectRoutes<Env>(rt))
+  app.route('/', migrationRoutes<Env>(rt))
 
   return app
 }

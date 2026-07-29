@@ -303,7 +303,8 @@ await seed(showcase.id, (root) => [
         ),
       ),
     ),
-    attribution: 'A caption-style field',
+    credit: 'A caption-style field',
+    tone: 'quiet',
   }),
 
   /* asset: intrinsic size, alt text, focal point ------------------------ */

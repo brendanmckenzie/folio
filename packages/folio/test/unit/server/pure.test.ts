@@ -832,6 +832,7 @@ const VERSION = {
   title: 'X',
   actor: null,
   createdAt: 0,
+  schemaId: null,
 }
 
 const PUBLISHED_EXTRA = { story: STORY, doc: DOC, version: VERSION, publishedAt: 1, actor: null }

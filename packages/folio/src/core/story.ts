@@ -42,6 +42,17 @@ export interface StoryMeta {
   /** When the watermark above was last written. Null until the first debounced write. */
   draftUpdatedAt: number | null
   publishedSyncId: number
+  /**
+   * The last content migration applied to this document
+   * (`schema-migrations.md`), or null for "before the first migration" — which
+   * is the correct reading for every row written before the column existed.
+   *
+   * Optional on the type rather than required, unlike the watermark pair above:
+   * it is read by exactly two places (the runner's sweep and the admin's
+   * behind-the-model banner), and making it required would mean touching every
+   * hand-built `StoryMeta` literal in the tree for no gain at either.
+   */
+  schemaId?: string | null
   /** Derived, not stored — see `draftState`. */
   state: StoryState
   /** Derived, not stored: `state === 'changed'`, named for callers that only

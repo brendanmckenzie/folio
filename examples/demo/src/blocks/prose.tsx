@@ -37,15 +37,35 @@ export const prose = defineBlock({
 export const pullquote = defineBlock({
   name: 'pullquote',
   label: 'Pull quote',
-  summary: 'attribution',
+  summary: 'credit',
   fields: {
     quote: richtext({ label: 'Quote', marks: ['bold', 'italic', 'link'], nodes: ['paragraph'] }),
-    attribution: text({ label: 'Attribution' }),
+    /**
+     * Renamed from `attribution` (`src/migrations.ts`, `0001`). The old key is
+     * still sitting in every document written before the rename, which is
+     * exactly the problem `docs/specs/foundation/schema-migrations.md` exists
+     * to solve: nothing reads it, nothing renders it, and the field the admin
+     * now draws is empty.
+     */
+    credit: text({ label: 'Credit' }),
+    /**
+     * Added after the block already existed, so documents written before it
+     * have no `tone` key at all — `Field.default` is read at *creation* only.
+     * `0002` fills the gap retroactively with `field.default`.
+     */
+    tone: select({
+      label: 'Tone',
+      options: [
+        { label: 'Quiet', value: 'quiet' },
+        { label: 'Loud', value: 'loud' },
+      ],
+      default: 'quiet',
+    }),
   },
-  render: ({ quote, attribution }) => (
-    <figure className="pullquote">
+  render: ({ quote, credit, tone }) => (
+    <figure className="pullquote" data-tone={tone || 'quiet'}>
       <blockquote className="pullquote__body">{quote}</blockquote>
-      {attribution ? <figcaption className="pullquote__by">{attribution}</figcaption> : null}
+      {credit ? <figcaption className="pullquote__by">{credit}</figcaption> : null}
     </figure>
   ),
 })

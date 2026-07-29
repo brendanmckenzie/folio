@@ -3,6 +3,7 @@ import { resolveAsset, type Doc, type Resolution } from 'folio/core'
 import type { ReactElement } from 'react'
 import { renderToReadableStream } from 'react-dom/server.edge'
 import { blocks } from './blocks'
+import { migrations } from './migrations'
 
 export { StoryDO } from 'folio/server'
 
@@ -84,6 +85,13 @@ const folio = createFolio<Env>({
   // (`content-model/globals.md`). `settings` doubles as the footer here —
   // its root block already renders a `<footer>`.
   globals: ['header', 'settings'],
+  // schema-migrations.md: content migrations, in run order, each a pure function
+  // from a document to a list of mutations. Nothing runs on boot — `POST
+  // /folio/migrate` (admin) or `folio.migrate(env)` from a deploy step, because
+  // a migration that runs itself on the first request after a deploy runs inside
+  // a request whose CPU limit it can exceed, on a cold Worker, with nobody
+  // watching. See src/migrations.ts.
+  migrations,
   // publish-hooks.md: an after-commit callback, not a webhook -- the host and
   // Folio are the same Worker, so a cache purge or a notification is a typed
   // function call rather than an HTTP round trip to itself. This demo has no
