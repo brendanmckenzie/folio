@@ -15,7 +15,9 @@ export interface Stories {
   open: (id: string) => void
   create: (title: string, parentId: string | null) => Promise<void>
   patch: (id: string, patch: Record<string, unknown>) => Promise<void>
-  remove: (story: StoryNode) => Promise<void>
+  /** `redirect` (redirects.md) is the delete confirmation's checkbox value:
+   * true writes a redirect to the parent, false is the escape hatch. */
+  remove: (story: StoryNode, redirect: boolean) => Promise<void>
 }
 
 function flatten(nodes: StoryNode[]): StoryNode[] {
@@ -99,10 +101,12 @@ export function useStories(apiBase: string, initialStoryId: string, notify: Noti
   )
 
   const remove = useCallback(
-    async (story: StoryNode) => {
+    async (story: StoryNode, redirect: boolean) => {
       try {
         await expectOk(
-          await fetch(`${apiBase}/stories/${encodeURIComponent(story.id)}`, { method: 'DELETE' }),
+          await fetch(`${apiBase}/stories/${encodeURIComponent(story.id)}?redirect=${redirect}`, {
+            method: 'DELETE',
+          }),
         )
       } catch (e) {
         notify((e as Error).message)

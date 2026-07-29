@@ -90,7 +90,18 @@ export default {
     const url = new URL(req.url)
     const path = url.pathname.replace(/^\/+|\/+$/g, '')
     const doc = await folio.published(env, path)
-    if (!doc) return new Response('host: not found', { status: 404 })
+    if (!doc) {
+      // redirects.md's architecture decision 2: only reached once folio.published
+      // has already said null, so a live story always wins over a redirect —
+      // and creating one at a redirected path deletes the row anyway.
+      const hit = await folio.redirect(env, path)
+      if (hit) {
+        const location = new URL(hit.to, url.origin)
+        location.search = url.search
+        return Response.redirect(location.toString(), hit.status)
+      }
+      return new Response('host: not found', { status: 404 })
+    }
 
     const resolution = await folio.resolve(env, doc)
     const shell = Shell({

@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { buildResolution } from '../core/resolve'
 import type { SchemaIndex } from '../core/schema'
+import type { StoryNode } from '../core/story'
 import { BlockTree } from './BlockTree'
+import { DeleteDialog } from './DeleteDialog'
 import { FolioProvider, useStoreState } from './FolioContext'
 import { History } from './History'
 import { useBlocks } from './hooks/useBlocks'
 import { useNotice } from './hooks/useNotice'
 import { usePreviewBridge } from './hooks/usePreviewBridge'
 import { usePublish } from './hooks/usePublish'
+import { useRedirects } from './hooks/useRedirects'
 import { useReferencedDocs } from './hooks/useReferencedDocs'
 import { useStories } from './hooks/useStories'
 import { useUndoShortcut } from './hooks/useUndoShortcut'
 import { useVersions } from './hooks/useVersions'
 import { Inspector } from './Inspector'
 import { PageAddress } from './PageAddress'
+import { Redirects } from './Redirects'
 import { StoryStore } from './store'
 import { StoryTree } from './StoryTree'
 import { TopBar, VIEWPORTS, type Viewport } from './TopBar'
@@ -26,7 +30,7 @@ interface Props {
   apiBase: string
 }
 
-type Rail = 'content' | 'blocks' | 'history'
+type Rail = 'content' | 'blocks' | 'history' | 'redirects'
 
 /**
  * Composition and layout only. Every domain — the story tree, versions, the
@@ -68,6 +72,13 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
   // whatever story is now current. Comparing against `storyId` below closes it
   // on navigation for free, with no effect needed to reset it.
   const [confirmingUnpublishFor, setConfirmingUnpublishFor] = useState<string | null>(null)
+
+  // Same reasoning as `confirmingUnpublishFor`, but the dialog needs the whole
+  // node (its path, for the redirect-target label) rather than just an id.
+  const [confirmingDeleteFor, setConfirmingDeleteFor] = useState<StoryNode | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const redirects = useRedirects(apiBase, notify, rail === 'redirects')
 
   /**
    * `/folio/stories` already returns every story's id, path and URL, so links
@@ -144,6 +155,22 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
           />
         ) : null}
 
+        {confirmingDeleteFor ? (
+          <DeleteDialog
+            story={confirmingDeleteFor}
+            tree={flat}
+            busy={deleting}
+            onCancel={() => setConfirmingDeleteFor(null)}
+            onConfirm={(redirect) => {
+              setDeleting(true)
+              void stories.remove(confirmingDeleteFor, redirect).then(() => {
+                setDeleting(false)
+                setConfirmingDeleteFor(null)
+              })
+            }}
+          />
+        ) : null}
+
         <div className="editor__body">
           <div className="rail">
             <div className="rail__tabs">
@@ -168,6 +195,13 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
               >
                 History
               </button>
+              <button
+                type="button"
+                className={rail === 'redirects' ? 'is-active' : ''}
+                onClick={() => setRail('redirects')}
+              >
+                Redirects
+              </button>
             </div>
 
             {rail === 'content' ? (
@@ -177,7 +211,7 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
                 onOpen={(story) => stories.open(story.id)}
                 onCreate={stories.create}
                 onMove={(id, parentId, index) => stories.patch(id, { parentId, index })}
-                onDelete={stories.remove}
+                onDelete={(story) => setConfirmingDeleteFor(story)}
               />
             ) : rail === 'history' ? (
               state.doc ? (
@@ -195,6 +229,15 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
               ) : (
                 <p className="rail__loading">Loading…</p>
               )
+            ) : rail === 'redirects' ? (
+              <Redirects
+                rows={redirects.rows}
+                loading={redirects.loading}
+                source={redirects.source}
+                onSourceChange={redirects.setSource}
+                onCreate={redirects.create}
+                onDelete={redirects.remove}
+              />
             ) : shownDoc ? (
               <BlockTree
                 doc={shownDoc}
