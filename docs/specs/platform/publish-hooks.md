@@ -3,7 +3,7 @@
 > **Group:** platform
 > **Build order:** 7
 > **Size:** S
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** none
 > **Last updated:** 2026-07-29
@@ -378,3 +378,75 @@ tests, and a browser adds nothing.
   an application.
 - **Cache invalidation itself.** `ROADMAP.md`'s item; this spec provides the seam it
   needs and deliberately does not choose a cache.
+
+## Implementation notes
+
+All five owner decision checkpoints landed as recommended. Both phases of the plan
+shipped, though not as two independently-green commits: `publishDeps` gaining a
+required `hookCtx` second parameter (decision 3) breaks every existing call site in
+the same edit that adds it, so phase 1 (the runner) and the `publish.ts` half of
+phase 2 (the call sites) landed together, with the `created`/`pathsChanged`/`deleted`
+call sites and their workers tests as a second commit, and docs as a third.
+
+**Ground truth was accurate.** `publish()`'s single `db.batch([versionStatement,
+publishStatement])` was exactly where the spec said, and `PublishDeps`/`createRuntime`
+carried the extra required parameters carryover flagged (`draftWithSyncId`,
+`publishedSyncId`) with no surprises.
+
+**What the spec's sketch did not anticipate, because it predates the specs that
+built the code paths it hooks:**
+
+- `updateStory` (rename/move) had no way to hand `pathsChanged`'s caller the
+  `changes` list without either recomputing the diff a second time or changing
+  `updateStory`'s own return shape (used by ~15 existing tests as a bare
+  `StoryMeta`). Resolved the way `deleteStoryStatement`/`deleteStory` already split
+  the same problem: a new `updateStoryStatement(db, id, patch)` returns
+  `{ next, statements, changes }` unrun, and `updateStory` is now a two-line wrapper
+  that runs it and returns `next`, unchanged for every existing caller. The route is
+  the only caller of the new function.
+- `deleteStoryStatement` gained a `paths: string[]` field (same order as `ids`) for
+  the same reason — `deleted`'s payload needs the paths and the row is gone by the
+  time anything could look them up again.
+- `pathsChanged` and `created` fire only when something actually changed: a plain
+  title edit that leaves every path alone fires no `pathsChanged` (an empty
+  `changes` array would purge nothing), and a failed write fires nothing, per the
+  edge cases already in this spec. Not spelled out as its own acceptance criterion,
+  but a direct reading of "the event that knows both the old and the new path" —
+  there has to be an old and a new that differ.
+- Unpublishing an already-unpublished story (the idempotent no-write path) fires no
+  `unpublished` — nothing committed, so there is nothing for an after-commit hook to
+  be about.
+
+**The internal-hook seam (decision 5, for `../editing/live-collaboration.md`):**
+`server/hooks.ts` exports `InternalHooks<Env> = readonly FolioHooks<Env>[]` — a plain
+array of the same `FolioHooks` object shape a host writes, not a parallel type or a
+per-event array map. `createHookRunner(hooks, ctx, internal = [])` takes it as a
+third, optional parameter; `createRuntime` holds one such array (empty today, with a
+comment naming the seam) and threads it into every `publishDeps` call. On `run(name,
+...)`, every internal hook registered for that event executes — each wrapped in its
+own try/catch, logged exactly like a host hook's failure — strictly before the host's
+own handler for the same event, so a host hook can assume other editors have already
+been told. Spec 16 adds its space-channel broadcast by pushing one `FolioHooks`
+literal onto that array; nothing else in this file needs to change.
+
+**Deferred:** the Durable Object alarm call site itself. Scheduled publishing has no
+route or alarm handler yet ("next on the roadmap" per `publish.ts`'s own header), so
+there is nothing to wire `alarmHookCtx` into beyond the helper existing and being
+unit-tested directly. Whoever builds scheduled publishing calls
+`publish(deps, story, actor)` with `deps.hooks` built from `createHookRunner(config
+.hooks, alarmHookCtx(env), internalHooks)` and nothing else changes.
+
+**Tests:** 25 added (853 total, was 828) — 15 unit (`test/unit/server/pure.test.ts`:
+the runner in isolation, `validateHooks`, and `alarmHookCtx`'s fallback waitUntil) and
+10 workers (`test/workers/http.test.ts`: every event at its real HTTP call site, a
+throwing hook not affecting the response, a failed write firing nothing, the
+idempotent-unpublish and no-path-change silences). The workers tests build their own
+`createFolio` instance per test (`app.test.ts`'s existing pattern) rather than adding
+hooks to the shared `test/workers/worker.ts` fixture — that fixture is the pool's
+`main` module, and vitest-pool-workers proxies named exports from it over an RPC
+boundary that cannot carry a plain array back to the test file. A second, purpose-built
+instance sharing the same `env` (same D1, same Durable Object namespace) sidesteps
+that entirely, and `waitOnExecutionContext` drains a non-awaited hook's `waitUntil`
+task before a test inspects what it recorded. No e2e script: the spec's own Testing
+requirements section says a host-facing callback needs none, and a browser adds
+nothing a workers test does not already cover.

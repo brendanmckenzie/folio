@@ -588,6 +588,41 @@ Worker" above for the three lines this takes, and note that `to` is only ever a
 path or an absolute URL that has passed `isSafeHref` — safe to hand straight to a
 `Location` header.
 
+## Hooks
+
+Folio needs no webhooks. Payload, Strapi, Contentful and Storyblok all give a host
+an HTTP callback for "something changed" — a shared secret, a retry queue, a
+delivery log — because the host and the CMS are different processes. Here they are
+the same Worker, so a hook is a typed function call, not a round trip to yourself:
+
+```ts
+const folio = createFolio<Env>({
+  blocks, root: 'page',
+  bindings: (env) => ({ db: env.DB, story: env.STORY }),
+  hooks: {
+    async published({ story, doc, env, waitUntil }) {
+      await caches.default.delete(new Request(`https://site${story.path ? `/${story.path}` : ''}`))
+      waitUntil(indexForSearch(env, story, doc))
+    },
+    async unpublished({ story, env }) {
+      await removeFromIndex(env, story.id)
+    },
+  },
+})
+```
+
+Six events, each after its write has already committed: `published`, `unpublished`,
+`pathsChanged` (a rename or move — the only one that knows both the old and the new
+path), `created`, `deleted`, `checkpointed`. There is no `before` hook and no way to
+veto or rewrite a publish: a hook that could reject one would have to run inside the
+atomic batch, which is exactly the failure that batch exists to prevent. A throwing
+hook is caught and logged with the event name — a broken integration never stops an
+editor from publishing — and every hook rides `waitUntil` by default, so it never
+delays the response; a cache purge that must land before the next read opts in with
+`await: ['published']`. Not delivery-guaranteed: at most once, no retries, no
+ordering between hooks. A host that needs that writes one line to a Cloudflare Queue
+inside the hook, which is the right tool for it.
+
 ## Verified
 
 `scripts/sync-test.mjs` (16 checks) exercises the engine against both `vite dev`

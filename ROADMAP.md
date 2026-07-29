@@ -78,8 +78,12 @@ cookie. We should do the same; it also makes share-a-preview-link work.
 `revalidate = 60` plus a Storyblok webhook hitting `/api/revalidate` with a
 shared secret. We own both sides, so publish can purge directly — no webhook,
 no secret, no eventual consistency window. Unpublish has to purge the same
-keys, or a cached page outlives the row that served it. Needs a cache layer
-first (Cache API or KV in front of D1).
+keys, or a cached page outlives the row that served it. The seam now exists
+(`docs/specs/platform/publish-hooks.md`): a host's `hooks.published` and
+`hooks.unpublished` fire after each write commits, with the story and, for
+`published`, the document. What is still missing is only the cache layer
+itself (Cache API or KV in front of D1) for a hook to purge — this item is
+now "pick a cache", not "invent a mechanism".
 
 **Per-story access control.** The reference has an `access_level` field on story
 content and gates rendering on the user's roles. With metadata now living on the

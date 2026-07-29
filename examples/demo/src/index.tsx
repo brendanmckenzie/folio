@@ -23,6 +23,20 @@ const folio = createFolio<Env>({
   route: (path) => (path ? `/${path}` : '/'),
   previewCss: ['/site.css'],
   assets: __FOLIO_ASSETS__,
+  // publish-hooks.md: an after-commit callback, not a webhook -- the host and
+  // Folio are the same Worker, so a cache purge or a notification is a typed
+  // function call rather than an HTTP round trip to itself. This demo has no
+  // cache layer of its own yet (ROADMAP.md's "cache invalidation on publish"),
+  // so the example just logs; a real host would purge `caches.default` here
+  // instead, keyed on `story.path`.
+  hooks: {
+    published: ({ story }) => {
+      console.log(`folio: published ${story.path || '/'}`)
+    },
+    unpublished: ({ story }) => {
+      console.log(`folio: unpublished ${story.path || '/'}`)
+    },
+  },
 })
 
 export default {
