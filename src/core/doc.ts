@@ -1,4 +1,4 @@
-import { generateKeyBetween } from 'fractional-indexing'
+import { generateKeyBetween, generateNKeysBetween } from 'fractional-indexing'
 
 export type Json = string | number | boolean | null | Json[] | { [key: string]: Json }
 
@@ -91,6 +91,27 @@ export function keyAtIndex(keys: readonly string[], index: number): string {
   let after = at
   while (after < keys.length && keys[after] === before) after++
   return generateKeyBetween(before, keys[after] ?? null)
+}
+
+/**
+ * `n` fractional keys strictly between `before` and `after`, in order.
+ *
+ * The plural of `keyAtIndex`, for a caller that already knows a whole run of new
+ * siblings goes into one gap — `../../../docs/specs/platform/content-api.md`'s
+ * `fromNested`, which keeps the sibling keys it can and fills the gaps between
+ * them. Generating them one at a time would work but would re-derive the same
+ * bounds `n` times and, worse, would have to thread each new key back into the
+ * sorted list to find the next gap.
+ *
+ * The same tie rule `keyAtIndex` documents applies: `generateNKeysBetween`
+ * throws when its bounds are equal or inverted, and equal keys are reachable by
+ * design, so a degenerate pair is treated as "after `before`" rather than
+ * "strictly between two equal keys", which is not a representable place.
+ */
+export function keysBetween(before: string | null, after: string | null, n: number): string[] {
+  if (n <= 0) return []
+  const upper = before !== null && after !== null && before >= after ? null : after
+  return generateNKeysBetween(before, upper, n)
 }
 
 export function childrenOf(doc: Doc, parent: string, slot: string): Blok[] {
