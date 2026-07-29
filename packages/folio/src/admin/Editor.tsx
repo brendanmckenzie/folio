@@ -17,6 +17,7 @@ import { PageAddress } from './PageAddress'
 import { StoryStore } from './store'
 import { StoryTree } from './StoryTree'
 import { TopBar, VIEWPORTS, type Viewport } from './TopBar'
+import { UnpublishDialog } from './UnpublishDialog'
 import { ViewingBar } from './ViewingBar'
 
 interface Props {
@@ -54,11 +55,19 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
     active: rail === 'history',
   })
 
-  // A publish changes the tree's draft badge and adds a retained version.
+  // A publish or unpublish changes the tree's badge and adds a retained
+  // version (unpublish adds none, but reloading unconditionally costs nothing
+  // extra and keeps the two writes sharing one afterWrite path).
   const afterPublish = useCallback(async () => {
     await Promise.all([stories.reload(), versions.reload()])
   }, [stories.reload, versions.reload])
   const publish = usePublish({ apiBase, storyId, notify, onPublished: afterPublish })
+
+  // Which story the confirmation is open for, not just whether it is open:
+  // switching pages while it is up must not leave it confirming unpublish for
+  // whatever story is now current. Comparing against `storyId` below closes it
+  // on navigation for free, with no effect needed to reset it.
+  const [confirmingUnpublishFor, setConfirmingUnpublishFor] = useState<string | null>(null)
 
   /**
    * `/folio/stories` already returns every story's id, path and URL, so links
@@ -120,7 +129,20 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
           publishing={publish.publishing}
           published={publish.published}
           onPublish={() => void publish.publish()}
+          onRequestUnpublish={() => setConfirmingUnpublishFor(storyId)}
         />
+
+        {confirmingUnpublishFor === storyId && current ? (
+          <UnpublishDialog
+            story={current}
+            tree={flat}
+            busy={publish.unpublishing}
+            onCancel={() => setConfirmingUnpublishFor(null)}
+            onConfirm={() => {
+              void publish.unpublish().then(() => setConfirmingUnpublishFor(null))
+            }}
+          />
+        ) : null}
 
         <div className="editor__body">
           <div className="rail">

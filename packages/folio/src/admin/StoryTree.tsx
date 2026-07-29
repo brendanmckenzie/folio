@@ -1,5 +1,16 @@
 import { useState } from 'react'
-import type { StoryNode } from '../core/story'
+import type { StoryNode, StoryState } from '../core/story'
+
+/**
+ * The tree's badge for each of `unpublish.md`'s three states this spec ships.
+ * `'live'` and the not-yet-reachable `'changed'` (unpublished-changes.md) both
+ * show nothing: an unadorned row already means "this is what's public".
+ */
+export function badgeLabel(state: StoryState): string | null {
+  if (state === 'unpublished') return 'not live'
+  if (state === 'draft') return 'draft'
+  return null
+}
 
 interface Props {
   tree: StoryNode[]
@@ -116,7 +127,11 @@ function Level({
             )}
             <span className="stories__title">{node.title}</span>
             <code className="stories__path">/{node.path}</code>
-            {node.publishedAt ? null : <span className="stories__badge">draft</span>}
+            {badgeLabel(node.state) ? (
+              <span className={`stories__badge stories__badge--${node.state}`}>
+                {badgeLabel(node.state)}
+              </span>
+            ) : null}
             <span className="stories__actions">
               <button
                 type="button"
