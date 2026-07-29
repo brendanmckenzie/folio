@@ -4,7 +4,8 @@
  */
 import { Hono } from 'hono'
 import { envelope, FolioError, INTERNAL } from './errors'
-import { withBindings } from './middleware'
+import { withActor, withBindings } from './middleware'
+import { accessRoutes } from './routes/access'
 import { assetRoutes } from './routes/assets'
 import { authRoutes } from './routes/auth'
 import { editorRoutes } from './routes/editor'
@@ -42,8 +43,18 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // middleware.ts.
   app.use('*', withBindings(config))
 
+  // Straight after the bindings, because it needs them (behind their thunk) and
+  // because every route below reads `c.var.actor`. It resolves an identity; it
+  // refuses nothing. What each route *requires* is declared at that route's own
+  // mount with `requireAccess`, so the gate is visible where the handler is
+  // rather than in a table of paths somewhere else
+  // (identity-and-access.md architecture decision 5).
+  app.use('*', withActor(rt))
+
   // The manifest is derived from the config alone: no bindings, no I/O, no way
-  // for the host's environment to turn this into a 500.
+  // for the host's environment to turn this into a 500. Deliberately left
+  // ungated: it describes the code, not the content, and the admin bundle needs
+  // it before it can render a sign-in prompt of its own.
   app.get('/schema', (c) => c.json(rt.manifest))
 
   // Ahead of the resource routes: `/login/verify` must not be read as
@@ -51,12 +62,13 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // down. Nothing in here needs a credential, which is what makes it safe to
   // mount before any gate exists (identity-and-access.md).
   app.route('/', authRoutes<Env>(rt))
+  app.route('/', accessRoutes<Env>(rt))
 
   app.route('/', storyRoutes<Env>(rt))
   app.route('/', historyRoutes<Env>(rt))
-  app.route('/', assetRoutes<Env>())
+  app.route('/', assetRoutes<Env>(rt))
   app.route('/', editorRoutes<Env>(rt))
-  app.route('/', redirectRoutes<Env>())
+  app.route('/', redirectRoutes<Env>(rt))
 
   return app
 }

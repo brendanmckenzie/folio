@@ -822,10 +822,7 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
       },
     })
 
-    const res = await callHooked(folio2, `/folio/story/${story.id}/publish`, {
-      method: 'POST',
-      headers: { 'x-folio-actor': 'alice' },
-    })
+    const res = await callHooked(folio2, `/folio/story/${story.id}/publish`, { method: 'POST' })
     const pub = await res.json<{ publishedAt: number; version: VersionMeta }>()
 
     expect(calls).toHaveLength(1)
@@ -835,7 +832,13 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
     expect(e.doc.bloks[e.doc.root]?.data.title).toBe('Hooked Title')
     expect(e.version.id).toBe(pub.version.id)
     expect(e.publishedAt).toBe(pub.publishedAt)
-    expect(e.actor).toBe('alice')
+    // Null, and correctly so: this fixture is `auth: 'open'`, where there are no
+    // accounts and therefore genuinely nobody to attribute a publish to. The
+    // `x-folio-actor` header that used to supply a name here is gone
+    // (identity-and-access.md) — a history a client can write is worse than one
+    // that admits it does not know. test/workers/auth-http.test.ts pins the
+    // other half: a session's own user id lands here on a real deployment.
+    expect(e.actor).toBeNull()
   })
 
   it('a throwing hook does not fail the publish: the response is normal and the event is logged once', async () => {
@@ -885,14 +888,15 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
     const res = await callHooked(
       folio2,
       `/folio/story/${story.id}/versions`,
-      jsonPost(JSON.stringify({ label: 'hook checkpoint', actor: 'alice' })),
+      jsonPost(JSON.stringify({ label: 'hook checkpoint' })),
     )
     const version = await res.json<VersionMeta>()
 
     expect(calls).toHaveLength(1)
     expect(calls[0]!.story.id).toBe(story.id)
     expect(calls[0]!.version.id).toBe(version.id)
-    expect(calls[0]!.actor).toBe('alice')
+    // See the `published` hook above: no accounts, so no actor.
+    expect(calls[0]!.actor).toBeNull()
   })
 
   it('unpublished fires with the story, and deleted fires with the removed ids and paths, after the objects are purged', async () => {
@@ -913,18 +917,16 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
 
     const unpubRes = await callHooked(folio2, `/folio/story/${parent.id}/unpublish`, {
       method: 'POST',
-      headers: { 'x-folio-actor': 'bob' },
     })
     const unpub = await unpubRes.json<{ unpublishedAt: number }>()
 
     expect(unpublishedCalls).toHaveLength(1)
     expect(unpublishedCalls[0]!.story.id).toBe(parent.id)
     expect(unpublishedCalls[0]!.story.unpublishedAt).toBe(unpub.unpublishedAt)
-    expect(unpublishedCalls[0]!.actor).toBe('bob')
+    expect(unpublishedCalls[0]!.actor).toBeNull()
 
     const delRes = await callHooked(folio2, `/folio/stories/${parent.id}?redirect=false`, {
       method: 'DELETE',
-      headers: { 'x-folio-actor': 'carol' },
     })
     const del = await delRes.json<{ deleted: string[] }>()
 
@@ -933,7 +935,7 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
     expect(new Set(deletedCalls[0]!.ids)).toEqual(new Set([parent.id, child.id]))
     expect(deletedCalls[0]!.paths).toContain(parent.path)
     expect(deletedCalls[0]!.paths).toContain(child.path)
-    expect(deletedCalls[0]!.actor).toBe('carol')
+    expect(deletedCalls[0]!.actor).toBeNull()
   })
 
   it('unpublishing an already-unpublished story is a no-op and fires nothing', async () => {
@@ -1243,16 +1245,20 @@ describe('validation and the error envelope', () => {
     expect(body.error.code).toBe('bad_request')
   })
 
-  it('rejects an actor header past the cap on publish', async () => {
-    const story = await createStory('Actor Header Cap')
-    const { status, body } = await failureOf(`/folio/story/${story.id}/publish`, {
+  it('ignores an `x-folio-actor` header entirely, rather than bounding it', async () => {
+    // The header is gone (identity-and-access.md phase 5): it was self-reported,
+    // so bounding and screening it was only ever making a lie tidy. A client that
+    // still sends one is not refused — an old tab should keep working — it simply
+    // has no effect on what history records.
+    const story = await createStory('Actor Header Ignored')
+    const res = await SELF.fetch(`${API}/story/${story.id}/publish`, {
       method: 'POST',
       headers: { 'x-folio-actor': 'a'.repeat(65) },
     })
 
-    expect(status).toBe(400)
-    expect(body.error.code).toBe('bad_request')
-    expect(body.error.message).toContain('x-folio-actor')
+    expect(res.status).toBe(200)
+    const versions = await getJson<VersionMeta[]>(`/folio/story/${story.id}/versions`)
+    expect(versions[0]?.actor).toBeNull()
   })
 
   it('refuses a body that is valid JSON but not an object, without echoing it back', async () => {

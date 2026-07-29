@@ -5,7 +5,10 @@
  * stay distinct.
  */
 import { Hono } from 'hono'
+import { MANAGE, READ } from '../auth/roles'
 import { FolioError } from '../errors'
+import { requireAccess } from '../middleware'
+import type { FolioRuntime } from '../runtime'
 import {
   deleteRedirect,
   listRedirects,
@@ -30,10 +33,10 @@ async function pointsBackAt(
   return back && normalisePath(back.to) === from ? back.to : null
 }
 
-export function redirectRoutes<Env>(): Hono<FolioEnv<Env>> {
+export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
 
-  app.get('/redirects', async (c) => {
+  app.get('/redirects', requireAccess<Env>(rt, READ), async (c) => {
     const db = c.var.bindings().db
     const limit = limitParam(c.req.query('limit'), 50, 200)
     const cursor = c.req.query('cursor')
@@ -55,7 +58,7 @@ export function redirectRoutes<Env>(): Hono<FolioEnv<Env>> {
    * back to `from`, which is the one loop a manual add can create (auto rows
    * cannot loop by construction — decision 3).
    */
-  app.post('/redirects', async (c) => {
+  app.post('/redirects', requireAccess<Env>(rt, MANAGE), async (c) => {
     const db = c.var.bindings().db
     const body = await parseBody(c.req, RedirectCreateBody)
     const from = normalisePath(body.from)
@@ -86,7 +89,7 @@ export function redirectRoutes<Env>(): Hono<FolioEnv<Env>> {
 
   // `{.+}` so a multi-segment path (`services/strategy`) arrives whole rather
   // than being cut at the first slash, the way a bare `:from` would.
-  app.delete('/redirects/:from{.+}', async (c) => {
+  app.delete('/redirects/:from{.+}', requireAccess<Env>(rt, MANAGE), async (c) => {
     const removed = await deleteRedirect(c.var.bindings().db, c.req.param('from'))
     return c.json({ deleted: removed })
   })

@@ -5,6 +5,7 @@ import {
   type ActivityEntry,
   type Delta,
   docCapError,
+  fallbackColour,
   MAX_FRAME_BYTES,
   parseClientFrame,
   type Presence,
@@ -12,6 +13,9 @@ import {
   type ServerMsg,
   txCapError,
 } from '../core/protocol'
+import { decodeIdentity, IDENTITY_HEADER, type SocketIdentity } from './auth/identity'
+import type { Role } from './auth/roles'
+import { sessionExpiry } from './auth/session'
 
 /** Beyond this many missed deltas it is cheaper to re-send the whole document. */
 const MAX_CATCHUP = 200
@@ -22,6 +26,21 @@ const CLOSE_VERSION = 4001
 /** Application close code: the story this object backs has been deleted. */
 const CLOSE_PURGED = 4002
 
+/** Application close code: no session, or one that has ended since the upgrade. */
+const CLOSE_UNAUTHENTICATED = 4003
+
+/**
+ * How often, at most, one socket's session is re-checked against D1
+ * (`identity-and-access.md` checkpoint 5). The attachment's own `expiresAt` is
+ * checked on every frame and costs nothing; this bounds how long an *explicit*
+ * revocation — an admin deleting a user, or that user signing out elsewhere —
+ * can go unnoticed on an already-open socket.
+ *
+ * A minute, not per frame: a D1 read in the keystroke path is the thing this
+ * design exists to avoid, and the alternative the spec rejected.
+ */
+const SESSION_RECHECK_MS = 60_000
+
 /**
  * How long after the last logged transaction the debounced watermark alarm
  * waits before mirroring `sync_id` into D1 (`unpublished-changes.md`'s
@@ -30,11 +49,79 @@ const CLOSE_PURGED = 4002
  */
 const WATERMARK_DEBOUNCE_MS = 2000
 
+/**
+ * What one socket carries, for the life of the connection, across hibernation.
+ *
+ * The attachment now exists from the moment the upgrade is accepted rather than
+ * from `hello`, which is what `joined` is for — see `broadcast`. Identity is
+ * either server-verified (the Worker vouched for it on the upgrade) or advisory
+ * (what `hello` asserted, which is all there is under `auth: 'open'`).
+ */
 interface Attachment {
   actor: string
   name: string
   colour: string
+  /**
+   * True when the Worker handed this socket an identity on the upgrade. `hello`
+   * cannot overwrite a verified identity — that is the point of the whole
+   * exercise — and *does* supply an unverified one.
+   */
+  verified: boolean
+  /** Global role, or null when there is no session (`auth: 'open'`). */
+  role: Role | null
+  /** `sessions.id`, for the bounded re-check below. Null without a session. */
+  session: string | null
+  /** Session expiry, epoch ms. 0 means "nothing to expire". */
+  expiresAt: number
+  /** When this socket's session was last re-checked against D1. */
+  checkedAt: number
+  /**
+   * Has said hello.
+   *
+   * **The membership test for fan-out, and the load-bearing part of this whole
+   * change.** `broadcast` used "has an attachment" as its pre-hello quarantine:
+   * a socket that has not identified itself has no watermark, so a delta
+   * delivered there is a gap the client cannot see. Attaching identity at
+   * upgrade time gives every socket an attachment immediately, which would have
+   * silently broken that test — a correctness regression in the sync engine
+   * dressed up as a login change. Hence an explicit flag.
+   */
+  joined: boolean
   selection: string | null
+}
+
+/** A fresh attachment for a socket that has just upgraded, before any frame. */
+function attach(identity: SocketIdentity | null): Attachment {
+  return {
+    actor: identity?.actor ?? '',
+    name: identity?.name ?? '',
+    colour: identity?.colour ?? '',
+    verified: identity !== null,
+    role: identity?.role ?? null,
+    session: identity?.session ?? null,
+    expiresAt: identity?.expiresAt ?? 0,
+    checkedAt: identity ? Date.now() : 0,
+    joined: false,
+    selection: null,
+  }
+}
+
+/**
+ * The wire's view of a socket: identity and selection, and none of the session
+ * bookkeeping above.
+ *
+ * Explicit rather than a spread of the attachment, which is what this used to be:
+ * spreading now would put `role`, `session` and `expiresAt` on a presence frame
+ * broadcast to every other editor.
+ */
+function presenceOf(a: Attachment): Presence {
+  const actor = a.actor || 'unknown'
+  return {
+    actor,
+    name: a.name || 'Anonymous',
+    colour: a.colour || fallbackColour(actor),
+    selection: a.selection,
+  }
 }
 
 const encode = (msg: ServerMsg): string => JSON.stringify({ ...msg, v: PROTOCOL_VERSION })
@@ -203,11 +290,65 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
       if (req.headers.get('Upgrade') !== 'websocket') {
         return new Response('Expected websocket', { status: 426 })
       }
+      // A Durable Object namespace is not publicly addressable: the only way to
+      // reach this object is through the Worker that set this header, which is
+      // what makes it trustworthy in a way the `hello` frame never was
+      // (identity-and-access.md architecture decision 3). Absent means
+      // `auth: 'open'`, where `hello`'s self-report is the only identity going.
+      const identity = decodeIdentity(req.headers.get(IDENTITY_HEADER))
       const pair = new WebSocketPair()
       // Hibernation: the object can be evicted between edits without dropping
       // connections, so an idle editing session costs nothing.
       this.ctx.acceptWebSocket(pair[1]!)
+      // Attached immediately, so the identity exists before the first frame is
+      // parsed. `joined: false` keeps this socket out of the fan-out until it
+      // says hello — see `Attachment.joined`.
+      pair[1]!.serializeAttachment(attach(identity))
       return new Response(null, { status: 101, webSocket: pair[0] })
+    }
+
+    /**
+     * Whether this socket's session is still live, and the attachment to carry
+     * on with — or null, having closed the socket.
+     *
+     * Two checks, deliberately unequal in cost. The attachment's own `expiresAt`
+     * is free and runs on every frame. The D1 read that catches an *explicit*
+     * revocation runs at most once a minute per socket (`SESSION_RECHECK_MS`),
+     * because the alternative — a query per frame — puts a database round trip in
+     * the keystroke path, which is the design the spec rejected.
+     *
+     * A transient D1 failure is not treated as a revocation. Signing an editor
+     * out mid-sentence because the database blinked is worse than the bounded
+     * window this feature already accepts, and `expiresAt` still bounds it.
+     */
+    private async liveSession(ws: WebSocket, a: Attachment): Promise<Attachment | null> {
+      if (!a.verified || a.session === null) return a
+      const now = Date.now()
+      if (a.expiresAt <= now) {
+        ws.close(CLOSE_UNAUTHENTICATED, 'session expired')
+        return null
+      }
+      if (now - a.checkedAt < SESSION_RECHECK_MS) return a
+
+      let expiresAt: number | null
+      try {
+        expiresAt = await sessionExpiry(config.db(this.env), a.session)
+      } catch (err) {
+        console.error('story-do: could not re-check a session; keeping the socket open', err)
+        const kept: Attachment = { ...a, checkedAt: now }
+        ws.serializeAttachment(kept)
+        return kept
+      }
+      if (expiresAt === null || expiresAt <= now) {
+        ws.close(CLOSE_UNAUTHENTICATED, 'your session has ended')
+        return null
+      }
+      // The renewal a sliding session performs on the HTTP side lands here too,
+      // so a socket held open for weeks is not closed by a stale copy of an
+      // expiry that has since moved.
+      const next: Attachment = { ...a, expiresAt, checkedAt: now }
+      ws.serializeAttachment(next)
+      return next
     }
 
     /**
@@ -259,17 +400,27 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
         return
       }
 
+      // Every frame, whatever its type: a socket whose session has ended must
+      // stop being able to write, and the check has to happen before the frame is
+      // dispatched rather than inside the one case that mutates.
+      const held = ws.deserializeAttachment() as Attachment | null
+      const who = held ? await this.liveSession(ws, held) : null
+      if (held && !who) return
+
       const current = this.read()
       if (!current) return
 
       switch (msg.type) {
         case 'hello': {
-          const attachment: Attachment = {
-            actor: msg.actor,
-            name: msg.name,
-            colour: msg.colour,
-            selection: null,
-          }
+          // A verified identity is not overwritable: `hello`'s `actor`, `name`
+          // and `colour` are advisory from here on (they keep their place in the
+          // frame, so no protocol bump and no broken old tab — they simply stop
+          // being believed). Under `auth: 'open'` they are still the only
+          // identity there is, so they are taken.
+          const base = who ?? attach(null)
+          const attachment: Attachment = base.verified
+            ? { ...base, joined: true }
+            : { ...base, actor: msg.actor, name: msg.name, colour: msg.colour, joined: true }
           ws.serializeAttachment(attachment)
 
           const behind = current.syncId - msg.lastSyncId
@@ -285,13 +436,28 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
           } else {
             this.sendTo(ws, { type: 'bootstrap', doc: current.doc, syncId: current.syncId, peers })
           }
-          this.broadcast({ type: 'presence', peer: { ...attachment } }, ws)
+          this.broadcast({ type: 'presence', peer: presenceOf(attachment) }, ws)
           break
         }
 
         case 'tx': {
-          const who = ws.deserializeAttachment() as Attachment | null
-          const actor = who?.actor ?? 'unknown'
+          const actor = who?.actor || 'unknown'
+
+          // The role gate, and the only place in the object that has one
+          // (architecture decision 5). A viewer is answered with the existing
+          // `reject` envelope, which the client already handles by dropping the
+          // tx and surfacing the reason — so a read-only editor degrades into a
+          // read-only editor rather than into a broken one. Checked before the
+          // dedupe lookup: a viewer's resend must not be answered with somebody
+          // else's delta either.
+          if (who?.role === 'viewer') {
+            this.sendTo(ws, {
+              type: 'reject',
+              txId: msg.txId,
+              reason: 'read-only: your role may not edit',
+            })
+            return
+          }
 
           // Already logged: answer with the delta this txId produced the first
           // time. Sender only, no re-apply, no new syncId — that idempotent ack is
@@ -345,7 +511,7 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
             'insert into log (tx_id, actor, actor_name, mutations, at) values (?, ?, ?, ?, ?)',
             msg.txId,
             actor,
-            who?.name ?? null,
+            who?.name || null,
             JSON.stringify(msg.mutations),
             Date.now(),
           )
@@ -383,11 +549,13 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
         }
 
         case 'presence': {
-          const attachment = ws.deserializeAttachment() as Attachment | null
-          if (!attachment) return
-          const next: Attachment = { ...attachment, selection: msg.selection }
+          // `joined`, not merely "has an attachment": a socket that has not said
+          // hello has no identity to announce, and announcing one under
+          // `auth: 'open'` would mean broadcasting an empty peer.
+          if (!who?.joined) return
+          const next: Attachment = { ...who, selection: msg.selection }
           ws.serializeAttachment(next)
-          this.broadcast({ type: 'presence', peer: { ...next } }, ws)
+          this.broadcast({ type: 'presence', peer: presenceOf(next) }, ws)
           break
         }
       }
@@ -404,7 +572,12 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
 
     private departed(ws: WebSocket) {
       const attachment = ws.deserializeAttachment() as Attachment | null
-      if (attachment) this.broadcast({ type: 'presence', peer: { ...attachment }, gone: true }, ws)
+      // Only a socket that joined was ever announced as arriving, so only one
+      // that joined has a departure to announce. Every socket has an attachment
+      // now, so this is `joined` rather than a presence check.
+      if (attachment?.joined) {
+        this.broadcast({ type: 'presence', peer: presenceOf(attachment), gone: true }, ws)
+      }
     }
 
     /**
@@ -471,7 +644,7 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
       for (const socket of this.ctx.getWebSockets()) {
         if (socket === exclude) continue
         const a = socket.deserializeAttachment() as Attachment | null
-        if (a) out.push({ ...a })
+        if (a?.joined) out.push(presenceOf(a))
       }
       return out
     }
@@ -484,14 +657,19 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
      * Fan-out is quarantined to sockets that have said hello. A connection still
      * waiting to identify itself has no watermark to place a delta against, so
      * delivering one there is exactly how a client ends up with a gap it cannot
-     * see; the hello attachment is the membership test, and it survives
-     * hibernation for free.
+     * see.
+     *
+     * The membership test is `joined`, and it used to be "has an attachment".
+     * That worked only because the attachment was *created* by `hello`; now that
+     * the Worker attaches a verified identity at upgrade time, every socket has
+     * one from the start, and the old test would have admitted every lurker.
+     * See `Attachment.joined`.
      */
     private broadcast(msg: ServerMsg, exclude?: WebSocket) {
       const payload = encode(msg)
       for (const socket of this.ctx.getWebSockets()) {
         if (socket === exclude) continue
-        if (!socket.deserializeAttachment()) continue
+        if (!(socket.deserializeAttachment() as Attachment | null)?.joined) continue
         try {
           socket.send(payload)
         } catch {

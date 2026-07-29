@@ -7,9 +7,11 @@ import { Hono } from 'hono'
 import { cloneDoc } from '../../core/clone'
 import type { DocumentType } from '../../core/schema'
 import type { StoryMeta } from '../../core/story'
+import { actorString } from '../auth/roles'
+import { MANAGE, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
 import { FolioError, rethrow } from '../errors'
 import type { HookRunnerCtx } from '../hooks'
-import { loadStory } from '../middleware'
+import { loadStory, requireAccess } from '../middleware'
 import { publish, unpublish } from '../publish'
 import type { FolioRuntime } from '../runtime'
 import {
@@ -23,7 +25,6 @@ import {
 } from '../stories'
 import type { FolioEnv } from '../types'
 import {
-  actorHeader,
   idParam,
   parseBody,
   parseOptionalBody,
@@ -39,6 +40,19 @@ import { deleteVersionsStatement } from '../versions'
  * (`../../../docs/specs/platform/publish-hooks.md` decision 3). */
 function hookCtx<Env>(c: Context<FolioEnv<Env>>): HookRunnerCtx {
   return { env: c.env, waitUntil: (p) => c.executionCtx.waitUntil(p) }
+}
+
+/**
+ * Who did this, for a hook payload and for `versions.actor`.
+ *
+ * Server-resolved and nothing else (`identity-and-access.md`): a person's own
+ * `users.id`, `token:<name>` for a script, and null under `auth: 'open'`, where
+ * there is genuinely nobody to attribute a change to. The `x-folio-actor` header
+ * this used to read is gone — a history that can be rewritten by editing a
+ * JavaScript variable is worse than one that admits it does not know.
+ */
+function actorFor<Env>(c: Context<FolioEnv<Env>>): string | null {
+  return actorString(c.var.actor)
 }
 
 export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
@@ -58,7 +72,9 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   }
 
   // The page tree: `buildTree` drops unrouted rows, so this is page types only.
-  app.get('/stories', async (c) => c.json(rt.decorate(await storyTree(c.var.bindings().db))))
+  app.get('/stories', requireAccess<Env>(rt, READ), async (c) =>
+    c.json(rt.decorate(await storyTree(c.var.bindings().db))),
+  )
 
   /**
    * The flat per-type listing records and singletons are addressed through,
@@ -71,7 +87,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * no `?type`, every declared singleton is ensured and every unrouted document
    * returned — one request for the whole Data section.
    */
-  app.get('/documents', async (c) => {
+  app.get('/documents', requireAccess<Env>(rt, READ), async (c) => {
     const raw = c.req.query('type')
     const bindings = c.var.bindings()
     const wanted = raw === undefined ? undefined : requireType(typeNameQuery(raw))
@@ -87,7 +103,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return c.json({ documents: documents.map(rt.withUrls) })
   })
 
-  app.post('/stories', async (c) => {
+  app.post('/stories', requireAccess<Env>(rt, MANAGE), async (c) => {
     const body = await parseBody(c.req, StoryCreateBody)
     const bindings = c.var.bindings()
     const type = requireType(body.type)
@@ -110,13 +126,13 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       rethrow(e)
     }
 
-    const actor = actorHeader(c.req.header('x-folio-actor'))
+    const actor = actorFor(c)
     await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('created', { story, actor })
 
     return c.json(rt.withUrls(story))
   })
 
-  app.patch('/stories/:id', async (c) => {
+  app.patch('/stories/:id', requireAccess<Env>(rt, MANAGE), async (c) => {
     const id = idParam('id', c.req.param('id'))
     const body = await parseBody(c.req, StoryPatchBody)
     const bindings = c.var.bindings()
@@ -136,7 +152,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // a host to purge, so `pathsChanged` stays silent rather than firing an
     // empty `changes` array.
     if (changes.length) {
-      const actor = actorHeader(c.req.header('x-folio-actor'))
+      const actor = actorFor(c)
       await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('pathsChanged', { changes, actor })
     }
 
@@ -160,31 +176,36 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * `../foundation/document-types.md`, which is what makes "singleton" mean
    * anything at all.
    */
-  app.post('/stories/:id/duplicate', loadStory<Env>(), async (c) => {
-    const bindings = c.var.bindings()
-    const source = c.var.story
-    const body = await parseOptionalBody(c.req, StoryDuplicateBody)
+  app.post(
+    '/stories/:id/duplicate',
+    requireAccess<Env>(rt, MANAGE),
+    loadStory<Env>(),
+    async (c) => {
+      const bindings = c.var.bindings()
+      const source = c.var.story
+      const body = await parseOptionalBody(c.req, StoryDuplicateBody)
 
-    let created: Awaited<ReturnType<typeof duplicateStory>>
-    try {
-      created = await duplicateStory(bindings.db, source.id, body, rt.types)
-    } catch (e) {
-      rethrow(e)
-    }
+      let created: Awaited<ReturnType<typeof duplicateStory>>
+      try {
+        created = await duplicateStory(bindings.db, source.id, body, rt.types)
+      } catch (e) {
+        rethrow(e)
+      }
 
-    // Fired the moment the row exists, same as a plain create: the D1 insert
-    // already committed, and a story with no draft seeded yet is a state this
-    // system already understands (a page someone created and never filled in).
-    const actor = actorHeader(c.req.header('x-folio-actor'))
-    await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('created', { story: created, actor })
+      // Fired the moment the row exists, same as a plain create: the D1 insert
+      // already committed, and a story with no draft seeded yet is a state this
+      // system already understands (a page someone created and never filled in).
+      const actor = actorFor(c)
+      await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('created', { story: created, actor })
 
-    const draft = await rt.draftFor(bindings, source)
-    await rt.stub(bindings, created.id).getOrInit(cloneDoc(draft))
+      const draft = await rt.draftFor(bindings, source)
+      await rt.stub(bindings, created.id).getOrInit(cloneDoc(draft))
 
-    return c.json({ story: rt.withUrls(created) }, 201)
-  })
+      return c.json({ story: rt.withUrls(created) }, 201)
+    },
+  )
 
-  app.delete('/stories/:id', async (c) => {
+  app.delete('/stories/:id', requireAccess<Env>(rt, MANAGE), async (c) => {
     const bindings = c.var.bindings()
     const target = idParam('id', c.req.param('id'))
     // redirects.md's architecture decision 4: checked by default in the admin's
@@ -240,7 +261,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // host's cache must be purged regardless (`publish-hooks.md`'s edge case
     // "partial success in the delete path"). The purge failure is swallowed
     // above, as it already was before this hook existed.
-    const actor = actorHeader(c.req.header('x-folio-actor'))
+    const actor = actorFor(c)
     await rt
       .publishDeps(bindings, hookCtx(c))
       .hooks?.run('deleted', { ids: found.ids, paths: found.paths, actor })
@@ -254,9 +275,9 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * on a request that cannot land — and the story's own existence is the
    * workflow's to check, because a scheduled publish has to check it too.
    */
-  app.post('/story/:id/publish', async (c) => {
+  app.post('/story/:id/publish', requireAccess<Env>(rt, PUBLISH), async (c) => {
     const id = idParam('id', c.req.param('id'))
-    const actor = actorHeader(c.req.header('x-folio-actor'))
+    const actor = actorFor(c)
 
     const { publishedAt, publishedSyncId, version } = await publish(
       rt.publishDeps(c.var.bindings(), hookCtx(c)),
@@ -271,8 +292,8 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * 404s before `unpublish` does anything, and hands the row it already found
    * straight to the workflow instead of a second lookup by id.
    */
-  app.post('/story/:id/unpublish', loadStory<Env>(), async (c) => {
-    const actor = actorHeader(c.req.header('x-folio-actor'))
+  app.post('/story/:id/unpublish', requireAccess<Env>(rt, PUBLISH), loadStory<Env>(), async (c) => {
+    const actor = actorFor(c)
     const { unpublishedAt } = await unpublish(
       rt.publishDeps(c.var.bindings(), hookCtx(c)),
       c.var.story,
@@ -288,7 +309,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * render, and pushes the result into the preview with the resolution. The
    * preview re-renders on every keystroke and must never reach the network.
    */
-  app.get('/story/:id/document', loadStory<Env>(), async (c) =>
+  app.get('/story/:id/document', requireAccess<Env>(rt, READ_DRAFT), loadStory<Env>(), async (c) =>
     c.json({ doc: await rt.draftFor(c.var.bindings(), c.var.story) }),
   )
 

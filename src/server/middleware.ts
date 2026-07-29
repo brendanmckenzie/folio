@@ -1,8 +1,11 @@
 import type { MiddlewareHandler } from 'hono'
+import { credentialOf, originAllowed, resolveActor } from './auth/resolve'
+import { type Access, allows, refusalOf } from './auth/roles'
 import { FolioError } from './errors'
+import type { FolioRuntime } from './runtime'
 import { storyById } from './stories'
 import type { FolioBindings, FolioConfig, FolioEnv } from './types'
-import { idParam } from './validate'
+import { idParam, safeNext } from './validate'
 
 /**
  * The one place the host's `Env` becomes Folio's bindings. Every handler then
@@ -20,6 +23,119 @@ export function withBindings<Env>(config: FolioConfig<Env>): MiddlewareHandler<F
   return async (c, next) => {
     let resolved: FolioBindings | undefined
     c.set('bindings', () => (resolved ??= config.bindings(c.env)))
+    await next()
+  }
+}
+
+/**
+ * Resolves who is making this request, once, for every route below
+ * (`../../../docs/specs/foundation/identity-and-access.md`).
+ *
+ * Stored as a value rather than a memoised thunk, unlike `bindings`, and the
+ * difference is deliberate: invoking the host's `bindings` accessor is
+ * observable, so the routes that answer from the config alone must not be made
+ * to do it — whereas resolving the actor *is* this middleware's job, and a route
+ * gated on a role has to have it resolved before its handler runs.
+ *
+ * The memoised-thunk discipline still applies underneath: `resolveActor` reads
+ * no D1 for a request that presents neither a cookie nor a bearer token, so
+ * `/schema`, a 404 and a refused socket upgrade still cost the database nothing.
+ *
+ * Under `auth: 'open'` this sets null and returns immediately: there are no users
+ * to resolve, and every gate short-circuits on the mode rather than on the actor.
+ *
+ * The origin check lives here too (architecture decision 4), applied before the
+ * credential is resolved so a cross-site attempt is refused without a lookup.
+ */
+export function withActor<Env>(rt: FolioRuntime): MiddlewareHandler<FolioEnv<Env>> {
+  return async (c, next) => {
+    if (rt.auth.mode !== 'session') {
+      c.set('actor', null)
+      await next()
+      return
+    }
+    const credential = credentialOf(c.req.raw)
+    if (!originAllowed(c.req.raw, credential)) {
+      throw new FolioError(
+        'forbidden',
+        'That request came from another site. Reload the editor and try again.',
+      )
+    }
+    c.set('actor', await resolveActor(() => c.var.bindings().db, rt.auth, credential))
+    await next()
+  }
+}
+
+/**
+ * Refuses a request whose actor may not do this (architecture decision 5).
+ *
+ * One middleware for both currencies — a minimum role for a person, a scope for a
+ * token — because they are the same requirement expressed twice and separating
+ * them is how the two drift. A route declares its requirement at the mount:
+ * `app.post('/stories', requireAccess<Env>(rt, MANAGE), handler)`.
+ *
+ * 401 and 403 are kept strictly apart. 401 means there is no usable credential,
+ * and is the only one the admin turns into a sign-in redirect; 403 means the
+ * credential is fine and the answer will not change on a retry.
+ *
+ * `auth: 'open'` passes everything, and that check is here rather than inside
+ * `allows` on purpose: `allows(null, …)` is unconditionally false, so the
+ * predicate can never be the reason an unauthenticated request got through.
+ */
+export function requireAccess<Env>(
+  rt: FolioRuntime,
+  access: Access,
+): MiddlewareHandler<FolioEnv<Env>> {
+  return async (c, next) => {
+    if (rt.auth.mode !== 'session') {
+      await next()
+      return
+    }
+    const actor = c.var.actor
+    if (!actor) throw new FolioError('unauthorized', 'Sign in to continue.')
+    if (!allows(actor, access)) throw new FolioError('forbidden', refusalOf(actor, access))
+    await next()
+  }
+}
+
+/**
+ * The same gate for a route that answers HTML: an unauthenticated request is a
+ * 302 to the login page, not a JSON envelope.
+ *
+ * A person who typed an editor URL into a browser and is not signed in wants a
+ * sign-in form, and `?next=` brings them back to the page they asked for. An
+ * *authenticated* request that is merely not allowed still gets the JSON
+ * refusal — it is a permissions answer, and no amount of signing in again
+ * changes it.
+ */
+export function requireHtmlAccess<Env>(
+  rt: FolioRuntime,
+  access: Access,
+): MiddlewareHandler<FolioEnv<Env>> {
+  return async (c, next) => {
+    if (rt.auth.mode !== 'session') {
+      await next()
+      return
+    }
+    const actor = c.var.actor
+    if (!actor) {
+      const url = new URL(c.req.url)
+      const next = safeNext(`${url.pathname}${url.search}`, `${rt.base}/edit`)
+      return c.redirect(`${rt.base}/login?next=${encodeURIComponent(next)}`)
+    }
+    if (!allows(actor, access)) throw new FolioError('forbidden', refusalOf(actor, access))
+    await next()
+  }
+}
+
+/**
+ * Refuses a route that only means something on a deployment with real accounts:
+ * managing editors and tokens under `auth: 'open'` would be a list nobody can
+ * sign in as and a permission nothing checks.
+ */
+export function requireAuthConfigured<Env>(rt: FolioRuntime): MiddlewareHandler<FolioEnv<Env>> {
+  return async (_c, next) => {
+    if (rt.auth.mode !== 'session') throw new FolioError('not_found', 'Auth is not configured')
     await next()
   }
 }
