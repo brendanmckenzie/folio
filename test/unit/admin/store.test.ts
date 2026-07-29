@@ -864,6 +864,72 @@ describe('admin sync store', () => {
       expect(h.sockets).toHaveLength(1)
       expect(h.store.getSnapshot().notice).toBe('story deleted')
     })
+
+    // SPEC(session-close): 4003 is terminal and offers a sign-in link, and — the
+    // part that matters — `pending` survives it, so nothing typed is lost when a
+    // session expires mid-edit (identity-and-access.md's first edge case).
+    it('goes terminal on 4003 with a sign-in link, and keeps the unsent queue', () => {
+      const h = setup()
+      boot(h, 3)
+
+      // Two edits in flight, unacknowledged.
+      h.store.tx([set('hero', 'heading', 'Typed while signed in')])
+      h.store.tx([set('hero', 'heading', 'And again')])
+      const sentBefore = h.last().txs().length
+      expect(sentBefore).toBe(2)
+      expect(h.store.getSnapshot().inflight).toBe(2)
+
+      h.last().drop(4003, 'session expired')
+
+      vi.advanceTimersByTime(60_000)
+      // Refused, not dropped: reconnecting cannot change the answer.
+      expect(h.sockets).toHaveLength(1)
+      const state = h.store.getSnapshot()
+      expect(state.signIn).toBe(true)
+      // The store's own wording, not the server's terse reason: only the client
+      // knows the queue survived, and that is the part a person needs told.
+      expect(state.notice).toContain('Sign in again')
+      expect(state.notice).toContain('nothing you typed has been lost')
+      // Still queued, and still on screen.
+      expect(state.inflight).toBe(2)
+      expect(value(h.store, 'hero', 'heading')).toBe('And again')
+
+      // Signing in again and reconnecting re-sends them with their original
+      // txIds, which the object's log dedupes.
+      const before = h
+        .last()
+        .txs()
+        .map((t) => t.txId)
+      h.store.connect()
+      const revived = boot(h, 3)
+      expect(revived.txs().map((t) => t.txId)).toEqual(before)
+    })
+
+    it('goes terminal on 4004, also with a sign-in link', () => {
+      const h = setup()
+      boot(h, 3)
+
+      h.last().drop(4004, 'an API token cannot open an editing session')
+
+      vi.advanceTimersByTime(60_000)
+      expect(h.sockets).toHaveLength(1)
+      expect(h.store.getSnapshot().signIn).toBe(true)
+      expect(h.store.getSnapshot().notice).toContain('do not have access')
+    })
+
+    it('does not offer a sign-in link for a version mismatch or a purge', () => {
+      // Signing in again fixes neither, so the link would be a dead end dressed
+      // up as an action.
+      const version = setup()
+      boot(version, 3)
+      version.last().drop(4001, 'unsupported protocol version')
+      expect(version.store.getSnapshot().signIn).toBe(false)
+
+      const purged = setup()
+      boot(purged, 3)
+      purged.last().drop(4002, 'story deleted')
+      expect(purged.store.getSnapshot().signIn).toBe(false)
+    })
   })
 
   describe('pinned behaviour', () => {

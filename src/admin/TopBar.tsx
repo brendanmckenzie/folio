@@ -3,6 +3,7 @@ import type { summariseDiff } from '../core/diff'
 import type { StoryNode } from '../core/story'
 import { useFolio, useStoreState } from './FolioContext'
 import type { PreviewMode } from './hooks/useVersions'
+import { actorLabel, canPublish, type Me, whyNot } from './me'
 
 /** Stage widths. The value is the CSS width the frame is given, not a breakpoint. */
 export const VIEWPORTS = { Desktop: '100%', Tablet: '834px', Phone: '390px' } as const
@@ -71,6 +72,11 @@ interface Props {
   delta: Delta | null
   /** Enters the comparison view against the newest publish version. */
   onCompare: () => void
+  /** Who is signed in, and therefore what this bar may offer
+   * (`identity-and-access.md`). */
+  me: Me
+  /** Signs out and reloads. Owned by Editor.tsx, which knows the api base. */
+  onSignOut: () => void
 }
 
 export function TopBar({
@@ -85,13 +91,20 @@ export function TopBar({
   everPublished,
   delta,
   onCompare,
+  me,
+  onSignOut,
 }: Props) {
   const { store } = useFolio()
   const state = useStoreState(store)
   // The first secondary publishing action, so it earns a small menu rather
   // than a second button squeezed in beside Publish.
   const [menuOpen, setMenuOpen] = useState(false)
-  const canUnpublish = current?.state === 'live' && mode !== 'viewing'
+  const [userMenuOpen, setUserMenuOpen] = useState(false)
+  // The server is the authority; this only keeps the bar from offering an
+  // action it will refuse (`identity-and-access.md` decision 5).
+  const mayPublish = canPublish(me)
+  const publishReason = whyNot(me, 'publish')
+  const canUnpublish = current?.state === 'live' && mode !== 'viewing' && mayPublish
   const status = publishStatus(
     state.connected,
     state.inflight,
@@ -130,10 +143,13 @@ export function TopBar({
 
       <div className="topbar__right">
         <div className="peers">
+          {/* The verified identity when there is one; the store's own generated
+              pair only under `auth: 'open'`, where nothing else tells two
+              anonymous tabs apart. */}
           <span
             className="peer peer--me"
-            style={{ background: store.colour }}
-            title={`${store.name} (you)`}
+            style={{ background: me.actor?.kind === 'user' ? me.actor.colour : store.colour }}
+            title={`${actorLabel(me) ?? store.name} (you)`}
           />
           {state.peers.map((p) => (
             <span key={p.actor} className="peer" style={{ background: p.colour }} title={p.name} />
@@ -166,13 +182,20 @@ export function TopBar({
             className="btn-primary publish-menu__main"
             onClick={onPublish}
             // Publishing sends the live draft, not what a version preview shows.
-            disabled={publishing || !state.doc || mode === 'viewing' || status.nothingToPublish}
+            disabled={
+              publishing ||
+              !state.doc ||
+              mode === 'viewing' ||
+              status.nothingToPublish ||
+              !mayPublish
+            }
             title={
-              mode === 'viewing'
+              publishReason ??
+              (mode === 'viewing'
                 ? 'Close the version preview first'
                 : status.nothingToPublish
                   ? 'No changes to publish'
-                  : undefined
+                  : undefined)
             }
           >
             {publishing ? 'Publishing…' : 'Publish'}
@@ -203,7 +226,11 @@ export function TopBar({
                   type="button"
                   role="menuitem"
                   disabled={!canUnpublish}
-                  title={canUnpublish ? undefined : 'Only a live page can be unpublished'}
+                  title={
+                    canUnpublish
+                      ? undefined
+                      : (publishReason ?? 'Only a live page can be unpublished')
+                  }
                   onClick={() => {
                     setMenuOpen(false)
                     onRequestUnpublish()
@@ -216,6 +243,47 @@ export function TopBar({
           ) : null}
         </div>
         {published ? <span className="topbar__flash">Published</span> : null}
+
+        {/* Only where there is an account to sign out of: under `auth: 'open'`
+            there is nobody to name and nothing to end. */}
+        {me.mode === 'session' ? (
+          <div className="user-menu">
+            <button
+              type="button"
+              className="user-menu__toggle"
+              aria-haspopup="menu"
+              aria-expanded={userMenuOpen}
+              onClick={() => setUserMenuOpen((v) => !v)}
+            >
+              {actorLabel(me) ?? 'Signed out'}
+            </button>
+            {userMenuOpen ? (
+              <>
+                <button
+                  type="button"
+                  className="user-menu__scrim"
+                  aria-label="Close menu"
+                  onClick={() => setUserMenuOpen(false)}
+                />
+                <div className="user-menu__list" role="menu">
+                  <span className="user-menu__role">
+                    {me.actor?.kind === 'user' ? me.actor.role : 'no account'}
+                  </span>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setUserMenuOpen(false)
+                      onSignOut()
+                    }}
+                  >
+                    Sign out
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </header>
   )

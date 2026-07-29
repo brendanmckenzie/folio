@@ -13,6 +13,32 @@
  */
 
 /**
+ * What to do about a 401, registered once at boot by `main.tsx`.
+ *
+ * A callback rather than a `window.location.assign` inline, for two reasons: this
+ * module is imported by tests that run in Node with no `window`, and a *session*
+ * failure is the one failure that must not become a toast — so there has to be
+ * exactly one place that decides it is a navigation instead, and it has to be
+ * observable from a test (`identity-and-access.md` phase 4, step 1).
+ *
+ * Null on an `auth: 'open'` deployment, where a 401 cannot happen.
+ */
+let unauthorizedHandler: ((next: string) => void) | null = null
+
+export function onUnauthorized(handler: ((next: string) => void) | null): void {
+  unauthorizedHandler = handler
+}
+
+/**
+ * Where a 401 sends the browser. Pure, so the query-string shape is testable
+ * without a `window`: the login page brings you back to the page you were on
+ * rather than dumping you at the root of the CMS.
+ */
+export function signInUrl(loginUrl: string, next: string): string {
+  return `${loginUrl}?next=${encodeURIComponent(next)}`
+}
+
+/**
  * The message a failed response carries. `fallback` covers the case where the
  * body is not the envelope at all — a proxy's own 502 page, or a request that
  * died before reaching the worker — because there is no message to quote then.
@@ -26,10 +52,22 @@ export async function failureOf(res: Response, fallback?: string): Promise<strin
  * Passes a successful response through and throws the envelope's message
  * otherwise, so callers can wrap a whole sequence in one try/catch and show
  * `(e as Error).message` verbatim.
+ *
+ * A 401 is the one status that does not simply become a message. Every mutating
+ * call in the admin comes through here, so this is the single place that can turn
+ * "your session ended" into a sign-in navigation rather than a toast telling you
+ * to sign in with no way to. It still throws afterwards: the caller's own state
+ * (a busy flag, an optimistic row) has to unwind either way, and the navigation
+ * is not instantaneous.
+ *
+ * 403 deliberately *is* just a message. Signing in again cannot change the answer
+ * to a permissions refusal, and redirecting there would be a loop.
  */
 export async function expectOk(res: Response, fallback?: string): Promise<Response> {
-  if (!res.ok) throw new Error(await failureOf(res, fallback))
-  return res
+  if (res.ok) return res
+  const message = await failureOf(res, fallback)
+  if (res.status === 401) unauthorizedHandler?.(message)
+  throw new Error(message)
 }
 
 /** `expectOk` plus the parsed body, for the calls whose answer is used. */

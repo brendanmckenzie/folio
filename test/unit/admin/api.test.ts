@@ -1,5 +1,12 @@
-import { describe, expect, it, vi } from 'vitest'
-import { afterWrite, expectJson, expectOk, failureOf } from '../../../src/admin/api'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  afterWrite,
+  expectJson,
+  expectOk,
+  failureOf,
+  onUnauthorized,
+  signInUrl,
+} from '../../../src/admin/api'
 
 const envelope = (message: string, status: number) =>
   new Response(JSON.stringify({ error: { code: 'conflict', message } }), { status })
@@ -79,5 +86,74 @@ describe('afterWrite', () => {
 
   it('discards the refresh’s value: nothing downstream reads it', async () => {
     expect(await afterWrite(Promise.resolve(['a', 'b']))).toBeUndefined()
+  })
+})
+
+/**
+ * identity-and-access.md phase 4, step 1: a 401 is the one failure that must not
+ * become a toast. Every mutating call in the admin goes through `expectOk`, so
+ * this is the single place that can turn "your session ended" into a navigation
+ * rather than a message telling you to sign in with no way to.
+ */
+describe('the 401 handler', () => {
+  afterEach(() => onUnauthorized(null))
+
+  const unauthorized = () =>
+    new Response(
+      JSON.stringify({ error: { code: 'unauthorized', message: 'Sign in to continue.' } }),
+      {
+        status: 401,
+      },
+    )
+
+  it('fires for a 401, and still throws so the caller can unwind', async () => {
+    const seen: string[] = []
+    onUnauthorized((message) => seen.push(message))
+
+    await expect(expectOk(unauthorized())).rejects.toThrow('Sign in to continue.')
+    // Both: the navigation is not instantaneous, and the caller's busy flag and
+    // optimistic state have to come back either way.
+    expect(seen).toEqual(['Sign in to continue.'])
+  })
+
+  it('does not fire for a 403: signing in again cannot change that answer', async () => {
+    const seen: string[] = []
+    onUnauthorized((message) => seen.push(message))
+
+    const forbidden = new Response(
+      JSON.stringify({ error: { code: 'forbidden', message: 'Your role (viewer) is read-only.' } }),
+      { status: 403 },
+    )
+    await expect(expectOk(forbidden)).rejects.toThrow('read-only')
+    // Redirecting here would be a loop dressed up as a fix.
+    expect(seen).toEqual([])
+  })
+
+  it('does not fire for any other failure, or for a success', async () => {
+    const handler = vi.fn()
+    onUnauthorized(handler)
+
+    await expect(expectOk(envelope('Unknown story', 404))).rejects.toThrow('Unknown story')
+    await expectOk(new Response('{}', { status: 200 }))
+    expect(handler).not.toHaveBeenCalled()
+  })
+
+  it('is a no-op once unregistered, so an auth: open deployment never navigates', async () => {
+    onUnauthorized(null)
+    await expect(expectOk(unauthorized())).rejects.toThrow('Sign in to continue.')
+  })
+})
+
+describe('signInUrl', () => {
+  it('brings the browser back to the page it was on', () => {
+    expect(signInUrl('/folio/login', '/folio/edit/sty_home')).toBe(
+      '/folio/login?next=%2Ffolio%2Fedit%2Fsty_home',
+    )
+  })
+
+  it('encodes a next that carries its own query string', () => {
+    expect(signInUrl('/folio/login', '/folio/edit/sty_a?rail=history')).toBe(
+      '/folio/login?next=%2Ffolio%2Fedit%2Fsty_a%3Frail%3Dhistory',
+    )
   })
 })

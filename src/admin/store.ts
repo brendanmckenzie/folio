@@ -22,6 +22,12 @@ export interface StoreState {
   inflight: number
   /** Last refusal from the object — a rejected tx or an unreadable frame. */
   notice: string | null
+  /**
+   * The socket closed for a reason signing in again would fix (4003/4004), so the
+   * notice should carry a sign-in link rather than just words
+   * (`identity-and-access.md` decision 4).
+   */
+  signIn: boolean
 }
 
 const COLOURS = ['#e5484d', '#0090ff', '#30a46c', '#f76b15', '#8e4ec6', '#e5b100']
@@ -32,12 +38,30 @@ const CONNECTING = 0
 const OPEN = 1
 
 /**
- * Application close codes the Durable Object hangs up with. Both say this client
- * is refused rather than unlucky, so neither is retried. Kept in step with
- * `story-do.ts` by hand: they are wire constants, not shared code.
+ * Application close codes the Durable Object hangs up with. Every one of them
+ * says this client is refused rather than unlucky, so none is retried. Kept in
+ * step with `story-do.ts` by hand: they are wire constants, not shared code.
  */
 const CLOSE_VERSION = 4001
 const CLOSE_PURGED = 4002
+/** No session, or one that ended (`identity-and-access.md` decision 4). */
+const CLOSE_UNAUTHENTICATED = 4003
+/** A valid credential that may not hold an editing session. */
+const CLOSE_FORBIDDEN = 4004
+
+/**
+ * What each terminal code says on screen. 4003's wording matters: `pending`
+ * survives a disconnect by design, so nothing typed has been lost — and telling
+ * someone their session ended without telling them their work is safe is how a
+ * person closes the tab and loses it.
+ */
+const TERMINAL: Record<number, string> = {
+  [CLOSE_VERSION]: 'The server closed this editing session.',
+  [CLOSE_PURGED]: 'The server closed this editing session.',
+  [CLOSE_UNAUTHENTICATED]:
+    'Your session ended. Sign in again — nothing you typed has been lost, and it will be sent when you reconnect.',
+  [CLOSE_FORBIDDEN]: 'You do not have access to edit this document.',
+}
 
 /**
  * A local transaction waiting on the object's verdict. `pending` is also the
@@ -112,6 +136,21 @@ function browserSocket(path: string): WebSocketLike {
 }
 
 export class StoryStore {
+  /**
+   * The identity this client *asserts* in `hello`, and it is now advisory.
+   *
+   * On a deployment with accounts the Worker attaches a verified identity to the
+   * socket at upgrade time and the object ignores these three fields entirely —
+   * they keep their place in the frame so no protocol bump is needed and an old
+   * tab keeps working, they simply stop being believed
+   * (`identity-and-access.md` architecture decision 3).
+   *
+   * They are still generated, and still used, under `auth: 'open'`: there are no
+   * accounts there, so this random pair is the only thing that tells two
+   * anonymous tabs apart in presence. Dropping them outright — which the spec's
+   * phase 4 asked for — would have left that deployment shape with no presence at
+   * all. `TopBar` prefers the real name from `/folio/me` whenever there is one.
+   */
   readonly actor = crypto.randomUUID().slice(0, 8)
   readonly name: string
   readonly colour: string
@@ -126,6 +165,7 @@ export class StoryStore {
     canRedo: false,
     inflight: 0,
     notice: null,
+    signIn: false,
   }
 
   private undoStack: HistoryEntry[] = []
@@ -256,9 +296,26 @@ export class StoryStore {
       const { code, reason } = (ev ?? {}) as { code?: number; reason?: string }
       // Refused, not dropped: reconnecting cannot change the object's answer, so
       // the store goes terminal and says why instead of hammering the socket.
-      if (code === CLOSE_VERSION || code === CLOSE_PURGED) {
+      //
+      // `pending` is deliberately left alone. An expired session is not a
+      // rejection of anything in the queue: signing in again and reconnecting
+      // re-sends it with the original txIds, which the log dedupes. This is the
+      // whole reason the refusal is a close rather than a wipe.
+      const signIn = code === CLOSE_UNAUTHENTICATED || code === CLOSE_FORBIDDEN
+      if (code !== undefined && code in TERMINAL) {
         this.closed = true
-        this.patch({ notice: reason || 'The server closed this editing session.' })
+        this.patch({
+          // The object's own reason wins for the codes where it is the more
+          // specific answer ("unsupported protocol version", "story deleted").
+          // For the two session codes it does not: the server's reason is terse
+          // and, more to the point, the server has no idea `pending` survived,
+          // which is the part a person needs told.
+          notice: signIn ? TERMINAL[code]! : reason || TERMINAL[code]!,
+          // Only the session codes offer the link. Signing in again fixes
+          // neither a purged story nor a version mismatch, and offering it there
+          // would be a dead end dressed up as an action.
+          signIn,
+        })
         return
       }
       if (this.closed) return
