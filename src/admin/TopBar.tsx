@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { StoryNode } from '../core/story'
 import { useFolio, useStoreState } from './FolioContext'
 import type { PreviewMode } from './hooks/useVersions'
@@ -14,6 +15,8 @@ interface Props {
   publishing: boolean
   published: boolean
   onPublish: () => void
+  /** Opens the confirmation; Editor.tsx owns whether it is showing. */
+  onRequestUnpublish: () => void
 }
 
 export function TopBar({
@@ -24,9 +27,14 @@ export function TopBar({
   publishing,
   published,
   onPublish,
+  onRequestUnpublish,
 }: Props) {
   const { store } = useFolio()
   const state = useStoreState(store)
+  // The first secondary publishing action, so it earns a small menu rather
+  // than a second button squeezed in beside Publish.
+  const [menuOpen, setMenuOpen] = useState(false)
+  const canUnpublish = current?.state === 'live' && mode !== 'viewing'
 
   return (
     <header className="topbar">
@@ -84,16 +92,55 @@ export function TopBar({
             View live
           </a>
         ) : null}
-        <button
-          type="button"
-          className="btn-primary"
-          onClick={onPublish}
-          // Publishing sends the live draft, not what a version preview shows.
-          disabled={publishing || !state.doc || mode === 'viewing'}
-          title={mode === 'viewing' ? 'Close the version preview first' : undefined}
-        >
-          {publishing ? 'Publishing…' : 'Publish'}
-        </button>
+        <div className="publish-menu">
+          <button
+            type="button"
+            className="btn-primary publish-menu__main"
+            onClick={onPublish}
+            // Publishing sends the live draft, not what a version preview shows.
+            disabled={publishing || !state.doc || mode === 'viewing'}
+            title={mode === 'viewing' ? 'Close the version preview first' : undefined}
+          >
+            {publishing ? 'Publishing…' : 'Publish'}
+          </button>
+          <button
+            type="button"
+            className="btn-primary publish-menu__toggle"
+            aria-label="More publishing actions"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            disabled={!current}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            ▾
+          </button>
+          {menuOpen ? (
+            <>
+              {/* Clicking outside closes the menu, the same pattern the media
+                  library's modal scrim uses. */}
+              <button
+                type="button"
+                className="publish-menu__scrim"
+                aria-label="Close menu"
+                onClick={() => setMenuOpen(false)}
+              />
+              <div className="publish-menu__list" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={!canUnpublish}
+                  title={canUnpublish ? undefined : 'Only a live page can be unpublished'}
+                  onClick={() => {
+                    setMenuOpen(false)
+                    onRequestUnpublish()
+                  }}
+                >
+                  Unpublish…
+                </button>
+              </div>
+            </>
+          ) : null}
+        </div>
         {published ? <span className="topbar__flash">Published</span> : null}
       </div>
     </header>

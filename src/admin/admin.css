@@ -111,6 +111,53 @@ button:disabled {
   border-color: var(--text);
 }
 
+/* Publish plus its one secondary action, held in a small menu rather than a
+   second button squeezed in beside it. */
+.publish-menu {
+  position: relative;
+  display: flex;
+}
+.publish-menu__main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.publish-menu__toggle {
+  padding: 0.3rem 0.4rem;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid rgb(255 255 255 / 35%);
+}
+.publish-menu__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: transparent;
+  border: 0;
+}
+.publish-menu__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 21;
+  min-width: 160px;
+  padding: 0.25rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(16 20 26 / 18%);
+}
+.publish-menu__list button {
+  display: block;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  text-align: left;
+  background: none;
+  border: 0;
+}
+.publish-menu__list button:hover:not(:disabled) {
+  background: var(--bg);
+}
+
 .dot {
   width: 7px;
   height: 7px;
@@ -709,6 +756,62 @@ button:disabled {
   border: 0;
 }
 
+/* ----------------------------------------------------------- unpublish ---- */
+
+.unpublish {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+}
+.unpublish__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgb(16 20 26 / 45%);
+  border: 0;
+}
+.unpublish__panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  width: min(420px, 92vw);
+  padding: 1.1rem;
+  background: var(--panel);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgb(16 20 26 / 30%);
+}
+.unpublish__panel h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.unpublish__panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.unpublish__descendants {
+  padding: 0.55rem 0.7rem;
+  background: #fafbfc;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.unpublish__descendants p {
+  margin-bottom: 0.3rem;
+}
+.unpublish__descendants ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8125rem;
+}
+.unpublish__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+
 /* --------------------------------------------------------------- rail ---- */
 
 .rail {
@@ -817,6 +920,12 @@ button:disabled {
   color: #8a6100;
   background: #fdf3d7;
   border-radius: 3px;
+}
+/* Taken down (was live, now not) reads as more urgent than never-published,
+   so it gets the danger palette rather than the neutral "draft" amber. */
+.stories__badge--unpublished {
+  color: var(--danger);
+  background: #fde8e8;
 }
 /* visibility, not display: toggling display reflows the row and makes the
    whole tree jump under the cursor. */
