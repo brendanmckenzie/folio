@@ -21,10 +21,22 @@ export interface PublishDeps {
    * is only the caller's bindings can say.
    */
   draft: (story: StoryMeta) => Promise<Doc>
+  /**
+   * The draft plus the Durable Object's log position it was read at, together —
+   * `publish()`'s own read. Two separate calls (`draft`, then a `head()`) are not
+   * atomic across the object's request boundary: a transaction landing between
+   * them could leave `published_sync_id` ahead of the bytes actually snapshotted,
+   * silently hiding a real change (`unpublished-changes.md`'s publish-race
+   * acceptance criterion; see `story-do.ts`'s `getOrInitWithSyncId`).
+   * `checkpoint` has no need of the position, so it keeps using `draft` alone.
+   */
+  draftWithSyncId: (story: StoryMeta) => Promise<{ doc: Doc; syncId: number }>
 }
 
 export interface PublishResult {
   publishedAt: number
+  /** The Durable Object log position that was actually snapshotted; see `draftWithSyncId`. */
+  publishedSyncId: number
   version: VersionMeta
 }
 
@@ -54,7 +66,9 @@ export async function publish(
   const meta = await requireStory(deps.db, story)
   const storyId = meta.id
 
-  const doc = await deps.draft(meta)
+  // `doc` and `syncId` come from one atomic read: see `draftWithSyncId`'s own
+  // doc for why two separate calls would race.
+  const { doc, syncId } = await deps.draftWithSyncId(meta)
   // Every publish is a retained version, so "restore what was live before" is
   // always possible. The version row and the stories.published_doc update
   // land in one batch: run separately, a failure between the two could leave
@@ -72,10 +86,11 @@ export async function publish(
     storyId,
     doc,
     meta.title,
+    syncId,
   )
   await deps.db.batch([versionStatement, publishStatement])
 
-  return { publishedAt, version }
+  return { publishedAt, publishedSyncId: syncId, version }
 }
 
 /**

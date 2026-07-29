@@ -1,4 +1,4 @@
-import { env, runInDurableObject, SELF } from 'cloudflare:test'
+import { env, runDurableObjectAlarm, runInDurableObject, SELF } from 'cloudflare:test'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { diff } from '../../src/core/diff'
 import type { Doc } from '../../src/core/doc'
@@ -90,6 +90,7 @@ function flatten(nodes: readonly StoryNode[]): StoryNode[] {
 interface PublishResult {
   ok: boolean
   publishedAt: number
+  publishedSyncId: number
   version: VersionMeta
 }
 
@@ -334,6 +335,39 @@ describe('publish', () => {
     const html = await htmlOf(`/${story.path}`)
     expect(html).toContain('Published Title')
     expect(html).not.toContain('<script')
+
+    conn.close()
+  })
+
+  // unpublished-changes.md: published_sync_id lands in the same batch as
+  // published_doc, so a reader can never see one without the other, and the
+  // tree's derived state agrees with the open story's own diff.
+  it('writes published_sync_id atomically, so the tree reads "changed" only once a later transaction lands', async () => {
+    const story = await createStory('Watermark Race')
+    const conn = await connect(story.id)
+    const doc = await conn.hello('alice')
+    await conn.tx('w1', [{ t: 'set', uid: doc.root, field: 'title', value: 'First' }])
+
+    const pub = await publish(story.id)
+    expect(pub.publishedSyncId).toBe(1)
+
+    // Nothing has been mirrored into D1 yet (the alarm has not fired), but the
+    // watermark this publish just wrote already agrees the story is clean.
+    const stub = env.STORY.get(env.STORY.idFromName(story.id))
+    expect(await stateOf(story.id)).toBe('live')
+
+    // A transaction lands after the snapshot: the object's log position moves
+    // past what was published, and — once the debounced mirror runs — the
+    // tree must say so.
+    await conn.tx('w2', [{ t: 'set', uid: doc.root, field: 'title', value: 'Second' }])
+    expect(await runDurableObjectAlarm(stub)).toBe(true)
+
+    const tree = await getJson<StoryNode[]>('/folio/stories')
+    const row = flatten(tree).find((n) => n.id === story.id)
+    expect(row?.state).toBe('changed')
+    expect(row?.hasUnpublishedChanges).toBe(true)
+    expect(row?.draftSyncId).toBe(2)
+    expect(row?.publishedSyncId).toBe(1)
 
     conn.close()
   })

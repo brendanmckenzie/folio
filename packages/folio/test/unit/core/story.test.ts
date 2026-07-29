@@ -3,6 +3,7 @@ import {
   buildTree,
   derivePaths,
   descendants,
+  draftState,
   liveDescendants,
   slugify,
   storyState,
@@ -12,6 +13,9 @@ import type { StoryMeta } from '../../../src/core/story'
 function meta(overrides: Partial<StoryMeta> & { id: string }): StoryMeta {
   const publishedAt = overrides.publishedAt ?? null
   const unpublishedAt = overrides.unpublishedAt ?? null
+  const draftSyncId = overrides.draftSyncId ?? 0
+  const publishedSyncId = overrides.publishedSyncId ?? 0
+  const state = draftState(publishedAt, unpublishedAt, draftSyncId, publishedSyncId)
   return {
     parentId: null,
     slug: overrides.id,
@@ -21,7 +25,11 @@ function meta(overrides: Partial<StoryMeta> & { id: string }): StoryMeta {
     updatedAt: 0,
     publishedAt,
     unpublishedAt,
-    state: storyState(publishedAt, unpublishedAt),
+    draftSyncId,
+    draftUpdatedAt: null,
+    publishedSyncId,
+    state,
+    hasUnpublishedChanges: state === 'changed',
     ...overrides,
   }
 }
@@ -172,6 +180,28 @@ describe('storyState', () => {
   })
 })
 
+// unpublished-changes.md's architecture decision 3: the fourth state, from the
+// watermark pair alone — coarser than a diff, correct enough for a tree.
+describe('draftState', () => {
+  it('is "live" when the draft watermark has not moved past what was published', () => {
+    expect(draftState(1000, null, 0, 0)).toBe('live')
+    expect(draftState(1000, null, 5, 5)).toBe('live')
+  })
+
+  it('is "changed" when the draft watermark has moved past the published one', () => {
+    expect(draftState(1000, null, 6, 5)).toBe('changed')
+  })
+
+  it('never reports "changed" for a story that is not live', () => {
+    expect(draftState(null, null, 6, 5)).toBe('draft')
+    expect(draftState(null, 1000, 6, 5)).toBe('unpublished')
+  })
+
+  it('falls back to storyState for a published_sync_id ahead of draft (should not arise, but not "changed")', () => {
+    expect(draftState(1000, null, 5, 6)).toBe('live')
+  })
+})
+
 describe('liveDescendants', () => {
   it('names only the live descendants, excluding the story itself', () => {
     const rows = [
@@ -195,6 +225,14 @@ describe('liveDescendants', () => {
       meta({ id: 'leaf', parentId: 'mid', publishedAt: 3 }),
     ]
     expect(liveDescendants(rows, 'about').map((s) => s.id)).toEqual(['leaf'])
+  })
+
+  it('counts a "changed" descendant as still live: it is serving the public mid-edit', () => {
+    const rows = [
+      meta({ id: 'about', publishedAt: 1 }),
+      meta({ id: 'team', parentId: 'about', publishedAt: 2, draftSyncId: 3, publishedSyncId: 1 }),
+    ]
+    expect(liveDescendants(rows, 'about').map((s) => s.id)).toEqual(['team'])
   })
 })
 

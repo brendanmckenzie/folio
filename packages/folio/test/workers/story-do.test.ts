@@ -1,4 +1,4 @@
-import { env, runInDurableObject } from 'cloudflare:test'
+import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { Doc } from '../../src/core/doc'
 import {
@@ -213,6 +213,80 @@ describe('StoryDO: the draft', () => {
     expect(boot.doc.bloks.root0000?.data.title).toBe('Edited')
     writer.ws.close()
     peer.ws.close()
+  })
+})
+
+// unpublished-changes.md's architecture decision 4: the object mirrors its own
+// log position into D1 on a debounced alarm rather than a per-transaction
+// write, so the content tree can show unpublished changes without opening
+// every story's object.
+describe('StoryDO: draft watermark alarm', () => {
+  it('head() on a fresh object reports syncId 0', async () => {
+    const stub = story('head-fresh')
+    expect(await runInDurableObject(stub, (instance) => instance.head())).toEqual({ syncId: 0 })
+  })
+
+  it('head() reflects the log position once transactions have landed', async () => {
+    const stub = story('head-after-tx')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    const writer = await join(stub, { actor: 'a1', name: 'Ada', colour: '#ff00ff' })
+    writer.send({ type: 'tx', txId: 't1', mutations: setTitle('Edited') })
+    await frame(writer, 'delta')
+
+    expect(await runInDurableObject(stub, (instance) => instance.head())).toEqual({ syncId: 1 })
+    writer.ws.close()
+  })
+
+  it('schedules exactly one alarm per burst and writes the latest syncId once it fires', async () => {
+    const stub = story('watermark-burst')
+    await env.DB.prepare(
+      `insert into stories (id, parent_id, slug, path, ord, title, updated_at)
+       values (?, null, ?, ?, 'a0', 'Watermark Burst', ?)`,
+    )
+      .bind('sty_watermark-burst', 'watermark-burst', 'watermark-burst', Date.now())
+      .run()
+
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    const writer = await join(stub, { actor: 'a1', name: 'Ada', colour: '#ff00ff' })
+
+    // A burst of three transactions, all before the alarm ever fires.
+    writer.send({ type: 'tx', txId: 't1', mutations: setTitle('One') })
+    await frame(writer, 'delta', 1)
+    writer.send({ type: 'tx', txId: 't2', mutations: setTitle('Two') })
+    await frame(writer, 'delta', 2)
+    writer.send({ type: 'tx', txId: 't3', mutations: setTitle('Three') })
+    await frame(writer, 'delta', 3)
+
+    expect(await runDurableObjectAlarm(stub)).toBe(true)
+
+    const row = await env.DB.prepare(
+      'select draft_sync_id as draftSyncId, draft_updated_at as draftUpdatedAt from stories where id = ?',
+    )
+      .bind('sty_watermark-burst')
+      .first<{ draftSyncId: number; draftUpdatedAt: number | null }>()
+    expect(row?.draftSyncId).toBe(3)
+    expect(row?.draftUpdatedAt).not.toBeNull()
+
+    // One alarm per burst: nothing is left scheduled once it has fired, so a
+    // second manual run finds none to run.
+    expect(await runDurableObjectAlarm(stub)).toBe(false)
+
+    writer.ws.close()
+  })
+
+  it('acknowledges the sender even when the story has no D1 row to mirror into', async () => {
+    // Deliberately no `stories` row for this id: the tx path must not depend
+    // on the watermark write succeeding (an update matching no rows is not an
+    // error, but the object's own tx ack must not depend on it either way).
+    const stub = story('watermark-orphan')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    const writer = await join(stub, { actor: 'a1', name: 'Ada', colour: '#ff00ff' })
+    writer.send({ type: 'tx', txId: 't1', mutations: setTitle('Orphaned') })
+    const delta = await frame(writer, 'delta')
+    expect(delta.syncId).toBe(1)
+
+    expect(await runDurableObjectAlarm(stub)).toBe(true)
+    writer.ws.close()
   })
 })
 

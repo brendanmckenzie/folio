@@ -16,8 +16,22 @@ export interface StoryMeta {
   /** Set the moment a live page is taken down; cleared by the next publish. */
   unpublishedAt: number | null
   updatedAt: number
-  /** Derived, not stored — see `storyState`. */
+  /**
+   * The Durable Object's log position last mirrored into D1, and the position
+   * that was actually published — `unpublished-changes.md`'s watermark pair.
+   * Both start at 0 for a story whose object has never been touched or never
+   * published, which reads as "nothing changed" rather than "everything
+   * changed" (see migrations/0005_draft_watermark.sql).
+   */
+  draftSyncId: number
+  /** When the watermark above was last written. Null until the first debounced write. */
+  draftUpdatedAt: number | null
+  publishedSyncId: number
+  /** Derived, not stored — see `draftState`. */
   state: StoryState
+  /** Derived, not stored: `state === 'changed'`, named for callers that only
+   * care about the yes/no rather than the whole state machine. */
+  hasUnpublishedChanges: boolean
   /** Filled server-side from the host's `route` config. */
   url?: string
   previewUrl?: string
@@ -33,10 +47,9 @@ export interface StoryNode extends StoryMeta {
  * agree on what a badge means.
  *
  * `'changed'` — live, with draft edits the last publish does not reflect — is
- * not derivable from `publishedAt`/`unpublishedAt` alone; it needs a document
- * diff. `storyState` below never returns it. The value stays in this union so
- * `StoryMeta.state` does not need widening when `unpublished-changes.md` adds
- * the comparison that produces it.
+ * not derivable from `publishedAt`/`unpublishedAt` alone; it needs a watermark
+ * comparison (or, for the story currently open, a real diff). `storyState`
+ * below never returns it; `draftState` wraps it to do so.
  */
 export type StoryState = 'draft' | 'unpublished' | 'live' | 'changed'
 
@@ -53,6 +66,28 @@ export function storyState(
   if (publishedAt !== null) return 'live'
   if (unpublishedAt !== null) return 'unpublished'
   return 'draft'
+}
+
+/**
+ * `storyState` widened to report `'changed'` — the watermark comparison from
+ * `unpublished-changes.md`'s architecture decision 3. A story reads `'changed'`
+ * rather than `'live'` when its Durable Object's log position (`draftSyncId`)
+ * has moved past the position that was actually published (`publishedSyncId`).
+ *
+ * Deliberately coarser than a diff: an edit that cancels itself out still
+ * advances the watermark, so a row can read `'changed'` with nothing left to
+ * publish. That is the accepted trade for rendering a tree without opening
+ * every Durable Object — the open story's own diff (the admin's
+ * `usePublishedDoc`) overrides this comparison for the page being edited.
+ */
+export function draftState(
+  publishedAt: number | null,
+  unpublishedAt: number | null,
+  draftSyncId: number,
+  publishedSyncId: number,
+): StoryState {
+  const base = storyState(publishedAt, unpublishedAt)
+  return base === 'live' && draftSyncId > publishedSyncId ? 'changed' : base
 }
 
 export function joinPath(parentPath: string, slug: string): string {
@@ -137,11 +172,15 @@ export function descendants(rows: readonly StoryMeta[], id: string): string[] {
  * staying up, per `unpublish.md`'s architecture decision 3 (no cascade, but
  * the editor is told what it does not cascade to). Excludes `id` itself,
  * unlike `descendants`, since a story is never its own descendant here.
+ *
+ * `'changed'` counts as live: it is `'live'` with unpublished edits on top
+ * (`draftState`), and a page mid-edit is still serving the public exactly like
+ * an untouched one — unpublishing its ancestor must still warn that it stays up.
  */
 export function liveDescendants(rows: readonly StoryMeta[], id: string): StoryMeta[] {
   const ids = new Set(descendants(rows, id))
   ids.delete(id)
-  return rows.filter((r) => ids.has(r.id) && r.state === 'live')
+  return rows.filter((r) => ids.has(r.id) && (r.state === 'live' || r.state === 'changed'))
 }
 
 export function slugify(input: string): string {
