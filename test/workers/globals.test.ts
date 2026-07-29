@@ -49,6 +49,7 @@ function makeFolio(types: DocumentType[], globals: string[]) {
     globals,
     bindings,
     basePath: '/folio',
+    auth: 'open',
     route: (p) => (p ? `/${p}` : '/'),
   })
 }

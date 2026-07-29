@@ -24,7 +24,13 @@ const page = defineBlock({
 const ORIGIN = 'https://example.com'
 
 function folioWith(bindings: (env: Cloudflare.Env) => FolioBindings) {
-  return createFolio<Cloudflare.Env>({ blocks: [page], root: 'page', bindings, basePath: '/folio' })
+  return createFolio<Cloudflare.Env>({
+    blocks: [page],
+    root: 'page',
+    bindings,
+    basePath: '/folio',
+    auth: 'open',
+  })
 }
 
 const real = (e: Cloudflare.Env): FolioBindings => ({

@@ -8,13 +8,29 @@
  * logs, not for whoever made the request.
  */
 
-export type FolioErrorCode = 'bad_request' | 'not_found' | 'conflict' | 'too_large' | 'unsupported'
+export type FolioErrorCode =
+  | 'bad_request'
+  /** No usable credential at all: absent, expired, or revoked. Never "the right
+   * credential lacking permission" — that is `forbidden`, and telling the two
+   * apart is what lets the admin turn exactly one of them into a sign-in
+   * redirect (`identity-and-access.md`). */
+  | 'unauthorized'
+  /** A credential this server recognises, doing something its role or scope does
+   * not cover. Retrying with the same credential can never help, so the admin
+   * must not treat it as a session problem. */
+  | 'forbidden'
+  | 'not_found'
+  | 'conflict'
+  | 'too_large'
+  | 'unsupported'
 
 /** Every status a FolioError can produce, so `c.json(body, status)` stays typed. */
-export type FolioErrorStatus = 400 | 404 | 409 | 413 | 501
+export type FolioErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 501
 
 const STATUS: Record<FolioErrorCode, FolioErrorStatus> = {
   bad_request: 400,
+  unauthorized: 401,
+  forbidden: 403,
   not_found: 404,
   conflict: 409,
   too_large: 413,

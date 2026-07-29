@@ -222,3 +222,115 @@ describe('0006: the three slug namespaces', () => {
     expect(row?.n).toBe(3)
   })
 })
+
+/**
+ * `0007_identity.sql`. Additive — four new tables, `stories` untouched — so
+ * unlike 0006 there is no rebuild to lose a column. What is pinned here is the
+ * shape the middleware and the Durable Object's revocation check depend on: the
+ * hashed primary keys, the role constraint, and the two indexes that keep a
+ * per-request session lookup and the per-address link rate limit from being
+ * table scans.
+ */
+describe('0007: identity', () => {
+  const columnsOf = async (table: string): Promise<ColumnInfo[]> => {
+    const { results } = await env.DB.prepare('select * from pragma_table_info(?)')
+      .bind(table)
+      .all<ColumnInfo>()
+    return results
+  }
+
+  const indexesOf = async (table: string): Promise<string[]> => {
+    const { results } = await env.DB.prepare(
+      `select name from sqlite_master
+       where type = 'index' and tbl_name = ? and name not like 'sqlite_%'
+       order by name`,
+    )
+      .bind(table)
+      .all<{ name: string }>()
+    return results.map((r) => r.name)
+  }
+
+  it('creates `users` with a unique email and a constrained role', async () => {
+    expect((await columnsOf('users')).map((c) => c.name)).toEqual([
+      'id',
+      'email',
+      'name',
+      'colour',
+      'role',
+      'provider',
+      'created_at',
+      'last_seen_at',
+    ])
+    const role = (await columnsOf('users')).find((c) => c.name === 'role')
+    // `default 'editor'` is what an invited user gets without a role named.
+    expect(role?.dflt_value).toBe("'editor'")
+    expect(role?.notnull).toBe(1)
+
+    await env.DB.prepare(
+      "insert into users (id, email, name, role, created_at) values ('usr_a', 'a@x.com', 'A', 'admin', 1)",
+    ).run()
+    await expect(
+      env.DB.prepare(
+        "insert into users (id, email, name, role, created_at) values ('usr_b', 'a@x.com', 'B', 'editor', 1)",
+      ).run(),
+    ).rejects.toThrow(/UNIQUE constraint failed/i)
+    await expect(
+      env.DB.prepare(
+        "insert into users (id, email, name, role, created_at) values ('usr_c', 'c@x.com', 'C', 'owner', 1)",
+      ).run(),
+    ).rejects.toThrow(/CHECK constraint failed/i)
+    await env.DB.prepare('delete from users').run()
+  })
+
+  it('creates `sessions` keyed on the token hash, indexed by user and expiry', async () => {
+    expect((await columnsOf('sessions')).map((c) => c.name)).toEqual([
+      'id',
+      'user_id',
+      'created_at',
+      'expires_at',
+      'user_agent',
+    ])
+    // `id` is the SHA-256 of the cookie's token, so it must be the primary key:
+    // the per-request lookup is by it and nothing else.
+    expect((await columnsOf('sessions')).find((c) => c.name === 'id')?.pk).toBe(1)
+    expect(await indexesOf('sessions')).toEqual(['sessions_expiry', 'sessions_user'])
+  })
+
+  it('creates `login_challenges` with the index the rate limit counts on', async () => {
+    expect((await columnsOf('login_challenges')).map((c) => c.name)).toEqual([
+      'id',
+      'email',
+      'created_at',
+      'expires_at',
+      'consumed_at',
+    ])
+    expect(await indexesOf('login_challenges')).toEqual(['login_challenges_email'])
+  })
+
+  it('creates `api_tokens` with scopes as text and a revocation stamp', async () => {
+    expect((await columnsOf('api_tokens')).map((c) => c.name)).toEqual([
+      'id',
+      'name',
+      'scopes',
+      'created_by',
+      'created_at',
+      'expires_at',
+      'last_used_at',
+      'revoked_at',
+    ])
+    expect(await indexesOf('api_tokens')).toEqual(['api_tokens_created'])
+  })
+
+  it('leaves `stories` exactly as 0006 left it', async () => {
+    // The regression 0007 could have been: a second rebuild. It is not one.
+    expect((await columns()).map((c) => c.name)).toContain('published_sync_id')
+    expect(await indexNames()).toEqual([
+      'stories_draft_updated',
+      'stories_parent_ord',
+      'stories_parent_slug',
+      'stories_path',
+      'stories_type',
+      'stories_type_slug',
+    ])
+  })
+})

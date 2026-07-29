@@ -791,6 +791,7 @@ function folioWithHooks(hooks: FolioHooks<Cloudflare.Env>) {
     root: 'page',
     bindings: (e) => ({ db: e.DB, story: e.STORY, media: e.MEDIA, images: e.IMAGES }),
     basePath: '/folio',
+    auth: 'open',
     hooks,
   })
 }
@@ -1553,6 +1554,7 @@ function typedFolio() {
     types: DT_TYPES,
     bindings: (e) => ({ db: e.DB, story: e.STORY, media: e.MEDIA, images: e.IMAGES }),
     basePath: '/folio',
+    auth: 'open',
     route: (path) => (path ? `/${path}` : '/'),
   })
 }
@@ -1853,12 +1855,13 @@ describe('document types: createFolio validates its config at construction', () 
         root: 'pageRoot',
         types: DT_TYPES,
         bindings,
+        auth: 'open',
       }),
     ).toThrow(/either `types` or `root`, not both/)
   })
 
   it('refuses neither', () => {
-    expect(() => createFolio<Cloudflare.Env>({ blocks: [dtPage], bindings })).toThrow(
+    expect(() => createFolio<Cloudflare.Env>({ blocks: [dtPage], bindings, auth: 'open' })).toThrow(
       /no document types configured/,
     )
   })
@@ -1869,6 +1872,7 @@ describe('document types: createFolio validates its config at construction', () 
         blocks: [dtPage],
         types: [{ name: 'page', label: 'Page', kind: 'page', root: 'ghost' }],
         bindings,
+        auth: 'open',
       }),
     ).toThrow(/names root block 'ghost'/)
   })
@@ -1882,6 +1886,7 @@ describe('document types: createFolio validates its config at construction', () 
       root: 'pageRoot',
       bindings,
       basePath: '/folio',
+      auth: 'open',
     })
     const ctx = createExecutionContext()
     const res = await folio.handle(new Request(`${ORIGIN}/folio/schema`), env, ctx)
