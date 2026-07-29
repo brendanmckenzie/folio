@@ -93,6 +93,56 @@ and write the value into `data`. That is not a missing feature, it is silent
 divergence between two clients looking at the same document — so it has to be
 refused at the handshake instead.
 
+**v4 is the cheapest bump there has been, and it is worth saying why.** Presence
+gained a field and a locale, and a second channel appeared
+(`editing/live-collaboration.md`) — and *nothing in it touches a mutation*.
+Presence is never persisted and the space object holds no storage at all, so
+there is no log entry whose meaning could shift and nothing to stay compatible
+with. The bump is still needed, for the same shape of reason as v3: a v3 client
+handed `selection: { uid, field }` fails its own shape guard and drops every
+presence frame, and a peer dot that silently stops appearing is exactly what the
+handshake exists to make visible.
+
+## The space channel is not the sync engine
+
+`editing/live-collaboration.md` added a second socket, to a second Durable Object
+(`SpaceDO`), and **nothing about it is authoritative**. This is the one thing a
+future reader must not misunderstand about it, so it gets a section of its own.
+
+The story channel is an ordered log. Every delta has a `syncId`, a client tracks a
+watermark, a gap triggers a resync, and a resend is deduped by `txId`. All of that
+exists because the document is the source of truth and divergence is silent.
+
+The space channel has none of it, and must never grow any of it:
+
+- **No content crosses it.** It carries "story X was renamed / created / deleted /
+  published" and who is where. A delta stays on its story's own socket, where the
+  watermark and the catchup logic are. Putting content here would mean two
+  orderings to reconcile — the one thing this design is careful about — for a
+  feature whose worst failure is a stale tree.
+- **No ordering guarantee, and no watermark.** Two renames in flight resolve as
+  "last applied wins", and if that is the wrong one the next tree load corrects
+  it. Nothing is replayed, because there is nothing to replay onto.
+- **No persistence, anywhere.** The object holds no SQLite and no key-value
+  storage; presence lives entirely in socket attachments and dies with them.
+  There is therefore no state that a missed frame could corrupt.
+- **Events are idempotent and advisory.** A client that missed one is corrected by
+  the next `GET /folio/stories`, which is the authoritative answer and is always
+  one request away. That is what makes it safe for the client to reload rather
+  than reconcile.
+
+The practical consequence: a bug on the space channel can make the editor's tree
+stale or an avatar wrong. It cannot lose an edit, cannot diverge two documents,
+and cannot corrupt a log. If a change to it ever *could*, that change belongs on
+the story channel instead.
+
+Two things follow that look like duplication and are not. A selection is sent on
+both channels — the story channel needs it for per-block dots with no round trip
+through a second object, and the space channel needs it for the tree and for
+follow-mode. And the editing locale rides story presence as well as space
+presence, so a peer ring can name a language even on a deployment that never
+declared the space binding. Two cheap frames beat one object trying to be both.
+
 ## Deliberately unchanged
 
 - **LWW on concurrent field writes** — correct for this product; rebase makes

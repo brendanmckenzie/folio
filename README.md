@@ -55,7 +55,7 @@ export const hero = defineBlock({
 import { createFolio, Shell } from 'folio/server'
 import { blocks } from './blocks'
 
-export { StoryDO } from 'folio/server'
+export { SpaceDO, StoryDO } from 'folio/server'
 
 const folio = createFolio<Env>({
   blocks,
@@ -75,7 +75,9 @@ const folio = createFolio<Env>({
   // The public URL for a story path, and the only place a locale reaches a URL:
   // Folio owns no URL shape, so a prefix, a subdomain or `?lang=` are all yours.
   route: (path, locale) => `${locale && locale !== 'en' ? `/${locale}` : ''}${path ? `/${path}` : '/'}`,
-  bindings: (env) => ({ db: env.DB, story: env.STORY }),
+  // `space` is optional; without it the editor loses cross-story presence and
+  // live tree updates and nothing else. See "Live collaboration" below.
+  bindings: (env) => ({ db: env.DB, story: env.STORY, space: env.SPACE }),
   // Required, with no default. Either name sign-in providers or say 'open' —
   // there is no third option, because a host that forgets this key would
   // otherwise be serving a publicly editable CMS. See "Auth" below.
@@ -625,7 +627,9 @@ Consequences that fall out of the model rather than being built:
   same reducer; the admin posts mutations to it. Zero network in the loop.
 - **Undo/redo** is `invertAll()` against pre-apply state, replayed as a new
   transaction. Typing on one field coalesces into a single undo entry.
-- **Multiplayer** is the same broadcast, including per-block presence dots.
+- **Multiplayer** is the same broadcast, including per-field presence rings.
+  Seeing people in *other* documents needs a second channel — see "Live
+  collaboration".
 - **Reconnect** sends a `lastSyncId` watermark and gets only the deltas it
   missed, falling back to a full bootstrap past 200.
 - **Reordering never conflicts.** Position is a fractional index, so a move
@@ -637,6 +641,88 @@ hydration is a preview-mode concern.
 Blocks get their `data-folio-uid` marker injected by the renderer via
 `cloneElement`, so unlike Storyblok's `{...storyblokEditable(blok)}` a block
 author cannot forget to make one editable.
+
+## Live collaboration
+
+Multiplayer inside one document has always worked: edits broadcast per keystroke,
+presence shows who is where, reconnection replays what you missed. The **space
+channel** is everything one step out — who is in the *site* rather than in this
+document, and the fact that somebody else just renamed, created, deleted or
+published something.
+
+It is a second Durable Object, `SpaceDO`, with one instance for the whole site.
+It **holds no storage at all**: everything it knows lives in socket attachments,
+so it cannot lose anything that matters, it hibernates the moment nobody is
+typing, and a full eviction rebuilds a peer list that is still correct. The
+alternative — polling a D1 table of heartbeats — is a write per editor every few
+seconds and is always slightly wrong.
+
+```
+"durable_objects": { "bindings": [ …, { "name": "SPACE", "class_name": "SpaceDO" } ]},
+"migrations": [ …, { "tag": "v2", "new_classes": ["SpaceDO"] } ]
+```
+
+```tsx
+export { SpaceDO, StoryDO } from 'folio/server'
+bindings: (env) => ({ db: env.DB, story: env.STORY, space: env.SPACE }),
+```
+
+**The binding is optional, and that is deliberate.** Leave it out and everything
+here degrades to the behaviour before it — per-story presence, a tree you refresh
+yourself — rather than failing. The admin learns from its own bootstrap whether
+the channel exists and never opens the socket at all, so there is no retry loop
+and nothing in the console. A library that hard-required a new binding would
+break every existing host on upgrade.
+
+What it buys, on every open editor:
+
+- **Who is in the site.** Avatars in the top bar say which document each person
+  is in and which language they are in, and a dot appears on that page's row in
+  the tree. Click an avatar and you land where they are, in their locale, on their
+  block — follow-mode is a client feature over presence, with nothing new on the
+  wire. Continuous following is deliberately not built: it needs an exit
+  affordance, a "they left" state and scroll sync the preview bridge has no way
+  to carry.
+- **A rename fixes your links.** Somebody else moving a page reaches your tree,
+  and the resolution rebuilt from it reaches your preview as a `resolve` frame —
+  so every link to that page in the page you are looking at updates live, with no
+  iframe reload and without your document being fetched or touched. This is the
+  payoff the link design was built for: links store ids, so the document is
+  byte-unchanged.
+- **A publish or a delete is explained.** You are told who published the page you
+  have open, and told that Ben deleted it rather than discovering it through a
+  terminal socket close with no explanation.
+
+**Presence is advisory and nothing is ever locked.** A field somebody else has
+focused shows their colour and name, and you may both type. Every lock needs a
+release, and a lock released by timeout — locked out of your own page for thirty
+seconds — is a worse failure than an overwrite you were warned about. So the
+warning is the feature: when a change from somebody else lands on the field you
+have focused, you are told whose it was. The locale is named whenever it differs
+from yours, because two people in one field in two languages are writing
+different keys and are not in conflict at all.
+
+Richtext gets one extra rule, and it is the highest-value line in this section for
+anyone who has actually tried two people in one prose field. Pushing an incoming
+value into the editor calls `setContent`, which resets the caret — so an external
+change is **deferred while that field has focus** and applied on blur, with a note
+saying your copy is behind. This is not a merge and does not pretend to be one:
+last write still wins, and collaborative richtext (a CRDT) stays out of scope for
+the reason "Not built yet" gives. What it fixes is that last-write-wins was
+*unusable* with two people in one prose field, rather than merely lossy.
+
+**What the channel deliberately does not carry.** No content. A delta stays on its
+story's own socket, where the watermark and the catchup logic live: putting
+content here would mean a second ordering to reconcile, which is the one thing the
+sync design is careful about. Everything on this channel is advisory, unordered
+and never authoritative — the authoritative answer is always one
+`GET /folio/stories` away — so there is no watermark, no catchup and no sequence
+number anywhere in it. See `docs/sync-design.md`.
+
+A **token** cannot open this socket (close code 4004), for the same reason it
+cannot open the sync socket: a token is a script, and presence is a person with a
+cursor. A `viewer` can, because seeing who else is here is not an editing
+capability.
 
 ## Links
 
@@ -1130,7 +1216,21 @@ Before deploying, run `wrangler d1 create folio` and put the real id in
 `wrangler.jsonc`, then `pnpm db:remote` to apply the migrations against it, and
 `wrangler r2 bucket create folio-media` for uploads. Note that
 `new_sqlite_classes` cannot be changed for an already-deployed Durable Object
-class.
+class — and that `SpaceDO` is declared with **`new_classes`**, not
+`new_sqlite_classes`, because it holds no storage at all. Getting that
+distinction wrong is not fixable in place either, so both classes get their own
+migration tag rather than sharing one:
+
+```jsonc
+"durable_objects": { "bindings": [
+  { "name": "STORY", "class_name": "StoryDO" },
+  { "name": "SPACE", "class_name": "SpaceDO" }
+]},
+"migrations": [
+  { "tag": "v1", "new_sqlite_classes": ["StoryDO"] },
+  { "tag": "v2", "new_classes": ["SpaceDO"] }
+]
+```
 
 ## History
 
@@ -1210,7 +1310,9 @@ the same Worker, so a hook is a typed function call, not a round trip to yoursel
 ```ts
 const folio = createFolio<Env>({
   blocks, types: [{ name: 'page', label: 'Page', kind: 'page', root: 'page' }],
-  bindings: (env) => ({ db: env.DB, story: env.STORY }),
+  // `space` is optional; without it the editor loses cross-story presence and
+  // live tree updates and nothing else. See "Live collaboration" below.
+  bindings: (env) => ({ db: env.DB, story: env.STORY, space: env.SPACE }),
   hooks: {
     async published({ story, doc, env, waitUntil }) {
       await caches.default.delete(new Request(`https://site${story.path ? `/${story.path}` : ''}`))
@@ -1751,6 +1853,22 @@ resolves to a real `href`**, because a link mark stores an id and no href, so a
 resolution narrowed to link *fields* would render every internal prose link as
 plain text with nothing failing.
 
+`scripts/space-test.mjs` (26 checks) covers the space channel with three clients —
+two story sockets on two different documents plus a space socket, which is the
+minimum that can show what it is for. Cross-story presence, as the signed-in
+identity rather than what the client asserted, and with no session id or expiry
+anywhere on a presence frame; each editor seeing which document the other is in;
+neither appearing in the other's per-block presence, because they are in different
+documents; the selection arriving on *both* channels, since that duplication is
+deliberate; a rename through the HTTP API arriving as `story.updated` naming every
+path in the moved subtree and attributed, so the client that caused it can ignore
+its own echo; both editors converging on the reloaded tree with the server's own
+URLs; a publish and a delete each reaching every open editor; an unversioned frame
+refused and closed 4001; and a departure announced so an avatar disappears rather
+than lingering. One is a regression guard rather than a feature test: **per-block
+presence on a story socket still works and now names a field**, because the space
+channel duplicates the selection and must not have replaced anything.
+
 Every script runs against a live dev server on port 5199 (and the engine tests
 against the production build via `vite preview`). They sign in first, through
 `scripts/lib/auth.mjs`: the demo's `send` logs the link and stashes it at a
@@ -1807,6 +1925,22 @@ update in the same breath, with no atomicity available across the two stores;
 expressible by hand). No per-block schema versioning with lazy up-conversion on
 read, deliberately — a document whose shape depends on when it was last read
 makes the diff, the audit and any query index ambiguous.
+
+Within live collaboration: **collaborative richtext (a CRDT)**, which means
+translating ProseMirror transactions into mutations against the blok graph and is
+`y-prosemirror` rewritten — the deferred-update rule in "Live collaboration" makes
+last-write-wins bearable instead, and does not pretend to merge. Also no cursors or
+text selections *inside* a richtext field (they need ProseMirror decorations fed
+from presence, and are only worth it alongside a CRDT), no comments or mentions on
+blocks (a real want, a separate spec, and it needs persistence the space object
+deliberately has none of), no continuous follow-mode, no presence on the published
+site ("3 people viewing" is not a CMS feature), and no sharding of the space
+object — one instance is right for a CMS's tens of editors, and sharding by
+story-prefix is named as the escape hatch rather than built. One smaller gap: a
+pure sibling **reorder** broadcasts nothing, because no path changes, so a peer's
+tree keeps the old order until its next load. Live propagation of a *draft* edit
+inside a global into another page's open preview is also unbuilt; publishing one
+does reach every editor.
 
 Within the field types: no tables in richtext, no text colour mark, and no
 embedded bloks inside richtext. Host projects cannot override how a richtext node
