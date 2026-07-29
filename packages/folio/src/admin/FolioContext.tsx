@@ -1,5 +1,5 @@
 import { createContext, type ReactNode, useContext, useSyncExternalStore } from 'react'
-import type { SchemaIndex } from '../core/schema'
+import type { DocumentType, SchemaIndex } from '../core/schema'
 import type { StoryNode } from '../core/story'
 import type { StoreState, StoryStore } from './store'
 
@@ -15,9 +15,16 @@ import type { StoreState, StoryStore } from './store'
 export interface FolioContextValue {
   store: StoryStore
   schema: SchemaIndex
+  /** Every declared document type (`document-types.md`), off the manifest. What
+   * labels a row, and what a picker filters against. */
+  types: readonly DocumentType[]
   /** Where Folio's routes are mounted, for uploads and the media library. */
   apiBase: string
-  /** Every story, flattened, so a link or a reference can be picked by name. */
+  /**
+   * Every document, flattened, so a link or a reference can be picked by name.
+   * Includes unrouted ones: a `reference` to a record is the point of records,
+   * even though a link to one can never resolve.
+   */
   stories: readonly StoryNode[]
 }
 

@@ -1121,6 +1121,44 @@ button.tree__menu-heading {
   background: #fdf3d7;
   border-radius: 3px;
 }
+
+/* document-types.md: the chip a row wears once the site has more than one
+   document type. Neutral, unlike the state badges: a type is what a row *is*,
+   not something that needs attention. */
+.stories__chip {
+  padding: 0 4px;
+  font-size: 0.625rem;
+  color: var(--muted);
+  background: #eceff3;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+/* A row whose type is no longer declared. Shown rather than hidden: deleting
+   rows because the code changed is worse than an odd-looking chip. */
+.stories__chip.is-unknown {
+  color: var(--danger);
+  background: #fde8e8;
+}
+
+/* The per-type create menu, shown only where more than one type could be
+   created. Same shape as .tree__menu, one level up in the model. */
+.stories__menu {
+  display: flex;
+  position: relative;
+  z-index: 2;
+  flex-direction: column;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel, #fff);
+}
+.stories__menu button {
+  padding: 0.15rem 0.4rem;
+  font-size: 0.75rem;
+  text-align: left;
+  border-color: transparent;
+}
 /* Taken down (was live, now not) reads as more urgent than never-published,
    so it gets the danger palette rather than the neutral "draft" amber. */
 .stories__badge--unpublished {
@@ -1534,4 +1572,91 @@ button.tree__menu-heading {
   padding: 0.5rem 0.75rem 0;
   font-size: 0.75rem;
   color: #8a6100;
+}
+
+/* --------------------------------------------------------------- data ---- */
+
+/* document-types.md's Data rail: records and singletons, which by construction
+   are not in the page tree. Deliberately thin — data-documents.md replaces this
+   list with a real table. */
+.data {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+.data__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.4rem;
+}
+.data__head h2 {
+  margin: 0;
+  font-size: 0.6875rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.data__head button {
+  padding: 0.15rem 0.4rem;
+  font-size: 0.75rem;
+}
+.data__level {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.data__row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.data__row:hover {
+  background: #f0f2f5;
+}
+.data__row.is-current {
+  background: #e6f2ff;
+  border-color: #b8dcff;
+}
+.data__title {
+  font-weight: 550;
+  white-space: nowrap;
+}
+.data__slug {
+  overflow: hidden;
+  flex: 1;
+  color: var(--muted);
+  font-size: 0.6875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.data__row:hover .stories__actions,
+.data__row:focus-within .stories__actions {
+  visibility: visible;
+}
+.data__empty {
+  padding: 0.35rem 0.45rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* An unrouted document has no page to show in the stage. */
+.stage__nopreview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  height: 100%;
+  padding: 2rem;
+  color: var(--muted);
+  text-align: center;
+}
+.stage__nopreview p {
+  max-width: 34rem;
+  margin: 0;
 }

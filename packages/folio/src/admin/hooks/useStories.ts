@@ -1,19 +1,28 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { StoryNode } from '../../core/story'
+import type { StoryMeta, StoryNode } from '../../core/story'
 import { expectJson, expectOk, send } from '../api'
 import type { Notify } from './useNotice'
 
 export interface Stories {
-  /** The tree as the rail draws it. */
+  /** The page tree as the rail draws it. `page`-kind types only: unrouted
+   * documents are not in it (`document-types.md` checkpoint 2). */
   tree: StoryNode[]
-  /** The same stories, flattened, for links, references and the parent picker. */
+  /** Every unrouted document (records and singletons), flat, for the Data rail.
+   * Fetching this is also what creates a singleton on first access. */
+  documents: StoryNode[]
+  /**
+   * Every document — the tree flattened, then the unrouted ones — for links,
+   * references and the parent picker. A `reference` can point at a record, so
+   * the pickers need both lists; each filters for itself.
+   */
   flat: StoryNode[]
-  /** The story being edited. */
+  /** The document being edited. */
   storyId: string
   current: StoryNode | undefined
   reload: () => Promise<void>
   open: (id: string) => void
-  create: (title: string, parentId: string | null) => Promise<void>
+  /** `type` is a document type name; absent means the default page type. */
+  create: (title: string, parentId: string | null, type?: string) => Promise<void>
   patch: (id: string, patch: Record<string, unknown>) => Promise<void>
   /** `redirect` (redirects.md) is the delete confirmation's checkbox value:
    * true writes a redirect to the parent, false is the escape hatch. */
@@ -37,13 +46,30 @@ function flatten(nodes: StoryNode[]): StoryNode[] {
 export function useStories(apiBase: string, initialStoryId: string, notify: Notify): Stories {
   const [storyId, setStoryId] = useState(initialStoryId)
   const [tree, setTree] = useState<StoryNode[]>([])
+  const [documents, setDocuments] = useState<StoryNode[]>([])
 
-  const flat = useMemo(() => flatten(tree), [tree])
+  const flat = useMemo(() => [...flatten(tree), ...documents], [tree, documents])
   const current = useMemo(() => flat.find((s) => s.id === storyId), [flat, storyId])
 
+  /**
+   * Both lists, in parallel. `/documents` is a second request rather than one
+   * combined payload because the tree is a *tree* and the unrouted documents are
+   * a flat list — and because asking for the flat list is what brings every
+   * declared singleton into existence (`document-types.md` decision 7), which
+   * the tree request must not be responsible for.
+   */
   const reload = useCallback(async () => {
-    const res = await fetch(`${apiBase}/stories`)
-    if (res.ok) setTree((await res.json()) as StoryNode[])
+    const [treeRes, docsRes] = await Promise.all([
+      fetch(`${apiBase}/stories`),
+      fetch(`${apiBase}/documents`),
+    ])
+    if (treeRes.ok) setTree((await treeRes.json()) as StoryNode[])
+    if (docsRes.ok) {
+      const body = (await docsRes.json()) as { documents: StoryMeta[] }
+      // Given `children: []` so one list can hold both kinds: nothing nests
+      // under an unrouted document, so the array is always empty.
+      setDocuments(body.documents.map((d) => ({ ...d, children: [] })))
+    }
   }, [apiBase])
 
   useEffect(() => {
@@ -87,18 +113,27 @@ export function useStories(apiBase: string, initialStoryId: string, notify: Noti
   )
 
   const create = useCallback(
-    async (title: string, parentId: string | null) => {
+    async (title: string, parentId: string | null, type?: string) => {
       let story: StoryNode
       try {
         story = await expectJson<StoryNode>(
-          await send(`${apiBase}/stories`, 'POST', { title, parentId }),
+          // `type` is omitted rather than sent as undefined when absent, so the
+          // server applies its own default page type.
+          await send(`${apiBase}/stories`, 'POST', {
+            title,
+            parentId,
+            ...(type ? { type } : {}),
+          }),
         )
       } catch (e) {
+        // An `under` violation and an unknown type both land here as a notice —
+        // the refusal the resolved open question asked for, rather than a
+        // create that appears to work and does nothing.
         notify((e as Error).message)
         return
       }
       await reload()
-      // Stay on the Content tab: you have just been working with the tree.
+      // Stay on the rail you were working in: the tree, or the Data list.
       open(story.id)
     },
     [apiBase, notify, open, reload],
@@ -149,5 +184,5 @@ export function useStories(apiBase: string, initialStoryId: string, notify: Noti
     [apiBase, notify, open, reload],
   )
 
-  return { tree, flat, storyId, current, reload, open, create, patch, remove, duplicate }
+  return { tree, documents, flat, storyId, current, reload, open, create, patch, remove, duplicate }
 }
