@@ -177,10 +177,10 @@ describe('admin sync store', () => {
       expect(h.last().hello()).toEqual({
         type: 'hello',
         v: PROTOCOL_VERSION,
-        actor: h.store.actor,
-        name: h.store.name,
-        colour: h.store.colour,
         lastSyncId: 0,
+        // v3: one optional nested object, advisory, and read only under
+        // `auth: 'open'` (`localisation.md`).
+        identity: { actor: h.store.actor, name: h.store.name, colour: h.store.colour },
       })
       expect(h.store.getSnapshot().connected).toBe(true)
     })

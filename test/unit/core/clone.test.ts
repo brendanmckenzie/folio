@@ -228,3 +228,71 @@ describe('cloneDoc', () => {
     for (const uid of Object.keys(second.bloks)) expect(firstUids.has(uid)).toBe(false)
   })
 })
+
+/**
+ * The debt `duplicate-and-paste.md` deferred to `localisation.md`.
+ *
+ * `i18n` is a **sibling** of `data` on `Blok`, not a key inside it (decision 1),
+ * so it has to be named explicitly in the recipe: a `subtreeRecipe` that carried
+ * only `data` would have let duplicate, paste and "duplicate this document" each
+ * silently drop every translation on the page. These tests are the regression
+ * guard for exactly that.
+ */
+describe('cloneSubtree — translations', () => {
+  function translated(): Doc {
+    return {
+      root: 'root',
+      bloks: {
+        root: blok({
+          uid: 'root',
+          type: 'page',
+          data: { title: 'About' },
+          i18n: { fr: { title: 'À propos' } },
+        }),
+        hero: blok({
+          uid: 'hero',
+          type: 'hero',
+          parent: 'root',
+          slot: 'body',
+          order: 'a0',
+          data: { heading: 'Hello', sub: 'World' },
+          i18n: { fr: { heading: 'Bonjour', sub: '' }, de: { heading: 'Hallo', sub: null } },
+        }),
+        child: blok({
+          uid: 'child',
+          type: 'item',
+          parent: 'hero',
+          slot: 'items',
+          order: 'a0',
+          data: { label: 'One' },
+          i18n: { fr: { label: 'Un' } },
+        }),
+      },
+    }
+  }
+
+  it('carries every locale of every blok in the subtree', () => {
+    const doc = translated()
+    const copy = cloneSubtree(doc, 'hero', { parent: 'root', slot: 'body', order: 'a1' })
+    expect(copy).toHaveLength(2)
+    expect(copy[0]!.i18n).toEqual({
+      fr: { heading: 'Bonjour', sub: '' },
+      de: { heading: 'Hallo', sub: null },
+    })
+    expect(copy[1]!.i18n).toEqual({ fr: { label: 'Un' } })
+  })
+
+  it('leaves i18n absent on a copy of a blok that had none', () => {
+    const doc = translated()
+    delete doc.bloks.hero!.i18n
+    const copy = cloneSubtree(doc, 'hero', { parent: 'root', slot: 'body', order: 'a1' })
+    expect(copy[0]).not.toHaveProperty('i18n')
+  })
+
+  it('carries translations through a whole-document clone, root included', () => {
+    const copy = cloneDoc(translated())
+    expect(copy.bloks[copy.root]!.i18n).toEqual({ fr: { title: 'À propos' } })
+    const values = Object.values(copy.bloks).map((b) => b.i18n)
+    expect(values.filter(Boolean)).toHaveLength(3)
+  })
+})

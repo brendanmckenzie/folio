@@ -83,6 +83,28 @@ export type {
 // reads, but walking or mutating one is engine work (see `folio/engine`).
 export type { Blok, Doc, Json } from './doc'
 
+// Locales (`localisation.md`) are core, not server: `fieldValue`/`dataOf` are how a
+// host reads a field in the active language, and a block author needs them the
+// moment they read a value off a root block rather than through `render`.
+export {
+  dataOf,
+  isKnownLocale,
+  isTranslatable,
+  localeChain,
+  localeContext,
+  translatableFields,
+  translationGaps,
+  translationStatus,
+  fieldValue,
+} from './locales'
+export type {
+  LocaleConfig,
+  LocaleContext,
+  LocaleDef,
+  TranslationGap,
+  TranslationStatus,
+} from './locales'
+
 export { buildTree, derivePaths, descendants, joinPath, newStoryId, slugify } from './story'
 export type { StoryMeta, StoryNode } from './story'
 

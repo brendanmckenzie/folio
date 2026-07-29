@@ -137,19 +137,20 @@ function browserSocket(path: string): WebSocketLike {
 
 export class StoryStore {
   /**
-   * The identity this client *asserts* in `hello`, and it is now advisory.
+   * The identity this client *asserts*, sent as `hello.identity` and advisory.
    *
    * On a deployment with accounts the Worker attaches a verified identity to the
-   * socket at upgrade time and the object ignores these three fields entirely —
-   * they keep their place in the frame so no protocol bump is needed and an old
-   * tab keeps working, they simply stop being believed
-   * (`identity-and-access.md` architecture decision 3).
+   * socket at upgrade time and the object ignores this entirely
+   * (`identity-and-access.md` architecture decision 3). At v3
+   * (`localisation.md`) the three fields left the top level of `hello` and became
+   * one optional nested object, which is what the wire had been saying in a
+   * comment since spec 10: not identity, a fallback.
    *
-   * They are still generated, and still used, under `auth: 'open'`: there are no
-   * accounts there, so this random pair is the only thing that tells two
-   * anonymous tabs apart in presence. Dropping them outright — which the spec's
-   * phase 4 asked for — would have left that deployment shape with no presence at
-   * all. `TopBar` prefers the real name from `/folio/me` whenever there is one.
+   * Still generated, and still the only identity going under `auth: 'open'`,
+   * where there are no accounts and this random pair is all that tells two
+   * anonymous tabs apart in presence. Dropping it outright would have left that
+   * deployment shape with no presence at all. `TopBar` prefers the real name from
+   * `/folio/me` whenever there is one.
    */
   readonly actor = crypto.randomUUID().slice(0, 8)
   readonly name: string
@@ -246,10 +247,8 @@ export class StoryStore {
   private hello(lastSyncId = this.lastSyncId) {
     this.send({
       type: 'hello',
-      actor: this.actor,
-      name: this.name,
-      colour: this.colour,
       lastSyncId,
+      identity: { actor: this.actor, name: this.name, colour: this.colour },
     })
   }
 

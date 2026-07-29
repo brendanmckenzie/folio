@@ -1,5 +1,6 @@
 import { type Blok, type Doc, type Json, keyAtIndex, newUid } from './doc'
 import { defaultValue, type Field } from './fields'
+import { type LocaleContext, fieldValue } from './locales'
 import { asRichtext, richtextToText } from './richtext'
 import { asAsset } from './values'
 
@@ -184,21 +185,30 @@ export function titleOf(
   type: DocumentType | undefined,
   schema: SchemaIndex,
   fallback = 'Untitled',
+  /** Reads the title in this locale, falling back per `fieldValue`
+   * (`localisation.md`). Absent is the source locale, exactly as before. */
+  locale?: LocaleContext,
 ): string {
   const root = doc.bloks[doc.root]
   if (!root) return fallback
   const def = schema[root.type]
   const field = titleFieldOf(type, def)
   if (!field) return fallback
-  return fieldText(def, field, root.data).trim() || fallback
+  return fieldText(def, field, root, locale).trim() || fallback
 }
 
 /**
- * One field's value as display text. Fields whose value is an object need
+ * One field's value as display text, read through `fieldValue` so a tree row in
+ * French says what the French page says. Fields whose value is an object need
  * unwrapping, or a tree row fills up with "[object Object]".
  */
-function fieldText(def: BlockSchema | undefined, name: string, data: Record<string, Json>): string {
-  const value = data[name]
+function fieldText(
+  def: BlockSchema | undefined,
+  name: string,
+  blok: Blok,
+  locale?: LocaleContext,
+): string {
+  const value = fieldValue(blok, name, locale)
   if (value == null) return ''
   switch (def?.fields[name]?.kind) {
     case 'richtext':
@@ -210,9 +220,19 @@ function fieldText(def: BlockSchema | undefined, name: string, data: Record<stri
   }
 }
 
-export function summarise(schema: BlockSchema | undefined, data: Record<string, Json>): string {
-  if (!schema?.summary) return ''
-  return fieldText(schema, schema.summary, data).slice(0, 64)
+/**
+ * The label a block wears in the tree. Takes the whole blok rather than its
+ * `data` (`localisation.md` phase 2): the summary field may itself be
+ * translatable, and a translator's tree that reads back in English is the
+ * clearest possible sign the locale did not take.
+ */
+export function summarise(
+  schema: BlockSchema | undefined,
+  blok: Blok | undefined,
+  locale?: LocaleContext,
+): string {
+  if (!schema?.summary || !blok) return ''
+  return fieldText(schema, schema.summary, blok, locale).slice(0, 64)
 }
 
 /**
@@ -343,6 +363,15 @@ export interface SubtreeBlok {
   key: string
   type: string
   data: Record<string, Json>
+  /**
+   * Translations to carry onto the allocated blok
+   * (`localisation.md`). Absent for a recipe built from a preset — a blank block
+   * has nothing translated yet — and **present for one built from an existing
+   * subtree**, which is the debt `duplicate-and-paste.md` deferred here: `i18n`
+   * is a sibling of `data` on `Blok`, not a key inside it, so a recipe that
+   * copied only `data` would drop every translation on duplicate and paste.
+   */
+  i18n?: Record<string, Record<string, Json>>
   parent: string | null
   slot: string | null
 }
@@ -398,6 +427,9 @@ export function allocateSubtree(
       slot: realSlot,
       order: realOrder,
       data: node.data,
+      // Omitted rather than written as undefined, so a blank block's JSON is
+      // byte-identical to what it was before locales existed.
+      ...(node.i18n ? { i18n: node.i18n } : {}),
     })
 
     // Group by slot so siblings within the same slot get sequential orders;

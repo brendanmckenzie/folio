@@ -5,7 +5,20 @@ import { ancestorsOf, type Blok, type Doc, type Json, subtree } from './doc'
  * directly, which is what makes undo, sync and multiplayer the same machinery.
  */
 export type Mutation =
-  | { t: 'set'; uid: string; field: string; value: Json }
+  /**
+   * Writes one field value. **An absent `locale` is a source-locale write, and
+   * it means that permanently** (`localisation.md` architecture decision 2): the
+   * log outlives every deploy, so every `set` written before locales existed has
+   * to keep meaning what it meant, which is why the locale is an optional
+   * addition rather than a required field with a default spelled somewhere.
+   *
+   * With a locale it writes `blok.i18n[locale][field]`, creating the maps as
+   * needed. Setting a locale value to `undefined` is not expressible (`isMutation`
+   * requires `value` to be *present*), so "untranslate this" is an explicit
+   * `{ locale, value: null }` — and `fieldValue` reads null as untranslated while
+   * `''` stays deliberately empty.
+   */
+  | { t: 'set'; uid: string; field: string; value: Json; locale?: string }
   | { t: 'insert'; blok: Blok }
   | { t: 'move'; uid: string; parent: string; slot: string; order: string }
   | { t: 'remove'; uid: string }
@@ -76,10 +89,7 @@ export function apply(doc: Doc, m: Mutation): Doc {
     case 'set': {
       const b = doc.bloks[m.uid]
       if (!b) return doc
-      return {
-        ...doc,
-        bloks: { ...doc.bloks, [m.uid]: { ...b, data: { ...b.data, [m.field]: m.value } } },
-      }
+      return { ...doc, bloks: { ...doc.bloks, [m.uid]: written(b, m.field, m.value, m.locale) } }
     }
     case 'insert': {
       return { ...doc, bloks: { ...doc.bloks, [m.blok.uid]: m.blok } }
@@ -112,6 +122,39 @@ export function apply(doc: Doc, m: Mutation): Doc {
   }
 }
 
+/**
+ * `blok` with one field written, in `data` or in one locale's map.
+ *
+ * The source-locale branch is byte-for-byte what `apply` did before locales
+ * existed, and it is the branch an old logged `set` takes — which is the whole
+ * compatibility guarantee, expressed as a default rather than as a migration.
+ *
+ * A locale write never touches `data`, so two translators in different languages
+ * write different keys of the same blok and cannot overwrite each other.
+ */
+function written(blok: Blok, field: string, value: Json, locale?: string): Blok {
+  if (locale === undefined) return { ...blok, data: { ...blok.data, [field]: value } }
+  return {
+    ...blok,
+    i18n: {
+      ...blok.i18n,
+      [locale]: { ...blok.i18n?.[locale], [field]: value },
+    },
+  }
+}
+
+/**
+ * A `set` for the same field and locale, carrying `value`. The locale key is
+ * *omitted* rather than set to undefined when there is none, so a source-locale
+ * inverse serialises exactly as a pre-v3 mutation did — `deepEqual` and the
+ * log's own bytes both notice the difference.
+ */
+function setMutation(uid: string, field: string, value: Json, locale?: string): Mutation {
+  return locale === undefined
+    ? { t: 'set', uid, field, value }
+    : { t: 'set', uid, field, value, locale }
+}
+
 export function applyAll(doc: Doc, ms: readonly Mutation[]): Doc {
   return ms.reduce(apply, doc)
 }
@@ -129,7 +172,10 @@ export function invert(doc: Doc, m: Mutation): Mutation[] {
     case 'set': {
       const b = doc.bloks[m.uid]
       if (!b) return []
-      return [{ t: 'set', uid: m.uid, field: m.field, value: b.data[m.field] ?? null }]
+      // Read the prior value from wherever this `set` is about to write, so a
+      // translator's Cmd+Z reverts their own language and nobody else's.
+      const prior = m.locale === undefined ? b.data[m.field] : b.i18n?.[m.locale]?.[m.field]
+      return [setMutation(m.uid, m.field, prior ?? null, m.locale)]
     }
     case 'insert':
       return [{ t: 'remove', uid: m.blok.uid }]

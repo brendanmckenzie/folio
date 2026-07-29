@@ -10,6 +10,8 @@ const delta = (total: number, over: Partial<Delta> = {}): Delta => ({
   moved: 0,
   retyped: 0,
   edited: total,
+  translated: 0,
+  locales: [],
   total,
   ...over,
 })

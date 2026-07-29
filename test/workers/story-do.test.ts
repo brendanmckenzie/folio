@@ -128,10 +128,8 @@ async function join(
   const peer = await connect(stub)
   peer.send({
     type: 'hello',
-    actor: who.actor,
-    name: who.name,
-    colour: who.colour,
     lastSyncId: who.lastSyncId ?? 0,
+    identity: { actor: who.actor, name: who.name, colour: who.colour },
   })
   return peer
 }
@@ -1028,7 +1026,11 @@ describe('StoryDO: protocol discipline', () => {
       closes.push(event.code)
     })
     stale.ws.send(
-      JSON.stringify({ type: 'hello', actor: 'a1', name: 'Ada', colour: '#ff00ff', lastSyncId: 0 }),
+      JSON.stringify({
+        type: 'hello',
+        lastSyncId: 0,
+        identity: { actor: 'a1', name: 'Ada', colour: '#ff00ff' },
+      }),
     )
 
     const err = await frame(stale, 'error')
@@ -1043,10 +1045,8 @@ describe('StoryDO: protocol discipline', () => {
     future.ws.send(
       JSON.stringify({
         type: 'hello',
-        actor: 'a2',
-        name: 'Bo',
-        colour: '#00ffff',
         lastSyncId: 0,
+        identity: { actor: 'a2', name: 'Bo', colour: '#00ffff' },
         v: PROTOCOL_VERSION + 98,
       }),
     )

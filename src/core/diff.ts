@@ -85,6 +85,30 @@ export function diff(from: Doc, to: Doc): Mutation[] {
         sets.push({ t: 'set', uid: blok.uid, field, value: after })
       }
     }
+
+    // The same walk over every locale map (`localisation.md` architecture
+    // decision 2). Without it a version restore would silently drop the
+    // translations the target version had, or leave behind ones it never did —
+    // the document would come back in the right language and the wrong content.
+    //
+    // A locale present on only one side contributes its whole map: an added
+    // locale reads as translations to write, a removed one as translations to
+    // clear (to `null`, which `fieldValue` reads as untranslated — the vocabulary
+    // has no delete-key, and `''` would mean "deliberately empty" instead).
+    for (const locale of new Set([
+      ...Object.keys(prev.i18n ?? {}),
+      ...Object.keys(blok.i18n ?? {}),
+    ])) {
+      const wasMap = prev.i18n?.[locale] ?? {}
+      const nowMap = blok.i18n?.[locale] ?? {}
+      for (const field of new Set([...Object.keys(wasMap), ...Object.keys(nowMap)])) {
+        const before = wasMap[field] ?? null
+        const after = nowMap[field] ?? null
+        if (!deepEqual(before, after)) {
+          sets.push({ t: 'set', uid: blok.uid, field, value: after, locale })
+        }
+      }
+    }
   }
 
   // Shallowest target first. Two bloks swapping parents can only be expressed as
@@ -134,6 +158,7 @@ function depthsIn(doc: Doc): Map<string, number> {
 
 /** Rough shape of a change set, for "this will change 3 blocks" style summaries. */
 export function summariseDiff(mutations: readonly Mutation[]) {
+  const localeSets = mutations.filter((m) => m.t === 'set' && m.locale !== undefined)
   return {
     added: mutations.filter((m) => m.t === 'insert').length,
     removed: mutations.filter((m) => m.t === 'remove').length,
@@ -141,6 +166,17 @@ export function summariseDiff(mutations: readonly Mutation[]) {
     /** Blocks whose *type* changed (`schema-migrations.md`), not their fields. */
     retyped: mutations.filter((m) => m.t === 'retype').length,
     edited: new Set(mutations.filter((m) => m.t === 'set').map((m) => m.uid)).size,
+    /**
+     * Locale-scoped `set`s (`localisation.md`) and which locales they touched.
+     * Counted separately from `edited` because "3 blocks edited" and "12
+     * translations changed" are different facts about the same restore, and a
+     * confirmation that folded them together would tell a French translator
+     * their English was about to move.
+     */
+    translated: localeSets.length,
+    locales: [
+      ...new Set(localeSets.map((m) => (m.t === 'set' ? (m.locale as string) : ''))),
+    ].sort(),
     total: mutations.length,
   }
 }
