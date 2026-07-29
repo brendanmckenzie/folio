@@ -20,6 +20,7 @@ import { History } from './History'
 import { useAccess } from './hooks/useAccess'
 import { useBlocks } from './hooks/useBlocks'
 import { useClipboardShortcuts } from './hooks/useClipboardShortcuts'
+import { useCollections } from './hooks/useCollections'
 import { useGlobalDocs } from './hooks/useGlobalDocs'
 import { useMigrations } from './hooks/useMigrations'
 import { useNotice } from './hooks/useNotice'
@@ -204,9 +205,14 @@ export function Editor({
   // (`globals.md` checkpoint 3), never to render anything itself — the
   // preview iframe renders every global server-side, fresh, on its own.
   const globalDocs = useGlobalDocs(apiBase, types, globals)
+  // Fetched when the *set of queries* changes, never per keystroke — the same
+  // discipline `useReferencedDocs` has, one level up
+  // (`../../../docs/specs/content-model/collections.md` decision 5). Published
+  // content, marked `stale`, exactly as the server's own preview branch resolves it.
+  const collections = useCollections(apiBase, state.doc, schema, localeCtx)
   const resolution = useMemo(
-    () => ({ ...base, docs, globals: globalDocs }),
-    [base, docs, globalDocs],
+    () => ({ ...base, docs, globals: globalDocs, collections }),
+    [base, collections, docs, globalDocs],
   )
 
   // A block inside a global was clicked while previewing something else: the

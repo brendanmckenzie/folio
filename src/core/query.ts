@@ -203,6 +203,34 @@ export function queryKey(q: ContentQuery, perPageMax = MAX_PER_PAGE): string {
   ])
 }
 
+/**
+ * A query as `GET /folio/content` spells it.
+ *
+ * Core rather than admin, and paired with `queryFromParams` (server side) rather
+ * than each end inventing its own encoding: the admin's collection hook and the
+ * route have to agree on `field:op:value` exactly, and one of them living next to
+ * the other's tests is how they stay agreed.
+ */
+export function queryToParams(q: ContentQuery, perPageMax = MAX_PER_PAGE): URLSearchParams {
+  const n = normaliseQuery(q, perPageMax)
+  const params = new URLSearchParams()
+  if (n.type.length > 0) params.set('type', n.type.join(','))
+  // Present-and-empty means the top level, which is a real filter; omitted means
+  // anywhere. `undefined` and `null` are different queries, so both are spellable.
+  if (n.parent !== undefined) params.set('parent', n.parent ?? '')
+  if (n.locale) params.set('locale', n.locale)
+  for (const w of n.where) {
+    params.append(
+      'where',
+      `${w.field}:${w.op}:${Array.isArray(w.value) ? w.value.join(',') : w.value}`,
+    )
+  }
+  params.set('order', `${n.order.field}:${n.order.dir}`)
+  params.set('page', String(n.page))
+  params.set('perPage', String(n.perPage))
+  return params
+}
+
 /* ------------------------------------------------- the collection field --- */
 
 /** The `collection` field's own declaration, narrowed off `Field`. */

@@ -275,6 +275,19 @@ function Level({
 >) {
   const { types, stories, locale, isSourceLocale, translation } = useFolio()
   const [dropIndex, setDropIndex] = useState<number | null>(null)
+  const [showAll, setShowAll] = useState(false)
+
+  /**
+   * Long levels are truncated (`../../../docs/specs/content-model/collections.md`
+   * decision 6, phase 4): a tree node with 800 insights under it is unusable
+   * however fast the query behind it is.
+   *
+   * `visibleAt` never hides the row that is **open**, or an ancestor of it — the
+   * one case where truncating would make the editor look broken rather than tidy.
+   * `nodes` is unchanged, so the drop-gap indices below still mean what they say.
+   */
+  const shown = showAll ? nodes : visibleAt(nodes, currentId)
+  const hidden = nodes.length - shown.length
 
   const chipOf = (node: StoryNode) => typeChip(types, node.type)
   const childTypes = (node: StoryNode) => creatableUnder(types, node.type)
@@ -300,7 +313,7 @@ function Level({
 
   return (
     <ul className="stories__level" style={{ paddingLeft: depth ? 12 : 0 }}>
-      {nodes.map((node, i) => (
+      {shown.map((node, i) => (
         <li key={node.id}>
           <div
             className={`stories__gap ${dropIndex === i ? 'is-over' : ''}`}
@@ -472,6 +485,14 @@ function Level({
         </li>
       ))}
 
+      {hidden > 0 ? (
+        <li>
+          <button type="button" className="stories__more" onClick={() => setShowAll(true)}>
+            Show all {nodes.length}
+          </button>
+        </li>
+      ) : null}
+
       <li
         className={`stories__gap ${dropIndex === nodes.length ? 'is-over' : ''}`}
         onDragOver={(e) => {
@@ -491,6 +512,33 @@ function Level({
       />
     </ul>
   )
+}
+
+/**
+ * How many siblings one level draws before it offers "Show all".
+ *
+ * Chosen to be past every hand-built tree and short of every generated one: a site
+ * with fifty pages under one parent has organised them that way on purpose, and a
+ * site with eight hundred has not.
+ */
+export const LEVEL_LIMIT = 50
+
+/**
+ * The prefix of a level to draw, extended when the open story (or an ancestor of
+ * it) would otherwise be cut off.
+ *
+ * Pure and exported so the one property worth pinning is testable without mounting
+ * the tree: **truncation never hides where you are.** A tree that silently omits the
+ * page you have open reads as a bug, not as tidiness.
+ */
+export function visibleAt(nodes: readonly StoryNode[], currentId: string): StoryNode[] {
+  if (nodes.length <= LEVEL_LIMIT) return [...nodes]
+  const holdsCurrent = (node: StoryNode): boolean =>
+    node.id === currentId || node.children.some(holdsCurrent)
+  const at = nodes.findIndex(holdsCurrent)
+  // `at + 1` rather than the limit, so the open row is the last one drawn: a level
+  // that jumped to row 700 and drew fifty more would be its own kind of confusing.
+  return nodes.slice(0, at >= LEVEL_LIMIT ? at + 1 : LEVEL_LIMIT)
 }
 
 function NewPage({

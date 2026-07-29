@@ -486,6 +486,58 @@ button.tree__menu-heading {
   color: inherit;
 }
 
+/* "Show all 812" on a truncated tree level. A link rather than a button, visually:
+   it reveals rows, it does not act on content. */
+.stories__more {
+  display: block;
+  width: 100%;
+  padding: 0.25rem 0.4rem;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--muted);
+  text-align: left;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.stories__more:hover {
+  color: inherit;
+}
+
+/* A `collection` field: what the block lists (fixed by the schema, so it reads as
+   a statement rather than a control), then the choices the field permits, then how
+   many published documents currently match. */
+.collection {
+  display: grid;
+  gap: 0.4rem;
+}
+.collection__what {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.collection__unknown {
+  font-weight: 400;
+  color: var(--danger, #b42318);
+}
+.collection__filter {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.collection__filter > span {
+  overflow-wrap: anywhere;
+}
+.collection__count {
+  margin: 0;
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+
 /* The editing-language switcher, beside the viewport buttons. */
 .topbar__locale {
   padding: 0.25rem 0.4rem;
