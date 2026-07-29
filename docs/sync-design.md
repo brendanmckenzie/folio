@@ -69,9 +69,29 @@ diff intended to rescue (`diff(live, target)` is the restore path). Inserted
 parents already precede their children; moves before removes can therefore
 always land.
 
-**9. The wire protocol is versioned.** Every message carries `v: 1`. The DO
-refuses a `hello` with an unknown version; persisted logs already outlive
-deploys, and the wire format will too.
+**9. The wire protocol is versioned.** Every message carries `v`. The DO refuses
+any frame with an unknown version; persisted logs already outlive deploys, and
+the wire format will too.
+
+**10. A wire change must be additive to a logged mutation, and every entry
+already in a log must replay under its old meaning forever.** Bumping the version
+is how a *peer* finds out it cannot read what this deploy sends. It is never a
+licence to reinterpret what an older deploy wrote.
+
+The concrete case, and the shape every later one should copy: **a `set` with no
+`locale` is a source-locale write, permanently** (v3, `content-model/
+localisation.md`). Every `set` in every log written before locales existed is
+exactly that, so the whole history replays with no migration — and `invert`
+*omits* the locale key rather than writing `undefined` for a source-locale write,
+so a fresh inverse serialises byte-for-byte as an old one did. `retype` (v2) is the
+other shape that works: a new variant, so a `set` written under v1 is still a
+`set`.
+
+The bump was still necessary, and for the opposite reason to the obvious one: a v2
+*client* handed a locale-scoped delta would drop the field it does not know about
+and write the value into `data`. That is not a missing feature, it is silent
+divergence between two clients looking at the same document — so it has to be
+refused at the handshake instead.
 
 ## Deliberately unchanged
 

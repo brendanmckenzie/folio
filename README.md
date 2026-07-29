@@ -69,6 +69,12 @@ const folio = createFolio<Env>({
   // Loaded into every page's Resolution, so any render can place them. See
   // "Globals" below.
   globals: ['settings'],
+  // The languages this site is available in, or omit for one language. `default`
+  // is the *source* locale. See "Localisation" below.
+  locales: { default: 'en', available: [{ code: 'en', label: 'English' }, { code: 'fr', label: 'Français' }] },
+  // The public URL for a story path, and the only place a locale reaches a URL:
+  // Folio owns no URL shape, so a prefix, a subdomain or `?lang=` are all yours.
+  route: (path, locale) => `${locale && locale !== 'en' ? `/${locale}` : ''}${path ? `/${path}` : '/'}`,
   bindings: (env) => ({ db: env.DB, story: env.STORY }),
   // Required, with no default. Either name sign-in providers or say 'open' —
   // there is no third option, because a host that forgets this key would
@@ -89,7 +95,11 @@ export default {
 
     // Published pages look however you want them to. `resolve` supplies the
     // context a document deliberately lacks — story ids to current URLs.
-    const doc = await folio.published(env, path)
+    // Your own `route` above decides how a locale is encoded, so reading it back
+    // out is yours too. Paths are locale-independent: /about and /fr/about are
+    // the same story. Passing the locale here refuses one you never declared.
+    const { locale, path } = parseLocale(url.pathname)
+    const doc = await folio.published(env, path, locale)
     if (!doc) {
       // A rename or move recorded a redirect for the path just vacated;
       // folio.redirect is the one indexed read that answers it. Checked only
@@ -107,7 +117,10 @@ export default {
       const status = await folio.status(env, path)
       return new Response('Not found', { status: status === 'unpublished' ? 410 : 404 })
     }
-    const resolution = await folio.resolve(env, doc)
+    // The locale rides on the resolution, which is what makes the whole render
+    // French: every field read goes through it, falling back to the source
+    // wherever a field is untranslated.
+    const resolution = await folio.resolve(env, doc, { locale })
     return render(
       <Shell title={title}>
         {folio.renderGlobal(resolution, 'settings')}
@@ -405,6 +418,156 @@ publishes the same way, through the same inspector. What it does not do is
 string interpolation — `{{ settings.phone }}` inside a text field is out of
 scope; a block that needs the phone number reads it off the settings global
 directly.
+
+## Localisation
+
+One document per story holds **every language**. A translatable field's source
+value lives in `Blok.data` exactly where it always did; a translation is an entry
+in `Blok.i18n[code]`:
+
+```ts
+{ uid: 'hero1', type: 'hero', /* … */
+  data: { heading: 'Hello', sub: 'World' },
+  i18n: { fr: { heading: 'Bonjour' } } }
+```
+
+The reason for that shape rather than a story row per language: **a translation is
+an ordinary `set` mutation with a locale on it.** So translations inherit
+multiplayer, undo, versioning, the activity trail, atomic publish and
+per-keystroke preview without one new mechanism. Two translators working in
+different languages on the same page never conflict, because they are writing
+different keys of the same blok.
+
+The cost is stated plainly: a translator cannot restructure a page. Adding a block
+adds it to every language. That is the same trade Storyblok's field-level
+translation makes, and for the same reason.
+
+**Translatable is opt-in per field.** `text({ translatable: true })`. Most
+`select`, `boolean`, `number` and `asset` fields should not diverge per language,
+and a default of "everything is translatable" turns every schema into a
+translation surface nobody asked for. The cost of opt-in is annotating existing
+blocks, so `GET /folio/audit` reports the text-ish fields that are *not* marked —
+the omissions are findable rather than invisible. `blocks` cannot be translatable
+and does not compile if you try.
+
+The renderer **does not check the flag**: if a value is in `i18n`, it wins. That
+asymmetry is deliberate — the same one richtext already has, where the editor
+constrains input and the renderer sanitises output — and it means un-marking a
+field cannot silently hide content somebody already translated. The audit reports
+that case too.
+
+### Reading a value
+
+```ts
+import { fieldValue, dataOf } from 'folio/core'
+
+fieldValue(blok, 'heading', resolution.locale) // one field, in the active language
+dataOf(blok, resolution.locale)                // the whole blok's data, layered
+```
+
+Everything Folio renders goes through `fieldValue`, and it implements one rule in
+one place: the first **defined and non-null** candidate wins — the active locale,
+then each fallback in the chain, then the source. Which means:
+
+| in `i18n[fr]`     | `/fr/about` renders | reads as     |
+| ----------------- | ------------------- | ------------ |
+| absent            | the source value    | untranslated |
+| `'Bonjour'`       | `Bonjour`           | translated   |
+| `''`              | *empty*             | translated   |
+| `null`            | the source value    | untranslated |
+
+`''` versus absent is what makes "clear this heading in French" expressible.
+`null` is how *un*-translating is expressible at all, since the mutation
+vocabulary has no delete-key — so writing `{ locale: 'fr', value: null }` is the
+undo of a translation.
+
+A locale may declare a `fallback` to try before the source, and a chain is
+followed to its end. A cycle is refused at construction, along with a default that
+is not in `available`, a duplicate code, and a fallback that does not exist.
+
+### The locale in a URL
+
+**Paths are locale-independent.** `/about` and `/fr/about` are the same story, one
+row, one path, one Durable Object. Translated slugs are out of scope: they make
+`path` per-locale, which forks the unique index, the `derivePaths` walk, the tree
+and every link resolution.
+
+**The host owns the URL shape**, because only the host knows how it encoded it:
+
+```ts
+route: (path, locale) => `${locale && locale !== 'en' ? `/${locale}` : ''}/${path}`
+```
+
+A prefix, a subdomain, `?lang=` — Folio only ever needs the *inverse*, for its own
+preview branch, and derives that by calling your `route` rather than by assuming a
+convention. So reading the locale back out of a request is host code:
+
+```ts
+const { locale, path } = parseLocale(url.pathname)   // yours, one line
+const doc = await folio.published(env, path, locale) // refuses an undeclared code
+const resolution = await folio.resolve(env, doc, { locale })
+```
+
+`published()` hands back the same document whatever the locale — there is only one
+— and the locale rides on the `Resolution`, which keeps "which language" in
+exactly one place instead of two. What the argument *does* do is refuse a locale
+this site never declared, so `/xx/about` answers your own 404 rather than serving
+English under a URL that means nothing.
+
+`folio.stories(env)` gives each routed row a `urls` and a `previewUrls` map, one
+entry per declared locale, built from your own `route` — so a sitemap covering
+every language needs no second call and no knowledge of the shape.
+
+### In the editor
+
+A language switcher sits in the top bar. On the source locale the editor is
+exactly what it was; on any other, each field is in one of two states:
+
+- **translatable** — the input is bound to that locale's own *raw* value, so an
+  untranslated field is empty rather than pre-filled with the source (a
+  pre-filled input would copy the English into the French the moment somebody
+  typed one character). The source appears beside it in a read-only column, with
+  richtext rendered formatted, because that is what a translator is translating
+  from.
+- **shared** — the input is disabled and labelled *shared across all languages*.
+  Nothing writes a locale-scoped value from there.
+
+Switching language **reloads the preview iframe** at that locale's own preview
+URL. The per-keystroke rule (no network in the loop) applies to *editing*, not to
+switching language: the host's own chrome, its `<html lang>` and possibly its
+stylesheet all change, and no postMessage reaches those.
+
+### Publishing
+
+**Publishing publishes every language at once.** One document, one `published_doc`,
+one atomic snapshot. So a half-translated page goes live with fallbacks — which is
+what Storyblok does under field-level translation, and is usually what you want,
+since launching one language first is how most sites ship. The admin warns before
+publishing when a locale is incomplete and *names what is missing*; a complete page
+publishes on one click, because a confirmation that always appears is a
+confirmation nobody reads.
+
+`stories.title_i18n` caches translated titles so a translator's content tree is
+not in English. Best-effort by definition: it is written by publish, so a French
+title that exists only in the draft reads in the source language until the page
+goes live. A stale entry costs a wrong label in a tree, never wrong content on a
+page.
+
+### Notes and limits
+
+- **Bytes, not bloks.** Eight languages of a long richtext field is eight times
+  the payload against `MAX_DOC_BYTES` (8 MB) with the same block count. One `set`
+  is still one field value, so `MAX_FRAME_BYTES` is unaffected.
+- **Removing a locale from config** leaves its values inert — nothing reads that
+  code — and the audit reports them. Nothing strips them automatically, because a
+  locale is at least as often removed by mistake as on purpose.
+- **Adding one** needs no migration and no write: every field reads as
+  untranslated and falls back.
+- **Changing the source locale** is not a config edit. `data` holds the source
+  values, so it means a content migration that swaps `data` with `i18n[new]`.
+- **`GET {base}/story/:id/translation?locale=fr`** answers `{ total, translated,
+  missing }` for one story, for a caller that wants the number without opening the
+  document.
 
 ## Stories, paths and page metadata
 
@@ -1151,8 +1314,12 @@ not migrating the document model:
 
 ## Not built yet
 
-i18n, custom field types defined by a host project, and a real package build (the
+Custom field types defined by a host project, and a real package build (the
 library currently ships TypeScript source and the host compiles it).
+
+Within localisation: translated slugs (a French URL contains English words), and
+per-locale publishing. Both are deliberate and both are additive later — see the
+section above.
 
 Within auth: site-visitor access control (who may *read* a published page — see
 `ROADMAP.md`), per-story editor permissions, multi-tenant spaces, SSO group → role

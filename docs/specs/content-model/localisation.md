@@ -3,7 +3,7 @@
 > **Group:** content model
 > **Build order:** 12
 > **Size:** L
-> **Status:** draft
+> **Status:** done
 > **Wire version:** bumps `PROTOCOL_VERSION` to 3 (`set` gains `locale`; `hello` sheds its identity fields)
 > **Migration:** `0009_locales.sql`
 > **Last updated:** 2026-07-29
@@ -564,7 +564,137 @@ translations survive; assert an old-format log still bootstraps identically.
 
 ## Open questions
 
-- Should the source value appear as a placeholder or as a second read-only column in
-  the inspector? Placeholder is proposed for noise reasons, but it is wrong for
-  richtext (a placeholder cannot show formatting), so richtext may need the column
-  anyway — in which case consistency argues for the column everywhere.
+None outstanding.
+
+- ~~Placeholder or a second read-only column for the source value?~~ **Resolved by
+  the owner: a second read-only column**, everywhere, for the reason the question
+  itself named — a placeholder cannot show richtext formatting, so richtext needed
+  the column regardless, and consistency then argues for it on every field. Built
+  as `SourceValue` in `admin/Inspector.tsx`: richtext renders through the same
+  `RichText` component and the same sanitiser the preview uses, with the editor's
+  real `Resolution`, so an internal link in the English prose is a working href
+  there rather than a broken `#`. That fidelity is what made putting `resolution`
+  on `FolioContext` worth doing.
+
+## Implementation notes
+
+Landed in four commits plus a demo/e2e commit. Tests: **1303 → 1451** (53 files,
+was 50). Gates green by exit code: `pnpm typecheck`, `pnpm exec biome ci .`,
+`pnpm test`, `pnpm build`. Eight e2e scripts re-run from a fresh database at v3:
+**i18n 30/30** (new), sync 16/16, history 43/43, fields 107/107, redirects 8/8,
+globals 16/16, auth 42/42, migrate 38/38.
+
+### What the spec got wrong about the codebase
+
+- **`core/values.ts` was already taken** — by the *stored shapes* of the richer
+  field kinds (`AssetValue`, `LinkValue`, `asLink`, `asAsset`), with its own test
+  file. The locale reader is `core/locales.ts`.
+- **`valueOf` is not an available name.** Biome's `noShadowRestrictedNames`
+  refuses it at the declaration and at every import site, and Biome is a hard
+  gate. It is `fieldValue(blok, field, locale?)` with identical semantics.
+- **`summarise(schema, data)` had a second caller shape** than the spec implies:
+  `BlockTree` passes `root?.data ?? {}` for a root that may not exist. It is now
+  `summarise(schema, blok | undefined, locale?)`.
+- **`Shell` hard-coded `lang="en"`.** It gained an optional `lang` prop defaulted
+  to that, so nothing changed for a caller that does not pass one.
+- The spec's Ground truth says `RenderBlok` reads `blok.data[name]` in **four**
+  places. It is three: richtext, reference, and the non-`blocks` default. The
+  `blocks` walk uses `childrenOf` and reads no field value.
+
+### Deliberate deviations, and why
+
+- **`hello` sheds its identity fields into one optional nested `identity`, rather
+  than losing them outright.** Spec 10 kept the store generating an advisory
+  actor/name/colour because dropping them leaves `auth: 'open'` with no presence
+  at all — two anonymous tabs become indistinguishable. Nesting them, optional,
+  achieves the shedding the spec asked for (identity is no longer something a
+  `hello` must assert) while keeping the open-auth fallback that is the only
+  identity that deployment shape has. A socket the Worker vouched for never reads
+  it. Open-auth presence is unregressed, and `auth-http.test.ts`'s "cannot have
+  its identity asserted by the client" still passes.
+- **`published(env, path, locale?)` is not inert.** The spec's own text says the
+  locale does not choose a document, which would have made the parameter
+  decoration. It refuses a locale the site never declared, so `/xx/about` answers
+  the host's own 404 rather than English under a meaningless URL — otherwise every
+  host would write that check itself.
+- **`pathForLocale` derives the story path by calling the host's own `route`**
+  rather than stripping a `/<code>/` prefix. Folio builds its preview URLs with
+  `route(path, locale)`, so the inverse is exact for whatever shape the host chose:
+  for each candidate produced by dropping leading segments, does
+  `route(candidate, locale)` reproduce this pathname? A host whose locale is a
+  query parameter needs no special case, and there is a test proving it. Stripping
+  a prefix would have quietly encoded a convention decision 5 explicitly leaves to
+  the host.
+- **The completeness badge is drawn for the *open* story only**, computed from the
+  draft already in the store — free, and live per keystroke. Phase 3 asked for one
+  per row; that is one `GET {base}/story/:id/translation` per row, and the spec's
+  own "cheap" claim does not survive a two-hundred-page tree. The route is built
+  and tested and is the seam a translation dashboard would use. A tree-wide answer
+  wants a single query over `published_doc`, which is `collections.md`'s shape, not
+  this one's.
+- **`summariseDiff` gained `translated` *and* `locales`**, where the spec said "a
+  per-locale count". "3 blocks edited" and "12 translations changed" are different
+  facts about one restore, and a confirmation folding them together would tell a
+  French translator their English was about to move.
+- **Three audit checks, not one.** The spec's plan names the unmarked-text check;
+  decision 4 and the edge cases also name "a translated value in a
+  non-translatable field" and "a locale removed from config with values still in
+  documents" as things the audit reports. Both are ~10 lines. Taking them required
+  one addition to spec 11's seam: `DOCUMENT_CHECKS` and `SCHEMA_CHECKS` now take an
+  `AuditContext` second argument carrying `locales`, which is what lets every
+  locale check stay **silent on a single-locale site** instead of filing hundreds
+  of rows of advice about an unused feature.
+
+### A real bug this found
+
+The store's undo-coalescing window keyed on `(uid, field)`. Translating one
+heading into French and then German inside that window produced a **single** undo
+entry holding only the French inverse, so Cmd+Z reverted the French and left the
+German — the acceptance criterion "each editor's Cmd+Z reverts only their own
+locale" was broken the moment two locales touched one field. The locale is now part
+of the key. Found by writing the test for the criterion rather than by review.
+
+### The debt spec 6 deferred, paid
+
+`i18n` is a **sibling** of `data` on `Blok`, not a key inside it, so
+`cloneSubtree`'s recipe had to name it explicitly: `SubtreeBlok` gained `i18n?` and
+`allocateSubtree` carries it through. Without that, duplicate, paste and
+duplicate-a-document would each have silently dropped every translation on the
+page. Three regression tests in `clone.test.ts`.
+
+### Deferred, on purpose
+
+- **Translated slugs and per-locale publishing** — both out of scope per
+  checkpoints 3 and 4, both additive later. Recorded in `ROADMAP.md`'s known
+  issues and `PARITY.md`.
+- **An audit check for a document approaching `MAX_DOC_BYTES`** — named in this
+  spec's edge cases rather than its plan. It needs a document-level check, which is
+  a third array on the audit seam; the two existing arrays are per-blok and
+  per-schema. Recorded in `ROADMAP.md`.
+- **`showIf` stays source-locale.** `visibleEntries` evaluates conditions against
+  `blok.data`, so a field's visibility is the same in every language — which is the
+  same trade decision 1 makes for structure, and is also the right answer: a
+  translatable field that is untranslated still *reads* as set through the
+  fallback, so an `isSet` condition would flip per locale for no good reason.
+- **A "copy the source into this locale" button.** Obvious, cheap, and not in the
+  spec; the read-only column makes it unnecessary for reading, and a translator who
+  wants the English can select it.
+
+### New surface, for the specs that follow
+
+- `core/locales.ts`: `fieldValue`, `dataOf`, `LocaleConfig`, `LocaleDef`,
+  `LocaleContext`, `localeContext`, `localeChain`, `isKnownLocale`,
+  `validateLocales`, `isTranslatable`, `translatableFields`, `translationStatus`,
+  `translationGaps`. Exported from `folio/core`; `validateLocales` from
+  `folio/engine`.
+- `Resolution.locale?: LocaleContext` — **absent means the source locale**,
+  including on a site that has locales and is viewing its default. That is what
+  keeps the default-locale render path identical to the pre-localisation one.
+- `StoryMeta` gained optional `titleI18n`, `urls`, `previewUrls`.
+- `FolioRuntime` gained `locales`, `localeOf`, `pathForLocale`, `titlesFor`.
+- `PublishDeps.titlesFor?`; `publishStoryStatement`/`publishStory` gained an
+  optional 6th `titleI18n` (undefined leaves the column alone).
+- `GET {base}/story/:id/translation?locale=` (400 with no locale, 501 for an
+  undeclared one); `Manifest.locales`.
+- `Field` gained `translatable?`, typed off `blocks`.
+- The workers vitest project now includes `*.test.tsx`, matching the unit project.

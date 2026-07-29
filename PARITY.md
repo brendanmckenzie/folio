@@ -184,6 +184,18 @@ The site has at least five root types: `Page`, `Insights`, `Resources`,
   placing one; a singleton previews in the context of a real page via its
   type's `previewPath`. Not built: template interpolation inside a field —
   a block reads a global directly instead. `docs/specs/content-model/globals.md`.
+- **Localisation: done, and the reference project does not use it** — recorded
+  here because it changes the *document* model, which everything on this list
+  reads. One document per story holds every language: a translatable field's
+  source value stays in `Blok.data` and a translation is an entry in
+  `Blok.i18n[code]`, written by an ordinary `set` with a `locale` on it. So an
+  importer, the query API and full-text search below each need to decide which
+  language they are reading, and `fieldValue(blok, name, resolution.locale)` is
+  the one answer. Not built, deliberately: **translated slugs** (a French URL
+  contains English words — per-locale paths fork the unique index, the path
+  derivation, the tree and every link resolution) and **per-locale publishing**
+  (one document, one snapshot, so a half-translated page goes live with
+  fallbacks). `docs/specs/content-model/localisation.md`.
 - **Query API** — this is the sleeper. `sitemap.ts` pages through every story;
   the insights index filters by topic and paginates. Storyblok gives
   `getStories({ content_type, filter_query, per_page, page, sort_by })`. Folio has

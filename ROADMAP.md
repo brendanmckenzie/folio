@@ -98,8 +98,9 @@ at its mount; API tokens carry scopes instead, because a token is not a person.
 Editor identity is no longer self-reported: the Worker validates the session
 before the upgrade and hands the verified identity to the Durable Object as a
 header, which is trustworthy because a DO namespace is not publicly
-addressable. `hello`'s `actor`/`name`/`colour` survive as advisory fields and
-are ignored. A revoked session closes an open socket within a bounded window —
+addressable. `hello`'s self-reported identity is advisory and
+ignored (and at v3 it is one optional nested field rather than three required
+ones — see Localisation below). A revoked session closes an open socket within a bounded window —
 the expiry rides in the attachment and the D1 re-check is once a minute per
 socket, deliberately not per keystroke. The login page ships no JavaScript.
 Spec: `docs/specs/foundation/identity-and-access.md`.
@@ -135,6 +136,36 @@ a diff blind to a type change would have restored the fields and silently left
 the old type in place. The change is additive to a logged mutation: a `set`
 written under v1 is still a `set`, which is the only rule a wire bump has to
 satisfy, since the log outlives every deploy.
+
+**Localisation: done, field-level, one document per story.** A translatable
+field's source value stays in `Blok.data`; a translation is an entry in
+`Blok.i18n[code]`, and `set` gained an optional `locale` (`PROTOCOL_VERSION` → 3).
+The reason for that shape rather than a story row per language: a translation is
+then an ordinary mutation, so it inherits multiplayer, undo, versioning, the
+activity trail, atomic publish and per-keystroke preview with no new mechanism —
+and two translators in different languages on the same page never conflict,
+because they are writing different keys of the same blok. The cost is stated
+plainly: a translator cannot restructure a page. `fieldValue` implements one rule
+in one place — first defined and non-null wins, so `''` is a deliberate emptiness
+and `null` reads as untranslated, which is how *un*-translating is expressible at
+all. `translatable` is opt-in per field and the audit reports the text-ish fields
+nobody marked, so the omissions are findable. Publishing publishes every language
+at once, with the admin naming what is incomplete first. Paths are
+locale-independent and the *host* owns how a locale reaches a URL — Folio derives
+the inverse for its own preview by calling `route`, so a prefix, a subdomain and
+`?lang=` all work with no convention encoded anywhere. Spec:
+`docs/specs/content-model/localisation.md`.
+
+**The second wire bump, and the rule it clarified.** v3 also sheds `hello`'s three
+top-level identity fields, which have been advisory since accounts landed: what
+remains is one optional nested `identity`, read in exactly one situation —
+`auth: 'open'`, where there are no accounts and a client's self-report is all that
+tells two anonymous tabs apart. `docs/sync-design.md` gained rule 10 out of this:
+a change must be additive to a logged mutation and every old entry must replay
+under its old meaning forever, so **a `set` with no locale is a source-locale
+write, permanently**. The bump was still necessary — a v2 client handed a
+locale-scoped delta would drop the locale and write into `data`, which is silent
+divergence, not a missing feature.
 
 ## Next
 
@@ -223,6 +254,18 @@ an unsorted flat list, which stops working somewhere around 15.
   off until this is done properly (see biome.json).
 - `MultiAssetInput` keys cards by index, so reordering drops focus; needs stable
   local ids (noted inline where the suppression lives).
+- Translated slugs are out: a French URL contains English words. Additive when it
+  is asked for (`stories.path_i18n` plus a locale-aware `storyByPath`), and
+  deliberately not now — per-locale paths fork the unique index, the `derivePaths`
+  walk, the tree and every link resolution.
+- The content tree's translation-completeness badge is drawn for the *open* story
+  only, from the draft already in the store. Every row would be one request per
+  row; a route exists (`GET /folio/story/:id/translation`) for a caller that wants
+  one story's answer, and a tree-wide answer wants a single query over
+  `published_doc` rather than N Durable Object reads.
+- Nothing warns when a document's *bytes* approach `MAX_DOC_BYTES`, which
+  localisation makes reachable: eight languages of long richtext is eight times
+  the payload at the same block count. The audit is the right place for it.
 
 ## Fixed 2026-07-29 (the hardening pass)
 
