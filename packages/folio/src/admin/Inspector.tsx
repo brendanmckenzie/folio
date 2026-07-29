@@ -6,12 +6,13 @@ import { isTranslatable } from '../core/locales'
 import { type CollectionField, collectionQuery, maxPerPageOf, queryKey } from '../core/query'
 import { asRichtext, richtextToText, sanitiseRichtext } from '../core/richtext'
 import type { StoryNode } from '../core/story'
-import { asAsset } from '../core/values'
+import { asAsset, asStoryIds } from '../core/values'
 import { RichText } from '../preview/RichText'
 import { AssetInput, MultiAssetInput } from './AssetInput'
 import { CollectionInput } from './CollectionInput'
 import { useFolio } from './FolioContext'
 import { LinkInput } from './LinkInput'
+import { ReferencesInput } from './ReferencesInput'
 import { RichTextInput } from './RichTextInput'
 
 interface Props {
@@ -339,6 +340,17 @@ function FieldInput({
               </option>
             ))}
           </select>
+        ) : field.kind === 'references' ? (
+          // The plural: a picker plus an ordered card list, keyed by story id
+          // (`data-documents.md` decision 3).
+          <ReferencesInput
+            id={id}
+            value={value}
+            types={field.types}
+            min={field.min}
+            max={field.max}
+            onChange={onChange}
+          />
         ) : field.kind === 'collection' ? (
           // The type is fixed by the schema; the editor picks filters, a count and
           // a sort. `answer` is what the query currently returns, off the same
@@ -428,6 +440,12 @@ function sourceText(field: Field, value: Json): string {
       return asAsset(value)?.filename ?? ''
     case 'multiasset':
       return Array.isArray(value) ? `${value.length} file${value.length === 1 ? '' : 's'}` : ''
+    case 'references': {
+      // A count, not the ids: raw `sty_…` strings beside a translation input tell
+      // a translator nothing they can act on.
+      const n = asStoryIds(value).length
+      return `${n} document${n === 1 ? '' : 's'}`
+    }
     case 'boolean':
       return value ? 'yes' : 'no'
     case 'select': {

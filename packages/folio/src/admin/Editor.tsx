@@ -11,6 +11,7 @@ import type { StoryNode } from '../core/story'
 import { Access } from './Access'
 import { BlockTree } from './BlockTree'
 import { DataList } from './DataList'
+import { DataTable } from './DataTable'
 import { DeleteDialog } from './DeleteDialog'
 import { DiscardDialog } from './DiscardDialog'
 import { DuplicateDialog } from './DuplicateDialog'
@@ -21,6 +22,7 @@ import { useAccess } from './hooks/useAccess'
 import { useBlocks } from './hooks/useBlocks'
 import { useClipboardShortcuts } from './hooks/useClipboardShortcuts'
 import { useCollections } from './hooks/useCollections'
+import { useDocumentUsage } from './hooks/useDocumentUsage'
 import { useGlobalDocs } from './hooks/useGlobalDocs'
 import { useMigrations } from './hooks/useMigrations'
 import { useNotice } from './hooks/useNotice'
@@ -135,6 +137,10 @@ export function Editor({
   // node (its path, for the redirect-target label) rather than just an id.
   const [confirmingDeleteFor, setConfirmingDeleteFor] = useState<StoryNode | null>(null)
   const [deleting, setDeleting] = useState(false)
+  // Fetched only while a delete confirmation is open (`data-documents.md`
+  // decision 4): it costs a query over `content_refs`, and nobody wants the
+  // answer until they are about to delete something.
+  const usage = useDocumentUsage(apiBase, confirmingDeleteFor?.id ?? null)
 
   // Same shape again, for duplicate-and-paste.md's document duplication.
   const [confirmingDuplicateFor, setConfirmingDuplicateFor] = useState<StoryNode | null>(null)
@@ -304,12 +310,14 @@ export function Editor({
   )
 
   // A record or a singleton has no URL, so there is no page to preview and no
-  // address to edit. The real record-editing UI (a form rather than an iframe)
-  // is `../../../docs/specs/content-model/data-documents.md`'s; until then the
-  // block tree and the inspector are the whole editor for one. A singleton
-  // gets a real preview after all when it is a *global*, in the context its
-  // type declares (`content-model/globals.md` decision 4) — the one carve-out
-  // from "no preview" an unrouted document otherwise gets.
+  // address to edit: it is edited **full width with no preview**
+  // (`../../../docs/specs/content-model/data-documents.md` checkpoint 3). There
+  // is nothing to preview, and previewing the record inside a page that
+  // references it is ambiguous the moment two pages reference it differently.
+  // A singleton gets a real preview after all when it is a *global*, in the
+  // context its type declares (`content-model/globals.md` decision 4) — the one
+  // carve-out, and it exists because a header genuinely renders in one place
+  // while a person does not.
   const routed = current ? current.path !== null : true
   /**
    * The preview URL for the active locale, falling back to the source one.
@@ -330,6 +338,40 @@ export function Editor({
       : undefined
   const hasDataTypes = types.some((t) => t.kind !== 'page')
 
+  /**
+   * The type whose list view the stage is showing, or null for the ordinary
+   * preview. Set by clicking a type in the Data rail and cleared by opening a
+   * document, so the table is a *destination* rather than a mode you have to get
+   * out of.
+   */
+  const [dataType, setDataType] = useState<string | null>(null)
+  const openedType = dataType ? typeByName(types, dataType) : undefined
+  const listing = rail === 'data' && openedType ? openedType : undefined
+
+  /**
+   * Form mode (checkpoint 3): the rails go full width and the stage is gone
+   * entirely. A layout branch, not a rewrite — `Editor` has been a composition
+   * over hooks with the iframe and the rails as siblings since the earlier
+   * refactor, so "no iframe" is one class and one conditional.
+   *
+   * Publish, History, undo, presence and multiplayer are all untouched, because
+   * none of them ever depended on there being a preview.
+   */
+  const formMode = Boolean(current) && !routed && !globalPreview && !listing
+
+  /**
+   * In form mode there is no preview to click, so nothing would ever select the
+   * root and the inspector would sit empty asking to be clicked in a pane that
+   * does not exist. A record's own fields *are* the form (checkpoint 3), so
+   * select it as soon as the document arrives.
+   *
+   * Only while nothing is selected, so an editor who has clicked into a nested
+   * block — a person's list of accreditations — keeps their place.
+   */
+  useEffect(() => {
+    if (formMode && state.doc && !state.selection) store.select(state.doc.root)
+  }, [formMode, state.doc, state.selection, store])
+
   return (
     <FolioProvider value={context}>
       <div className="editor">
@@ -341,6 +383,9 @@ export function Editor({
           current={current}
           viewport={viewport}
           onViewport={setViewport}
+          // No viewport switcher and no "View live" for a document with no page
+          // of its own: both would be controls that cannot do anything.
+          hasPreview={!formMode}
           mode={versions.source.mode}
           publishing={publish.publishing}
           published={publish.published}
@@ -372,6 +417,7 @@ export function Editor({
             story={confirmingDeleteFor}
             tree={flat}
             busy={deleting}
+            usage={usage.usage}
             onCancel={() => setConfirmingDeleteFor(null)}
             onConfirm={(redirect) => {
               setDeleting(true)
@@ -423,7 +469,13 @@ export function Editor({
           />
         ) : null}
 
-        <div className="editor__body">
+        {/* The banner lives inside the stage for a page, and there is no stage in
+            form mode — so it appears here instead rather than becoming
+            unreachable for a record that is behind the model. Full width, which
+            for a banner is if anything better; the page layout is untouched. */}
+        {formMode ? <MigrationBanner status={migrations.status} /> : null}
+
+        <div className={`editor__body ${formMode ? 'is-form' : ''}`}>
           <div className="rail">
             <GlobalsList
               documents={stories.documents}
@@ -527,17 +579,13 @@ export function Editor({
             ) : rail === 'data' ? (
               <DataList
                 documents={stories.documents}
+                selectedType={dataType}
                 currentId={storyId}
-                onOpen={(story) => stories.open(story.id)}
-                onCreate={
-                  mayManage
-                    ? stories.create
-                    : async () => {
-                        refuseManage()
-                      }
-                }
-                onDelete={mayManage ? (story) => setConfirmingDeleteFor(story) : refuseManage}
-                onDuplicate={mayManage ? (story) => setConfirmingDuplicateFor(story) : refuseManage}
+                onSelectType={setDataType}
+                onOpen={(story) => {
+                  setDataType(null)
+                  stories.open(story.id)
+                }}
               />
             ) : rail === 'history' ? (
               state.doc ? (
@@ -591,51 +639,79 @@ export function Editor({
             )}
           </div>
 
-          <div className="stage">
-            {/* A banner, never a lock (checkpoint 4): refusing to serve the
+          {/* Form mode: no stage at all. Not an empty stage, and not a stage
+              apologising for having nothing in it — the rails simply take the
+              width (`data-documents.md` checkpoint 3). */}
+          {formMode ? null : (
+            <div className={`stage ${listing ? 'stage--list' : ''}`}>
+              {/* A banner, never a lock (checkpoint 4): refusing to serve the
                 editor until somebody runs a migration would turn a schema drift
                 into an outage. An empty field that is explained is a different
                 experience from an empty field that is mysterious. */}
-            <MigrationBanner status={migrations.status} />
-            {viewing ? (
-              <ViewingBar
-                version={viewing.version}
-                doc={viewing.doc}
-                delta={versions.delta}
-                busy={versions.busy}
-                onExit={versions.exit}
-                onRestore={(version, preloaded) => void versions.restore(version, preloaded)}
-                canDiscard={published.version?.id === viewing.version.id}
-                onRequestDiscard={() => setConfirmingDiscard(true)}
-              />
-            ) : null}
-
-            <div
-              className={`stage__frame ${readOnly ? 'is-viewing' : ''}`}
-              style={{ width: VIEWPORTS[viewport] }}
-            >
-              {current && routed && previewUrl ? (
-                <iframe
-                  key={`${current.id}:${locale}`}
-                  ref={frame}
-                  title="Preview"
-                  src={previewUrl}
+              <MigrationBanner status={migrations.status} />
+              {listing ? (
+                /* The per-type list view (`data-documents.md` decision 2, and the
+                 piece collections.md deferred here). In the stage rather than the
+                 rail: twenty-four people do not fit in a 280px column, and this
+                 is the only wide space the editor has. */
+                <DataTable
+                  type={listing}
+                  documents={stories.documents.filter((d) => d.type === listing.name)}
+                  indexed={stories.indexed}
+                  currentId={storyId}
+                  canManage={mayManage}
+                  onOpen={(story) => {
+                    setDataType(null)
+                    stories.open(story.id)
+                  }}
+                  onCreate={
+                    mayManage
+                      ? async (title, parentId, type) => {
+                          setDataType(null)
+                          await stories.create(title, parentId, type)
+                        }
+                      : async () => {
+                          refuseManage()
+                        }
+                  }
+                  onDelete={mayManage ? (story) => setConfirmingDeleteFor(story) : refuseManage}
+                  onDuplicate={
+                    mayManage ? (story) => setConfirmingDuplicateFor(story) : refuseManage
+                  }
                 />
-              ) : current && globalPreview ? (
-                <iframe key={current.id} ref={frame} title="Preview" src={globalPreview} />
-              ) : current && !routed ? (
-                <div className="stage__nopreview">
-                  <p>
-                    <strong>{current.title}</strong> has no page of its own.
-                  </p>
-                  <p>
-                    Edit its fields on the right. Records and singletons are content other pages
-                    pull in, so there is nothing to preview here.
-                  </p>
-                </div>
               ) : null}
+              {!listing && viewing ? (
+                <ViewingBar
+                  version={viewing.version}
+                  doc={viewing.doc}
+                  delta={versions.delta}
+                  busy={versions.busy}
+                  onExit={versions.exit}
+                  onRestore={(version, preloaded) => void versions.restore(version, preloaded)}
+                  canDiscard={published.version?.id === viewing.version.id}
+                  onRequestDiscard={() => setConfirmingDiscard(true)}
+                />
+              ) : null}
+
+              {listing ? null : (
+                <div
+                  className={`stage__frame ${readOnly ? 'is-viewing' : ''}`}
+                  style={{ width: VIEWPORTS[viewport] }}
+                >
+                  {current && routed && previewUrl ? (
+                    <iframe
+                      key={`${current.id}:${locale}`}
+                      ref={frame}
+                      title="Preview"
+                      src={previewUrl}
+                    />
+                  ) : current && globalPreview ? (
+                    <iframe key={current.id} ref={frame} title="Preview" src={globalPreview} />
+                  ) : null}
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
           <Inspector
             blok={selected}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { StoryMeta, StoryNode } from '../../core/story'
+import type { IndexedValues } from '../../server/content-index'
 import { expectJson, expectOk, send } from '../api'
 import type { Notify } from './useNotice'
 
@@ -10,6 +11,16 @@ export interface Stories {
   /** Every unrouted document (records and singletons), flat, for the Data rail.
    * Fetching this is also what creates a singleton on first access. */
   documents: StoryNode[]
+  /**
+   * The `indexed` field values of those documents, keyed by story id then field
+   * — the Data list view's columns
+   * (`../../../docs/specs/content-model/data-documents.md` decision 2).
+   *
+   * Published values, source locale, from one query on the server. Empty for a
+   * document with nothing published, which the list draws as a blank cell beside
+   * that row's draft badge.
+   */
+  indexed: IndexedValues
   /**
    * Every document — the tree flattened, then the unrouted ones — for links,
    * references and the parent picker. A `reference` can point at a record, so
@@ -47,6 +58,7 @@ export function useStories(apiBase: string, initialStoryId: string, notify: Noti
   const [storyId, setStoryId] = useState(initialStoryId)
   const [tree, setTree] = useState<StoryNode[]>([])
   const [documents, setDocuments] = useState<StoryNode[]>([])
+  const [indexed, setIndexed] = useState<IndexedValues>({})
 
   const flat = useMemo(() => [...flatten(tree), ...documents], [tree, documents])
   const current = useMemo(() => flat.find((s) => s.id === storyId), [flat, storyId])
@@ -65,10 +77,13 @@ export function useStories(apiBase: string, initialStoryId: string, notify: Noti
     ])
     if (treeRes.ok) setTree((await treeRes.json()) as StoryNode[])
     if (docsRes.ok) {
-      const body = (await docsRes.json()) as { documents: StoryMeta[] }
+      const body = (await docsRes.json()) as { documents: StoryMeta[]; indexed?: IndexedValues }
       // Given `children: []` so one list can hold both kinds: nothing nests
       // under an unrouted document, so the array is always empty.
       setDocuments(body.documents.map((d) => ({ ...d, children: [] })))
+      // Absent on a site that marks nothing `indexed`, which is why this is
+      // defaulted rather than required.
+      setIndexed(body.indexed ?? {})
     }
   }, [apiBase])
 
@@ -184,5 +199,18 @@ export function useStories(apiBase: string, initialStoryId: string, notify: Noti
     [apiBase, notify, open, reload],
   )
 
-  return { tree, documents, flat, storyId, current, reload, open, create, patch, remove, duplicate }
+  return {
+    tree,
+    documents,
+    indexed,
+    flat,
+    storyId,
+    current,
+    reload,
+    open,
+    create,
+    patch,
+    remove,
+    duplicate,
+  }
 }

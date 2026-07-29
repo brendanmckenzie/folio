@@ -60,6 +60,14 @@ interface Props {
   current: StoryNode | undefined
   viewport: Viewport
   onViewport: (v: Viewport) => void
+  /**
+   * False in form mode (`../../../docs/specs/content-model/data-documents.md`
+   * checkpoint 3): a record has no page of its own, so the viewport switcher and
+   * "View live" are controls with nothing to act on. Hidden rather than disabled
+   * — a greyed-out phone icon invites an editor to work out why, and there is no
+   * answer they can do anything about.
+   */
+  hasPreview?: boolean
   mode: PreviewMode
   publishing: boolean
   published: boolean
@@ -83,6 +91,7 @@ export function TopBar({
   current,
   viewport,
   onViewport,
+  hasPreview = true,
   mode,
   publishing,
   published,
@@ -117,7 +126,9 @@ export function TopBar({
     <header className="topbar">
       <div className="topbar__left">
         <strong>Folio</strong>
-        <span className="topbar__slug">{current?.url ?? '/'}</span>
+        {/* An unrouted document has no URL at all, so its title stands in rather
+            than `/` standing in for it — which would name the homepage. */}
+        <span className="topbar__slug">{current ? (current.url ?? current.title) : '/'}</span>
         <span className={`dot ${state.connected ? 'dot--ok' : 'dot--off'}`} />
         {status.clickable ? (
           <button type="button" className="topbar__status topbar__status--link" onClick={onCompare}>
@@ -147,16 +158,18 @@ export function TopBar({
             ))}
           </select>
         ) : null}
-        {(Object.keys(VIEWPORTS) as Viewport[]).map((v) => (
-          <button
-            key={v}
-            type="button"
-            className={viewport === v ? 'is-active' : ''}
-            onClick={() => onViewport(v)}
-          >
-            {v}
-          </button>
-        ))}
+        {hasPreview
+          ? (Object.keys(VIEWPORTS) as Viewport[]).map((v) => (
+              <button
+                key={v}
+                type="button"
+                className={viewport === v ? 'is-active' : ''}
+                onClick={() => onViewport(v)}
+              >
+                {v}
+              </button>
+            ))
+          : null}
       </div>
 
       <div className="topbar__right">
@@ -189,7 +202,7 @@ export function TopBar({
         >
           Redo
         </button>
-        {current ? (
+        {current && hasPreview ? (
           <a className="topbar__link" href={current.url} target="_blank" rel="noreferrer">
             View live
           </a>
