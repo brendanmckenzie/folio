@@ -451,6 +451,188 @@ export function parseClientFrame(raw: string | ArrayBuffer): ClientFrame | null 
 
 /*
  * ---------------------------------------------------------------------------
+ * The space channel (v4, `live-collaboration.md`).
+ *
+ * A second socket, to a second Durable Object, carrying the two things one
+ * story's object cannot know: who is in the *site* rather than in this
+ * document, and that some other document was renamed, created, deleted or
+ * published.
+ *
+ * Deliberately **not** content. Deltas stay on the story's own socket, where
+ * the watermark and the catchup logic live (architecture decision 3): a second
+ * ordering to reconcile is the one thing the sync design is careful about.
+ * Everything here is advisory, unordered and never authoritative — the
+ * authoritative answer is always one `GET /folio/stories` away — which is why
+ * there is no watermark, no catchup and no sequence number anywhere in it.
+ *
+ * Same discipline as the story wire even so: total guards over `unknown`, every
+ * message rebuilt from only the fields its type declares, every string bounded,
+ * and the version checked on every frame.
+ * ---------------------------------------------------------------------------
+ */
+
+/** A document title rides on space presence; long enough for a real page name. */
+export const MAX_TITLE_LEN = 200
+
+/**
+ * One editor, as the rest of the site sees them.
+ *
+ * `storyId` is null while somebody is on a list screen rather than in a
+ * document, which is a real state and not a missing value — an editor browsing
+ * the tree is present and worth showing.
+ */
+export interface SpacePresence {
+  actor: string
+  name: string
+  colour: string
+  /**
+   * The `Role` name (`server/auth/roles.ts`), or null under `auth: 'open'`.
+   * Typed as a string because this wire lives in core and core does not import
+   * the server; the object writes it from the verified identity, never from a
+   * client's claim.
+   */
+  role: string | null
+  /** Story id currently open, or null while the admin is on a list screen. */
+  storyId: string | null
+  storyTitle: string | null
+  locale: string | null
+  /** Mirrors the story-level selection, so follow-mode can land on a block. */
+  selection: PresenceSelection | null
+}
+
+/**
+ * What the client says. Three messages and no `lastSyncId`, because there is
+ * nothing here to be behind on.
+ *
+ * There is deliberate duplication with the story channel: a selection rides on
+ * both, because the per-block dots need it with no round trip through a second
+ * object and the tree and follow-mode need it across documents. Two cheap frames
+ * beat one object trying to be both.
+ */
+export type SpaceClientMsg =
+  | { type: 'hello'; identity?: HelloIdentity }
+  | { type: 'where'; storyId: string | null; storyTitle: string | null; locale: string | null }
+  | { type: 'selection'; selection: PresenceSelection | null }
+
+/**
+ * A structural change to the site, broadcast from the Worker after the D1 write
+ * has already committed (architecture decision 4).
+ *
+ * Every payload here is exactly what the after-commit hook that fires it
+ * actually holds (`server/hooks.ts`), rather than a richer shape the emitting
+ * route would have to go back to the database for. A client applies what it can
+ * and reloads the tree for the rest: one refetch is cheaper than a wrong tree,
+ * and the events are idempotent, so a missed one is corrected by the next load.
+ */
+export type SpaceEvent = SpaceEventBody & {
+  /**
+   * Who caused it (`actorString`: a user id, or `token:<name>`), or null under
+   * `auth: 'open'`.
+   *
+   * Two jobs. The client that *made* the change already reloaded on its own, so
+   * it uses this to ignore its own echo — the object broadcasts to every joined
+   * socket, because a Worker calling an RPC has no idea which socket the request
+   * came in on and inventing a way for it to know would be a lot of machinery for
+   * one redundant refetch. And it is how a notice gets a name: the id is looked
+   * up in the peer list this same channel already carries, so no display name has
+   * to ride on the event itself.
+   */
+  actor: string | null
+}
+
+type SpaceEventBody =
+  | { kind: 'story.created'; id: string; parentId: string | null; title: string; type: string }
+  /** Paths moved: a rename, or a move to another parent. One entry per row whose
+   * path changed, which for a move includes every descendant. */
+  | { kind: 'story.updated'; changes: readonly { id: string; from: string; to: string }[] }
+  | { kind: 'story.deleted'; ids: readonly string[] }
+  | { kind: 'story.published'; id: string; title: string; at: number; versionId: string }
+  /** A configured global's published content moved, so anything rendering it is
+   * stale (`content-model/globals.md`'s deferred gap). */
+  | { kind: 'global.changed'; name: string; storyId: string }
+
+export type SpaceServerMsg =
+  /** The full peer list, sent once in answer to `hello`. */
+  | { type: 'peers'; peers: SpacePresence[] }
+  | { type: 'presence'; peer: SpacePresence; gone?: true }
+  | { type: 'event'; event: SpaceEvent }
+  /** A frame the object could not read, or a handshake it refused. */
+  | { type: 'error'; reason: string }
+
+export type SpaceServerFrame = Framed<SpaceServerMsg>
+
+/** An inbound space frame: a valid body plus the version it claims. Same split
+ * as `ClientFrame` — the version is reported as itself, not as bad shape. */
+export type SpaceFrame = SpaceClientMsg & { v?: number }
+
+/** Bounds a story id on the space wire. Ids are `sty_<16 hex>` or `sng_<name>`. */
+const normalizeStoryId = (id: string | null): string | null =>
+  id === null ? null : id.slice(0, MAX_SELECTION_LEN)
+
+/** Bounds a document title. Same control-character screening as a display name:
+ * it is shown on every other editor's screen, in a tree row and an avatar. */
+function normalizeTitle(title: string | null): string | null {
+  if (title === null) return null
+  const trimmed = stripControlChars(title).trim().slice(0, MAX_TITLE_LEN)
+  return trimmed.length > 0 ? trimmed : null
+}
+
+export function isSpaceMsg(x: unknown): x is SpaceFrame {
+  if (!isRecord(x)) return false
+  if (x.v !== undefined && !isNumber(x.v)) return false
+  switch (x.type) {
+    case 'hello':
+      return x.identity === undefined || isHelloIdentity(x.identity)
+    case 'where':
+      return (
+        (x.storyId === null || isString(x.storyId)) &&
+        (x.storyTitle === null || isString(x.storyTitle)) &&
+        (x.locale === null || isString(x.locale))
+      )
+    case 'selection':
+      return x.selection === null || isPresenceSelection(x.selection)
+    default:
+      return false
+  }
+}
+
+/**
+ * The space frame `raw` carries, or null if it is unreadable. Never throws.
+ *
+ * Beside `parseClientFrame` and identical in discipline, including the rebuild:
+ * a `where` names a story and a title that every other editor will see, so junk
+ * riding along inside it would reach a broadcast.
+ */
+export function parseSpaceFrame(raw: string | ArrayBuffer): SpaceFrame | null {
+  if (typeof raw !== 'string') return null
+  let value: unknown
+  try {
+    value = JSON.parse(raw)
+  } catch {
+    return null
+  }
+  if (!isSpaceMsg(value)) return null
+  const version = value.v !== undefined ? { v: value.v } : {}
+  switch (value.type) {
+    case 'hello': {
+      const identity = normalizeIdentity(value.identity)
+      return { type: 'hello', ...(identity ? { identity } : {}), ...version }
+    }
+    case 'where':
+      return {
+        type: 'where',
+        storyId: normalizeStoryId(value.storyId),
+        storyTitle: normalizeTitle(value.storyTitle),
+        locale: normalizeLocale(value.locale),
+        ...version,
+      }
+    case 'selection':
+      return { type: 'selection', selection: normalizeSelection(value.selection), ...version }
+  }
+}
+
+/*
+ * ---------------------------------------------------------------------------
  * Admin <-> preview postMessage protocol.
  *
  * A second, unrelated wire: the admin and its preview iframe, talking over

@@ -101,10 +101,14 @@ export function editorRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.get('/edit/:id', requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {
     const id = c.req.param('id')
     // An HTML route: an id nothing is behind — malformed or simply gone — is a
-    // 404 page, not a JSON envelope.
-    const story = isId(id) ? await storyById(c.var.bindings().db, id) : null
+    // 404 page, not a JSON envelope. Checked *before* the bindings are taken, so
+    // an id that cannot name a story never touches the host's environment
+    // (test/workers/app.test.ts pins exactly this).
+    if (!isId(id)) return c.notFound()
+    const bindings = c.var.bindings()
+    const story = await storyById(bindings.db, id)
     if (!story) return c.notFound()
-    return adminPage(rt, story)
+    return adminPage(rt, bindings, story)
   })
 
   app.get('/edit', requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {

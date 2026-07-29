@@ -4,6 +4,7 @@ import type { StoryNode } from '../core/story'
 import { useFolio, useStoreState } from './FolioContext'
 import type { PreviewMode } from './hooks/useVersions'
 import { actorLabel, canPublish, type Me, whyNot } from './me'
+import type { SpaceAvatar } from './spaceStore'
 
 /** Stage widths. The value is the CSS width the frame is given, not a breakpoint. */
 export const VIEWPORTS = { Desktop: '100%', Tablet: '834px', Phone: '390px' } as const
@@ -56,6 +57,22 @@ export function publishStatus(
   }
 }
 
+/**
+ * What a peer's avatar says: their name, where they are, and how many tabs.
+ *
+ * "on a list screen" is a real answer rather than a missing one — an editor
+ * browsing the tree is present and worth showing, and saying so is better than an
+ * avatar that looks broken. Pure and exported so the wording is tested without
+ * mounting the bar.
+ */
+export function followLabel(peer: SpaceAvatar): string {
+  const tabs = peer.tabs > 1 ? ` · ${peer.tabs} tabs` : ''
+  if (peer.storyId === null) return `${peer.name} — on a list screen${tabs}`
+  const where = peer.storyTitle ?? 'a document'
+  const locale = peer.locale ? ` (${peer.locale})` : ''
+  return `${peer.name} — ${where}${locale}${tabs}`
+}
+
 interface Props {
   current: StoryNode | undefined
   viewport: Viewport
@@ -85,6 +102,15 @@ interface Props {
   me: Me
   /** Signs out and reloads. Owned by Editor.tsx, which knows the api base. */
   onSignOut: () => void
+  /**
+   * Everybody in the *site*, deduped by actor
+   * (`../../../docs/specs/editing/live-collaboration.md`). Empty on a deployment
+   * with no `SPACE` binding, in which case the avatar row falls back to the
+   * per-story peers it has always shown.
+   */
+  spaceAvatars?: readonly SpaceAvatar[]
+  /** Follow-mode: opens a peer's story and selects what they have selected. */
+  onFollow?: (peer: SpaceAvatar) => void
 }
 
 export function TopBar({
@@ -102,6 +128,8 @@ export function TopBar({
   onCompare,
   me,
   onSignOut,
+  spaceAvatars,
+  onFollow,
 }: Props) {
   const { store, locales, locale, setLocale } = useFolio()
   const state = useStoreState(store)
@@ -109,6 +137,7 @@ export function TopBar({
   // than a second button squeezed in beside Publish.
   const [menuOpen, setMenuOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [hereOpen, setHereOpen] = useState(false)
   // The server is the authority; this only keeps the bar from offering an
   // action it will refuse (`identity-and-access.md` decision 5).
   const mayPublish = canPublish(me)
@@ -182,9 +211,75 @@ export function TopBar({
             style={{ background: me.actor?.kind === 'user' ? me.actor.colour : store.colour }}
             title={`${actorLabel(me) ?? store.name} (you)`}
           />
-          {state.peers.map((p) => (
-            <span key={p.actor} className="peer" style={{ background: p.colour }} title={p.name} />
-          ))}
+          {/* The space channel's list when there is one: it knows who is in the
+              *site*, which is the whole point, and each avatar says which page.
+              Without the binding this falls back to the per-story peers the top
+              bar has always shown, so the row never goes empty
+              (`live-collaboration.md`'s "degrades without the binding"). */}
+          {spaceAvatars && spaceAvatars.length > 0 ? (
+            <div className="here">
+              {spaceAvatars.map((p) => (
+                <button
+                  key={p.actor}
+                  type="button"
+                  className="peer peer--follow"
+                  style={{ background: p.colour }}
+                  // Advisory presence, and follow-mode is one click
+                  // (decision 6): open where they are, in their locale, on their
+                  // block. Nothing new on the wire.
+                  title={followLabel(p)}
+                  disabled={!onFollow || p.storyId === null}
+                  onClick={() => onFollow?.(p)}
+                />
+              ))}
+              <button
+                type="button"
+                className="here__toggle"
+                aria-haspopup="menu"
+                aria-expanded={hereOpen}
+                title="Who’s here"
+                onClick={() => setHereOpen((v) => !v)}
+              >
+                ▾
+              </button>
+              {hereOpen ? (
+                <>
+                  <button
+                    type="button"
+                    className="here__scrim"
+                    aria-label="Close"
+                    onClick={() => setHereOpen(false)}
+                  />
+                  <div className="here__list" role="menu">
+                    {spaceAvatars.map((p) => (
+                      <button
+                        key={p.actor}
+                        type="button"
+                        role="menuitem"
+                        disabled={!onFollow || p.storyId === null}
+                        onClick={() => {
+                          setHereOpen(false)
+                          onFollow?.(p)
+                        }}
+                      >
+                        <span className="here__dot" style={{ background: p.colour }} />
+                        {followLabel(p)}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+            </div>
+          ) : (
+            state.peers.map((p) => (
+              <span
+                key={p.actor}
+                className="peer"
+                style={{ background: p.colour }}
+                title={p.name}
+              />
+            ))
+          )}
         </div>
         <button
           type="button"

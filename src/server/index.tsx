@@ -20,11 +20,23 @@ import {
   storyStatus,
   storyTree,
 } from './stories'
+import { SpaceDO } from './space-do'
 import { StoryDO } from './story-do'
 import type { Folio, FolioConfig } from './types'
 import { commitAll } from './write'
 
 export { StoryDO }
+/**
+ * The space channel's Durable Object
+ * (`../../../docs/specs/editing/live-collaboration.md`). A host exports this and
+ * binds it as `SPACE` to get cross-story presence and structural events; without
+ * it everything that channel carries is simply absent.
+ *
+ * **Declared with `new_classes`, not `new_sqlite_classes`** — it holds no storage
+ * at all. See README.
+ */
+export { SpaceDO }
+export type { SpaceEvent, SpacePresence } from '../core/protocol'
 /**
  * The Content API (`../../../docs/specs/platform/content-api.md`): what one write
  * reports, and the payload shapes the routes answer. `toNested` / `fromNested`

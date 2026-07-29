@@ -14,6 +14,14 @@ import { fetchMe, type Me, OPEN } from './me'
 interface Boot {
   storyId: string
   apiBase: string
+  /**
+   * Whether the host declared the `SPACE` binding
+   * (`../../../docs/specs/editing/live-collaboration.md`). False means the space
+   * channel does not exist here, so the admin never opens the socket at all —
+   * rather than discovering it through a failed upgrade and a console full of
+   * retries. Optional so a stale cached page keeps booting.
+   */
+  space?: boolean
 }
 
 declare global {
@@ -118,6 +126,7 @@ function App({ boot }: { boot: Boot }) {
       globals={loaded.globals}
       locales={loaded.locales}
       me={me}
+      space={boot.space ?? false}
       apiBase={boot.apiBase}
     />
   )

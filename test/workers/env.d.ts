@@ -1,6 +1,6 @@
 /// <reference types="@cloudflare/vitest-pool-workers/types" />
 
-import type { StoryDO } from '../../src/server'
+import type { SpaceDO, StoryDO } from '../../src/server'
 
 /**
  * Types for the bindings declared in test/workers/wrangler.jsonc.
@@ -14,6 +14,9 @@ declare global {
     interface Env {
       DB: D1Database
       STORY: DurableObjectNamespace<StoryDO>
+      /** The space channel (editing/live-collaboration.md). Optional on
+       * FolioBindings; bound here, because there are tests that drive it. */
+      SPACE: DurableObjectNamespace<SpaceDO>
       MEDIA: R2Bucket
       /**
        * Optional, and deliberately not bound in wrangler.jsonc: tests exercise

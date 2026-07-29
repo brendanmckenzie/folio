@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { canNest, type DocumentType, typeByName } from '../core/schema'
 import type { StoryNode, StoryState } from '../core/story'
+import type { SpacePresence } from '../core/protocol'
 import { useFolio } from './FolioContext'
 import { formatWhen } from './History'
+import { peersIn } from './spaceStore'
 
 /**
  * The tree's badge for each of the four states `draftState` derives.
@@ -117,6 +119,13 @@ interface Props {
   /** Shows a refused drop (`document-types.md`). The server refuses it too; this
    * is so an editor is told before the request rather than by it. */
   onNotice: (message: string) => void
+  /**
+   * Who is in which story, from the space channel
+   * (`../../../docs/specs/editing/live-collaboration.md`). Absent on a deployment
+   * with no `SPACE` binding, and every row simply has no avatar — which is what
+   * the tree looked like before this spec.
+   */
+  presence?: readonly SpacePresence[]
 }
 
 export function StoryTree({
@@ -128,6 +137,7 @@ export function StoryTree({
   onDelete,
   onDuplicate,
   onNotice,
+  presence,
 }: Props) {
   const { types } = useFolio()
   /**
@@ -192,6 +202,7 @@ export function StoryTree({
         onDelete={onDelete}
         onDuplicate={onDuplicate}
         onNotice={onNotice}
+        presence={presence}
       />
     </div>
   )
@@ -258,6 +269,7 @@ function Level({
   onDelete,
   onDuplicate,
   onNotice,
+  presence,
 }: {
   nodes: StoryNode[]
   depth: number
@@ -271,7 +283,14 @@ function Level({
   closeForm: () => void
 } & Pick<
   Props,
-  'currentId' | 'onOpen' | 'onCreate' | 'onMove' | 'onDelete' | 'onDuplicate' | 'onNotice'
+  | 'currentId'
+  | 'onOpen'
+  | 'onCreate'
+  | 'onMove'
+  | 'onDelete'
+  | 'onDuplicate'
+  | 'onNotice'
+  | 'presence'
 >) {
   const { types, stories, locale, isSourceLocale, translation } = useFolio()
   const [dropIndex, setDropIndex] = useState<number | null>(null)
@@ -401,6 +420,18 @@ function Level({
                 {badgeLabel(node.state)}
               </span>
             ) : null}
+            {/* Who else is in this document (`live-collaboration.md`): the payoff
+                of a channel that knows about more than one story, and the answer
+                to "am I about to open the page somebody is already in". Deduped by
+                actor, so one person with two tabs is one dot. */}
+            {(presence ? peersIn(presence, node.id) : []).map((p) => (
+              <span
+                key={p.actor}
+                className="stories__peer"
+                style={{ background: p.colour }}
+                title={p.tabs > 1 ? `${p.name} (${p.tabs} tabs)` : p.name}
+              />
+            ))}
             <span className="stories__actions">
               {/* `under` narrows what can be created here, not just what a drag
                   may drop into: an empty list disables the affordance rather
@@ -480,6 +511,7 @@ function Level({
               onDelete={onDelete}
               onDuplicate={onDuplicate}
               onNotice={onNotice}
+              presence={presence}
             />
           ) : null}
         </li>

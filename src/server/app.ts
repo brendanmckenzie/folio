@@ -14,6 +14,7 @@ import { editorRoutes } from './routes/editor'
 import { historyRoutes } from './routes/history'
 import { migrationRoutes } from './routes/migrations'
 import { redirectRoutes } from './routes/redirects'
+import { spaceRoutes } from './routes/space'
 import { storyRoutes } from './routes/stories'
 import type { FolioRuntime } from './runtime'
 import type { FolioConfig, FolioEnv } from './types'
@@ -84,6 +85,7 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   app.route('/', redirectRoutes<Env>(rt))
   app.route('/', migrationRoutes<Env>(rt))
   app.route('/', contentRoutes<Env>(rt))
+  app.route('/', spaceRoutes<Env>(rt))
 
   return app
 }

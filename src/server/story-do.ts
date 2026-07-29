@@ -6,7 +6,6 @@ import {
   type Delta,
   docCapError,
   fallbackColour,
-  MAX_FRAME_BYTES,
   parseClientFrame,
   type Presence,
   type PresenceSelection,
@@ -16,31 +15,16 @@ import {
 } from '../core/protocol'
 import { decodeIdentity, IDENTITY_HEADER, type SocketIdentity } from './auth/identity'
 import type { Role } from './auth/roles'
-import { sessionExpiry } from './auth/session'
+import {
+  CLOSE_PURGED,
+  CLOSE_VERSION,
+  frameSizeError,
+  liveSession,
+  type SocketSession,
+} from './sockets'
 
 /** Beyond this many missed deltas it is cheaper to re-send the whole document. */
 const MAX_CATCHUP = 200
-
-/** Application close code: the peer speaks a wire version we do not implement. */
-const CLOSE_VERSION = 4001
-
-/** Application close code: the story this object backs has been deleted. */
-const CLOSE_PURGED = 4002
-
-/** Application close code: no session, or one that has ended since the upgrade. */
-const CLOSE_UNAUTHENTICATED = 4003
-
-/**
- * How often, at most, one socket's session is re-checked against D1
- * (`identity-and-access.md` checkpoint 5). The attachment's own `expiresAt` is
- * checked on every frame and costs nothing; this bounds how long an *explicit*
- * revocation — an admin deleting a user, or that user signing out elsewhere —
- * can go unnoticed on an already-open socket.
- *
- * A minute, not per frame: a D1 read in the keystroke path is the thing this
- * design exists to avoid, and the alternative the spec rejected.
- */
-const SESSION_RECHECK_MS = 60_000
 
 /**
  * How long after the last logged transaction the debounced watermark alarm
@@ -58,24 +42,12 @@ const WATERMARK_DEBOUNCE_MS = 2000
  * either server-verified (the Worker vouched for it on the upgrade) or advisory
  * (what `hello` asserted, which is all there is under `auth: 'open'`).
  */
-interface Attachment {
+interface Attachment extends SocketSession {
   actor: string
   name: string
   colour: string
-  /**
-   * True when the Worker handed this socket an identity on the upgrade. `hello`
-   * cannot overwrite a verified identity — that is the point of the whole
-   * exercise — and *does* supply an unverified one.
-   */
-  verified: boolean
   /** Global role, or null when there is no session (`auth: 'open'`). */
   role: Role | null
-  /** `sessions.id`, for the bounded re-check below. Null without a session. */
-  session: string | null
-  /** Session expiry, epoch ms. 0 means "nothing to expire". */
-  expiresAt: number
-  /** When this socket's session was last re-checked against D1. */
-  checkedAt: number
   /**
    * Has said hello.
    *
@@ -343,50 +315,6 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
     }
 
     /**
-     * Whether this socket's session is still live, and the attachment to carry
-     * on with — or null, having closed the socket.
-     *
-     * Two checks, deliberately unequal in cost. The attachment's own `expiresAt`
-     * is free and runs on every frame. The D1 read that catches an *explicit*
-     * revocation runs at most once a minute per socket (`SESSION_RECHECK_MS`),
-     * because the alternative — a query per frame — puts a database round trip in
-     * the keystroke path, which is the design the spec rejected.
-     *
-     * A transient D1 failure is not treated as a revocation. Signing an editor
-     * out mid-sentence because the database blinked is worse than the bounded
-     * window this feature already accepts, and `expiresAt` still bounds it.
-     */
-    private async liveSession(ws: WebSocket, a: Attachment): Promise<Attachment | null> {
-      if (!a.verified || a.session === null) return a
-      const now = Date.now()
-      if (a.expiresAt <= now) {
-        ws.close(CLOSE_UNAUTHENTICATED, 'session expired')
-        return null
-      }
-      if (now - a.checkedAt < SESSION_RECHECK_MS) return a
-
-      let expiresAt: number | null
-      try {
-        expiresAt = await sessionExpiry(config.db(this.env), a.session)
-      } catch (err) {
-        console.error('story-do: could not re-check a session; keeping the socket open', err)
-        const kept: Attachment = { ...a, checkedAt: now }
-        ws.serializeAttachment(kept)
-        return kept
-      }
-      if (expiresAt === null || expiresAt <= now) {
-        ws.close(CLOSE_UNAUTHENTICATED, 'your session has ended')
-        return null
-      }
-      // The renewal a sliding session performs on the HTTP side lands here too,
-      // so a socket held open for weeks is not closed by a stale copy of an
-      // expiry that has since moved.
-      const next: Attachment = { ...a, expiresAt, checkedAt: now }
-      ws.serializeAttachment(next)
-      return next
-    }
-
-    /**
      * Every guarantee a transaction has, in one place: txId dedupe, the frame's
      * mutation cap, atomic per-mutation validation, the document cap, the log
      * append, the doc row update and the debounced watermark alarm.
@@ -522,19 +450,12 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
      * a hibernatable handler takes the connection with it.
      */
     async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
-      // Checked ahead of parsing: a frame this large would cost a JSON.parse over
-      // attacker-controlled input before anything else gets a chance to refuse it,
-      // and it stays a bounded, nameable error rather than an unreadable frame.
-      //
-      // Measured in UTF-8 bytes, not `.length`: a string's `.length` counts UTF-16
-      // code units, so a frame padded with 3-byte-in-UTF-8 characters can be three
-      // times MAX_FRAME_BYTES on the wire while reading well under the cap here -
-      // exactly the value size (`set.value` at 64KB) this cap stands in for.
-      const size =
-        typeof raw === 'string' ? new TextEncoder().encode(raw).byteLength : raw.byteLength
-      if (size > MAX_FRAME_BYTES) {
-        const reason = `frame too large: ${size} exceeds ${MAX_FRAME_BYTES} bytes`
-        this.sendTo(ws, { type: 'error', reason })
+      // Ahead of parsing, and shared with SpaceDO (`sockets.ts`): a frame this
+      // large would cost a JSON.parse over attacker-controlled input before
+      // anything else got a chance to refuse it.
+      const tooBig = frameSizeError(raw)
+      if (tooBig) {
+        this.sendTo(ws, { type: 'error', reason: tooBig })
         return
       }
 
@@ -568,7 +489,7 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
       // stop being able to write, and the check has to happen before the frame is
       // dispatched rather than inside the one case that mutates.
       const held = ws.deserializeAttachment() as Attachment | null
-      const who = held ? await this.liveSession(ws, held) : null
+      const who = held ? await liveSession(config.db(this.env), ws, held, 'story-do') : null
       if (held && !who) return
 
       const current = this.read()
