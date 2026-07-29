@@ -242,15 +242,36 @@ export async function duplicateStory(
 }
 
 /**
- * Rename, retitle or move. Paths for the whole affected subtree are recomputed
- * in one batch. Cheap enough to do in JS at any realistic page count, and much
- * easier to get right than a recursive CTE.
+ * A path this rename or move actually vacated, and where it now lives —
+ * exactly the fact `redirectStatements` needs, and the one
+ * `../platform/publish-hooks.md`'s `pathsChanged` hook fires with, because it
+ * is the only place both the old and the new path of every affected row are
+ * known at once. Gone once `updateStoryStatement` returns, which is why that
+ * hook has to fire at the route, not inside this file.
  */
-export async function updateStory(
+export interface PathChange {
+  id: string
+  from: string
+  to: string
+}
+
+/**
+ * Rename, retitle or move, computed but not yet run: `updateStory` batches
+ * these statements immediately, while the PATCH route (`routes/stories.ts`)
+ * needs the same statements *and* the `changes` list its `pathsChanged` hook
+ * fires with — reusing this rather than restating the diff is what keeps the
+ * hook's payload from ever being able to drift from what the redirects
+ * (`redirects.md`) actually captured.
+ *
+ * Paths for the whole affected subtree are recomputed in one batch. Cheap
+ * enough to do in JS at any realistic page count, and much easier to get
+ * right than a recursive CTE.
+ */
+export async function updateStoryStatement(
   db: D1Database,
   id: string,
   patch: { title?: string; slug?: string; parentId?: string | null; index?: number },
-): Promise<StoryMeta> {
+): Promise<{ next: StoryMeta; statements: D1PreparedStatement[]; changes: PathChange[] }> {
   const rows = await listStories(db)
   const current = rows.find((r) => r.id === id)
   if (!current) throw new Error('Unknown story')
@@ -293,16 +314,28 @@ export async function updateStory(
   // redirects.md's decision 1: every path this rename or move actually vacates
   // gets its redirect written in the same batch as the row update, so a rename
   // either records where it used to live or does not happen at all.
+  const changes: PathChange[] = []
   for (const r of changed) {
     const from = r.path
     const to = paths.get(r.id) ?? r.path
     if (from === to) continue
+    changes.push({ id: r.id, from, to })
     statements.push(...redirectStatements(db, { from, to, storyId: r.id }))
   }
 
-  if (statements.length) await db.batch(statements)
+  return { next: { ...next, path: paths.get(id) ?? next.path }, statements, changes }
+}
 
-  return { ...next, path: paths.get(id) ?? next.path }
+/** `updateStoryStatement`, run. What every caller wanted before this spec's
+ * `pathsChanged` hook needed the `changes` list as well. */
+export async function updateStory(
+  db: D1Database,
+  id: string,
+  patch: { title?: string; slug?: string; parentId?: string | null; index?: number },
+): Promise<StoryMeta> {
+  const { next, statements } = await updateStoryStatement(db, id, patch)
+  if (statements.length) await db.batch(statements)
+  return next
 }
 
 /**
@@ -325,6 +358,10 @@ export async function deleteStoryStatement(
   opts: { redirect?: boolean } = {},
 ): Promise<{
   ids: string[]
+  /** `ids`' own paths, same order — what `publish-hooks.md`'s `deleted` hook
+   * fires with, so a host can purge a cache without a second lookup for rows
+   * this call already read and is about to remove. */
+  paths: string[]
   statement: D1PreparedStatement
   redirectStatements: D1PreparedStatement[]
 } | null> {
@@ -334,6 +371,7 @@ export async function deleteStoryStatement(
   if (target.path === '') throw new Error('Cannot delete the root story')
 
   const ids = descendants(rows, id)
+  const paths = ids.map((descId) => rows.find((r) => r.id === descId)?.path ?? '')
   const placeholders = ids.map(() => '?').join(', ')
   const statement = db.prepare(`delete from stories where id in (${placeholders})`).bind(...ids)
 
@@ -348,7 +386,7 @@ export async function deleteStoryStatement(
     }
   }
 
-  return { ids, statement, redirectStatements: redirects }
+  return { ids, paths, statement, redirectStatements: redirects }
 }
 
 /** Removes the story and everything beneath it. */

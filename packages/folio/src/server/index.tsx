@@ -10,6 +10,16 @@ import type { Folio, FolioConfig } from './types'
 export { StoryDO }
 export type { VersionKind, VersionMeta } from './versions'
 export type { Redirect } from './redirects'
+export type {
+  CheckpointedHookPayload,
+  CreatedHookPayload,
+  DeletedHookPayload,
+  FolioHooks,
+  HookEvent,
+  PathsChangedHookPayload,
+  PublishedHookPayload,
+  UnpublishedHookPayload,
+} from './hooks'
 export { FolioError } from './errors'
 export type { ErrorEnvelope, FolioErrorCode } from './errors'
 export { FolioDoc } from '../preview/Render'

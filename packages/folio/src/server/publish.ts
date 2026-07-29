@@ -8,12 +8,13 @@
  * and hold nothing but input validation and the response shape.
  */
 import type { Doc } from '../core/doc'
-import type { StoryMeta } from '../core/story'
+import { draftState, type StoryMeta } from '../core/story'
 import { FolioError } from './errors'
+import type { HookRunner } from './hooks'
 import { publishStoryStatement, storyById, unpublishStoryStatement } from './stories'
 import { buildVersionWrite, type VersionMeta, writeVersion } from './versions'
 
-export interface PublishDeps {
+export interface PublishDeps<Env = unknown> {
   db: D1Database
   /**
    * The story's live draft, created from its row on first touch. Passed in rather
@@ -31,6 +32,12 @@ export interface PublishDeps {
    * `checkpoint` has no need of the position, so it keeps using `draft` alone.
    */
   draftWithSyncId: (story: StoryMeta) => Promise<{ doc: Doc; syncId: number }>
+  /**
+   * Fires the after-commit lifecycle hooks (`publish-hooks.md`). Absent only in
+   * tests that exercise a workflow directly with no `createRuntime` behind it —
+   * every real caller gets one from `FolioRuntime.publishDeps`.
+   */
+  hooks?: HookRunner<Env>
 }
 
 export interface PublishResult {
@@ -81,14 +88,30 @@ export async function publish(
     actor,
     fallbackTitle: meta.title,
   })
-  const { publishedAt, statement: publishStatement } = publishStoryStatement(
-    deps.db,
-    storyId,
-    doc,
-    meta.title,
-    syncId,
-  )
+  const {
+    publishedAt,
+    title,
+    statement: publishStatement,
+  } = publishStoryStatement(deps.db, storyId, doc, meta.title, syncId)
   await deps.db.batch([versionStatement, publishStatement])
+
+  // Built from `meta` plus the writes just committed, rather than re-read: the
+  // batch above is the only truth this function needs, and re-querying D1
+  // for a row this function just wrote would be a second read of the same
+  // fact for no reason (`publish-hooks.md`'s after-commit hook is the only
+  // consumer, and waitUntil already keeps it off the response's critical path).
+  const state = draftState(publishedAt, null, meta.draftSyncId, syncId)
+  const publishedMeta: StoryMeta = {
+    ...meta,
+    title,
+    publishedAt,
+    unpublishedAt: null,
+    publishedSyncId: syncId,
+    updatedAt: publishedAt,
+    state,
+    hasUnpublishedChanges: state === 'changed',
+  }
+  await deps.hooks?.run('published', { story: publishedMeta, doc, version, publishedAt, actor })
 
   return { publishedAt, publishedSyncId: syncId, version }
 }
@@ -111,12 +134,25 @@ export async function unpublish(
 ): Promise<{ unpublishedAt: number }> {
   const meta = await requireStory(deps.db, story)
 
+  // Idempotent, and deliberately silent about it: nothing was written, so
+  // there is no commit for an after-commit hook to fire about either.
   if (meta.publishedAt === null && meta.unpublishedAt !== null) {
     return { unpublishedAt: meta.unpublishedAt }
   }
 
   const { unpublishedAt, statement } = unpublishStoryStatement(deps.db, meta.id, actor)
   await statement.run()
+
+  const updated: StoryMeta = {
+    ...meta,
+    publishedAt: null,
+    unpublishedAt,
+    updatedAt: unpublishedAt,
+    state: 'unpublished',
+    hasUnpublishedChanges: false,
+  }
+  await deps.hooks?.run('unpublished', { story: updated, actor })
+
   return { unpublishedAt }
 }
 
@@ -131,13 +167,17 @@ export async function checkpoint(
   input: { label?: string | null; actor?: string | null },
 ): Promise<VersionMeta> {
   const meta = await requireStory(deps.db, story)
+  const actor = input.actor ?? null
 
-  return writeVersion(deps.db, {
+  const version = await writeVersion(deps.db, {
     storyId: meta.id,
     kind: 'checkpoint',
     doc: await deps.draft(meta),
     label: input.label ?? null,
-    actor: input.actor ?? null,
+    actor,
     fallbackTitle: meta.title,
   })
+  await deps.hooks?.run('checkpointed', { story: meta, version, actor })
+
+  return version
 }

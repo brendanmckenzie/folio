@@ -11,6 +11,7 @@ import type { AnyBlockDef, Registry } from '../core/block'
 import type { Doc } from '../core/doc'
 import type { Resolution } from '../core/resolve'
 import type { StoryMeta, StoryNode } from '../core/story'
+import type { FolioHooks } from './hooks'
 import type { StoryDO } from './story-do'
 
 export interface FolioBindings {
@@ -71,6 +72,13 @@ export interface FolioConfig<Env> {
     adminCss?: string[]
     previewCss?: string[]
   }
+  /**
+   * After-commit callbacks for the host: cache purges, search indexing,
+   * notifications (`../platform/publish-hooks.md`). Runs after a write has
+   * already landed, never inside it — there is no `before` hook and no way
+   * to veto or rewrite a publish. Validated for unknown keys at construction.
+   */
+  hooks?: FolioHooks<Env>
 }
 
 export interface Folio<Env> {

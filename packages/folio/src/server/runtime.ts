@@ -12,6 +12,7 @@ import type { Doc } from '../core/doc'
 import { buildResolution, referencedIds, type Resolution } from '../core/resolve'
 import { blankSubtree, type Manifest, validatePresets } from '../core/schema'
 import type { StoryMeta, StoryNode } from '../core/story'
+import { createHookRunner, type FolioHooks, type HookRunnerCtx, validateHooks } from './hooks'
 import type { PublishDeps } from './publish'
 import { listStories, publishedDocsByIds, storyById } from './stories'
 import type { FolioBindings, FolioConfig, StoryStub } from './types'
@@ -52,9 +53,15 @@ export interface FolioRuntime {
   /**
    * What the publish workflows need, assembled from bindings alone — the one
    * place that assembly lives, for a route today and a Durable Object alarm next
-   * phase.
+   * phase. `hookCtx` is `{ env, waitUntil }`: the host's own `env` and a way to
+   * run something after the response, built differently by an HTTP call site
+   * (`c.env`, `c.executionCtx.waitUntil`) and a Durable Object alarm
+   * (`alarmHookCtx`, this file) — `publish()` cannot tell the difference, which
+   * is the point (`../platform/publish-hooks.md` decision 3). Every route that
+   * mutates a story reads `.hooks` off the result, not only the publish/
+   * unpublish/checkpoint routes that also want the rest of `PublishDeps`.
    */
-  publishDeps: (bindings: FolioBindings) => PublishDeps
+  publishDeps: (bindings: FolioBindings, hookCtx: HookRunnerCtx) => PublishDeps
   page: (which: 'admin' | 'preview') => PageAssets
 }
 
@@ -65,6 +72,9 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // unknown type or slot, a disallowed child, a cycle) is a config mistake,
   // not a runtime surprise a caller discovers three requests later.
   validatePresets(schema)
+  // Same timing, same reason: a typo in `hooks` (or in `await`) should fail
+  // loudly once, not silently never fire (`../platform/publish-hooks.md`).
+  validateHooks(config.hooks)
   const base = config.basePath ?? DEFAULT_BASE
   const route = config.route ?? ((path: string) => `/${path}`)
   const assetBase = `${base}/asset`
@@ -148,10 +158,24 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     return { ...resolution, docs }
   }
 
-  const publishDeps = (bindings: FolioBindings): PublishDeps => ({
+  /**
+   * Hooks Folio registers on itself, run before any host hook for the same
+   * event (`hooks.ts`'s `InternalHooks`) — the seam
+   * `../editing/live-collaboration.md`'s space-channel broadcast hangs its own
+   * entry off (`../platform/publish-hooks.md` decision 5). Empty today: this
+   * spec has no internal consumer of its own, only the seam for the next one.
+   */
+  const internalHooks: FolioHooks<Env>[] = []
+
+  const publishDeps = (bindings: FolioBindings, hookCtx: HookRunnerCtx): PublishDeps => ({
     db: bindings.db,
     draft: (story) => draftFor(bindings, story),
     draftWithSyncId: (story) => draftForWithSyncId(bindings, story),
+    hooks: createHookRunner<Env>(
+      config.hooks,
+      { env: hookCtx.env as Env, waitUntil: hookCtx.waitUntil },
+      internalHooks,
+    ),
   })
 
   /**
@@ -188,5 +212,26 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     resolve,
     publishDeps,
     page,
+  }
+}
+
+/**
+ * `hookCtx` for a Durable Object alarm, which has no `ExecutionContext` to
+ * take a `waitUntil` from (`../platform/publish-hooks.md` decision 3): the
+ * fallback runs the task and catches anything it rejects with itself, so an
+ * unawaited hook cannot turn into an unhandled rejection inside the alarm
+ * handler the way an HTTP response has `executionCtx.waitUntil` to catch it
+ * for free. A hook marked `{ await: true }` is still awaited under this
+ * fallback — the runner does not know or care which kind of `waitUntil` it
+ * was handed.
+ */
+export function alarmHookCtx<Env>(env: Env): HookRunnerCtx<Env> {
+  return {
+    env,
+    waitUntil: (p) => {
+      void p.catch((err) =>
+        console.error('folio: hook rejected with no waitUntil to catch it', err),
+      )
+    },
   }
 }

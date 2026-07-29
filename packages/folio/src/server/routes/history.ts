@@ -35,7 +35,11 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.post('/story/:id/versions', loadStory<Env>(), async (c) => {
     const body = await parseOptionalBody(c.req, CheckpointBody)
-    return c.json(await checkpoint(rt.publishDeps(c.var.bindings()), c.var.story, body))
+    const deps = rt.publishDeps(c.var.bindings(), {
+      env: c.env,
+      waitUntil: (p) => c.executionCtx.waitUntil(p),
+    })
+    return c.json(await checkpoint(deps, c.var.story, body))
   })
 
   /**
