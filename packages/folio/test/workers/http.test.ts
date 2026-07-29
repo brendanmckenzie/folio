@@ -282,6 +282,98 @@ describe('stories: CRUD over /folio/stories', () => {
   })
 })
 
+// duplicate-and-paste.md: architecture decision 2 (create, then seed —
+// getOrInit needs no new Durable Object entry point), decision 4 (the
+// *draft* is cloned, not the published snapshot), checkpoint 3 (uids always
+// re-allocated), checkpoint 4 (no version history of its own).
+describe('duplicate: POST /folio/stories/:id/duplicate', () => {
+  it('seeds the new story with the source draft, uids re-allocated, versions empty', async () => {
+    const source = await createStory('Duplicate Source')
+    const conn = await connect(source.id)
+    const sourceDoc = await conn.hello('alice')
+    await conn.tx('dup-edit', [
+      { t: 'set', uid: sourceDoc.root, field: 'title', value: 'Edited Draft Title' },
+      {
+        t: 'insert',
+        blok: {
+          uid: 'dup-lnk1',
+          type: 'link',
+          parent: sourceDoc.root,
+          slot: 'body',
+          order: 'a0',
+          data: { label: 'Original Link', href: null },
+        },
+      },
+    ])
+    conn.close()
+
+    const res = await SELF.fetch(`${API}/stories/${source.id}/duplicate`, jsonPost('{}'))
+    expect(res.status).toBe(201)
+    const { story: created } = await res.json<{ story: StoryMeta }>()
+
+    // Decision 5: the source's own slug collides with the still-live source,
+    // so the copy is bumped to '-2' with no special case anywhere.
+    expect(created.path).toBe('duplicate-source-2')
+    expect(created.publishedAt).toBeNull()
+    expect(created.title).toBe('Duplicate Source (copy)')
+
+    const { doc: cloned } = await getJson<{ doc: Doc }>(`/folio/story/${created.id}/document`)
+    expect(cloned.bloks[cloned.root]?.data.title).toBe('Edited Draft Title')
+
+    // Checkpoint 3: every uid re-allocated, including the root.
+    expect(cloned.root).not.toBe(sourceDoc.root)
+    const clonedLink = Object.values(cloned.bloks).find((b) => b.type === 'link')
+    expect(clonedLink?.uid).not.toBe('dup-lnk1')
+    expect(clonedLink?.data).toEqual({ label: 'Original Link', href: null })
+
+    // Checkpoint 4: no version history of its own.
+    const versions = await getJson<VersionMeta[]>(`/folio/story/${created.id}/versions`)
+    expect(versions).toEqual([])
+
+    // The source is untouched by its own duplication.
+    const { doc: stillSource } = await getJson<{ doc: Doc }>(`/folio/story/${source.id}/document`)
+    expect(stillSource.root).toBe(sourceDoc.root)
+    expect(stillSource.bloks['dup-lnk1']).toBeDefined()
+  })
+
+  it('accepts an explicit title and parentId', async () => {
+    const source = await createStory('Custom Duplicate Source')
+    const dest = await createStory('Duplicate Destination')
+
+    const res = await SELF.fetch(
+      `${API}/stories/${source.id}/duplicate`,
+      jsonPost(JSON.stringify({ title: 'A Brand New Name', parentId: dest.id })),
+    )
+    const { story: created } = await res.json<{ story: StoryMeta }>()
+
+    expect(created.title).toBe('A Brand New Name')
+    expect(created.parentId).toBe(dest.id)
+    expect(created.path).toBe(`${dest.slug}/custom-duplicate-source`)
+  })
+
+  it('the copy publishes independently of the source', async () => {
+    const source = await createStory('Publish Independently Source')
+    const dupRes = await SELF.fetch(`${API}/stories/${source.id}/duplicate`, jsonPost('{}'))
+    const { story: created } = await dupRes.json<{ story: StoryMeta }>()
+
+    const pub = await publish(created.id)
+    expect(pub.ok).toBe(true)
+
+    const tree = await getJson<StoryNode[]>('/folio/stories')
+    const row = flatten(tree).find((n) => n.id === created.id)
+    expect(row?.publishedAt).not.toBeNull()
+
+    // The source was never published by any of this.
+    const sourceTree = flatten(tree).find((n) => n.id === source.id)
+    expect(sourceTree?.publishedAt).toBeNull()
+  })
+
+  it('404s duplicating an unknown story', async () => {
+    const { status } = await failureOf(`/folio/stories/sty_nope/duplicate`, jsonPost('{}'))
+    expect(status).toBe(404)
+  })
+})
+
 describe('purge races a live editor', () => {
   it('closes an already-open editing session on delete, and a fresh connection afterwards gets the same terminal close instead of a 404 that would loop forever', async () => {
     const story = await createStory('Purged While Editing')

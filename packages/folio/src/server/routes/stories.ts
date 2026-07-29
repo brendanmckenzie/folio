@@ -3,13 +3,28 @@
  * against, and publishing.
  */
 import { Hono } from 'hono'
+import { cloneDoc } from '../../core/clone'
 import { rethrow } from '../errors'
 import { loadStory } from '../middleware'
 import { publish, unpublish } from '../publish'
 import type { FolioRuntime } from '../runtime'
-import { createStory, deleteStoryStatement, storyTree, updateStory } from '../stories'
+import {
+  createStory,
+  deleteStoryStatement,
+  duplicateStory,
+  storyTree,
+  updateStory,
+} from '../stories'
 import type { FolioEnv } from '../types'
-import { actorHeader, idParam, parseBody, StoryCreateBody, StoryPatchBody } from '../validate'
+import {
+  actorHeader,
+  idParam,
+  parseBody,
+  parseOptionalBody,
+  StoryCreateBody,
+  StoryDuplicateBody,
+  StoryPatchBody,
+} from '../validate'
 import { deleteVersionsStatement } from '../versions'
 
 export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
@@ -36,6 +51,38 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     } catch (e) {
       rethrow(e)
     }
+  })
+
+  /**
+   * Duplicate a document (`duplicate-and-paste.md`). Row first, seed second
+   * (architecture decision 4): if `duplicateStory`'s insert fails, nothing
+   * else has happened; if the DO seed after it fails, the result is a story
+   * row with a blank document — a state this system already understands (a
+   * page someone created and never filled in), not an orphaned Durable
+   * Object. The *draft* is cloned, not the published snapshot: an editor
+   * duplicating a page means "give me what I am looking at" (decision 4's
+   * sibling on version history — the copy starts with none of its own).
+   *
+   * No singleton refusal yet: that lands with
+   * `../foundation/document-types.md`, which is what makes "singleton"
+   * mean anything at all.
+   */
+  app.post('/stories/:id/duplicate', loadStory<Env>(), async (c) => {
+    const bindings = c.var.bindings()
+    const source = c.var.story
+    const body = await parseOptionalBody(c.req, StoryDuplicateBody)
+
+    let created: Awaited<ReturnType<typeof duplicateStory>>
+    try {
+      created = await duplicateStory(bindings.db, source.id, body)
+    } catch (e) {
+      rethrow(e)
+    }
+
+    const draft = await rt.draftFor(bindings, source)
+    await rt.stub(bindings, created.id).getOrInit(cloneDoc(draft))
+
+    return c.json({ story: rt.withUrls(created) }, 201)
   })
 
   app.delete('/stories/:id', async (c) => {

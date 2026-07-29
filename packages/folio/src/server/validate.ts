@@ -117,6 +117,19 @@ export const StoryPatchBody = v.object(
   OBJECT,
 )
 
+/**
+ * `duplicate-and-paste.md`'s `POST /stories/:id/duplicate`. Both optional:
+ * an absent `title` falls back to `"{source title} (copy)"`
+ * (`duplicateStory`), an absent `parentId` to the source's own parent.
+ */
+export const StoryDuplicateBody = v.object(
+  {
+    title: v.optional(required(300)),
+    parentId: v.nullish(ID),
+  },
+  OBJECT,
+)
+
 export const CheckpointBody = v.object(
   {
     label: v.optional(bounded(120)),
@@ -143,6 +156,7 @@ export const RedirectCreateBody = v.object(
 
 export type StoryCreateInput = v.InferOutput<typeof StoryCreateBody>
 export type StoryPatchInput = v.InferOutput<typeof StoryPatchBody>
+export type StoryDuplicateInput = v.InferOutput<typeof StoryDuplicateBody>
 export type CheckpointInput = v.InferOutput<typeof CheckpointBody>
 export type AssetPatchInput = v.InferOutput<typeof AssetPatchBody>
 export type RedirectCreateInput = v.InferOutput<typeof RedirectCreateBody>

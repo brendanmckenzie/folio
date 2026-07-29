@@ -18,6 +18,10 @@ export interface Stories {
   /** `redirect` (redirects.md) is the delete confirmation's checkbox value:
    * true writes a redirect to the parent, false is the escape hatch. */
   remove: (story: StoryNode, redirect: boolean) => Promise<void>
+  /** duplicate-and-paste.md: `title` is the confirmation dialog's title field
+   * at the moment of confirming. Opens the copy once it lands, the same as
+   * `create` does for a brand-new page. */
+  duplicate: (story: StoryNode, title: string) => Promise<void>
 }
 
 function flatten(nodes: StoryNode[]): StoryNode[] {
@@ -122,5 +126,28 @@ export function useStories(apiBase: string, initialStoryId: string, notify: Noti
     [apiBase, flat, notify, open, reload, storyId],
   )
 
-  return { tree, flat, storyId, current, reload, open, create, patch, remove }
+  const duplicate = useCallback(
+    async (story: StoryNode, title: string) => {
+      let created: StoryNode
+      try {
+        created = (
+          await expectJson<{ story: StoryNode }>(
+            await send(`${apiBase}/stories/${encodeURIComponent(story.id)}/duplicate`, 'POST', {
+              title,
+            }),
+          )
+        ).story
+      } catch (e) {
+        notify((e as Error).message)
+        return
+      }
+      await reload()
+      // Same reasoning as `create`: you were just working with the tree, so
+      // stay there — but open the copy, not the page just duplicated.
+      open(created.id)
+    },
+    [apiBase, notify, open, reload],
+  )
+
+  return { tree, flat, storyId, current, reload, open, create, patch, remove, duplicate }
 }
