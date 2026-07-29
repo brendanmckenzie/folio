@@ -4,17 +4,19 @@ import type { SchemaIndex } from '../core/schema'
 import type { StoryNode } from '../core/story'
 import { BlockTree } from './BlockTree'
 import { DeleteDialog } from './DeleteDialog'
+import { DiscardDialog } from './DiscardDialog'
 import { FolioProvider, useStoreState } from './FolioContext'
 import { History } from './History'
 import { useBlocks } from './hooks/useBlocks'
 import { useNotice } from './hooks/useNotice'
 import { usePreviewBridge } from './hooks/usePreviewBridge'
 import { usePublish } from './hooks/usePublish'
+import { usePublishedDoc } from './hooks/usePublishedDoc'
 import { useRedirects } from './hooks/useRedirects'
 import { useReferencedDocs } from './hooks/useReferencedDocs'
 import { useStories } from './hooks/useStories'
 import { useUndoShortcut } from './hooks/useUndoShortcut'
-import { useVersions } from './hooks/useVersions'
+import { useVersions, useVersionsList } from './hooks/useVersions'
 import { Inspector } from './Inspector'
 import { PageAddress } from './PageAddress'
 import { Redirects } from './Redirects'
@@ -50,6 +52,10 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
   const state = useStoreState(store)
 
   const blocks = useBlocks(store, schema)
+  // Loaded unconditionally, not only while the History rail is open: the top
+  // bar's own state (below) needs the newest publish version on every load
+  // (`unpublished-changes.md`'s phase 1 note on `useVersions`).
+  const versionsList = useVersionsList(apiBase, storyId)
   const versions = useVersions({
     store,
     apiBase,
@@ -57,7 +63,13 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
     liveDoc: state.doc,
     notify,
     active: rail === 'history',
+    versions: versionsList.versions,
+    reloadVersions: versionsList.reload,
   })
+  // "Published" is the newest `publish` version, not a second read of
+  // published_doc (architecture decision 1): what the top bar's state and the
+  // comparison view are both built from.
+  const published = usePublishedDoc({ apiBase, versions: versionsList.versions, liveDoc: state.doc })
 
   // A publish or unpublish changes the tree's badge and adds a retained
   // version (unpublish adds none, but reloading unconditionally costs nothing
@@ -77,6 +89,12 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
   // node (its path, for the redirect-target label) rather than just an id.
   const [confirmingDeleteFor, setConfirmingDeleteFor] = useState<StoryNode | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Discard has no story-switching hazard to guard against the way the two
+  // above do — it is only reachable while the comparison view for *this*
+  // story is open, and that view itself closes on navigation — but the same
+  // "confirming, not just open" shape keeps it consistent with them.
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
 
   const redirects = useRedirects(apiBase, notify, rail === 'redirects')
 
@@ -141,6 +159,11 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
           published={publish.published}
           onPublish={() => void publish.publish()}
           onRequestUnpublish={() => setConfirmingUnpublishFor(storyId)}
+          everPublished={published.version !== null}
+          delta={published.delta}
+          onCompare={() => {
+            if (published.version) void versions.view(published.version)
+          }}
         />
 
         {confirmingUnpublishFor === storyId && current ? (
@@ -167,6 +190,17 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
                 setDeleting(false)
                 setConfirmingDeleteFor(null)
               })
+            }}
+          />
+        ) : null}
+
+        {confirmingDiscard && viewing ? (
+          <DiscardDialog
+            delta={versions.delta}
+            busy={versions.busy}
+            onCancel={() => setConfirmingDiscard(false)}
+            onConfirm={() => {
+              void versions.restore(viewing.version, viewing.doc).then(() => setConfirmingDiscard(false))
             }}
           />
         ) : null}
@@ -261,6 +295,8 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
                 busy={versions.busy}
                 onExit={versions.exit}
                 onRestore={(version, preloaded) => void versions.restore(version, preloaded)}
+                canDiscard={published.version?.id === viewing.version.id}
+                onRequestDiscard={() => setConfirmingDiscard(true)}
               />
             ) : null}
 

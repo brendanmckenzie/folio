@@ -29,10 +29,29 @@ interface Props {
   busy: boolean
   onExit: () => void
   onRestore: (version: VersionMeta, preloaded: Doc) => void
+  /**
+   * True only when the version on screen is the newest publish version — the
+   * "N unpublished changes" entry point in the top bar, not an arbitrary
+   * checkpoint opened from History. Discard only makes sense there
+   * (`unpublished-changes.md`); an arbitrary past version keeps the plain
+   * restore button it always had.
+   */
+  canDiscard: boolean
+  /** Opens the confirmation; `Editor.tsx` owns whether it is showing. */
+  onRequestDiscard: () => void
 }
 
 /** The banner over the stage while a past version is on screen. */
-export function ViewingBar({ version, doc, delta, busy, onExit, onRestore }: Props) {
+export function ViewingBar({
+  version,
+  doc,
+  delta,
+  busy,
+  onExit,
+  onRestore,
+  canDiscard,
+  onRequestDiscard,
+}: Props) {
   return (
     <div className="viewbar">
       <span className="viewbar__dot" />
@@ -50,14 +69,25 @@ export function ViewingBar({ version, doc, delta, busy, onExit, onRestore }: Pro
       <button type="button" onClick={onExit}>
         Close
       </button>
-      <button
-        type="button"
-        className="btn-primary"
-        disabled={busy || delta?.total === 0}
-        onClick={() => onRestore(version, doc)}
-      >
-        Restore this version
-      </button>
+      {canDiscard ? (
+        <button
+          type="button"
+          className="btn-danger"
+          disabled={busy || delta?.total === 0}
+          onClick={onRequestDiscard}
+        >
+          Discard changes
+        </button>
+      ) : (
+        <button
+          type="button"
+          className="btn-primary"
+          disabled={busy || delta?.total === 0}
+          onClick={() => onRestore(version, doc)}
+        >
+          Restore this version
+        </button>
+      )}
     </div>
   )
 }

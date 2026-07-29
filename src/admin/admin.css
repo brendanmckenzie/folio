@@ -96,6 +96,18 @@ button:disabled {
   font-size: 0.75rem;
   color: var(--muted);
 }
+/* The one state ("N unpublished changes") that is also a button into the
+   comparison view (unpublished-changes.md) — reset to look like the plain
+   label beside it, plus the affordance an editor needs to notice it is
+   clickable. */
+.topbar__status--link {
+  padding: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
 .topbar__link {
   align-self: center;
   font-size: 0.8125rem;
@@ -858,6 +870,49 @@ button:disabled {
   font-size: 0.8125rem;
 }
 .delete-story__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+
+/* Discard changes (unpublished-changes.md): same overlay shape as delete and
+   unpublish, since all three are "confirm before an irreversible-looking
+   action" dialogs even though discard itself is an ordinary, undoable edit. */
+.discard {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+}
+.discard__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgb(16 20 26 / 45%);
+  border: 0;
+}
+.discard__panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  width: min(420px, 92vw);
+  padding: 1.1rem;
+  background: var(--panel);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgb(16 20 26 / 30%);
+}
+.discard__panel h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.discard__panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.discard__actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
