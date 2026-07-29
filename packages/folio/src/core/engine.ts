@@ -17,7 +17,32 @@
 // engine consumers can type a `Doc` without a second import just for that.
 export type { Blok, Doc, Json } from './doc'
 
-export { ancestorsOf, childrenOf, compareSiblings, keyAtIndex, newUid, subtree } from './doc'
+export {
+  ancestorsOf,
+  childrenOf,
+  compareSiblings,
+  keyAtIndex,
+  keysBetween,
+  newUid,
+  subtree,
+} from './doc'
+
+/**
+ * The nested document shape (`../../../docs/specs/platform/content-api.md`) — the
+ * two functions the Storyblok importer (`PARITY.md` Phase 6) and any
+ * other bulk-import script build on, rather than reaching into the normalised
+ * graph and allocating uids and fractional orders by hand. `folio/engine` is
+ * exactly the entry point that doc comment above describes.
+ */
+export { fieldShapeError, fromNested, NestedError, toNested } from './nested'
+export type {
+  FromNestedOptions,
+  NestedBlok,
+  NestedDoc,
+  NestedInput,
+  NestedValue,
+  ToNestedOptions,
+} from './nested'
 
 export { apply, applyAll, invert, invertAll, mutationError } from './mutations'
 export type { Mutation } from './mutations'
