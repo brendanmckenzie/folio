@@ -379,6 +379,241 @@ describe('StoryDO: transactions', () => {
   })
 })
 
+/**
+ * `schema-migrations.md` architecture decision 4: the second door into the log.
+ * The point of every test here is that it is *not* a second write path — it runs
+ * the same `applyTransaction` the socket's `tx` frame does, so it inherits the
+ * cap, the atomic validation, the document ceiling and the dedupe.
+ */
+describe('StoryDO: commit (the transaction RPC)', () => {
+  const MIGRATION = { id: 'migration:0001-test', name: 'Migration 0001' }
+
+  it('logs a transaction, advances the syncId, and attributes it to its actor', async () => {
+    const stub = story('commit-log')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+
+    const result = await runInDurableObject(stub, (instance) =>
+      instance.commit(setTitle('Migrated'), MIGRATION, 'commit-1'),
+    )
+    expect(result).toEqual({ syncId: 1, txId: 'commit-1' })
+
+    const trail = await runInDurableObject(stub, (instance) => instance.recent())
+    expect(trail[0]).toMatchObject({
+      syncId: 1,
+      actor: 'migration:0001-test',
+      actorName: 'Migration 0001',
+      mutations: setTitle('Migrated'),
+    })
+    const doc = await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    expect(doc.bloks.root0000?.data.title).toBe('Migrated')
+  })
+
+  it('mints its own txId when the caller supplies none', async () => {
+    const stub = story('commit-txid')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+
+    const result = await runInDurableObject(stub, (instance) =>
+      instance.commit(setTitle('Auto'), MIGRATION),
+    )
+    expect('rejected' in result).toBe(false)
+    if ('rejected' in result) throw new Error(result.rejected)
+    expect(result.txId).toMatch(/^tx_[0-9a-f]{20}$/)
+    expect(result.syncId).toBe(1)
+  })
+
+  /**
+   * The acceptance criterion "a migration reaches a connected editor live": no
+   * sender to exclude, so every joined socket gets the delta. That is what makes
+   * it appear without a reload, land in the activity trail, and undo.
+   */
+  it('broadcasts the delta to every joined socket', async () => {
+    const stub = story('commit-broadcast')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    const ada = await join(stub, { actor: 'a1', name: 'Ada', colour: '#ff00ff' })
+    const bo = await join(stub, { actor: 'a2', name: 'Bo', colour: '#00ffff' })
+    await frame(ada, 'bootstrap')
+    await frame(bo, 'bootstrap')
+
+    await runInDurableObject(stub, (instance) =>
+      instance.commit(setTitle('From a migration'), MIGRATION, 'commit-bc'),
+    )
+
+    for (const peer of [ada, bo]) {
+      expect(await frame(peer, 'delta')).toEqual({
+        type: 'delta',
+        syncId: 1,
+        txId: 'commit-bc',
+        actor: 'migration:0001-test',
+        mutations: setTitle('From a migration'),
+      })
+    }
+    ada.ws.close()
+    bo.ws.close()
+  })
+
+  /**
+   * The pre-hello quarantine applies to this door too, and it has to: a socket
+   * with no watermark cannot place a delta, so delivering one there is exactly
+   * how a client ends up with a gap it cannot see.
+   */
+  it('does not broadcast to a socket that has not said hello', async () => {
+    const stub = story('commit-quarantine')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    const lurker = await connect(stub)
+
+    await runInDurableObject(stub, (instance) =>
+      instance.commit(setTitle('Unseen'), MIGRATION, 'commit-q'),
+    )
+
+    await settle()
+    expect(framesOf(lurker, 'delta')).toEqual([])
+    lurker.ws.close()
+  })
+
+  it('dedupes a repeated txId: answered as a replay, written once', async () => {
+    const stub = story('commit-dedupe')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+
+    const first = await runInDurableObject(stub, (instance) =>
+      instance.commit(setTitle('Once'), MIGRATION, 'commit-same'),
+    )
+    const second = await runInDurableObject(stub, (instance) =>
+      instance.commit(setTitle('Twice'), MIGRATION, 'commit-same'),
+    )
+
+    expect(first).toEqual({ syncId: 1, txId: 'commit-same' })
+    expect(second).toEqual({ syncId: 1, txId: 'commit-same', replay: true })
+    // The second call's mutations never ran: the log has one row and the
+    // document still holds the first call's value.
+    expect(await runInDurableObject(stub, (instance) => instance.recent())).toHaveLength(1)
+    const doc = await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    expect(doc.bloks.root0000?.data.title).toBe('Once')
+  })
+
+  it('does not re-broadcast a replay', async () => {
+    const stub = story('commit-replay-quiet')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    const peer = await join(stub, { actor: 'a1', name: 'Ada', colour: '#ff00ff' })
+    await frame(peer, 'bootstrap')
+
+    await runInDurableObject(stub, (instance) =>
+      instance.commit(setTitle('Once'), MIGRATION, 'commit-rq'),
+    )
+    await frame(peer, 'delta')
+    await runInDurableObject(stub, (instance) =>
+      instance.commit(setTitle('Once'), MIGRATION, 'commit-rq'),
+    )
+
+    await settle()
+    expect(framesOf(peer, 'delta')).toHaveLength(1)
+    peer.ws.close()
+  })
+
+  it('refuses over the mutation cap with the same reason the socket path gives', async () => {
+    const stub = story('commit-cap')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+
+    const tooMany = Array.from({ length: MAX_TX_MUTATIONS + 1 }, (_, i) => ({
+      t: 'set' as const,
+      uid: 'root0000',
+      field: `f${i}`,
+      value: i,
+    }))
+    const result = await runInDurableObject(stub, (instance) =>
+      instance.commit(tooMany, MIGRATION, 'commit-cap'),
+    )
+
+    expect(result).toEqual({
+      rejected: `too many mutations: ${MAX_TX_MUTATIONS + 1} exceeds the ${MAX_TX_MUTATIONS} cap`,
+    })
+    expect(await runInDurableObject(stub, (instance) => instance.recent())).toEqual([])
+  })
+
+  /**
+   * Atomic: nothing partial lands. This is what lets the runner record a failure
+   * per story and carry on — a chunk is either wholly applied or wholly refused,
+   * so a re-run recomputes from a document in a known shape.
+   */
+  it('refuses an invalid mutation and logs nothing from the whole transaction', async () => {
+    const stub = story('commit-invalid')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+
+    const result = await runInDurableObject(stub, (instance) =>
+      instance.commit(
+        [
+          { t: 'set', uid: 'root0000', field: 'title', value: 'landed?' },
+          { t: 'remove', uid: 'root0000' },
+        ],
+        MIGRATION,
+        'commit-invalid',
+      ),
+    )
+
+    expect(result).toEqual({ rejected: 'root remove: the root cannot be removed' })
+    expect(await runInDurableObject(stub, (instance) => instance.recent())).toEqual([])
+    const doc = await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    expect(doc.bloks.root0000?.data.title).toBe('Home')
+  })
+
+  it('carries a retype through, so a migration can consolidate two block types', async () => {
+    const stub = story('commit-retype')
+    await runInDurableObject(stub, async (instance) => {
+      await instance.getOrInit(seed())
+      await instance.commit(
+        [
+          {
+            t: 'insert',
+            blok: {
+              uid: 'bq000001',
+              type: 'bigQuote',
+              parent: 'root0000',
+              slot: 'body',
+              order: 'a0',
+              data: { text: 'Hi' },
+            },
+          },
+        ],
+        MIGRATION,
+        'commit-rt-seed',
+      )
+    })
+
+    await runInDurableObject(stub, (instance) =>
+      instance.commit(
+        [
+          { t: 'retype', uid: 'bq000001', type: 'quote' },
+          { t: 'set', uid: 'bq000001', field: 'size', value: 'large' },
+        ],
+        MIGRATION,
+        'commit-rt',
+      ),
+    )
+
+    const doc = await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    expect(doc.bloks.bq000001).toEqual({
+      uid: 'bq000001',
+      type: 'quote',
+      parent: 'root0000',
+      slot: 'body',
+      order: 'a0',
+      data: { text: 'Hi', size: 'large' },
+    })
+  })
+
+  /**
+   * Deliberate: the caller's job is `getOrInit` first, and inventing a seed here
+   * would mean this object knowing what a document type looks like — the one
+   * thing it is designed not to know.
+   */
+  it('refuses when the object has no document yet', async () => {
+    const stub = story('commit-no-doc')
+    const result = await runInDurableObject(stub, (instance) =>
+      instance.commit(setTitle('Nothing to migrate'), MIGRATION, 'commit-nodoc'),
+    )
+    expect(result).toEqual({ rejected: 'no document: this story has never been opened' })
+  })
+})
+
 describe('StoryDO: activity trail', () => {
   it('returns the most recent transactions first and honours the limit', async () => {
     const stub = story('recent')
