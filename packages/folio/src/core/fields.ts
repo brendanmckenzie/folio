@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import type { FieldCondition } from './conditions'
 import type { Json } from './doc'
 import type { ResolvedAsset, ResolvedLink, ResolvedReference } from './resolve'
 import type { RichtextMarkName, RichtextNodeName } from './richtext'
@@ -8,6 +9,14 @@ interface Common {
   label?: string
   help?: string
   required?: boolean
+  /**
+   * Admin-only: hides the input when it does not match the same blok's own
+   * data. The value is untouched — hiding a field hides the input, not the
+   * value (`conditional-fields.md`, checkpoint 3).
+   */
+  showIf?: FieldCondition
+  /** Admin-only. Never draw this input; its stored value is untouched. */
+  hidden?: boolean
 }
 
 export interface SelectOption {

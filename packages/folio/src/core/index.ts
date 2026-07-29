@@ -9,6 +9,9 @@
 export { defineBlock, toRegistry, toSchemaIndex, toManifest } from './block'
 export type { AnyBlockDef, BlockDef, Registry } from './block'
 
+export { matches } from './conditions'
+export type { FieldCondition } from './conditions'
+
 export {
   asset,
   blocks,
