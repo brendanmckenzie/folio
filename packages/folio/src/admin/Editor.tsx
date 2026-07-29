@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { buildResolution } from '../core/resolve'
 import { type DocumentType, type SchemaIndex, singletonId, typeByName } from '../core/schema'
 import type { StoryNode } from '../core/story'
+import { Access } from './Access'
 import { BlockTree } from './BlockTree'
 import { DataList } from './DataList'
 import { DeleteDialog } from './DeleteDialog'
@@ -10,6 +11,7 @@ import { DuplicateDialog } from './DuplicateDialog'
 import { FolioProvider, useStoreState } from './FolioContext'
 import { globalPreviewUrl, GlobalsList } from './GlobalsList'
 import { History } from './History'
+import { useAccess } from './hooks/useAccess'
 import { useBlocks } from './hooks/useBlocks'
 import { useClipboardShortcuts } from './hooks/useClipboardShortcuts'
 import { useGlobalDocs } from './hooks/useGlobalDocs'
@@ -23,6 +25,7 @@ import { useStories } from './hooks/useStories'
 import { useUndoShortcut } from './hooks/useUndoShortcut'
 import { useVersions, useVersionsList } from './hooks/useVersions'
 import { Inspector } from './Inspector'
+import { canEdit, canManageAccess, canManageContent, type Me, whyNot } from './me'
 import { PageAddress } from './PageAddress'
 import { Redirects } from './Redirects'
 import { StoryStore } from './store'
@@ -38,10 +41,12 @@ interface Props {
   types: readonly DocumentType[]
   /** `FolioConfig.globals`, off the manifest (`content-model/globals.md`). */
   globals: readonly string[]
+  /** Who is signed in, from `GET /folio/me` (`identity-and-access.md`). */
+  me: Me
   apiBase: string
 }
 
-type Rail = 'content' | 'data' | 'blocks' | 'history' | 'redirects'
+type Rail = 'content' | 'data' | 'blocks' | 'history' | 'redirects' | 'access'
 
 /**
  * Composition and layout only. Every domain — the story tree, versions, the
@@ -49,7 +54,7 @@ type Rail = 'content' | 'data' | 'blocks' | 'history' | 'redirects'
  * under hooks/, and everything the panels share reaches them through
  * FolioProvider rather than as props.
  */
-export function Editor({ storyId: initialStoryId, schema, types, globals, apiBase }: Props) {
+export function Editor({ storyId: initialStoryId, schema, types, globals, me, apiBase }: Props) {
   const [rail, setRail] = useState<Rail>('blocks')
   const [viewport, setViewport] = useState<Viewport>('Desktop')
 
@@ -114,6 +119,18 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, apiBas
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
 
   const redirects = useRedirects(apiBase, notify, rail === 'redirects')
+  const showAccess = canManageAccess(me)
+  const access = useAccess(apiBase, notify, rail === 'access')
+
+  /**
+   * Signs out and reloads rather than navigating to the login page directly: the
+   * cookie is cleared by the response, and a reload is what makes every other
+   * piece of state in the editor — the socket included — re-derive itself from a
+   * browser that is no longer signed in.
+   */
+  const signOut = useCallback(() => {
+    void fetch(`${apiBase}/logout`, { method: 'POST' }).then(() => window.location.reload())
+  }, [apiBase])
 
   /**
    * `/folio/stories` already returns every story's id, path and URL, so links
@@ -166,7 +183,23 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, apiBas
   }, [notify, state.notice])
 
   const viewing = versions.viewing
-  const readOnly = versions.source.mode === 'viewing'
+  // Two independent reasons to be read-only, deliberately folded into one flag:
+  // looking at a past version, and holding a role that may not edit. The
+  // inspector already knew how to be read-only for the first, so the second is
+  // free (`identity-and-access.md` phase 4, step 4).
+  const mayEdit = canEdit(me)
+  const mayManage = canManageContent(me)
+  const readOnly = versions.source.mode === 'viewing' || !mayEdit
+
+  /**
+   * Stands in for every create / delete / move affordance a non-publisher may
+   * still click, and says why. The server refuses these too (403); this is so an
+   * editor is told *before* the request rather than by it, exactly as
+   * `StoryTree`'s existing `onNotice` does for a refused drag.
+   */
+  const refuseManage = useCallback(() => {
+    notify(whyNot(me, 'manage') ?? 'Your role may not do that')
+  }, [me, notify])
   // While previewing, the tree and the inspector both show the version's document.
   const shownDoc = viewing?.doc ?? state.doc
   const selected = state.selection && shownDoc ? (shownDoc.bloks[state.selection] ?? null) : null
@@ -213,6 +246,8 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, apiBas
           onCompare={() => {
             if (published.version) void versions.view(published.version)
           }}
+          me={me}
+          onSignOut={signOut}
         />
 
         {confirmingUnpublishFor === storyId && current ? (
@@ -319,6 +354,17 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, apiBas
               >
                 Redirects
               </button>
+              {/* Admins only, and the routes behind it 404 under `auth: 'open'`
+                  and 403 for everyone else regardless. */}
+              {showAccess ? (
+                <button
+                  type="button"
+                  className={rail === 'access' ? 'is-active' : ''}
+                  onClick={() => setRail('access')}
+                >
+                  Access
+                </button>
+              ) : null}
             </div>
 
             {rail === 'content' ? (
@@ -326,10 +372,26 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, apiBas
                 tree={stories.tree}
                 currentId={storyId}
                 onOpen={(story) => stories.open(story.id)}
-                onCreate={stories.create}
-                onMove={(id, parentId, index) => stories.patch(id, { parentId, index })}
-                onDelete={(story) => setConfirmingDeleteFor(story)}
-                onDuplicate={(story) => setConfirmingDuplicateFor(story)}
+                // Creating, deleting and moving are publisher acts (the role
+                // table): all three change what URLs the site serves, which is a
+                // publishing act even when nothing is published in the same
+                // breath.
+                onCreate={
+                  mayManage
+                    ? stories.create
+                    : async () => {
+                        refuseManage()
+                      }
+                }
+                onMove={
+                  mayManage
+                    ? (id, parentId, index) => stories.patch(id, { parentId, index })
+                    : async () => {
+                        refuseManage()
+                      }
+                }
+                onDelete={mayManage ? (story) => setConfirmingDeleteFor(story) : refuseManage}
+                onDuplicate={mayManage ? (story) => setConfirmingDuplicateFor(story) : refuseManage}
                 onNotice={notify}
               />
             ) : rail === 'data' ? (
@@ -337,9 +399,15 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, apiBas
                 documents={stories.documents}
                 currentId={storyId}
                 onOpen={(story) => stories.open(story.id)}
-                onCreate={stories.create}
-                onDelete={(story) => setConfirmingDeleteFor(story)}
-                onDuplicate={(story) => setConfirmingDuplicateFor(story)}
+                onCreate={
+                  mayManage
+                    ? stories.create
+                    : async () => {
+                        refuseManage()
+                      }
+                }
+                onDelete={mayManage ? (story) => setConfirmingDeleteFor(story) : refuseManage}
+                onDuplicate={mayManage ? (story) => setConfirmingDuplicateFor(story) : refuseManage}
               />
             ) : rail === 'history' ? (
               state.doc ? (
@@ -357,6 +425,8 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, apiBas
               ) : (
                 <p className="rail__loading">Loading…</p>
               )
+            ) : rail === 'access' && showAccess ? (
+              <Access state={access} selfId={me.actor?.kind === 'user' ? me.actor.id : null} />
             ) : rail === 'redirects' ? (
               <Redirects
                 rows={redirects.rows}

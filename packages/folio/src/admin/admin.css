@@ -1693,3 +1693,143 @@ button.tree__menu-heading {
   max-width: 34rem;
   margin: 0;
 }
+
+/* ------------------------------------------------------------- access ---- */
+/* identity-and-access.md: the user menu in the top bar, and the Access rail. */
+
+.user-menu {
+  position: relative;
+}
+.user-menu__toggle {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-menu__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: transparent;
+  border: 0;
+}
+.user-menu__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 21;
+  min-width: 160px;
+  padding: 0.25rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(16 20 26 / 18%);
+}
+.user-menu__role {
+  display: block;
+  padding: 0.3rem 0.55rem;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.user-menu__list button {
+  display: block;
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  text-align: left;
+  background: none;
+  border: 0;
+}
+.user-menu__list button:hover:not(:disabled) {
+  background: var(--bg);
+}
+
+.access {
+  padding: 0.5rem 0.6rem 1rem;
+  overflow-y: auto;
+}
+.access h3 {
+  margin: 0.9rem 0 0.4rem;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.access__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.access__row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.access__who {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.access__who strong {
+  font-size: 13px;
+}
+.access__email,
+.access__meta {
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.access__form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
+.access__form input[type="email"],
+.access__form input[type="text"] {
+  flex: 1;
+  min-width: 8rem;
+}
+.access__form--token {
+  flex-direction: column;
+  align-items: stretch;
+}
+.access__scopes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.7rem;
+  font-size: 11px;
+  color: var(--muted);
+}
+.access__scopes label {
+  display: flex;
+  gap: 0.2rem;
+  align-items: center;
+}
+.access__minted {
+  padding: 0.5rem 0.6rem;
+  margin: 0.5rem 0;
+  background: #fffbe6;
+  border: 1px solid #f0dc8a;
+  border-radius: 6px;
+}
+.access__minted p {
+  margin: 0 0 0.35rem;
+  font-size: 12px;
+}
+.access__minted code {
+  display: block;
+  padding: 0.3rem;
+  margin-bottom: 0.4rem;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
