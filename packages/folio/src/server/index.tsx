@@ -31,6 +31,29 @@ export type {
 } from './hooks'
 export { FolioError } from './errors'
 export type { ErrorEnvelope, FolioErrorCode } from './errors'
+export {
+  ADMIN,
+  ASSETS,
+  atLeast,
+  EDIT,
+  hasScope,
+  MANAGE,
+  PUBLISH,
+  READ,
+  READ_DRAFT,
+  ROLES,
+  SCOPES,
+} from './auth/roles'
+export type { Access, Actor, Role, Scope, TokenActor, UserActor } from './auth/roles'
+export type {
+  AuthConfig,
+  AuthProvider,
+  MagicLinkMail,
+  Provisioning,
+  VerifiedIdentity,
+} from './auth/config'
+export type { UserRow } from './auth/users'
+export type { TokenRow } from './auth/tokens'
 export { FolioDoc } from '../preview/Render'
 export { Shell, serializeJson } from './Document'
 export type { StoryMeta, StoryNode } from '../core/story'

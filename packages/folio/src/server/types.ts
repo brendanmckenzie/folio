@@ -12,6 +12,8 @@ import type { Doc } from '../core/doc'
 import type { Resolution } from '../core/resolve'
 import type { DocumentType } from '../core/schema'
 import type { StoryMeta, StoryNode } from '../core/story'
+import type { AuthConfig, OpenAuth } from './auth/config'
+import type { Actor } from './auth/roles'
 import type { FolioHooks } from './hooks'
 import type { StoryDO } from './story-do'
 
@@ -69,6 +71,20 @@ export interface FolioConfig<Env> {
    */
   types?: readonly DocumentType[]
   bindings: (env: Env) => FolioBindings
+  /**
+   * Who may edit (`../../../docs/specs/foundation/identity-and-access.md`).
+   *
+   * **Required, with no default.** Either name the sign-in providers, or write
+   * `auth: 'open'` to say deliberately that anyone who reaches the editor may
+   * edit and publish. `createFolio` throws at construction otherwise
+   * (checkpoint 2): Folio is a library, and a host that simply forgot this key
+   * used to get a publicly editable CMS silently, whose failure mode is a
+   * defaced site.
+   *
+   * Site-visitor auth — who may *read* a published page — is deliberately not
+   * this key. See the spec's "Out of scope".
+   */
+  auth: AuthConfig<Env> | OpenAuth
   /** Where these routes are mounted. Default `/folio`. */
   basePath?: string
   /**
@@ -202,6 +218,21 @@ export interface Folio<Env> {
 export interface FolioVars {
   bindings: () => FolioBindings
   story: StoryMeta
+  /**
+   * Who is making this request, resolved by `withActor` (middleware.ts) from the
+   * session cookie, then a bearer token, then nothing.
+   *
+   * A value, not a thunk — the opposite of `bindings`, and deliberately so.
+   * `bindings` is memoised behind a call because *invoking* the host's accessor
+   * is observable and some routes must not; resolving the actor is this
+   * middleware's whole job, and a route that is gated on a role has already had
+   * it resolved before its handler runs.
+   *
+   * Null means "nobody", which is either an unauthenticated request (the route
+   * gate has already refused it, so a handler never sees this) or `auth: 'open'`,
+   * where there are no users at all and every gate passes.
+   */
+  actor: Actor | null
 }
 
 /**

@@ -50,6 +50,10 @@ const folio = createFolio<Env>({
     { name: 'header', label: 'Header', kind: 'singleton', root: 'headerRoot', previewPath: '' },
   ],
   bindings: (env) => ({ db: env.DB, story: env.STORY, media: env.MEDIA, images: env.IMAGES }),
+  // identity-and-access.md checkpoint 2: `auth` has no default, so this key is
+  // required and a host that forgets it fails at construction rather than
+  // serving a publicly editable CMS. Flipped to a real provider below.
+  auth: 'open',
   basePath: '/folio',
   // '' is the root story, which serves '/'.
   route: (path) => (path ? `/${path}` : '/'),

@@ -69,6 +69,11 @@ const folio = createFolio<Cloudflare.Env>({
   root: 'page',
   bindings: (env) => ({ db: env.DB, story: env.STORY, media: env.MEDIA, images: env.IMAGES }),
   basePath: '/folio',
+  // identity-and-access.md checkpoint 2: `auth` is required, so a test host
+  // declares it too. 'open' keeps this fixture's own scenarios about routing
+  // and content rather than about credentials; the auth suites build their own
+  // `createFolio` with providers configured.
+  auth: 'open',
   // '' is the root story, which serves '/', matching examples/demo.
   route: (path) => (path ? `/${path}` : '/'),
 })

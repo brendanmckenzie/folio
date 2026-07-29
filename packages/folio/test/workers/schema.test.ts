@@ -42,6 +42,7 @@ describe('GET /folio/schema: showIf and hidden survive the trip', () => {
       root: 'hero',
       bindings,
       basePath: '/folio',
+      auth: 'open',
     })
 
     const res = await folio.handle(
@@ -107,6 +108,7 @@ describe('a starting document is the root block’s own default preset', () => {
       root: 'insightRoot',
       bindings,
       basePath: '/folio',
+      auth: 'open',
     })
 
     const doc = await folio.draft(env, 'sty_insight_defaults_presets')
@@ -128,6 +130,7 @@ describe('a starting document is the root block’s own default preset', () => {
       root: 'button',
       bindings,
       basePath: '/folio',
+      auth: 'open',
     })
 
     const doc = await folio.draft(env, 'sty_bare_root')
@@ -144,6 +147,7 @@ describe('GET /folio/schema: field defaults and block presets survive the trip',
       root: 'insightRoot',
       bindings,
       basePath: '/folio',
+      auth: 'open',
     })
 
     const res = await folio.handle(

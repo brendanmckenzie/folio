@@ -24,6 +24,7 @@ import {
   validateTypes,
 } from '../core/schema'
 import type { StoryMeta, StoryNode } from '../core/story'
+import { type ResolvedAuth, resolveAuth } from './auth/config'
 import { createHookRunner, type FolioHooks, type HookRunnerCtx, validateHooks } from './hooks'
 import type { PublishDeps } from './publish'
 import { ensureSingleton, listStories, publishedDocsByIds, storyById } from './stories'
@@ -45,6 +46,17 @@ export interface FolioRuntime {
   types: readonly DocumentType[]
   /** `FolioConfig.globals`, validated. Every name is a declared `singleton`. */
   globals: readonly string[]
+  /**
+   * `FolioConfig.auth`, resolved and validated
+   * (`../../../docs/specs/foundation/identity-and-access.md`). `mode: 'open'` is
+   * the deliberately-open deployment; every route gate short-circuits on it.
+   *
+   * Typed at `unknown` rather than making `FolioRuntime` generic: the only thing
+   * a provider's `Env` parameter is ever handed is the same `c.env` the host's
+   * own `bindings` accessor gets, so widening it here costs nothing real and
+   * saves threading a type parameter through every route module.
+   */
+  auth: ResolvedAuth<unknown>
   /** A declared type by name, or undefined — a row whose type was removed from
    * the code still reads, it just has no schema to render ("Unknown type"). */
   typeOf: (name: string | undefined) => DocumentType | undefined
@@ -130,6 +142,11 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // singleton one is a config mistake, not a runtime surprise the first page
   // render discovers (`../../../docs/specs/content-model/globals.md`).
   validateGlobals(config.globals, types)
+  // Same timing, one rung more insistent: `auth` has no default at all, so an
+  // absent key throws here rather than quietly leaving the CMS open
+  // (`identity-and-access.md` checkpoint 2). The widening cast is explained on
+  // `FolioRuntime.auth`.
+  const auth = resolveAuth(config.auth) as ResolvedAuth<unknown>
   const globals = config.globals ?? []
   const typeOf = (name: string | undefined) => typeByName(types, name)
   const fallbackType = defaultType(types)
@@ -309,6 +326,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     manifest: toManifest(registry, types, globals),
     types,
     globals,
+    auth,
     typeOf,
     defaultType: fallbackType,
     titleFor,

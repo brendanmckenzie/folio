@@ -51,10 +51,14 @@ describe('workers harness: D1', () => {
     ).all<{ name: string }>()
 
     expect(results.map((r) => r.name)).toEqual([
+      'api_tokens',
       'assets',
       'd1_migrations',
+      'login_challenges',
       'redirects',
+      'sessions',
       'stories',
+      'users',
       'versions',
     ])
   })
