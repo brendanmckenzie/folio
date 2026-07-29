@@ -19,7 +19,7 @@ import {
   type StoryMeta,
   type StoryNode,
 } from '../core/story'
-import { clearIndexStatements } from './content-index'
+import { clearIndexStatements, countReferencesTo, referencesTo } from './content-index'
 import { clearRedirectAtStatement, redirectStatements } from './redirects'
 
 const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18n,
@@ -169,6 +169,76 @@ export async function listDocuments(db: D1Database, type?: string): Promise<Stor
     ? await db.prepare(`select ${COLS} from stories where type = ?`).bind(type).all<StoryRow>()
     : await db.prepare(`select ${COLS} from stories where path is null`).all<StoryRow>()
   return results.map(withState).sort((a, b) => compareSiblings(a.ord, a.id, b.ord, b.id))
+}
+
+/**
+ * One document that points at another, as the delete confirmation names it. The
+ * whole story row rather than a projection of it, so the route can put the
+ * host's own `route()` over it with `withUrls` — the URL shape is the host's, and
+ * this reader has no business knowing it.
+ */
+export interface UsageRef {
+  story: StoryMeta
+  kind: 'link' | 'reference'
+}
+
+export interface DocumentUsage {
+  published: UsageRef[]
+  /** Distinct published documents — what "Used on N published pages" counts. */
+  total: number
+  links: number
+  references: number
+}
+
+/**
+ * What points at this document, for the warning shown before it is deleted
+ * (`../content-model/data-documents.md` architecture decision 4).
+ *
+ * **Published references only, and the dialog says so.** `content_refs` is
+ * written inside the publish batch, so that is all the table holds. Covering
+ * drafts would mean an edge table maintained per keystroke or a scan of every
+ * Durable Object; neither is worth it for a confirmation dialog, and the failure
+ * it would prevent already degrades safely — `resolveReference` returns null and
+ * the block renders its empty state.
+ *
+ * `total` is **distinct documents**, because that is what "Used on 4 published
+ * pages" counts. `links` and `references` are the row counts, which differ: a
+ * page that both links to and references the same target contributes two rows
+ * and one document, and appears twice in `published` so the list can say which.
+ *
+ * A row whose source story has since been deleted is dropped rather than
+ * reported as an untitled usage: `content_refs` keeps `to_story` rows for a
+ * deleted document deliberately (see `clearIndexStatements`), and the mirror
+ * image — a `from_story` gone before its own rows were rewritten — is the same
+ * unpruned-row case seen from the other end.
+ */
+export async function documentUsage(db: D1Database, id: string): Promise<DocumentUsage> {
+  const [counts, rows] = await Promise.all([countReferencesTo(db, id), referencesTo(db, id)])
+  if (rows.length === 0) return { published: [], total: 0, links: 0, references: 0 }
+
+  const sources = await storiesFor(db, [...new Set(rows.map((r) => r.from))])
+  const byId = new Map(sources.map((s) => [s.id, s]))
+
+  const published: UsageRef[] = []
+  for (const row of rows) {
+    const story = byId.get(row.from)
+    if (story) published.push({ story, kind: row.kind === 'link' ? 'link' : 'reference' })
+  }
+  // Routed documents first, by path, then unrouted by title: an editor scanning
+  // "what breaks" wants the pages before the records.
+  published.sort(
+    (a, b) =>
+      (a.story.path === null ? 1 : 0) - (b.story.path === null ? 1 : 0) ||
+      (a.story.path ?? a.story.title).localeCompare(b.story.path ?? b.story.title) ||
+      a.kind.localeCompare(b.kind),
+  )
+
+  return {
+    published,
+    total: new Set(published.map((p) => p.story.id)).size,
+    links: counts.links,
+    references: counts.references,
+  }
 }
 
 /**

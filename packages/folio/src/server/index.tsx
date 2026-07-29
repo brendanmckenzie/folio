@@ -52,7 +52,16 @@ export type {
   ContentWhere,
   ResolvedCollection,
 } from '../core/query'
-export { countReferencesTo, referencesTo } from './content-index'
+export { countReferencesTo, indexedValuesFor, referencesTo } from './content-index'
+export type { IndexedValue, IndexedValues } from './content-index'
+/**
+ * Data documents (`../../../docs/specs/content-model/data-documents.md`): what
+ * points at a document, for the warning shown before deleting it. Exported for a
+ * host that wants the same answer outside the admin — a deploy check, a report —
+ * rather than only from `GET {base}/documents/:id/usage`.
+ */
+export { documentUsage } from './stories'
+export type { DocumentUsage, UsageRef } from './stories'
 export type {
   CheckpointedHookPayload,
   CreatedHookPayload,

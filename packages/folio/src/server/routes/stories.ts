@@ -9,7 +9,8 @@ import { isKnownLocale, translationStatus } from '../../core/locales'
 import type { DocumentType } from '../../core/schema'
 import type { StoryMeta } from '../../core/story'
 import { actorString } from '../auth/roles'
-import { MANAGE, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
+import { EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
+import { indexedValuesFor } from '../content-index'
 import { FolioError, rethrow } from '../errors'
 import type { HookRunnerCtx } from '../hooks'
 import { loadStory, requireAccess } from '../middleware'
@@ -18,6 +19,7 @@ import type { FolioRuntime } from '../runtime'
 import {
   createStory,
   deleteStoryStatement,
+  documentUsage,
   duplicateStory,
   ensureSingleton,
   listDocuments,
@@ -101,7 +103,59 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     for (const type of singletons) await ensureSingleton(bindings.db, type, rt.schemaId)
 
     const documents = await listDocuments(bindings.db, wanted?.name)
-    return c.json({ documents: documents.map(rt.withUrls) })
+    // The `indexed` field values the Data list view draws its columns from
+    // (`../../../docs/specs/content-model/data-documents.md` decision 2). One
+    // query for the whole list, additive on the response, and skipped entirely on
+    // a site that marks nothing `indexed` — so a caller written before this
+    // reads the identical payload it always did.
+    const indexed =
+      rt.indexedFields.size > 0
+        ? await indexedValuesFor(
+            bindings.db,
+            documents.map((d) => d.id),
+          )
+        : {}
+
+    return c.json({
+      documents: documents.map(rt.withUrls),
+      ...(Object.keys(indexed).length > 0 ? { indexed } : {}),
+    })
+  })
+
+  /**
+   * What points at this document, for the confirmation shown before deleting it
+   * (`data-documents.md` architecture decision 4).
+   *
+   * **Warns with a count and proceeds** — this route informs a dialog, it does
+   * not gate a delete. Blocking would mean maintaining referential integrity
+   * across draft documents nobody can see, and a broken reference already
+   * degrades safely: `resolveReference` returns null and the block renders its
+   * empty state.
+   *
+   * `EDIT` (editor+), per the spec's route table. It reports on published content
+   * an editor can already read, so nothing is leaked by the lower bar; the delete
+   * it precedes is `MANAGE`, so a plain editor never sees the dialog anyway.
+   */
+  app.get('/documents/:id/usage', requireAccess<Env>(rt, EDIT), async (c) => {
+    const id = idParam('id', c.req.param('id'))
+    const usage = await documentUsage(c.var.bindings().db, id)
+    return c.json({
+      published: usage.published.map(({ story, kind }) => {
+        const decorated = rt.withUrls(story)
+        return {
+          id: story.id,
+          title: story.title,
+          path: story.path,
+          // `''` rather than absent for an unrouted source, matching
+          // `StoryRef.url`: a record referencing a record has no URL to offer.
+          url: decorated.url ?? '',
+          kind,
+        }
+      }),
+      total: usage.total,
+      links: usage.links,
+      references: usage.references,
+    })
   })
 
   app.post('/stories', requireAccess<Env>(rt, MANAGE), async (c) => {

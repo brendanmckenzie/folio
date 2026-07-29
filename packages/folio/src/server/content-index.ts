@@ -140,6 +140,64 @@ export async function countReferencesTo(
   return { total: links + references, links, references }
 }
 
+/**
+ * One indexed field's value for one document, as a table cell wants it.
+ *
+ * Two halves because `content_index` has two columns for a reason: `text` is
+ * filled for every scalar and is what a cell *shows*; `num` is filled only where
+ * a number is genuinely meant (a `number` field, a boolean's 0/1, an ISO date's
+ * epoch milliseconds) and is what a numeric sort uses. Sorting a publish-date
+ * column lexicographically on `text` would be right by accident for ISO dates and
+ * wrong for everything else.
+ */
+export interface IndexedValue {
+  text: string
+  num: number | null
+}
+
+/** Indexed values keyed by story id, then by field name. */
+export type IndexedValues = Record<string, Record<string, IndexedValue>>
+
+/**
+ * The indexed values for a set of documents, for the admin's Data list view
+ * columns (`data-documents.md` architecture decision 2).
+ *
+ * One query for the whole list, which is the only reason a table of columns is
+ * affordable at all: reading each document's draft instead would be one Durable
+ * Object per row, exactly what `localisation.md` refused for its per-row badge.
+ *
+ * Two honest limits, both visible in the UI rather than hidden:
+ *
+ *  - **Published values.** `content_index` is written inside the publish batch, so
+ *    a document with nothing published has no rows and its cells are blank. The
+ *    same row carries a draft-state badge, so a blank cell beside "Draft" reads
+ *    as "not published yet" rather than as "empty".
+ *  - **The source locale only** (`locale = ''`). The list is a management view;
+ *    a column per locale would be a second dimension nobody asked for, and the
+ *    document itself is where a translation is read.
+ */
+export async function indexedValuesFor(
+  db: D1Database,
+  ids: readonly string[],
+): Promise<IndexedValues> {
+  if (ids.length === 0) return {}
+  const placeholders = ids.map(() => '?').join(', ')
+  const { results } = await db
+    .prepare(
+      `select story_id as storyId, field, text_value as text, num_value as num
+       from content_index where locale = '' and story_id in (${placeholders})`,
+    )
+    .bind(...ids)
+    .all<{ storyId: string; field: string; text: string | null; num: number | null }>()
+
+  const out: IndexedValues = {}
+  for (const row of results) {
+    out[row.storyId] ??= {}
+    out[row.storyId]![row.field] = { text: row.text ?? '', num: row.num ?? null }
+  }
+  return out
+}
+
 /** The distinct documents pointing at `id`, for a warning that names them. */
 export async function referencesTo(
   db: D1Database,
