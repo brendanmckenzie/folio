@@ -796,6 +796,152 @@ In the admin, referenced documents are fetched when the *set* of referenced ids
 changes — never per render, because the preview re-renders on every keystroke with
 no network in the loop. Selecting a story that is already loaded costs nothing.
 
+## Collections
+
+An insights index, a news list, a team grid, a paginated archive and a sitemap are
+all the same missing primitive: **list the documents matching a query**. Folio has
+one, and it starts by declaring which fields are worth querying.
+
+```tsx
+export const insightPage = defineBlock({
+  name: 'insightPage',
+  fields: {
+    title:     text({ required: true, translatable: true, indexed: true }),
+    topic:     select({ options: TOPICS, indexed: true }),
+    published: text({ label: 'Publish date', indexed: true }),   // ISO 8601
+    body:      blocks({ allow: [...] }),
+  },
+  render: …,
+})
+```
+
+`indexed: true` projects the field into `content_index` **inside the batch that
+publishes the document**, so a query can never return something that is not live,
+and a failed publish leaves neither. Only the five scalar kinds accept it —
+`richtext({ indexed: true })` does not compile, because the table exists to filter
+and sort, not to render. Only a **root** block is projected: the index is a fixed
+projection of a document, so which rows it holds must not depend on which blocks
+happen to be inside one. `GET /folio/audit` reports an `indexed` flag that can
+never take effect, either way round.
+
+One row per field **per locale**, holding the value that locale renders — the
+translation where there is one, the fallback where there is not. So a French index
+page filtering a French topic matches, and so does the English page filtering the
+English one, on the same story.
+
+### The `collection` field
+
+```tsx
+fields: {
+  list: collection({
+    type: 'insight',
+    filterable: ['topic'],                        // what the editor may narrow by
+    maxPerPage: 12,
+    defaultOrder: { field: 'published', dir: 'desc' },
+  }),
+}
+
+render: ({ list }) => (
+  <ul>{list.items.map((i) => <li key={i.id}><a href={i.url}>{i.title}</a></li>)}</ul>
+)
+```
+
+The whole list is one field. The field declares the shape of the query; the stored
+value is only the editor's choices within it, and both are enforced on the way in
+*and* on the way out — the same double enforcement `richtext`'s `marks` has,
+because a value can also arrive from an importer or over the API.
+
+Items are `ReferenceTarget`s, the shape `reference` already resolves to, so a block
+author who can render a reference can render a collection item with no new
+knowledge. An empty result is an empty page, never null, so `list.items.map(…)`
+needs no guard.
+
+`list.total`, `list.page` and `list.pages` are there because a design will ask for
+"page 4 of 9". Pagination is the **host's**: read `?page=` and pass it in, and it
+offsets every collection in the document.
+
+```tsx
+const page = Number(url.searchParams.get('page') ?? '1')
+const resolution = await folio.resolve(env, doc, { locale, page })
+```
+
+A page with no collection field runs no query at all. Two blocks with the same
+configuration cost one query between them: the queries a document contains are
+collected, deduplicated by a canonical key, run once each, and their answers pushed
+onto the `Resolution` — the same treatment `reference` gets, one level up. So the
+preview still re-renders per keystroke against data it already holds.
+
+**A preview lists published content, and says so.** Querying drafts would mean
+opening every candidate Durable Object on every keystroke, so the list is marked
+`stale` in the editor and a block can say "shows published items". The one
+exception is the document being previewed: if it is a member of its own list, its
+draft values are patched in, because that draft is already in hand.
+
+### Querying from your own code
+
+```ts
+const { items, total, pages } = await folio.query(env, {
+  type: 'insight',
+  where: [{ field: 'topic', op: 'eq', value: 'policy' }],
+  order: { field: 'published', dir: 'desc' },
+  perPage: 6,
+  page: 2,
+})
+```
+
+Two D1 statements: a `count(*)` and the page with its documents. `GET
+/folio/content?type=insight&where=topic:eq:policy&order=published:desc&perPage=6`
+is the same thing over HTTP.
+
+Operators: `eq`, `ne`, `in`, `contains`, `startsWith`, and `gt`/`gte`/`lt`/`lte`. A
+numeric bound compares the numeric column; a string bound compares the text one,
+and an ISO date is stored in both, so either spelling of "since March" works. `ne`
+is a `NOT EXISTS`, so "topic is not ai" is true of a document with no topic —
+which is what it means in English. `contains` is a scan and is refused unless
+something else can narrow first; full-text search is FTS5's job and its own spec.
+
+**A `where` or `order` on a field nobody marked `indexed` is a 400 naming the
+field**, and listing the ones that work. Never a silent empty result: that is the
+failure mode that costs an afternoon.
+
+Every value is bound. The only names a caller supplies — a type, a field, a locale
+— are *values* in this schema rather than column names, so there is no string a
+client can send that reaches SQL as SQL.
+
+### Rebuilding the index
+
+Publish writes these rows, so the only case left is a schema change that marks an
+*existing* field `indexed`, where nothing republishes:
+
+```
+POST /folio/reindex     # or folio.reindex(env, { batch: 50 })
+```
+
+Batched and resumable — re-call with the previous answer's `continueFrom` until it
+is null — and idempotent, so racing a publish is harmless.
+
+### What resolution loads
+
+`folio.resolve(env, doc)` used to load **every story in the site**, on every page
+render. It now loads the ids the document needs: the targets of its `multilink`
+fields *and of the link marks inside its richtext* (a story link in prose stores an
+id and has no href — the href is derived here), the targets of its `reference`
+fields, the same two sets again for each document it pulls in, and the ancestors of
+`opts.story` when you pass one.
+
+For the full map — a navigation built from the whole tree — ask for it:
+
+```ts
+await folio.resolve(env, doc, { stories: 'all' })
+```
+
+A sitemap should use `folio.stories(env, { page, perPage })` or `folio.query`
+instead.
+
+`content_refs` is written in the same publish batch and records the outbound edges
+of every published document, which is what "used by N documents" will read before
+letting you delete something.
+
 ## Layout
 
 ```
@@ -1288,6 +1434,22 @@ back as a `reject`, a read-only token refused a write and refused a socket
 entirely, a cross-origin mutation refused, and — after signing out — the editor and
 the socket both refused while the published page carries on serving to anyone.
 
+`scripts/collections-test.mjs` (45 checks) covers collections against the demo's
+`insight` type and its `insightList` block: twenty-five insights, one left
+unpublished, filtered and sorted and paged over HTTP; `total` counting every match
+rather than the page; a filter on an unindexed field answering 400 with the field
+named; a French query matching a translated title while an untranslated field falls
+back; an index page rendering the right six in the right order with no `<script>`;
+`?page=2` continuing where page one stopped; a preview saying it lists published
+items while the document being previewed shows its own draft title in a list it
+belongs to; delete and unpublish each dropping the rows and the total; the host's
+own `/archive` route querying with no block involved; and `POST /folio/reindex`
+sweeping every document and then changing nothing. One is a regression guard rather
+than a feature test: **a story id reachable only from a richtext link mark still
+resolves to a real `href`**, because a link mark stores an id and no href, so a
+resolution narrowed to link *fields* would render every internal prose link as
+plain text with nothing failing.
+
 Every script runs against a live dev server on port 5199 (and the engine tests
 against the production build via `vite preview`). They sign in first, through
 `scripts/lib/auth.mjs`: the demo's `send` logs the link and stashes it at a
@@ -1326,6 +1488,17 @@ Within auth: site-visitor access control (who may *read* a published page — se
 mapping, passwords/passkeys/TOTP, and a separate `auth_events` audit log. Sign-in
 link rate limiting is per address only; the IP dimension wants a Cloudflare
 rate-limiting rule at the zone.
+
+Within collections: **full-text search** (D1 has FTS5; it is a separate index, a
+separate write path and a separate ranking question, so it is its own spec), a
+`collection` on a nested block's field (only a root block is projected, so the index
+stays a fixed projection of a document), **faceted counts** ("Policy (12), AI (8)" —
+one `group by` over the same predicate, genuinely easy and deliberately unbuilt
+until a design asks), per-field pagination on a page with two independently paged
+lists (`?page` is one number), **draft-status queries** (the index is published-only
+by construction, and the admin lists documents from `stories` instead — a list of
+documents, not a query over content), and a per-type admin list view with columns
+from the indexed fields, which belongs with the rest of the Data section.
 
 Within content migrations: no `down`, and no automated migration of a document
 from one *document type* to another (it needs a root retype plus a `stories.type`

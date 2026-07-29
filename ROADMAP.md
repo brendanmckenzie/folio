@@ -167,6 +167,28 @@ write, permanently**. The bump was still necessary — a v2 client handed a
 locale-scoped delta would drop the locale and write into `data`, which is silent
 divergence, not a missing feature.
 
+**Collections, and story enumeration with them.** `folio.query(env, { type, where,
+order, page, perPage })`, `GET /folio/content`, and a `collection` field an editor
+narrows — filter, sort and offset-page over published documents. Filters and sorts
+read `content_index`, a scalar projection of each document's **root** block written
+*inside the publish batch*, one row per field per locale holding what that locale
+renders. So a query cannot describe something that is not live, a failed publish
+leaves neither, and a French index page filtering a French topic matches. An index
+table rather than an expression index over `json_extract`, because the root blok's
+uid is random (so the path is not a constant), it would need one index per field per
+locale, and it could never reach a nested block. `POST /folio/reindex` is the
+rebuild, for the one case publish cannot cover: a field newly marked `indexed`. A
+`where` on a field nobody indexed is a 400 naming it, never an empty page.
+
+It also fixed a scaling problem the *Uncovered* list did not name: **`resolve()`
+loaded every story in the site on every page render**, every tree render and every
+preview boot. It now loads the ids the document needs — its links (including the
+story ids inside richtext link marks, which carry no href), its references, the same
+sets for the documents it pulls in, and its own ancestors — with `stories: 'all'`
+as the explicit opt-in for a host that wants the full map. `content_refs` records
+the outbound edges in the same batch, which is what "used by N documents" and, later,
+a cache purge set will read. Spec: `docs/specs/content-model/collections.md`.
+
 ## Next
 
 ### 1. Scheduled publishing
@@ -213,9 +235,6 @@ staff account on first sign-in; mapping IdP groups onto Folio roles needs claims
 configuration per tenant and is a follow-up. So is an `auth_events` table: the
 activity trail and version rows already record who changed content, but sign-ins,
 role changes and token creation are not recorded anywhere.
-
-**Story enumeration.** `sitemap.ts` and `generateStaticParams` both page through
-every story. Folio needs a public list/query API, not just the tree.
 
 **SEO metadata.** Mostly done: `title`, `description`, `socialImage`, `noindex`
 are fields on the root block and the demo renders them into `<head>`. Still
@@ -266,6 +285,24 @@ an unsorted flat list, which stops working somewhere around 15.
 - Nothing warns when a document's *bytes* approach `MAX_DOC_BYTES`, which
   localisation makes reachable: eight languages of long richtext is eight times
   the payload at the same block count. The audit is the right place for it.
+- `content_index` is keyed on the field *name*, not on (type, field). So filtering
+  one document type on a field only another type declares matches nothing rather
+  than 400ing, and two blocks declaring the same indexed name are one queryable
+  field. Correct for every case examined and cheap to tighten if it bites.
+- A collection's `order` takes a single field. One was enough everywhere it was
+  looked at, and a second is additive — but it has to be threaded through the
+  canonical form, the query string and the SQL, so it is not free.
+- The admin's Data section still lists documents from `stories` with no filtering,
+  sorting or paging over content fields. That is the right *source* (the index is
+  published-only, and an editor's list must show drafts), but it wants the list view
+  `docs/specs/content-model/data-documents.md` describes.
+- Nothing prunes `content_refs` rows pointing *at* a deleted story. Another
+  document still names it, which is the fact "used by N" reads, and the row is
+  rewritten when that document is next published — but a site that never republishes
+  accumulates edges to ids that no longer exist.
+- The admin's `useReferencedDocs` still walks source-locale `reference` values only.
+  The server's resolution walks every locale, so a live page is right; the editor's
+  own copy would miss a target only a translation points at.
 
 ## Fixed 2026-07-29 (the hardening pass)
 

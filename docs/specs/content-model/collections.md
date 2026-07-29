@@ -3,7 +3,7 @@
 > **Group:** content model
 > **Build order:** 13
 > **Size:** L
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** `0010_content_index.sql`
 > **Last updated:** 2026-07-29
@@ -585,12 +585,157 @@ an insight and assert it leaves the list.
 
 ## Open questions
 
-- **How do the admin's list views see unpublished documents?** The index is
-  published-only by construction. Options: query `stories` directly for the admin
-  (no filtering on content fields, which is probably fine — the admin lists by type
-  and sorts by date), or maintain draft index rows on the publish-free path (a write
-  per debounced draft watermark, which
-  `../editing/unpublished-changes.md` already schedules). Leaning the first: the
-  admin's list is a list of documents, not a query over content.
-- Should `order` accept several fields? One is enough for every case examined; more
-  is additive.
+Both resolved, and built as resolved.
+
+- **The admin's list views query the `stories` table directly.** No draft index
+  rows are maintained, and none ever will be by this design: the index is
+  published-only by construction, and an editor's list is a list of *documents*,
+  not a query over content. `listDocuments(db, type?)` and `GET /folio/documents`
+  (from `../foundation/document-types.md`) are what the Data section reads, and
+  `GET /folio/documents` was deliberately **not** turned into a wrapper over
+  `query()` — doing so would have made every unpublished record invisible in the
+  editor, which is the opposite of what an admin list is for.
+- **`order` accepts a single field.** One was enough for every case examined, and a
+  second is additive: it has to be threaded through the canonical form, the query
+  string and the SQL, which is not free for a case nothing has asked for.
+
+## Implementation notes
+
+Landed in four commits. Tests: **1451 → 1566** (53 → 59 files), plus
+`scripts/collections-test.mjs` at 45 checks. All four gates green by exit code;
+every one of the nine e2e scripts re-run from a fresh database.
+
+### What landed
+
+**Phase 1, the index.** `migrations/0010_content_index.sql` — two new tables,
+`stories` untouched. `core/index-projection.ts` (`indexRowsFor`, `projectValue`,
+`indexedFieldNames`, `isIndexed`), `core/refs.ts` (`linkedIds`, `outboundRefs`,
+`referencedIdsAllLocales`), `server/content-index.ts` (statement builders plus
+`countReferencesTo` / `referencesTo` for spec 14), `server/reindex.ts`. The index
+statements join publish's existing `db.batch`; unpublish and delete drop them in
+theirs. `Field` gained `indexed?: boolean` on the five scalar kinds only, so
+`richtext({ indexed: true })` does not compile.
+
+**Phase 2, the query engine.** `core/query.ts` holds the shapes, the canonical form
+and `queryKey`; `server/query.ts` turns one into SQL. `folio.query(env, q)`,
+`folio.reindex(env, opts)`, `GET /folio/content`, `POST /folio/reindex`.
+
+**Phase 3, the field.** `collection()`, `ValueOf<collection> = ResolvedCollection`,
+`collectionQueries` / `collectionQuery` / `resolveCollection`,
+`Resolution.collections` and `Resolution.page`. In the admin, `CollectionInput` and
+`useCollections`.
+
+**Phase 4, the narrowing.** `resolve()` loads a bounded id set (see below).
+`folio.stories(env, { page, perPage })`. `StoryTree` truncates a level past fifty
+siblings with "Show all N".
+
+**Phase 5, docs.** README gained a Collections section and the corrected claim about
+what resolution loads; `PARITY.md`'s *Query API* is done (full-text search
+explicitly still open); `ROADMAP.md` records it and drops *Story enumeration* from
+*Uncovered*.
+
+### Deliberate deviations, and why
+
+1. **`queryKey` is the canonical form, not a hash of it.** The spec asked for "a
+   stable hash of the normalised query, so the admin and the server agree on the key
+   without coordinating". The canonical string serves that purpose exactly, and a
+   hash would trade a key you can read in a payload for a collision that silently
+   serves one block another block's list. A page carries a handful of collections.
+2. **A query is two D1 statements, not three.** The spec costed it as count + page +
+   `publishedDocsByIds`. The page statement selects `published_doc` alongside the
+   story columns, which is identical bytes with one fewer hop — and the id list the
+   third statement would bind is the list the second just produced. The acceptance
+   criterion's "exactly two … plus one" is met as "exactly two".
+3. **`GET /folio/content` is gated at `READ`, not public.** The route table says
+   "public for published"; the same section says `../platform/content-api.md` owns
+   this route's auth and envelope. Published content is public by definition, so
+   opening it later costs nothing, whereas opening it now and having spec 15 decide
+   otherwise means removing a public surface. A published page is unaffected either
+   way: its collections resolve inside `resolve()`, with no HTTP in the loop.
+4. **`GET /folio/documents` did not become a wrapper over `query()`.** See the
+   resolved open question above — it would have hidden every draft from the admin.
+   It gained nothing; `folio.stories` is where pagination landed.
+5. **`ne` is a `NOT EXISTS`.** So "topic is not ai" is true of a document with no
+   topic, which is what it means in English. An `exists (… <> ?)` would have
+   silently excluded every one of them.
+6. **`collectionQueries` and `queryKey` live in `core/query.ts`, not
+   `core/fields.ts`.** `fields.ts` is a leaf that imports types only; a document
+   walk and a canonicaliser do not belong in it.
+7. **The locale is not part of `queryKey`.** It rides on the `Resolution` alongside
+   `page`, so one canonical form serves every language and `resolveCollection`
+   computes the same key whichever locale it is rendering. `runQuery` takes the
+   locale separately.
+8. **`resolve()` gained `opts.story` and `opts.stories`, and `Resolution.page`.**
+   The spec's sketch was `resolve(bindings, doc, { locale, page })`. Ancestors need
+   the rendered story's *path* (they are addressed by path, in the same query — a
+   recursive `parent_id` walk could not be), and the draft patch needs its id and
+   type. `stories: 'all'` is decision 6's "plus every routable story only when a
+   host asks for the full map", made explicit.
+9. **Phase 4 step 4 — a per-type admin list view with columns from the indexed
+   fields — was not built.** `data-documents.md` owns list views, and this spec's own
+   resolved open question routes the admin's lists at `stories` rather than at the
+   index, so it would have been built here and immediately rebuilt there. Recorded in
+   `ROADMAP.md` rather than half-done.
+
+### Where the spec was wrong about the codebase
+
+- **`resolve()`'s narrowing needs three passes, not one.** The spec's sketch is
+  `ids = linkedIds ∪ referencedIds ∪ ancestorsOf(story)` and one `where id in (…)`.
+  But a referenced document and a global both contain links of their own, and
+  `RenderBlok` empties `docs` one level down while `stories` **survives** — so a
+  link inside a global's navigation resolves against the narrowed map. The
+  implementation loads the direct ids, fetches the pulled-in documents, then loads
+  what *those* point at. Three D1 reads worst case, two typically, one when there
+  are no globals and no references — against two unconditionally before.
+- **`referencedIds` reads the source locale only.** It is public API and
+  `useReferencedDocs` keys off it, so it was left alone; `referencedIdsAllLocales`
+  in `core/refs.ts` is the widened form the resolution and `content_refs` use. A
+  translated `reference` target now resolves on a live page and still does not in the
+  admin's own copy — recorded in `ROADMAP.md`.
+- **The spec's `content_refs` note about "the targets of a collection field's stored
+  filter when it names one" has nothing to write.** A collection filters on indexed
+  *fields*; no stored filter names a story id. Left unimplemented rather than
+  invented.
+- **`unpublishStoryStatement`'s own doc comment already anticipated this spec** and
+  said it was written unrun so the query-index deletes could join its batch. They do.
+
+### The bug this spec could have reintroduced, and did not
+
+A Folio-native richtext link mark stores a structured `attrs.link`
+(`{ kind: 'story', id }`) and has **no `href`** — the href is derived from the
+resolution at render time, which is what lets an internal prose link survive a
+rename. Narrowing `resolve()` to `multilink` and `reference` *fields* would have
+rendered every one of them as unstyled text with no anchor, and the two unit tests
+guarding the sanitiser would still have passed, because they test the sanitiser.
+
+`core/refs.ts` walks richtext marks, across `data` **and** every `i18n` locale. Three
+tests pin it from three directions: a unit test that a story id reachable *only*
+from a link mark is in `linkedIds`; a workers test that such an id is in the
+resolution with a real URL and that nothing else is; and an e2e check that the
+published page contains `href="/collections-index"`.
+
+### Deferred, and named
+
+Full-text search (its own spec, **M**); faceted counts (one `group by`, unbuilt
+until a design asks); per-field pagination; draft-status queries; a `collection` on a
+nested block; the admin list view above. `content_refs` rows pointing at a deleted
+story are not pruned — another document still names it, which is the fact spec 14
+reads, and the row is rewritten when that document is next published.
+
+### What spec 14 needs
+
+```sql
+create table content_refs (
+  from_story text not null,
+  to_story   text not null,
+  kind       text not null,          -- 'link' | 'reference'
+  primary key (from_story, to_story, kind)
+);
+create index content_refs_to on content_refs (to_story);
+```
+
+`countReferencesTo(db, id)` → `{ total, links, references }` (one `group by kind`)
+and `referencesTo(db, id)` → the rows, both in `server/content-index.ts` and both
+exported from `folio/server`. Published references only, which is what the table
+holds — a draft pointing somewhere is not yet a usage. Self-edges are dropped, so a
+page linking to itself never warns about itself.

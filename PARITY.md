@@ -196,14 +196,29 @@ The site has at least five root types: `Page`, `Insights`, `Resources`,
   derivation, the tree and every link resolution) and **per-locale publishing**
   (one document, one snapshot, so a half-translated page goes live with
   fallbacks). `docs/specs/content-model/localisation.md`.
-- **Query API** — this is the sleeper. `sitemap.ts` pages through every story;
-  the insights index filters by topic and paginates. Storyblok gives
-  `getStories({ content_type, filter_query, per_page, page, sort_by })`. Folio has
-  a tree endpoint and nothing else. Needs a real list/filter/paginate API over
-  published docs, which means indexing selected fields out of the JSON into
-  queryable columns on publish. **L**
+- **Query API** — **done**. It was the sleeper and it was right to call it that: an
+  insights index, a news list, a team grid, a sitemap and a search page are all the
+  same primitive. `folio.query(env, { type, where, order, page, perPage })` and
+  `GET /folio/content` filter, sort and page over published documents;
+  `collection()` is a field, so an editor picks a topic and a count and the block
+  receives the results already resolved as the same `ReferenceTarget`s a `reference`
+  hands back. Storyblok's `filter_query` runs against a hosted index; this runs
+  against a `content_index` table written **inside the publish batch**, so a query
+  cannot return something that is not live, and a `where` on a field nobody marked
+  `indexed` is a 400 naming it rather than an empty page.
+
+  Two things worth carrying into the reference project's own conversion. The
+  `indexed` flag is on the **root** block only, so the index is a fixed projection
+  of a document — the reference project's insight fields are on its root schema, so
+  this costs nothing there. And it fixed a scaling problem this list did not name:
+  `folio.resolve()` loaded every story in the site on every render, which is
+  invisible at 40 pages and fatal at the reference project's insight count. Spec:
+  `docs/specs/content-model/collections.md`.
 - **Full-text search** — there is a `SearchComponent`. D1 supports FTS5, which is
-  what EmDash uses. Index on publish. **M**
+  what EmDash uses. Index on publish. Still open, and deliberately not folded into
+  the query API above: a separate index, a separate write path and a separate
+  ranking question. `content_index` is a scalar projection for filtering and
+  sorting, and stretching it into a search index would make it good at neither. **M**
 - **Datasources** — Storyblok key/value lists; their revalidate webhook handles
   `datasource_id`, so they are in use. **S**
 
