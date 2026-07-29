@@ -47,6 +47,24 @@ const ID = v.pipe(
 )
 
 /**
+ * A document type name, as a body field or a query param. Names are written by
+ * a developer in `createFolio`'s config, not by a person in the CMS, so this is
+ * the identifier charset rather than `PRINTABLE`: it bounds the bind before the
+ * route looks the name up in the config.
+ */
+const TYPE_NAME = v.pipe(
+  v.string('must be a string'),
+  v.trim(),
+  v.minLength(1, 'is required'),
+  v.maxLength(64, 'must be 64 characters or fewer'),
+  v.regex(/^[A-Za-z0-9_-]+$/, 'contains unsupported characters'),
+)
+
+export function typeNameQuery(raw: string | undefined): string {
+  return parseOrThrow(TYPE_NAME, raw, 'type')
+}
+
+/**
  * What a person can type into a CMS: everything except the characters that make
  * a stored string lie about itself.
  *
@@ -92,6 +110,15 @@ export const StoryCreateBody = v.object(
     title: required(300),
     slug: v.optional(bounded(200)),
     parentId: v.nullish(ID),
+    /**
+     * Document type name (`document-types.md`). Absent means the default page
+     * type, so a client written before types existed keeps working. Screened
+     * like an id rather than checked against the config here: whether the type
+     * is *declared* is the route's answer to give, and it answers
+     * `unsupported` — the request is well-formed, the server just has no such
+     * type.
+     */
+    type: v.optional(TYPE_NAME),
   },
   OBJECT,
 )
@@ -106,6 +133,15 @@ export const StoryPatchBody = v.object(
     title: v.optional(required(300)),
     slug: v.optional(bounded(200)),
     parentId: v.nullish(ID),
+    /**
+     * Accepted so a client that round-trips a whole story object is not
+     * punished for it, then refused by `updateStoryStatement` when it actually
+     * differs from the row: retyping a document is a schema migration
+     * (`schema-migrations.md`), not a patch. Declaring the key rather than
+     * letting valibot strip it silently is what makes that a refusal instead of
+     * a change that appears to succeed and does nothing.
+     */
+    type: v.optional(TYPE_NAME),
     index: v.optional(
       v.pipe(
         v.number('must be a number'),

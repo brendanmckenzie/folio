@@ -5,8 +5,9 @@
 import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { cloneDoc } from '../../core/clone'
+import type { DocumentType } from '../../core/schema'
 import type { StoryMeta } from '../../core/story'
-import { rethrow } from '../errors'
+import { FolioError, rethrow } from '../errors'
 import type { HookRunnerCtx } from '../hooks'
 import { loadStory } from '../middleware'
 import { publish, unpublish } from '../publish'
@@ -15,6 +16,8 @@ import {
   createStory,
   deleteStoryStatement,
   duplicateStory,
+  ensureSingleton,
+  listDocuments,
   storyTree,
   updateStoryStatement,
 } from '../stories'
@@ -27,6 +30,7 @@ import {
   StoryCreateBody,
   StoryDuplicateBody,
   StoryPatchBody,
+  typeNameQuery,
 } from '../validate'
 import { deleteVersionsStatement } from '../versions'
 
@@ -40,15 +44,66 @@ function hookCtx<Env>(c: Context<FolioEnv<Env>>): HookRunnerCtx {
 export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
 
+  /**
+   * A declared document type by name, or `unsupported` (501) — not `not_found`:
+   * the request is perfectly well-formed, the server simply has no such type
+   * declared (`document-types.md`). An absent name is the default page type, so
+   * a client written before types existed keeps working.
+   */
+  const requireType = (name: string | undefined): DocumentType => {
+    if (name === undefined) return rt.defaultType
+    const type = rt.typeOf(name)
+    if (!type) throw new FolioError('unsupported', `Unknown document type: ${name}`)
+    return type
+  }
+
+  // The page tree: `buildTree` drops unrouted rows, so this is page types only.
   app.get('/stories', async (c) => c.json(rt.decorate(await storyTree(c.var.bindings().db))))
+
+  /**
+   * The flat per-type listing records and singletons are addressed through,
+   * since they are deliberately not in the tree. Pagination and filtering arrive
+   * with `../../../docs/specs/content-model/collections.md`; this is the minimum
+   * the admin's Data section needs.
+   *
+   * Asking is what creates a singleton (architecture decision 7): an editor
+   * never does, so first *access* is the only moment left for it to happen. With
+   * no `?type`, every declared singleton is ensured and every unrouted document
+   * returned — one request for the whole Data section.
+   */
+  app.get('/documents', async (c) => {
+    const raw = c.req.query('type')
+    const bindings = c.var.bindings()
+    const wanted = raw === undefined ? undefined : requireType(typeNameQuery(raw))
+
+    const singletons = wanted
+      ? wanted.kind === 'singleton'
+        ? [wanted]
+        : []
+      : rt.types.filter((t) => t.kind === 'singleton')
+    for (const type of singletons) await ensureSingleton(bindings.db, type)
+
+    const documents = await listDocuments(bindings.db, wanted?.name)
+    return c.json({ documents: documents.map(rt.withUrls) })
+  })
 
   app.post('/stories', async (c) => {
     const body = await parseBody(c.req, StoryCreateBody)
     const bindings = c.var.bindings()
+    const type = requireType(body.type)
+    // A singleton is created by first access, never by a request that asks for
+    // one: there is exactly one, its id is derived, and `POST` has no way to
+    // express "the" rather than "a".
+    if (type.kind === 'singleton') {
+      throw new FolioError(
+        'conflict',
+        `'${type.name}' is a singleton and already exists; open it instead of creating one`,
+      )
+    }
 
     let story: StoryMeta
     try {
-      story = await createStory(bindings.db, body)
+      story = await createStory(bindings.db, { ...body, type }, rt.types)
     } catch (e) {
       // `Unknown parent` is the client's mistake; a path collision is a
       // conflict; a D1 failure is nobody's business but the log's.
@@ -69,7 +124,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     let next: StoryMeta
     let changes: { id: string; from: string; to: string }[]
     try {
-      const result = await updateStoryStatement(bindings.db, id, body)
+      const result = await updateStoryStatement(bindings.db, id, body, rt.types)
       next = result.next
       changes = result.changes
       if (result.statements.length) await bindings.db.batch(result.statements)
@@ -98,9 +153,12 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * duplicating a page means "give me what I am looking at" (decision 4's
    * sibling on version history — the copy starts with none of its own).
    *
-   * No singleton refusal yet: that lands with
-   * `../foundation/document-types.md`, which is what makes "singleton"
-   * mean anything at all.
+   * A singleton is refused, inside `duplicateStory` rather than here so a direct
+   * caller cannot route around it: there is exactly one of a singleton by
+   * definition, so a second copy is not a document its own schema can describe.
+   * This is the debt `duplicate-and-paste.md` deferred to
+   * `../foundation/document-types.md`, which is what makes "singleton" mean
+   * anything at all.
    */
   app.post('/stories/:id/duplicate', loadStory<Env>(), async (c) => {
     const bindings = c.var.bindings()
@@ -109,7 +167,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     let created: Awaited<ReturnType<typeof duplicateStory>>
     try {
-      created = await duplicateStory(bindings.db, source.id, body)
+      created = await duplicateStory(bindings.db, source.id, body, rt.types)
     } catch (e) {
       rethrow(e)
     }
@@ -135,7 +193,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     let found: Awaited<ReturnType<typeof deleteStoryStatement>>
     try {
-      found = await deleteStoryStatement(bindings.db, target, { redirect })
+      found = await deleteStoryStatement(bindings.db, target, { redirect }, rt.types)
       if (!found) return c.json({ deleted: [] })
 
       // One batch for the story rows, their version history and (optionally)

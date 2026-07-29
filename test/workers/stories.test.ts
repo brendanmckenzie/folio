@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Doc } from '../../src/core/doc'
+import type { DocumentType } from '../../src/core/schema'
 import { envelope, FolioError, rethrow } from '../../src/server/errors'
 import type { PublishDeps } from '../../src/server/publish'
 import { unpublish } from '../../src/server/publish'
@@ -10,16 +11,44 @@ import {
   deleteStory,
   deleteStoryStatement,
   duplicateStory,
+  ensureSingleton,
+  listDocuments,
   listStories,
+  publishedDoc,
   publishedDocsByIds,
   publishStoryStatement,
   storyById,
   storyByPath,
   storyStatus,
+  storyTree,
   unpublishStoryStatement,
   updateStory,
+  updateStoryStatement,
 } from '../../src/server/stories'
 import { applySeedFixture } from './seed-fixture'
+
+/**
+ * The document types this file's fixture rows belong to (document-types.md).
+ * `PAGE` is exactly what `root: 'page'` expands to, and exactly what 0006
+ * defaults every pre-existing row's `type` column to, so the seeded three rows
+ * and a `createStory` here agree.
+ */
+const PAGE: DocumentType = { name: 'page', label: 'Page', kind: 'page', root: 'page' }
+const INSIGHT: DocumentType = {
+  name: 'insight',
+  label: 'Insight',
+  kind: 'page',
+  root: 'page',
+  under: ['page'],
+}
+const PERSON: DocumentType = { name: 'person', label: 'Person', kind: 'record', root: 'page' }
+const SETTINGS: DocumentType = {
+  name: 'settings',
+  label: 'Settings',
+  kind: 'singleton',
+  root: 'page',
+}
+const TYPES = [PAGE, INSIGHT, PERSON, SETTINGS]
 
 /**
  * Migrations (packages/folio/migrations/**) are structure only, so this file
@@ -83,7 +112,7 @@ function pageDoc(title: string): Doc {
 
 describe('createStory', () => {
   it('derives the slug and path from the title, at the root', async () => {
-    const story = await createStory(env.DB, { title: 'Contact Us' })
+    const story = await createStory(env.DB, { title: 'Contact Us', type: PAGE })
 
     expect(story.slug).toBe('contact-us')
     expect(story.path).toBe('contact-us')
@@ -91,7 +120,7 @@ describe('createStory', () => {
   })
 
   it('derives the slug and path from the title, under a parent', async () => {
-    const story = await createStory(env.DB, { title: 'Contact', parentId: 'sty_about' })
+    const story = await createStory(env.DB, { title: 'Contact', parentId: 'sty_about', type: PAGE })
 
     expect(story.parentId).toBe('sty_about')
     expect(story.slug).toBe('contact')
@@ -99,20 +128,24 @@ describe('createStory', () => {
   })
 
   it('prefers an explicit slug over one derived from the title', async () => {
-    const story = await createStory(env.DB, { title: 'Some Title', slug: 'custom-slug' })
+    const story = await createStory(env.DB, {
+      title: 'Some Title',
+      slug: 'custom-slug',
+      type: PAGE,
+    })
 
     expect(story.slug).toBe('custom-slug')
     expect(story.path).toBe('custom-slug')
   })
 
   it('falls back to "Untitled" when the title is blank', async () => {
-    const story = await createStory(env.DB, { title: '   ' })
+    const story = await createStory(env.DB, { title: '   ', type: PAGE })
 
     expect(story.title).toBe('Untitled')
   })
 
   it('assigns an ord that sorts after existing siblings at the same level', async () => {
-    const created = await createStory(env.DB, { title: 'Contact' })
+    const created = await createStory(env.DB, { title: 'Contact', type: PAGE })
 
     const rows = await listStories(env.DB)
     const topLevel = rows
@@ -123,14 +156,14 @@ describe('createStory', () => {
   })
 
   it('suffixes the slug on collision with a sibling at the same level', async () => {
-    const dup = await createStory(env.DB, { title: 'About' })
+    const dup = await createStory(env.DB, { title: 'About', type: PAGE })
 
     expect(dup.slug).toBe('about-2')
     expect(dup.path).toBe('about-2')
   })
 
   it('does not treat a same-named story under a different parent as a collision', async () => {
-    const story = await createStory(env.DB, { title: 'Team', parentId: null })
+    const story = await createStory(env.DB, { title: 'Team', parentId: null, type: PAGE })
 
     // sty_team already exists with slug 'team', but under sty_about.
     expect(story.slug).toBe('team')
@@ -138,9 +171,9 @@ describe('createStory', () => {
   })
 
   it('rejects creating a story under an unknown parent', async () => {
-    await expect(createStory(env.DB, { title: 'Orphan', parentId: 'sty_nope' })).rejects.toThrow(
-      'Unknown parent',
-    )
+    await expect(
+      createStory(env.DB, { title: 'Orphan', parentId: 'sty_nope', type: PAGE }),
+    ).rejects.toThrow('Unknown parent')
   })
 })
 
@@ -151,17 +184,17 @@ describe('createStory', () => {
 // deriving one from the title instead.
 describe('duplicateStory', () => {
   it('defaults the title to "{source title} (copy)"', async () => {
-    const dup = await duplicateStory(env.DB, 'sty_about', {})
+    const dup = await duplicateStory(env.DB, 'sty_about', {}, TYPES)
     expect(dup.title).toBe('About (copy)')
   })
 
   it('prefers an explicit title over the default', async () => {
-    const dup = await duplicateStory(env.DB, 'sty_about', { title: 'A whole new page' })
+    const dup = await duplicateStory(env.DB, 'sty_about', { title: 'A whole new page' }, TYPES)
     expect(dup.title).toBe('A whole new page')
   })
 
   it('collides with the still-live source slug and lands on the next suffix', async () => {
-    const dup = await duplicateStory(env.DB, 'sty_about', {})
+    const dup = await duplicateStory(env.DB, 'sty_about', {}, TYPES)
     expect(dup.slug).toBe('about-2')
     expect(dup.path).toBe('about-2')
     // The source is untouched: still at its own path, still there.
@@ -169,20 +202,20 @@ describe('duplicateStory', () => {
   })
 
   it('defaults to the source’s own parent, landing as a sibling', async () => {
-    const dup = await duplicateStory(env.DB, 'sty_team', {})
+    const dup = await duplicateStory(env.DB, 'sty_team', {}, TYPES)
     expect(dup.parentId).toBe('sty_about')
     expect(dup.path).toBe('about/team-2')
   })
 
   it('accepts an explicit parentId override', async () => {
-    const dest = await createStory(env.DB, { title: 'Elsewhere' })
-    const dup = await duplicateStory(env.DB, 'sty_about', { parentId: dest.id })
+    const dest = await createStory(env.DB, { title: 'Elsewhere', type: PAGE })
+    const dup = await duplicateStory(env.DB, 'sty_about', { parentId: dest.id }, TYPES)
     expect(dup.parentId).toBe(dest.id)
     expect(dup.path).toBe(`${dest.slug}/about`)
   })
 
   it('the root’s duplicate is an ordinary top-level page, slug derived from the title', async () => {
-    const dup = await duplicateStory(env.DB, 'sty_home', {})
+    const dup = await duplicateStory(env.DB, 'sty_home', {}, TYPES)
     expect(dup.parentId).toBeNull()
     expect(dup.slug).toBe('home-copy')
     expect(dup.path).toBe('home-copy')
@@ -191,13 +224,13 @@ describe('duplicateStory', () => {
   })
 
   it('the duplicate starts unpublished, with no version history of its own', async () => {
-    const dup = await duplicateStory(env.DB, 'sty_about', {})
+    const dup = await duplicateStory(env.DB, 'sty_about', {}, TYPES)
     expect(dup.publishedAt).toBeNull()
     expect(dup.state).toBe('draft')
   })
 
   it('rejects duplicating an unknown story', async () => {
-    await expect(duplicateStory(env.DB, 'sty_nope', {})).rejects.toThrow('Unknown story')
+    await expect(duplicateStory(env.DB, 'sty_nope', {}, TYPES)).rejects.toThrow('Unknown story')
   })
 })
 
@@ -214,7 +247,7 @@ describe('updateStory', () => {
   })
 
   it('reparents a story, recomputing its path under the new parent', async () => {
-    const dest = await createStory(env.DB, { title: 'Team Home' })
+    const dest = await createStory(env.DB, { title: 'Team Home', type: PAGE })
     const moved = await updateStory(env.DB, 'sty_team', { parentId: dest.id })
 
     expect(moved.parentId).toBe(dest.id)
@@ -260,7 +293,7 @@ describe('updateStory', () => {
   })
 
   it('suffixes the slug on collision when renaming into a taken slug', async () => {
-    const created = await createStory(env.DB, { title: 'Contact' })
+    const created = await createStory(env.DB, { title: 'Contact', type: PAGE })
     const updated = await updateStory(env.DB, created.id, { title: 'About' })
 
     expect(updated.slug).toBe('about-2')
@@ -287,7 +320,7 @@ describe('redirects (redirects.md): captured inside updateStory/createStory', ()
   })
 
   it('a move records one redirect per descendant, all pointing at the new path', async () => {
-    const dest = await createStory(env.DB, { title: 'What We Do' })
+    const dest = await createStory(env.DB, { title: 'What We Do', type: PAGE })
     await updateStory(env.DB, 'sty_about', { parentId: dest.id })
 
     expect((await redirectFor('about'))?.to).toBe(`${dest.slug}/about`)
@@ -315,7 +348,7 @@ describe('redirects (redirects.md): captured inside updateStory/createStory', ()
   })
 
   it('a collision-adjusted slug is recorded as the path actually written, not the one requested', async () => {
-    const created = await createStory(env.DB, { title: 'Contact' })
+    const created = await createStory(env.DB, { title: 'Contact', type: PAGE })
     expect(created.path).toBe('contact')
 
     // 'about' is already taken at the root, so this lands on 'about-2'.
@@ -329,7 +362,7 @@ describe('redirects (redirects.md): captured inside updateStory/createStory', ()
     await updateStory(env.DB, 'sty_about', { slug: 'about-us' })
     expect(await redirectFor('about')).not.toBeNull()
 
-    await createStory(env.DB, { title: 'About', slug: 'about', parentId: null })
+    await createStory(env.DB, { title: 'About', slug: 'about', parentId: null, type: PAGE })
 
     expect(await redirectFor('about')).toBeNull()
   })
@@ -397,11 +430,14 @@ describe('publishStoryStatement', () => {
         },
       },
     }
+    // The 4th argument is the *resolved* display title now, not a fallback:
+    // which root field holds it depends on the document type, so `titleOf`
+    // (document-types.md) settles it before this statement is built.
     const { statement, publishedAt, title } = publishStoryStatement(
       env.DB,
       'sty_about',
       doc,
-      'About',
+      'Batched Publish',
       7,
     )
     expect(title).toBe('Batched Publish')
@@ -490,6 +526,13 @@ describe('unpublish (server/publish.ts)', () => {
         d.calls++
         throw new Error('unpublish must never read the draft')
       },
+      // Never reached either: an unpublish is not a document snapshot, so it
+      // has no title to resolve (document-types.md put `titleFor` on
+      // PublishDeps for publish and checkpoint).
+      titleFor: () => {
+        d.calls++
+        throw new Error('unpublish must never resolve a title')
+      },
     }
     return d
   }
@@ -547,7 +590,12 @@ describe('publishedDocsByIds and unpublish: references degrade, they do not brea
     expect(await publishedDocsByIds(env.DB, ['sty_about'])).toEqual({ sty_about: doc })
 
     await unpublish(
-      { db: env.DB, draft: async () => doc, draftWithSyncId: async () => ({ doc, syncId: 0 }) },
+      {
+        db: env.DB,
+        draft: async () => doc,
+        draftWithSyncId: async () => ({ doc, syncId: 0 }),
+        titleFor: (story) => story.title,
+      },
       'sty_about',
       'alice',
     )
@@ -696,6 +744,407 @@ describe('listStories', () => {
   })
 })
 
+/**
+ * document-types.md: one `stories` table for every kind of document, with the
+ * routed/unrouted split carried entirely by `path` being null (checkpoints 1
+ * and 2). Every refusal below is a `rethrow`-mapped plain Error, so the route
+ * boundary turns it into the right envelope without this file knowing.
+ */
+describe('document types: createStory per kind', () => {
+  it('creates a page in the tree, with a derived path', async () => {
+    const story = await createStory(env.DB, { title: 'Hello', parentId: 'sty_about', type: PAGE })
+
+    expect(story.type).toBe('page')
+    expect(story.parentId).toBe('sty_about')
+    expect(story.path).toBe('about/hello')
+  })
+
+  it('creates a record outside the tree: parent_id and path both null', async () => {
+    const person = await createStory(env.DB, { title: 'Ada Lovelace', type: PERSON }, TYPES)
+
+    expect(person.type).toBe('person')
+    expect(person.parentId).toBeNull()
+    expect(person.path).toBeNull()
+    expect(person.slug).toBe('ada-lovelace')
+
+    // The row really is unrouted in D1, not just in the returned object.
+    const raw = await env.DB.prepare('select type, parent_id, path from stories where id = ?')
+      .bind(person.id)
+      .first<{ type: string; parent_id: string | null; path: string | null }>()
+    expect(raw).toEqual({ type: 'person', parent_id: null, path: null })
+  })
+
+  it('refuses a parent for an unrouted document', async () => {
+    await expect(
+      createStory(env.DB, { title: 'Ada', parentId: 'sty_about', type: PERSON }, TYPES),
+    ).rejects.toThrow('An unrouted document cannot have a parent')
+  })
+
+  it('refuses a page under an unrouted document: there is no path to derive from', async () => {
+    const person = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    await expect(
+      createStory(env.DB, { title: 'Nested', parentId: person.id, type: PAGE }, TYPES),
+    ).rejects.toThrow('Cannot create a page under an unrouted document')
+  })
+
+  it('a record called "Contact" leaves /contact free for the page that wants it', async () => {
+    await createStory(env.DB, { title: 'Contact', type: PERSON }, TYPES)
+    const page = await createStory(env.DB, { title: 'Contact', type: PAGE }, TYPES)
+
+    // The whole point of checkpoint 2: no slug suffix, no path collision.
+    expect(page.slug).toBe('contact')
+    expect(page.path).toBe('contact')
+    expect((await storyByPath(env.DB, 'contact'))?.id).toBe(page.id)
+  })
+
+  it('scopes an unrouted slug to its type, bumping a collision within it', async () => {
+    const first = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    const second = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+
+    expect(first.slug).toBe('ada')
+    expect(second.slug).toBe('ada-2')
+  })
+
+  it('does not treat the same slug under a different type as a collision', async () => {
+    const office: DocumentType = { name: 'office', label: 'Office', kind: 'record', root: 'page' }
+    await createStory(env.DB, { title: 'Ada', type: PERSON }, [...TYPES, office])
+    const other = await createStory(env.DB, { title: 'Ada', type: office }, [...TYPES, office])
+
+    expect(other.slug).toBe('ada')
+  })
+
+  it('orders unrouted documents within their type, not alongside top-level pages', async () => {
+    const a = await createStory(env.DB, { title: 'A', type: PERSON }, TYPES)
+    const b = await createStory(env.DB, { title: 'B', type: PERSON }, TYPES)
+
+    // Both start a fresh sequence: the two seeded top-level pages already hold
+    // 'a0' and 'a1', so sharing their group would have pushed these past them.
+    expect(a.ord < b.ord).toBe(true)
+    const listed = await listDocuments(env.DB, 'person')
+    expect(listed.map((r) => r.id)).toEqual([a.id, b.id])
+  })
+
+  it('a second page type routes from the tree, exactly like the first', async () => {
+    const parent = await createStory(env.DB, { title: 'Insights', type: PAGE }, TYPES)
+    const insight = await createStory(
+      env.DB,
+      { title: 'Hello', parentId: parent.id, type: INSIGHT },
+      TYPES,
+    )
+
+    expect(insight.type).toBe('insight')
+    expect(insight.path).toBe('insights/hello')
+    expect((await storyByPath(env.DB, 'insights/hello'))?.id).toBe(insight.id)
+  })
+
+  describe('`under`', () => {
+    it('refuses creation under a type it does not name', async () => {
+      const office: DocumentType = {
+        name: 'office',
+        label: 'Office',
+        kind: 'page',
+        root: 'page',
+        under: ['insight'],
+      }
+      await expect(
+        createStory(env.DB, { title: 'Nope', parentId: 'sty_about', type: office }, [
+          ...TYPES,
+          office,
+        ]),
+      ).rejects.toThrow("A 'office' document is only allowed under: insight")
+    })
+
+    it('refuses creation at the top level, which has no type to match', async () => {
+      await expect(createStory(env.DB, { title: 'Loose', type: INSIGHT }, TYPES)).rejects.toThrow(
+        "A 'insight' document is only allowed under: page",
+      )
+    })
+
+    it('permits creation under a type it names', async () => {
+      const insight = await createStory(
+        env.DB,
+        { title: 'Fine', parentId: 'sty_about', type: INSIGHT },
+        TYPES,
+      )
+      expect(insight.path).toBe('about/fine')
+    })
+
+    it('is not enforced when the caller supplies no types to resolve a parent against', async () => {
+      // `types` defaults to empty for a caller with no `under` to check; the
+      // constraint then cannot be evaluated, and a page still refuses rather
+      // than being silently allowed.
+      await expect(createStory(env.DB, { title: 'Loose', type: INSIGHT })).rejects.toThrow(
+        "A 'insight' document is only allowed under: page",
+      )
+    })
+  })
+})
+
+describe('document types: listDocuments', () => {
+  it('returns only unrouted documents when no type is named', async () => {
+    const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    await createStory(env.DB, { title: 'A page', type: PAGE }, TYPES)
+
+    const all = await listDocuments(env.DB)
+    expect(all.map((r) => r.id)).toEqual([ada.id])
+  })
+
+  it('returns one type’s rows when a type is named', async () => {
+    const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    await createStory(env.DB, { title: 'Grace', type: PERSON }, TYPES)
+    await createStory(env.DB, { title: 'Something else', type: PAGE }, TYPES)
+
+    expect((await listDocuments(env.DB, 'person')).map((r) => r.title)).toEqual(['Ada', 'Grace'])
+    expect((await listDocuments(env.DB, 'page')).map((r) => r.id)).toContain('sty_home')
+    expect((await listDocuments(env.DB, 'person')).map((r) => r.id)).not.toContain('sty_home')
+    expect(ada.path).toBeNull()
+  })
+
+  it('answers an empty list for a type with no rows', async () => {
+    expect(await listDocuments(env.DB, 'person')).toEqual([])
+  })
+})
+
+describe('document types: ensureSingleton', () => {
+  it('creates the row on first access, with a derived id and no path', async () => {
+    const first = await ensureSingleton(env.DB, SETTINGS)
+
+    expect(first.id).toBe('sng_settings')
+    expect(first.type).toBe('settings')
+    expect(first.path).toBeNull()
+    expect(first.parentId).toBeNull()
+    expect(first.slug).toBe('settings')
+    expect(first.title).toBe('Settings')
+  })
+
+  it('returns the same row on every subsequent ask, never a second one', async () => {
+    const first = await ensureSingleton(env.DB, SETTINGS)
+    const second = await ensureSingleton(env.DB, SETTINGS)
+
+    expect(second.id).toBe(first.id)
+    const rows = await listDocuments(env.DB, 'settings')
+    expect(rows).toHaveLength(1)
+  })
+
+  it('keeps edits: a second ask does not reset the row', async () => {
+    await ensureSingleton(env.DB, SETTINGS)
+    await updateStory(env.DB, 'sng_settings', { title: 'Renamed by an editor' }, TYPES)
+
+    expect((await ensureSingleton(env.DB, SETTINGS)).title).toBe('Renamed by an editor')
+  })
+
+  it('survives two concurrent first accesses', async () => {
+    const [a, b] = await Promise.all([
+      ensureSingleton(env.DB, SETTINGS),
+      ensureSingleton(env.DB, SETTINGS),
+    ])
+
+    expect(a?.id).toBe('sng_settings')
+    expect(b?.id).toBe('sng_settings')
+    expect(await listDocuments(env.DB, 'settings')).toHaveLength(1)
+  })
+
+  it('refuses a type that is not a singleton', async () => {
+    await expect(ensureSingleton(env.DB, PERSON)).rejects.toThrow(
+      "Document type 'person' is not a singleton",
+    )
+  })
+
+  it('is refused deletion, and refuses being duplicated', async () => {
+    await ensureSingleton(env.DB, SETTINGS)
+
+    await expect(deleteStoryStatement(env.DB, 'sng_settings', {}, TYPES)).rejects.toThrow(
+      'Cannot delete a singleton document',
+    )
+    // The debt duplicate-and-paste.md deferred here.
+    await expect(duplicateStory(env.DB, 'sng_settings', {}, TYPES)).rejects.toThrow(
+      'Cannot duplicate a singleton document',
+    )
+    // Still there.
+    expect(await storyById(env.DB, 'sng_settings')).not.toBeNull()
+  })
+
+  it('is refused deletion even when its type has been removed from the config', async () => {
+    await ensureSingleton(env.DB, SETTINGS)
+    // The derived id is the fallback: deleting rows because the code changed is
+    // worse than refusing a delete the operator can still do by hand.
+    await expect(deleteStoryStatement(env.DB, 'sng_settings', {}, [PAGE])).rejects.toThrow(
+      'Cannot delete a singleton document',
+    )
+  })
+})
+
+describe('document types: updateStory across the routed/unrouted fence', () => {
+  it('renames an unrouted document without ever giving it a path', async () => {
+    const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    const renamed = await updateStory(env.DB, ada.id, { title: 'Grace Hopper' }, TYPES)
+
+    expect(renamed.title).toBe('Grace Hopper')
+    expect(renamed.slug).toBe('grace-hopper')
+    expect(renamed.path).toBeNull()
+    expect((await storyById(env.DB, ada.id))?.path).toBeNull()
+  })
+
+  it('refuses moving an unrouted document into the page tree', async () => {
+    const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    await expect(updateStory(env.DB, ada.id, { parentId: 'sty_about' }, TYPES)).rejects.toThrow(
+      'Cannot move an unrouted document into the page tree',
+    )
+  })
+
+  it('accepts an explicit null parentId on an unrouted document as the no-op it is', async () => {
+    const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    const patched = await updateStory(env.DB, ada.id, { parentId: null, title: 'Ada L' }, TYPES)
+    expect(patched.title).toBe('Ada L')
+    expect(patched.path).toBeNull()
+  })
+
+  it('refuses moving a page under an unrouted document', async () => {
+    const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    await expect(updateStory(env.DB, 'sty_about', { parentId: ada.id }, TYPES)).rejects.toThrow(
+      'Cannot move a page under an unrouted document',
+    )
+  })
+
+  it('refuses changing a document’s type: that is a schema migration', async () => {
+    await expect(updateStory(env.DB, 'sty_about', { type: 'insight' }, TYPES)).rejects.toThrow(
+      "Cannot change a document's type",
+    )
+  })
+
+  it('accepts a type that matches, so round-tripping a whole story object is not punished', async () => {
+    const patched = await updateStory(env.DB, 'sty_about', { type: 'page', title: 'Abt' }, TYPES)
+    expect(patched.title).toBe('Abt')
+    expect(patched.type).toBe('page')
+  })
+
+  it('writes no redirect for an unrouted rename: nothing was vacated', async () => {
+    const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    const { changes, statements } = await updateStoryStatement(
+      env.DB,
+      ada.id,
+      { title: 'Grace' },
+      TYPES,
+    )
+    expect(changes).toEqual([])
+    // One statement: the row update itself, with no redirect alongside it.
+    expect(statements).toHaveLength(1)
+  })
+
+  it('leaves unrouted rows untouched when a page rename repaths a whole subtree', async () => {
+    const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    const before = await storyById(env.DB, ada.id)
+
+    await updateStory(env.DB, 'sty_about', { slug: 'about-us' }, TYPES)
+
+    expect((await storyByPath(env.DB, 'about-us/team'))?.id).toBe('sty_team')
+    const after = await storyById(env.DB, ada.id)
+    expect(after?.path).toBeNull()
+    expect(after?.updatedAt).toBe(before?.updatedAt)
+  })
+
+  describe('`under` on a move (drag targets, not only creation)', () => {
+    it('refuses a drag onto a parent the type does not allow', async () => {
+      const parent = await createStory(env.DB, { title: 'Insights', type: PAGE }, TYPES)
+      const insight = await createStory(
+        env.DB,
+        { title: 'One', parentId: parent.id, type: INSIGHT },
+        TYPES,
+      )
+      // `insight` is `under: ['page']`, so another insight is not a legal home.
+      const sibling = await createStory(
+        env.DB,
+        { title: 'Two', parentId: parent.id, type: INSIGHT },
+        TYPES,
+      )
+      await expect(
+        updateStory(env.DB, insight.id, { parentId: sibling.id }, TYPES),
+      ).rejects.toThrow("A 'insight' document is only allowed under: page")
+    })
+
+    it('refuses a drag to the top level', async () => {
+      const insight = await createStory(
+        env.DB,
+        { title: 'One', parentId: 'sty_about', type: INSIGHT },
+        TYPES,
+      )
+      await expect(updateStory(env.DB, insight.id, { parentId: null }, TYPES)).rejects.toThrow(
+        "A 'insight' document is only allowed under: page",
+      )
+    })
+
+    it('permits a drag between two legal parents', async () => {
+      const insight = await createStory(
+        env.DB,
+        { title: 'One', parentId: 'sty_about', type: INSIGHT },
+        TYPES,
+      )
+      const moved = await updateStory(env.DB, insight.id, { parentId: 'sty_team' }, TYPES)
+      expect(moved.path).toBe('about/team/one')
+    })
+
+    it('does not block a plain rename on a tree that predates the constraint', async () => {
+      // Written by hand the way an importer or an older config would: an
+      // insight sitting at the top level, which `under` now forbids.
+      await env.DB.prepare(
+        `insert into stories (id, type, parent_id, slug, path, ord, title) values (?, ?, null, ?, ?, ?, ?)`,
+      )
+        .bind('sty_legacy', 'insight', 'legacy', 'legacy', 'a9', 'Legacy')
+        .run()
+
+      const renamed = await updateStory(env.DB, 'sty_legacy', { title: 'Still editable' }, TYPES)
+      expect(renamed.slug).toBe('still-editable')
+    })
+  })
+})
+
+describe('document types: delete and the deleted-hook paths', () => {
+  it('reports null rather than "" for an unrouted document’s path', async () => {
+    const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    const found = await deleteStoryStatement(env.DB, ada.id, { redirect: true }, TYPES)
+
+    expect(found?.ids).toEqual([ada.id])
+    // '' is the root story's path; a record never had one at all.
+    expect(found?.paths).toEqual([null])
+    expect(found?.redirectStatements).toEqual([])
+  })
+
+  it('deletes a record without touching the tree', async () => {
+    const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    expect(await deleteStory(env.DB, ada.id, TYPES)).toEqual([ada.id])
+    expect(await listDocuments(env.DB, 'person')).toEqual([])
+    expect(await storyByPath(env.DB, 'about/team')).not.toBeNull()
+  })
+})
+
+describe('document types: routing never reaches an unrouted document', () => {
+  it('storyByPath, storyStatus and publishedDoc all miss a record', async () => {
+    const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    await publishStoryStatement(env.DB, ada.id, pageDoc('Ada'), 'Ada', 0).statement.run()
+
+    // Published, and still unreachable by any path — including the root's ''.
+    expect((await storyById(env.DB, ada.id))?.publishedAt).not.toBeNull()
+    expect(await storyByPath(env.DB, '')).not.toBeNull()
+    expect((await storyByPath(env.DB, ''))?.id).toBe('sty_home')
+    expect(await storyByPath(env.DB, 'ada')).toBeNull()
+    expect(await storyStatus(env.DB, 'ada')).toBe('unknown')
+    expect(await publishedDoc(env.DB, 'ada')).toBeNull()
+
+    // But it does resolve by id, which is how a reference reaches it.
+    expect(await publishedDocsByIds(env.DB, [ada.id])).toEqual({ [ada.id]: pageDoc('Ada') })
+  })
+
+  it('a record is absent from the tree and present in listStories', async () => {
+    const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+
+    const flat = (await storyTree(env.DB)).flatMap(function walk(n): string[] {
+      return [n.id, ...n.children.flatMap(walk)]
+    })
+    expect(flat.sort()).toEqual(['sty_about', 'sty_home', 'sty_team'])
+    expect((await listStories(env.DB)).map((r) => r.id)).toContain(ada.id)
+  })
+})
+
 describe('concurrent creates and the conflict envelope', () => {
   it('surfaces a same-tick duplicate slug as a conflict envelope, not a 500', async () => {
     // `createStory` snapshots `listStories` before it picks a slug, so two
@@ -714,8 +1163,8 @@ describe('concurrent creates and the conflict envelope', () => {
     // reports, `rethrow` maps a raw UNIQUE violation to the same conflict
     // envelope. See the next describe block for a case only 0002 catches.
     const results = await Promise.allSettled([
-      createStory(env.DB, { title: 'Race', parentId: null }),
-      createStory(env.DB, { title: 'Race', parentId: null }),
+      createStory(env.DB, { title: 'Race', parentId: null, type: PAGE }),
+      createStory(env.DB, { title: 'Race', parentId: null, type: PAGE }),
     ])
 
     const fulfilled = results.filter((r) => r.status === 'fulfilled')

@@ -8,6 +8,7 @@ import { StoryDO } from './story-do'
 import type { Folio, FolioConfig } from './types'
 
 export { StoryDO }
+export type { DocumentKind, DocumentType } from '../core/schema'
 export type { VersionKind, VersionMeta } from './versions'
 export type { Redirect } from './redirects'
 export type {
@@ -55,8 +56,12 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       const bindings = config.bindings(env)
       const path = url.pathname.replace(/^\/+|\/+$/g, '')
       const story = await storyByPath(bindings.db, path)
-      // Not a story: hand it back so the host's own routing wins.
-      if (!story) return null
+      // Not a story: hand it back so the host's own routing wins. An unrouted
+      // document can never be reached here anyway — `storyByPath` matches on
+      // `path = ?` and one stores NULL — but the check is spelled out because
+      // "a preview request for a record is the host's, not Folio's" is a rule
+      // (`document-types.md`), not an accident of SQL semantics.
+      if (!story || story.path === null) return null
       return previewPage(rt, bindings, story)
     }
 

@@ -44,8 +44,11 @@ export type Field =
   /**
    * `allow` narrows which kinds of target the editor offers, so a "Read more"
    * button can be restricted to internal pages while a footer link is not.
+   * `types` narrows a story target further, to particular document types.
+   * Omitting it permits every type — but never an unrouted document, which has
+   * no URL to link to and always resolves `broken`.
    */
-  | ({ kind: 'multilink'; allow?: readonly LinkKind[] } & Common)
+  | ({ kind: 'multilink'; allow?: readonly LinkKind[]; types?: readonly string[] } & Common)
   /**
    * `marks` and `nodes` constrain what the editor offers *and* what the renderer
    * will emit, so a caption can permit bold and links and nothing else. Omitting
@@ -58,11 +61,15 @@ export type Field =
       headingLevels?: readonly number[]
     } & Common)
   /**
-   * Points at another story and resolves its content at render time. Filtering
-   * candidates by document type needs multiple document types, which Folio does
-   * not have yet, so every story is offered.
+   * Points at another document and resolves its content at render time.
+   * `types` narrows the candidates to particular document types, so a
+   * form-embed block cannot be wired to the homepage; omitting it offers every
+   * document. Enforced twice, like `richtext`'s `marks`/`nodes`: the admin's
+   * picker only offers matching documents, and `resolveReference` re-checks,
+   * because content can also arrive from an importer or over the API
+   * (`document-types.md` architecture decision 5).
    */
-  | ({ kind: 'reference' } & Common)
+  | ({ kind: 'reference'; types?: readonly string[] } & Common)
   // Children are separate bloks, not a value on the parent, so `blocks` is the
   // one kind that cannot carry a `default` — a preset's `children` is the
   // equivalent (`field-defaults-and-presets.md`, decision 1).

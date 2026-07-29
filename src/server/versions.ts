@@ -18,10 +18,6 @@ function newVersionId(): string {
   return `ver_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
 }
 
-function docTitle(doc: Doc, fallback: string): string {
-  return String(doc.bloks[doc.root]?.data.title ?? '').trim() || fallback
-}
-
 /** Newest first. Excludes the document payload so this stays cheap to list. */
 export async function listVersions(
   db: D1Database,
@@ -56,7 +52,15 @@ export interface WriteVersionInput {
   doc: Doc
   label?: string | null
   actor?: string | null
-  fallbackTitle: string
+  /**
+   * The document's display title, already resolved by the caller. This file used
+   * to derive it from `doc.bloks[doc.root].data.title` and fall back — which is
+   * only correct for a root block that happens to have a `title` field. Which
+   * field holds it is a property of the *document type* now (`titleOf`), so the
+   * caller that knows the type resolves it and the version row records exactly
+   * what `stories.title` caches.
+   */
+  title: string
 }
 
 function buildVersionMeta(input: WriteVersionInput): VersionMeta {
@@ -65,7 +69,7 @@ function buildVersionMeta(input: WriteVersionInput): VersionMeta {
     storyId: input.storyId,
     kind: input.kind,
     label: input.label?.trim() || null,
-    title: docTitle(input.doc, input.fallbackTitle),
+    title: input.title.trim() || 'Untitled',
     actor: input.actor ?? null,
     createdAt: Date.now(),
   }

@@ -10,6 +10,7 @@ import type { ReactNode } from 'react'
 import type { AnyBlockDef, Registry } from '../core/block'
 import type { Doc } from '../core/doc'
 import type { Resolution } from '../core/resolve'
+import type { DocumentType } from '../core/schema'
 import type { StoryMeta, StoryNode } from '../core/story'
 import type { FolioHooks } from './hooks'
 import type { StoryDO } from './story-do'
@@ -44,8 +45,29 @@ export type StoryStub = Pick<
 
 export interface FolioConfig<Env> {
   blocks: readonly AnyBlockDef[] | Registry
-  /** Block type used as the document root. Also where page metadata lives. */
-  root: string
+  /**
+   * Sugar for a single routable page type, and the only shape that existed
+   * before `document-types.md`: `root: 'page'` is expanded to
+   * `[{ name: 'page', label: 'Page', kind: 'page', root: 'page' }]`. The type's
+   * *name* is always `'page'` whatever the root block is called, because that
+   * is what `migrations/0006_document_types.sql` defaults every pre-existing
+   * row's `type` column to — so an unchanged host config keeps resolving every
+   * row it already had.
+   *
+   * Mutually exclusive with `types`, and `createFolio` throws at construction
+   * when both or neither are given: a configuration mistake in a CMS should not
+   * become a runtime 500 on one code path.
+   *
+   * @deprecated Declare `types` instead. `root` keeps working; the deprecation
+   * is documented, not enforced.
+   */
+  root?: string
+  /**
+   * Every shape of document this site has: a routable page, an unrouted record,
+   * or a singleton (`DocumentKind`). Each declares its own root block, so an
+   * insight is not a page with six unused fields.
+   */
+  types?: readonly DocumentType[]
   bindings: (env: Env) => FolioBindings
   /** Where these routes are mounted. Default `/folio`. */
   basePath?: string

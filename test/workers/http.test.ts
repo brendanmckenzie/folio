@@ -1492,3 +1492,405 @@ describe('asset uploads and serving', () => {
     expect(body.error.message).toContain('filename')
   })
 })
+
+/* ------------------------------------------------- document types (HTTP) --- */
+
+/**
+ * document-types.md over the real HTTP surface. Builds its own `createFolio`
+ * rather than going through `SELF`/worker.ts, following app.test.ts's pattern:
+ * the thing under test is a multi-type *config*, and worker.ts declares exactly
+ * one type (`root: 'page'`) on purpose, so that every other test in this file
+ * keeps exercising the back-compatible single-type path.
+ *
+ * The same D1 and Durable Object `env` is shared, so rows created here are the
+ * same rows `SELF` would have created.
+ */
+const dtPage = defineBlock({
+  name: 'pageRoot',
+  label: 'Page',
+  summary: 'title',
+  fields: { title: text({ label: 'Title', required: true }) },
+  render: () => null,
+})
+
+const dtPerson = defineBlock({
+  name: 'personRoot',
+  label: 'Person',
+  summary: 'fullName',
+  fields: { fullName: text({ label: 'Full name' }), role: text({ label: 'Role' }) },
+  render: () => null,
+})
+
+const dtSettings = defineBlock({
+  name: 'settingsRoot',
+  label: 'Site settings',
+  fields: { siteName: text({ label: 'Site name' }) },
+  render: () => null,
+})
+
+const DT_TYPES = [
+  { name: 'page', label: 'Page', kind: 'page' as const, root: 'pageRoot' },
+  {
+    name: 'insight',
+    label: 'Insight',
+    kind: 'page' as const,
+    root: 'pageRoot',
+    under: ['page'],
+  },
+  {
+    name: 'person',
+    label: 'Person',
+    kind: 'record' as const,
+    root: 'personRoot',
+    titleField: 'fullName',
+  },
+  { name: 'settings', label: 'Site settings', kind: 'singleton' as const, root: 'settingsRoot' },
+]
+
+function typedFolio() {
+  return createFolio<Cloudflare.Env>({
+    blocks: [dtPage, dtPerson, dtSettings],
+    types: DT_TYPES,
+    bindings: (e) => ({ db: e.DB, story: e.STORY, media: e.MEDIA, images: e.IMAGES }),
+    basePath: '/folio',
+    route: (path) => (path ? `/${path}` : '/'),
+  })
+}
+
+async function dtCall(path: string, init?: RequestInit): Promise<Response> {
+  const ctx = createExecutionContext()
+  const res = await typedFolio().handle(new Request(`${ORIGIN}${path}`, init), env, ctx)
+  await waitOnExecutionContext(ctx)
+  return res!
+}
+
+async function dtJson<T>(path: string, init?: RequestInit): Promise<T> {
+  return (await dtCall(path, init)).json<T>()
+}
+
+async function dtFailure(
+  path: string,
+  init?: RequestInit,
+): Promise<{ status: number; body: ErrorEnvelope }> {
+  const res = await dtCall(path, init)
+  return { status: res.status, body: (await res.json()) as ErrorEnvelope }
+}
+
+function dtCreate(body: Record<string, unknown>): Promise<StoryMeta> {
+  return dtJson<StoryMeta>('/folio/stories', jsonPost(JSON.stringify(body)))
+}
+
+describe('document types: GET /folio/schema', () => {
+  it('carries every type through, and keeps `root` as the default page type’s root block', async () => {
+    const manifest = await dtJson<{
+      types: { name: string; kind: string; root: string; under?: string[] }[]
+      root: string
+    }>('/folio/schema')
+
+    expect(manifest.types.map((t) => t.name)).toEqual(['page', 'insight', 'person', 'settings'])
+    expect(manifest.types.find((t) => t.name === 'insight')).toEqual({
+      name: 'insight',
+      label: 'Insight',
+      kind: 'page',
+      root: 'pageRoot',
+      under: ['page'],
+    })
+    // The deprecated key stays, so a consumer written before `types` existed
+    // keeps reading the same value.
+    expect(manifest.root).toBe('pageRoot')
+  })
+})
+
+describe('document types: POST /folio/stories', () => {
+  it('defaults to the default page type when the body names none', async () => {
+    const story = await dtCreate({ title: 'Untyped create' })
+    expect(story.type).toBe('page')
+    expect(story.path).toBe('untyped-create')
+  })
+
+  it('creates a record with no URL of its own', async () => {
+    const person = await dtCreate({ title: 'Ada Lovelace', type: 'person' })
+    expect(person.type).toBe('person')
+    expect(person.path).toBeNull()
+    expect(person.parentId).toBeNull()
+    // No `url`/`previewUrl`: there is nothing to navigate to.
+    expect(person.url).toBeUndefined()
+    expect(person.previewUrl).toBeUndefined()
+  })
+
+  it('answers `unsupported` (501) for a type the config does not declare', async () => {
+    const { status, body } = await dtFailure(
+      '/folio/stories',
+      jsonPost(JSON.stringify({ title: 'X', type: 'nosuchtype' })),
+    )
+    // Not 404: the request is well-formed, the server just has no such type.
+    expect(status).toBe(501)
+    expect(body.error.code).toBe('unsupported')
+    expect(body.error.message).toBe('Unknown document type: nosuchtype')
+  })
+
+  it('refuses a record with a parentId', async () => {
+    const parent = await dtCreate({ title: 'Somewhere' })
+    const { status, body } = await dtFailure(
+      '/folio/stories',
+      jsonPost(JSON.stringify({ title: 'Ada', type: 'person', parentId: parent.id })),
+    )
+    expect(status).toBe(400)
+    expect(body.error.message).toBe('An unrouted document cannot have a parent')
+  })
+
+  it('refuses creating a singleton: it exists because the schema says so', async () => {
+    const { status, body } = await dtFailure(
+      '/folio/stories',
+      jsonPost(JSON.stringify({ title: 'Another one', type: 'settings' })),
+    )
+    expect(status).toBe(409)
+    expect(body.error.message).toContain('is a singleton and already exists')
+  })
+
+  it('refuses an `under` violation with a notice naming the allowed parents', async () => {
+    const { status, body } = await dtFailure(
+      '/folio/stories',
+      jsonPost(JSON.stringify({ title: 'Loose insight', type: 'insight' })),
+    )
+    expect(status).toBe(400)
+    expect(body.error.message).toBe("A 'insight' document is only allowed under: page")
+  })
+
+  it('screens a malformed type name before it reaches the config lookup', async () => {
+    const { status, body } = await dtFailure(
+      '/folio/stories',
+      jsonPost(JSON.stringify({ title: 'X', type: 'not a type' })),
+    )
+    expect(status).toBe(400)
+    expect(body.error.message).toContain('type')
+  })
+})
+
+describe('document types: GET /folio/stories vs GET /folio/documents', () => {
+  it('keeps records out of the tree and lists them flat instead', async () => {
+    const page = await dtCreate({ title: 'A visible page' })
+    const ada = await dtCreate({ title: 'Ada In Tree Test', type: 'person' })
+
+    const tree = await dtJson<StoryNode[]>('/folio/stories')
+    const ids = flatten(tree).map((n) => n.id)
+    expect(ids).toContain(page.id)
+    expect(ids).not.toContain(ada.id)
+
+    const { documents } = await dtJson<{ documents: StoryMeta[] }>('/folio/documents?type=person')
+    expect(documents.map((d) => d.id)).toContain(ada.id)
+    expect(documents.every((d) => d.type === 'person')).toBe(true)
+  })
+
+  it('answers `unsupported` for an undeclared type', async () => {
+    const { status, body } = await dtFailure('/folio/documents?type=nope')
+    expect(status).toBe(501)
+    expect(body.error.code).toBe('unsupported')
+  })
+
+  it('creates every declared singleton on first access, and only once', async () => {
+    const first = await dtJson<{ documents: StoryMeta[] }>('/folio/documents')
+    const settings = first.documents.filter((d) => d.type === 'settings')
+    expect(settings).toHaveLength(1)
+    expect(settings[0]?.id).toBe('sng_settings')
+
+    const second = await dtJson<{ documents: StoryMeta[] }>('/folio/documents')
+    expect(second.documents.filter((d) => d.type === 'settings')).toHaveLength(1)
+  })
+
+  it('seeds a singleton’s document from its own root block', async () => {
+    await dtJson<{ documents: StoryMeta[] }>('/folio/documents?type=settings')
+    const { doc } = await dtJson<{ doc: Doc }>('/folio/story/sng_settings/document')
+    expect(doc.bloks[doc.root]?.type).toBe('settingsRoot')
+  })
+
+  it('seeds a record’s document from its own root block, with the title in its own field', async () => {
+    const person = await dtCreate({ title: 'Grace Hopper', type: 'person' })
+    const { doc } = await dtJson<{ doc: Doc }>(`/folio/story/${person.id}/document`)
+    const root = doc.bloks[doc.root]
+
+    expect(root?.type).toBe('personRoot')
+    // `titleField: 'fullName'`, so the title lands where the schema keeps it —
+    // this root block has no `title` field at all.
+    expect(root?.data.fullName).toBe('Grace Hopper')
+    expect(root?.data.title).toBeUndefined()
+  })
+})
+
+describe('document types: PATCH and DELETE refusals', () => {
+  it('refuses moving a record into the page tree', async () => {
+    const ada = await dtCreate({ title: 'Ada Patch Test', type: 'person' })
+    const page = await dtCreate({ title: 'Patch Target' })
+
+    const { status, body } = await dtFailure(`/folio/stories/${ada.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ parentId: page.id }),
+    })
+    expect(status).toBe(400)
+    expect(body.error.message).toBe('Cannot move an unrouted document into the page tree')
+  })
+
+  it('refuses changing a document’s type', async () => {
+    const page = await dtCreate({ title: 'Retype Me' })
+    const { status, body } = await dtFailure(`/folio/stories/${page.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'insight' }),
+    })
+    expect(status).toBe(409)
+    expect(body.error.message).toBe("Cannot change a document's type")
+  })
+
+  it('renames a record without giving it a path', async () => {
+    const ada = await dtCreate({ title: 'Ada Rename Test', type: 'person' })
+    const patched = await dtJson<StoryMeta>(`/folio/stories/${ada.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Grace Rename Test' }),
+    })
+    expect(patched.title).toBe('Grace Rename Test')
+    expect(patched.path).toBeNull()
+  })
+
+  it('refuses deleting a singleton', async () => {
+    await dtJson('/folio/documents?type=settings')
+    const { status, body } = await dtFailure('/folio/stories/sng_settings', { method: 'DELETE' })
+    expect(status).toBe(409)
+    expect(body.error.message).toBe('Cannot delete a singleton document')
+  })
+
+  it('refuses duplicating a singleton — the debt duplicate-and-paste.md deferred here', async () => {
+    await dtJson('/folio/documents?type=settings')
+    const { status, body } = await dtFailure('/folio/stories/sng_settings/duplicate', {
+      method: 'POST',
+    })
+    expect(status).toBe(409)
+    expect(body.error.message).toBe('Cannot duplicate a singleton document')
+  })
+
+  it('duplicates a record as another record of the same type', async () => {
+    const ada = await dtCreate({ title: 'Ada Dup Test', type: 'person' })
+    const { story } = await dtJson<{ story: StoryMeta }>(`/folio/stories/${ada.id}/duplicate`, {
+      method: 'POST',
+    })
+    expect(story.type).toBe('person')
+    expect(story.path).toBeNull()
+    expect(story.title).toBe('Ada Dup Test (copy)')
+  })
+
+  it('deletes a record, and reports no path for it', async () => {
+    const ada = await dtCreate({ title: 'Ada Delete Test', type: 'person' })
+    const { deleted } = await dtJson<{ deleted: string[] }>(`/folio/stories/${ada.id}`, {
+      method: 'DELETE',
+    })
+    expect(deleted).toEqual([ada.id])
+  })
+})
+
+describe('document types: a second page type serves from the tree', () => {
+  it('routes an insight under the page it lives beneath, and never serves a record', async () => {
+    const parent = await dtCreate({ title: 'Insights Landing' })
+    const insight = await dtCreate({
+      title: 'A Real Insight',
+      type: 'insight',
+      parentId: parent.id,
+    })
+    expect(insight.path).toBe('insights-landing/a-real-insight')
+
+    const ada = await dtCreate({ title: 'Ada Route Test', type: 'person' })
+
+    // Published, and still not servable: `folio.published` matches on `path`,
+    // and an unrouted row stores NULL.
+    await dtCall(`/folio/story/${insight.id}/publish`, { method: 'POST' })
+    await dtCall(`/folio/story/${ada.id}/publish`, { method: 'POST' })
+
+    expect(await typedFolio().published(env, 'insights-landing/a-real-insight')).not.toBeNull()
+    expect(await typedFolio().published(env, 'ada-route-test')).toBeNull()
+
+    // And a preview request for a record's own slug is handed back to the host.
+    const ctx = createExecutionContext()
+    const preview = await typedFolio().handle(
+      new Request(`${ORIGIN}/ada-route-test?_folio=preview`),
+      env,
+      ctx,
+    )
+    await waitOnExecutionContext(ctx)
+    expect(preview).toBeNull()
+  })
+
+  it('caches the type’s own title field into stories.title on publish', async () => {
+    const person = await dtCreate({ title: 'Placeholder Name', type: 'person' })
+    const conn = await connect(person.id)
+    const doc = await conn.hello('alice')
+    await conn.tx('dttitle1', [{ t: 'set', uid: doc.root, field: 'fullName', value: 'Ada Byron' }])
+    conn.close()
+
+    const res = await dtJson<PublishResult>(`/folio/story/${person.id}/publish`, {
+      method: 'POST',
+    })
+
+    // Both the row and the retained version record the fullName, from a root
+    // block that has no `title` field to have read instead.
+    expect(res.version.title).toBe('Ada Byron')
+    const { documents } = await dtJson<{ documents: StoryMeta[] }>('/folio/documents?type=person')
+    expect(documents.find((d) => d.id === person.id)?.title).toBe('Ada Byron')
+  })
+})
+
+describe('document types: createFolio validates its config at construction', () => {
+  const bindings = (e: Cloudflare.Env) => ({
+    db: e.DB,
+    story: e.STORY,
+    media: e.MEDIA,
+    images: e.IMAGES,
+  })
+
+  it('refuses both `types` and `root`', () => {
+    expect(() =>
+      createFolio<Cloudflare.Env>({
+        blocks: [dtPage],
+        root: 'pageRoot',
+        types: DT_TYPES,
+        bindings,
+      }),
+    ).toThrow(/either `types` or `root`, not both/)
+  })
+
+  it('refuses neither', () => {
+    expect(() => createFolio<Cloudflare.Env>({ blocks: [dtPage], bindings })).toThrow(
+      /no document types configured/,
+    )
+  })
+
+  it('refuses a type whose root block is not in the registry', () => {
+    expect(() =>
+      createFolio<Cloudflare.Env>({
+        blocks: [dtPage],
+        types: [{ name: 'page', label: 'Page', kind: 'page', root: 'ghost' }],
+        bindings,
+      }),
+    ).toThrow(/names root block 'ghost'/)
+  })
+
+  it('accepts the `root` sugar, expanding it to a single page type named "page"', async () => {
+    // The name matters: 0006 defaults every pre-existing row's `type` to
+    // 'page', so the sugar has to resolve those rows whatever the root block is
+    // called.
+    const folio = createFolio<Cloudflare.Env>({
+      blocks: [dtPage],
+      root: 'pageRoot',
+      bindings,
+      basePath: '/folio',
+    })
+    const ctx = createExecutionContext()
+    const res = await folio.handle(new Request(`${ORIGIN}/folio/schema`), env, ctx)
+    await waitOnExecutionContext(ctx)
+
+    const manifest = await res?.json<{ types: { name: string; root: string }[]; root: string }>()
+    expect(manifest?.types).toEqual([
+      { name: 'page', label: 'Page', kind: 'page', root: 'pageRoot' },
+    ])
+    expect(manifest?.root).toBe('pageRoot')
+  })
+})
