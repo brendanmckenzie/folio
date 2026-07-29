@@ -249,6 +249,114 @@ check(
   `n=${finalVersions.length}`,
 )
 
+/* --- unpublished-changes.md: the tree finds unpublished changes ---------- */
+
+const flatten = (nodes) => nodes.flatMap((n) => [n, ...flatten(n.children ?? [])])
+
+const bob = client('Bob', '#30a46c')
+const bobDoc = await bob.hello()
+check(
+  'a second editor sees the same republished draft',
+  bobDoc.bloks[root]?.data.title === 'Version One',
+)
+
+alice.send({
+  type: 'tx',
+  txId: 't4',
+  mutations: [{ t: 'set', uid: root, field: 'title', value: 'Changed After Republish' }],
+})
+await alice.expect((m) => m.type === 'delta' && m.txId === 't4')
+await bob.expect((m) => m.type === 'delta' && m.txId === 't4')
+
+// The debounced watermark alarm (unpublished-changes.md's architecture
+// decision 4) fires ~2s after the last logged transaction; give it a margin
+// against a real dev server rather than a fake clock.
+await wait(2500)
+
+const treeAfterEdit = await json(`${API}/stories`)
+const rowAfterEdit = flatten(treeAfterEdit).find((n) => n.id === STORY)
+check(
+  'the tree marks the story "changed" once the watermark catches up',
+  rowAfterEdit?.state === 'changed',
+  rowAfterEdit?.state,
+)
+check('hasUnpublishedChanges agrees', rowAfterEdit?.hasUnpublishedChanges === true)
+check(
+  'draftSyncId has moved past publishedSyncId',
+  rowAfterEdit?.draftSyncId > rowAfterEdit?.publishedSyncId,
+  `draft=${rowAfterEdit?.draftSyncId} published=${rowAfterEdit?.publishedSyncId}`,
+)
+
+/* --- compare: the draft against the newest publish version --------------- */
+
+const versionsBeforeDiscard = await json(`${API}/story/${STORY}/versions`)
+const newestPublish = versionsBeforeDiscard.find((v) => v.kind === 'publish')
+check(
+  'the newest publish version is the republish from earlier',
+  newestPublish?.id === pub3.version.id,
+)
+
+const { doc: publishedDoc } = await json(`${API}/versions/${newestPublish.id}`)
+const { doc: draftBeforeDiscard } = await json(`${API}/story/${STORY}/document`)
+const compareMutations = diff(publishedDoc, draftBeforeDiscard)
+check(
+  'the comparison finds exactly the one title edit since publish',
+  compareMutations.length === 1 &&
+    compareMutations[0].t === 'set' &&
+    compareMutations[0].value === 'Changed After Republish',
+  JSON.stringify(compareMutations),
+)
+
+/* --- discard: diff(draft, published) applied as one ordinary transaction - */
+
+const discardMutations = diff(draftBeforeDiscard, publishedDoc)
+alice.send({ type: 'tx', txId: 't5', mutations: discardMutations })
+await alice.expect((m) => m.type === 'delta' && m.txId === 't5')
+await bob.expect((m) => m.type === 'delta' && m.txId === 't5')
+
+const draftAfterDiscard = await fetch(`${HTTP}/?_folio=preview`).then((r) => r.text())
+check('the draft reads the published title again after discarding', draftAfterDiscard.includes('Version One'))
+check(
+  'the discarded edit is gone from the draft',
+  !draftAfterDiscard.includes('Changed After Republish'),
+)
+
+const liveDuringDiscard = await fetch(`${HTTP}/`).then((r) => r.text())
+check(
+  'the live page never changed: discarding never published anything',
+  liveDuringDiscard.includes('Version One'),
+)
+
+const activityAfterDiscard = await json(`${API}/story/${STORY}/activity`)
+check(
+  'the discard lands in the activity trail like any other transaction',
+  activityAfterDiscard[0]?.mutations?.some((m) => m.t === 'set' && m.value === 'Version One'),
+)
+
+/* --- discard is undoable: it is an ordinary, invertible transaction ------ */
+
+const { doc: docAfterDiscard } = await json(`${API}/story/${STORY}/document`)
+const undoMutations = diff(docAfterDiscard, draftBeforeDiscard)
+alice.send({ type: 'tx', txId: 't6', mutations: undoMutations })
+await alice.expect((m) => m.type === 'delta' && m.txId === 't6')
+
+const draftAfterUndo = await fetch(`${HTTP}/?_folio=preview`).then((r) => r.text())
+check(
+  'undoing the discard brings the edit back, as Cmd+Z would',
+  draftAfterUndo.includes('Changed After Republish'),
+)
+
+await wait(2500)
+const treeAfterUndo = await json(`${API}/stories`)
+const rowAfterUndo = flatten(treeAfterUndo).find((n) => n.id === STORY)
+check(
+  'the tree marks it "changed" again once the undo is mirrored',
+  rowAfterUndo?.state === 'changed',
+  rowAfterUndo?.state,
+)
+
+bob.ws.close()
+
 const failed = results.filter((r) => !r.ok)
 console.log(`\n${results.length - failed.length}/${results.length} passed`)
 process.exit(failed.length ? 1 : 0)

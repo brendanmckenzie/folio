@@ -27,6 +27,35 @@ export interface PreviewSource {
 
 const LIVE: PreviewSource = { mode: 'live', doc: null }
 
+export interface VersionsList {
+  versions: VersionMeta[]
+  reload: () => Promise<void>
+}
+
+/**
+ * The version list alone, loaded unconditionally rather than only while the
+ * History rail is open: `usePublishedDoc` needs the newest `publish` version
+ * on every load of the story, not only once an editor opens History
+ * (`unpublished-changes.md`'s phase 1 note on `useVersions`). `Editor.tsx`
+ * owns one of these and hands the list to both `usePublishedDoc` and
+ * `useVersions` below, so there is exactly one fetch of it, not two
+ * disagreeing copies.
+ */
+export function useVersionsList(apiBase: string, storyId: string): VersionsList {
+  const [versions, setVersions] = useState<VersionMeta[]>([])
+
+  const reload = useCallback(async () => {
+    const res = await fetch(`${apiBase}/story/${encodeURIComponent(storyId)}/versions`)
+    if (res.ok) setVersions((await res.json()) as VersionMeta[])
+  }, [apiBase, storyId])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
+
+  return { versions, reload }
+}
+
 export interface Versions {
   versions: VersionMeta[]
   activity: ActivityEntry[]
@@ -51,12 +80,17 @@ interface Options {
   /** The live draft, for the delta against the version being viewed. */
   liveDoc: Doc | null
   notify: Notify
-  /** True while the History rail is open: the lists load when it is. */
+  /** True while the History rail is open: the activity trail loads when it is. */
   active: boolean
+  /** The version list `useVersionsList` already loaded, for the History rail
+   * and the viewing/restore machinery below. */
+  versions: VersionMeta[]
+  reloadVersions: () => Promise<void>
 }
 
 /**
- * Versions, activity, and the read-only preview of a past version.
+ * Activity, the read-only preview of a past version, and everything that acts
+ * on the version list `Editor.tsx` already loaded via `useVersionsList`.
  *
  * Previewing leaves the store untouched. The version's document is pushed into
  * the iframe by the preview bridge and live mutations stop being forwarded, so
@@ -69,20 +103,20 @@ export function useVersions({
   liveDoc,
   notify,
   active,
+  versions,
+  reloadVersions,
 }: Options): Versions {
-  const [versions, setVersions] = useState<VersionMeta[]>([])
   const [activity, setActivity] = useState<ActivityEntry[]>([])
   const [busy, setBusy] = useState(false)
   const [viewing, setViewing] = useState<{ version: VersionMeta; doc: Doc } | null>(null)
 
   const reload = useCallback(async () => {
-    const [v, a] = await Promise.all([
-      fetch(`${apiBase}/story/${encodeURIComponent(storyId)}/versions`),
+    const [, a] = await Promise.all([
+      reloadVersions(),
       fetch(`${apiBase}/story/${encodeURIComponent(storyId)}/activity`),
     ])
-    if (v.ok) setVersions((await v.json()) as VersionMeta[])
     if (a.ok) setActivity((await a.json()) as ActivityEntry[])
-  }, [apiBase, storyId])
+  }, [apiBase, reloadVersions, storyId])
 
   useEffect(() => {
     if (active) void reload()

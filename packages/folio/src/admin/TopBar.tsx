@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { summariseDiff } from '../core/diff'
 import type { StoryNode } from '../core/story'
 import { useFolio, useStoreState } from './FolioContext'
 import type { PreviewMode } from './hooks/useVersions'
@@ -6,6 +7,53 @@ import type { PreviewMode } from './hooks/useVersions'
 /** Stage widths. The value is the CSS width the frame is given, not a breakpoint. */
 export const VIEWPORTS = { Desktop: '100%', Tablet: '834px', Phone: '390px' } as const
 export type Viewport = keyof typeof VIEWPORTS
+
+type Delta = ReturnType<typeof summariseDiff>
+
+export interface PublishStatus {
+  label: string
+  /** Only the "N unpublished changes" state is; it is the door into the
+   * comparison view. */
+  clickable: boolean
+  /** Publish is pointless when true (owner decision 2): the story is
+   * currently live and identical to what was published. */
+  nothingToPublish: boolean
+}
+
+/**
+ * The top bar's state machine (`unpublished-changes.md`'s phase 1, step 3),
+ * replacing the bare "Synced" label. Order matters: connection state first,
+ * since neither "up to date" nor a count means anything while the socket has
+ * not settled; then whether this story has ever been published at all; only
+ * then the draft-vs-published diff itself.
+ *
+ * `isLive` is the story's *current* state, not merely "has a publish version
+ * ever existed": a story taken down (`unpublish.md`'s `'unpublished'` state)
+ * can be identical to its last publish and still have something worth
+ * publishing — bringing it back live — so "nothing to publish" only applies
+ * while the page is actually serving the public.
+ */
+export function publishStatus(
+  connected: boolean,
+  inflight: number,
+  everPublished: boolean,
+  isLive: boolean,
+  delta: Delta | null,
+): PublishStatus {
+  if (!connected) return { label: 'Connecting…', clickable: false, nothingToPublish: false }
+  if (inflight > 0) return { label: 'Saving…', clickable: false, nothingToPublish: false }
+  if (!everPublished) {
+    return { label: 'Not published yet', clickable: false, nothingToPublish: false }
+  }
+  if (!delta || delta.total === 0) {
+    return { label: 'Up to date', clickable: false, nothingToPublish: isLive }
+  }
+  return {
+    label: `${delta.total} unpublished change${delta.total === 1 ? '' : 's'}`,
+    clickable: true,
+    nothingToPublish: false,
+  }
+}
 
 interface Props {
   current: StoryNode | undefined
@@ -17,6 +65,12 @@ interface Props {
   onPublish: () => void
   /** Opens the confirmation; Editor.tsx owns whether it is showing. */
   onRequestUnpublish: () => void
+  /** Whether this story has a `publish` version at all, and how the live
+   * draft differs from the newest one (`usePublishedDoc`). */
+  everPublished: boolean
+  delta: Delta | null
+  /** Enters the comparison view against the newest publish version. */
+  onCompare: () => void
 }
 
 export function TopBar({
@@ -28,6 +82,9 @@ export function TopBar({
   published,
   onPublish,
   onRequestUnpublish,
+  everPublished,
+  delta,
+  onCompare,
 }: Props) {
   const { store } = useFolio()
   const state = useStoreState(store)
@@ -35,6 +92,13 @@ export function TopBar({
   // than a second button squeezed in beside Publish.
   const [menuOpen, setMenuOpen] = useState(false)
   const canUnpublish = current?.state === 'live' && mode !== 'viewing'
+  const status = publishStatus(
+    state.connected,
+    state.inflight,
+    everPublished,
+    current?.state === 'live',
+    delta,
+  )
 
   return (
     <header className="topbar">
@@ -42,9 +106,13 @@ export function TopBar({
         <strong>Folio</strong>
         <span className="topbar__slug">{current?.url ?? '/'}</span>
         <span className={`dot ${state.connected ? 'dot--ok' : 'dot--off'}`} />
-        <span className="topbar__status">
-          {state.connected ? (state.inflight > 0 ? 'Saving…' : 'Synced') : 'Connecting…'}
-        </span>
+        {status.clickable ? (
+          <button type="button" className="topbar__status topbar__status--link" onClick={onCompare}>
+            {status.label}
+          </button>
+        ) : (
+          <span className="topbar__status">{status.label}</span>
+        )}
       </div>
 
       <div className="topbar__mid">
@@ -98,8 +166,14 @@ export function TopBar({
             className="btn-primary publish-menu__main"
             onClick={onPublish}
             // Publishing sends the live draft, not what a version preview shows.
-            disabled={publishing || !state.doc || mode === 'viewing'}
-            title={mode === 'viewing' ? 'Close the version preview first' : undefined}
+            disabled={publishing || !state.doc || mode === 'viewing' || status.nothingToPublish}
+            title={
+              mode === 'viewing'
+                ? 'Close the version preview first'
+                : status.nothingToPublish
+                  ? 'No changes to publish'
+                  : undefined
+            }
           >
             {publishing ? 'Publishing…' : 'Publish'}
           </button>
