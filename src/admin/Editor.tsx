@@ -15,6 +15,7 @@ import { useAccess } from './hooks/useAccess'
 import { useBlocks } from './hooks/useBlocks'
 import { useClipboardShortcuts } from './hooks/useClipboardShortcuts'
 import { useGlobalDocs } from './hooks/useGlobalDocs'
+import { useMigrations } from './hooks/useMigrations'
 import { useNotice } from './hooks/useNotice'
 import { usePreviewBridge } from './hooks/usePreviewBridge'
 import { usePublish } from './hooks/usePublish'
@@ -26,6 +27,7 @@ import { useUndoShortcut } from './hooks/useUndoShortcut'
 import { useVersions, useVersionsList } from './hooks/useVersions'
 import { Inspector } from './Inspector'
 import { canEdit, canManageAccess, canManageContent, type Me, whyNot } from './me'
+import { MigrationBanner, Migrations } from './Migrations'
 import { PageAddress } from './PageAddress'
 import { Redirects } from './Redirects'
 import { StoryStore } from './store'
@@ -46,7 +48,7 @@ interface Props {
   apiBase: string
 }
 
-type Rail = 'content' | 'data' | 'blocks' | 'history' | 'redirects' | 'access'
+type Rail = 'content' | 'data' | 'blocks' | 'history' | 'redirects' | 'model' | 'access'
 
 /**
  * Composition and layout only. Every domain — the story tree, versions, the
@@ -119,6 +121,10 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, me, ap
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
 
   const redirects = useRedirects(apiBase, notify, rail === 'redirects')
+  // Loaded on every story load, not lazily like `redirects` above: the banner
+  // below is drawn from it, and a banner that only appears once you open an
+  // unrelated tab is not a banner (`schema-migrations.md` checkpoint 4).
+  const migrations = useMigrations(apiBase, storyId, notify)
   const showAccess = canManageAccess(me)
   const access = useAccess(apiBase, notify, rail === 'access')
 
@@ -354,6 +360,19 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, me, ap
               >
                 Redirects
               </button>
+              {/* Only when the host has declared migrations at all: an empty
+                  screen on a site with none is noise, the same rule the Data tab
+                  follows. Visible to every role, because the banner it explains
+                  is — only the Run button is admin-only. */}
+              {migrations.status && migrations.status.migrations.length > 0 ? (
+                <button
+                  type="button"
+                  className={rail === 'model' ? 'is-active' : ''}
+                  onClick={() => setRail('model')}
+                >
+                  Model
+                </button>
+              ) : null}
               {/* Admins only, and the routes behind it 404 under `auth: 'open'`
                   and 403 for everyone else regardless. */}
               {showAccess ? (
@@ -427,6 +446,15 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, me, ap
               )
             ) : rail === 'access' && showAccess ? (
               <Access state={access} selfId={me.actor?.kind === 'user' ? me.actor.id : null} />
+            ) : rail === 'model' ? (
+              <Migrations
+                status={migrations.status}
+                report={migrations.report}
+                busy={migrations.busy}
+                canRun={showAccess}
+                onRun={(opts) => void migrations.run(opts)}
+                onRefresh={() => void migrations.reload()}
+              />
             ) : rail === 'redirects' ? (
               <Redirects
                 rows={redirects.rows}
@@ -453,6 +481,11 @@ export function Editor({ storyId: initialStoryId, schema, types, globals, me, ap
           </div>
 
           <div className="stage">
+            {/* A banner, never a lock (checkpoint 4): refusing to serve the
+                editor until somebody runs a migration would turn a schema drift
+                into an outage. An empty field that is explained is a different
+                experience from an empty field that is mysterious. */}
+            <MigrationBanner status={migrations.status} />
             {viewing ? (
               <ViewingBar
                 version={viewing.version}
