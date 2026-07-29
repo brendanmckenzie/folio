@@ -10,7 +10,7 @@
 import type { Doc } from '../core/doc'
 import type { StoryMeta } from '../core/story'
 import { FolioError } from './errors'
-import { publishStoryStatement, storyById } from './stories'
+import { publishStoryStatement, storyById, unpublishStoryStatement } from './stories'
 import { buildVersionWrite, type VersionMeta, writeVersion } from './versions'
 
 export interface PublishDeps {
@@ -76,6 +76,33 @@ export async function publish(
   await deps.db.batch([versionStatement, publishStatement])
 
   return { publishedAt, version }
+}
+
+/**
+ * Clears the published snapshot. Unlike `publish` and `checkpoint`, this never
+ * reads `deps.draft`: it does not touch the draft, the Durable Object, or
+ * versions at all — an unpublish is not a document snapshot, just the row
+ * saying the site should no longer serve one (`unpublish.md`).
+ *
+ * Idempotent: unpublishing something already unpublished (`publishedAt` null,
+ * `unpublishedAt` set) answers with the existing timestamp and performs no
+ * write, rather than stamping a new one — taking a page down is exactly the
+ * kind of action someone double-clicks.
+ */
+export async function unpublish(
+  deps: PublishDeps,
+  story: StorySelector,
+  actor: string | null,
+): Promise<{ unpublishedAt: number }> {
+  const meta = await requireStory(deps.db, story)
+
+  if (meta.publishedAt === null && meta.unpublishedAt !== null) {
+    return { unpublishedAt: meta.unpublishedAt }
+  }
+
+  const { unpublishedAt, statement } = unpublishStoryStatement(deps.db, meta.id, actor)
+  await statement.run()
+  return { unpublishedAt }
 }
 
 /**

@@ -33,7 +33,9 @@ function story(overrides: Partial<StoryMeta> = {}): StoryMeta {
     ord: 'a0',
     title: 'Home',
     publishedAt: null,
+    unpublishedAt: null,
     updatedAt: 0,
+    state: 'draft',
     ...overrides,
   }
 }

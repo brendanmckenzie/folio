@@ -2,14 +2,19 @@ import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Doc } from '../../src/core/doc'
 import { envelope, FolioError, rethrow } from '../../src/server/errors'
+import type { PublishDeps } from '../../src/server/publish'
+import { unpublish } from '../../src/server/publish'
 import {
   createStory,
   deleteStory,
   deleteStoryStatement,
   listStories,
+  publishedDocsByIds,
   publishStoryStatement,
   storyById,
   storyByPath,
+  storyStatus,
+  unpublishStoryStatement,
   updateStory,
 } from '../../src/server/stories'
 import { applySeedFixture } from './seed-fixture'
@@ -35,6 +40,16 @@ async function resetStories(): Promise<void> {
 beforeEach(async () => {
   await resetStories()
 })
+
+/** A minimal one-block document, titled, for publish/unpublish tests below. */
+function pageDoc(title: string): Doc {
+  return {
+    root: 'r1',
+    bloks: {
+      r1: { uid: 'r1', type: 'page', parent: null, slot: null, order: 'a0', data: { title } },
+    },
+  }
+}
 
 describe('createStory', () => {
   it('derives the slug and path from the title, at the root', async () => {
@@ -222,6 +237,133 @@ describe('publishStoryStatement', () => {
     const row = await storyById(env.DB, 'sty_about')
     expect(row?.publishedAt).toBe(publishedAt)
     expect(row?.title).toBe('Batched Publish')
+  })
+
+  it('clears a stale unpublished_at/unpublished_by on republish', async () => {
+    const doc = pageDoc('Republished')
+    await unpublishStoryStatement(env.DB, 'sty_about', 'alice').statement.run()
+    expect((await storyById(env.DB, 'sty_about'))?.unpublishedAt).not.toBeNull()
+
+    await publishStoryStatement(env.DB, 'sty_about', doc, 'About').statement.run()
+
+    const row = await storyById(env.DB, 'sty_about')
+    expect(row?.unpublishedAt).toBeNull()
+    expect(row?.state).toBe('live')
+  })
+})
+
+describe('unpublishStoryStatement', () => {
+  it('returns an unrun statement that clears published_doc/published_at and stamps unpublished_at/by', async () => {
+    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Up'), 'About').statement.run()
+
+    const { statement, unpublishedAt } = unpublishStoryStatement(env.DB, 'sty_about', 'alice')
+
+    // Nothing has run yet.
+    expect((await storyById(env.DB, 'sty_about'))?.publishedAt).not.toBeNull()
+
+    await statement.run()
+
+    const row = await storyById(env.DB, 'sty_about')
+    expect(row?.publishedAt).toBeNull()
+    expect(row?.unpublishedAt).toBe(unpublishedAt)
+    expect(row?.state).toBe('unpublished')
+
+    const raw = await env.DB.prepare('select unpublished_by from stories where id = ?')
+      .bind('sty_about')
+      .first<{ unpublished_by: string | null }>()
+    expect(raw?.unpublished_by).toBe('alice')
+  })
+})
+
+describe('storyStatus', () => {
+  it('is "unknown" for a path with no story at all', async () => {
+    expect(await storyStatus(env.DB, 'does-not-exist')).toBe('unknown')
+  })
+
+  it('is "unknown" for a story that has never been published', async () => {
+    expect(await storyStatus(env.DB, 'about')).toBe('unknown')
+  })
+
+  it('is "live" once published', async () => {
+    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Live'), 'About').statement.run()
+    expect(await storyStatus(env.DB, 'about')).toBe('live')
+  })
+
+  it('is "unpublished" once taken down, so a host can answer 410 instead of 404', async () => {
+    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Live'), 'About').statement.run()
+    await unpublishStoryStatement(env.DB, 'sty_about', 'alice').statement.run()
+    expect(await storyStatus(env.DB, 'about')).toBe('unpublished')
+  })
+})
+
+describe('unpublish (server/publish.ts)', () => {
+  function deps(): PublishDeps & { calls: number } {
+    const d = {
+      db: env.DB,
+      calls: 0,
+      draft: async () => {
+        d.calls++
+        throw new Error('unpublish must never read the draft')
+      },
+    }
+    return d
+  }
+
+  it('clears published_doc/published_at without ever touching the draft', async () => {
+    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Up'), 'About').statement.run()
+
+    const d = deps()
+    const { unpublishedAt } = await unpublish(d, 'sty_about', 'alice')
+
+    expect(d.calls).toBe(0)
+    const row = await storyById(env.DB, 'sty_about')
+    expect(row?.publishedAt).toBeNull()
+    expect(row?.unpublishedAt).toBe(unpublishedAt)
+  })
+
+  it('is idempotent: a second call on an already-unpublished story reports the same timestamp and writes nothing', async () => {
+    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Up'), 'About').statement.run()
+    const d = deps()
+    const first = await unpublish(d, 'sty_about', 'alice')
+
+    await new Promise((r) => setTimeout(r, 5))
+    const second = await unpublish(d, 'sty_about', 'bob')
+
+    expect(second.unpublishedAt).toBe(first.unpublishedAt)
+    const raw = await env.DB.prepare('select unpublished_by from stories where id = ?')
+      .bind('sty_about')
+      .first<{ unpublished_by: string | null }>()
+    // The second call's actor never landed: idempotent means no write happened.
+    expect(raw?.unpublished_by).toBe('alice')
+  })
+
+  it('allows unpublishing the root story', async () => {
+    await publishStoryStatement(env.DB, 'sty_home', pageDoc('Root'), 'Home').statement.run()
+
+    const { unpublishedAt } = await unpublish(deps(), 'sty_home', 'alice')
+
+    expect(unpublishedAt).toBeGreaterThan(0)
+    expect((await storyById(env.DB, 'sty_home'))?.publishedAt).toBeNull()
+    // Delete is still refused, as today — unpublish is not delete.
+    await expect(deleteStoryStatement(env.DB, 'sty_home')).rejects.toThrow(
+      'Cannot delete the root story',
+    )
+  })
+
+  it('rejects unpublishing an unknown story', async () => {
+    await expect(unpublish(deps(), 'sty_nope', null)).rejects.toThrow('Unknown story')
+  })
+})
+
+describe('publishedDocsByIds and unpublish: references degrade, they do not break', () => {
+  it('an unpublished story stops resolving as a reference; publishedDocsByIds simply omits it', async () => {
+    const doc = pageDoc('Referenced')
+    await publishStoryStatement(env.DB, 'sty_about', doc, 'About').statement.run()
+    expect(await publishedDocsByIds(env.DB, ['sty_about'])).toEqual({ sty_about: doc })
+
+    await unpublish({ db: env.DB, draft: async () => doc }, 'sty_about', 'alice')
+
+    expect(await publishedDocsByIds(env.DB, ['sty_about'])).toEqual({})
   })
 })
 
