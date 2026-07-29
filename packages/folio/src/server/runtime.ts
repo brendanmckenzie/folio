@@ -15,16 +15,18 @@ import {
   defaultType,
   type DocumentType,
   type Manifest,
+  singletonId,
   titleFieldOf,
   titleOf,
   typeByName,
+  validateGlobals,
   validatePresets,
   validateTypes,
 } from '../core/schema'
 import type { StoryMeta, StoryNode } from '../core/story'
 import { createHookRunner, type FolioHooks, type HookRunnerCtx, validateHooks } from './hooks'
 import type { PublishDeps } from './publish'
-import { listStories, publishedDocsByIds, storyById } from './stories'
+import { ensureSingleton, listStories, publishedDocsByIds, storyById } from './stories'
 import type { FolioBindings, FolioConfig, StoryStub } from './types'
 
 const DEFAULT_BASE = '/folio'
@@ -41,6 +43,8 @@ export interface FolioRuntime {
   manifest: Manifest
   /** Every declared document type, with `root` sugar already expanded. */
   types: readonly DocumentType[]
+  /** `FolioConfig.globals`, validated. Every name is a declared `singleton`. */
+  globals: readonly string[]
   /** A declared type by name, or undefined — a row whose type was removed from
    * the code still reads, it just has no schema to render ("Unknown type"). */
   typeOf: (name: string | undefined) => DocumentType | undefined
@@ -122,6 +126,11 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // Same timing, same reason: a typo in `hooks` (or in `await`) should fail
   // loudly once, not silently never fire (`../platform/publish-hooks.md`).
   validateHooks(config.hooks)
+  // Same timing, same reason: `globals` naming an unknown type or a non-
+  // singleton one is a config mistake, not a runtime surprise the first page
+  // render discovers (`../../../docs/specs/content-model/globals.md`).
+  validateGlobals(config.globals, types)
+  const globals = config.globals ?? []
   const typeOf = (name: string | undefined) => typeByName(types, name)
   const fallbackType = defaultType(types)
   const base = config.basePath ?? DEFAULT_BASE
@@ -192,13 +201,21 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
 
   /**
    * One D1 query for the story map, the same one the tree already runs, plus one
-   * more only if the document actually has `reference` fields pointing somewhere.
-   * Cheap enough to do per page render; a cache layer in front of it is Phase 4's
-   * problem.
+   * more only if the document actually has `reference` fields pointing somewhere
+   * — and now, every configured global rides along in that same second query
+   * (`globals.md` architecture decision 1), so a site with globals costs no
+   * extra D1 read over one with references alone.
    *
    * `draft` is what the preview passes: an editor looking at a page that
    * references a form should see the form as they just edited it, not the last
-   * published copy. A live page always resolves published content.
+   * published copy. A live page always resolves published content. The same
+   * split applies to globals — but only in draft mode is a global's row
+   * ensured into existence (`ensureSingleton`): that write is fine for an
+   * editor's preview, rare and never on the hot path, while a live page must
+   * cost nothing extra for a global nobody has ever opened in the admin, so
+   * the published branch below only *reads* the derived id and lets a missing
+   * row mean exactly what a missing published_doc already means — nothing to
+   * show, no error thrown.
    */
   const resolve = async (
     bindings: FolioBindings,
@@ -207,18 +224,43 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   ): Promise<Resolution> => {
     const db = bindings.db
     const resolution = buildResolution((await listStories(db)).map(withUrls), assetBase)
-    if (!doc) return resolution
 
-    const ids = referencedIds(doc, schema).filter((id) => resolution.stories[id])
-    if (ids.length === 0) return resolution
+    const refIds = doc ? referencedIds(doc, schema).filter((id) => resolution.stories[id]) : []
+    if (refIds.length === 0 && globals.length === 0) return resolution
 
-    const docs = opts?.draft
-      ? Object.fromEntries(
-          await Promise.all(ids.map(async (id) => [id, await draft(bindings, id)] as const)),
-        )
-      : await publishedDocsByIds(db, ids)
+    if (opts?.draft) {
+      const [refEntries, globalEntries] = await Promise.all([
+        Promise.all(refIds.map(async (id) => [id, await draft(bindings, id)] as const)),
+        Promise.all(
+          globals.map(async (name) => {
+            const type = typeOf(name)!
+            const meta = await ensureSingleton(db, type)
+            return [name, await draftFor(bindings, meta)] as const
+          }),
+        ),
+      ])
+      return {
+        ...resolution,
+        docs: Object.fromEntries(refEntries),
+        globals: globals.length ? Object.fromEntries(globalEntries) : undefined,
+      }
+    }
 
-    return { ...resolution, docs }
+    const globalIds = globals.map((name) => singletonId(typeOf(name)!))
+    const combined = await publishedDocsByIds(db, [...refIds, ...globalIds])
+    const docs = Object.fromEntries(
+      refIds.filter((id) => combined[id]).map((id) => [id, combined[id]!]),
+    )
+    const globalDocs = Object.fromEntries(
+      globals
+        .map((name, i) => [name, combined[globalIds[i]!]] as const)
+        .filter((entry): entry is [string, Doc] => Boolean(entry[1])),
+    )
+    return {
+      ...resolution,
+      docs,
+      globals: globals.length ? globalDocs : undefined,
+    }
   }
 
   /**
@@ -264,8 +306,9 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
 
   return {
     registry,
-    manifest: toManifest(registry, types),
+    manifest: toManifest(registry, types, globals),
     types,
+    globals,
     typeOf,
     defaultType: fallbackType,
     titleFor,

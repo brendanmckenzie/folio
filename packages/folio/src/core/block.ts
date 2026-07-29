@@ -67,10 +67,15 @@ export function toSchemaIndex(registry: Registry): SchemaIndex {
  * one-element `types` array server-side (`server/runtime.ts`), so this function
  * never sees the string form.
  */
-export function toManifest(registry: Registry, types: readonly DocumentType[]): Manifest {
+export function toManifest(
+  registry: Registry,
+  types: readonly DocumentType[],
+  globals: readonly string[] = [],
+): Manifest {
   return {
     types: [...types],
     blocks: Object.values(toSchemaIndex(registry)),
     root: defaultType(types).root,
+    globals: [...globals],
   }
 }

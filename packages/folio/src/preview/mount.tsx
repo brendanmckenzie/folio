@@ -15,7 +15,19 @@ import { FolioDoc } from './Render'
 
 declare global {
   interface Window {
-    __FOLIO__?: { doc: Doc; resolution?: Resolution }
+    __FOLIO__?: {
+      doc: Doc
+      resolution?: Resolution
+      /**
+       * Present only when editing a global in the context of a host page
+       * (`../../../docs/specs/content-model/globals.md` decision 4): `doc`
+       * above is then the *global's* own draft, not the page's, and `mount`
+       * names the wrapper `renderGlobal` already rendered server-side for it
+       * — the same markup in both modes, so hydrating into it is a plain
+       * `hydrateRoot`, not a rebuild. `#folio-root` stays static in this mode.
+       */
+      editing?: { global: string; mount: string }
+    }
   }
 }
 
@@ -139,8 +151,14 @@ function attachBridge() {
  */
 export function mountPreview(blocks: readonly AnyBlockDef[] | Registry) {
   const boot = window.__FOLIO__
-  const root = document.getElementById('folio-root')
-  if (!boot || !root) return
+  if (!boot) return
+  // Editing a global in context (`editing.mount`) hydrates its own wrapper
+  // instead of `#folio-root`; the page around it stays static server-rendered
+  // markup with no React root of its own (`globals.md` decision 4).
+  const root = boot.editing
+    ? document.querySelector(boot.editing.mount)
+    : document.getElementById('folio-root')
+  if (!root) return
   hydrateRoot(
     root,
     <PreviewApp

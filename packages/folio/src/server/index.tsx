@@ -1,9 +1,17 @@
-import { FolioDoc } from '../preview/Render'
+import { singletonId } from '../core/schema'
+import { FolioDoc, renderGlobalNode } from '../preview/Render'
 import { createApp } from './app'
 import { previewPage } from './pages'
 import { lookupRedirect } from './redirects'
 import { createRuntime } from './runtime'
-import { listStories, publishedDoc, storyByPath, storyStatus, storyTree } from './stories'
+import {
+  listStories,
+  publishedDoc,
+  publishedDocsByIds,
+  storyByPath,
+  storyStatus,
+  storyTree,
+} from './stories'
 import { StoryDO } from './story-do'
 import type { Folio, FolioConfig } from './types'
 
@@ -62,6 +70,18 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       // "a preview request for a record is the host's, not Folio's" is a rule
       // (`document-types.md`), not an accident of SQL semantics.
       if (!story || story.path === null) return null
+
+      // `as` previews a singleton in the context of this page (`globals.md`
+      // decision 4). Naming anything that is not a configured global is the
+      // same refusal shape as a path with no story: null, so the host's own
+      // routes win rather than Folio guessing at what was meant.
+      const as = url.searchParams.get('as')
+      if (as !== null) {
+        const type = rt.typeOf(as)
+        if (type?.kind !== 'singleton' || !rt.globals.includes(as)) return null
+        return previewPage(rt, bindings, story, { as })
+      }
+
       return previewPage(rt, bindings, story)
     }
 
@@ -81,5 +101,13 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     render: (doc, opts) => (
       <FolioDoc doc={doc} registry={rt.registry} edit={opts?.edit} resolution={opts?.resolution} />
     ),
+    global: async (env, name) => {
+      const type = rt.typeOf(name)
+      if (type?.kind !== 'singleton') return null
+      const id = singletonId(type)
+      const docs = await publishedDocsByIds(config.bindings(env).db, [id])
+      return docs[id] ?? null
+    },
+    renderGlobal: (resolution, name, opts) => renderGlobalNode(rt.registry, resolution, name, opts),
   }
 }

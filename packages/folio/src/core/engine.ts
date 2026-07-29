@@ -42,7 +42,13 @@ export { blankBlok } from './schema'
 // preset's recipe (`blankSubtree`, schema-aware) and `duplicate-and-paste.md`
 // (an existing subtree's recipe) — engine work, since both allocate uids and
 // orders rather than read a schema.
-export { allocateSubtree, blankSubtree, validatePresets, validateTypes } from './schema'
+export {
+  allocateSubtree,
+  blankSubtree,
+  validatePresets,
+  validateGlobals,
+  validateTypes,
+} from './schema'
 export type { SubtreeBlok } from './schema'
 
 export {

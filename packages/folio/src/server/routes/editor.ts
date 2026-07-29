@@ -7,9 +7,9 @@
  * uses `loadStory`.
  */
 import { Hono } from 'hono'
-import { adminPage } from '../pages'
+import { adminPage, previewPage } from '../pages'
 import type { FolioRuntime } from '../runtime'
-import { listStories, storyById, storyByPath } from '../stories'
+import { ensureSingleton, listStories, storyById, storyByPath } from '../stories'
 import type { FolioEnv } from '../types'
 import { isId } from '../validate'
 
@@ -65,6 +65,22 @@ export function editorRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const root = await storyByPath(db, '')
     const first = root ?? (await listStories(db))[0]
     return first ? c.redirect(`${rt.base}/edit/${first.id}`) : c.notFound()
+  })
+
+  /**
+   * The bare preview for a singleton with no `previewPath` (`globals.md`
+   * decision 4): there is no host page to render it in context, so this
+   * renders the singleton alone, on the host's own preview stylesheet, with a
+   * note explaining why. `ensureSingleton` is fine to call here — an editor
+   * opening this route is the "first access" moment, same as `/documents`.
+   */
+  app.get('/preview/global/:name', async (c) => {
+    const name = c.req.param('name')
+    const type = rt.typeOf(name)
+    if (type?.kind !== 'singleton') return c.notFound()
+    const bindings = c.var.bindings()
+    const story = await ensureSingleton(bindings.db, type)
+    return previewPage(rt, bindings, story, { bare: true })
   })
 
   return app
