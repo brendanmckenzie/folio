@@ -57,6 +57,21 @@ cascade, idempotent, the draft and history untouched, one click to reverse.
 `folio.status(env, path)` lets a host answer `410 Gone` for a page taken down
 on purpose instead of guessing at `404`. See `docs/specs/editing/unpublish.md`.
 
+**Multiple content types, and singletons.** `createFolio` takes a `types` array
+rather than one `root` block type: each type names its own root block, so an
+insight is not a page with six unused fields. `kind` decides the routing
+consequence and nothing else does — a `page` lives in the tree and owns a URL, a
+`record` and a `singleton` leave the tree entirely with `parent_id` and `path`
+both null, which is what stops a record called "Contact" taking `/contact` from
+the page that needs it. A singleton's id is *derived* from its type name, so
+"exactly one" needs no column and no constraint. Deliberately **not** built:
+per-type routing rules, since Folio derives a path from the tree and a
+`pathPrefix` would only be a second derivation to keep in step. `reference` and
+`multilink` can now be narrowed by type, enforced in the picker and again at
+resolve. Host-side reading of a singleton (`folio.global`) is still to come;
+see `docs/specs/content-model/globals.md`. Spec:
+`docs/specs/foundation/document-types.md`.
+
 ## Next
 
 ### 1. Scheduled publishing
@@ -96,14 +111,6 @@ user into the Durable Object. Sessions in D1 behind a signed httpOnly cookie:
 OIDC against Microsoft 365 for staff, magic link for client editors. Cloudflare
 Access is deliberately not the plan — it is IdP-shaped and awkward for
 per-space editor roles.
-
-**Multiple content types.** The reference has `page`, `insights`, `resources`,
-each with different fields and different routing. `createFolio` currently takes
-a single `root` block type. Should become a set of document types.
-
-**Singleton / config documents.** The reference has a `config` story holding
-global settings and navigation, fetched separately and cached. Folio needs
-globals that are not routable pages.
 
 **Story enumeration.** `sitemap.ts` and `generateStaticParams` both page through
 every story. Folio needs a public list/query API, not just the tree.

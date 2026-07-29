@@ -3,7 +3,7 @@
 > **Group:** foundation
 > **Build order:** 8
 > **Size:** M
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** `0006_document_types.sql`
 > **Last updated:** 2026-07-29
@@ -577,7 +577,138 @@ record coming back `broken`.
 
 ## Open questions
 
-- Should `under` also constrain *drag* targets in the page tree, or only creation?
-  Constraining both is more consistent; constraining creation alone is less likely
-  to make an existing tree undraggable after a config change. Leaning both, with
-  a refusal notice rather than a silent no-op.
+None. Resolved as built:
+
+- **`under` constrains drag targets as well as creation**, with a refusal notice
+  rather than a silent no-op — checked in `updateStoryStatement` (a 400 whose
+  message names the allowed parents) and mirrored client-side in
+  `StoryTree.dropRefusal`, so the editor is told before the request rather than
+  by it. Two deliberate narrowings fell out of building it, both aimed at the
+  "less likely to make an existing tree undraggable" half of the original
+  question: the server checks `under` **only when the parent actually changes**,
+  so a plain title edit on a tree that predates the constraint still works; and
+  the admin lets a row whose own type is no longer declared be dragged anywhere,
+  since a config change must not freeze a tree and the server has the final say
+  regardless.
+
+## Implementation notes
+
+Landed 2026-07-29 across four commits (49d2444, a545b39, c2cdf3d, plus this
+restamp). All four gates green by exit code: typecheck, `biome ci`, 1008 tests
+(38 files, up from 853/35), demo build. All four e2e scripts green from a fresh
+database: fields 106/106 (up from 80), sync 16/16, history 41/41, redirects 8/8.
+
+**Phases 1 and 2 shipped as one commit.** `StoryMeta.type` is required and
+`path` became nullable, which means core cannot compile without the server
+reading the new column — there is no green intermediate state between them. The
+phase boundary was real as a *plan*, not as a commit boundary.
+
+### What the spec got wrong about the codebase
+
+- **`toManifest(registry, root)` → `toManifest(registry, types)`.** The spec's
+  core plan said "keep the `root` field", which it does, but it is now *derived*
+  as the default page type's root block rather than passed in.
+- **`publishStoryStatement`'s 4th parameter changed meaning**, from
+  `fallbackTitle` to the already-resolved `title`, and `WriteVersionInput`'s
+  `fallbackTitle` likewise became `title`. The spec described `titleOf` replacing
+  the `data.title` read *inside* those functions, but they have no access to the
+  document's type or the schema. `PublishDeps` gained a required
+  `titleFor(story, doc)` instead, injected by `createRuntime` — the same shape
+  `draft`/`draftWithSyncId` already had, and required rather than defaulted
+  because a silently-wrong cached title is the bug being fixed. `versions.ts`'s
+  `docTitle` is gone entirely.
+- **`deleteStoryStatement`'s `paths` is `(string | null)[]`**, and so is the
+  `deleted` hook payload's. The spec did not mention it; `''` is the root story's
+  path and a record never had one, so the two must not be spelled the same.
+- **`derivePaths` returns a map that simply omits unrouted rows** rather than
+  mapping them to anything. `paths.get(id) ?? row.path` then preserves their
+  null, which is what stops a rename writing a path onto a record.
+- **`ensureSingleton(db, type)` takes the resolved `DocumentType`**, not a name.
+  Same for `createStory`'s `input.type`. The `types` array is a separate
+  positional argument wherever `under` has to resolve a *parent's* type.
+- `path === ''` (the root story) and `path === null` (unrouted) are distinct
+  everywhere. Every `?? ''` on a path was reviewed for this.
+
+### Beyond the spec, deliberately
+
+- **`validateTypes` throws for `under` on any non-page kind**, not only
+  `singleton`. A record has no place in the tree either, so the key would read as
+  a constraint and enforce nothing.
+- **At least one `kind: 'page'` type is required.** Without one nothing can be
+  routed, the root story could not exist, and `defaultType` would have nothing
+  to return.
+- **`StoryPatchBody` declares `type`** and `updateStoryStatement` refuses a
+  *change* while accepting a match. valibot strips unknown keys, so without the
+  declaration a `type` in the body would have been silently ignored — which is
+  not the refusal the spec asked for.
+- **`GET /folio/documents` with no `?type`** returns every unrouted document and
+  ensures every declared singleton. The spec only named the `?type=` form; the
+  admin needs one request for the whole Data rail, and "first access" is exactly
+  what should bring a singleton into being.
+- **`POST /folio/stories` refuses `kind: 'singleton'`** with a 409. The spec said
+  "creating a second one is impossible: there is no route that can", which was
+  true only because the route did not check — a `type: 'settings'` body would
+  otherwise have minted an ordinary `sty_` row of that type.
+- **`test/workers/migrations.test.ts` is new** and pins the rebuilt table's
+  column list, nullability, watermark defaults, index list and all three slug
+  namespaces. The spec asked for "a migration test over a pre-`0006` database",
+  which the workers pool cannot express (it applies the whole directory in
+  `beforeAll`). Data survival across the rebuild was verified out-of-band instead
+  — rows written between `0002` and `0006` against a real local D1, compared
+  before and after, byte for byte — and this file is what stops a later migration
+  quietly undoing the structure.
+
+### Deferred
+
+- **Host-side reading of a singleton.** `folio.global('settings')` is
+  `../content-model/globals.md`'s. What exists is the document: created on first
+  access, editable, publishable, undeletable, unduplicatable. The demo says so in
+  `blocks/settings.tsx`.
+- **The real record-editing UI.** Opening an unrouted document today gives the
+  block tree and the inspector, with an explanation where the preview iframe
+  would be and no Address panel. A table instead of a list, and a form instead of
+  an iframe, is `../content-model/data-documents.md`'s.
+- **Pagination and filtering over a type.** `../content-model/collections.md`'s.
+  `GET /folio/documents` is a flat list and nothing more.
+
+### Debt paid off
+
+`duplicate-and-paste.md` deferred "duplicating a singleton must be refused" to
+this spec. Done, in `duplicateStory` rather than at the route, so a direct caller
+cannot route around it. `duplicateStory`'s `types` argument is required for that
+reason — it cannot decide without it, and a default would have turned an omission
+into a runtime throw.
+
+### For whoever writes the next migration
+
+`stories` after `0006`, with every index. Anything added from here is an ordinary
+`alter table`; nothing else will need a rebuild.
+
+```sql
+create table stories (
+  id            text primary key,
+  type          text not null default 'page',
+  parent_id     text,
+  slug          text not null,
+  path          text,                                    -- null = unrouted
+  ord           text not null,
+  title         text not null,
+  published_doc text,
+  published_at  integer,
+  created_at    integer not null default (unixepoch()),
+  updated_at    integer not null default (unixepoch()),
+  unpublished_at    integer,                              -- 0003
+  unpublished_by    text,                                 -- 0003
+  draft_sync_id     integer not null default 0,           -- 0005
+  draft_updated_at  integer,                              -- 0005
+  published_sync_id integer not null default 0            -- 0005
+);
+
+create index stories_parent_ord on stories (parent_id, ord);
+create index stories_draft_updated on stories (draft_updated_at desc);
+create index stories_type on stories (type, ord);
+create unique index stories_path on stories (path) where path is not null;
+create unique index stories_parent_slug
+  on stories (coalesce(parent_id, ''), slug) where path is not null;
+create unique index stories_type_slug on stories (type, slug) where path is null;
+```

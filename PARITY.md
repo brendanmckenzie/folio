@@ -135,17 +135,19 @@ copy, so public pages never leak another story's unpublished work. Resolution is
 bounded to one level, which matches Storyblok and stops a self-reference from
 recursing.
 
-Cannot filter candidates by document type yet — the reference project's schema uses
-`filter_content_type: ["Form"]`, which needs Phase 2's document types. The field
-currently offers every story. **This is the one place Phase 1 is knowingly thinner
-than the reference project**, and it is blocked on Phase 2 rather than on effort.
+**Filtering by document type: done**, with Phase 2's document types. The reference
+project's schema uses `filter_content_type: ["Form"]`; the equivalent here is
+`reference({ types: ['form'] })`, and `multilink({ types })` narrows a story link
+the same way. Enforced twice, like `richtext`'s `marks`: the picker only offers
+matching documents, and resolution re-checks, because content also arrives from an
+importer or over the API. A wrong-type value resolves to `null` and the block
+renders its empty state.
 
 ### Deferred, and not blocking Phase 2
 
 - Richtext tables and a text colour mark.
 - Embedded bloks inside richtext.
 - Host-defined rendering overrides for richtext nodes.
-- `reference` filtering by document type (needs Phase 2).
 - Presigned uploads, which would only matter for files far larger than images.
 - `required` is still declared and ignored, as noted in Phase 5.
 
@@ -156,12 +158,27 @@ paste-handling are where these always get expensive.
 ## Phase 2 — Multiple document types, querying, singletons
 
 The site has at least five root types: `Page`, `Insights`, `Resources`,
-`ProgramContent`, `Config`. `createFolio` currently takes one `root` block type.
+`ProgramContent`, `Config`.
 
-- **Document types** — a set of root types, each with its own fields and its own
-  routing rule. Story rows gain a `type` column. **M**
-- **Singletons** — `Config` holds global settings and navigation. Not a routable
-  page, fetched separately, cached. **S**
+- **Document types: done.** `createFolio` takes a `types` array, each entry naming
+  its own root block, so an insight is not a page with six unused fields.
+  `stories` gained a `type` column and `path` became nullable
+  (`migrations/0006_document_types.sql`). `root: 'page'` still works, as sugar
+  for a single `page` type.
+
+  One thing the reference project has that Folio deliberately does **not**: a
+  per-type routing rule. That is a Next.js artefact. Folio derives a path from
+  the tree, so an insight under the "Insights" page already serves at
+  `/insights/whatever` — a `pathPrefix` would only be a second path-derivation
+  rule to keep in step with the first. Instead a type's `kind` decides whether it
+  is in the tree at all, and `under` constrains where in it a document may go.
+- **Singletons: done.** A singleton is a document with a *derived* id
+  (`sng_settings`), created on first access — no `singleton boolean` column and no
+  uniqueness constraint, because there is no other id a second one could be
+  created under. `Config`-style host-side reading (`folio.global('settings')`,
+  fetched once and cached) is `docs/specs/content-model/globals.md`; what exists
+  today is the document itself, editable and publishable like any other, and
+  refusing to be deleted or duplicated.
 - **Query API** — this is the sleeper. `sitemap.ts` pages through every story;
   the insights index filters by topic and paginates. Storyblok gives
   `getStories({ content_type, filter_query, per_page, page, sort_by })`. Folio has

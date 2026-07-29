@@ -59,7 +59,13 @@ export { StoryDO } from 'folio/server'
 
 const folio = createFolio<Env>({
   blocks,
-  root: 'page',
+  // Every shape of document this site has. `root: 'page'` is sugar for exactly
+  // the first entry and still works; see "Document types" below.
+  types: [
+    { name: 'page', label: 'Page', kind: 'page', root: 'page' },
+    { name: 'person', label: 'Person', kind: 'record', root: 'personRecord', titleField: 'fullName' },
+    { name: 'settings', label: 'Site settings', kind: 'singleton', root: 'settingsRoot' },
+  ],
   bindings: (env) => ({ db: env.DB, story: env.STORY }),
   assets: __FOLIO_ASSETS__,
 })
@@ -243,6 +249,83 @@ looking at, unpublished changes included), re-allocates every uid, and seeds a
 brand-new story — unpublished, with no version history of its own. The
 source page is never touched.
 
+## Document types
+
+A document is not necessarily a page. `types` declares each shape one, with its
+own root block and therefore its own fields — an insight is not a page with six
+unused fields and a comment explaining which ones matter.
+
+`kind` is the whole routing story:
+
+| kind | routable | in the page tree | how many | example |
+| --- | --- | --- | --- | --- |
+| `page` | yes | yes, with `parent_id`/`path` | many | Page, Insight |
+| `record` | no | no (both columns null) | many | Person, Office |
+| `singleton` | no | no | exactly one | Site settings, Header |
+
+An **unrouted** document (a record or a singleton) leaves the page tree
+entirely: `parent_id` and `path` are both null, and it is ordered by `ord`
+within its own type. That is what stops a record called "Contact" taking
+`/contact` away from the page that needs it — the two are in different slug
+namespaces, so the collision is not merely resolved, it is unrepresentable. A
+record's slug is unique *per type* instead, because the content API needs a
+stable machine-readable handle for it.
+
+There are **no per-type routing rules**. Folio derives a path from the tree, so
+an insight created under the "Insights" page already serves at
+`/insights/whatever` with nothing to configure.
+
+A **singleton**'s id is derived from its type name (`sng_settings`), which is
+the entire uniqueness mechanism: there is no other id a second one could be
+created under. It is created on first *access* — the admin's Data rail asking
+for it — never by an editor, because it exists because the schema says so, and
+deleting it would only mean it comes back empty. `DELETE` and `duplicate` both
+refuse it.
+
+Optional keys on a type:
+
+- `titleField` — which root field is the display title, cached into
+  `stories.title` on publish. Defaults to `title` when the root block has one,
+  then to the root block's `summary` field. A `person` whose root has
+  `fullName` and no `title` needs this, or the tree would cache nothing.
+- `under` — the parent types a document of this type may live under. Constrains
+  creation *and* drag targets, with a refusal notice rather than a silent
+  no-op. Declaring it also means the type can never sit at the top level.
+- `default` — the type a bare "New page" creates. Implicitly the first `page`
+  type.
+
+`reference` and `multilink` can both be narrowed by type:
+
+```ts
+person: reference({ types: ['person'] })       // only Person records are offered
+href: multilink({ types: ['page'] })           // only Pages, and never a record
+```
+
+Enforced twice, the same discipline `richtext`'s `marks` follow: the admin's
+picker only offers matching documents, *and* resolution re-checks, because
+content also arrives from importers and over the API. A `reference` of the wrong
+type resolves to `null` and the block renders its empty state; a `multilink`
+pointing at an unrouted or wrong-type document resolves to
+`{ broken: true, href: '#' }`, because "there is no URL for this" and "this URL
+is gone" are the same problem for an editor.
+
+Routes: `GET /folio/stories` is the page tree (page types only), `GET
+/folio/documents?type=person` is the flat per-type list, and `GET
+/folio/documents` returns every unrouted document — which is also what brings
+each declared singleton into being. `POST /folio/stories` takes a `type`;
+an undeclared one answers `501 unsupported`, because the request is
+well-formed and the server simply has no such type. Changing a document's type
+is refused: that is a schema migration, not a patch.
+
+A row whose `type` is no longer declared in code is not an error. The tree
+shows it with an "Unknown type" chip and the Data rail gives it its own
+heading — deleting rows because the code changed is worse.
+
+`createFolio` validates all of this at construction, before a request is
+served: an unknown root block, a duplicate name, two defaults, a `titleField`
+the root block lacks, an `under` chain that never reaches the top level, or both
+`types` and `root` at once.
+
 ## Stories, paths and page metadata
 
 A story is keyed by an opaque, stable `id`, which is also its Durable Object
@@ -251,22 +334,30 @@ name — so renaming or moving a page never orphans its draft or mutation log.
 on rename or move. The root story has `path = ''` and serves `/`, so there is no
 `home` special-case anywhere.
 
-D1 holds only routing structure: `id`, `parent_id`, `slug`, `path`, `ord`.
+D1 holds only routing structure: `id`, `type`, `parent_id`, `slug`, `path`,
+`ord`.
+
+D1 also holds each row's `type`, and `path` is null for an unrouted document
+(see "Document types" above).
 
 **Page metadata lives in the document, not the database.** `title`,
 `description`, `socialImage`, `noindex` are ordinary fields on the root block,
-selectable in the tree as "Page settings". That means editing them is the same
+selectable in the tree as "Page settings" — or "Person settings", since the
+label comes from the root block's own. That means editing them is the same
 inspector as everything else, and they inherit multiplayer, undo, versioning and
-atomic publish for free. `title` is denormalised into D1 purely so the tree can
-render without loading every Durable Object; the document is the source of
-truth.
+atomic publish for free. Which fields exist is per type, so a record's root
+carries none of the four; `titleField` says which one the tree caches.
+`title` is denormalised into D1 purely so the tree can render without loading
+every Durable Object; the document is the source of truth.
 
 Sibling order is a fractional index, the same primitive used for blocks.
 
 Slug and parent are edited in the **Address** panel that appears at the top of
 the inspector when "Page settings" is selected. Pages can also be reparented and
-reordered by dragging in the Content tree. Switching pages is client-side, so
-the rail keeps its tab and there is no reload.
+reordered by dragging in the Content tree, subject to `under`. Switching pages is
+client-side, so the rail keeps its tab and there is no reload. An unrouted
+document has no Address panel and no preview iframe: it has no URL, so there is
+no page to show. Records and singletons live in the **Data** rail instead.
 
 ## How editing works
 
@@ -597,7 +688,7 @@ the same Worker, so a hook is a typed function call, not a round trip to yoursel
 
 ```ts
 const folio = createFolio<Env>({
-  blocks, root: 'page',
+  blocks, types: [{ name: 'page', label: 'Page', kind: 'page', root: 'page' }],
   bindings: (env) => ({ db: env.DB, story: env.STORY }),
   hooks: {
     async published({ story, doc, env, waitUntil }) {
@@ -677,8 +768,7 @@ and the host compiles it).
 Within the field types: no tables in richtext, no text colour mark, and no
 embedded bloks inside richtext. Host projects cannot override how a richtext node
 renders, which is fine while the output is semantic HTML that CSS can style, and
-will need revisiting when it is not. `reference` cannot filter candidates by
-document type, because there is only one document type so far.
+will need revisiting when it is not.
 
 Note also that `vite preview` does not proxy the browser's WebSocket upgrade, so
 the admin only connects under `vite dev` or a real deploy. The test scripts use a
