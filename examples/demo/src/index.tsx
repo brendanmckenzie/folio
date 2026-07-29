@@ -46,7 +46,22 @@ export default {
     // --- published pages -------------------------------------------------
     const path = url.pathname.replace(/^\/+|\/+$/g, '')
     const doc = await folio.published(env, path)
-    if (!doc) return new Response('Not found', { status: 404 })
+    if (!doc) {
+      // A live story always wins: folio.published is checked first, and
+      // creating a story at a redirected path deletes the row anyway, so the
+      // redirect can never shadow a real page.
+      const hit = await folio.redirect(env, path)
+      if (hit) {
+        const location = new URL(hit.to, url.origin)
+        location.search = url.search
+        return Response.redirect(location.toString(), hit.status)
+      }
+      // folio.status tells apart a page taken down on purpose from one that
+      // never existed, so a host can answer 410 for the former and 404 for
+      // the latter instead of guessing. Folio itself never assumes either.
+      const status = await folio.status(env, path)
+      return new Response('Not found', { status: status === 'unpublished' ? 410 : 404 })
+    }
 
     // Story links store an id, so hrefs are resolved per render rather than
     // frozen at publish time. Renaming a page fixes every link to it.

@@ -127,10 +127,25 @@ export const CheckpointBody = v.object(
 
 export const AssetPatchBody = v.object({ alt: v.optional(bounded(500)) }, OBJECT)
 
+/**
+ * A manual redirect (redirects.md). `to` is capped generously: it is either an
+ * in-site path or an absolute URL, and the row is re-checked with `isSafeHref`
+ * on every read regardless of what this schema let through.
+ */
+export const RedirectCreateBody = v.object(
+  {
+    from: required(500),
+    to: required(2000),
+    status: v.optional(v.picklist([301, 302, 307, 308])),
+  },
+  OBJECT,
+)
+
 export type StoryCreateInput = v.InferOutput<typeof StoryCreateBody>
 export type StoryPatchInput = v.InferOutput<typeof StoryPatchBody>
 export type CheckpointInput = v.InferOutput<typeof CheckpointBody>
 export type AssetPatchInput = v.InferOutput<typeof AssetPatchBody>
+export type RedirectCreateInput = v.InferOutput<typeof RedirectCreateBody>
 
 /* --------------------------------------------------------------- parsing --- */
 

@@ -11,6 +11,7 @@ import {
 } from '../../src/core/protocol'
 import type { StoryMeta, StoryNode } from '../../src/core/story'
 import type { AssetRow } from '../../src/server/assets'
+import type { Redirect } from '../../src/server/redirects'
 import type { VersionMeta } from '../../src/server/versions'
 import { applySeedFixture } from './seed-fixture'
 
@@ -589,6 +590,167 @@ describe('rename updates links', () => {
     expect(stored.doc.bloks.linkblok1?.data.href).toEqual({ kind: 'story', id: target.id })
 
     conn.close()
+  })
+})
+
+describe('DELETE /folio/stories/:id and the redirect option (redirects.md)', () => {
+  it('defaults to redirecting the deleted page to its parent', async () => {
+    const parent = await createStory('Delete-Redirect Parent')
+    const child = await createStory('Delete-Redirect Child', parent.id)
+
+    const res = await SELF.fetch(`${API}/stories/${child.id}`, { method: 'DELETE' })
+    expect(res.ok).toBe(true)
+
+    const list = await getJson<{ rows: Redirect[] }>('/folio/redirects')
+    expect(list.rows.find((r) => r.from === child.path)?.to).toBe(parent.path)
+  })
+
+  it('writes no redirect when redirect=false, the escape hatch', async () => {
+    const parent = await createStory('Delete-No-Redirect Parent')
+    const child = await createStory('Delete-No-Redirect Child', parent.id)
+
+    await SELF.fetch(`${API}/stories/${child.id}?redirect=false`, { method: 'DELETE' })
+
+    const list = await getJson<{ rows: Redirect[] }>('/folio/redirects')
+    expect(list.rows.some((r) => r.from === child.path)).toBe(false)
+  })
+})
+
+describe('redirects: GET/POST/DELETE /folio/redirects', () => {
+  it('a rename recorded automatically shows up in the list, newest first', async () => {
+    const story = await createStory('List-Redirect Source')
+    const oldPath = story.path
+    const renamed = await patchJson<StoryMeta>(`/folio/stories/${story.id}`, {
+      slug: 'list-redirect-target',
+    })
+    expect(renamed.path).toBe('list-redirect-target')
+
+    const page = await getJson<{ rows: Redirect[]; cursor: string | null }>('/folio/redirects')
+    const row = page.rows.find((r) => r.from === oldPath)
+    expect(row).toMatchObject({
+      to: 'list-redirect-target',
+      status: 301,
+      source: 'auto',
+      storyId: story.id,
+    })
+  })
+
+  it('POST adds a manual redirect', async () => {
+    const created = await postJson<Redirect>('/folio/redirects', {
+      from: 'manual-redirect-source',
+      to: 'manual-redirect-target',
+    })
+    expect(created).toMatchObject({
+      from: 'manual-redirect-source',
+      to: 'manual-redirect-target',
+      status: 301,
+      source: 'manual',
+    })
+
+    const filtered = await getJson<{ rows: Redirect[] }>('/folio/redirects?source=manual')
+    expect(filtered.rows.some((r) => r.from === 'manual-redirect-source')).toBe(true)
+  })
+
+  it('POST refuses a `from` a story currently occupies, naming the story', async () => {
+    const story = await createStory('Occupied Redirect Target')
+
+    const { status, body } = await failureOf(
+      '/folio/redirects',
+      jsonPost(JSON.stringify({ from: story.path, to: 'somewhere-else' })),
+    )
+    expect(status).toBe(409)
+    expect(body.error.code).toBe('conflict')
+    expect(body.error.message).toContain(story.title)
+  })
+
+  it('POST refuses a manual redirect whose target already redirects back to its source', async () => {
+    await postJson('/folio/redirects', { from: 'loop-a', to: 'loop-b' })
+
+    const { status, body } = await failureOf(
+      '/folio/redirects',
+      jsonPost(JSON.stringify({ from: 'loop-b', to: 'loop-a' })),
+    )
+    expect(status).toBe(409)
+    expect(body.error.code).toBe('conflict')
+  })
+
+  it('DELETE removes a redirect and reports whether one was actually there', async () => {
+    await postJson('/folio/redirects', { from: 'delete-redirect-me', to: 'elsewhere' })
+
+    const removed = await SELF.fetch(`${API}/redirects/delete-redirect-me`, { method: 'DELETE' })
+    expect((await removed.json<{ deleted: boolean }>()).deleted).toBe(true)
+
+    const again = await SELF.fetch(`${API}/redirects/delete-redirect-me`, { method: 'DELETE' })
+    expect((await again.json<{ deleted: boolean }>()).deleted).toBe(false)
+
+    const list = await getJson<{ rows: Redirect[] }>('/folio/redirects')
+    expect(list.rows.some((r) => r.from === 'delete-redirect-me')).toBe(false)
+  })
+
+  it('DELETE accepts a multi-segment path', async () => {
+    await postJson('/folio/redirects', { from: 'a/b/c', to: 'somewhere' })
+
+    const res = await SELF.fetch(`${API}/redirects/a/b/c`, { method: 'DELETE' })
+    expect((await res.json<{ deleted: boolean }>()).deleted).toBe(true)
+  })
+})
+
+describe('redirects: the host 404 branch (test/workers/worker.ts)', () => {
+  it('a renamed page 301s from its old path to the new one', async () => {
+    const story = await createStory('Host-Redirect Rename')
+    const oldPath = story.path
+    await patchJson<StoryMeta>(`/folio/stories/${story.id}`, { slug: 'host-redirect-renamed' })
+
+    const res = await SELF.fetch(`${ORIGIN}/${oldPath}`, { redirect: 'manual' })
+    expect(res.status).toBe(301)
+    expect(res.headers.get('location')).toBe(`${ORIGIN}/host-redirect-renamed`)
+  })
+
+  it('preserves the query string across the redirect', async () => {
+    const story = await createStory('Host-Redirect Query')
+    const oldPath = story.path
+    await patchJson<StoryMeta>(`/folio/stories/${story.id}`, { slug: 'host-redirect-query-new' })
+
+    const res = await SELF.fetch(`${ORIGIN}/${oldPath}?utm_source=x`, { redirect: 'manual' })
+    expect(res.headers.get('location')).toBe(`${ORIGIN}/host-redirect-query-new?utm_source=x`)
+  })
+
+  it('a live story at the path always wins over a redirect, and creating one deletes the trap', async () => {
+    const story = await createStory('Host-Redirect Reoccupy Source')
+    const oldPath = story.path
+    await patchJson<StoryMeta>(`/folio/stories/${story.id}`, { slug: 'host-redirect-reoccupy-new' })
+    expect(
+      (await getJson<{ rows: Redirect[] }>('/folio/redirects')).rows.some(
+        (r) => r.from === oldPath,
+      ),
+    ).toBe(true)
+
+    // A fresh story created at exactly the vacated path makes it live again —
+    // reoccupying the trap rather than merely shadowing it.
+    const reoccupied = await postJson<StoryMeta>('/folio/stories', {
+      title: 'Reoccupier',
+      slug: oldPath,
+    })
+    expect(reoccupied.path).toBe(oldPath)
+    await publish(reoccupied.id)
+
+    const res = await SELF.fetch(`${ORIGIN}/${oldPath}`, { redirect: 'manual' })
+    expect(res.status).not.toBe(301)
+
+    const list = await getJson<{ rows: Redirect[] }>('/folio/redirects')
+    expect(list.rows.some((r) => r.from === oldPath)).toBe(false)
+  })
+
+  it('an unsafe stored target never reaches a Location header', async () => {
+    await env.DB.prepare(
+      `insert into redirects (from_path, to_path, status, source, story_id, created_at)
+       values (?, ?, ?, 'manual', null, ?)`,
+    )
+      .bind('host-redirect-unsafe', 'javascript:alert(1)', 301, Date.now())
+      .run()
+
+    const res = await SELF.fetch(`${ORIGIN}/host-redirect-unsafe`, { redirect: 'manual' })
+    expect(res.status).toBe(404)
   })
 })
 

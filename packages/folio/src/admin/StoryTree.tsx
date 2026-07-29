@@ -18,7 +18,9 @@ interface Props {
   onOpen: (story: StoryNode) => void
   onCreate: (title: string, parentId: string | null) => Promise<void>
   onMove: (id: string, parentId: string | null, index: number) => Promise<void>
-  onDelete: (story: StoryNode) => Promise<void>
+  /** Requests the delete confirmation (redirects.md); the editor owns whether
+   * it is showing and what actually happens next. */
+  onDelete: (story: StoryNode) => void
 }
 
 export function StoryTree({ tree, currentId, onOpen, onCreate, onMove, onDelete }: Props) {
@@ -149,7 +151,7 @@ function Level({
                   title="Delete page and children"
                   onClick={(e) => {
                     e.stopPropagation()
-                    void onDelete(node)
+                    onDelete(node)
                   }}
                 >
                   ×

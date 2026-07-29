@@ -8,6 +8,7 @@ import { withBindings } from './middleware'
 import { assetRoutes } from './routes/assets'
 import { editorRoutes } from './routes/editor'
 import { historyRoutes } from './routes/history'
+import { redirectRoutes } from './routes/redirects'
 import { storyRoutes } from './routes/stories'
 import type { FolioRuntime } from './runtime'
 import type { FolioConfig, FolioEnv } from './types'
@@ -48,6 +49,7 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   app.route('/', historyRoutes<Env>(rt))
   app.route('/', assetRoutes<Env>())
   app.route('/', editorRoutes<Env>(rt))
+  app.route('/', redirectRoutes<Env>())
 
   return app
 }
