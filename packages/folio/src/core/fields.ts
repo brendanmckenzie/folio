@@ -116,6 +116,29 @@ export type Field =
    * (`document-types.md` architecture decision 5).
    */
   | ({ kind: 'reference'; types?: readonly string[] } & Common)
+  /**
+   * A hand-picked, **ordered** list of documents
+   * (`../../../docs/specs/content-model/data-documents.md` architecture
+   * decision 3): "these three people, in this order".
+   *
+   * The plural of `reference`, and deliberately not a `collection` with a manual
+   * filter — a query cannot express an order somebody chose by dragging, and
+   * `ord` on the records themselves is one global order rather than a per-usage
+   * one.
+   *
+   * Stored as an array of story ids. `types` narrows the picker and is
+   * re-checked by `resolveReferences`, exactly as `reference`'s is. `min` is
+   * surfaced in the admin as a warning and **not** enforced on write, because
+   * `required` is declared-and-ignored across the whole field system and this
+   * field should not invent its own enforcement ahead of the rest; `max` *is*
+   * enforced by the input, which is the only place a pick can be refused.
+   */
+  | ({
+      kind: 'references'
+      types?: readonly string[]
+      min?: number
+      max?: number
+    } & Common)
   // Children are separate bloks, not a value on the parent, so `blocks` is the
   // one kind that cannot carry a `default` — a preset's `children` is the
   // equivalent (`field-defaults-and-presets.md`, decision 1) — and, for the same
@@ -177,6 +200,10 @@ export const multilink = <const T extends readonly LinkKind[]>(
 
 export const richtext = (o: Opts<'richtext'> = {}) => ({ kind: 'richtext' as const, ...o })
 export const reference = (o: Opts<'reference'> = {}) => ({ kind: 'reference' as const, ...o })
+export const references = (o: Defaulted<'references', string[]> = {}) => ({
+  kind: 'references' as const,
+  ...o,
+})
 
 export const select = <const T extends readonly SelectOption[]>(
   o: Omit<Opts<'select'>, 'options' | 'default'> & { options: T; default?: T[number]['value'] },
@@ -210,16 +237,21 @@ export type ValueOf<F extends Field> = F extends { kind: 'blocks' | 'richtext' }
             ? ResolvedAsset[]
             : F extends { kind: 'reference' }
               ? ResolvedReference | null
-              : // Never null: an empty page is a page, so a block writes
-                // `list.items.map(…)` without a guard and an empty collection
-                // renders its own empty state rather than crashing.
-                F extends { kind: 'collection' }
-                ? ResolvedCollection
-                : F extends { kind: 'select'; options: readonly (infer O)[] }
-                  ? O extends SelectOption
-                    ? O['value']
+              : // Never null, and never with a hole in it: an unresolvable entry
+                // is dropped, so a block writes `team.map(…)` without guarding
+                // each item (`data-documents.md` decision 3).
+                F extends { kind: 'references' }
+                ? ResolvedReference[]
+                : // Never null: an empty page is a page, so a block writes
+                  // `list.items.map(…)` without a guard and an empty collection
+                  // renders its own empty state rather than crashing.
+                  F extends { kind: 'collection' }
+                  ? ResolvedCollection
+                  : F extends { kind: 'select'; options: readonly (infer O)[] }
+                    ? O extends SelectOption
+                      ? O['value']
+                      : string
                     : string
-                  : string
 
 export type PropsOf<F extends Record<string, Field>> = { [K in keyof F]: ValueOf<F[K]> }
 
@@ -243,7 +275,10 @@ export function defaultValue(f: Field): Json {
     case 'richtext':
     case 'reference':
       return null
+    // Both plural, both empty rather than null, so a fresh block's stored value
+    // already has the shape its input and its renderer expect.
     case 'multiasset':
+    case 'references':
       return []
     default:
       return ''

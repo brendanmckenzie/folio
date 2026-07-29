@@ -6,7 +6,7 @@
  * `folio/engine` instead.
  */
 
-export { defineBlock, toRegistry, toSchemaIndex, toManifest } from './block'
+export { defineBlock, defineRecord, toRegistry, toSchemaIndex, toManifest } from './block'
 export type { AnyBlockDef, BlockDef, Registry } from './block'
 
 export { matches } from './conditions'
@@ -21,6 +21,7 @@ export {
   multilink,
   number,
   reference,
+  references,
   richtext,
   select,
   text,
@@ -71,6 +72,7 @@ export {
   asAsset,
   asAssets,
   asLink,
+  asStoryIds,
   isImageAsset,
   isLinkEmpty,
   isSafeHref,
@@ -107,6 +109,7 @@ export {
   resolveCollection,
   resolveLink,
   resolveReference,
+  resolveReferences,
   resolveValue,
 } from './resolve'
 export type {

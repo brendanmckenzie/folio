@@ -30,6 +30,7 @@ import {
   asAsset,
   asAssets,
   asLink,
+  asStoryIds,
   isImageAsset,
   isSafeHref,
   type AssetValue,
@@ -287,10 +288,12 @@ const pct = (n: number) => `${Math.round(n * 1000) / 10}%`
 const round = (n: number) => Math.round(n * 1000) / 1000
 
 /**
- * Story ids a document points at through `reference` fields.
+ * Story ids a document points at through `reference` and `references` fields.
  *
  * The caller loads exactly these and nothing else, so a page with no references
- * costs no extra reads at all.
+ * costs no extra reads at all — and a `references()` field naming six people
+ * costs one document read per distinct target, batched with everything else
+ * (`data-documents.md` decision 3).
  */
 export function referencedIds(doc: Doc, schema: SchemaIndex): string[] {
   const out = new Set<string>()
@@ -298,9 +301,14 @@ export function referencedIds(doc: Doc, schema: SchemaIndex): string[] {
     const fields = schema[blok.type]?.fields
     if (!fields) continue
     for (const [name, field] of Object.entries(fields)) {
-      if (field.kind !== 'reference') continue
-      const id = blok.data[name]
-      if (typeof id === 'string' && id) out.add(id)
+      if (field.kind === 'reference') {
+        const id = blok.data[name]
+        if (typeof id === 'string' && id) out.add(id)
+        continue
+      }
+      if (field.kind === 'references') {
+        for (const id of asStoryIds(blok.data[name])) out.add(id)
+      }
     }
   }
   return [...out]
@@ -358,6 +366,34 @@ export function resolveReference(
 }
 
 /**
+ * What a `references` field hands to `render`, before the renderer adds each
+ * entry's `content`: the targets that resolved, **in the stored order**.
+ *
+ * Unresolvable entries are **dropped rather than left as holes**
+ * (`data-documents.md` decision 3): a deleted person should not render an empty
+ * card, and a block author iterating the list must not have to guard every item.
+ * The admin's input shows the same entry as "missing (deleted)" so the editor can
+ * see why the list got shorter — the renderer hides the damage, the editor
+ * surfaces it, which is the same split `multilink`'s `broken` flag makes.
+ *
+ * `types` is the field's own `references({ types })`, re-checked here as well as
+ * narrowed in the picker, for the reason `resolveReference` re-checks its own:
+ * content also arrives from an importer and over the API.
+ */
+export function resolveReferences(
+  value: Json | undefined,
+  resolution: Resolution,
+  types?: readonly string[],
+): ReferenceTarget[] {
+  const out: ReferenceTarget[] = []
+  for (const id of asStoryIds(value)) {
+    const target = resolveReference(id, resolution, types)
+    if (target) out.push(target)
+  }
+  return out
+}
+
+/**
  * What a `collection` field hands to `render`: the answer the resolution already
  * holds for this field's query, or an empty page.
  *
@@ -402,6 +438,8 @@ export function resolveValue(
       return resolveAssets(value, resolution)
     case 'reference':
       return resolveReference(value, resolution, field.types)
+    case 'references':
+      return resolveReferences(value, resolution, field.types)
     case 'collection':
       return resolveCollection(field, value, resolution)
     case 'number':

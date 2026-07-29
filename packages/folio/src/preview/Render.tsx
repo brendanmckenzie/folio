@@ -3,7 +3,13 @@ import type { Registry } from '../core/block'
 import { childrenOf, type Doc } from '../core/doc'
 import type { Field } from '../core/fields'
 import { fieldValue } from '../core/locales'
-import { EMPTY_RESOLUTION, resolveReference, resolveValue, type Resolution } from '../core/resolve'
+import {
+  EMPTY_RESOLUTION,
+  resolveReference,
+  resolveReferences,
+  resolveValue,
+  type Resolution,
+} from '../core/resolve'
 import { asRichtext, sanitiseRichtext } from '../core/richtext'
 import { RichText } from './RichText'
 
@@ -35,6 +41,21 @@ export function RenderBlok({
     return edit ? <div className="folio-unknown">Unknown block type “{blok.type}”</div> : null
   }
 
+  /**
+   * `render` is optional (`../../../docs/specs/content-model/data-documents.md`
+   * checkpoint 1). Guarded here, above the props loop, so a block with nothing to
+   * render also does no resolution work — and guarded the same way an unknown
+   * type is, including not descending into children: a placeholder that then drew
+   * its slots would be scaffolding pretending to be a layout.
+   */
+  if (!def.render) {
+    return edit ? (
+      <div className="folio-unrendered">
+        “{def.label || blok.type}” has no renderer. It is data other pages read.
+      </div>
+    ) : null
+  }
+
   const props: Record<string, unknown> = { uid }
   // Every field value this renderer reads goes through `fieldValue`
   // (`../../../docs/specs/content-model/localisation.md` architecture decision
@@ -63,25 +84,16 @@ export function RenderBlok({
     if (field.kind === 'reference') {
       const target = resolveReference(fieldValue(blok, name, locale), resolution, field.types)
       props[name] = target
-        ? {
-            ...target,
-            // Rendered without `edit` and without uid markers: this content
-            // belongs to another story, so clicking it here must not offer to
-            // edit it in the context of this one.
-            //
-            // `docs` is emptied on the way down, which is what bounds resolution
-            // to one level and stops a story that references itself from
-            // rendering until the stack gives out.
-            content: (
-              <RenderBlok
-                doc={target.doc}
-                registry={registry}
-                uid={target.doc.root}
-                resolution={{ ...resolution, docs: {} }}
-              />
-            ),
-          }
+        ? { ...target, content: referenceContent(target.doc, registry, resolution) }
         : null
+      continue
+    }
+    // The plural, in the editor's chosen order, with unresolvable entries already
+    // dropped by `resolveReferences` (`data-documents.md` decision 3).
+    if (field.kind === 'references') {
+      props[name] = resolveReferences(fieldValue(blok, name, locale), resolution, field.types).map(
+        (target) => ({ ...target, content: referenceContent(target.doc, registry, resolution) }),
+      )
       continue
     }
     if (field.kind !== 'blocks') {
@@ -120,6 +132,35 @@ export function RenderBlok({
     <div data-folio-uid={uid} data-folio-type={blok.type}>
       {el}
     </div>
+  )
+}
+
+/**
+ * The rendered form of a referenced document — what `reference.content` and each
+ * `references[i].content` hold.
+ *
+ * **Literally `null`** when the target's root block has no renderer
+ * (`../../../docs/specs/content-model/data-documents.md` checkpoint 2), rather
+ * than an element that happens to render nothing: a record that is pure data
+ * gives `content: null`, so `{person.content ?? <MyOwnCard {...person.data} />}`
+ * means what it says. An always-truthy element would make that fallback dead code.
+ *
+ * Rendered without `edit` and without uid markers: this content belongs to
+ * another story, so clicking it here must not offer to edit it in the context of
+ * this one. `docs` is emptied on the way down, which is what bounds resolution to
+ * one level and stops a story that references itself from rendering until the
+ * stack gives out.
+ */
+function referenceContent(doc: Doc, registry: Registry, resolution: Resolution): ReactNode {
+  const root = doc.bloks[doc.root]
+  if (!root || !registry[root.type]?.render) return null
+  return (
+    <RenderBlok
+      doc={doc}
+      registry={registry}
+      uid={doc.root}
+      resolution={{ ...resolution, docs: {} }}
+    />
   )
 }
 

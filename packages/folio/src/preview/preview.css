@@ -51,3 +51,17 @@
   background: #fdecec;
   border: 1px solid #f2c0c0;
 }
+
+/* A block whose definition declares no `render`
+   (docs/specs/content-model/data-documents.md checkpoint 1). Neutral rather than
+   red, unlike .folio-unknown above: an unknown type is a broken document, while
+   this is a record root doing exactly what it was declared to do. Edit mode only
+   — a published page never draws it at all. */
+.folio-unrendered {
+  padding: 1rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8125rem;
+  color: #5a5f66;
+  background: #f4f5f7;
+  border: 1px dashed #ccd0d6;
+}
