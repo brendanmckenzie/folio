@@ -16,7 +16,12 @@ const layout: Field = {
 const image: Field = { kind: 'asset', showIf: { field: 'layout', eq: 'split' } }
 const imageAlt: Field = {
   kind: 'text',
-  showIf: { all: [{ field: 'layout', eq: 'split' }, { field: 'image', isSet: true }] },
+  showIf: {
+    all: [
+      { field: 'layout', eq: 'split' },
+      { field: 'image', isSet: true },
+    ],
+  },
 }
 const legacyId: Field = { kind: 'text', hidden: true }
 const body: Field = { kind: 'blocks', allow: ['paragraph'] }
@@ -62,12 +67,12 @@ describe('visibleEntries', () => {
   })
 
   it('evaluates a combinator against sibling data (all: layout split AND image set)', () => {
-    expect(
-      visibleEntries(fields, { layout: 'split', image: 'x.png' }).map(([n]) => n),
-    ).toContain('imageAlt')
-    expect(
-      visibleEntries(fields, { layout: 'split', image: '' }).map(([n]) => n),
-    ).not.toContain('imageAlt')
+    expect(visibleEntries(fields, { layout: 'split', image: 'x.png' }).map(([n]) => n)).toContain(
+      'imageAlt',
+    )
+    expect(visibleEntries(fields, { layout: 'split', image: '' }).map(([n]) => n)).not.toContain(
+      'imageAlt',
+    )
     expect(
       visibleEntries(fields, { layout: 'full', image: 'x.png' }).map(([n]) => n),
     ).not.toContain('imageAlt')

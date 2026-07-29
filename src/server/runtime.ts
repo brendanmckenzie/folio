@@ -44,7 +44,10 @@ export interface FolioRuntime {
   draftFor: (bindings: FolioBindings, story: StoryMeta) => Promise<Doc>
   draft: (bindings: FolioBindings, id: string) => Promise<Doc>
   /** `draftFor` plus the syncId it was read at, atomically. See `PublishDeps.draftWithSyncId`. */
-  draftForWithSyncId: (bindings: FolioBindings, story: StoryMeta) => Promise<{ doc: Doc; syncId: number }>
+  draftForWithSyncId: (
+    bindings: FolioBindings,
+    story: StoryMeta,
+  ) => Promise<{ doc: Doc; syncId: number }>
   resolve: (bindings: FolioBindings, doc?: Doc, opts?: { draft?: boolean }) => Promise<Resolution>
   /**
    * What the publish workflows need, assembled from bindings alone — the one

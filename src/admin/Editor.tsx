@@ -69,7 +69,11 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
   // "Published" is the newest `publish` version, not a second read of
   // published_doc (architecture decision 1): what the top bar's state and the
   // comparison view are both built from.
-  const published = usePublishedDoc({ apiBase, versions: versionsList.versions, liveDoc: state.doc })
+  const published = usePublishedDoc({
+    apiBase,
+    versions: versionsList.versions,
+    liveDoc: state.doc,
+  })
 
   // A publish or unpublish changes the tree's badge and adds a retained
   // version (unpublish adds none, but reloading unconditionally costs nothing
@@ -200,7 +204,9 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
             busy={versions.busy}
             onCancel={() => setConfirmingDiscard(false)}
             onConfirm={() => {
-              void versions.restore(viewing.version, viewing.doc).then(() => setConfirmingDiscard(false))
+              void versions
+                .restore(viewing.version, viewing.doc)
+                .then(() => setConfirmingDiscard(false))
             }}
           />
         ) : null}

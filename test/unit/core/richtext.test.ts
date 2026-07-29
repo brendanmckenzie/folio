@@ -306,7 +306,9 @@ describe('sanitiseRichtext', () => {
             {
               type: 'text',
               text: 'x',
-              marks: [{ type: 'link', attrs: { link: { kind: 'url', url: 'javascript:alert(1)' } } }],
+              marks: [
+                { type: 'link', attrs: { link: { kind: 'url', url: 'javascript:alert(1)' } } },
+              ],
             },
           ],
         },
