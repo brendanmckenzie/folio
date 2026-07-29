@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  globalOwning,
   type PostableWindow,
   PreviewBridge,
   readyFrames,
 } from '../../../src/admin/hooks/usePreviewBridge'
+import type { Doc } from '../../../src/core/doc'
 import { PROTOCOL_VERSION } from '../../../src/core/protocol'
 
 /**
@@ -210,6 +212,47 @@ describe('PreviewBridge: onReady', () => {
       },
       { source: 'folio-admin', v: PROTOCOL_VERSION, type: 'select', uid: 'blk_2' },
     ])
+  })
+})
+
+// content-model/globals.md checkpoint 3: clicking a block inside a global
+// while previewing something else offers "Edit `<name>` →" rather than
+// selecting it. `globalOwning` is the whole decision, pure so it needs
+// neither a DOM nor a mounted bridge.
+describe('globalOwning', () => {
+  const blok = (uid: string, type = 'x') => ({
+    uid,
+    type,
+    parent: null,
+    slot: null,
+    order: 'a0',
+    data: {},
+  })
+  const header: Doc = { root: 'hdr1', bloks: { hdr1: blok('hdr1') } }
+  const footer: Doc = { root: 'ftr1', bloks: { ftr1: blok('ftr1') } }
+  const openDoc: Doc = { root: 'pg1', bloks: { pg1: blok('pg1') } }
+
+  it('is null for a uid that belongs to the document currently open', () => {
+    expect(globalOwning('pg1', openDoc, { header, footer })).toBeNull()
+  })
+
+  it('names the global a uid belongs to when it is not in the open document', () => {
+    expect(globalOwning('hdr1', openDoc, { header, footer })).toBe('header')
+    expect(globalOwning('ftr1', openDoc, { header, footer })).toBe('footer')
+  })
+
+  it('is null when the uid belongs to neither the open document nor any global', () => {
+    expect(globalOwning('nope', openDoc, { header, footer })).toBeNull()
+  })
+
+  it('is null with no globals at all, and with no uid', () => {
+    expect(globalOwning('hdr1', openDoc, undefined)).toBeNull()
+    expect(globalOwning(null, openDoc, { header })).toBeNull()
+  })
+
+  it('prefers the open document over a global, if a uid somehow existed in both', () => {
+    const clash: Doc = { root: 'hdr1', bloks: { hdr1: blok('hdr1') } }
+    expect(globalOwning('hdr1', clash, { header })).toBeNull()
   })
 })
 

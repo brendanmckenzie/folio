@@ -18,6 +18,9 @@ export interface FolioContextValue {
   /** Every declared document type (`document-types.md`), off the manifest. What
    * labels a row, and what a picker filters against. */
   types: readonly DocumentType[]
+  /** `FolioConfig.globals` (`../../../docs/specs/content-model/globals.md`),
+   * off the manifest: the subset of `singleton` types the Globals rail lists. */
+  globals: readonly string[]
   /** Where Folio's routes are mounted, for uploads and the media library. */
   apiBase: string
   /**

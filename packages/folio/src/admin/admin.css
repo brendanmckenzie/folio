@@ -1012,6 +1012,39 @@ button.tree__menu-heading {
   margin-top: 0.3rem;
 }
 
+/* ------------------------------------------------------------ globals ---- */
+/* content-model/globals.md: the configured globals, above the rail's tabs so
+   they are reachable regardless of which tab is open. */
+
+.globals {
+  padding: 0.5rem 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.globals__head h2 {
+  margin: 0 0 0.3rem;
+  font-size: 0.6875rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.globals__level {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin: 0 0 0.5rem;
+  padding: 0;
+  list-style: none;
+}
+.globals__row {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  border-radius: 999px;
+}
+.globals__row.is-current {
+  background: #e6f2ff;
+  border-color: #b8dcff;
+}
+
 /* --------------------------------------------------------------- rail ---- */
 
 .rail {

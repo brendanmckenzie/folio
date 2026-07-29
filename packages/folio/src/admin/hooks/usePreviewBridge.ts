@@ -23,6 +23,35 @@ interface Options {
   blocks: Blocks
   /** Brings the Blocks rail forward when a block is picked in the preview. */
   onPick: () => void
+  /**
+   * A block belonging to a global was clicked while previewing something else
+   * (`../../../docs/specs/content-model/globals.md` checkpoint 3): the editor
+   * offers "Edit `<name>` →" instead of selecting it, since there is exactly
+   * one editable document at a time. Absent gets today's behaviour — every
+   * click selects, which is correct wherever `resolution.globals` is empty.
+   */
+  onGlobalClick?: (name: string) => void
+}
+
+/**
+ * Which configured global owns `uid`, or null when it belongs to the document
+ * currently open (or to neither) — the whole decision behind "Edit `<name>` →"
+ * (`globals.md` checkpoint 3). Pure so it is tested without a DOM or a mounted
+ * bridge: a block inside the open document always wins, even if a global
+ * happens to hold a uid nobody would ever produce twice.
+ */
+export function globalOwning(
+  uid: string | null,
+  doc: Doc | null,
+  globals: Record<string, Doc> | undefined,
+): string | null {
+  if (!uid) return null
+  if (doc?.bloks[uid]) return null
+  if (!globals) return null
+  for (const [name, globalDoc] of Object.entries(globals)) {
+    if (globalDoc.bloks[uid]) return name
+  }
+  return null
 }
 
 /** The one method this seam needs from `HTMLIFrameElement['contentWindow']`. */
@@ -141,6 +170,7 @@ export function usePreviewBridge({
   root,
   blocks,
   onPick,
+  onGlobalClick,
 }: Options): (node: HTMLIFrameElement | null) => void {
   const frame = useRef<HTMLIFrameElement | null>(null)
   const bridge = useMemo(() => new PreviewBridge(), [])
@@ -234,8 +264,20 @@ export function usePreviewBridge({
           }),
         )
       } else if (msg.type === 'select') {
-        store.select(msg.uid)
-        if (showing.current.mode === 'live') onPick()
+        // A click inside a global while something else is open offers "Edit
+        // `<name>` →" rather than selecting a block that is not part of the
+        // document on screen (`globals.md` checkpoint 3).
+        const owner = globalOwning(
+          msg.uid,
+          store.getSnapshot().doc,
+          latest.current.resolution.globals,
+        )
+        if (owner) {
+          onGlobalClick?.(owner)
+        } else {
+          store.select(msg.uid)
+          if (showing.current.mode === 'live') onPick()
+        }
       } else if (msg.type === 'add') {
         if (showing.current.mode === 'viewing') return
         blocks.addFirst(msg.parent, msg.slot)
@@ -243,7 +285,7 @@ export function usePreviewBridge({
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [blocks, bridge, onPick, store])
+  }, [blocks, bridge, onGlobalClick, onPick, store])
 
   /**
    * Entering or leaving a version preview swaps the document wholesale: no

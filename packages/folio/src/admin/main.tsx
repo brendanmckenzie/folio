@@ -25,6 +25,8 @@ interface Loaded {
   /** Every declared document type (`document-types.md`). Never empty: the
    * server refuses to construct without one. */
   types: DocumentType[]
+  /** `FolioConfig.globals` (`content-model/globals.md`). */
+  globals: string[]
 }
 
 function App({ boot }: { boot: Boot }) {
@@ -36,7 +38,11 @@ function App({ boot }: { boot: Boot }) {
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`schema ${r.status}`))))
       .then((m) => {
         const manifest = m as Manifest
-        setLoaded({ schema: indexManifest(manifest), types: manifest.types ?? [] })
+        setLoaded({
+          schema: indexManifest(manifest),
+          types: manifest.types ?? [],
+          globals: manifest.globals ?? [],
+        })
       })
       .catch((e: Error) => setError(e.message))
   }, [boot.apiBase])
@@ -60,6 +66,7 @@ function App({ boot }: { boot: Boot }) {
       storyId={boot.storyId}
       schema={loaded.schema}
       types={loaded.types}
+      globals={loaded.globals}
       apiBase={boot.apiBase}
     />
   )
