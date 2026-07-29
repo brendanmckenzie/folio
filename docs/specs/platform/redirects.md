@@ -3,7 +3,7 @@
 > **Group:** platform
 > **Build order:** 2
 > **Size:** S
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** `0004_redirects.sql`
 > **Last updated:** 2026-07-29
@@ -438,3 +438,57 @@ fires.
 - **Importing a redirect list** from an old CMS. One loop over
   `POST /folio/redirects`, and better placed in `../platform/content-api.md`'s import
   story.
+
+## Implementation notes
+
+All three phases landed as written; all five owner decision checkpoints were
+accepted and built as recommended. No Open questions section existed for this
+spec.
+
+**What landed.** `migrations/0004_redirects.sql` byte-for-byte as specified.
+`server/redirects.ts` holds `normalisePath`, `redirectStatements` (the
+three-statement collapse), `lookupRedirect`, `listRedirects` (paginated with a
+`(created_at, from_path)` keyset cursor, filterable by `source`),
+`upsertRedirect` and `deleteRedirect`. `updateStory` and `deleteStoryStatement`
+batch redirect statements alongside their row writes exactly as decision 1 and
+decision 4 describe; `createStory` clears a redirect claiming its new path in
+the same batch as its insert. `Folio<Env>` gained `redirect(env, path)`,
+shaped to pair with `unpublish.md`'s `status`. Routes: `GET/POST
+/folio/redirects`, `DELETE /folio/redirects/:from{.+}`. Admin: a Redirects rail
+tab (flat list, filter by source, add, delete) and a delete confirmation
+dialog with the checked-by-default redirect-to-parent checkbox.
+
+**What the spec's Ground truth got wrong about the codebase.** "The delete
+confirmation gains a checked-by-default checkbox" (Architecture decision 4)
+assumed a delete confirmation already existed. It did not: clicking a page's ×
+in the tree deleted it immediately, with no dialog at all. This phase adds the
+confirmation itself (`DeleteDialog.tsx`, mirroring the existing
+`UnpublishDialog.tsx`) rather than only adding a checkbox to one — a
+by-product of this spec, not a regression it introduced, and arguably an
+overdue fix on its own.
+
+**One deliberate design choice beyond the spec's text.** `upsertRedirect` (the
+manual-add path) does **not** reuse `redirectStatements`'s three-statement
+collapse, even though decision 3 reads as if collapsing should be universal.
+Running the collapse for a manual add would delete or rewrite whatever row
+happens to already share the new `to_path` — correct when that path was just
+vacated by a real page, wrong when it is merely another manual redirect's
+source (adding `b → a` would silently delete an existing `a → b` row nobody
+asked to touch). The edge case "redirect loops through manual rows" already
+in this spec's own text confirms the intended behaviour is a refusal, not a
+silent rewrite, so the POST route checks for that specific 2-cycle instead.
+
+**Deferred / simplified.** `GET /folio/redirects`'s pagination is real but
+untested beyond the unit level for ties on `created_at` at a page boundary;
+the admin screen itself doesn't page past the first batch, since "a flat list
+is enough" was the brief. The admin's manual-add form does no client-side
+validation beyond non-empty fields — every real check (occupied path, loop)
+already lives server-side and surfaces through the existing notice toast.
+
+**Tests added:** 41 across the three phases (616 → 657): `normalisePath` and
+the statement builder (unit, fake D1), every acceptance criterion against
+real D1 in `test/workers/stories.test.ts`, the three routes plus a live
+host-integration round trip (real 301s, query-string preservation, "a live
+page always wins") in `test/workers/http.test.ts`, and `deleteConfirmation`
+in `test/unit/admin/delete-dialog.test.ts`. `scripts/redirects-test.mjs` was
+written and run live against `pnpm dev` (8/8 passed).

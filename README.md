@@ -75,6 +75,16 @@ export default {
     // context a document deliberately lacks — story ids to current URLs.
     const doc = await folio.published(env, path)
     if (!doc) {
+      // A rename or move recorded a redirect for the path just vacated;
+      // folio.redirect is the one indexed read that answers it. Checked only
+      // once folio.published has already said null, so a live page always
+      // wins — Folio never intercepts inside handle() either.
+      const hit = await folio.redirect(env, path)
+      if (hit) {
+        const location = new URL(hit.to, url.origin)
+        location.search = url.search // query strings survive a redirect
+        return Response.redirect(location.toString(), hit.status)
+      }
       // folio.status tells apart a page taken down on purpose from one that
       // never existed, so a host can answer 410 for the former and 404 for
       // the latter instead of guessing. Folio itself never assumes either.
@@ -427,6 +437,33 @@ diff(live, target) -> Mutation[]  -> store.tx(mutations)
 
 So a restore reaches other editors, lands in the activity trail, and Cmd+Z undoes
 it. Reverting a title change plus one added block produces exactly two mutations.
+
+## Redirects
+
+**Internal links never need a redirect.** A link stores the story's `id`, not its
+path, so renaming or moving the page it points at is fixed for every link the
+moment `resolve` runs — there is nothing to redirect *to*, because nothing broke.
+Redirects exist for the links Folio does not own: bookmarks, a search index, a
+newsletter that already went out, a partner site linking to `/services/strategy`.
+
+`updateStory` already computes every old path and its replacement in one batch, at
+the exact moment the change is true, so capturing a redirect there is nearly free.
+Renaming or moving a page writes a `301` for every path it vacates; deleting one
+offers a redirect to its parent, checked by default in the confirmation. Chains are
+collapsed at write time — renaming `a` to `b` and then `b` to `c` repoints the `a`
+row straight at `c` — so a lookup is always one indexed read and a loop is
+unrepresentable. Editors can also add a redirect by hand, for a URL that never
+existed in Folio at all (a print campaign, a legacy CMS); the **Redirects** tab
+lists both kinds, filterable by source, with add and delete.
+
+Folio never intercepts a redirect inside `handle()` — that would shadow a host
+route that legitimately lives at the same path now. Instead the host asks:
+`folio.redirect(env, path)` returns `{ to, status } | null`, checked only once
+`folio.published` has already answered null, so a live page always wins (creating
+a story at a redirected path deletes the row anyway). See "Mount it in your
+Worker" above for the three lines this takes, and note that `to` is only ever a
+path or an absolute URL that has passed `isSafeHref` — safe to hand straight to a
+`Location` header.
 
 ## Verified
 
