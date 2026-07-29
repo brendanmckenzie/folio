@@ -222,8 +222,14 @@ Real scale breaks the current UI:
   instead of three edits. Worth an explicit pass over
   `components.3001038.json` once Phase 6's stub generator exists, rather than
   guessing here. See `docs/specs/editing/field-defaults-and-presets.md`.
-- **Duplicate a block**, and copy/paste blocks between pages. Editors will ask
-  within a day. **S**
+- **Duplicate a block**, and copy/paste blocks between pages — done. Every
+  copy is `insert` mutations through the ordinary store (one transaction, so
+  it inherits sync, undo and the activity trail for free), uids are always
+  re-allocated, and pasting validates the payload against the schema before
+  building a single mutation. Duplicating a whole document works the same way
+  one level up: the *draft* is cloned into a brand-new, unpublished story with
+  no version history of its own. See
+  `docs/specs/editing/duplicate-and-paste.md`.
 - **Collapse/expand** in the block tree, which gets unusable deep in a
   `Collage → Item → Link` nest. **S**
 - **Field-level validation surfaced in the UI** — `required` is declared and

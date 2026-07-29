@@ -1,8 +1,16 @@
-// Imports protocol.ts directly: Node strips types natively and the module has
-// only type-only imports, so there is nothing to compile.
+// Library source is imported directly. ./lib/ts-resolve.mjs teaches Node to
+// resolve the extensionless relative specifiers the library uses — needed
+// from here on, since core/clone.ts (unlike protocol.ts) has real relative
+// imports of its own.
+import './lib/ts-resolve.mjs'
+
 const { PROTOCOL_VERSION } = await import(
   new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
 )
+const { cloneSubtree } = await import(
+  new URL('../packages/folio/src/core/clone.ts', import.meta.url)
+)
+const { keyAtIndex } = await import(new URL('../packages/folio/src/core/doc.ts', import.meta.url))
 
 const BASE = 'ws://localhost:5199/folio/story/sty_home/socket'
 const HTTP = 'http://localhost:5199'
@@ -108,6 +116,96 @@ check(
   `n=${catchup.deltas?.length}`,
 )
 check('catchup watermark advanced', catchup.syncId === d2.syncId)
+
+// --- duplicate-and-paste.md: one client duplicates a subtree; the other
+// receives it as a single transaction, and both documents converge ---
+const sectionUid = 'sec00000'
+const itemUid = 'itm00000'
+// keyAtIndex, not a hand-typed literal: fractional-indexing's keys are not
+// arbitrary strings, and 'z0' (say) is not a legal one.
+const sectionOrder = keyAtIndex([], 0)
+const itemOrder = keyAtIndex([], 0)
+a.send({
+  type: 'tx',
+  txId: 'tx-section',
+  mutations: [
+    {
+      t: 'insert',
+      blok: {
+        uid: sectionUid,
+        type: 'section',
+        parent: root,
+        slot: 'body',
+        order: sectionOrder,
+        data: {},
+      },
+    },
+    {
+      t: 'insert',
+      blok: {
+        uid: itemUid,
+        type: 'item',
+        parent: sectionUid,
+        slot: 'items',
+        order: itemOrder,
+        data: { label: 'One' },
+      },
+    },
+  ],
+})
+await a.expect((m) => m.type === 'delta' && m.txId === 'tx-section')
+await c.expect((m) => m.type === 'delta' && m.txId === 'tx-section')
+
+const sourceDoc = {
+  root,
+  bloks: {
+    [root]: { uid: root, type: 'page', parent: null, slot: null, order: 'a0', data: {} },
+    [sectionUid]: {
+      uid: sectionUid,
+      type: 'section',
+      parent: root,
+      slot: 'body',
+      order: sectionOrder,
+      data: {},
+    },
+    [itemUid]: {
+      uid: itemUid,
+      type: 'item',
+      parent: sectionUid,
+      slot: 'items',
+      order: itemOrder,
+      data: { label: 'One' },
+    },
+  },
+}
+const dupOrder = keyAtIndex([sectionOrder], 1)
+const duplicated = cloneSubtree(sourceDoc, sectionUid, {
+  parent: root,
+  slot: 'body',
+  order: dupOrder,
+})
+check('cloneSubtree produces the section plus its one child', duplicated.length === 2)
+check(
+  'every uid in the duplicate is fresh',
+  new Set(duplicated.map((b) => b.uid)).size === 2 &&
+    !duplicated.some((b) => b.uid === sectionUid || b.uid === itemUid),
+)
+
+const dupTxId = 'tx-duplicate'
+a.send({ type: 'tx', txId: dupTxId, mutations: duplicated.map((blok) => ({ t: 'insert', blok })) })
+
+const dupOnC = await c.expect((m) => m.type === 'delta' && m.txId === dupTxId)
+check(
+  'the other client receives the duplicate as a single transaction with every blok',
+  dupOnC.mutations.length === duplicated.length,
+  `n=${dupOnC.mutations.length}`,
+)
+
+const dupOnA = await a.expect((m) => m.type === 'delta' && m.txId === dupTxId)
+check(
+  'both clients converge on the identical set of mutations',
+  JSON.stringify(dupOnA.mutations) === JSON.stringify(dupOnC.mutations),
+)
 
 // --- publish snapshots draft to D1 ---
 const pub = await fetch(`${HTTP}/folio/story/sty_home/publish`, { method: 'POST' }).then((r) =>

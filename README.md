@@ -214,6 +214,35 @@ A document's starting content is nothing new: it is the root block's own
 preset named `'default'`. A root block with no such preset seeds a bare root,
 exactly as before this feature existed.
 
+### Duplicate and paste
+
+Every block-level copy is `insert` mutations through the ordinary store, so it
+is one transaction: one undo step, one delta, one activity entry, whatever
+sync, undo and multiplayer already give any other edit. Duplicating a block
+clones its whole subtree with fresh uids, dropped in right after the
+original:
+
+```tsx
+onDuplicate={(uid) => blocks.duplicate(uid)}
+```
+
+Copy (`Cmd+C`, or a menu action) writes a small self-describing JSON payload
+to the system clipboard — `{ folio: 1, bloks, from }` — with
+`navigator.clipboard.writeText`. Paste (`Cmd+V`) reads the browser's own
+`paste` event instead of asking for clipboard-read permission, and validates
+before building a single mutation: the payload's shape, every block's type
+against the schema, and every child's type against its actual parent's
+declared slot. Uids are always re-allocated, so pasting the same clipboard
+twice inserts two independent copies, and a payload from another site or an
+older schema is refused with a message naming what was wrong rather than
+silently doing nothing.
+
+Duplicating a whole document works the same way one level up: `POST
+/folio/stories/:id/duplicate` clones the *draft* (what the editor is actually
+looking at, unpublished changes included), re-allocates every uid, and seeds a
+brand-new story — unpublished, with no version history of its own. The
+source page is never touched.
+
 ## Stories, paths and page metadata
 
 A story is keyed by an opaque, stable `id`, which is also its Durable Object
@@ -561,10 +590,11 @@ path or an absolute URL that has passed `isSafeHref` — safe to hand straight t
 
 ## Verified
 
-`scripts/sync-test.mjs` (12 checks) exercises the engine against both `vite dev`
+`scripts/sync-test.mjs` (16 checks) exercises the engine against both `vite dev`
 and the production build: bootstrap, cross-client delta, self-ack, presence,
-draft persistence, watermark catchup, publish, and that a published page contains
-no `<script>`.
+draft persistence, watermark catchup, that a client-side `cloneSubtree` duplicate
+arrives at another connected client as one transaction and both converge, publish,
+and that a published page contains no `<script>`.
 
 `scripts/history-test.mjs` (19 checks) covers versioning: checkpoints, publish
 writing a version, list ordering, that the list omits document payloads, that a
