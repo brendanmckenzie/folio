@@ -3,10 +3,10 @@
 > **Group:** platform
 > **Build order:** 15
 > **Size:** M
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** none — `api_tokens` comes from `0007`
-> **Last updated:** 2026-07-29
+> **Last updated:** 2026-07-30
 
 ## Summary
 
@@ -518,8 +518,64 @@ one log entry.
 
 ## Open questions
 
-- Should `PUT /content` support a `mode: 'merge'` that leaves absent fields alone?
-  It would make the locale rule unnecessary and make partial payloads safe — at the
-  cost of no longer being able to express "remove this block" through `PUT`, which
-  is what `PATCH /fields` is for anyway. Leaning yes, as the *default*, with
-  `mode: 'replace'` opt-in.
+None left. Resolved during implementation:
+
+- **`PUT /content` supports `mode: 'merge'`, and it is the default.** Confirmed by the
+  owner, as the leaning proposed. An absent field, `i18n` or slot leaves what is stored
+  alone, which makes a partial payload safe and makes the locale rule unnecessary.
+  `mode: 'replace'` is opt-in and is the only mode that can lose content it was not told
+  about — so a replace that omits `i18n` on a blok holding translations is refused with
+  the locales named, rather than diffing them away. "Remove this block" is `PATCH
+  /fields`, as the question anticipated.
+
+## Implementation notes
+
+Landed 2026-07-30 in four commits (`1577fee`, `e0772b4`, `17b7e90`, `cb825ba`).
+Tests: 1651 → 1791 (66 files). `scripts/api-test.mjs` is 68 checks against a live
+server. No migration and no `PROTOCOL_VERSION` change, as the header says.
+
+**Two questions the spec left to this one, both decided here.**
+
+*`GET /folio/content` stays at `READ` rather than becoming public.* The reasoning is
+recorded in full at the route (`server/routes/content.ts`), and it is threefold: the
+route is *internal* and free to change shape whenever the editor needs it to, so
+declaring it public would freeze a second contract nobody asked for — the documented,
+versioned equivalent is `GET /folio/api/v1/documents` over the same `queryFromParams`
+and the same `rt.query`; `content:read` is the weakest scope a token can hold, so "let a
+script read published content" is one token away, and that is the door; and
+`content_index` holds every indexed field value across the whole site, which makes an
+open query route a bulk-extraction primitive whatever the individual rows say about
+themselves. A published page is unaffected either way and always was — its collections
+resolve server-side inside `resolve()` with no HTTP in the loop.
+
+*A `sng_*` id is addressable exactly like an ordinary story id.* Reading one may create
+the row, which is what `GET /folio/documents` already does at the same access level, and
+it is bounded: only an id whose `sng_` prefix names a **declared** singleton type can
+cause that write. Creating a second instance of a singleton type is refused with a
+message naming the id to write to instead.
+
+**What the nested shape guarantees.** `toNested` / `fromNested` live in `folio/engine`
+and are public, because the Storyblok importer (`PARITY.md` Phase 6) and any
+other bulk-import script need them rather than reaching into the normalised graph to
+allocate uids and fractional orders by hand. uids round-trip: optional on the way in,
+where present means "this blok, in place" and absent means "a new one, between its
+neighbours". Order is positional and existing sibling keys are kept wherever they can
+be, so inserting at the front of a list of fifty is one insert and zero moves — which is
+what keeps version diffs minimal, presence attached to the right block, and undo
+granular. `fromNested` validates against the schema and refuses **by path**
+(`body[0].fields.headng`).
+
+**There is no second door into a document.** A write is read-diff-commit through
+`StoryDO.commit`, exactly as a keystroke is, so it appears in every open editor as a
+delta, lands in the activity trail as `token:<name>`, is undoable, and cannot leave the
+draft and the Durable Object disagreeing. An unchanged payload produces zero mutations
+and writes nothing, so a nightly sync of 400 products of which three changed is three
+writes. `Idempotency-Key` rides on the log's own `tx_id` unique index rather than a table
+of its own — a retry is answered `replayed: true` with the original `syncId` — and is
+scoped per document, because the log is.
+
+`folio.write(env, id, mutations, opts)` is the same path with no HTTP, for a host's own
+Worker. The demo uses it for an in-process sync job and ships a token you can `curl`.
+
+**Reference:** `docs/api.md` is the contract (every route, shape and error code);
+`README.md`'s Content API section carries the reasoning.
