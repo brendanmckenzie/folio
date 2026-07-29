@@ -320,7 +320,23 @@ Non-negotiable for actually delivering an existing site.
 - Import stories: Storyblok's nested `content` tree → Folio's normalised
   `{root, bloks}`, allocating uids and fractional orders. Richtext and asset
   payloads need mapping, and assets need re-hosting to R2. **L**
-- A reconciliation report: which blocks and fields did not map. **S**
+
+  **This got materially smaller.** `docs/specs/platform/content-api.md` landed
+  `toNested` / `fromNested` in `folio/engine` and `folio.write` on `Folio<Env>`,
+  so the importer no longer allocates a uid or a fractional order itself: it maps
+  Storyblok's tree onto Folio's nested shape — which is the same shape, a
+  `component` field becoming a `type` and a `blocks` field becoming an array —
+  and hands it to `fromNested`, then `diff`, then `folio.write`. Two consequences
+  worth naming. `fromNested` **validates against the schema and refuses by path**
+  (`body[0].fields.headng`), which is most of the reconciliation report below,
+  produced by the thing doing the import rather than by a second pass over it. And
+  because the write goes through the mutation log, an import is visible in the
+  editor as it happens, attributed, undoable, and safe to run against a site
+  somebody is already working in. The remaining work is genuinely the mapping:
+  Storyblok richtext → the Tiptap-shaped `RichtextDoc`, and assets to R2.
+- A reconciliation report: which blocks and fields did not map. **S** — and
+  smaller than **S** if the importer collects `NestedError`s per story rather than
+  stopping at the first, since each already carries the path it refused.
 
 ---
 

@@ -1522,6 +1522,175 @@ effect of a write is an audit nobody reads. Adding a check is one entry in
 carries its own `check` name and travels in the report's `content` / `schema`
 arrays, so no route, response shape or admin screen changes.
 
+## Content API
+
+Everything above assumes a person in a browser. `/folio/api/v1` is the same
+content for a script: token-authenticated, versioned, documented in
+[`docs/api.md`](docs/api.md), and — the part that matters — **writing through the
+same mutation log the editor writes through**.
+
+```sh
+TOKEN=folio_…
+curl -H "authorization: Bearer $TOKEN" \
+     http://localhost:5199/folio/api/v1/documents/by-path/about
+```
+
+```jsonc
+{
+  "id": "sty_9f3c1a02",
+  "type": "page",
+  "title": "About us",
+  "path": "about",
+  "url": "/about",
+  "state": "live",
+  "source": "published",
+  "content": {
+    "uid": "9f3c1a02bb47de10",
+    "type": "page",
+    "fields": {
+      "title": "About us",
+      "body": [
+        {
+          "uid": "1a2b3c4d5e6f7081",
+          "type": "hero",
+          "fields": { "heading": "Hello", "align": "center" },
+          "i18n": { "fr": { "heading": "Bonjour" } },
+          "actions": []
+        }
+      ]
+    }
+  }
+}
+```
+
+A stored document is normalised — a flat map keyed by uid, each blok holding its
+own `parent`, `slot` and fractional `order`. That is the right shape for a mutation
+log and the wrong one to ask somebody's import script to construct, so the API
+speaks trees: **a `blocks` field becomes an array in `fields`**, which is the shape
+a block author already sees in `render`. `toNested` and `fromNested`
+(`folio/engine`) are the conversion, and they are public because an importer needs
+them too.
+
+### A write is read, diff, commit
+
+```
+PUT /api/v1/documents/sty_9f3c1a02/content
+  → current  = the story's live draft, from its Durable Object
+  → target   = fromNested(body.content, schema, current)
+  → mutations = diff(current, target)
+  → StoryDO.commit(chunk, actor) per MAX_TX_MUTATIONS
+  → 200 { "changed": 1, "transactions": 1, "syncId": 42 }
+```
+
+Nothing about that is a special path, which is the whole point:
+
+- an editor with the page open **receives the delta and re-renders**, through the
+  per-keystroke machinery, with no reload;
+- the activity trail says `token:import-script`;
+- **Cmd+Z undoes it**, because it is an ordinary transaction;
+- an unchanged payload produces zero mutations and writes nothing, so a nightly
+  sync of 400 products of which 3 changed is three writes;
+- the document caps refuse an oversized write at the door, with the reason.
+
+The alternative — writing `published_doc`, or the Durable Object's `doc` row —
+would have been quicker to build and would have broken all five silently, visible
+only to whoever happened to have the page open at the time.
+
+### uids, and why they are in the payload
+
+`uid` is **optional on the way in**. Present means "this blok, updated in place";
+absent means "a new one, placed between its neighbours". So a read-modify-write
+preserves identity, and version diffs stay minimal, presence stays attached to the
+right block, and undo stays granular. A shape without uids would make every write
+a wholesale replace.
+
+Order is **positional**: send the array in the order you want. `fromNested` keeps
+the longest run of existing sibling keys it can and mints keys only for the gaps,
+so inserting an item at the front of a list of fifty is one insert and zero moves.
+
+### `merge` is the default
+
+`PUT /content` merges unless told otherwise. An absent field, an absent `i18n` and
+an absent slot all leave what is stored alone, so a partial payload is safe:
+
+```sh
+curl -X PUT -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"content":{"uid":"9f3c1a02bb47de10","fields":{"title":"About"}}}' \
+  http://localhost:5199/folio/api/v1/documents/sty_9f3c1a02/content
+```
+
+A slot that *is* present is authoritative for that slot, which is how a block is
+removed through `PUT` at all. `mode: 'replace'` is opt-in, and is the only mode
+that can discard content it was not told about — so a replace omitting `i18n` on a
+blok that holds translations is **refused**, with the locales named, rather than
+diffing them away. `"i18n": {}` is how you clear them deliberately.
+
+`PATCH /fields` is the narrower tool, and skips the diff entirely:
+
+```json
+{ "fields": { "title": "New title" },
+  "bloks": [ { "uid": "1a2b3c4d5e6f7081", "fields": { "heading": "Changed" } } ],
+  "locale": "fr" }
+```
+
+`fields` addresses the root blok (where a document's own metadata lives), `bloks`
+addresses any other by uid, and `locale` scopes every write in the request to one
+language. It becomes one `set` per field and touches no structure — which is what
+a bulk price update wants.
+
+### Idempotency
+
+`Idempotency-Key: <anything>` is hashed to a txId and handed to the log, whose
+`log_tx_id` unique index already answers a resend with the delta it produced the
+first time. So a retry gets `"replayed": true` with the original `syncId`, and the
+log holds one transaction. Scoped **per document**, because the log is: a batch
+across documents needs a key each, and the per-document results make a retry after
+a partial failure precise.
+
+Reusing a key with a *different* body is answered by the first write. That is the
+contract, not a bug: the key is the identity of the write, and `replayed: true` is
+how a caller notices.
+
+### Reading a locale
+
+`?locale=fr` reads every field through the fallback chain and drops `i18n`, because
+the values are already resolved. That payload is for **reading**; writing it back
+would put French into the source locale. Its `locale` field is the flag that says
+so. Omit the parameter and you get the authoring shape, which round-trips.
+
+### From the host's own Worker
+
+A host Worker already holds the bindings and should not make an HTTP request to
+itself:
+
+```ts
+const doc = await folio.draft(env, id)
+const target = fromNested({ uid: doc.root, fields }, toSchemaIndex(folio.registry), doc)
+await folio.write(env, id, diff(doc, target), { actor: 'sync-job', txId: 'nightly-1' })
+```
+
+Same `commit`, same chunking, same guarantees — see `POST /dev/sync` in
+`examples/demo/src/index.tsx`, which is that call and a JSON body.
+
+### Globals are ordinary documents
+
+A singleton's id is derived (`sng_settings`), and it is addressable through every
+route here: read it, write it, publish it. Reading one that nothing has opened yet
+creates its row, exactly as the admin's own document list does. Creating a second
+one is refused (there is no other id it could have) and so is deleting it.
+
+### Scopes
+
+`content:read`, `content:read:draft`, `content:write`, `publish`, `assets:write`,
+`admin` — the implications are in the auth section above. Notably `content:read`
+alone cannot read a draft, and `assets:write` implies nothing about content.
+
+A **session cookie works on these routes too**, at the equivalent role, so the
+admin could use them and there is one enforcement point rather than two. What
+Folio does *not* do is declare its own admin routes public: those ship inside the
+library and change with it, and `/api/v1` is a contract with somebody's script.
+Two surfaces over one set of services.
+
 ## Verified
 
 `scripts/sync-test.mjs` (16 checks) exercises the engine against both `vite dev`

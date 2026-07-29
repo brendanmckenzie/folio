@@ -224,6 +224,48 @@ confirmation reads — it names the published documents pointing here, states th
 drafts are not counted, and **proceeds**, because a broken reference already degrades
 safely. Spec: `docs/specs/content-model/data-documents.md`.
 
+**A Content API — `/folio/api/v1`, token-scoped, versioned, and writing through the
+mutation log.** Reference: `docs/api.md`.
+
+The decision the whole thing turns on is that **there is no second door into a
+document**. A script's write is read-diff-commit through `StoryDO.commit`, exactly
+as a keystroke is — so it appears in every open editor as a delta, lands in the
+activity trail as `token:<name>`, is undoable with Cmd+Z, and cannot leave the draft
+and the Durable Object disagreeing. Writing `published_doc` or the object's `doc`
+row would have been faster to build and would have broken all four silently, visible
+only to whoever happened to have the page open. An unchanged payload produces zero
+mutations and writes nothing, so a nightly sync of 400 products of which three
+changed is three writes.
+
+Consumers send and receive **nested documents** — `{ type: 'hero', fields: { heading,
+actions: [ … ] } }` — not the normalised graph, so nobody outside the library has to
+know that fractional indexing exists. `toNested` / `fromNested` (`folio/engine`) are
+the conversion and are public because the Storyblok importer needs them too. **uids
+round-trip**: optional on the way in, where present means "this blok, in place" and
+absent means "a new one, between its neighbours", which is what keeps version diffs
+minimal, presence attached to the right block and undo granular. Order is positional,
+and existing sibling keys are kept wherever they can be, so inserting at the front of
+a list of fifty is one insert and zero moves.
+
+`PUT /content` defaults to **merge** — an absent field, `i18n` or slot leaves what is
+stored alone — which makes a partial payload safe and makes the locale problem
+disappear. `mode: 'replace'` is opt-in and is the only mode that can lose content it
+was not told about, so a replace omitting `i18n` on a blok holding translations is
+refused with the locales named rather than diffing them away. `PATCH /fields` is the
+narrower tool: one `set` per field, no structure touched, `locale` scoping the whole
+request.
+
+`Idempotency-Key` rides on the log's own `tx_id` unique index rather than a table of
+its own, so a retry is answered `replayed: true` with the original `syncId` from
+machinery that already existed. Scoped per document, because the log is.
+
+A second surface over one set of services, deliberately: the admin's routes ship
+inside the library and stay free to change with it, while `/api/v1` is a contract
+with somebody's script and changes by gaining a `v2`. A session cookie works on both
+at the equivalent role, so there is one enforcement point rather than two.
+`folio.write(env, id, mutations, opts)` is the same path with no HTTP for a host's
+own Worker. Spec: `docs/specs/platform/content-api.md`.
+
 ## Next
 
 ### 1. Scheduled publishing
