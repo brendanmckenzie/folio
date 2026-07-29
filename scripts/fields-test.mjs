@@ -822,16 +822,17 @@ await ed.tx('f12', [{ t: 'set', uid: 'emb1', field: 'source', value: 'sty_about'
 aboutDoc.ws.close()
 
 /* --- document types: a record has no URL, and type filtering bites ------ */
-// docs/specs/foundation/document-types.md. The demo declares five types (see
-// examples/demo/src/index.tsx): `page`, a second routable `insight`, an
-// unrouted `person` record, and two singletons — `settings` and `header`,
-// both globals (content-model/globals.md).
+// docs/specs/foundation/document-types.md. The demo declares six types (see
+// examples/demo/src/index.tsx): `page`, a second routable `insight`, two
+// unrouted records — `person` and `office`, the latter with no renderer at all
+// (content-model/data-documents.md) — and two singletons, `settings` and
+// `header`, both globals (content-model/globals.md).
 
 const schema = await json(`${API}/schema`)
 check(
   'the manifest carries every declared document type',
   schema.types?.map((t) => `${t.name}:${t.kind}`).join(',') ===
-    'page:page,insight:page,person:record,settings:singleton,header:singleton',
+    'page:page,insight:page,person:record,office:record,settings:singleton,header:singleton',
   schema.types?.map((t) => `${t.name}:${t.kind}`).join(','),
 )
 check(
