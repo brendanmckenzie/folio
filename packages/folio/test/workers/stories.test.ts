@@ -4,6 +4,7 @@ import type { Doc } from '../../src/core/doc'
 import { envelope, FolioError, rethrow } from '../../src/server/errors'
 import type { PublishDeps } from '../../src/server/publish'
 import { unpublish } from '../../src/server/publish'
+import { lookupRedirect } from '../../src/server/redirects'
 import {
   createStory,
   deleteStory,
@@ -34,7 +35,35 @@ import { applySeedFixture } from './seed-fixture'
  */
 async function resetStories(): Promise<void> {
   await env.DB.prepare('delete from stories').run()
+  // redirects.md rows are keyed on paths this fixture's own reset does not
+  // otherwise touch: cleared here too so a redirect written by one test can
+  // never leak into the next (see the file-level comment on why writes here
+  // are not rolled back per test).
+  await env.DB.prepare('delete from redirects').run()
   await applySeedFixture(env.DB)
+}
+
+interface RedirectRow {
+  from: string
+  to: string
+  status: number
+  source: string
+  storyId: string | null
+}
+
+async function redirectFor(from: string): Promise<RedirectRow | null> {
+  return env.DB.prepare(
+    'select from_path as "from", to_path as "to", status, source, story_id as storyId from redirects where from_path = ?',
+  )
+    .bind(from)
+    .first<RedirectRow>()
+}
+
+async function allRedirects(): Promise<RedirectRow[]> {
+  const { results } = await env.DB.prepare(
+    'select from_path as "from", to_path as "to", status, source, story_id as storyId from redirects order by from_path',
+  ).all<RedirectRow>()
+  return results
 }
 
 beforeEach(async () => {
@@ -181,6 +210,96 @@ describe('updateStory', () => {
 
   it('rejects updating an unknown story', async () => {
     await expect(updateStory(env.DB, 'sty_nope', { title: 'X' })).rejects.toThrow('Unknown story')
+  })
+})
+
+describe('redirects (redirects.md): captured inside updateStory/createStory', () => {
+  it('a rename records a redirect from the old path to the path actually written', async () => {
+    const updated = await updateStory(env.DB, 'sty_about', { slug: 'about-us' })
+    expect(updated.path).toBe('about-us')
+
+    const row = await redirectFor('about')
+    expect(row).toMatchObject({
+      from: 'about',
+      to: 'about-us',
+      status: 301,
+      source: 'auto',
+      storyId: 'sty_about',
+    })
+  })
+
+  it('a move records one redirect per descendant, all pointing at the new path', async () => {
+    const dest = await createStory(env.DB, { title: 'What We Do' })
+    await updateStory(env.DB, 'sty_about', { parentId: dest.id })
+
+    expect((await redirectFor('about'))?.to).toBe(`${dest.slug}/about`)
+    expect((await redirectFor('about/team'))?.to).toBe(`${dest.slug}/about/team`)
+  })
+
+  it('renaming back cannot produce a self-redirect or a loop', async () => {
+    await updateStory(env.DB, 'sty_about', { slug: 'about-us' })
+    await updateStory(env.DB, 'sty_about', { slug: 'about' })
+
+    // The a -> b row (about -> about-us) is gone: the page occupies 'about' again.
+    expect(await redirectFor('about')).toBeNull()
+    // Exactly the reverse row remains, for the path just vacated.
+    expect((await redirectFor('about-us'))?.to).toBe('about')
+    // No row anywhere points at itself.
+    for (const row of await allRedirects()) expect(row.from).not.toBe(row.to)
+  })
+
+  it('chains collapse: renaming b to c repoints both the a->b and the new b->c row at c', async () => {
+    await updateStory(env.DB, 'sty_about', { slug: 'about-us' }) // a (about) -> b (about-us)
+    await updateStory(env.DB, 'sty_about', { slug: 'about-final' }) // b (about-us) -> c (about-final)
+
+    expect((await redirectFor('about'))?.to).toBe('about-final')
+    expect((await redirectFor('about-us'))?.to).toBe('about-final')
+  })
+
+  it('a collision-adjusted slug is recorded as the path actually written, not the one requested', async () => {
+    const created = await createStory(env.DB, { title: 'Contact' })
+    expect(created.path).toBe('contact')
+
+    // 'about' is already taken at the root, so this lands on 'about-2'.
+    const updated = await updateStory(env.DB, created.id, { title: 'About' })
+    expect(updated.slug).toBe('about-2')
+
+    expect((await redirectFor('contact'))?.to).toBe('about-2')
+  })
+
+  it('creating a story over a redirected path deletes the redirect: live pages always win', async () => {
+    await updateStory(env.DB, 'sty_about', { slug: 'about-us' })
+    expect(await redirectFor('about')).not.toBeNull()
+
+    await createStory(env.DB, { title: 'About', slug: 'about', parentId: null })
+
+    expect(await redirectFor('about')).toBeNull()
+  })
+
+  it('a rejected rename writes no redirect: the batch never runs', async () => {
+    await expect(updateStory(env.DB, 'sty_about', { parentId: 'sty_team' })).rejects.toThrow()
+    expect(await redirectFor('about')).toBeNull()
+  })
+
+  it('lookupRedirect refuses an unsafe target rather than handing it to the host', async () => {
+    await env.DB.prepare(
+      `insert into redirects (from_path, to_path, status, source, story_id, created_at)
+       values (?, ?, ?, 'manual', null, ?)`,
+    )
+      .bind('bad', 'javascript:alert(1)', 301, Date.now())
+      .run()
+
+    expect(await lookupRedirect(env.DB, 'bad')).toBeNull()
+  })
+
+  it('lookupRedirect normalises case, slashes and query strings on the way in', async () => {
+    await updateStory(env.DB, 'sty_about', { slug: 'about-us' })
+
+    expect(await lookupRedirect(env.DB, '/About/')).toEqual({ to: 'about-us', status: 301 })
+    expect(await lookupRedirect(env.DB, 'about?utm_source=x')).toEqual({
+      to: 'about-us',
+      status: 301,
+    })
   })
 })
 
@@ -388,6 +507,45 @@ describe('deleteStoryStatement', () => {
     await expect(deleteStoryStatement(env.DB, 'sty_home')).rejects.toThrow(
       'Cannot delete the root story',
     )
+  })
+
+  it('defaults to no redirect statements when no options are given', async () => {
+    const found = await deleteStoryStatement(env.DB, 'sty_about')
+    expect(found?.redirectStatements).toEqual([])
+  })
+
+  describe('with { redirect: true } (redirects.md architecture decision 4)', () => {
+    it('redirects the deleted node and every descendant to its parent, in the same batch', async () => {
+      const found = await deleteStoryStatement(env.DB, 'sty_about', { redirect: true })
+      expect(found?.redirectStatements.length).toBeGreaterThan(0)
+
+      await env.DB.batch([found!.statement, ...found!.redirectStatements])
+
+      // sty_about's parent is the root, path ''. Both it and its descendant
+      // 'about/team' redirect there — the nearest surviving ancestor, since the
+      // whole subtree goes together.
+      expect((await redirectFor('about'))?.to).toBe('')
+      expect((await redirectFor('about/team'))?.to).toBe('')
+
+      expect(await storyByPath(env.DB, 'about')).toBeNull()
+    })
+
+    it("redirects to the deleted node's own parent, not the root, when it is nested", async () => {
+      const found = await deleteStoryStatement(env.DB, 'sty_team', { redirect: true })
+      await env.DB.batch([found!.statement, ...found!.redirectStatements])
+
+      expect((await redirectFor('about/team'))?.to).toBe('about')
+    })
+  })
+
+  describe('with { redirect: false } (the escape hatch)', () => {
+    it('writes no redirect: the path simply 404s', async () => {
+      const found = await deleteStoryStatement(env.DB, 'sty_about', { redirect: false })
+      await env.DB.batch([found!.statement, ...found!.redirectStatements])
+
+      expect(await redirectFor('about')).toBeNull()
+      expect(await redirectFor('about/team')).toBeNull()
+    })
   })
 })
 

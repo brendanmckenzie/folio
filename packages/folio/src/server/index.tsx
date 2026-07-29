@@ -1,6 +1,7 @@
 import { FolioDoc } from '../preview/Render'
 import { createApp } from './app'
 import { previewPage } from './pages'
+import { lookupRedirect } from './redirects'
 import { createRuntime } from './runtime'
 import { listStories, publishedDoc, storyByPath, storyStatus, storyTree } from './stories'
 import { StoryDO } from './story-do'
@@ -8,6 +9,7 @@ import type { Folio, FolioConfig } from './types'
 
 export { StoryDO }
 export type { VersionKind, VersionMeta } from './versions'
+export type { Redirect } from './redirects'
 export { FolioError } from './errors'
 export type { ErrorEnvelope, FolioErrorCode } from './errors'
 export { FolioDoc } from '../preview/Render'
@@ -55,6 +57,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     handle,
     published: (env, path) => publishedDoc(config.bindings(env).db, path),
     status: (env, path) => storyStatus(config.bindings(env).db, path),
+    redirect: (env, path) => lookupRedirect(config.bindings(env).db, path),
     draft: (env, id) => rt.draft(config.bindings(env), id),
     stories: async (env) => (await listStories(config.bindings(env).db)).map(rt.withUrls),
     tree: async (env) => rt.decorate(await storyTree(config.bindings(env).db)),

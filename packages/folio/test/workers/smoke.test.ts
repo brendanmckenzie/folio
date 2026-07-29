@@ -50,7 +50,13 @@ describe('workers harness: D1', () => {
        order by name`,
     ).all<{ name: string }>()
 
-    expect(results.map((r) => r.name)).toEqual(['assets', 'd1_migrations', 'stories', 'versions'])
+    expect(results.map((r) => r.name)).toEqual([
+      'assets',
+      'd1_migrations',
+      'redirects',
+      'stories',
+      'versions',
+    ])
   })
 
   it('has the seed stories from examples/demo/seed.sql, including the root story serving /', async () => {

@@ -87,6 +87,20 @@ export interface Folio<Env> {
    * latter calls this instead (`unpublish.md`).
    */
   status: (env: Env, path: string) => Promise<'live' | 'unpublished' | 'unknown'>
+  /**
+   * A redirect for a path, or null. One indexed read.
+   *
+   * Called from the host's own 404 branch (`redirects.md`), after
+   * `folio.published` has already answered null — Folio never intercepts
+   * inside `handle()`, so a host's own routes always win, and a redirect is
+   * for a path Folio no longer owns. `to` is either a path (resolve it against
+   * the request's own origin) or an absolute URL for a manual off-site
+   * redirect; either way it has already passed `isSafeHref` on the way out, so
+   * it is always safe to hand straight to a `Location` header. Reattaching the
+   * request's own query string is the host's job, not this call's: only the
+   * host knows what it did with the rest of the URL.
+   */
+  redirect: (env: Env, path: string) => Promise<{ to: string; status: number } | null>
   /** Live draft for a story id, creating it on first touch. */
   draft: (env: Env, id: string) => Promise<Doc>
   /** Every story, for sitemaps and static generation. */

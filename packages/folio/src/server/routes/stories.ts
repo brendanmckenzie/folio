@@ -41,19 +41,25 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.delete('/stories/:id', async (c) => {
     const bindings = c.var.bindings()
     const target = idParam('id', c.req.param('id'))
+    // redirects.md's architecture decision 4: checked by default in the admin's
+    // confirmation, an escape hatch for a page that should genuinely 404.
+    const redirect = c.req.query('redirect') !== 'false'
 
     let found: Awaited<ReturnType<typeof deleteStoryStatement>>
     try {
-      found = await deleteStoryStatement(bindings.db, target)
+      found = await deleteStoryStatement(bindings.db, target, { redirect })
       if (!found) return c.json({ deleted: [] })
 
-      // One batch for the story rows and their version history: either both
-      // disappear or neither does, so a reader never finds versions for a story
-      // that is already gone (or vice versa). `found.ids` always contains at
-      // least the target's own id, so `versions` is never actually null here;
-      // the guard stays because the helper's signature allows it.
+      // One batch for the story rows, their version history and (optionally)
+      // the redirect to the parent: all three disappear or land together, so a
+      // reader never finds versions for a story that is already gone, or a
+      // redirect for a delete that never actually committed.
       const versions = deleteVersionsStatement(bindings.db, found.ids)
-      await bindings.db.batch(versions ? [found.statement, versions] : [found.statement])
+      await bindings.db.batch([
+        found.statement,
+        ...found.redirectStatements,
+        ...(versions ? [versions] : []),
+      ])
     } catch (e) {
       // Nothing has committed yet at this point, so reporting a failure here
       // is accurate. `Cannot delete the root story` is a conflict; a failed

@@ -9,6 +9,7 @@ import {
   type StoryMeta,
   type StoryNode,
 } from '../core/story'
+import { clearRedirectAtStatement, redirectStatements } from './redirects'
 
 const COLS = `id, parent_id as parentId, slug, path, ord, title,
               published_at as publishedAt, unpublished_at as unpublishedAt,
@@ -168,13 +169,27 @@ export async function createStory(
     updatedAt: Date.now(),
   }
 
-  await db
-    .prepare(
-      `insert into stories (id, parent_id, slug, path, ord, title, updated_at)
-       values (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(story.id, story.parentId, story.slug, story.path, story.ord, story.title, story.updatedAt)
-    .run()
+  // A redirect can only ever be a trap once something is created at the path it
+  // claims (redirects.md's edge case "a path vacated and reoccupied by a
+  // different story"): batched with the insert so the new page is reachable
+  // the instant it exists, never shadowed by a stale row at the host level.
+  await db.batch([
+    db
+      .prepare(
+        `insert into stories (id, parent_id, slug, path, ord, title, updated_at)
+         values (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(
+        story.id,
+        story.parentId,
+        story.slug,
+        story.path,
+        story.ord,
+        story.title,
+        story.updatedAt,
+      ),
+    clearRedirectAtStatement(db, story.path),
+  ])
 
   return story
 }
@@ -227,6 +242,17 @@ export async function updateStory(
       )
       .bind(r.parentId, r.slug, paths.get(r.id) ?? r.path, r.ord, r.title, Date.now(), r.id),
   )
+
+  // redirects.md's decision 1: every path this rename or move actually vacates
+  // gets its redirect written in the same batch as the row update, so a rename
+  // either records where it used to live or does not happen at all.
+  for (const r of changed) {
+    const from = r.path
+    const to = paths.get(r.id) ?? r.path
+    if (from === to) continue
+    statements.push(...redirectStatements(db, { from, to, storyId: r.id }))
+  }
+
   if (statements.length) await db.batch(statements)
 
   return { ...next, path: paths.get(id) ?? next.path }
@@ -237,11 +263,24 @@ export async function updateStory(
  * caller batches this alongside the versions cleanup so a story's rows and its
  * version history disappear in one transaction rather than one succeeding
  * while the other fails. Null when there is no such story.
+ *
+ * `redirect: true` (redirects.md's architecture decision 4, "deleting a page
+ * offers a redirect to its parent") adds one redirect statement per
+ * descendant, each pointing at the deleted node's parent — the nearest
+ * surviving ancestor, since the whole subtree is going away together.
+ * `redirectStatements` (not the plain delete `deleteStoryStatement` would
+ * otherwise need) is reused here too, so a path a redirect already claims
+ * before this delete still collapses correctly rather than doubling up.
  */
 export async function deleteStoryStatement(
   db: D1Database,
   id: string,
-): Promise<{ ids: string[]; statement: D1PreparedStatement } | null> {
+  opts: { redirect?: boolean } = {},
+): Promise<{
+  ids: string[]
+  statement: D1PreparedStatement
+  redirectStatements: D1PreparedStatement[]
+} | null> {
   const rows = await listStories(db)
   const target = rows.find((r) => r.id === id)
   if (!target) return null
@@ -250,7 +289,19 @@ export async function deleteStoryStatement(
   const ids = descendants(rows, id)
   const placeholders = ids.map(() => '?').join(', ')
   const statement = db.prepare(`delete from stories where id in (${placeholders})`).bind(...ids)
-  return { ids, statement }
+
+  const redirects: D1PreparedStatement[] = []
+  if (opts.redirect) {
+    const parent = target.parentId ? rows.find((r) => r.id === target.parentId) : undefined
+    const parentPath = parent ? parent.path : ''
+    for (const descId of ids) {
+      const row = rows.find((r) => r.id === descId)
+      if (!row) continue
+      redirects.push(...redirectStatements(db, { from: row.path, to: parentPath, storyId: row.id }))
+    }
+  }
+
+  return { ids, statement, redirectStatements: redirects }
 }
 
 /** Removes the story and everything beneath it. */
