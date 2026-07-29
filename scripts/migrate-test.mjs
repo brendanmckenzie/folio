@@ -90,10 +90,11 @@ function client(name, storyId) {
   }
 }
 
-// v3 since content-model/localisation.md: `set` gained an optional `locale` and
-// `hello` shed its top-level identity fields. `retype`, this spec's own addition,
-// is unaffected — it was v2's.
-check('the wire version is 3', PROTOCOL_VERSION === 3, String(PROTOCOL_VERSION))
+// v4 since editing/live-collaboration.md: presence carries a field and a locale,
+// and a space-level channel appeared. `retype`, this spec's own addition, is
+// unaffected — it was v2's, and neither of the two bumps since has touched a
+// mutation.
+check('the wire version is 4', PROTOCOL_VERSION === 4, String(PROTOCOL_VERSION))
 
 /* --- what the config declares -------------------------------------------- */
 

@@ -1795,7 +1795,7 @@ Two surfaces over one set of services.
 
 ## Verified
 
-`scripts/sync-test.mjs` (16 checks) exercises the engine against both `vite dev`
+`scripts/sync-test.mjs` (17 checks) exercises the engine against both `vite dev`
 and the production build: bootstrap, cross-client delta, self-ack, presence,
 draft persistence, watermark catchup, that a client-side `cloneSubtree` duplicate
 arrives at another connected client as one transaction and both converge, publish,

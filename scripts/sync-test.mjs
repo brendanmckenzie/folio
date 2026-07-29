@@ -105,9 +105,17 @@ const ackA = await a.expect((m) => m.type === 'delta' && m.txId === 'tx1')
 check('A receives own tx as ack', ackA.syncId === deltaB.syncId)
 
 // --- presence propagates ---
-b.send({ type: 'presence', selection: root })
-const pres = await a.expect((m) => m.type === 'presence' && m.peer?.selection === root)
+// v4 (live-collaboration.md): a selection is `{ uid, field }` rather than a bare
+// uid, and `field: null` means "this blok, no particular field" — which is what a
+// click in the tree or the preview sends. A peer's editing locale rides here too.
+b.send({ type: 'presence', selection: { uid: root, field: 'title' }, locale: null })
+const pres = await a.expect((m) => m.type === 'presence' && m.peer?.selection?.uid === root)
 check('presence selection propagates', !!pres)
+check(
+  'and names the field, not only the block',
+  pres.peer.selection.field === 'title' && pres.peer.locale === null,
+  JSON.stringify(pres.peer.selection),
+)
 
 // --- the DO persisted it: the SSR preview should now contain the new title ---
 await wait(150)
