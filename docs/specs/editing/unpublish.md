@@ -3,7 +3,7 @@
 > **Group:** editing
 > **Build order:** 1
 > **Size:** S
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** `0003_unpublish.sql`
 > **Last updated:** 2026-07-29
@@ -362,3 +362,54 @@ draft); the derived `state` for all three cases.
   is the affordance, not a policy.
 - **Removing an unpublished page from search indexes.** Needs the search index that
   does not exist; `../platform/publish-hooks.md` is where a host would hang it.
+
+## Implementation notes
+
+All five owner decision checkpoints landed as recommended, all acceptance criteria
+are covered by workers tests plus an extended `scripts/history-test.mjs` run live
+against `pnpm dev`, and the plan's three phases shipped as three commits.
+
+**What landed, beyond the plan's letter:**
+
+- `StoryMeta.state` is derived by a new `storyState(publishedAt, unpublishedAt)`
+  in `core/story.ts` (not `server/stories.ts` as the plan's wording implied) so
+  the admin can reuse it without importing anything server-side. It returns
+  `Exclude<StoryState, 'changed'>` rather than the full union — the fourth state
+  needs a document diff this spec has no reason to compute, and the narrower
+  return type means a future caller cannot forget to handle a value this
+  function is structurally incapable of producing.
+- `liveDescendants(rows, id)` (`core/story.ts`) is the pure descendant
+  computation the confirmation dialog needs; `UnpublishDialog.tsx` wraps it in
+  `unpublishConfirmation()` so the dialog's own root-story wording and path
+  labelling are unit-testable without a DOM renderer (this codebase has none).
+- The admin's "Unpublish…" action lives behind a small menu next to Publish,
+  gated on the current story being live, with its own confirmation dialog
+  naming live descendants and using distinct wording for the root story.
+- `unpublishStoryStatement` also clears `updated_at`, and `publishStoryStatement`
+  now clears `unpublished_at`/`unpublished_by` — both extensions the plan's SQL
+  sketch implied but did not spell out, needed so a republish can't leave a
+  stale marker and so the row's own bookkeeping stays consistent with publish's.
+
+**Where the spec's ground truth was slightly imprecise:** the implementation
+plan says `POST /story/:id/unpublish` uses `loadStory` "for the same reason the
+publish and checkpoint routes do it," but the existing publish route does not
+use `loadStory` — only checkpoint does, because it has a body to validate after
+the existence check. Unpublish has no body either. `loadStory` was used anyway,
+since it hands the already-loaded row straight to `unpublish()` and avoids a
+second lookup by id; this is a reasonable choice, not a requirement the ground
+truth accurately described.
+
+**Deliberately deferred:** nothing from this spec's own scope. The fourth tree
+state (`'changed'`) stays unreachable in the `StoryState` union, exactly as the
+spec says it should, for `unpublished-changes.md` to fill in. The query-index
+cleanup on unpublish is `collections.md`'s one-line addition to make, as noted.
+
+**Tests added:** 32 (616 vs. the inherited baseline of 584): 6 unit (core:
+`storyState`, `liveDescendants`), 9 unit (admin: `badgeLabel`,
+`unpublishConfirmation`), 11 workers in `stories.test.ts` (`unpublishStoryStatement`,
+`storyStatus`, the `unpublish()` workflow including the no-draft-read and
+idempotency guarantees, `publishedDocsByIds` degrading a reference, a stale
+marker clearing on republish), 6 workers in `http.test.ts` (every acceptance
+criterion over the real HTTP surface). Plus 9 new checks in
+`scripts/history-test.mjs`, run live against `wrangler dev` (28/28 passing from a
+freshly migrated and seeded local D1).
