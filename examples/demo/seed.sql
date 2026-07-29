@@ -29,3 +29,26 @@ insert into users (id, email, name, role, created_at) values
   ('usr_demoadmin1', 'demo@example.com',   'Demo Admin',  'admin',  unixepoch() * 1000),
   ('usr_demoeditor', 'editor@example.com', 'Demo Editor', 'editor', unixepoch() * 1000),
   ('usr_demoviewer', 'viewer@example.com', 'Demo Viewer', 'viewer', unixepoch() * 1000);
+
+-- An API token, for platform/content-api.md. Same reasoning as the users above,
+-- one rung more so: the Content API is the surface you reach for with `curl`
+-- rather than a browser, and needing to sign into the editor first to mint a
+-- token is exactly the friction that makes it look harder than it is. So a fixed
+-- one is seeded and `curl` works the moment `pnpm db:seed` finishes:
+--
+--   TOKEN=folio_de70c0dede70c0dede70c0dede70c0dede70c0dede70c0dede70c0dede70c0de
+--   curl -H "authorization: Bearer $TOKEN" \
+--        http://localhost:5199/folio/api/v1/documents/by-path/about
+--
+-- `id` is the lowercase-hex SHA-256 of that string, because that is the only form
+-- the database ever holds (auth/secrets.ts) — so this file cannot compute it and
+-- carries it precomputed, and the plaintext exists nowhere but this comment.
+--
+-- LOCAL DEV ONLY, and the value is deliberately unmistakable (`de70c0de`
+-- repeated) so a copy of it turning up in a real deployment's `api_tokens` table
+-- is obvious at a glance. `admin` scope because this is the token a person pokes
+-- at every route with; a real one is minted per job with the narrowest scope it
+-- needs, through the admin's Access rail or `POST /folio/tokens`.
+insert into api_tokens (id, name, scopes, created_by, created_at) values
+  ('69032e6a6159cb3e492e3caec563abb20287e2395ec75bc036d5b5eb2b900f74',
+   'local dev', '["admin"]', 'usr_demoadmin1', unixepoch() * 1000);

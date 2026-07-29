@@ -1,5 +1,9 @@
 import { createFolio, magicLink, Shell } from 'folio/server'
-import { dataOf, resolveAsset, type Doc, type Resolution } from 'folio/core'
+import { dataOf, resolveAsset, toSchemaIndex, type Doc, type Resolution } from 'folio/core'
+// `folio/engine` is the entry point for host-side tooling that manipulates
+// documents — a sync job is exactly the case its doc comment names. Ordinary
+// block and page code never needs it.
+import { diff, fromNested } from 'folio/engine'
 import type { ReactElement } from 'react'
 import { renderToReadableStream } from 'react-dom/server.edge'
 import { blocks } from './blocks'
@@ -181,6 +185,18 @@ export default {
     if (url.pathname === '/archive') {
       return archive(env, url)
     }
+    // The in-process write (`platform/content-api.md` decision 6): a host's own
+    // Worker already holds the bindings, so a nightly ERP sync should not have to
+    // make an HTTP request to itself. Behind `/dev/` and localhost-only here only
+    // because a route that writes content with no credential is not a pattern to
+    // copy — a real one would be a `scheduled()` handler or sit behind the host's
+    // own auth. The *code* is what a real one looks like.
+    if (url.pathname === '/dev/sync' && req.method === 'POST') {
+      if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
+        return new Response('Not found', { status: 404 })
+      }
+      return sync(env, req)
+    }
 
     // --- Folio: editor, its API, and preview renders ---------------------
     // Returns null for anything it does not own, including a preview request
@@ -342,6 +358,45 @@ async function archive(env: Env, url: URL) {
       published: i.data.published ?? null,
     })),
   })
+}
+
+/**
+ * One document updated from "another system", in process — the second user story
+ * in `platform/content-api.md`, and the whole of its decision 6 in a dozen lines.
+ *
+ * Read the draft, build the target with `fromNested`, `diff`, `folio.write`. That
+ * is the same read-diff-commit `PUT /api/v1/documents/:id/content` performs, so
+ * this write inherits every property that one has: an editor with the page open
+ * sees it arrive, the activity trail says `sync-job`, and Cmd+Z undoes it.
+ *
+ * `mode: 'merge'` is why the body can be `{ fields: { role: 'CTO' } }` and nothing
+ * else — absent fields are left alone, so a partial payload from an ERP is safe.
+ * `txId` makes a retry after a timeout write once rather than twice, which is what
+ * a scheduled job needs and what nobody remembers to build.
+ *
+ * `POST /dev/sync` with `{ "id": "sty_x", "fields": { "role": "CTO" } }`.
+ */
+async function sync(env: Env, req: Request) {
+  const body = (await req.json().catch(() => ({}))) as {
+    id?: string
+    fields?: Record<string, unknown>
+    txId?: string
+  }
+  if (!body.id) return Response.json({ error: 'id is required' }, { status: 400 })
+
+  const doc = await folio.draft(env, body.id)
+  const target = fromNested(
+    { uid: doc.root, fields: body.fields ?? {} },
+    toSchemaIndex(folio.registry),
+    doc,
+    { mode: 'merge' },
+  )
+  const result = await folio.write(env, body.id, diff(doc, target), {
+    actor: 'sync-job',
+    name: 'Nightly sync',
+    ...(body.txId ? { txId: body.txId } : {}),
+  })
+  return Response.json(result)
 }
 
 function sitemap(stories: Awaited<ReturnType<typeof folio.stories>>, origin: string) {

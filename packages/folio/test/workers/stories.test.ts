@@ -73,6 +73,9 @@ async function resetStories(): Promise<void> {
   // Same reason, one table further: seed.sql also seeds the three demo editors
   // (identity-and-access.md), and `users.email` is unique — so re-applying the
   // fixture without clearing them first collides on the second test in the file.
+  // `api_tokens` is the same story (content-api.md seeds one for `curl`), and its
+  // `created_by` points at a user row, so it has to go first.
+  await env.DB.prepare('delete from api_tokens').run()
   await env.DB.prepare('delete from users').run()
   await applySeedFixture(env.DB)
 }
