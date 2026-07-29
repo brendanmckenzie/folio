@@ -27,9 +27,21 @@ interface Props {
   /** Requests the delete confirmation (redirects.md); the editor owns whether
    * it is showing and what actually happens next. */
   onDelete: (story: StoryNode) => void
+  /** Requests the duplicate confirmation (duplicate-and-paste.md); the editor
+   * owns whether it is showing and what actually happens next, same as
+   * `onDelete`. */
+  onDuplicate: (story: StoryNode) => void
 }
 
-export function StoryTree({ tree, currentId, onOpen, onCreate, onMove, onDelete }: Props) {
+export function StoryTree({
+  tree,
+  currentId,
+  onOpen,
+  onCreate,
+  onMove,
+  onDelete,
+  onDuplicate,
+}: Props) {
   const [addingTo, setAddingTo] = useState<string | null | undefined>(undefined)
 
   return (
@@ -62,6 +74,7 @@ export function StoryTree({ tree, currentId, onOpen, onCreate, onMove, onDelete 
         onCreate={onCreate}
         onMove={onMove}
         onDelete={onDelete}
+        onDuplicate={onDuplicate}
       />
     </div>
   )
@@ -78,13 +91,14 @@ function Level({
   onCreate,
   onMove,
   onDelete,
+  onDuplicate,
 }: {
   nodes: StoryNode[]
   depth: number
   parentId: string | null
   addingTo: string | null | undefined
   setAddingTo: (v: string | null | undefined) => void
-} & Pick<Props, 'currentId' | 'onOpen' | 'onCreate' | 'onMove' | 'onDelete'>) {
+} & Pick<Props, 'currentId' | 'onOpen' | 'onCreate' | 'onMove' | 'onDelete' | 'onDuplicate'>) {
   const [dropIndex, setDropIndex] = useState<number | null>(null)
 
   return (
@@ -158,6 +172,16 @@ function Level({
               >
                 +
               </button>
+              <button
+                type="button"
+                title="Duplicate page"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onDuplicate(node)
+                }}
+              >
+                ⧉
+              </button>
               {node.path === '' ? null : (
                 <button
                   type="button"
@@ -195,6 +219,7 @@ function Level({
               onCreate={onCreate}
               onMove={onMove}
               onDelete={onDelete}
+              onDuplicate={onDuplicate}
             />
           ) : null}
         </li>

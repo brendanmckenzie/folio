@@ -920,6 +920,55 @@ button.tree__menu-heading {
   margin-top: 0.3rem;
 }
 
+/* --------------------------------------------------------- duplicate ----- */
+/* Same overlay shape as delete (duplicate-and-paste.md). */
+
+.duplicate-story {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+}
+.duplicate-story__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgb(16 20 26 / 45%);
+  border: 0;
+}
+.duplicate-story__panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  width: min(420px, 92vw);
+  padding: 1.1rem;
+  background: var(--panel);
+  border-radius: 10px;
+  box-shadow: 0 18px 50px rgb(16 20 26 / 30%);
+}
+.duplicate-story__panel h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.duplicate-story__panel p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.duplicate-story__title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8125rem;
+}
+.duplicate-story__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+
 /* Discard changes (unpublished-changes.md): same overlay shape as delete and
    unpublish, since all three are "confirm before an irreversible-looking
    action" dialogs even though discard itself is an ordinary, undoable edit. */

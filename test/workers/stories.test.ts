@@ -9,6 +9,7 @@ import {
   createStory,
   deleteStory,
   deleteStoryStatement,
+  duplicateStory,
   listStories,
   publishedDocsByIds,
   publishStoryStatement,
@@ -140,6 +141,63 @@ describe('createStory', () => {
     await expect(createStory(env.DB, { title: 'Orphan', parentId: 'sty_nope' })).rejects.toThrow(
       'Unknown parent',
     )
+  })
+})
+
+// duplicate-and-paste.md's architecture decision 5: passing the *source's own
+// slug* through to `createStory` is what makes both cases fall out of
+// existing code — an ordinary page collides with its still-live original and
+// gets bumped to '-2', the root's slug ('') is falsy and falls through to
+// deriving one from the title instead.
+describe('duplicateStory', () => {
+  it('defaults the title to "{source title} (copy)"', async () => {
+    const dup = await duplicateStory(env.DB, 'sty_about', {})
+    expect(dup.title).toBe('About (copy)')
+  })
+
+  it('prefers an explicit title over the default', async () => {
+    const dup = await duplicateStory(env.DB, 'sty_about', { title: 'A whole new page' })
+    expect(dup.title).toBe('A whole new page')
+  })
+
+  it('collides with the still-live source slug and lands on the next suffix', async () => {
+    const dup = await duplicateStory(env.DB, 'sty_about', {})
+    expect(dup.slug).toBe('about-2')
+    expect(dup.path).toBe('about-2')
+    // The source is untouched: still at its own path, still there.
+    expect(await storyByPath(env.DB, 'about')).not.toBeNull()
+  })
+
+  it('defaults to the source’s own parent, landing as a sibling', async () => {
+    const dup = await duplicateStory(env.DB, 'sty_team', {})
+    expect(dup.parentId).toBe('sty_about')
+    expect(dup.path).toBe('about/team-2')
+  })
+
+  it('accepts an explicit parentId override', async () => {
+    const dest = await createStory(env.DB, { title: 'Elsewhere' })
+    const dup = await duplicateStory(env.DB, 'sty_about', { parentId: dest.id })
+    expect(dup.parentId).toBe(dest.id)
+    expect(dup.path).toBe(`${dest.slug}/about`)
+  })
+
+  it('the root’s duplicate is an ordinary top-level page, slug derived from the title', async () => {
+    const dup = await duplicateStory(env.DB, 'sty_home', {})
+    expect(dup.parentId).toBeNull()
+    expect(dup.slug).toBe('home-copy')
+    expect(dup.path).toBe('home-copy')
+    // The root itself still owns '' — untouched by its own duplicate.
+    expect((await storyById(env.DB, 'sty_home'))?.path).toBe('')
+  })
+
+  it('the duplicate starts unpublished, with no version history of its own', async () => {
+    const dup = await duplicateStory(env.DB, 'sty_about', {})
+    expect(dup.publishedAt).toBeNull()
+    expect(dup.state).toBe('draft')
+  })
+
+  it('rejects duplicating an unknown story', async () => {
+    await expect(duplicateStory(env.DB, 'sty_nope', {})).rejects.toThrow('Unknown story')
   })
 })
 

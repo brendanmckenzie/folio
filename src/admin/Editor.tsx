@@ -5,6 +5,7 @@ import type { StoryNode } from '../core/story'
 import { BlockTree } from './BlockTree'
 import { DeleteDialog } from './DeleteDialog'
 import { DiscardDialog } from './DiscardDialog'
+import { DuplicateDialog } from './DuplicateDialog'
 import { FolioProvider, useStoreState } from './FolioContext'
 import { History } from './History'
 import { useBlocks } from './hooks/useBlocks'
@@ -94,6 +95,10 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
   // node (its path, for the redirect-target label) rather than just an id.
   const [confirmingDeleteFor, setConfirmingDeleteFor] = useState<StoryNode | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Same shape again, for duplicate-and-paste.md's document duplication.
+  const [confirmingDuplicateFor, setConfirmingDuplicateFor] = useState<StoryNode | null>(null)
+  const [duplicating, setDuplicating] = useState(false)
 
   // Discard has no story-switching hazard to guard against the way the two
   // above do — it is only reachable while the comparison view for *this*
@@ -200,6 +205,21 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
           />
         ) : null}
 
+        {confirmingDuplicateFor ? (
+          <DuplicateDialog
+            story={confirmingDuplicateFor}
+            busy={duplicating}
+            onCancel={() => setConfirmingDuplicateFor(null)}
+            onConfirm={(title) => {
+              setDuplicating(true)
+              void stories.duplicate(confirmingDuplicateFor, title).then(() => {
+                setDuplicating(false)
+                setConfirmingDuplicateFor(null)
+              })
+            }}
+          />
+        ) : null}
+
         {confirmingDiscard && viewing ? (
           <DiscardDialog
             delta={versions.delta}
@@ -254,6 +274,7 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
                 onCreate={stories.create}
                 onMove={(id, parentId, index) => stories.patch(id, { parentId, index })}
                 onDelete={(story) => setConfirmingDeleteFor(story)}
+                onDuplicate={(story) => setConfirmingDuplicateFor(story)}
               />
             ) : rail === 'history' ? (
               state.doc ? (

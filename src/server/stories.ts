@@ -203,6 +203,45 @@ export async function createStory(
 }
 
 /**
+ * The row for a duplicated document (`duplicate-and-paste.md`): everything
+ * `createStory` already does — slug dedupe, path derivation, a fresh
+ * `clearRedirectAtStatement` batch — reused rather than restated, by passing
+ * the *source's own slug* through as the wanted slug.
+ *
+ * That single choice is what makes both of architecture decision 5's cases
+ * fall out of `createStory` with no special case written here: an ordinary
+ * page's slug (`'about'`) collides with the still-live original and
+ * `uniqueSlug` bumps it to `'about-2'`, while the root's slug is `''` —
+ * falsy — so `createStory`'s own `input.slug || input.title` falls through to
+ * deriving the slug from the new title instead, exactly the "a top-level
+ * page with a slug derived from its title" the root's duplicate needs.
+ *
+ * `parentId` defaults to the source's own parent (a duplicate is offered as
+ * a sibling), which is `null` for the root — already what a top-level page
+ * needs, again with no `isRoot` check written here.
+ *
+ * Reads only the D1 row: the *document* (the draft to actually clone, and
+ * the watermark-driven title override) is the caller's job
+ * (`routes/stories.ts`), because that needs the Durable Object, which
+ * nothing else in this file touches.
+ */
+export async function duplicateStory(
+  db: D1Database,
+  id: string,
+  patch: { title?: string; parentId?: string | null },
+): Promise<StoryMeta> {
+  const source = await storyById(db, id)
+  if (!source) throw new Error('Unknown story')
+
+  const title = patch.title?.trim() || `${source.title} (copy)`
+  return createStory(db, {
+    title,
+    slug: source.slug,
+    parentId: patch.parentId !== undefined ? patch.parentId : source.parentId,
+  })
+}
+
+/**
  * Rename, retitle or move. Paths for the whole affected subtree are recomputed
  * in one batch. Cheap enough to do in JS at any realistic page count, and much
  * easier to get right than a recursive CTE.
