@@ -568,7 +568,10 @@ describe('the audit reports what a translator cannot see', () => {
 /* ------------------------------------------------- the wire, end to end --- */
 
 describe('the wire', () => {
-  it('is version 3', () => {
-    expect(PROTOCOL_VERSION).toBe(3)
+  // Bumped to 4 by `../../../docs/specs/editing/live-collaboration.md`: presence
+  // carries a field and a locale, and a space-level channel appears. Nothing in
+  // that bump touches a mutation, so v3's own guarantee below is unaffected.
+  it('is version 4', () => {
+    expect(PROTOCOL_VERSION).toBe(4)
   })
 })

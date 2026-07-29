@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { matches } from '../core/conditions'
 import type { Blok, Json } from '../core/doc'
 import type { Field } from '../core/fields'
@@ -6,11 +6,12 @@ import { isTranslatable } from '../core/locales'
 import { type CollectionField, collectionQuery, maxPerPageOf, queryKey } from '../core/query'
 import { asRichtext, richtextToText, sanitiseRichtext } from '../core/richtext'
 import type { StoryNode } from '../core/story'
+import type { Presence } from '../core/protocol'
 import { asAsset, asStoryIds } from '../core/values'
 import { RichText } from '../preview/RichText'
 import { AssetInput, MultiAssetInput } from './AssetInput'
 import { CollectionInput } from './CollectionInput'
-import { useFolio } from './FolioContext'
+import { useFolio, useStoreState } from './FolioContext'
 import { LinkInput } from './LinkInput'
 import { ReferencesInput } from './ReferencesInput'
 import { RichTextInput } from './RichTextInput'
@@ -138,6 +139,37 @@ export function boundValue(blok: Blok, name: string, mode: FieldMode, locale: st
 const collectionKey = (field: CollectionField, value: Json): string =>
   queryKey(collectionQuery(field, value), maxPerPageOf(field))
 
+/**
+ * Who else has this field focused (`live-collaboration.md` decision 3 and 5).
+ *
+ * **Advisory, never a lock** (checkpoint 2): both people may type, and this is
+ * the warning that says so. A peer holding the *block* but no particular field
+ * is not holding this field — the block tree's dot already says where they are.
+ *
+ * Pure and exported so the derivation, and specifically the locale rule, is
+ * tested without mounting the panel.
+ */
+export function fieldWatchers(peers: readonly Presence[], uid: string, field: string): Presence[] {
+  return peers.filter((p) => p.selection?.uid === uid && p.selection.field === field)
+}
+
+/**
+ * What a peer ring says. The locale is named whenever it differs from the one
+ * this editor is in, because two people in the same field in different languages
+ * are writing different keys and are not in conflict at all
+ * (`live-collaboration.md`'s edge case): a bare "Ann is here" would report a
+ * clash that does not exist.
+ *
+ * Pure and exported for the same reason `fieldWatchers` is.
+ */
+export function watcherLabel(peer: Presence, locale: string | null): string {
+  const theirs = peer.locale ?? null
+  const mine = locale ?? null
+  return theirs === mine
+    ? `${peer.name} is in this field`
+    : `${peer.name} is here in ${theirs ?? 'the source language'}`
+}
+
 export function Inspector({
   blok,
   onChange,
@@ -148,7 +180,8 @@ export function Inspector({
   globalHint,
   onEditGlobal,
 }: Props) {
-  const { schema, locale, isSourceLocale, locales } = useFolio()
+  const { store, schema, locale, isSourceLocale, locales } = useFolio()
+  const state = useStoreState(store)
   const localeLabel = locales?.available.find((l) => l.code === locale)?.label ?? locale
   const sourceLabel =
     locales?.available.find((l) => l.code === locales.default)?.label ?? locales?.default ?? ''
@@ -231,6 +264,18 @@ export function Inspector({
               value={boundValue(blok, name, mode, locale)}
               mode={mode}
               source={blok.data[name] ?? null}
+              watchers={fieldWatchers(state.peers, blok.uid, name)}
+              myLocale={isSourceLocale ? null : locale}
+              // Focus is presence, not selection: the block is already selected
+              // by the time a field inside it can be focused, so this only ever
+              // narrows what the peers see. Blur clears it rather than leaving a
+              // stale ring on a field nobody is in — but only if this field is
+              // still the one recorded, so tabbing between two fields does not
+              // race its own focus.
+              onFocus={() => store.focusField(name)}
+              onBlur={() => {
+                if (store.getSnapshot().focus === name) store.focusField(null)
+              }}
               onChange={(v) =>
                 onChange(blok.uid, name, v, mode === 'translate' ? locale : undefined)
               }
@@ -249,6 +294,10 @@ function FieldInput({
   onChange,
   mode = 'source',
   source = null,
+  watchers = [],
+  myLocale = null,
+  onFocus,
+  onBlur,
 }: {
   name: string
   field: Field
@@ -259,6 +308,12 @@ function FieldInput({
   mode?: FieldMode
   /** The source-locale value, for the read-only column beside a translation. */
   source?: Json
+  /** Peers holding this exact field (`live-collaboration.md`). Advisory. */
+  watchers?: readonly Presence[]
+  /** This editor's own locale, for the ring's label. */
+  myLocale?: string | null
+  onFocus?: () => void
+  onBlur?: () => void
 }) {
   const { stories, resolution } = useFolio()
   const label = field.label ?? name
@@ -270,7 +325,17 @@ function FieldInput({
     field.kind === 'collection' ? resolution.collections?.[collectionKey(field, value)] : undefined
 
   return (
-    <div className={`field${mode === 'source' ? '' : ` field--${mode}`}`}>
+    <div
+      className={`field${mode === 'source' ? '' : ` field--${mode}`}${watchers.length ? ' is-watched' : ''}`}
+      // The ring's colour is the first watcher's, so two people in one field
+      // read as one ring plus two names rather than as a stripe.
+      style={watchers[0] ? ({ '--peer': watchers[0].colour } as CSSProperties) : undefined}
+      // Delegated rather than wired into each of the fourteen input kinds: focus
+      // bubbles in React, and a control this component does not know about (a
+      // TipTap surface, an upload picker) reports itself for free.
+      onFocus={onFocus}
+      onBlur={onBlur}
+    >
       <label className="field__label" htmlFor={id}>
         {label}
         {field.required ? <span className="field__req">*</span> : null}
@@ -279,6 +344,18 @@ function FieldInput({
         {mode === 'shared' ? (
           <span className="field__shared">shared across all languages</span>
         ) : null}
+        {/* Advisory, never a lock (checkpoint 2): both may type, and this says
+            somebody else is here so the last-write-wins model is visible. */}
+        {watchers.map((p) => (
+          <span
+            key={p.actor}
+            className="field__peer"
+            style={{ background: p.colour }}
+            title={watcherLabel(p, myLocale)}
+          >
+            {p.name}
+          </span>
+        ))}
       </label>
 
       {/* A nested fieldset is what disables an arbitrary input tree without

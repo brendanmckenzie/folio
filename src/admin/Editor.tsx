@@ -96,6 +96,14 @@ export function Editor({
   const state = useStoreState(store)
 
   const blocks = useBlocks(store, schema, notify, current?.path ?? '')
+
+  // Which language this client is editing in, announced with its presence so a
+  // peer ring can say so (`live-collaboration.md`). Null on the source locale, so
+  // a single-locale site announces nothing new at all.
+  useEffect(() => {
+    store.setLocale(isSourceLocale ? null : locale)
+  }, [isSourceLocale, locale, store])
+
   // Loaded unconditionally, not only while the History rail is open: the top
   // bar's own state (below) needs the newest publish version on every load
   // (`unpublished-changes.md`'s phase 1 note on `useVersions`).

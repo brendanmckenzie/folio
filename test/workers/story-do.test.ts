@@ -619,7 +619,13 @@ describe('StoryDO: activity trail', () => {
       await instance.getOrInit(seed())
       for (const n of [1, 2, 3]) {
         await instance.webSocketMessage(
-          ghost({ actor: 'usr_ada', name: 'Ada', colour: '#ff00ff', selection: null }),
+          ghost({
+            actor: 'usr_ada',
+            name: 'Ada',
+            colour: '#ff00ff',
+            selection: null,
+            locale: null,
+          }),
           JSON.stringify({
             type: 'tx',
             txId: `tx-${n}`,
@@ -648,7 +654,13 @@ describe('StoryDO: since()', () => {
       await instance.getOrInit(seed())
       for (const n of [1, 2, 3]) {
         await instance.webSocketMessage(
-          ghost({ actor: 'usr_ada', name: 'Ada', colour: '#ff00ff', selection: null }),
+          ghost({
+            actor: 'usr_ada',
+            name: 'Ada',
+            colour: '#ff00ff',
+            selection: null,
+            locale: null,
+          }),
           JSON.stringify({
             type: 'tx',
             txId: `tx-${n}`,
@@ -682,7 +694,13 @@ describe('StoryDO: reconnecting', () => {
   beforeAll(async () => {
     await runInDurableObject(catchupStub(), async (instance) => {
       await instance.getOrInit(seed())
-      const socket = ghost({ actor: 'usr_ada', name: 'Ada', colour: '#ff00ff', selection: null })
+      const socket = ghost({
+        actor: 'usr_ada',
+        name: 'Ada',
+        colour: '#ff00ff',
+        selection: null,
+        locale: null,
+      })
       for (let n = 1; n <= LOGGED; n++) {
         await instance.webSocketMessage(
           socket,
@@ -750,11 +768,11 @@ describe('StoryDO: multiplayer', () => {
     const bo = await join(stub, { actor: 'usr_bo', name: 'Bo', colour: '#00ffff' })
 
     expect((await frame(bo, 'bootstrap')).peers).toEqual([
-      { actor: 'usr_ada', name: 'Ada', colour: '#ff00ff', selection: null },
+      { actor: 'usr_ada', name: 'Ada', colour: '#ff00ff', selection: null, locale: null },
     ])
     expect(await frame(ada, 'presence')).toEqual({
       type: 'presence',
-      peer: { actor: 'usr_bo', name: 'Bo', colour: '#00ffff', selection: null },
+      peer: { actor: 'usr_bo', name: 'Bo', colour: '#00ffff', selection: null, locale: null },
     })
     ada.ws.close()
     bo.ws.close()
@@ -793,15 +811,47 @@ describe('StoryDO: multiplayer', () => {
     await frame(bo, 'bootstrap')
     await frame(ada, 'presence')
 
-    ada.send({ type: 'presence', selection: 'root0000' })
+    ada.send({ type: 'presence', selection: { uid: 'root0000', field: 'title' } })
 
     expect(await frame(bo, 'presence')).toEqual({
       type: 'presence',
-      peer: { actor: 'usr_ada', name: 'Ada', colour: '#ff00ff', selection: 'root0000' },
+      peer: {
+        actor: 'usr_ada',
+        name: 'Ada',
+        colour: '#ff00ff',
+        selection: { uid: 'root0000', field: 'title' },
+        locale: null,
+      },
     })
     // Ada's own inbox still holds only Bo's arrival.
     await settle()
     expect(framesOf(ada, 'presence')).toHaveLength(1)
+    ada.ws.close()
+    bo.ws.close()
+  })
+
+  /**
+   * v4 (`live-collaboration.md`): the locale rides presence so a peer ring can
+   * name it — two editors in one field in different languages are writing
+   * different keys and are not in conflict. It rides the *story* channel rather
+   * than being cross-referenced from the space channel so the label is right for
+   * a host that never declared the space binding.
+   */
+  it('carries the editing locale alongside the selection', async () => {
+    const stub = story('mp-presence-locale')
+    await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
+    const ada = await join(stub, { actor: 'usr_ada', name: 'Ada', colour: '#ff00ff' })
+    await frame(ada, 'bootstrap')
+    const bo = await join(stub, { actor: 'usr_bo', name: 'Bo', colour: '#00ffff' })
+    await frame(bo, 'bootstrap')
+    await frame(ada, 'presence')
+
+    ada.send({ type: 'presence', selection: { uid: 'root0000', field: 'title' }, locale: 'fr' })
+    expect((await frame(bo, 'presence')).peer.locale).toBe('fr')
+
+    // Back to the source locale: an absent locale means the source, permanently.
+    ada.send({ type: 'presence', selection: { uid: 'root0000', field: 'title' } })
+    expect((await frame(bo, 'presence', 2)).peer.locale).toBeNull()
     ada.ws.close()
     bo.ws.close()
   })
@@ -818,7 +868,7 @@ describe('StoryDO: multiplayer', () => {
 
     expect(await frame(bo, 'presence')).toEqual({
       type: 'presence',
-      peer: { actor: 'usr_ada', name: 'Ada', colour: '#ff00ff', selection: null },
+      peer: { actor: 'usr_ada', name: 'Ada', colour: '#ff00ff', selection: null, locale: null },
       gone: true,
     })
     bo.ws.close()
@@ -1103,7 +1153,7 @@ describe('StoryDO: protocol discipline', () => {
 
     expect(await frame(bo, 'presence')).toEqual({
       type: 'presence',
-      peer: { actor: 'usr_ada', name: 'Ada', colour: '#ff00ff', selection: null },
+      peer: { actor: 'usr_ada', name: 'Ada', colour: '#ff00ff', selection: null, locale: null },
       gone: true,
     })
     ada.ws.close()
@@ -1181,7 +1231,13 @@ describe('StoryDO: wire caps', () => {
     const bo = await join(stub, { actor: 'usr_bo', name: 'Bo', colour: '#00ffff' })
 
     expect((await frame(bo, 'bootstrap')).peers).toEqual([
-      { actor: 'usr_ada', name: 'Ada', colour: fallbackColour('usr_ada'), selection: null },
+      {
+        actor: 'usr_ada',
+        name: 'Ada',
+        colour: fallbackColour('usr_ada'),
+        selection: null,
+        locale: null,
+      },
     ])
     ada.ws.close()
     bo.ws.close()
@@ -1198,11 +1254,23 @@ describe('StoryDO: wire caps', () => {
     const blank = await join(stub, { actor: 'usr_bo', name: '   ', colour: '#00ffff' })
 
     expect((await frame(blank, 'bootstrap')).peers).toEqual([
-      { actor: 'usr_ada', name: 'x'.repeat(MAX_NAME_LEN), colour: '#ff00ff', selection: null },
+      {
+        actor: 'usr_ada',
+        name: 'x'.repeat(MAX_NAME_LEN),
+        colour: '#ff00ff',
+        selection: null,
+        locale: null,
+      },
     ])
     expect(await frame(long, 'presence')).toEqual({
       type: 'presence',
-      peer: { actor: 'usr_bo', name: 'Anonymous', colour: '#00ffff', selection: null },
+      peer: {
+        actor: 'usr_bo',
+        name: 'Anonymous',
+        colour: '#00ffff',
+        selection: null,
+        locale: null,
+      },
     })
     long.ws.close()
     blank.ws.close()
@@ -1292,7 +1360,7 @@ describe('StoryDO: wire caps', () => {
     const closes: number[] = []
     peer.ws.addEventListener('close', (event) => closes.push(event.code))
 
-    peer.ws.send(JSON.stringify({ type: 'presence', selection: 'root0000' }))
+    peer.ws.send(JSON.stringify({ type: 'presence', selection: { uid: 'root0000', field: null } }))
 
     const err = await frame(peer, 'error')
     expect(err.reason).toContain('unset')

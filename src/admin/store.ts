@@ -6,16 +6,37 @@ import {
   MAX_FRAME_BYTES,
   MAX_TX_MUTATIONS,
   type Presence,
+  type PresenceSelection,
   PROTOCOL_VERSION,
   type ServerFrame,
   type ServerMsg,
 } from '../core/protocol'
 
+/**
+ * Shortest gap between two presence frames from this client
+ * (`live-collaboration.md` architecture decision 2). Presence is chatty by
+ * nature and this plus the dedupe below is the whole cost control: no timers, no
+ * heartbeats, one frame per real change, and a burst collapsed to its last
+ * value.
+ */
+export const PRESENCE_THROTTLE_MS = 100
+
 export interface StoreState {
   doc: Doc | null
   connected: boolean
   peers: Presence[]
+  /**
+   * The selected blok's uid. Deliberately still a bare uid rather than the
+   * wire's `{ uid, field }` pair: every panel in the editor asks "is this blok
+   * selected", and the focused field is a separate question with a separate
+   * answer below.
+   */
   selection: string | null
+  /**
+   * The field inside `selection` this client has focus in, or null. Reported by
+   * the inspector, announced as presence, and what the overwrite notice is about.
+   */
+  focus: string | null
   canUndo: boolean
   canRedo: boolean
   /** Local transactions not yet acknowledged by the Durable Object. */
@@ -162,6 +183,7 @@ export class StoryStore {
     connected: false,
     peers: [],
     selection: null,
+    focus: null,
     canUndo: false,
     canRedo: false,
     inflight: 0,
@@ -197,6 +219,13 @@ export class StoryStore {
    */
   private lastEdit: { uid: string; field: string; locale?: string; at: number } | null = null
   private createSocket: (path: string) => WebSocketLike
+  /** The locale this client is editing in, announced with presence. */
+  private locale: string | null = null
+  /** The last presence value actually put on the wire, for the dedupe. */
+  private lastPresence: string | null = null
+  /** When the last presence frame went out, for the throttle. */
+  private presenceAt = 0
+  private presenceTimer: ReturnType<typeof setTimeout> | null = null
 
   /** Called with every mutation applied locally, for forwarding to the preview iframe. */
   onMutations: (mutations: Mutation[]) => void = () => {}
@@ -300,6 +329,11 @@ export class StoryStore {
       this.resyncing = false
       this.patch({ connected: true })
       this.hello()
+      // A reconnect is a new socket and therefore a new attachment, which starts
+      // with no selection: the dedupe has to forget what the *previous* socket
+      // was told or this client would sit in every peer's list with no dot.
+      this.lastPresence = null
+      if (this.state.selection !== null) this.announce()
     }
     ws.onmessage = (e) => this.frame(e.data)
     ws.onclose = (ev) => {
@@ -348,6 +382,8 @@ export class StoryStore {
     this.closed = true
     if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer)
     this.reconnectTimer = null
+    if (this.presenceTimer !== null) clearTimeout(this.presenceTimer)
+    this.presenceTimer = null
     this.ws?.close()
     this.ws = null
   }
@@ -584,9 +620,80 @@ export class StoryStore {
     return sent
   }
 
-  select(uid: string | null) {
-    if (uid === this.state.selection) return
-    this.patch({ selection: uid })
-    this.send({ type: 'presence', selection: uid })
+  /**
+   * Select a blok, and optionally a field inside it (v4,
+   * `live-collaboration.md`). `select(uid)` with no field is the pre-v4 call and
+   * means "this blok, no particular field" — every existing call site keeps
+   * working and keeps meaning what it meant.
+   */
+  select(uid: string | null, field: string | null = null) {
+    if (uid === this.state.selection && field === this.state.focus) return
+    this.patch({ selection: uid, focus: uid === null ? null : field })
+    this.announce()
+  }
+
+  /**
+   * The focused field within the current selection, reported by the inspector.
+   * A no-op when nothing is selected: a field cannot be focused without its
+   * blok being the one on screen.
+   */
+  focusField(field: string | null) {
+    if (this.state.selection === null || field === this.state.focus) return
+    this.patch({ focus: field })
+    this.announce()
+  }
+
+  /**
+   * Which locale this client is editing in, so a peer ring can say so. Announced
+   * as presence rather than sent on its own frame: it is a property of where
+   * somebody is, exactly like the selection.
+   */
+  setLocale(locale: string | null) {
+    const next = locale || null
+    if (next === this.locale) return
+    this.locale = next
+    this.announce()
+  }
+
+  /** What this client currently holds, in the wire's shape. */
+  private currentSelection(): PresenceSelection | null {
+    const uid = this.state.selection
+    return uid === null ? null : { uid, field: this.state.focus }
+  }
+
+  /**
+   * Announce this client's presence, throttled and deduplicated.
+   *
+   * Deduplicated first: an unchanged selection sends nothing at all, which is
+   * what keeps a re-render or a repeated click off the wire entirely. Then
+   * throttled with a **trailing** send rather than a leading one, so dragging a
+   * selection across a run of blocks costs one frame per 100 ms and always ends
+   * on the value that is actually held — a leading throttle would announce the
+   * first block of the drag and then go quiet on the one you stopped at.
+   */
+  private announce() {
+    const selection = this.currentSelection()
+    const key = JSON.stringify([selection, this.locale])
+    if (key === this.lastPresence) return
+    this.lastPresence = key
+
+    const now = Date.now()
+    const wait = PRESENCE_THROTTLE_MS - (now - this.presenceAt)
+    if (wait <= 0) {
+      this.presenceAt = now
+      this.send({ type: 'presence', selection, locale: this.locale })
+      return
+    }
+    if (this.presenceTimer !== null) return // a trailing send is already scheduled
+    this.presenceTimer = setTimeout(() => {
+      this.presenceTimer = null
+      this.presenceAt = Date.now()
+      // The value at the moment the timer fires, not the one that scheduled it.
+      this.send({
+        type: 'presence',
+        selection: this.currentSelection(),
+        locale: this.locale,
+      })
+    }, wait)
   }
 }

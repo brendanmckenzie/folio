@@ -566,7 +566,13 @@ describe('the sync socket', () => {
 
     // Presence carries Ann's own row, not what her client claimed.
     expect(watching.peers).toEqual([
-      { actor: ann.user.id, name: 'Ann', colour: expect.any(String), selection: null },
+      {
+        actor: ann.user.id,
+        name: 'Ann',
+        colour: expect.any(String),
+        selection: null,
+        locale: null,
+      },
     ])
 
     annSocket.send({ type: 'tx', txId: 'a1', mutations: setTitle(boot.doc.root, 'Ann was here') })
@@ -651,7 +657,13 @@ describe('the sync socket', () => {
     const presence = await frame(first, 'presence')
     // The attachment now holds role, session id and expiry; presence used to be a
     // spread of it.
-    expect(Object.keys(presence.peer).sort()).toEqual(['actor', 'colour', 'name', 'selection'])
+    expect(Object.keys(presence.peer).sort()).toEqual([
+      'actor',
+      'colour',
+      'locale',
+      'name',
+      'selection',
+    ])
     first.ws.close()
     second.ws.close()
   })
