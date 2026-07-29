@@ -3,7 +3,7 @@
 > **Group:** editing
 > **Build order:** 6
 > **Size:** S–M
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** none
 > **Last updated:** 2026-07-29
@@ -436,3 +436,54 @@ clients.
   A loop over the same route, and worth adding once someone asks — but the
   confirmation, the slug derivation and the partial-failure story all need care, so it
   is not smuggled in here.
+
+## Implementation notes
+
+Built in four phases, each committed green: core (`core/clone.ts`, `core/clipboard.ts`),
+admin blocks (`useBlocks`, `BlockTree`, `Inspector`, `useClipboardShortcuts`), server
+documents (`duplicateStory`, `POST /stories/:id/duplicate`, `StoryTree`,
+`DuplicateDialog`), then docs. All five owner decision checkpoints landed as written.
+64 tests added (32 unit core, 20 unit admin, 12 workers) plus 4 new `scripts/sync-test.mjs`
+checks run live against a real dev server (16/16). Baseline 764 → 828.
+
+**What shipped, versus the spec's own sketch:**
+
+- `cloneSubtree`/`cloneDoc` (`core/clone.ts`) do **not** carry a subtree's original
+  `order` strings forward, unlike architecture decision 1's prose ("descendants keep
+  their own order strings unchanged"). Spec 5 (`field-defaults-and-presets.md`) landed
+  first and built `allocateSubtree` as the shared uid *and* fractional-order allocator,
+  with the explicit instruction (recorded in that spec's carryover notes) that this spec
+  call it directly rather than write a second allocator. `allocateSubtree` always
+  re-derives fresh, sequential fractional keys per `(parent, slot)` group in the
+  recipe's own array order — so `cloneSubtree` walks each level via `childrenOf` (already
+  sorted by `compareSiblings`) to build that array in the *correct* sibling order, and
+  the fresh keys it gets back preserve relative order without reusing the old strings.
+  The observable behaviour the acceptance criteria actually ask for — sibling order is
+  preserved, orders are valid fractional keys — holds; only the mechanism differs from
+  the sketch.
+- The route pseudocode in "Architecture decision 4" passes a `type` field through to
+  `createStory`. No such field exists: no document-type concept has landed yet
+  (`../foundation/document-types.md` is later in the build order), so `duplicateStory`
+  does not pass one. `cloneDoc` already carries the source's root block `type` forward
+  as part of the document itself, which is what actually matters here.
+- Singleton refusal (decision 5's second paragraph) is deliberately not implemented:
+  there is nothing to check a singleton against yet. `document-types.md` owns adding it.
+- `i18n` (mentioned in architecture decision 1's "translations" bullet) does not exist
+  on `Blok` yet — `localisation.md` hasn't landed. Nothing needed doing; `data` is
+  copied verbatim regardless of what fields it holds, so a future `i18n` map (if it
+  ends up living in `data`) already carries through for free, and if it ends up as a
+  sibling field on `Blok` instead, that spec will need to teach `subtreeRecipe` about it.
+- The paste target's slot `allow`/`max` checks and `parseClipboard`'s internal
+  type/slot-conformance checks are split as the spec's own core-type signature implies
+  (`parseClipboard(text, schema)` takes no target): `parseClipboard` validates the
+  payload's own internal structure; `pasteInsert` (`useBlocks.ts`, a new pure function
+  alongside `subtreeInsert`) resolves and validates the destination. Internal `max`
+  violations inside a hand-edited clipboard (as opposed to `allow` violations, which
+  are checked) are not walked — only the destination slot's `max` is checked, matching
+  the acceptance criteria's own oversized-paste and full-slot scenarios.
+- Every refusal (duplicate, paste, slug/parent errors) surfaces through the existing
+  `useNotice` toast; `useBlocks` gained two required parameters (`notify`, `storyPath`)
+  as a result, with `Editor.tsx` as the only call site to update.
+- Not implemented: multi-select copy, cross-site paste as a supported feature, and
+  duplicating a document with its descendants — all called out in "Out of scope" above
+  and left that way.
