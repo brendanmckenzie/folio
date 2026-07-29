@@ -6,8 +6,20 @@ import type { Resolution } from './resolve'
  * Wire format version, carried by every frame in both directions. Persisted logs
  * already outlive deploys and the wire format will too, so a peer that speaks a
  * version we do not recognise is refused at the handshake rather than guessed at.
+ *
+ * The rule every bump has to satisfy: **the mutation log outlives every deploy**,
+ * so a change must be *additive* to a logged mutation and every entry already in
+ * a log must replay under its old meaning forever. Bumping is how a peer finds
+ * out it cannot read what this deploy sends, never a licence to reinterpret what
+ * an older one wrote.
+ *
+ * | v | what changed |
+ * | - | ------------ |
+ * | 1 | the original: `set`, `insert`, `move`, `remove` |
+ * | 2 | `Mutation` gains `retype` (`schema-migrations.md`) — a new variant, so a
+ *       `set` written under v1 is still a `set` |
  */
-export const PROTOCOL_VERSION = 1
+export const PROTOCOL_VERSION = 2
 
 export interface Presence {
   actor: string
@@ -240,6 +252,8 @@ export function isMutation(x: unknown): x is Mutation {
       return isString(x.uid) && isString(x.parent) && isString(x.slot) && isString(x.order)
     case 'remove':
       return isString(x.uid)
+    case 'retype':
+      return isString(x.uid) && isString(x.type)
     default:
       return false
   }

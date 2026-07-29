@@ -216,6 +216,51 @@ describe('apply — remove', () => {
   })
 })
 
+/**
+ * `schema-migrations.md` architecture decision 3. The variant exists because
+ * "remove and re-insert with the same uid" is not a transaction that can be
+ * written: `insert` refuses a duplicate uid and `remove` cascades.
+ */
+describe('apply — retype', () => {
+  it('changes the type and nothing else', () => {
+    const out = apply(makeDoc(), { t: 'retype', uid: 'hero', type: 'quote' })
+    expect(out.bloks.hero).toEqual(b('hero', 'quote', 'root', 'body', 'a0', { heading: 'Hello' }))
+  })
+
+  it('keeps the blok its children, in place and in order', () => {
+    const out = apply(makeDoc(), { t: 'retype', uid: 'section', type: 'container' })
+    expect(out.bloks.section!.type).toBe('container')
+    expect(out.bloks.text).toEqual(makeDoc().bloks.text)
+    expect(out.bloks.col).toEqual(makeDoc().bloks.col)
+    expect(out.bloks.img).toEqual(makeDoc().bloks.img)
+    expect(uids(out)).toEqual(uids(makeDoc()))
+  })
+
+  it('leaves field data untouched — seeding the new type is a set alongside it', () => {
+    const out = applyAll(makeDoc(), [
+      { t: 'retype', uid: 'hero', type: 'quote' },
+      { t: 'set', uid: 'hero', field: 'size', value: 'large' },
+    ])
+    expect(out.bloks.hero!.data).toEqual({ heading: 'Hello', size: 'large' })
+  })
+
+  it('refuses to retype doc.root', () => {
+    const doc = makeDoc()
+    expect(apply(doc, { t: 'retype', uid: 'root', type: 'insightPage' })).toBe(doc)
+  })
+
+  it('is a no-op for an unknown uid', () => {
+    const doc = makeDoc()
+    expect(apply(doc, { t: 'retype', uid: 'nope', type: 'quote' })).toBe(doc)
+  })
+
+  it('does not mutate the input doc', () => {
+    const doc = makeDoc()
+    apply(doc, { t: 'retype', uid: 'hero', type: 'quote' })
+    expect(doc).toEqual(makeDoc())
+  })
+})
+
 describe('applyAll', () => {
   it('applies mutations in order, last write winning', () => {
     const out = applyAll(makeDoc(), [
@@ -301,6 +346,21 @@ describe('invert', () => {
     expect(invert(makeDoc(), m)).toEqual([])
   })
 
+  it('inverts retype to a retype back to the previous type', () => {
+    const doc = makeDoc()
+    expect(invert(doc, { t: 'retype', uid: 'hero', type: 'quote' })).toEqual([
+      { t: 'retype', uid: 'hero', type: 'hero' },
+    ])
+  })
+
+  it('inverts retype on an unknown uid to nothing', () => {
+    expect(invert(makeDoc(), { t: 'retype', uid: 'nope', type: 'quote' })).toEqual([])
+  })
+
+  it('inverts a retype of the root to nothing, since it is refused', () => {
+    expect(invert(makeDoc(), { t: 'retype', uid: 'root', type: 'insightPage' })).toEqual([])
+  })
+
   it('returns an empty inverse for an empty transaction', () => {
     expect(invertAll(makeDoc(), [])).toEqual([])
   })
@@ -376,6 +436,27 @@ describe('invertAll round trip', () => {
     expect(roundTrip(doc, ms)).toEqual(makeDoc())
   })
 
+  /**
+   * The whole point of a migration going through the log: an editor can see it
+   * happen and Cmd+Z takes it back (`schema-migrations.md`'s edge case on
+   * undoing a migration transaction).
+   */
+  it('round trips a retype with the sets that seed the new type', () => {
+    const doc = makeDoc()
+    const ms: Mutation[] = [
+      { t: 'retype', uid: 'hero', type: 'quote' },
+      { t: 'set', uid: 'hero', field: 'heading', value: null },
+      { t: 'set', uid: 'hero', field: 'quote', value: 'Hello' },
+    ]
+    const applied = applyAll(doc, ms)
+    expect(applied.bloks.hero!.type).toBe('quote')
+    // `heading` survives holding null, the same asymmetry a plain set has (see
+    // the pin below): the vocabulary has no delete-field.
+    expect(roundTrip(doc, ms).bloks.hero).toEqual(
+      b('hero', 'hero', 'root', 'body', 'a0', { heading: 'Hello', quote: null }),
+    )
+  })
+
   it('round trips a transaction containing a refused remove of the root', () => {
     const doc = makeDoc()
     const ms: Mutation[] = [
@@ -444,6 +525,11 @@ describe('mutationError', () => {
       }),
     ).toMatch(/cycle/)
     expect(mutationError(doc, { t: 'remove', uid: 'root' })).toMatch(/root remove/)
+    // A document's root type *is* its document type, so changing it is a
+    // `stories.type` update in the same breath — out of scope for a block edit.
+    expect(mutationError(doc, { t: 'retype', uid: 'root', type: 'insightPage' })).toMatch(
+      /root retype/,
+    )
     expect(mutationError(doc, { t: 'nonsense' } as unknown as Mutation)).toMatch(/unknown kind/)
   })
 
@@ -453,6 +539,13 @@ describe('mutationError', () => {
       { t: 'insert', blok: b('card', 'card', 'section', 'children', 'a2') },
       { t: 'move', uid: 'img', parent: 'root', slot: 'body', order: 'a2' },
       { t: 'remove', uid: 'section' },
+      { t: 'retype', uid: 'hero', type: 'quote' },
+      // Deliberately not checked against any registry: the Durable Object knows
+      // nothing about block schemas, and an unknown type renders as "Unknown
+      // block type" and is fixable by another migration. A DO that had to hold
+      // the registry and keep it in step is a far worse coupling than a bad
+      // type name (`schema-migrations.md` architecture decision 3).
+      { t: 'retype', uid: 'hero', type: 'notInAnyRegistry' },
     ]
     for (const m of ok) expect(mutationError(doc, m)).toBeNull()
 
@@ -463,6 +556,7 @@ describe('mutationError', () => {
       { t: 'set', uid: 'nope', field: 'x', value: 1 },
       { t: 'move', uid: 'nope', parent: 'root', slot: 'body', order: 'a0' },
       { t: 'remove', uid: 'nope' },
+      { t: 'retype', uid: 'nope', type: 'quote' },
     ]
     for (const m of absent) expect(mutationError(doc, m)).toBeNull()
   })

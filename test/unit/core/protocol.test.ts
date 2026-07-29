@@ -32,6 +32,19 @@ const setMutation = (uid = 'root0000', value: unknown = 'x') => ({
 
 const send = (body: Record<string, unknown>) => JSON.stringify({ ...body, v: PROTOCOL_VERSION })
 
+/**
+ * The version is a fact both ends and every `scripts/*.mjs` stamp from this one
+ * constant, so a bump that was meant and a bump that happened are the same
+ * thing. Pinned as a literal on purpose: an accidental change to a number every
+ * frame carries would otherwise be invisible until a deployed tab stopped
+ * talking to a deployed worker.
+ */
+describe('PROTOCOL_VERSION', () => {
+  it('is 2 — `Mutation` gained `retype` (schema-migrations.md)', () => {
+    expect(PROTOCOL_VERSION).toBe(2)
+  })
+})
+
 describe('parseClientFrame: hello', () => {
   it('parses a well-formed hello unchanged', () => {
     const frame = parseClientFrame(
@@ -177,6 +190,37 @@ describe('parseClientFrame: tx', () => {
         send({ type: 'tx', txId: 'tx-1', mutations: [setMutation(), { t: 'insert' }] }),
       ),
     ).toBeNull()
+  })
+
+  /**
+   * `retype` is the v2 addition (`schema-migrations.md`). The guard has to know
+   * it or every migration transaction would arrive as an unreadable frame — and
+   * a `retype` missing its `type` must not sail through and reach `apply` as an
+   * undefined type name.
+   */
+  it('parses a tx carrying a retype', () => {
+    const frame = parseClientFrame(
+      send({
+        type: 'tx',
+        txId: 'tx-r',
+        mutations: [{ t: 'retype', uid: 'blk00001', type: 'quote' }],
+      }),
+    )
+    expect(frame).toEqual({
+      type: 'tx',
+      txId: 'tx-r',
+      mutations: [{ t: 'retype', uid: 'blk00001', type: 'quote' }],
+      v: PROTOCOL_VERSION,
+    })
+  })
+
+  it.each([
+    { t: 'retype', uid: 'blk00001' },
+    { t: 'retype', type: 'quote' },
+    { t: 'retype', uid: 'blk00001', type: 7 },
+    { t: 'retype', uid: null, type: 'quote' },
+  ])('rejects a malformed retype (%o)', (mutation) => {
+    expect(parseClientFrame(send({ type: 'tx', txId: 'tx-r', mutations: [mutation] }))).toBeNull()
   })
 
   it('still parses a tx whose mutation count exceeds the cap: the door names it via reject, not an unreadable frame', () => {

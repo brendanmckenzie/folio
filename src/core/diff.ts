@@ -32,6 +32,7 @@ export function diff(from: Doc, to: Doc): Mutation[] {
 
   const inserts: Mutation[] = []
   const moves: Mutation[] = []
+  const retypes: Mutation[] = []
   const sets: Mutation[] = []
   const removes: Mutation[] = []
 
@@ -49,10 +50,20 @@ export function diff(from: Doc, to: Doc): Mutation[] {
   }
   for (const blok of added) emitInsert(blok)
 
-  // 2. Surviving bloks: reposition, then field values.
+  // 2. Surviving bloks: reposition, retype, then field values.
   for (const blok of Object.values(to.bloks)) {
     const prev = from.bloks[blok.uid]
     if (!prev) continue
+
+    // Without this, the same uid at a different type would emit only field
+    // `set`s and quietly leave the old type in place — which would make a
+    // version restore *across* a content migration wrong, silently
+    // (`schema-migrations.md` architecture decision 3). The root is skipped:
+    // `mutationError` refuses retyping it, so emitting one would put a
+    // guaranteed rejection into a transaction the caller cannot fix.
+    if (prev.type !== blok.type && blok.uid !== to.root) {
+      retypes.push({ t: 'retype', uid: blok.uid, type: blok.type })
+    }
 
     const moved =
       prev.parent !== blok.parent || prev.slot !== blok.slot || prev.order !== blok.order
@@ -94,7 +105,11 @@ export function diff(from: Doc, to: Doc): Mutation[] {
     removes.push({ t: 'remove', uid })
   }
 
-  return [...inserts, ...moves, ...sets, ...removes]
+  // Retypes ride with the sets, after the moves and before the removes: a
+  // retype needs the blok to exist (inserts are done) and says nothing about
+  // position, so it is only ever ordered against the field writes that
+  // accompany it — and those may well be the fields the new type introduced.
+  return [...inserts, ...moves, ...retypes, ...sets, ...removes]
 }
 
 const uidOf = (m: Mutation): string => (m.t === 'insert' ? m.blok.uid : m.uid)
@@ -123,6 +138,8 @@ export function summariseDiff(mutations: readonly Mutation[]) {
     added: mutations.filter((m) => m.t === 'insert').length,
     removed: mutations.filter((m) => m.t === 'remove').length,
     moved: mutations.filter((m) => m.t === 'move').length,
+    /** Blocks whose *type* changed (`schema-migrations.md`), not their fields. */
+    retyped: mutations.filter((m) => m.t === 'retype').length,
     edited: new Set(mutations.filter((m) => m.t === 'set').map((m) => m.uid)).size,
     total: mutations.length,
   }

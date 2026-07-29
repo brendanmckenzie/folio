@@ -8,6 +8,7 @@ const delta = (total: number, over: Partial<Delta> = {}): Delta => ({
   added: 0,
   removed: 0,
   moved: 0,
+  retyped: 0,
   edited: total,
   total,
   ...over,

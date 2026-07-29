@@ -836,7 +836,7 @@ describe('admin sync store', () => {
 
       // Applying a frame of an unknown vintage is how a document diverges silently.
       expect(value(h.store, 'hero', 'heading')).toBe('Hi')
-      expect(h.store.getSnapshot().notice).toContain('protocol version 2')
+      expect(h.store.getSnapshot().notice).toContain(`protocol version ${PROTOCOL_VERSION + 1}`)
       // Terminal: a reconnect would meet the same two versions.
       expect(h.last().closedByStore).toBe(true)
       vi.advanceTimersByTime(60_000)

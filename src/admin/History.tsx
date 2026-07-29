@@ -186,6 +186,13 @@ function describe(mutations: readonly Mutation[], doc: Doc, schema: SchemaIndex)
     case 'move':
       phrase = `Moved ${labelFor(first.uid)}`
       break
+    case 'retype':
+      // The *new* type's label comes from the schema rather than from the
+      // document: a retype is almost always a content migration, and by the
+      // time this renders the document already carries the new type — so
+      // `labelFor` would name the destination twice and never the source.
+      phrase = `Changed ${labelFor(first.uid)} to ${schema[first.type]?.label ?? first.type}`
+      break
   }
 
   const rest = mutations.length - 1

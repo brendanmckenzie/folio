@@ -207,12 +207,50 @@ describe('diff', () => {
     expect(applyAll(from, ms)).toEqual(to)
   })
 
-  it('cannot express a type change, so a type-only edit produces no mutations', () => {
-    // Pins a real gap: there is no mutation that rewrites `type`.
+  /**
+   * This test used to pin the *gap* — "there is no mutation that rewrites
+   * `type`, so a type-only edit produces nothing". `schema-migrations.md`
+   * closes it, and the reason it had to be closed here rather than only in
+   * `mutations.ts` is version restore: a restore is `diff(live, target)`, so a
+   * diff that could not see a type change would restore the fields and leave
+   * the old type behind.
+   */
+  it('emits a retype for a surviving uid whose type changed', () => {
     const from = mkDoc([rootBlk(), blk('a', { type: 'text' })])
     const to = mkDoc([rootBlk(), blk('a', { type: 'image' })])
+    expect(diff(from, to)).toEqual([{ t: 'retype', uid: 'a', type: 'image' }])
+    expect(applyAll(from, diff(from, to))).toEqual(to)
+  })
+
+  it('orders a retype after the moves and before the removes, alongside the sets', () => {
+    const from = mkDoc([
+      rootBlk(),
+      blk('a', { type: 'text', order: 'a1', data: { body: 'one' } }),
+      blk('gone', { order: 'a2' }),
+    ])
+    const to = mkDoc([
+      rootBlk(),
+      blk('a', { type: 'image', slot: 'aside', order: 'a1', data: { body: 'two' } }),
+      blk('new', { order: 'a3' }),
+    ])
+
+    expect(diff(from, to).map((m) => m.t)).toEqual(['insert', 'move', 'retype', 'set', 'remove'])
+    expect(applyAll(from, diff(from, to))).toEqual(to)
+  })
+
+  /**
+   * `mutationError` refuses retyping the root, so emitting one would put a
+   * guaranteed rejection into a transaction the caller has no way to fix. A
+   * document's root type is its *document* type; changing it is a `stories.type`
+   * update in the same breath, which `schema-migrations.md` puts out of scope.
+   */
+  it('never emits a retype for the root, even when the root type differs', () => {
+    const from = mkDoc([rootBlk()])
+    const to: typeof from = {
+      ...from,
+      bloks: { ...from.bloks, [ROOT]: { ...from.bloks[ROOT]!, type: 'insightPage' } },
+    }
     expect(diff(from, to)).toEqual([])
-    expect(applyAll(from, diff(from, to)).bloks.a?.type).toBe('text')
   })
 
   // SPEC(diff-order): applying diff(from,to) produces to even when a child is rescued out
@@ -256,14 +294,35 @@ describe('summariseDiff', () => {
       added: 1,
       removed: 1,
       moved: 1,
+      retyped: 0,
       edited: 1,
       total: 5,
     })
     expect(applyAll(from, ms)).toEqual(to)
   })
 
+  it('counts retypes separately from the field edits that accompany them', () => {
+    const from = mkDoc([rootBlk(), blk('a', { type: 'bigQuote', data: { text: 'hi' } })])
+    const to = mkDoc([rootBlk(), blk('a', { type: 'quote', data: { text: 'hi', size: 'large' } })])
+    expect(summariseDiff(diff(from, to))).toEqual({
+      added: 0,
+      removed: 0,
+      moved: 0,
+      retyped: 1,
+      edited: 1,
+      total: 2,
+    })
+  })
+
   it('reports all zeroes for an empty change set', () => {
-    expect(summariseDiff([])).toEqual({ added: 0, removed: 0, moved: 0, edited: 0, total: 0 })
+    expect(summariseDiff([])).toEqual({
+      added: 0,
+      removed: 0,
+      moved: 0,
+      retyped: 0,
+      edited: 0,
+      total: 0,
+    })
   })
 })
 
@@ -415,6 +474,16 @@ function deriveTo(from: Doc, rand: Rand): Doc {
     }
   }
 
+  // Type changes on surviving bloks — `retype`'s shape, and the reason it had
+  // to reach `diff` at all rather than only `mutations.ts`. Never the root:
+  // `mutationError` refuses retyping it, so `diff` must not emit one.
+  for (let i = int(rand, 3); i > 0; i--) {
+    const changeable = Object.keys(to.bloks).filter((uid) => uid !== to.root)
+    if (changeable.length === 0) break
+    const uid = pick(rand, changeable)
+    to.bloks[uid] = { ...to.bloks[uid]!, type: pick(rand, TYPES) }
+  }
+
   for (let i = int(rand, 5); i > 0; i--) {
     const uid = pick(rand, Object.keys(to.bloks))
     const b = to.bloks[uid]!
@@ -521,7 +590,7 @@ describe('diff/applyAll round trip (seeded property)', () => {
   })
 
   it('exercises every mutation kind across the generated cases', () => {
-    const totals = { added: 0, removed: 0, moved: 0, edited: 0, total: 0 }
+    const totals = { added: 0, removed: 0, moved: 0, retyped: 0, edited: 0, total: 0 }
     let empty = 0
     let fieldRemovals = 0
     let rescues = 0
@@ -531,6 +600,7 @@ describe('diff/applyAll round trip (seeded property)', () => {
       totals.added += s.added
       totals.removed += s.removed
       totals.moved += s.moved
+      totals.retyped += s.retyped
       totals.edited += s.edited
       totals.total += s.total
       if (s.total === 0) empty++
@@ -541,6 +611,7 @@ describe('diff/applyAll round trip (seeded property)', () => {
     expect(totals.added).toBeGreaterThan(20)
     expect(totals.removed).toBeGreaterThan(20)
     expect(totals.moved).toBeGreaterThan(20)
+    expect(totals.retyped).toBeGreaterThan(20)
     expect(totals.edited).toBeGreaterThan(20)
     expect(fieldRemovals).toBeGreaterThan(5)
     // Rescues are the shape the emission order exists for; without them the

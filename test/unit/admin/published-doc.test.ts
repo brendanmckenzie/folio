@@ -52,7 +52,7 @@ describe('publishedDelta', () => {
       },
     }
     const delta = publishedDelta(published, draft)
-    expect(delta).toEqual({ added: 1, removed: 0, moved: 0, edited: 1, total: 2 })
+    expect(delta).toEqual({ added: 1, removed: 0, moved: 0, retyped: 0, edited: 1, total: 2 })
   })
 
   it('returns to a zero-total delta once a changed value is edited back to its published state', () => {
