@@ -338,6 +338,131 @@ describe('publish', () => {
   })
 })
 
+interface UnpublishResult {
+  ok: boolean
+  unpublishedAt: number
+}
+
+async function unpublish(storyId: string): Promise<UnpublishResult> {
+  const res = await SELF.fetch(`${API}/story/${storyId}/unpublish`, { method: 'POST' })
+  return res.json<UnpublishResult>()
+}
+
+async function stateOf(storyId: string): Promise<string | undefined> {
+  const tree = await getJson<StoryNode[]>('/folio/stories')
+  return flatten(tree).find((n) => n.id === storyId)?.state
+}
+
+describe('unpublish', () => {
+  it('takes a page down and keeps the draft, its history and its edits intact', async () => {
+    const story = await createStory('Offer')
+    const conn = await connect(story.id)
+    const doc = await conn.hello('alice')
+    await conn.tx('u1', [{ t: 'set', uid: doc.root, field: 'title', value: 'The Offer' }])
+    const pub = await publish(story.id)
+    expect((await SELF.fetch(`${ORIGIN}/${story.path}`)).status).not.toBe(404)
+    expect(await stateOf(story.id)).toBe('live')
+
+    const res = await unpublish(story.id)
+    expect(res.ok).toBe(true)
+    expect(res.unpublishedAt).toBeGreaterThan(0)
+
+    const gone = await SELF.fetch(`${ORIGIN}/${story.path}`)
+    expect(gone.status).toBe(404)
+    expect(await stateOf(story.id)).toBe('unpublished')
+
+    // The draft is byte-unchanged and still editable/previewable.
+    const stored = await getJson<{ doc: Doc }>(`/folio/story/${story.id}/document`)
+    expect(stored.doc.bloks[doc.root]?.data.title).toBe('The Offer')
+    const preview = await htmlOf(story.previewUrl!)
+    expect(preview).toContain('The Offer')
+
+    // Version history survives.
+    const versions = await getJson<VersionMeta[]>(`/folio/story/${story.id}/versions`)
+    expect(versions.some((v) => v.id === pub.version.id)).toBe(true)
+
+    conn.close()
+  })
+
+  it('is idempotent: a second call answers 200 with the original timestamp', async () => {
+    const story = await createStory('Double Unpublish')
+    await publish(story.id)
+
+    const first = await unpublish(story.id)
+    const second = await unpublish(story.id)
+
+    expect(second.ok).toBe(true)
+    expect(second.unpublishedAt).toBe(first.unpublishedAt)
+  })
+
+  it('404s for an unknown story', async () => {
+    const { status, body } = await failureOf(`/folio/story/sty_nope/unpublish`, {
+      method: 'POST',
+    })
+    expect(status).toBe(404)
+    expect(body.error.code).toBe('not_found')
+  })
+
+  it('republishing afterwards is an ordinary publish: history gains a second version and the page serves again', async () => {
+    const story = await createStory('Republish Target')
+    const conn = await connect(story.id)
+    const doc = await conn.hello('alice')
+    await conn.tx('r1', [{ t: 'set', uid: doc.root, field: 'title', value: 'First' }])
+    await publish(story.id)
+    await unpublish(story.id)
+    expect(await stateOf(story.id)).toBe('unpublished')
+
+    await conn.tx('r2', [{ t: 'set', uid: doc.root, field: 'title', value: 'Second' }])
+    const pub2 = await publish(story.id)
+    expect(pub2.ok).toBe(true)
+
+    expect(await stateOf(story.id)).toBe('live')
+    const html = await htmlOf(`/${story.path}`)
+    expect(html).toContain('Second')
+
+    const versions = await getJson<VersionMeta[]>(`/folio/story/${story.id}/versions`)
+    expect(versions.length).toBeGreaterThanOrEqual(2)
+
+    conn.close()
+  })
+
+  it('names descendants without cascading: unpublishing a parent leaves its published children live', async () => {
+    const parent = await createStory('Section')
+    const childA = await createStory('Section Child A', parent.id)
+    const childB = await createStory('Section Child B', parent.id)
+    await publish(parent.id)
+    await publish(childA.id)
+    await publish(childB.id)
+
+    await unpublish(parent.id)
+
+    expect((await SELF.fetch(`${ORIGIN}/${parent.path}`)).status).toBe(404)
+    expect((await SELF.fetch(`${ORIGIN}/${childA.path}`)).status).not.toBe(404)
+    expect((await SELF.fetch(`${ORIGIN}/${childB.path}`)).status).not.toBe(404)
+  })
+
+  it('the root story can be unpublished: "/" 404s, but it stays editable and delete is still refused', async () => {
+    const conn = await connect('sty_home')
+    const doc = await conn.hello('alice')
+    await conn.tx('root1', [{ t: 'set', uid: doc.root, field: 'title', value: 'Root Home' }])
+    await publish('sty_home')
+    expect((await SELF.fetch(`${ORIGIN}/`)).status).not.toBe(404)
+
+    await unpublish('sty_home')
+    expect((await SELF.fetch(`${ORIGIN}/`)).status).toBe(404)
+
+    // Still editable.
+    const stored = await getJson<{ doc: Doc }>(`/folio/story/sty_home/document`)
+    expect(stored.doc.bloks[doc.root]?.data.title).toBe('Root Home')
+
+    // Delete is still refused, as today — unpublish is not delete.
+    const del = await failureOf('/folio/stories/sty_home', { method: 'DELETE' })
+    expect(del.status).toBe(409)
+
+    conn.close()
+  })
+})
+
 describe('versions and restore', () => {
   it('publishing twice keeps both versions, newest first, with no doc payload in the list', async () => {
     const story = await createStory('Versioned Story')

@@ -78,6 +78,15 @@ export interface Folio<Env> {
   handle: (req: Request, env: Env, ctx: ExecutionContext) => Promise<Response | null>
   /** Published document for a URL path, or null. */
   published: (env: Env, path: string) => Promise<Doc | null>
+  /**
+   * What a path answers when it is not currently live: `'unpublished'` for a
+   * story that was live and has been taken down, `'unknown'` for a path with
+   * no story or one that has never been published — both never having served
+   * the public. Folio itself only ever hands back `null` from `published`; a
+   * host that wants to answer `410 Gone` for the former and `404` for the
+   * latter calls this instead (`unpublish.md`).
+   */
+  status: (env: Env, path: string) => Promise<'live' | 'unpublished' | 'unknown'>
   /** Live draft for a story id, creating it on first touch. */
   draft: (env: Env, id: string) => Promise<Doc>
   /** Every story, for sitemaps and static generation. */

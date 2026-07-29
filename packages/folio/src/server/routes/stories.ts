@@ -5,7 +5,7 @@
 import { Hono } from 'hono'
 import { rethrow } from '../errors'
 import { loadStory } from '../middleware'
-import { publish } from '../publish'
+import { publish, unpublish } from '../publish'
 import type { FolioRuntime } from '../runtime'
 import { createStory, deleteStoryStatement, storyTree, updateStory } from '../stories'
 import type { FolioEnv } from '../types'
@@ -98,6 +98,17 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     const { publishedAt, version } = await publish(rt.publishDeps(c.var.bindings()), id, actor)
     return c.json({ ok: true, publishedAt, version })
+  })
+
+  /**
+   * Clears the published snapshot. `loadStory` runs first so an unknown id
+   * 404s before `unpublish` does anything, and hands the row it already found
+   * straight to the workflow instead of a second lookup by id.
+   */
+  app.post('/story/:id/unpublish', loadStory<Env>(), async (c) => {
+    const actor = actorHeader(c.req.header('x-folio-actor'))
+    const { unpublishedAt } = await unpublish(rt.publishDeps(c.var.bindings()), c.var.story, actor)
+    return c.json({ ok: true, unpublishedAt })
   })
 
   /**

@@ -13,7 +13,11 @@ export interface StoryMeta {
   ord: string
   title: string
   publishedAt: number | null
+  /** Set the moment a live page is taken down; cleared by the next publish. */
+  unpublishedAt: number | null
   updatedAt: number
+  /** Derived, not stored — see `storyState`. */
+  state: StoryState
   /** Filled server-side from the host's `route` config. */
   url?: string
   previewUrl?: string
@@ -21,6 +25,34 @@ export interface StoryMeta {
 
 export interface StoryNode extends StoryMeta {
   children: StoryNode[]
+}
+
+/**
+ * The tree's four states (`unpublish.md`'s architecture decision 2), named
+ * once so the tree, the content API and any host reading `folio.stories(env)`
+ * agree on what a badge means.
+ *
+ * `'changed'` — live, with draft edits the last publish does not reflect — is
+ * not derivable from `publishedAt`/`unpublishedAt` alone; it needs a document
+ * diff. `storyState` below never returns it. The value stays in this union so
+ * `StoryMeta.state` does not need widening when `unpublished-changes.md` adds
+ * the comparison that produces it.
+ */
+export type StoryState = 'draft' | 'unpublished' | 'live' | 'changed'
+
+/**
+ * `published_doc is not null` is the actual liveness switch (server/stories.ts),
+ * but `publishStoryStatement` and `unpublishStoryStatement` always write
+ * `published_at` in lockstep with it, so testing `publishedAt` here costs no
+ * extra column and never disagrees with the document.
+ */
+export function storyState(
+  publishedAt: number | null,
+  unpublishedAt: number | null,
+): Exclude<StoryState, 'changed'> {
+  if (publishedAt !== null) return 'live'
+  if (unpublishedAt !== null) return 'unpublished'
+  return 'draft'
 }
 
 export function joinPath(parentPath: string, slug: string): string {
@@ -98,6 +130,18 @@ export function descendants(rows: readonly StoryMeta[], id: string): string[] {
   }
   walk(id)
   return out
+}
+
+/**
+ * The *live* descendants of `id` — what unpublish's confirmation names as
+ * staying up, per `unpublish.md`'s architecture decision 3 (no cascade, but
+ * the editor is told what it does not cascade to). Excludes `id` itself,
+ * unlike `descendants`, since a story is never its own descendant here.
+ */
+export function liveDescendants(rows: readonly StoryMeta[], id: string): StoryMeta[] {
+  const ids = new Set(descendants(rows, id))
+  ids.delete(id)
+  return rows.filter((r) => ids.has(r.id) && r.state === 'live')
 }
 
 export function slugify(input: string): string {

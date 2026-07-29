@@ -5,16 +5,32 @@ import {
   descendants,
   newStoryId,
   slugify,
+  storyState,
   type StoryMeta,
   type StoryNode,
 } from '../core/story'
 
 const COLS = `id, parent_id as parentId, slug, path, ord, title,
-              published_at as publishedAt, updated_at as updatedAt`
+              published_at as publishedAt, unpublished_at as unpublishedAt,
+              updated_at as updatedAt`
+
+/** A `COLS` row before `state` is derived onto it. */
+type StoryRow = Omit<StoryMeta, 'state'>
+
+/**
+ * `state` is derived here, once, rather than stored: `publishedAt` and
+ * `unpublishedAt` are the only columns it needs (see `storyState`), so every
+ * reader of a story row — the tree, `folio.stories(env)`, a future content API
+ * — agrees on what a badge means without a column that could itself drift out
+ * of sync with the two it summarises.
+ */
+function withState(row: StoryRow): StoryMeta {
+  return { ...row, state: storyState(row.publishedAt, row.unpublishedAt) }
+}
 
 export async function listStories(db: D1Database): Promise<StoryMeta[]> {
-  const { results } = await db.prepare(`select ${COLS} from stories`).all<StoryMeta>()
-  return results
+  const { results } = await db.prepare(`select ${COLS} from stories`).all<StoryRow>()
+  return results.map(withState)
 }
 
 export async function storyTree(db: D1Database): Promise<StoryNode[]> {
@@ -22,11 +38,42 @@ export async function storyTree(db: D1Database): Promise<StoryNode[]> {
 }
 
 export async function storyByPath(db: D1Database, path: string): Promise<StoryMeta | null> {
-  return db.prepare(`select ${COLS} from stories where path = ?`).bind(path).first<StoryMeta>()
+  const row = await db
+    .prepare(`select ${COLS} from stories where path = ?`)
+    .bind(path)
+    .first<StoryRow>()
+  return row && withState(row)
 }
 
 export async function storyById(db: D1Database, id: string): Promise<StoryMeta | null> {
-  return db.prepare(`select ${COLS} from stories where id = ?`).bind(id).first<StoryMeta>()
+  const row = await db
+    .prepare(`select ${COLS} from stories where id = ?`)
+    .bind(id)
+    .first<StoryRow>()
+  return row && withState(row)
+}
+
+/**
+ * What a host answers for a path that is not currently serving: `'live'` never
+ * happens here (a live path has a document to return instead), so this is only
+ * ever `'unpublished'` or `'unknown'` — the two `folio.status` promises,
+ * `unpublish.md`'s architecture decision 5. `'unknown'` covers both a path with
+ * no story at all and a story that has never been published: neither has ever
+ * served the public, so a host answering 404 for both is correct.
+ */
+export async function storyStatus(
+  db: D1Database,
+  path: string,
+): Promise<'live' | 'unpublished' | 'unknown'> {
+  const row = await db
+    .prepare(
+      'select published_at as publishedAt, unpublished_at as unpublishedAt from stories where path = ?',
+    )
+    .bind(path)
+    .first<{ publishedAt: number | null; unpublishedAt: number | null }>()
+  if (!row) return 'unknown'
+  const state = storyState(row.publishedAt, row.unpublishedAt)
+  return state === 'draft' ? 'unknown' : state
 }
 
 export async function publishedDoc(db: D1Database, path: string): Promise<Doc | null> {
@@ -116,6 +163,8 @@ export async function createStory(
     ord: orderAt(rows, parentId, rows.filter((r) => r.parentId === parentId).length),
     title: input.title.trim() || 'Untitled',
     publishedAt: null,
+    unpublishedAt: null,
+    state: 'draft',
     updatedAt: Date.now(),
   }
 
@@ -217,6 +266,10 @@ export async function deleteStory(db: D1Database, id: string): Promise<string[]>
  * version-row insert (see versions.ts's `buildVersionWrite`) so a publish either
  * lands both writes or neither — `published_doc` and the retained version can no
  * longer disagree about what "the last publish" was.
+ *
+ * Also clears `unpublished_at`/`unpublished_by`: republishing is an ordinary
+ * publish (`unpublish.md`), so a story taken down and then republished must not
+ * keep answering `folio.status` as `'unpublished'` from a stale marker.
  */
 export function publishStoryStatement(
   db: D1Database,
@@ -228,7 +281,8 @@ export function publishStoryStatement(
   const publishedAt = Date.now()
   const statement = db
     .prepare(
-      `update stories set published_doc = ?, published_at = ?, title = ?, updated_at = ?
+      `update stories set published_doc = ?, published_at = ?, title = ?, updated_at = ?,
+       unpublished_at = null, unpublished_by = null
        where id = ?`,
     )
     .bind(JSON.stringify(doc), publishedAt, title, publishedAt, id)
@@ -245,4 +299,33 @@ export async function publishStory(
   const { publishedAt, statement } = publishStoryStatement(db, id, doc, fallbackTitle)
   await statement.run()
   return publishedAt
+}
+
+/**
+ * The stories-row update for an unpublish, unrun for the same batching reason
+ * as `publishStoryStatement`: a future caller (`../content-model/collections.md`'s
+ * publish batch) needs to drop query-index rows in the same transaction. This
+ * spec's own `unpublish()` (`publish.ts`) has nothing else to batch it with —
+ * it is the one workflow that writes D1 alone, with no version row and no
+ * Durable Object call — so it just runs this statement by itself.
+ *
+ * Clears `published_doc` and `published_at` together, which is the entire
+ * liveness switch (`published_doc is not null`) going off; `published_at` is
+ * cleared alongside it because every existing reader — the tree, a host's
+ * sitemap — already treats it as "is this live".
+ */
+export function unpublishStoryStatement(
+  db: D1Database,
+  id: string,
+  actor: string | null,
+): { unpublishedAt: number; statement: D1PreparedStatement } {
+  const unpublishedAt = Date.now()
+  const statement = db
+    .prepare(
+      `update stories set published_doc = null, published_at = null,
+       unpublished_at = ?, unpublished_by = ?, updated_at = ?
+       where id = ?`,
+    )
+    .bind(unpublishedAt, actor, unpublishedAt, id)
+  return { unpublishedAt, statement }
 }

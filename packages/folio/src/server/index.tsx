@@ -2,7 +2,7 @@ import { FolioDoc } from '../preview/Render'
 import { createApp } from './app'
 import { previewPage } from './pages'
 import { createRuntime } from './runtime'
-import { listStories, publishedDoc, storyByPath, storyTree } from './stories'
+import { listStories, publishedDoc, storyByPath, storyStatus, storyTree } from './stories'
 import { StoryDO } from './story-do'
 import type { Folio, FolioConfig } from './types'
 
@@ -54,6 +54,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
   return {
     handle,
     published: (env, path) => publishedDoc(config.bindings(env).db, path),
+    status: (env, path) => storyStatus(config.bindings(env).db, path),
     draft: (env, id) => rt.draft(config.bindings(env), id),
     stories: async (env) => (await listStories(config.bindings(env).db)).map(rt.withUrls),
     tree: async (env) => rt.decorate(await storyTree(config.bindings(env).db)),

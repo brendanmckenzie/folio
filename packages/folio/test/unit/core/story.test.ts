@@ -1,16 +1,27 @@
 import { describe, expect, it } from 'vitest'
-import { buildTree, derivePaths, descendants, slugify } from '../../../src/core/story'
+import {
+  buildTree,
+  derivePaths,
+  descendants,
+  liveDescendants,
+  slugify,
+  storyState,
+} from '../../../src/core/story'
 import type { StoryMeta } from '../../../src/core/story'
 
 function meta(overrides: Partial<StoryMeta> & { id: string }): StoryMeta {
+  const publishedAt = overrides.publishedAt ?? null
+  const unpublishedAt = overrides.unpublishedAt ?? null
   return {
     parentId: null,
     slug: overrides.id,
     path: overrides.id,
     ord: 'a0',
     title: overrides.id,
-    publishedAt: null,
     updatedAt: 0,
+    publishedAt,
+    unpublishedAt,
+    state: storyState(publishedAt, unpublishedAt),
     ...overrides,
   }
 }
@@ -138,6 +149,52 @@ describe('descendants', () => {
   it('visits each row once on a parent_id cycle rather than overflowing the stack', () => {
     const rows = [meta({ id: 'a', parentId: 'b' }), meta({ id: 'b', parentId: 'a' })]
     expect(descendants(rows, 'a')).toEqual(['a', 'b'])
+  })
+})
+
+// unpublish.md's architecture decision 2: the tree's three (of four) states
+// this spec derives, from `publishedAt`/`unpublishedAt` alone.
+describe('storyState', () => {
+  it('is "draft" when never published', () => {
+    expect(storyState(null, null)).toBe('draft')
+  })
+
+  it('is "live" when published_at is set, whatever unpublished_at says', () => {
+    expect(storyState(1000, null)).toBe('live')
+    // publishStoryStatement clears unpublished_at on every publish, so this
+    // combination should not arise in practice — but "live" wins regardless,
+    // since `published_at` is the liveness signal.
+    expect(storyState(1000, 500)).toBe('live')
+  })
+
+  it('is "unpublished" when taken down: published_at null, unpublished_at set', () => {
+    expect(storyState(null, 1000)).toBe('unpublished')
+  })
+})
+
+describe('liveDescendants', () => {
+  it('names only the live descendants, excluding the story itself', () => {
+    const rows = [
+      meta({ id: 'about', publishedAt: 1 }),
+      meta({ id: 'team', parentId: 'about', publishedAt: 2 }),
+      meta({ id: 'history', parentId: 'about', unpublishedAt: 5 }),
+      meta({ id: 'jobs', parentId: 'about' }),
+    ]
+    expect(liveDescendants(rows, 'about').map((s) => s.id)).toEqual(['team'])
+  })
+
+  it('is empty for a story with no live descendants', () => {
+    const rows = [meta({ id: 'about', publishedAt: 1 }), meta({ id: 'team', parentId: 'about' })]
+    expect(liveDescendants(rows, 'about')).toEqual([])
+  })
+
+  it('walks the whole subtree, not just direct children', () => {
+    const rows = [
+      meta({ id: 'about' }),
+      meta({ id: 'mid', parentId: 'about' }),
+      meta({ id: 'leaf', parentId: 'mid', publishedAt: 3 }),
+    ]
+    expect(liveDescendants(rows, 'about').map((s) => s.id)).toEqual(['leaf'])
   })
 })
 
