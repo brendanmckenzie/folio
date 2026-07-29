@@ -104,6 +104,38 @@ the expiry rides in the attachment and the D1 re-check is once a minute per
 socket, deliberately not per keystroke. The login page ships no JavaScript.
 Spec: `docs/specs/foundation/identity-and-access.md`.
 
+**Content migrations: done.** Block schemas are code and documents are data, and
+nothing reconciled the two. A migration is now a pure function from a document to
+a list of mutations, which is what lets one function reach all three copies of a
+document — the live draft through `StoryDO.commit` (so it syncs, lands in the
+activity trail and undoes), `stories.published_doc` through `applyAll` and one D1
+write, and a `versions.doc` row on *read* only, so history stays byte-true.
+Migrations are **idempotent** and that is the correctness mechanism, not a
+nicety: applied to an already-migrated document one produces zero mutations,
+which makes the runner re-runnable after a partial failure and makes "did that
+work" answerable by running it again. `field.rename/remove/default/map/split` and
+`block.retype/wrap` implement that once each, so it is not reimplemented per
+migration. The runner is explicit (`folio.migrate(env)`, or `POST /folio/migrate`
+behind `admin`), batched with a `continueFrom` cursor, and chunks a document over
+`MAX_TX_MUTATIONS` rather than refusing it. A drifted document shows a banner in
+the editor, never a lock. `GET /folio/audit` is a separate read-only drift report
+(orphan keys, unknown types, missing fields, plus two schema-only checks
+`conditional-fields.md` deferred). Spec:
+`docs/specs/foundation/schema-migrations.md`.
+
+**The mutation vocabulary can express a type change.** `Mutation` gained
+`retype`, and `PROTOCOL_VERSION` went to 2 — the first bump. It closes the one
+gap in the vocabulary: `insert` refuses a duplicate uid and `remove` cascades
+over the subtree, so "this block is a `quote` now" could not be written as a
+transaction at all, and consolidating two block types meant an editor recreating
+content by hand. A retype keeps the uid, the position and the children, touches
+no field data, is invertible like everything else, and is emitted by `diff` —
+which matters more than it sounds, because a restore is `diff(live, target)`, so
+a diff blind to a type change would have restored the fields and silently left
+the old type in place. The change is additive to a logged mutation: a `set`
+written under v1 is still a `set`, which is the only rule a wire bump has to
+satisfy, since the log outlives every deploy.
+
 ## Next
 
 ### 1. Scheduled publishing
@@ -179,6 +211,13 @@ an unsorted flat list, which stops working somewhere around 15.
   contiguous syncIds make a compaction watermark straightforward now.
 - `versions` also grows without bound: every publish stores a full doc copy and
   nothing prunes checkpoints. Wants a retention policy.
+- Content migrations have no `down`. Every mutation is invertible and the log
+  holds what happened, so one is writable when something needs it — but a
+  generated inverse over 142 documents applied hours later is a worse tool than a
+  new forward migration, and offering it would imply a safety it does not have.
+- A migration over a huge document lands as several transactions and therefore
+  several undo steps, not one. Named in the dry run's `oversized` list rather than
+  hidden; the alternative was refusing to migrate the biggest pages at all.
 - a11y in the admin: click-only tree rows, no keyboard reorder, no focus trap in
   the media library, no aria-live on toasts. Biome's a11y rules are deliberately
   off until this is done properly (see biome.json).

@@ -3,7 +3,7 @@
 > **Group:** foundation
 > **Build order:** 11
 > **Size:** M
-> **Status:** draft
+> **Status:** done
 > **Wire version:** bumps `PROTOCOL_VERSION` to 2 (`Mutation` gains `retype`)
 > **Migration:** `0008_schema_migrations.sql`
 > **Last updated:** 2026-07-29
@@ -571,8 +571,175 @@ field, an old version previews correctly, and a second run reports zero changes.
 
 ## Open questions
 
-- Should `POST /folio/migrate` stream progress (a long run over hundreds of stories
-  against Workers' CPU limits) or return one report? A batched loop with a
-  `continueFrom` cursor in the response and the client re-calling is the boring
-  answer, and probably the right one — decide when the first real dataset makes the
-  limit measurable.
+None left.
+
+- **Does `POST /folio/migrate` stream progress, or return one report?** Resolved
+  to the batched answer this file already leaned towards: one call sweeps up to
+  `batch` documents in `id` order and returns a report carrying a `continueFrom`
+  story id, and the client re-calls until it is null. It does **not** stream. A
+  stream would have to hold a response open across exactly the CPU limit this
+  whole design exists to stay under, and the cursor is resumable across separate
+  requests — and separate *deploys* — in a way an open connection is not. The
+  admin's Migrations screen follows the cursor to the end and accumulates the
+  counts (`mergeReports`), so a batched run reads as one report on screen.
+
+## Implementation notes
+
+Landed in four commits, one per phase, each leaving the tree green.
+
+**Phase 1 — the vocabulary.** `retype` in `core/mutations.ts` (`mutationError`,
+`apply`, `invert`), in `core/protocol.ts`'s `isMutation`, and in `core/diff.ts`.
+`PROTOCOL_VERSION` → 2, pinned as a literal by a test: an accidental change to a
+number every frame carries would otherwise stay invisible until a deployed tab
+stopped talking to a deployed worker. `summariseDiff` gained `retyped`, which
+required the new key on three hand-written delta fixtures. The seeded property
+test now generates type changes on surviving bloks, so
+`applyAll(from, diff(from, to)) === to` covers them. Two diff tests that pinned
+the *gap* ("cannot express a type change") now pin the behaviour. `History.tsx`'s
+activity phrase gained the case, and names the destination type from the schema —
+by the time the trail renders, the document already carries it.
+
+**Phase 2 — `StoryDO.commit`.** `applyTransaction(current, mutations, who, txId)`
+is extracted from the socket's `tx` case and both doors run it, so the cap, the
+atomic per-mutation validation, the document ceiling, the txId dedupe, the log
+append and the watermark alarm have exactly one implementation. The doors differ
+only in fan-out (a socket echoes to its sender and excludes it; a commit
+broadcasts to every joined socket, which is what makes a migration land live) and
+in the `viewer` role gate, which stays on the socket because it is a property of
+that door. **`commit` takes an optional third argument `txId`**, which the spec's
+two-argument signature did not: dedupe is only reachable if a caller can name a
+transaction, and the phase's own test list asks for it. Refusals are values
+(`{ rejected }`), not throws, because the runner records one story's failure and
+carries on. `StoryStub` gained `commit`.
+
+**Phase 3 — the runner.** `core/migrate.ts` (`defineMigration`, `field`, `block`,
+`migrationContext`, `migrateDoc`, `pendingFor`, `latestMigrationId`,
+`validateMigrations`), exported from `folio/engine`. `server/migrate.ts` (the
+runner, `migrationStatus`, `chunk`, `appliedMigrations`, `outOfOrderMigration`).
+`server/audit.ts`. `server/routes/migrations.ts`. `folio.migrate(env, opts)` and
+`folio.audit(env)` on the public interface. `FolioConfig.migrations`, validated at
+construction alongside `validatePresets`/`validateTypes`/`validateGlobals`.
+
+**Phase 4 — the admin and the docs.** `useMigrations` (loaded on every story load,
+not lazily like `useRedirects`: the banner is drawn from it, and a banner that only
+appears once you open an unrelated tab is not a banner), `Migrations.tsx` (the
+`MigrationBanner` plus a **Model** rail with Preview and Run, admin-only), README's
+"Content migrations" section, and ROADMAP.
+
+### Where the spec was wrong about the codebase, or about itself
+
+- **"A migration id inserted out of order → refused at construction."** It cannot
+  be: construction reads no D1, and "already applied" is a database fact. Checked
+  at the top of a run instead (`outOfOrderMigration`), which refuses the whole run
+  and names both ids.
+- **`field.rename` cannot delete a key.** The acceptance criterion says the draft
+  ends with "no heading key". The mutation vocabulary has no delete-field, and
+  adding one would have been a second wire change this spec explicitly scoped out
+  ("This is the whole of the wire change"). So the old key is **cleared to
+  `null`**, which is what `resolveValue` already renders as empty, what `diff`
+  already treats as equal to an absent key, and what makes the second run produce
+  nothing. The audit's orphan-key check ignores null values for the same reason: a
+  completed rename must not leave permanent drift in its own report.
+- **Chunk txIds are random, not derived from the migration id.** The spec's "two
+  runs at once" edge case leans on the log's txId dedupe. A deterministic txId is
+  actively wrong there: run B reads a document A has half-migrated, computes a
+  shorter chunk 0, and the dedupe answers it with A's delta — so B believes its own
+  different mutations landed, and stamps a watermark. Value-idempotence
+  (checkpoint 2) is the real protection; dedupe stays what it is for, a resend.
+- **The published snapshot is migrated independently of the draft**, not by
+  replaying the draft's mutations at it. The spec's decision 5 reads as the
+  latter. A snapshot taken at some past publish is a *different document*, so
+  replaying would migrate whatever happened to overlap and silently miss the rest.
+  A migration is a pure function of a document; there are two documents.
+- **`GET /folio/migrations` is gated on `READ_DRAFT`, not `editor+`.** It is the
+  access the editor page itself requires, and a route that page always fetches
+  must not require more than the page — a `viewer` would otherwise get a silent
+  403 exactly where the explanation should be. What it discloses is migration ids
+  and descriptions, on a deployment whose `/schema` manifest is ungated entirely.
+
+### Two bugs the end-to-end script found
+
+- **A new document was born behind.** `createStory` wrote no `schema_id`, so a page
+  created five seconds after a migration ran carried a "not updated for the latest
+  content model" banner forever and was re-read by every sweep. It is now stamped
+  with `FolioRuntime.schemaId`, which is the true answer: `blankSubtree` seeds the
+  document from the current schema. `ensureSingleton` does the same; a duplicate
+  inherits its *source's* watermark, because its document is a clone of that draft.
+- **A version row claimed the wrong shape.** `publish`/`checkpoint` first stamped
+  the runtime's latest migration, which made a version of an unmigrated page claim
+  to be current — so `getVersion` would hand back pre-migration bytes with nothing
+  pending, and a restore from it would reintroduce the old keys. It now stamps
+  `story.schemaId`: a version records the shape of the bytes *it holds*.
+
+### Deliberately deferred
+
+- **No `down`.** Out of scope in this file and still the right call.
+- **No automated document-type change.** A root retype plus a `stories.type` write
+  with no atomicity across the two stores. Expressible by hand.
+- **`block.wrap` is not exercised by the demo or the e2e**, only by unit tests:
+  the demo has no container block to wrap into, and inventing one would be schema
+  churn for a demonstration. `block.retype` is the same — covered fully in unit
+  and workers tests, with a worked example in `examples/demo/src/migrations.ts`'s
+  own comments, because the demo has no block pair to consolidate.
+- **The audit reads published documents only**, as decision 7 specifies. Drift in
+  a draft nobody has published is invisible to it. That is the right default (the
+  report is about what the site is serving) but it is worth knowing.
+
+### Extending the audit
+
+Two arrays in `src/server/audit.ts` and nothing else. `DOCUMENT_CHECKS` is called
+once per blok of every published document and its findings are tallied per distinct
+`(check, type, field)` across documents and bloks. `SCHEMA_CHECKS` is called once
+with the whole `SchemaIndex`, for anything that is a property of the declarations
+alone. Every finding carries its own `check` name and travels in the report's
+`content` / `schema` arrays, so a new check needs no route change, no response
+shape change and no admin change. `../content-model/localisation.md`'s "a text-ish
+field not marked `translatable`" is one entry in `SCHEMA_CHECKS`.
+
+Both checks `../editing/conditional-fields.md` deferred here are implemented:
+`unknown-condition-field` (a `showIf` naming a field the block does not declare)
+and `hidden-summary-field` / `unknown-summary-field` (a `summary` naming a hidden,
+conditional or undeclared field).
+
+### Tests
+
+**+101, 1202 → 1303.**
+
+- `test/unit/core/mutations.test.ts` — the full `retype` contract:
+  validate/apply/invert, children and position surviving, the root refused, an
+  unknown uid a no-op, an unregistered type accepted, and the round trip with the
+  sets that seed the new type.
+- `test/unit/core/protocol.test.ts` — `isMutation`'s `retype` case (four malformed
+  shapes), and `PROTOCOL_VERSION` pinned at 2.
+- `test/unit/core/diff.test.ts` — retype emission, its ordering
+  (`insert, move, retype, set, remove`), never for the root, `summariseDiff`'s new
+  key, and type changes generated into the 300-case property test.
+- `test/unit/core/migrate.test.ts` (new, 48) — every helper, with the
+  already-migrated second run as the assertion that matters in each;
+  `migrationContext.each`; `migrateDoc` chaining; `pendingFor`;
+  `validateMigrations` including the unpadded-prefix trap.
+- `test/unit/server/audit.test.ts` (new, 18) — every content check including the
+  null-orphan exclusion, and both schema checks.
+- `test/unit/admin/migrations.test.ts` (new, 8) — `behindNotice` and
+  `mergeReports`.
+- `test/workers/story-do.test.ts` (+10) — `commit` logging, broadcasting to joined
+  sockets, *not* broadcasting to an unjoined one, deduping a repeated txId, not
+  re-broadcasting a replay, refusing over the caps with the socket path's own
+  reasons, carrying a retype, and refusing with no document.
+- `test/workers/migrate.test.ts` (new, 22) — the runner over real D1 and real
+  Durable Objects: a rename reaching draft, snapshot and ledger; a snapshot that
+  has diverged from its draft; the delta on an open socket; re-running with the
+  ledger row deleted; retype; dry run writing nothing; 450 mutations landing as
+  three transactions; a failure recorded and resumed; the cursor; a migration
+  inserted into the past; versions migrated on read; a document born up to date;
+  and all three routes.
+- `test/workers/migrations.test.ts` (+5) — 0008's columns, both nullable with no
+  default (a `default ''` would make every pre-existing row read as migrated), and
+  `stories` still unrebuilt.
+
+**End to end:** `scripts/migrate-test.mjs` (new, **38/38**), run live against a
+fresh database. It uses the *seeded* rows rather than fresh ones, because a story
+created through the API is born up to date and correctly never migrated —
+`seed.sql`'s three rows are what a site that existed before its first migration
+actually looks like. All six other scripts re-run green under v2: sync 16/16,
+history 43/43, fields 107/107, redirects 8/8, globals 16/16, auth 42/42.

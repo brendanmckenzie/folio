@@ -1343,6 +1343,118 @@ button.tree__menu-heading {
   color: #2a7a4c;
 }
 
+/* ------------------------------------------------- content migrations ---- */
+
+/*
+ * The behind-the-model banner (schema-migrations.md checkpoint 4). Sits above the
+ * preview, in the stage's own flow rather than over it: this is an explanation an
+ * editor reads once and carries on past, not an alert that needs dismissing.
+ */
+.migration-banner {
+  flex: none;
+  padding: 0.5rem 0.75rem;
+  background: #fff8e1;
+  border-bottom: 1px solid #f0dfa8;
+  color: #6b5300;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+
+.migrations {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+.migrations__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.migrations__head h2 {
+  margin: 0;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.migrations__empty {
+  margin: 0.35rem 0;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.migrations__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.migrations__row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.4rem 0.25rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+}
+.migrations__row.is-pending {
+  background: #fff8e1;
+}
+.migrations__id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6875rem;
+  color: var(--muted);
+}
+.migrations__desc {
+  color: var(--text);
+}
+.migrations__badge {
+  align-self: flex-start;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  background: #eef1f5;
+  color: var(--muted);
+}
+.migrations__row.is-applied .migrations__badge {
+  background: #e6f4ea;
+  color: #2a7a4c;
+}
+.migrations__behind {
+  margin: 0.5rem 0 0.35rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.migrations__actions {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 0.5rem;
+}
+.migrations__report {
+  border-top: 1px solid var(--line);
+  padding-top: 0.5rem;
+  font-size: 0.75rem;
+}
+.migrations__report h3 {
+  margin: 0.5rem 0 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.migrations__report ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+.migrations__report code {
+  font-size: 0.6875rem;
+}
+.migrations__failed {
+  color: #a3352b;
+}
+
 /* ------------------------------------------------------------ address ---- */
 
 .address {

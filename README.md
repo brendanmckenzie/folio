@@ -919,6 +919,168 @@ Out of scope, deliberately: **site-visitor auth** — who may *read* a published
 page. That is a different problem (`ROADMAP.md` has it), and reading a published
 page still needs no account at all.
 
+## Content migrations
+
+Block schemas are code and documents are data, and nothing reconciles the two on
+its own. Rename `heading` to `title` in a block's `fields` and every stored
+document keeps writing to `heading`, which no longer renders: the old value is
+still in `blok.data`, invisible, and the field the admin now draws is empty.
+Rename a *block type* and every existing instance renders "Unknown block type" in
+the editor and nothing at all on the live page. Both failures are quiet by
+construction, because `RenderBlok` iterates `def.fields` and reads
+`blok.data[name]` — so a key the schema no longer declares is never read again.
+
+A migration is a **pure function from a document to a list of mutations**:
+
+```ts
+// src/migrations.ts
+import { defineMigration, field } from 'folio/engine'
+
+export const migrations = [
+  defineMigration({
+    id: '0001-hero-heading-to-title',
+    description: 'Hero: heading → title',
+    up: (_doc, ctx) => ctx.each('hero', (blok) => field.rename(blok, 'heading', 'title')),
+  }),
+]
+```
+
+```ts
+const folio = createFolio<Env>({ blocks, types, bindings, auth, migrations })
+```
+
+That one shape is what lets the same function reach all three copies of a
+document, which live in three unrelated places:
+
+| Target | How the mutations are applied |
+| --- | --- |
+| A story's live draft | `StoryDO.commit` — the real log path, so it syncs to open editors, lands in the activity trail, and Cmd+Z undoes it |
+| `stories.published_doc` | `applyAll` and one D1 write, batched with the watermark |
+| `versions.doc` | `applyAll` **at read time**, never written back |
+
+The alternative — rewrite the DO's `doc` row, rewrite `published_doc` and hope
+the draft catches up — bypasses the mutation log, which means no sync, no
+activity trail, no undo, and an open editor whose document has silently diverged
+from the object's.
+
+**Idempotence is the correctness mechanism, not a nicety.** A migration applied
+to an already-migrated document produces *zero* mutations. That makes the runner
+re-runnable after a partial failure, makes the ledger an optimisation rather than
+a guarantee, and makes "did that actually work" answerable by running it again
+and seeing nothing happen. It is implemented once, in the helpers, rather than in
+every migration you write:
+
+```ts
+field.rename(blok, 'heading', 'title')            // set new, clear old — [] once done
+field.remove(blok, 'legacyFlag')
+field.default(blok, 'align', 'left')              // only where the key is absent
+field.map(blok, 'topic', (v) => String(v).toLowerCase())
+field.split(blok, 'name', { firstName, lastName })
+block.retype(blok, 'quote', { size: 'large' })    // retype + seed the new fields
+block.wrap(doc, blok, 'container', 'body')        // insert a parent, move the blok in
+```
+
+`ctx.each(type, fn)` walks the document's bloks of a type in uid order and
+flattens what `fn` returns. Anything the helpers do not cover is written by hand
+against `Blok` and `Mutation` — which is what `folio/engine` exists for, and what
+its own doc comment already promised: *"host-side tooling that legitimately needs
+to manipulate documents — bulk-import scripts, content migrations"*. A migration
+gets no network and no clock: one that depends on either is not re-runnable, and
+re-runnability is the mechanism.
+
+Two details worth knowing. `field.rename` **clears** the old key by setting it to
+`null`, because the mutation vocabulary has no delete-key — and null is already
+what `resolveValue` renders as empty and what `diff` treats as equal to an absent
+key. And `field.default` fills only a key that is *absent*, never one holding
+`''`, `false`, `0` or an explicit `null`: those are values an editor could have
+chosen, and this is a tool for filling holes rather than for overwriting
+decisions. (It is the retroactive half of a field's own `default`, which is read
+at creation only, so that a schema edit never changes what an already-published
+page says.)
+
+**`Mutation` gained `retype`, and the wire went to v2.** It is the one edit the
+vocabulary could not express: `insert` refuses a duplicate uid and `remove`
+cascades over the subtree, so "remove and re-insert under the same uid" is not a
+transaction that can be written at all. A retype keeps the uid, the position and
+the children, and touches no field data — a retype that needs fields added emits
+`set`s alongside it. The Durable Object does **not** check that the new type
+exists, deliberately: an unknown type renders as "Unknown block type" and is
+fixable by another migration, whereas an object that had to hold the block
+registry and keep it in step is a far worse coupling than a bad type name.
+Retyping a document's *root* is refused, because a root's type is its **document**
+type and changing that needs a `stories.type` update in the same breath.
+
+**The runner is explicit, never automatic on boot.** A migration that runs itself
+on the first request after a deploy runs inside a request whose CPU limit it can
+exceed, on a cold Worker, with nobody watching. So it is a call:
+
+```ts
+const report = await folio.migrate(env, { dryRun: true })
+// { pending: ['0001-hero-heading-to-title'], stories: 142, changed: 139,
+//   unchanged: 3, mutations: 388, oversized: [{ storyId, mutations: 450,
+//   transactions: 3 }], failed: [], continueFrom: 'sty_…', complete: false }
+```
+
+or `POST /folio/migrate` (`admin`), which the **Model** rail in the editor drives
+with a Preview and a Run button. One call sweeps a batch of documents in `id`
+order and answers a `continueFrom` cursor; the caller re-calls until it is null.
+Batched rather than streamed, because a stream would have to hold a response open
+across exactly the CPU limit this design exists to stay under.
+
+A document over `MAX_TX_MUTATIONS` is **chunked, not refused**: several
+transactions, and therefore several undo steps. That is the honest trade — the
+alternative is refusing to migrate documents over a size, and a CMS that cannot
+migrate its biggest pages is not much use — and the dry run names them, so it is
+never a surprise. A chunk the object refuses is recorded per story, the story's
+watermark is left alone, and the run carries on; re-running picks it up.
+
+Two ledgers, doing different jobs. `schema_migrations` records a *completed*
+sweep — a row means "this migration reached every document" — and is the audit
+trail. `stories.schema_id` is the per-document watermark, which is what makes a
+partial run resumable and what the editor's banner reads: a document created
+today is stamped with the latest migration, because `blankSubtree` seeded it from
+the current schema and it is therefore already correct. `versions.schema_id`
+records the shape of the bytes in that row, so `getVersion` can apply what a
+version is missing on the way out. History is never rewritten: that keeps the
+record of what was actually published, and it is what makes a restore across a
+migration correct, since `diff(live, target)` has to be computed between two
+documents in the same shape.
+
+**A drifted database shows a banner; it does not lock the editor.** Refusing to
+serve the admin until somebody runs a migration would turn a schema drift into an
+outage. An editor opening a page that is behind gets "This page has not been
+updated for the latest content model", with the pending descriptions, and carries
+on editing.
+
+### The drift audit
+
+```
+GET /folio/audit   (admin)
+```
+
+A read-only report over every *published* document — one D1 query, no Durable
+Objects, because it reports on what the site is actually serving:
+
+- **orphan keys**: a key the schema no longer declares, still holding a value.
+  (A `null` orphan is not reported: clearing a field *is* setting it to null, so
+  counting those would mean every completed rename left permanent drift behind
+  it.)
+- **unknown types**: a blok whose type nothing declares any more.
+- **missing fields**: a declared field a document has no key for — what
+  `field.default` fills.
+
+Plus two checks over the *schema* alone, which are code mistakes with no runtime
+symptom: a `showIf` naming a field the block does not declare (`matches` is total,
+so the input is simply never drawn and nothing says why), and a `summary` naming
+a hidden field (the tree labels every row with a value the inspector never
+shows).
+
+It is deliberately not part of the migrate path: an audit that runs as a side
+effect of a write is an audit nobody reads. Adding a check is one entry in
+`DOCUMENT_CHECKS` or `SCHEMA_CHECKS` (`src/server/audit.ts`) — every finding
+carries its own `check` name and travels in the report's `content` / `schema`
+arrays, so no route, response shape or admin screen changes.
+
 ## Verified
 
 `scripts/sync-test.mjs` (16 checks) exercises the engine against both `vite dev`
@@ -942,6 +1104,15 @@ correctly. Two are load-bearing:
 - renaming a page updates every link pointing at it — including links inside
   richtext — while leaving the linking documents byte-for-byte unchanged, and
 - a story that references itself renders once rather than forever.
+
+`scripts/migrate-test.mjs` (38 checks) covers content migrations against the
+demo's own two (`examples/demo/src/migrations.ts`): the seeded rows, which
+genuinely predate them, reaching all three copies of a document — a connected
+editor receiving the change as a delta with no reload, the published page
+rendering the new field, and an old version previewing correctly because it is
+migrated on read while its stored bytes stay untouched. Plus the two properties
+everything else leans on: a dry run that writes nothing at all, and a second run
+that reports zero changes.
 
 `scripts/auth-test.mjs` (42 checks) covers identity and access against the demo's
 own `magicLink` provider: the editor redirecting when signed out and the API
@@ -988,6 +1159,13 @@ Within auth: site-visitor access control (who may *read* a published page — se
 mapping, passwords/passkeys/TOTP, and a separate `auth_events` audit log. Sign-in
 link rate limiting is per address only; the IP dimension wants a Cloudflare
 rate-limiting rule at the zone.
+
+Within content migrations: no `down`, and no automated migration of a document
+from one *document type* to another (it needs a root retype plus a `stories.type`
+update in the same breath, with no atomicity available across the two stores;
+expressible by hand). No per-block schema versioning with lazy up-conversion on
+read, deliberately — a document whose shape depends on when it was last read
+makes the diff, the audit and any query index ambiguous.
 
 Within the field types: no tables in richtext, no text colour mark, and no
 embedded bloks inside richtext. Host projects cannot override how a richtext node
