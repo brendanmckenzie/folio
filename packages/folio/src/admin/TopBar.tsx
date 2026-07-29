@@ -94,7 +94,7 @@ export function TopBar({
   me,
   onSignOut,
 }: Props) {
-  const { store } = useFolio()
+  const { store, locales, locale, setLocale } = useFolio()
   const state = useStoreState(store)
   // The first secondary publishing action, so it earns a small menu rather
   // than a second button squeezed in beside Publish.
@@ -129,6 +129,24 @@ export function TopBar({
       </div>
 
       <div className="topbar__mid">
+        {/* Only where there is more than one language to switch between: a
+            switcher offering one option is furniture
+            (`../../../docs/specs/content-model/localisation.md` phase 3). */}
+        {locales && locales.available.length > 1 ? (
+          <select
+            className="topbar__locale"
+            aria-label="Editing language"
+            value={locale}
+            onChange={(e) => setLocale(e.target.value)}
+          >
+            {locales.available.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.label}
+                {l.code === locales.default ? ' (source)' : ''}
+              </option>
+            ))}
+          </select>
+        ) : null}
         {(Object.keys(VIEWPORTS) as Viewport[]).map((v) => (
           <button
             key={v}

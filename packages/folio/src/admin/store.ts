@@ -183,7 +183,19 @@ export class StoryStore {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   /** A handshake re-run is outstanding; a second gap escalates to a bootstrap. */
   private resyncing = false
-  private lastEdit: { uid: string; field: string; at: number } | null = null
+  /**
+   * The last coalescible edit: which field of which blok, **in which locale**,
+   * and when.
+   *
+   * The locale is part of the key, and has to be
+   * (`../../../docs/specs/content-model/localisation.md`): two consecutive `set`s
+   * on the same field in different languages are two edits, not one run of
+   * typing. Without it, translating a heading into French and then German inside
+   * the coalescing window produced a single undo step that reverted the French
+   * and left the German — "each editor's Cmd+Z reverts only their own locale",
+   * silently broken.
+   */
+  private lastEdit: { uid: string; field: string; locale?: string; at: number } | null = null
   private createSocket: (path: string) => WebSocketLike
 
   /** Called with every mutation applied locally, for forwarding to the preview iframe. */
@@ -513,6 +525,7 @@ export class StoryStore {
       only?.t === 'set' &&
       this.lastEdit?.uid === only.uid &&
       this.lastEdit.field === only.field &&
+      this.lastEdit.locale === only.locale &&
       now - this.lastEdit.at < COALESCE_MS
 
     const seq = ++this.seq
@@ -521,7 +534,8 @@ export class StoryStore {
     const priorRedo = this.redoStack
     const priorLastEdit = this.lastEdit
     this.redoStack = []
-    this.lastEdit = only?.t === 'set' ? { uid: only.uid, field: only.field, at: now } : null
+    this.lastEdit =
+      only?.t === 'set' ? { uid: only.uid, field: only.field, locale: only.locale, at: now } : null
 
     const sent = this.dispatch(mutations, seq)
     if (!sent) {
