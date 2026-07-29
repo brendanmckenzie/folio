@@ -12,7 +12,11 @@ function meta(overrides: Partial<StoryMeta> & { id: string }): StoryMeta {
     updatedAt: 0,
     publishedAt: null,
     unpublishedAt: null,
+    draftSyncId: 0,
+    draftUpdatedAt: null,
+    publishedSyncId: 0,
     state: 'draft',
+    hasUnpublishedChanges: false,
     ...overrides,
   }
 }

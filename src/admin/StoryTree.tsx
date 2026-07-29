@@ -1,14 +1,20 @@
 import { useState } from 'react'
 import type { StoryNode, StoryState } from '../core/story'
+import { formatWhen } from './History'
 
 /**
- * The tree's badge for each of `unpublish.md`'s three states this spec ships.
- * `'live'` and the not-yet-reachable `'changed'` (unpublished-changes.md) both
- * show nothing: an unadorned row already means "this is what's public".
+ * The tree's badge for each of the four states `draftState` derives.
+ * `'live'` shows nothing: an unadorned row already means "this is what's
+ * public, and matches what was published". `'changed'` is the same liveness
+ * with draft edits the last publish does not reflect
+ * (`unpublished-changes.md`) — a "look here" hint from the coarse watermark
+ * comparison, not a diff; the open story's own delta is authoritative for the
+ * page actually being edited.
  */
 export function badgeLabel(state: StoryState): string | null {
   if (state === 'unpublished') return 'not live'
   if (state === 'draft') return 'draft'
+  if (state === 'changed') return 'unpublished changes'
   return null
 }
 
@@ -130,7 +136,14 @@ function Level({
             <span className="stories__title">{node.title}</span>
             <code className="stories__path">/{node.path}</code>
             {badgeLabel(node.state) ? (
-              <span className={`stories__badge stories__badge--${node.state}`}>
+              <span
+                className={`stories__badge stories__badge--${node.state}`}
+                title={
+                  node.state === 'changed' && node.draftUpdatedAt
+                    ? `Edited ${formatWhen(node.draftUpdatedAt)}`
+                    : undefined
+                }
+              >
                 {badgeLabel(node.state)}
               </span>
             ) : null}

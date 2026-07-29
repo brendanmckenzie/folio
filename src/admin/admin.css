@@ -979,6 +979,13 @@ button:disabled {
   color: var(--danger);
   background: #fde8e8;
 }
+/* Live, with unpublished edits on top (unpublished-changes.md) — a "look
+   here" hint, not a problem, so it gets the accent tint rather than danger
+   or the neutral "draft" amber. */
+.stories__badge--changed {
+  color: var(--accent);
+  background: #e3f2ff;
+}
 /* visibility, not display: toggling display reflows the row and makes the
    whole tree jump under the cursor. */
 .stories__actions {

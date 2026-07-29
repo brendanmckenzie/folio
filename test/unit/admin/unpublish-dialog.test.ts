@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { unpublishConfirmation } from '../../../src/admin/UnpublishDialog'
+import { draftState } from '../../../src/core/story'
 import type { StoryMeta } from '../../../src/core/story'
 
 function meta(overrides: Partial<StoryMeta> & { id: string }): StoryMeta {
   const publishedAt = overrides.publishedAt ?? null
   const unpublishedAt = overrides.unpublishedAt ?? null
+  const draftSyncId = overrides.draftSyncId ?? 0
+  const publishedSyncId = overrides.publishedSyncId ?? 0
+  const state = draftState(publishedAt, unpublishedAt, draftSyncId, publishedSyncId)
   return {
     parentId: null,
     slug: overrides.id,
@@ -14,7 +18,11 @@ function meta(overrides: Partial<StoryMeta> & { id: string }): StoryMeta {
     updatedAt: 0,
     publishedAt,
     unpublishedAt,
-    state: publishedAt !== null ? 'live' : unpublishedAt !== null ? 'unpublished' : 'draft',
+    draftSyncId,
+    draftUpdatedAt: null,
+    publishedSyncId,
+    state,
+    hasUnpublishedChanges: state === 'changed',
     ...overrides,
   }
 }
@@ -51,6 +59,19 @@ describe('unpublishConfirmation', () => {
       '/about/team',
       '/about/team/jobs',
     ])
+  })
+
+  it('counts a descendant with unpublished changes as still live (unpublished-changes.md)', () => {
+    const about = meta({ id: 'about', path: 'about', publishedAt: 1 })
+    const team = meta({
+      id: 'team',
+      parentId: 'about',
+      path: 'about/team',
+      publishedAt: 2,
+      draftSyncId: 4,
+      publishedSyncId: 1,
+    })
+    expect(unpublishConfirmation(about, [about, team]).descendantPaths).toEqual(['/about/team'])
   })
 
   it('is empty when nothing beneath it is live', () => {

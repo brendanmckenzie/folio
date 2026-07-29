@@ -43,6 +43,8 @@ export interface FolioRuntime {
    */
   draftFor: (bindings: FolioBindings, story: StoryMeta) => Promise<Doc>
   draft: (bindings: FolioBindings, id: string) => Promise<Doc>
+  /** `draftFor` plus the syncId it was read at, atomically. See `PublishDeps.draftWithSyncId`. */
+  draftForWithSyncId: (bindings: FolioBindings, story: StoryMeta) => Promise<{ doc: Doc; syncId: number }>
   resolve: (bindings: FolioBindings, doc?: Doc, opts?: { draft?: boolean }) => Promise<Resolution>
   /**
    * What the publish workflows need, assembled from bindings alone — the one
@@ -86,6 +88,9 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const draftFor = (bindings: FolioBindings, story: StoryMeta) =>
     stub(bindings, story.id).getOrInit(seed(story.title))
 
+  const draftForWithSyncId = (bindings: FolioBindings, story: StoryMeta) =>
+    stub(bindings, story.id).getOrInitWithSyncId(seed(story.title))
+
   const draft = async (bindings: FolioBindings, id: string) => {
     const meta = await storyById(bindings.db, id)
     return stub(bindings, id).getOrInit(seed(meta?.title ?? 'Untitled'))
@@ -125,6 +130,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const publishDeps = (bindings: FolioBindings): PublishDeps => ({
     db: bindings.db,
     draft: (story) => draftFor(bindings, story),
+    draftWithSyncId: (story) => draftForWithSyncId(bindings, story),
   })
 
   /**
@@ -156,6 +162,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     decorate,
     stub,
     draftFor,
+    draftForWithSyncId,
     draft,
     resolve,
     publishDeps,

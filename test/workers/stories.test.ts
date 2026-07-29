@@ -344,6 +344,7 @@ describe('publishStoryStatement', () => {
       'sty_about',
       doc,
       'About',
+      7,
     )
     expect(title).toBe('Batched Publish')
 
@@ -356,6 +357,9 @@ describe('publishStoryStatement', () => {
     const row = await storyById(env.DB, 'sty_about')
     expect(row?.publishedAt).toBe(publishedAt)
     expect(row?.title).toBe('Batched Publish')
+    // The watermark lands in the same statement as the snapshot, so a reader
+    // can never see one without the other (unpublished-changes.md).
+    expect(row?.publishedSyncId).toBe(7)
   })
 
   it('clears a stale unpublished_at/unpublished_by on republish', async () => {
@@ -363,7 +367,7 @@ describe('publishStoryStatement', () => {
     await unpublishStoryStatement(env.DB, 'sty_about', 'alice').statement.run()
     expect((await storyById(env.DB, 'sty_about'))?.unpublishedAt).not.toBeNull()
 
-    await publishStoryStatement(env.DB, 'sty_about', doc, 'About').statement.run()
+    await publishStoryStatement(env.DB, 'sty_about', doc, 'About', 0).statement.run()
 
     const row = await storyById(env.DB, 'sty_about')
     expect(row?.unpublishedAt).toBeNull()
@@ -373,7 +377,7 @@ describe('publishStoryStatement', () => {
 
 describe('unpublishStoryStatement', () => {
   it('returns an unrun statement that clears published_doc/published_at and stamps unpublished_at/by', async () => {
-    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Up'), 'About').statement.run()
+    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Up'), 'About', 0).statement.run()
 
     const { statement, unpublishedAt } = unpublishStoryStatement(env.DB, 'sty_about', 'alice')
 
@@ -404,12 +408,12 @@ describe('storyStatus', () => {
   })
 
   it('is "live" once published', async () => {
-    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Live'), 'About').statement.run()
+    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Live'), 'About', 0).statement.run()
     expect(await storyStatus(env.DB, 'about')).toBe('live')
   })
 
   it('is "unpublished" once taken down, so a host can answer 410 instead of 404', async () => {
-    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Live'), 'About').statement.run()
+    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Live'), 'About', 0).statement.run()
     await unpublishStoryStatement(env.DB, 'sty_about', 'alice').statement.run()
     expect(await storyStatus(env.DB, 'about')).toBe('unpublished')
   })
@@ -424,12 +428,16 @@ describe('unpublish (server/publish.ts)', () => {
         d.calls++
         throw new Error('unpublish must never read the draft')
       },
+      draftWithSyncId: async () => {
+        d.calls++
+        throw new Error('unpublish must never read the draft')
+      },
     }
     return d
   }
 
   it('clears published_doc/published_at without ever touching the draft', async () => {
-    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Up'), 'About').statement.run()
+    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Up'), 'About', 0).statement.run()
 
     const d = deps()
     const { unpublishedAt } = await unpublish(d, 'sty_about', 'alice')
@@ -441,7 +449,7 @@ describe('unpublish (server/publish.ts)', () => {
   })
 
   it('is idempotent: a second call on an already-unpublished story reports the same timestamp and writes nothing', async () => {
-    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Up'), 'About').statement.run()
+    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Up'), 'About', 0).statement.run()
     const d = deps()
     const first = await unpublish(d, 'sty_about', 'alice')
 
@@ -457,7 +465,7 @@ describe('unpublish (server/publish.ts)', () => {
   })
 
   it('allows unpublishing the root story', async () => {
-    await publishStoryStatement(env.DB, 'sty_home', pageDoc('Root'), 'Home').statement.run()
+    await publishStoryStatement(env.DB, 'sty_home', pageDoc('Root'), 'Home', 0).statement.run()
 
     const { unpublishedAt } = await unpublish(deps(), 'sty_home', 'alice')
 
@@ -477,10 +485,14 @@ describe('unpublish (server/publish.ts)', () => {
 describe('publishedDocsByIds and unpublish: references degrade, they do not break', () => {
   it('an unpublished story stops resolving as a reference; publishedDocsByIds simply omits it', async () => {
     const doc = pageDoc('Referenced')
-    await publishStoryStatement(env.DB, 'sty_about', doc, 'About').statement.run()
+    await publishStoryStatement(env.DB, 'sty_about', doc, 'About', 0).statement.run()
     expect(await publishedDocsByIds(env.DB, ['sty_about'])).toEqual({ sty_about: doc })
 
-    await unpublish({ db: env.DB, draft: async () => doc }, 'sty_about', 'alice')
+    await unpublish(
+      { db: env.DB, draft: async () => doc, draftWithSyncId: async () => ({ doc, syncId: 0 }) },
+      'sty_about',
+      'alice',
+    )
 
     expect(await publishedDocsByIds(env.DB, ['sty_about'])).toEqual({})
   })
@@ -599,6 +611,30 @@ describe('listStories', () => {
       ]),
     )
     for (const row of rows) expect(typeof row.updatedAt).toBe('number')
+  })
+
+  // unpublished-changes.md: the tree-wide badge is a watermark comparison, not
+  // a diff, and it must reach every reader of a story row — including the ones
+  // `listStories` itself serves, since `storyTree` and `folio.stories(env)`
+  // both go through it.
+  it('derives "changed" and hasUnpublishedChanges once the draft watermark moves past the published one', async () => {
+    await publishStoryStatement(env.DB, 'sty_about', pageDoc('Live'), 'About', 3).statement.run()
+    await env.DB.prepare('update stories set draft_sync_id = ? where id = ?')
+      .bind(5, 'sty_about')
+      .run()
+
+    const rows = await listStories(env.DB)
+    const about = rows.find((r) => r.id === 'sty_about')
+    expect(about?.state).toBe('changed')
+    expect(about?.hasUnpublishedChanges).toBe(true)
+    expect(about?.draftSyncId).toBe(5)
+    expect(about?.publishedSyncId).toBe(3)
+
+    // A never-published story reads clean, not "everything changed": both
+    // watermarks default to 0 (migrations/0005_draft_watermark.sql).
+    const home = rows.find((r) => r.id === 'sty_home')
+    expect(home?.state).toBe('draft')
+    expect(home?.hasUnpublishedChanges).toBe(false)
   })
 })
 

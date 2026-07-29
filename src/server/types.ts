@@ -36,7 +36,10 @@ export interface FolioBindings {
  * them drifts the moment the class changes — and never instantiates the mapper.
  * test/workers/smoke.test.ts hits the same wall and says so.
  */
-export type StoryStub = Pick<StoryDO, 'getOrInit' | 'recent' | 'purge' | 'fetch'>
+export type StoryStub = Pick<
+  StoryDO,
+  'getOrInit' | 'getOrInitWithSyncId' | 'head' | 'recent' | 'purge' | 'fetch'
+>
 
 export interface FolioConfig<Env> {
   blocks: readonly AnyBlockDef[] | Registry

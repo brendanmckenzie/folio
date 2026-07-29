@@ -102,8 +102,12 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const id = idParam('id', c.req.param('id'))
     const actor = actorHeader(c.req.header('x-folio-actor'))
 
-    const { publishedAt, version } = await publish(rt.publishDeps(c.var.bindings()), id, actor)
-    return c.json({ ok: true, publishedAt, version })
+    const { publishedAt, publishedSyncId, version } = await publish(
+      rt.publishDeps(c.var.bindings()),
+      id,
+      actor,
+    )
+    return c.json({ ok: true, publishedAt, publishedSyncId, version })
   })
 
   /**

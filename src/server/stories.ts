@@ -3,6 +3,7 @@ import {
   buildTree,
   derivePaths,
   descendants,
+  draftState,
   newStoryId,
   slugify,
   storyState,
@@ -13,20 +14,23 @@ import { clearRedirectAtStatement, redirectStatements } from './redirects'
 
 const COLS = `id, parent_id as parentId, slug, path, ord, title,
               published_at as publishedAt, unpublished_at as unpublishedAt,
-              updated_at as updatedAt`
+              updated_at as updatedAt, draft_sync_id as draftSyncId,
+              draft_updated_at as draftUpdatedAt, published_sync_id as publishedSyncId`
 
-/** A `COLS` row before `state` is derived onto it. */
-type StoryRow = Omit<StoryMeta, 'state'>
+/** A `COLS` row before `state`/`hasUnpublishedChanges` are derived onto it. */
+type StoryRow = Omit<StoryMeta, 'state' | 'hasUnpublishedChanges'>
 
 /**
- * `state` is derived here, once, rather than stored: `publishedAt` and
- * `unpublishedAt` are the only columns it needs (see `storyState`), so every
- * reader of a story row — the tree, `folio.stories(env)`, a future content API
- * — agrees on what a badge means without a column that could itself drift out
- * of sync with the two it summarises.
+ * `state` is derived here, once, rather than stored: the four columns it needs
+ * (see `draftState`) are the only ones it reads, so every reader of a story row
+ * — the tree, `folio.stories(env)`, a future content API — agrees on what a
+ * badge means without a column that could itself drift out of sync with the
+ * ones it summarises. `hasUnpublishedChanges` is the same derivation, named for
+ * callers that only want the yes/no (`unpublished-changes.md`).
  */
 function withState(row: StoryRow): StoryMeta {
-  return { ...row, state: storyState(row.publishedAt, row.unpublishedAt) }
+  const state = draftState(row.publishedAt, row.unpublishedAt, row.draftSyncId, row.publishedSyncId)
+  return { ...row, state, hasUnpublishedChanges: state === 'changed' }
 }
 
 export async function listStories(db: D1Database): Promise<StoryMeta[]> {
@@ -165,7 +169,11 @@ export async function createStory(
     title: input.title.trim() || 'Untitled',
     publishedAt: null,
     unpublishedAt: null,
+    draftSyncId: 0,
+    draftUpdatedAt: null,
+    publishedSyncId: 0,
     state: 'draft',
+    hasUnpublishedChanges: false,
     updatedAt: Date.now(),
   }
 
@@ -321,22 +329,30 @@ export async function deleteStory(db: D1Database, id: string): Promise<string[]>
  * Also clears `unpublished_at`/`unpublished_by`: republishing is an ordinary
  * publish (`unpublish.md`), so a story taken down and then republished must not
  * keep answering `folio.status` as `'unpublished'` from a stale marker.
+ *
+ * `publishedSyncId` is the Durable Object's log position *at the moment `doc`
+ * was read* (`unpublished-changes.md`'s architecture decision 4) — the caller
+ * must read it atomically with the draft it snapshots (see `story-do.ts`'s
+ * `getOrInitWithSyncId`), or a transaction landing between the two reads could
+ * leave this watermark ahead of the bytes actually published, silently hiding a
+ * real change.
  */
 export function publishStoryStatement(
   db: D1Database,
   id: string,
   doc: Doc,
   fallbackTitle: string,
+  publishedSyncId: number,
 ): { publishedAt: number; title: string; statement: D1PreparedStatement } {
   const title = String(doc.bloks[doc.root]?.data.title ?? '').trim() || fallbackTitle
   const publishedAt = Date.now()
   const statement = db
     .prepare(
       `update stories set published_doc = ?, published_at = ?, title = ?, updated_at = ?,
-       unpublished_at = null, unpublished_by = null
+       unpublished_at = null, unpublished_by = null, published_sync_id = ?
        where id = ?`,
     )
-    .bind(JSON.stringify(doc), publishedAt, title, publishedAt, id)
+    .bind(JSON.stringify(doc), publishedAt, title, publishedAt, publishedSyncId, id)
   return { publishedAt, title, statement }
 }
 
@@ -346,8 +362,9 @@ export async function publishStory(
   id: string,
   doc: Doc,
   fallbackTitle: string,
+  publishedSyncId: number,
 ): Promise<number> {
-  const { publishedAt, statement } = publishStoryStatement(db, id, doc, fallbackTitle)
+  const { publishedAt, statement } = publishStoryStatement(db, id, doc, fallbackTitle, publishedSyncId)
   await statement.run()
   return publishedAt
 }
