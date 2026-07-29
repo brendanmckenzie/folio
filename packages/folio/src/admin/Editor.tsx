@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   type LocaleConfig,
   localeContext,
   translationGaps,
   translationStatus,
 } from '../core/locales'
+import type { SpaceEvent, SpacePresence } from '../core/protocol'
 import { buildResolution } from '../core/resolve'
 import { type DocumentType, type SchemaIndex, singletonId, typeByName } from '../core/schema'
 import type { StoryNode } from '../core/story'
@@ -30,6 +31,7 @@ import { usePreviewBridge } from './hooks/usePreviewBridge'
 import { usePublish } from './hooks/usePublish'
 import { usePublishedDoc } from './hooks/usePublishedDoc'
 import { useRedirects } from './hooks/useRedirects'
+import { spaceEventEffect, useSpace } from './hooks/useSpace'
 import { useReferencedDocs } from './hooks/useReferencedDocs'
 import { useStories } from './hooks/useStories'
 import { useUndoShortcut } from './hooks/useUndoShortcut'
@@ -40,6 +42,7 @@ import { MigrationBanner, Migrations } from './Migrations'
 import { PageAddress } from './PageAddress'
 import { PublishDialog } from './PublishDialog'
 import { Redirects } from './Redirects'
+import type { SpaceAvatar } from './spaceStore'
 import { StoryStore } from './store'
 import { StoryTree } from './StoryTree'
 import { TopBar, VIEWPORTS, type Viewport } from './TopBar'
@@ -59,6 +62,13 @@ interface Props {
   locales?: LocaleConfig
   /** Who is signed in, from `GET /folio/me` (`identity-and-access.md`). */
   me: Me
+  /**
+   * Whether the host declared the `SPACE` binding
+   * (`../../../docs/specs/editing/live-collaboration.md`). False and everything
+   * that channel carries — cross-story presence, a tree that updates itself when
+   * somebody else renames a page — is absent, and nothing is attempted or logged.
+   */
+  space?: boolean
   apiBase: string
 }
 
@@ -77,6 +87,7 @@ export function Editor({
   globals,
   locales,
   me,
+  space = false,
   apiBase,
 }: Props) {
   const [rail, setRail] = useState<Rail>('blocks')
@@ -208,6 +219,32 @@ export function Editor({
   }, [apiBase])
 
   /**
+   * Follow-mode (`live-collaboration.md` decision 6): open where a peer is, in
+   * their locale, on their block. **Nothing new on the wire** — it is the reason
+   * `selection` rides the space channel at all.
+   *
+   * The selection is applied against the *new* story's document, which the store
+   * for that story has not loaded yet, so it is held and applied by the effect
+   * below once the document arrives. Continuous following — moving as they move —
+   * is deliberately not built: it needs an exit affordance, a "they left" state
+   * and scroll sync the preview bridge does not carry.
+   */
+  const [followTo, setFollowTo] = useState<{ storyId: string; uid: string | null } | null>(null)
+  const follow = useCallback(
+    (peer: SpaceAvatar) => {
+      if (!peer.storyId) return
+      if (peer.locale && locales?.available.some((l) => l.code === peer.locale)) {
+        setLocale(peer.locale)
+      } else if (!peer.locale && locales) {
+        setLocale(locales.default)
+      }
+      setFollowTo({ storyId: peer.storyId, uid: peer.selection?.uid ?? null })
+      stories.open(peer.storyId)
+    },
+    [locales, stories.open],
+  )
+
+  /**
    * `/folio/stories` already returns every story's id, path and URL, so links
    * resolve with no extra fetching. Rebuilt only when the tree changes, which is
    * exactly when a rename or move can have altered a URL.
@@ -225,9 +262,52 @@ export function Editor({
   // content, marked `stale`, exactly as the server's own preview branch resolves it.
   const collections = useCollections(apiBase, state.doc, schema, localeCtx)
   const resolution = useMemo(
-    () => ({ ...base, docs, globals: globalDocs, collections }),
-    [base, collections, docs, globalDocs],
+    () => ({ ...base, docs, globals: globalDocs.docs, collections }),
+    [base, collections, docs, globalDocs.docs],
   )
+
+  /**
+   * The space channel (`live-collaboration.md`). Everything about it is optional:
+   * with no `SPACE` binding `useSpace` builds no store and opens no socket, so the
+   * editor is exactly what it was before this spec — no retry loop, nothing logged.
+   *
+   * `onEvent` closes over the tree and the open story, so it changes identity on
+   * every render; `useSpace` holds it in a ref rather than as a dependency, which
+   * is what keeps the socket from being rebuilt underneath it.
+   */
+  const spacePeers = useRef<readonly SpacePresence[]>([])
+  const spaceHandler = useCallback(
+    (event: SpaceEvent) => {
+      const effect = spaceEventEffect(event, {
+        openStoryId: storyId,
+        myActor: me.actor?.kind === 'user' ? me.actor.id : null,
+        // The name comes off the peer list this same channel already carries, so
+        // no display name has to ride on the event. Somebody who has since closed
+        // their tab is "Someone", which is honest.
+        nameOf: (actor) => spacePeers.current.find((p) => p.actor === actor)?.name ?? 'Someone',
+      })
+      if (effect.notice) notify(effect.notice)
+      if (effect.reload) void stories.reload()
+      if (effect.globals) globalDocs.reload()
+    },
+    [globalDocs.reload, me.actor, notify, stories.reload, storyId],
+  )
+  const spaceChannel = useSpace({
+    apiBase,
+    enabled: space,
+    identity: { actor: store.actor, name: store.name, colour: store.colour },
+    storyId,
+    storyTitle: current?.title ?? null,
+    locale: isSourceLocale ? null : locale,
+    // The story-level selection, mirrored: follow-mode needs to land on a block,
+    // and the deliberate duplication is decision 2's — two cheap frames beat one
+    // object trying to be both channels.
+    selection: state.selection === null ? null : { uid: state.selection, field: state.focus },
+    onEvent: spaceHandler,
+  })
+  // Read inside `spaceHandler` without making the peer list a dependency of it:
+  // presence moves constantly and the handler must stay stable.
+  spacePeers.current = spaceChannel.peers
 
   // A block inside a global was clicked while previewing something else: the
   // name of the global to offer "Edit `<name>` →" for, until the next normal
@@ -380,6 +460,18 @@ export function Editor({
     if (formMode && state.doc && !state.selection) store.select(state.doc.root)
   }, [formMode, state.doc, state.selection, store])
 
+  /**
+   * The second half of follow-mode: the block a peer had selected, applied once
+   * this story's document has arrived. A uid the document does not have is
+   * dropped rather than being an error — they may be a delta ahead of us, and the
+   * page is still the right place to have landed.
+   */
+  useEffect(() => {
+    if (!followTo || followTo.storyId !== storyId || !state.doc) return
+    if (followTo.uid && state.doc.bloks[followTo.uid]) store.select(followTo.uid)
+    setFollowTo(null)
+  }, [followTo, state.doc, storyId, store])
+
   return (
     <FolioProvider value={context}>
       <div className="editor">
@@ -406,6 +498,8 @@ export function Editor({
           }}
           me={me}
           onSignOut={signOut}
+          spaceAvatars={spaceChannel.avatars}
+          onFollow={follow}
         />
 
         {confirmingUnpublishFor === storyId && current ? (
@@ -583,6 +677,7 @@ export function Editor({
                 onDelete={mayManage ? (story) => setConfirmingDeleteFor(story) : refuseManage}
                 onDuplicate={mayManage ? (story) => setConfirmingDuplicateFor(story) : refuseManage}
                 onNotice={notify}
+                presence={spaceChannel.peers}
               />
             ) : rail === 'data' ? (
               <DataList

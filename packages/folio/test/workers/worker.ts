@@ -17,7 +17,7 @@ import { renderToReadableStream } from 'react-dom/server.edge'
 import { blocks, defineBlock, multilink, text } from '../../src/core'
 import { createFolio, Shell } from '../../src/server'
 
-export { StoryDO } from '../../src/server'
+export { SpaceDO, StoryDO } from '../../src/server'
 
 /**
  * Smallest registry that exercises test/workers/http.test.ts's load-bearing
@@ -67,7 +67,13 @@ const link = defineBlock({
 const folio = createFolio<Cloudflare.Env>({
   blocks: [page, link],
   root: 'page',
-  bindings: (env) => ({ db: env.DB, story: env.STORY, media: env.MEDIA, images: env.IMAGES }),
+  bindings: (env) => ({
+    db: env.DB,
+    story: env.STORY,
+    space: env.SPACE,
+    media: env.MEDIA,
+    images: env.IMAGES,
+  }),
   basePath: '/folio',
   // identity-and-access.md checkpoint 2: `auth` is required, so a test host
   // declares it too. 'open' keeps this fixture's own scenarios about routing

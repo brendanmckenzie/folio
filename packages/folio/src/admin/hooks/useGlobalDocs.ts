@@ -1,7 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { Doc } from '../../core/doc'
 import { singletonId, type DocumentType } from '../../core/schema'
 import { globalTypes } from '../GlobalsList'
+
+export interface GlobalDocs {
+  docs: Readonly<Record<string, Doc>>
+  /**
+   * Re-fetch every configured global.
+   *
+   * The seam `../../../docs/specs/editing/live-collaboration.md` hydrates: a
+   * `global.changed` event says another editor published the header, so this copy
+   * of its document is stale. Still not per keystroke — an event, not a
+   * subscription.
+   */
+  reload: () => void
+}
 
 /**
  * Each configured global's own document, keyed by type name rather than story
@@ -18,10 +31,14 @@ export function useGlobalDocs(
   apiBase: string,
   types: readonly DocumentType[],
   globals: readonly string[],
-): Readonly<Record<string, Doc>> {
+): GlobalDocs {
   const [docs, setDocs] = useState<Record<string, Doc>>({})
+  /** Bumped to re-run the fetch below. A counter rather than a second copy of the
+   * fetch, so there is one code path whether it runs on mount or on an event. */
+  const [nonce, setNonce] = useState(0)
   const key = globals.join(',')
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `nonce` is deliberate — it is not read in the body, and bumping it is the whole mechanism for re-running this fetch on a `global.changed` event
   useEffect(() => {
     const wanted = globalTypes(types, key ? key.split(',') : [])
     if (wanted.length === 0) return
@@ -49,7 +66,9 @@ export function useGlobalDocs(
     return () => {
       live = false
     }
-  }, [apiBase, key, types])
+  }, [apiBase, key, types, nonce])
 
-  return docs
+  const reload = useCallback(() => setNonce((n) => n + 1), [])
+
+  return { docs, reload }
 }

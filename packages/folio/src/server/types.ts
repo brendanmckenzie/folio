@@ -23,6 +23,7 @@ import type { AuditReport } from './audit'
 import type { MigrateOptions, MigrateReport } from './migrate'
 import type { ReindexOptions, ReindexReport } from './reindex'
 import type { ResolveOptions } from './runtime'
+import type { SpaceDO } from './space-do'
 import type { StoryDO } from './story-do'
 import type { WriteResult } from './write'
 
@@ -35,6 +36,19 @@ export type HostResolveOptions = Omit<ResolveOptions, 'draft'>
 export interface FolioBindings {
   db: D1Database
   story: DurableObjectNamespace<StoryDO>
+  /**
+   * The space channel (`../../../docs/specs/editing/live-collaboration.md`):
+   * cross-story presence and structural events.
+   *
+   * **Optional, deliberately.** Without it everything in that spec degrades to
+   * the behaviour before it — per-story presence, a tree you refresh yourself —
+   * rather than failing: the admin is told through its bootstrap and never opens
+   * the socket, and no route 500s for want of a binding. A library that
+   * hard-requires a new binding breaks every existing host on upgrade, and this
+   * one needs a `wrangler.jsonc` migration tag as well as a binding
+   * (`new_classes`, since the class holds no storage).
+   */
+  space?: DurableObjectNamespace<SpaceDO>
   /** R2 bucket for uploads. Without it the media library is read-only. */
   media?: R2Bucket
   /**
@@ -59,6 +73,12 @@ export type StoryStub = Pick<
   StoryDO,
   'getOrInit' | 'getOrInitWithSyncId' | 'head' | 'recent' | 'purge' | 'commit' | 'hasTx' | 'fetch'
 >
+
+/**
+ * The space object's RPC surface, picked off the class for the same reason
+ * `StoryStub` is. Two methods: the upgrade, and the event broadcast.
+ */
+export type SpaceStub = Pick<SpaceDO, 'broadcastEvent' | 'fetch'>
 
 export interface FolioConfig<Env> {
   blocks: readonly AnyBlockDef[] | Registry

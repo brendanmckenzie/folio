@@ -14,8 +14,20 @@ import { Bootstrap, ReactRefreshPreamble, Shell } from './Document'
 import type { FolioRuntime } from './runtime'
 import type { FolioBindings } from './types'
 
-/** The editor shell. The admin bundle takes over from `__FOLIO_ADMIN__`. */
-export function adminPage(rt: FolioRuntime, story: StoryMeta): Promise<Response> {
+/**
+ * The editor shell. The admin bundle takes over from `__FOLIO_ADMIN__`.
+ *
+ * `space` is how the admin feature-detects the space channel
+ * (`../../../docs/specs/editing/live-collaboration.md`): a host that has not
+ * declared the binding must not have its console filled with a socket retrying
+ * forever, so the answer travels in the bootstrap rather than being discovered by
+ * a failed upgrade.
+ */
+export function adminPage(
+  rt: FolioRuntime,
+  bindings: FolioBindings,
+  story: StoryMeta,
+): Promise<Response> {
   const { entries, stylesheets } = rt.page('admin')
   return html(
     <Shell
@@ -24,7 +36,10 @@ export function adminPage(rt: FolioRuntime, story: StoryMeta): Promise<Response>
       head={
         <>
           {rt.dev ? <ReactRefreshPreamble /> : null}
-          <Bootstrap global="__FOLIO_ADMIN__" value={{ storyId: story.id, apiBase: rt.base }} />
+          <Bootstrap
+            global="__FOLIO_ADMIN__"
+            value={{ storyId: story.id, apiBase: rt.base, space: Boolean(bindings.space) }}
+          />
         </>
       }
     >

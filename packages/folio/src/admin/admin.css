@@ -197,6 +197,91 @@ button:disabled {
   box-shadow: 0 0 0 1px var(--line);
 }
 
+/* ------------------------------------------------------- the space channel ---- */
+/* editing/live-collaboration.md: who is in the *site* rather than in this
+   document. The avatar is a button because clicking it follows them
+   (decision 6), and a peer on a list screen has nowhere to follow to, so it
+   disables rather than disappearing — they are still present. */
+
+.here {
+  position: relative;
+  display: flex;
+  gap: 3px;
+  align-items: center;
+}
+.peer--follow {
+  padding: 0;
+  cursor: pointer;
+}
+.peer--follow:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.here__toggle {
+  padding: 0 2px;
+  font-size: 0.6875rem;
+  line-height: 1;
+  background: none;
+  border: 0;
+  color: var(--muted);
+  cursor: pointer;
+}
+.here__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: none;
+  border: 0;
+  cursor: default;
+}
+.here__list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  padding: 0.25rem;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+}
+.here__list button {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  padding: 0.3rem 0.4rem;
+  font-size: 0.75rem;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.here__list button:hover:not(:disabled) {
+  background: var(--bg-soft, #f6f6f7);
+}
+.here__list button:disabled {
+  cursor: default;
+  color: var(--muted);
+}
+.here__dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* One dot per person in a story row. Deduped by actor, so two tabs is one dot. */
+.stories__peer {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
 /* --------------------------------------------------------------- tree ---- */
 
 .tree {

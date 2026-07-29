@@ -29,7 +29,14 @@
     }
   ],
   "durable_objects": {
-    "bindings": [{ "name": "STORY", "class_name": "StoryDO" }]
+    "bindings": [
+      { "name": "STORY", "class_name": "StoryDO" },
+      // The space channel (editing/live-collaboration.md): cross-story presence
+      // and structural events. Optional — Folio degrades to per-story presence
+      // and a tree you refresh yourself without it — but there is no reason for a
+      // real deployment not to have it.
+      { "name": "SPACE", "class_name": "SpaceDO" }
+    ]
   },
   "r2_buckets": [
     {
@@ -43,6 +50,13 @@
     "binding": "IMAGES"
   },
   // SQLite-backed DOs must be declared as such at creation; this cannot be
-  // changed for an already-deployed class.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StoryDO"] }]
+  // changed for an already-deployed class. Hence a second tag for SpaceDO rather
+  // than an edit to v1 — and `new_classes`, not `new_sqlite_classes`, because
+  // SpaceDO holds no storage at all: presence lives in socket attachments and
+  // nothing it knows outlives the sockets (live-collaboration.md decision 1). A
+  // smaller commitment than StoryDO's, and equally permanent.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["StoryDO"] },
+    { "tag": "v2", "new_classes": ["SpaceDO"] }
+  ]
 }

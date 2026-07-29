@@ -46,8 +46,9 @@ import { type ContentProjection, contentProjection } from './content-index'
 import { createHookRunner, type FolioHooks, type HookRunnerCtx, validateHooks } from './hooks'
 import type { PublishDeps } from './publish'
 import { type QueryDeps, runQuery } from './query'
+import { SPACE_NAME, spaceBroadcastHooks } from './space-events'
 import { ensureSingleton, listStories, publishedDocsByIds, storiesFor, storyById } from './stories'
-import type { FolioBindings, FolioConfig, StoryStub } from './types'
+import type { FolioBindings, FolioConfig, SpaceStub, StoryStub } from './types'
 
 const DEFAULT_BASE = '/folio'
 
@@ -180,6 +181,16 @@ export interface FolioRuntime {
    */
   seed: (type: DocumentType | undefined, title: string) => Doc
   stub: (bindings: FolioBindings, id: string) => StoryStub
+  /**
+   * The one space object (`../editing/live-collaboration.md`), or null when the
+   * host has not declared the binding — in which case everything that channel
+   * carries is simply absent rather than broken.
+   *
+   * One instance for the whole site, named `'space'`: it is the only thing that
+   * can know who is in the site rather than in a document, and sharding it is
+   * named as the escape hatch rather than built.
+   */
+  space: (bindings: FolioBindings) => SpaceStub | null
   /**
    * The live draft for a story whose row the caller already has. Preferred over
    * `draft` wherever that is true: `draft` exists to look the row up.
@@ -385,6 +396,10 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
 
   const stub = ({ story }: FolioBindings, id: string): StoryStub =>
     story.get(story.idFromName(id)) as unknown as StoryStub
+
+  /** The single space instance, or null for a host without the binding. */
+  const space = ({ space: ns }: FolioBindings): SpaceStub | null =>
+    ns ? (ns.get(ns.idFromName(SPACE_NAME)) as unknown as SpaceStub) : null
 
   const draftFor = (bindings: FolioBindings, story: StoryMeta) =>
     stub(bindings, story.id).getOrInit(seed(typeOf(story.type), story.title))
@@ -635,11 +650,15 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   /**
    * Hooks Folio registers on itself, run before any host hook for the same
    * event (`hooks.ts`'s `InternalHooks`) — the seam
-   * `../editing/live-collaboration.md`'s space-channel broadcast hangs its own
-   * entry off (`../platform/publish-hooks.md` decision 5). Empty today: this
-   * spec has no internal consumer of its own, only the seam for the next one.
+   * `../platform/publish-hooks.md` decision 5 built so there would be one
+   * after-commit path rather than two conventions.
+   *
+   * Its one occupant is the space channel's broadcast: a plain `FolioHooks`
+   * literal, written exactly the way a host writes one, hanging off the same
+   * mechanism. No second path, no ordering of its own, and nothing for a future
+   * internal consumer to copy except this.
    */
-  const internalHooks: FolioHooks<Env>[] = []
+  const internalHooks: FolioHooks<Env>[] = [spaceBroadcastHooks<Env>(config, globals)]
 
   const publishDeps = (bindings: FolioBindings, hookCtx: HookRunnerCtx): PublishDeps => ({
     db: bindings.db,
@@ -697,6 +716,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     decorate,
     seed,
     stub,
+    space,
     draftFor,
     draftForWithSyncId,
     draft,

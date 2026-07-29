@@ -9,7 +9,12 @@ import { renderToReadableStream } from 'react-dom/server.edge'
 import { blocks } from './blocks'
 import { migrations } from './migrations'
 
-export { StoryDO } from 'folio/server'
+// Two Durable Object classes now. SpaceDO is the space channel
+// (editing/live-collaboration.md): one instance for the whole site, no storage at
+// all, carrying who is where and broadcasting structural events. It is declared
+// with `new_classes` rather than `new_sqlite_classes` in wrangler.jsonc for
+// exactly that reason.
+export { SpaceDO, StoryDO } from 'folio/server'
 
 declare const __FOLIO_ASSETS__: {
   admin: string
@@ -70,7 +75,17 @@ const folio = createFolio<Env>({
     // points the iframe at `/?_folio=preview&as=header`.
     { name: 'header', label: 'Header', kind: 'singleton', root: 'headerRoot', previewPath: '' },
   ],
-  bindings: (env) => ({ db: env.DB, story: env.STORY, media: env.MEDIA, images: env.IMAGES }),
+  bindings: (env) => ({
+    db: env.DB,
+    story: env.STORY,
+    // Optional, and this is the binding editing/live-collaboration.md adds. Drop
+    // it and the editor loses cross-story presence and live tree updates and
+    // nothing else — no error, no retry loop, because the admin is told through
+    // its bootstrap that the channel does not exist.
+    space: env.SPACE,
+    media: env.MEDIA,
+    images: env.IMAGES,
+  }),
   // identity-and-access.md: `auth` has no default (checkpoint 2), so a host that
   // forgets this key fails at construction rather than serving a publicly
   // editable CMS. `auth: 'open'` is the one-line escape hatch for a throwaway

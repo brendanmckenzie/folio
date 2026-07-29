@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { summariseDiff } from '../../../src/core/diff'
-import { publishStatus } from '../../../src/admin/TopBar'
+import { followLabel, publishStatus } from '../../../src/admin/TopBar'
+import type { SpaceAvatar } from '../../../src/admin/spaceStore'
 
 type Delta = ReturnType<typeof summariseDiff>
 
@@ -59,5 +60,46 @@ describe('publishStatus', () => {
   it('does not disable Publish for an unpublished (taken down) story even if unchanged since its last publish', () => {
     const status = publishStatus(true, 0, true, false, delta(0))
     expect(status.nothingToPublish).toBe(false)
+  })
+})
+
+/*
+ * editing/live-collaboration.md: what a peer's avatar says. "on a list screen" is
+ * a real answer rather than a missing one — an editor browsing the tree is
+ * present, and an avatar with no explanation reads as broken.
+ */
+describe('followLabel', () => {
+  const avatar = (over: Partial<SpaceAvatar> = {}): SpaceAvatar => ({
+    actor: 'usr_ann',
+    name: 'Ann',
+    colour: '#e5484d',
+    storyId: 'sty_about',
+    storyTitle: 'About',
+    locale: null,
+    selection: null,
+    tabs: 1,
+    ...over,
+  })
+
+  it('names the document somebody is in', () => {
+    expect(followLabel(avatar())).toBe('Ann — About')
+  })
+
+  it('names the locale when there is one', () => {
+    expect(followLabel(avatar({ locale: 'fr' }))).toBe('Ann — About (fr)')
+  })
+
+  it('says so when somebody is on a list screen rather than in a document', () => {
+    expect(followLabel(avatar({ storyId: null, storyTitle: null }))).toBe('Ann — on a list screen')
+  })
+
+  it('counts tabs only when there is more than one', () => {
+    expect(followLabel(avatar({ tabs: 2 }))).toBe('Ann — About · 2 tabs')
+  })
+
+  /** A story whose title never reached this client (an event about a page it has
+   * not loaded) still gets a legible label. */
+  it('falls back when the title is unknown', () => {
+    expect(followLabel(avatar({ storyTitle: null }))).toBe('Ann — a document')
   })
 })

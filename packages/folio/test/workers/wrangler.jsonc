@@ -18,7 +18,13 @@
     }
   ],
   "durable_objects": {
-    "bindings": [{ "name": "STORY", "class_name": "StoryDO" }]
+    "bindings": [
+      { "name": "STORY", "class_name": "StoryDO" },
+      // The space channel (editing/live-collaboration.md). Bound here so
+      // space-do.test.ts drives a real one, and so http.test.ts exercises the
+      // structural-event broadcast a mutating route now fires.
+      { "name": "SPACE", "class_name": "SpaceDO" }
+    ]
   },
   "r2_buckets": [
     {
@@ -33,5 +39,11 @@
   //
   // StoryDO keeps its draft in ctx.storage.sql, so the class has to be created
   // as SQLite-backed. Without this migration every `sql.exec` throws.
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StoryDO"] }]
+  //
+  // SpaceDO, by contrast, holds no storage at all, so it is `new_classes` — the
+  // distinction a host has to get right once and cannot change afterwards.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["StoryDO"] },
+    { "tag": "v2", "new_classes": ["SpaceDO"] }
+  ]
 }
