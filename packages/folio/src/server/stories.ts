@@ -364,7 +364,13 @@ export async function publishStory(
   fallbackTitle: string,
   publishedSyncId: number,
 ): Promise<number> {
-  const { publishedAt, statement } = publishStoryStatement(db, id, doc, fallbackTitle, publishedSyncId)
+  const { publishedAt, statement } = publishStoryStatement(
+    db,
+    id,
+    doc,
+    fallbackTitle,
+    publishedSyncId,
+  )
   await statement.run()
   return publishedAt
 }

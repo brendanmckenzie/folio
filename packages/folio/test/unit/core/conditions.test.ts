@@ -103,7 +103,10 @@ describe('matches: combinators', () => {
 
   it('any requires at least one sub-condition to hold', () => {
     const cond: FieldCondition = {
-      any: [{ field: 'layout', eq: 'split' }, { field: 'layout', eq: 'video' }],
+      any: [
+        { field: 'layout', eq: 'split' },
+        { field: 'layout', eq: 'video' },
+      ],
     }
     expect(matches(cond, { layout: 'video' })).toBe(true)
     expect(matches(cond, { layout: 'full' })).toBe(false)
@@ -118,7 +121,12 @@ describe('matches: combinators', () => {
   it('nests arbitrarily', () => {
     const cond: FieldCondition = {
       all: [
-        { any: [{ field: 'layout', eq: 'split' }, { field: 'layout', eq: 'video' }] },
+        {
+          any: [
+            { field: 'layout', eq: 'split' },
+            { field: 'layout', eq: 'video' },
+          ],
+        },
         { not: { field: 'archived', eq: true } },
       ],
     }

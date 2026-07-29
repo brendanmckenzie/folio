@@ -315,7 +315,10 @@ await alice.expect((m) => m.type === 'delta' && m.txId === 't5')
 await bob.expect((m) => m.type === 'delta' && m.txId === 't5')
 
 const draftAfterDiscard = await fetch(`${HTTP}/?_folio=preview`).then((r) => r.text())
-check('the draft reads the published title again after discarding', draftAfterDiscard.includes('Version One'))
+check(
+  'the draft reads the published title again after discarding',
+  draftAfterDiscard.includes('Version One'),
+)
 check(
   'the discarded edit is gone from the draft',
   !draftAfterDiscard.includes('Changed After Republish'),
