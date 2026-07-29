@@ -322,6 +322,22 @@ an unsorted flat list, which stops working somewhere around 15.
 
 ## Known smaller issues
 
+- The space channel does not carry a sibling **reorder**: nothing in `stories`
+  changes path when two siblings swap places, so `pathsChanged` does not fire and a
+  peer's tree keeps the old order until its next load. Closing it means a second
+  after-commit path for the sake of a row moving up one place, so it is named
+  rather than built.
+- Live propagation of a *draft* edit inside a global into another page's open
+  preview is unbuilt. `global.changed` fires on **publish** and the admin refetches
+  its copy from it, so the seam exists and the published case works; the draft case
+  would mean `StoryDO` holding the space binding and emitting on every transaction,
+  which is content on the space channel in all but name.
+- A structural event triggers one `GET /folio/stories` rather than patching the
+  tree in place. Not laziness: `StoryNode.url` is computed by the host's own
+  `route` on the server, so a client cannot derive the URL of a page whose path just
+  moved, and a tree holding the new path with the old URL would leave every link in
+  the open preview pointing at the vacated address. Patching would need the event to
+  carry server-rendered URLs.
 - Login rate limiting is a partial answer, and says so: sign-in links are capped
   per address per hour out of `login_challenges`, but the IP dimension needs a
   Cloudflare rate-limiting rule at the zone, which is not Folio's to configure.

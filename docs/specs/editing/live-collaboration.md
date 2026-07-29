@@ -3,10 +3,10 @@
 > **Group:** editing
 > **Build order:** 16
 > **Size:** M
-> **Status:** draft
+> **Status:** done
 > **Wire version:** bumps `PROTOCOL_VERSION` to 4 (`presence` carries a field; a second space-level channel appears)
 > **Migration:** none (one new Durable Object class, so a `wrangler.jsonc` migration tag)
-> **Last updated:** 2026-07-29
+> **Last updated:** 2026-07-30
 
 ## Summary
 
@@ -525,7 +525,124 @@ clients against the dev server.
 
 ## Open questions
 
-- Should the space channel carry a "someone is typing in story X" hint so the tree can
-  show activity without an avatar (an editor with the tab open but idle looks the same
-  as one mid-sentence)? It is one boolean derived from the last tx time, and it may be
-  more noise than signal.
+None left.
+
+- *Should the space channel carry a "someone is typing in story X" hint?* **No, and it
+  is not built.** Judged more noise than signal: an avatar already says somebody is in
+  a document, and a boolean that flickers on and off every few seconds adds movement to
+  the tree without adding an answer anybody acts on. The channel carries where people
+  are and what changed structurally; whether a given person is mid-sentence is not a
+  question the tree needs to answer.
+
+## Implementation notes
+
+Landed 2026-07-30 in six commits (`d5a1c44`, `72b6f44`, `fa0f642`, `6bd114e`,
+`643cd61`, `4f3ba46`). Tests: 1791 → 1873 (66 → 69 files). `PROTOCOL_VERSION` is
+**4**. No D1 migration, as the header says: presence is never persisted, which is
+also what makes this the cheapest wire bump there has been — nothing in it touches
+a mutation, so there is no log entry whose meaning could shift and nothing to stay
+compatible with. `scripts/space-test.mjs` is 26 checks against a live server.
+
+**All five phases landed, including the optional one.** Phase 4's live-globals step
+is the one thing that landed only in part; see "Deliberately not built" below.
+
+### The one real departure from the spec: events reload, they do not patch
+
+Decision 4 says a client applies an event's payload to its tree directly rather
+than refetching. **It cannot, and the reason is `StoryNode.url`.** That field is
+computed by the *host's* own `route` function, on the server, so the admin has no
+way to derive it for a page whose path just moved. A tree patched with the right
+path and a stale URL is strictly worse than one that refetches: every link to that
+page in the preview you are looking at would keep pointing at the vacated URL,
+which is the exact failure this feature exists to fix.
+
+So `spaceEventEffect` (`admin/hooks/useSpace.ts`) answers with a reload, and the
+acceptance criteria still hold, because they are about three specific things and a
+reload breaks none of them: the open document is never refetched, the iframe never
+reloads, and the resolution rebuilt from the new tree reaches the preview as a
+`resolve` frame. One `GET /folio/stories` is the cost. The spec's own edge case
+already said "one refetch is cheaper than a wrong tree"; this generalises that from
+the unknown-parent case to every case.
+
+### Two additions beyond the spec's sketch
+
+**`Presence` also carries a `locale`.** The spec's edge case asks the peer ring to
+name which language somebody is editing in, since two people in one field in two
+locales are writing different keys and are not in conflict at all. The alternative
+was cross-referencing the space channel's `SpacePresence.locale` by actor, which
+would have made the label wrong — silently claiming a clash — on a deployment
+without the space binding. It rides the story channel instead, where the ring is.
+
+**Every `SpaceEvent` carries its `actor`.** Two jobs. The object broadcasts to
+every joined socket, because a Worker calling an RPC has no idea which socket the
+request arrived on and inventing a way for it to know is a lot of machinery for one
+redundant refetch — so the client that caused a change ignores its own echo by
+comparing this. And it is how a notice gets a *name*: the id is looked up in the
+peer list this same channel already carries, so no display name has to ride on the
+event. An actor who has since closed their tab reads as "Someone".
+
+### What the spec got wrong or could not know about the codebase
+
+- **`SpacePresence.role: Role`** is `role: string | null` on the wire. `Role` lives
+  in `server/auth/roles.ts` and the wire lives in `core/`, which does not import
+  the server. The object writes it from the verified identity, never from a claim.
+- **The `SpaceEvent` payloads** are narrower than the sketch, because each one is
+  assembled from what its after-commit hook actually holds and nothing else — no
+  second query to enrich an event that fires on every rename. `story.updated`
+  carries `changes: {id, from, to}[]` (which is what `pathsChanged` has) rather
+  than `{title, slug, parentId, path}`; `story.moved` does not exist at all,
+  because a move changes paths and therefore *is* a `story.updated`.
+- **A pure sibling reorder broadcasts nothing.** No path changes, so
+  `pathsChanged` does not fire. Named rather than papered over: closing it would
+  mean a second after-commit path for the sake of a row moving up one place, and
+  the symptom is a peer's tree keeping the old order until its next load.
+- **`useGlobalDocs` returns `{ docs, reload }`** now, not a bare record. The
+  `reload` is the seam `globals.md` deferred, driven by `global.changed`.
+- **`adminPage(rt, bindings, story)`** takes the bindings, to put `space: boolean`
+  in the `__FOLIO_ADMIN__` bootstrap. The `isId` check in `/edit/:id` moved
+  *ahead* of taking the bindings, because `test/workers/app.test.ts` pins that an
+  id which cannot name a story never touches the host's environment.
+
+### Shared, not copied
+
+`server/sockets.ts` is new and holds what the two socket-bearing objects genuinely
+share: the application close codes, the pre-parse frame-size ceiling, and the
+bounded session re-check. `StoryDO` was refactored onto it, which is why that file
+got shorter. Two copies of a security check drift, and the untested copy drifts
+first. What is *not* shared stayed put: the story object's catchup, watermark and
+quarantine reasoning, and the space object's per-story presence.
+
+`SpaceDO` is a factory (`createSpaceDO<Env>({ db })`) for the same reason
+`createStoryDO` is — a Durable Object is constructed with the raw host env and
+never sees `createFolio`'s config. The `db` there is *not* storage: the object
+persists nothing of its own and reads `sessions` only to notice a revocation on an
+already-open socket. `wrangler.jsonc` therefore declares it with **`new_classes`**,
+under its own `v2` tag; a test pins that no storage and no alarm exist after a busy
+session.
+
+### The trap, held
+
+`identity-and-access.md` warned that the attachment now exists from upgrade time,
+so "has an attachment" admits every lurker. `SpaceDO` uses `joined`, and it matters
+more here than on the story socket: this is the one channel that shows a name
+*outside* the document it was asserted in. There is a test that a socket which has
+not said hello appears in nobody's peer list, receives nobody's presence, receives
+no events, and cannot announce a position. Presence frames are built by an explicit
+`presenceOf`, never a spread, and the e2e asserts no `session` or `expiresAt` key
+reaches a frame.
+
+### Deliberately not built
+
+- **Live propagation of a *draft* edit inside a global into another page's open
+  preview** — phase 4, step 3, the half of it that needed a per-keystroke path from
+  `StoryDO` to `SpaceDO`. `global.changed` exists and fires when a configured
+  global is **published**, and `useGlobalDocs.reload` consumes it, so the seam is
+  built and the published case works. The draft case would mean the story object
+  holding the space binding and emitting on every transaction, which is content on
+  the space channel in all but name (decision 3), and it was not worth the risk on
+  an optional phase. Recorded in README's "Not built yet".
+- **Continuous follow-mode**, per decision 6. Click-to-follow is built and needed
+  nothing new on the wire, which is the reason `selection` rides the space channel
+  at all.
+- Everything under *Out of scope* stands: no CRDT, no cursors inside a richtext
+  field, no comments, no presence on the published site, no sharding.
