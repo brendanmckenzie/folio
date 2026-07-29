@@ -206,6 +206,27 @@ p { text-wrap: pretty; }
   line-height: 1.5;
 }
 .insight__author { margin: 1rem 0 0; font-size: 0.875rem; }
+.insight__meta { margin: 0.75rem 0 0; font-size: 0.8125rem; color: var(--muted); }
+
+/* An index page's list of insights (docs/specs/content-model/collections.md).
+   One `collection` field: the answer arrives already resolved, so this is plain
+   markup over `list.items` with no fetch anywhere. */
+.insight-list { max-width: 46rem; padding: 2rem 1.5rem; margin-inline: auto; }
+.insight-list__heading { margin: 0 0 1.25rem; font-size: 1.5rem; }
+.insight-list__empty { color: var(--muted); font-size: 0.9375rem; }
+.insight-list__items { margin: 0; padding: 0; list-style: none; display: grid; gap: 1.25rem; }
+.insight-list__item { padding-bottom: 1.25rem; border-bottom: 1px solid var(--line); }
+.insight-list__item > a { font-size: 1.125rem; font-weight: 600; }
+.insight-list__date { margin-left: 0.5rem; font-size: 0.8125rem; color: var(--muted); }
+.insight-list__standfirst { margin: 0.4rem 0 0; color: var(--muted); font-size: 0.9375rem; }
+.insight-list__pages {
+  display: flex;
+  gap: 1rem;
+  align-items: baseline;
+  margin-top: 1.5rem;
+  font-size: 0.875rem;
+}
+.insight-list__stale { margin: 1rem 0 0; font-size: 0.8125rem; color: var(--muted); }
 
 .card { max-width: 46rem; padding: 1.5rem; margin-inline: auto; }
 .card--empty { color: var(--muted); font-size: 0.875rem; }

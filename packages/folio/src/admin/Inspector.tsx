@@ -3,11 +3,13 @@ import { matches } from '../core/conditions'
 import type { Blok, Json } from '../core/doc'
 import type { Field } from '../core/fields'
 import { isTranslatable } from '../core/locales'
+import { type CollectionField, collectionQuery, maxPerPageOf, queryKey } from '../core/query'
 import { asRichtext, richtextToText, sanitiseRichtext } from '../core/richtext'
 import type { StoryNode } from '../core/story'
 import { asAsset } from '../core/values'
 import { RichText } from '../preview/RichText'
 import { AssetInput, MultiAssetInput } from './AssetInput'
+import { CollectionInput } from './CollectionInput'
 import { useFolio } from './FolioContext'
 import { LinkInput } from './LinkInput'
 import { RichTextInput } from './RichTextInput'
@@ -126,6 +128,14 @@ export function boundValue(blok: Blok, name: string, mode: FieldMode, locale: st
   if (mode === 'translate') return blok.i18n?.[locale]?.[name] ?? null
   return blok.data[name] ?? null
 }
+
+/**
+ * The key one collection field's answer travels under, exactly as `render` computes
+ * it — so the inspector's count and the preview's list can never be about different
+ * queries.
+ */
+const collectionKey = (field: CollectionField, value: Json): string =>
+  queryKey(collectionQuery(field, value), maxPerPageOf(field))
 
 export function Inspector({
   blok,
@@ -249,9 +259,14 @@ function FieldInput({
   /** The source-locale value, for the read-only column beside a translation. */
   source?: Json
 }) {
-  const { stories } = useFolio()
+  const { stories, resolution } = useFolio()
   const label = field.label ?? name
   const id = `f-${name}`
+  // The collection's own answer, looked up the way `render` looks it up — through
+  // `resolveCollection`, so the panel's count and the preview's list are the same
+  // query. Undefined for every other field kind, and while the fetch is in flight.
+  const collectionAnswer =
+    field.kind === 'collection' ? resolution.collections?.[collectionKey(field, value)] : undefined
 
   return (
     <div className={`field${mode === 'source' ? '' : ` field--${mode}`}`}>
@@ -324,6 +339,17 @@ function FieldInput({
               </option>
             ))}
           </select>
+        ) : field.kind === 'collection' ? (
+          // The type is fixed by the schema; the editor picks filters, a count and
+          // a sort. `answer` is what the query currently returns, off the same
+          // resolution the preview renders from — so the count is free.
+          <CollectionInput
+            id={id}
+            field={field}
+            value={value}
+            answer={collectionAnswer}
+            onChange={onChange}
+          />
         ) : field.kind === 'richtext' ? (
           <RichTextInput value={value} limits={field} onChange={onChange} />
         ) : field.kind === 'asset' ? (

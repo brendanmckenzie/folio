@@ -159,6 +159,12 @@ export default {
     if (url.pathname === '/sitemap.xml') {
       return sitemap(await folio.stories(env), url.origin)
     }
+    // A filtered archive as ordinary application code, which is the fourth user
+    // story in `content-model/collections.md`: no Folio route is involved, just
+    // `folio.query` over published content. `/archive?topic=policy&page=2`.
+    if (url.pathname === '/archive') {
+      return archive(env, url)
+    }
 
     // --- Folio: editor, its API, and preview renders ---------------------
     // Returns null for anything it does not own, including a preview request
@@ -199,7 +205,15 @@ export default {
     // The locale rides on the resolution, which is what makes the whole render
     // French: every field read in `folio.render` goes through it, and an
     // untranslated field falls back to the source rather than leaving a hole.
-    const resolution = await folio.resolve(env, doc, { locale })
+    // `?page=` is the host's, not Folio's (`content-model/collections.md`
+    // decision 5): the host reads it and passes it in, and it offsets every
+    // `collection` field in the document. One number for the page, deliberately —
+    // per-field pagination keyed by uid is out of scope until something needs it.
+    const page = Number(url.searchParams.get('page') ?? '1')
+    const resolution = await folio.resolve(env, doc, {
+      locale,
+      page: Number.isFinite(page) && page >= 1 ? Math.trunc(page) : 1,
+    })
     return html(<Page doc={doc} resolution={resolution} locale={locale} />)
   },
 } satisfies ExportedHandler<Env>
@@ -275,6 +289,43 @@ function Page({ doc, resolution, locale }: { doc: Doc; resolution: Resolution; l
       {folio.renderGlobal(resolution, 'settings')}
     </Shell>
   )
+}
+
+/**
+ * A filtered archive, written as ordinary application code — the point being that
+ * `folio.query` needs no block, no page and no editor
+ * (`content-model/collections.md`). Answers JSON so it is legible in a terminal and
+ * usable by `scripts/collections-test.mjs`.
+ *
+ * An unknown `topic` is a 400 from Folio naming the field, not a silent empty
+ * result, which is the whole reason `where` is checked against the schema's indexed
+ * set before it reaches SQL.
+ */
+async function archive(env: Env, url: URL) {
+  const topic = url.searchParams.get('topic')
+  const page = Number(url.searchParams.get('page') ?? '1')
+  const result = await folio.query(env, {
+    type: 'insight',
+    ...(topic ? { where: [{ field: 'topic', op: 'eq' as const, value: topic }] } : {}),
+    order: { field: 'published', dir: 'desc' },
+    perPage: 5,
+    page: Number.isFinite(page) && page >= 1 ? Math.trunc(page) : 1,
+  })
+
+  return Response.json({
+    total: result.total,
+    page: result.page,
+    pages: result.pages,
+    // Deliberately not the whole document: an archive listing needs a title and a
+    // URL, and `items` carries the document for the cases that need more.
+    items: result.items.map((i) => ({
+      id: i.id,
+      title: i.title,
+      url: i.url,
+      topic: i.data.topic ?? null,
+      published: i.data.published ?? null,
+    })),
+  })
 }
 
 function sitemap(stories: Awaited<ReturnType<typeof folio.stories>>, origin: string) {

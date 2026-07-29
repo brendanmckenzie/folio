@@ -4,7 +4,7 @@ import { embed, section } from './embed'
 import { feature, features } from './features'
 import { headerRoot } from './header'
 import { hero } from './hero'
-import { insightPage } from './insight'
+import { insightList, insightPage } from './insight'
 import { gallery, image } from './media'
 import { page } from './page'
 import { personCard, personRecord } from './person'
@@ -38,4 +38,5 @@ export const blocks = [
   embed,
   section,
   personCard,
+  insightList,
 ]

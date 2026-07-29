@@ -35,6 +35,9 @@ export const page = defineBlock({
         'embed',
         'section',
         'personCard',
+        // The one block that lists other documents rather than holding content
+        // (`content-model/collections.md`), so a page can be an index page.
+        'insightList',
       ],
     }),
   },
