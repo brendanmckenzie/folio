@@ -7,6 +7,7 @@
  * constraints, and an internal `Error` message is written for whoever reads the
  * logs, not for whoever made the request.
  */
+import { NestedError } from '../core/nested'
 
 export type FolioErrorCode =
   | 'bad_request'
@@ -23,9 +24,20 @@ export type FolioErrorCode =
   | 'conflict'
   | 'too_large'
   | 'unsupported'
+  /**
+   * Half of a two-store write landed (`content-api.md` architecture decision 5).
+   * D1 and a Durable Object share no transaction, so creating a document is a row
+   * and then a document, and the second one can fail. 502 rather than 500 because
+   * nothing is wrong with the request or with this server's logic — one dependency
+   * did not answer — and rather than 200 because reporting success for a document
+   * whose content never arrived is how an importer silently loses a third of its
+   * input. The message names the id that *was* created, so the caller can retry
+   * the content alone rather than the whole create.
+   */
+  | 'incomplete'
 
 /** Every status a FolioError can produce, so `c.json(body, status)` stays typed. */
-export type FolioErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 501
+export type FolioErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 501 | 502
 
 const STATUS: Record<FolioErrorCode, FolioErrorStatus> = {
   bad_request: 400,
@@ -35,6 +47,7 @@ const STATUS: Record<FolioErrorCode, FolioErrorStatus> = {
   conflict: 409,
   too_large: 413,
   unsupported: 501,
+  incomplete: 502,
 }
 
 export class FolioError extends Error {
@@ -134,6 +147,13 @@ function messagesOf(e: unknown, depth = 3): string[] {
  */
 export function rethrow(e: unknown): never {
   if (e instanceof FolioError) throw e
+  // A nested payload the schema refused (`content-api.md`). Its message is
+  // already written for a client and already names the path that failed
+  // (`body[0].fields.headng is not a field of 'hero'`) — the whole point of the
+  // refusal — so it travels verbatim. It is translated here rather than caught in
+  // each route because every route that writes content already funnels through
+  // `rethrow`, and a per-route catch is one a later route would forget.
+  if (e instanceof NestedError) throw new FolioError('bad_request', e.message)
 
   const messages = messagesOf(e)
   for (const message of messages) {

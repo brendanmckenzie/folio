@@ -6,6 +6,7 @@ import { Hono } from 'hono'
 import { envelope, FolioError, INTERNAL } from './errors'
 import { withActor, withBindings } from './middleware'
 import { accessRoutes } from './routes/access'
+import { API_VERSION, apiRoutes } from './routes/api'
 import { assetRoutes } from './routes/assets'
 import { authRoutes } from './routes/auth'
 import { contentRoutes } from './routes/content'
@@ -65,6 +66,16 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // mount before any gate exists (identity-and-access.md).
   app.route('/', authRoutes<Env>(rt))
   app.route('/', accessRoutes<Env>(rt))
+
+  // Ahead of the resource routes, so `/api/v1/documents/:id` is never read as one
+  // of their `:id` patterns. Two surfaces over one set of services
+  // (`../../../docs/specs/platform/content-api.md` decision 2): everything below
+  // this line is internal to the admin and free to change with it, everything
+  // under `/api/v1` is a contract with somebody's script. Mounted *after*
+  // `withActor`, like everything else, so a token and a session cookie are
+  // resolved by the same middleware and each route declares what it needs at its
+  // own mount.
+  app.route(`/api/${API_VERSION}`, apiRoutes<Env>(rt))
 
   app.route('/', storyRoutes<Env>(rt))
   app.route('/', historyRoutes<Env>(rt))

@@ -5,6 +5,7 @@ import { createApp } from './app'
 import { audit } from './audit'
 import { credentialOf, resolveActor } from './auth/resolve'
 import { allows, READ_DRAFT } from './auth/roles'
+import { FolioError } from './errors'
 import { runMigrations } from './migrate'
 import { previewPage } from './pages'
 import { lookupRedirect } from './redirects'
@@ -15,13 +16,23 @@ import {
   publishedDoc,
   publishedDocsByIds,
   storyByPath,
+  storyById,
   storyStatus,
   storyTree,
 } from './stories'
 import { StoryDO } from './story-do'
 import type { Folio, FolioConfig } from './types'
+import { commitAll } from './write'
 
 export { StoryDO }
+/**
+ * The Content API (`../../../docs/specs/platform/content-api.md`): what one write
+ * reports, and the payload shapes the routes answer. `toNested` / `fromNested`
+ * themselves ship from `folio/engine`, with the rest of the document tooling.
+ */
+export type { WriteResult, WriteActor } from './write'
+export type { ApiDocument, ApiDocumentMeta } from './routes/api/documents'
+export { API_VERSION } from './routes/api'
 export type { DocumentKind, DocumentType } from '../core/schema'
 export type { Migration } from '../core/migrate'
 export type { VersionKind, VersionMeta } from './versions'
@@ -204,6 +215,33 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     status: (env, path) => storyStatus(config.bindings(env).db, path),
     redirect: (env, path) => lookupRedirect(config.bindings(env).db, path),
     draft: (env, id) => rt.draft(config.bindings(env), id),
+    /**
+     * The in-process write (`content-api.md` decision 6), assembled from bindings
+     * alone exactly as `publish` and `migrate` are — so a nightly sync job, a
+     * deploy step and the HTTP route all reach the identical code.
+     *
+     * The row is looked up before the object is touched, deliberately. `commit`
+     * refuses a document that has never been opened, and reaching for the draft by
+     * id first would *create* a Durable Object for a story D1 no longer has — the
+     * resurrection `purge()` exists to prevent.
+     */
+    write: async (env, id, mutations, opts) => {
+      const bindings = config.bindings(env)
+      const story = await storyById(bindings.db, id)
+      if (!story) throw new FolioError('not_found', 'Unknown document')
+      // `commit` refuses an object that holds no document, and its job is not to
+      // know what a seed looks like. Creating it here is what makes writing to a
+      // story nobody has opened in the editor work.
+      await rt.draftFor(bindings, story)
+      return commitAll(
+        rt.stub(bindings, id),
+        mutations,
+        { id: opts.actor, name: opts.name ?? opts.actor },
+        // A caller-supplied txId is already an identity for this write, which is
+        // what `commitAll` derives its per-chunk ids from.
+        opts.txId,
+      )
+    },
     /**
      * `opts` pages this (`collections.md` decision 6). Absent still answers
      * everything: a sitemap of 40 pages should not have to page, and one of 2,000

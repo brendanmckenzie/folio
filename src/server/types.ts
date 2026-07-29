@@ -11,6 +11,7 @@ import type { AnyBlockDef, Registry } from '../core/block'
 import type { Doc } from '../core/doc'
 import type { LocaleConfig } from '../core/locales'
 import type { Migration } from '../core/migrate'
+import type { Mutation } from '../core/mutations'
 import type { ContentPage, ContentQuery } from '../core/query'
 import type { Resolution } from '../core/resolve'
 import type { DocumentType } from '../core/schema'
@@ -23,6 +24,7 @@ import type { MigrateOptions, MigrateReport } from './migrate'
 import type { ReindexOptions, ReindexReport } from './reindex'
 import type { ResolveOptions } from './runtime'
 import type { StoryDO } from './story-do'
+import type { WriteResult } from './write'
 
 /**
  * `ResolveOptions` minus `draft`, which is Folio's own preview mode and not
@@ -55,7 +57,7 @@ export interface FolioBindings {
  */
 export type StoryStub = Pick<
   StoryDO,
-  'getOrInit' | 'getOrInitWithSyncId' | 'head' | 'recent' | 'purge' | 'commit' | 'fetch'
+  'getOrInit' | 'getOrInitWithSyncId' | 'head' | 'recent' | 'purge' | 'commit' | 'hasTx' | 'fetch'
 >
 
 export interface FolioConfig<Env> {
@@ -224,6 +226,32 @@ export interface Folio<Env> {
   redirect: (env: Env, path: string) => Promise<{ to: string; status: number } | null>
   /** Live draft for a story id, creating it on first touch. */
   draft: (env: Env, id: string) => Promise<Doc>
+  /**
+   * Commits mutations to a document's log
+   * (`../../../docs/specs/platform/content-api.md` architecture decision 6).
+   *
+   * A host's own Worker already holds the bindings and should not have to make an
+   * HTTP request to itself to write content. This is the same `commit` path
+   * `PUT /api/v1/documents/:id/content` takes, with the same chunking at
+   * `MAX_TX_MUTATIONS` and the same guarantees: the edit reaches every open
+   * editor, lands in the activity trail under `opts.actor`, and is undoable.
+   * `folio.draft(env, id)` is how you get the document to diff against;
+   * `fromNested` / `diff` from `folio/engine` are how you turn a payload into
+   * mutations.
+   *
+   * `opts.txId` is the idempotency handle: the same id twice is written once and
+   * answered `replayed`. Scoped per document, because the log is.
+   *
+   * Refuses rather than half-applies. An unknown id is `not_found`, a document
+   * over its caps is `too_large`, a structurally invalid transaction is
+   * `conflict` — all as `FolioError`, which `folio/server` exports.
+   */
+  write: (
+    env: Env,
+    id: string,
+    mutations: Mutation[],
+    opts: { actor: string; name?: string; txId?: string },
+  ) => Promise<WriteResult>
   /**
    * Every story, for sitemaps and static generation. With `locales` configured
    * each routed row also carries `urls` and `previewUrls` — the host's own

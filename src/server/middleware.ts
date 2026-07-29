@@ -1,6 +1,6 @@
 import type { MiddlewareHandler } from 'hono'
 import { credentialOf, originAllowed, resolveActor } from './auth/resolve'
-import { type Access, allows, refusalOf } from './auth/roles'
+import { type Access, type Actor, allows, refusalOf } from './auth/roles'
 import { FolioError } from './errors'
 import type { FolioRuntime } from './runtime'
 import { storyById } from './stories'
@@ -96,6 +96,22 @@ export function requireAccess<Env>(
     if (!allows(actor, access)) throw new FolioError('forbidden', refusalOf(actor, access))
     await next()
   }
+}
+
+/**
+ * The same check inside a handler, for a route whose requirement depends on what
+ * the request asked for rather than on which path it hit.
+ *
+ * `GET /api/v1/documents/:id` is the case: it needs `content:read` to read
+ * published content and `content:read:draft` to read a draft, and which one is
+ * decided by `?status=draft` — so it cannot be declared at the mount the way every
+ * other route's is. Same predicate, same `auth: 'open'` short-circuit, same
+ * refusal wording; the only difference is where it is asked.
+ */
+export function ensureAccess(rt: FolioRuntime, actor: Actor | null, access: Access): void {
+  if (rt.auth.mode !== 'session') return
+  if (!actor) throw new FolioError('unauthorized', 'Sign in to continue.')
+  if (!allows(actor, access)) throw new FolioError('forbidden', refusalOf(actor, access))
 }
 
 /**

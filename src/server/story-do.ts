@@ -720,6 +720,23 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
         }))
     }
 
+    /**
+     * Whether a txId is already in this log, and how much it did. A **read**: it
+     * writes nothing, broadcasts nothing and touches no alarm.
+     *
+     * For `../platform/content-api.md`'s `Idempotency-Key`, and specifically for
+     * the retry whose recomputed diff is *empty* — the ordinary case, since the
+     * first attempt already landed the change. `commit` alone cannot answer that
+     * one: an empty transaction is within every cap, so probing with
+     * `commit([], actor, txId)` would log an empty tx for a genuinely-new key,
+     * bump `sync_id`, and thereby make an unchanged story report unpublished
+     * changes. So the question is asked instead of guessed at.
+     */
+    async hasTx(txId: string): Promise<{ syncId: number; mutations: number } | null> {
+      const delta = this.logged(txId)
+      return delta ? { syncId: delta.syncId, mutations: delta.mutations.length } : null
+    }
+
     /** The delta a txId already produced, or null if this transaction is new. */
     private logged(txId: string): Delta | null {
       const row = this.sql
