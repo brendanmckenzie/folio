@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { type Blok, type Doc, type Json, newUid } from '../../../src/core/doc'
+import { fieldValue } from '../../../src/core/locales'
 import {
   type Mutation,
   apply,
@@ -593,5 +594,195 @@ describe('newUid', () => {
   it('does not repeat across a small sample', () => {
     const seen = new Set(Array.from({ length: 200 }, () => newUid()))
     expect(seen.size).toBe(200)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Locale-scoped set (`localisation.md` architecture decision 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The one property that has to hold forever: **a `set` with no locale is a
+ * source-locale write**. Every entry in every log written before v3 is exactly
+ * that, and the log outlives every deploy — so the absent case is tested as hard
+ * as the present one, including that an inverse of a source write carries no
+ * `locale` key at all.
+ */
+describe('apply — set with a locale', () => {
+  it('writes into i18n rather than data, creating the maps', () => {
+    const out = apply(makeDoc(), {
+      t: 'set',
+      uid: 'hero',
+      field: 'heading',
+      value: 'Bonjour',
+      locale: 'fr',
+    })
+    expect(out.bloks.hero!.data.heading).toBe('Hello')
+    expect(out.bloks.hero!.i18n).toEqual({ fr: { heading: 'Bonjour' } })
+  })
+
+  it('leaves the other fields of an existing locale map alone', () => {
+    const doc = apply(makeDoc(), {
+      t: 'set',
+      uid: 'hero',
+      field: 'heading',
+      value: 'Bonjour',
+      locale: 'fr',
+    })
+    const out = apply(doc, { t: 'set', uid: 'hero', field: 'sub', value: 'Salut', locale: 'fr' })
+    expect(out.bloks.hero!.i18n).toEqual({ fr: { heading: 'Bonjour', sub: 'Salut' } })
+  })
+
+  it('leaves other locales alone: two translators never collide', () => {
+    let doc = makeDoc()
+    doc = apply(doc, { t: 'set', uid: 'hero', field: 'heading', value: 'Bonjour', locale: 'fr' })
+    doc = apply(doc, { t: 'set', uid: 'hero', field: 'heading', value: 'Hallo', locale: 'de' })
+    expect(doc.bloks.hero!.i18n).toEqual({ fr: { heading: 'Bonjour' }, de: { heading: 'Hallo' } })
+    expect(doc.bloks.hero!.data.heading).toBe('Hello')
+  })
+
+  it('never touches i18n for a source-locale write', () => {
+    const out = apply(makeDoc(), { t: 'set', uid: 'hero', field: 'heading', value: 'Hi' })
+    expect(out.bloks.hero!.data.heading).toBe('Hi')
+    expect(out.bloks.hero).not.toHaveProperty('i18n')
+  })
+
+  it('stores an explicit null rather than deleting the key: that is how "untranslate" is expressed', () => {
+    const doc = apply(makeDoc(), {
+      t: 'set',
+      uid: 'hero',
+      field: 'heading',
+      value: 'Bonjour',
+      locale: 'fr',
+    })
+    const out = apply(doc, { t: 'set', uid: 'hero', field: 'heading', value: null, locale: 'fr' })
+    expect(out.bloks.hero!.i18n).toEqual({ fr: { heading: null } })
+  })
+
+  it('is a no-op for a uid the document does not have', () => {
+    const doc = makeDoc()
+    expect(apply(doc, { t: 'set', uid: 'gone', field: 'x', value: 'y', locale: 'fr' })).toBe(doc)
+  })
+})
+
+describe('invert — set with a locale', () => {
+  it('undoes into the same locale, not the source', () => {
+    const doc = apply(makeDoc(), {
+      t: 'set',
+      uid: 'hero',
+      field: 'heading',
+      value: 'Bonjour',
+      locale: 'fr',
+    })
+    const back = invert(doc, {
+      t: 'set',
+      uid: 'hero',
+      field: 'heading',
+      value: 'Salut',
+      locale: 'fr',
+    })
+    expect(back).toEqual([
+      { t: 'set', uid: 'hero', field: 'heading', value: 'Bonjour', locale: 'fr' },
+    ])
+  })
+
+  it('undoes a first translation to null, which reads as untranslated again', () => {
+    const back = invert(makeDoc(), {
+      t: 'set',
+      uid: 'hero',
+      field: 'heading',
+      value: 'Bonjour',
+      locale: 'fr',
+    })
+    expect(back).toEqual([{ t: 'set', uid: 'hero', field: 'heading', value: null, locale: 'fr' }])
+  })
+
+  it('omits the locale key entirely when inverting a source-locale write', () => {
+    const back = invert(makeDoc(), { t: 'set', uid: 'hero', field: 'heading', value: 'Hi' })
+    expect(back).toEqual([{ t: 'set', uid: 'hero', field: 'heading', value: 'Hello' }])
+    expect(back[0]).not.toHaveProperty('locale')
+  })
+
+  it('does not read the source value for a locale write, however tempting', () => {
+    // `heading` has a source value; French has nothing. The inverse must be
+    // null (untranslated), never 'Hello' — undoing must not smuggle the English
+    // into the French map.
+    const back = invert(makeDoc(), {
+      t: 'set',
+      uid: 'hero',
+      field: 'heading',
+      value: 'Bonjour',
+      locale: 'fr',
+    })
+    expect(back[0]).toMatchObject({ value: null })
+  })
+
+  it('round-trips a run of interleaved locale and source writes', () => {
+    const doc = makeDoc()
+    const ms: Mutation[] = [
+      { t: 'set', uid: 'hero', field: 'heading', value: 'Hi' },
+      { t: 'set', uid: 'hero', field: 'heading', value: 'Bonjour', locale: 'fr' },
+      { t: 'set', uid: 'hero', field: 'heading', value: 'Hallo', locale: 'de' },
+      { t: 'set', uid: 'hero', field: 'heading', value: '', locale: 'fr' },
+      { t: 'set', uid: 'text', field: 'body', value: 'deux', locale: 'fr' },
+    ]
+    const back = applyAll(applyAll(doc, ms), invertAll(doc, ms))
+
+    // Observational, not structural: undoing the first translation of a field
+    // restores its *value* to null rather than removing the map that held it, and
+    // `fieldValue` reads a null translation and an absent one identically. `diff`
+    // agrees — see diff.test.ts's "a fully undone translation diffs as no change".
+    for (const locale of [
+      undefined,
+      { code: 'fr', fallbacks: [] },
+      { code: 'de', fallbacks: [] },
+    ]) {
+      for (const [uid, field] of [
+        ['hero', 'heading'],
+        ['text', 'body'],
+        ['root', 'title'],
+      ] as const) {
+        expect(fieldValue(back.bloks[uid]!, field, locale)).toEqual(
+          fieldValue(doc.bloks[uid]!, field, locale),
+        )
+      }
+    }
+    // The source maps really are byte-identical again.
+    for (const uid of Object.keys(doc.bloks)) {
+      expect(back.bloks[uid]!.data).toEqual(doc.bloks[uid]!.data)
+    }
+  })
+
+  it('leaves i18n absent again after undoing the only translation ever written', () => {
+    // The one asymmetry worth naming: undo restores the *value* to null, not the
+    // shape to "no map at all". `fieldValue` reads both as untranslated, so this is
+    // observationally identical and much cheaper than pruning empty maps.
+    const doc = makeDoc()
+    const m: Mutation = { t: 'set', uid: 'hero', field: 'heading', value: 'Bonjour', locale: 'fr' }
+    const back = applyAll(applyAll(doc, [m]), invertAll(doc, [m]))
+    expect(back.bloks.hero!.i18n).toEqual({ fr: { heading: null } })
+    expect(back.bloks.hero!.data).toEqual(doc.bloks.hero!.data)
+  })
+})
+
+/**
+ * The compatibility property stated directly: a log of pre-v3 mutations produces
+ * the identical document it always did, byte for byte, with no `i18n` anywhere.
+ */
+describe('a pre-v3 log replays unchanged', () => {
+  it('produces a document with no i18n at all', () => {
+    const doc = makeDoc()
+    const log: Mutation[] = [
+      { t: 'set', uid: 'root', field: 'title', value: 'Home v2' },
+      { t: 'insert', blok: b('new1', 'text', 'root', 'body', 'a2', { body: 'three' }) },
+      { t: 'set', uid: 'new1', field: 'body', value: 'four' },
+      { t: 'move', uid: 'new1', parent: 'section', slot: 'children', order: 'a2' },
+      { t: 'remove', uid: 'img' },
+    ]
+    const out = applyAll(doc, log)
+    for (const blok of Object.values(out.bloks)) expect(blok).not.toHaveProperty('i18n')
+    expect(out.bloks.root!.data.title).toBe('Home v2')
+    expect(out.bloks.new1!.data.body).toBe('four')
+    expect(out.bloks.img).toBeUndefined()
   })
 })

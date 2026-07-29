@@ -54,10 +54,8 @@ function client(name, storyId) {
       ws.send(
         JSON.stringify({
           type: 'hello',
-          actor: name,
-          name,
-          colour: '#0090ff',
           lastSyncId: 0,
+          identity: { actor: name, name, colour: '#0090ff' },
           v: PROTOCOL_VERSION,
         }),
       )

@@ -69,10 +69,8 @@ function client(name, storyId = STORY) {
       ws.send(
         JSON.stringify({
           type: 'hello',
-          actor: name,
-          name,
-          colour: '#0090ff',
           lastSyncId: 0,
+          identity: { actor: name, name, colour: '#0090ff' },
           v: PROTOCOL_VERSION,
         }),
       )
@@ -639,10 +637,8 @@ const aboutDoc = await new Promise((resolve) => {
     ws.send(
       JSON.stringify({
         type: 'hello',
-        actor: 'about',
-        name: 'about',
-        colour: '#000',
         lastSyncId: 0,
+        identity: { actor: 'about', name: 'about', colour: '#000' },
         v: PROTOCOL_VERSION,
       }),
     ),

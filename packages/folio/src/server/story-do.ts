@@ -570,15 +570,24 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
 
       switch (msg.type) {
         case 'hello': {
-          // A verified identity is not overwritable: `hello`'s `actor`, `name`
-          // and `colour` are advisory from here on (they keep their place in the
-          // frame, so no protocol bump and no broken old tab — they simply stop
-          // being believed). Under `auth: 'open'` they are still the only
-          // identity there is, so they are taken.
+          // A verified identity is not overwritable, and at v3 the frame says so
+          // structurally: `hello.identity` is optional and nested
+          // (`localisation.md`), and it is read in exactly one situation —
+          // `auth: 'open'`, where there are no accounts and a client's self-report
+          // is the only thing that tells two anonymous tabs apart. A socket the
+          // Worker vouched for never reaches the second branch, whatever it sent.
           const base = who ?? attach(null)
-          const attachment: Attachment = base.verified
-            ? { ...base, joined: true }
-            : { ...base, actor: msg.actor, name: msg.name, colour: msg.colour, joined: true }
+          const asserted = msg.identity
+          const attachment: Attachment =
+            base.verified || !asserted
+              ? { ...base, joined: true }
+              : {
+                  ...base,
+                  actor: asserted.actor,
+                  name: asserted.name,
+                  colour: asserted.colour,
+                  joined: true,
+                }
           ws.serializeAttachment(attachment)
 
           const behind = current.syncId - msg.lastSyncId

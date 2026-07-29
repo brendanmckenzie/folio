@@ -47,10 +47,8 @@ function client(name, colour) {
       ws.send(
         JSON.stringify({
           type: 'hello',
-          actor: name.toLowerCase(),
-          name,
-          colour,
           lastSyncId: 0,
+          identity: { actor: name.toLowerCase(), name, colour },
           v: PROTOCOL_VERSION,
         }),
       )

@@ -160,7 +160,11 @@ check('the editor serves once signed in', editorSignedIn.status === 200)
 
 const live = socket({ cookie })
 await live.ready()
-live.send({ type: 'hello', actor: 'not-me', name: 'Not Me', colour: '#000000', lastSyncId: 0 })
+live.send({
+  type: 'hello',
+  lastSyncId: 0,
+  identity: { actor: 'not-me', name: 'Not Me', colour: '#000000' },
+})
 const boot = await live.expect((f) => f.type === 'bootstrap')
 check('a signed-in socket bootstraps', Boolean(boot.doc?.root))
 
@@ -223,7 +227,11 @@ check(
 )
 const viewerSocket = socket({ cookie: viewerCookie })
 await viewerSocket.ready()
-viewerSocket.send({ type: 'hello', actor: 'v', name: 'V', colour: '#111111', lastSyncId: 0 })
+viewerSocket.send({
+  type: 'hello',
+  lastSyncId: 0,
+  identity: { actor: 'v', name: 'V', colour: '#111111' },
+})
 const viewerBoot = await viewerSocket.expect((f) => f.type === 'bootstrap')
 check('and gets a socket, read-only (the spec’s open question)', Boolean(viewerBoot.doc?.root))
 viewerSocket.send({

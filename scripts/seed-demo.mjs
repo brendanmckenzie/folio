@@ -111,10 +111,8 @@ async function seed(storyId, build) {
       ws.send(
         JSON.stringify({
           type: 'hello',
-          actor: 'seed',
-          name: 'Seed',
-          colour: '#0090ff',
           lastSyncId: 0,
+          identity: { actor: 'seed', name: 'Seed', colour: '#0090ff' },
           v: PROTOCOL_VERSION,
         }),
       ),

@@ -28,7 +28,19 @@ function subtreeRecipe(doc: Doc, uid: string): SubtreeBlok[] {
     visited.add(id)
     const b = doc.bloks[id]
     if (!b) return
-    out.push({ key: id, type: b.type, data: b.data, parent, slot })
+    // `i18n` is a sibling of `data` on `Blok`, not a key inside it
+    // (`localisation.md` decision 1), so it has to be named here: a recipe
+    // carrying only `data` would let duplicate, paste and "duplicate this
+    // document" each silently drop every translation. This is the debt that spec
+    // deferred to localisation.
+    out.push({
+      key: id,
+      type: b.type,
+      data: b.data,
+      parent,
+      slot,
+      ...(b.i18n ? { i18n: b.i18n } : {}),
+    })
 
     const slots = new Set<string>()
     for (const child of Object.values(doc.bloks)) {

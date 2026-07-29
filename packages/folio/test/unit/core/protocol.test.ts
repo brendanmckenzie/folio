@@ -40,50 +40,62 @@ const send = (body: Record<string, unknown>) => JSON.stringify({ ...body, v: PRO
  * talking to a deployed worker.
  */
 describe('PROTOCOL_VERSION', () => {
-  it('is 2 — `Mutation` gained `retype` (schema-migrations.md)', () => {
-    expect(PROTOCOL_VERSION).toBe(2)
+  it('is 3 — `set` gained an optional `locale` and `hello` shed its identity fields (localisation.md)', () => {
+    expect(PROTOCOL_VERSION).toBe(3)
   })
 })
 
+/** The identity a client may still assert, as one optional nested object. */
+const hello = (identity?: Record<string, unknown>, lastSyncId: unknown = 0) =>
+  send({ type: 'hello', lastSyncId, ...(identity ? { identity } : {}) })
+
+const ada = (over: Record<string, unknown> = {}) => ({
+  actor: 'usr_ada',
+  name: 'Ada',
+  colour: '#ff00ff',
+  ...over,
+})
+
+const identityOf = (frame: unknown) =>
+  (frame as { identity?: { actor: string; name: string; colour: string } }).identity
+
 describe('parseClientFrame: hello', () => {
   it('parses a well-formed hello unchanged', () => {
-    const frame = parseClientFrame(
-      send({ type: 'hello', actor: 'usr_ada', name: 'Ada', colour: '#ff00ff', lastSyncId: 3 }),
-    )
-    expect(frame).toEqual({
+    expect(parseClientFrame(hello(ada(), 3))).toEqual({
       type: 'hello',
-      actor: 'usr_ada',
-      name: 'Ada',
-      colour: '#ff00ff',
       lastSyncId: 3,
+      identity: { actor: 'usr_ada', name: 'Ada', colour: '#ff00ff' },
       v: PROTOCOL_VERSION,
     })
   })
 
+  /**
+   * The v3 shedding, from the wire's side: identity is not something a `hello`
+   * has to carry any more, because on a deployment with accounts the Worker
+   * already attached one at upgrade time. The key is *omitted* rather than
+   * present-and-undefined, so nothing downstream has to distinguish the two.
+   */
+  it('parses a hello that asserts no identity at all', () => {
+    const frame = parseClientFrame(hello(undefined, 7))
+    expect(frame).toEqual({ type: 'hello', lastSyncId: 7, v: PROTOCOL_VERSION })
+    expect(frame).not.toHaveProperty('identity')
+  })
+
   it('trims and caps a name at MAX_NAME_LEN', () => {
-    const longName = `  ${'a'.repeat(MAX_NAME_LEN + 20)}  `
-    const frame = parseClientFrame(
-      send({ type: 'hello', actor: 'usr_ada', name: longName, colour: '#ff00ff', lastSyncId: 0 }),
-    )
+    const frame = parseClientFrame(hello(ada({ name: `  ${'a'.repeat(MAX_NAME_LEN + 20)}  ` })))
     expect(frame?.type).toBe('hello')
-    expect((frame as { name: string }).name).toBe('a'.repeat(MAX_NAME_LEN))
+    expect(identityOf(frame)?.name).toBe('a'.repeat(MAX_NAME_LEN))
   })
 
   it('defaults an empty or whitespace-only name to Anonymous', () => {
     for (const name of ['', '   ', '\t\n']) {
-      const frame = parseClientFrame(
-        send({ type: 'hello', actor: 'usr_ada', name, colour: '#ff00ff', lastSyncId: 0 }),
-      )
-      expect((frame as { name: string }).name).toBe('Anonymous')
+      expect(identityOf(parseClientFrame(hello(ada({ name }))))?.name).toBe('Anonymous')
     }
   })
 
   it('strips control characters from actor and caps it at MAX_ACTOR_LEN', () => {
     const actor = `usr\x00_${'b'.repeat(MAX_ACTOR_LEN + 10)}`
-    const frame = parseClientFrame(
-      send({ type: 'hello', actor, name: 'Ada', colour: '#ff00ff', lastSyncId: 0 }),
-    )
-    const cleaned = (frame as { actor: string }).actor
+    const cleaned = identityOf(parseClientFrame(hello(ada({ actor }))))?.actor ?? ''
     expect(cleaned).not.toContain('\x00')
     expect(cleaned.length).toBe(MAX_ACTOR_LEN)
   })
@@ -92,16 +104,7 @@ describe('parseClientFrame: hello', () => {
   // name rides on every presence broadcast and the log's activity trail for the
   // life of the socket, same as `actor` - it must not carry controls either.
   it('strips control characters from name', () => {
-    const frame = parseClientFrame(
-      send({
-        type: 'hello',
-        actor: 'usr_ada',
-        name: 'Ada\x00\x7f Lovelace',
-        colour: '#ff00ff',
-        lastSyncId: 0,
-      }),
-    )
-    const name = (frame as { name: string }).name
+    const name = identityOf(parseClientFrame(hello(ada({ name: 'Ada\x00\x7f Lovelace' }))))?.name
     expect(name).not.toContain('\x00')
     expect(name).not.toContain('\x7f')
     expect(name).toBe('Ada Lovelace')
@@ -111,19 +114,13 @@ describe('parseClientFrame: hello', () => {
   // stored, exactly the ranges validate.ts's PRINTABLE refuses on the HTTP side.
   it('strips bidi override and isolate characters from name and actor', () => {
     const evil = 'Ada‮evil‬'
-    const frame = parseClientFrame(
-      send({ type: 'hello', actor: evil, name: evil, colour: '#ff00ff', lastSyncId: 0 }),
-    )
-    const { name, actor } = frame as { name: string; actor: string }
-    expect(name).toBe('Adaevil')
-    expect(actor).toBe('Adaevil')
+    const identity = identityOf(parseClientFrame(hello(ada({ actor: evil, name: evil }))))
+    expect(identity?.name).toBe('Adaevil')
+    expect(identity?.actor).toBe('Adaevil')
   })
 
   it('keeps a colour that matches the 6-digit hex form', () => {
-    const frame = parseClientFrame(
-      send({ type: 'hello', actor: 'usr_ada', name: 'Ada', colour: '#A1B2C3', lastSyncId: 0 }),
-    )
-    expect((frame as { colour: string }).colour).toBe('#A1B2C3')
+    expect(identityOf(parseClientFrame(hello(ada({ colour: '#A1B2C3' }))))?.colour).toBe('#A1B2C3')
   })
 
   // A client cannot choose its way past the guard: shorthand hex, a bare word, and
@@ -131,25 +128,26 @@ describe('parseClientFrame: hello', () => {
   it.each(['#fff', 'red', 'ff00ff', '#gggggg', '#ff00ff0'])(
     'falls back to a colour derived from actor when colour is %s',
     (colour) => {
-      const frame = parseClientFrame(
-        send({ type: 'hello', actor: 'usr_ada', name: 'Ada', colour, lastSyncId: 0 }),
+      expect(identityOf(parseClientFrame(hello(ada({ colour }))))?.colour).toBe(
+        fallbackColour('usr_ada'),
       )
-      expect((frame as { colour: string }).colour).toBe(fallbackColour('usr_ada'))
     },
   )
 
-  it('rejects a hello missing a required field', () => {
-    expect(
-      parseClientFrame(send({ type: 'hello', actor: 'usr_ada', colour: '#ff00ff', lastSyncId: 0 })),
-    ).toBeNull()
+  it('rejects a hello whose identity is missing a field', () => {
+    expect(parseClientFrame(hello({ actor: 'usr_ada', colour: '#ff00ff' }))).toBeNull()
   })
 
-  it('rejects a hello whose fields are the wrong type', () => {
-    expect(
-      parseClientFrame(
-        send({ type: 'hello', actor: 'usr_ada', name: 'Ada', colour: '#ff00ff', lastSyncId: '3' }),
-      ),
-    ).toBeNull()
+  it('rejects a hello whose identity is not an object', () => {
+    expect(parseClientFrame(send({ type: 'hello', lastSyncId: 0, identity: 'Ada' }))).toBeNull()
+  })
+
+  it('rejects a hello whose lastSyncId is the wrong type', () => {
+    expect(parseClientFrame(hello(ada(), '3'))).toBeNull()
+  })
+
+  it('rejects a hello with no lastSyncId at all', () => {
+    expect(parseClientFrame(send({ type: 'hello' }))).toBeNull()
   })
 })
 
@@ -222,6 +220,51 @@ describe('parseClientFrame: tx', () => {
   ])('rejects a malformed retype (%o)', (mutation) => {
     expect(parseClientFrame(send({ type: 'tx', txId: 'tx-r', mutations: [mutation] }))).toBeNull()
   })
+
+  /**
+   * The v3 addition (`localisation.md`). Three properties, and the first is the
+   * one that has to hold forever: a `set` with no locale is still a `set`, so
+   * every entry in every log written before this deploy replays as a
+   * source-locale write.
+   */
+  it('parses a set with no locale, exactly as it did before v3', () => {
+    const frame = parseClientFrame(send({ type: 'tx', txId: 'tx-1', mutations: [setMutation()] }))
+    expect(frame).toEqual({
+      type: 'tx',
+      txId: 'tx-1',
+      mutations: [setMutation()],
+      v: PROTOCOL_VERSION,
+    })
+    expect((frame as { mutations: unknown[] }).mutations[0]).not.toHaveProperty('locale')
+  })
+
+  it('parses a locale-scoped set through unchanged', () => {
+    const mutation = { ...setMutation(), value: 'Bonjour', locale: 'fr' }
+    const frame = parseClientFrame(send({ type: 'tx', txId: 'tx-fr', mutations: [mutation] }))
+    expect(frame).toEqual({
+      type: 'tx',
+      txId: 'tx-fr',
+      mutations: [mutation],
+      v: PROTOCOL_VERSION,
+    })
+  })
+
+  // An unknown locale code is not a wire concern, for the same reason `retype`
+  // does not check the schema: the object is deliberately ignorant of config.
+  it('accepts a locale the site has never declared', () => {
+    const mutation = { ...setMutation(), locale: 'kl-GL' }
+    expect(
+      parseClientFrame(send({ type: 'tx', txId: 'tx-x', mutations: [mutation] })),
+    ).not.toBeNull()
+  })
+
+  it.each([{ locale: 7 }, { locale: null }, { locale: { code: 'fr' } }])(
+    'rejects a set whose locale is not a string (%o)',
+    (over) => {
+      const mutation = { ...setMutation(), ...over }
+      expect(parseClientFrame(send({ type: 'tx', txId: 'tx-b', mutations: [mutation] }))).toBeNull()
+    },
+  )
 
   it('still parses a tx whose mutation count exceeds the cap: the door names it via reject, not an unreadable frame', () => {
     const mutations = Array.from({ length: MAX_TX_MUTATIONS + 1 }, (_, i) => setMutation(`u${i}`))

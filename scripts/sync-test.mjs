@@ -79,11 +79,11 @@ await Promise.all([a.open(), b.open()])
 // they are simply ignored whenever the Worker vouched for a session, which it
 // has here. Left as-is on purpose: an old tab that still asserts an identity
 // must keep working.
-a.send({ type: 'hello', actor: 'aaa', name: 'A', colour: '#f00', lastSyncId: 0 })
+a.send({ type: 'hello', lastSyncId: 0, identity: { actor: 'aaa', name: 'A', colour: '#f00' } })
 const boot = await a.expect((m) => m.type === 'bootstrap')
 check('A receives bootstrap', !!boot.doc?.root, `syncId=${boot.syncId}`)
 
-b.send({ type: 'hello', actor: 'bbb', name: 'B', colour: '#00f', lastSyncId: 0 })
+b.send({ type: 'hello', lastSyncId: 0, identity: { actor: 'bbb', name: 'B', colour: '#00f' } })
 await b.expect((m) => m.type === 'bootstrap')
 
 const peerSeen = await a.expect((m) => m.type === 'presence' && m.peer?.actor === EDITOR_ID)
@@ -127,7 +127,11 @@ const d2 = await a.expect((m) => m.type === 'delta' && m.txId === 'tx2')
 // B reconnecting: the same editor, so the same cookie.
 const c = client('C', EDITOR_COOKIE)
 await c.open()
-c.send({ type: 'hello', actor: 'bbb', name: 'B', colour: '#00f', lastSyncId: deltaB.syncId })
+c.send({
+  type: 'hello',
+  lastSyncId: deltaB.syncId,
+  identity: { actor: 'bbb', name: 'B', colour: '#00f' },
+})
 const catchup = await c.expect((m) => m.type === 'catchup' || m.type === 'bootstrap')
 check('reconnect gets catchup not bootstrap', catchup.type === 'catchup', `type=${catchup.type}`)
 check(

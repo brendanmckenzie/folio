@@ -521,7 +521,11 @@ describe('the sync socket', () => {
     const { cookie } = await signIn('viewer')
     const peer = await openSocket(id, { cookie })
 
-    peer.send({ type: 'hello', actor: 'x', name: 'x', colour: '#000000', lastSyncId: 0 })
+    peer.send({
+      type: 'hello',
+      lastSyncId: 0,
+      identity: { actor: 'x', name: 'x', colour: '#000000' },
+    })
     const boot = await frame(peer, 'bootstrap')
 
     peer.send({ type: 'tx', txId: 'v1', mutations: setTitle(boot.doc.root, 'Nope') })
@@ -545,16 +549,19 @@ describe('the sync socket', () => {
     const annSocket = await openSocket(id, { cookie: ann.cookie })
     annSocket.send({
       type: 'hello',
-      // A lie, in every field the frame offers.
-      actor: 'usr_bo_pretending',
-      name: 'Bo',
-      colour: '#000000',
       lastSyncId: 0,
+      // A lie, in every field the frame still offers. At v3 that is one optional
+      // nested object, and a vouched-for socket never reads it.
+      identity: { actor: 'usr_bo_pretending', name: 'Bo', colour: '#000000' },
     })
     const boot = await frame(annSocket, 'bootstrap')
 
     const watcher = await openSocket(id, { cookie: bo.cookie })
-    watcher.send({ type: 'hello', actor: 'w', name: 'w', colour: '#ffffff', lastSyncId: 0 })
+    watcher.send({
+      type: 'hello',
+      lastSyncId: 0,
+      identity: { actor: 'w', name: 'w', colour: '#ffffff' },
+    })
     const watching = await frame(watcher, 'bootstrap')
 
     // Presence carries Ann's own row, not what her client claimed.
@@ -581,7 +588,11 @@ describe('the sync socket', () => {
     const lurkerAuth = await signIn('editor', 'lurk@example.com')
 
     const writer = await openSocket(id, { cookie: ann.cookie })
-    writer.send({ type: 'hello', actor: 'a', name: 'a', colour: '#ff00ff', lastSyncId: 0 })
+    writer.send({
+      type: 'hello',
+      lastSyncId: 0,
+      identity: { actor: 'a', name: 'a', colour: '#ff00ff' },
+    })
     const boot = await frame(writer, 'bootstrap')
 
     // Upgraded with a perfectly good session — so it *has* an attachment — and
@@ -595,11 +606,19 @@ describe('the sync socket', () => {
     expect(lurker.inbox).toEqual([])
     // And it is not in anybody's peer list either, for the same reason.
     const third = await openSocket(id, { cookie: ann.cookie })
-    third.send({ type: 'hello', actor: 'c', name: 'c', colour: '#00ffff', lastSyncId: 0 })
+    third.send({
+      type: 'hello',
+      lastSyncId: 0,
+      identity: { actor: 'c', name: 'c', colour: '#00ffff' },
+    })
     expect((await frame(third, 'bootstrap')).peers).toHaveLength(1)
 
     // Once it joins, it gets a bootstrap and every delta from then on.
-    lurker.send({ type: 'hello', actor: 'l', name: 'l', colour: '#00ff00', lastSyncId: 0 })
+    lurker.send({
+      type: 'hello',
+      lastSyncId: 0,
+      identity: { actor: 'l', name: 'l', colour: '#00ff00' },
+    })
     expect((await frame(lurker, 'bootstrap')).syncId).toBe(1)
     writer.send({ type: 'tx', txId: 'q2', mutations: setTitle(boot.doc.root, 'Now visible') })
     expect((await frame(lurker, 'delta')).txId).toBe('q2')
@@ -615,10 +634,18 @@ describe('the sync socket', () => {
     const bo = await signIn('editor', 'bo@example.com')
 
     const first = await openSocket(id, { cookie: ann.cookie })
-    first.send({ type: 'hello', actor: 'a', name: 'a', colour: '#ff00ff', lastSyncId: 0 })
+    first.send({
+      type: 'hello',
+      lastSyncId: 0,
+      identity: { actor: 'a', name: 'a', colour: '#ff00ff' },
+    })
     await frame(first, 'bootstrap')
     const second = await openSocket(id, { cookie: bo.cookie })
-    second.send({ type: 'hello', actor: 'b', name: 'b', colour: '#00ffff', lastSyncId: 0 })
+    second.send({
+      type: 'hello',
+      lastSyncId: 0,
+      identity: { actor: 'b', name: 'b', colour: '#00ffff' },
+    })
     await frame(second, 'bootstrap')
 
     const presence = await frame(first, 'presence')
@@ -633,7 +660,11 @@ describe('the sync socket', () => {
     const id = await seedStory()
     const { cookie } = await signIn('editor')
     const peer = await openSocket(id, { cookie })
-    peer.send({ type: 'hello', actor: 'a', name: 'a', colour: '#ff00ff', lastSyncId: 0 })
+    peer.send({
+      type: 'hello',
+      lastSyncId: 0,
+      identity: { actor: 'a', name: 'a', colour: '#ff00ff' },
+    })
     const boot = await frame(peer, 'bootstrap')
 
     // The expiry rides in the attachment and is checked on every frame, which
@@ -649,7 +680,11 @@ describe('the sync socket', () => {
     const id = await seedStory()
     const { session, cookie } = await signIn('editor')
     const peer = await openSocket(id, { cookie })
-    peer.send({ type: 'hello', actor: 'a', name: 'a', colour: '#ff00ff', lastSyncId: 0 })
+    peer.send({
+      type: 'hello',
+      lastSyncId: 0,
+      identity: { actor: 'a', name: 'a', colour: '#ff00ff' },
+    })
     const boot = await frame(peer, 'bootstrap')
 
     await env.DB.prepare('delete from sessions where id = ?').bind(session.id).run()
@@ -679,7 +714,11 @@ describe('the sync socket', () => {
     const id = await seedStory()
     const { cookie } = await signIn('editor')
     const peer = await openSocket(id, { cookie })
-    peer.send({ type: 'hello', actor: 'a', name: 'a', colour: '#ff00ff', lastSyncId: 0 })
+    peer.send({
+      type: 'hello',
+      lastSyncId: 0,
+      identity: { actor: 'a', name: 'a', colour: '#ff00ff' },
+    })
     const boot = await frame(peer, 'bootstrap')
 
     await editAttachment(id, { checkedAt: 0 })
@@ -713,10 +752,8 @@ describe('the sync socket', () => {
     ws.send(
       JSON.stringify({
         type: 'hello',
-        actor: 'self-reported',
-        name: 'Anon',
-        colour: '#123456',
         lastSyncId: 0,
+        identity: { actor: 'self-reported', name: 'Anon', colour: '#123456' },
         v: PROTOCOL_VERSION,
       }),
     )

@@ -174,7 +174,11 @@ async function connect(storyId: string): Promise<Socket> {
   return {
     ws,
     async hello(actor) {
-      const msg: ClientMsg = { type: 'hello', actor, name: actor, colour: '#000', lastSyncId: 0 }
+      const msg: ClientMsg = {
+        type: 'hello',
+        lastSyncId: 0,
+        identity: { actor, name: actor, colour: '#000' },
+      }
       // The object refuses a handshake that does not name the wire version.
       ws.send(JSON.stringify({ ...msg, v: PROTOCOL_VERSION }))
       const reply = await expectMsg(

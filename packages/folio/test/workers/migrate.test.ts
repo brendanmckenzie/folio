@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { blocks, defineBlock, text } from '../../src/core'
 import type { Blok, Doc } from '../../src/core/doc'
 import { block, defineMigration, field, type Migration } from '../../src/core/migrate'
-import { MAX_TX_MUTATIONS } from '../../src/core/protocol'
+import { MAX_TX_MUTATIONS, PROTOCOL_VERSION } from '../../src/core/protocol'
 import { createFolio } from '../../src/server'
 import type { AuditReport, FolioBindings, MigrateReport } from '../../src/server'
 import type { MigrationStatus } from '../../src/server/migrate'
@@ -277,11 +277,9 @@ describe('folio.migrate: a rename reaches every copy of a document', () => {
     ws.send(
       JSON.stringify({
         type: 'hello',
-        actor: 'a',
-        name: 'A',
-        colour: '#ffffff',
         lastSyncId: 0,
-        v: 2,
+        identity: { actor: 'a', name: 'A', colour: '#ffffff' },
+        v: PROTOCOL_VERSION,
       }),
     )
     for (let i = 0; i < 200 && inbox.length === 0; i++) await new Promise((r) => setTimeout(r, 1))

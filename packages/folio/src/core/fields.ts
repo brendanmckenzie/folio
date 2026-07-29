@@ -25,6 +25,26 @@ interface Common {
    * (`field.default(blok, name, value)`), not this key.
    */
   default?: Json
+  /**
+   * This field may hold a different value per locale
+   * (`../../../docs/specs/content-model/localisation.md` checkpoint 2).
+   *
+   * Opt-in, deliberately: most `select`, `boolean`, `number` and `asset` fields
+   * should not diverge per language, and a default of "everything is
+   * translatable" turns every schema into a translation surface nobody asked
+   * for. `/folio/audit` reports the text-ish fields that are *not* marked, so
+   * the omissions are findable rather than invisible.
+   *
+   * Enforced in the editor and **ignored by the renderer** (decision 4): the
+   * inspector refuses to write a locale-scoped value to a field without this,
+   * but if a value is in `i18n` — from an importer, the content API, or a flag
+   * that has since been removed — it wins. Un-marking a field must not silently
+   * hide content somebody already translated; the audit reports that case too.
+   *
+   * Not available on `blocks`: children are separate bloks, not a value, and
+   * per-locale structure is exactly what decision 1 trades away.
+   */
+  translatable?: boolean
 }
 
 export interface SelectOption {
@@ -72,8 +92,14 @@ export type Field =
   | ({ kind: 'reference'; types?: readonly string[] } & Common)
   // Children are separate bloks, not a value on the parent, so `blocks` is the
   // one kind that cannot carry a `default` — a preset's `children` is the
-  // equivalent (`field-defaults-and-presets.md`, decision 1).
-  | ({ kind: 'blocks'; allow: readonly string[]; max?: number } & Omit<Common, 'default'>)
+  // equivalent (`field-defaults-and-presets.md`, decision 1) — and, for the same
+  // reason, cannot be `translatable`: per-locale structure is the trade
+  // `localisation.md`'s decision 1 makes, so `blocks({ translatable: true })`
+  // must not compile.
+  | ({ kind: 'blocks'; allow: readonly string[]; max?: number } & Omit<
+      Common,
+      'default' | 'translatable'
+    >)
 
 type Opts<K extends Field['kind']> = Omit<Extract<Field, { kind: K }>, 'kind'>
 

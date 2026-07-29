@@ -62,7 +62,11 @@ function client(storyId) {
     ws,
     async hello() {
       await new Promise((r) => ws.addEventListener('open', r, { once: true }))
-      this.send({ type: 'hello', actor: 'e2e', name: 'e2e', colour: '#0090ff', lastSyncId: 0 })
+      this.send({
+        type: 'hello',
+        lastSyncId: 0,
+        identity: { actor: 'e2e', name: 'e2e', colour: '#0090ff' },
+      })
       return (await this.expect((m) => m.type === 'bootstrap')).doc
     },
     // Every frame carries the wire version, not only `hello` — the object

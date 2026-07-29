@@ -296,6 +296,8 @@ describe('summariseDiff', () => {
       moved: 1,
       retyped: 0,
       edited: 1,
+      translated: 0,
+      locales: [],
       total: 5,
     })
     expect(applyAll(from, ms)).toEqual(to)
@@ -310,6 +312,8 @@ describe('summariseDiff', () => {
       moved: 0,
       retyped: 1,
       edited: 1,
+      translated: 0,
+      locales: [],
       total: 2,
     })
   })
@@ -321,6 +325,8 @@ describe('summariseDiff', () => {
       moved: 0,
       retyped: 0,
       edited: 0,
+      translated: 0,
+      locales: [],
       total: 0,
     })
   })
@@ -618,5 +624,114 @@ describe('diff/applyAll round trip (seeded property)', () => {
     // property would pass on a diff that emits removals first.
     expect(rescues).toBeGreaterThan(5)
     expect(empty).toBeLessThan(CASES / 4)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Locale maps (`localisation.md` architecture decision 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Without this walk a version restore would silently drop the translations the
+ * target version had, or leave behind ones it never did — the document would come
+ * back in the right language and the wrong content. Every case below is a restore
+ * that used to be wrong.
+ */
+describe('diff over locale maps', () => {
+  const withI18n = (uid: string, data: Record<string, Json>, i18n?: Blok['i18n']): Blok => ({
+    ...blk(uid, { data }),
+    ...(i18n ? { i18n } : {}),
+  })
+
+  it('emits a locale-scoped set for a changed translation', () => {
+    const from = mkDoc([rootBlk(), withI18n('a', { t: 'Hello' }, { fr: { t: 'Salut' } })])
+    const to = mkDoc([rootBlk(), withI18n('a', { t: 'Hello' }, { fr: { t: 'Bonjour' } })])
+    expect(diff(from, to)).toEqual([
+      { t: 'set', uid: 'a', field: 't', value: 'Bonjour', locale: 'fr' },
+    ])
+    expect(applyAll(from, diff(from, to))).toEqual(to)
+  })
+
+  it('emits nothing when only the source changed', () => {
+    const from = mkDoc([rootBlk(), withI18n('a', { t: 'Hello' }, { fr: { t: 'Bonjour' } })])
+    const to = mkDoc([rootBlk(), withI18n('a', { t: 'Hi' }, { fr: { t: 'Bonjour' } })])
+    expect(diff(from, to)).toEqual([{ t: 'set', uid: 'a', field: 't', value: 'Hi' }])
+  })
+
+  it('emits a whole map for a locale that appears', () => {
+    const from = mkDoc([rootBlk(), withI18n('a', { t: 'Hello', u: 'World' })])
+    const to = mkDoc([
+      rootBlk(),
+      withI18n('a', { t: 'Hello', u: 'World' }, { fr: { t: 'Bonjour', u: 'Monde' } }),
+    ])
+    expect(diff(from, to)).toEqual([
+      { t: 'set', uid: 'a', field: 't', value: 'Bonjour', locale: 'fr' },
+      { t: 'set', uid: 'a', field: 'u', value: 'Monde', locale: 'fr' },
+    ])
+    expect(applyAll(from, diff(from, to))).toEqual(to)
+  })
+
+  /**
+   * Clearing rather than deleting: the vocabulary has no delete-key mutation, so
+   * a locale the target version did not have is nulled out. `fieldValue` reads null
+   * and absent identically, so the restored document renders as the target did.
+   */
+  it('clears a locale that disappears, to null rather than to empty string', () => {
+    const from = mkDoc([rootBlk(), withI18n('a', { t: 'Hello' }, { fr: { t: 'Bonjour' } })])
+    const to = mkDoc([rootBlk(), withI18n('a', { t: 'Hello' })])
+    expect(diff(from, to)).toEqual([{ t: 'set', uid: 'a', field: 't', value: null, locale: 'fr' }])
+  })
+
+  it('touches only the locale that changed', () => {
+    const from = mkDoc([
+      rootBlk(),
+      withI18n('a', { t: 'Hello' }, { fr: { t: 'Salut' }, de: { t: 'Hallo' } }),
+    ])
+    const to = mkDoc([
+      rootBlk(),
+      withI18n('a', { t: 'Hello' }, { fr: { t: 'Bonjour' }, de: { t: 'Hallo' } }),
+    ])
+    expect(diff(from, to)).toEqual([
+      { t: 'set', uid: 'a', field: 't', value: 'Bonjour', locale: 'fr' },
+    ])
+  })
+
+  it('reads a null translation and an absent one as the same thing', () => {
+    const from = mkDoc([rootBlk(), withI18n('a', { t: 'Hello' })])
+    const to = mkDoc([rootBlk(), withI18n('a', { t: 'Hello' }, { fr: { t: null } })])
+    expect(diff(from, to)).toEqual([])
+    expect(diff(to, from)).toEqual([])
+  })
+
+  it('distinguishes an empty translation from an absent one', () => {
+    const from = mkDoc([rootBlk(), withI18n('a', { t: 'Hello' })])
+    const to = mkDoc([rootBlk(), withI18n('a', { t: 'Hello' }, { fr: { t: '' } })])
+    expect(diff(from, to)).toEqual([{ t: 'set', uid: 'a', field: 't', value: '', locale: 'fr' }])
+  })
+
+  it('carries translations on an inserted blok rather than as follow-up sets', () => {
+    const from = mkDoc([rootBlk()])
+    const added = withI18n('a', { t: 'Hello' }, { fr: { t: 'Bonjour' } })
+    const to = mkDoc([rootBlk(), added])
+    expect(diff(from, to)).toEqual([{ t: 'insert', blok: added }])
+    expect(applyAll(from, diff(from, to))).toEqual(to)
+  })
+
+  it('counts locale sets separately from source edits, and names the locales', () => {
+    const from = mkDoc([rootBlk(), withI18n('a', { t: 'Hello' }, { fr: { t: 'Salut' } })])
+    const to = mkDoc([
+      rootBlk(),
+      withI18n('a', { t: 'Hi' }, { fr: { t: 'Bonjour' }, de: { t: 'Hallo' } }),
+    ])
+    const s = summariseDiff(diff(from, to))
+    expect(s.edited).toBe(1)
+    expect(s.translated).toBe(2)
+    expect(s.locales).toEqual(['de', 'fr'])
+  })
+
+  it('reports no translations for a diff that touches none', () => {
+    const from = mkDoc([rootBlk({ title: 'a' })])
+    const to = mkDoc([rootBlk({ title: 'b' })])
+    expect(summariseDiff(diff(from, to))).toMatchObject({ translated: 0, locales: [] })
   })
 })

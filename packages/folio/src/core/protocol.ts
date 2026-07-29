@@ -18,8 +18,16 @@ import type { Resolution } from './resolve'
  * | 1 | the original: `set`, `insert`, `move`, `remove` |
  * | 2 | `Mutation` gains `retype` (`schema-migrations.md`) — a new variant, so a
  *       `set` written under v1 is still a `set` |
+ * | 3 | `set` gains an optional `locale` (`localisation.md`), and `hello` sheds
+ *       its three top-level identity fields. **A `set` with no `locale` is a
+ *       source-locale write, permanently** — that is the whole of the
+ *       compatibility story for this bump, and it is why the field is optional
+ *       rather than required with a default written down somewhere. The bump is
+ *       needed even so: a v2 *client* handed a locale-scoped delta would drop
+ *       the locale and write the value into `data`, which is silent divergence,
+ *       so it must be refused at the handshake instead. |
  */
-export const PROTOCOL_VERSION = 2
+export const PROTOCOL_VERSION = 3
 
 export interface Presence {
   actor: string
@@ -28,8 +36,29 @@ export interface Presence {
   selection: string | null
 }
 
+/**
+ * An identity a client asserts about itself, and the **only** thing left of
+ * `hello`'s old `actor`/`name`/`colour` trio (v3, `localisation.md`).
+ *
+ * Advisory by construction now rather than by comment. On a deployment with
+ * accounts the Worker attaches a verified identity to the socket at upgrade time
+ * (`identity-and-access.md` architecture decision 3) and the object ignores this
+ * entirely — it does not merge, it does not prefer, it does not look. It is read
+ * in exactly one situation: `auth: 'open'`, where there are no accounts and this
+ * random pair is the only thing that tells two anonymous tabs apart in presence.
+ *
+ * Hence optional and nested: a client with a session need not send it at all,
+ * and the shape of the frame says which case is which instead of three
+ * always-present fields that are believed only sometimes.
+ */
+export interface HelloIdentity {
+  actor: string
+  name: string
+  colour: string
+}
+
 export type ClientMsg =
-  | { type: 'hello'; actor: string; name: string; colour: string; lastSyncId: number }
+  | { type: 'hello'; lastSyncId: number; identity?: HelloIdentity }
   | { type: 'tx'; txId: string; mutations: Mutation[] }
   | { type: 'presence'; selection: string | null }
 
@@ -89,7 +118,7 @@ export interface ActivityEntry {
  * construction and needs no walk.
  */
 
-/** A `hello` name or actor longer than this is truncated, not rejected. */
+/** A `hello` identity's name longer than this is truncated, not rejected. */
 export const MAX_NAME_LEN = 64
 
 /** Same cap for `actor`: both ride on every presence broadcast for the life of the socket. */
@@ -192,15 +221,26 @@ export function fallbackColour(actor: string): string {
  * Caps and defaults the identity a `hello` asserts about itself. Not part of the
  * shape guard: these values are still a valid `hello` if oversized or malformed,
  * just not ones a broadcast should carry verbatim to every peer.
+ *
+ * Kept whole through the v3 bump that moved these three fields into an optional
+ * `identity`: nothing about a name riding on every presence broadcast changed
+ * because the frame's shape did, and `stripControlChars` is the same screening
+ * `validate.ts`'s `PRINTABLE` applies on the HTTP side.
  */
-function normalizeHello(actor: string, name: string, colour: string) {
-  const cleanActor = stripControlChars(actor).slice(0, MAX_ACTOR_LEN)
-  const trimmedName = stripControlChars(name).trim().slice(0, MAX_NAME_LEN)
+function normalizeIdentity(identity: HelloIdentity | undefined): HelloIdentity | undefined {
+  if (!identity) return undefined
+  const actor = stripControlChars(identity.actor).slice(0, MAX_ACTOR_LEN)
+  const trimmed = stripControlChars(identity.name).trim().slice(0, MAX_NAME_LEN)
   return {
-    actor: cleanActor,
-    name: trimmedName.length > 0 ? trimmedName : 'Anonymous',
-    colour: COLOUR_RE.test(colour) ? colour : fallbackColour(cleanActor),
+    actor,
+    name: trimmed.length > 0 ? trimmed : 'Anonymous',
+    colour: COLOUR_RE.test(identity.colour) ? identity.colour : fallbackColour(actor),
   }
+}
+
+/** Shape guard for `hello.identity`; absent is valid, malformed is not. */
+function isHelloIdentity(x: unknown): x is HelloIdentity {
+  return isRecord(x) && isString(x.actor) && isString(x.name) && isString(x.colour)
 }
 
 /** Bounds a presence selection; `null` (no selection) passes through unchanged. */
@@ -236,8 +276,18 @@ export function isBlok(x: unknown): x is Blok {
     (x.parent === null || isString(x.parent)) &&
     (x.slot === null || isString(x.slot)) &&
     isString(x.order) &&
-    isRecord(x.data)
+    isRecord(x.data) &&
+    // Absent on every document written before locales existed, and on every
+    // single-locale one. Checked one level deep only: a locale's field values are
+    // whatever JSON.parse produced, which is `Json` by construction — the same
+    // reason `data` itself needs no walk.
+    (x.i18n === undefined || isLocaleMap(x.i18n))
   )
+}
+
+/** `Record<string, Record<string, Json>>`, shallowly. */
+function isLocaleMap(x: unknown): boolean {
+  return isRecord(x) && Object.values(x).every(isRecord)
 }
 
 export function isMutation(x: unknown): x is Mutation {
@@ -245,7 +295,17 @@ export function isMutation(x: unknown): x is Mutation {
   switch (x.t) {
     case 'set':
       // An explicit null is a value; an absent key is a malformed mutation.
-      return isString(x.uid) && isString(x.field) && 'value' in x
+      // An absent `locale` is a source-locale write and always legal — that is
+      // the property every log entry written before v3 depends on. A `locale`
+      // that is present must be a string; whether the *site* declares that code
+      // is not a wire concern, for the same reason `retype` does not check the
+      // schema (the object is deliberately ignorant of configuration).
+      return (
+        isString(x.uid) &&
+        isString(x.field) &&
+        'value' in x &&
+        (x.locale === undefined || isString(x.locale))
+      )
     case 'insert':
       return isBlok(x.blok)
     case 'move':
@@ -264,7 +324,7 @@ export function isClientMsg(x: unknown): x is ClientFrame {
   if (x.v !== undefined && !isNumber(x.v)) return false
   switch (x.type) {
     case 'hello':
-      return isString(x.actor) && isString(x.name) && isString(x.colour) && isNumber(x.lastSyncId)
+      return isNumber(x.lastSyncId) && (x.identity === undefined || isHelloIdentity(x.identity))
     case 'tx':
       return isString(x.txId) && Array.isArray(x.mutations) && x.mutations.every(isMutation)
     case 'presence':
@@ -280,9 +340,9 @@ export function isClientMsg(x: unknown): x is ClientFrame {
  * Rebuilds the message from only the fields each type declares rather than
  * returning the parsed value as-is: a guard that mirrors its input carries
  * forward whatever else a client's JSON had, which is exactly how junk keys
- * would reach a broadcast. `hello`'s identity fields are capped and defaulted
- * here too, since every field it asserts rides on every peer's presence list
- * for as long as the socket is open.
+ * would reach a broadcast. `hello.identity`, when a client sends one, is capped
+ * and defaulted here too, since every field it asserts rides on every peer's
+ * presence list for as long as the socket is open.
  */
 export function parseClientFrame(raw: string | ArrayBuffer): ClientFrame | null {
   if (typeof raw !== 'string') return null
@@ -296,9 +356,13 @@ export function parseClientFrame(raw: string | ArrayBuffer): ClientFrame | null 
   const version = value.v !== undefined ? { v: value.v } : {}
   switch (value.type) {
     case 'hello': {
-      const { actor, name, colour } = normalizeHello(value.actor, value.name, value.colour)
-      const { lastSyncId } = value
-      return { type: 'hello', actor, name, colour, lastSyncId, ...version }
+      const identity = normalizeIdentity(value.identity)
+      return {
+        type: 'hello',
+        lastSyncId: value.lastSyncId,
+        ...(identity ? { identity } : {}),
+        ...version,
+      }
     }
     case 'tx':
       return { type: 'tx', txId: value.txId, mutations: value.mutations, ...version }

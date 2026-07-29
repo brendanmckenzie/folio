@@ -69,6 +69,12 @@ export {
 } from './schema'
 export type { SubtreeBlok } from './schema'
 
+// `validateLocales` sits with the other construction-time validators; `fieldValue`
+// and `dataOf` are re-exported here as well as from `folio/core` because a
+// bulk-import or migration script writing `i18n` needs to read it back.
+export { dataOf, validateLocales, fieldValue } from './locales'
+export type { LocaleConfig, LocaleContext } from './locales'
+
 export {
   PROTOCOL_VERSION,
   docCapError,
@@ -93,6 +99,7 @@ export type {
   ClientMsg,
   Delta,
   Framed,
+  HelloIdentity,
   Presence,
   PreviewFrame,
   PreviewMsg,

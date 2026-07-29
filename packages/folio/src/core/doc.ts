@@ -17,7 +17,26 @@ export interface Blok {
   /** Which `blocks()` field of the parent this lives in. */
   slot: string | null
   order: string
+  /**
+   * The **source locale's** field values (`localisation.md` architecture
+   * decision 1). Unchanged by localisation, and deliberately not a special case
+   * of `i18n` below: writing the source into `i18n[default]` as well would mean
+   * two places to read a default from, and the first time they disagreed
+   * nothing could say which was authoritative.
+   */
   data: Record<string, Json>
+  /**
+   * Per-locale overrides, by locale code then field name. An **absent key means
+   * untranslated** and falls back; an explicit `''` means deliberately empty and
+   * does not (decision 5). `null` reads as untranslated, which is how
+   * "untranslate this field" is expressible at all — the mutation vocabulary has
+   * no delete-key.
+   *
+   * Optional, so every document written before locales existed is already valid
+   * and a single-locale site never grows the field. Read it through
+   * `fieldValue` (core/locales.ts), never directly.
+   */
+  i18n?: Record<string, Record<string, Json>>
 }
 
 export interface Doc {
