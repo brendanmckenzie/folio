@@ -33,6 +33,7 @@ export const page = defineBlock({
         'cta',
         'embed',
         'section',
+        'personCard',
       ],
     }),
   },

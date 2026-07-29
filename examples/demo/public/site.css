@@ -188,3 +188,54 @@ p { text-wrap: pretty; }
 }
 .embed--empty { color: var(--muted); font-size: 0.875rem; }
 .section__heading { max-width: 55rem; padding: 0 1.5rem; margin: 2rem auto 0; font-size: 1.75rem; }
+
+/* ---------------------------------------------- document types (records) --- */
+/* docs/specs/foundation/document-types.md: an insight is a second *routable*
+   page type, a person is an unrouted record other pages pull in, and site
+   settings is a singleton. Nothing here is special-cased by Folio — a record
+   renders through the same registry as everything else, which is exactly what
+   lets `personCard` inline one with `content`. */
+
+.insight { max-width: 46rem; padding: 3rem 1.5rem 0; margin-inline: auto; }
+.insight__head { padding-bottom: 1.5rem; border-bottom: 1px solid var(--line); }
+.insight__title { margin: 0; font-size: 2.5rem; line-height: 1.1; text-wrap: balance; }
+.insight__standfirst {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 1.125rem;
+  line-height: 1.5;
+}
+.insight__author { margin: 1rem 0 0; font-size: 0.875rem; }
+
+.card { max-width: 46rem; padding: 1.5rem; margin-inline: auto; }
+.card--empty { color: var(--muted); font-size: 0.875rem; }
+
+.person {
+  display: flex;
+  gap: 1.25rem;
+  align-items: flex-start;
+  padding: 1.25rem;
+  margin: 0;
+  background: #f4f6f8;
+  border-radius: 8px;
+}
+.person__portrait {
+  width: 88px;
+  height: 88px;
+  flex: none;
+  object-fit: cover;
+  border-radius: 50%;
+}
+.person__caption { flex: 1; }
+.person__name { margin: 0; font-size: 1.125rem; font-weight: 600; }
+.person__role { margin: 0.15rem 0 0; color: var(--muted); font-size: 0.875rem; }
+.person__bio { margin-top: 0.6rem; font-size: 0.9375rem; }
+.person__bio p { margin: 0; }
+
+/* The singleton, rendered only in the admin's preview-less editor today: reading
+   it from host code is globals.md's job. */
+.settings { padding: 2rem 1.5rem; color: var(--muted); font-size: 0.875rem; }
+.settings__name { margin: 0; font-weight: 600; color: var(--text, #16181d); }
+.settings__tagline,
+.settings__note { margin: 0.25rem 0 0; }
+.settings__links { display: flex; gap: 0.75rem; margin-top: 0.75rem; }

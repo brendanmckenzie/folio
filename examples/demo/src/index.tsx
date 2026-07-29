@@ -16,7 +16,34 @@ declare const __FOLIO_ASSETS__: {
 
 const folio = createFolio<Env>({
   blocks,
-  root: 'page',
+  // document-types.md: four shapes of document, not one. `root: 'page'` still
+  // works and is sugar for exactly the first entry here; this spells it out
+  // because the point of the demo is to show what a real host declares.
+  //
+  // `kind` is the whole routing story. A `page` lives in the tree and owns a
+  // URL; a `record` and a `singleton` leave the tree entirely (parent_id and
+  // path both null), so naming a person "Contact" cannot take /contact away
+  // from the page that needs it.
+  types: [
+    { name: 'page', label: 'Page', kind: 'page', root: 'page' },
+    // A second *routable* type. No routing rule to configure: an insight
+    // created under the "Insights" page already serves at /insights/whatever,
+    // because Folio derives a path from the tree (checkpoint 3). `under`
+    // constrains where one may be created *and* dragged, with a refusal notice.
+    { name: 'insight', label: 'Insight', kind: 'page', root: 'insightPage', under: ['page'] },
+    // Unrouted, and many of them. `titleField` is needed because personRecord
+    // has no `title` field for the tree cache to have guessed at.
+    {
+      name: 'person',
+      label: 'Person',
+      kind: 'record',
+      root: 'personRecord',
+      titleField: 'fullName',
+    },
+    // Unrouted, and exactly one — enforced by the derived id `sng_settings`
+    // rather than by a constraint. Created on first access, never by an editor.
+    { name: 'settings', label: 'Site settings', kind: 'singleton', root: 'settingsRoot' },
+  ],
   bindings: (env) => ({ db: env.DB, story: env.STORY, media: env.MEDIA, images: env.IMAGES }),
   basePath: '/folio',
   // '' is the root story, which serves '/'.
@@ -118,7 +145,11 @@ function Page({ doc, resolution }: { doc: Doc; resolution: Resolution }) {
 
 function sitemap(stories: Awaited<ReturnType<typeof folio.stories>>, origin: string) {
   const urls = stories
-    .filter((s) => s.publishedAt)
+    // `folio.stories` returns every document, records and singletons included
+    // (document-types.md). An unrouted one has `path === null` and no URL at
+    // all, so it is not a sitemap entry — filtering on `publishedAt` alone
+    // would have emitted `/null`.
+    .filter((s) => s.publishedAt && s.path !== null)
     .map((s) => `  <url><loc>${origin}${s.url ?? `/${s.path}`}</loc></url>`)
     .join('\n')
 

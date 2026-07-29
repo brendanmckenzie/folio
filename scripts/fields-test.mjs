@@ -37,8 +37,14 @@ const docWith = (data) => ({
 })
 const diffOf = (before, after) => diff(docWith(before), docWith(after))
 
-function client(name) {
-  const ws = new WebSocket(`ws://localhost:5199/folio/story/${STORY}/socket`)
+/**
+ * A sync client for one story. `storyId` defaults to the home page, which is
+ * what almost every check here drives; document-types.md's checks need a second
+ * and a third document (a person record, an insight), so it is a parameter
+ * rather than the hard-coded constant it used to be.
+ */
+function client(name, storyId = STORY) {
+  const ws = new WebSocket(`ws://localhost:5199/folio/story/${storyId}/socket`)
   const inbox = []
   const waiters = []
   ws.addEventListener('message', (e) => {
@@ -809,6 +815,273 @@ check(
 await ed.tx('f12', [{ t: 'set', uid: 'emb1', field: 'source', value: 'sty_about' }])
 
 aboutDoc.ws.close()
+
+/* --- document types: a record has no URL, and type filtering bites ------ */
+// docs/specs/foundation/document-types.md. The demo declares four types (see
+// examples/demo/src/index.tsx): `page`, a second routable `insight`, an
+// unrouted `person` record, and a `settings` singleton.
+
+const schema = await json(`${API}/schema`)
+check(
+  'the manifest carries every declared document type',
+  schema.types?.map((t) => `${t.name}:${t.kind}`).join(',') ===
+    'page:page,insight:page,person:record,settings:singleton',
+  schema.types?.map((t) => `${t.name}:${t.kind}`).join(','),
+)
+check(
+  'the manifest keeps `root` as the default page type’s root block',
+  schema.root === 'page',
+  schema.root,
+)
+check(
+  'a type-restricted reference field carries its `types` to the admin',
+  JSON.stringify(schema.blocks?.find((b) => b.name === 'personCard')?.fields?.person?.types) ===
+    '["person"]',
+  JSON.stringify(schema.blocks?.find((b) => b.name === 'personCard')?.fields?.person?.types),
+)
+
+// A record: unrouted, so it takes no path and blocks no page.
+const ada = await json(`${API}/stories`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ title: 'Ada Lovelace', type: 'person' }),
+})
+check(
+  'a record is created outside the page tree, with no path and no parent',
+  ada.type === 'person' && ada.path === null && ada.parentId === null,
+  `${ada.type} ${JSON.stringify(ada.path)} ${JSON.stringify(ada.parentId)}`,
+)
+check(
+  'a record has no URL for anything to navigate to',
+  ada.url === undefined && ada.previewUrl === undefined,
+  `${ada.url} ${ada.previewUrl}`,
+)
+
+const treeIds = (nodes) => nodes.flatMap((n) => [n.id, ...treeIds(n.children)])
+check(
+  'a record is absent from GET /folio/stories',
+  !treeIds(await json(`${API}/stories`)).includes(ada.id),
+)
+const docs = await json(`${API}/documents?type=person`)
+check(
+  'a record is present in GET /folio/documents?type=person',
+  docs.documents?.some((d) => d.id === ada.id),
+  JSON.stringify(docs.documents?.map((d) => d.id)),
+)
+
+// A page may still take the slug a record already uses: different namespaces.
+const adaPage = await json(`${API}/stories`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ title: 'Ada Lovelace' }),
+})
+check(
+  'a page can take the slug a record already uses — no collision at all',
+  adaPage.slug === 'ada-lovelace' && adaPage.path === 'ada-lovelace',
+  `${adaPage.slug} ${adaPage.path}`,
+)
+check(
+  'the record still 404s at that path: the page owns it',
+  (await fetch(`${HTTP}/ada-lovelace`)).status === 404,
+)
+
+// Fill the record in, then point a type-restricted reference at it.
+const adaConn = client('ada', ada.id)
+const adaDoc = await adaConn.hello()
+check(
+  'a record is seeded from its own root block, not the page root',
+  adaDoc.bloks[adaDoc.root].type === 'personRecord',
+  adaDoc.bloks[adaDoc.root].type,
+)
+check(
+  'the title lands in the type’s own titleField, since personRecord has no `title`',
+  adaDoc.bloks[adaDoc.root].data.fullName === 'Ada Lovelace' &&
+    adaDoc.bloks[adaDoc.root].data.title === undefined,
+  JSON.stringify(adaDoc.bloks[adaDoc.root].data.fullName),
+)
+await adaConn.tx('dt1', [{ t: 'set', uid: adaDoc.root, field: 'role', value: 'Mathematician' }])
+adaConn.ws.close()
+
+await ed.tx('dt2', [
+  {
+    t: 'insert',
+    blok: {
+      uid: 'pcard1',
+      type: 'personCard',
+      parent: root,
+      slot: 'body',
+      order: 'a5',
+      data: { person: ada.id },
+    },
+  },
+])
+
+const withPerson = await preview()
+check(
+  'a reference to a record resolves, rendering the record’s own markup',
+  withPerson.includes('person__name') && withPerson.includes('Mathematician'),
+  withPerson.match(/<figcaption[\s\S]{0,120}/)?.[0],
+)
+
+// THE type-filter invariant: a value an importer could have written, pointing at
+// the wrong kind of document, must resolve to nothing rather than render
+// something strange (architecture decision 5).
+await ed.tx('dt3', [{ t: 'set', uid: 'pcard1', field: 'person', value: 'sty_about' }])
+const wrongType = await preview()
+check(
+  'a reference pointing at the wrong document type resolves to nothing',
+  wrongType.includes('card--empty') && !wrongType.includes('person__name'),
+  wrongType.match(/<section class="card[^"]*"/)?.[0],
+)
+await ed.tx('dt4', [{ t: 'set', uid: 'pcard1', field: 'person', value: ada.id }])
+
+// A link to a record comes back broken: there is no URL to emit.
+await ed.tx('dt5', [btn('lrecord', CTA2, 'a2', { kind: 'story', id: ada.id })])
+const withRecordLink = await preview()
+check(
+  'a multilink pointing at an unrouted document resolves broken, not to a path',
+  tagOf('lrecord', withRecordLink).includes('data-broken="true"') &&
+    hrefOf('lrecord', withRecordLink) === '#',
+  tagOf('lrecord', withRecordLink),
+)
+
+// A second routable page type: routed from the tree, `under` enforced.
+const looseInsight = await fetch(`${API}/stories`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ title: 'Loose insight', type: 'insight' }),
+})
+check(
+  '`under` refuses an insight at the top level, with a notice naming the parent',
+  looseInsight.status === 400 &&
+    (await looseInsight.clone().json()).error.message.includes('only allowed under: page'),
+  `${looseInsight.status} ${(await looseInsight.json()).error?.message}`,
+)
+
+const landing = await json(`${API}/stories`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ title: 'Insights' }),
+})
+const insight = await json(`${API}/stories`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ title: 'Hello world', type: 'insight', parentId: landing.id }),
+})
+check(
+  'a second page type routes from the tree with no rule to configure',
+  insight.path === 'insights/hello-world',
+  insight.path,
+)
+
+const insightConn = client('insight', insight.id)
+const insightDoc = await insightConn.hello()
+check(
+  'an insight is seeded from insightPage, not from the page root',
+  insightDoc.bloks[insightDoc.root].type === 'insightPage',
+  insightDoc.bloks[insightDoc.root].type,
+)
+await insightConn.tx('dt6', [
+  { t: 'set', uid: insightDoc.root, field: 'standfirst', value: 'A standfirst' },
+  { t: 'set', uid: insightDoc.root, field: 'author', value: ada.id },
+])
+insightConn.ws.close()
+
+await fetch(`${API}/story/${insight.id}/publish`, { method: 'POST' })
+const insightHtml = await fetch(`${HTTP}/insights/hello-world`).then((r) => r.text())
+check(
+  'the insight serves at its derived path once published',
+  insightHtml.includes('insight__title') && insightHtml.includes('A standfirst'),
+  insightHtml.match(/<h1 class="insight__title">[^<]*/)?.[0],
+)
+// A live page resolves *published* references, so an author record that has
+// never been published resolves to nothing — the same rule the embed checks
+// above prove for a page, now shown to hold for a record too.
+check(
+  'a live page does not leak an unpublished record’s fields',
+  !insightHtml.includes('insight__author'),
+  insightHtml.match(/<p class="insight__author">[^<]*/)?.[0] ?? 'absent',
+)
+
+await fetch(`${API}/story/${ada.id}/publish`, { method: 'POST' })
+const insightHtml2 = await fetch(`${HTTP}/insights/hello-world`).then((r) => r.text())
+check(
+  'once the record is published, the author reference reads its own fields',
+  insightHtml2.includes('Ada Lovelace') && insightHtml2.includes('Mathematician'),
+  insightHtml2.match(/<p class="insight__author">[^<]*/)?.[0],
+)
+
+// The singleton: created by asking, refusing to be deleted or duplicated.
+const settings = await json(`${API}/documents?type=settings`)
+check(
+  'a singleton is created on first access, under a derived id',
+  settings.documents?.length === 1 && settings.documents[0].id === 'sng_settings',
+  JSON.stringify(settings.documents?.map((d) => d.id)),
+)
+check(
+  'asking again returns the same one, never a second',
+  (await json(`${API}/documents?type=settings`)).documents?.length === 1,
+)
+check(
+  'a singleton refuses to be deleted',
+  (await fetch(`${API}/stories/sng_settings`, { method: 'DELETE' })).status === 409,
+)
+check(
+  'a singleton refuses to be duplicated',
+  (await fetch(`${API}/stories/sng_settings/duplicate`, { method: 'POST' })).status === 409,
+)
+check(
+  'creating a second singleton is refused outright',
+  (
+    await fetch(`${API}/stories`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Another', type: 'settings' }),
+    })
+  ).status === 409,
+)
+
+// Refusals that keep a document on the side of the fence it was created on.
+check(
+  'moving a record into the page tree is refused',
+  (
+    await fetch(`${API}/stories/${ada.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ parentId: landing.id }),
+    })
+  ).status === 400,
+)
+check(
+  'changing a document’s type is refused: that is a schema migration',
+  (
+    await fetch(`${API}/stories/${insight.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'page' }),
+    })
+  ).status === 409,
+)
+check(
+  'an undeclared type answers `unsupported`, not `not_found`',
+  (
+    await fetch(`${API}/stories`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'X', type: 'nosuchtype' }),
+    })
+  ).status === 501,
+)
+
+// The sitemap must not emit a URL for something that has none. `ada` is
+// published by now (above), so this is a published-but-unrouted document.
+const xml = await fetch(`${HTTP}/sitemap.xml`).then((r) => r.text())
+check(
+  'a published record contributes no sitemap entry: it has no URL',
+  !xml.includes('/null') && !xml.includes('><loc></loc>'),
+  xml.match(/<loc>[^<]*null[^<]*<\/loc>/)?.[0] ?? 'clean',
+)
+check('the published insight does appear in the sitemap', xml.includes('/insights/hello-world'))
 
 /* --- nested objects diff and restore correctly -------------------------- */
 
