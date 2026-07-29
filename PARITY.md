@@ -213,7 +213,16 @@ Real scale breaks the current UI:
 - **Collapse/expand** in the block tree, which gets unusable deep in a
   `Collage → Item → Link` nest. **S**
 - **Field-level validation surfaced in the UI** — `required` is declared and
-  currently ignored. **S**
+  currently ignored. **S**. When this lands: `required` must be evaluated only
+  for **visible** fields (`conditional-fields.md`'s decision 3's follow-on note)
+  — a field hidden by `showIf` cannot block publishing with an error the editor
+  has no way to act on.
+- **Conditional fields** (`showIf`/`hidden`) — done. A `hero` with a `layout`
+  select and four fields that only apply when `layout === 'split'` is one
+  block instead of three: `showIf` is a small declarative condition (`eq`/
+  `ne`/`in`/`isSet`, `all`/`any`/`not`) evaluated by `matches` in `folio/core`
+  against the block's own sibling data, and `hidden: true` retires a field
+  without losing its stored value. See `docs/specs/editing/conditional-fields.md`.
 
 ## Phase 6 — Migration
 

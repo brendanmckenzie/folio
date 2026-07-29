@@ -3,7 +3,7 @@
 > **Group:** editing
 > **Build order:** 4
 > **Size:** S
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** none
 > **Last updated:** 2026-07-29
@@ -349,3 +349,57 @@ None. Core plus one admin file.
   organises the ones that remain. Worth doing next, and sized with the block-picker
   item already on `ROADMAP.md`.
 - **Renderer-side condition evaluation** (checkpoint 3).
+
+## Implementation notes
+
+Landed exactly as designed, in the three phases above. All four owner decision
+checkpoints were built as recommended/forced; there was no Open questions section
+to resolve.
+
+**Ground truth was accurate**, with one filename correction: `summarise`,
+`blankBlok` and `slotsOf` (and `BlockSchema`/`Manifest`/`SchemaIndex`) live in
+`core/schema.ts`, not `core/block.ts` as the Ground truth section says — `block.ts`
+holds `defineBlock`, `toRegistry`, `toSchemaIndex` and `toManifest`, and imports
+`BlockSchema`/`Manifest`/`SchemaIndex` from `schema.ts`. Everything the spec says
+about their behaviour (the manifest drops `render`, `toManifest`'s own "contains no
+functions" comment, `defaultValue`/`blankBlok` filling hidden fields at insert time)
+was correct; only the file split was stale. `Inspector.tsx`'s line 44 and
+`FieldInput`'s props matched the spec exactly.
+
+**What shipped:**
+- `core/conditions.ts` — `FieldCondition` (the seven-shape union exactly as
+  specified) and `matches`, reusing `deepEqual` from `core/diff.ts`. Total over
+  unknown shapes: an unrecognised operator or an unknown field name evaluates
+  `false`, never throws.
+- `core/fields.ts` — `Common` gained `showIf?: FieldCondition` and
+  `hidden?: boolean`, both optional and additive.
+- `core/index.ts` — exports `matches` and `FieldCondition` from `folio/core`.
+- `admin/Inspector.tsx` — the line-44 filter became `visibleEntries(fields, data)`,
+  an exported pure function (not inlined), specifically so it is unit-testable
+  without mounting React — this codebase's existing convention for admin components
+  (`badgeLabel`, `publishStatus`, `deleteConfirmation` are all tested the same way,
+  and there is no `@testing-library/react` dependency or jsdom environment in the
+  `unit` vitest project to mount a component in the first place).
+- Docs: a "Conditional fields" subsection in `README.md` under the block-definition
+  example, and a done-item note in `PARITY.md`'s Phase 5 recording the
+  `required`-must-skip-hidden-fields interaction for whoever builds validation next.
+
+**Deliberately deferred:** the plan's Phase 3 item 3 ("`schema-migrations.md`'s
+audit: add unknown-`showIf`-field and `summary`-names-hidden-field to the drift
+report") was **not done**. `schema-migrations.md` is another spec's file, still
+`draft`, and this run's brief reserves cross-spec bookkeeping for the orchestrator —
+editing another spec's document was explicitly out of bounds for this pass. The
+two checks are still correctly motivated and worth adding when that spec is
+implemented; noting it here so it is not lost.
+
+**Test counts:** 685 → 716 (26 → 29 files). 20 unit tests in
+`test/unit/core/conditions.test.ts` (every operator, the full `isSet` matrix,
+nesting, deep equality, unknown field/shape). 10 in the new
+`test/unit/admin/inspector.test.ts` (visibility toggling in both directions,
+`hidden` overriding any condition, `blocks`-kind exclusion, declaration-order/key
+stability across a reveal, purity — no mutation from the filter itself). 1 workers
+test in `test/workers/schema.test.ts` confirming a schema using `showIf`/`hidden`
+round-trips through `GET /folio/schema` structurally unchanged.
+
+No e2e script was written — the spec's own Testing requirements section says none
+is needed, since nothing here crosses the network or touches storage.

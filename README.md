@@ -120,6 +120,44 @@ Only two surfaces need real components, and both are already your build:
 The Vite plugin generates the preview entry as a virtual module that imports
 your block registry, and adds the library's prebuilt admin to your client build.
 
+### Conditional fields
+
+A field can hide its *input* until a sibling field says otherwise, so a `hero`
+with a `layout` select and four fields that only apply when `layout ===
+'split'` can be one block instead of three:
+
+```tsx
+fields: {
+  layout: select({ options: [{ label: 'Full', value: 'full' }, { label: 'Split', value: 'split' }] }),
+  image: asset({ showIf: { field: 'layout', eq: 'split' } }),
+  imageAlt: text({ showIf: { all: [{ field: 'layout', eq: 'split' }, { field: 'image', isSet: true }] } }),
+  legacyId: text({ hidden: true }), // superseded field, kept only so a later migration can read it
+}
+```
+
+`showIf` takes a small condition object — `eq`/`ne`/`in`/`isSet` plus
+`all`/`any`/`not` — evaluated against the same block's own data, never a parent
+block or another document. Conditions are data, not functions: the admin ships
+prebuilt and learns your schema by fetching `/folio/schema`, and a function
+cannot survive that trip. `hidden: true` is shorthand for a field that never
+shows regardless of any condition.
+
+Hiding a field hides the input, never the value: the stored value persists and
+still renders exactly as a visible field's does, so toggling a select back and
+forth loses nothing, and a block that wants different *output* per layout
+still decides that in `render`.
+
+`matches` is exported from `folio/core`, so `render` can reuse the identical
+condition instead of restating it in JavaScript and risking the two drifting
+apart:
+
+```tsx
+import { matches } from 'folio/core'
+
+render: ({ layout, image }) =>
+  matches({ field: 'layout', eq: 'split' }, { layout }) ? <img src={image?.url} alt="" /> : null
+```
+
 ## Stories, paths and page metadata
 
 A story is keyed by an opaque, stable `id`, which is also its Durable Object
