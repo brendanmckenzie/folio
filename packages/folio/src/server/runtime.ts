@@ -10,7 +10,7 @@
 import { toManifest, toRegistry, toSchemaIndex, type Registry } from '../core/block'
 import type { Doc } from '../core/doc'
 import { buildResolution, referencedIds, type Resolution } from '../core/resolve'
-import { blankBlok, type Manifest } from '../core/schema'
+import { blankSubtree, type Manifest, validatePresets } from '../core/schema'
 import type { StoryMeta, StoryNode } from '../core/story'
 import type { PublishDeps } from './publish'
 import { listStories, publishedDocsByIds, storyById } from './stories'
@@ -61,6 +61,10 @@ export interface FolioRuntime {
 export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const registry = toRegistry(config.blocks)
   const schema = toSchemaIndex(registry)
+  // Construction-time, before any request is served: an invalid preset (an
+  // unknown type or slot, a disallowed child, a cycle) is a config mistake,
+  // not a runtime surprise a caller discovers three requests later.
+  validatePresets(schema)
   const base = config.basePath ?? DEFAULT_BASE
   const route = config.route ?? ((path: string) => `/${path}`)
   const assetBase = `${base}/asset`
@@ -79,10 +83,24 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const decorate = (nodes: StoryNode[]): StoryNode[] =>
     nodes.map((n) => ({ ...withUrls(n), children: decorate(n.children) }))
 
+  // A starting document is just the root block's own 'default' preset
+  // (field-defaults-and-presets.md, decision 3) — no template config key of
+  // its own. A root with no such preset seeds a bare root, exactly as before
+  // this spec.
+  const hasDefaultPreset = schema[config.root]?.presets?.some((p) => p.name === 'default') ?? false
+
   const seed = (title: string): Doc => {
-    const root = blankBlok(schema, config.root, null, null, 'a0')
+    const bloks = blankSubtree(
+      schema,
+      config.root,
+      null,
+      null,
+      'a0',
+      hasDefaultPreset ? 'default' : undefined,
+    )
+    const root = bloks[0]!
     if ('title' in root.data) root.data.title = title
-    return { root: root.uid, bloks: { [root.uid]: root } }
+    return { root: root.uid, bloks: Object.fromEntries(bloks.map((b) => [b.uid, b])) }
   }
 
   const stub = ({ story }: FolioBindings, id: string): StoryStub =>

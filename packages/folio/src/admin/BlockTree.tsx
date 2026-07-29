@@ -1,7 +1,7 @@
 import { Fragment, useState, type CSSProperties, type DragEvent } from 'react'
 import { childrenOf, type Doc } from '../core/doc'
 import type { Presence } from '../core/protocol'
-import { slotsOf, summarise } from '../core/schema'
+import { slotsOf, summarise, type SchemaIndex } from '../core/schema'
 import { useFolio } from './FolioContext'
 
 interface Props {
@@ -9,7 +9,7 @@ interface Props {
   selection: string | null
   peers: Presence[]
   onSelect: (uid: string) => void
-  onAdd: (parent: string, slot: string, type: string, index: number) => void
+  onAdd: (parent: string, slot: string, type: string, index: number, preset?: string) => void
   onMove: (uid: string, parent: string, slot: string, index: number) => void
 }
 
@@ -133,14 +133,54 @@ function Slot({
 
       {allow.length > 0 && !full ? (
         <li className="tree__add">
-          <AddMenu allow={allow} onPick={(type) => onAdd(parent, slot, type, kids.length)} />
+          <AddMenu
+            allow={allow}
+            onPick={(type, preset) => onAdd(parent, slot, type, kids.length, preset)}
+          />
         </li>
       ) : null}
     </ul>
   )
 }
 
-function AddMenu({ allow, onPick }: { allow: readonly string[]; onPick: (type: string) => void }) {
+export interface MenuGroup {
+  type: string
+  label: string
+  /** False for a `presetsOnly` block: no bare version to offer. */
+  bare: boolean
+  presets: { name: string; label: string }[]
+}
+
+/**
+ * One group per allowed type, in declaration order (decision 5): the type's
+ * label as a heading, the bare block first unless `presetsOnly` hides it,
+ * then its presets nested beneath. Presets multiply entries on top of a menu
+ * `ROADMAP.md` already flags as breaking around 15 types — grouping is the
+ * minimum that keeps it legible; search, icons and categories stay on the
+ * roadmap as their own work.
+ *
+ * Pure and exported so the grouping is tested directly, without mounting
+ * `AddMenu`.
+ */
+export function menuGroups(schema: SchemaIndex, allow: readonly string[]): MenuGroup[] {
+  return allow.map((type) => {
+    const def = schema[type]
+    return {
+      type,
+      label: def?.label ?? type,
+      bare: !def?.presetsOnly,
+      presets: (def?.presets ?? []).map((p) => ({ name: p.name, label: p.label })),
+    }
+  })
+}
+
+function AddMenu({
+  allow,
+  onPick,
+}: {
+  allow: readonly string[]
+  onPick: (type: string, preset?: string) => void
+}) {
   const { schema } = useFolio()
   const [open, setOpen] = useState(false)
   if (!open) {
@@ -150,19 +190,34 @@ function AddMenu({ allow, onPick }: { allow: readonly string[]; onPick: (type: s
       </button>
     )
   }
+
+  const pick = (type: string, preset?: string) => {
+    onPick(type, preset)
+    setOpen(false)
+  }
+
   return (
     <div className="tree__menu" onMouseLeave={() => setOpen(false)}>
-      {allow.map((type) => (
-        <button
-          key={type}
-          type="button"
-          onClick={() => {
-            onPick(type)
-            setOpen(false)
-          }}
-        >
-          {schema[type]?.label ?? type}
-        </button>
+      {menuGroups(schema, allow).map((group) => (
+        <div key={group.type} className="tree__menu-group">
+          {/*
+            The heading doubles as the bare block's own button — one entry,
+            not a label plus a same-named button — except for a presetsOnly
+            block, which has no bare version to pick.
+          */}
+          {group.bare ? (
+            <button type="button" className="tree__menu-heading" onClick={() => pick(group.type)}>
+              {group.label}
+            </button>
+          ) : (
+            <p className="tree__menu-heading">{group.label}</p>
+          )}
+          {group.presets.map((preset) => (
+            <button key={preset.name} type="button" onClick={() => pick(group.type, preset.name)}>
+              {preset.label}
+            </button>
+          ))}
+        </div>
       ))}
     </div>
   )

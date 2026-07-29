@@ -1,11 +1,45 @@
 import { useCallback, useMemo } from 'react'
 import { ancestorsOf, childrenOf, type Json, keyAtIndex } from '../../core/doc'
-import { blankBlok, type SchemaIndex } from '../../core/schema'
+import type { Mutation } from '../../core/mutations'
+import { blankSubtree, type SchemaIndex } from '../../core/schema'
 import type { StoryStore } from '../store'
 
+/**
+ * What one `add` call issues: every blok a type (or its preset's whole
+ * subtree) produces, as insert mutations in the same parents-before-children
+ * order `blankSubtree` returns them in, plus which uid a caller should select
+ * afterwards — always the top one, an added block's usual behaviour.
+ *
+ * Pure and exported so "a preset with children lands as one transaction" is
+ * tested directly against the mutation list, without mounting the hook.
+ */
+export function subtreeInsert(
+  schema: SchemaIndex,
+  type: string,
+  parent: string | null,
+  slot: string | null,
+  order: string,
+  preset?: string,
+): { mutations: Mutation[]; selected: string } {
+  const bloks = blankSubtree(schema, type, parent, slot, order, preset)
+  return {
+    mutations: bloks.map((blok) => ({ t: 'insert', blok })),
+    selected: bloks[0]!.uid,
+  }
+}
+
 export interface Blocks {
-  add: (parent: string, slot: string, type: string, index: number) => void
-  /** Adds the first type the slot allows, for the preview's own add button. */
+  /**
+   * Inserts `type` (or, when `preset` is given, that preset's whole subtree —
+   * field-defaults-and-presets.md) as one transaction: one undo step, one
+   * delta, one activity entry, however many bloks it produces.
+   */
+  add: (parent: string, slot: string, type: string, index: number, preset?: string) => void
+  /**
+   * Adds the first type the slot allows, for the preview's own add button —
+   * that type's own `'default'` preset if it declares one, a bare block
+   * otherwise.
+   */
   addFirst: (parent: string, slot: string) => void
   move: (uid: string, parent: string, slot: string, index: number) => void
   remove: (uid: string) => void
@@ -36,10 +70,17 @@ export function useBlocks(store: StoryStore, schema: SchemaIndex): Blocks {
   )
 
   const add = useCallback(
-    (parent: string, slot: string, type: string, index: number) => {
-      const blok = blankBlok(schema, type, parent, slot, keyAt(parent, slot, index))
-      store.tx([{ t: 'insert', blok }])
-      store.select(blok.uid)
+    (parent: string, slot: string, type: string, index: number, preset?: string) => {
+      const { mutations, selected } = subtreeInsert(
+        schema,
+        type,
+        parent,
+        slot,
+        keyAt(parent, slot, index),
+        preset,
+      )
+      store.tx(mutations)
+      store.select(selected)
     },
     [keyAt, schema, store],
   )
@@ -48,7 +89,11 @@ export function useBlocks(store: StoryStore, schema: SchemaIndex): Blocks {
     (parent: string, slot: string) => {
       const field = schema[store.getSnapshot().doc?.bloks[parent]?.type ?? '']?.fields[slot]
       const first = field?.kind === 'blocks' ? field.allow[0] : undefined
-      if (first) add(parent, slot, first, 0)
+      if (!first) return
+      const preset = schema[first]?.presets?.some((p) => p.name === 'default')
+        ? 'default'
+        : undefined
+      add(parent, slot, first, 0, preset)
     },
     [add, schema, store],
   )

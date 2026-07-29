@@ -273,6 +273,26 @@ button:disabled {
   text-align: left;
   border-color: transparent;
 }
+/* One group per type (field-defaults-and-presets.md, decision 5): the type's
+   label as a heading — doubling as the bare block's own button, except for a
+   presetsOnly type, where it is plain text — and its presets nested beneath. */
+.tree__menu-group + .tree__menu-group {
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+}
+p.tree__menu-heading {
+  margin: 0 0 2px;
+  padding: 0 0.4rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+button.tree__menu-heading {
+  font-weight: 600;
+}
+.tree__menu-group button:not(.tree__menu-heading) {
+  padding-left: 1rem;
+}
 
 /* -------------------------------------------------------------- stage ---- */
 
