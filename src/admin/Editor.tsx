@@ -8,6 +8,7 @@ import { DiscardDialog } from './DiscardDialog'
 import { FolioProvider, useStoreState } from './FolioContext'
 import { History } from './History'
 import { useBlocks } from './hooks/useBlocks'
+import { useClipboardShortcuts } from './hooks/useClipboardShortcuts'
 import { useNotice } from './hooks/useNotice'
 import { usePreviewBridge } from './hooks/usePreviewBridge'
 import { usePublish } from './hooks/usePublish'
@@ -51,7 +52,7 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
   const store = useMemo(() => new StoryStore(storyId, apiBase), [storyId, apiBase])
   const state = useStoreState(store)
 
-  const blocks = useBlocks(store, schema)
+  const blocks = useBlocks(store, schema, notify, current?.path ?? '')
   // Loaded unconditionally, not only while the History rail is open: the top
   // bar's own state (below) needs the newest publish version on every load
   // (`unpublished-changes.md`'s phase 1 note on `useVersions`).
@@ -123,6 +124,7 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
   })
 
   useUndoShortcut(store, versions.source.mode === 'live')
+  useClipboardShortcuts(blocks, state.selection, versions.source.mode === 'live')
 
   /**
    * The object's refusals — a rejected transaction, an unreadable or wrongly
@@ -286,6 +288,8 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
                 onSelect={(uid) => store.select(uid)}
                 onAdd={blocks.add}
                 onMove={blocks.move}
+                onDuplicate={blocks.duplicate}
+                onCopy={(uid) => void blocks.copy(uid)}
               />
             ) : (
               <p className="rail__loading">Loading…</p>
@@ -321,6 +325,7 @@ export function Editor({ storyId: initialStoryId, schema, apiBase }: Props) {
             readOnly={readOnly}
             onChange={blocks.setField}
             onRemove={blocks.remove}
+            onDuplicate={blocks.duplicate}
             address={
               isRootBlok && current ? (
                 <PageAddress

@@ -3,6 +3,7 @@ import { childrenOf, type Doc } from '../core/doc'
 import type { Presence } from '../core/protocol'
 import { slotsOf, summarise, type SchemaIndex } from '../core/schema'
 import { useFolio } from './FolioContext'
+import { fullSlotMessage } from './hooks/useBlocks'
 
 interface Props {
   doc: Doc
@@ -11,6 +12,13 @@ interface Props {
   onSelect: (uid: string) => void
   onAdd: (parent: string, slot: string, type: string, index: number, preset?: string) => void
   onMove: (uid: string, parent: string, slot: string, index: number) => void
+  /** duplicate-and-paste.md: clones the whole subtree, fresh uids, right after
+   * the original in the same slot. Disabled (with a reason) when the slot is
+   * already at its `max` — the same rule the add menu applies via `full`. */
+  onDuplicate: (uid: string) => void
+  /** Writes the subtree to the clipboard, for a later paste on this page or
+   * another. */
+  onCopy: (uid: string) => void
 }
 
 export function BlockTree(props: Props) {
@@ -45,13 +53,15 @@ function Slot({
   ...props
 }: Props & { parent: string; slot: string; depth: number }) {
   const { schema } = useFolio()
-  const { doc, selection, peers, onSelect, onAdd, onMove } = props
+  const { doc, selection, peers, onSelect, onAdd, onMove, onDuplicate, onCopy } = props
   const [dropIndex, setDropIndex] = useState<number | null>(null)
 
   const kids = childrenOf(doc, parent, slot)
   const field = schema[doc.bloks[parent]?.type ?? '']?.fields[slot]
   const allow = field?.kind === 'blocks' ? field.allow : []
-  const full = field?.kind === 'blocks' && field.max !== undefined && kids.length >= field.max
+  const slotMax = field?.kind === 'blocks' ? field.max : undefined
+  const full = slotMax !== undefined && kids.length >= slotMax
+  const duplicateTitle = full ? fullSlotMessage(slotMax) : 'Duplicate'
 
   const over = (index: number) => (e: DragEvent) => {
     if (!e.dataTransfer.types.includes('text/folio-uid')) return
@@ -109,6 +119,29 @@ function Slot({
                     title={p.name}
                   />
                 ))}
+                <span className="tree__actions">
+                  <button
+                    type="button"
+                    title={duplicateTitle}
+                    disabled={full}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onDuplicate(blok.uid)
+                    }}
+                  >
+                    ⧉
+                  </button>
+                  <button
+                    type="button"
+                    title="Copy"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onCopy(blok.uid)
+                    }}
+                  >
+                    ⎘
+                  </button>
+                </span>
               </div>
 
               {slotsOf(def).map(([childSlot]) => (

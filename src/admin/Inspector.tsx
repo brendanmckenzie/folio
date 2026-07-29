@@ -16,6 +16,11 @@ interface Props {
    */
   onChange: (uid: string, field: string, value: Json) => void
   onRemove: (uid: string) => void
+  /** Clones the whole subtree with fresh uids, right after the original in the
+   * same slot (duplicate-and-paste.md). A full slot refuses with a toast
+   * rather than disabling this button: unlike the tree row, the inspector has
+   * no cheap way to know the slot's sibling count. */
+  onDuplicate: (uid: string) => void
   /** Rendered above the fields. Used for page routing on the root block. */
   address?: ReactNode
   /** True while a past version is being previewed. */
@@ -46,7 +51,14 @@ export function visibleEntries(
   )
 }
 
-export function Inspector({ blok, onChange, onRemove, address, readOnly = false }: Props) {
+export function Inspector({
+  blok,
+  onChange,
+  onRemove,
+  onDuplicate,
+  address,
+  readOnly = false,
+}: Props) {
   const { schema } = useFolio()
 
   if (!blok) {
@@ -76,9 +88,14 @@ export function Inspector({ blok, onChange, onRemove, address, readOnly = false 
           <code>{blok.uid}</code>
         </div>
         {blok.parent && !readOnly ? (
-          <button type="button" className="btn-danger" onClick={() => onRemove(blok.uid)}>
-            Delete
-          </button>
+          <div className="inspector__head-actions">
+            <button type="button" onClick={() => onDuplicate(blok.uid)}>
+              Duplicate
+            </button>
+            <button type="button" className="btn-danger" onClick={() => onRemove(blok.uid)}>
+              Delete
+            </button>
+          </div>
         ) : null}
       </header>
 

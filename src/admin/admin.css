@@ -253,6 +253,25 @@ button:disabled {
   flex: none;
 }
 
+/* duplicate-and-paste.md: per-row Duplicate/Copy, revealed on hover so the
+   row does not compete visually with the type/summary at rest. */
+.tree__actions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+}
+.tree__row:hover .tree__actions,
+.tree__row:focus-within .tree__actions {
+  opacity: 1;
+}
+.tree__actions button {
+  padding: 0.1rem 0.35rem;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
 .tree__add {
   margin: 0.25rem 0;
 }
@@ -347,6 +366,11 @@ button.tree__menu-heading {
 .inspector__head code {
   color: var(--muted);
   font-size: 0.6875rem;
+}
+.inspector__head-actions {
+  display: flex;
+  flex: none;
+  gap: 0.35rem;
 }
 .inspector__fields {
   display: flex;
