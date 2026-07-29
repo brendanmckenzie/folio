@@ -174,6 +174,30 @@ export function asAssets(value: unknown): AssetValue[] {
   return value.map(asAsset).filter((a): a is AssetValue => a !== null)
 }
 
+/**
+ * A `references` value (`../../../docs/specs/content-model/data-documents.md`):
+ * story ids in the editor's chosen order, with anything unreadable dropped.
+ *
+ * A bare string is tolerated the same way `asAssets` tolerates a single asset —
+ * a value from an importer, or a `reference` field widened to `references` by a
+ * content migration, reads as a one-element list rather than as nothing.
+ *
+ * Duplicates are dropped. The same document twice in one hand-picked list has no
+ * sensible rendering, and keeping both would make `max` count something the
+ * editor cannot see.
+ */
+export function asStoryIds(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : [value]
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const entry of raw) {
+    if (typeof entry !== 'string' || !entry || seen.has(entry)) continue
+    seen.add(entry)
+    out.push(entry)
+  }
+  return out
+}
+
 function focalOf(value: unknown): FocalPoint | null {
   if (!value || typeof value !== 'object') return null
   const { x, y } = value as Record<string, unknown>

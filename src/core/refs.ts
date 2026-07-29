@@ -24,7 +24,7 @@ import type { Blok, Doc, Json } from './doc'
 import type { Field } from './fields'
 import type { SchemaIndex } from './schema'
 import { asRichtext, type RichtextNode } from './richtext'
-import { asLink } from './values'
+import { asLink, asStoryIds } from './values'
 
 /** An outbound edge of a document, as `content_refs` stores it. */
 export interface OutboundRef {
@@ -102,12 +102,19 @@ export function linkedIds(doc: Doc, schema: SchemaIndex): string[] {
 }
 
 /**
- * Story ids a document *references*: `reference` fields, across every locale.
+ * Story ids a document *references*: `reference` and `references` fields, across
+ * every locale.
  *
  * `referencedIds` in resolve.ts is the public, source-locale-only form that
  * predates this file and is what `useReferencedDocs` keys off. This is the same
  * walk widened to `i18n`, for the two callers that must not miss a translated
  * target: the narrowed resolution, and `content_refs`.
+ *
+ * Both kinds, because both are ids a render needs loaded and both are usages the
+ * "used by N published documents" warning is about
+ * (`../../../docs/specs/content-model/data-documents.md` decision 4). A
+ * `references()` field holding six people contributes six `reference` rows, so
+ * deleting one of them warns about every page whose hand-picked list names it.
  */
 export function referencedIdsAllLocales(doc: Doc, schema: SchemaIndex): string[] {
   const out = new Set<string>()
@@ -115,9 +122,16 @@ export function referencedIdsAllLocales(doc: Doc, schema: SchemaIndex): string[]
     const fields: Record<string, Field> | undefined = schema[blok.type]?.fields
     if (!fields) continue
     for (const [name, field] of Object.entries(fields)) {
-      if (field.kind !== 'reference') continue
-      for (const value of storedValues(blok, name)) {
-        if (typeof value === 'string' && value) out.add(value)
+      if (field.kind === 'reference') {
+        for (const value of storedValues(blok, name)) {
+          if (typeof value === 'string' && value) out.add(value)
+        }
+        continue
+      }
+      if (field.kind === 'references') {
+        for (const value of storedValues(blok, name)) {
+          for (const id of asStoryIds(value)) out.add(id)
+        }
       }
     }
   }

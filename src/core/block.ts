@@ -18,10 +18,46 @@ export interface BlockDef<F extends Record<string, Field> = Record<string, Field
   fields: F
   /** Field name used to label this block in the editor's tree. */
   summary?: Extract<keyof F, string>
-  render: (props: PropsOf<F> & { uid: string }) => ReactNode
+  /**
+   * **Optional** (`../../../docs/specs/content-model/data-documents.md`
+   * checkpoint 1). A record root — a person, an office, a partner logo — has no
+   * layout of its own and should not have to return `null` from a mandatory
+   * function to say so. `defineRecord` below is the sugar that omits it.
+   *
+   * Absent renders **nothing at all** on a published page and a
+   * `folio-unrendered` placeholder in edit mode, naming the type: the same
+   * posture as an unknown block type, and for the same reason — an editor must
+   * be able to see that something is there and not renderable, and a published
+   * page must never show scaffolding.
+   *
+   * Optional on *every* block, not only record roots, deliberately: the type
+   * system cannot tell a record root from any other block (both are `BlockDef`),
+   * and inventing a marker to enforce it would buy nothing. A content block with
+   * no renderer is a mistake, and it is a visible one.
+   */
+  render?: (props: PropsOf<F> & { uid: string }) => ReactNode
 }
 
 export function defineBlock<const F extends Record<string, Field>>(def: BlockDef<F>): BlockDef<F> {
+  return def
+}
+
+/**
+ * A document type's root block for content with nothing to render — the usable
+ * half of `kind: 'record'` (`data-documents.md` checkpoint 1).
+ *
+ * Sugar, and nothing more: `render` is optional on every `BlockDef` now, so this
+ * is `defineBlock` under a name that says what the definition is *for*. The
+ * return type is the same `BlockDef<F>`, so a record root still flows through
+ * `toSchemaIndex`, `blankBlok`, the manifest and the inspector unchanged — no
+ * second definition kind, no fork in the schema pipeline.
+ *
+ * A record **may** still carry a renderer, and it is used for
+ * `reference.content` (checkpoint 2): a "Person card" block can drop
+ * `{person.content}` and get a consistent card wherever a person is referenced.
+ * Records without one give `content: null`, and blocks read `person.data`.
+ */
+export function defineRecord<const F extends Record<string, Field>>(def: BlockDef<F>): BlockDef<F> {
   return def
 }
 
