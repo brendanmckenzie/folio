@@ -9,6 +9,18 @@ export type Mutation =
   | { t: 'insert'; blok: Blok }
   | { t: 'move'; uid: string; parent: string; slot: string; order: string }
   | { t: 'remove'; uid: string }
+  /**
+   * Changes a blok's *type*, keeping its uid, its position and its children
+   * (`schema-migrations.md` architecture decision 3). The only edit the
+   * vocabulary could not express: `insert` refuses a duplicate uid and `remove`
+   * cascades over the subtree, so "remove and re-insert as another type" is not
+   * a transaction that can be written.
+   *
+   * Field data is deliberately untouched. A retype that needs fields added or
+   * dropped emits `set` mutations alongside it, which is why `block.retype`
+   * (core/migrate.ts) returns several mutations rather than one.
+   */
+  | { t: 'retype'; uid: string; type: string }
 
 /**
  * Why `m` cannot be applied to `doc`, or null when it can. Naming the violation
@@ -40,6 +52,15 @@ export function mutationError(doc: Doc, m: Mutation): string | null {
     }
     case 'remove':
       return m.uid === doc.root ? 'root remove: the root cannot be removed' : null
+    case 'retype':
+      // A missing uid is a no-op, exactly as for set/move/remove. Retyping the
+      // *root* is refused: a document's root type is its document type, and
+      // changing that is a `document-types.md` concern (a `stories.type` update
+      // in the same breath), not a block edit.
+      if (!doc.bloks[m.uid]) return null
+      return m.uid === doc.root
+        ? 'root retype: the root type is the document type, not a block edit'
+        : null
     default:
       return `unknown kind: ${(m as { t: string }).t}`
   }
@@ -80,6 +101,14 @@ export function apply(doc: Doc, m: Mutation): Doc {
       }
       return { ...doc, bloks }
     }
+    case 'retype': {
+      const b = doc.bloks[m.uid]
+      if (!b) return doc
+      // Type only. Position, children and every field value survive, which is
+      // what makes "consolidate two blocks" a migration rather than an editor
+      // re-creating content by hand.
+      return { ...doc, bloks: { ...doc.bloks, [m.uid]: { ...b, type: m.type } } }
+    }
   }
 }
 
@@ -115,6 +144,13 @@ export function invert(doc: Doc, m: Mutation): Mutation[] {
       // Re-insert the whole subtree, parents first so children always land on
       // an existing parent.
       return subtree(doc, m.uid).map((uid) => ({ t: 'insert', blok: doc.bloks[uid]! }))
+    }
+    case 'retype': {
+      const b = doc.bloks[m.uid]
+      if (!b) return []
+      // So a migration is undoable like every other transaction, which is the
+      // point of routing one through the log at all.
+      return [{ t: 'retype', uid: m.uid, type: b.type }]
     }
   }
 }
