@@ -5,6 +5,7 @@
 import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { cloneDoc } from '../../core/clone'
+import { isKnownLocale, translationStatus } from '../../core/locales'
 import type { DocumentType } from '../../core/schema'
 import type { StoryMeta } from '../../core/story'
 import { actorString } from '../auth/roles'
@@ -315,6 +316,40 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.get('/story/:id/document', requireAccess<Env>(rt, READ_DRAFT), loadStory<Env>(), async (c) =>
     c.json({ doc: await rt.draftFor(c.var.bindings(), c.var.story) }),
+  )
+
+  /**
+   * How complete one locale's translation of this document is
+   * (`../../../docs/specs/content-model/localisation.md`), for the tree's
+   * per-story badge.
+   *
+   * This route exists *only* for the tree. The open story's own completeness is
+   * computed client-side from the draft the admin already holds, per keystroke,
+   * because a network round trip in that loop is the thing this codebase exists
+   * to avoid — so this is for the rows an editor is not currently editing.
+   *
+   * `READ_DRAFT`, matching `/document` above: it reports on the draft, and the
+   * editor page that draws the badge already requires no less.
+   *
+   * 501 rather than 404 for a locale this site never declared: the request is
+   * perfectly well-formed, the server simply has no such locale — the same shape
+   * `requireType` uses for an unknown document type.
+   */
+  app.get(
+    '/story/:id/translation',
+    requireAccess<Env>(rt, READ_DRAFT),
+    loadStory<Env>(),
+    async (c) => {
+      const locale = c.req.query('locale')
+      if (locale === undefined) {
+        throw new FolioError('bad_request', 'A `locale` query parameter is required')
+      }
+      if (!isKnownLocale(rt.locales, locale)) {
+        throw new FolioError('unsupported', `Unknown locale: ${locale}`)
+      }
+      const doc = await rt.draftFor(c.var.bindings(), c.var.story)
+      return c.json(translationStatus(doc, rt.schema, locale))
+    },
   )
 
   return app

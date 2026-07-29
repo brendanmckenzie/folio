@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { Field, PropsOf } from './fields'
+import type { LocaleConfig } from './locales'
 import {
   type BlockSchema,
   defaultType,
@@ -71,11 +72,16 @@ export function toManifest(
   registry: Registry,
   types: readonly DocumentType[],
   globals: readonly string[] = [],
+  /** `FolioConfig.locales` (`localisation.md`), so the admin can draw a locale
+   * switcher without a second request. Omitted for a single-locale site, which
+   * is what makes the admin's own locale state default to "no locales at all". */
+  locales?: LocaleConfig,
 ): Manifest {
   return {
     types: [...types],
     blocks: Object.values(toSchemaIndex(registry)),
     root: defaultType(types).root,
     globals: [...globals],
+    ...(locales ? { locales } : {}),
   }
 }

@@ -21,18 +21,35 @@
  *     than a content one. Use this for anything that is a property of the
  *     declarations alone.
  *
+ * Both take an `AuditContext` as a second argument: the parts of the *config* a
+ * check needs and cannot read off the schema. Today that is `locales`, and it is
+ * why the translatable checks below can stay silent on a single-locale site
+ * instead of filling the report with advice nobody asked for.
+ *
  * Every finding carries its own `check` name and travels in `content` /
  * `schema`, so a new check needs no route change, no response-shape change and
  * no admin change to be visible. `orphanKeys` / `unknownTypes` / `missingFields`
  * are named projections of `content`, kept because the spec's own route example
  * names them.
- *
- * `../content-model/localisation.md` adds "a text-ish field not marked
- * `translatable`" as one entry in `SCHEMA_CHECKS`.
  */
 import type { Blok } from '../core/doc'
+import { isTranslatable, type LocaleConfig } from '../core/locales'
 import { type BlockSchema, type SchemaIndex, slotsOf } from '../core/schema'
 import { publishedDocsAll } from './stories'
+
+/**
+ * Config a check needs beyond the schema and the blok in front of it.
+ *
+ * A second parameter rather than a closure over `createFolio`, so `auditSchema`
+ * and `auditDocuments` stay callable from a test with a literal.
+ */
+export interface AuditContext {
+  /** `FolioConfig.locales` (`../content-model/localisation.md`). Absent for a
+   * single-locale site, and every locale check reads that as "nothing to say". */
+  locales?: LocaleConfig
+}
+
+const NO_CONTEXT: AuditContext = {}
 
 /** One problem found in one blok. Counted, not listed per blok: a site with 400 heroes carrying an orphan key needs the count, not 400 rows. */
 export interface Finding {
@@ -79,7 +96,11 @@ export interface AuditReport {
 
 /* ------------------------------------------------------- content checks --- */
 
-export type DocumentCheck = (blok: Blok, def: BlockSchema | undefined) => Finding[]
+export type DocumentCheck = (
+  blok: Blok,
+  def: BlockSchema | undefined,
+  ctx: AuditContext,
+) => Finding[]
 
 /**
  * A key the schema no longer declares, holding something.
@@ -127,12 +148,69 @@ const missingField: DocumentCheck = (blok, def) => {
     .map((name) => ({ check: 'missing-field', type: blok.type, field: name }))
 }
 
+/**
+ * A translated value sitting in a field the schema does not mark `translatable`
+ * (`../content-model/localisation.md` decision 4).
+ *
+ * Not a bug in the renderer — the renderer honours it deliberately, so
+ * un-marking a field cannot silently hide content somebody already translated —
+ * but it *is* content the editor will no longer let anybody change, since the
+ * inspector refuses to write a locale value to an unmarked field. So it is
+ * reported, to be migrated away on purpose rather than discovered by accident.
+ *
+ * Nulls are skipped for the same reason `orphanKey` skips them: clearing a
+ * translation writes null, so reporting those would leave permanent drift behind
+ * every completed untranslation.
+ */
+const translatedNotTranslatable: DocumentCheck = (blok, def, ctx) => {
+  if (!def || !ctx.locales || !blok.i18n) return []
+  const out: Finding[] = []
+  const seen = new Set<string>()
+  for (const map of Object.values(blok.i18n)) {
+    for (const [name, value] of Object.entries(map)) {
+      if (value === null || seen.has(name)) continue
+      const field = def.fields[name]
+      if (field && !isTranslatable(field)) {
+        seen.add(name)
+        out.push({ check: 'translated-not-translatable', type: blok.type, field: name })
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * A translation under a locale code the config no longer declares
+ * (`../content-model/localisation.md`'s first edge case).
+ *
+ * Inert — nothing reads that code, so the page renders its fallback — which is
+ * exactly why it needs saying out loud. Nothing strips these automatically,
+ * because a locale is at least as often removed by mistake as on purpose, and a
+ * migration that deleted the French the moment somebody fat-fingered the config
+ * would be unrecoverable.
+ */
+const unknownLocaleValues: DocumentCheck = (blok, _def, ctx) => {
+  if (!ctx.locales || !blok.i18n) return []
+  const declared = new Set(ctx.locales.available.map((l) => l.code))
+  return Object.entries(blok.i18n)
+    .filter(
+      ([code, map]) => !declared.has(code) && Object.values(map).some((value) => value !== null),
+    )
+    .map(([code]) => ({ check: 'unknown-locale', type: blok.type, field: code }))
+}
+
 /** See "Adding a check" in the file header. */
-export const DOCUMENT_CHECKS: readonly DocumentCheck[] = [orphanKey, unknownType, missingField]
+export const DOCUMENT_CHECKS: readonly DocumentCheck[] = [
+  orphanKey,
+  unknownType,
+  missingField,
+  translatedNotTranslatable,
+  unknownLocaleValues,
+]
 
 /* -------------------------------------------------------- schema checks --- */
 
-export type SchemaCheck = (schema: SchemaIndex) => SchemaFinding[]
+export type SchemaCheck = (schema: SchemaIndex, ctx: AuditContext) => SchemaFinding[]
 
 /**
  * A `showIf` naming a field the block does not declare
@@ -211,20 +289,62 @@ const hiddenSummaryField: SchemaCheck = (schema) => {
   return out
 }
 
+/**
+ * A text-ish field nobody marked `translatable`
+ * (`../content-model/localisation.md` checkpoint 2's stated mitigation).
+ *
+ * Translatable is opt-in per field, deliberately — a default of "everything is
+ * translatable" turns every schema into a translation surface nobody asked for.
+ * The cost of opt-in is annotating existing blocks, and the whole point of this
+ * check is that the omissions are then *findable* rather than invisible: a
+ * heading nobody marked simply never appears to a translator, with nothing
+ * anywhere saying why.
+ *
+ * Only the four kinds whose value is human prose. A `select` holds a token, a
+ * `number` a number, a `boolean` a flag and an `asset` a file — none of those
+ * should diverge per locale by default, and reporting them would bury the four
+ * that matter. `blocks` cannot be translatable at all.
+ *
+ * Silent without `locales` configured: on a single-locale site this would be
+ * several hundred rows of advice about a feature the host is not using.
+ */
+const untranslatableText: SchemaCheck = (schema, ctx) => {
+  if (!ctx.locales) return []
+  const PROSE = new Set(['text', 'textarea', 'richtext'])
+  const out: SchemaFinding[] = []
+  for (const def of Object.values(schema)) {
+    for (const [name, field] of Object.entries(def.fields)) {
+      if (!PROSE.has(field.kind) || isTranslatable(field)) continue
+      out.push({
+        check: 'not-translatable',
+        block: def.name,
+        field: name,
+        detail: `'${name}' is a ${field.kind} field with no 'translatable: true' — a translator never sees it, and nothing in the editor says why`,
+      })
+    }
+  }
+  return out
+}
+
 /** See "Adding a check" in the file header. */
-export const SCHEMA_CHECKS: readonly SchemaCheck[] = [unknownConditionField, hiddenSummaryField]
+export const SCHEMA_CHECKS: readonly SchemaCheck[] = [
+  unknownConditionField,
+  hiddenSummaryField,
+  untranslatableText,
+]
 
 /* ------------------------------------------------------------- the walk --- */
 
 /** The schema half on its own: pure, and worth calling from a test directly. */
-export function auditSchema(schema: SchemaIndex): SchemaFinding[] {
-  return SCHEMA_CHECKS.flatMap((check) => check(schema))
+export function auditSchema(schema: SchemaIndex, ctx: AuditContext = NO_CONTEXT): SchemaFinding[] {
+  return SCHEMA_CHECKS.flatMap((check) => check(schema, ctx))
 }
 
 /** The content half on its own, over documents a caller already has. */
 export function auditDocuments(
   docs: readonly { doc: { bloks: Record<string, Blok> } }[],
   schema: SchemaIndex,
+  ctx: AuditContext = NO_CONTEXT,
 ): ContentFinding[] {
   const tally = new Map<string, ContentFinding>()
 
@@ -233,7 +353,7 @@ export function auditDocuments(
     for (const blok of Object.values(doc.bloks)) {
       const def = schema[blok.type]
       for (const check of DOCUMENT_CHECKS) {
-        for (const finding of check(blok, def)) {
+        for (const finding of check(blok, def, ctx)) {
           const key = `${finding.check} ${finding.type} ${finding.field ?? ''}`
           const row = tally.get(key) ?? { ...finding, documents: 0, bloks: 0 }
           row.bloks++
@@ -256,15 +376,19 @@ export function auditDocuments(
   )
 }
 
-export async function audit(db: D1Database, schema: SchemaIndex): Promise<AuditReport> {
+export async function audit(
+  db: D1Database,
+  schema: SchemaIndex,
+  ctx: AuditContext = NO_CONTEXT,
+): Promise<AuditReport> {
   const docs = await publishedDocsAll(db)
-  const content = auditDocuments(docs, schema)
+  const content = auditDocuments(docs, schema, ctx)
   const named = (check: string) => content.filter((f) => f.check === check)
 
   return {
     documents: docs.length,
     content,
-    schema: auditSchema(schema),
+    schema: auditSchema(schema, ctx),
     orphanKeys: named('orphan-key').map((f) => ({
       type: f.type,
       field: f.field ?? '',

@@ -1,6 +1,6 @@
 import { type Blok, type Doc, type Json, keyAtIndex, newUid } from './doc'
 import { defaultValue, type Field } from './fields'
-import { type LocaleContext, fieldValue } from './locales'
+import { type LocaleConfig, type LocaleContext, fieldValue } from './locales'
 import { asRichtext, richtextToText } from './richtext'
 import { asAsset } from './values'
 
@@ -103,6 +103,13 @@ export interface Manifest {
    * singleton needs to be a global (`globals.md`'s resolved open question).
    */
   globals: string[]
+  /**
+   * `FolioConfig.locales` (`localisation.md`), so the admin draws its locale
+   * switcher from the same request it draws the block schema from. Absent for a
+   * single-locale site, which is the admin's cue that there is no switcher to
+   * draw and no second inspector column to show.
+   */
+  locales?: LocaleConfig
 }
 
 export function indexManifest(manifest: Manifest): SchemaIndex {

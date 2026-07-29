@@ -1,3 +1,4 @@
+import { isKnownLocale } from '../core/locales'
 import { singletonId } from '../core/schema'
 import { FolioDoc, renderGlobalNode } from '../preview/Render'
 import { createApp } from './app'
@@ -78,6 +79,10 @@ export { FolioDoc } from '../preview/Render'
 export { Shell, serializeJson } from './Document'
 export type { StoryMeta, StoryNode } from '../core/story'
 export type { Resolution } from '../core/resolve'
+/** Locales (`localisation.md`): the config a host declares, and the context a
+ * render reads. `fieldValue`/`dataOf` ship from `folio/core`, with the rest of
+ * what a block author needs. */
+export type { LocaleConfig, LocaleContext, LocaleDef, TranslationStatus } from '../core/locales'
 export type { AssetRow } from './assets'
 export type { Folio, FolioBindings, FolioConfig } from './types'
 
@@ -121,7 +126,19 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         if (!allows(actor, READ_DRAFT)) return null
       }
 
-      const path = url.pathname.replace(/^\/+|\/+$/g, '')
+      // `?locale=` is what the admin's switcher appends (`localisation.md`
+      // decision 6). An undeclared code is refused the same way an undeclared
+      // `as` below is — by handing the request back, so the host's own routes
+      // win rather than Folio guessing what was meant.
+      const asked = url.searchParams.get('locale')
+      if (asked !== null && !isKnownLocale(rt.locales, asked)) return null
+      const locale = asked ?? undefined
+
+      // The path with the host's own locale decoration removed. Derived by
+      // asking `config.route` rather than by assuming a prefix convention: the
+      // admin built this URL from `previewUrls`, which `route` produced, so the
+      // inverse is exact for whatever shape the host chose (`pathForLocale`).
+      const path = rt.pathForLocale(url.pathname, locale)
       const story = await storyByPath(bindings.db, path)
       // Not a story: hand it back so the host's own routing wins. An unrouted
       // document can never be reached here anyway — `storyByPath` matches on
@@ -138,10 +155,10 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       if (as !== null) {
         const type = rt.typeOf(as)
         if (type?.kind !== 'singleton' || !rt.globals.includes(as)) return null
-        return previewPage(rt, bindings, story, { as })
+        return previewPage(rt, bindings, story, { as, locale })
       }
 
-      return previewPage(rt, bindings, story)
+      return previewPage(rt, bindings, story, { locale })
     }
 
     return null
@@ -149,14 +166,24 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
 
   return {
     handle,
-    published: (env, path) => publishedDoc(config.bindings(env).db, path),
+    /**
+     * The locale does not select a document — there is one per story, holding
+     * every language (`localisation.md` checkpoint 3). What it does is refuse a
+     * code this site never declared, so `/xx/about` answers the host's own 404
+     * rather than serving English under a URL that means nothing. Absent, or the
+     * source locale, is the pre-localisation behaviour exactly.
+     */
+    published: async (env, path, locale) => {
+      if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null
+      return publishedDoc(config.bindings(env).db, path)
+    },
     status: (env, path) => storyStatus(config.bindings(env).db, path),
     redirect: (env, path) => lookupRedirect(config.bindings(env).db, path),
     draft: (env, id) => rt.draft(config.bindings(env), id),
     stories: async (env) => (await listStories(config.bindings(env).db)).map(rt.withUrls),
     tree: async (env) => rt.decorate(await storyTree(config.bindings(env).db)),
     registry: rt.registry,
-    resolve: (env, doc) => rt.resolve(config.bindings(env), doc),
+    resolve: (env, doc, opts) => rt.resolve(config.bindings(env), doc, { locale: opts?.locale }),
     render: (doc, opts) => (
       <FolioDoc doc={doc} registry={rt.registry} edit={opts?.edit} resolution={opts?.resolution} />
     ),
@@ -187,6 +214,6 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         opts,
       )
     },
-    audit: (env) => audit(config.bindings(env).db, rt.schema),
+    audit: (env) => audit(config.bindings(env).db, rt.schema, { locales: rt.locales }),
   }
 }

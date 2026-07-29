@@ -2,6 +2,7 @@ import { cloneElement, isValidElement, type ReactElement, type ReactNode } from 
 import type { Registry } from '../core/block'
 import { childrenOf, type Doc } from '../core/doc'
 import type { Field } from '../core/fields'
+import { fieldValue } from '../core/locales'
 import { EMPTY_RESOLUTION, resolveReference, resolveValue, type Resolution } from '../core/resolve'
 import { asRichtext, sanitiseRichtext } from '../core/richtext'
 import { RichText } from './RichText'
@@ -35,6 +36,17 @@ export function RenderBlok({
   }
 
   const props: Record<string, unknown> = { uid }
+  // Every field value this renderer reads goes through `fieldValue`
+  // (`../../../docs/specs/content-model/localisation.md` architecture decision
+  // 3), so "which language" is answered once, from the resolution, rather than
+  // per field kind. `resolveValue` stays locale-blind, which is what keeps the
+  // change small.
+  //
+  // Deliberately unconditional on `field.translatable` (decision 4): if a value
+  // is in `i18n` it wins, wherever it came from. The editor is what refuses to
+  // *write* a locale value to an unmarked field; un-marking one must not silently
+  // hide content somebody already translated, and the audit reports that case.
+  const locale = resolution.locale
   for (const [name, field] of Object.entries(def.fields as Record<string, Field>)) {
     // Richtext arrives already rendered, like a `blocks` field, so a block author
     // drops `{body}` into their JSX and cannot accidentally skip sanitising or
@@ -42,14 +54,14 @@ export function RenderBlok({
     if (field.kind === 'richtext') {
       props[name] = (
         <RichText
-          doc={sanitiseRichtext(asRichtext(blok.data[name]), field)}
+          doc={sanitiseRichtext(asRichtext(fieldValue(blok, name, locale)), field)}
           resolution={resolution}
         />
       )
       continue
     }
     if (field.kind === 'reference') {
-      const target = resolveReference(blok.data[name], resolution, field.types)
+      const target = resolveReference(fieldValue(blok, name, locale), resolution, field.types)
       props[name] = target
         ? {
             ...target,
@@ -73,7 +85,7 @@ export function RenderBlok({
       continue
     }
     if (field.kind !== 'blocks') {
-      props[name] = resolveValue(field, blok.data[name], resolution)
+      props[name] = resolveValue(field, fieldValue(blok, name, locale), resolution)
       continue
     }
     const kids = childrenOf(doc, uid, name)
