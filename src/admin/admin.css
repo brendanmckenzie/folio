@@ -876,6 +876,18 @@ button.tree__menu-heading {
   font-size: 0.75rem;
   color: var(--muted);
 }
+/* editing/live-collaboration.md phase 4: an external value held back while this
+   field has focus, so a peer typing cannot yank the caret. Said plainly, because
+   the alternative is publishing prose you were not looking at. */
+.rt__behind {
+  margin: 0;
+  padding: 0.3rem 0.45rem;
+  font-size: 0.6875rem;
+  color: #8a4b00;
+  background: #fff6e5;
+  border: 1px solid #f0c785;
+  border-radius: 6px;
+}
 .rt__bar {
   display: flex;
   flex-wrap: wrap;

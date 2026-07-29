@@ -513,13 +513,44 @@ export class StoryStore {
     this.lastSyncId = delta.syncId
     const ours = this.pending.delete(delta.txId)
     this.base = applyAll(this.base, delta.mutations)
-    const doc = this.commit()
+    // The overwrite notice (`live-collaboration.md` decision 5): a `set` from
+    // somebody else on the field this client has focused. `ours` is the test for
+    // "somebody else", not the actor id — under session auth this store's own
+    // `actor` is the advisory random pair the object ignores, so comparing ids
+    // would silently notify about every one of your own keystrokes.
+    const overwritten = ours ? null : this.overwriteNotice(delta)
+    const doc = this.commit(overwritten ? { notice: overwritten } : {})
     // With the queue drained the delta's mutations describe the view exactly, so
     // the preview takes them incrementally. Under a rebase they do not — the
     // view is base plus pending — so it takes the whole document.
     if (doc && this.pending.size > 0) this.onReset(doc)
     else if (!ours) this.onMutations(delta.mutations)
     return true
+  }
+
+  /**
+   * "Ann changed this field", or null.
+   *
+   * Makes last-write-wins **visible** rather than silent, which is the whole of
+   * decision 5's second half — the model is unchanged and the value still lands.
+   * It goes through the store's existing notice channel rather than inventing a
+   * second one, so it reaches the same toast a refused edit does.
+   *
+   * Scoped to the field this client actually has focused, and to the locale it is
+   * editing: a French edit while you are in the English is not an overwrite of
+   * anything, it is a different key.
+   */
+  private overwriteNotice(delta: Delta): string | null {
+    const uid = this.state.selection
+    const field = this.state.focus
+    if (!uid || !field) return null
+    const hit = delta.mutations.some(
+      (m) =>
+        m.t === 'set' && m.uid === uid && m.field === field && (m.locale ?? null) === this.locale,
+    )
+    if (!hit) return null
+    const who = this.state.peers.find((p) => p.actor === delta.actor)?.name ?? 'Somebody else'
+    return `${who} changed this field`
   }
 
   /**

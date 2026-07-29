@@ -110,6 +110,48 @@ function extensionsFor(limits: RichtextLimits) {
   return out as never
 }
 
+/**
+ * What to do with a value that arrived from outside this editor
+ * (`../../../docs/specs/editing/live-collaboration.md` phase 4, step 1).
+ *
+ * Three answers, and the middle one is the whole point of this spec's phase 4:
+ *
+ *   - `'ignore'` — it is what this editor already holds. Either the round trip of
+ *     our own keystroke or a value the surface already shows; pushing it in would
+ *     reset the caret for nothing.
+ *   - `'defer'` — it differs, **and this field has focus**. Pushing it in calls
+ *     `setContent`, which resets the selection, so a peer typing in the same
+ *     richtext field would yank the caret out of the middle of your sentence.
+ *     Held instead, and applied on blur.
+ *   - `'apply'` — it differs and nobody is typing here. Exactly the pre-v4
+ *     behaviour: another editor over the socket, an undo, or a version restore.
+ *
+ * This is not a merge and does not pretend to be one: last write still wins
+ * (CRDTs are out of scope, and `README.md` says why). What it fixes is that
+ * last-write-wins was *unusable* with two people in one prose field, rather than
+ * merely lossy — and it costs nothing, because the deferred value is never
+ * snapshotted. `'defer'` simply skips this pass; the effect re-runs on blur and
+ * reads whatever the authoritative value is by then, which is the peer's value if
+ * they wrote last and yours if you did.
+ *
+ * Pure and exported so all three branches are tested without a DOM or a TipTap
+ * instance.
+ */
+export type ExternalUpdate = 'apply' | 'defer' | 'ignore'
+
+export function externalUpdate(
+  /** The incoming value, serialised. */
+  incoming: string,
+  /** The last value this editor emitted, serialised — the round-trip guard. */
+  localEcho: string,
+  /** What the surface currently shows, serialised. */
+  shown: string,
+  focused: boolean,
+): ExternalUpdate {
+  if (incoming === localEcho || incoming === shown) return 'ignore'
+  return focused ? 'defer' : 'apply'
+}
+
 interface Props {
   value: Json
   limits: RichtextLimits
@@ -118,6 +160,10 @@ interface Props {
 
 export function RichTextInput({ value, limits, onChange }: Props) {
   const [linking, setLinking] = useState(false)
+  /** Whether the prose surface itself has focus. See `externalUpdate`. */
+  const [focused, setFocused] = useState(false)
+  /** An external value is being held back while this field has focus. */
+  const [behind, setBehind] = useState(false)
 
   /**
    * Guards the round trip. Every keystroke writes a mutation, which comes back
@@ -132,6 +178,8 @@ export function RichTextInput({ value, limits, onChange }: Props) {
     editorProps: { attributes: { class: 'rt__surface' } },
     // The admin renders on the client only; TipTap warns without this.
     immediatelyRender: false,
+    onFocus: () => setFocused(true),
+    onBlur: () => setFocused(false),
     onUpdate: ({ editor: ed }) => {
       const doc = sanitiseRichtext(ed.getJSON() as RichtextDoc, limits)
       const next = ed.isEmpty ? null : doc
@@ -140,17 +188,29 @@ export function RichTextInput({ value, limits, onChange }: Props) {
     },
   })
 
-  // Applies edits that came from somewhere else: another editor over the
-  // WebSocket, an undo, or a version restore.
+  /**
+   * Applies edits that came from somewhere else: another editor over the
+   * WebSocket, an undo, or a version restore — unless this field has focus, in
+   * which case it waits for the blur rather than resetting the caret under
+   * somebody's hands. `focused` is a dependency, which is what makes the blur
+   * re-run this against whatever the authoritative value is by then.
+   */
   useEffect(() => {
     if (!editor) return
     const incoming = asRichtext(value)
     const serialised = JSON.stringify(incoming)
-    if (serialised === local.current) return
+    const shown = JSON.stringify(asRichtext(editor.getJSON() as RichtextDoc))
+    const decision = externalUpdate(serialised, local.current, shown, focused)
+    if (decision === 'defer') {
+      setBehind(true)
+      return
+    }
+    setBehind(false)
+    // Recorded even when nothing is pushed, exactly as before: the surface
+    // already shows this value, so it is no longer an external change.
     local.current = serialised
-    if (serialised === JSON.stringify(asRichtext(editor.getJSON() as RichtextDoc))) return
-    editor.commands.setContent(incoming ?? '', { emitUpdate: false })
-  }, [editor, value])
+    if (decision === 'apply') editor.commands.setContent(incoming ?? '', { emitUpdate: false })
+  }, [editor, value, focused])
 
   if (!editor) return <div className="rt rt--loading">Loading editor…</div>
 
@@ -252,6 +312,16 @@ export function RichTextInput({ value, limits, onChange }: Props) {
       ) : null}
 
       <EditorContent editor={editor} />
+
+      {/* Said plainly, because the alternative is somebody publishing a version
+          of the prose they were not looking at. It clears itself the moment this
+          field loses focus and the newer value lands. */}
+      {behind ? (
+        <p className="rt__behind">
+          Somebody else changed this text while you were typing. Your copy is behind — click away to
+          see theirs.
+        </p>
+      ) : null}
     </div>
   )
 }
