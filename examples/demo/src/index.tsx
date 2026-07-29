@@ -34,12 +34,28 @@ const folio = createFolio<Env>({
     { name: 'insight', label: 'Insight', kind: 'page', root: 'insightPage', under: ['page'] },
     // Unrouted, and many of them. `titleField` is needed because personRecord
     // has no `title` field for the tree cache to have guessed at.
+    //
+    // content-model/data-documents.md is what makes a record *usable*: the Data
+    // rail lists People with a count, selecting it opens a table whose columns
+    // are personRecord's `indexed` fields, and opening one is a full-width form
+    // with no preview — there is nothing to preview.
     {
       name: 'person',
       label: 'Person',
       kind: 'record',
       root: 'personRecord',
       titleField: 'fullName',
+    },
+    // A second record type, and the one that shows checkpoint 1: `officeRecord`
+    // declares no `render` at all. An office is an address and a phone number,
+    // with no layout of its own, so `officeCard` reads `office.data` and
+    // `office.content` is genuinely null.
+    {
+      name: 'office',
+      label: 'Office',
+      kind: 'record',
+      root: 'officeRecord',
+      titleField: 'city',
     },
     // Unrouted, and exactly one — enforced by the derived id `sng_settings`
     // rather than by a constraint. Created on first access, never by an editor.

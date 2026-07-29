@@ -7,7 +7,7 @@ import { hero } from './hero'
 import { insightList, insightPage } from './insight'
 import { gallery, image } from './media'
 import { page } from './page'
-import { personCard, personRecord } from './person'
+import { leadership, officeCard, officeRecord, personCard, personRecord } from './person'
 import { prose, pullquote } from './prose'
 import { settingsRoot } from './settings'
 
@@ -23,6 +23,10 @@ export const blocks = [
   page,
   insightPage,
   personRecord,
+  // A record with no `render` at all (content-model/data-documents.md
+  // checkpoint 1): an office is pure data, and `officeCard` below is what draws
+  // it. Nothing about the registry treats it differently.
+  officeRecord,
   settingsRoot,
   headerRoot,
   // Content blocks.
@@ -38,5 +42,9 @@ export const blocks = [
   embed,
   section,
   personCard,
+  officeCard,
+  // A `references()` field: a hand-picked, ordered list of people
+  // (data-documents.md decision 3).
+  leadership,
   insightList,
 ]

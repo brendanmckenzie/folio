@@ -35,6 +35,11 @@ export const page = defineBlock({
         'embed',
         'section',
         'personCard',
+        // Two more blocks that read records rather than holding content
+        // (`content-model/data-documents.md`): a hand-picked ordered list of
+        // people, and a reference to a record with no renderer of its own.
+        'leadership',
+        'officeCard',
         // The one block that lists other documents rather than holding content
         // (`content-model/collections.md`), so a page can be an index page.
         'insightList',

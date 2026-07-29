@@ -253,6 +253,27 @@ p { text-wrap: pretty; }
 .person__bio { margin-top: 0.6rem; font-size: 0.9375rem; }
 .person__bio p { margin: 0; }
 
+/* A `references()` field: a hand-picked, ordered list of people
+   (docs/specs/content-model/data-documents.md decision 3). Each item is one
+   person rendered through their own root block, so there is no person markup
+   here — only the list around it. */
+.leadership { max-width: 46rem; padding: 2rem 1.5rem; margin-inline: auto; }
+.leadership__heading { margin: 0 0 1.25rem; font-size: 1.5rem; }
+.leadership__empty { color: var(--muted); font-size: 0.9375rem; }
+.leadership__items { margin: 0; padding: 0; list-style: none; display: grid; gap: 0.75rem; }
+
+/* A reference to a record with NO renderer (checkpoint 1): `office.content` is
+   null, so `officeCard` draws this itself from `office.data`. */
+.office {
+  max-width: 46rem;
+  padding: 1.25rem 1.5rem;
+  margin-inline: auto;
+  border-left: 3px solid var(--line);
+}
+.office__city { margin: 0; font-size: 1.125rem; }
+.office__line { margin: 0.25rem 0 0; font-size: 0.9375rem; }
+.office__hours { margin: 0.5rem 0 0; color: var(--muted); font-size: 0.875rem; }
+
 /* Both globals (content-model/globals.md): rendered by src/index.tsx's <Page>
    via folio.renderGlobal, header above #folio-root and settings-as-footer
    below it — Folio itself has no opinion on where either goes. */
