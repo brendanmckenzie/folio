@@ -63,7 +63,9 @@ export interface CreatedHookPayload<Env> extends HookBase<Env> {
 
 export interface DeletedHookPayload<Env> extends HookBase<Env> {
   ids: string[]
-  paths: string[]
+  /** `ids`' own paths, same order. `null` for an unrouted document
+   * (`document-types.md`), which never had a URL for a cache to hold. */
+  paths: (string | null)[]
 }
 
 export interface CheckpointedHookPayload<Env> extends HookBase<Env> {

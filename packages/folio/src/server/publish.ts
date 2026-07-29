@@ -33,6 +33,15 @@ export interface PublishDeps<Env = unknown> {
    */
   draftWithSyncId: (story: StoryMeta) => Promise<{ doc: Doc; syncId: number }>
   /**
+   * The document's display title, per its own document type's `titleField`
+   * (`document-types.md` architecture decision 3). Injected rather than computed
+   * here for the same reason `draft` is: resolving it needs the block schema and
+   * the `types` config, which only `createRuntime` has. Required, with no
+   * default, because a silently-wrong cached title is exactly the bug this
+   * replaced.
+   */
+  titleFor: (story: StoryMeta, doc: Doc) => string
+  /**
    * Fires the after-commit lifecycle hooks (`publish-hooks.md`). Absent only in
    * tests that exercise a workflow directly with no `createRuntime` behind it —
    * every real caller gets one from `FolioRuntime.publishDeps`.
@@ -76,6 +85,11 @@ export async function publish(
   // `doc` and `syncId` come from one atomic read: see `draftWithSyncId`'s own
   // doc for why two separate calls would race.
   const { doc, syncId } = await deps.draftWithSyncId(meta)
+  // Resolved once and used for both writes, so the cached tree title and the
+  // retained version's title can never disagree about what the document is
+  // called (`document-types.md`'s acceptance criterion "Titles come from the
+  // type").
+  const resolvedTitle = deps.titleFor(meta, doc)
   // Every publish is a retained version, so "restore what was live before" is
   // always possible. The version row and the stories.published_doc update
   // land in one batch: run separately, a failure between the two could leave
@@ -86,13 +100,13 @@ export async function publish(
     kind: 'publish',
     doc,
     actor,
-    fallbackTitle: meta.title,
+    title: resolvedTitle,
   })
   const {
     publishedAt,
     title,
     statement: publishStatement,
-  } = publishStoryStatement(deps.db, storyId, doc, meta.title, syncId)
+  } = publishStoryStatement(deps.db, storyId, doc, resolvedTitle, syncId)
   await deps.db.batch([versionStatement, publishStatement])
 
   // Built from `meta` plus the writes just committed, rather than re-read: the
@@ -168,14 +182,15 @@ export async function checkpoint(
 ): Promise<VersionMeta> {
   const meta = await requireStory(deps.db, story)
   const actor = input.actor ?? null
+  const doc = await deps.draft(meta)
 
   const version = await writeVersion(deps.db, {
     storyId: meta.id,
     kind: 'checkpoint',
-    doc: await deps.draft(meta),
+    doc,
     label: input.label ?? null,
     actor,
-    fallbackTitle: meta.title,
+    title: deps.titleFor(meta, doc),
   })
   await deps.hooks?.run('checkpointed', { story: meta, version, actor })
 

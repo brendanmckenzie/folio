@@ -806,6 +806,7 @@ interface Env {
 
 const STORY = {
   id: 'sty_x',
+  type: 'page',
   parentId: null,
   slug: 'x',
   path: 'x',

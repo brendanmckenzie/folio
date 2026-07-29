@@ -27,6 +27,7 @@ import type { AssetValue } from '../../../src/core/values'
 function story(overrides: Partial<StoryMeta> = {}): StoryMeta {
   return {
     id: 'sty_home',
+    type: 'page',
     parentId: null,
     slug: 'home',
     path: 'home',
@@ -120,6 +121,46 @@ describe('resolveLink', () => {
   it('returns null for a value that is not a recognised link', () => {
     expect(resolveLink(undefined, resolution)).toBeNull()
     expect(resolveLink({ kind: 'nonsense' }, resolution)).toBeNull()
+  })
+
+  // document-types.md architecture decision 5: "there is no URL for this" and
+  // "this URL is gone" are the same problem for an editor, so both come back
+  // `broken` rather than one of them silently emitting an href.
+  describe('unrouted and wrong-type story targets', () => {
+    const withRecord = buildResolution([
+      story({ id: 'sty_home', type: 'page', path: 'home', title: 'Home' }),
+      story({ id: 'sty_ada', type: 'person', path: null, title: 'Ada Lovelace' }),
+    ])
+
+    it('marks a link to an unrouted document broken, keeping its title for the editor', () => {
+      expect(resolveLink({ kind: 'story', id: 'sty_ada' }, withRecord)).toEqual({
+        kind: 'story',
+        href: '#',
+        broken: true,
+        title: 'Ada Lovelace',
+      })
+    })
+
+    it('marks a link broken when the field’s own `types` does not allow the target', () => {
+      expect(resolveLink({ kind: 'story', id: 'sty_home' }, withRecord, ['insight'])).toEqual({
+        kind: 'story',
+        href: '#',
+        broken: true,
+        title: 'Home',
+      })
+    })
+
+    it('resolves normally when the target’s type is allowed', () => {
+      expect(resolveLink({ kind: 'story', id: 'sty_home' }, withRecord, ['page'])?.href).toBe(
+        '/home',
+      )
+    })
+
+    it('keeps target/rel on a broken link, so an editor’s own settings survive the fix', () => {
+      expect(
+        resolveLink({ kind: 'story', id: 'sty_ada', target: '_blank' }, withRecord),
+      ).toMatchObject({ broken: true, target: '_blank', rel: 'noopener noreferrer' })
+    })
   })
 
   describe('windowing (target/rel defaulting)', () => {
@@ -377,6 +418,83 @@ describe('resolveReference (one level deep)', () => {
     // cannot itself resolve and the recursion stops there.
     const oneLevelDown: Resolution = { ...resolution, docs: {} }
     expect(resolveReference('sty_about', oneLevelDown)).toBeNull()
+  })
+
+  // document-types.md architecture decision 5: `reference({ types })` narrows
+  // the admin's picker *and* is re-checked here, because content can also
+  // arrive from an importer or over the API — a value pointing at the wrong
+  // kind of document has to be visible rather than render something strange.
+  describe('type filtering', () => {
+    it('resolves a target whose type the field allows', () => {
+      expect(resolveReference('sty_about', resolution, ['page'])?.id).toBe('sty_about')
+    })
+
+    it('returns null for a target of the wrong type, exactly like a deleted one', () => {
+      expect(resolveReference('sty_about', resolution, ['form'])).toBeNull()
+    })
+
+    it('offers every type when the field names none', () => {
+      expect(resolveReference('sty_about', resolution, undefined)?.id).toBe('sty_about')
+    })
+
+    it('resolves an unrouted target: a reference to a record wants its data, not a URL', () => {
+      const person = story({ id: 'sty_ada', type: 'person', path: null, title: 'Ada' })
+      const personDoc: Doc = {
+        root: 'p',
+        bloks: {
+          p: {
+            uid: 'p',
+            type: 'personRecord',
+            parent: null,
+            slot: null,
+            order: 'a0',
+            data: { fullName: 'Ada Lovelace' },
+          },
+        },
+      }
+      const res: Resolution = {
+        ...buildResolution([person]),
+        docs: { sty_ada: personDoc },
+      }
+      const resolved = resolveReference('sty_ada', res, ['person'])
+      expect(resolved).toMatchObject({ id: 'sty_ada', title: 'Ada', path: '', url: '' })
+      expect(resolved?.data).toEqual({ fullName: 'Ada Lovelace' })
+    })
+  })
+})
+
+describe('buildResolution: type and routable', () => {
+  it('carries the document type through and marks a routed story routable', () => {
+    const res = buildResolution([story({ id: 'sty_a', type: 'insight', path: 'insights/one' })])
+    expect(res.stories.sty_a).toMatchObject({
+      type: 'insight',
+      routable: true,
+      path: 'insights/one',
+      url: '/insights/one',
+    })
+  })
+
+  it('still maps an unrouted story — a reference needs its title — but with no URL', () => {
+    const res = buildResolution([story({ id: 'sty_r', type: 'person', path: null, title: 'Ada' })])
+    // `''` rather than null: StoryRef.url is a published type host code reads,
+    // and `routable` is the field to test (architecture decision 6).
+    expect(res.stories.sty_r).toEqual({
+      id: 'sty_r',
+      type: 'person',
+      routable: false,
+      path: '',
+      url: '',
+      title: 'Ada',
+    })
+  })
+
+  it('prefers a server-filled url over deriving one, for a routed story only', () => {
+    const res = buildResolution([
+      story({ id: 'sty_a', path: 'about', url: 'https://site.test/about' }),
+      story({ id: 'sty_r', path: null, url: 'https://site.test/leaked' }),
+    ])
+    expect(res.stories.sty_a?.url).toBe('https://site.test/about')
+    expect(res.stories.sty_r?.url).toBe('')
   })
 })
 

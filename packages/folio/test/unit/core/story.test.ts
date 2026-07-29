@@ -17,6 +17,7 @@ function meta(overrides: Partial<StoryMeta> & { id: string }): StoryMeta {
   const publishedSyncId = overrides.publishedSyncId ?? 0
   const state = draftState(publishedAt, unpublishedAt, draftSyncId, publishedSyncId)
   return {
+    type: 'page',
     parentId: null,
     slug: overrides.id,
     path: overrides.id,
@@ -81,6 +82,35 @@ describe('buildTree', () => {
     const reversed = buildTree([b, a]).map((n) => n.id)
     expect(forward).toEqual(reversed)
   })
+
+  // document-types.md checkpoint 2: records and singletons leave the page tree
+  // entirely, which is what makes `GET /folio/stories` page-types-only without a
+  // `where` clause of its own.
+  describe('with unrouted rows present', () => {
+    it('drops them rather than surfacing them as extra top-level nodes', () => {
+      const rows = [
+        meta({ id: 'home', ord: 'a0', slug: '', path: '' }),
+        meta({ id: 'ada', type: 'person', path: null, ord: 'a0' }),
+        meta({ id: 'about', ord: 'a1' }),
+        meta({ id: 'settings', type: 'settings', path: null, ord: 'a1' }),
+      ]
+      expect(buildTree(rows).map((n) => n.id)).toEqual(['home', 'about'])
+    })
+
+    it('drops a routed row that names an unrouted one as its parent from that parent’s place, keeping it as a root', () => {
+      // An unrouted row is not in the tree, so nothing can nest under it; the
+      // child falls back to being a root, the same as any orphan.
+      const rows = [
+        meta({ id: 'ada', type: 'person', path: null }),
+        meta({ id: 'child', parentId: 'ada' }),
+      ]
+      expect(buildTree(rows).map((n) => n.id)).toEqual(['child'])
+    })
+
+    it('returns an empty tree when every row is unrouted', () => {
+      expect(buildTree([meta({ id: 'ada', type: 'person', path: null })])).toEqual([])
+    })
+  })
 })
 
 describe('derivePaths', () => {
@@ -133,6 +163,41 @@ describe('derivePaths', () => {
     const paths = derivePaths(rows)
     expect(paths.get('a')).toBe('alpha/beta/alpha')
     expect(paths.get('b')).toBe('alpha/beta')
+  })
+
+  // document-types.md checkpoint 2: an unrouted document has no ancestor chain
+  // to derive from, so it is absent from the map rather than mapped to
+  // something. A caller writing `paths.get(id) ?? row.path` therefore keeps its
+  // null, which is what stops a rename writing a path onto a record.
+  describe('with unrouted rows interleaved', () => {
+    const rows = [
+      meta({ id: 'root', slug: '' }),
+      meta({ id: 'ada', type: 'person', path: null, slug: 'ada', parentId: null }),
+      meta({ id: 'about', parentId: 'root', slug: 'about' }),
+      meta({ id: 'settings', type: 'settings', path: null, slug: 'settings', parentId: null }),
+      meta({ id: 'team', parentId: 'about', slug: 'team' }),
+    ]
+
+    it('derives every routed path exactly as if the unrouted rows were not there', () => {
+      const paths = derivePaths(rows)
+      expect(paths.get('root')).toBe('')
+      expect(paths.get('about')).toBe('about')
+      expect(paths.get('team')).toBe('about/team')
+    })
+
+    it('omits the unrouted rows entirely', () => {
+      const paths = derivePaths(rows)
+      expect(paths.has('ada')).toBe(false)
+      expect(paths.has('settings')).toBe(false)
+      expect([...paths.keys()].sort()).toEqual(['about', 'root', 'team'])
+    })
+
+    it('never treats an unrouted row as a parent, even if something names it', () => {
+      // Only reachable by a hand-written statement, but the derivation must not
+      // build a path through a document that has none.
+      const stray = [...rows, meta({ id: 'stray', parentId: 'ada', slug: 'stray' })]
+      expect(derivePaths(stray).get('stray')).toBe('stray')
+    })
   })
 })
 

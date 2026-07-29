@@ -7,7 +7,11 @@
 -- db:seed`, after `pnpm db:local`. scripts/seed-demo.mjs seeds the actual
 -- content (a full field-type showcase) through the API instead, which is safe
 -- to rerun and doesn't care whether this file has been run.
-insert into stories (id, parent_id, slug, path, ord, title) values
-  ('sty_home',  null,        '',      '',           'a0', 'Home'),
-  ('sty_about', null,        'about', 'about',      'a1', 'About'),
-  ('sty_team',  'sty_about', 'team',  'about/team', 'a0', 'Our team');
+-- `type` is named explicitly rather than left to 0006's `default 'page'`: this
+-- file is also the workers-test fixture (test/workers/seed-fixture.ts), so it is
+-- where a mistake about which document type a seeded row belongs to would show
+-- up first.
+insert into stories (id, type, parent_id, slug, path, ord, title) values
+  ('sty_home',  'page', null,        '',      '',           'a0', 'Home'),
+  ('sty_about', 'page', null,        'about', 'about',      'a1', 'About'),
+  ('sty_team',  'page', 'sty_about', 'team',  'about/team', 'a0', 'Our team');

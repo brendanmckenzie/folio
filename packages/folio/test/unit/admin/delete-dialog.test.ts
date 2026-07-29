@@ -4,6 +4,7 @@ import type { StoryMeta } from '../../../src/core/story'
 
 function meta(overrides: Partial<StoryMeta> & { id: string }): StoryMeta {
   return {
+    type: 'page',
     parentId: null,
     slug: overrides.id,
     path: overrides.id,

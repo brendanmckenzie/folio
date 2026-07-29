@@ -10,7 +10,17 @@
 import { toManifest, toRegistry, toSchemaIndex, type Registry } from '../core/block'
 import type { Doc } from '../core/doc'
 import { buildResolution, referencedIds, type Resolution } from '../core/resolve'
-import { blankSubtree, type Manifest, validatePresets } from '../core/schema'
+import {
+  blankSubtree,
+  defaultType,
+  type DocumentType,
+  type Manifest,
+  titleFieldOf,
+  titleOf,
+  typeByName,
+  validatePresets,
+  validateTypes,
+} from '../core/schema'
 import type { StoryMeta, StoryNode } from '../core/story'
 import { createHookRunner, type FolioHooks, type HookRunnerCtx, validateHooks } from './hooks'
 import type { PublishDeps } from './publish'
@@ -29,6 +39,15 @@ export interface FolioRuntime {
   registry: Registry
   /** What `GET {base}/schema` answers. Contains no functions. */
   manifest: Manifest
+  /** Every declared document type, with `root` sugar already expanded. */
+  types: readonly DocumentType[]
+  /** A declared type by name, or undefined — a row whose type was removed from
+   * the code still reads, it just has no schema to render ("Unknown type"). */
+  typeOf: (name: string | undefined) => DocumentType | undefined
+  /** The type a bare "New page" creates. */
+  defaultType: DocumentType
+  /** What a document is called, per its type's `titleField`. */
+  titleFor: (story: StoryMeta, doc: Doc) => string
   /** Where the routes are mounted, with no trailing slash. */
   base: string
   /** True when a Vite dev client is configured, so the pages ship the preamble. */
@@ -65,6 +84,29 @@ export interface FolioRuntime {
   page: (which: 'admin' | 'preview') => PageAssets
 }
 
+/**
+ * `types`, with the `root: 'page'` sugar expanded (`document-types.md`
+ * architecture decision 1). Mutually exclusive: both keys, or neither, is a
+ * config mistake that throws here rather than turning into a 500 on whichever
+ * route reaches it first.
+ */
+export function documentTypes<Env>(config: FolioConfig<Env>): readonly DocumentType[] {
+  if (config.types && config.root !== undefined) {
+    throw new Error(
+      "folio: pass either `types` or `root`, not both — `root` is sugar for one 'page' type",
+    )
+  }
+  if (config.types) return config.types
+  if (config.root !== undefined) {
+    // `name: 'page'` regardless of the root block's own name: that is the value
+    // 0006 defaults every existing row's `type` column to.
+    return [{ name: 'page', label: 'Page', kind: 'page', root: config.root }]
+  }
+  throw new Error(
+    'folio: no document types configured — pass `types` (or `root` for a single page type)',
+  )
+}
+
 export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const registry = toRegistry(config.blocks)
   const schema = toSchemaIndex(registry)
@@ -72,9 +114,16 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // unknown type or slot, a disallowed child, a cycle) is a config mistake,
   // not a runtime surprise a caller discovers three requests later.
   validatePresets(schema)
+  // Same timing, same reason, and the same for `types`: an unknown root block,
+  // two defaults, a duplicate name or an `under` chain that never reaches the
+  // top level all throw here (`../foundation/document-types.md`).
+  const types = documentTypes(config)
+  validateTypes(types, schema)
   // Same timing, same reason: a typo in `hooks` (or in `await`) should fail
   // loudly once, not silently never fire (`../platform/publish-hooks.md`).
   validateHooks(config.hooks)
+  const typeOf = (name: string | undefined) => typeByName(types, name)
+  const fallbackType = defaultType(types)
   const base = config.basePath ?? DEFAULT_BASE
   const route = config.route ?? ((path: string) => `/${path}`)
   const assetBase = `${base}/asset`
@@ -84,32 +133,38 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     return `${url}${url.includes('?') ? '&' : '?'}_folio=preview`
   }
 
-  const withUrls = <T extends StoryMeta>(story: T): T => ({
-    ...story,
-    url: route(story.path),
-    previewUrl: previewUrlFor(story.path),
-  })
+  /**
+   * An unrouted document is handed back untouched: it has no path, so there is
+   * no public URL and no preview URL to build (`document-types.md` architecture
+   * decision 2). `url`/`previewUrl` stay absent rather than becoming `''`, so
+   * nothing can accidentally navigate to one.
+   */
+  const withUrls = <T extends StoryMeta>(story: T): T =>
+    story.path === null
+      ? story
+      : { ...story, url: route(story.path), previewUrl: previewUrlFor(story.path) }
 
   const decorate = (nodes: StoryNode[]): StoryNode[] =>
     nodes.map((n) => ({ ...withUrls(n), children: decorate(n.children) }))
 
-  // A starting document is just the root block's own 'default' preset
-  // (field-defaults-and-presets.md, decision 3) — no template config key of
-  // its own. A root with no such preset seeds a bare root, exactly as before
-  // this spec.
-  const hasDefaultPreset = schema[config.root]?.presets?.some((p) => p.name === 'default') ?? false
-
-  const seed = (title: string): Doc => {
-    const bloks = blankSubtree(
-      schema,
-      config.root,
-      null,
-      null,
-      'a0',
-      hasDefaultPreset ? 'default' : undefined,
-    )
+  /**
+   * A starting document for one document type: its root block's own 'default'
+   * preset (field-defaults-and-presets.md, decision 3) — no template config key
+   * of its own. A root with no such preset seeds a bare root, exactly as before
+   * that spec.
+   *
+   * The title is written into the *type's* title field rather than always
+   * `title`, so a `person` record whose root has `fullName` and no `title` gets
+   * its name where the schema actually keeps it (`titleFieldOf`).
+   */
+  const seed = (type: DocumentType | undefined, title: string): Doc => {
+    const t = type ?? fallbackType
+    const def = schema[t.root]
+    const preset = def?.presets?.some((p) => p.name === 'default') ? 'default' : undefined
+    const bloks = blankSubtree(schema, t.root, null, null, 'a0', preset)
     const root = bloks[0]!
-    if ('title' in root.data) root.data.title = title
+    const field = titleFieldOf(t, def)
+    if (field && field in root.data) root.data[field] = title
     return { root: root.uid, bloks: Object.fromEntries(bloks.map((b) => [b.uid, b])) }
   }
 
@@ -117,15 +172,23 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     story.get(story.idFromName(id)) as unknown as StoryStub
 
   const draftFor = (bindings: FolioBindings, story: StoryMeta) =>
-    stub(bindings, story.id).getOrInit(seed(story.title))
+    stub(bindings, story.id).getOrInit(seed(typeOf(story.type), story.title))
 
   const draftForWithSyncId = (bindings: FolioBindings, story: StoryMeta) =>
-    stub(bindings, story.id).getOrInitWithSyncId(seed(story.title))
+    stub(bindings, story.id).getOrInitWithSyncId(seed(typeOf(story.type), story.title))
 
   const draft = async (bindings: FolioBindings, id: string) => {
     const meta = await storyById(bindings.db, id)
-    return stub(bindings, id).getOrInit(seed(meta?.title ?? 'Untitled'))
+    return stub(bindings, id).getOrInit(seed(typeOf(meta?.type), meta?.title ?? 'Untitled'))
   }
+
+  /**
+   * What a document is called, from its own type's title field, falling back to
+   * the row's cached title rather than to the literal `'Untitled'`: the row is
+   * the better answer for a root block that offers no title field at all.
+   */
+  const titleFor = (story: StoryMeta, doc: Doc) =>
+    titleOf(doc, typeOf(story.type), schema, story.title)
 
   /**
    * One D1 query for the story map, the same one the tree already runs, plus one
@@ -171,6 +234,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     db: bindings.db,
     draft: (story) => draftFor(bindings, story),
     draftWithSyncId: (story) => draftForWithSyncId(bindings, story),
+    titleFor,
     hooks: createHookRunner<Env>(
       config.hooks,
       { env: hookCtx.env as Env, waitUntil: hookCtx.waitUntil },
@@ -200,7 +264,11 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
 
   return {
     registry,
-    manifest: toManifest(registry, config.root),
+    manifest: toManifest(registry, types),
+    types,
+    typeOf,
+    defaultType: fallbackType,
+    titleFor,
     base,
     dev: Boolean(config.assets?.devClient),
     withUrls,

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { matches } from '../core/conditions'
 import type { Blok, Json } from '../core/doc'
 import type { Field } from '../core/fields'
+import type { StoryNode } from '../core/story'
 import { AssetInput, MultiAssetInput } from './AssetInput'
 import { useFolio } from './FolioContext'
 import { LinkInput } from './LinkInput'
@@ -49,6 +50,27 @@ export function visibleEntries(
   return Object.entries(fields).filter(
     ([, f]) => f.kind !== 'blocks' && !f.hidden && (!f.showIf || matches(f.showIf, data)),
   )
+}
+
+/**
+ * The documents a `reference` field offers: narrowed by `field.types`, sorted so
+ * routed documents come first by path and unrouted ones by title. Unlike a link,
+ * a reference *may* point at a record — pulling a person's details into a card
+ * is the whole point — so nothing is excluded for being unrouted.
+ *
+ * Pure and exported so the filter is tested without mounting the inspector.
+ */
+export function referenceCandidates(
+  stories: readonly StoryNode[],
+  types?: readonly string[],
+): StoryNode[] {
+  return stories
+    .filter((s) => !types || types.includes(s.type))
+    .sort((a, b) =>
+      a.path === null || b.path === null
+        ? (a.path === null ? 1 : 0) - (b.path === null ? 1 : 0) || a.title.localeCompare(b.title)
+        : a.path.localeCompare(b.path),
+    )
 }
 
 export function Inspector({
@@ -175,7 +197,13 @@ function FieldInput({
           onChange={(e) => onChange(e.target.valueAsNumber || 0)}
         />
       ) : field.kind === 'multilink' ? (
-        <LinkInput id={id} value={value} allow={field.allow} onChange={onChange} />
+        <LinkInput
+          id={id}
+          value={value}
+          allow={field.allow}
+          types={field.types}
+          onChange={onChange}
+        />
       ) : field.kind === 'reference' ? (
         <select
           id={id}
@@ -183,13 +211,12 @@ function FieldInput({
           onChange={(e) => onChange(e.target.value || null)}
         >
           <option value="">Nothing selected</option>
-          {[...stories]
-            .sort((a, b) => a.path.localeCompare(b.path))
-            .map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.title} — /{s.path}
-              </option>
-            ))}
+          {referenceCandidates(stories, field.types).map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.title}
+              {s.path === null ? '' : ` — /${s.path}`}
+            </option>
+          ))}
         </select>
       ) : field.kind === 'richtext' ? (
         <RichTextInput value={value} limits={field} onChange={onChange} />

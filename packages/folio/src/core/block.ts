@@ -1,6 +1,12 @@
 import type { ReactNode } from 'react'
 import type { Field, PropsOf } from './fields'
-import type { BlockSchema, Manifest, SchemaIndex } from './schema'
+import {
+  type BlockSchema,
+  defaultType,
+  type DocumentType,
+  type Manifest,
+  type SchemaIndex,
+} from './schema'
 
 /**
  * Schema and renderer in one place. The admin form, the TypeScript prop types
@@ -51,7 +57,20 @@ export function toSchemaIndex(registry: Registry): SchemaIndex {
   )
 }
 
-/** What `/api/folio/schema` returns. Contains no functions, so it is cacheable. */
-export function toManifest(registry: Registry, root: string): Manifest {
-  return { root, blocks: Object.values(toSchemaIndex(registry)) }
+/**
+ * What `/api/folio/schema` returns. Contains no functions, so it is cacheable.
+ *
+ * Takes the whole set of document types rather than the single root block name
+ * it took before `document-types.md`: `root` is still emitted, as the *default*
+ * page type's root block, so a consumer written against the old manifest keeps
+ * reading the same value. The `root: 'page'` config sugar is expanded into a
+ * one-element `types` array server-side (`server/runtime.ts`), so this function
+ * never sees the string form.
+ */
+export function toManifest(registry: Registry, types: readonly DocumentType[]): Manifest {
+  return {
+    types: [...types],
+    blocks: Object.values(toSchemaIndex(registry)),
+    root: defaultType(types).root,
+  }
 }

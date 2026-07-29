@@ -1,9 +1,18 @@
 import { compareSiblings, type Doc, keyAtIndex } from '../core/doc'
 import {
+  canNest,
+  type DocumentType,
+  isRouted,
+  SINGLETON_PREFIX,
+  singletonId,
+  typeByName,
+} from '../core/schema'
+import {
   buildTree,
   derivePaths,
   descendants,
   draftState,
+  joinPath,
   newStoryId,
   slugify,
   storyState,
@@ -12,7 +21,7 @@ import {
 } from '../core/story'
 import { clearRedirectAtStatement, redirectStatements } from './redirects'
 
-const COLS = `id, parent_id as parentId, slug, path, ord, title,
+const COLS = `id, type, parent_id as parentId, slug, path, ord, title,
               published_at as publishedAt, unpublished_at as unpublishedAt,
               updated_at as updatedAt, draft_sync_id as draftSyncId,
               draft_updated_at as draftUpdatedAt, published_sync_id as publishedSyncId`
@@ -38,10 +47,40 @@ export async function listStories(db: D1Database): Promise<StoryMeta[]> {
   return results.map(withState)
 }
 
+/**
+ * The page tree. `buildTree` drops unrouted rows, so this is `page`-kind types
+ * only without a `where` clause of its own — the same list every reader of the
+ * tree gets (`document-types.md`). `listDocuments` is the unrouted counterpart.
+ */
 export async function storyTree(db: D1Database): Promise<StoryNode[]> {
   return buildTree(await listStories(db))
 }
 
+/**
+ * A flat list of one type's documents, for the admin's Data section and the
+ * content API (`GET /folio/documents?type=person`). Querying, filtering and
+ * pagination over a type belong to `../content-model/collections.md`; this is
+ * the minimum an admin list needs and nothing more.
+ *
+ * With no `type`, every *unrouted* document across every type — what the admin
+ * loads in one request to render the whole Data section. With a `type`, that
+ * type's rows whether they are routed or not, so a second page type's flat list
+ * is available too.
+ */
+export async function listDocuments(db: D1Database, type?: string): Promise<StoryMeta[]> {
+  const { results } = type
+    ? await db.prepare(`select ${COLS} from stories where type = ?`).bind(type).all<StoryRow>()
+    : await db.prepare(`select ${COLS} from stories where path is null`).all<StoryRow>()
+  return results.map(withState).sort((a, b) => compareSiblings(a.ord, a.id, b.ord, b.id))
+}
+
+/**
+ * The one routing lookup. Needs no `path is not null` guard: an unrouted row
+ * stores NULL, and SQL equality never matches NULL, so a record can never be
+ * reached by path however it is spelled — which is exactly what
+ * `document-types.md` checkpoint 2 buys. Same for `storyStatus` and
+ * `publishedDoc` below.
+ */
 export async function storyByPath(db: D1Database, path: string): Promise<StoryMeta | null> {
   const row = await db
     .prepare(`select ${COLS} from stories where path = ?`)
@@ -113,20 +152,35 @@ export async function publishedDocsByIds(
 }
 
 /**
- * Fractional key placing a story at `index` among the children of `parentId`.
+ * The set of rows a document's `slug` must be unique within and its `ord` is
+ * ordered against — the two things that differ between a routed and an unrouted
+ * document, named once so `orderAt` and `uniqueSlug` share one definition and
+ * the two partial unique indexes in `migrations/0006_document_types.sql` have an
+ * exact counterpart in code.
+ *
+ * A routed document is grouped by its parent (`stories_parent_slug`); an
+ * unrouted one by its type (`stories_type_slug`), because every unrouted row
+ * carries `parent_id = null` and grouping those by parent would make a hundred
+ * records collide with each other and with every top-level page.
+ */
+type SiblingGroup = { routed: true; parentId: string | null } | { routed: false; type: string }
+
+function inGroup(row: StoryMeta, group: SiblingGroup): boolean {
+  return group.routed
+    ? row.path !== null && row.parentId === group.parentId
+    : row.path === null && row.type === group.type
+}
+
+/**
+ * Fractional key placing a story at `index` among its siblings.
  *
  * Sorted through `compareSiblings`, the comparator `buildTree` uses, so the sibling
  * list an index counts into is the one the user was looking at. A raw comparator
  * returns 0 on tied `ord` values and leaves the two orders free to disagree.
  */
-function orderAt(
-  rows: readonly StoryMeta[],
-  parentId: string | null,
-  index: number,
-  ignore?: string,
-) {
+function orderAt(rows: readonly StoryMeta[], group: SiblingGroup, index: number, ignore?: string) {
   const sibs = rows
-    .filter((r) => r.parentId === parentId && r.id !== ignore)
+    .filter((r) => inGroup(r, group) && r.id !== ignore)
     .sort((a, b) => compareSiblings(a.ord, a.id, b.ord, b.id))
   return keyAtIndex(
     sibs.map((r) => r.ord),
@@ -136,13 +190,11 @@ function orderAt(
 
 function uniqueSlug(
   rows: readonly StoryMeta[],
-  parentId: string | null,
+  group: SiblingGroup,
   wanted: string,
   ignore?: string,
 ) {
-  const taken = new Set(
-    rows.filter((r) => r.parentId === parentId && r.id !== ignore).map((r) => r.slug),
-  )
+  const taken = new Set(rows.filter((r) => inGroup(r, group) && r.id !== ignore).map((r) => r.slug))
   if (!taken.has(wanted)) return wanted
   for (let n = 2; ; n++) {
     const candidate = `${wanted}-${n}`
@@ -150,22 +202,67 @@ function uniqueSlug(
   }
 }
 
+/**
+ * The `under` refusal, worded once: it is thrown from creation *and* from a
+ * move, because constraining one without the other means a tree can be dragged
+ * into a shape the same config refuses to create (`document-types.md`'s
+ * resolved open question). `errors.ts` maps it to a 400, so the notice reaches
+ * the editor rather than the move silently doing nothing.
+ */
+function underError(type: DocumentType): Error {
+  return new Error(
+    `A '${type.name}' document is only allowed under: ${(type.under ?? []).join(', ')}`,
+  )
+}
+
+export interface CreateStoryInput {
+  title: string
+  slug?: string
+  parentId?: string | null
+  /**
+   * Which shape of document this is. A `page` kind lands in the tree with a
+   * derived path; anything else is created unrouted, with `parent_id` and `path`
+   * both null.
+   */
+  type: DocumentType
+}
+
+/**
+ * `types` is the whole declared set, needed only so a prospective parent's own
+ * type can be resolved for the `under` check. Defaulted to empty so a caller
+ * with no `under` constraint to enforce can leave it off.
+ */
 export async function createStory(
   db: D1Database,
-  input: { title: string; slug?: string; parentId?: string | null },
+  input: CreateStoryInput,
+  types: readonly DocumentType[] = [],
 ): Promise<StoryMeta> {
   const rows = await listStories(db)
-  const parentId = input.parentId ?? null
-  if (parentId && !rows.some((r) => r.id === parentId)) throw new Error('Unknown parent')
+  const type = input.type
+  const routed = isRouted(type)
 
-  const slug = uniqueSlug(rows, parentId, slugify(input.slug || input.title))
-  const parentPath = parentId ? (rows.find((r) => r.id === parentId)?.path ?? '') : ''
+  if (!routed && input.parentId) throw new Error('An unrouted document cannot have a parent')
+
+  const parentId = routed ? (input.parentId ?? null) : null
+  const parent = parentId ? rows.find((r) => r.id === parentId) : undefined
+  if (parentId && !parent) throw new Error('Unknown parent')
+  // A record has no path, so nothing beneath it could derive one.
+  if (parent && parent.path === null) {
+    throw new Error('Cannot create a page under an unrouted document')
+  }
+  if (routed && !canNest(type, typeByName(types, parent?.type))) throw underError(type)
+
+  const group: SiblingGroup = routed
+    ? { routed: true, parentId }
+    : { routed: false, type: type.name }
+  const slug = uniqueSlug(rows, group, slugify(input.slug || input.title))
   const story: StoryMeta = {
     id: newStoryId(),
+    type: type.name,
     parentId,
     slug,
-    path: parentPath ? `${parentPath}/${slug}` : slug,
-    ord: orderAt(rows, parentId, rows.filter((r) => r.parentId === parentId).length),
+    path: routed ? joinPath(parent?.path ?? '', slug) : null,
+    ord: orderAt(rows, group, rows.filter((r) => inGroup(r, group)).length),
     title: input.title.trim() || 'Untitled',
     publishedAt: null,
     unpublishedAt: null,
@@ -181,25 +278,62 @@ export async function createStory(
   // claims (redirects.md's edge case "a path vacated and reoccupied by a
   // different story"): batched with the insert so the new page is reachable
   // the instant it exists, never shadowed by a stale row at the host level.
-  await db.batch([
-    db
-      .prepare(
-        `insert into stories (id, parent_id, slug, path, ord, title, updated_at)
-         values (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        story.id,
-        story.parentId,
-        story.slug,
-        story.path,
-        story.ord,
-        story.title,
-        story.updatedAt,
-      ),
-    clearRedirectAtStatement(db, story.path),
-  ])
+  // An unrouted document claims no path, so there is nothing to clear.
+  const insert = db
+    .prepare(
+      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at)
+       values (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(
+      story.id,
+      story.type,
+      story.parentId,
+      story.slug,
+      story.path,
+      story.ord,
+      story.title,
+      story.updatedAt,
+    )
+  await db.batch(
+    story.path === null ? [insert] : [insert, clearRedirectAtStatement(db, story.path)],
+  )
 
   return story
+}
+
+/**
+ * The row for a singleton, created on first access (`document-types.md`
+ * architecture decision 7). An editor never creates or deletes one: a singleton
+ * exists because the schema says it does, and deleting it would only mean it
+ * comes back empty.
+ *
+ * The id is derived (`sng_<type>`), which is what makes a second one
+ * unrepresentable — there is no other id it could be created under, so no
+ * uniqueness constraint is needed to enforce "exactly one".
+ * `on conflict do nothing` handles two concurrent first accesses: the loser's
+ * insert is a no-op and both then read the same row.
+ */
+export async function ensureSingleton(db: D1Database, type: DocumentType): Promise<StoryMeta> {
+  if (type.kind !== 'singleton') {
+    throw new Error(`Document type '${type.name}' is not a singleton`)
+  }
+  const id = singletonId(type)
+  const existing = await storyById(db, id)
+  if (existing) return existing
+
+  const now = Date.now()
+  await db
+    .prepare(
+      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at)
+       values (?, ?, null, ?, null, 'a0', ?, ?)
+       on conflict (id) do nothing`,
+    )
+    .bind(id, type.name, type.name, type.label, now)
+    .run()
+
+  const row = await storyById(db, id)
+  if (!row) throw new Error(`Could not create the '${type.name}' singleton`)
+  return row
 }
 
 /**
@@ -229,16 +363,35 @@ export async function duplicateStory(
   db: D1Database,
   id: string,
   patch: { title?: string; parentId?: string | null },
+  /** Required, unlike everywhere else this appears: the source's own type is
+   * what says whether it is a singleton, and duplicating one has to be refused.
+   * A default would turn a caller's omission into a runtime throw. */
+  types: readonly DocumentType[],
 ): Promise<StoryMeta> {
   const source = await storyById(db, id)
   if (!source) throw new Error('Unknown story')
 
+  const type = typeByName(types, source.type)
+  if (!type) throw new Error(`Unknown document type: ${source.type}`)
+  // The debt `duplicate-and-paste.md` deferred to this spec: there is exactly
+  // one of a singleton by definition, so a second copy is not a document its
+  // own schema can describe. Refused here rather than at the route so a direct
+  // caller cannot route around it.
+  if (type.kind === 'singleton') throw new Error('Cannot duplicate a singleton document')
+
   const title = patch.title?.trim() || `${source.title} (copy)`
-  return createStory(db, {
-    title,
-    slug: source.slug,
-    parentId: patch.parentId !== undefined ? patch.parentId : source.parentId,
-  })
+  return createStory(
+    db,
+    {
+      title,
+      slug: source.slug,
+      // An unrouted source has no parent to be a sibling of; `createStory`
+      // refuses a parent for it anyway, so this is only ever read for a page.
+      parentId: patch.parentId !== undefined ? patch.parentId : source.parentId,
+      type,
+    },
+    types,
+  )
 }
 
 /**
@@ -267,41 +420,87 @@ export interface PathChange {
  * enough to do in JS at any realistic page count, and much easier to get
  * right than a recursive CTE.
  */
+export interface StoryPatch {
+  title?: string
+  slug?: string
+  parentId?: string | null
+  index?: number
+  /**
+   * Accepted only when it matches the row's existing type, so a client that
+   * round-trips a whole story object is not punished for it. An actual change is
+   * refused: moving a document between types is a schema migration, which needs
+   * the `retype` mutation `../platform/schema-migrations.md` adds.
+   */
+  type?: string
+}
+
 export async function updateStoryStatement(
   db: D1Database,
   id: string,
-  patch: { title?: string; slug?: string; parentId?: string | null; index?: number },
+  patch: StoryPatch,
+  types: readonly DocumentType[] = [],
 ): Promise<{ next: StoryMeta; statements: D1PreparedStatement[]; changes: PathChange[] }> {
   const rows = await listStories(db)
   const current = rows.find((r) => r.id === id)
   if (!current) throw new Error('Unknown story')
+  if (patch.type !== undefined && patch.type !== current.type) {
+    throw new Error("Cannot change a document's type")
+  }
 
   // The root story owns '/' and cannot be reslugged or reparented.
   const isRoot = current.path === ''
+  // An unrouted document is not in the tree at all, so there is no parent for a
+  // patch to change. An explicit `null` is allowed through as the no-op it is.
+  const unrouted = current.path === null
+  if (unrouted && patch.parentId != null) {
+    throw new Error('Cannot move an unrouted document into the page tree')
+  }
   const subtree = new Set(descendants(rows, id))
 
-  const parentId = patch.parentId !== undefined && !isRoot ? patch.parentId : current.parentId
+  const parentId = unrouted
+    ? null
+    : patch.parentId !== undefined && !isRoot
+      ? patch.parentId
+      : current.parentId
   if (parentId && subtree.has(parentId)) throw new Error('Cannot move a story into its own subtree')
-  if (parentId && !rows.some((r) => r.id === parentId)) throw new Error('Unknown parent')
+  const parent = parentId ? rows.find((r) => r.id === parentId) : undefined
+  if (parentId && !parent) throw new Error('Unknown parent')
+  if (parent && parent.path === null) {
+    throw new Error('Cannot move a page under an unrouted document')
+  }
+  // `under` is re-checked here, so a drag is constrained exactly as creation is
+  // — but only when the parent actually changes. Checking it on every patch
+  // would make a plain title edit fail on a tree that predates the constraint.
+  if (!unrouted && parentId !== current.parentId) {
+    const type = typeByName(types, current.type)
+    if (type && !canNest(type, typeByName(types, parent?.type))) throw underError(type)
+  }
 
+  const group: SiblingGroup = unrouted
+    ? { routed: false, type: current.type }
+    : { routed: true, parentId }
   const next: StoryMeta = {
     ...current,
     title: patch.title?.trim() || current.title,
     slug: isRoot
       ? ''
-      : uniqueSlug(rows, parentId, slugify(patch.slug ?? patch.title ?? current.slug), id),
+      : uniqueSlug(rows, group, slugify(patch.slug ?? patch.title ?? current.slug), id),
     parentId,
     ord:
       patch.index !== undefined || parentId !== current.parentId
-        ? orderAt(rows, parentId, patch.index ?? 0, id)
+        ? orderAt(rows, group, patch.index ?? 0, id)
         : current.ord,
     updatedAt: Date.now(),
   }
 
   const merged = rows.map((r) => (r.id === id ? next : r))
+  // Routed rows only: an unrouted one has no ancestor chain to derive from and
+  // is absent from the map, so `paths.get(r.id) ?? r.path` keeps its null.
   const paths = derivePaths(merged)
 
-  const changed = merged.filter((r) => paths.get(r.id) !== r.path || r.id === id)
+  const changed = merged.filter(
+    (r) => r.id === id || (r.path !== null && paths.get(r.id) !== r.path),
+  )
   const statements = changed.map((r) =>
     db
       .prepare(
@@ -313,12 +512,13 @@ export async function updateStoryStatement(
 
   // redirects.md's decision 1: every path this rename or move actually vacates
   // gets its redirect written in the same batch as the row update, so a rename
-  // either records where it used to live or does not happen at all.
+  // either records where it used to live or does not happen at all. An unrouted
+  // document vacates nothing, so it contributes no redirect.
   const changes: PathChange[] = []
   for (const r of changed) {
     const from = r.path
     const to = paths.get(r.id) ?? r.path
-    if (from === to) continue
+    if (from === null || to === null || from === to) continue
     changes.push({ id: r.id, from, to })
     statements.push(...redirectStatements(db, { from, to, storyId: r.id }))
   }
@@ -331,9 +531,10 @@ export async function updateStoryStatement(
 export async function updateStory(
   db: D1Database,
   id: string,
-  patch: { title?: string; slug?: string; parentId?: string | null; index?: number },
+  patch: StoryPatch,
+  types: readonly DocumentType[] = [],
 ): Promise<StoryMeta> {
-  const { next, statements } = await updateStoryStatement(db, id, patch)
+  const { next, statements } = await updateStoryStatement(db, id, patch, types)
   if (statements.length) await db.batch(statements)
   return next
 }
@@ -356,12 +557,16 @@ export async function deleteStoryStatement(
   db: D1Database,
   id: string,
   opts: { redirect?: boolean } = {},
+  types: readonly DocumentType[] = [],
 ): Promise<{
   ids: string[]
-  /** `ids`' own paths, same order — what `publish-hooks.md`'s `deleted` hook
+  /**
+   * `ids`' own paths, same order — what `publish-hooks.md`'s `deleted` hook
    * fires with, so a host can purge a cache without a second lookup for rows
-   * this call already read and is about to remove. */
-  paths: string[]
+   * this call already read and is about to remove. `null` for an unrouted
+   * document, which never had a URL for a cache to hold.
+   */
+  paths: (string | null)[]
   statement: D1PreparedStatement
   redirectStatements: D1PreparedStatement[]
 } | null> {
@@ -369,19 +574,30 @@ export async function deleteStoryStatement(
   const target = rows.find((r) => r.id === id)
   if (!target) return null
   if (target.path === '') throw new Error('Cannot delete the root story')
+  // A singleton exists because the schema says it does (`document-types.md`
+  // architecture decision 7). Recognised by its declared kind, falling back to
+  // the derived id so a row whose type has since been removed from the code is
+  // still refused rather than quietly deleted.
+  if (
+    typeByName(types, target.type)?.kind === 'singleton' ||
+    target.id.startsWith(SINGLETON_PREFIX)
+  ) {
+    throw new Error('Cannot delete a singleton document')
+  }
 
   const ids = descendants(rows, id)
-  const paths = ids.map((descId) => rows.find((r) => r.id === descId)?.path ?? '')
+  const paths = ids.map((descId) => rows.find((r) => r.id === descId)?.path ?? null)
   const placeholders = ids.map(() => '?').join(', ')
   const statement = db.prepare(`delete from stories where id in (${placeholders})`).bind(...ids)
 
   const redirects: D1PreparedStatement[] = []
   if (opts.redirect) {
     const parent = target.parentId ? rows.find((r) => r.id === target.parentId) : undefined
-    const parentPath = parent ? parent.path : ''
+    const parentPath = parent?.path ?? ''
     for (const descId of ids) {
       const row = rows.find((r) => r.id === descId)
-      if (!row) continue
+      // No path vacated, so no redirect to write.
+      if (!row || row.path === null) continue
       redirects.push(...redirectStatements(db, { from: row.path, to: parentPath, storyId: row.id }))
     }
   }
@@ -390,8 +606,12 @@ export async function deleteStoryStatement(
 }
 
 /** Removes the story and everything beneath it. */
-export async function deleteStory(db: D1Database, id: string): Promise<string[]> {
-  const found = await deleteStoryStatement(db, id)
+export async function deleteStory(
+  db: D1Database,
+  id: string,
+  types: readonly DocumentType[] = [],
+): Promise<string[]> {
+  const found = await deleteStoryStatement(db, id, {}, types)
   if (!found) return []
   await found.statement.run()
   return found.ids
@@ -413,15 +633,20 @@ export async function deleteStory(db: D1Database, id: string): Promise<string[]>
  * `getOrInitWithSyncId`), or a transaction landing between the two reads could
  * leave this watermark ahead of the bytes actually published, silently hiding a
  * real change.
+ *
+ * `title` is the *already-resolved* display title, not a fallback: which root
+ * field holds it depends on the document's type (`titleOf`, `document-types.md`
+ * architecture decision 3), and only the caller has the type to hand. This used
+ * to read `doc.bloks[doc.root].data.title` directly, which cached an empty title
+ * for any root block that had no such field.
  */
 export function publishStoryStatement(
   db: D1Database,
   id: string,
   doc: Doc,
-  fallbackTitle: string,
+  title: string,
   publishedSyncId: number,
 ): { publishedAt: number; title: string; statement: D1PreparedStatement } {
-  const title = String(doc.bloks[doc.root]?.data.title ?? '').trim() || fallbackTitle
   const publishedAt = Date.now()
   const statement = db
     .prepare(

@@ -49,7 +49,7 @@ export function RenderBlok({
       continue
     }
     if (field.kind === 'reference') {
-      const target = resolveReference(blok.data[name], resolution)
+      const target = resolveReference(blok.data[name], resolution, field.types)
       props[name] = target
         ? {
             ...target,

@@ -31,9 +31,21 @@ import {
 /** What a story id resolves to. Derived, never stored inside a document. */
 export interface StoryRef {
   id: string
+  /** `''` for an unrouted document, which has no place in the URL namespace. */
   path: string
+  /**
+   * `''` for an unrouted document rather than `null`: this is a published type
+   * host code reads, and widening `string` to `string | null` would be a
+   * breaking change forced on every consumer for a value they should not be
+   * reading anyway (`document-types.md` architecture decision 6). `routable`
+   * below is the field to test; `resolveLink` refuses to emit an href from a
+   * ref that fails it.
+   */
   url: string
   title: string
+  /** The document type's name, for `reference`/`multilink` type filtering. */
+  type: string
+  routable: boolean
 }
 
 export interface Resolution {
@@ -57,13 +69,27 @@ export const DEFAULT_ASSET_BASE = '/folio/asset'
 
 export const EMPTY_RESOLUTION: Resolution = { stories: {}, assetBase: DEFAULT_ASSET_BASE }
 
+/**
+ * Every story gets a ref, unrouted ones included: a `reference` to a record
+ * needs its title even though it has no URL (`document-types.md` architecture
+ * decision 6). What an unrouted ref does *not* get is a usable `url`, which is
+ * what `resolveLink` checks before emitting an href.
+ */
 export function buildResolution(
   stories: readonly StoryMeta[],
   assetBase: string = DEFAULT_ASSET_BASE,
 ): Resolution {
   const out: Record<string, StoryRef> = {}
   for (const s of stories) {
-    out[s.id] = { id: s.id, path: s.path, url: s.url ?? `/${s.path}`, title: s.title }
+    const routable = s.path !== null
+    out[s.id] = {
+      id: s.id,
+      path: s.path ?? '',
+      url: routable ? (s.url ?? `/${s.path}`) : '',
+      title: s.title,
+      type: s.type,
+      routable,
+    }
   }
   return { stories: out, assetBase }
 }
@@ -80,7 +106,16 @@ export interface ResolvedLink {
   title?: string
 }
 
-export function resolveLink(value: Json | undefined, resolution: Resolution): ResolvedLink | null {
+/**
+ * `types`, when given, is the field's own `multilink({ types })` — re-checked
+ * here as well as narrowed in the admin's picker, because content can also
+ * arrive from an importer or over the API.
+ */
+export function resolveLink(
+  value: Json | undefined,
+  resolution: Resolution,
+  types?: readonly string[],
+): ResolvedLink | null {
   const link = asLink(value)
   if (!link) return null
 
@@ -90,6 +125,13 @@ export function resolveLink(value: Json | undefined, resolution: Resolution): Re
       // A deleted story leaves the link in place rather than dropping it, so an
       // editor can see what broke instead of the link quietly vanishing.
       if (!story) return { kind: 'story', href: '#', broken: true, ...windowing(link) }
+      // The same treatment for a target that has no URL to offer, or one the
+      // field's own `types` does not permit: "there is no URL for this" and
+      // "this URL is gone" are the same problem for an editor
+      // (`document-types.md` architecture decision 5).
+      if (!story.routable || (types && !types.includes(story.type))) {
+        return { kind: 'story', href: '#', broken: true, title: story.title, ...windowing(link) }
+      }
       return {
         kind: 'story',
         href: `${story.url}${hash(link.anchor)}`,
@@ -224,9 +266,16 @@ export interface ResolvedReference extends ReferenceTarget {
   content: ReactNode
 }
 
+/**
+ * `types` is the field's own `reference({ types })`. A target of the wrong type
+ * resolves to `null`, exactly like a deleted one, so the block renders its
+ * empty state — the visible failure a value written by an importer needs
+ * (`document-types.md` architecture decision 5).
+ */
 export function resolveReference(
   value: Json | undefined,
   resolution: Resolution,
+  types?: readonly string[],
 ): ReferenceTarget | null {
   if (typeof value !== 'string' || !value) return null
   const story = resolution.stories[value]
@@ -234,6 +283,7 @@ export function resolveReference(
   // Unresolvable either because the story is gone or because nothing loaded its
   // document. Both are the caller's cue to render nothing.
   if (!story || !doc) return null
+  if (types && !types.includes(story.type)) return null
   return {
     id: value,
     title: story.title,
@@ -261,13 +311,13 @@ export function resolveValue(
 ): unknown {
   switch (field.kind) {
     case 'multilink':
-      return resolveLink(value, resolution)
+      return resolveLink(value, resolution, field.types)
     case 'asset':
       return resolveAsset(value, resolution)
     case 'multiasset':
       return resolveAssets(value, resolution)
     case 'reference':
-      return resolveReference(value, resolution)
+      return resolveReference(value, resolution, field.types)
     case 'number':
       // Deliberately `defaultValue(field)`, never `field.default`: this runs on
       // every render, and a schema edit must not retroactively change what an

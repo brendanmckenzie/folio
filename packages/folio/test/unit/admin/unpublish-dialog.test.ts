@@ -10,6 +10,7 @@ function meta(overrides: Partial<StoryMeta> & { id: string }): StoryMeta {
   const publishedSyncId = overrides.publishedSyncId ?? 0
   const state = draftState(publishedAt, unpublishedAt, draftSyncId, publishedSyncId)
   return {
+    type: 'page',
     parentId: null,
     slug: overrides.id,
     path: overrides.id,

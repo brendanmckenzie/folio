@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Json } from '../core/doc'
+import type { StoryNode } from '../core/story'
 import { asAsset, asLink, LINK_KINDS, type LinkKind, type LinkValue } from '../core/values'
 import { AssetInput } from './AssetInput'
 import { useFolio } from './FolioContext'
@@ -12,10 +13,28 @@ const LABELS: Record<LinkKind, string> = {
   asset: 'File',
 }
 
+/**
+ * The documents a story link may point at: routed only, narrowed by the field's
+ * own `types`, sorted by path. Pure and exported so the filter is tested without
+ * mounting the input.
+ */
+export function linkCandidates(
+  stories: readonly StoryNode[],
+  types?: readonly string[],
+): StoryNode[] {
+  return stories
+    .filter((s) => s.path !== null && (!types || types.includes(s.type)))
+    .sort((a, b) => (a.path ?? '').localeCompare(b.path ?? ''))
+}
+
 interface Props {
   id: string
   value: Json
   allow?: readonly LinkKind[]
+  /** `multilink({ types })`: which document types a story link may point at.
+   * Absent offers every *routed* type — an unrouted document has no URL, so it
+   * is never offered whatever this says (`document-types.md`). */
+  types?: readonly string[]
   onChange: (value: Json) => void
 }
 
@@ -27,7 +46,7 @@ interface Props {
  * Every change writes the whole link object back as one value, so a link edit is
  * an ordinary `set` mutation and needs nothing special from the sync engine.
  */
-export function LinkInput({ id, value, allow, onChange }: Props) {
+export function LinkInput({ id, value, allow, types, onChange }: Props) {
   const { stories } = useFolio()
   const kinds = allow?.length ? LINK_KINDS.filter((k) => allow.includes(k)) : LINK_KINDS
   const link = asLink(value)
@@ -53,7 +72,11 @@ export function LinkInput({ id, value, allow, onChange }: Props) {
     patch(null)
   }
 
-  const sorted = [...stories].sort((a, b) => a.path.localeCompare(b.path))
+  // The picker never offers what `resolveLink` would refuse to emit an href
+  // from: an unrouted document has no URL at all, and a type the field does not
+  // allow resolves `broken`. Same constraint, enforced in both places, for the
+  // same reason `richtext`'s marks are (`document-types.md` decision 5).
+  const sorted = linkCandidates(stories, types)
   const missing = link?.kind === 'story' && link.id && !stories.some((s) => s.id === link.id)
 
   return (

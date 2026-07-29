@@ -7,9 +7,24 @@ import { compareSiblings } from './doc'
  */
 export interface StoryMeta {
   id: string
+  /**
+   * Document type name, resolved against the `types` passed to `createFolio`.
+   * A record and a page are the same row with a different value here
+   * (`document-types.md` checkpoint 1) — there is no second table.
+   */
+  type: string
   parentId: string | null
   slug: string
-  path: string
+  /**
+   * Null for an unrouted document (a record or a singleton), which leaves the
+   * page tree entirely rather than squatting a URL: naming a record "Contact"
+   * must not take `/contact` away from the page that needs it
+   * (`document-types.md` checkpoint 2). Derived from the ancestor chain for
+   * everything else.
+   */
+  path: string | null
+  /** Fractional index among siblings: within the parent for a routed document,
+   * within the type for an unrouted one. */
   ord: string
   title: string
   publishedAt: number | null
@@ -95,9 +110,19 @@ export function joinPath(parentPath: string, slug: string): string {
   return parentPath ? `${parentPath}/${slug}` : slug
 }
 
+/**
+ * The page tree. Unrouted rows (`path === null`) are skipped entirely rather
+ * than surfacing as extra top-level nodes: they are not in the tree, which is
+ * the whole of `document-types.md` checkpoint 2, and `GET /folio/stories`
+ * becomes page-types-only for free. `listDocuments` is how a record or a
+ * singleton is listed instead.
+ */
 export function buildTree(rows: readonly StoryMeta[]): StoryNode[] {
   const byId = new Map<string, StoryNode>()
-  for (const row of rows) byId.set(row.id, { ...row, children: [] })
+  for (const row of rows) {
+    if (row.path === null) continue
+    byId.set(row.id, { ...row, children: [] })
+  }
 
   const roots: StoryNode[] = []
   for (const node of byId.values()) {
@@ -115,11 +140,16 @@ export function buildTree(rows: readonly StoryMeta[]): StoryNode[] {
 }
 
 /**
- * Paths for every row, derived from the ancestor chain. Run after a rename or
- * a move and write back only the rows whose path actually changed.
+ * Paths for every *routed* row, derived from the ancestor chain. Run after a
+ * rename or a move and write back only the rows whose path actually changed.
+ *
+ * Unrouted rows (`path === null`) are absent from the result rather than
+ * mapped to something: they have no ancestor chain — `parent_id` is null too —
+ * and a caller writing `paths.get(id) ?? row.path` therefore keeps their null
+ * untouched.
  */
 export function derivePaths(rows: readonly StoryMeta[]): Map<string, string> {
-  const byId = new Map(rows.map((r) => [r.id, r]))
+  const byId = new Map(rows.filter((r) => r.path !== null).map((r) => [r.id, r]))
   const out = new Map<string, string>()
   const seen = new Set<string>()
 
@@ -135,7 +165,7 @@ export function derivePaths(rows: readonly StoryMeta[]): Map<string, string> {
     return path
   }
 
-  for (const row of rows) pathOf(row)
+  for (const row of byId.values()) pathOf(row)
   return out
 }
 

@@ -66,6 +66,20 @@ const EXACT: ReadonlyMap<string, FolioErrorCode> = new Map([
   ['Cannot move a story into its own subtree', 'bad_request' as const],
   ['Cannot delete the root story', 'conflict' as const],
   ['Empty upload', 'bad_request' as const],
+  // document-types.md: the refusals that keep a document on the routed or the
+  // unrouted side of the fence it was created on. All `bad_request`: the
+  // request is well-formed, it just asks for something the model does not
+  // represent.
+  ['An unrouted document cannot have a parent', 'bad_request' as const],
+  ['Cannot create a page under an unrouted document', 'bad_request' as const],
+  ['Cannot move a page under an unrouted document', 'bad_request' as const],
+  ['Cannot move an unrouted document into the page tree', 'bad_request' as const],
+  // `conflict`, not `bad_request`: the request is legible and the server simply
+  // will not do it. Retyping a document is a schema migration
+  // (schema-migrations.md), and a singleton exists because the schema says so.
+  ["Cannot change a document's type", 'conflict' as const],
+  ['Cannot delete a singleton document', 'conflict' as const],
+  ['Cannot duplicate a singleton document', 'conflict' as const],
 ])
 
 /**
@@ -76,6 +90,13 @@ const EXACT: ReadonlyMap<string, FolioErrorCode> = new Map([
 const PATTERNS: ReadonlyArray<[RegExp, FolioErrorCode, string?]> = [
   // assets.ts computes the limit into its own message, which is worth keeping.
   [/^File is larger than /, 'too_large'],
+  // document-types.md: `unsupported`, not `not_found` — the request is
+  // well-formed, the server just has no such type declared.
+  [/^Unknown document type: /, 'unsupported'],
+  // The `under` refusal, which names the type and its allowed parents, so the
+  // message itself is what travels (that is the point of a refusal notice
+  // rather than a silent no-op).
+  [/^A '[^']*' document is only allowed under/, 'bad_request'],
   [
     /UNIQUE constraint failed/i,
     'conflict',
