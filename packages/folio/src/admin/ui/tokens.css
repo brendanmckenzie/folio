@@ -1,0 +1,276 @@
+/*
+ * The token layer. Two tiers, and the split is load-bearing:
+ *
+ *   - the **scale** names raw values and is never referenced by a component;
+ *   - the **semantic** tier is all a component may consume.
+ *
+ * A component reaching for `--n-300` instead of `--border` is a review comment,
+ * because the scale has no dark-mode answer and the semantic tier is exactly
+ * where that answer lives. See docs/design-system.md.
+ *
+ * Plain custom properties with no build step, on purpose: `server/pages.tsx`
+ * serves the login and error pages with an inline stylesheet — the admin CSS is
+ * a hashed Vite asset and a page that must render when the build is broken
+ * cannot link to it — so the tokens have to be readable and inlinable by the
+ * server. That constraint is why this is CSS and not vanilla-extract.
+ */
+
+:root {
+  /* ---------------------------------------------------------------- scale --- */
+  /* Neutrals. The chrome is built entirely from these (brief, commitment 1:
+     colour is reserved for state, so the furniture is achromatic). */
+  --n-0: #ffffff;
+  --n-25: #fcfcfd;
+  --n-50: #f7f8f9;
+  --n-100: #f0f1f3;
+  --n-200: #e5e7ea;
+  --n-300: #d3d7dc;
+  --n-400: #a8afb8;
+  --n-500: #7c848f;
+  --n-600: #5c646f;
+  --n-700: #3f4650;
+  --n-800: #282d35;
+  --n-900: #15181d;
+  --n-950: #0d0f12;
+
+  /* Accent. Selection, focus and "look here" — never a surface, never a stripe. */
+  --blue-50: #eef4ff;
+  --blue-100: #dce7fe;
+  --blue-200: #c0d3fc;
+  --blue-500: #3b6ff5;
+  --blue-600: #2b57d0;
+  --blue-700: #1f419e;
+
+  /* State hues. One meaning each: green is "complete", amber is drift and
+     history, red is withdrawal and refusal. Nothing else gets a hue. */
+  --green-50: #e9f7ef;
+  --green-200: #b6e2c8;
+  --green-700: #1c6b42;
+  --amber-50: #fdf6e3;
+  --amber-200: #ecd9a4;
+  --amber-700: #7a5a12;
+  --red-50: #fdeeee;
+  --red-200: #f3c4c4;
+  --red-700: #a3282c;
+
+  /* ------------------------------------------------------------- semantic --- */
+  --bg-app: var(--n-50);
+  --bg-panel: var(--n-0);
+  --bg-inset: var(--n-50);
+  --bg-hover: var(--n-100);
+  --bg-active: var(--n-200);
+  --bg-selected: var(--blue-50);
+  --bg-overlay: rgb(21 24 29 / 45%);
+
+  --fg: var(--n-900);
+  --fg-muted: var(--n-600);
+  --fg-subtle: var(--n-500);
+  --fg-accent: var(--blue-600);
+  --fg-inverse: var(--n-0);
+
+  --border: var(--n-200);
+  --border-strong: var(--n-300);
+  --ring: var(--blue-500);
+
+  --state-ok-bg: var(--green-50);
+  --state-ok-border: var(--green-200);
+  --state-ok-fg: var(--green-700);
+  --state-warn-bg: var(--amber-50);
+  --state-warn-border: var(--amber-200);
+  --state-warn-fg: var(--amber-700);
+  --state-danger-bg: var(--red-50);
+  --state-danger-border: var(--red-200);
+  --state-danger-fg: var(--red-700);
+  --state-accent-bg: var(--blue-50);
+  --state-accent-border: var(--blue-200);
+  --state-accent-fg: var(--blue-700);
+
+  /* Five sizes and no sixth. Uppercase tracking belongs to --text-xs only. */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-lg: 15px;
+  --text-xl: 20px;
+
+  /* 4px grid. Two named exceptions, because both are structural rather than
+     spacing: the list row's height and the rail's default width. */
+  --space-0: 0;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --row-h: 28px;
+  --rail-w: 15rem;
+  --indent: 16px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-full: 999px;
+
+  /* Two, because there are exactly two things that float. */
+  --shadow-menu: 0 6px 20px rgb(13 15 18 / 12%), 0 1px 2px rgb(13 15 18 / 8%);
+  --shadow-dialog: 0 18px 50px rgb(13 15 18 / 24%);
+
+  --dur-fast: 90ms;
+  --dur-base: 160ms;
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+
+  --font-ui: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Not decoration: paths, slugs, uids and scopes are content here
+     (brief, commitment 3). */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  color-scheme: light;
+}
+
+/*
+ * Dark is the second column of the semantic table rather than a later theme —
+ * the reason the two tiers exist at all. Only the semantic tier is restated.
+ *
+ * Both selectors are needed and neither is redundant: the media query follows
+ * the system, and `[data-theme]` lets a person override it. `:not([data-theme])`
+ * keeps an explicit light choice winning over a dark system.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg-app: var(--n-950);
+    --bg-panel: var(--n-900);
+    --bg-inset: var(--n-800);
+    --bg-hover: var(--n-800);
+    --bg-active: var(--n-700);
+    --bg-selected: #182746;
+    --bg-overlay: rgb(0 0 0 / 60%);
+
+    --fg: var(--n-50);
+    --fg-muted: var(--n-400);
+    --fg-subtle: var(--n-500);
+    --fg-accent: var(--blue-200);
+    --fg-inverse: var(--n-900);
+
+    --border: var(--n-800);
+    --border-strong: var(--n-700);
+
+    --state-ok-bg: #10281b;
+    --state-ok-border: #1f5236;
+    --state-ok-fg: #7fd0a1;
+    --state-warn-bg: #2a2109;
+    --state-warn-border: #5c4715;
+    --state-warn-fg: #e2c176;
+    --state-danger-bg: #2d1214;
+    --state-danger-border: #5f2427;
+    --state-danger-fg: #f0a3a5;
+    --state-accent-bg: #182746;
+    --state-accent-border: #2a437a;
+    --state-accent-fg: #a8c3fb;
+
+    --shadow-menu: 0 6px 20px rgb(0 0 0 / 45%), 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-dialog: 0 18px 50px rgb(0 0 0 / 60%);
+
+    color-scheme: dark;
+  }
+}
+
+/*
+ * An element selector rather than `:root[data-theme]`, so a *subtree* can be
+ * themed and not only the document. The editor will want that: a preview frame
+ * showing a light-only site inside a dark admin is the obvious case.
+ *
+ * What this does not yet cover is the inverse — an explicit light island inside a
+ * document the system is already rendering dark. That needs the light values
+ * restated under `@media (prefers-color-scheme: dark) [data-theme="light"]`, a
+ * fourth copy of the table, and nothing needs it yet.
+ */
+[data-theme="dark"] {
+  --bg-app: var(--n-950);
+  --bg-panel: var(--n-900);
+  --bg-inset: var(--n-800);
+  --bg-hover: var(--n-800);
+  --bg-active: var(--n-700);
+  --bg-selected: #182746;
+  --bg-overlay: rgb(0 0 0 / 60%);
+
+  --fg: var(--n-50);
+  --fg-muted: var(--n-400);
+  --fg-subtle: var(--n-500);
+  --fg-accent: var(--blue-200);
+  --fg-inverse: var(--n-900);
+
+  --border: var(--n-800);
+  --border-strong: var(--n-700);
+
+  --state-ok-bg: #10281b;
+  --state-ok-border: #1f5236;
+  --state-ok-fg: #7fd0a1;
+  --state-warn-bg: #2a2109;
+  --state-warn-border: #5c4715;
+  --state-warn-fg: #e2c176;
+  --state-danger-bg: #2d1214;
+  --state-danger-border: #5f2427;
+  --state-danger-fg: #f0a3a5;
+  --state-accent-bg: #182746;
+  --state-accent-border: #2a437a;
+  --state-accent-fg: #a8c3fb;
+
+  --shadow-menu: 0 6px 20px rgb(0 0 0 / 45%), 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-dialog: 0 18px 50px rgb(0 0 0 / 60%);
+
+  color-scheme: dark;
+}
+
+/*
+ * The only global rules the system owns. Everything else is a component module.
+ *
+ * `.folio-ui` rather than `body`, because the admin is mounted into a host's
+ * document and must not restyle it — the same discipline that keeps
+ * `folio.handle()` from intercepting a host's routes.
+ */
+.folio-ui {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  line-height: 1.45;
+  color: var(--fg);
+  background: var(--bg-app);
+  -webkit-font-smoothing: antialiased;
+}
+
+.folio-ui *,
+.folio-ui *::before,
+.folio-ui *::after {
+  box-sizing: border-box;
+}
+
+/* One focus treatment, everywhere. The old stylesheet had two rules and both
+   were on text inputs, so nothing else in the admin expressed focus at all. */
+.folio-ui :focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+.folio-ui code,
+.folio-ui kbd,
+.folio-ui .mono {
+  font-family: var(--font-mono);
+  font-size: 0.95em;
+}
+
+/*
+ * The one place `!important` is right, and the reason is cascade order rather
+ * than laziness: every transition in the system is declared inside a CSS module
+ * whose load order relative to this file is decided by the bundler, so an equal
+ * specificity rule here would win or lose at random. Stated once, globally, and
+ * never again — a component must not carry its own reduced-motion branch.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .folio-ui *,
+  .folio-ui *::before,
+  .folio-ui *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: see above — bundler-decided module order */
+    transition-duration: 1ms !important;
+    /* biome-ignore lint/complexity/noImportantStyles: see above — bundler-decided module order */
+    animation-duration: 1ms !important;
+  }
+}

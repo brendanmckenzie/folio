@@ -1,0 +1,126 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: var(--row-h);
+  padding: 0 var(--space-2) 0 calc(var(--space-2) + var(--depth, 0) * var(--indent));
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--bg-hover);
+}
+
+.selected {
+  background: var(--bg-selected);
+}
+
+.title {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * Shrinks first, and disappears entirely rather than truncating to nothing. The
+ * review's finding was that a path column rendering `/ab…` is worse than absent:
+ * it spends the width without carrying the information. Anything hidden this way
+ * is still in the row's title and still findable in the palette.
+ */
+.meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  color: var(--fg-subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * There was a container query here that hid `.meta` below a 20rem list, and it
+ * was the wrong fix: at the rail's own 15rem it hid every path, short ones
+ * included, which trades one loss of information for a bigger one.
+ *
+ * The real answer is upstream, in what a caller passes: inside a tree the indent
+ * already carries the ancestry, so the row's meta is the **slug**, and the full
+ * path belongs to the tooltip and the palette's hint. A slug is short enough that
+ * the truncation case stops arising. Kept as a comment because the container
+ * query looks like an obvious improvement until you size it against the rail.
+ */
+
+.trailing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  margin-left: auto;
+}
+
+/*
+ * `visibility`, never `display`: toggling display reflows the row and makes the
+ * whole list jump under the cursor. Carried forward from `admin.css`, where it
+ * was learned the hard way.
+ */
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex: none;
+  visibility: hidden;
+}
+
+.row:hover .actions,
+.row:focus-within .actions,
+.row:focus-visible .actions {
+  visibility: visible;
+}
+
+.handle {
+  flex: none;
+  width: 10px;
+  color: var(--border-strong);
+  font-size: var(--text-sm);
+  line-height: 1;
+  text-align: center;
+  cursor: grab;
+  user-select: none;
+}
+
+.row:hover .handle {
+  color: var(--fg-subtle);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--row-h);
+  padding: 0 var(--space-2);
+}
+
+.headerTitle {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+.headerActions {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}
