@@ -3,7 +3,8 @@
 > **Status:** plan, with a working spike (`packages/folio/src/admin/ui/`)
 > **Written:** 2026-07-30
 > **Follows:** `docs/ui-review.md` — the audit this is answerable to
-> **Precedes:** `docs/specs/admin/url-and-shell.md`, then the screen ports
+> **Precedes:** `docs/ui-architecture.md`, which turns this language into eleven
+> screens, then the screen ports
 > **Decided before this:** a router is in scope and everything is linkable;
 > `admin.css` is deleted rather than refactored; the state layer is rebuilt too,
 > wire format included — this project has no users and compatibility is not a
@@ -291,8 +292,9 @@ Two primitives deliberately **not** in the set:
 
 ## The URL model
 
-Owned in detail by `docs/specs/admin/url-and-shell.md`; the shape it has to take,
-because the primitives assume it:
+Designed screen by screen in `docs/ui-architecture.md`, and owned in detail by
+`docs/specs/admin/url-and-shell.md`. The shape it has to take, because the
+primitives assume it:
 
 ```
 {base}/                          home
