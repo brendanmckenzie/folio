@@ -8,6 +8,7 @@
  */
 import type { ReactElement } from 'react'
 import { renderToReadableStream } from 'react-dom/server.edge'
+import { NO_STORE } from '../core/cache-tags'
 import type { StoryMeta } from '../core/story'
 import { FolioDoc, renderGlobalNode } from '../preview/Render'
 import { Bootstrap, ReactRefreshPreamble, Shell } from './Document'
@@ -249,7 +250,27 @@ export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Res
   )
 }
 
+/**
+ * All three pages here are private by construction — the editor, a story's
+ * *draft* preview, and the sign-in form — so all three say `no-store` and none
+ * of them carries a `Cache-Tag`
+ * (`../../../docs/specs/platform/caching.md` decision 7).
+ *
+ * The preview is the one that matters. The same URL returns draft HTML to an
+ * editor and published HTML to a visitor, decided by the session cookie, and a
+ * `Cookie` header neither bypasses Workers Cache nor forms part of its key — so
+ * without this an editor's draft and a visitor's page would collide on one
+ * entry, in the direction that serves an unpublished draft to the public. Belt
+ * and braces: the README also tells a host not to cache a request carrying
+ * `_folio=preview`, because the failure mode is bad enough to be worth saying
+ * twice.
+ */
 async function html(node: ReactElement, bootstrapModules: string[]) {
   const stream = await renderToReadableStream(node, { bootstrapModules })
-  return new Response(stream, { headers: { 'content-type': 'text/html; charset=utf-8' } })
+  return new Response(stream, {
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': NO_STORE,
+    },
+  })
 }

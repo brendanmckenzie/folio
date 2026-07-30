@@ -10,6 +10,22 @@
   "observability": {
     "enabled": true
   },
+  // Workers Cache (docs/specs/platform/caching.md). The whole of the host's
+  // opt-in: no binding, no API token, no zone, no paid plan. With it, a
+  // response carrying the `Cache-Control`/`Cache-Tag` pair `folio.cacheHeaders`
+  // returns is stored at the edge, and `cache.purge({ tags })` from inside the
+  // Worker invalidates it globally when the page is published.
+  //
+  // Without this key the two headers are inert and every purge is a no-op, so
+  // the site behaves exactly as it did before — which is what makes it safe for
+  // a host to adopt the headers first and the flag second.
+  //
+  // Nothing here is observable locally: miniflare simulates no part of Workers
+  // Cache, so `wrangler dev` never reports a HIT and `scripts/cache-probe.mjs`
+  // needs a real deployment.
+  "cache": {
+    "enabled": true
+  },
   "d1_databases": [
     {
       "binding": "DB",

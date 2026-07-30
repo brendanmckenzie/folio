@@ -1324,19 +1324,20 @@ const folio = createFolio<Env>({
 })
 ```
 
-**A cache purge is the obvious first hook, and it is deliberately not the example.**
-`caches.default.delete()` is per-colo: the hook runs in exactly one data centre, so
-every other one keeps serving the old page until its TTL expires. It reads as
-invalidation without being it. Purging globally from inside a Worker is Workers
-Cache's job, and the design for it — the dependency set computed at render and
-emitted as `Cache-Tag`, purged by tag on publish — is specified in
-[`docs/specs/platform/caching.md`](docs/specs/platform/caching.md). It is not built
-yet, so Folio ships no caching API today and nothing in this README should be read
-as one.
+**A cache purge is the obvious first hook, and it is deliberately not the example** —
+because Folio does it for you now. See [Caching](#caching): the purge set is derived
+from Folio's own internals, so it is an *internal* hook rather than something every
+host reimplements. What a host must never write here is `caches.default.delete()`
+keyed on `story.path`: that delete is per-colo, so the hook's own data centre stops
+serving the old page and every other one carries on until its TTL. It reads as
+invalidation without being it.
 
-Six events, each after its write has already committed: `published`, `unpublished`,
+Ten events, each after its write has already committed: `published`, `unpublished`,
 `pathsChanged` (a rename or move — the only one that knows both the old and the new
-path), `created`, `deleted`, `checkpointed`. There is no `before` hook and no way to
+path), `created`, `deleted`, `checkpointed`, `updated` (a row's title, slug, parent
+or position — a **title-only** patch changes every page that links to this one and
+fires no `pathsChanged`, by design), `migrated`, `reindexed` and `redirectsChanged`.
+There is no `before` hook and no way to
 veto or rewrite a publish: a hook that could reject one would have to run inside the
 atomic batch, which is exactly the failure that batch exists to prevent. A throwing
 hook is caught and logged with the event name — a broken integration never stops an
@@ -1345,6 +1346,136 @@ delays the response; a cache purge that must land before the next read opts in w
 `await: ['published']`. Not delivery-guaranteed: at most once, no retries, no
 ordering between hooks. A host that needs that writes one line to a Cloudflare Queue
 inside the hook, which is the right tool for it.
+
+## Caching
+
+Two headers on your published response, one flag in `wrangler.jsonc`, and a publish
+purges the pages that rendered it — globally, from inside the Worker, with no
+webhook, no API token, no zone and no paid plan.
+
+```jsonc
+// wrangler.jsonc
+"cache": { "enabled": true }
+```
+
+```tsx
+const story = await folio.storyAt(env, path)
+const doc = await folio.published(env, path)
+const resolution = await folio.resolve(env, doc, { story })
+
+return new Response(await renderToReadableStream(<Page … />), {
+  headers: {
+    'content-type': 'text/html; charset=utf-8',
+    ...folio.cacheHeaders(resolution, { story: story?.id ?? null }),
+  },
+})
+```
+
+That is the whole integration. `cacheHeaders` returns
+
+```
+cache-control: public, max-age=0, s-maxage=604800, must-revalidate
+cache-tag:     site,global:header,story:sty_about,story:sty_home,type:insight
+```
+
+### Why the tags are computed at render
+
+The tempting design is a reverse index: `content_refs` already records which
+documents point at which, so purge by walking it backwards. It cannot work, and this
+is worth knowing before you try it. A global comes from config, not from a field, so
+it writes no edge at all. Collection membership is a query run at render, so it
+writes no edge either. A title-only patch changes `StoryRef.title` on every page that
+links to the renamed document and touches no index. Ancestors are loaded by path for
+breadcrumbs and are never an edge. And `content_refs` truncates at 400 rows per
+document by construction. Five ways to be silently incomplete.
+
+So it is inverted. A `Resolution` already **is** the dependency set of the page that
+was just rendered — that is what `resolve()` builds — so the tags are emitted from it
+at render time and the purge is `purge({ tags: ['story:sty_about'] })` with no lookup
+anywhere. Nothing is stored, no table is added, and four of those five problems stop
+being lookups.
+
+Three prefixes plus one constant:
+
+| Tag | Emitted for | Purged by |
+| --- | --- | --- |
+| `story:<id>` | every id the render loaded — links, references, ancestors, collection items, and the page's own | publishing, unpublishing, deleting, renaming or retitling that document |
+| `global:<name>` | every global on the resolution | publishing that global |
+| `type:<name>` | the document type of every collection query on the page | publishing, unpublishing or deleting **any** document of that type |
+| `site` | every page | a reindex, or a migration too large to purge precisely |
+
+`type:` is what makes an index page work with no membership table: publishing an
+insight purges every page listing insights, and nothing had to know which pages those
+are.
+
+### `max-age` is 0 on purpose
+
+Do not raise it. **A purge reaches the edge and cannot reach a browser cache.** A
+visitor who loaded the page under `max-age=300` keeps their stale copy for five
+minutes after you publish and nothing can evict it — you see the new page, they do
+not. `s-maxage` governs only the shared cache, which is exactly the part `purge()`
+can clear, so the edge TTL is a week: with invalidation measured under 165 ms there
+is no reason for the edge copy to expire on a timer. The TTL is the fallback for a
+purge that never arrives, not the mechanism. `cacheHeaders(resolution, { story,
+maxAge })` overrides the browser number if you really want one; `s-maxage` is not
+overridable, because a host that wants a short edge TTL wants a different design.
+
+### Traps
+
+- **`Set-Cookie` means no caching at all.** Workers Cache never stores a response
+  carrying one, silently and with no error. If your published path rolls a session
+  cookie, you get zero cache hits and nothing tells you. Folio's own published path
+  sets none.
+- **Do not cache `?_folio=preview`.** Folio already answers it with
+  `Cache-Control: private, no-store` and no `Cache-Tag`, and so does the editor
+  shell. But a `Cookie` header neither bypasses Workers Cache nor forms part of its
+  key, so if your own middleware caches that request, an editor's draft and a
+  visitor's page collide on one entry — in the direction that serves an unpublished
+  draft to the public. Belt and braces.
+- **`Vary` is a cache variant.** Check what your stack adds. Vite's dev and preview
+  servers add `Vary: Origin`; a deployed Worker does not, and nothing in Folio sets
+  one.
+- **Both headers or neither.** `Cache-Control` without `Cache-Tag` is a page cached
+  for a week with no purge path — it fails silently, and it is worse than no caching.
+  Forgetting both is harmless and is exactly today's behaviour, which is why
+  `cacheHeaders` returns them together and there is no way to ask for one.
+- **A deploy invalidates everything**, because the Worker version is part of the
+  cache key. That is right for a CMS: a renderer change should not serve pre-change
+  HTML.
+- **Turning caching off does not purge.** Disabling is not an invalidation; a stale
+  entry can still be served for a while after you redeploy with `enabled: false`.
+  Purge first, then disable.
+
+### What a host can still hook
+
+`redirectsChanged` fires when a manual redirect is added or removed. Folio's own
+purge ignores it, deliberately — its tags describe rendered pages, not paths, so
+there is no right tag to purge. If you cache your own 404s, purge them yourself:
+
+```ts
+hooks: {
+  async redirectsChanged({ from }) {
+    const { cache } = await import('cloudflare:workers')
+    // Resolved here, inside the hook: the export is request-scoped, and a
+    // reference held at module scope has no `purge` at all.
+    if (typeof cache?.purge === 'function') {
+      await cache.purge({ pathPrefixes: from.map((p) => `https://example.com/${p}`) })
+    }
+  },
+}
+```
+
+### What is not testable, and why
+
+Workers Cache is not simulated by miniflare, so no test in this repo — unit, workers,
+or `scripts/*-test.mjs` against `wrangler dev` — can observe a hit or a purge. Every
+computation is therefore a pure function with tests behind it, and
+[`scripts/cache-probe.mjs`](scripts/cache-probe.mjs) covers the rest against a real
+deployment: it asserts MISS→HIT, triggers a purge for each tag prefix and reports
+time-to-fresh. It needs a deployed Worker, so it is a tool rather than a test and CI
+never runs it. Run it after changing the purge hook or the tag vocabulary. It cannot
+tell you whether a purge propagated to any colo other than the one answering it —
+that is not observable from one client.
 
 ## Auth
 

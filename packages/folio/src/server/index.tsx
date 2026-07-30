@@ -1,3 +1,4 @@
+import { cacheHeaders, cacheTags } from '../core/cache-tags'
 import { isKnownLocale } from '../core/locales'
 import { singletonId } from '../core/schema'
 import { FolioDoc, renderGlobalNode } from '../preview/Render'
@@ -138,6 +139,19 @@ export { FolioDoc } from '../preview/Render'
 export { Shell, serializeJson } from './Document'
 export type { StoryMeta, StoryNode } from '../core/story'
 export type { Resolution } from '../core/resolve'
+/**
+ * Caching (`../../../docs/specs/platform/caching.md`): what `folio.cacheTags`
+ * and `folio.cacheHeaders` take and answer. The functions themselves also ship
+ * from `folio/core`, since they are pure and a host rendering without a `folio`
+ * object in hand can still call them.
+ */
+export type {
+  CacheHeaderOptions,
+  CacheHeaders,
+  CacheTagOptions,
+  CacheTags,
+} from '../core/cache-tags'
+export { ANY_TYPE_TAG, NO_STORE, SITE_TAG, globalTag, storyTag, typeTag } from '../core/cache-tags'
 /** Locales (`localisation.md`): the config a host declares, and the context a
  * render reads. `fieldValue`/`dataOf` ship from `folio/core`, with the rest of
  * what a block author needs. */
@@ -237,6 +251,10 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       return publishedDoc(config.bindings(env).db, path)
     },
     status: (env, path) => storyStatus(config.bindings(env).db, path),
+    storyAt: async (env, path) => {
+      const story = await storyByPath(config.bindings(env).db, path)
+      return story && rt.withUrls(story)
+    },
     redirect: (env, path) => lookupRedirect(config.bindings(env).db, path),
     draft: (env, id) => rt.draft(config.bindings(env), id),
     /**
@@ -305,6 +323,14 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     render: (doc, opts) => (
       <FolioDoc doc={doc} registry={rt.registry} edit={opts?.edit} resolution={opts?.resolution} />
     ),
+    /**
+     * Both are the pure functions from `core/cache-tags.ts`, re-exposed here
+     * rather than only from `folio/core`: a host that is already holding a
+     * `folio` object to render with should not have to reach for a second
+     * import to answer "what should this response say about caching".
+     */
+    cacheTags,
+    cacheHeaders,
     global: async (env, name) => {
       const type = rt.typeOf(name)
       if (type?.kind !== 'singleton') return null

@@ -148,16 +148,23 @@ const folio = createFolio<Env>({
   // a request whose CPU limit it can exceed, on a cold Worker, with nobody
   // watching. See src/migrations.ts.
   migrations,
-  // publish-hooks.md: an after-commit callback, not a webhook -- the host and
-  // Folio are the same Worker, so a cache purge or a notification is a typed
-  // function call rather than an HTTP round trip to itself. This demo has no
-  // cache layer of its own yet (ROADMAP.md's "cache invalidation on publish"),
-  // so the example just logs. It deliberately does *not* purge `caches.default`
-  // keyed on `story.path`: that delete is per-colo, and a hook runs in exactly
-  // one data centre, so every other one would go on serving the stale page
-  // until its TTL — invalidation in appearance only. Purging globally from
-  // inside a Worker means Workers Cache purge-by-tag, specified in
-  // `docs/specs/platform/caching.md` and not built yet.
+  // publish-hooks.md: an after-commit callback, not a webhook — the host and
+  // Folio are the same Worker, so a notification is a typed function call
+  // rather than an HTTP round trip to itself. This example just logs.
+  //
+  // **The cache purge is deliberately not here.** platform/caching.md made it
+  // Folio's own internal hook rather than something each host writes: the purge
+  // set is derived from Folio's internals — which ids a render loaded, what a
+  // `type:` tag means, when a migration touched everything — so a host
+  // reimplementing it would drift from the tag vocabulary on the next release.
+  // All this project does is set the two headers `folio.cacheHeaders` returns on
+  // its published response (see the fetch handler) and turn `cache.enabled` on
+  // in wrangler.jsonc.
+  //
+  // What a host must still never do is `caches.default.delete()` keyed on
+  // `story.path`: that delete is per-colo, and a hook runs in exactly one data
+  // centre, so every other one goes on serving the stale page until its TTL.
+  // Invalidation in appearance only.
   hooks: {
     published: ({ story }) => {
       console.log(`folio: published ${story.path || '/'}`)
@@ -261,11 +268,26 @@ export default {
     // `collection` field in the document. One number for the page, deliberately —
     // per-field pagination keyed by uid is out of scope until something needs it.
     const page = Number(url.searchParams.get('page') ?? '1')
+    // The row behind this path, for two things at once (`platform/caching.md`):
+    // `story` lets the resolution reach this page's ancestors, so a breadcrumb
+    // resolves; and its id is the one tag a page cannot derive from its own
+    // resolution, because a page never links to itself.
+    const story = await folio.storyAt(env, path)
     const resolution = await folio.resolve(env, doc, {
       locale,
       page: Number.isFinite(page) && page >= 1 ? Math.trunc(page) : 1,
+      ...(story ? { story } : {}),
     })
-    return html(<Page doc={doc} resolution={resolution} locale={locale} />)
+    return html(<Page doc={doc} resolution={resolution} locale={locale} />, {
+      // Two headers, always together — `Cache-Control` without `Cache-Tag`
+      // would be a page cached for a week with no way to purge it, which fails
+      // silently and is worse than not caching at all. `max-age` in there is 0
+      // on purpose: a purge reaches the edge and cannot reach a browser cache,
+      // so a visitor holding a stale copy is a stale copy nothing can evict.
+      // The edge's `s-maxage` is a week, because invalidation is the mechanism
+      // and the TTL is only the fallback for a purge that never arrived.
+      ...folio.cacheHeaders(resolution, { story: story?.id ?? null }),
+    })
   },
 } satisfies ExportedHandler<Env>
 
@@ -441,8 +463,8 @@ function sitemap(stories: Awaited<ReturnType<typeof folio.stories>>, origin: str
   )
 }
 
-async function html(node: ReactElement) {
+async function html(node: ReactElement, headers: Record<string, string> = {}) {
   return new Response(await renderToReadableStream(node), {
-    headers: { 'content-type': 'text/html; charset=utf-8' },
+    headers: { 'content-type': 'text/html; charset=utf-8', ...headers },
   })
 }
