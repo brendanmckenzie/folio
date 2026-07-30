@@ -53,6 +53,10 @@ When writing a new one, follow two conventions that already exist:
 - `import './lib/ts-resolve.mjs'` first if you import library source; it resolves the
   extensionless relative specifiers the library uses.
 
+`scripts/cache-probe.mjs` is **not** one of these and `e2e.sh` does not glob it: it
+takes a deployment URL, because Workers Cache does not exist locally. A tool, not a
+test, and it cannot gate CI.
+
 ## Local login
 
 The demo configures the magic-link provider with a `send` that **logs the link**
@@ -147,18 +151,28 @@ sections are **Ground truth** (verified `file:line` facts, so a plan is not buil
 guess) and **Architecture decisions** (each naming the alternative it beat — a decision
 with no rejected alternative is a description).
 
-Specs 1–16 are **done** and restamped in place with an `## Implementation notes`
+Specs 1–17 are **done** and restamped in place with an `## Implementation notes`
 section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
 
-**17 (`platform/caching.md`) is `ready` and unbuilt** — the first spec written from
-`ROADMAP.md` rather than from `docs/feedback.md`. Its owner checkpoints are confirmed
-and its open questions were closed by deploying a probe Worker, not by reading docs.
-Two things in it are worth knowing before touching anything cache-shaped: the purge
-set **cannot** be computed from `content_refs` (globals and collections leave no edge,
-and it truncates at 400 rows), and **`caches.default.delete()` is per-colo**, so the
-obvious "purge the cache in a publish hook" is wrong in a way that looks right locally.
+Four things from 17 (`platform/caching.md`) are worth knowing before touching
+anything cache-shaped, because all four are wrong in ways that look right:
+
+- The purge set **cannot** be computed from `content_refs`. Globals, collections
+  and ancestors leave no edge, a title change fires no event, and it truncates at
+  400 rows. Tags are computed at *render*, from the `Resolution`.
+- **`caches.default.delete()` is per-colo**, so "purge the cache in a publish hook"
+  invalidates one data centre and no others.
+- **`cloudflare:workers`' `cache` export is request-scoped.** At module scope its
+  `purge` is not a function, so a held reference is a permanent no-op that never
+  purges, never errors and passes every test. Dereference it inside the hook.
+- **`max-age` is 0 on purpose** in `cacheHeaders`. A purge cannot reach a browser
+  cache; raising it buys a stale copy nothing can evict.
+
+Workers Cache is not simulated by miniflare, so no test here can observe a hit or a
+purge — which is why everything computable is a pure function and
+`scripts/cache-probe.mjs` (a tool, never CI) covers the rest against a deployment.
 
 Deferred work is in `ROADMAP.md`, under `## Next`, `## Uncovered from the reference
 project` and `## Known smaller issues`. `docs/feedback.md` records what the owner

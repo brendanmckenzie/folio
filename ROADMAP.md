@@ -186,8 +186,9 @@ preview boot. It now loads the ids the document needs — its links (including t
 story ids inside richtext link marks, which carry no href), its references, the same
 sets for the documents it pulls in, and its own ancestors — with `stories: 'all'`
 as the explicit opt-in for a host that wants the full map. `content_refs` records
-the outbound edges in the same batch, which is what "used by N documents" and, later,
-a cache purge set will read. Spec: `docs/specs/content-model/collections.md`.
+the outbound edges in the same batch, which is what "used by N documents" reads.
+(It is **not** what the cache purge set reads — that promise was wrong, and
+`docs/specs/platform/caching.md` is where it is unpicked.) Spec: `docs/specs/content-model/collections.md`.
 
 **Data documents.** Document types made a person *storable*; this made one usable.
 `BlockDef.render` is now optional and `defineRecord` is the sugar that omits it, so
@@ -266,6 +267,43 @@ at the equivalent role, so there is one enforcement point rather than two.
 `folio.write(env, id, mutations, opts)` is the same path with no HTTP for a host's
 own Worker. Spec: `docs/specs/platform/content-api.md`.
 
+**Caching published pages, and purging them on publish.** Two headers from
+`folio.cacheHeaders(resolution, { story })` on the host's published response, plus
+`"cache": { "enabled": true }` in its wrangler config, and a publish invalidates
+every page that rendered the published document — globally, from inside the
+Worker, with no webhook, no shared secret, no API token, no zone and no paid plan.
+
+**The dependency set is computed at render, not looked up at purge.** That is the
+whole design and it is the opposite of what this file used to promise. A
+`Resolution` already *is* the set of ids a page loaded, so it is emitted as
+`Cache-Tag` — `story:<id>` per id (links, references, ancestors, collection items
+and the page's own), `global:<name>` per global, `type:<name>` per collection
+query, plus `site` — and a publish becomes `purge({ tags })` with no lookup
+anywhere. No table, no migration, no reverse index.
+
+`Cache-Control` is `public, max-age=0, s-maxage=604800, must-revalidate`, and the
+zero is the load-bearing part: a purge reaches the edge and **cannot** reach a
+browser cache, so any nonzero `max-age` buys a stale copy nothing can evict. The
+edge TTL is a week because invalidation is the mechanism and the TTL is only the
+fallback for a purge that never arrived.
+
+Folio purges; the host tags. The purge is an *internal* hook on
+`publish-hooks.md`'s own seam rather than something each host writes, because the
+purge set is derived from Folio's internals and every host would reimplement that
+mapping and drift from it. Four events were added for write paths that changed
+published bytes and fired nothing at all: `updated` (a **title-only** patch
+changes every page linking to that document and `pathsChanged` skips it by
+design), `migrated`, `reindexed` and `redirectsChanged`. A migration purges the
+ids it rewrote, precisely, batching at 100 tags and flushing past five calls — one
+minute of the Free plan's budget; a reindex always flushes, because which pages
+hold a collection is exactly what nothing records. Preview is a hard bypass
+(`private, no-store`, no tag).
+
+Nothing about it is observable locally — miniflare simulates no part of Workers
+Cache — so every computation is a pure function with unit tests behind it and
+`scripts/cache-probe.mjs` covers the rest against a deployment. Spec:
+`docs/specs/platform/caching.md`.
+
 ## Next
 
 ### 1. Scheduled publishing
@@ -283,27 +321,29 @@ Editors also need to browse the *real* site in draft, across navigations. The
 reference does this with `/api/preview` + `/api/exit-preview` setting a signed
 cookie. We should do the same; it also makes share-a-preview-link work.
 
-**Cache invalidation on publish (and unpublish).** The reference runs
-`revalidate = 60` plus a Storyblok webhook hitting `/api/revalidate` with a
-shared secret. We own both sides, so publish can purge directly — no webhook,
-no secret, no eventual consistency window. Unpublish has to purge the same
-keys, or a cached page outlives the row that served it. The seam exists
-(`docs/specs/platform/publish-hooks.md`): a host's `hooks.published` and
-`hooks.unpublished` fire after each write commits.
+**Cache invalidation on publish (and unpublish). Done** — see *Caching* under
+*Done* above. Kept here because the shape of the answer is the useful part: the
+reference runs `revalidate = 60` plus a Storyblok webhook hitting
+`/api/revalidate` with a shared secret, and none of that was needed, because the
+host's Worker and the CMS are the same process.
 
 **This entry used to say the item was "pick a cache, not invent a mechanism".
-That was wrong, and the spec written on 2026-07-30 says why.** The purge *set*
-is not computable from anything stored: globals leave no `content_refs` edge
-because they come from config rather than a field, collection membership is a
-query run at render, a title-only patch changes every linking page and fires no
-event at all, and `content_refs` truncates at 400 rows per document. A reverse
-index over it would have been silently incomplete five different ways. The
-answer is to invert it — compute the dependency set at *render*, where
-`Resolution` already holds it, emit it as `Cache-Tag`, and purge by tag. No
-table, no migration, and globals.md's wrinkle dissolves instead of needing a
-purge-key scheme. Spec: `docs/specs/platform/caching.md`, **ready** — all five
-owner checkpoints confirmed and the three open questions closed by measurement
-against a deployed Worker, not by reading docs.
+That was wrong**, and it stayed wrong right up until somebody tried to compute a
+purge set. It is not computable from anything stored: globals leave no
+`content_refs` edge because they come from config rather than a field, collection
+membership is a query run at render, a title-only patch changes every linking page
+and fires no event at all, ancestors are loaded by path and are never an edge, and
+`content_refs` truncates at 400 rows per document. A reverse index over it —
+which `ROADMAP.md:190` promised, in this very file — would have been silently
+incomplete five different ways.
+
+Two more things that only measurement caught, recorded here because both are the
+kind of wrong that ships green. `caches.default.delete()` is **per-colo**, so the
+obvious purge-in-a-publish-hook is a TTL with extra steps. And the `cache` export
+of `cloudflare:workers` is **request-scoped**: holding a reference at module scope
+gives a permanent no-op that never purges, never errors and passes every unit
+test. Neither is discoverable from the types. Spec:
+`docs/specs/platform/caching.md`.
 
 **Per-story access control, for site visitors.** The reference has an
 `access_level` field on story content and gates *rendering* on the visitor's

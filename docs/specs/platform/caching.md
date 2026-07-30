@@ -3,7 +3,7 @@
 > **Group:** platform
 > **Build order:** 17
 > **Size:** M ≈ a few days
-> **Status:** ready
+> **Status:** done
 > **Wire version:** none
 > **Migration:** none
 > **Last updated:** 2026-07-30
@@ -737,3 +737,151 @@ Still open, and now the only one:
 - **Is `Vary: Origin` on the demo's responses a dev artefact or a production
   one?** It is a cache variant. Harmless for browser navigation, which sends no
   `Origin`, but it should be confirmed rather than assumed in Phase 4.
+
+## Implementation notes
+
+Landed in four commits, one per phase, each with all four gates green by exit
+code. Tests: **1927 → 1969** (72 → 73 files). No migration, no
+`PROTOCOL_VERSION` bump, no new route — as the plan predicted.
+
+All five owner decision checkpoints landed as confirmed. The five things the
+research established — the request-scoped `cache` export, the absent-not-failing
+capability, `max-age=0`, no reverse index, and "put everything computable in a
+pure function" — all held under contact with the code and none needed revisiting.
+
+### What landed
+
+**Phase 1 — `core/cache-tags.ts`.** `cacheTags`, `cacheHeaders`, `cacheControl`,
+the tag helpers (`storyTag` / `globalTag` / `typeTag`), `SITE_TAG`,
+`ANY_TYPE_TAG`, `NO_STORE`, and the budget constants. Exported from `folio/core`
+and re-exposed on the `Folio<Env>` object. 25 unit tests.
+
+**Phase 2 — the four events.** `updated`, `migrated`, `reindexed`,
+`redirectsChanged` on `HookEvent`, `HOOK_EVENTS`, `FolioHooks` and
+`HookPayloadMap`, fired from `routes/stories.ts`, `routes/api/documents.ts`,
+`migrate.ts`, `reindex.ts` and `routes/redirects.ts`.
+`FolioRuntime.hookRunner(hookCtx)` is the new seam for the two write paths that
+fire an event and want none of the rest of `PublishDeps`; `publishDeps` builds
+its own runner from it, so there is one place a runner is assembled.
+
+**Phase 3 — `server/cache-purge.ts`.** `cachePurgeHooks(globals, capability?)`
+and the pure `purgePlan`, registered second on `createRuntime`'s `internalHooks`
+after `spaceBroadcastHooks`. 23 unit tests against an injected capability, 2
+workers tests against the real absent one.
+
+**Phase 4 — the host side.** `folio.cacheTags` / `folio.cacheHeaders` /
+`folio.storyAt`, `no-store` on all three pages Folio serves itself, the demo's
+`"cache": { "enabled": true }` and header spread, `scripts/cache-probe.mjs`, and
+a README *Caching* section.
+
+### Where the spec was wrong
+
+1. **`cacheTags(resolution, doc?)` is not implementable.** The page's own id is
+   the one thing a `Resolution` does not carry: `resolve()` loads a page's
+   links, references, globals and ancestors, and `ancestorPaths(path)` excludes
+   the path itself, so a page never appears in its own map. A `Doc` has no story
+   id either. The signature is `cacheTags(resolution, { story })` with
+   `story: string | null` **required and nullable rather than optional** —
+   forgetting it produces a page cached for a week with no purge path, which is
+   decision 2's own dangerous half-configured state, and a type error is cheaper
+   than that. `null` is the honest answer for a host-built page with no document
+   (the demo's `/archive`).
+
+   This is also why **`folio.storyAt(env, path)` had to exist**. The host has to
+   name the page, and `folio.published(env, path)` answers with the document
+   alone. One indexed read. It pays for itself twice: passing `{ story }` to
+   `resolve()` is what makes a breadcrumb resolve on a published page, which the
+   demo was quietly not doing.
+
+2. **`updated`'s `changed` is `('title'|'slug'|'parent'|'ord')[]`, not
+   `('title'|'titleI18n')[]`.** `stories.title_i18n` is written only by
+   `publishStoryStatement`, so a patch can never change it and `published`
+   already covers the case. The diff is computed inside `updateStoryStatement`,
+   beside the `changes` one, for the reason that one lives there.
+
+3. **`collection()`'s `type` is optional**, which the tag vocabulary did not
+   account for: a query with no type filter lists every document there is, and
+   no `type:<name>` can describe it. Such a page carries `ANY_TYPE_TAG`
+   (`type:*`) and every publish, unpublish and delete purges it alongside the
+   document's own type. One extra tag per purge call, against an index page that
+   silently never updates. An unparseable query key takes the same branch
+   deliberately — the safe reading of a key written by some future shape is
+   "this page lists something".
+
+4. **`Resolution.collections` items are dependencies too.** Found while writing
+   the purge mapping. `type:` covers *membership* changing; it does not cover a
+   listed document being **renamed or retitled**, which alters neither membership
+   nor `content_index`. A collection's answers are built by `server/query.ts` and
+   never join `resolution.stories`, so without tagging each item an index page
+   would show a stale URL for a story it lists until its week-long TTL ran out —
+   the exact silent staleness the spec exists to remove. Bounded by
+   `MAX_PER_PAGE`, well inside the tag budget.
+
+5. **`DeletedHookPayload` needed `types`.** Not in the spec, and the hole is
+   real: deleting a published insight must purge the index page listing it, and
+   `deleted` carried only `ids` and `paths`. Added alongside `paths`, for
+   identical reasons — the row is gone by the time anything could look the type
+   up again.
+
+6. **Internal hooks had to become unconditionally awaited.** Decision 5 says the
+   purge is awaited so the next read is correct, but `createHookRunner` handed
+   the *whole* task — internal hooks included — to `waitUntil` unless the host
+   listed the event in its own `await`. The editor's very next act after
+   publishing is to reload the page they just published, which is precisely the
+   race. `run` now awaits internal hooks first and unconditionally, then applies
+   the host's `await` set to the host's own handler. The other internal consumer
+   hands its RPC to `waitUntil` itself, so awaiting it costs nothing.
+
+7. **`hookCtx` was duplicated three ways** (CLAUDE.md's trap I). This spec adds
+   two more hook-firing routes, at which point five copies of three lines was the
+   wrong shape; it moved to `middleware.ts`. Not to `hooks.ts`, which knows
+   nothing about Hono — the whole reason a Durable Object alarm can fire the same
+   hooks.
+
+8. **`redirectsChanged` has no internal consumer.** Decision 3 justified it as
+   "a few lines once the pattern exists", which turned out to be zero lines: a
+   redirect changes what an *uncached 404 path* answers, and Folio's tags
+   describe rendered pages rather than paths, so there is no tag that would be
+   the right one to purge. The event still fires, for a host that caches its own
+   404s and can purge by `pathPrefixes` — it knows its own origin, which Folio
+   does not. The README shows the hook.
+
+9. **`created` and `checkpointed` purge nothing**, which the spec never said
+   either way. Neither publishes anything, so no cached page can be describing
+   them yet.
+
+### The last open question, closed
+
+**`Vary: Origin` is a dev artefact.** Nothing in `packages/folio/src` or
+`examples/demo/src` sets a `Vary` header — verified by grep and by running the
+demo — so it comes from Vite's dev and preview middleware and a deployed Worker
+does not carry it. Recorded in the README's traps rather than left as a caveat.
+
+### Testing, and what is deliberately not tested
+
+Unit (`test/unit/core/cache-tags.test.ts`, 25; `test/unit/server/cache-purge.test.ts`,
+23): the whole tag vocabulary, the overflow degradation, the locale collapse, the
+batching threshold, and every event→tag mapping against an **injected**
+capability. Workers (`http.test.ts`, `migrate.test.ts`, `app.test.ts`): the four
+new events at their real call sites, the `no-store` on both pages Folio serves
+itself, and — the one thing only real workerd can show — that
+`import('cloudflare:workers')` with the capability genuinely absent is a silent
+no-op through a real publish and a real reindex.
+
+**Nothing fakes the platform call and asserts against the fake.** Workers Cache
+is not simulated by miniflare 4.20260722.0, so a green suite built on a fake of
+it would prove nothing at all. No e2e script either, for the same reason and as
+this spec's own Testing requirements already said. `scripts/cache-probe.mjs` is
+what covers the rest, and cannot gate CI.
+
+### Deferred
+
+- **A purge propagating to a second colo** stays unmeasured and unmeasurable
+  from one client, exactly as Ground truth recorded. If a stale page is ever
+  reported from another region, that is the assumption to re-test.
+- **`cross_version_cache`**, stale-while-revalidate, caching `folio.query()`,
+  and multi-site cache partitioning are all still out of scope and unchanged.
+- **Nothing purges on a `folio.write()`** (the Content API's in-process write).
+  A write mutates a *draft*; a published page is unaffected until somebody
+  publishes, and that fires `published`. Worth naming because it looks like a
+  gap and is not.
