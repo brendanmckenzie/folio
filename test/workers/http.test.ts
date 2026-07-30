@@ -1189,6 +1189,53 @@ describe('the caching lifecycle hooks (caching.md)', () => {
   })
 })
 
+/**
+ * The one thing about the purge hook a local test *can* prove, and the reason
+ * it is worth proving here rather than in the unit suite: miniflare simulates
+ * no part of Workers Cache, so this runs against the real
+ * `import('cloudflare:workers')` under real workerd, with the capability
+ * genuinely absent. The mapping from event to tag set is covered exhaustively
+ * by `test/unit/server/cache-purge.test.ts` against an injected capability;
+ * faking the platform call here and asserting against the fake would prove
+ * nothing at all (`caching.md`'s Testing requirements).
+ */
+describe('the cache purge hook under a runtime with no Workers Cache (caching.md)', () => {
+  it('is a silent no-op: a publish succeeds, nothing throws, nothing is logged', async () => {
+    const story = await createStory('Cache Purge Absent')
+    const conn = await connect(story.id)
+    await conn.hello('alice')
+    conn.close()
+
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // No hooks of its own: the purge is an *internal* hook, registered by
+    // `createRuntime` on every instance, so this exercises the real one.
+    const folio2 = folioWithHooks({})
+    const res = await callHooked(folio2, `/folio/story/${story.id}/publish`, { method: 'POST' })
+
+    expect(res.status).toBe(200)
+    expect(await res.json<{ ok: boolean }>()).toMatchObject({ ok: true })
+    expect(logged).not.toHaveBeenCalled()
+    expect(warned).not.toHaveBeenCalled()
+    logged.mockRestore()
+    warned.mockRestore()
+  })
+
+  it('leaves a reindex — the one trigger that always flushes — equally silent', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const warned = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const folio2 = folioWithHooks({})
+
+    const res = await callHooked(folio2, '/folio/reindex', jsonPost('{}'))
+
+    expect(res.status).toBe(200)
+    expect(logged).not.toHaveBeenCalled()
+    expect(warned).not.toHaveBeenCalled()
+    logged.mockRestore()
+    warned.mockRestore()
+  })
+})
+
 describe('redirects: GET/POST/DELETE /folio/redirects', () => {
   it('a rename recorded automatically shows up in the list, newest first', async () => {
     const story = await createStory('List-Redirect Source')

@@ -276,13 +276,19 @@ export function createHookRunner<Env>(
 
       const payload: unknown = { ...extra, env: ctx.env, waitUntil: ctx.waitUntil }
 
-      const task = (async () => {
-        // Internal hooks always run first: a host hook for the same event
-        // can assume they have already completed (decision 5).
-        for (const fn of internalFns) await runOne(name, fn, payload)
-        if (hostFn) await runOne(name, hostFn, payload)
-      })()
+      // Internal hooks always run first, and are **always awaited**, whatever
+      // the host's `await` list says. That is not a courtesy to the host: the
+      // cache purge (`cache-purge.ts`) has to land before the response, or the
+      // editor's reload — the very next thing they do after publishing — races
+      // it and is served the entry that was just superseded
+      // (`../platform/caching.md` decision 5). The other internal consumer, the
+      // space broadcast, hands its RPC to `waitUntil` itself and so costs
+      // nothing to await. A host hook for the same event can still assume they
+      // have completed.
+      for (const fn of internalFns) await runOne(name, fn, payload)
+      if (!hostFn) return
 
+      const task = runOne(name, hostFn, payload)
       if (awaited.has(name)) await task
       else ctx.waitUntil(task)
     },

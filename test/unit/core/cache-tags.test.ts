@@ -175,6 +175,33 @@ describe('cacheTags', () => {
       expect(tags).toContain(ANY_TYPE_TAG)
     })
 
+    it('tags each listed item, so renaming one purges the index that shows its URL', () => {
+      const key = queryKey({ type: 'insight', status: 'published' })
+      const resolution: Resolution = {
+        stories: {},
+        assetBase: '/a',
+        collections: {
+          [key]: {
+            items: [
+              { id: 'sty_one', title: 'One', path: 'one', url: '/one', data: {}, doc: EMPTY_DOC },
+              { id: 'sty_two', title: 'Two', path: 'two', url: '/two', data: {}, doc: EMPTY_DOC },
+            ],
+            total: 2,
+            page: 1,
+            perPage: 20,
+            pages: 1,
+          },
+        },
+      }
+      // `type:insight` covers membership changing; it does not cover a member
+      // being renamed, which changes neither membership nor `content_index`.
+      // A collection's answers never reach `resolution.stories`.
+      const { tags } = cacheTags(resolution, { story: 'sty_index' })
+      expect(tags).toContain(storyTag('sty_one'))
+      expect(tags).toContain(storyTag('sty_two'))
+      expect(tags).toContain(typeTag('insight'))
+    })
+
     it('collapses two pages of one query onto the same type tag', () => {
       const one = queryKey({ type: 'insight', page: 1, status: 'published' })
       const two = queryKey({ type: 'insight', page: 2, status: 'published' })
