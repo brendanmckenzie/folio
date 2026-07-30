@@ -192,9 +192,15 @@ deferred. Read the notes, not just the plan: several specs' Ground truth was acc
 when written and stale by the time it was built.
 
 **18 (`foundation/pagination.md`) is the current one and is `draft`.** It carries the
-API-prefix move with it — the admin's internal JSON goes to `{base}/_/` so screens can
-own the bare paths — so it touches every list route and ~265 literal paths in `test/`
-and `scripts/`. Nothing else should reshape a list route until it lands.
+API-prefix move with it — the admin's internal JSON goes to `{base}/api/` so screens
+can own the bare paths — so it touches every list route and ~265 literal paths in
+`test/` and `scripts/`. Nothing else should reshape a list route until it lands.
+
+One rule from it is worth knowing before adding any route: **a version segment is a
+promise.** `{base}/api/v1/*` is a contract with somebody's script; `{base}/api/*`
+with no version is internal to the admin and may change shape in any commit. A
+workers test pins the partition, so adding `{base}/api/v1/stories` by reflex fails
+CI.
 
 Four things from 17 (`platform/caching.md`) are worth knowing before touching
 anything cache-shaped, because all four are wrong in ways that look right:

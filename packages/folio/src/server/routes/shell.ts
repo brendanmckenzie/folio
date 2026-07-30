@@ -11,28 +11,25 @@
  * incidental: the screens and the API are named after the same resources, because
  * they are about the same resources.
  *
- * So the shell is mounted under a prefix while the prototype is being judged, and
- * the fix is a decision for the URL-and-shell spec rather than something to
- * improvise here. The shape it should take, recorded so the reasoning is not
- * re-derived:
+ * So the shell is mounted under a prefix until the API moves out of the way.
  *
- * **The admin's internal JSON moves; the screens keep the pretty paths.** The
- * screens are what a person sees, links and bookmarks, so they win. `app.ts`
- * already says the internal routes are "free to change with" the admin, which is
- * exactly the licence needed — and every one of the admin's own fetches goes
- * through `boot.apiBase`, so most of the client follows by changing one string.
- * The cost is real but mechanical: ~265 literal paths across `test/` and
- * `scripts/`, which is why it is a sequenced piece of work and not a drive-by.
+ * **Decided 2026-07-31** (`docs/specs/foundation/pagination.md` decision 3, its
+ * phase 3): the admin's internal JSON moves to `{base}/api/`, beside the existing
+ * `{base}/api/v1/*`, and the screens take the bare paths. One rule keeps the two
+ * apart, and it is worth knowing before adding any route here:
  *
- * Rejected: **content negotiation on one path** — HTML for `Accept: text/html`,
- * JSON otherwise. Cheap, and the kind of cleverness that fails silently the first
- * time something sends the wrong header. Rejected: **the screens under a prefix
- * permanently**; `/folio/admin/content` spends a segment on the fact that the CMS
- * is a CMS.
+ * > **A version segment is a promise. Its absence is the absence of one.**
+ * > `{base}/api/v1/*` is a contract with somebody's script and changes by adding a
+ * > `v2`. `{base}/api/*` with no version is internal to the admin, ships in the
+ * > same deploy as its only caller, and may change shape in any commit.
  *
- * Until then the prefix costs nothing but a segment, because the router is
- * relative to its mount by necessity — `basePath` is host-configurable — so
- * moving it is one constant in `route.ts` and one in this file.
+ * A workers test pins that partition, because the objection to sharing one prefix
+ * was that the two surfaces would look like siblings — which they do, so the
+ * difference is asserted rather than left to a reader's memory.
+ *
+ * When that lands, this file loses `SHELL_PREFIX` and mounts at `{base}`. The
+ * client needs no edit: `admin/ui/route.ts` is relative to its mount by necessity,
+ * since `basePath` is host-configurable.
  */
 import { Hono } from 'hono'
 import { READ_DRAFT } from '../auth/roles'

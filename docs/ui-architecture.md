@@ -212,6 +212,16 @@ and the type chip can be a column rather than a repeated word on every row.
 - **Rows are the tree**, indented 16px per level, with expand/collapse. Collapse
   matters now for two reasons rather than one: it is how a large site is navigated,
   and it is what makes lazy per-level loading honest (see *Dependencies*).
+- **A `[ Tree | Flat ]` toggle**, added 2026-07-31 (owner's call;
+  `foundation/pagination.md` decision 2a). Flat is every routed page with no
+  structure, sorted by last edited, title or path — because a tree tells you how the
+  site is *shaped* and a flat sortable list tells you what was touched last, and on
+  a large site that is how a person finds anything. The mode is in the URL
+  (`?view=flat&sort=edited`) with the last choice remembered as the default, the same
+  rule Assets' grid/table toggle gets. Flat rows show the **full path** rather than
+  the slug, since there is no indent to carry ancestry. Filters, selection and bulk
+  actions are the same objects in both modes — that is what makes it a toggle rather
+  than a second screen.
 - **Columns**: title · slug · type · state · translations · last edited · editing
   now. Slug rather than full path, per `design-system.md` — the indent carries the
   ancestry.
@@ -597,8 +607,9 @@ reaches the surface with sync, presence and preview in it.
 
 1. **Shell** — sidebar, top bar, breadcrumb, router, palette, shortcut map. No
    screen content yet; every route renders a stub.
-2. **Content** — the tree as a screen, with keyboard traversal and reorder. Retires
-   `StoryTree.tsx` and turns Biome's a11y rules back on.
+2. **Content** — the tree as a screen, with keyboard traversal and reorder, and the
+   `[ Tree | Flat ]` toggle. Retires `StoryTree.tsx` and turns Biome's a11y rules
+   back on.
 3. **Documents** — the table as a screen. Retires `DataList.tsx`, `DataTable.tsx`.
 4. **Assets** — the new screen, and the picker as one `Dialog` mount of it. Retires
    the library half of `AssetInput.tsx`.
@@ -635,11 +646,34 @@ going and looking at what other products do, which is recorded above.
    count rather than a list of ids — which is what lets it be 51,420 items without
    the question of a ceiling arising at all.
 
+Three more, answered 2026-07-31 while `foundation/pagination.md` was being drafted,
+because a list route and the screen over it are one decision:
+
+5. **Long lists are next / previous with a count** — `Showing 20 of 1,284`. Not
+   infinite scroll, and not page numbers, which over live content were a lie. So no
+   screen here promises "Page 3 of 7", and every list header carries an exact total.
+6. **Content gets a `[ Tree | Flat ]` toggle** — see the Content section and
+   `pagination.md` decision 2a. The tree is how the site is shaped; the flat list is
+   how you find what changed.
+7. **Search is substring matching, not full-text.** `⌘K`, every screen's search box
+   and both pickers find `team` in `Our team` and do not find `teem`. Fuzzy ranking
+   would mean a second index kept in step with every write, for a quality nobody has
+   asked for yet.
+
 ## Open questions
 
-1. **Does `group` on `DocumentType` want to also order the sidebar?** A declared
-   group implies an order, and alphabetical-within-group is a guess. Probably wants
-   declaration order, like the palette's groups.
+1. ~~**Does `group` on `DocumentType` want to also order the sidebar?**~~
+   **Answered while building the shell prototype:** groups order by *first
+   appearance*, like the palette's, because alphabetical fights the declaration order
+   every other list in Folio respects. Implemented in `admin/ui/nav.ts`.
 2. **Does a refused bulk job report what it would have done?** A count mismatch
    says the set changed but not how. Showing the difference costs a second query and
    might be worth it for a destructive action; for publish it is probably noise.
+3. **Do platform screens keep their own `h1`?** The breadcrumb already names a
+   single-segment screen, so `Content` currently renders twice — once in the top bar
+   and once as the heading beneath it. Either the screens drop the heading and let the
+   breadcrumb title them, or the breadcrumb stops rendering a one-segment trail.
+   Found in the shell prototype; a decision for `admin/url-and-shell.md`.
+4. **Does flat mode want `sort=state`?** The one filter that is also a plausible
+   ordering, and the one sort with no index. Deferred in `pagination.md` rather than
+   guessed.

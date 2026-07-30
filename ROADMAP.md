@@ -380,19 +380,24 @@ conversation as pagination because both decide what a list route looks like.
 `docs/ui-architecture.md` gives the screens `{base}/content`, `{base}/assets`,
 `{base}/documents/:type` and `{base}/redirects`. **All four answer JSON today**,
 so no screen can have its own URL until the API moves. The prototype is mounted at
-`{base}/ui` for exactly that reason, and `server/routes/shell.ts` records the
-argument: the screens win the pretty paths because a screen is what a person links
-to and bookmarks, and `server/app.ts` already declares those routes internal to
-the admin and free to change with it.
+`{base}/ui` for exactly that reason: the screens win the pretty paths because a
+screen is what a person links to and bookmarks, and `server/app.ts` already
+declares those routes internal to the admin and free to change with it.
+
+**Resolved 2026-07-31: the internal prefix is `{base}/api/`**, alongside the
+existing `{base}/api/v1/*`, under one rule — **a version segment is a promise, and
+its absence is the absence of one.** A workers test pins the partition so nobody
+adds an internal route under a versioned prefix. Rejected `{base}/_/`
+(unguessable), the screens under `{base}/admin/` (a segment on every human-facing
+URL forever), and content negotiation on one path (fails silently the first time
+something sends the wrong header).
 
 Cost: mechanical but wide — roughly 265 literal paths across `test/` and
 `scripts/`. The client is nearly free, because every admin fetch already goes
 through `boot.apiBase` and the rebuilt router is relative to its mount.
 
-Rejected: **content negotiation on one path** (HTML for `Accept: text/html`, JSON
-otherwise) — cheap, and it fails silently the first time something sends the wrong
-header. Rejected: **the screens under a prefix permanently**; `/folio/admin/content`
-spends a URL segment on the fact that the CMS is a CMS.
+**Specified in full** in `docs/specs/foundation/pagination.md` decision 3, as its
+phase 3 — a rename with no response body changed.
 
 ### 1b. There is no icon system, and the sidebar is using text glyphs
 

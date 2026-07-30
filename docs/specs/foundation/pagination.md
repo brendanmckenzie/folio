@@ -87,14 +87,21 @@ Verified 2026-07-31 against `main` at `4022ae3`.
 - `stories_parent_ord (parent_id, ord)` — **exactly** the index a per-level keyset
   walk needs, already there.
 - `stories_type (type, ord)` — the Documents screen's order.
-- `stories_draft_updated (draft_updated_at desc)` — Home's recency block.
-- `stories_path (path) where path is not null`, `stories_parent_slug`,
+- `stories_path (path) where path is not null` — **unique**, so `path` is a total
+  order over routed rows with no tiebreak needed. Plus `stories_parent_slug` and
   `stories_type_slug`.
 - `assets_created (created_at desc)`, `versions_story (story_id, created_at desc)`,
   `api_tokens_created (created_at desc)`, `content_index_lookup (field, locale,
   text_value)`, `content_refs_to (to_story)`.
-- **`users` has no `created_at` index** while `listUsers` orders by it. The only
-  index this spec adds.
+- **`stories_draft_updated (draft_updated_at desc)` is dead.** Added by `0005:19`,
+  rebuilt by `0006:87`, and **nothing in `src/` orders by that column** — the only
+  two references are a write (`story-do.ts:276`) and a projection
+  (`stories.ts:34`). It also indexes the wrong expression for the query that now
+  wants it; see decision 2a.
+- **`users` has no `created_at` index** while `auth/users.ts:86` orders by it.
+- `draft_updated_at` is **nullable** (`0006:64`, "null until the first debounced
+  write"), which is what makes "last edited" a `coalesce` rather than a column —
+  decision 2a.
 
 **admin (`packages/folio/src/admin/`):**
 
@@ -121,20 +128,19 @@ Verified 2026-07-31 against `main` at `4022ae3`.
 
 ## Owner decision checkpoints
 
-1. **Two paging shapes, deliberately: keyset for the admin, page numbers for
-   `/api/v1`.** Recommended. The codebase already has both and they are right for
-   different jobs — see decision 1. The alternative is one shape everywhere, which
-   means either page numbers over live content (a lie) or no page numbers in a
-   public blog listing (a missing feature).
-2. **The admin's internal JSON moves to `{base}/_/`.** Recommended: one character,
-   unmistakably internal, and no screen will ever be named `_`. Rejected
-   alternatives in decision 3.
-3. **The ten migrations collapse into one `0001_init.sql`.** Recommended, and
-   already the owner's standing position (`CLAUDE.md`, "This is greenfield").
-   `test/workers/migrations.test.ts` is rewritten with it.
-4. **`state` is a SQL expression, not a stored column.** Recommended — every input
-   is already stored, so a column would be a denormalisation that can disagree
-   with itself. Decision 4.
+**All resolved 2026-07-31** — see `## Resolved` at the end for what was asked and
+what came back. One answer overrode the recommendation and one added scope.
+
+1. **Two paging shapes: keyset for the admin, page numbers for `/api/v1`.**
+   Confirmed — decision 1.
+2. **The internal prefix is `{base}/api/`**, not `{base}/_/` as recommended.
+   Decision 3, rewritten around the rule that makes it work.
+3. **The ten migrations collapse into one `0001_init.sql`.** Taken as already
+   decided by the standing greenfield position (`CLAUDE.md`) rather than re-asked.
+4. **`state` is a SQL expression, not a stored column.** An engineering call, not
+   put to the owner — decision 4 carries the argument.
+5. **The tree gets a flat twin, screen included** — decision 2a. Added scope, and
+   the reason the schema needed a second look.
 
 ## User stories
 
@@ -187,7 +193,7 @@ The two are not a contradiction to be tidied away later, so both are named in
 
 ### 2. The tree pages one level at a time
 
-`GET {base}/_/stories` answers **one parent's children**, keyset over `(ord, id)`,
+`GET {base}/api/stories` answers **one parent's children**, keyset over `(ord, id)`,
 which is exactly `compareSiblings`' order and exactly the `stories_parent_ord`
 index that already exists. No `parentId` means the top level.
 
@@ -206,7 +212,55 @@ the same problem with an arbitrary constant in front of it.
 Consequence worth stating: the tree is no longer one request, so the admin cannot
 hold "every story" — which is what forces decisions 6 and 7.
 
-### 3. The admin's internal JSON moves to `{base}/_/`
+### 2a. The tree has a flat twin, and it needed a different index
+
+`{base}/api/stories?flat=1&sort=edited|title|path` answers **every routed page**,
+paged, with no structure — and Content gets a `[ Tree | Flat ]` toggle for it.
+
+Two views of one thing, because they answer different questions. A tree tells you
+how the site is *shaped*; a flat sortable list tells you what was touched last, and
+on a 5,000-page site that is how a person finds anything. Storyblok ships both for
+this reason. The mode is **in the URL** (`?view=flat&sort=edited`) and the last
+choice is remembered as the default when arriving without one — the same rule
+`ui-architecture.md` gives the Assets grid/table toggle, and the same reason:
+linkable first, convenient second.
+
+**Building it found a schema problem the tree does not have.** `sort=edited` means
+"last edited", which is `draftUpdatedAt ?? updatedAt` — `draft_updated_at` is
+**nullable** (`0006_document_types.sql:64`, "null until the first debounced
+write"), and the admin already reads it that way (`draftState`'s neighbour in the
+prototype's `when()`). So:
+
+- `order by draft_updated_at desc` is **wrong**, not merely unindexed. SQLite sorts
+  NULLs last under `desc`, so every page nobody has opened lands at the bottom —
+  below a page last edited three years ago. A page created five minutes ago would
+  sort last in a list called "last edited".
+- The correct order is `coalesce(draft_updated_at, updated_at) desc, id desc`, and
+  the cursor is that pair.
+- **`stories_draft_updated (draft_updated_at desc)` is dead.** Added by `0005`,
+  carried through `0006`'s rebuild, and nothing in `src/` orders by that column —
+  the only two references are a write in `story-do.ts:276` and a projection in
+  `stories.ts:34`. It was created for a query nobody wrote, and it indexes the
+  wrong expression for the query that now exists.
+
+The collapse replaces it with an expression index. `sort=title` needs a new one;
+`sort=path` needs nothing, because `stories_path` is already unique over non-null
+paths, which makes `path` a total order with no tiebreak column.
+
+**Rejected: the flat list as its own screen** at its own URL. It is the same rows,
+the same filters, the same selection and the same bulk actions — two screens would
+duplicate all four and then drift. A toggle keeps one screen with two orderings.
+
+**Rejected: sorting the tree instead** (a tree ordered by last edited). Order and
+structure are the same axis in a tree — `ord` *is* the sibling order — so
+re-sorting it either breaks the indent or sorts only within each parent, which is
+not what "what changed lately" means.
+
+**Rejected: a stored `last_edited` column** maintained by both writers. Removes the
+`coalesce` and reintroduces decision 4's problem: two columns that can disagree
+about the same fact.
+
+### 3. The admin's internal JSON moves to `{base}/api/`, and a version segment is a promise
 
 The screens take the bare paths, because a screen is what a person links to,
 bookmarks and sends to a colleague. Four of them — `/content`, `/assets`,
@@ -217,14 +271,40 @@ resources because they are about the same resources.
 `server/app.ts` already declares everything below its `/api/v1` mount "internal to
 the admin and free to change with it", which is precisely the licence needed.
 
-After: `{base}/_/stories`, `{base}/_/documents`, `{base}/_/assets`,
-`{base}/_/users`, `{base}/_/audit`, `{base}/_/search`, … and `{base}/content`,
-`{base}/assets`, `{base}/edit/:id` are screens. `/api/v1` is untouched — it is the
-one surface that *is* a contract.
+**The rule that makes one `/api` hold two different promises:**
 
-**Rejected: `{base}/api/` for internal JSON.** Reads well, and it blurs the exact
-line `app.ts` draws: under `/api` would then live both a versioned contract and an
-unstable internal surface, distinguished only by the presence of `v1`.
+> **A version segment is a promise. Its absence is the absence of one.**
+> `{base}/api/v1/*` is a contract with somebody's script and changes by adding a
+> `v2`. `{base}/api/*` with no version is internal to the admin, ships in the same
+> deploy as its only caller, and may change shape in any commit.
+
+After: `{base}/api/stories`, `{base}/api/documents`, `{base}/api/assets`,
+`{base}/api/users`, `{base}/api/audit`, `{base}/api/search`, … while
+`{base}/content`, `{base}/assets` and `{base}/edit/:id` are screens, and
+`{base}/api/v1/*` is untouched.
+
+This was **not** the recommendation. The objection was that the two surfaces would
+look like siblings and be told apart only by the presence of `v1`, and it stands —
+so it gets answered with a rule stated where it can be read rather than left as a
+convention nobody wrote down:
+
+- `server/app.ts` carries the rule as a comment at the mount, next to the existing
+  one explaining why `/api/v1` is registered first.
+- A workers test asserts the partition: **every** route under `{base}/api/v1` is a
+  documented contract path, and **no** internal route sits under a versioned
+  prefix. It fails if somebody adds `{base}/api/v1/stories` by reflex.
+- Mount order is load-bearing and already correct: `/api/v1` is routed before the
+  resource routes (`app.ts:79`) so `/api/v1/documents/:id` is never read as a
+  resource `:id` pattern. The internal routes join *after* it, which keeps that
+  true. An internal route may never be named `v1` or `v2`.
+
+The upside the recommendation undervalued: one prefix means one mental model for
+"this response is JSON", and a reader in a network tab sees `/api/` and stops
+wondering. `_` would have been unambiguous to a person who already knew the
+convention and cryptic to everyone else.
+
+**Rejected: `{base}/_/`.** Unambiguous and unguessable in equal measure. The
+partition test above buys back what it was protecting against.
 
 **Rejected: the screens under `{base}/admin/`.** Spends a URL segment saying the
 CMS is a CMS, on every URL a human ever sees, forever.
@@ -263,20 +343,31 @@ to filter, indexable, and it can disagree with the four columns it derives from 
 which is the same class of bug as a denormalised `title`, except that this one
 decides whether a page appears in a publisher's list at all.
 
-### 5. A count is a separate, opt-in query
+### 5. A count is a separate, opt-in query — and list headers opt in
 
-`Page<T>` carries no total. A list header that wants "24 pages" asks for it:
-`?count=1` adds one `count(*)` over the same filter and returns it alongside.
+`Page<T>` carries no total. A caller that wants one asks: `?count=1` adds one
+`count(*)` over the same filter and returns it alongside.
 
-Two reasons. Keyset paging does not need a count to work, so making it part of the
-envelope charges every page for a number most pages do not show. And **the count
-is load-bearing somewhere else**: it is the guard on a bulk write
-(`ui-architecture.md` decision 7a — the server re-runs the captured filter,
-compares the count to `expected`, and refuses on mismatch). One count endpoint
-shape serves the list header and the bulk guard, and they must not drift.
+**Every list header does ask**, because the owner's answer to the paging control was
+"next / previous **plus** a count" — `Showing 20 of 1,284`. So in practice most
+list requests carry `count=1`, and the mechanism still has to be opt-in for two
+reasons that survive that:
 
-**Rejected: `total` always in the envelope.** Simpler to consume, and it makes
-every keystroke of a search box run a second aggregate query over the whole table.
+- **A search box does not want it.** Typing runs a request per keystroke (debounced),
+  and each would otherwise drag a full aggregate over the table behind it. The
+  header keeps the count from the last settled query and dims it while typing.
+- **The count is load-bearing somewhere else.** It is the guard on a bulk write
+  (`ui-architecture.md` decision 7a — the server re-runs the captured filter,
+  compares to `expected`, and refuses on mismatch). One count implementation serves
+  the header and the guard, and they must not drift, which they would if the header
+  got a cheap approximation baked into the envelope.
+
+**Rejected: `total` always in the envelope.** Simpler to consume, and it makes the
+count unavoidable exactly where it is least affordable.
+
+**Rejected: an approximate count** past some threshold ("1,000+"). Honest about
+cost, and it cannot be the bulk guard, so the guard would need a second exact
+implementation — the drift this decision exists to prevent.
 
 ### 6. One `Page<T>` envelope and one cursor module
 
@@ -304,7 +395,7 @@ tie-breaking, or the last-page condition subtly wrong, and no shared test.
 
 ### 7. The admin asks for the ids it needs, not for every story
 
-`GET {base}/_/stories?ids=a,b,c` — `storiesFor(db, ids, paths)`
+`GET {base}/api/stories?ids=a,b,c` — `storiesFor(db, ids, paths)`
 (`stories.ts:137`) already resolves a batch of ids **and** a batch of ancestor
 paths in one query, which is precisely what `buildResolution` needs.
 
@@ -324,7 +415,7 @@ re-added a tree-wide fetch later.
 
 ### 8. Link and reference pickers, and the palette, share one search route
 
-`GET {base}/_/search?q=&kind=&type=&limit=` — over `stories.title`, `slug`, `path`
+`GET {base}/api/search?q=&kind=&type=&limit=` — over `stories.title`, `slug`, `path`
 and `content_index`'s text values, returning a small paged `Page<StoryRef>`.
 
 The pickers filter the full list in memory today; the palette in the shell
@@ -379,18 +470,33 @@ licenses removing.
 
 ### D1 migration `0001_init.sql`
 
-Replaces `0001_initial.sql` … `0010_content_index.sql`. Identical final shape,
-plus one index. Not reproduced in full here — it is the composition of ten
-existing files — but the delta over today's end state is exactly:
+Replaces `0001_initial.sql` … `0010_content_index.sql`. Every table, column and
+trigger carries over unchanged. Not reproduced in full here — it is the composition
+of ten existing files — but the **index** delta over today's end state is exact and
+is the whole schema story:
 
 ```sql
--- listUsers orders by created_at and had no index for it.
-create index if not exists users_created on users (created_at);
+-- `listUsers` (auth/users.ts:86) orders by created_at and had no index for it.
+create index users_created on users (created_at);
+
+-- Flat mode's default sort (decision 2a). `draft_updated_at` is nullable, so
+-- "last edited" is the coalesce, and the cursor is (that value, id).
+create index stories_edited
+  on stories (coalesce(draft_updated_at, updated_at) desc, id desc);
+
+-- Flat mode's `sort=title`. `sort=path` needs nothing: `stories_path` is already
+-- unique over non-null paths, so path alone is a total order.
+create index stories_title on stories (title, id);
+
+-- DROPPED, not carried over: `stories_draft_updated (draft_updated_at desc)`.
+-- Added by 0005, rebuilt by 0006, and never read — nothing in src/ orders by that
+-- column. `stories_edited` above is what the query that now exists actually needs.
 ```
 
-Every table, column, index and trigger otherwise carries over unchanged. The
-acceptance criterion is that `migrations.test.ts`, rewritten, asserts the same
-column and index set it asserts today, plus `users_created`.
+Three indexes added, one dropped, so the net cost per write is two. The acceptance
+criterion is that `migrations.test.ts`, rewritten, asserts the same column set it
+asserts today and this index set — including the *absence* of
+`stories_draft_updated`, so nobody restores it by copying an old file.
 
 ### Core types
 
@@ -409,21 +515,26 @@ Every path below is the **new** internal prefix. All keep their current auth.
 
 | Method | Path | Change |
 | --- | --- | --- |
-| GET | `{base}/_/stories` | Was the whole tree. Now one level: `?parentId=&cursor=&limit=&type=&state=&q=&count=` → `Page<StoryMeta>` |
-| GET | `{base}/_/stories?ids=a,b,c` | New mode, via `storiesFor`. Returns `{ rows }`, uncursored — a batch by id is not a page |
-| GET | `{base}/_/documents` | `?type=&cursor=&limit=&state=&q=&count=` → `Page<StoryMeta>`. Still ensures singletons on first access |
-| GET | `{base}/_/search` | New. `?q=&kind=&type=&limit=` → `Page<StoryRef>` |
-| GET | `{base}/_/assets` | `?cursor=&limit=&q=&kind=&count=` → `Page<AssetRow>` |
-| GET | `{base}/_/story/:id/versions` | `?cursor=&limit=` → `Page<VersionMeta>` |
-| GET | `{base}/_/story/:id/activity` | `?cursor=&limit=` → `Page<ActivityEntry>` |
-| GET | `{base}/_/users`, `{base}/_/tokens` | `?cursor=&limit=&count=` → `Page<…>` |
-| GET | `{base}/_/audit` | `?continueFrom=&batch=` → the report plus `continueFrom`, per `migrate.ts`'s shape |
-| GET | `{base}/api/v1/*` | **Unchanged.** Keeps `ContentPage` and page numbers |
+| GET | `{base}/api/stories` | Was the whole tree. Now one level: `?parentId=&cursor=&limit=&type=&state=&q=&count=` → `Page<StoryMeta>` |
+| GET | `{base}/api/stories?flat=1` | New mode (decision 2a). `&sort=edited\|title\|path` plus the same filters → `Page<StoryMeta>`, no structure |
+| GET | `{base}/api/stories?ids=a,b,c` | New mode, via `storiesFor`. Returns `{ rows }`, uncursored — a batch by id is not a page |
+| GET | `{base}/api/documents` | `?type=&cursor=&limit=&state=&q=&count=` → `Page<StoryMeta>`. Still ensures singletons on first access |
+| GET | `{base}/api/search` | New. `?q=&kind=&type=&limit=` → `Page<StoryRef>` |
+| GET | `{base}/api/assets` | `?cursor=&limit=&q=&kind=&count=` → `Page<AssetRow>` |
+| GET | `{base}/api/story/:id/versions` | `?cursor=&limit=` → `Page<VersionMeta>` |
+| GET | `{base}/api/story/:id/activity` | `?cursor=&limit=` → `Page<ActivityEntry>` |
+| GET | `{base}/api/users`, `{base}/api/tokens` | `?cursor=&limit=&count=` → `Page<…>` |
+| GET | `{base}/api/audit` | `?continueFrom=&batch=` → the report plus `continueFrom`, per `migrate.ts`'s shape |
+| GET | `{base}/api/v1/*` | **Unchanged.** Keeps `ContentPage` and page numbers — and stays mounted first (decision 3) |
+
+`count=1` answers `{ rows, cursor, total }`; without it, no `total` key and no
+aggregate query.
 
 Screens (HTML, all serving the admin shell): `{base}/`, `{base}/content`,
 `{base}/documents/:type`, `{base}/assets`, `{base}/edit/:id`, `{base}/access`,
 `{base}/model`, `{base}/redirects`, `{base}/settings`, `{base}/ui`.
-`server/routes/shell.ts` loses its `SHELL_PREFIX`.
+`server/routes/shell.ts` loses its `SHELL_PREFIX`. Content's own state lives in its
+query: `?view=tree|flat&sort=&state=&type=&q=`.
 
 Error codes unchanged: a malformed cursor is a `400` with the one envelope
 (`server/errors.ts`), not a silent first page — see edge cases.
@@ -435,7 +546,7 @@ Error codes unchanged: a malformed cursor is a `400` with the one envelope
 ```
 GIVEN a site with 400 top-level pages
 WHEN the admin opens {base}/content
-THEN GET {base}/_/stories returns at most `limit` rows and a non-null cursor
+THEN GET {base}/api/stories returns at most `limit` rows and a non-null cursor
 AND no request in the boot path returns more than `limit` story rows
 AND expanding a node requests only that node's children
 ```
@@ -475,7 +586,7 @@ THEN a total for the whole filter is returned alongside the page
 ```
 GIVEN a document with three internal links and a richtext link mark
 WHEN the editor opens it
-THEN GET {base}/_/stories?ids= is called with those four ids
+THEN GET {base}/api/stories?ids= is called with those four ids
 AND every internal link in the preview renders with its href
 AND no request returns the whole stories table
 ```
@@ -486,7 +597,7 @@ AND no request returns the whole stories table
 GIVEN the prefix move has landed
 WHEN a signed-in editor loads {base}/content directly
 THEN the admin shell is served as HTML
-AND {base}/_/stories answers JSON
+AND {base}/api/stories answers JSON
 AND no path answers both
 ```
 
@@ -536,20 +647,41 @@ Each: server reader takes `{ filter, cursor, limit }`, route parses and clamps v
 
 ### Phase 5 — Retire the full fetches
 
-1. `GET {base}/_/stories?ids=` and switch `Editor.tsx:252` to ask for the ids the
+1. `GET {base}/api/stories?ids=` and switch `Editor.tsx:252` to ask for the ids the
    open document mentions, reusing the walk in `core/refs.ts`.
-2. `GET {base}/_/search`, and switch the link picker, the reference picker and the
+2. `GET {base}/api/search`, and switch the link picker, the reference picker and the
    palette onto it.
 3. `runtime.ts:525`'s `wantAll` branch: confirm what still needs it, and narrow or
    document it.
 
 ### Phase 6 — Retire the client-side pagers
 
-1. `DataTable.tsx` — `ROWS_PER_PAGE`/`slice` out, next/previous over the cursor in.
+1. `DataTable.tsx` — `ROWS_PER_PAGE`/`slice` out, next/previous over the cursor in,
+   `Showing n of N` from `?count=1`.
 2. `StoryTree.tsx` — `LEVEL_LIMIT` and "Show all N" out; expansion fetches.
 3. Both are surfaces the UI rebuild replaces, so this phase is the minimum that
    keeps the current admin honest until the ports land. It does not restyle
    anything.
+
+### Phase 7 — Flat mode
+
+Last, because it is the only phase that adds a capability rather than fixing one,
+and it wants the route and the shell prototype's Content screen both already
+paged.
+
+1. `?flat=1&sort=edited|title|path` on the stories read, over the indexes phase 1
+   added. Keyset per sort: `(coalesce(draft_updated_at, updated_at), id)`,
+   `(title, id)`, `(path)`.
+2. `admin/ui/screens/Content.tsx` — a `[ Tree | Flat ]` toggle, `?view=` in the
+   URL, last choice remembered as the default (`ui/remembered.ts` already does
+   this for the sidebar).
+3. Flat rows show the **full path** rather than the slug, since there is no indent
+   to carry ancestry — the opposite of the tree's rule, and the reason
+   `List.module.css` already carries a note about that trade.
+4. Filters, selection and bulk actions are the same objects in both modes. That is
+   the point of a toggle rather than a second screen; a test asserts a selection
+   survives the toggle, which is decision 7a's "captures rather than tracks" in its
+   cheapest possible form.
 
 ## Edge cases
 
@@ -577,6 +709,19 @@ Each: server reader takes `{ filter, cursor, limit }`, route parses and clamps v
 - **A bulk count that moved between read and execute** → refuse with the new
   count, per `ui-architecture.md` 7a. Out of scope to implement; in scope not to
   design against.
+- **Flat mode's `sort=edited` over a page nobody has opened** → sorts by
+  `updated_at`, because `coalesce` makes the row's own timestamp the fallback. This
+  is the case a plain `draft_updated_at desc` gets exactly backwards, sinking a
+  page created minutes ago to the bottom of a list called "last edited".
+- **Flat mode `sort=title` with two identical titles** → the cursor's second
+  component is `id`, so the boundary is total. Duplicate titles are legitimate:
+  `stories_type_slug` constrains the slug, nothing constrains the title.
+- **Toggling tree ↔ flat with rows selected** → the selection survives, unchanged.
+  Both modes list the same rows under a different ordering, so a toggle is a
+  narrower case of "a selection survives a filter change".
+- **`?view=flat` on a site with one page** → the toggle still renders. It is not an
+  affordance that appears past a threshold; a control that comes and goes with the
+  data is one a person cannot learn.
 
 ## Testing requirements
 
@@ -602,6 +747,13 @@ Each: server reader takes `{ filter, cursor, limit }`, route parses and clamps v
 - `?ids=` chunking above the bind limit.
 - The prefix move: a screen path serves HTML, its JSON twin serves JSON, no path
   serves both.
+- **The `/api` partition** (decision 3): no internal route sits under a versioned
+  prefix, and every `/api/v1` path is one the content API documents. This is the
+  test that earns the shared prefix, so it is not optional.
+- **Flat mode's three sorts**, each paged to exhaustion, plus the null case:
+  a never-opened page created *now* sorts above a page edited long ago under
+  `sort=edited`. That assertion is the whole reason `coalesce` is there.
+- The dropped index: `stories_draft_updated` is **absent** after the collapse.
 
 **End to end (`scripts/*.mjs`, live dev server on port 5199):**
 
@@ -638,13 +790,38 @@ Each: server reader takes `{ filter, cursor, limit }`, route parses and clamps v
 - **Restyling `DataTable` or `StoryTree`.** Phase 6 keeps them correct; the UI
   rebuild replaces them.
 
+## Resolved
+
+Four questions put to the owner, 2026-07-31. Two confirmed a recommendation, one
+overrode it, one added scope — and the added scope is the one that improved the
+spec, because building it out found a dead index and a null-ordering bug.
+
+1. **The internal prefix is `{base}/api/`, not `{base}/_/`** — the recommendation
+   was overridden. The objection to it was real (a versioned contract and an
+   unstable internal surface would look like siblings) so it is answered rather than
+   dropped: **a version segment is a promise, and its absence is the absence of
+   one**, stated at the mount in `app.ts` and pinned by a partition test. Decision 3.
+2. **Next / previous, plus a count** — `Showing 20 of 1,284`. Confirms the keyset
+   choice while making the opt-in count the normal case for a list header; decision 5
+   now says why opt-in still matters (a search box per keystroke, and the bulk guard
+   sharing one implementation).
+3. **The flat page list gets built, not just supported** — a `[ Tree | Flat ]`
+   toggle on Content, and decision 2a. Writing it up produced the two findings this
+   spec would otherwise have shipped without: `stories_draft_updated` has never been
+   read by anything, and `order by draft_updated_at desc` sinks a page created five
+   minutes ago to the bottom of a list called "last edited", because the column is
+   nullable and SQLite sorts nulls last under `desc`.
+4. **Substring search, not FTS5** — `like` over title, slug and path plus
+   `content_index`. Decision 8, unchanged.
+
 ## Open questions
 
-- **Does `GET {base}/_/stories` with no `parentId` mean "the top level" or "every
-  routed story, paged flat"?** The spec assumes the former throughout, and a flat
-  paged mode may still be wanted for a future "all pages, sorted by last edited"
-  view. Deferring costs nothing: it is a separate query parameter, not a different
-  route.
 - **Should the `state` expression live in a SQL view** rather than being
   interpolated next to `COLS`? A view is tidier and D1 supports it; it also puts a
-  rule the tests pin into the migration rather than into the code they test.
+  rule the tests pin into the migration rather than into the code they test. Leaning
+  towards interpolation, because `draftState` in `core/` is the definition and a
+  view would make the migration a second place to read it.
+- **Does flat mode want `sort=state`?** It is the one filter that is also a
+  plausible ordering ("show me everything, drafts first"), and it is the one sort
+  with no index and only four distinct values. Cheap to add later; guessing now
+  would add a fourth index for a sort nobody has asked for.
