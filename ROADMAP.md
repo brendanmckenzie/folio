@@ -306,7 +306,73 @@ Cache — so every computation is a pure function with unit tests behind it and
 
 ## Next
 
-### 1. Scheduled publishing
+### 1. Pagination, everywhere, as a rule
+
+**Nothing may be unpaginated — no route, no list, no panel.** Found while
+planning the UI rebuild (`docs/design-system.md`), and it is a bigger constraint
+than the thing that surfaced it: the admin's command palette was going to rank
+documents client-side over the list the tree already fetches, which is only cheap
+because something worse is already happening.
+
+Audited 2026-07-30, and the state is three-tiered:
+
+**Properly paginated — two, and one of them is the pattern to copy:**
+
+- `GET /redirects` → `listRedirects` (`server/redirects.ts:169`): a real keyset
+  cursor over `(created_at, from_path)`, `limit` defaulted to 50 and clamped to
+  200. This is the shape everything else should take.
+- `GET /api/v1/documents` → `rt.query`, which is `collections.md`'s engine and
+  pages properly.
+
+**Capped but not paginated — silent truncation with no page two:**
+
+- `GET /assets` → `listAssets(db, limit = 200)` (`server/assets.ts:37`). No
+  search either, so asset 201 is unreachable by any means.
+- `GET /story/:id/versions` → `listVersions(..., limit = 50)`.
+- `GET /story/:id/activity` → `limitParam(limit, 60, 200)`.
+
+**Unbounded — the whole table, every request:**
+
+- `GET /stories` → `listStories(db)`. The worst one, and the sharpest detail:
+  `listStories` **already takes `{ limit, offset }`** and not one of its seven
+  callers passes it.
+- `GET /documents` → `listDocuments`, every unrouted document or every row of a
+  type.
+- `GET /users`, `GET /tokens` → `listUsers`, `listTokens`, whole table each.
+- `GET /audit` → no limit anywhere in `server/audit.ts`.
+
+The UI half is the same story from the other end. Every admin list is one unpaged
+request; `DataTable` then pages **20 rows client-side over the full list**, and
+`StoryTree` caps a level at 50 rows with "Show all N" — a *render* cap over data
+already transferred, which is the worst of both: it pays the cost and hides the
+rows anyway.
+
+**Why this is a spec and not a sweep of `limit` clauses.** Three things depend on
+`GET /stories` returning everything, and each needs a different answer:
+
+1. **The tree.** Paging a tree means paging *within a parent*, so the tree loads
+   one level at a time, ordered by `ord`. That also makes collapse mean something
+   and retires "Show all 812".
+2. **Link and reference pickers.** They currently filter the full list in memory.
+   They need a search route, which is the same route the palette needs.
+3. **`buildResolution(flat, …)` in the admin**, which needs every story to turn a
+   link's target id into a URL for the open preview. This is the load-bearing one
+   and the reason the full fetch has survived. The answer already exists
+   server-side: `storiesFor(db, ids, paths)` (`server/stories.ts`) resolves a
+   batch in one query, so the admin wants `GET /stories?ids=…` and to ask for the
+   ids a document actually mentions — exactly what `resolve()` does on the server.
+
+Open decision for the spec: **keyset cursors everywhere, and the UI stops
+promising page numbers.** Keyset matches the redirects precedent, is correct under
+concurrent writes and needs no `count(*)`; the cost is that "Page 3 of 7" becomes
+"next/previous", which over live content was a lie anyway. A separate cheap
+`count(*)` can still front a header ("24 documents") where one is worth a second
+query.
+
+Sequenced **before** `docs/specs/admin/url-and-shell.md`, because the URL's list
+parameters (`?q=&sort=&page=`) have no meaning until this decides what a page is.
+
+### 2. Scheduled publishing
 
 A DO alarm per story. Small, and a real Cloudflare advantage: no cron worker, no
 queue, no polling. Now unblocked: a scheduled publish writes a version like any
