@@ -43,7 +43,13 @@ import {
 import { ancestorPaths, type StoryMeta, type StoryNode } from '../core/story'
 import { type ResolvedAuth, resolveAuth } from './auth/config'
 import { type ContentProjection, contentProjection } from './content-index'
-import { createHookRunner, type FolioHooks, type HookRunnerCtx, validateHooks } from './hooks'
+import {
+  createHookRunner,
+  type FolioHooks,
+  type HookRunner,
+  type HookRunnerCtx,
+  validateHooks,
+} from './hooks'
 import type { PublishDeps } from './publish'
 import { type QueryDeps, runQuery } from './query'
 import { SPACE_NAME, spaceBroadcastHooks } from './space-events'
@@ -223,6 +229,15 @@ export interface FolioRuntime {
    * unpublish/checkpoint routes that also want the rest of `PublishDeps`.
    */
   publishDeps: (bindings: FolioBindings, hookCtx: HookRunnerCtx) => PublishDeps
+  /**
+   * The hook runner on its own, for the two write paths that fire an event and
+   * need none of the rest of `PublishDeps`: `runMigrations` and `reindex`
+   * (`../platform/caching.md`). Same host hooks, same internal list, same
+   * ordering — `publishDeps` builds its own `hooks` from this, so there is one
+   * place a runner is assembled rather than two that could register different
+   * internal consumers.
+   */
+  hookRunner: (hookCtx: HookRunnerCtx) => HookRunner<unknown>
   page: (which: 'admin' | 'preview') => PageAssets
 }
 
@@ -660,6 +675,13 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    */
   const internalHooks: FolioHooks<Env>[] = [spaceBroadcastHooks<Env>(config, globals)]
 
+  const hookRunner = (hookCtx: HookRunnerCtx): HookRunner<unknown> =>
+    createHookRunner<Env>(
+      config.hooks,
+      { env: hookCtx.env as Env, waitUntil: hookCtx.waitUntil },
+      internalHooks,
+    )
+
   const publishDeps = (bindings: FolioBindings, hookCtx: HookRunnerCtx): PublishDeps => ({
     db: bindings.db,
     draft: (story) => draftFor(bindings, story),
@@ -667,11 +689,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     titleFor,
     titlesFor,
     projection,
-    hooks: createHookRunner<Env>(
-      config.hooks,
-      { env: hookCtx.env as Env, waitUntil: hookCtx.waitUntil },
-      internalHooks,
-    ),
+    hooks: hookRunner(hookCtx),
   })
 
   /**
@@ -724,6 +742,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     query,
     indexedFields: indexed,
     publishDeps,
+    hookRunner,
     page,
   }
 }

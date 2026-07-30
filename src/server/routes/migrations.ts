@@ -11,7 +11,7 @@ import { Hono } from 'hono'
 import { actorString, ADMIN, READ_DRAFT } from '../auth/roles'
 import { audit } from '../audit'
 import { migrationStatus, runMigrations } from '../migrate'
-import { requireAccess } from '../middleware'
+import { hookCtx, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
 import { idParam, MigrateBody, parseOptionalBody } from '../validate'
@@ -65,6 +65,7 @@ export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           typeOf: rt.typeOf,
           draft: (story) => rt.draftFor(bindings, story),
           stub: (id) => rt.stub(bindings, id),
+          hooks: rt.hookRunner(hookCtx(c)),
         },
         {
           dryRun: body.dryRun,

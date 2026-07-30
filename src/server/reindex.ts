@@ -19,6 +19,7 @@
 import type { LocaleConfig } from '../core/locales'
 import type { DocumentType, SchemaIndex } from '../core/schema'
 import { contentProjection, indexStatements } from './content-index'
+import type { HookRunner } from './hooks'
 import { publishedDocsAfter } from './stories'
 
 const DEFAULT_BATCH = 50
@@ -31,6 +32,8 @@ export interface ReindexOptions {
   continueFrom?: string | null
   /** Computes everything, writes nothing, and answers the same shape. */
   dryRun?: boolean
+  /** Who asked, for the `reindexed` hook. Off the session, never the body. */
+  actor?: string | null
 }
 
 export interface ReindexReport {
@@ -52,6 +55,14 @@ export interface ReindexDeps {
   schema: SchemaIndex
   typeOf: (name: string | undefined) => DocumentType | undefined
   locales?: LocaleConfig
+  /**
+   * Fires `reindexed` once per batch (`../platform/caching.md`). Optional for
+   * the reason `MigrateDeps.hooks` is: absent is what every caller did before
+   * the event existed. Unlike a migration this one cannot name what it
+   * affected — it changes what *every* collection query answers, and which
+   * pages hold a collection is precisely what nothing records.
+   */
+  hooks?: HookRunner<unknown>
 }
 
 export async function reindex(
@@ -89,6 +100,12 @@ export async function reindex(
   // landed and its inserts not — is a document silently missing from every
   // collection until somebody notices.
   if (!dryRun && statements.length > 0) await deps.db.batch(statements)
+
+  // After the write, like every other lifecycle hook, and only when there was
+  // one: a dry run and an empty sweep both leave the index exactly as it was.
+  if (!dryRun && docs.length > 0) {
+    await deps.hooks?.run('reindexed', { count: docs.length, actor: opts.actor ?? null })
+  }
 
   return {
     documents: docs.length,

@@ -26,7 +26,10 @@ import type {
   FolioHooks,
   PathsChangedHookPayload,
   PublishedHookPayload,
+  RedirectsChangedHookPayload,
+  ReindexedHookPayload,
   UnpublishedHookPayload,
+  UpdatedHookPayload,
 } from '../../src/server/hooks'
 import type { Redirect } from '../../src/server/redirects'
 import { createFolio } from '../../src/server'
@@ -1028,6 +1031,160 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
     const res = await callHooked(folio2, '/folio/stories', jsonPost(JSON.stringify({})))
 
     expect(res.status).toBe(400)
+    expect(calls).toEqual([])
+  })
+
+  it('deleted carries each removed id with its path and its type', async () => {
+    const story = await createStory('Hook Deleted Types')
+
+    const calls: DeletedHookPayload<Cloudflare.Env>[] = []
+    const folio2 = folioWithHooks({ deleted: (e) => calls.push(e) })
+    await callHooked(folio2, `/folio/stories/${story.id}?redirect=false`, { method: 'DELETE' })
+
+    expect(calls).toHaveLength(1)
+    const i = calls[0]!.ids.indexOf(story.id)
+    expect(calls[0]!.paths[i]).toBe(story.path)
+    // The third fact that is gone the moment the delete runs, and the one a
+    // collection over this type has to be invalidated by (`caching.md`).
+    expect(calls[0]!.types[i]).toBe('page')
+  })
+})
+
+/**
+ * The four events `../../../docs/specs/platform/caching.md` added, at their real
+ * call sites. Each exists because a write path that changes published bytes used
+ * to fire nothing at all, and the same fixture rules as the block above apply:
+ * a second `createFolio` over the same `env`, and `waitOnExecutionContext` to
+ * drain anything that rode `waitUntil`.
+ */
+describe('the caching lifecycle hooks (caching.md)', () => {
+  it('updated fires with changed: ["title"] for the title-only patch pathsChanged skips', async () => {
+    const story = await createStory('Hook Updated Title')
+
+    const updated: UpdatedHookPayload<Cloudflare.Env>[] = []
+    const paths: unknown[] = []
+    const folio2 = folioWithHooks({
+      updated: (e) => updated.push(e),
+      pathsChanged: (e) => paths.push(e),
+    })
+
+    // `slug` pinned, so nothing moves: this is exactly the write that alters
+    // `StoryRef.title` on every page linking here and used to be silent.
+    await callHooked(folio2, `/folio/stories/${story.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Hook Updated Retitled', slug: story.slug }),
+    })
+
+    expect(updated).toHaveLength(1)
+    expect(updated[0]!.changed).toEqual(['title'])
+    expect(updated[0]!.story.id).toBe(story.id)
+    expect(updated[0]!.story.title).toBe('Hook Updated Retitled')
+    expect(paths).toEqual([])
+  })
+
+  it('does not fire updated for a patch that changed nothing', async () => {
+    const story = await createStory('Hook Updated Noop')
+
+    const calls: unknown[] = []
+    const folio2 = folioWithHooks({ updated: (e) => calls.push(e) })
+    await callHooked(folio2, `/folio/stories/${story.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: story.title, slug: story.slug }),
+    })
+
+    expect(calls).toEqual([])
+  })
+
+  it('fires both updated and pathsChanged for a rename, which are different facts', async () => {
+    const story = await createStory('Hook Updated Rename')
+
+    const updated: UpdatedHookPayload<Cloudflare.Env>[] = []
+    const paths: PathsChangedHookPayload<Cloudflare.Env>[] = []
+    const folio2 = folioWithHooks({
+      updated: (e) => updated.push(e),
+      pathsChanged: (e) => paths.push(e),
+    })
+
+    await callHooked(folio2, `/folio/stories/${story.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ slug: 'hook-updated-renamed' }),
+    })
+
+    expect(updated).toHaveLength(1)
+    expect(updated[0]!.changed).toEqual(['slug'])
+    expect(paths).toHaveLength(1)
+  })
+
+  it('fires updated from the API surface too, not only the admin route', async () => {
+    const story = await createStory('Hook Updated Api')
+
+    const calls: UpdatedHookPayload<Cloudflare.Env>[] = []
+    const folio2 = folioWithHooks({ updated: (e) => calls.push(e) })
+    await callHooked(folio2, `/folio/api/v1/documents/${story.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Hook Updated Api Retitled', slug: story.slug }),
+    })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.changed).toEqual(['title'])
+  })
+
+  it('reindexed fires with the number of documents the batch swept', async () => {
+    const story = await createStory('Hook Reindexed Target')
+    const conn = await connect(story.id)
+    await conn.hello('alice')
+    conn.close()
+    expect((await SELF.fetch(`${API}/story/${story.id}/publish`, { method: 'POST' })).ok).toBe(true)
+
+    const calls: ReindexedHookPayload<Cloudflare.Env>[] = []
+    const folio2 = folioWithHooks({ reindexed: (e) => calls.push(e) })
+    const res = await callHooked(folio2, '/folio/reindex', jsonPost('{}'))
+    const report = await res.json<{ documents: number }>()
+
+    expect(report.documents).toBeGreaterThan(0)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.count).toBe(report.documents)
+  })
+
+  it('does not fire reindexed for a dry run, which writes nothing', async () => {
+    const calls: unknown[] = []
+    const folio2 = folioWithHooks({ reindexed: (e) => calls.push(e) })
+    await callHooked(folio2, '/folio/reindex', jsonPost(JSON.stringify({ dryRun: true })))
+
+    expect(calls).toEqual([])
+  })
+
+  it('redirectsChanged fires when a manual redirect is added and when it is removed', async () => {
+    const calls: RedirectsChangedHookPayload<Cloudflare.Env>[] = []
+    const folio2 = folioWithHooks({ redirectsChanged: (e) => calls.push(e) })
+
+    const created = await callHooked(
+      folio2,
+      '/folio/redirects',
+      jsonPost(JSON.stringify({ from: '/hook-redirect-source', to: '/hook-redirect-target' })),
+    )
+    expect(created.status).toBe(201)
+    expect(calls).toHaveLength(1)
+    // Normalised: no leading slash, matching what `lookupRedirect` matches on.
+    expect(calls[0]!.from).toEqual(['hook-redirect-source'])
+
+    const removed = await callHooked(folio2, '/folio/redirects/hook-redirect-source', {
+      method: 'DELETE',
+    })
+    expect(await removed.json<{ deleted: boolean }>()).toEqual({ deleted: true })
+    expect(calls).toHaveLength(2)
+    expect(calls[1]!.from).toEqual(['hook-redirect-source'])
+  })
+
+  it('does not fire redirectsChanged for a delete that removed nothing', async () => {
+    const calls: unknown[] = []
+    const folio2 = folioWithHooks({ redirectsChanged: (e) => calls.push(e) })
+    await callHooked(folio2, '/folio/redirects/hook-redirect-never-existed', { method: 'DELETE' })
+
     expect(calls).toEqual([])
   })
 })

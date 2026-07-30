@@ -12,8 +12,8 @@ import { actorString } from '../auth/roles'
 import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
 import { indexedValuesFor } from '../content-index'
 import { FolioError, rethrow } from '../errors'
-import type { HookRunnerCtx } from '../hooks'
-import { loadStory, requireAccess } from '../middleware'
+import type { StoryChange } from '../hooks'
+import { hookCtx, loadStory, requireAccess } from '../middleware'
 import { publish, unpublish } from '../publish'
 import type { FolioRuntime } from '../runtime'
 import {
@@ -37,13 +37,6 @@ import {
   typeNameQuery,
 } from '../validate'
 import { deleteVersionsStatement } from '../versions'
-
-/** `c.env` and a `waitUntil` built from `c.executionCtx`, the two things
- * every hook-firing route needs alongside `rt.publishDeps`
- * (`../../../docs/specs/platform/publish-hooks.md` decision 3). */
-function hookCtx<Env>(c: Context<FolioEnv<Env>>): HookRunnerCtx {
-  return { env: c.env, waitUntil: (p) => c.executionCtx.waitUntil(p) }
-}
 
 /**
  * Who did this, for a hook payload and for `versions.actor`.
@@ -199,21 +192,33 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     let next: StoryMeta
     let changes: { id: string; from: string; to: string }[]
+    let updated: StoryChange[]
     try {
       const result = await updateStoryStatement(bindings.db, id, body, rt.types)
       next = result.next
       changes = result.changes
+      updated = result.updated
       if (result.statements.length) await bindings.db.batch(result.statements)
     } catch (e) {
       rethrow(e)
     }
 
+    const actor = actorFor(c)
     // Nothing renamed or moved (a plain title edit, say) has no old path for
     // a host to purge, so `pathsChanged` stays silent rather than firing an
     // empty `changes` array.
     if (changes.length) {
-      const actor = actorFor(c)
       await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('pathsChanged', { changes, actor })
+    }
+    // ...and `updated` is the event that fires for exactly the case
+    // `pathsChanged` skips (`../../../docs/specs/platform/caching.md`): a
+    // title-only patch changes `StoryRef.title` on every page linking here and
+    // used to fire nothing at all. Both fire for a rename, which is correct —
+    // they describe different facts about the same write.
+    if (updated.length) {
+      await rt
+        .publishDeps(bindings, hookCtx(c))
+        .hooks?.run('updated', { story: next, changed: updated, actor })
     }
 
     return c.json(rt.withUrls(next))
@@ -326,7 +331,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const actor = actorFor(c)
     await rt
       .publishDeps(bindings, hookCtx(c))
-      .hooks?.run('deleted', { ids: found.ids, paths: found.paths, actor })
+      .hooks?.run('deleted', { ids: found.ids, paths: found.paths, types: found.types, actor })
 
     return c.json({ deleted: found.ids })
   })

@@ -25,6 +25,7 @@ import {
   countReferencesTo,
   referencesTo,
 } from './content-index'
+import type { StoryChange } from './hooks'
 import { clearRedirectAtStatement, redirectStatements } from './redirects'
 
 const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18n,
@@ -765,7 +766,19 @@ export async function updateStoryStatement(
   id: string,
   patch: StoryPatch,
   types: readonly DocumentType[] = [],
-): Promise<{ next: StoryMeta; statements: D1PreparedStatement[]; changes: PathChange[] }> {
+): Promise<{
+  next: StoryMeta
+  statements: D1PreparedStatement[]
+  changes: PathChange[]
+  /**
+   * Which of the row's own fields this patch actually altered, for the
+   * `updated` hook (`../platform/caching.md`). Computed here, beside the
+   * `changes` diff, for the reason that one is: the "before" is gone once these
+   * statements run, and a caller recomputing it would be a second answer that
+   * could drift from this one.
+   */
+  updated: StoryChange[]
+}> {
   const rows = await listStories(db)
   const current = rows.find((r) => r.id === id)
   if (!current) throw new Error('Unknown story')
@@ -849,7 +862,16 @@ export async function updateStoryStatement(
     statements.push(...redirectStatements(db, { from, to, storyId: r.id }))
   }
 
-  return { next: { ...next, path: paths.get(id) ?? next.path }, statements, changes }
+  // The target row only. A descendant whose path moved because its ancestor did
+  // has none of *its* own fields changed, and is already fully described by
+  // `changes`.
+  const updated: StoryChange[] = []
+  if (next.title !== current.title) updated.push('title')
+  if (next.slug !== current.slug) updated.push('slug')
+  if (next.parentId !== current.parentId) updated.push('parent')
+  if (next.ord !== current.ord) updated.push('ord')
+
+  return { next: { ...next, path: paths.get(id) ?? next.path }, statements, changes, updated }
 }
 
 /** `updateStoryStatement`, run. What every caller wanted before this spec's
@@ -893,6 +915,13 @@ export async function deleteStoryStatement(
    * document, which never had a URL for a cache to hold.
    */
   paths: (string | null)[]
+  /**
+   * `ids`' own document types, same order — the third fact that is gone the
+   * moment this statement runs, needed for the same reason `paths` is: a
+   * deleted document leaves every collection over its type, and
+   * `../platform/caching.md`'s purge hook has to name that type.
+   */
+  types: string[]
   statement: D1PreparedStatement
   redirectStatements: D1PreparedStatement[]
   /**
@@ -928,6 +957,7 @@ export async function deleteStoryStatement(
 
   const ids = descendants(rows, id)
   const paths = ids.map((descId) => rows.find((r) => r.id === descId)?.path ?? null)
+  const types_ = ids.map((descId) => rows.find((r) => r.id === descId)?.type ?? '')
   const placeholders = ids.map(() => '?').join(', ')
   const statement = db.prepare(`delete from stories where id in (${placeholders})`).bind(...ids)
 
@@ -946,6 +976,7 @@ export async function deleteStoryStatement(
   return {
     ids,
     paths,
+    types: types_,
     statement,
     redirectStatements: redirects,
     indexStatements: [...clearIndexStatements(db, ids), ...clearInboundRefStatements(db, ids)],

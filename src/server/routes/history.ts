@@ -6,7 +6,7 @@
 import { Hono } from 'hono'
 import { actorString, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
 import { FolioError } from '../errors'
-import { loadStory, requireAccess } from '../middleware'
+import { hookCtx, loadStory, requireAccess } from '../middleware'
 import { checkpoint } from '../publish'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
@@ -36,10 +36,7 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.post('/story/:id/versions', requireAccess<Env>(rt, PUBLISH), loadStory<Env>(), async (c) => {
     const body = await parseOptionalBody(c.req, CheckpointBody)
-    const deps = rt.publishDeps(c.var.bindings(), {
-      env: c.env,
-      waitUntil: (p) => c.executionCtx.waitUntil(p),
-    })
+    const deps = rt.publishDeps(c.var.bindings(), hookCtx(c))
     // `actor` comes off the session, never off the body: the client used to
     // send its own display name here, which made "who checkpointed this" a
     // field anybody could type into.

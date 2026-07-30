@@ -35,8 +35,8 @@ import {
   READ_DRAFT,
 } from '../../auth/roles'
 import { FolioError, rethrow } from '../../errors'
-import type { HookRunnerCtx } from '../../hooks'
-import { ensureAccess, requireAccess } from '../../middleware'
+import type { StoryChange } from '../../hooks'
+import { ensureAccess, hookCtx, requireAccess } from '../../middleware'
 import { checkpoint, publish } from '../../publish'
 import type { FolioRuntime } from '../../runtime'
 import {
@@ -91,10 +91,6 @@ export interface ApiDocument extends ApiDocumentMeta {
    */
   locale?: string
   content: NestedDoc
-}
-
-function hookCtx<Env>(c: Context<FolioEnv<Env>>): HookRunnerCtx {
-  return { env: c.env, waitUntil: (p) => c.executionCtx.waitUntil(p) }
 }
 
 /** The token's own name, or the person's id. Never anything a client sent. */
@@ -453,18 +449,29 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     let next: StoryMeta
     let changes: { id: string; from: string; to: string }[]
+    let updated: StoryChange[]
     try {
       const result = await updateStoryStatement(bindings.db, id, body, rt.types)
       next = result.next
       changes = result.changes
+      updated = result.updated
       if (result.statements.length) await bindings.db.batch(result.statements)
     } catch (e) {
       rethrow(e)
     }
 
+    // The same two hooks the admin's own PATCH fires, for the same reasons —
+    // see `routes/stories.ts`. Both call sites, deliberately: the API is a
+    // second surface over the same services, and a host hook must not be able
+    // to tell which door a write came through.
+    const actor = actorString(c.var.actor)
     if (changes.length) {
-      const actor = actorString(c.var.actor)
       await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('pathsChanged', { changes, actor })
+    }
+    if (updated.length) {
+      await rt
+        .publishDeps(bindings, hookCtx(c))
+        .hooks?.run('updated', { story: next, changed: updated, actor })
     }
 
     return c.json(meta(next))
@@ -509,7 +516,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const actor = actorString(c.var.actor)
     await rt
       .publishDeps(bindings, hookCtx(c))
-      .hooks?.run('deleted', { ids: found.ids, paths: found.paths, actor })
+      .hooks?.run('deleted', { ids: found.ids, paths: found.paths, types: found.types, actor })
 
     return c.json({ deleted: found.ids })
   })

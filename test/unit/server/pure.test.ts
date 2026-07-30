@@ -929,7 +929,7 @@ describe('createHookRunner', () => {
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     await expect(
-      runner.run('deleted', { ids: ['sty_a'], paths: ['a'], actor: null }),
+      runner.run('deleted', { ids: ['sty_a'], paths: ['a'], types: ['page'], actor: null }),
     ).resolves.toBeUndefined()
     await Promise.all(tasks)
 
@@ -943,7 +943,7 @@ describe('createHookRunner', () => {
     const runner = createHookRunner(hooks, ctx)
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    await runner.run('deleted', { ids: [], paths: [], actor: null })
+    await runner.run('deleted', { ids: [], paths: [], types: [], actor: null })
 
     expect(tasks).toHaveLength(0)
     expect(logged).not.toHaveBeenCalled()
@@ -1004,7 +1004,7 @@ describe('createHookRunner', () => {
       const { ctx, tasks } = fakeCtx()
       const runner = createHookRunner(undefined, ctx, internal)
 
-      await runner.run('deleted', { ids: [], paths: [], actor: null })
+      await runner.run('deleted', { ids: [], paths: [], types: [], actor: null })
       await Promise.all(tasks)
 
       expect(calls).toEqual(['internal'])
@@ -1107,6 +1107,13 @@ describe('validateHooks', () => {
     expect(() => validateHooks(undefined)).not.toThrow()
   })
 
+  /**
+   * The two lists — `HookEvent` (compile time) and `HOOK_EVENTS` (runtime) —
+   * have to agree, or a name is either a hook nobody can configure or one
+   * `createFolio` refuses at construction. This literal is checked against
+   * `FolioHooks` by the compiler and against the array by `validateHooks`, so
+   * a name missing from either side fails here.
+   */
   it('accepts every real event, plus await', () => {
     const hooks: FolioHooks<Env> = {
       published: () => {},
@@ -1115,9 +1122,19 @@ describe('validateHooks', () => {
       created: () => {},
       deleted: () => {},
       checkpointed: () => {},
+      updated: () => {},
+      migrated: () => {},
+      reindexed: () => {},
+      redirectsChanged: () => {},
       await: ['published'],
     }
     expect(() => validateHooks(hooks)).not.toThrow()
+  })
+
+  it('names every valid key in the message it throws, so the list is discoverable', () => {
+    expect(() => validateHooks({ reindex: () => {} } as unknown as FolioHooks<Env>)).toThrow(
+      /valid: await, checkpointed, created, deleted, migrated, pathsChanged, published, redirectsChanged, reindexed, unpublished, updated/,
+    )
   })
 
   it('throws naming an unknown key and listing the valid ones', () => {

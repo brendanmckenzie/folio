@@ -374,6 +374,65 @@ describe('folio.migrate: dry run', () => {
 })
 
 /**
+ * The `migrated` hook (`../../../docs/specs/platform/caching.md`). A run
+ * rewrites `published_doc` per story and used to tell nobody at all, which is a
+ * cached page outliving the schema change that rewrote it.
+ */
+describe('folio.migrate: the migrated hook', () => {
+  function withHook(migrations: readonly Migration[], onMigrated: (e: unknown) => void) {
+    return createFolio<Cloudflare.Env>({
+      blocks: [page, hero, quote],
+      root: 'page',
+      migrations,
+      bindings,
+      basePath: '/folio',
+      auth: 'open',
+      route: (p) => (p ? `/${p}` : '/'),
+      hooks: { migrated: (e) => onMigrated(e) },
+    })
+  }
+
+  it('names the documents whose published snapshot it rewrote, and the migrations it applied', async () => {
+    const calls: { ids: string[]; migrations: string[] }[] = []
+    const folio = withHook([RENAME], (e) => {
+      calls.push(e as (typeof calls)[number])
+    })
+    await seedStory(folio, 'mig_hook_pub', [blok('h1', 'hero', { heading: 'Hi' })], {
+      publish: true,
+    })
+    // Never published, so its published snapshot cannot have been rewritten and
+    // no cached page can exist for it.
+    await seedStory(folio, 'mig_hook_draft', [blok('h1', 'hero', { heading: 'Yo' })])
+
+    await folio.migrate(env)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.ids).toEqual(['mig_hook_pub'])
+    expect(calls[0]!.migrations).toEqual(['0001-hero-heading-to-title'])
+  })
+
+  it('fires nothing on a dry run, and nothing when no published snapshot changed', async () => {
+    const calls: unknown[] = []
+    const folio = withHook([RENAME], (e) => {
+      calls.push(e)
+    })
+    await seedStory(folio, 'mig_hook_dry', [blok('h1', 'hero', { heading: 'Hi' })], {
+      publish: true,
+    })
+
+    await folio.migrate(env, { dryRun: true })
+    expect(calls).toEqual([])
+
+    // Second run: everything is already in the target shape, so it rewrites
+    // nothing and the event would have nothing to be about.
+    await folio.migrate(env)
+    expect(calls).toHaveLength(1)
+    await folio.migrate(env)
+    expect(calls).toHaveLength(1)
+  })
+})
+
+/**
  * Chunking splits a large migration into several transactions, which means
  * several undo steps rather than one. The honest trade: the alternative is
  * refusing to migrate documents over a size.

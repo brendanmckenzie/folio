@@ -27,6 +27,7 @@ import { applyAll, type Mutation } from '../core/mutations'
 import { MAX_TX_MUTATIONS } from '../core/protocol'
 import type { SchemaIndex } from '../core/schema'
 import type { StoryMeta } from '../core/story'
+import type { HookRunner } from './hooks'
 import type { FolioRuntime } from './runtime'
 import { countBehind, stampSchemaStatement, storiesBehind } from './stories'
 import type { StoryStub } from './types'
@@ -169,6 +170,14 @@ export interface MigrateDeps {
   draft: (story: StoryMeta) => Promise<Doc>
   /** The story's Durable Object, for `commit`. */
   stub: (id: string) => StoryStub
+  /**
+   * Fires `migrated` once per batch (`../platform/caching.md`). Optional, like
+   * `PublishDeps.hooks`, and absent is the behaviour every caller had before
+   * the event existed: a run rewrites `published_doc` per story through
+   * `stampSchemaStatement` and used to tell nobody, so a cached page could
+   * outlive the schema change that rewrote it.
+   */
+  hooks?: HookRunner<unknown>
 }
 
 /**
@@ -196,6 +205,15 @@ export async function runMigrations(
 
   const report: MigrateReport = { ...EMPTY(dryRun), pending, stories: rows.length }
   const actor = { id: opts.actor ?? `migration:${latestId}`, name: `Migration ${latestId}` }
+  /**
+   * Stories whose **published** snapshot this batch rewrote, for the `migrated`
+   * hook. The published half rather than `report.changed`, deliberately: a
+   * draft-only migration changes no bytes any reader can see, and the whole
+   * point of naming ids at all (`caching.md` decision 6) is that a precise set
+   * is *complete* — `story:X` is tagged on every page that loaded X, not only
+   * on X's own page, so purging these also catches everything referencing them.
+   */
+  const republished: string[] = []
 
   for (const { story, publishedDoc } of rows) {
     const due = pendingFor(story.schemaId ?? null, migrations)
@@ -296,6 +314,7 @@ export async function runMigrations(
         ? applyAll(publishedDoc!, publishedResult.mutations)
         : undefined,
     ).run()
+    if (publishedResult.mutations.length > 0) republished.push(story.id)
   }
 
   // A short batch means the sweep reached the end of the table.
@@ -310,6 +329,18 @@ export async function runMigrations(
   // which is the only claim worth recording. A dry run writes nothing at all.
   if (!dryRun && report.continueFrom === null && report.complete && pending.length > 0) {
     await writeLedger(db, pending, report, opts.actor ?? null)
+  }
+
+  // After every write this batch makes, like every other lifecycle hook. A dry
+  // run rewrote nothing, so it fires nothing; a batch that changed no published
+  // document has an empty set and fires nothing either, rather than an event
+  // whose only honest reading is "nothing happened".
+  if (!dryRun && republished.length > 0) {
+    await deps.hooks?.run('migrated', {
+      ids: republished,
+      migrations: pending,
+      actor: opts.actor ?? null,
+    })
   }
 
   return report
