@@ -63,3 +63,53 @@ Schema-in-UI content-type building (Strapi's headline feature) contradicts
 schema-as-code, which is what keeps the admin form, the prop types and the HTML from
 drifting. Same for a second query language alongside `ContentQuery`, and for a plugin
 marketplace.
+
+## After the current spec set, 2026-07-29
+
+Two wants that come *after* specs 1–16 land, recorded now so the specs above are built
+with them in mind. Neither is specced yet, and neither should be started before its own
+review.
+
+| Note | Spec | Reading taken |
+| --- | --- | --- |
+| a full ui sweep to flesh it out into a proper platform but also adopt a linear-esque ui look and feel but obviously still retaining a bit of uniqueness. this will need a proper ui review and design system plan before we jump into it. this is/should be a big one. | not written — wants a UI review and a design system plan first | Explicitly **two pieces of work, review before build**. The sweep cannot be scoped until someone audits what the admin actually is today, and the design system is the thing that makes the sweep finishable rather than endless. Size is **XL**, above anything in the table above. |
+| i'd like this to be super ai-friendly. i.e., mcp's where claude/codex/etc. can help author content and manipulate the content basically all the same functions a person can do i want ai to be able to help with. even down to previewing a page before publishing. | not written — sits on top of [platform/content-api.md](specs/platform/content-api.md) and [foundation/identity-and-access.md](specs/foundation/identity-and-access.md) | The bar is **parity with a person**, not a read API with a chat wrapper. That is already the content API's load-bearing decision: writes go through the mutation log, so an agent's edit appears live in an open editor, lands in the activity trail and is undoable — the same seam a human's keystroke uses. An MCP server is then mostly a tool surface over `/folio/api/v1` plus a token scope. |
+
+### What each one still owes
+
+**The UI sweep.**
+
+- *Review first.* What the admin is today, screen by screen: the tree, the inspector,
+  the media library, versions, the preview frame. What is missing to read as a platform
+  rather than an editor.
+- *Design system second.* Tokens, spacing, type scale, the component set, and the
+  keyboard-first, density-first, command-palette posture Linear is actually known for —
+  the look is downstream of that. "Retaining a bit of uniqueness" needs writing down as
+  a positive brief, not as a caveat, or the sweep converges on a clone.
+- *Then the sweep.* It should absorb the a11y debt `ROADMAP.md` still carries
+  (click-only tree rows, no keyboard reorder, no focus trap in the media library, no
+  aria-live on toasts, Biome's a11y rules switched off in `biome.json`) rather than
+  leaving it to a second pass. A keyboard-first redesign that is not accessible would be
+  an odd result.
+- *Ordering.* After 1–16, because several of those add surface it would otherwise have
+  to redraw: document types puts non-page documents in the tree, data documents add a
+  table-and-form editor, localisation adds a locale switcher, collections add a query
+  builder, live collaboration adds presence.
+
+**AI-friendliness.**
+
+- *The functions.* Enumerate what a person can do and hold the MCP to that list: create,
+  edit, move, duplicate, publish, unpublish, restore a version, upload an asset, read
+  the schema. Schema-as-code is the advantage here — the block manifest is already JSON,
+  so an agent can be told what shape a document must take instead of guessing.
+- *Preview before publish.* The one item on the note that the content API does not
+  already reach. Today preview is the admin's iframe plus a postMessage bootstrap;
+  an agent wants an addressable draft preview it can fetch and read back. Closest
+  existing machinery is `unpublished-changes.md`'s read-only comparison against what is
+  live. Likely wants a scoped, expiring preview URL, which is `identity-and-access.md`'s
+  token table and nothing new.
+- *Identity.* An agent is not a person: `api_tokens` already models this (a token has
+  scopes, not a role). Whatever an agent does must be attributable in the activity trail
+  as the agent, not as whoever minted the token.
+- *Not just MCP.* An MCP server is one client. The durable surface is the versioned HTTP
+  API underneath it, which Codex, a CI script and a future agent all reach the same way.
