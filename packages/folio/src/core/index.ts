@@ -12,6 +12,31 @@ export type { AnyBlockDef, BlockDef, Registry } from './block'
 export { matches } from './conditions'
 export type { FieldCondition } from './conditions'
 
+// Caching (`../../../docs/specs/platform/caching.md`). Core rather than server
+// because it is a pure function of a `Resolution`: the host holds the published
+// `Response` and sets these two headers on it, and Folio — which never
+// constructs one — computes what they should say.
+export {
+  ANY_TYPE_TAG,
+  cacheControl,
+  cacheHeaders,
+  cacheTags,
+  DEFAULT_S_MAXAGE,
+  globalTag,
+  MAX_CACHE_TAGS,
+  MAX_CACHE_TAG_BYTES,
+  NO_STORE,
+  SITE_TAG,
+  storyTag,
+  typeTag,
+} from './cache-tags'
+export type {
+  CacheHeaderOptions,
+  CacheHeaders,
+  CacheTagOptions,
+  CacheTags,
+} from './cache-tags'
+
 export {
   asset,
   blocks,
