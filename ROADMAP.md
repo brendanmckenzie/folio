@@ -287,15 +287,23 @@ cookie. We should do the same; it also makes share-a-preview-link work.
 `revalidate = 60` plus a Storyblok webhook hitting `/api/revalidate` with a
 shared secret. We own both sides, so publish can purge directly — no webhook,
 no secret, no eventual consistency window. Unpublish has to purge the same
-keys, or a cached page outlives the row that served it. The seam now exists
+keys, or a cached page outlives the row that served it. The seam exists
 (`docs/specs/platform/publish-hooks.md`): a host's `hooks.published` and
-`hooks.unpublished` fire after each write commits, with the story and, for
-`published`, the document. What is still missing is only the cache layer
-itself (Cache API or KV in front of D1) for a hook to purge — this item is
-now "pick a cache", not "invent a mechanism". One wrinkle globals.md adds:
-publishing a global has to purge *every* page that rendered it, not one, so
-the purge key for a page must include the globals it rendered, not just its
-own path.
+`hooks.unpublished` fire after each write commits.
+
+**This entry used to say the item was "pick a cache, not invent a mechanism".
+That was wrong, and the spec written on 2026-07-30 says why.** The purge *set*
+is not computable from anything stored: globals leave no `content_refs` edge
+because they come from config rather than a field, collection membership is a
+query run at render, a title-only patch changes every linking page and fires no
+event at all, and `content_refs` truncates at 400 rows per document. A reverse
+index over it would have been silently incomplete five different ways. The
+answer is to invert it — compute the dependency set at *render*, where
+`Resolution` already holds it, emit it as `Cache-Tag`, and purge by tag. No
+table, no migration, and globals.md's wrinkle dissolves instead of needing a
+purge-key scheme. Spec: `docs/specs/platform/caching.md`, **ready** — all five
+owner checkpoints confirmed and the three open questions closed by measurement
+against a deployed Worker, not by reading docs.
 
 **Per-story access control, for site visitors.** The reference has an
 `access_level` field on story content and gates *rendering* on the visitor's

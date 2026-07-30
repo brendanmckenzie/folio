@@ -211,6 +211,10 @@ purge **every** page rather than one, and that is the one place globals cost mor
 than a page. Recorded here so it is not discovered later: the purge key for a page
 must include the globals it rendered.
 
+**Since built:** `platform/caching.md` (spec 17) closes this, but not with a purge-key
+scheme — a render tags its page `global:<name>` and a publish purges by tag, so no
+reverse index is needed.
+
 ### 6. "Variables" are a settings singleton with ordinary fields
 
 The want in `docs/feedback.md` reads *global "variables" — i.e. for
@@ -429,7 +433,9 @@ assert it lands as one transaction.
   document, and field-level locales are a document feature.
 - **Editing a global inline from a page preview** (checkpoint 3).
 - **Cache purge on global publish.** Needs the cache layer that does not exist yet;
-  the requirement is recorded in decision 5.
+  the requirement is recorded in decision 5. **Since built:** `platform/caching.md`
+  (spec 17) tags each render `global:<name>` and purges by tag instead — no
+  purge-key scheme, no reverse index.
 
 ## Open questions
 
@@ -510,7 +516,9 @@ claim that it visually mirrors the host's own render.
   other cross-story staleness today.
 - Cache purge on global publish (decision 5) — there is no cache layer yet
   at all (`ROADMAP.md`); the requirement that a page's purge key include the
-  globals it rendered is recorded there for when one lands.
+  globals it rendered is recorded there for when one lands. **Since built:**
+  `platform/caching.md` (spec 17) tags each render `global:<name>` and purges
+  by tag instead — no purge-key scheme, no reverse index.
 - Template interpolation, datasources, per-locale globals — all out of scope
   as written.
 

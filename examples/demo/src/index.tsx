@@ -152,8 +152,12 @@ const folio = createFolio<Env>({
   // Folio are the same Worker, so a cache purge or a notification is a typed
   // function call rather than an HTTP round trip to itself. This demo has no
   // cache layer of its own yet (ROADMAP.md's "cache invalidation on publish"),
-  // so the example just logs; a real host would purge `caches.default` here
-  // instead, keyed on `story.path`.
+  // so the example just logs. It deliberately does *not* purge `caches.default`
+  // keyed on `story.path`: that delete is per-colo, and a hook runs in exactly
+  // one data centre, so every other one would go on serving the stale page
+  // until its TTL — invalidation in appearance only. Purging globally from
+  // inside a Worker means Workers Cache purge-by-tag, specified in
+  // `docs/specs/platform/caching.md` and not built yet.
   hooks: {
     published: ({ story }) => {
       console.log(`folio: published ${story.path || '/'}`)

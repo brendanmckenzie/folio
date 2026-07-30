@@ -450,3 +450,8 @@ that entirely, and `waitOnExecutionContext` drains a non-awaited hook's `waitUnt
 task before a test inspects what it recorded. No e2e script: the spec's own Testing
 requirements section says a host-facing callback needs none, and a browser adds
 nothing a workers test does not already cover.
+
+**Since built:** `platform/caching.md` (spec 17) adds four more events to this seam —
+`updated`, `migrated`, `reindexed`, `redirectsChanged` — for write paths that change
+published bytes but fired nothing, and registers the first internal hook consumer
+after `spaceBroadcastHooks`.

@@ -117,7 +117,17 @@ source inverse serialises byte-identically to a pre-v3 one.
   faster and breaks sync, undo, presence and the activity trail — visible only to
   whoever had the page open.
 - `deleteStoryStatement` returns four things now, including `indexStatements`, which a
-  caller must batch.
+  caller must batch. Those statements clear `content_refs` in **both** directions on a
+  delete; **unpublish deliberately clears only the outbound half**, because the story
+  still exists and "used by N" is still a true warning about it. Two builders
+  (`clearIndexStatements`, `clearInboundRefStatements`) rather than one with a flag,
+  and `records.test.ts` pins the difference against a later tidy-up that merges them.
+- **One focus trap, in `admin/hooks/useFocusTrap.ts`.** All six admin dialogs use it:
+  focus in on open, back to the opener on close, Tab cycle, Escape. Do not hand-roll a
+  seventh — and note `autoFocus` fights it, because React applies it during commit,
+  before the trap reads `activeElement` to remember the opener. The admin's toast is a
+  permanently mounted `role="status"` live region; making it conditional again breaks
+  announcement, which is why the unconditional render carries a comment.
 
 ## Where things live
 
@@ -137,10 +147,18 @@ sections are **Ground truth** (verified `file:line` facts, so a plan is not buil
 guess) and **Architecture decisions** (each naming the alternative it beat — a decision
 with no rejected alternative is a description).
 
-All sixteen are **done** and restamped in place with an `## Implementation notes`
+Specs 1–16 are **done** and restamped in place with an `## Implementation notes`
 section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
+
+**17 (`platform/caching.md`) is `ready` and unbuilt** — the first spec written from
+`ROADMAP.md` rather than from `docs/feedback.md`. Its owner checkpoints are confirmed
+and its open questions were closed by deploying a probe Worker, not by reading docs.
+Two things in it are worth knowing before touching anything cache-shaped: the purge
+set **cannot** be computed from `content_refs` (globals and collections leave no edge,
+and it truncates at 400 rows), and **`caches.default.delete()` is per-colo**, so the
+obvious "purge the cache in a publish hook" is wrong in a way that looks right locally.
 
 Deferred work is in `ROADMAP.md`, under `## Next`, `## Uncovered from the reference
 project` and `## Known smaller issues`. `docs/feedback.md` records what the owner

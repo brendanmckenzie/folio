@@ -1314,8 +1314,7 @@ const folio = createFolio<Env>({
   // live tree updates and nothing else. See "Live collaboration" below.
   bindings: (env) => ({ db: env.DB, story: env.STORY, space: env.SPACE }),
   hooks: {
-    async published({ story, doc, env, waitUntil }) {
-      await caches.default.delete(new Request(`https://site${story.path ? `/${story.path}` : ''}`))
+    published({ story, doc, env, waitUntil }) {
       waitUntil(indexForSearch(env, story, doc))
     },
     async unpublished({ story, env }) {
@@ -1324,6 +1323,16 @@ const folio = createFolio<Env>({
   },
 })
 ```
+
+**A cache purge is the obvious first hook, and it is deliberately not the example.**
+`caches.default.delete()` is per-colo: the hook runs in exactly one data centre, so
+every other one keeps serving the old page until its TTL expires. It reads as
+invalidation without being it. Purging globally from inside a Worker is Workers
+Cache's job, and the design for it — the dependency set computed at render and
+emitted as `Cache-Tag`, purged by tag on publish — is specified in
+[`docs/specs/platform/caching.md`](docs/specs/platform/caching.md). It is not built
+yet, so Folio ships no caching API today and nothing in this README should be read
+as one.
 
 Six events, each after its write has already committed: `published`, `unpublished`,
 `pathsChanged` (a rename or move — the only one that knows both the old and the new
@@ -1625,11 +1634,23 @@ so the input is simply never drawn and nothing says why), and a `summary` naming
 a hidden field (the tree labels every row with a value the inspector never
 shows).
 
+And one check over a whole *document* rather than a blok or a declaration:
+**document size**, which names any published document past 75% of the 8 MB
+`MAX_DOC_BYTES` cap, heaviest first, with its serialised bytes and what each
+locale's translations weigh inside that total. It measures with `docBytes`
+(`folio/engine`), the same function the write path caps against, so the report
+and the door count the same bytes. 75% because the cap has no soft landing — the
+transaction that crosses it is refused whole and the edit that did it is lost —
+so the warning has to arrive while there is still room to split the page or
+retire a locale. It reads the published copy, so it under-states a page that has
+grown since it last went live.
+
 It is deliberately not part of the migrate path: an audit that runs as a side
 effect of a write is an audit nobody reads. Adding a check is one entry in
-`DOCUMENT_CHECKS` or `SCHEMA_CHECKS` (`src/server/audit.ts`) — every finding
-carries its own `check` name and travels in the report's `content` / `schema`
-arrays, so no route, response shape or admin screen changes.
+`DOCUMENT_CHECKS`, `STORY_CHECKS` or `SCHEMA_CHECKS` (`src/server/audit.ts`) —
+every finding carries its own `check` name and travels in the report's `content`
+/ `stories` / `schema` arrays, so no route, response shape or admin screen
+changes.
 
 ## Content API
 

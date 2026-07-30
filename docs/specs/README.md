@@ -44,6 +44,15 @@ the rest can land in any order.
 | 15 | [Content API](platform/content-api.md) | platform | M | — | — | feedback #7 |
 | 16 | [Live collaboration](editing/live-collaboration.md) | editing | M | v4 | — | feedback #8 |
 
+## After the main line (17–)
+
+Specs written once 1–16 were done, from `ROADMAP.md` rather than from the original
+wants. Numbered in the same sequence because the dependency graph is the same one.
+
+| # | Spec | Group | Size | Wire | Migration | From |
+| --- | --- | --- | --- | --- | --- | --- |
+| 17 | [Caching and purge](platform/caching.md) | platform | M | — | — | roadmap: uncovered |
+
 Sizing matches `PARITY.md`: **S** ≈ a day, **M** ≈ a few days, **L** ≈ a week
 or two. Relative weight, not a quote.
 
@@ -67,6 +76,9 @@ or two. Relative weight, not a quote.
                          └── 16 live-collaboration
 
 11 schema-migrations ──── everything after it churns block schemas
+
+17 caching ───────────── needs 7's seam, 9's globals and 13's collections to
+                         know what a rendered page actually depends on
 ```
 
 - **1–2 first** because both are near-bug-fixes, and because both add `stories`
@@ -92,6 +104,10 @@ or two. Relative weight, not a quote.
   schema to the next. It also builds `StoryDO.commit`, which **15** needs.
 - **16** last: the only item whose value is entirely additive, and it wants verified
   identity underneath it.
+- **17** could not have been written before **9** and **13** landed. Its central
+  decision is that a page's cache tags are computed from what a render loaded, and
+  globals and collections are the two things that make that set larger than "this
+  page" — neither existed to be discovered when **7** predicted this work.
 
 ## Wire version ledger
 
@@ -147,6 +163,8 @@ on `0006`'s `type` column; the content API builds on `0007`'s `api_tokens`.
 
 ## Status
 
-Every spec in this directory is **draft**: written, argued, not yet implemented and not
-yet reviewed by anyone but its author. A spec that gets built is restamped in place with
-implementation notes, the way `../../PARITY.md` records what landed.
+Each spec carries its own `> **Status:**` stamp. All sixteen specs in the quick-wins and
+main-line tables are **done**, restamped in place with an `## Implementation notes`
+section recording what actually landed. Spec 17 (caching) is **ready**: written and
+argued, not yet implemented. A spec that gets built is restamped the same way, the way
+`../../PARITY.md` records what landed.
