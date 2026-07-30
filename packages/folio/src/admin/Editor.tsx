@@ -480,8 +480,14 @@ export function Editor({
     <FolioProvider value={context}>
       <div className="editor">
         {/* Out of the toolbar's flow: a transient message must never reflow
-            controls the user is about to click. */}
-        {notice ? <div className="toast">{notice}</div> : null}
+            controls the user is about to click.
+            Always mounted, never conditionally rendered: a live region has to
+            already be in the DOM before its text changes for a screen reader to
+            announce it reliably, so only the text toggles here. Empty, it is
+            collapsed to nothing by .toast:empty in admin.css rather than removed. */}
+        <div className="toast" role="status" aria-live="polite">
+          {notice}
+        </div>
 
         <TopBar
           current={current}

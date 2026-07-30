@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import type { StoryNode } from '../core/story'
+import { useFocusTrap } from './hooks/useFocusTrap'
 
 interface Props {
   story: StoryNode
@@ -20,18 +21,40 @@ interface Props {
 export function DuplicateDialog({ story, busy, onCancel, onConfirm }: Props) {
   const isRoot = story.path === ''
   const [title, setTitle] = useState(`${story.title} (copy)`)
+  const panel = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+
+  // Inert while the duplicate is in flight, matching the Cancel button beneath.
+  // `stories.duplicate` reports its own failures and always resolves, so `busy`
+  // always clears.
+  const dismiss = () => {
+    if (!busy) onCancel()
+  }
+  useFocusTrap(panel, dismiss)
 
   return (
-    <div className="duplicate-story" role="dialog" aria-label="Duplicate page">
-      {/* Clicking the backdrop cancels, matching the delete confirmation. */}
+    <div className="duplicate-story">
+      {/* Clicking the backdrop cancels, matching the delete confirmation.
+          `tabIndex={-1}` keeps it out of the cycle: the visible Cancel button is
+          the keyboard route out. */}
       <button
         type="button"
         className="duplicate-story__scrim"
         aria-label="Cancel"
-        onClick={onCancel}
+        tabIndex={-1}
+        onClick={dismiss}
       />
-      <div className="duplicate-story__panel">
-        <h3>Duplicate {isRoot ? 'the homepage' : <code>/{story.path}</code>}?</h3>
+      {/* The dialog is the panel, not the overlay, so the scrim's own "Cancel"
+          label stays outside the region the dialog names. */}
+      <div
+        ref={panel}
+        className="duplicate-story__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
+        <h3 id={titleId}>Duplicate {isRoot ? 'the homepage' : <code>/{story.path}</code>}?</h3>
 
         <p>
           {isRoot
@@ -41,9 +64,14 @@ export function DuplicateDialog({ story, busy, onCancel, onConfirm }: Props) {
           no version history of its own. Nothing about the source page changes.
         </p>
 
+        {/* No `autoFocus`: it fires during commit, before the trap's effect
+            reads `document.activeElement` to remember the opener, so the dialog
+            would record *itself* as what to restore focus to and the tree row
+            that opened it would never get focus back. The trap lands on the
+            first tabbable control, which is this input anyway. */}
         <label className="duplicate-story__title">
           Title
-          <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} />
         </label>
 
         <div className="duplicate-story__actions">

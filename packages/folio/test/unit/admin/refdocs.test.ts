@@ -5,8 +5,11 @@ import {
   mergeReferencedDocs,
   NO_REFERENCED_DOCS,
   type ReferencedDocs,
+  wantedReferencedIds,
 } from '../../../src/admin/hooks/useReferencedDocs'
-import type { Doc } from '../../../src/core/doc'
+import type { Blok, Doc } from '../../../src/core/doc'
+import { reference } from '../../../src/core/fields'
+import type { SchemaIndex } from '../../../src/core/schema'
 
 const doc = (root: string): Doc => ({
   root,
@@ -94,5 +97,38 @@ describe('the negative cache', () => {
   it('is the same object when a load settled nothing, so the effect cannot loop', () => {
     const prev = mergeReferencedDocs(NO_REFERENCED_DOCS, { docs: { a: doc('r1') }, missing: [] })
     expect(mergeReferencedDocs(prev, { docs: {}, missing: [] })).toBe(prev)
+  })
+})
+
+describe('wantedReferencedIds', () => {
+  const schema: SchemaIndex = {
+    card: { name: 'card', label: 'Card', fields: { who: reference({ types: ['person'] }) } },
+  }
+
+  /** A `card` blok whose `who` reference is set only on a translation, never on the source. */
+  const cardWithTranslationOnlyRef = (locale: string, targetId: string): Doc => {
+    const blok: Blok = {
+      uid: 'card-1',
+      type: 'card',
+      parent: null,
+      slot: null,
+      order: 'a0',
+      data: {},
+      i18n: { [locale]: { who: targetId } },
+    }
+    return { root: blok.uid, bloks: { [blok.uid]: blok } }
+  }
+
+  it('includes a target only a translation points at, not the source value', () => {
+    // The bug this closes: the admin's copy used to walk `reference` values in
+    // the source locale only, so a target a translation alone points at was
+    // never fetched even though the server's own resolution (which walks every
+    // locale, `core/refs.ts`'s header) would render it fine on a live page.
+    const wanted = wantedReferencedIds(cardWithTranslationOnlyRef('fr', 'person-1'), schema)
+    expect(wanted.split(',')).toEqual(['person-1'])
+  })
+
+  it('is empty with no document open', () => {
+    expect(wantedReferencedIds(null, schema)).toBe('')
   })
 })

@@ -361,11 +361,14 @@ an unsorted flat list, which stops working somewhere around 15.
 - A migration over a huge document lands as several transactions and therefore
   several undo steps, not one. Named in the dry run's `oversized` list rather than
   hidden; the alternative was refusing to migrate the biggest pages at all.
-- a11y in the admin: click-only tree rows, no keyboard reorder, no focus trap in
-  the media library, no aria-live on toasts. Biome's a11y rules are deliberately
-  off until this is done properly (see biome.json).
-- `MultiAssetInput` keys cards by index, so reordering drops focus; needs stable
-  local ids (noted inline where the suppression lives).
+- a11y in the admin, what is left of it: the content tree's rows are click-only
+  and there is no keyboard reorder. Dialogs and toasts are done (see the 2026-07-30
+  pass below), so what remains is the hard half — reordering is drag-and-drop over
+  a fractional index, and the keyboard equivalent has to express "between these two
+  siblings" with no pointer, which is a UI question before it is an a11y one. The
+  same shape as `references()`'s ↑ ↓ buttons. Biome's a11y rules stay off until
+  it is done, and turning them on is its own sweep across every admin file
+  (see biome.json).
 - Translated slugs are out: a French URL contains English words. Additive when it
   is asked for (`stories.path_i18n` plus a locale-aware `storyByPath`), and
   deliberately not now — per-locale paths fork the unique index, the `derivePaths`
@@ -375,9 +378,12 @@ an unsorted flat list, which stops working somewhere around 15.
   row; a route exists (`GET /folio/story/:id/translation`) for a caller that wants
   one story's answer, and a tree-wide answer wants a single query over
   `published_doc` rather than N Durable Object reads.
-- Nothing warns when a document's *bytes* approach `MAX_DOC_BYTES`, which
-  localisation makes reachable: eight languages of long richtext is eight times
-  the payload at the same block count. The audit is the right place for it.
+- The audit has no admin surface. `GET /folio/audit` answers in full, but
+  `Migrations.tsx` renders migration status and nothing else, so every drift
+  finding — orphan keys, unknown types, missing fields, and now document size —
+  is reachable only by a script or a curl. The report shape is stable and three
+  families wide now, which is the argument for building the panel rather than
+  against it.
 - `content_index` is keyed on the field *name*, not on (type, field). So filtering
   one document type on a field only another type declares matches nothing rather
   than 400ing, and two blocks declaring the same indexed name are one queryable
@@ -394,18 +400,68 @@ an unsorted flat list, which stops working somewhere around 15.
   document's cells are blank (the footer says so), and a translated value is not a
   column. Both would want the same server-side query as the point above.
 - `references()` reorders with ↑ ↓ buttons rather than drag-and-drop. Keyed by story
-  id, so it does not have `MultiAssetInput`'s focus bug — but the spec asked for
-  drag, and that is the same a11y-shaped work as the tree's keyboard reordering.
+  id, so it never needed the local ids `MultiAssetInput` now mints — but the spec
+  asked for drag, and that is the same a11y-shaped work as the tree's keyboard
+  reordering.
 - `min` on a `references()` field warns in the editor and is not enforced on write.
   Consistent with `required` across the whole field system, and it should be fixed
   in one place for every field rather than here first.
-- Nothing prunes `content_refs` rows pointing *at* a deleted story. Another
-  document still names it, which is the fact "used by N" reads, and the row is
-  rewritten when that document is next published — but a site that never republishes
-  accumulates edges to ids that no longer exist.
-- The admin's `useReferencedDocs` still walks source-locale `reference` values only.
-  The server's resolution walks every locale, so a live page is right; the editor's
-  own copy would miss a target only a translation points at.
+- The admin has no dialog primitive. Six dialogs share one hand-rolled shell
+  (overlay, scrim button, panel) and `hooks/useFocusTrap.ts` is the only piece
+  actually factored out; the CSS is duplicated five times over too. A seventh
+  dialog is the point at which a `<Modal>` wrapper beats the hook, and the hook is
+  what it would be built on.
+
+## Fixed 2026-07-30 (the small-items pass)
+
+Four bullets off the list above, plus two clauses of the a11y one. Taken because
+they were small, not because they were next; recorded here so the list stays
+honest.
+
+- Deleting a story clears its `content_refs` rows in **both** directions, in the
+  same batch as the story rows. Unpublish deliberately keeps the inbound half —
+  the story still exists, so "used by N" is still a true warning about it — which
+  is why the two are separate statement builders and not one, and why
+  `records.test.ts` pins the difference against a later tidy-up that folds them.
+- `GET /folio/audit` grew a third finding family, one per document rather than per
+  blok or per declaration, warning at three quarters of `MAX_DOC_BYTES` with a
+  per-locale breakdown of where the weight went. `docBytes` (`core/protocol.ts`)
+  is now the single measurement and `docCapError` was rewired through it, so the
+  warning counts bytes exactly the way the door enforces them; a test asserts that
+  equality, because a warning that drifts from the cap it warns about is worse
+  than no warning. The threshold is 75% because the cap has no soft landing — the
+  transaction that crosses it is refused whole — so the warning has to arrive
+  before a locale-sized jump rather than during one.
+- `useReferencedDocs` walks every locale, through the same
+  `referencedIdsAllLocales` the server resolves with, so the editor no longer
+  misses a target that only a translation points at.
+- `MultiAssetInput` mints a stable local card id per entry, so reordering a
+  gallery moves DOM nodes instead of remounting them. The stored value is
+  untouched — the ids are React keys and nothing else. Matching is two-pass,
+  byte-identical first for a reorder and then `key ?? url`, because one pass would
+  remount the card on every alt-text keystroke, which is a worse bug than the one
+  being fixed.
+- Every dialog in the admin is a real modal, over one implementation
+  (`hooks/useFocusTrap.ts`): focus in on open, back to the opener on close, Tab
+  cycling, Escape to close. The five confirmations had none of it and were
+  mouse-only. They also stopped naming their own scrim as part of the dialog, and
+  swapped `aria-label` for `aria-labelledby` on a heading they already render, so
+  a screen reader says "Delete /blog/old-post?" rather than "Delete document".
+  Dismissal by scrim or Escape is inert exactly while Cancel is, so a dialog
+  cannot disable Cancel to say an irreversible delete is past calling back and
+  then let Escape call it back.
+- The toast is a permanently mounted `role="status" aria-live="polite"` region
+  whose text changes, rather than a div that appears. A live region has to exist
+  before its content changes to be announced reliably, which is why it is
+  unconditional, and why it collapses on `:empty` rather than `display: none` —
+  hiding it would take it back out of the accessibility tree and reintroduce the
+  same problem.
+
+Not covered by tests, and named rather than faked: focus movement, Tab cycling
+and focus restore. `test/unit/admin` runs under Node with no jsdom and no
+`@testing-library/react`, so the pure predicates (`keyAssets`, `isTabbable`) are
+unit-tested instead and the DOM behaviour is not. A test rendering a
+hand-duplicated copy of the markup would assert against the copy.
 
 ## Fixed 2026-07-29 (the hardening pass)
 

@@ -718,9 +718,14 @@ published page contains `href="/collections-index"`.
 
 Full-text search (its own spec, **M**); faceted counts (one `group by`, unbuilt
 until a design asks); per-field pagination; draft-status queries; a `collection` on a
-nested block; the admin list view above. `content_refs` rows pointing at a deleted
-story are not pruned — another document still names it, which is the fact spec 14
-reads, and the row is rewritten when that document is next published.
+nested block; the admin list view above.
+
+`content_refs` rows pointing at a deleted story were deferred here — another
+document still names it, which is the fact spec 14 reads, and the row is rewritten
+when that document is next published. **Since built:** `deleteStoryStatement` now
+batches `clearInboundRefStatements` alongside `clearIndexStatements`, so a delete
+drops the edges in both directions. An unpublish still keeps the inbound half,
+because the story is still there to warn about.
 
 ### What spec 14 needs
 

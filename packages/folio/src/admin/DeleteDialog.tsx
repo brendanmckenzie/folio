@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { descendants, type StoryMeta, type StoryNode } from '../core/story'
 import type { DocumentUsage } from './hooks/useDocumentUsage'
+import { useFocusTrap } from './hooks/useFocusTrap'
 
 export interface DeleteConfirmation {
   /** The path about to stop existing, `/`-prefixed. */
@@ -83,18 +84,45 @@ export function DeleteDialog({ story, tree, busy, usage, onCancel, onConfirm }: 
   const { label, parentLabel, descendantCount, unrouted } = deleteConfirmation(story, tree)
   const [redirect, setRedirect] = useState(true)
   const sentence = usageSentence(usage ?? null)
+  const panel = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+
+  // Escape cancels, it never confirms — but only while cancelling is still on
+  // offer. Mid-delete the Cancel button is disabled to say the deletion cannot
+  // be called back, and a scrim or an Escape that dismissed anyway would be
+  // saying the opposite about something irreversible. `stories.remove` reports
+  // its own failures and always resolves, so `busy` always clears: this cannot
+  // strand anyone in a dialog with no way out.
+  const dismiss = () => {
+    if (!busy) onCancel()
+  }
+  useFocusTrap(panel, dismiss)
 
   return (
-    <div className="delete-story" role="dialog" aria-label="Delete document">
-      {/* Clicking the backdrop cancels, matching the unpublish confirmation. */}
+    <div className="delete-story">
+      {/* Clicking the backdrop cancels, matching the unpublish confirmation.
+          `tabIndex={-1}` keeps it out of the cycle — it is the same affordance
+          as the panel's Cancel button, and a keyboard user should meet the one
+          they can see. */}
       <button
         type="button"
         className="delete-story__scrim"
         aria-label="Cancel"
-        onClick={onCancel}
+        tabIndex={-1}
+        onClick={dismiss}
       />
-      <div className="delete-story__panel">
-        <h3>
+      {/* The dialog is the panel, not the overlay: the scrim is chrome, and
+          naming it part of the dialog would put a bare "Cancel" button inside
+          the thing being described. */}
+      <div
+        ref={panel}
+        className="delete-story__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
+        <h3 id={titleId}>
           Delete <code>{label}</code>?
         </h3>
 

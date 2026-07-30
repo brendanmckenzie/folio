@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useRef, useState } from 'react'
 import type { Json } from '../core/doc'
 import { asAsset, asAssets, isImageAsset, type AssetValue } from '../core/values'
 import { expectJson, expectOk } from './api'
 import { useFolio } from './FolioContext'
+import { useFocusTrap } from './hooks/useFocusTrap'
 import { useUpload } from './hooks/useUpload'
 
 /** A row of the media library, as `GET /assets` returns it. */
@@ -98,9 +99,108 @@ export function AssetInput({ id, value, accept, onChange }: Props) {
 
 /* --------------------------------------------------------------- many ---- */
 
+/**
+ * One card's stable React key, paired with the asset it is drawn from.
+ *
+ * The key is **local and minted here**. It is never written back: a `multiasset`
+ * value is an array of `AssetValue`, and adding an id to it would put a
+ * client-side render detail into the mutation log, where it would outlive every
+ * deploy. So identity is reconstructed on each render instead, from the previous
+ * render's answer.
+ */
+export interface KeyedAsset {
+  /** Minted, not stored. Only ever a React key. */
+  id: string
+  asset: AssetValue
+}
+
+/** The R2 key, or the absolute URL for an asset hosted elsewhere. Not unique —
+ * the same file may legitimately appear twice in one list, which is exactly why
+ * the index was being used as a key in the first place. */
+const mediaOf = (a: AssetValue) => a.key ?? a.url ?? ''
+
+/** Whole-value equality: the card is showing precisely this, alt and focal
+ * point included. */
+const sameAsset = (a: AssetValue, b: AssetValue) =>
+  a.key === b.key &&
+  a.url === b.url &&
+  a.filename === b.filename &&
+  a.contentType === b.contentType &&
+  a.size === b.size &&
+  a.width === b.width &&
+  a.height === b.height &&
+  a.alt === b.alt &&
+  a.focal?.x === b.focal?.x &&
+  a.focal?.y === b.focal?.y
+
+/**
+ * Carry the previous render's card ids onto this render's assets, minting one
+ * wherever nothing matches. Pure and exported so the reorder case is tested
+ * without mounting.
+ *
+ * `asAssets` rebuilds every object on every render, so object identity is worth
+ * nothing here and the match has to be made on content. It happens in two
+ * passes, and the order is the whole point:
+ *
+ * 1. **Byte-identical first.** A reorder moves values around without changing
+ *    any of them, so every card finds its own id and React moves DOM nodes
+ *    instead of remounting them. That is what stops a reorder dropping focus.
+ * 2. **Then same media, edited.** Typing in a card's alt box changes the value
+ *    but not the card, so an unclaimed entry with the same `key`/`url` hands its
+ *    id over. Without this pass every keystroke would remount the card and the
+ *    caret would be lost after one character — a worse bug than the one being
+ *    fixed.
+ *
+ * Both passes consume from the same pool, so two copies of one file get two
+ * distinct ids and keep them.
+ */
+export function keyAssets(
+  previous: readonly KeyedAsset[],
+  assets: readonly AssetValue[],
+  mint: () => string,
+): KeyedAsset[] {
+  const spare: (KeyedAsset | undefined)[] = [...previous]
+  const out: (KeyedAsset | undefined)[] = assets.map(() => undefined)
+
+  const claim = (at: number, asset: AssetValue): KeyedAsset => {
+    const taken = spare[at]!
+    spare[at] = undefined
+    return { id: taken.id, asset }
+  }
+
+  assets.forEach((asset, i) => {
+    const at = spare.findIndex((e) => e !== undefined && sameAsset(e.asset, asset))
+    if (at !== -1) out[i] = claim(at, asset)
+  })
+
+  assets.forEach((asset, i) => {
+    if (out[i]) return
+    const at = spare.findIndex((e) => e !== undefined && mediaOf(e.asset) === mediaOf(asset))
+    out[i] = at === -1 ? { id: mint(), asset } : claim(at, asset)
+  })
+
+  return out as KeyedAsset[]
+}
+
+/** `keyAssets` against the previous render, held in a ref. Reconciling during
+ * render rather than in an effect is deliberate: the keys have to be right for
+ * the markup being produced now, not one paint later. It is idempotent, so
+ * StrictMode's double render produces the same ids. */
+function useAssetKeys(assets: readonly AssetValue[]): KeyedAsset[] {
+  const previous = useRef<KeyedAsset[]>([])
+  const seq = useRef(0)
+  const keyed = keyAssets(previous.current, assets, () => {
+    seq.current += 1
+    return `asset-${seq.current}`
+  })
+  previous.current = keyed
+  return keyed
+}
+
 export function MultiAssetInput({ id, value, accept, max, onChange }: Props & { max?: number }) {
   const { apiBase } = useFolio()
   const assets = asAssets(value)
+  const cards = useAssetKeys(assets)
   const upload = useUpload(apiBase)
   const [picking, setPicking] = useState(false)
   const file = useRef<HTMLInputElement>(null)
@@ -136,10 +236,9 @@ export function MultiAssetInput({ id, value, accept, max, onChange }: Props & { 
         }}
       />
 
-      {assets.map((asset, i) => (
+      {cards.map(({ id: cardId, asset }, i) => (
         <AssetCard
-          // biome-ignore lint/suspicious/noArrayIndexKey: the same asset can appear twice so the index disambiguates; stable local ids are tracked follow-up work
-          key={`${asset.key ?? asset.url}:${i}`}
+          key={cardId}
           asset={asset}
           position={{ index: i, total: assets.length }}
           onMove={(to) => swap(i, to)}
@@ -306,6 +405,8 @@ function MediaLibrary({
   const [failure, setFailure] = useState<string | null>(null)
   const upload = useUpload(apiBase)
   const file = useRef<HTMLInputElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
+  const titleId = useId()
 
   const load = useCallback(async () => {
     try {
@@ -322,13 +423,10 @@ function MediaLibrary({
     void load()
   }, [load])
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  // Focus in on open, back to the opener on close, Tab cycling inside, Escape
+  // out. The grid has not loaded when focus moves in, so the first landing spot
+  // is Upload in the head.
+  useFocusTrap(panel, onClose)
 
   const add = async (chosen: File | undefined) => {
     const picked = await upload.one(chosen)
@@ -351,12 +449,31 @@ function MediaLibrary({
   }
 
   return (
-    <div className="library" role="dialog" aria-label="Media library">
-      {/* Clicking the backdrop closes, so the modal never traps anyone. */}
-      <button type="button" className="library__scrim" aria-label="Close" onClick={onClose} />
-      <div className="library__panel">
+    <div className="library">
+      {/* Clicking the backdrop still closes, and so does Escape: focus is
+          trapped, but never without a way out. `tabIndex={-1}` keeps this out of
+          the cycle — it is the same affordance as the head's Close button, and a
+          keyboard user should meet the one they can see. */}
+      <button
+        type="button"
+        className="library__scrim"
+        aria-label="Close"
+        tabIndex={-1}
+        onClick={onClose}
+      />
+      {/* The dialog is the panel, not the overlay: the scrim is chrome, and
+          naming it part of the dialog would put a bare "Close" button inside the
+          thing being described. */}
+      <div
+        ref={panel}
+        className="library__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
         <header className="library__head">
-          <strong>Media library</strong>
+          <strong id={titleId}>Media library</strong>
           <input
             ref={file}
             type="file"

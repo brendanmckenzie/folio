@@ -683,6 +683,9 @@ describe('GET /folio/audit', () => {
     const report = await res?.json<AuditReport>()
     expect(report?.orphanKeys).toEqual([{ type: 'hero', field: 'heading', documents: 1 }])
     expect(report?.unknownTypes).toEqual([{ type: 'bigQuote', documents: 1 }])
+    // The story-level checks ride the same response and stay quiet on documents
+    // nowhere near `MAX_DOC_BYTES`, which is every document on a normal site.
+    expect(report?.stories).toEqual([])
     // Nothing was modified.
     expect(publishedHero(await publishedDocOf('aud_a'))?.heading).toBe('orphaned')
   })

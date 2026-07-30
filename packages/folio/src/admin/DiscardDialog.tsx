@@ -1,4 +1,6 @@
+import { useId, useRef } from 'react'
 import type { summariseDiff } from '../core/diff'
+import { useFocusTrap } from './hooks/useFocusTrap'
 
 /**
  * Named counts for the confirmation, in the same "what is about to happen"
@@ -34,12 +36,40 @@ interface Props {
  * indistinguishable from that outcome.
  */
 export function DiscardDialog({ delta, busy, onConfirm, onCancel }: Props) {
+  const panel = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+
+  // Inert while the restore is in flight, matching the Cancel button beneath.
+  // `versions.restore` reports its own failures and always resolves, so `busy`
+  // always clears.
+  const dismiss = () => {
+    if (!busy) onCancel()
+  }
+  useFocusTrap(panel, dismiss)
+
   return (
-    <div className="discard" role="dialog" aria-label="Discard unpublished changes">
-      {/* Clicking the backdrop cancels, matching the delete and unpublish confirmations. */}
-      <button type="button" className="discard__scrim" aria-label="Cancel" onClick={onCancel} />
-      <div className="discard__panel">
-        <h3>Discard unpublished changes?</h3>
+    <div className="discard">
+      {/* Clicking the backdrop cancels, matching the delete and unpublish
+          confirmations. `tabIndex={-1}` keeps it out of the cycle: the visible
+          Cancel button is the keyboard route out. */}
+      <button
+        type="button"
+        className="discard__scrim"
+        aria-label="Cancel"
+        tabIndex={-1}
+        onClick={dismiss}
+      />
+      {/* The dialog is the panel, not the overlay, so the scrim's own "Cancel"
+          label stays outside the region the dialog names. */}
+      <div
+        ref={panel}
+        className="discard__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
+        <h3 id={titleId}>Discard unpublished changes?</h3>
 
         <p>
           This applies {discardSummary(delta)} to go back to what is live. It is an ordinary edit —

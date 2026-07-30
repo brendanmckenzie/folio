@@ -61,7 +61,13 @@ export type {
   MigrateReport,
   MigrationStatus,
 } from './migrate'
-export type { AuditReport, ContentFinding, SchemaFinding } from './audit'
+export type {
+  AuditReport,
+  ContentFinding,
+  DocumentSizeFinding,
+  SchemaFinding,
+  StoryFinding,
+} from './audit'
 /**
  * Collections (`../../../docs/specs/content-model/collections.md`): the query
  * shapes a host writes and reads. `collection()` itself, and the resolved value a

@@ -10,31 +10,38 @@
  *
  * ## Adding a check
  *
- * There are two arrays and that is the whole extension point.
+ * There are three arrays and that is the whole extension point. They differ in
+ * *what one call sees*, which is what decides which one a new check belongs in.
  *
  *   - `DOCUMENT_CHECKS` — a function called once per blok of every published
  *     document. Return a `Finding` per problem; the walker tallies distinct
  *     `(check, type, field)` triples across documents and bloks for you. Use
  *     this for anything that depends on stored *values*.
+ *   - `STORY_CHECKS` — a function called once with every published document at
+ *     once. Use this for anything true of a *document as a whole* rather than
+ *     of a value inside one: a finding here names a single story, is not
+ *     tallied, and the check owns its own ordering (which is how
+ *     `document-size` can report the heaviest page first).
  *   - `SCHEMA_CHECKS` — a function called once with the whole `SchemaIndex`.
  *     No document is involved, so a finding here is a *code* mistake rather
  *     than a content one. Use this for anything that is a property of the
  *     declarations alone.
  *
- * Both take an `AuditContext` as a second argument: the parts of the *config* a
- * check needs and cannot read off the schema. Today that is `locales`, and it is
- * why the translatable checks below can stay silent on a single-locale site
- * instead of filling the report with advice nobody asked for.
+ * All three take an `AuditContext` as their last argument: the parts of the
+ * *config* a check needs and cannot read off the schema. Today that is
+ * `locales`, and it is why the translatable checks below can stay silent on a
+ * single-locale site instead of filling the report with advice nobody asked for.
  *
  * Every finding carries its own `check` name and travels in `content` /
- * `schema`, so a new check needs no route change, no response-shape change and
- * no admin change to be visible. `orphanKeys` / `unknownTypes` / `missingFields`
- * are named projections of `content`, kept because the spec's own route example
- * names them.
+ * `stories` / `schema`, so a new check needs no route change, no
+ * response-shape change and no admin change to be visible. `orphanKeys` /
+ * `unknownTypes` / `missingFields` are named projections of `content`, kept
+ * because the spec's own route example names them.
  */
-import type { Blok } from '../core/doc'
+import type { Blok, Doc } from '../core/doc'
 import { isIndexableKind } from '../core/index-projection'
 import { isTranslatable, type LocaleConfig } from '../core/locales'
+import { docBytes, MAX_DOC_BYTES, utf8Bytes } from '../core/protocol'
 import { type BlockSchema, type DocumentType, type SchemaIndex, slotsOf } from '../core/schema'
 import { publishedDocsAll } from './stories'
 
@@ -76,6 +83,44 @@ export interface ContentFinding extends Finding {
   bloks: number
 }
 
+/**
+ * A finding about one whole published document, named by its story.
+ *
+ * Not tallied, unlike `ContentFinding`: "some type of block has this problem in
+ * 40 documents" is the useful summary of a value-level fault, and *"this page"*
+ * is the only useful summary of a document-level one. Which is also why this
+ * carries a story id where the others carry a block type — a report that said
+ * "one document is nearly too big" without saying which is not actionable.
+ */
+export interface StoryFinding {
+  check: string
+  /** The story whose published document this is about. */
+  story: string
+  /** Its document type, as `stories.type` records it. */
+  type: string
+  /** Written for a developer reading a report, not for a UI to parse. */
+  detail: string
+}
+
+/**
+ * `document-size`'s finding: a `StoryFinding` plus the numbers its `detail`
+ * spells out in prose, so a caller that wants to sort or draw a bar does not
+ * have to parse the sentence. Extends rather than widens `StoryFinding` for the
+ * same reason `ContentFinding` extends `Finding`: the base is what every check
+ * in the family promises, not what this one happens to measure.
+ */
+export interface DocumentSizeFinding extends StoryFinding {
+  /** Serialised size of the published document, in UTF-8 bytes. */
+  bytes: number
+  /**
+   * What each locale's translations weigh inside that total, heaviest first.
+   * Empty on an untranslated document. Measured over `i18n` alone, so the parts
+   * sum to slightly under the whole — the source-locale `data`, and the
+   * structure holding all of it, are the rest.
+   */
+  locales: { code: string; bytes: number }[]
+}
+
 /** A finding about the declarations alone: no document is involved. */
 export interface SchemaFinding {
   check: string
@@ -94,6 +139,11 @@ export interface AuditReport {
    * a check added to `DOCUMENT_CHECKS` appears here with nothing else changed.
    */
   content: ContentFinding[]
+  /**
+   * Every story check's findings: one per affected document, in each check's
+   * own order. Same extensible surface, for `STORY_CHECKS`.
+   */
+  stories: StoryFinding[]
   /** Every schema check's findings. Same, for `SCHEMA_CHECKS`. */
   schema: SchemaFinding[]
   /* The three the spec's route example names, projected out of `content`. */
@@ -215,6 +265,140 @@ export const DOCUMENT_CHECKS: readonly DocumentCheck[] = [
   translatedNotTranslatable,
   unknownLocaleValues,
 ]
+
+/* --------------------------------------------------------- story checks --- */
+
+/** One published document, exactly as `publishedDocsAll` hands it over. */
+export interface AuditedStory {
+  id: string
+  type: string
+  doc: Doc
+}
+
+/**
+ * A check over the whole published set at once. See "Adding a check": it gets
+ * every document rather than one, so that a finding can be ordered against the
+ * others — `document-size` reports the heaviest page first, which a per-document
+ * call could not do.
+ */
+export type StoryCheck = (
+  stories: readonly AuditedStory[],
+  ctx: AuditContext,
+) => readonly StoryFinding[]
+
+/**
+ * The share of `MAX_DOC_BYTES` at which a published document counts as
+ * *approaching* it. A judgement call, so here is the argument.
+ *
+ * The cap is enforced at the door and nowhere else: `docCapError` runs on the
+ * document a transaction has **already** been applied to, so the tx that carries
+ * a document past 8 MB is refused whole and the edit that did it is lost
+ * (`core/protocol.ts`, `StoryDO.commit`). There is no soft landing and no
+ * degraded mode, which means a warning is only worth having if it arrives with
+ * room left to act in — to split the page, retire a locale, or move a block off
+ * it.
+ *
+ * How much room is enough is set by the thing that made 8 MB reachable at all:
+ * a locale. Adding one is not a keystroke, it is another whole copy of every
+ * translatable value in the document, arriving over an afternoon of
+ * translation rather than in one tx. The tightest case that matters is a fifth
+ * locale on a four-locale document — about a quarter more translated weight,
+ * committed steadily, with nothing to stop it partway. Three quarters is the
+ * threshold that still fires *before* a jump of that size instead of during it.
+ *
+ * Higher (90%) reports documents already too far gone to fix calmly; much lower
+ * (50%) reports every large page on any real site, and a report that is always
+ * red is the same as no report.
+ */
+export const DOC_BYTES_WARN_SHARE = 0.75
+
+/** `DOC_BYTES_WARN_SHARE` of `MAX_DOC_BYTES`, floored to whole bytes — 6 MB of the 8 MB cap. */
+export const WARN_DOC_BYTES = Math.floor(MAX_DOC_BYTES * DOC_BYTES_WARN_SHARE)
+
+/** Bytes as an operator reads them. The cap is quoted in MB everywhere else too. */
+const mb = (bytes: number): string => `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+
+/**
+ * What each locale's translations weigh inside one document, heaviest first.
+ *
+ * Attribution, not a second measurement: `i18n` is a sibling of `data` on every
+ * blok (`core/locales.ts`), so a locale's map is a real subtree of the very JSON
+ * the cap is enforced against, and measuring it with the same `utf8Bytes` gives
+ * the share of the total that locale is responsible for. It is a slight
+ * under-count by construction — the `"fr":` keys and the punctuation between
+ * them belong to no one locale — and that is the right direction to be wrong in
+ * for a number an operator is about to act on.
+ *
+ * Undeclared locale codes are counted like any other. Weight is weight; that the
+ * config no longer names the code is `unknown-locale`'s finding, not this one's.
+ */
+function localeWeights(doc: Doc): { code: string; bytes: number }[] {
+  const per = new Map<string, number>()
+  for (const blok of Object.values(doc.bloks)) {
+    if (!blok.i18n) continue
+    for (const [code, map] of Object.entries(blok.i18n)) {
+      per.set(code, (per.get(code) ?? 0) + utf8Bytes(JSON.stringify(map)))
+    }
+  }
+  return [...per]
+    .map(([code, bytes]) => ({ code, bytes }))
+    .sort((a, b) => b.bytes - a.bytes || a.code.localeCompare(b.code))
+}
+
+/** The sentence. Says the size, the share, and — when there is one — where the weight went. */
+function sizeDetail(bytes: number, locales: { code: string; bytes: number }[]): string {
+  const translated = locales.reduce((n, l) => n + l.bytes, 0)
+  const named = locales.slice(0, 3).map((l) => `${l.code} ${mb(l.bytes)}`)
+  if (locales.length > named.length) named.push(`${locales.length - named.length} more`)
+  const where =
+    translated > 0 ? `, of which ${mb(translated)} is translations (${named.join(', ')})` : ''
+  return (
+    `${mb(bytes)} serialised, ${Math.round((bytes / MAX_DOC_BYTES) * 100)}% of the ` +
+    `${mb(MAX_DOC_BYTES)} document cap${where} — the transaction that crosses the cap is ` +
+    `refused whole, so the edit that does it is the one that is lost`
+  )
+}
+
+/**
+ * A published document whose bytes are closing on `MAX_DOC_BYTES`.
+ *
+ * The blok ceiling is the one anybody watches, and it is not the one
+ * localisation moves: eight languages of long richtext is eight times the
+ * payload at the same block count (`../content-model/localisation.md`
+ * checkpoint 2). So a document can be nowhere near `MAX_DOC_BLOKS` and still be
+ * one translation pass away from a wall — with no symptom at all until an
+ * editor's save is refused, because a document under the cap behaves perfectly.
+ *
+ * Measured with `docBytes`, the same function `docCapError` caps, over the same
+ * serialisation: a report that counted bytes its own way would disagree with the
+ * door at precisely the size where the answer matters.
+ *
+ * Reported on the *published* document, because that is the only copy this
+ * report reads (`publishedDocsAll`, no Durable Object). The cap is enforced on
+ * the **draft**, so this is a lower bound: a page that has grown since it was
+ * last published is already heavier than the number here. A warning that
+ * under-states is the right way round for one whose whole job is arriving early.
+ */
+const documentSize: StoryCheck = (stories) => {
+  const out: DocumentSizeFinding[] = []
+  for (const { id, type, doc } of stories) {
+    const bytes = docBytes(doc)
+    if (bytes < WARN_DOC_BYTES) continue
+    const locales = localeWeights(doc)
+    out.push({
+      check: 'document-size',
+      story: id,
+      type,
+      bytes,
+      locales,
+      detail: sizeDetail(bytes, locales),
+    })
+  }
+  return out.sort((a, b) => b.bytes - a.bytes || a.story.localeCompare(b.story))
+}
+
+/** See "Adding a check" in the file header. */
+export const STORY_CHECKS: readonly StoryCheck[] = [documentSize]
 
 /* -------------------------------------------------------- schema checks --- */
 
@@ -400,6 +584,18 @@ export function auditSchema(schema: SchemaIndex, ctx: AuditContext = NO_CONTEXT)
   return SCHEMA_CHECKS.flatMap((check) => check(schema, ctx))
 }
 
+/**
+ * The whole-document checks, over documents a caller already has. No tally and
+ * no re-sort: each check has already ordered its own findings by whatever makes
+ * that check readable.
+ */
+export function auditStories(
+  stories: readonly AuditedStory[],
+  ctx: AuditContext = NO_CONTEXT,
+): StoryFinding[] {
+  return STORY_CHECKS.flatMap((check) => [...check(stories, ctx)])
+}
+
 /** The content half on its own, over documents a caller already has. */
 export function auditDocuments(
   docs: readonly { doc: { bloks: Record<string, Blok> } }[],
@@ -448,6 +644,7 @@ export async function audit(
   return {
     documents: docs.length,
     content,
+    stories: auditStories(docs, ctx),
     schema: auditSchema(schema, ctx),
     orphanKeys: named('orphan-key').map((f) => ({
       type: f.type,

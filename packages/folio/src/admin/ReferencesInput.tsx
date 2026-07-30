@@ -12,10 +12,11 @@ import { referenceCandidates } from './Inspector'
  *
  * The picker is `LinkInput`'s (a `select` narrowed by the field's `types`,
  * through the shared `referenceCandidates`); the card list is
- * `MultiAssetInput`'s — and deliberately **not** its bug. That component keys
- * cards by index, so reordering drops focus and an in-flight edit lands on the
- * wrong card (recorded in ROADMAP). A reference has a story id, which is a real
- * identity, so these cards key by it.
+ * `MultiAssetInput`'s, minus its machinery. That component has to mint local
+ * card ids and reconcile them across every render, because an asset carries no
+ * identity of its own and the same file may appear in the list twice. A
+ * reference is a story id — a real identity, and unique here, since duplicates
+ * are dropped on the way in — so these cards key by it directly.
  *
  * Every change writes the whole array back as one value, so a reorder is one
  * ordinary `set` mutation and therefore one undo step — consistent with how

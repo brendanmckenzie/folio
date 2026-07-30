@@ -102,13 +102,16 @@ export function indexStatements(
 }
 
 /**
- * Drops every index and ref row for a set of stories — what an unpublish and a
- * delete both need.
+ * Drops every index row and every *outbound* ref row for a set of stories — what
+ * an unpublish and a delete both need.
  *
- * `to_story` rows are deliberately left alone on a delete: another document still
- * points here, and that is exactly the fact `data-documents.md`'s "used by N"
- * warning is about. They are cleaned up when *that* document is next published,
- * which is the same moment its own outbound set is recomputed.
+ * Outbound only, because this is the half an unpublish means: the story still
+ * exists, so a row pointing *at* it is still another document's true fact and
+ * still what `data-documents.md`'s "used by N" warning reads. Unpublishing a
+ * referenced record must keep warning that four pages point at it.
+ *
+ * A delete is the case where the target stops existing, and it pairs this with
+ * `clearInboundRefStatements` in the same batch.
  */
 export function clearIndexStatements(
   db: D1Database,
@@ -120,6 +123,32 @@ export function clearIndexStatements(
     db.prepare(`delete from content_index where story_id in (${placeholders})`).bind(...ids),
     db.prepare(`delete from content_refs where from_story in (${placeholders})`).bind(...ids),
   ]
+}
+
+/**
+ * Drops the *inbound* ref rows for a set of stories: the edges where one of
+ * `ids` is the target. What a delete adds on top of `clearIndexStatements`.
+ *
+ * The row `(A → B)` is the fact "A names B", and deleting B does not stop A
+ * naming it — but nothing reads that fact once B is gone. Both readers of
+ * `to_story` (`countReferencesTo`, `referencesTo`) are asked about a document
+ * somebody is looking at, and `documentUsage` already drops a row whose source
+ * has vanished. Left behind, the row is only ever rewritten when A is next
+ * published, so a site that never republishes accumulates edges to ids with no
+ * document behind them.
+ *
+ * Separate from `clearIndexStatements` rather than a flag on it, because the two
+ * callers genuinely differ: an unpublish must keep them and a delete must not.
+ * A `boolean` parameter would put that distinction at the call site, where the
+ * reason for it is invisible.
+ */
+export function clearInboundRefStatements(
+  db: D1Database,
+  ids: readonly string[],
+): D1PreparedStatement[] {
+  if (ids.length === 0) return []
+  const placeholders = ids.map(() => '?').join(', ')
+  return [db.prepare(`delete from content_refs where to_story in (${placeholders})`).bind(...ids)]
 }
 
 /**
