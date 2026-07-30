@@ -311,7 +311,9 @@ primitives assume it:
 
 `{base}` is `config.basePath` (`runtime.ts:313`), so nothing may hardcode
 `/folio`. Ephemeral by design and *not* in the URL: an open menu, an unsent
-palette query, presence, and in-flight transactions.
+palette query, presence, in-flight transactions, and a bulk selection — the last
+being the one deliberate exception to "if a person can see it, they can link to
+it", argued in `docs/ui-architecture.md` decision 7a.
 
 One route rather than a screen, from Resolved, 2: `GET {base}/search?q=`.
 

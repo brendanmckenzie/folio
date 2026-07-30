@@ -468,12 +468,47 @@ than decorative:
 
 - **Select-all-matching-the-filter**, not just select-all-on-this-page. With
   server-side paging, "select the 340 pages matching this filter" must not require
-  loading 340 rows — so a selection is a *filter plus exclusions*, not a list of ids.
+  loading 340 *rows*.
 - **Report successes and failures with counts**, and name the failures. Nothing here
   is atomic and the UI should not imply it is: N sequential writes, each of which can
   be individually refused by role or by a tree rule. Contentful's API offers an
   all-or-nothing batch; Folio has no equivalent and pretending otherwise would be
   the lie.
+
+### 7a. A selection is a set of ids, and it survives a filter change
+
+**A selection persists across filtering, sorting and paging.** The owner's call, and
+it settles the shape: an earlier draft made a selection a *filter plus exclusions*,
+which cannot survive the filter changing — the expression would silently come to
+mean something else. So a selection is **a concrete set of ids**, and
+select-all-matching resolves to ids at the moment it is clicked, through an
+**ids-only** query. That is what the "not 340 rows" constraint above was actually
+protecting: 340 ids is a few kilobytes, 340 rows is not.
+
+This is simpler than what it replaces, and it deletes a whole class of bug rather
+than managing one.
+
+**Then it has to be obvious, or it is a trap.** A bar saying "12 selected" over a
+list showing nothing selected reads as broken software. Four things, and the second
+is the one that matters:
+
+- **A selection bar** appears as soon as anything is selected, and stays put through
+  filtering, sorting, paging and scrolling. It holds the count, the five actions, and
+  Clear.
+- **It states the split**: *"12 selected · 3 shown here"*, and *"12 selected · none
+  match this filter"* when that is true. Saying the quiet part is the whole
+  difference between persistence and a trap.
+- **"Show only selected"** is a toggle in the bar — one click to see exactly what is
+  selected, whatever the filter says. This is the recovery path, and it is better
+  than a warning because it answers the question rather than raising it.
+- **Confirmations name the invisible part**: *"Publish 12 pages? 9 are not shown by
+  the current filter."* The dangerous case is acting on more than you can see, and
+  the confirmation is where that has to be said.
+
+**Selection is not in the URL**, and it is the one deliberate exception to "if a
+person can see it, they can link to it". Three hundred ids in a query string is not a
+link anybody wants, and a selection is a gesture rather than a place. It lives with
+the screen and clears on leaving it — like an open menu or an unsent palette query.
 
 **Rejected: bulk field editing** (Payload's Edit, WordPress's Bulk Edit panel).
 Genuinely powerful, and the machinery exists — a field set across N documents is
@@ -510,12 +545,13 @@ work:
    for other reasons.
 6. **The audit route rendered** — `GET /folio/audit` answers today and nothing draws
    it.
-7. **Bulk write endpoints**, and a selection expressed as *filter plus exclusions*
-   rather than a list of ids — otherwise select-all-matching has to load every row it
-   claims to have selected, which is the thing pagination exists to stop.
+7. **Bulk write endpoints**, plus an **ids-only** variant of every filtered list
+   query — so select-all-matching resolves to a set of ids without loading the rows
+   it claims to have selected, which is the thing pagination exists to stop
+   (decision 7a).
 
 A note on ordering: 1 and 7 are the same conversation. Whatever shape the pagination
-spec gives a filtered query is the shape a bulk selection has to be expressed in.
+spec gives a filtered query is the shape the ids-only variant has to mirror.
 
 ## The port plan
 
@@ -556,12 +592,17 @@ going and looking at what other products do, which is recorded above.
    Move is in, and the reasoning that had excluded it was our implementation's
    problem rather than the user's.
 
+4. **A selection survives a filter change**, and says so loudly — decision 7a. This
+   is the one question every product checked was silent on, and answering it "keep it"
+   rather than "clear it" turned the selection from a lazy filter expression into a
+   concrete id set, which is both simpler and what makes the persistence coherent.
+
 ## Open questions
 
 1. **Does `group` on `DocumentType` want to also order the sidebar?** A declared
    group implies an order, and alphabetical-within-group is a guess. Probably wants
    declaration order, like the palette's groups.
-2. **How does a selection survive a filter change?** A selection is a filter plus
-   exclusions (decision 7), so changing the filter changes what is selected. Every
-   product checked is silent on this and it is the sharp edge of select-all-matching.
-   Leaning: changing a filter clears the selection, loudly.
+2. **Is there a ceiling on select-all-matching?** Ids are cheap but not free, and
+   "select all 50,000" is a real request on a large enough site. Leaning: resolve up
+   to a generous cap and say plainly when the cap is what is selected, rather than
+   silently selecting a prefix.
