@@ -477,33 +477,68 @@ than decorative:
 
 ### 7a. A selection is a set of ids, and it survives a filter change
 
-**A selection persists across filtering, sorting and paging.** The owner's call, and
-it settles the shape: an earlier draft made a selection a *filter plus exclusions*,
-which cannot survive the filter changing — the expression would silently come to
-mean something else. So a selection is **a concrete set of ids**, and
-select-all-matching resolves to ids at the moment it is clicked, through an
-**ids-only** query. That is what the "not 340 rows" constraint above was actually
-protecting: 340 ids is a few kilobytes, 340 rows is not.
+**A selection persists across filtering, sorting and paging**, and there are **two
+kinds of it**. The distinction is what makes both the persistence and the scale
+work, and getting to it took two wrong turns — first a live filter expression, then
+a materialised id list.
 
-This is simpler than what it replaces, and it deletes a whole class of bug rather
-than managing one.
+**Explicit selection** — somebody ticked rows. That is a set of ids, and it is small
+by construction: you can only tick what you can see, a page at a time. Nothing
+clever required.
 
-**Then it has to be obvious, or it is a trap.** A bar saying "12 selected" over a
-list showing nothing selected reads as broken software. Four things, and the second
-is the one that matters:
+**Select-all-matching** — a **flag**, the filter conditions **captured at the moment
+it was clicked**, an **expected count**, and any rows ticked off afterwards as
+exclusions. No ids are materialised at all, so "select all 51,420 matching" is the
+same amount of data as "select all 12 matching", and the ceiling question disappears
+rather than getting an arbitrary answer.
 
-- **A selection bar** appears as soon as anything is selected, and stays put through
-  filtering, sorting, paging and scrolling. It holds the count, the five actions, and
-  Clear.
-- **It states the split**: *"12 selected · 3 shown here"*, and *"12 selected · none
-  match this filter"* when that is true. Saying the quiet part is the whole
-  difference between persistence and a trap.
+```
+{ all: true, filter: { state: 'draft' }, expected: 51420, exclude: ['sty_x', 'sty_y'] }
+```
+
+**The count is the safety mechanism, checked server-side.** The backend re-runs the
+captured filter, compares its count to `expected`, and only then executes. A
+mismatch means the world moved between the number a person read and the button they
+pressed — somebody else published, or a colleague deleted a draft — so the operation
+is refused rather than silently applied to a different set than the one that was
+agreed to. Optimistic concurrency, with the count as the version.
+
+A refusal has to be a door, not a wall: it comes back with the *new* count and
+re-confirming is one click. On a busy site with a `state: draft` filter this will
+fire regularly, which is the point — the alternative is a bulk publish quietly
+including nine pages nobody looked at.
+
+**Both kinds capture rather than track.** That is what satisfies "a selection
+survives a filter change": the filter in a select-all is a snapshot, not a live read
+of whatever the UI's filter chips currently say. Change the visible filter and the
+selection still means what it meant when it was made.
+
+**Which forces the display to name the mode, not just a number.** "51,420 selected"
+is meaningless without *matching what*, and this is where a selection stops being a
+trap:
+
+- **A selection bar** appears on first selection and stays put through filtering,
+  sorting, paging and scrolling. Count, the five actions, Clear.
+- **It states the mode and the split.** Explicit: *"12 selected · 3 shown here"*.
+  Select-all: *"All 51,420 matching state is draft · 20 shown here"*, with the
+  captured conditions written out rather than implied. And *"none match this
+  filter"* when that is the truth, because a bar reading "12 selected" over a list
+  showing nothing selected reads as broken software.
 - **"Show only selected"** is a toggle in the bar — one click to see exactly what is
-  selected, whatever the filter says. This is the recovery path, and it is better
-  than a warning because it answers the question rather than raising it.
+  selected regardless of the visible filter. For a select-all that means switching
+  the view to the captured conditions. This is the recovery path, and it answers the
+  question rather than warning about it.
 - **Confirmations name the invisible part**: *"Publish 12 pages? 9 are not shown by
-  the current filter."* The dangerous case is acting on more than you can see, and
-  the confirmation is where that has to be said.
+  the current filter."* Acting on more than you can see is the hazard, so that is
+  where it gets said.
+
+**Execution over 51,420 documents is a batched job, not a request.** A Worker has a
+CPU limit and the codebase has already met this problem twice: `runMigrations` and
+`reindex` are both explicit, batched, and resumable by a `continueFrom` cursor,
+with comments saying why. Bulk actions take the same shape. The count is validated
+**once, at the start of the job** — re-checking per batch would make a long job
+un-completable on any site with live editors, and the guard's purpose is to confirm
+intent, not to freeze the database.
 
 **Selection is not in the URL**, and it is the one deliberate exception to "if a
 person can see it, they can link to it". Three hundred ids in a query string is not a
@@ -545,13 +580,14 @@ work:
    for other reasons.
 6. **The audit route rendered** — `GET /folio/audit` answers today and nothing draws
    it.
-7. **Bulk write endpoints**, plus an **ids-only** variant of every filtered list
-   query — so select-all-matching resolves to a set of ids without loading the rows
-   it claims to have selected, which is the thing pagination exists to stop
-   (decision 7a).
+7. **Bulk write endpoints** taking `{ all, filter, expected, exclude }` or a plain
+   id list, validating the count before executing, and batching with a `continueFrom`
+   cursor the way `runMigrations` and `reindex` already do (decision 7a). Plus **a
+   count for a filter**, which every list header wants anyway.
 
-A note on ordering: 1 and 7 are the same conversation. Whatever shape the pagination
-spec gives a filtered query is the shape the ids-only variant has to mirror.
+A note on ordering: 1 and 7 are the same conversation. The filter shape the
+pagination spec settles is the shape a captured selection serialises, and the count
+it needs for a header is the same count that guards a bulk write.
 
 ## The port plan
 
@@ -592,17 +628,18 @@ going and looking at what other products do, which is recorded above.
    Move is in, and the reasoning that had excluded it was our implementation's
    problem rather than the user's.
 
-4. **A selection survives a filter change**, and says so loudly — decision 7a. This
-   is the one question every product checked was silent on, and answering it "keep it"
-   rather than "clear it" turned the selection from a lazy filter expression into a
-   concrete id set, which is both simpler and what makes the persistence coherent.
+4. **A selection survives a filter change**, and says so loudly — decision 7a. The
+   one question every product checked was silent on. Answering it "keep it" rather
+   than "clear it" forced the shape: a selection *captures* its conditions instead of
+   tracking them, and select-all is a flag plus a captured filter plus an expected
+   count rather than a list of ids — which is what lets it be 51,420 items without
+   the question of a ceiling arising at all.
 
 ## Open questions
 
 1. **Does `group` on `DocumentType` want to also order the sidebar?** A declared
    group implies an order, and alphabetical-within-group is a guess. Probably wants
    declaration order, like the palette's groups.
-2. **Is there a ceiling on select-all-matching?** Ids are cheap but not free, and
-   "select all 50,000" is a real request on a large enough site. Leaning: resolve up
-   to a generous cap and say plainly when the cap is what is selected, rather than
-   silently selecting a prefix.
+2. **Does a refused bulk job report what it would have done?** A count mismatch
+   says the set changed but not how. Showing the difference costs a second query and
+   might be worth it for a destructive action; for publish it is probably noise.
