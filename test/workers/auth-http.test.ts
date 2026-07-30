@@ -213,19 +213,29 @@ describe('role gates', () => {
     expect(row?.published_at).toBeNull()
   })
 
-  it('reserves create, delete, move and manual redirects for a publisher', async () => {
-    const id = await seedStory()
+  // Create split away from the rest at the owner's direction: a new document is
+  // an unpublished draft at a path nothing links to yet, so starting one
+  // withdraws nothing. Renaming, moving and deleting act on a URL that may
+  // already be live, so those stay with the publisher.
+  it('lets an editor create a document, since a new draft serves nothing yet', async () => {
     const editor = await signIn('editor')
-    const publisher = await signIn('publisher')
+    const viewer = await signIn('viewer')
 
-    const post = (cookie: string) =>
+    const post = (cookie: string, title: string) =>
       call('/folio/stories', {
         method: 'POST',
         headers: { cookie, 'content-type': 'application/json' },
-        body: JSON.stringify({ title: `New ${cookie.slice(-4)}` }),
+        body: JSON.stringify({ title }),
       })
-    expect((await post(editor.cookie)).status).toBe(403)
-    expect((await post(publisher.cookie)).status).toBe(200)
+    expect((await post(editor.cookie, 'Editor made this')).status).toBe(200)
+    // Still closed to a viewer: `CREATE` is `editor`, not `viewer`.
+    expect((await post(viewer.cookie, 'Viewer made this')).status).toBe(403)
+  })
+
+  it('reserves delete, move and manual redirects for a publisher', async () => {
+    const id = await seedStory()
+    const editor = await signIn('editor')
+    const publisher = await signIn('publisher')
 
     const patch = (cookie: string) =>
       call(`/folio/stories/${id}`, {

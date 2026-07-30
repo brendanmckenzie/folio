@@ -9,7 +9,7 @@ import { isKnownLocale, translationStatus } from '../../core/locales'
 import type { DocumentType } from '../../core/schema'
 import type { StoryMeta } from '../../core/story'
 import { actorString } from '../auth/roles'
-import { EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
+import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
 import { indexedValuesFor } from '../content-index'
 import { FolioError, rethrow } from '../errors'
 import type { HookRunnerCtx } from '../hooks'
@@ -134,7 +134,8 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    *
    * `EDIT` (editor+), per the spec's route table. It reports on published content
    * an editor can already read, so nothing is leaked by the lower bar; the delete
-   * it precedes is `MANAGE`, so a plain editor never sees the dialog anyway.
+   * it precedes is `MANAGE`, so a plain editor never sees the dialog anyway — they
+   * may create and duplicate (`CREATE`), but not delete.
    */
   app.get('/documents/:id/usage', requireAccess<Env>(rt, EDIT), async (c) => {
     const id = idParam('id', c.req.param('id'))
@@ -158,7 +159,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     })
   })
 
-  app.post('/stories', requireAccess<Env>(rt, MANAGE), async (c) => {
+  app.post('/stories', requireAccess<Env>(rt, CREATE), async (c) => {
     const body = await parseBody(c.req, StoryCreateBody)
     const bindings = c.var.bindings()
     const type = requireType(body.type)
@@ -237,7 +238,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.post(
     '/stories/:id/duplicate',
-    requireAccess<Env>(rt, MANAGE),
+    requireAccess<Env>(rt, CREATE),
     loadStory<Env>(),
     async (c) => {
       const bindings = c.var.bindings()

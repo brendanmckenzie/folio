@@ -164,8 +164,10 @@ interface Props {
   /** Requests the delete confirmation, same contract as the page tree's. */
   onDelete: (story: StoryNode) => void
   onDuplicate: (story: StoryNode) => void
-  /** False for a role that may not create, delete or duplicate. */
+  /** False for a role that may not delete a document. */
   canManage: boolean
+  /** False for a role that may not create or duplicate one. */
+  canCreate: boolean
 }
 
 export function DataTable({
@@ -178,6 +180,7 @@ export function DataTable({
   onDelete,
   onDuplicate,
   canManage,
+  canCreate,
 }: Props) {
   const { schema } = useFolio()
   const [sort, setSort] = useState<DataSort>({ key: 'title', dir: 'asc' })
@@ -226,7 +229,7 @@ export function DataTable({
             setPage(1)
           }}
         />
-        {canManage ? (
+        {canCreate ? (
           <button type="button" className="btn-primary" onClick={() => setAdding(true)}>
             + New
           </button>
@@ -283,24 +286,26 @@ export function DataTable({
                     )}
                   </td>
                 ))}
+                {/* Duplicating creates a new draft, so it follows `canCreate`;
+                    deleting withdraws a document and stays at `canManage`. */}
                 <td className="datatable__actions">
+                  {canCreate ? (
+                    <button
+                      type="button"
+                      title={`Duplicate ${row.title}`}
+                      onClick={() => onDuplicate(row)}
+                    >
+                      ⧉
+                    </button>
+                  ) : null}
                   {canManage ? (
-                    <>
-                      <button
-                        type="button"
-                        title={`Duplicate ${row.title}`}
-                        onClick={() => onDuplicate(row)}
-                      >
-                        ⧉
-                      </button>
-                      <button
-                        type="button"
-                        title={`Delete ${row.title}`}
-                        onClick={() => onDelete(row)}
-                      >
-                        ×
-                      </button>
-                    </>
+                    <button
+                      type="button"
+                      title={`Delete ${row.title}`}
+                      onClick={() => onDelete(row)}
+                    >
+                      ×
+                    </button>
                   ) : null}
                 </td>
               </tr>
