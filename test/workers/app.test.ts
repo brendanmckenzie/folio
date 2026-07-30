@@ -33,6 +33,8 @@ function folioWith(bindings: (env: Cloudflare.Env) => FolioBindings) {
   })
 }
 
+const folio = () => folioWith(real)
+
 const real = (e: Cloudflare.Env): FolioBindings => ({
   db: e.DB,
   story: e.STORY,
@@ -129,5 +131,27 @@ describe('handle() and host fallthrough', () => {
     // to read D1 to find out whether the path names a story at all.
     expect(await get(folio, '/nothing-here?_folio=preview')).toBeNull()
     expect(calls).toBe(1)
+  })
+})
+
+/**
+ * `../../../docs/specs/platform/caching.md` decision 7. The same URL returns
+ * draft HTML to an editor and published HTML to a visitor, decided by the
+ * session cookie — and a `Cookie` header neither bypasses Workers Cache nor
+ * forms part of its key, so the two would collide on one entry, in the direction
+ * that serves an unpublished draft to the public.
+ */
+describe('the pages Folio serves itself are never cached', () => {
+  it('a preview response says no-store and carries no Cache-Tag', async () => {
+    const res = await get(folio(), '/?_folio=preview')
+    expect(res?.status).toBe(200)
+    expect(res?.headers.get('cache-control')).toBe('private, no-store')
+    expect(res?.headers.get('cache-tag')).toBeNull()
+  })
+
+  it('so does the editor shell', async () => {
+    const res = await get(folio(), '/folio/edit/sty_appmw01')
+    expect(res?.status).toBe(200)
+    expect(res?.headers.get('cache-control')).toBe('private, no-store')
   })
 })

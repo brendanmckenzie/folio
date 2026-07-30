@@ -8,6 +8,12 @@
  */
 import type { ReactNode } from 'react'
 import type { AnyBlockDef, Registry } from '../core/block'
+import type {
+  CacheHeaderOptions,
+  CacheHeaders,
+  CacheTagOptions,
+  CacheTags,
+} from '../core/cache-tags'
 import type { Doc } from '../core/doc'
 import type { LocaleConfig } from '../core/locales'
 import type { Migration } from '../core/migrate'
@@ -231,6 +237,22 @@ export interface Folio<Env> {
    */
   status: (env: Env, path: string) => Promise<'live' | 'unpublished' | 'unknown'>
   /**
+   * The story row behind a URL path, decorated with its urls, or null. One
+   * indexed read.
+   *
+   * `published(env, path)` answers with the document alone, which is everything
+   * a render needs and one thing short of everything a *response* needs: the
+   * story's own id. Two things want it. `resolve(env, doc, { story })` needs it
+   * to load this page's ancestors, so a breadcrumb resolves; and
+   * `cacheHeaders(resolution, { story })` needs it because a page never appears
+   * in its own resolution and `story:<id>` is the tag its next publish purges
+   * by (`../platform/caching.md`).
+   *
+   * Deliberately a second call rather than a wider return from `published`,
+   * which is a published type host code already reads.
+   */
+  storyAt: (env: Env, path: string) => Promise<StoryMeta | null>
+  /**
    * A redirect for a path, or null. One indexed read.
    *
    * Called from the host's own 404 branch (`redirects.md`), after
@@ -330,6 +352,41 @@ export interface Folio<Env> {
    */
   resolve: (env: Env, doc?: Doc, opts?: HostResolveOptions) => Promise<Resolution>
   render: (doc: Doc, opts?: { edit?: boolean; resolution?: Resolution }) => ReactNode
+  /**
+   * The cache tags a rendered page should carry, and whether the set had to be
+   * coarsened (`../../../docs/specs/platform/caching.md`).
+   *
+   * Pure — no `env`, no I/O — because a `Resolution` already *is* the
+   * dependency set of the page that was just rendered. That inversion is the
+   * whole design: the purge set is not computable from anything Folio stores
+   * (a global comes from config and writes no `content_refs` edge, collection
+   * membership is a query run at render, a title change fires no event, and the
+   * ref index truncates at 400 rows), so it is computed here instead and purged
+   * by tag.
+   *
+   * Reach for this over `cacheHeaders` when you want to log `degraded`, or to
+   * add tags of your own before setting the header.
+   */
+  cacheTags: (resolution: Resolution, opts: CacheTagOptions) => CacheTags
+  /**
+   * `cache-control` and `cache-tag` for a published response, as one spread:
+   *
+   * ```ts
+   * return new Response(html, {
+   *   headers: { 'content-type': 'text/html', ...folio.cacheHeaders(resolution, { story: story.id }) },
+   * })
+   * ```
+   *
+   * **Both headers or neither.** `Cache-Control` without `Cache-Tag` is a page
+   * cached for its full TTL with no purge path — it fails silently and is worse
+   * than no caching at all — whereas forgetting both is exactly today's
+   * behaviour. That asymmetry is why this is one call.
+   *
+   * Needs `"cache": { "enabled": true }` in the host's `wrangler.jsonc` to do
+   * anything. No binding, no token, no zone, no paid plan; without it these are
+   * two headers nothing acts on, and every purge is a no-op.
+   */
+  cacheHeaders: (resolution: Resolution, opts: CacheHeaderOptions) => CacheHeaders
   /**
    * Published document for a global, or null — `name` is not required to be
    * one of `FolioConfig.globals`, since a host may read a singleton by name
