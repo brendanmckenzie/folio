@@ -13,7 +13,11 @@
  * `{base}/ui` while the admin's internal JSON still owns the bare namespace:
  * `{base}/content`, `{base}/assets`, `{base}/documents` and `{base}/redirects` are
  * all JSON routes today, so a screen cannot take those paths until they move.
- * See `server/routes/shell.ts`, which records the finding and what it costs.
+ *
+ * They move to `{base}/api/` in `docs/specs/foundation/pagination.md` phase 3, at
+ * which point this file needs **no edit at all** — the mount changes in
+ * `server/routes/shell.ts` and every URL here follows. That is the whole return on
+ * making the router prefix-relative rather than absolute.
  */
 
 /** The screens. `docs/ui-architecture.md`'s table, minus `login`, which is
