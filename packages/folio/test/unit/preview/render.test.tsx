@@ -70,4 +70,31 @@ describe('renderGlobalNode', () => {
     )
     expect(html).toContain('data-folio-uid="hdr00001"')
   })
+
+  /**
+   * Both Folio's preview shell and a host laying out its own chrome map over
+   * several globals, and a caller cannot add a key to a node it did not create —
+   * so the node carries its own. Without it React warns "Each child in a list
+   * should have a unique key" against whatever component holds the array, which
+   * is a real report about library markup pointing at host code.
+   */
+  it('carries its own React key, so mapping over several globals is warning-free', () => {
+    const resolution: Resolution = {
+      ...baseResolution,
+      globals: { header: headerDoc('Top'), footer: headerDoc('Bottom') },
+    }
+    const nodes = ['header', 'footer'].map((name) => renderGlobalNode(registry, resolution, name))
+    expect(nodes.map((n) => (n as { key: string | null }).key)).toEqual(['header', 'footer'])
+
+    // And the array renders as a list without React complaining.
+    const warnings: unknown[][] = []
+    const error = console.error
+    console.error = (...args: unknown[]) => warnings.push(args)
+    try {
+      renderToStaticMarkup(<>{nodes}</>)
+    } finally {
+      console.error = error
+    }
+    expect(warnings.filter((w) => String(w[0]).includes('unique "key"'))).toEqual([])
+  })
 })
