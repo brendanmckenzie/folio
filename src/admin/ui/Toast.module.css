@@ -1,0 +1,20 @@
+.toast {
+  position: fixed;
+  bottom: var(--space-5);
+  left: 50%;
+  z-index: 45;
+  padding: var(--space-2) var(--space-4);
+  color: var(--fg-inverse);
+  background: var(--fg);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-menu);
+  transform: translateX(-50%);
+}
+
+/* Mounted but silent: no padding, no background, no pointer target. */
+.toast:empty {
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  pointer-events: none;
+}
