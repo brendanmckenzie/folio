@@ -102,6 +102,7 @@ export type { LocaleConfig, LocaleContext } from './locales'
 
 export {
   PROTOCOL_VERSION,
+  docBytes,
   docCapError,
   fallbackColour,
   isBlok,

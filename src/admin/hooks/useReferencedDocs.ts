@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Doc } from '../../core/doc'
-import { referencedIds } from '../../core/resolve'
+import { referencedIdsAllLocales } from '../../core/refs'
 import type { SchemaIndex } from '../../core/schema'
 
 /**
@@ -85,7 +85,23 @@ export function mergeReferencedDocs(
 }
 
 /**
- * Documents pulled in by `reference` fields.
+ * The referenced-id set to fetch, as a sorted, joined string so an unchanged
+ * set is an unchanged `useMemo`/`useEffect` dependency.
+ *
+ * `referencedIdsAllLocales`, not the source-locale-only `referencedIds`: the
+ * server's own resolution walks every locale (`core/refs.ts`'s header), so a
+ * `reference` a translation points at but the source value does not must still
+ * be fetched here, or the editor's preview would be missing a document the
+ * published render has.
+ */
+export function wantedReferencedIds(doc: Doc | null, schema: SchemaIndex): string {
+  return doc ? referencedIdsAllLocales(doc, schema).sort().join(',') : ''
+}
+
+/**
+ * Documents pulled in by `reference` and `references` fields, across every
+ * locale — the same set the server's own resolution loads, so a target only a
+ * translation points at is not missing from the editor's copy.
  *
  * Fetched only when the *set* of referenced ids changes — never per render,
  * because the preview re-renders on every keystroke and there must be no network
@@ -98,11 +114,7 @@ export function useReferencedDocs(
 ): Readonly<Record<string, Doc>> {
   const [known, setKnown] = useState<ReferencedDocs>(NO_REFERENCED_DOCS)
 
-  // A sorted, joined string so an unchanged set is an unchanged dependency.
-  const wantedIds = useMemo(
-    () => (doc ? referencedIds(doc, schema).sort().join(',') : ''),
-    [doc, schema],
-  )
+  const wantedIds = useMemo(() => wantedReferencedIds(doc, schema), [doc, schema])
 
   useEffect(() => {
     const wanted = idsToFetch(wantedIds ? wantedIds.split(',') : [], known)

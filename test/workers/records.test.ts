@@ -395,11 +395,106 @@ describe('deleting a referenced record proceeds', () => {
     // The referring page is still live and still published; it renders its
     // block's empty state, which is what makes a broken reference safe.
     expect(await folio.published(env, 'recreferrer')).not.toBeNull()
-    // And the `to_story` row survives deliberately, so the *next* publish of the
-    // referrer is what prunes it.
+
+    // And the inbound edge goes with the target. It used to survive until the
+    // referrer's next publish rewrote it, which meant a site that never
+    // republishes accumulated edges to ids with no document behind them.
     const refs = await env.DB.prepare('select count(*) as n from content_refs where to_story = ?')
       .bind(created.id)
       .first<{ n: number }>()
-    expect(refs?.n).toBe(1)
+    expect(refs?.n).toBe(0)
+
+    // The referrer's *other* rows are untouched: this pruned one edge, not the
+    // whole source document's outbound set.
+    const outbound = await env.DB.prepare(
+      'select count(*) as n from content_refs where from_story = ?',
+    )
+      .bind('rec_referrer')
+      .first<{ n: number }>()
+    expect(outbound?.n).toBe(0)
+
+    await env.DB.prepare('delete from stories where id = ?').bind('rec_referrer').run()
+  })
+
+  it('takes the deleted subtree out of content_refs from both directions at once', async () => {
+    // A page that both points at a record and is pointed at by another page, so
+    // one delete has an outbound edge and an inbound edge to lose.
+    await insertRow('rec_hub', {
+      type: 'recPageType',
+      path: 'rechub',
+      title: 'Hub',
+      doc: one('h', 'recPage', { title: 'Hub', office: SYDNEY }),
+    })
+    await insertRow('rec_pointer', {
+      type: 'recPageType',
+      path: 'recpointer',
+      title: 'Pointer',
+      doc: one('pt', 'recPage', { title: 'Pointer', lead: ADA, office: SYDNEY }),
+    })
+    await folio.reindex(env, { batch: 200 })
+    // A `link`-kind edge on top of the two `reference` ones the walk produced —
+    // the shape a richtext link mark writes. Inserted after the reindex, because
+    // a reindex rewrites `rec_pointer`'s whole outbound set.
+    await env.DB.prepare('insert into content_refs (from_story, to_story, kind) values (?, ?, ?)')
+      .bind('rec_pointer', 'rec_hub', 'link')
+      .run()
+
+    const res = (await send('/folio/stories/rec_hub?redirect=false', 'DELETE'))!
+    expect(res.status).toBe(200)
+
+    const rows = await env.DB.prepare(
+      'select count(*) as n from content_refs where from_story = ? or to_story = ?',
+    )
+      .bind('rec_hub', 'rec_hub')
+      .first<{ n: number }>()
+    expect(rows?.n).toBe(0)
+
+    // `rec_pointer` itself is untouched — only the edge naming the deleted page
+    // went, not every edge it owns.
+    const survivors = await env.DB.prepare(
+      'select to_story as target from content_refs where from_story = ? order by target',
+    )
+      .bind('rec_pointer')
+      .all<{ target: string }>()
+    expect(survivors.results.map((r) => r.target)).toEqual([ADA, SYDNEY])
+
+    await env.DB.prepare('delete from stories where id = ?').bind('rec_pointer').run()
+  })
+
+  it('keeps the inbound edges when a referenced record is only unpublished', async () => {
+    // The distinction `clearIndexStatements` and `clearInboundRefStatements`
+    // exist to draw: the story is still there, so "used by N" is still a true
+    // and useful warning about it.
+    await insertRow('rec_paused', {
+      type: 'recOfficeType',
+      path: null,
+      title: 'Paused Office',
+      doc: one('pa', 'recOffice', { city: 'Paused', phone: '111' }),
+    })
+    await insertRow('rec_naming', {
+      type: 'recPageType',
+      path: 'recnaming',
+      title: 'Naming',
+      doc: one('nm', 'recPage', { title: 'Naming', office: 'rec_paused' }),
+    })
+    await folio.reindex(env, { batch: 200 })
+
+    expect((await send('/folio/story/rec_paused/unpublish', 'POST'))!.status).toBe(200)
+
+    // Its own projection is gone: an unpublished document leaves every collection.
+    const own = await env.DB.prepare('select count(*) as n from content_index where story_id = ?')
+      .bind('rec_paused')
+      .first<{ n: number }>()
+    expect(own?.n).toBe(0)
+
+    // The inbound edge is not.
+    const usage = (await (await get('/folio/documents/rec_paused/usage'))!.json()) as {
+      total: number
+    }
+    expect(usage.total).toBe(1)
+
+    await env.DB.prepare('delete from stories where id in (?, ?)')
+      .bind('rec_paused', 'rec_naming')
+      .run()
   })
 })

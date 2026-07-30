@@ -203,6 +203,27 @@ export const MAX_DOC_BLOKS = 20_000
 export const MAX_DOC_BYTES = 8 * 1024 * 1024
 
 /**
+ * UTF-8 length of `s`, never `.length`: a string's `.length` counts UTF-16 code
+ * units, so prose in a non-Latin script reads well under a cap it is already
+ * over. Every byte ceiling in the system is measured through here.
+ */
+export const utf8Bytes = (s: string): number => new TextEncoder().encode(s).byteLength
+
+/**
+ * The serialised size of `doc`, in UTF-8 bytes — **the** measurement
+ * `MAX_DOC_BYTES` is enforced against, exported so that anything which merely
+ * *reports* on document size (`server/audit.ts`) counts the same bytes the door
+ * counts. A report that measured it its own way would be a warning that lies at
+ * exactly the moment it matters.
+ *
+ * `json`, when given, is the serialised form the caller already produced for
+ * persistence: this re-measures it rather than stringifying twice.
+ */
+export function docBytes(doc: Doc, json?: string): number {
+  return utf8Bytes(json ?? JSON.stringify(doc))
+}
+
+/**
  * Why `doc` cannot be admitted for its accumulated size, or null when it is
  * within both ceilings. `json`, when given, is the serialised form the caller
  * already produced for persistence — this only re-measures it, rather than
@@ -213,7 +234,7 @@ export function docCapError(doc: Doc, json?: string): string | null {
   if (count > MAX_DOC_BLOKS) {
     return `document too large: ${count} bloks exceeds the ${MAX_DOC_BLOKS} cap`
   }
-  const bytes = new TextEncoder().encode(json ?? JSON.stringify(doc)).byteLength
+  const bytes = docBytes(doc, json)
   if (bytes > MAX_DOC_BYTES) {
     return `document too large: ${bytes} bytes exceeds the ${MAX_DOC_BYTES} byte cap`
   }

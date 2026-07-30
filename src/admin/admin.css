@@ -1935,6 +1935,15 @@ button.tree__menu-heading {
   box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
   transform: translateX(-50%);
 }
+/* The div is always mounted (Editor.tsx) so the live region exists before its
+   text changes. With no message it has no child text node, so :empty collapses
+   it to a zero-size box: invisible, out of layout, and inert rather than gone. */
+.toast:empty {
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  pointer-events: none;
+}
 
 /* --------------------------------------------------- version preview ---- */
 
@@ -2279,8 +2288,8 @@ button.tree__menu-heading {
 /* --------------------------------------------------------- references ---- */
 
 /* data-documents.md decision 3: a hand-picked, ordered list. Cards are keyed by
-   story id in the component, not by index — MultiAssetInput's index keys are the
-   bug this must not reuse. */
+   story id in the component, never by index — and unlike MultiAssetInput, which
+   mints local ids because an asset has none, the id here is already real. */
 .refs {
   display: flex;
   flex-direction: column;

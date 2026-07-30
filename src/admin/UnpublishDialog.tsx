@@ -1,4 +1,6 @@
+import { useId, useRef } from 'react'
 import { liveDescendants, type StoryMeta, type StoryNode } from '../core/story'
+import { useFocusTrap } from './hooks/useFocusTrap'
 
 export interface UnpublishConfirmation {
   isRoot: boolean
@@ -45,13 +47,40 @@ interface Props {
  */
 export function UnpublishDialog({ story, tree, busy, onConfirm, onCancel }: Props) {
   const { isRoot, label, descendantPaths } = unpublishConfirmation(story, tree)
+  const panel = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+
+  // Inert while the unpublish is in flight, matching the Cancel button beneath.
+  // `publish.unpublish` reports its own failures and always resolves, so `busy`
+  // always clears.
+  const dismiss = () => {
+    if (!busy) onCancel()
+  }
+  useFocusTrap(panel, dismiss)
 
   return (
-    <div className="unpublish" role="dialog" aria-label="Unpublish page">
-      {/* Clicking the backdrop cancels, matching the media library's modal. */}
-      <button type="button" className="unpublish__scrim" aria-label="Cancel" onClick={onCancel} />
-      <div className="unpublish__panel">
-        <h3>Unpublish {isRoot ? 'the site root' : <code>{label}</code>}?</h3>
+    <div className="unpublish">
+      {/* Clicking the backdrop cancels, matching the media library's modal.
+          `tabIndex={-1}` keeps it out of the cycle: the visible Cancel button is
+          the keyboard route out. */}
+      <button
+        type="button"
+        className="unpublish__scrim"
+        aria-label="Cancel"
+        tabIndex={-1}
+        onClick={dismiss}
+      />
+      {/* The dialog is the panel, not the overlay, so the scrim's own "Cancel"
+          label stays outside the region the dialog names. */}
+      <div
+        ref={panel}
+        className="unpublish__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
+        <h3 id={titleId}>Unpublish {isRoot ? 'the site root' : <code>{label}</code>}?</h3>
 
         <p>
           <code>{label}</code> will stop serving. The draft is kept — it stays editable and

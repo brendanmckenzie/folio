@@ -19,7 +19,12 @@ import {
   type StoryMeta,
   type StoryNode,
 } from '../core/story'
-import { clearIndexStatements, countReferencesTo, referencesTo } from './content-index'
+import {
+  clearIndexStatements,
+  clearInboundRefStatements,
+  countReferencesTo,
+  referencesTo,
+} from './content-index'
 import { clearRedirectAtStatement, redirectStatements } from './redirects'
 
 const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18n,
@@ -207,10 +212,12 @@ export interface DocumentUsage {
  * and one document, and appears twice in `published` so the list can say which.
  *
  * A row whose source story has since been deleted is dropped rather than
- * reported as an untitled usage: `content_refs` keeps `to_story` rows for a
- * deleted document deliberately (see `clearIndexStatements`), and the mirror
- * image — a `from_story` gone before its own rows were rewritten — is the same
- * unpruned-row case seen from the other end.
+ * reported as an untitled usage. `deleteStoryStatement` now removes a deleted
+ * story's rows in both directions, so this should no longer happen on a live
+ * site — but the check stays: a database carrying rows from before that, or an
+ * import that wrote edges directly, would otherwise show the dialog a usage with
+ * no title and no URL. `total` counts what survives the join; `links` and
+ * `references` come from the raw row counts and can exceed it.
  */
 export async function documentUsage(db: D1Database, id: string): Promise<DocumentUsage> {
   const [counts, rows] = await Promise.all([countReferencesTo(db, id), referencesTo(db, id)])
@@ -892,9 +899,15 @@ export async function deleteStoryStatement(
    * `content_index` / `content_refs` rows for the same ids
    * (`../content-model/collections.md`), for the same batch: a deleted story must
    * leave every collection in the same transaction it leaves the tree, or a query
-   * returns an id with no document behind it. Outbound edges only — a row where
-   * this story is the *target* is another document's fact, and is what
-   * `data-documents.md`'s "used by N" warning reads.
+   * returns an id with no document behind it.
+   *
+   * **Both directions.** The outbound rows go because the source is gone; the
+   * inbound ones (`to_story in ids`) go because the *target* is, and an edge to
+   * an id with no document behind it is a fact nothing reads —
+   * `data-documents.md`'s "used by N" warning is only ever asked about a document
+   * somebody has open. Left behind they are rewritten only when the referring
+   * document is next published, so a site that never republishes accumulates
+   * them forever.
    */
   indexStatements: D1PreparedStatement[]
 } | null> {
@@ -935,7 +948,7 @@ export async function deleteStoryStatement(
     paths,
     statement,
     redirectStatements: redirects,
-    indexStatements: clearIndexStatements(db, ids),
+    indexStatements: [...clearIndexStatements(db, ids), ...clearInboundRefStatements(db, ids)],
   }
 }
 

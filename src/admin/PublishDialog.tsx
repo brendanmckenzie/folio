@@ -1,4 +1,6 @@
+import { useId, useRef } from 'react'
 import type { LocaleConfig, TranslationStatus } from '../core/locales'
+import { useFocusTrap } from './hooks/useFocusTrap'
 
 /**
  * "80% of French" — the number an editor actually asks for, and the one the
@@ -56,12 +58,40 @@ interface Props {
  * sites ship — so this says what will happen and gets out of the way.
  */
 export function PublishDialog({ gaps, locales, busy, onConfirm, onCancel }: Props) {
+  const panel = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+
+  // Inert while the publish is in flight, matching the Cancel button beneath.
+  // `publish.publish` reports its own failures and always resolves, so `busy`
+  // always clears.
+  const dismiss = () => {
+    if (!busy) onCancel()
+  }
+  useFocusTrap(panel, dismiss)
+
   return (
-    <div className="discard" role="dialog" aria-label="Publish with incomplete translations">
-      {/* Clicking the backdrop cancels, matching every other confirmation here. */}
-      <button type="button" className="discard__scrim" aria-label="Cancel" onClick={onCancel} />
-      <div className="discard__panel">
-        <h3>Publish with incomplete translations?</h3>
+    <div className="discard">
+      {/* Clicking the backdrop cancels, matching every other confirmation here.
+          `tabIndex={-1}` keeps it out of the cycle: the visible Cancel button is
+          the keyboard route out. */}
+      <button
+        type="button"
+        className="discard__scrim"
+        aria-label="Cancel"
+        tabIndex={-1}
+        onClick={dismiss}
+      />
+      {/* The dialog is the panel, not the overlay, so the scrim's own "Cancel"
+          label stays outside the region the dialog names. */}
+      <div
+        ref={panel}
+        className="discard__panel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
+        <h3 id={titleId}>Publish with incomplete translations?</h3>
 
         <p>
           Publishing publishes every language at once. These will go live with the source language

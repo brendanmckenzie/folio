@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import { auditDocuments, auditSchema } from '../../../src/server/audit'
+import {
+  type AuditedStory,
+  auditDocuments,
+  auditSchema,
+  auditStories,
+  type DocumentSizeFinding,
+  WARN_DOC_BYTES,
+} from '../../../src/server/audit'
 import type { Blok, Doc, Json } from '../../../src/core/doc'
 import { asset, blocks, boolean, select, text } from '../../../src/core/fields'
+import { docBytes, MAX_DOC_BYTES } from '../../../src/core/protocol'
 import type { SchemaIndex } from '../../../src/core/schema'
 
 /**
@@ -148,6 +156,111 @@ describe('auditDocuments: ordering and emptiness', () => {
 
   it('reports nothing for no documents at all', () => {
     expect(auditDocuments([], SCHEMA)).toEqual([])
+  })
+})
+
+/**
+ * `document-size`: the byte ceiling nobody watches, because the blok ceiling is
+ * the one that sounds like the limit. Eight languages of long richtext is eight
+ * times the payload at the same block count, so `MAX_DOC_BYTES` is reachable on
+ * a page whose block count is unremarkable — and the first symptom without this
+ * check is an editor's save being refused.
+ *
+ * Sized against `WARN_DOC_BYTES` rather than a literal on purpose: the threshold
+ * is an argued judgement call, and a test that pinned 6 MB would have to be
+ * rewritten to change it rather than simply following.
+ */
+describe('auditStories: a document approaching MAX_DOC_BYTES', () => {
+  /** One published row whose body is `filler` bytes of prose, plus optional translations. */
+  const story = (
+    id: string,
+    filler: number,
+    i18n?: Record<string, Record<string, Json>>,
+  ): AuditedStory => ({
+    id,
+    type: 'page',
+    doc: {
+      root: 'root',
+      bloks: {
+        root: { uid: 'root', type: 'page', parent: null, slot: null, order: 'a0', data: {} },
+        body: {
+          uid: 'body',
+          type: 'hero',
+          parent: 'root',
+          slot: 'body',
+          order: 'a0',
+          data: { title: 'x'.repeat(filler) },
+          ...(i18n ? { i18n } : {}),
+        },
+      },
+    },
+  })
+
+  it('says nothing about a document under the threshold', () => {
+    const under = story('sty_small', WARN_DOC_BYTES - 4096)
+    expect(docBytes(under.doc)).toBeLessThan(WARN_DOC_BYTES)
+    expect(auditStories([under])).toEqual([])
+  })
+
+  it('reports exactly one finding, naming the story, once it is over', () => {
+    const over = story('sty_big', WARN_DOC_BYTES)
+    const findings = auditStories([over]) as DocumentSizeFinding[]
+    expect(findings).toHaveLength(1)
+    const finding = findings[0]!
+    expect(finding).toMatchObject({
+      check: 'document-size',
+      story: 'sty_big',
+      type: 'page',
+      bytes: docBytes(over.doc),
+      locales: [],
+    })
+    expect(finding.bytes).toBeGreaterThanOrEqual(WARN_DOC_BYTES)
+    expect(finding.bytes).toBeLessThan(MAX_DOC_BYTES)
+    expect(finding.detail).toContain('% of the 8.0 MB document cap')
+  })
+
+  /**
+   * The measurement has to be the one the door makes. A warning derived from a
+   * different serialisation would disagree with `docCapError` at exactly the
+   * size where an operator is relying on it.
+   */
+  it('counts the bytes docCapError counts', () => {
+    const over = story('sty_big', WARN_DOC_BYTES)
+    const finding = (auditStories([over]) as DocumentSizeFinding[])[0]!
+    expect(finding.bytes).toBe(new TextEncoder().encode(JSON.stringify(over.doc)).byteLength)
+  })
+
+  /**
+   * Localisation is the reason this became reachable, so the finding says where
+   * the weight went: "6.5 MB" is alarming, "of which 4 MB is fr and de" is
+   * something an operator can act on.
+   */
+  it('attributes the weight per locale, heaviest first', () => {
+    const over = story('sty_i18n', 1024 * 1024, {
+      de: { title: 'd'.repeat(2 * 1024 * 1024) },
+      fr: { title: 'f'.repeat(3 * 1024 * 1024) },
+      es: { title: 'e'.repeat(512) },
+    })
+    const finding = (auditStories([over]) as DocumentSizeFinding[])[0]!
+    expect(finding.locales.map((l) => l.code)).toEqual(['fr', 'de', 'es'])
+    expect(finding.locales[0]!.bytes).toBeGreaterThan(3 * 1024 * 1024)
+    // The parts are a real subtree of the whole, so they sum to just under it.
+    const translated = finding.locales.reduce((n, l) => n + l.bytes, 0)
+    expect(translated).toBeLessThan(finding.bytes)
+    expect(finding.detail).toContain('is translations (fr ')
+  })
+
+  it('reports the heaviest document first', () => {
+    const findings = auditStories([
+      story('sty_a', WARN_DOC_BYTES),
+      story('sty_c', WARN_DOC_BYTES + 512 * 1024),
+      story('sty_b', WARN_DOC_BYTES + 1024),
+    ]) as DocumentSizeFinding[]
+    expect(findings.map((f) => f.story)).toEqual(['sty_c', 'sty_b', 'sty_a'])
+  })
+
+  it('says nothing about no documents at all', () => {
+    expect(auditStories([])).toEqual([])
   })
 })
 
