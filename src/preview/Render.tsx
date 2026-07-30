@@ -204,8 +204,15 @@ export function renderGlobalNode(
 ): ReactNode {
   const doc = resolution.globals?.[name]
   if (!doc) return null
+  // Keyed on the global's name, which is unique by construction (`globals` is a
+  // list of declared singleton type names). The key is inert for the single-use
+  // call a host makes in its own shell — `renderGlobal(resolution, 'header')` —
+  // and load-bearing the moment anything maps over several, which both Folio's
+  // own preview shell and a host laying out its chrome naturally do. Setting it
+  // here rather than at each call site is what makes that free: a caller cannot
+  // add a key to a node it did not create.
   return (
-    <div data-folio-global={name}>
+    <div key={name} data-folio-global={name}>
       <FolioDoc doc={doc} registry={registry} edit={opts?.edit} resolution={resolution} />
     </div>
   )
