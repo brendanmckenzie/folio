@@ -1,0 +1,42 @@
+/*
+ * The frame. `100dvh` rather than `100vh`: the admin is a fixed-height
+ * application whose lists scroll inside it, and on iOS `vh` includes chrome that
+ * is not there — which puts the bottom of a list, and any selection bar in it,
+ * under the browser's own toolbar.
+ */
+
+.shell {
+  display: flex;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg-app);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.screen {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-4);
+}
+
+/*
+ * The editor's version: no padding, no scroll of its own. The preview is edge to
+ * edge (`ui-architecture.md`, the editor) and the rail and inspector scroll
+ * independently inside it.
+ */
+.bare {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+}

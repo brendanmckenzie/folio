@@ -12,9 +12,29 @@
     border-color var(--dur-fast) var(--ease);
 }
 
+/*
+ * Disabled is **inert, not faded**. `opacity: .45` was the first answer and the
+ * shell prototype showed why it is wrong: a disabled `primary` became pale blue
+ * with pale white text on it, which fails contrast in both themes and reads as a
+ * rendering fault rather than a refusal. Dropping the fill instead says "this
+ * cannot act" in the same language everywhere, whatever the variant would have
+ * been.
+ *
+ * `:disabled` out-specifies the variant classes below (class + pseudo-class beats
+ * one class), so this needs no `!important` and no ordering trick.
+ */
 .btn:disabled {
-  opacity: 0.45;
   cursor: default;
+  color: var(--fg-subtle);
+  background: var(--bg-inset);
+  border-color: var(--border);
+}
+
+/* Except `subtle`, whose whole character is having no box at rest. A disabled row
+ * action should recede, not grow a fill it never had. */
+.subtle:disabled {
+  background: none;
+  border-color: transparent;
 }
 
 .md {

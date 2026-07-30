@@ -1,0 +1,173 @@
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 1400px;
+}
+
+.search {
+  height: 26px;
+  width: 200px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.search:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
+  border-color: var(--fg-accent);
+}
+
+.chips {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.chip {
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/*
+ * The selected chip is inverted rather than tinted. A state filter named `live`
+ * next to a `live` badge would otherwise be two greens meaning different things —
+ * "the filter is on" and "the page is published" — and the brief reserves hue for
+ * the second.
+ */
+.chipOn {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--fg-inverse);
+}
+
+.title {
+  color: inherit;
+  text-decoration: none;
+}
+
+.title:hover {
+  text-decoration: underline;
+}
+
+.title:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.untitled {
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+
+.twisty {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-subtle);
+  font: inherit;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.twisty[data-open] {
+  transform: rotate(90deg);
+}
+
+.twisty:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.twisty:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 0;
+}
+
+/* A leaf still owes the column its width, or every leaf title sits 16px left of
+   its siblings' and the indent stops reading as depth. */
+.twistySpacer {
+  display: block;
+  width: 16px;
+}
+
+/*
+ * The metadata columns. Each cell is left-aligned inside a fixed width, so the
+ * badges line up down the list and the stamps form a column of their own.
+ */
+.cols {
+  display: grid;
+  grid-template-columns: 96px 80px;
+  gap: var(--space-2);
+  align-items: center;
+  /* A grid item stretches by default, which would blow every badge out to its
+     cell's full width. */
+  justify-items: start;
+}
+
+.cols[data-typed] {
+  grid-template-columns: 72px 96px 80px;
+}
+
+.stamp {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.skeleton {
+  height: var(--row-h);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+}
+
+.footnote {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.footnote code {
+  font-family: var(--font-mono);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .twisty {
+    /* biome-ignore lint/complexity/noImportantStyles: beats the transition above
+       it, the same pattern tokens.css uses for its own guard. */
+    transition: none !important;
+  }
+}

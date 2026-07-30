@@ -51,6 +51,38 @@ export function adminPage(
 }
 
 /**
+ * The rebuilt admin's shell, for any screen under its mount.
+ *
+ * One handler for every screen, because the router is on the client: the server's
+ * only job is to answer the same HTML at every path the shell owns and let
+ * `admin/ui/route.ts` decide what it means. That is what makes a deep link work on
+ * a cold load rather than only after a click — which is the whole of "everything
+ * must be linkable".
+ *
+ * It carries no story id. The old editor page needs one because the editor *is*
+ * the application there; here `/edit/:id` is one route among eleven and the id is
+ * in the URL where it belongs.
+ */
+export function shellPage(rt: FolioRuntime, mount: string): Promise<Response> {
+  const { entries, stylesheets } = rt.page('admin')
+  return html(
+    <Shell
+      title="Folio"
+      stylesheets={stylesheets}
+      head={
+        <>
+          {rt.dev ? <ReactRefreshPreamble /> : null}
+          <Bootstrap global="__FOLIO_SHELL__" value={{ apiBase: rt.base, mount }} />
+        </>
+      }
+    >
+      <div id="folio-admin" />
+    </Shell>,
+    entries,
+  )
+}
+
+/**
  * The story's live draft, rendered for the editor's iframe.
  *
  * Every configured global rides along too (`../../../docs/specs/content-model/

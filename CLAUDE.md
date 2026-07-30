@@ -19,10 +19,18 @@ pnpm build              # demo vite build
 `Lint: No issues found` even when its *format* check failed further up, so a piped
 `| tail` can hide a red gate.
 
-- Use `pnpm exec biome ci .`, **not** `pnpm lint`, if a shell hook on your machine
-  rewrites `pnpm lint` into something else.
+- **Run `./node_modules/.bin/biome ci .` — the direct binary.** `pnpm exec biome ci .`
+  is what CI runs, but on a machine with a shell hook it can be rewritten into
+  something that prints a plausible summary and never runs biome at all. It has
+  reported `Lint: No issues found` over four real errors. `pnpm lint` is worse.
+- `echo "EXIT=$?"` **after a pipe reads the last command's status, not biome's**.
+  `cmd | tail; echo $?` is `tail`'s exit code, which is always 0 — that plus the
+  rewrite above is how a red gate reads as green twice over.
 - To auto-format, `./node_modules/.bin/biome format --write .` is reliable;
   `pnpm exec biome check --write` can be intercepted and silently do nothing.
+- A **`biome-ignore` naming a rule that does not exist is itself an error**
+  (`suppressions/parse`), and the rule it was meant to suppress stays reported. The
+  group matters: `noImportantStyles` is `lint/complexity/`, not `lint/style/`.
 
 CI (`.github/workflows/ci.yml`) runs exactly those four.
 
