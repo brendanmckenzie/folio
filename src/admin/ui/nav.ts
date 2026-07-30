@@ -19,11 +19,18 @@ export interface NavItem {
   screen: Screen
   /**
    * A single glyph, which is what the 48px collapsed rail shows. Deliberately
-   * data rather than JSX so this module stays free of React — and a placeholder:
-   * `docs/ui-architecture.md` lists an icon set as a dependency, and
-   * `docs/ui-review.md`'s complaint about the two bare `↻` buttons applies to any
-   * glyph without an accessible name, which is why `Sidebar` gives every one of
-   * these a label even when it is drawing only the icon.
+   * data rather than JSX so this module stays free of React.
+   *
+   * **Every one of these is a placeholder, and there is no icon system yet.**
+   * These are unicode characters in the UI font, so their weight, size and
+   * optical alignment are whatever that font happens to do — not a design. No
+   * doc has decided what the real answer is; `ROADMAP.md` records the question
+   * under the UI rebuild. Nothing here should be read as a judgement about
+   * iconography.
+   *
+   * What *is* deliberate: `docs/ui-review.md`'s complaint about the two bare `↻`
+   * buttons applies to any glyph without an accessible name, so `Sidebar` gives
+   * every one of these a label even when it draws only the icon.
    */
   icon: string
 }
