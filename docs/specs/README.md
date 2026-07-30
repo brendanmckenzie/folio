@@ -52,6 +52,7 @@ wants. Numbered in the same sequence because the dependency graph is the same on
 | # | Spec | Group | Size | Wire | Migration | From |
 | --- | --- | --- | --- | --- | --- | --- |
 | 17 | [Caching and purge](platform/caching.md) | platform | M | — | — | roadmap: uncovered |
+| 18 | [Pagination, everywhere](foundation/pagination.md) | foundation | L | — | `0001_init` | roadmap: next 1 + 1a |
 
 Sizing matches `PARITY.md`: **S** ≈ a day, **M** ≈ a few days, **L** ≈ a week
 or two. Relative weight, not a quote.

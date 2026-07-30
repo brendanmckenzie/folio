@@ -191,6 +191,11 @@ section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
 
+**18 (`foundation/pagination.md`) is the current one and is `draft`.** It carries the
+API-prefix move with it — the admin's internal JSON goes to `{base}/_/` so screens can
+own the bare paths — so it touches every list route and ~265 literal paths in `test/`
+and `scripts/`. Nothing else should reshape a list route until it lands.
+
 Four things from 17 (`platform/caching.md`) are worth knowing before touching
 anything cache-shaped, because all four are wrong in ways that look right:
 
