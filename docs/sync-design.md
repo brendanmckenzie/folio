@@ -73,10 +73,23 @@ always land.
 any frame with an unknown version; persisted logs already outlive deploys, and
 the wire format will too.
 
-**10. A wire change must be additive to a logged mutation, and every entry
-already in a log must replay under its old meaning forever.** Bumping the version
-is how a *peer* finds out it cannot read what this deploy sends. It is never a
-licence to reinterpret what an older deploy wrote.
+**10. ~~A wire change must be additive to a logged mutation, and every entry
+already in a log must replay under its old meaning forever.~~ Retracted,
+2026-07-30.** The project has zero users, no remote and nothing deployed, and the
+owner's standing position is that backwards compatibility is not a constraint
+anywhere in it. There is no old log to be kind to, `scripts/e2e.sh` wipes local
+Durable Object state on every run, and the honest fallback for a log this deploy
+cannot read is to reset it.
+
+So a wire change **may** reinterpret what older frames meant, and may drop them.
+Bumping the version is still how a *peer* finds out it cannot read what this deploy
+sends, which is invariant 9 and stands on its own.
+
+The rest of this section is kept as **history**, because the engineering in it is
+still instructive even though its justification is gone. The two shims it
+describes — a locale-less `set`, and `invert` omitting the key — are now free to
+be removed the next time that code is touched, and `PROTOCOL_VERSION` is free to
+be reset rather than incremented.
 
 The concrete case, and the shape every later one should copy: **a `set` with no
 `locale` is a source-locale write, permanently** (v3, `content-model/

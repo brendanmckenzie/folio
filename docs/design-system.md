@@ -6,7 +6,8 @@
 > **Precedes:** `docs/specs/admin/url-and-shell.md`, then the screen ports
 > **Decided before this:** a router is in scope and everything is linkable;
 > `admin.css` is deleted rather than refactored; the state layer is rebuilt too,
-> with the wire format held byte-identical.
+> wire format included — this project has no users and compatibility is not a
+> constraint (see `CLAUDE.md`, *This is greenfield*).
 
 ## Summary
 
@@ -335,20 +336,31 @@ tokens — the strongest guarantees on offer. Costs a build dependency and a new
 authoring language for a payoff (typo-proof token names) that a two-tier CSS
 variable set plus review gets most of.
 
-### 2. The state layer is rebuilt around the URL; the wire format is frozen
+### 2. The state layer is rebuilt around the URL, and the wire is fair game too
 
 `Editor.tsx` holds twenty-odd `useState`s, several of which are navigational
 (which rail, which locale, which version, which data type, which dialog). Those
 become derived from the URL, which is the whole point of the router.
 
-**The frozen half, stated precisely:** the socket frames, the transaction
-envelope, `PROTOCOL_VERSION`, the `tx_id` dedupe key, the base+pending rebase
-rule, the contiguous watermark and the byte-level inverse serialisation are
-unchanged. `CLAUDE.md` makes this an invariant rather than a preference — the
-mutation log outlives every deploy and a v3 entry must replay under its v3
-meaning forever, which is why `invert` omits a key rather than writing
-`undefined`. The client that produces the frames is rebuilt; the frames are not.
-`docs/sync-design.md` remains the contract and does not change.
+**This paragraph used to freeze the wire format** — socket frames, the transaction
+envelope, `PROTOCOL_VERSION`, the dedupe key, the byte-level inverse
+serialisation — on the grounds that the mutation log outlives every deploy and an
+old entry must replay under its old meaning forever. **That is retracted.** The
+project has zero users, no remote and nothing deployed; there is no old log to be
+kind to, and `scripts/e2e.sh` already wipes local Durable Object state on every
+run. `docs/sync-design.md` invariant 10 is struck through in place and `CLAUDE.md`
+now says so at the top.
+
+What that changes in practice: the frames may be redesigned rather than extended,
+`PROTOCOL_VERSION` may be reset rather than incremented, and the two compatibility
+shims in the mutation vocabulary — a locale-less `set` meaning a source-locale
+write, and `invert` omitting the key so a fresh inverse serialises byte-identically
+to a pre-v3 one — should go when that code is next touched. Neither buys anything.
+
+What does *not* change is the engineering the old rule happened to protect, which
+was good for its own reasons: atomic validated transactions, `tx_id` dedupe,
+base+pending rebase, a contiguous watermark. Keep those because they are correct,
+not because a log somewhere depends on them.
 
 **Rejected: keeping `store.ts` as-is** and layering a router over it. Cheaper and
 safer, and it would leave the store owning selection and locale — the two pieces

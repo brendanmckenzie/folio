@@ -74,24 +74,51 @@ rather than emailing it — there is no mail binding. Seeded accounts live in
 `/dev/last-signin` is a demo-only stand-in for a mailbox and 404s off localhost. It is
 not a Folio route and should not be copied into a real host.
 
+## This is greenfield, and that is a licence
+
+**Zero users. No remote. Nothing deployed.** The owner's standing position, and it
+overrides every instinct toward compatibility you will find in this repo's history:
+
+- **Backwards compatibility is not a constraint.** Not for the wire, not for the
+  schema, not for stored documents or logs. There is no old data to be kind to.
+- **All ten migrations can be rolled into one whenever it is convenient.** They are
+  not a ledger anybody depends on.
+- **A thing existing is not an argument for keeping it.** If a design is wrong,
+  replace it; do not extend it to avoid a rewrite.
+- **Pivots are allowed.** Nothing here is set in stone.
+
+Documents written before this was stated argue at length for additive change and
+byte-identical serialisation — `docs/sync-design.md` invariant 10 is the clearest
+case, and it says so in place. Read those arguments as *history*, not as rules.
+The engineering in them is often still good; the reason given for it is not.
+
+What still applies, for ordinary reasons rather than compatibility ones: a change
+should leave the tree green, and a schema change should be one obvious file rather
+than a scatter.
+
 ## The two ledgers
 
-**D1 migrations** (`packages/folio/migrations/`) are shared by every consuming project.
-`0001`–`0010` exist. A new one is the next number and is normally a plain
-`alter table`. **Do not rebuild `stories`** — `0006` already did, to make `path`
-nullable, and a rebuild has to carry every column and recreate every index or it is
-silent data loss. `test/workers/migrations.test.ts` pins the current shape.
+**D1 migrations** (`packages/folio/migrations/`). `0001`–`0010` exist and are
+sequenced only because they were written in sequence. A new one is normally the next
+number and a plain `alter table`, but rebuilding a table — `stories` included — is
+fair game when the shape is wrong; `0006` already did it once. A rebuild has to
+carry every column and recreate every index, which is a correctness chore, not a
+reason to avoid it. `test/workers/migrations.test.ts` pins the current shape and is
+meant to be updated alongside.
 
 **`PROTOCOL_VERSION`** (`packages/folio/src/core/protocol.ts`) is carried by every
 socket frame and every admin↔preview postMessage frame; a mismatch is refused, not
-guessed at. It is at **4**. Both ends ship in the same deploy, so a version is a guard
-against a stale tab, not a compatibility mechanism — bumping is cheap.
+guessed at. It is at **4**. Both ends ship in the same deploy, so a version is a
+guard against a stale tab, not a compatibility mechanism — bumping is cheap, and so
+is redesigning what the frames contain.
 
-**The thing that is not cheap:** the mutation log outlives every deploy. So every wire
-change must be **additive to a logged mutation**, and an old entry must replay under
-its old meaning *forever*. Live examples: a `set` with no `locale` is a source-locale
-write, permanently; `invert` omits the key rather than writing `undefined` so a fresh
-source inverse serialises byte-identically to a pre-v3 one.
+**The mutation log is not sacred.** It is per-Durable-Object state on a system with
+no users, and `scripts/e2e.sh` wipes it on every run. A wire change may reinterpret
+what older frames meant, and it may drop them: the fallback for an unreadable log is
+to reset local state, which costs nothing today. Two shims exist purely for the old
+rule — a `set` with no `locale` meaning a source-locale write, and `invert` omitting
+the key so a fresh inverse serialises byte-identically to a pre-v3 one — and both
+are free to go the next time that code is touched.
 
 ## Invariants that are easy to break by accident
 
