@@ -163,6 +163,17 @@ export function cacheTags(resolution: Resolution, opts: CacheTagOptions): CacheT
   const collections = collectionTypes(Object.keys(resolution.collections ?? {}))
   for (const type of collections.types) tags.add(typeTag(type))
   if (collections.any) tags.add(ANY_TYPE_TAG)
+  // The *members* as well as the type. `type:` covers membership changing —
+  // something published, unpublished or deleted — but an index page also
+  // renders each item's title and URL, and renaming one of them changes neither
+  // the membership nor `content_index`. A collection's answers never reach
+  // `resolution.stories` (they are built by `server/query.ts`, not by the id
+  // walk), so without this an index page would show a stale URL for a story it
+  // lists until its own TTL ran out. Bounded by `MAX_PER_PAGE`, well inside the
+  // tag budget.
+  for (const answer of Object.values(resolution.collections ?? {})) {
+    for (const item of answer.items) tags.add(storyTag(item.id))
+  }
 
   const all = [...tags].sort()
   // Every tag is ASCII after `encode`, so a character is a byte. `+ 1` per tag

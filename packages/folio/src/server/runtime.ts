@@ -42,6 +42,7 @@ import {
 } from '../core/schema'
 import { ancestorPaths, type StoryMeta, type StoryNode } from '../core/story'
 import { type ResolvedAuth, resolveAuth } from './auth/config'
+import { cachePurgeHooks } from './cache-purge'
 import { type ContentProjection, contentProjection } from './content-index'
 import {
   createHookRunner,
@@ -668,12 +669,20 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    * `../platform/publish-hooks.md` decision 5 built so there would be one
    * after-commit path rather than two conventions.
    *
-   * Its one occupant is the space channel's broadcast: a plain `FolioHooks`
-   * literal, written exactly the way a host writes one, hanging off the same
-   * mechanism. No second path, no ordering of its own, and nothing for a future
-   * internal consumer to copy except this.
+   * Two occupants now, each a plain `FolioHooks` literal written exactly the
+   * way a host writes one: the space channel's broadcast, and the cache purge
+   * (`../platform/caching.md`). No second path, no ordering of its own beyond
+   * this array's, and nothing for a future internal consumer to copy except
+   * these.
+   *
+   * The purge is second on purpose. Both are after-commit and neither depends
+   * on the other, but telling the open editors is the one whose latency a
+   * person is watching, and the purge is the one that awaits a network call.
    */
-  const internalHooks: FolioHooks<Env>[] = [spaceBroadcastHooks<Env>(config, globals)]
+  const internalHooks: FolioHooks<Env>[] = [
+    spaceBroadcastHooks<Env>(config, globals),
+    cachePurgeHooks<Env>(globals),
+  ]
 
   const hookRunner = (hookCtx: HookRunnerCtx): HookRunner<unknown> =>
     createHookRunner<Env>(

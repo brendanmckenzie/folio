@@ -1010,6 +1010,64 @@ describe('createHookRunner', () => {
       expect(calls).toEqual(['internal'])
     })
 
+    /**
+     * Internal hooks are awaited whatever the host's `await` list says
+     * (`../platform/caching.md` decision 5). The cache purge has to land before
+     * the response: the editor's very next act after publishing is to reload
+     * the page, and `waitUntil` would let that reload race it.
+     */
+    it('are awaited even when the host has asked for nothing to be awaited', async () => {
+      const order: string[] = []
+      let release: () => void = () => {}
+      const blocked = new Promise<void>((r) => {
+        release = r
+      })
+      const internal: FolioHooks<Env>[] = [
+        {
+          published: async () => {
+            order.push('internal-start')
+            await blocked
+            order.push('internal-end')
+          },
+        },
+      ]
+      const { ctx, tasks } = fakeCtx()
+      const runner = createHookRunner(undefined, ctx, internal)
+
+      const run = runner.run('published', PUBLISHED_EXTRA)
+      expect(order).toEqual(['internal-start'])
+      release()
+      await run
+
+      expect(order).toEqual(['internal-start', 'internal-end'])
+      // Never handed to waitUntil: that is the whole point.
+      expect(tasks).toHaveLength(0)
+    })
+
+    it('still let a non-awaited host hook ride waitUntil behind them', async () => {
+      const order: string[] = []
+      const internal: FolioHooks<Env>[] = [
+        {
+          published: () => {
+            order.push('internal')
+          },
+        },
+      ]
+      const hooks: FolioHooks<Env> = {
+        published: () => {
+          order.push('host')
+        },
+      }
+      const { ctx, tasks } = fakeCtx()
+      const runner = createHookRunner(hooks, ctx, internal)
+
+      await runner.run('published', PUBLISHED_EXTRA)
+      await Promise.all(tasks)
+
+      expect(order).toEqual(['internal', 'host'])
+      expect(tasks).toHaveLength(1)
+    })
+
     it("an internal hook's failure does not stop the host hook from running", async () => {
       const calls: string[] = []
       const internal: FolioHooks<Env>[] = [
