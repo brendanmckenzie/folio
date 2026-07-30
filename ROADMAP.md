@@ -372,6 +372,46 @@ query.
 Sequenced **before** `docs/specs/admin/url-and-shell.md`, because the URL's list
 parameters (`?q=&sort=&page=`) have no meaning until this decides what a page is.
 
+### 1a. The admin's internal JSON moves off the bare paths
+
+Found by building the shell prototype (`admin/ui/`, 2026-07-30), and the same
+conversation as pagination because both decide what a list route looks like.
+
+`docs/ui-architecture.md` gives the screens `{base}/content`, `{base}/assets`,
+`{base}/documents/:type` and `{base}/redirects`. **All four answer JSON today**,
+so no screen can have its own URL until the API moves. The prototype is mounted at
+`{base}/ui` for exactly that reason, and `server/routes/shell.ts` records the
+argument: the screens win the pretty paths because a screen is what a person links
+to and bookmarks, and `server/app.ts` already declares those routes internal to
+the admin and free to change with it.
+
+Cost: mechanical but wide — roughly 265 literal paths across `test/` and
+`scripts/`. The client is nearly free, because every admin fetch already goes
+through `boot.apiBase` and the rebuilt router is relative to its mount.
+
+Rejected: **content negotiation on one path** (HTML for `Accept: text/html`, JSON
+otherwise) — cheap, and it fails silently the first time something sends the wrong
+header. Rejected: **the screens under a prefix permanently**; `/folio/admin/content`
+spends a URL segment on the fact that the CMS is a CMS.
+
+### 1b. There is no icon system, and the sidebar is using text glyphs
+
+Also found by building the shell. `admin/ui/nav.ts` gives every nav item a
+single unicode character (`⌂ ☰ ▤ ⬚ ◆ ⚿`) rendered in the UI font, so weight, size
+and optical alignment are whatever that font does. It reads as a design and is
+not one.
+
+Nothing has decided the answer, and none of `ui-review.md`,
+`design-system.md` or `ui-architecture.md` names it — which is the gap. The
+decision is at least: an inline SVG set (which set, or drawn?), sized on a token,
+with a fixed stroke weight; and whether icons appear anywhere other than the
+sidebar and the collapsed rail, because the design system's eleven primitives
+currently use none.
+
+Not urgent, and deliberately not on the critical path: the collapsed rail is the
+only place an icon carries meaning alone, and every item there already has a
+`title` and an accessible name.
+
 ### 2. Scheduled publishing
 
 A DO alarm per story. Small, and a real Cloudflare advantage: no cron worker, no
