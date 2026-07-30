@@ -1,51 +1,56 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
+import { Prototype, type PrototypeBoot } from './ui/Prototype'
 
 /**
- * The bundle's entry, and nothing else — the editor itself moved to `App.tsx`,
- * which also owns the `admin.css` import now. This file is the seed of the router
- * `docs/specs/admin/url-and-shell.md` will specify: one place that reads the URL
- * and decides what to mount.
+ * The bundle's entry, and nothing else. Two applications share it while the
+ * rebuild is in flight, and the page decides which one by **which bootstrap it
+ * shipped** rather than by sniffing the URL:
  *
- * `App` is imported statically and the design-system screen dynamically, not the
- * other way round, and the asymmetry is deliberate: the Vite plugin tells the
- * server to link `/folio-admin.css` in production (`src/vite/index.ts`), and that
- * file only exists while `admin.css` is reachable from this entry's static graph.
- * Splitting `App` out renames it to a hashed chunk asset and the editor ships
- * unstyled.
+ * - `__FOLIO_SHELL__` — the rebuilt admin (`server/routes/shell.ts`), whose own
+ *   router owns every path under its mount. This replaces the `?_ui` query flag
+ *   that carried the design-system screen: `{base}/ui/ui` is a route now.
+ * - `__FOLIO_ADMIN__` — the current single-screen editor, untouched, still at
+ *   `{base}/edit/:id`.
  *
- * The cost is that the design-system screen loads `admin.css` too, whose
- * bare-element rules (`button`, `body`) leak into it. Every primitive sets those
- * properties on its own hashed class, which out-specifies an element selector, so
- * the leak is survivable — and it disappears entirely when `admin.css` does.
+ * Both are **static** imports, and that matters: the Vite plugin tells the server
+ * to link `/folio-admin.css` in production (`src/vite/index.ts`), and that file
+ * only exists while `admin.css` is reachable from this entry's static graph. A
+ * dynamic import renames it to a hashed chunk asset and the editor ships unstyled —
+ * a failure only `pnpm build` catches, since dev serves the CSS through the module
+ * graph either way.
+ *
+ * The cost is that the rebuilt shell loads `admin.css` too, whose bare-element
+ * rules (`button`, `body`) leak into it. Every primitive sets those properties on
+ * its own hashed class, which out-specifies an element selector, so the leak is
+ * survivable — and it disappears with `admin.css` in the last phase of the port
+ * plan.
  */
+
+declare global {
+  interface Window {
+    __FOLIO_SHELL__?: PrototypeBoot
+  }
+}
 
 const el = document.getElementById('folio-admin')
 
 if (el) {
-  /**
-   * Scaffolding, deliberately ugly so it is not mistaken for a feature: the
-   * design-system screen has no route of its own until the router lands, so it
-   * rides on a query flag over the editor's URL. Reach it in dev at
-   * `{base}/edit/<any id>?_ui`. Delete this branch when `{base}/ui` exists.
-   */
-  if (new URLSearchParams(window.location.search).has('_ui')) {
-    void import('./ui/Kitchen').then(({ Kitchen }) => {
-      createRoot(el).render(
-        <StrictMode>
-          <Kitchen />
-        </StrictMode>,
-      )
-    })
-  } else {
-    const boot = window.__FOLIO_ADMIN__
-    if (boot) {
-      createRoot(el).render(
-        <StrictMode>
-          <App boot={boot} />
-        </StrictMode>,
-      )
-    }
+  const shell = window.__FOLIO_SHELL__
+  const boot = window.__FOLIO_ADMIN__
+
+  if (shell) {
+    createRoot(el).render(
+      <StrictMode>
+        <Prototype boot={shell} />
+      </StrictMode>,
+    )
+  } else if (boot) {
+    createRoot(el).render(
+      <StrictMode>
+        <App boot={boot} />
+      </StrictMode>,
+    )
   }
 }

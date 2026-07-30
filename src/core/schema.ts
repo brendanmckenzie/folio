@@ -77,6 +77,18 @@ export interface DocumentType {
   /** The type a bare "New page" creates. Implicitly the first `page` type. */
   default?: boolean
   /**
+   * The sidebar heading this type appears under (`../../../docs/ui-architecture.md`
+   * decision 3). Payload's `admin.group` by another name, and schema-as-code like
+   * everything else here: a host organises its own nav in the same file it
+   * declares the type.
+   *
+   * Purely presentational, and only consulted for `record` kinds — pages live in
+   * the tree under Content and singletons are addressed individually. Absent is
+   * the normal case: under about eight record types the sidebar is flat, and a
+   * heading over four items is ceremony.
+   */
+  group?: string
+  /**
    * Where a `singleton` is seen in context, since it has no URL of its own to
    * preview (`../../../docs/specs/content-model/globals.md`): the *path* of a
    * routed document whose preview the admin loads with `&as=<name>` appended,

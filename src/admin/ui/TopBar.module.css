@@ -1,0 +1,125 @@
+/*
+ * 40px, one hairline, and the same on every screen. The height is what makes the
+ * editor's preview a known quantity: `100vh - 40px`, with no per-screen chrome
+ * to measure.
+ */
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: 40px;
+  flex: 0 0 auto;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: var(--text-sm);
+  overflow: hidden;
+}
+
+/*
+ * The trail gives up its *early* segments first, so the last crumb — the thing
+ * you are actually looking at — survives a narrow window. A breadcrumb that keeps
+ * "Content /" and drops "Our team" has kept the wrong half.
+ *
+ * This was `direction: rtl` on the container first, which is a well-known trick
+ * for ellipsising from the left and is wrong here: `rtl` reverses the order of
+ * the *children*, so `Content / About / Our team` rendered as
+ * `/ Our team / About Content`. Shrinking the ancestors and pinning the last
+ * crumb does the same job with no reordering to undo.
+ */
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.crumb:last-child {
+  flex: 0 0 auto;
+}
+
+.sep {
+  color: var(--fg-subtle);
+  padding: 0 var(--space-2);
+  flex: 0 0 auto;
+}
+
+.link {
+  color: var(--fg-muted);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.link:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.here {
+  color: var(--fg);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 24px;
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+  color: var(--fg-subtle);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.search:hover {
+  border-color: var(--border-strong);
+  color: var(--fg-muted);
+}
+
+.search:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.kbd {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 4px;
+}
+
+.anon {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}

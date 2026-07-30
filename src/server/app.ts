@@ -14,6 +14,7 @@ import { editorRoutes } from './routes/editor'
 import { historyRoutes } from './routes/history'
 import { migrationRoutes } from './routes/migrations'
 import { redirectRoutes } from './routes/redirects'
+import { shellRoutes } from './routes/shell'
 import { spaceRoutes } from './routes/space'
 import { storyRoutes } from './routes/stories'
 import type { FolioRuntime } from './runtime'
@@ -77,6 +78,11 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // resolved by the same middleware and each route declares what it needs at its
   // own mount.
   app.route(`/api/${API_VERSION}`, apiRoutes<Env>(rt))
+
+  // Ahead of the resource routes, so its wildcard is never reached for a path one
+  // of them owns — and it only matches under its own prefix anyway, which is the
+  // reason that prefix exists (see routes/shell.ts).
+  app.route('/', shellRoutes<Env>(rt))
 
   app.route('/', storyRoutes<Env>(rt))
   app.route('/', historyRoutes<Env>(rt))

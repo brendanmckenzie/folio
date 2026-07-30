@@ -1,0 +1,212 @@
+/*
+ * The sidebar. Two widths — `--rail-w` labelled, 48px collapsed — and nothing in
+ * between: an animated width is a reflow of the preview iframe on every frame,
+ * which is the one thing in this layout that cannot be cheap. The transition is
+ * on `width` alone and short enough (`--dur-fast`) that the iframe settles once.
+ */
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: var(--rail-w);
+  flex: 0 0 auto;
+  padding: 0 var(--space-2) var(--space-3);
+  border-right: 1px solid var(--border);
+  background: var(--bg-panel);
+  overflow-y: auto;
+  overflow-x: hidden;
+  transition: width var(--dur-fast) var(--ease);
+}
+
+.collapsed {
+  width: 48px;
+  padding-inline: 0;
+  align-items: center;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  height: 40px;
+  padding-inline: var(--space-2);
+  /* Aligns with the top bar's hairline: the two are one horizontal rule across
+     the window, not two lines a pixel apart. */
+  border-bottom: 1px solid var(--border);
+  margin: 0 calc(var(--space-2) * -1) var(--space-1);
+  flex: 0 0 auto;
+}
+
+.collapsed .brand {
+  justify-content: center;
+  margin-inline: 0;
+  padding-inline: 0;
+  /* The parent is `align-items: center` while collapsed, which shrank this to its
+     one button — leaving the hairline 22px wide and the sidebar's top border not
+     meeting the top bar's. The rule they form together is one line across the
+     window or it is a smudge. */
+  align-self: stretch;
+}
+
+.wordmark {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+
+.toggle {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-subtle);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.toggle:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  margin: var(--space-2) 0 var(--space-1);
+  padding: 0 var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--fg-subtle);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  cursor: pointer;
+}
+
+h2.heading {
+  cursor: default;
+}
+
+.heading:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+
+.chevron {
+  display: inline-block;
+  width: 10px;
+  transition: transform var(--dur-fast) var(--ease);
+}
+
+.chevron[data-open] {
+  transform: rotate(90deg);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-md);
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.item:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
+}
+
+/*
+ * The active item is a background, not a left border or a colour: `--bg-selected`
+ * is the same signal a selected row carries, and `design-system.md`'s first
+ * commitment reserves hue for state. A blue nav item would say "this section is
+ * accented" when it means "you are here".
+ */
+.on {
+  background: var(--bg-selected);
+  color: var(--fg);
+  font-weight: 500;
+}
+
+.icon {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  flex: 0 0 auto;
+  font-size: var(--text-sm);
+  color: var(--fg-subtle);
+}
+
+.on .icon {
+  color: var(--fg-accent);
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.collapsed .item {
+  justify-content: center;
+  width: 32px;
+  padding: 0;
+}
+
+/*
+ * Kept in the accessibility tree while invisible, rather than removed from the
+ * DOM. A 48px rail of glyphs with no names is exactly the defect
+ * `docs/ui-review.md` found in the two bare `↻` buttons; the `title` handles a
+ * mouse and this handles everything else.
+ */
+.hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .chevron {
+    /* biome-ignore lint/complexity/noImportantStyles: the guard has to beat the
+       two transition declarations above it, and stating it once here is the
+       pattern tokens.css already uses. */
+    transition: none !important;
+  }
+}
