@@ -18,14 +18,53 @@ in and the one the current three-pane layout serves worst.
 
 Two things drive nearly every decision below.
 
-**The admin is a work queue, not a report.** Folio has no analytics and should not
-pretend to. Every screen either shows work that needs doing or shows a thing being
-edited. That is what kills the usual CMS dashboard and what makes the home screen
-worth having.
+**The admin is for working, not for reporting.** Folio has no analytics binding and
+should not pretend to have one. Every screen either gets you to a thing or shows a
+thing being edited — which is what kills the metrics-and-charts dashboard, and
+what the survey below confirms every comparable product concluded too.
 
 **The rendered page is the hero** (`design-system.md`, commitment 2). In the
 editor, chrome recedes to hairlines and can be collapsed to nothing. Every other
 screen may be as dense as it likes, because the subject there *is* the list.
+
+## What comparable products actually do
+
+Checked 2026-07-30, because two decisions below were being made from first
+principles when there was evidence available. Both changed as a result.
+
+**Home screens.** Every one of them converges on the same three things — recency,
+counts, and quick access — and **not one leads with a work queue.**
+
+| Product | What its home shows by default |
+| --- | --- |
+| [Storyblok](https://www.storyblok.com/docs/editor-guides/dashboard) | Entity counts against plan limits; an Activity panel with team/content changes, *my last edits*, assigned-to-me and mentions; traffic and AI-credit consumption; a two-week content-activity timeline |
+| [Strapi 5](https://docs.strapi.io/cms/admin-panel-customization/homepage) | Six widgets: *last edited entries*, *last published entries*, profile, draft/published counts, project statistics, deploy button |
+| [Payload](https://payloadcms.com/docs/custom-components/dashboard) | Cards for every collection and global, and that is the only built-in widget |
+| [Sanity](https://www.sanity.io/docs/studio/dashboard) | Dashboard is an opt-in plugin; its primary widget is a document list, typically ordered by `_updatedAt` — recently edited, or newest |
+| [WordPress](https://wordpress.org/documentation/article/dashboard-screen/) | At a Glance (counts, each a link), Activity (scheduled, recently published, recent comments), Quick Draft, news |
+| [Contentful](https://www.contentful.com/developers/docs/extensibility/app-framework/locations/) | The Home tab is an app *location* — largely something you replace rather than a rich default |
+
+Two absences are as informative as the pattern. **Nobody surfaces "everything with
+unpublished changes" on the home screen**, and the closest analogues — Storyblok's
+assigned-to-me and mentions — are workflow features, which is a thing Folio does
+not have. And **nobody shows recently uploaded media** either, which makes it a
+cheap point of difference rather than an omission to copy.
+
+**Bulk actions from a content list.** Table stakes, and more generous than I had
+assumed:
+
+| Product | Bulk actions offered |
+| --- | --- |
+| [Contentful](https://www.contentful.com/help/content-and-entries/managing-multiple-entries/) | Publish, Unpublish, Delete, Archive, Duplicate, Add to release, Add/remove tags, Export CSV. Header checkbox selects the page; the API batches up to 200 as one asynchronous job |
+| [Storyblok](https://www.storyblok.com/docs/manuals/stories) | **Move** — select stories, choose Move, open the destination folder, confirm — plus Tag and Settings |
+| [Strapi 5](https://docs.strapi.io/user-docs/content-manager/saving-and-publishing-content) | Publish, Unpublish, Delete. Locale-scoped when i18n is on |
+| [Payload](https://payloadcms.com/posts/blog/launch-week-day-3-bulk-operations) | Edit (choosing which fields to set), Delete, Publish, Unpublish — with **select-all-matching-the-current-filter**, one request, and a count of how many succeeded and how many failed |
+| [WordPress](https://wordpress.org/documentation/article/dashboard-screen/) | Edit (a panel setting status, author, categories, tags) and Move to Trash |
+
+The finding that matters: **bulk move is an ordinary feature**, and Storyblok's flow
+is exactly the one I had called out as needing its own thinking. It does not. Its
+UI is "choose a destination, confirm"; fractional indices and cycle checks are our
+implementation's problem and have no business shaping what the screen offers.
 
 ## The shell
 
@@ -74,6 +113,19 @@ category. The manifest already carries every declared type with its label
 (`core/schema.ts`'s `DocumentType`), so the nav is generated. Page types stay under
 Content, because they live in the tree.
 
+**Past about eight types the list groups rather than scrolls.** A flat list of
+twenty is a wall, and the answer both Payload and Strapi reached is grouping:
+Payload takes an optional `admin.group` per collection, Strapi separates collection
+types from single types. Folio's version is schema-as-code like everything else — an
+optional `group?: string` on `DocumentType`, so a host organises its own nav in the
+same file it declares the type. With no groups declared and more than eight types,
+they fall under one collapsible **Documents** heading whose state is remembered.
+Under eight, flat, because a heading over four items is ceremony.
+
+Grouping rather than hiding, deliberately: a type that is not on screen has to be
+*findable*, and the palette is the fast path, not a substitute for knowing the site
+has an Offices type at all.
+
 **Globals get their own group and link straight to the document.** There is exactly
 one of each by construction — a singleton's id is derived from its type name — so
 a list would be a list of one. `FolioConfig.globals` names them, so the nav can
@@ -109,28 +161,46 @@ per-screen actions belong to the screen.
 
 ### Home
 
-The screen the review found missing, and the one most likely to be filled with
-rubbish. It is a work queue. Four blocks, each of which answers a question an
-editor actually asks:
+**Recency and quick access, which is what every comparable product's home screen
+actually is.** An earlier draft of this document made it a work queue led by
+"everything with unpublished changes"; the survey above found that nobody does
+that, and it was a wrong answer arrived at confidently. Five blocks:
 
-- **Unpublished changes** — every document whose draft differs from what is
-  published, with who touched it last and when. This exists nowhere today. The
-  data is already there: `unpublished-changes.md`'s watermark pair
-  (`draft_sync_id` / `published_sync_id`) is what the tree's `changed` badge is
-  computed from, so a site-wide list is the same comparison without the per-story
-  filter. This is the single most useful thing the admin could show and it is
-  nearly free.
-- **Continue editing** — recently touched documents, from `draftUpdatedAt`
-  (`core/story.ts:43`).
-- **Needs attention** — pending migrations, audit findings, incomplete
-  translations. One row each, linking to `Model` or the document. Absent entirely
-  when there is nothing wrong, rather than showing a green tick.
-- **Who's here** — the space channel's presence, with follow-mode on click.
-  Absent when nobody else is.
+- **Quick access** — one card per document type, plus globals and assets, each with
+  a count and a create action. This is Payload's entire default dashboard and
+  WordPress's At a Glance, and it does double duty: it is the fastest route to
+  anything, and it is how somebody new learns what the site contains. The manifest
+  already carries every type and its label, so it is generated rather than
+  configured.
+- **Latest changes** — recently edited documents across every type, with who and
+  when. Storyblok's *my last edits*, Strapi's *last edited entries*, Sanity's
+  document list ordered by `_updatedAt`. Reads `draftUpdatedAt`
+  (`core/story.ts:43`), which exists.
+- **Latest published** — recent publishes, with who and when. Strapi's *last
+  published entries*, WordPress's Activity panel. Cheap and exact: the `versions`
+  table already holds one row per publish with its actor and timestamp, so this is
+  a site-wide query over data written for another purpose.
+- **Latest media** — the newest uploads as thumbnails. The one block nobody else
+  has by default, and nearly free: `listAssets` is already ordered by `created_at`
+  descending. A CMS that treats assets as a first-class place should show them.
+- **Needs attention** — pending migrations and audit findings, one row each,
+  linking to `Model` or to the document. **Absent entirely when there is nothing
+  wrong** — no green tick, no "all clear" panel.
 
-Rejected: a "welcome to Folio" panel, publish-count charts, a getting-started
-checklist. Folio has no analytics binding and a dashboard that reports on itself
-is furniture.
+**Unpublished changes are not gone, they moved to where you would act on them:** a
+`state: changed` filter chip on Content. That is the KISS version — the capability
+survives, the dedicated block does not, and filtering a list is how the rest of the
+world does it.
+
+Rejected, with reasons rather than taste. **Charts, traffic and consumption
+metrics** (Storyblok): Folio has no analytics binding and inventing one to fill a
+panel is the definition of furniture. **Assigned to me, mentions, workflow states**
+(Storyblok): there is no workflow or assignment model in Folio, and this is the one
+thing that would make a dashboard genuinely sticky if one ever appears — worth
+remembering as the reason to revisit. **Profile and project-statistics widgets**
+(Strapi): who you are belongs in the user menu, and a statistics panel about the
+tool is not work. **A welcome panel or getting-started checklist**: this is a tool
+for the person who built the site.
 
 ### Content
 
@@ -147,10 +217,9 @@ and the type chip can be a column rather than a repeated word on every row.
   ancestry.
 - **Filters** as chips: state, type, locale completeness. Plus the screen's own
   search, which is the palette scoped to pages.
-- **Selection and bulk actions**: publish, unpublish, delete across a selection.
-  New capability, and worth stating what it is *not* — this is N sequential
-  publishes, not an atomic release. "Publish these nine together" is
-  `unpublished-changes.md`'s parallel-drafts machinery and stays out of scope.
+- **Selection and bulk actions**: **Publish · Unpublish · Duplicate · Move ·
+  Delete.** See decision 7 — the set is what the survey found to be table stakes,
+  including Move, which Storyblok treats as ordinary and I had wrongly called hard.
 - **Keyboard**: `↑ ↓` traverse, `→ ←` expand and collapse, `⏎` open, `⌥↑ ⌥↓`
   reorder among siblings, `⌥← ⌥→` change depth. The last two are the answer
   `ROADMAP.md:412-419` asks for: one place at a time, so "between these two
@@ -355,6 +424,12 @@ their orientation.
 category name for "documents that are not pages", and an editor looking for the
 people list is looking for `People`.
 
+Past eight they group, via an optional `group?: string` on `DocumentType` —
+Payload's `admin.group` by another name, and consistent with every other thing in
+this product being declared in code. **Rejected: hiding the overflow behind "more"**,
+which makes the existence of a type undiscoverable and leaves the palette as the
+only route to it.
+
 ### 4. History is a slide-over; the block tree owns the rail
 
 **Rejected: a segmented control in the inspector** (Fields / History). It is tabs
@@ -373,7 +448,43 @@ every screen where prose is not being edited.
 four representations of a block in step. A settings form would be a second source
 of truth for the one thing that must have exactly one.
 
-### 7. Every list is server-paged, and the UI stops promising page numbers
+### 7. Bulk actions are Publish, Unpublish, Duplicate, Move and Delete
+
+Five, and the set comes from what the survey found rather than from what is easy.
+Publish, Unpublish and Delete are in every product checked. Duplicate is
+Contentful's, and Folio already has single-document duplicate
+(`duplicate-and-paste.md`), so the bulk case is the same call in a loop. Move is
+Storyblok's, and it is the one I had this wrong about.
+
+**Move was previously deferred here on the grounds that it is "a tree operation
+with fractional indices and cycle checks".** That is an implementation concern
+dressed up as a product decision. What a user needs is to pick a destination and
+confirm; the existing `PATCH /stories/:id { parentId, index }` and
+`StoryTree`'s `dropRefusal` already encode every rule that applies, so the bulk
+version is per-item calls with refusals reported rather than a new mechanism.
+
+Two mechanics adopted from Payload because they are what make bulk useful rather
+than decorative:
+
+- **Select-all-matching-the-filter**, not just select-all-on-this-page. With
+  server-side paging, "select the 340 pages matching this filter" must not require
+  loading 340 rows — so a selection is a *filter plus exclusions*, not a list of ids.
+- **Report successes and failures with counts**, and name the failures. Nothing here
+  is atomic and the UI should not imply it is: N sequential writes, each of which can
+  be individually refused by role or by a tree rule. Contentful's API offers an
+  all-or-nothing batch; Folio has no equivalent and pretending otherwise would be
+  the lie.
+
+**Rejected: bulk field editing** (Payload's Edit, WordPress's Bulk Edit panel).
+Genuinely powerful, and the machinery exists — a field set across N documents is
+what `schema-migrations.md`'s runner already does. Out of the first pass because it
+is a second editing surface with its own validation and preview problems, not
+because it is hard. Named so it is a decision.
+
+**Rejected: archive, tags, releases, CSV export.** Folio has none of the underlying
+concepts, and `docs/feedback.md` already parks archive and releases with reasons.
+
+### 8. Every list is server-paged, and the UI stops promising page numbers
 
 Consequence of the rule in `ROADMAP.md`, *Next → 1*, and the reason it is sequenced
 before the ports: a screen built on an unpaged fetch gets built twice. Page numbers
@@ -393,10 +504,18 @@ work:
    does the work server-side.
 4. **Asset usage counts** — for the Assets detail panel and a safe delete. Wants
    asset keys in `content_refs`.
-5. **A site-wide unpublished-changes query** — for the home screen. The watermark
-   comparison already exists per story.
+5. **Two site-wide recency queries** — most recently edited documents
+   (`draftUpdatedAt`) and most recent publishes (`versions` rows of kind `publish`,
+   which already carry actor and timestamp). Both for Home, both over data written
+   for other reasons.
 6. **The audit route rendered** — `GET /folio/audit` answers today and nothing draws
    it.
+7. **Bulk write endpoints**, and a selection expressed as *filter plus exclusions*
+   rather than a list of ids — otherwise select-all-matching has to load every row it
+   claims to have selected, which is the thing pagination exists to stop.
+
+A note on ordering: 1 and 7 are the same conversation. Whatever shape the pagination
+spec gives a filtered query is the shape a bulk selection has to be expressed in.
 
 ## The port plan
 
@@ -423,17 +542,26 @@ Acceptance for every phase: the screen is reachable by URL, linkable in the stat
 it is in, fully keyboard-operable, correct in both themes, and paged if it is a
 list.
 
+## Resolved
+
+The three questions this document opened with, answered 2026-07-30. Two of them by
+going and looking at what other products do, which is recorded above.
+
+1. **The sidebar groups past about eight types**, via an optional `group?: string`
+   on `DocumentType`. Grouped, not hidden — see decision 3.
+2. **Home is recency and quick access**, not a work queue led by unpublished
+   changes. The survey found nobody does the latter, and the block I had been
+   most confident about became a filter chip on Content instead.
+3. **Bulk actions are Publish, Unpublish, Duplicate, Move and Delete** — decision 7.
+   Move is in, and the reasoning that had excluded it was our implementation's
+   problem rather than the user's.
+
 ## Open questions
 
-1. **Does the sidebar list every document type, or does it collapse past a
-   threshold?** Fine at the demo's four. A site with twenty record types wants a
-   grouped or scrolling section, and the honest answer is probably "list them until
-   there are more than about eight, then group".
-2. **Does Home earn its place?** It is the screen most likely to be built and then
-   bypassed in favour of `⌘K`. My view is that the unpublished-changes list alone
-   justifies it, since nothing else in the product answers "what is sitting
-   unpublished across this site" — but it is the one screen I would cut if the
-   answer is no.
-3. **Bulk actions on Content: how far?** Publish, unpublish and delete are
-   straightforward as N sequential writes. Bulk *move* is a tree operation with
-   fractional indices and cycle checks, and probably wants its own thinking.
+1. **Does `group` on `DocumentType` want to also order the sidebar?** A declared
+   group implies an order, and alphabetical-within-group is a guess. Probably wants
+   declaration order, like the palette's groups.
+2. **How does a selection survive a filter change?** A selection is a filter plus
+   exclusions (decision 7), so changing the filter changes what is selected. Every
+   product checked is silent on this and it is the sharp edge of select-all-matching.
+   Leaning: changing a filter clears the selection, loudly.
