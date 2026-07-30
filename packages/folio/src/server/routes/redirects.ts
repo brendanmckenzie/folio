@@ -5,9 +5,9 @@
  * stay distinct.
  */
 import { Hono } from 'hono'
-import { MANAGE, READ } from '../auth/roles'
+import { actorString, MANAGE, READ } from '../auth/roles'
 import { FolioError } from '../errors'
-import { requireAccess } from '../middleware'
+import { hookCtx, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import {
   deleteRedirect,
@@ -84,13 +84,30 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       to: body.to,
       status: body.status,
     })
+    // A path that used to answer the host's own 404 now answers a redirect
+    // (`../../../docs/specs/platform/caching.md`). Folio's own purge hook has
+    // nothing to do with this — its tags describe rendered pages, not paths —
+    // but a host that caches its 404s has to hear about it, and this is the
+    // only moment that knows which path changed meaning.
+    await rt
+      .hookRunner(hookCtx(c))
+      .run('redirectsChanged', { from: [from], actor: actorString(c.var.actor) })
     return c.json(redirect, 201)
   })
 
   // `{.+}` so a multi-segment path (`services/strategy`) arrives whole rather
   // than being cut at the first slash, the way a bare `:from` would.
   app.delete('/redirects/:from{.+}', requireAccess<Env>(rt, MANAGE), async (c) => {
-    const removed = await deleteRedirect(c.var.bindings().db, c.req.param('from'))
+    const from = c.req.param('from')
+    const removed = await deleteRedirect(c.var.bindings().db, from)
+    // Only when a row actually went: deleting a redirect that was never there
+    // changes nothing, and an event for it would be a purge for nothing.
+    if (removed) {
+      await rt.hookRunner(hookCtx(c)).run('redirectsChanged', {
+        from: [normalisePath(from)],
+        actor: actorString(c.var.actor),
+      })
+    }
     return c.json({ deleted: removed })
   })
 

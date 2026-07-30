@@ -1,7 +1,8 @@
-import type { MiddlewareHandler } from 'hono'
+import type { Context, MiddlewareHandler } from 'hono'
 import { credentialOf, originAllowed, resolveActor } from './auth/resolve'
 import { type Access, type Actor, allows, refusalOf } from './auth/roles'
 import { FolioError } from './errors'
+import type { HookRunnerCtx } from './hooks'
 import type { FolioRuntime } from './runtime'
 import { storyById } from './stories'
 import type { FolioBindings, FolioConfig, FolioEnv } from './types'
@@ -173,4 +174,21 @@ export function loadStory<Env>(): MiddlewareHandler<FolioEnv<Env>> {
     c.set('story', story)
     await next()
   }
+}
+
+/**
+ * `c.env` and a `waitUntil` built from `c.executionCtx` — the two halves of a
+ * `HookRunnerCtx` (`../../../docs/specs/platform/publish-hooks.md` decision 3),
+ * for every route that fires a lifecycle hook.
+ *
+ * One copy, here. It used to be two identical private helpers in
+ * `routes/stories.ts` and `routes/api/documents.ts` plus a third spelled out
+ * inline in `routes/history.ts`; `../platform/caching.md` added two more
+ * hook-firing routes, at which point five copies of the same three lines was
+ * the wrong shape. Not in `hooks.ts`, which deliberately knows nothing about
+ * Hono or a Request — the whole reason a Durable Object alarm can fire the same
+ * hooks (`alarmHookCtx`, runtime.ts).
+ */
+export function hookCtx<Env>(c: Context<FolioEnv<Env>>): HookRunnerCtx {
+  return { env: c.env, waitUntil: (p) => c.executionCtx.waitUntil(p) }
 }

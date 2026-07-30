@@ -11,9 +11,9 @@
 import { Hono } from 'hono'
 import type { ContentQuery, ContentWhere, TextOp } from '../../core/query'
 import { isRangeOp, isTextOp, MAX_PER_PAGE, WHERE_OPS } from '../../core/query'
-import { ADMIN, READ } from '../auth/roles'
+import { actorString, ADMIN, READ } from '../auth/roles'
 import { FolioError } from '../errors'
-import { requireAccess } from '../middleware'
+import { hookCtx, requireAccess } from '../middleware'
 import { reindex } from '../reindex'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
@@ -167,8 +167,11 @@ export function contentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           schema: rt.schema,
           typeOf: rt.typeOf,
           locales: rt.locales,
+          hooks: rt.hookRunner(hookCtx(c)),
         },
-        body,
+        // `actor` off the session, never the body, exactly as `POST /migrate`
+        // takes it: the `reindexed` hook records who asked.
+        { ...body, actor: actorString(c.var.actor) },
       ),
     )
   })

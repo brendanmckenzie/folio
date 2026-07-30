@@ -10,7 +10,7 @@ import { runMigrations } from './migrate'
 import { previewPage } from './pages'
 import { lookupRedirect } from './redirects'
 import { reindex } from './reindex'
-import { createRuntime } from './runtime'
+import { alarmHookCtx, createRuntime } from './runtime'
 import {
   listStories,
   publishedDoc,
@@ -97,9 +97,14 @@ export type {
   DeletedHookPayload,
   FolioHooks,
   HookEvent,
+  MigratedHookPayload,
   PathsChangedHookPayload,
   PublishedHookPayload,
+  RedirectsChangedHookPayload,
+  ReindexedHookPayload,
+  StoryChange,
   UnpublishedHookPayload,
+  UpdatedHookPayload,
 } from './hooks'
 export { FolioError } from './errors'
 export type { ErrorEnvelope, FolioErrorCode } from './errors'
@@ -278,6 +283,14 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     registry: rt.registry,
     resolve: (env, doc, opts) => rt.resolve(config.bindings(env), doc, opts),
     query: (env, q) => rt.query(config.bindings(env), q),
+    /**
+     * `alarmHookCtx(env)` for the hook context, here and in `migrate` below.
+     * Neither method takes an `ExecutionContext` — a deploy script has none to
+     * offer — and that is exactly the case the alarm fallback was built for
+     * (`publish-hooks.md` decision 3): the runner cannot tell which kind of
+     * `waitUntil` it was handed, and Folio's own internal hooks are awaited
+     * either way, so a purge lands before this call returns.
+     */
     reindex: (env, opts) =>
       reindex(
         {
@@ -285,6 +298,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
           schema: rt.schema,
           typeOf: rt.typeOf,
           locales: rt.locales,
+          hooks: rt.hookRunner(alarmHookCtx(env)),
         },
         opts,
       ),
@@ -314,6 +328,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
           typeOf: rt.typeOf,
           draft: (story) => rt.draftFor(bindings, story),
           stub: (id) => rt.stub(bindings, id),
+          hooks: rt.hookRunner(alarmHookCtx(env)),
         },
         opts,
       )

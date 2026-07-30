@@ -23,7 +23,18 @@ export type HookEvent =
   | 'created'
   | 'deleted'
   | 'checkpointed'
+  | 'updated'
+  | 'migrated'
+  | 'reindexed'
+  | 'redirectsChanged'
 
+/**
+ * The same list at runtime, for `validateHooks`. A name must appear in both or
+ * it is either a hook nobody can configure (missing from the type) or one
+ * `createFolio` refuses at construction (missing from here) — pinned by
+ * `every event in the type is a key validateHooks accepts` in
+ * `test/unit/server/pure.test.ts`.
+ */
 const HOOK_EVENTS: readonly HookEvent[] = [
   'published',
   'unpublished',
@@ -31,6 +42,10 @@ const HOOK_EVENTS: readonly HookEvent[] = [
   'created',
   'deleted',
   'checkpointed',
+  'updated',
+  'migrated',
+  'reindexed',
+  'redirectsChanged',
 ]
 
 /** Every hook payload's common shape. Nothing else is injected: a hook that
@@ -66,11 +81,64 @@ export interface DeletedHookPayload<Env> extends HookBase<Env> {
   /** `ids`' own paths, same order. `null` for an unrouted document
    * (`document-types.md`), which never had a URL for a cache to hold. */
   paths: (string | null)[]
+  /**
+   * `ids`' own document types, same order. Here for the same reason `paths` is:
+   * the rows are gone by the time anything could look them up again, and a
+   * deleted document leaves every collection over its type
+   * (`../platform/caching.md`) — so a consumer that has to invalidate an index
+   * page needs the type and has no second chance to read it.
+   */
+  types: string[]
 }
 
 export interface CheckpointedHookPayload<Env> extends HookBase<Env> {
   story: StoryMeta
   version: VersionMeta
+}
+
+/**
+ * A field of the story *row* — its title and its place in the tree — that a
+ * patch actually changed. Not content: a page's own title lives on its root
+ * block and travels through the mutation log.
+ */
+export type StoryChange = 'title' | 'slug' | 'parent' | 'ord'
+
+export interface UpdatedHookPayload<Env> extends HookBase<Env> {
+  story: StoryMeta
+  /**
+   * What the patch changed, at least one entry — `updated` does not fire for a
+   * patch that changed nothing.
+   *
+   * The event exists because of the gap `caching.md`'s ground truth found:
+   * `pathsChanged` is gated on a path actually moving, so a **title-only**
+   * patch writes `stories.title`, alters `StoryRef.title` on every page that
+   * links to this one, and fires nothing at all. `slug`/`parent` usually come
+   * with a `pathsChanged` as well; on an unrouted document (no path to move)
+   * they arrive here alone.
+   */
+  changed: StoryChange[]
+}
+
+export interface MigratedHookPayload<Env> extends HookBase<Env> {
+  /**
+   * The documents whose **published snapshot** this batch rewrote — not every
+   * document it touched. A draft-only migration changes no bytes a reader can
+   * see. `runMigrations` is batched and resumable, so this fires once per call
+   * with that call's ids, not once for the whole run.
+   */
+  ids: string[]
+  /** The migration ids the run is applying, in run order. */
+  migrations: string[]
+}
+
+export interface ReindexedHookPayload<Env> extends HookBase<Env> {
+  /** Documents reindexed in this batch. */
+  count: number
+}
+
+export interface RedirectsChangedHookPayload<Env> extends HookBase<Env> {
+  /** The source paths added or removed, normalised (no leading slash). */
+  from: string[]
 }
 
 /** Every event's full payload, keyed by name — what `FolioHooks` hands a
@@ -82,6 +150,10 @@ export interface HookPayloadMap<Env> {
   created: CreatedHookPayload<Env>
   deleted: DeletedHookPayload<Env>
   checkpointed: CheckpointedHookPayload<Env>
+  updated: UpdatedHookPayload<Env>
+  migrated: MigratedHookPayload<Env>
+  reindexed: ReindexedHookPayload<Env>
+  redirectsChanged: RedirectsChangedHookPayload<Env>
 }
 
 /**
@@ -97,6 +169,20 @@ export interface FolioHooks<Env> {
   created?: (e: CreatedHookPayload<Env>) => unknown
   deleted?: (e: DeletedHookPayload<Env>) => unknown
   checkpointed?: (e: CheckpointedHookPayload<Env>) => unknown
+  /**
+   * The four events `../platform/caching.md` added, for write paths that change
+   * published bytes and used to fire nothing at all. Each one is a way a cached
+   * page can go stale without any other event noticing:
+   *
+   * - `updated` — a title-only patch, which `pathsChanged` skips by design
+   * - `migrated` — `runMigrations` rewrites `published_doc` per story
+   * - `reindexed` — `POST {base}/reindex` changes what every collection answers
+   * - `redirectsChanged` — a manual redirect added or removed
+   */
+  updated?: (e: UpdatedHookPayload<Env>) => unknown
+  migrated?: (e: MigratedHookPayload<Env>) => unknown
+  reindexed?: (e: ReindexedHookPayload<Env>) => unknown
+  redirectsChanged?: (e: RedirectsChangedHookPayload<Env>) => unknown
   /** Events to await before responding. Everything else rides `waitUntil`. */
   await?: readonly HookEvent[]
 }
