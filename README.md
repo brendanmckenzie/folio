@@ -1388,16 +1388,23 @@ holding a cookie the server will not accept.
 
 **Roles are global**, on the user row, and each route declares its own minimum:
 
-| | read drafts | edit | publish / checkpoint | create / delete / move | manage access |
-| --- | --- | --- | --- | --- | --- |
-| `viewer` | yes | no | no | no | no |
-| `editor` | yes | yes | no | no | no |
-| `publisher` | yes | yes | yes | yes | no |
-| `admin` | yes | yes | yes | yes | yes |
+| | read drafts | edit | create | publish / checkpoint | delete / move | manage access |
+| --- | --- | --- | --- | --- | --- | --- |
+| `viewer` | yes | no | no | no | no | no |
+| `editor` | yes | yes | yes | no | no | no |
+| `publisher` | yes | yes | yes | yes | yes | no |
+| `admin` | yes | yes | yes | yes | yes | yes |
 
-Create, delete, move and rename are `publisher` rather than `editor` because all
-four change what URLs the site serves, which is a publishing act even when
+Delete, move and rename are `publisher` rather than `editor` because each changes
+or withdraws a URL the site already serves, which is a publishing act even when
 nothing is published in the same breath.
+
+**Creating is not**, and sits at `editor`. A new document is an unpublished draft
+at a path nothing links to yet, so starting one serves nothing and breaks nothing —
+and "may write a page but not start one" is a strange line to hold. Duplicating
+follows creating for the same reason. The token scopes are unchanged either way:
+both are `content:write`, so this is a distinction between *people*, not between
+scripts.
 
 A `viewer` **does** get the sync socket, read-only: watching live changes is the
 point of read access, and the object answers their `tx` frames with the ordinary

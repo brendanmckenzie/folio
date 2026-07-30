@@ -24,7 +24,16 @@ import type { Mutation } from '../../../core/mutations'
 import { fieldShapeError, fromNested, type NestedDoc, toNested } from '../../../core/nested'
 import { type DocumentType, SINGLETON_PREFIX, typeByName } from '../../../core/schema'
 import type { StoryMeta, StoryState } from '../../../core/story'
-import { actorName, actorString, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from '../../auth/roles'
+import {
+  actorName,
+  actorString,
+  CREATE,
+  EDIT,
+  MANAGE,
+  PUBLISH,
+  READ,
+  READ_DRAFT,
+} from '../../auth/roles'
 import { FolioError, rethrow } from '../../errors'
 import type { HookRunnerCtx } from '../../hooks'
 import { ensureAccess, requireAccess } from '../../middleware'
@@ -281,7 +290,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * nothing at all, and a created document's content arrives with it rather than
    * as a follow-up transaction there is nobody yet to broadcast to.
    */
-  app.post('/documents', requireAccess<Env>(rt, MANAGE), async (c) => {
+  app.post('/documents', requireAccess<Env>(rt, CREATE), async (c) => {
     const body = await parseBody(c.req, DocumentCreateBody)
     const bindings = c.var.bindings()
     const type = requireType(body.type)

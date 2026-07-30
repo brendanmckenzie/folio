@@ -151,10 +151,25 @@ export const READ_DRAFT: Access = { role: 'viewer', scope: 'content:read:draft' 
 export const EDIT: Access = { role: 'editor', scope: 'content:write' }
 
 /**
- * Creating, deleting, moving or renaming a document, and adding a manual
- * redirect. `publisher`, not `editor`, per the role table: all four change what
- * URLs the site serves, which is a publishing act even when nothing is
- * published in the same breath.
+ * Creating a document, including by duplicating one.
+ *
+ * `editor`, deliberately lower than `MANAGE`. The owner overrode the spec's role
+ * table here: a new document is an unpublished draft at a path nothing links to
+ * yet, so creating one serves nothing and breaks nothing, and "an editor may
+ * write a page but not start one" is a strange line to hold. Moving, renaming and
+ * deleting stay at `MANAGE` because those act on a URL that may already be live.
+ *
+ * The token scope is unchanged (`content:write`), so this widens the session path
+ * only — a token that could create before still can, and one that could not still
+ * cannot.
+ */
+export const CREATE: Access = { role: 'editor', scope: 'content:write' }
+
+/**
+ * Deleting, moving or renaming a document, and adding a manual redirect.
+ * `publisher`, not `editor`, per the role table: each changes or withdraws a URL
+ * the site already serves, which is a publishing act even when nothing is
+ * published in the same breath. Creating is `CREATE` — see there for why it split.
  */
 export const MANAGE: Access = { role: 'publisher', scope: 'content:write' }
 

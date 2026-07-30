@@ -37,7 +37,7 @@ import { useStories } from './hooks/useStories'
 import { useUndoShortcut } from './hooks/useUndoShortcut'
 import { useVersions, useVersionsList } from './hooks/useVersions'
 import { Inspector } from './Inspector'
-import { canEdit, canManageAccess, canManageContent, type Me, whyNot } from './me'
+import { canCreateContent, canEdit, canManageAccess, canManageContent, type Me, whyNot } from './me'
 import { MigrationBanner, Migrations } from './Migrations'
 import { PageAddress } from './PageAddress'
 import { PublishDialog } from './PublishDialog'
@@ -349,6 +349,7 @@ export function Editor({
   // free (`identity-and-access.md` phase 4, step 4).
   const mayEdit = canEdit(me)
   const mayManage = canManageContent(me)
+  const mayCreate = canCreateContent(me)
   const readOnly = versions.source.mode === 'viewing' || !mayEdit
 
   /**
@@ -359,6 +360,9 @@ export function Editor({
    */
   const refuseManage = useCallback(() => {
     notify(whyNot(me, 'manage') ?? 'Your role may not do that')
+  }, [me, notify])
+  const refuseCreate = useCallback(() => {
+    notify(whyNot(me, 'create') ?? 'Your role may not do that')
   }, [me, notify])
   // While previewing, the tree and the inspector both show the version's document.
   const shownDoc = viewing?.doc ?? state.doc
@@ -656,15 +660,16 @@ export function Editor({
                 tree={stories.tree}
                 currentId={storyId}
                 onOpen={(story) => stories.open(story.id)}
-                // Creating, deleting and moving are publisher acts (the role
-                // table): all three change what URLs the site serves, which is a
-                // publishing act even when nothing is published in the same
-                // breath.
+                // Deleting and moving are publisher acts: both change or
+                // withdraw a URL the site already serves, which is a publishing
+                // act even when nothing is published in the same breath.
+                // Creating is not — a new document is an unpublished draft at a
+                // path nothing links to yet — so it sits at `editor`.
                 onCreate={
-                  mayManage
+                  mayCreate
                     ? stories.create
                     : async () => {
-                        refuseManage()
+                        refuseCreate()
                       }
                 }
                 onMove={
@@ -675,7 +680,7 @@ export function Editor({
                       }
                 }
                 onDelete={mayManage ? (story) => setConfirmingDeleteFor(story) : refuseManage}
-                onDuplicate={mayManage ? (story) => setConfirmingDuplicateFor(story) : refuseManage}
+                onDuplicate={mayCreate ? (story) => setConfirmingDuplicateFor(story) : refuseCreate}
                 onNotice={notify}
                 presence={spaceChannel.peers}
               />
@@ -763,23 +768,24 @@ export function Editor({
                   indexed={stories.indexed}
                   currentId={storyId}
                   canManage={mayManage}
+                  canCreate={mayCreate}
                   onOpen={(story) => {
                     setDataType(null)
                     stories.open(story.id)
                   }}
                   onCreate={
-                    mayManage
+                    mayCreate
                       ? async (title, parentId, type) => {
                           setDataType(null)
                           await stories.create(title, parentId, type)
                         }
                       : async () => {
-                          refuseManage()
+                          refuseCreate()
                         }
                   }
                   onDelete={mayManage ? (story) => setConfirmingDeleteFor(story) : refuseManage}
                   onDuplicate={
-                    mayManage ? (story) => setConfirmingDuplicateFor(story) : refuseManage
+                    mayCreate ? (story) => setConfirmingDuplicateFor(story) : refuseCreate
                   }
                 />
               ) : null}

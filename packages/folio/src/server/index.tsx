@@ -105,6 +105,7 @@ export {
   atLeast,
   EDIT,
   hasScope,
+  CREATE,
   MANAGE,
   PUBLISH,
   READ,

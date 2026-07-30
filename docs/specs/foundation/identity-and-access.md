@@ -247,6 +247,13 @@ close codes:
 | `publisher` | yes | yes | yes | yes | no |
 | `admin` | yes | yes | yes | yes | yes |
 
+> **Superseded in part, 2026-07-30.** The owner split **create** out of the fourth
+> column and put it at `editor`: a new document is an unpublished draft at a path
+> nothing links to yet, so starting one withdraws nothing, and "may write a page but
+> not start one" is a strange line to hold. Delete, move and rename stay at
+> `publisher` as argued below. Duplicating follows creating. See *Implementation
+> notes*; the gate is `CREATE` in `server/auth/roles.ts`.
+
 Enforced in two places and no more: a Hono middleware for the HTTP routes, and the
 `tx` case in the Durable Object, which answers a `viewer` with the existing
 `reject` envelope (`{ type: 'reject', txId, reason }`). That envelope already makes
@@ -702,3 +709,29 @@ process's `fetch` and `WebSocket` so both carry the cookie the way a browser doe
 `sync-test.mjs` now signs its second peer in as a *different* seeded editor, since
 identity on the socket is server-supplied and two sockets on one account are one
 person in presence.
+
+### Amendment, 2026-07-30 — create moves to `editor`
+
+The owner reviewed the role table after the run and split **create** out of
+"create / delete / move", putting it at `editor`. Reasoning, in their framing: a new
+document is an unpublished draft at a path nothing links to yet, so creating one
+serves nothing and withdraws nothing, and an `editor` who may write a page but not
+start one is a strange line to hold. Delete, move and rename keep the argument made
+above — each acts on a URL the site may already serve — and stay at `publisher`.
+
+- `CREATE: Access = { role: 'editor', scope: 'content:write' }` in
+  `server/auth/roles.ts`, beside `MANAGE`, whose comment now covers only delete,
+  move, rename and manual redirects.
+- `POST /folio/stories`, `POST /folio/stories/:id/duplicate` and
+  `POST /folio/api/v1/documents` moved from `MANAGE` to `CREATE`. `PATCH` and
+  `DELETE` on both surfaces are unchanged. Duplicating follows creating because it
+  produces a new draft.
+- **The token scope is unchanged** (`content:write` on both gates), so this widens
+  the session path only: a token that could create before still can, and one that
+  could not still cannot. It is a distinction between people, not between scripts.
+- Admin: `canCreateContent(me)` (= `canEdit`) in `admin/me.ts`, and `whyNot` gained a
+  `'create'` need whose refusal reads "read-only" rather than "may not publish".
+  `DataTable` takes `canCreate` alongside `canManage` — "+ New" and duplicate follow
+  the former, delete the latter.
+- `auth-http.test.ts`'s role-gate test split in two: an editor creating succeeds, a
+  viewer creating is still 403, and delete/move/redirects stay publisher-only.

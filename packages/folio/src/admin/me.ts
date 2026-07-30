@@ -61,7 +61,18 @@ export function canPublish(me: Me): boolean {
   return user !== null && atLeast(user.role, 'publisher')
 }
 
-/** May they create, delete, move or rename a document, or add a redirect? */
+/**
+ * May they create a document, including by duplicating one?
+ *
+ * `editor`, matching `CREATE` on the server. A new document is an unpublished
+ * draft at a path nothing links to yet, so starting one withdraws nothing.
+ * Changing or removing an existing URL is `canManageContent`.
+ */
+export function canCreateContent(me: Me): boolean {
+  return canEdit(me)
+}
+
+/** May they delete, move or rename a document, or add a redirect? */
 export function canManageContent(me: Me): boolean {
   return canPublish(me)
 }
@@ -86,15 +97,19 @@ export function actorLabel(me: Me): string | null {
 /** The reason an affordance is disabled, for a `title`, or undefined when it is
  * not. Worth its own function: "why is this greyed out" with no answer is the
  * most annoying possible version of a permissions system. */
-export function whyNot(me: Me, need: 'edit' | 'publish' | 'manage'): string | undefined {
+export function whyNot(me: Me, need: 'edit' | 'create' | 'publish' | 'manage'): string | undefined {
   const user = asUser(me)
   if (me.mode === 'open') return undefined
   if (!user) return 'Sign in to make changes'
-  const allowed = need === 'edit' ? canEdit(me) : canPublish(me)
+  // 'create' rides on canEdit: an editor may start a document even though they
+  // may not move or delete one, so a refusal here means read-only, not "cannot
+  // publish".
+  const allowed = need === 'edit' || need === 'create' ? canEdit(me) : canPublish(me)
   if (allowed) return undefined
-  return need === 'edit'
-    ? `Your role (${user.role}) is read-only`
-    : `Your role (${user.role}) may not publish`
+  if (need === 'edit' || need === 'create') return `Your role (${user.role}) is read-only`
+  return need === 'publish'
+    ? `Your role (${user.role}) may not publish`
+    : `Your role (${user.role}) may not move or delete documents`
 }
 
 /**
