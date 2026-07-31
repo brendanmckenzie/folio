@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { DocumentType } from '../../core/schema'
 import { ancestorPaths, type StoryMeta } from '../../core/story'
 
@@ -23,37 +23,75 @@ export interface OpenStory {
   /** Root first, the document itself last — the breadcrumb's chain. */
   chain: { id: string; title: string }[]
   loading: boolean
+  /**
+   * Fetch the row again, because a write moved it.
+   *
+   * `useEditor`'s `onStoryChanged` predicted this — *"wiring it is one line at the
+   * call site (`useStory` grows a `reload`)"* — and understated what it cost to
+   * leave unwired. The comment said only the state badge went stale. It did not:
+   * `story.state` is also `publishStatus`'s `isLive` argument, so a stale row left
+   * `nothingToPublish` false after a successful publish and **the Publish button
+   * stayed enabled on a document that had just been published**. Which is how the
+   * owner found it.
+   */
+  reload: () => void
 }
 
-const NOTHING: OpenStory = { story: undefined, chain: [], loading: false }
+const NOTHING: Omit<OpenStory, 'reload'> = { story: undefined, chain: [], loading: false }
 
 export function useStory(apiBase: string, id: string | undefined): OpenStory {
-  const [state, setState] = useState<OpenStory>(id ? { ...NOTHING, loading: true } : NOTHING)
+  const [state, setState] = useState<Omit<OpenStory, 'reload'>>(
+    id ? { ...NOTHING, loading: true } : NOTHING,
+  )
+  /**
+   * Which request is allowed to answer.
+   *
+   * This replaced the `let live = true` flag the effect used to close over, and the
+   * reason is `reload`: with two code paths able to start the same fetch, a flag
+   * scoped to one effect run cannot tell a *superseded* response from a live one, so
+   * a slow first request could land after a fast reload and put the pre-publish row
+   * back. A monotonic generation held in a ref is the smallest thing that orders
+   * them — only the newest request may write, whoever started it — and it subsumes
+   * the unmount case the flag existed for, because the cleanup bumps it too.
+   */
+  const generation = useRef(0)
+
+  const load = useCallback(
+    (storyId: string) => {
+      const mine = ++generation.current
+      setState((prev) => ({ ...prev, loading: true }))
+      const query = new URLSearchParams({ ids: storyId, ancestors: '1' })
+      fetch(`${apiBase}/stories?${query}`)
+        .then((res) => (res.ok ? (res.json() as Promise<{ rows: StoryMeta[] }>) : { rows: [] }))
+        .then(({ rows }) => {
+          if (generation.current !== mine) return
+          const story = rows.find((row) => row.id === storyId)
+          setState({ story, chain: story ? chainOf(rows, story) : [], loading: false })
+        })
+        .catch(() => {
+          if (generation.current === mine) setState({ ...NOTHING, loading: false })
+        })
+    },
+    [apiBase],
+  )
+
+  const reload = useCallback(() => {
+    if (id) load(id)
+  }, [id, load])
 
   useEffect(() => {
     if (!id) {
       setState(NOTHING)
       return
     }
-    let live = true
-    setState((prev) => ({ ...prev, loading: true }))
-    const query = new URLSearchParams({ ids: id, ancestors: '1' })
-    fetch(`${apiBase}/stories?${query}`)
-      .then((res) => (res.ok ? (res.json() as Promise<{ rows: StoryMeta[] }>) : { rows: [] }))
-      .then(({ rows }) => {
-        if (!live) return
-        const story = rows.find((row) => row.id === id)
-        setState({ story, chain: story ? chainOf(rows, story) : [], loading: false })
-      })
-      .catch(() => {
-        if (live) setState({ ...NOTHING, loading: false })
-      })
+    load(id)
     return () => {
-      live = false
+      // Nothing in flight may answer for a document that is no longer open.
+      generation.current++
     }
-  }, [apiBase, id])
+  }, [id, load])
 
-  return state
+  return { ...state, reload }
 }
 
 /**

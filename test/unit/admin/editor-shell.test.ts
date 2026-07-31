@@ -820,6 +820,58 @@ describe('publishStatus', () => {
     const status = publishStatus(true, 0, true, false, delta(0))
     expect(status.nothingToPublish).toBe(false)
   })
+
+  /**
+   * The case above is also the shape a **stale row** fabricates, which is worth
+   * stating because it is why the owner saw a live document offering to publish
+   * itself. `isLive` comes from `story.state`, a row the shell fetched *before* the
+   * publish; leave it unrefreshed and this function is handed `everPublished: true,
+   * isLive: false, delta: 0` — indistinguishable from a taken-down page, so Publish
+   * stays enabled and the label beside it reads "Up to date".
+   *
+   * `publishStatus` is right in both readings and there is nothing to fix here. The
+   * fix was wiring `onStoryChanged`, which is asserted below.
+   */
+  it('cannot tell a just-published story from a taken-down one, which is why the row must be refreshed', () => {
+    const stale = publishStatus(true, 0, true, false, delta(0))
+    const fresh = publishStatus(true, 0, true, true, delta(0))
+    expect(stale.nothingToPublish).toBe(false)
+    expect(fresh.nothingToPublish).toBe(true)
+  })
+})
+
+/**
+ * The row the editor was handed goes stale on every publish, and the seam that
+ * refreshes it has to actually be connected.
+ *
+ * `useEditor`'s `onStoryChanged` is optional and its own comment called leaving it
+ * unwired cosmetic — *"only the state badge goes stale"*. That was wrong: it is also
+ * `publishStatus`'s `isLive`, so the Publish button stayed enabled on a document
+ * that had just been published. It went unnoticed because nothing asserted the
+ * connection existed and every unit test calls `publishStatus` directly.
+ *
+ * A source-text assertion because the admin's suite mounts no components
+ * (`vitest.config.ts`). It proves the prop is passed, which is the thing that was
+ * missing; it cannot prove the fetch resolves.
+ */
+describe('the open row is refreshed after a write', () => {
+  const prototype = readFileSync(
+    new URL('../../../src/admin/ui/Prototype.tsx', import.meta.url),
+    'utf8',
+  )
+
+  it('passes onStoryChanged down to the editor', () => {
+    expect(prototype).toMatch(/onStoryChanged=\{a\.onStoryChanged\}/)
+  })
+
+  it('refreshes a global from the singleton call, not from useStory', () => {
+    // A singleton's row never came from `useStory` — the sidebar links it by
+    // derived id and the boot's `?kind=singleton` call is what holds it — so
+    // `fetched.reload` would refresh nothing for the one screen most likely to be
+    // publishing: a global.
+    expect(prototype).toMatch(/const onStoryChanged = local \? reloadGlobals : fetched\.reload/)
+    expect(prototype).toContain('documents?kind=singleton')
+  })
 })
 
 describe('behindNotice', () => {
