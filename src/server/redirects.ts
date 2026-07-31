@@ -1,5 +1,5 @@
 /**
- * Paths a request should be redirected away from — see migrations/0004_redirects.sql
+ * Paths a request should be redirected away from — see migrations/0001_init.sql
  * and docs/specs/platform/redirects.md.
  *
  * Two distinct write paths land here, and they stay distinct on purpose:

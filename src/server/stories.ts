@@ -457,7 +457,7 @@ export async function publishedDocsAfter(
  * The set of rows a document's `slug` must be unique within and its `ord` is
  * ordered against — the two things that differ between a routed and an unrouted
  * document, named once so `orderAt` and `uniqueSlug` share one definition and
- * the two partial unique indexes in `migrations/0006_document_types.sql` have an
+ * the two partial unique indexes in `migrations/0001_init.sql` have an
  * exact counterpart in code.
  *
  * A routed document is grouped by its parent (`stories_parent_slug`); an

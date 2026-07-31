@@ -93,7 +93,7 @@ export interface FolioConfig<Env> {
    * before `document-types.md`: `root: 'page'` is expanded to
    * `[{ name: 'page', label: 'Page', kind: 'page', root: 'page' }]`. The type's
    * *name* is always `'page'` whatever the root block is called, because that
-   * is what `migrations/0006_document_types.sql` defaults every pre-existing
+   * is what `stories.type`'s default in `migrations/0001_init.sql` gives every
    * row's `type` column to — so an unchanged host config keeps resolving every
    * row it already had.
    *
