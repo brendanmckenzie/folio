@@ -1,9 +1,16 @@
 /*
  * The Settings screen. Deliberately thin, like `Documents.module.css`: every table
- * here is `Table.module.css` and the search box is Documents' box unchanged. What
- * is left is the handful of objects a *reference* screen needs and a list screen
- * does not — the anchor nav, the disclosure card, and the two text tones that let
- * a declaration's name sit beside its label without competing with it.
+ * here is `Table`, and the search box is Documents' box unchanged. What is left is
+ * the handful of objects a *reference* screen needs and a list screen does not — the
+ * anchor nav, the disclosure card, and the two text tones that let a declaration's
+ * name sit beside its label without competing with it.
+ *
+ * The one place it is not thin is the `tables` section below, and that is deliberate
+ * too. `Table` is tuned for the five screens that list *records*, where one line per
+ * row is the whole point; every table on this screen is an explanation instead, so
+ * three of its assumptions are inverted here — cells wrap, the first column stops
+ * hoarding the slack, and header labels may take a second line. Each rule carries the
+ * measurement that forced it and says why the fix is not in the primitive.
  */
 
 .screen {
@@ -11,9 +18,29 @@
   flex-direction: column;
   gap: var(--space-4);
   /* Wider than Documents' 1400px: the block-type tables carry six columns of
-     schema and a document type carries eight, and a horizontal scrollbar inside a
-     reference page is worse than a long line. */
+     schema and a document type carries eight, and this screen is read rather than
+     scanned, so the extra width goes into columns nobody has to scroll to. */
   max-width: 1600px;
+}
+
+/*
+ * The title row, with `ListHeader`'s gutter cancelled.
+ *
+ * `.header` in `List.module.css` carries `padding: 0 var(--space-2)` because its
+ * other register is a *section* label above `List` rows, and a row carries the same
+ * gutter — so on Content the `h1` lands exactly on a row's title, which is right.
+ * This screen's body is prose, headings and tables, and none of the three has that
+ * gutter: the same padding put the `h1` 8px to the right of every other left edge
+ * on the page, and the filter box 8px short of the tables' right edge. Measured at
+ * 1440px: `h1` at x=272, the intro paragraph and all seven section headings at 264.
+ *
+ * Cancelled from this side rather than in the shared header, because the gutter is
+ * correct for the five screens whose body *is* rows. The clean fix is for `level={1}`
+ * to stop inheriting a row gutter it has no rows to align to — a change to a
+ * primitive six screens share, so it is reported rather than made here.
+ */
+.head {
+  margin: 0 calc(var(--space-2) * -1);
 }
 
 /* The same box as Documents', because it is the same control. Copied rather than
@@ -134,18 +161,160 @@
   color: var(--fg);
 }
 
+/* ------------------------------------------------------------------ tables --- */
+
+/*
+ * **Every cell on this screen wraps, and the shared table's cells do not.**
+ *
+ * `Table.module.css` sets `white-space: nowrap` on every `td`, and that is right
+ * where it lives: the five screens with tables are listing *records*, and one line
+ * per row is what makes a dense list scannable. None of the seven sections here is
+ * a list of records. They are explanations — `Why` is a whole sentence, `Where it
+ * can live` is a clause, `Allows` is a comma list of twenty block names — and a
+ * sentence that cannot wrap can only clip or scroll. It clipped: at a 1440px
+ * viewport the Caching table's `Why` column held 502px of prose it did not draw,
+ * cut mid-word, with no ellipsis and nothing but an overlay scrollbar (invisible
+ * until it is touched) to suggest there was more. That prose is the value of the
+ * screen, so losing it silently is the whole defect.
+ *
+ * **Rejected: leaning on `.scroll`'s `overflow-x: auto`.** It is already there and
+ * it is what failed. Scrolling sideways to finish a sentence whose beginning is on
+ * screen is worse than reading two lines of it, and an unmarked truncation is the
+ * failure `List.module.css`'s `.meta` comment names — width spent without carrying
+ * the information. It stays as the last resort for a table that cannot fit even
+ * wrapped, which is what a scroll container is for. **Rejected: dropping columns.**
+ * Every column here answers a question somebody asked out loud, which is the screen's
+ * entire premise.
+ *
+ * **`baseline`, not `middle`.** With a four-line cell in the row, `middle` floated
+ * every short cell to the centre of it, so `Browser cache` sat opposite the *second*
+ * line of its own explanation and a table of six rows read as ragged. Baseline puts
+ * the first line of every cell on one line, which is the line a reader scans across;
+ * `top` would too, but it also drops a single-line row's text off the optical centre
+ * of its 28px box.
+ *
+ * This reaches into a shared primitive's elements from a screen's stylesheet rather
+ * than adding a prop to `Table` for one screen's benefit — the same trade `Blocks`
+ * below records for the disclosure it wanted and did not add. `td` sits two elements
+ * deep here, so `.screen tbody td` outweighs `.table td` on specificity and does not
+ * depend on which module's stylesheet loads first.
+ */
+.screen tbody td {
+  padding-block: var(--space-1);
+  white-space: normal;
+  vertical-align: baseline;
+}
+
+/*
+ * **The header labels wrap too, because they were the last thing pinning the table
+ * wider than the page.**
+ *
+ * `nowrap` on `th` is what floors each column at its own header's width, and on every
+ * table here but one that floor is useful — it is what stops a wrapping cell being
+ * squeezed to two characters. On the document types table it was the whole problem:
+ * its eight headers at full width come to 905px of floor, so in an 812px column (a
+ * 1100px viewport) the table could not fit however well its cells wrapped, and 94px of
+ * `Previewed on` went straight back behind the scroll container.
+ *
+ * Letting them wrap moves each floor from the label to its longest *word*, and the
+ * price is paid honestly: eight columns of this table want about 1172px and a 1440px
+ * viewport gives them 1152, so `Top level` and `Sidebar group` take a second line
+ * even there. That is 12px of header height, once, and nothing is lost either side of
+ * it — which is the trade. `Previewed on` over two lines is a header; `Previewed o`
+ * is a bug, and a scroll container holding the difference is a bug you cannot see.
+ *
+ * **Rejected: a breakpoint that only wraps below some width.** It was the first idea
+ * and the numbers kill it — the shortfall exists at 1440px, so the breakpoint would
+ * have to sit above the viewport the screen is read at and would do nothing. Both
+ * sides of it would also have to be correct, which is the one thing that would have
+ * made it different from the breakpoint `List.module.css` records as a mistake.
+ *
+ * The second rule is the consequence of the first: `Table`'s header content is a
+ * fixed `height: var(--row-h)` flex row, so a two-line label would have spilled
+ * straight through the bottom border. `min-height` keeps a one-line header on the 28px
+ * rhythm the rest of the admin uses.
+ *
+ * `> *` also catches the visually-hidden `Actions` label in the globals table's last
+ * header, and that is inert: it is absolutely positioned, 1px wide, `overflow: hidden`
+ * and clipped to nothing, so a height it is given cannot be seen or take up space.
+ */
+.screen thead th {
+  white-space: normal;
+}
+
+.screen thead th > * {
+  height: auto;
+  min-height: var(--row-h);
+  padding-block: var(--space-1);
+}
+
+/*
+ * **And the first column stops absorbing the slack, because wrapping changed what
+ * that rule does.**
+ *
+ * `Table.module.css` puts `width: 100%` on the first column so the leftover width
+ * lands on the title rather than on the hover-actions strip, and that is right for a
+ * list of records. But a percentage column in table auto-layout is satisfied
+ * *before* the rest: every other column falls back to its **min**-content, which
+ * under `nowrap` was the same as its max-content and is not any more. So the moment
+ * cells wrapped, the rule inverted the table it was meant to fix — the document
+ * types table gave `Type` 400px to hold `Page` / `page` and squeezed `Where it can
+ * live` to 145px, where a clause that had fitted on one line broke over four. The
+ * table was no shorter than the clipping it replaced, just taller.
+ *
+ * `auto` puts every column back on the ordinary algorithm: max-content while there
+ * is room, and the shortfall shared proportionally when there is not. That is
+ * exactly the degradation this screen wants, and it is why nothing here needs a
+ * width of its own.
+ */
+.screen th:first-child,
+.screen td:first-child {
+  width: auto;
+}
+
 /* ------------------------------------------------------------------- cells --- */
 
-/* A declaration's label and its name, on one line. Both matter and they are not
-   the same thing: an editor searches for "Insight", a developer greps for
-   `insight`, and putting the second in mono at a lower weight lets one eye skip
-   what the other is looking for. */
+/*
+ * A declaration's label and its name, on one line. Both matter and they are not
+ * the same thing: an editor searches for "Insight", a developer greps for
+ * `insight`, and putting the second in mono at a lower weight lets one eye skip
+ * what the other is looking for.
+ *
+ * **`nowrap`, so it is one line and not sometimes two.** It used to be
+ * `flex-wrap: wrap`, which under the wrapping rule above is not a fallback but a
+ * lottery: the document types table drew `Page page` on one line, `Insight` /
+ * `insight` on two and `Site settings` / `settings` / a badge on three, six rows at
+ * three heights varying on nothing a reader can see. Refusing to wrap makes the
+ * pair the cell's *minimum* width instead, so the table sizes the column to hold it
+ * rather than reflowing the cell to fit whatever the column got. Where a second
+ * line is genuinely wanted it is declared, with `.stack`.
+ */
 .pair {
   display: flex;
   align-items: baseline;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
-  min-width: 0;
+  flex-wrap: nowrap;
+  gap: var(--space-2);
+  white-space: nowrap;
+}
+
+/*
+ * Two lines, on purpose: a heading line and a detail line under it.
+ *
+ * Used by the two first columns that carry more than a label and a name — the
+ * document types table, where the name and its `default` / `global` badges go
+ * below, and a block's fields table, where the field's `help` does. Both were
+ * previously one `.pair` relying on flex wrapping to find a second line for them,
+ * which is how the raggedness above got in.
+ *
+ * The other four first columns stay a bare `.pair`: they have a label and a name and
+ * nothing else, and a second line for two words would double four tables' height to
+ * settle nothing.
+ */
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
 }
 
 .pairLabel {
@@ -157,7 +326,13 @@
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--fg-muted);
-  overflow-wrap: anywhere;
+  /* `break-word`, not `anywhere`, and the difference only shows now that cells wrap:
+     `anywhere` counts as a break opportunity when the table measures a column's
+     *minimum*, so a column of names could be squeezed to two characters and would
+     split `insightPage` mid-token to get there. `break-word` keeps a token whole and
+     floors the column at the longest one instead, leaving a table that still cannot
+     fit to the scroll container — an identifier is content, and half of one is not. */
+  overflow-wrap: break-word;
 }
 
 /* Sits inside `.name`, so it has to step back out of the mono family it inherits. */
@@ -167,19 +342,52 @@
   color: var(--fg-subtle);
 }
 
-/* Help text, under the field it belongs to. The block width is what keeps a long
-   `help` from stretching the column it is in. */
+/*
+ * Help text, on its own line under the field it belongs to — the second row of a
+ * `.stack`, rather than a `flex: 1 1 100%` item hoping to be pushed onto one.
+ *
+ * That hope was misplaced and it showed: a flex item's line break is decided from
+ * its hypothetical main size, which is the basis *clamped by `max-width`*, so
+ * `1 1 100%` capped at 46ch asks for 46ch and shares the line whenever 46ch happens
+ * to fit. `Topic` got its own line and `Joined` did not, in two tables three inches
+ * apart.
+ *
+ * The `max-width` stays, and now it does one job instead of two: it caps what this
+ * column asks the table for, so a paragraph of help does not widen the field column
+ * past the six that follow it.
+ */
 .help {
-  flex: 1 1 100%;
   max-width: 46ch;
   font-size: var(--text-xs);
   line-height: 1.45;
   color: var(--fg-subtle);
 }
 
+/*
+ * A cell that is a sentence rather than a value — where a type may live, what a
+ * provider does with an address it has never seen. Three columns were the only prose
+ * on the screen with no measure of their own, which under the wrapping rule above
+ * means they ask the table for however long the sentence happens to be.
+ *
+ * Inert on the demo's content and deliberately kept anyway: today's longest clause
+ * is 51 characters and sits inside 44ch, but `whereClause` builds `Only under …` from
+ * a joined list of every parent type a site declares, so on a real manifest it is one
+ * `under: [...]` away from being a 200-character column. A measure that has not
+ * started binding yet is cheaper than the column that blows out when it does.
+ */
+.clause {
+  display: block;
+  max-width: 44ch;
+}
+
+/* A setting's explanation, at a measure rather than at the column's width. The
+   `max-width` is what makes the wrapping rule above read as a paragraph instead of
+   a 130-character line: it caps what the column asks the table for, so the two
+   Facts tables settle at a column of prose and the rest of the width stays with the
+   setting's name. */
 .why {
   display: block;
-  max-width: 56ch;
+  max-width: 62ch;
   font-size: var(--text-xs);
   line-height: 1.45;
   color: var(--fg-subtle);
