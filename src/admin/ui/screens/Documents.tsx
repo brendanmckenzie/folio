@@ -7,6 +7,8 @@ import { ListHeader } from '../List'
 import { type Column, Table } from '../Table'
 import type { Screen } from '../route'
 import { stateTone, when } from './content-rows'
+import { CreateDialog } from './CreateDialog'
+import type { CreateBody } from './create-model'
 import css from './Documents.module.css'
 import { DeleteDialog } from './DeleteDialog'
 import {
@@ -190,6 +192,7 @@ export function Documents(props: Props) {
             />
             <NewDocumentButton
               type={type}
+              schema={schema}
               apiBase={apiBase}
               onCreated={(id) => onOpen({ name: 'edit', id })}
               onNotice={onNotice}
@@ -363,50 +366,72 @@ function Cell({ row, column }: { row: DocumentRow; column: DocumentColumn }) {
   if (column.kind === 'updated') return <span className={css.stamp}>{when(row)}</span>
 
   const text = cellText(row, column)
-  if (column.kind === 'title') {
-    return text ? <>{text}</> : <span className={css.untitled}>Untitled</span>
-  }
+  // Returned bare rather than wrapped in a fragment: a component may return a
+  // string in React 19, and `<>{text}</>` is a `noUselessFragments` error.
+  if (text) return text
+  if (column.kind === 'title') return <span className={css.untitled}>Untitled</span>
   // A blank cell is a value nobody has published, not an empty field — and the
   // row's own badge is what says which. A dash rather than nothing, so an empty
   // cell reads as deliberate.
-  return text ? <>{text}</> : <span className={css.blank}>—</span>
+  return <span className={css.blank}>—</span>
 }
 
 /* ------------------------------------------------------------------ create --- */
 
 /**
- * `+ New`, as one call and a navigation — the same shape as Content's
- * `NewPageButton` and deliberately not the shape `DataTable.tsx` used, which asked
- * for a name in an inline form first.
+ * `+ New`, which **asks for a name and then writes once** (`CreateDialog`).
  *
- * A record's title is derived from its `titleField`, so a name typed into a
- * one-field form before the document exists is a name typed into the wrong place:
- * the field it belongs to is the first thing on the form this opens, and typing it
- * there updates the title cache through the ordinary write path. One fewer dialog,
- * and the name ends up somewhere it can be edited again.
+ * This used to post on click with a hard-coded `'Untitled'`, and the comment here
+ * argued for it: a record's title is derived from its `titleField`, so a name typed
+ * into a one-field form before the document exists is a name typed into the wrong
+ * place. **That argument is false, and `seed()` in `server/runtime.ts` is why.** A
+ * new document's doc is seeded lazily on first access, and `seed` writes the row's
+ * title *into the type's own title field*, resolved through `titleFieldOf` — so a
+ * title sent to `POST /stories` lands in `fullName` for a `person`, which is
+ * precisely the field the old comment said it belonged in. The dialog's one field
+ * *is* that field, asked a moment earlier, and it stays editable there afterwards.
+ *
+ * The new reason for asking is a defect the old shape produced: **a document must
+ * not exist before it has a name.** Clicking New and walking away left a permanent
+ * `Untitled` row in the list, in search and in every "used by N" count, and the
+ * demo database held two of them. Strapi's create form writes nothing until you
+ * save; Storyblok asks for a name in a modal first. This is the second.
+ *
+ * Rejected: **create-then-edit, which is what Contentful does** and what this was.
+ * It has one real advantage — the editor opens a keystroke sooner, with no modal
+ * in the way — and it pays for it with rows nobody meant to create, which only the
+ * person who made them can recognise as junk. An abandoned dialog costs nothing.
  */
 function NewDocumentButton({
   type,
+  schema,
   apiBase,
   onCreated,
   onNotice,
 }: {
   type: DocumentType
+  /** For the dialog's one label: the title field's own, so a `person` is asked for
+   * a "Full name". */
+  schema: SchemaIndex
   apiBase: string
   onCreated: (id: string) => void
   onNotice: (message: string) => void
 }) {
   const [pending, setPending] = useState(false)
+  const [creating, setCreating] = useState(false)
 
-  const create = async () => {
+  /** Closes on success only: a failed POST leaves the dialog open with the typed
+   * name still in it, and the message in the toast above it. */
+  const create = async (body: CreateBody) => {
     setPending(true)
     try {
       const res = await fetch(`${apiBase}/stories`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: 'Untitled', parentId: null, type: type.name }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) throw new Error(await messageOf(res))
+      setCreating(false)
       onCreated(((await res.json()) as { id: string }).id)
     } catch (e) {
       onNotice((e as Error).message)
@@ -416,14 +441,19 @@ function NewDocumentButton({
   }
 
   return (
-    <Button
-      variant="primary"
-      size="sm"
-      disabled={pending}
-      reason="Creating…"
-      onClick={() => void create()}
-    >
-      New {type.label.toLowerCase()}
-    </Button>
+    <>
+      <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+        New {type.label.toLowerCase()}
+      </Button>
+      {creating ? (
+        <CreateDialog
+          type={type}
+          schema={schema}
+          pending={pending}
+          onClose={() => setCreating(false)}
+          onCreate={(body) => void create(body)}
+        />
+      ) : null}
+    </>
   )
 }

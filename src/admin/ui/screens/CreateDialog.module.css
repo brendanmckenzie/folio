@@ -1,0 +1,22 @@
+/*
+ * The create dialog. Two classes, because `Field` already owns the label, the
+ * control and the help line — what is left is the gap between two fields and the
+ * one typographic decision the dialog makes for itself.
+ */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The path a page will serve at, inside its slug field's help line. Mono and
+   inherited-size rather than a badge: `design-system.md`'s third commitment is
+   that an identifier is a typographic citizen, and this one is a sentence
+   fragment rather than a value to be picked out. */
+.path {
+  font-family: var(--font-mono);
+  font-size: inherit;
+  color: var(--fg);
+  word-break: break-all;
+}
