@@ -102,10 +102,10 @@ describe('countStories', () => {
 
     // A card labelled "Pages" means the tree, not the sum of the page kinds — a
     // second page type's records are in the tree too, so the two are different
-    // questions and `routed` is the one argument that tells them apart.
+    // questions and `routed` is the one filter key that tells them apart.
     expect(await countStories(env.DB, { type: 'person' })).toBe(2)
-    expect(await countStories(env.DB, undefined, false)).toBe(2)
-    expect(await countStories(env.DB, undefined, true)).toBe(3) // the seeded three
+    expect(await countStories(env.DB, { routed: false })).toBe(2)
+    expect(await countStories(env.DB, { routed: true })).toBe(3) // the seeded three
   })
 
   it('answers 0 rather than throwing for a type with nothing in it', async () => {

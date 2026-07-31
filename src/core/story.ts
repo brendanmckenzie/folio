@@ -238,7 +238,84 @@ export interface StoryFilter {
   q?: string
   /** A locale code, for translation completeness. */
   locale?: string
+  /**
+   * `true` for routed pages, `false` for unrouted documents, absent for both.
+   *
+   * The axis every list route already applies and none of them could *say*: the
+   * tree and flat mode hardcode `path is not null`, the Documents list hardcodes
+   * `path is null`, and `countStories` took it as a positional boolean. It moved
+   * onto the filter when the bulk guard needed it (`../../../docs/specs/platform/
+   * bulk-writes.md` decision 4): a captured selection has to be able to count the
+   * *same set* the list header counted, and a filter that could not distinguish
+   * "every draft page" from "every draft document" would refuse every select-all
+   * Content ever made.
+   */
+  routed?: boolean
 }
+
+/**
+ * What a bulk write does to each document it reaches
+ * (`../../../docs/ui-architecture.md` decision 7).
+ *
+ * Five, from what the competitor survey found rather than from what is easy, and
+ * `move` is in the set: "a tree operation with fractional indices and cycle checks"
+ * was our implementation's problem dressed up as a product decision, and
+ * `updateStoryStatement` already encodes every rule that applies.
+ *
+ * Here rather than in `server/bulk.ts` for the same reason `ScheduleAction` and
+ * `StoryFilter` are here: the value appears in a URL — one route per action — so the
+ * screen that posts it and the runner that performs it share one vocabulary.
+ */
+export type BulkAction = 'publish' | 'unpublish' | 'duplicate' | 'move' | 'delete'
+
+/**
+ * The documents somebody ticked. Small by construction: you can only tick what you
+ * can see, a page at a time.
+ */
+export interface IdSelection {
+  ids: string[]
+  all?: never
+}
+
+/**
+ * Every document matching a filter, as it stood when somebody clicked *select all* —
+ * a flag, the conditions **captured** at that moment, the count they were shown, and
+ * whatever they ticked off afterwards (`ui-architecture.md` decision 7a).
+ *
+ * **No ids are materialised at all**, which is the whole point: "select all 51,420
+ * matching" is the same amount of data as "select all 12 matching", so the question
+ * of a ceiling never arises. And it *captures* rather than tracks, which is what
+ * makes a selection survive a filter change — the filter here is a snapshot, not a
+ * live read of whatever the screen's chips currently say.
+ */
+export interface FilterSelection {
+  all: true
+  filter: StoryFilter
+  /**
+   * The count the person was shown — `total` from `?count=1` on the list they were
+   * looking at (`pagination.md` decision 5, which insists one `count(*)` serves the
+   * header and this guard so the two cannot drift).
+   *
+   * **The safety mechanism, and the job's ceiling.** The server re-runs the filter
+   * once at the start and refuses on a mismatch, so an operation is never quietly
+   * applied to a different set than the one that was agreed to; and no run ever
+   * touches more documents than this number, so a set that grows underneath a long
+   * job cannot make it act on more than was agreed.
+   */
+  expected: number
+  /** Rows ticked *off* after the select-all. Bounded by what a person can see. */
+  exclude?: string[]
+  ids?: never
+}
+
+/**
+ * One selection, in the two shapes a selection comes in.
+ *
+ * One type rather than two endpoints: the action half of a bulk request is
+ * identical either way, and a client that had to choose a *URL* by selection mode
+ * would be encoding the mode twice.
+ */
+export type BulkSelection = IdSelection | FilterSelection
 
 /**
  * Flat mode's ordering (`pagination.md` decision 2a) — the other half of the

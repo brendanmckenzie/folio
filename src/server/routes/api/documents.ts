@@ -34,19 +34,17 @@ import {
   READ,
   READ_DRAFT,
 } from '../../auth/roles'
+import { deleteDocument, type DocumentDeps, moveDocument } from '../../documents'
 import { FolioError, rethrow } from '../../errors'
-import type { StoryChange } from '../../hooks'
 import { ensureAccess, hookCtx, requireAccess } from '../../middleware'
 import { checkpoint, publish } from '../../publish'
 import type { FolioRuntime } from '../../runtime'
 import {
   createStory,
-  deleteStoryStatement,
   ensureSingleton,
   publishedDocsByIds,
   storyByPath,
   storyById,
-  updateStoryStatement,
 } from '../../stories'
 import type { FolioBindings, FolioEnv } from '../../types'
 import {
@@ -63,7 +61,7 @@ import {
   StoryPatchBody,
   storyPathParam,
 } from '../../validate'
-import { deleteVersionsStatement, listVersions } from '../../versions'
+import { listVersions } from '../../versions'
 import { commitAll, writeDocument, type WriteActor } from '../../write'
 import { queryFromParams } from '../content'
 
@@ -184,6 +182,28 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     draft: () => rt.draftFor(bindings, story),
     stub: rt.stub(bindings, story.id),
   })
+
+  /**
+   * What `documents.ts`' three workflows need, off this request — the same object
+   * `routes/stories.ts` builds.
+   *
+   * This is where the API's own copy of the delete batch and the two patch hooks
+   * went. It used to hold both inline, under a comment saying "reimplementing either
+   * would mean two orderings to keep right" above a reimplementation of both; a
+   * third caller (`routes/bulk.ts`) is what made keeping them honest impossible by
+   * hand. What each route still owns is its answer to *absence*: this one 404s where
+   * the admin's answers `{ deleted: [] }`.
+   */
+  const documentDeps = (c: Context<FolioEnv<Env>>): DocumentDeps<unknown> => {
+    const bindings = c.var.bindings()
+    return {
+      db: bindings.db,
+      types: rt.types,
+      stub: (id: string) => rt.stub(bindings, id),
+      draft: (story: StoryMeta) => rt.draftFor(bindings, story),
+      hooks: rt.hookRunner(hookCtx(c)),
+    }
+  }
 
   /* ------------------------------------------------------------- reading --- */
 
@@ -455,33 +475,14 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.patch('/documents/:id', requireAccess<Env>(rt, MANAGE), async (c) => {
     const id = idParam('id', c.req.param('id'))
     const body = await parseBody(c.req, StoryPatchBody)
-    const bindings = c.var.bindings()
 
     let next: StoryMeta
-    let changes: { id: string; from: string; to: string }[]
-    let updated: StoryChange[]
     try {
-      const result = await updateStoryStatement(bindings.db, id, body, rt.types)
-      next = result.next
-      changes = result.changes
-      updated = result.updated
-      if (result.statements.length) await bindings.db.batch(result.statements)
+      // `moveDocument` fires both hooks the admin's own PATCH fires, which is what
+      // keeps a host hook from being able to tell which door a write came through.
+      next = (await moveDocument(documentDeps(c), id, body, actorString(c.var.actor))).next
     } catch (e) {
       rethrow(e)
-    }
-
-    // The same two hooks the admin's own PATCH fires, for the same reasons —
-    // see `routes/stories.ts`. Both call sites, deliberately: the API is a
-    // second surface over the same services, and a host hook must not be able
-    // to tell which door a write came through.
-    const actor = actorString(c.var.actor)
-    if (changes.length) {
-      await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('pathsChanged', { changes, actor })
-    }
-    if (updated.length) {
-      await rt
-        .publishDeps(bindings, hookCtx(c))
-        .hooks?.run('updated', { story: next, changed: updated, actor })
     }
 
     return c.json(meta(next))
@@ -495,43 +496,21 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * either would mean two orderings to keep right.
    */
   app.delete('/documents/:id', requireAccess<Env>(rt, MANAGE), async (c) => {
-    const bindings = c.var.bindings()
     const target = idParam('id', c.req.param('id'))
     const redirect = c.req.query('redirect') !== 'false'
 
-    let found: Awaited<ReturnType<typeof deleteStoryStatement>>
+    let found: Awaited<ReturnType<typeof deleteDocument>>
     try {
-      found = await deleteStoryStatement(bindings.db, target, { redirect }, rt.types)
-      if (!found) throw new FolioError('not_found', 'Unknown document')
-      const versions = deleteVersionsStatement(bindings.db, found.ids)
-      await bindings.db.batch([
-        found.statement,
-        ...found.redirectStatements,
-        ...found.indexStatements,
-        // A schedule must not outlive its story (`../../schedules.ts`), so it goes
-        // in the same batch the admin's own delete route puts it in.
-        ...found.scheduleStatements,
-        ...(versions ? [versions] : []),
-      ])
+      found = await deleteDocument(documentDeps(c), target, { redirect }, actorString(c.var.actor))
     } catch (e) {
       rethrow(e)
     }
+    // A 404 where the admin's route answers `{ deleted: [] }`, and the difference is
+    // deliberate: this is a contract with a script, and a script deleting an id that
+    // is not there has a bug worth surfacing.
+    if (!found) throw new FolioError('not_found', 'Unknown document')
 
-    await Promise.all(
-      found.ids.map((id) =>
-        rt
-          .stub(bindings, id)
-          .purge()
-          .catch(() => {}),
-      ),
-    )
-
-    const actor = actorString(c.var.actor)
-    await rt
-      .publishDeps(bindings, hookCtx(c))
-      .hooks?.run('deleted', { ids: found.ids, paths: found.paths, types: found.types, actor })
-
-    return c.json({ deleted: found.ids })
+    return c.json({ deleted: found.deleted })
   })
 
   /** Publish the draft. `publish()` does the work; this only translates. */
