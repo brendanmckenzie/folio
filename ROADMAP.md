@@ -610,9 +610,32 @@ an unsorted flat list, which stops working somewhere around 15.
   a `wrangler d1 execute` deploy step.
 - Passkeys, TOTP and password login are all out. Magic link plus OIDC covers both
   audiences, and a password store is a liability nobody asked for.
-- The library ships TypeScript source; the host compiles it. Fine for now, wrong
-  for a release. (The `folio/core` / `folio/engine` export split is done; build
-  artifacts and `.d.ts` generation are not.)
+- The library ships built JavaScript now — `packages/folio/dist`, esbuild, one
+  bundle per entry with source maps and no minification, and `exports` pointing at
+  it (`docs/specs/foundation/package-build.md`). Two things are deliberately still
+  source, and one is deliberately still blocked:
+  - `folio/preview` and `folio/admin-entry` ship as TypeScript **on purpose**, and
+    permanently. They are entry points of the *host's* client bundle — the Vite
+    plugin puts them in `rollupOptions.input` — so the host's Vite owns their TSX
+    and their 33 `*.module.css` files. A project reaching them has Vite by
+    construction, and prebuilding the admin would move the
+    "`/folio-admin.css` exists and is not a hashed chunk asset" tripwire out of
+    `pnpm build`, which is the only thing that catches it.
+  - `folio/core`, `folio/engine` and `folio/server` still point `types` at source.
+    **Declaration emit for `src/server` fails**, and it is one small source change
+    away: `createStoryDO` (`src/server/story-do.ts:173`) and `createSpaceDO`
+    (`src/server/space-do.ts:127`) each `return class ... extends DurableObject`
+    with `private` members, which is TS4094 — "Property 'sql' of exported
+    anonymous class type may not be private or protected" — and tsc writes no
+    `.d.ts` for either file at all. Give each factory a declared return type, or
+    make those thirteen members `#private`. The three entries move together
+    because a *half*-built type surface is worse than none: with `folio/core`
+    resolved to `dist/types` and `folio/server` to source, `createFolio({ blocks:
+    [defineBlock({…})] })` fails, since TypeScript's variance fast path only
+    applies to two references to the *same* declaration.
+  - Flipping `private: true` is the actual release step, along with a version, a
+    licence and a package-level README. `pnpm pack` already produces the right
+    tarball: 292 files, `dist/` + `src/` + `migrations/`.
 - The DO mutation log grows without bound. Fine against the 10GB per-object
   limit, but it wants compaction eventually. The `tx_id` unique index and
   contiguous syncIds make a compaction watermark straightforward now.

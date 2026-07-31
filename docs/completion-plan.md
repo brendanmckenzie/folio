@@ -61,15 +61,22 @@ in a browser before it is called done.
      that grows under a long run cannot enlarge it. No migration and no wire change.
      **No admin surface yet** — what Content's selection bar needs is six precise
      steps, listed in the spec's implementation notes.
-   - **Outbound webhooks.** `publish-hooks.md` exists server-side for a host's own
-     code; a *configured* webhook with a delivery log is what a client asks for on
-     day one.
-   - **Draft preview sharing.** A tokenised link that shows an unpublished document
-     to somebody with no account. Contentful and Storyblok both ship it; it is how
-     a client reviews work.
-   - **Build artifacts and `.d.ts`.** `ROADMAP.md` calls this out: the library ships
-     TypeScript source and the host compiles it, which is "fine for now, wrong for a
-     release". A product somebody installs needs a build.
+   - **Outbound webhooks.** Not built. `publish-hooks.md` exists server-side for a
+     host's own code; a *configured* webhook with a delivery log is what a client asks
+     for on day one. The seam is there — the hooks fire on publish, unpublish,
+     `pathsChanged`, `updated` and `deleted` — so this is a table, a sender with
+     retries, and a delivery log. **The one genuine gap left in this list.**
+   - **Draft preview sharing.** Done (`edf742b`),
+     `docs/specs/platform/draft-sharing.md`. A share is never an `Actor`, enforced by
+     the cookie name, the type and the schema independently. What it cannot reach is a
+     33-row data table in both the workers test and the e2e script, so a route family
+     added later without a gate fails there rather than being missed. **No admin
+     surface yet** — the spec lists what a "Share a preview" control needs.
+   - **Build artifacts and `.d.ts`.** In flight,
+     `docs/specs/foundation/package-build.md`. `ROADMAP.md` calls it out: the library
+     ships TypeScript source and the host compiles it, "fine for now, wrong for a
+     release". Until it lands, Folio cannot be installed by anyone outside this
+     workspace — which is the difference between a codebase and a product.
 
 ## What is deliberately NOT in this run
 

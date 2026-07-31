@@ -165,13 +165,22 @@ ever resolve the build, so nothing would ever prove it works.
 Beat **`resolve.alias` in the demo**, which would make the reference host stop being
 a real consumer.
 
-**`./vite` is the exception and takes no `development` condition**, because it
-cannot: Vite's config loader externalises bare specifiers and hands them to Node,
-and Node has no `development` condition — it falls straight through to `default`.
-Verified as a failure first: with no `dist`, `pnpm dev` died with
-`ERR_MODULE_NOT_FOUND` on `folio/dist/vite.js`. That is also the reason `./vite`
-*must* be built JavaScript for a real consumer: installed into `node_modules`, a
-`.ts` plugin is a module Node cannot load at all.
+**`./vite` is the exception, and it is the one entry whose `development` condition
+Node ignores.** Vite's config loader externalises bare specifiers and hands them to
+Node, and Node knows no `development` condition, so `import { folio } from
+'folio/vite'` in a `vite.config.ts` *always* takes `default` — the build. Verified
+as a failure first: with no `dist`, `pnpm dev` died with `ERR_MODULE_NOT_FOUND` on
+`folio/dist/vite.js`. That is also why `./vite` must be built JavaScript for a real
+consumer at all: installed into `node_modules`, a `.ts` plugin is a module Node
+cannot load.
+
+The condition still has to be *there*, and removing it as dead config was a real
+regression caught by the gates rather than by reading: **tsc honours it** through
+`customConditions`, and `examples/demo/vite.config.ts` imports `folio/vite`. Without
+it, `pnpm typecheck` needs `dist/types/vite/index.d.ts` on disk and fails
+`TS7016: Could not find a declaration file for module 'folio/vite'` after any
+`pnpm dev`, which builds `build:js` and not the types. Node takes `default`, tsc and
+Vite's module graph take `development`; both readings are live.
 
 So the demo's `dev` becomes `pnpm --filter folio build:js && vite` and its `build`
 becomes `pnpm --filter folio build && vite build`. That is the one build step this

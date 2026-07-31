@@ -5,16 +5,38 @@
   "type": "module",
   "description": "Cloudflare-native block CMS with a live visual editor",
   "scripts": {
+    "build": "pnpm run build:js && pnpm run build:types",
+    "build:js": "esbuild core=src/core/index.ts engine=src/core/engine.ts server=src/server/index.tsx vite=src/vite/index.ts --bundle --splitting --format=esm --platform=neutral --packages=external --target=es2022 --sourcemap --outdir=dist --tsconfig=tsconfig.json",
+    "build:types": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "prepack": "pnpm run clean && pnpm run build",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "files": ["dist", "src", "migrations"],
   "exports": {
-    "./core": "./src/core/index.ts",
-    "./engine": "./src/core/engine.ts",
-    "./server": "./src/server/index.tsx",
+    "./core": {
+      "development": "./src/core/index.ts",
+      "types": "./src/core/index.ts",
+      "default": "./dist/core.js"
+    },
+    "./engine": {
+      "development": "./src/core/engine.ts",
+      "types": "./src/core/engine.ts",
+      "default": "./dist/engine.js"
+    },
+    "./server": {
+      "development": "./src/server/index.tsx",
+      "types": "./src/server/index.tsx",
+      "default": "./dist/server.js"
+    },
+    "./vite": {
+      "development": "./src/vite/index.ts",
+      "types": "./dist/types/vite/index.d.ts",
+      "default": "./dist/vite.js"
+    },
     "./preview": "./src/preview/mount.tsx",
-    "./vite": "./src/vite/index.ts",
     "./admin-entry": "./src/admin/main.tsx"
   },
   "peerDependencies": {
@@ -39,6 +61,7 @@
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "esbuild": "^0.28.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "typescript": "^7.0.2",

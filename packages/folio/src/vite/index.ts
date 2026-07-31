@@ -101,12 +101,24 @@ export function folio(options: FolioPluginOptions): Plugin[] {
   return [main]
 }
 
+/**
+ * `src/admin/main.tsx`, wherever the package sits. The admin ships as **source**,
+ * not as a prebuilt bundle: it is an entry point of the *host's* client build (see
+ * `config` above, which puts it in `rollupOptions.input`), so the host's Vite owns
+ * transpiling its TSX and its `*.module.css`. That is not an assumption — a project
+ * reaching this plugin has Vite by construction.
+ */
 function adminEntry(): string {
   const require = createRequire(import.meta.url)
   try {
+    // Package self-reference. Works from `src/vite/index.ts` and from the built
+    // `dist/vite.js`, since both sit inside the package whose `exports` names the
+    // subpath, and `./admin-entry` is unconditional in that map.
     return require.resolve('folio/admin-entry')
   } catch {
-    // Running inside the monorepo, before the package is linked.
-    return path.resolve(import.meta.dirname, '../admin/main.tsx')
+    // A resolver with no self-reference support. `dist/vite.js` is one directory
+    // below the package root; `src/vite/index.ts` is two.
+    const dir = import.meta.dirname
+    return path.resolve(dir, path.basename(dir) === 'vite' ? '../..' : '..', 'src/admin/main.tsx')
   }
 }

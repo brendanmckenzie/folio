@@ -1,0 +1,68 @@
+{
+  // Declaration emit for the distributable package. `tsconfig.json` is the
+  // *checking* config (`noEmit`, and it includes `test/`); this one only writes
+  // `dist/types/**`. The JavaScript comes from esbuild — see `build:js` — so
+  // nothing here emits `.js`.
+  //
+  // ## Why `src/server` is not in `include`
+  //
+  // Not a tidy-up, and not an oversight. Declaration emit for it **fails**:
+  //
+  //   src/server/story-do.ts(173,17): error TS4094: Property 'sql' of exported
+  //     anonymous class type may not be private or protected.
+  //   src/server/space-do.ts(127,17): error TS4094: Property 'broadcast' of
+  //     exported anonymous class type may not be private or protected.
+  //
+  // `createStoryDO` / `createSpaceDO` each `return class ... extends
+  // DurableObject` — a class expression tsc cannot name — and those classes hold
+  // `private` members. Thirteen of them across the two files. tsc has no way to
+  // write that type into a `.d.ts`, so it writes *no file at all*: `story-do.d.ts`
+  // and `space-do.d.ts` are simply absent, and `server/types.d.ts` needs
+  // `StoryDO` for `DurableObjectNamespace<StoryDO>`. `--noCheck` does not help;
+  // the diagnostic comes from the declaration emitter, not the checker.
+  //
+  // The fix is in those two files: declare a return type on each factory, or make
+  // the members `#private` (ECMAScript private, which tsc emits as `#private;`).
+  // Until then `folio/core`, `folio/engine` and `folio/server` all keep `types`
+  // pointing at source in `package.json`.
+  //
+  // ## Why they keep it *together*
+  //
+  // Half-and-half does not work, and it fails in the least obvious place.
+  // Structurally identical declarations of a generic type are **not**
+  // interchangeable: TypeScript's variance fast path only applies to two
+  // references to the *same* declaration, so with `folio/core` resolved to
+  // `dist/types` and `folio/server` resolved to source,
+  //
+  //   createFolio({ blocks: [defineBlock({ ... })] })
+  //
+  // fails with "Type 'BlockDef<{...}>' is not assignable to type 'AnyBlockDef'"
+  // — `AnyBlockDef` is `BlockDef<any>`, and across two declarations
+  // `strictFunctionTypes` compares `render`'s parameter structurally instead. That
+  // is the first call in every host's file. So the `types` condition moves for
+  // core, engine and server in one commit or not at all.
+  //
+  // `dist/types/core/**` is emitted anyway: it is the artifact the move needs, it
+  // is what proves the pipeline works today, and an out-of-tree consumer
+  // typechecks against it. `folio/vite` already points at it, and can, because
+  // its whole surface is `FolioPluginOptions` and Vite's `Plugin` — it shares no
+  // type with `core`, so there is nothing to be inconsistent with.
+  //
+  // ## Why `src/admin` and `src/preview` are absent
+  //
+  // A different and permanent reason: they are entry points to the *host's*
+  // client bundle, so they ship as source and are never imported as types. See
+  // `package.json`'s `exports` and `src/vite/index.ts`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    // Points at the `src/` this package ships, so jump-to-definition from a
+    // consumer's editor lands on real TypeScript rather than the declaration.
+    "declarationMap": true,
+    "rootDir": "src",
+    "outDir": "dist/types"
+  },
+  "include": ["src/core", "src/vite"]
+}

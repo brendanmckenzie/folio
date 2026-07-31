@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "deploy": "vite build && wrangler deploy",
+    "dev": "pnpm --filter folio build:js && vite",
+    "build": "pnpm --filter folio build && vite build",
+    "deploy": "pnpm run build && wrangler deploy",
     "typecheck": "tsc --noEmit",
     "db:local": "wrangler d1 migrations apply folio --local",
     "db:remote": "wrangler d1 migrations apply folio --remote",

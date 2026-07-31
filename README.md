@@ -2057,8 +2057,17 @@ not migrating the document model:
 
 ## Not built yet
 
-Custom field types defined by a host project, and a real package build (the
-library currently ships TypeScript source and the host compiles it).
+Custom field types defined by a host project. An **admin surface for outbound
+webhooks** — the publish hooks fire and a host's own code can act on them, but a
+*configured* webhook with a delivery log is what a client asks for on day one.
+
+The package build **has** landed (`docs/specs/foundation/package-build.md`): `folio`
+ships `dist/` with declaration files and source maps, so a consumer no longer
+transpiles `node_modules` or matches this repo's TypeScript version. One half is still
+owed and the spec spells it out — `folio/core`, `folio/engine` and `folio/server` point
+`types` at source rather than at `dist/types`, because `createStoryDO` and
+`createSpaceDO` each return an *anonymous* class holding `private` members, and tsc
+answers `TS4094` by emitting no declaration file for those modules at all.
 
 Within localisation: translated slugs (a French URL contains English words), and
 per-locale publishing. Both are deliberate and both are additive later — see the
