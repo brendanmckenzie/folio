@@ -59,20 +59,28 @@ export function Table<T>({
         <thead>
           <tr>
             {columns.map((column) => (
-              <th key={column.key} className={column.numeric ? css.numeric : undefined}>
+              <th
+                key={column.key}
+                className={column.numeric ? css.numeric : undefined}
+                /*
+                 * `aria-sort` belongs on the **header cell**, not on the button
+                 * inside it — the attribute is only supported on a
+                 * `columnheader`, so on the button it was announced nowhere at
+                 * all. A real bug rather than a lint nit, and the one Biome's
+                 * a11y rules found the moment they were switched on for `ui/`.
+                 */
+                aria-sort={
+                  column.sortable && onSort
+                    ? sort?.key === column.key
+                      ? sort.dir === 'asc'
+                        ? 'ascending'
+                        : 'descending'
+                      : 'none'
+                    : undefined
+                }
+              >
                 {column.sortable && onSort ? (
-                  <button
-                    type="button"
-                    className={css.sort}
-                    aria-sort={
-                      sort?.key === column.key
-                        ? sort.dir === 'asc'
-                          ? 'ascending'
-                          : 'descending'
-                        : 'none'
-                    }
-                    onClick={() => onSort(column.key)}
-                  >
+                  <button type="button" className={css.sort} onClick={() => onSort(column.key)}>
                     {column.label}
                     <span className={css.arrow} aria-hidden="true">
                       {sort?.key === column.key ? (sort.dir === 'asc' ? '↑' : '↓') : ''}

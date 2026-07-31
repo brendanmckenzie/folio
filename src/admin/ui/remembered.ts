@@ -52,3 +52,53 @@ function read(key: string, fallback: boolean): boolean {
     return fallback
   }
 }
+
+/**
+ * The same, for a value from a fixed set — Content's `[ Tree | Flat ]` and its
+ * three sorts, and Assets' grid/table toggle next.
+ *
+ * `valid` is required rather than optional, and it is the whole reason this is not
+ * a bare `useState` over `localStorage`. What comes out of storage is whatever was
+ * in there: a value from a build two versions ago, or one somebody typed into
+ * devtools. Without the screen, `?sort=` would be assembled from it and the route
+ * would answer a 400 that no amount of clicking could clear — a remembered
+ * preference must never be able to break the screen that remembers it.
+ */
+export function useRememberedString<T extends string>(
+  key: string,
+  fallback: T,
+  valid: (raw: string) => raw is T,
+) {
+  const [value, set] = useState<T>(() => readString(key, fallback, valid))
+
+  useEffect(() => {
+    set(readString(key, fallback, valid))
+  }, [key, fallback, valid])
+
+  const write = useCallback(
+    (next: T) => {
+      set(next)
+      try {
+        localStorage.setItem(key, next)
+      } catch {
+        // As above: it still changed, it just will not be that way next time.
+      }
+    },
+    [key],
+  )
+
+  return { value, set: write }
+}
+
+function readString<T extends string>(
+  key: string,
+  fallback: T,
+  valid: (raw: string) => raw is T,
+): T {
+  try {
+    const saved = localStorage.getItem(key)
+    return saved !== null && valid(saved) ? saved : fallback
+  } catch {
+    return fallback
+  }
+}

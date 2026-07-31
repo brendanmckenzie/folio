@@ -23,9 +23,123 @@
   border-color: var(--fg-accent);
 }
 
+/*
+ * The filter row. Wraps rather than scrolls: a site with six page types has six
+ * type chips plus five state chips plus the toggle plus the sort, and a horizontal
+ * scroller would hide the last of them behind a gesture nobody expects on a
+ * filter bar.
+ */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+/*
+ * Every group of controls here is a `<fieldset>` with a visually-hidden `<legend>`,
+ * which is what `role="group"` + `aria-label` should have been in the first place —
+ * Biome's `useSemanticElements` says so, and it is right: a fieldset is the element
+ * a group of related controls already has.
+ *
+ * The cost is this reset, and it is not optional. A bare fieldset arrives with a
+ * border, its own margin and padding, and a legend that renders *inside* the border
+ * — so switching the three groups over put visible boxes and headings on the filter
+ * bar. Worth writing down because the markup change looks free and is not.
+ *
+ * The border is dropped per group rather than here, and that is deliberate:
+ * `.controls fieldset` is a class plus an element, so it outranks the single class
+ * on `.toggle` and a `border: 0` in this rule would silently erase the segmented
+ * control's own outline.
+ */
+.controls fieldset {
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+/*
+ * Hidden from sight, present for a screen reader. Not `display: none` and not
+ * `visibility: hidden` — both remove it from the accessibility tree too, which
+ * would take the group's name away and leave the fieldset worse than the
+ * `role="group"` it replaced.
+ */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .chips {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-1);
+  border: 0;
+}
+
+/* The [ Tree | Flat ] toggle. A segmented control rather than two chips: the two
+   are mutually exclusive and always both present, which a joined pair says and a
+   gap does not. */
+.toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.segment {
+  height: 24px;
+  padding: 0 var(--space-3);
+  border: 0;
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.segment + .segment {
+  border-left: 1px solid var(--border);
+}
+
+.segment:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+.segment:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.segmentOn {
+  background: var(--bg-active);
+  color: var(--fg);
+  font-weight: 550;
+}
+
+.sort {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.sort select {
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-xs);
 }
 
 .chip {
@@ -154,14 +268,186 @@
   background: var(--bg-inset);
 }
 
-.footnote {
+/*
+ * The selection bar. `sticky` at the top of the screen rather than floating over
+ * the list, because decision 7a says it "stays put through filtering, sorting,
+ * paging and scrolling" — an overlay would cover rows, which is the wrong thing to
+ * do to a control whose whole job is telling you what you cannot see.
+ */
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--row-h);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--state-accent-border);
+  border-radius: var(--radius-md);
+  background: var(--state-accent-bg);
+  color: var(--state-accent-fg);
+}
+
+.barCount {
+  font-size: var(--text-sm);
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+
+.barActions {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* The per-row checkbox. Sized on the row height rather than left at the browser's
+   default, which is 13px in one engine and 16px in another. */
+.tick {
+  width: 13px;
+  height: 13px;
   margin: 0;
+  accent-color: var(--fg-accent);
+  cursor: pointer;
+}
+
+/* The `Show N more` row. Not a `Row`: it is not a page, it has no title, and it
+   must not be reachable by the tree's ↑ ↓ traversal as though it were a document. */
+.moreRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--row-h);
+  padding: 0 var(--space-2);
+}
+
+/* Matches `List.module.css`'s `.indent` plus the checkbox column, so the control
+   sits under the level it belongs to rather than under the screen. */
+.moreIndent {
+  flex: none;
+  width: calc(16px + var(--space-2) + var(--depth, 0) * var(--indent));
+}
+
+.more {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--fg-accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.more:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.more:disabled {
+  color: var(--fg-subtle);
+  cursor: default;
+}
+
+.more:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* The footer: select-all, the count, and the pager. */
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-2);
   font-size: var(--text-xs);
   color: var(--fg-subtle);
 }
 
-.footnote code {
+.selectAll {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.selectAll:hover:not(:disabled) {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+.selectAll:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.selectAll:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+}
+
+.pager {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* ------------------------------------------------------------ move dialog --- */
+
+.destinations {
+  display: flex;
+  flex-direction: column;
+  max-height: 40vh;
+  margin-top: var(--space-2);
+  overflow-y: auto;
+}
+
+.destination {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: var(--row-h);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.destination:hover {
+  background: var(--bg-hover);
+}
+
+.destinationName {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.destinationPath {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
   font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--fg-subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialogError {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--state-danger-fg);
 }
 
 @media (prefers-reduced-motion: reduce) {

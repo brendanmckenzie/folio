@@ -10,17 +10,53 @@
   gap: var(--space-2);
   min-width: 0;
   height: var(--row-h);
-  padding: 0 var(--space-2) 0 calc(var(--space-2) + var(--depth, 0) * var(--indent));
+  padding: 0 var(--space-2);
   border-radius: var(--radius-md);
   cursor: pointer;
+}
+
+/*
+ * Depth as a spacer element rather than as left padding on the row, which is what
+ * it used to be.
+ *
+ * The reason is the selection checkbox: with the indent in the row's padding,
+ * every checkbox sits at its row's depth, so ticking a run of rows across three
+ * levels means aiming at three different x positions. A spacer *after* the
+ * checkbox column puts every checkbox in one column and indents only what carries
+ * ancestry — the twisty and the title.
+ */
+.indent {
+  flex: none;
+  width: calc(var(--depth, 0) * var(--indent));
 }
 
 .row:hover {
   background: var(--bg-hover);
 }
 
+/* The row you are looking at. */
 .selected {
   background: var(--bg-selected);
+}
+
+/*
+ * Ticked for a bulk action, and deliberately a *different* signal from
+ * `.selected`: a left edge rather than a fill, so a ticked row and the open row
+ * are still distinguishable when they are the same row. A second background
+ * would make one of the two facts invisible exactly when both matter.
+ *
+ * `inset` rather than a border, so a row does not change height or reflow its
+ * indent when it is ticked.
+ */
+.ticked {
+  box-shadow: inset 2px 0 0 var(--fg-accent);
+}
+
+.lead {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
 }
 
 .title {

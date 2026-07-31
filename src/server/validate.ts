@@ -19,6 +19,7 @@
  */
 import * as v from 'valibot'
 import { decodeCursor } from '../core/pagination'
+import { DEFAULT_FLAT_SORT, type FlatSort, type StoryFilter } from '../core/story'
 import { FolioError } from './errors'
 
 /**
@@ -645,4 +646,130 @@ export function requireCursor(raw: string | undefined): void {
   if (raw !== undefined && decodeCursor(raw) === null) {
     throw new FolioError('bad_request', 'Malformed pagination cursor')
   }
+}
+
+/* ------------------------------------------------------------ story lists --- */
+
+/**
+ * How many ids or paths one batch request may name.
+ *
+ * `storiesForChunked` will chunk any number of them, so this is not a technical
+ * bound — it is the bound on how much work one request may ask for. A document
+ * with three hundred links is legitimate; three thousand ids in a query string is
+ * a client with a bug or a URL somebody built by accident, and answering it would
+ * be twenty round trips to D1 inside one request.
+ */
+const MAX_BATCH = 500
+
+/**
+ * A comma-separated id list off a query string, screened id by id.
+ *
+ * Empty in, empty out — an absent `?ids=` and `?ids=` with nothing after it are
+ * the same request, which is what lets a client build the URL without a
+ * conditional. A malformed id is a 400 rather than being dropped: silently
+ * ignoring one means the caller gets a short list back and no way to tell whether
+ * the row is missing or its id was rejected.
+ */
+export function idListQuery(raw: string | undefined): string[] {
+  return listQuery(raw, 'ids', (value, label) => parseOrThrow(ID, value, label))
+}
+
+/**
+ * The same, for paths. Not `ID`: a path contains `/`, is empty for the root
+ * story, and is the one identifier here a person types.
+ *
+ * The root's `''` is why the empty *segments* of a list are kept rather than
+ * filtered — `?paths=,about` legitimately means the root and `/about`, and a
+ * breadcrumb over a top-level page asks for exactly that (`ancestorPaths`
+ * returns `['']`).
+ */
+export function pathListQuery(raw: string | undefined): string[] {
+  return listQuery(raw, 'paths', (value, label) => parseOrThrow(STORY_PATH, value, label))
+}
+
+/**
+ * A stored path, as a query parameter.
+ *
+ * Not `bounded()`, which trims: a trimmed path is a *different* path, so a lookup
+ * for one with a trailing space would silently find its neighbour instead. No
+ * leading slash either — `derivePaths` writes none, so `/about` is not a stored
+ * value and asking for it is a client bug worth surfacing rather than normalising.
+ * `''` is allowed, and is the root story.
+ */
+const STORY_PATH = v.pipe(
+  v.string('must be a string'),
+  v.maxLength(1024, 'must be 1024 characters or fewer'),
+  v.regex(PRINTABLE, 'contains unsupported characters'),
+  v.regex(/^(?!\/)\S*$/, 'is not a story path'),
+)
+
+function listQuery(
+  raw: string | undefined,
+  label: string,
+  screen: (value: string, label: string) => string,
+): string[] {
+  if (raw === undefined || raw === '') return []
+  const parts = raw.split(',')
+  if (parts.length > MAX_BATCH) {
+    throw new FolioError('bad_request', `\`${label}\` names more than ${MAX_BATCH} documents`)
+  }
+  return parts.map((part, at) => screen(part, `${label}[${at}]`))
+}
+
+/** The four states `core/story.ts`'s `StoryState` names. Screened here so a chip
+ * value from a stale bookmark is a 400 rather than a filter that matches nothing
+ * and looks like an empty site. */
+const STORY_STATE = v.picklist(
+  ['draft', 'unpublished', 'live', 'changed'],
+  'must be one of: draft, unpublished, live, changed',
+)
+
+/**
+ * A free-text search term. Bounded, and that is the whole screen: it reaches SQL
+ * as a bound `like` parameter, so `%` and `_` in it are the user's wildcards
+ * rather than an injection — a substring search where `_` matched any character
+ * is a surprise, not a vulnerability.
+ */
+const SEARCH_Q = v.pipe(v.string('must be a string'), v.trim(), v.maxLength(200))
+
+/**
+ * `StoryFilter` off a query string — the same object the Content screen keeps in
+ * its URL and the same one a captured selection would serialise
+ * (`../../../docs/specs/foundation/pagination.md` decision 9).
+ *
+ * `parentId` is deliberately **not** read here. It is structure rather than a
+ * filter, and its absent-versus-null distinction is load-bearing enough
+ * (`null` is the top level; absent is every level) that it belongs as a
+ * positional argument at the one route that means it, not as a key that can be
+ * forgotten inside an options object.
+ */
+export function storyFilterQuery(req: { query: (key: string) => string | undefined }): StoryFilter {
+  const type = req.query('type')
+  const state = req.query('state')
+  const q = req.query('q')
+  const locale = req.query('locale')
+  return {
+    ...(type ? { type: typeNameQuery(type) } : {}),
+    ...(state ? { state: parseOrThrow(STORY_STATE, state, 'state') } : {}),
+    ...(q ? { q: parseOrThrow(SEARCH_Q, q, 'q') } : {}),
+    ...(locale ? { locale: localeQuery(locale) } : {}),
+  }
+}
+
+/**
+ * Flat mode's ordering, defaulting to `edited`.
+ *
+ * Defaulted rather than required, because the default is the answer to the
+ * question the flat list exists for — "what changed lately" — and a client that
+ * omits it wants that rather than an error. An *unknown* sort still 400s: it is a
+ * typo or a stale link, and quietly serving `edited` would make the URL lie about
+ * what is on screen.
+ */
+export function flatSortQuery(raw: string | undefined): FlatSort {
+  if (raw === undefined || raw === '') return DEFAULT_FLAT_SORT
+  return parseOrThrow(
+    v.picklist(['edited', 'title', 'path'], 'must be one of: edited, title, path'),
+    raw,
+    'sort',
+  )
 }

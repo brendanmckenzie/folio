@@ -1,4 +1,5 @@
 import { compareSiblings, type Doc, keyAtIndex } from '../core/doc'
+import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
 import {
   canNest,
   type DocumentType,
@@ -12,13 +13,16 @@ import {
   derivePaths,
   descendants,
   draftState,
+  type FlatSort,
   joinPath,
   newStoryId,
   slugify,
   storyState,
+  type StoryFilter,
   type StoryMeta,
   type StoryNode,
 } from '../core/story'
+import { type Keyset, keysetWhere, orderBy, SIBLING_ORDER, whereOf } from './keyset'
 import {
   clearIndexStatements,
   clearInboundRefStatements,
@@ -180,12 +184,244 @@ export async function storiesFor(
 }
 
 /**
+ * How many bound parameters one `storiesFor` call may carry.
+ *
+ * D1's own ceiling is higher; this is deliberately conservative because the
+ * caller's input is not — a document with three hundred internal links is
+ * legitimate (`pagination.md`'s edge cases), and so is a breadcrumb over a deep
+ * path. The chunk size is the constraint's, not the caller's.
+ */
+const BIND_CHUNK = 100
+
+/**
+ * `storiesFor`, chunked, deduplicated by id, and safe for any size of input.
+ *
+ * This is what `GET {base}/api/stories?ids=` answers with, and the reason it is
+ * not just `storiesFor`: the route's input arrives off a query string, so its
+ * length is whatever a client sent. Rows come back in no particular order — a
+ * batch by id is not a page, and its consumer looks rows up by id rather than
+ * reading them in sequence.
+ */
+export async function storiesForChunked(
+  db: D1Database,
+  ids: readonly string[],
+  paths: readonly string[] = [],
+): Promise<StoryMeta[]> {
+  const batches: Promise<StoryMeta[]>[] = []
+  for (let at = 0; at < ids.length; at += BIND_CHUNK) {
+    batches.push(storiesFor(db, ids.slice(at, at + BIND_CHUNK)))
+  }
+  for (let at = 0; at < paths.length; at += BIND_CHUNK) {
+    batches.push(storiesFor(db, [], paths.slice(at, at + BIND_CHUNK)))
+  }
+  const seen = new Map<string, StoryMeta>()
+  for (const rows of await Promise.all(batches)) {
+    // An id and a path can name the same row — a breadcrumb's leaf is its own
+    // ancestor chain's last entry — so the dedupe is not defensive, it is the
+    // normal case.
+    for (const row of rows) seen.set(row.id, row)
+  }
+  return [...seen.values()]
+}
+
+/**
  * The page tree. `buildTree` drops unrouted rows, so this is `page`-kind types
  * only without a `where` clause of its own — the same list every reader of the
  * tree gets (`document-types.md`). `listDocuments` is the unrouted counterpart.
+ *
+ * **No route answers with this any more.** `GET {base}/api/stories` pages one
+ * level at a time (`listStoryLevel`), so the only callers left are server-side
+ * ones that genuinely need the whole shape — and the tree is a shape, not a list,
+ * which is why it is still here rather than deleted.
  */
 export async function storyTree(db: D1Database): Promise<StoryNode[]> {
   return buildTree(await listStories(db))
+}
+
+/* --------------------------------------------------------- paged tree reads --- */
+
+/**
+ * One story row plus how many children it has.
+ *
+ * **A finding from building the Content screen, not something the spec asked
+ * for.** Per-level paging means the client no longer holds `node.children`, so
+ * nothing tells it whether a row has a disclosure twisty — and the two wrong
+ * answers are both visible: draw a twisty on every row and half of them open on
+ * nothing, or draw none and a site's structure becomes unreachable.
+ *
+ * A correlated subquery over `stories_parent_ord`, so it costs one index probe
+ * per row of the page rather than a scan. `path is not null` inside it for the
+ * same reason the level query has it: an unrouted document carries
+ * `parent_id = null` and is not a child of anything in the tree.
+ */
+export interface StoryLevelRow extends StoryMeta {
+  childCount: number
+}
+
+/**
+ * The three flat orderings, as keysets.
+ *
+ * `edited` is the one with an argument behind it. `draft_updated_at` is nullable
+ * — null until a document's first debounced write — and SQLite sorts nulls last
+ * under `desc`, so ordering by the bare column puts a page created five minutes
+ * ago *below* one last edited three years ago, in a list called "last edited".
+ * The coalesce is what makes it mean what it says, and `stories_edited` indexes
+ * exactly this expression (`migrations/0001_init.sql`).
+ *
+ * `path` needs no real tiebreak — `stories_path` is unique over non-null paths —
+ * but it gets `id` anyway so all three sorts go through one code path.
+ */
+const FLAT_KEYSETS: Record<FlatSort, Keyset> = {
+  edited: { columns: ['coalesce(draft_updated_at, updated_at)', 'id'], direction: 'desc' },
+  title: { columns: ['title', 'id'], direction: 'asc' },
+  path: { columns: ['path', 'id'], direction: 'asc' },
+}
+
+/** The sort key of a row, component for component with `FLAT_KEYSETS`. The
+ * correspondence is the one thing `paginate` cannot check for its caller. */
+function flatKeyOf(sort: FlatSort, row: StoryMeta): [string | number, string] {
+  if (sort === 'edited') return [row.draftUpdatedAt ?? row.updatedAt, row.id]
+  if (sort === 'title') return [row.title, row.id]
+  return [row.path ?? '', row.id]
+}
+
+export interface StoryPageOptions {
+  limit?: number
+  cursor?: string
+  /** Everything except `parentId`, which the level reader takes as its own
+   * argument because it is structure rather than a filter. */
+  filter?: StoryFilter
+  /** Adds `total` for the same filter — one extra `count(*)`, only when asked
+   * (`../../../docs/specs/foundation/pagination.md` decision 5). */
+  count?: boolean
+}
+
+/**
+ * The `where` fragments and binds for the filters three story reads share.
+ *
+ * `state` goes through `STATE_EXPR` rather than a stored column, which is what
+ * makes a state chip answerable server-side once the list is paged: a
+ * client-side predicate over one page filters the page, not the site.
+ */
+function storyFilters(filter: StoryFilter | undefined): { sql: string[]; binds: unknown[] } {
+  const sql: string[] = []
+  const binds: unknown[] = []
+  if (!filter) return { sql, binds }
+  if (filter.type) {
+    sql.push('type = ?')
+    binds.push(filter.type)
+  }
+  if (filter.state) {
+    sql.push(`(${STATE_EXPR}) = ?`)
+    binds.push(filter.state)
+  }
+  if (filter.q) {
+    // Title, slug and path: the three things a person types when looking for a
+    // page, and the same three `matches` compared client-side in the prototype.
+    // `coalesce(path, '')` because an unrouted row has none and `null like ?` is
+    // null rather than false — which would drop the whole row from an OR chain.
+    sql.push("(title like ? or slug like ? or coalesce(path, '') like ?)")
+    const like = `%${filter.q}%`
+    binds.push(like, like, like)
+  }
+  return { sql, binds }
+}
+
+/**
+ * One parent's children, paged over `(ord, id)`.
+ *
+ * `(ord, id)` is exactly what `core/doc.ts`'s `compareSiblings` compares and
+ * exactly what `stories_parent_ord` covers, so the page boundary is total even
+ * when two clients insert between the same neighbours and produce the same `ord`
+ * (`../../../docs/specs/foundation/pagination.md` decision 2).
+ *
+ * `parentId: null` is the top level, and it is **not** the same as absent — which
+ * is why it is a positional argument rather than something to forget inside
+ * `filter`. `path is not null` is what keeps records and singletons out: every
+ * unrouted row carries `parent_id = null`, so without it the top level of the
+ * page tree would list every record on the site.
+ */
+export async function listStoryLevel(
+  db: D1Database,
+  parentId: string | null,
+  opts: StoryPageOptions = {},
+): Promise<Page<StoryLevelRow>> {
+  const limit = clampLimit(opts.limit, 50, 200)
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
+  const resume = keysetWhere(SIBLING_ORDER, cursor)
+  const filters = storyFilters(opts.filter)
+
+  const scope = parentId === null ? 'parent_id is null' : 'parent_id = ?'
+  const scopeBinds = parentId === null ? [] : [parentId]
+  const narrow = ['path is not null', scope, ...filters.sql]
+  const narrowBinds = [...scopeBinds, ...filters.binds]
+
+  const [rows, total] = await Promise.all([
+    db
+      .prepare(
+        `select ${COLS}, ${CHILD_COUNT} from stories
+         ${whereOf(...narrow, resume.sql)} ${orderBy(SIBLING_ORDER)} limit ?`,
+      )
+      .bind(...narrowBinds, ...resume.binds, limit + 1)
+      .all<StoryRow & { childCount: number }>(),
+    opts.count
+      ? db
+          .prepare(`select count(*) as n from stories ${whereOf(...narrow)}`)
+          .bind(...narrowBinds)
+          .first<{ n: number }>()
+      : null,
+  ])
+
+  const page = paginate(
+    rows.results.map((row) => ({ ...withState(row), childCount: row.childCount })),
+    limit,
+    (row) => [row.ord, row.id],
+  )
+  return total ? { ...page, total: total.n } : page
+}
+
+/** The correlated child count. See `StoryLevelRow`. */
+const CHILD_COUNT = `(select count(*) from stories kids
+                      where kids.parent_id = stories.id and kids.path is not null) as childCount`
+
+/**
+ * Every routed page, flat and paged, in one of three orderings — the `[ Tree |
+ * Flat ]` toggle's other half (`pagination.md` decision 2a).
+ *
+ * Two views of one thing, because they answer different questions: a tree tells
+ * you how the site is *shaped*, a flat sortable list tells you what was touched
+ * last, and on a large site the second is how a person finds anything. No
+ * `childCount`, because flat mode has no structure to disclose.
+ */
+export async function listStoriesFlat(
+  db: D1Database,
+  sort: FlatSort,
+  opts: StoryPageOptions = {},
+): Promise<Page<StoryMeta>> {
+  const limit = clampLimit(opts.limit, 50, 200)
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
+  const keyset = FLAT_KEYSETS[sort]
+  const resume = keysetWhere(keyset, cursor)
+  const filters = storyFilters(opts.filter)
+  const narrow = ['path is not null', ...filters.sql]
+
+  const [rows, total] = await Promise.all([
+    db
+      .prepare(
+        `select ${COLS} from stories ${whereOf(...narrow, resume.sql)} ${orderBy(keyset)} limit ?`,
+      )
+      .bind(...filters.binds, ...resume.binds, limit + 1)
+      .all<StoryRow>(),
+    opts.count
+      ? db
+          .prepare(`select count(*) as n from stories ${whereOf(...narrow)}`)
+          .bind(...filters.binds)
+          .first<{ n: number }>()
+      : null,
+  ])
+
+  const page = paginate(rows.results.map(withState), limit, (row) => flatKeyOf(sort, row))
+  return total ? { ...page, total: total.n } : page
 }
 
 /**
