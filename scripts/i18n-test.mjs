@@ -243,7 +243,10 @@ check('the French page declares its language', frHtml.includes('<html lang="fr"'
 check('and ships no JavaScript, like any published page', !frHtml.includes('<script'), '')
 
 // One document, one snapshot, every locale (checkpoint 3).
-const published = await json(`${API}/story/${page.id}/versions`)
+// `.rows`: `GET /story/:id/versions` answers a `Page` since
+// `foundation/pagination.md` phase 4 paged it. `activity` below is **not** paged —
+// it is still capped rather than cursored, and reads as a bare array.
+const published = (await json(`${API}/story/${page.id}/versions`)).rows
 const publishVersion = published.find((v) => v.id === pub.version.id)
 const { doc: snapshot } = await json(`${API}/versions/${publishVersion.id}`)
 check(
@@ -253,9 +256,13 @@ check(
 )
 
 // The tree's per-locale title cache, written by that same publish.
-const tree = await json(`${API}/stories`)
-const flatten = (nodes) => nodes.flatMap((n) => [n, ...flatten(n.children ?? [])])
-const row = flatten(tree).find((n) => n.id === page.id)
+//
+// Read through flat mode rather than by flattening a nested tree: `GET
+// {base}/api/stories` answers **one level at a time** since
+// `foundation/pagination.md` decision 2, so "every routed page" is `?flat=1` and
+// there are no `children` arrays to walk.
+const flat = (await json(`${API}/stories?flat=1&limit=200`)).rows
+const row = flat.find((n) => n.id === page.id)
 check(
   'publish cached the translated title for the tree',
   row?.titleI18n?.fr === 'Localisation (FR)',

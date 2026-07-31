@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import './tokens.css'
 import type { DocumentType, Manifest } from '../../core/schema'
-import type { StoryMeta, StoryNode } from '../../core/story'
+import { DEFAULT_FLAT_SORT, type FlatSort, type StoryMeta } from '../../core/story'
 import { globalPreviewUrl } from '../GlobalsList'
 import { actorLabel, fetchMe, type Me, OPEN } from '../me'
 import { Kitchen } from './Kitchen'
@@ -9,8 +9,9 @@ import type { MenuItem } from './Menu'
 import { activeItem, nav } from './nav'
 import { Palette, type PaletteAction } from './Palette'
 import { type Crumb, type CrumbContext, crumbs, documentTitle, href } from './route'
-import { useRemembered } from './remembered'
+import { useRemembered, useRememberedString } from './remembered'
 import { Content } from './screens/Content'
+import type { ViewMode } from './screens/content-model'
 import { EditorShell } from './screens/EditorShell'
 import { Home } from './screens/Home'
 import { Stub } from './screens/Stub'
@@ -18,6 +19,8 @@ import { Shell } from './Shell'
 import { SAVE_NOTICE, useShortcuts } from './shortcuts'
 import { Toast } from './Toast'
 import { useRouter } from './useRouter'
+import { usePageSearch } from './usePageSearch'
+import { usePreviewHost, useStory } from './useStory'
 
 export interface PrototypeBoot {
   /**
@@ -30,24 +33,28 @@ export interface PrototypeBoot {
 }
 
 /**
- * The shell, wired to real data.
+ * The shell.
  *
- * This is phase 1 of `docs/ui-architecture.md`'s port plan built as a prototype
- * rather than as the port: the sidebar, the top bar, the breadcrumb, the router,
- * the palette and the shortcut map, with the Content screen and the editor's
- * geometry real enough to judge. Nothing here writes.
+ * Phase 1 of `docs/ui-architecture.md`'s port plan, now with phase 2's Content
+ * screen real rather than a prototype — which is what removed the thing this
+ * file's comment used to be about. It booted from four requests, **two of which
+ * returned every row in a table**, and said so as a finding.
  *
- * It boots from the same four requests the current admin does — the manifest, the
- * actor, the story tree, and the unrouted documents — and two of them are the
- * finding: `/stories` returns **every** story and `/documents` returns **every**
- * record, which is `ROADMAP.md`'s next foundation item and the reason the port is
- * sequenced behind pagination rather than in front of it.
+ * One of the two is gone. The tree is no longer fetched here at all: Content owns
+ * its own paged reads, and the three things the shell genuinely needs about a
+ * document — the row, its ancestors, and a global's preview host — come from
+ * `useStory` and `usePreviewHost`, each asking for the ids or paths it needs
+ * (`docs/specs/foundation/pagination.md` decision 7).
+ *
+ * `/documents` is the one left, and it is deliberate rather than overlooked:
+ * asking for it is what *creates* a declared singleton (`ensureSingleton`), so it
+ * is load-bearing in the boot path, and its shape is the Documents screen's to
+ * decide at port phase 3. Paging it now would mean deciding that shape twice.
  */
 export function Prototype({ boot }: { boot: PrototypeBoot }) {
   const { route, go, replace } = useRouter(boot.base)
   const [manifest, setManifest] = useState<Manifest | null>(null)
   const [me, setMe] = useState<Me>(OPEN)
-  const [tree, setTree] = useState<readonly StoryNode[]>([])
   const [unrouted, setUnrouted] = useState<readonly StoryMeta[]>([])
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
@@ -58,34 +65,26 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
     Promise.all([
       fetch(`${boot.apiBase}/schema`).then((r) => r.json() as Promise<Manifest>),
       fetchMe(boot.apiBase, boot.base),
-      fetch(`${boot.apiBase}/stories`, { headers: { accept: 'application/json' } }).then((r) =>
-        r.ok ? (r.json() as Promise<StoryNode[]>) : [],
-      ),
       /**
        * The records and singletons, which are **not in the tree**: `storyTree`
-       * drops every unrouted row, so a global's document is not in `/stories` at
-       * all.
+       * drops every unrouted row, so a global's document is not in the paged
+       * `/stories` walk at all.
        *
-       * A finding, and one the prototype produced by failing: the sidebar links a
-       * global straight at `sng_<type>` (its id is derived), the router resolved
-       * the id against the tree, found nothing, and drew "No such document" under
-       * a correctly highlighted nav item. Two requests is what the current admin
-       * does too, and asking is also what *creates* a singleton on first access
-       * (`stories.ts`'s `ensureSingleton`) — so this call is load-bearing, not
-       * merely convenient.
-       *
-       * It is also the second unpaged fetch in the boot path, which is the same
-       * argument for `ROADMAP.md`'s pagination item as the tree is.
+       * A finding the prototype produced by failing: the sidebar links a global
+       * straight at `sng_<type>` (its id is derived), the router resolved the id
+       * against the tree, found nothing, and drew "No such document" under a
+       * correctly highlighted nav item. Asking is also what *creates* a singleton
+       * on first access (`stories.ts`'s `ensureSingleton`) — so this call is
+       * load-bearing, not merely convenient.
        */
       fetch(`${boot.apiBase}/documents`, { headers: { accept: 'application/json' } })
         .then((r) => (r.ok ? (r.json() as Promise<{ documents: StoryMeta[] }>) : { documents: [] }))
         .then((body) => body.documents),
     ])
-      .then(([m, who, stories, documents]) => {
+      .then(([m, who, documents]) => {
         if (!live) return
         setManifest(m)
         setMe(who)
-        setTree(stories)
         setUnrouted(documents)
         setLoading(false)
       })
@@ -100,12 +99,18 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
   }, [boot.apiBase, boot.base])
 
   const types = manifest?.types ?? []
-  // Tree first, then the unrouted documents: one list for the palette, the
-  // breadcrumb's chain, and resolving whatever `/edit/:id` names.
-  const flat = useMemo(() => [...flatten(tree), ...unrouted], [tree, unrouted])
-  // Held in a local so the narrowing survives into the callback below.
+  const pageTypes = useMemo(() => types.filter((t) => t.kind === 'page'), [types])
   const screen = route.screen
-  const open = screen.name === 'edit' ? flat.find((n) => n.id === screen.id) : undefined
+
+  /**
+   * The open document, resolved by id rather than looked up in a tree the shell no
+   * longer holds. An unrouted document is already in `unrouted`, so it is answered
+   * without a request — which matters because that list is also what brought the
+   * singleton into existence.
+   */
+  const local = screen.name === 'edit' ? unrouted.find((n) => n.id === screen.id) : undefined
+  const fetched = useStory(boot.apiBase, screen.name === 'edit' && !local ? screen.id : undefined)
+  const open = local ?? fetched.story
 
   const groups = useMemo(
     () => nav({ types, globals: manifest?.globals ?? [], me }),
@@ -118,12 +123,16 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
       label: (name) => types.find((t) => t.name === name)?.label,
       ...(open
         ? {
-            chain: chainOf(flat, open),
+            chain: local
+              ? // A record or a global is one crumb: it has no ancestor chain,
+                // because it is not in the tree.
+                [{ id: local.id, title: local.title || local.id }]
+              : fetched.chain,
             root: rootCrumbFor(types.find((t) => t.name === open.type)),
           }
         : {}),
     }),
-    [types, open, flat],
+    [types, open, local, fetched.chain],
   )
   const trail = crumbs(route, crumbContext)
 
@@ -131,6 +140,8 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
   const sidebar = useRemembered(`folio.sidebar.${editing ? 'editor' : 'platform'}`, editing)
   const blockRail = useRemembered('folio.editor.rail', false)
   const inspector = useRemembered('folio.editor.inspector', false)
+  const contentView = useRememberedString<ViewMode>('folio.content.view', 'tree', isViewMode)
+  const contentSort = useRememberedString<FlatSort>('folio.content.sort', DEFAULT_FLAT_SORT, isSort)
 
   useEffect(() => {
     document.title = documentTitle(route, crumbContext)
@@ -156,7 +167,15 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
     return () => clearTimeout(t)
   }, [notice])
 
-  const actions = usePaletteActions({ groups, flat, mount: boot.base, go, label })
+  const search = usePageSearch(boot.apiBase, palette)
+  const actions = usePaletteActions({
+    groups,
+    pages: search.pages,
+    unrouted,
+    mount: boot.base,
+    go,
+    label,
+  })
 
   const user: MenuItem[] = [
     { id: 'ui', label: 'Design system', run: () => go({ name: 'ui' }) },
@@ -172,6 +191,12 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
       run: () => setNotice('Sign out is wired up with the Access port'),
     },
   ]
+
+  const previewType = open && !open.previewUrl ? types.find((t) => t.name === open.type) : undefined
+  const previewHost = usePreviewHost(
+    boot.apiBase,
+    previewType?.kind === 'singleton' ? previewType.previewPath : undefined,
+  )
 
   return (
     <>
@@ -190,42 +215,50 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
         {screenFor({
           route,
           boot,
-          tree,
           loading,
           types,
+          pageTypes,
           open,
           label,
           go,
           replace,
           blockRail,
           inspector,
-          pageTypesInUse: new Set(flat.filter((n) => n.path !== null).map((n) => n.type)).size,
-          preview: previewFor(open, types, flatten(tree), boot.base),
+          notify: setNotice,
+          contentView,
+          contentSort,
+          preview: previewFor(open, previewType, previewHost, boot.base),
         })}
       </Shell>
-      {palette ? <Palette actions={actions} onClose={() => setPalette(false)} /> : null}
+      {palette ? (
+        <Palette actions={actions} onQuery={search.setQuery} onClose={() => setPalette(false)} />
+      ) : null}
       <Toast message={notice} />
     </>
   )
 }
+
+const isViewMode = (raw: string): raw is ViewMode => raw === 'tree' || raw === 'flat'
+const isSort = (raw: string): raw is FlatSort =>
+  raw === 'edited' || raw === 'title' || raw === 'path'
 
 /* ------------------------------------------------------------------ routing --- */
 
 interface ScreenArgs {
   route: ReturnType<typeof useRouter>['route']
   boot: PrototypeBoot
-  tree: readonly StoryNode[]
   loading: boolean
   types: Manifest['types']
+  pageTypes: readonly DocumentType[]
   open: StoryMeta | undefined
   label: (name: string) => string | undefined
   go: ReturnType<typeof useRouter>['go']
   replace: ReturnType<typeof useRouter>['replace']
   blockRail: ReturnType<typeof useRemembered>
   inspector: ReturnType<typeof useRemembered>
-  /** Distinct document types actually present in the page tree. See `Content`'s
-   * `showType`. */
-  pageTypesInUse: number
+  notify: (message: string) => void
+  contentView: ReturnType<typeof useRememberedString<ViewMode>>
+  contentSort: ReturnType<typeof useRememberedString<FlatSort>>
   /** The open document's iframe src. See `EditorShell`'s `preview`. */
   preview: string | undefined
 }
@@ -240,18 +273,24 @@ function screenFor(a: ScreenArgs) {
   const { route, boot } = a
   switch (route.screen.name) {
     case 'home':
-      return <Home types={a.types} tree={a.tree} mount={boot.base} />
+      return <Home types={a.types} apiBase={boot.apiBase} mount={boot.base} />
 
     case 'content':
       return (
         <Content
-          tree={a.tree}
-          loading={a.loading}
           mount={boot.base}
+          apiBase={boot.apiBase}
           query={route.query}
           onQuery={(next) => a.replace({ name: 'content' }, { ...route.query, ...next })}
           onOpen={a.go}
-          showType={a.pageTypesInUse > 1}
+          onNotice={a.notify}
+          {...(a.open ? { selected: a.open.id } : {})}
+          pageTypes={a.pageTypes}
+          remembered={{ view: a.contentView.value, sort: a.contentSort.value }}
+          onRemember={(next) => {
+            a.contentView.set(next.view)
+            a.contentSort.set(next.sort)
+          }}
         />
       )
 
@@ -283,10 +322,6 @@ function screenFor(a: ScreenArgs) {
           title="Assets"
           needs={
             <>
-              <li>
-                Paged listing: the route caps at 200 today, and with no search, asset 201 is
-                unreachable.
-              </li>
               <li>Usage counts, so a delete can name what references the file.</li>
             </>
           }
@@ -316,7 +351,7 @@ function screenFor(a: ScreenArgs) {
     case 'redirects':
       return (
         <Stub title="Redirects">
-          The table it already is — and the one list route in the codebase that already pages
+          The table it already is — and the one list route in the codebase that already paged
           properly, over a keyset cursor.
         </Stub>
       )
@@ -345,15 +380,33 @@ function screenFor(a: ScreenArgs) {
 
 /* ------------------------------------------------------------------ palette --- */
 
+/**
+ * The palette's actions: every screen, plus the documents matching what has been
+ * typed.
+ *
+ * **Pages are searched, not held.** The prototype ranked its two boot payloads in
+ * memory, which was only possible because one of them was every story on the site.
+ * Now the query goes to `?flat=1&q=` (debounced) and the records — already in hand,
+ * and small by construction — are ranked locally, so the palette finds a page on a
+ * site of any size.
+ *
+ * This is decision 8's job in the end: `GET {base}/api/search` unifies the palette,
+ * every screen's search box and both pickers over one route that also reaches
+ * `content_index`'s values. Until it exists, the flat mode of the tree route
+ * answers the same question for pages, which is the part the palette was worst at.
+ */
 function usePaletteActions({
   groups,
-  flat,
+  pages,
+  unrouted,
   mount,
   go,
   label,
 }: {
   groups: ReturnType<typeof nav>
-  flat: readonly StoryMeta[]
+  /** Pages matching what has been typed, from `usePageSearch`. */
+  pages: readonly StoryMeta[]
+  unrouted: readonly StoryMeta[]
   mount: string
   go: ReturnType<typeof useRouter>['go']
   label: (name: string) => string | undefined
@@ -368,12 +421,11 @@ function usePaletteActions({
         run: () => go(item.screen),
       })),
     )
-    const documents: PaletteAction[] = flat.map((node) => {
+    const documents: PaletteAction[] = [...pages, ...unrouted].map((node) => {
       // The path, because that is the thing that tells two pages with the same
-      // title apart — and `design-system.md`'s third commitment says an
-      // identifier is a typographic citizen rather than something to hide. It is
-      // also a `keyword`, so typing a path finds the page whose title does not
-      // contain it.
+      // title apart — and `design-system.md`'s third commitment says an identifier
+      // is a typographic citizen rather than something to hide. It is also a
+      // `keyword`, so typing a path finds the page whose title does not contain it.
       const where = node.path === null ? label(node.type) : node.path === '' ? '/' : node.path
       return {
         id: `doc:${node.id}`,
@@ -384,7 +436,7 @@ function usePaletteActions({
       }
     })
     return [...screens, ...documents]
-  }, [groups, flat, mount, go, label])
+  }, [groups, pages, unrouted, mount, go, label])
 }
 
 /* ------------------------------------------------------------------ preview --- */
@@ -400,18 +452,22 @@ function usePaletteActions({
  *   `/preview/global/:name` route. Reused rather than reimplemented — it is
  *   already pure and already tested.
  * - A **record** has neither, and the editor says so instead of showing a frame.
+ *
+ * The host page is now passed in as one row rather than found in a whole tree
+ * (`usePreviewHost`), which is why `globalPreviewUrl` gets a one-element list: its
+ * signature takes the candidates to search, and the search is now the server's.
  */
 function previewFor(
   story: StoryMeta | undefined,
-  types: readonly DocumentType[],
-  tree: readonly StoryNode[],
+  type: DocumentType | undefined,
+  host: StoryMeta | undefined,
   /** The bare mount: a global's preview is an HTML page. */
   base: string,
 ): string | undefined {
   if (!story) return undefined
   if (story.previewUrl) return story.previewUrl
-  const type = types.find((t) => t.name === story.type)
-  return type?.kind === 'singleton' ? globalPreviewUrl(type, tree, base) : undefined
+  if (type?.kind !== 'singleton') return undefined
+  return globalPreviewUrl(type, host ? [{ ...host, children: [] }] : [], base)
 }
 
 /* -------------------------------------------------------------- breadcrumbs --- */
@@ -434,28 +490,4 @@ function rootCrumbFor(type: DocumentType | undefined): Crumb | null {
     return { text: type.label, screen: { name: 'documents', type: type.name } }
   }
   return { text: 'Content', screen: { name: 'content' } }
-}
-
-/* -------------------------------------------------------------------- trees --- */
-
-function flatten(nodes: readonly StoryNode[]): StoryNode[] {
-  return nodes.flatMap((n) => [n, ...flatten(n.children)])
-}
-
-/**
- * The open document's ancestors, root first, itself last — the breadcrumb's
- * chain. Derived from the flat list by walking `parentId` rather than by
- * searching the tree, which is the same walk `core/refs.ts` does server-side.
- */
-function chainOf(flat: readonly StoryMeta[], node: StoryMeta): { id: string; title: string }[] {
-  const out: { id: string; title: string }[] = []
-  let at: StoryMeta | undefined = node
-  const seen = new Set<string>()
-  while (at && !seen.has(at.id)) {
-    seen.add(at.id)
-    out.unshift({ id: at.id, title: at.title || at.slug || at.id })
-    const parent: string | null = at.parentId
-    at = parent === null ? undefined : flat.find((n) => n.id === parent)
-  }
-  return out
 }

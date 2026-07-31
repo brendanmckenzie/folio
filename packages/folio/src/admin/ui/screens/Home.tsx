@@ -1,11 +1,13 @@
+import { useEffect, useState } from 'react'
+import type { Page } from '../../../core/pagination'
 import type { DocumentType } from '../../../core/schema'
-import type { StoryNode } from '../../../core/story'
+import type { StoryMeta } from '../../../core/story'
 import { href, type Screen } from '../route'
 import css from './Home.module.css'
 
 interface Props {
   types: readonly DocumentType[]
-  tree: readonly StoryNode[]
+  apiBase: string
   mount: string
 }
 
@@ -23,12 +25,13 @@ interface Props {
  * because a plausible fake list on a home screen is the single easiest thing in
  * this prototype to mistake for a working feature.
  */
-export function Home({ types, tree, mount }: Props) {
+export function Home({ types, apiBase, mount }: Props) {
+  const pages = usePageCount(apiBase)
   const cards: { label: string; screen: Screen; count?: number; note: string }[] = [
     {
       label: 'Pages',
       screen: { name: 'content' },
-      count: count(tree),
+      ...(pages === undefined ? {} : { count: pages }),
       note: 'The tree. Every one has a URL.',
     },
     ...types
@@ -93,6 +96,34 @@ export function Home({ types, tree, mount }: Props) {
   )
 }
 
-function count(nodes: readonly StoryNode[]): number {
-  return nodes.reduce((n, node) => n + 1 + count(node.children), 0)
+/**
+ * How many routed pages the site has.
+ *
+ * `?count=1&limit=1` — the count is the whole point and the row is the smallest
+ * thing that can carry it, so this is one aggregate and one row rather than the
+ * recursive walk over a whole tree it replaces. The card simply has no number
+ * until it lands, which is why `count` is spread in conditionally rather than
+ * rendered as a zero: a "0" that turns into "1,284" reads as data loss for the
+ * moment it is wrong.
+ *
+ * The other three cards still have no count, for the reason the comment below
+ * gives, and this is the shape theirs will take.
+ */
+function usePageCount(apiBase: string): number | undefined {
+  const [total, setTotal] = useState<number | undefined>(undefined)
+  useEffect(() => {
+    let live = true
+    fetch(`${apiBase}/stories?flat=1&limit=1&count=1`)
+      .then((res) => (res.ok ? (res.json() as Promise<Page<StoryMeta>>) : null))
+      .then((page) => {
+        if (live && page) setTotal(page.total)
+      })
+      .catch(() => {
+        // A missing number on a card is a missing number. Nothing to say.
+      })
+    return () => {
+      live = false
+    }
+  }, [apiBase])
+  return total
 }

@@ -358,7 +358,9 @@ check(
 
 /* --- records publish and version like pages ------------------------------ */
 
-const adaVersions = await json(`${API}/story/${ada.id}/versions`)
+// `.rows`: `GET /story/:id/versions` answers a `Page` since
+// `foundation/pagination.md` phase 4 paged it.
+const adaVersions = (await json(`${API}/story/${ada.id}/versions`)).rows
 check(
   'a record has ordinary version history',
   Array.isArray(adaVersions) && adaVersions.some((v) => v.kind === 'publish'),
@@ -373,7 +375,7 @@ await ap.tx('rada2', [{ t: 'set', uid: adaDoc.root, field: 'role', value: 'First
 ap.ws.close()
 await post(`/story/${ada.id}/publish`)
 
-const adaVersions2 = await json(`${API}/story/${ada.id}/versions`)
+const adaVersions2 = (await json(`${API}/story/${ada.id}/versions`)).rows
 check(
   'publishing twice retains two publish versions',
   adaVersions2.filter((v) => v.kind === 'publish').length >= 2,

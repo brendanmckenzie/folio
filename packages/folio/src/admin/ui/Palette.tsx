@@ -16,6 +16,17 @@ export interface PaletteAction extends Rankable {
 interface Props {
   actions: readonly PaletteAction[]
   onClose: () => void
+  /**
+   * What has been typed, reported as it changes, for a caller that answers part of
+   * the list from the server.
+   *
+   * The palette used to rank a list it was handed once, which only worked because
+   * the shell held every story on the site. Pages are now searched over
+   * `?flat=1&q=` — so somebody has to hear the keystrokes, and it may as well be
+   * the component that already owns the input. It still ranks whatever it is given:
+   * this reports, it does not delegate.
+   */
+  onQuery?: (query: string) => void
 }
 
 /**
@@ -30,7 +41,7 @@ interface Props {
  * The ranking is `rank.ts`, which is pure and unit tested in Node — the admin's
  * whole test suite works that way and this rebuild keeps it that way.
  */
-export function Palette({ actions, onClose }: Props) {
+export function Palette({ actions, onClose, onQuery }: Props) {
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const listRef = useRef<HTMLDivElement>(null)
@@ -90,6 +101,7 @@ export function Palette({ actions, onClose }: Props) {
           onChange={(e) => {
             setQuery(e.target.value)
             setActive(0)
+            onQuery?.(e.target.value)
           }}
           onKeyDown={(e) => {
             if (e.key === 'Escape') {

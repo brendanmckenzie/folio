@@ -237,15 +237,10 @@ check('the renaming client hears it too, and filters by actor', onAnn.event.acto
 // What the client does with it: reload the tree. Both editors converge, and the
 // URL is the server's own — which is exactly why the event triggers a reload
 // rather than a patch (the admin cannot compute a host's `route`).
-const tree = await json(`${API}/stories`)
-const flat = []
-const walk = (nodes) => {
-  for (const n of nodes) {
-    flat.push(n)
-    walk(n.children)
-  }
-}
-walk(tree)
+// Flat mode, because the tree route answers one level at a time now
+// (`foundation/pagination.md` decision 2) and this wants the whole reloaded set —
+// including a descendant two levels down, which is the point of the second check.
+const flat = (await json(`${API}/stories?flat=1&limit=200`)).rows
 const renamedNode = flat.find((n) => n.id === made.id)
 const childNode = flat.find((n) => n.id === child.id)
 check('the reloaded tree carries the new path', renamedNode?.path === 'space-test-renamed')

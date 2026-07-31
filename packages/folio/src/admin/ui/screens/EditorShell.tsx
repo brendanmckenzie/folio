@@ -178,7 +178,14 @@ export function EditorShell({
             A real separator with a role and a keyboard: the current editor's
             fixed 300px column has no resize at all, and adding one as a bare
             `<div onMouseDown>` would be the same a11y hole the tree rows are.
+
+            The suppression below has to sit here, before the element, rather than
+            beside the `role` attribute it is about — a `//` comment inside a JSX
+            attribute list does not attach to the element's own diagnostic, which
+            costs a while to work out because the comment looks like it is in the
+            right place.
           */}
+          {/* biome-ignore lint/a11y/useSemanticElements: <hr> is the semantic separator and cannot be this one — a focusable grip carrying aria-valuenow is a widget, not a rule */}
           <div
             className={css.grip}
             role="separator"

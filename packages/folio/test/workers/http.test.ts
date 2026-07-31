@@ -17,7 +17,7 @@ import {
   PROTOCOL_VERSION,
   type ServerMsg,
 } from '../../src/core/protocol'
-import type { StoryMeta, StoryNode } from '../../src/core/story'
+import type { StoryMeta } from '../../src/core/story'
 import type { AssetRow } from '../../src/server/assets'
 import type {
   CheckpointedHookPayload,
@@ -106,8 +106,18 @@ const jsonPost = (body: string): RequestInit => ({
   body,
 })
 
-function flatten(nodes: readonly StoryNode[]): StoryNode[] {
-  return nodes.flatMap((n) => [n, ...flatten(n.children)])
+/**
+ * Every routed page, flat.
+ *
+ * `GET /folio/api/stories` used to answer the whole tree as one nested array, and
+ * this was `flatten(tree)`. It now answers **one level at a time**
+ * (`../../../docs/specs/foundation/pagination.md` decision 2), so a test that wants
+ * "every story" asks flat mode instead. `limit=200` is the route's own ceiling and
+ * comfortably past what anything here creates; `pagination.test.ts` is where the
+ * boundary itself is pinned.
+ */
+async function allStories(): Promise<StoryMeta[]> {
+  return (await getJson<Page<StoryMeta>>('/folio/api/stories?flat=1&limit=200')).rows
 }
 
 interface PublishResult {
@@ -241,8 +251,7 @@ describe('stories: CRUD over /folio/api/stories', () => {
   })
 
   it('lists every story in the tree, seeded and created', async () => {
-    const tree = await getJson<StoryNode[]>('/folio/api/stories')
-    const flat = flatten(tree)
+    const flat = await allStories()
 
     expect(flat.some((n) => n.id === 'sty_home')).toBe(true)
     expect(flat.some((n) => n.slug === 'crud-parent')).toBe(true)
@@ -270,8 +279,7 @@ describe('stories: CRUD over /folio/api/stories', () => {
 
     expect(new Set(body.deleted)).toEqual(new Set([parent.id, child.id]))
 
-    const tree = await getJson<StoryNode[]>('/folio/api/stories')
-    expect(flatten(tree).some((n) => n.id === parent.id)).toBe(false)
+    expect((await allStories()).some((n) => n.id === parent.id)).toBe(false)
   })
 
   it('purges the Durable Object on delete, so a reused id reseeds blank instead of resurrecting the old draft', async () => {
@@ -389,12 +397,12 @@ describe('duplicate: POST /folio/api/stories/:id/duplicate', () => {
     const pub = await publish(created.id)
     expect(pub.ok).toBe(true)
 
-    const tree = await getJson<StoryNode[]>('/folio/api/stories')
-    const row = flatten(tree).find((n) => n.id === created.id)
+    const rows = await allStories()
+    const row = rows.find((n) => n.id === created.id)
     expect(row?.publishedAt).not.toBeNull()
 
     // The source was never published by any of this.
-    const sourceTree = flatten(tree).find((n) => n.id === source.id)
+    const sourceTree = rows.find((n) => n.id === source.id)
     expect(sourceTree?.publishedAt).toBeNull()
   })
 
@@ -484,8 +492,7 @@ describe('publish', () => {
     await conn.tx('w2', [{ t: 'set', uid: doc.root, field: 'title', value: 'Second' }])
     expect(await runDurableObjectAlarm(stub)).toBe(true)
 
-    const tree = await getJson<StoryNode[]>('/folio/api/stories')
-    const row = flatten(tree).find((n) => n.id === story.id)
+    const row = (await allStories()).find((n) => n.id === story.id)
     expect(row?.state).toBe('changed')
     expect(row?.hasUnpublishedChanges).toBe(true)
     expect(row?.draftSyncId).toBe(2)
@@ -506,8 +513,7 @@ async function unpublish(storyId: string): Promise<UnpublishResult> {
 }
 
 async function stateOf(storyId: string): Promise<string | undefined> {
-  const tree = await getJson<StoryNode[]>('/folio/api/stories')
-  return flatten(tree).find((n) => n.id === storyId)?.state
+  return (await allStories()).find((n) => n.id === storyId)?.state
 }
 
 describe('unpublish', () => {
@@ -1514,8 +1520,7 @@ describe('validation and the error envelope', () => {
     expect(body.error.message).toContain('300')
 
     // The cap exists to stop the write, not to describe it after the fact.
-    const tree = await getJson<StoryNode[]>('/folio/api/stories')
-    expect(flatten(tree).every((n) => n.title.length <= 300)).toBe(true)
+    expect((await allStories()).every((n) => n.title.length <= 300)).toBe(true)
   })
 
   it('rejects an id that could not name a row', async () => {
@@ -1960,8 +1965,8 @@ describe('document types: GET /folio/api/stories vs GET /folio/api/documents', (
     const page = await dtCreate({ title: 'A visible page' })
     const ada = await dtCreate({ title: 'Ada In Tree Test', type: 'person' })
 
-    const tree = await dtJson<StoryNode[]>('/folio/api/stories')
-    const ids = flatten(tree).map((n) => n.id)
+    const tree = await dtJson<Page<StoryMeta>>('/folio/api/stories?flat=1&limit=200')
+    const ids = tree.rows.map((n) => n.id)
     expect(ids).toContain(page.id)
     expect(ids).not.toContain(ada.id)
 

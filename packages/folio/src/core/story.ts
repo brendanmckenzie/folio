@@ -171,6 +171,26 @@ export interface StoryFilter {
   locale?: string
 }
 
+/**
+ * Flat mode's ordering (`pagination.md` decision 2a) — the other half of the
+ * Content screen's `[ Tree | Flat ]` toggle.
+ *
+ * Here rather than in `server/stories.ts` for the same reason `StoryFilter` is:
+ * it is a value that travels in a URL, so the screen that writes the URL and the
+ * reader that answers it have to agree on the vocabulary, and only `core/` is
+ * shared by both.
+ *
+ * Three and no fourth. `state` would be the obvious next one — it is the one
+ * filter that is also a plausible ordering — and it is deliberately absent: it
+ * would need a fourth index for a sort nobody has asked for, over an expression
+ * with four distinct values. Adding it later is one index and one `order by`.
+ */
+export type FlatSort = 'edited' | 'title' | 'path'
+
+/** `edited`, the default: "what changed lately" is the question flat mode exists
+ * to answer, so a URL that omits the sort wants it rather than an error. */
+export const DEFAULT_FLAT_SORT: FlatSort = 'edited'
+
 export function joinPath(parentPath: string, slug: string): string {
   if (!slug) return parentPath
   return parentPath ? `${parentPath}/${slug}` : slug

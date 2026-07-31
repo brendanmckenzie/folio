@@ -3,7 +3,8 @@
 > **Group:** foundation
 > **Build order:** 18, per docs/specs/README.md
 > **Size:** L ≈ a week or two
-> **Status:** in-progress — phase 1 landing; checkpoints and open questions all closed
+> **Status:** in-progress — phases 1–4 and 7 done; phase 5 partly done, phase 6 moot.
+> See `## Implementation notes`.
 > **Wire version:** none — no socket frame changes shape
 > **Migration:** `0001_init.sql` (the ten existing migrations collapse into one)
 > **Last updated:** 2026-07-31
@@ -828,3 +829,145 @@ None. The last two closed themselves once written down, 2026-07-31:
   Adding it later is one index and one `order by`; guessing now is a write cost on
   every story forever — which is precisely the mistake `stories_draft_updated`
   already made once.
+
+## Implementation notes
+
+Written 2026-07-31, after the stories route landed alongside `ui-architecture.md`'s
+port phase 2. **Read this rather than the plan above** where the two disagree: the
+Ground truth was accurate when written and the phase order did not survive contact
+with the screen built on top of it.
+
+### What landed, and in what order
+
+Phases 1, 2 and 3 landed as written (`0001_init.sql`, `core/pagination.ts` plus
+`server/keyset.ts`, then the `{base}/api` move). Phase 4 then landed in two halves,
+and the split is worth recording because it is the same split the spec's own
+sequencing implies without saying so:
+
+- **Assets, versions, activity, users and tokens** were mechanical: a reader takes
+  `{ filter, cursor, limit }`, the route parses and clamps, `count` is opt-in.
+- **Stories was structural**, and it waited for the Content screen. That was the
+  right call and the reason is decision 2's own consequence: paging a *tree* changes
+  what a client can know, and only the screen could say what it needed back.
+
+**Phase 7 (flat mode) landed with phase 4's stories half, not after it.** They are
+one commit's worth of work — the same `where` fragments, the same filters, the same
+route — and separating them would have meant writing `storyFilters` twice.
+
+**Phase 6 is moot.** It was "keep `DataTable` and `StoryTree` honest until the ports
+land", and the Content port replaced `StoryTree` outright. `DataTable`'s
+client-side pager survives, and now belongs to the Documents screen (port phase 3).
+
+**Phase 5 is half done.** `?ids=`/`?paths=` exists and the *shell* uses it; the
+editor's `buildResolution` call still reads the whole flat list — see below.
+
+### Three things the route needed that this spec did not predict
+
+All three were found by building the screen, which is the argument for that
+sequencing rather than a coincidence of it.
+
+**1. A row has to carry `childCount`.** Per-level paging means the client no longer
+holds `node.children`, so nothing tells it which rows get a disclosure twisty. Both
+alternatives are visibly wrong: a twisty on every row, half of which open onto
+nothing, or no twisty at all and a site's structure unreachable. It is a correlated
+subquery over `stories_parent_ord` — one index probe per row of the page — and it
+is on the level rows only, because flat mode has no structure to disclose.
+
+**2. A batch by identity wants `?paths=` and `?ancestors=1`, not just `?ids=`.**
+Decision 7 named `?ids=` and pointed at `storiesFor(db, ids, paths)`, which already
+takes both. The breadcrumb is why the second half matters: a caller cannot compute
+`ancestorPaths` until it knows the row's own `path`, so `?ids=x&ancestors=1` is one
+request where the specified shape is two sequential ones. `?paths=` on its own has
+exactly one caller — a global finding its preview host, which used to search the
+whole tree for it.
+
+**3. A filtered tree cannot be answered one level at a time.** The sharpest
+finding, and it is a *product* consequence rather than an implementation detail: a
+`changed` page nested under an untouched parent is unreachable by walking down from
+the root, because the parent does not match. The old prototype had no such problem
+— it held the whole tree and filtered client-side, keeping each match's ancestors —
+and that is precisely the capability paging removes.
+
+The answer is that **the filter controls write `view=flat`**: flat mode *is* the
+filtered view. `ui-architecture.md`'s Content section and
+`admin/ui/screens/content-model.ts`'s `withFilter` carry the argument and the two
+rejected alternatives, the more interesting of which was answering "matches, plus
+every ancestor of a match" in SQL. That is buildable (`exists (select 1 from
+stories m where m.path like child.path || '/%' and <match>)` is an index range scan
+over `stories_path`) and was rejected on what it costs *above* the query: a level's
+page then contains rows that are only present to hold a descendant, so paging it
+means paging two interleaved result sets, and the client has to be told which nodes
+to auto-expand.
+
+### Where the spec was wrong
+
+- **"`GET {base}/api/documents` … `?type=&cursor=&limit=&state=&q=&count=`"** —
+  **not done.** It is the last unbounded read in the boot path, and it stayed that
+  way deliberately: its envelope also carries the `indexed` column values and
+  ensuring singletons is a side effect of asking, both of which are the Documents
+  screen's shape to settle at port phase 3. Paging it now would mean deciding that
+  shape twice. Named in `ROADMAP.md` so it is a decision rather than an oversight.
+- **`GET {base}/api/search` (decision 8) is not built.** The palette needed page
+  search the moment the shell stopped holding every story, and got it from
+  `?flat=1&q=` (debounced) rather than waiting for the shared route. So the palette
+  now finds a page on a site of any size, which is what it was worst at — but the
+  *three consumers, one route* part of decision 8 is still owed, and `content_index`
+  values are still unreachable from any search box.
+- **`Editor.tsx:252`'s `buildResolution`** still reads a full list. The old
+  single-screen editor holds `flat` for four different consumers, and it is deleted
+  at port phase 7, so it was given a **documented stopgap** instead of a rewrite:
+  `useStories` walks `?flat=1&sort=path` to exhaustion and rebuilds the tree
+  client-side. N bounded requests rather than one unbounded one — worse for the
+  server than the query it replaces, and the thing it buys is that the *route* is
+  correct for the screens being built against it.
+- **`runtime.ts:525`'s `wantAll` branch** was not revisited. Still server-side, still
+  not a route response.
+- **`{base}/api/story/:id/activity` is still capped, not cursored.** Phase 4 named it
+  and the versions route beside it; only versions was converted. It is
+  `limitParam(query, 60, 200)` and answers a bare array, which is why
+  `history-test.mjs` reads `versions.rows` and `activity` unadorned — a difference
+  that looks like an oversight in the scripts and is a real difference in the routes.
+
+### The e2e scripts were the expensive part, and half of it was not this work
+
+Eight of the fourteen `scripts/*-test.mjs` broke, and finding out **which commit
+broke each** took longer than fixing them:
+
+- **Five were mine**, all reading `GET {base}/api/stories` as a nested tree:
+  `fields-test` (twice), `history-test`, `i18n-test`, `space-test`. Each became
+  `?flat=1&limit=200` or `?parentId=`, and `fields-test`'s "a record is absent from
+  the tree" got *stronger* in the process — flat mode is every routed page, so the
+  claim now holds at any depth rather than at whichever level was loaded.
+- **Three were phase 4's**, left stale when versions was paged one commit earlier:
+  `records-test`, `globals-test`, `i18n-test` needed `.rows`. `history-test` had been
+  updated then, which is what made the others look deliberate.
+
+Two lessons worth carrying to the Documents, Assets and Access ports, each of which
+changes a route these scripts read:
+
+- **A route shape change is not done until every `scripts/*-test.mjs` has run.**
+  `pnpm test` was green through all eight of these; nothing in CI reads those
+  scripts, and `e2e.sh` runs exactly one per invocation, so a stale one stays quiet
+  until somebody runs it by name.
+- **The failure mode is a `TypeError`, not a failed check** — `nodes.flatMap is not a
+  function`, `activity is not iterable`. That reads like a bug in the library rather
+  than a stale caller, which is most of why the attribution took a while.
+
+### Tests, as built
+
+`test/workers/pagination.test.ts` grew three describes rather than a new file, per
+its own header. Two fixture notes worth keeping:
+
+- **Rows are inserted directly, not through `POST /stories`.** `POST` picks `ord`
+  itself, so the two boundary cases that matter — a tie on `ord`, and a null
+  `draft_updated_at` — would be unreachable through it.
+- **`applySeedFixture` was tried and removed.** It also writes users and an API
+  token, which silently changed what the roster tests further down the same file
+  saw. That failure reads exactly like a paging bug.
+
+`scripts/pagination-test.mjs` covers the one property no unit test can: the `order
+by` and the resume clause checked against real SQLite, including a row inserted
+above the cursor mid-walk. 24 checks.
+
+`test/workers/http.test.ts` lost its `flatten(tree)` helper — eight call sites now
+read `allStories()`, which is `?flat=1&limit=200`.

@@ -341,6 +341,17 @@ Audited 2026-07-30, and the state is three-tiered:
 - `GET /users`, `GET /tokens` → `listUsers`, `listTokens`, whole table each.
 - `GET /audit` → no limit anywhere in `server/audit.ts`.
 
+**Status 2026-07-31: all of the above are paged except `GET {base}/api/documents`,
+which is the last unbounded read in the admin's boot path.** It stayed that way on
+purpose. Its envelope also carries the `indexed` column values, and *asking* for it
+is what creates a declared singleton (`ensureSingleton`) — both of which are the
+Documents screen's shape to settle at `ui-architecture.md`'s port phase 3, so paging
+it now would mean deciding that shape twice. `docs/specs/foundation/pagination.md`'s
+implementation notes record what else it left owed: `GET {base}/api/search` (the
+palette got page search from `?flat=1&q=` instead), and `Editor.tsx`'s
+`buildResolution`, which still reads a full list through a documented stopgap that
+dies with the old editor.
+
 The UI half is the same story from the other end. Every admin list is one unpaged
 request; `DataTable` then pages **20 rows client-side over the full list**, and
 `StoryTree` caps a level at 50 rows with "Show all N" — a *render* cap over data
@@ -520,14 +531,23 @@ an unsorted flat list, which stops working somewhere around 15.
 - A migration over a huge document lands as several transactions and therefore
   several undo steps, not one. Named in the dry run's `oversized` list rather than
   hidden; the alternative was refusing to migrate the biggest pages at all.
-- a11y in the admin, what is left of it: the content tree's rows are click-only
-  and there is no keyboard reorder. Dialogs and toasts are done (see the 2026-07-30
-  pass below), so what remains is the hard half — reordering is drag-and-drop over
-  a fractional index, and the keyboard equivalent has to express "between these two
-  siblings" with no pointer, which is a UI question before it is an a11y one. The
-  same shape as `references()`'s ↑ ↓ buttons. Biome's a11y rules stay off until
-  it is done, and turning them on is its own sweep across every admin file
-  (see biome.json).
+- a11y in the admin: **the hard half is done** (2026-07-31, `ui-architecture.md`
+  port phase 2). The rebuilt Content screen's rows are real `treeitem`s with a
+  roving tabindex, and `⌥↑ ⌥↓ ⌥← ⌥→` reorder and reparent — the question this
+  entry called "a UI question before it is an a11y one" was answered by moving one
+  page at a time, so "between these two siblings" never has to be expressed.
+  `content-model.ts`'s `gestureMove` is the arithmetic and is unit tested.
+  What is left is the **sweep**, not the design. Biome's a11y rules are on for
+  `packages/folio/src/admin/ui/**` via an `overrides` entry and off everywhere else,
+  because turning them on globally means fixing every file in the old admin — which
+  port phase 8 deletes. The global switch flips there. Two things the scoped rules
+  already caught in code that had passed review: `Table.tsx` carried `aria-sort` on
+  the sort *button* rather than the header cell, where it is announced by nothing,
+  and a `role={x ? 'a' : 'b'}` expression makes every `aria-*` on the element
+  unverifiable — literal roles per branch are the fix.
+  Still open: `references()` reorders with ↑ ↓ buttons and the tree has no *drag*
+  at all (the keyboard is the only route today; a pointer user must use the row
+  menus).
 - Translated slugs are out: a French URL contains English words. Additive when it
   is asked for (`stories.path_i18n` plus a locale-aware `storyByPath`), and
   deliberately not now — per-locale paths fork the unique index, the `derivePaths`

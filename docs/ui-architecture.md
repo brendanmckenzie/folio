@@ -227,6 +227,17 @@ and the type chip can be a column rather than a repeated word on every row.
   ancestry.
 - **Filters** as chips: state, type, locale completeness. Plus the screen's own
   search, which is the palette scoped to pages.
+- **A filter moves you to Flat**, added 2026-07-31 while building the port, and it
+  is the one genuinely surprising rule on this screen. The tree loads **one level at
+  a time**, so a filtered tree can only show matches whose *entire ancestor chain
+  also matches*: a `changed` page under an untouched parent is unreachable, because
+  walking down from the root never returns its parent. A filter that silently omits
+  matching pages is worse than no filter, so the chips and the search box write
+  `view=flat` in the same URL update that sets them — flat mode *is* the filtered
+  view, and clicking `Tree` clears the filters and goes back to the shape of the
+  site. See `pagination.md`'s implementation notes for the two rejected
+  alternatives, of which the interesting one is answering "matches, plus every
+  ancestor of a match" in SQL.
 - **Selection and bulk actions**: **Publish · Unpublish · Duplicate · Move ·
   Delete.** See decision 7 — the set is what the survey found to be table stakes,
   including Move, which Storyblok treats as ordinary and I had wrongly called hard.
@@ -606,10 +617,21 @@ CSS it replaces. Order is least-coupled first, so the shell is proven before it
 reaches the surface with sync, presence and preview in it.
 
 1. **Shell** — sidebar, top bar, breadcrumb, router, palette, shortcut map. No
-   screen content yet; every route renders a stub.
+   screen content yet; every route renders a stub. **Done** 2026-07-31.
 2. **Content** — the tree as a screen, with keyboard traversal and reorder, and the
    `[ Tree | Flat ]` toggle. Retires `StoryTree.tsx` and turns Biome's a11y rules
-   back on.
+   back on. **Done** 2026-07-31, with three amendments:
+   - **`StoryTree.tsx` is not deleted yet.** It belongs to the *old* single-screen
+     editor, which still owns `{base}/edit/:id` until phase 7. Content no longer
+     uses it, and it goes with the file that does.
+   - **The a11y rules are on for `admin/ui/**` only**, as a scoped `overrides` entry
+     in `biome.json`. Turning them on globally means a sweep across every old admin
+     file, which phase 8 deletes; the global switch flips there. They earned their
+     keep immediately — `Table.tsx` had `aria-sort` on the sort *button* rather than
+     the header cell, where it is announced by nothing.
+   - **`⌥↑ ⌥↓ ⌥← ⌥→` are real**, which closes the last open a11y item in
+     `ROADMAP.md`. All four are one `PATCH /stories/:id { parentId, index }` with
+     different arguments.
 3. **Documents** — the table as a screen. Retires `DataList.tsx`, `DataTable.tsx`.
 4. **Assets** — the new screen, and the picker as one `Dialog` mount of it. Retires
    the library half of `AssetInput.tsx`.
@@ -677,3 +699,26 @@ because a list route and the screen over it are one decision:
 4. **Does flat mode want `sort=state`?** The one filter that is also a plausible
    ordering, and the one sort with no index. Deferred in `pagination.md` rather than
    guessed.
+5. **What is a tree's paging control?** Answered while building the Content port,
+   and recorded here because it is a **departure from Resolved 5**: a tree level
+   appends (`Show 25 more`) where every other list gets next / previous. It has to.
+   A level's rows have expanded descendants nested inside them, so replacing page
+   one with page two would either drop those subtrees or leave them under rows that
+   are no longer on screen — and the indent, which is the only thing carrying
+   ancestry, would stop meaning anything. Flat mode gets the real next / previous,
+   so the rule survives everywhere it can hold. `content-model.ts`'s `Level` carries
+   the argument.
+6. **Does a bulk action need select-all-matching to be useful?** Deferred, and
+   deliberately absent rather than disabled. Explicit selection plus the five actions
+   is built, as N per-item calls with the counts reported. Select-all-matching is
+   decision 7a's flag-plus-captured-filter-plus-count, and the reason that shape
+   works is that the *server* re-runs the filter and executes a batched job —
+   dependency 7, which does not exist. Offering it over per-item client calls would
+   mean fetching 51,420 rows to loop over them, which is the one thing the shape
+   exists to avoid.
+7. **Which Content columns are still owed?** Two of the seven. **Translations** wants
+   a single query over `published_doc` rather than N Durable Object reads
+   (`ROADMAP.md` already records this). **Editing now** wants the space channel, and
+   joining it from a list screen would mean announcing a presence the wire has no
+   word for — "in no story" is not a location `SpacePresence` can express. Both land
+   with the editor port, which needs the channel anyway.

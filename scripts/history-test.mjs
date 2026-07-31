@@ -295,7 +295,14 @@ check(
 
 /* --- unpublished-changes.md: the tree finds unpublished changes ---------- */
 
-const flatten = (nodes) => nodes.flatMap((n) => [n, ...flatten(n.children ?? [])])
+/**
+ * Every routed page, one request.
+ *
+ * `GET {base}/api/stories` answers **one level at a time** since
+ * `foundation/pagination.md` decision 2, so this reads flat mode rather than
+ * flattening a nested tree — there are no `children` arrays to walk any more.
+ */
+const routedPages = async () => (await json(`${API}/stories?flat=1&limit=200`)).rows
 
 const bob = client('Bob', '#30a46c')
 const bobDoc = await bob.hello()
@@ -317,8 +324,7 @@ await bob.expect((m) => m.type === 'delta' && m.txId === 't4')
 // against a real dev server rather than a fake clock.
 await wait(2500)
 
-const treeAfterEdit = await json(`${API}/stories`)
-const rowAfterEdit = flatten(treeAfterEdit).find((n) => n.id === STORY)
+const rowAfterEdit = (await routedPages()).find((n) => n.id === STORY)
 check(
   'the tree marks the story "changed" once the watermark catches up',
   rowAfterEdit?.state === 'changed',
@@ -394,8 +400,7 @@ check(
 )
 
 await wait(2500)
-const treeAfterUndo = await json(`${API}/stories`)
-const rowAfterUndo = flatten(treeAfterUndo).find((n) => n.id === STORY)
+const rowAfterUndo = (await routedPages()).find((n) => n.id === STORY)
 check(
   'the tree marks it "changed" again once the undo is mirrored',
   rowAfterUndo?.state === 'changed',

@@ -6,8 +6,9 @@ import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { cloneDoc } from '../../core/clone'
 import { isKnownLocale, translationStatus } from '../../core/locales'
+import type { Page } from '../../core/pagination'
 import type { DocumentType } from '../../core/schema'
-import type { StoryMeta } from '../../core/story'
+import { ancestorPaths, type StoryMeta } from '../../core/story'
 import { actorString } from '../auth/roles'
 import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
 import { indexedValuesFor } from '../content-index'
@@ -23,17 +24,25 @@ import {
   duplicateStory,
   ensureSingleton,
   listDocuments,
-  storyTree,
+  listStoriesFlat,
+  listStoryLevel,
+  storiesForChunked,
   updateStoryStatement,
 } from '../stories'
 import type { FolioEnv } from '../types'
 import {
+  flatSortQuery,
+  idListQuery,
   idParam,
+  limitParam,
   parseBody,
   parseOptionalBody,
+  pathListQuery,
+  requireCursor,
   StoryCreateBody,
   StoryDuplicateBody,
   StoryPatchBody,
+  storyFilterQuery,
   typeNameQuery,
 } from '../validate'
 import { deleteVersionsStatement } from '../versions'
@@ -49,6 +58,18 @@ import { deleteVersionsStatement } from '../versions'
  */
 function actorFor<Env>(c: Context<FolioEnv<Env>>): string | null {
   return actorString(c.var.actor)
+}
+
+/**
+ * `rt.withUrls` over a page's rows, keeping the envelope.
+ *
+ * A page is `{ rows, cursor, total? }` and only `rows` is content, so a spread
+ * rather than a rebuild: `total` is absent unless it was asked for, and rebuilding
+ * the object by hand is how an absent key becomes `total: undefined` and starts
+ * appearing in the JSON.
+ */
+function decorated<T extends StoryMeta>(rt: FolioRuntime, page: Page<T>): Page<T> {
+  return { ...page, rows: page.rows.map(rt.withUrls) }
 }
 
 export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
@@ -67,10 +88,72 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return type
   }
 
-  // The page tree: `buildTree` drops unrouted rows, so this is page types only.
-  app.get('/stories', requireAccess<Env>(rt, READ), async (c) =>
-    c.json(rt.decorate(await storyTree(c.var.bindings().db))),
-  )
+  /**
+   * The page tree, in one of three modes — and **none of them is the whole
+   * tree** any more (`../../../docs/specs/foundation/pagination.md` decision 2).
+   *
+   *   `?parentId=`            one parent's children, keyset over `(ord, id)`.
+   *                           Absent means the top level.
+   *   `?flat=1&sort=`         every routed page, no structure, one of three
+   *                           orderings (decision 2a).
+   *   `?ids=` / `?paths=`     a batch by identity, uncursored: a batch is not a
+   *                           page (decision 7).
+   *
+   * The modes are checked most-specific first, so `?ids=` wins over `?flat=1`
+   * and `?flat=1` over the level walk. A request naming two of them gets the
+   * narrower one rather than a 400: they are not contradictory, one is simply
+   * more specific, and refusing would make a URL harder to assemble by hand for
+   * no gain in clarity.
+   *
+   * All three share `?type=`, `?state=` and `?q=`, which is what makes a Content
+   * filter chip mean the same thing in either view — and what makes it mean
+   * anything at all once the list is longer than one page.
+   */
+  app.get('/stories', requireAccess<Env>(rt, READ), async (c) => {
+    const db = c.var.bindings().db
+
+    const ids = idListQuery(c.req.query('ids'))
+    const paths = pathListQuery(c.req.query('paths'))
+    if (ids.length > 0 || paths.length > 0) {
+      const rows = await storiesForChunked(db, ids, paths)
+      // `?ancestors=1` pulls each row's breadcrumb chain in the same request.
+      // Two queries rather than one, and worth it: the caller cannot compute
+      // `ancestorPaths` before it knows the row's `path`, so the alternative is
+      // a second round trip for something the server already has in hand.
+      const chain =
+        c.req.query('ancestors') === '1'
+          ? await storiesForChunked(
+              db,
+              [],
+              [...new Set(rows.flatMap((row) => ancestorPaths(row.path)))],
+            )
+          : []
+      const merged = new Map(rows.map((row) => [row.id, row]))
+      for (const row of chain) merged.set(row.id, row)
+      return c.json({ rows: [...merged.values()].map(rt.withUrls) })
+    }
+
+    const cursor = c.req.query('cursor')
+    requireCursor(cursor)
+    const opts = {
+      limit: limitParam(c.req.query('limit'), 50, 200),
+      cursor,
+      filter: storyFilterQuery(c.req),
+      count: c.req.query('count') === '1',
+    }
+
+    if (c.req.query('flat') === '1') {
+      return c.json(
+        decorated(rt, await listStoriesFlat(db, flatSortQuery(c.req.query('sort')), opts)),
+      )
+    }
+
+    // An absent `parentId` is the top level; `parentId=` (empty) is the same
+    // request, so a client can build the URL without a conditional.
+    const raw = c.req.query('parentId')
+    const parentId = raw ? idParam('parentId', raw) : null
+    return c.json(decorated(rt, await listStoryLevel(db, parentId, opts)))
+  })
 
   /**
    * The flat per-type listing records and singletons are addressed through,

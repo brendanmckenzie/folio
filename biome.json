@@ -33,6 +33,16 @@
       "a11y": "off"
     }
   },
+  "overrides": [
+    {
+      "includes": ["packages/folio/src/admin/ui/**"],
+      "linter": {
+        "rules": {
+          "a11y": "on"
+        }
+      }
+    }
+  ],
   "assist": {
     "actions": {
       "source": {

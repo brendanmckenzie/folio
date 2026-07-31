@@ -1,122 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { flatten, stateTone, when } from '../../../src/admin/ui/screens/content-rows'
-import type { StoryNode } from '../../../src/core/story'
+import { stateTone, when } from '../../../src/admin/ui/screens/content-rows'
 
 /**
- * The Content screen's arithmetic. The rule worth pinning hardest is that a
- * filtered tree **keeps the ancestors of its matches** — without it the indent
- * stops meaning anything the moment somebody types, which is the difference
- * between a filter and a broken tree.
+ * What is left of the Content prototype's arithmetic once the tree was paged.
+ *
+ * The `flatten` tests that used to be here are gone with the function, and the
+ * property they pinned hardest — "a filtered tree keeps the ancestors of its
+ * matches" — is the one per-level paging cannot express at all. It became a
+ * *product* decision instead of a client-side walk, and it is pinned as one in
+ * `ui-content-model.test.ts`: a filter moves you to flat mode, because a tree
+ * loaded one level at a time can only show matches whose whole ancestor chain also
+ * matches. See `content-model.ts`'s `withFilter`.
  */
-
-const node = (id: string, extra: Partial<StoryNode> = {}): StoryNode =>
-  ({
-    id,
-    type: 'page',
-    parentId: null,
-    slug: id,
-    path: `/${id}`,
-    ord: 'a0',
-    title: id,
-    publishedAt: null,
-    unpublishedAt: null,
-    updatedAt: 1000,
-    draftSyncId: 0,
-    draftUpdatedAt: null,
-    publishedSyncId: 0,
-    state: 'draft',
-    hasUnpublishedChanges: false,
-    children: [],
-    ...extra,
-  }) as StoryNode
-
-const NONE = new Set<string>()
-const ids = (rows: ReturnType<typeof flatten>) => rows.map((r) => `${r.depth}:${r.node.id}`)
-
-const TREE: StoryNode[] = [
-  node('about', {
-    title: 'About',
-    state: 'live',
-    children: [
-      node('team', { title: 'Our team', state: 'changed', path: '/about/team' }),
-      node('history', { title: 'History', state: 'live', path: '/about/history' }),
-    ],
-  }),
-  node('contact', { title: 'Contact', state: 'draft' }),
-]
-
-describe('flatten', () => {
-  it('walks depth-first with a depth per row', () => {
-    expect(ids(flatten(TREE, { closed: NONE, state: 'all', search: '' }))).toEqual([
-      '0:about',
-      '1:team',
-      '1:history',
-      '0:contact',
-    ])
-  })
-
-  it('is fully expanded by default: collapse is the exception that is stored', () => {
-    const all = flatten(TREE, { closed: NONE, state: 'all', search: '' })
-    expect(all).toHaveLength(4)
-  })
-
-  it('hides the children of a closed node but keeps the node', () => {
-    expect(ids(flatten(TREE, { closed: new Set(['about']), state: 'all', search: '' }))).toEqual([
-      '0:about',
-      '0:contact',
-    ])
-  })
-
-  it('keeps a match and drops everything else', () => {
-    expect(ids(flatten(TREE, { closed: NONE, state: 'all', search: 'contact' }))).toEqual([
-      '0:contact',
-    ])
-  })
-
-  it('keeps the ancestors of a match, so the indent still means depth', () => {
-    expect(ids(flatten(TREE, { closed: NONE, state: 'all', search: 'our team' }))).toEqual([
-      '0:about',
-      '1:team',
-    ])
-  })
-
-  it('searches title, slug and path', () => {
-    const bySlug = flatten(TREE, { closed: NONE, state: 'all', search: 'history' })
-    const byPath = flatten(TREE, { closed: NONE, state: 'all', search: '/about/' })
-    expect(bySlug.map((r) => r.node.id)).toEqual(['about', 'history'])
-    expect(byPath.map((r) => r.node.id)).toEqual(['about', 'team', 'history'])
-  })
-
-  it('ignores case and surrounding whitespace', () => {
-    expect(flatten(TREE, { closed: NONE, state: 'all', search: '  CONTACT ' })).toHaveLength(1)
-  })
-
-  it('filters by state, and keeps an ancestor whose state does not match', () => {
-    const changed = flatten(TREE, { closed: NONE, state: 'changed', search: '' })
-    expect(ids(changed)).toEqual(['0:about', '1:team'])
-    // `about` is live, not changed: it is here as the parent of a match, and it is
-    // still a real row somebody may want to click.
-    expect(changed[0]?.node.state).toBe('live')
-  })
-
-  it('combines a state filter and a search as an AND', () => {
-    expect(flatten(TREE, { closed: NONE, state: 'live', search: 'contact' })).toHaveLength(0)
-    expect(ids(flatten(TREE, { closed: NONE, state: 'live', search: 'history' }))).toEqual([
-      '0:about',
-      '1:history',
-    ])
-  })
-
-  it('still hides a closed node’s matching children, because the person closed it', () => {
-    expect(
-      flatten(TREE, { closed: new Set(['about']), state: 'all', search: 'our team' }),
-    ).toHaveLength(0)
-  })
-
-  it('returns nothing for an empty tree rather than throwing', () => {
-    expect(flatten([], { closed: NONE, state: 'all', search: 'x' })).toEqual([])
-  })
-})
 
 describe('stateTone', () => {
   it('gives a draft the neutral tone, which is the review’s one palette change', () => {

@@ -1,35 +1,62 @@
-import { useMemo, useState } from 'react'
-import type { StoryNode } from '../../../core/story'
+import type { CSSProperties, KeyboardEvent } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import type { DocumentType } from '../../../core/schema'
+import type { FlatSort, StoryMeta } from '../../../core/story'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { EmptyState } from '../EmptyState'
 import { List, ListHeader, Row } from '../List'
+import { Menu } from '../Menu'
 import { href, type Screen } from '../route'
-import { type StateFilter, flatten, stateTone, when } from './content-rows'
+import {
+  type BulkAction,
+  type ContentUrl,
+  contentQuery,
+  filterOf,
+  type Gesture,
+  gestureMove,
+  isNarrowed,
+  type LevelRow,
+  type Move,
+  parseContentUrl,
+  reportOf,
+  ROOT,
+  type Selection,
+  storyRowsOf,
+  summarise,
+  toggleAllShown,
+  toggleSelected,
+  type TreeRow,
+  type ViewMode,
+  type VisibleRow,
+  visibleRows,
+  withFilter,
+  withView,
+} from './content-model'
+import { stateTone, when } from './content-rows'
 import css from './Content.module.css'
+import { MoveDialog } from './MoveDialog'
+import { useContent } from './useContent'
 
 interface Props {
-  tree: readonly StoryNode[]
-  loading: boolean
+  /** Where Folio is mounted, for the real `<a href>` inside each row. */
   mount: string
+  /** The admin's internal JSON base — the reads here and the writes the bulk
+   * actions make. */
+  apiBase: string
+  query: Readonly<Record<string, string>>
+  /** `replace`, not `push`: a filter keystroke must not be a history entry. */
+  onQuery: (next: Record<string, string | undefined>) => void
+  onOpen: (screen: Screen) => void
+  onNotice: (message: string) => void
   /** The open document, if the editor was reached from here — so walking back to
    * the tree shows you where you were. */
   selected?: string
-  query: Readonly<Record<string, string>>
-  onQuery: (next: Record<string, string | undefined>) => void
-  onOpen: (screen: Screen) => void
-  /**
-   * Whether to draw the type badge. False when every page in the tree is the same
-   * type, where the column is one word repeated on every row — the exact noise
-   * `docs/ui-review.md` complained about in the old rail, reproduced faithfully on
-   * the first render of this screen until I looked at it.
-   *
-   * Computed from the **whole tree**, not from the filtered rows and not from the
-   * manifest: the rows would make a column appear and vanish as somebody types,
-   * and the manifest would keep the column on a site that declares a second page
-   * type and has never used it.
-   */
-  showType: boolean
+  /** Declared page types, for the type chips and the create menu. */
+  pageTypes: readonly DocumentType[]
+  /** The remembered view and sort, used when the URL names neither. */
+  remembered: { view: ViewMode; sort: FlatSort }
+  onRemember: (next: { view: ViewMode; sort: FlatSort }) => void
 }
 
 /** Eight placeholder rows, named rather than indexed — an index key on a list
@@ -37,12 +64,18 @@ interface Props {
  * lists here that do. */
 const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8']
 
-const FILTERS: { value: StateFilter; label: string }[] = [
+const STATES = [
   { value: 'all', label: 'All' },
   { value: 'draft', label: 'Draft' },
   { value: 'changed', label: 'Changed' },
   { value: 'live', label: 'Live' },
   { value: 'unpublished', label: 'Unpublished' },
+] as const
+
+const SORTS: { value: FlatSort; label: string }[] = [
+  { value: 'edited', label: 'Last edited' },
+  { value: 'title', label: 'Title' },
+  { value: 'path', label: 'Path' },
 ]
 
 /**
@@ -51,48 +84,238 @@ const FILTERS: { value: StateFilter; label: string }[] = [
  * badge and the timestamp fit at once, and the type is a column rather than a word
  * repeated on every row.
  *
- * Two findings from building it, both worth carrying into the port:
+ * This is `docs/ui-architecture.md`'s port phase 2, and it replaces the prototype
+ * that stood here. Four things changed in the porting, each because the route
+ * underneath it did:
  *
- * 1. **The expand twisty and the drag handle want the same slot.** `Row`'s
- *    `handle` was designed for the drag affordance, and a tree needs a disclosure
- *    control in exactly that position. Here the twisty takes it and there is no
- *    dragging yet; the Content port needs `Row` to hold both, and the twisty is
- *    the one that must never be draggable.
- * 2. **State comes from `StoryMeta.state`, which the server derives** — so the
- *    filter is a client-side predicate over a field, not a query the tree route
- *    would need to learn. That is true until the tree is paged, at which point the
- *    same predicate has to move server-side and the chip has to serialise; see
- *    `ROADMAP.md`'s pagination item, which is why this screen is a prototype and
- *    not the port.
+ * 1. **It loads one level at a time.** `GET {base}/api/stories` answers a
+ *    parent's children over a keyset cursor, so a collapsed node costs nothing and
+ *    "Show all 812" is gone. The screen therefore never holds "the tree" — it
+ *    holds levels, and `content-model.ts` turns those into rows.
+ * 2. **`showType` comes from the manifest, not from what is in use.** The
+ *    prototype counted distinct types across the whole tree, which a paged tree
+ *    cannot do; and the honest replacement is the declared list, because a column
+ *    that appears once you scroll to page three is worse than one that is always
+ *    there. If you can filter by type, you can see type.
+ * 3. **Filtering moves you to flat mode**, because a filtered tree loaded per
+ *    level silently drops matches whose ancestors do not match. The argument, and
+ *    the two rejected alternatives, are on `withFilter`.
+ * 4. **Keyboard reorder is real**, which was the last open a11y item in
+ *    `ROADMAP.md`. `⌥↑ ⌥↓ ⌥← ⌥→` are four `PATCH /stories/:id { parentId, index }`
+ *    calls with different arguments; `content-model.ts`'s `gestureMove` is the
+ *    arithmetic, and it is where the off-by-one on a downward move lives.
  */
-export function Content({
-  tree,
-  loading,
-  mount,
-  selected,
-  query,
-  onQuery,
-  onOpen,
-  showType,
-}: Props) {
-  // Collapse state lives with the screen, not in the URL: `design-system.md`
-  // lists it with the open menus and unsent palette queries. A link to a page in
-  // a tree is a link to the page, not to a particular shape of tree.
-  const [closed, setClosed] = useState<ReadonlySet<string>>(new Set())
-  const state = (query.state ?? 'all') as StateFilter
-  const search = query.q ?? ''
+export function Content(props: Props) {
+  const { mount, apiBase, pageTypes, onNotice, onQuery, onRemember, onOpen } = props
+  const url = parseContentUrl(props.query, props.remembered)
+  const filter = filterOf(url)
+  const data = useContent(apiBase, url)
 
-  const rows = useMemo(
-    () => flatten(tree, { closed, state, search }),
-    [tree, closed, state, search],
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  const [selection, setSelection] = useState<Selection>(new Set())
+  const [moving, setMoving] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  const showType = pageTypes.length > 1
+
+  const go = useCallback(
+    (next: ContentUrl) => {
+      // Remembered *and* in the URL: linkable first, convenient second — the same
+      // rule Assets' grid/table toggle gets. The URL is what a person sends a
+      // colleague; the memory is what they get when they arrive without one.
+      onRemember({ view: next.view, sort: next.sort })
+      onQuery(contentQuery(next))
+    },
+    [onQuery, onRemember],
   )
 
-  const toggle = (id: string) =>
-    setClosed((prev) => {
+  /* ------------------------------------------------------------------ rows --- */
+
+  const rows: VisibleRow[] = useMemo(
+    () =>
+      url.view === 'tree'
+        ? visibleRows(data.levels, expanded)
+        : data.flat.rows.map((row, index) => ({
+            kind: 'story' as const,
+            // Flat rows never disclose, so `childCount` is 0 by construction
+            // rather than fetched: the column exists for the tree's twisty and
+            // there is no twisty here.
+            row: { ...row, childCount: 0 },
+            depth: 0,
+            parent: ROOT,
+            index,
+            siblings: data.flat.rows.length,
+            expandable: false,
+            expanded: false,
+          })),
+    [url.view, data.levels, data.flat.rows, expanded],
+  )
+  const stories = useMemo(() => storyRowsOf(rows), [rows])
+  const visibleIds = useMemo(() => stories.map((r) => r.row.id), [stories])
+  const bar = summarise(selection, visibleIds)
+
+  const rootLevel = data.levels[ROOT]
+  const loading = url.view === 'tree' ? (rootLevel?.loading ?? true) : data.flat.loading
+  const firstLoad = loading && stories.length === 0
+  const error = url.view === 'tree' ? rootLevel?.error : data.flat.error
+  const total = url.view === 'tree' ? rootLevel?.total : data.flat.total
+
+  const toggleOpen = (row: LevelRow) => {
+    setExpanded((prev) => {
       const next = new Set(prev)
-      if (!next.delete(id)) next.add(id)
+      if (!next.delete(row.id)) {
+        next.add(row.id)
+        // Asked for on expand rather than up front, which is the whole point of
+        // per-level loading. `openLevel` is idempotent, so re-opening a node
+        // already fetched costs no request.
+        data.openLevel(row.id)
+      }
       return next
     })
+  }
+
+  /* -------------------------------------------------------------- keyboard --- */
+
+  const patchMove = useCallback(
+    async (move: Move) => {
+      const res = await fetch(`${apiBase}/stories/${encodeURIComponent(move.id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ parentId: move.parentId, index: move.index }),
+      })
+      if (!res.ok) {
+        const { error: err } = (await res.json().catch(() => ({}))) as {
+          error?: { message?: string }
+        }
+        throw new Error(err?.message ?? `Move failed (${res.status})`)
+      }
+    },
+    [apiBase],
+  )
+
+  const gesture = useCallback(
+    async (which: Gesture, at: TreeRow) => {
+      if (url.view === 'flat') {
+        // Order and structure are the same axis in a tree — `ord` *is* the sibling
+        // order — so a reorder inside a list sorted by title or by edit time has
+        // no meaning to express. Refused with the reason rather than silently
+        // ignored, which is the rule the whole screen follows.
+        onNotice('Reordering is a tree operation — switch to Tree to move pages')
+        return
+      }
+      const outcome = gestureMove(which, at, rows, data.levels)
+      if ('refusal' in outcome) {
+        onNotice(outcome.refusal)
+        return
+      }
+      // Focus survives the reload because rows are keyed by story id and the moved
+      // row keeps its own id; the browser restores focus to the same element.
+      try {
+        await patchMove(outcome.move)
+        data.reload()
+      } catch (e) {
+        onNotice((e as Error).message)
+      }
+    },
+    [rows, data, url.view, onNotice, patchMove],
+  )
+
+  /**
+   * → ← and the four ⌥ gestures, for whichever row has focus.
+   *
+   * Reached through `List`'s `onUnhandledKey` rather than a handler on a wrapper
+   * div: the list already knows which row is focused and what index it is, so it
+   * hands both over. ↑ ↓ Home End PageUp PageDown never arrive here — those are
+   * `List`'s, and it consumed them.
+   */
+  const onRowKey = (
+    e: KeyboardEvent<HTMLDivElement>,
+    index: number,
+    focus: (i: number) => void,
+  ) => {
+    const at = stories[index]
+    if (!at) return
+
+    if (e.altKey) {
+      const which = GESTURES[e.key]
+      if (!which) return
+      e.preventDefault()
+      void gesture(which, at)
+      return
+    }
+    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+    e.preventDefault()
+    if (e.key === 'ArrowRight') {
+      // → on a closed parent opens it; on an open one it steps to the first child,
+      // which is the row physically below. Leaving that to ↓ would mean → doing
+      // nothing at all on an already-open node.
+      if (at.expandable && !at.expanded) toggleOpen(at.row)
+      else focus(index + 1)
+      return
+    }
+    // ← collapses an open node, and steps out to the parent otherwise. The same
+    // asymmetry, the other way round.
+    if (at.expanded) toggleOpen(at.row)
+    else focus(stories.findIndex((r) => r.row.id === at.parent))
+  }
+
+  /* ------------------------------------------------------------------ bulk --- */
+
+  const chosen = useMemo(
+    () => stories.filter((r) => selection.has(r.row.id)).map((r) => r.row),
+    [stories, selection],
+  )
+
+  /**
+   * The five bulk actions, as **N sequential per-item calls** — which is what
+   * `ui-architecture.md` decision 7 sanctions and what its "report successes and
+   * failures with counts" exists for. Nothing here is atomic and the report says
+   * so.
+   *
+   * Sequential rather than `Promise.all`: every one of these writes goes through
+   * `updateStoryStatement` or `publish`, both of which read the story table and
+   * derive paths from it, so firing forty in parallel is forty readers racing over
+   * the same rows. The ordering also makes the failure report deterministic.
+   */
+  const runBulk = useCallback(
+    async (action: BulkAction, targets: readonly StoryMeta[], moveTo?: string | null) => {
+      setBusy(true)
+      let done = 0
+      const failures: { title: string; message: string }[] = []
+      for (const story of targets) {
+        try {
+          await writeFor(apiBase, action, story, moveTo)
+          done += 1
+        } catch (e) {
+          failures.push({ title: story.title, message: (e as Error).message })
+        }
+      }
+      setBusy(false)
+      setSelection(new Set())
+      data.reload()
+      onNotice(reportOf(action, done, failures))
+    },
+    [apiBase, data, onNotice],
+  )
+
+  /* ------------------------------------------------------------------ view --- */
+
+  if (error && stories.length === 0) {
+    return (
+      <div className={css.screen}>
+        <ListHeader>Content</ListHeader>
+        <EmptyState
+          title="Could not load the page tree"
+          body={error}
+          action={
+            <Button size="sm" onClick={data.reload}>
+              Try again
+            </Button>
+          }
+        />
+      </div>
+    )
+  }
 
   return (
     <div className={css.screen}>
@@ -102,43 +325,124 @@ export function Content({
             <input
               className={css.search}
               type="search"
-              value={search}
+              value={url.q}
               placeholder="Search pages"
               aria-label="Search pages"
-              // `replace`, not `push`: one history entry per keystroke makes Back
-              // useless, which is the failure mode "the URL is the state" has to
-              // avoid to be worth having.
-              onChange={(e) => onQuery({ q: e.target.value })}
+              onChange={(e) => go(withFilter(url, { q: e.target.value }))}
             />
-            <Button
-              variant="primary"
-              size="sm"
-              disabled
-              reason="Creating pages arrives with the Content port"
-            >
-              New page
-            </Button>
+            <NewPageButton
+              types={pageTypes}
+              apiBase={apiBase}
+              onCreated={(id) => {
+                data.reload()
+                onOpen({ name: 'edit', id })
+              }}
+              onNotice={onNotice}
+            />
           </>
         }
       >
         Content
       </ListHeader>
 
-      <div className={css.chips} role="group" aria-label="Filter by state">
-        {FILTERS.map((filter) => (
-          <button
-            key={filter.value}
-            type="button"
-            className={`${css.chip} ${state === filter.value ? css.chipOn : ''}`}
-            aria-pressed={state === filter.value}
-            onClick={() => onQuery({ state: filter.value === 'all' ? undefined : filter.value })}
-          >
-            {filter.label}
-          </button>
-        ))}
+      <div className={css.controls}>
+        {/*
+          The toggle. `pagination.md` decision 2a: a tree tells you how the site is
+          shaped, a flat sortable list tells you what was touched last, and on a
+          large site the second is how a person finds anything.
+        */}
+        <fieldset className={css.toggle}>
+          <legend className={css.srOnly}>View</legend>
+          {(['tree', 'flat'] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className={`${css.segment} ${url.view === mode ? css.segmentOn : ''}`}
+              aria-pressed={url.view === mode}
+              title={
+                mode === 'tree' && isNarrowed(filter)
+                  ? 'Clears the filters: a tree loads one level at a time, so it cannot show a filtered result without hiding matches'
+                  : undefined
+              }
+              onClick={() => go(withView(url, mode))}
+            >
+              {mode === 'tree' ? 'Tree' : 'Flat'}
+            </button>
+          ))}
+        </fieldset>
+
+        <fieldset className={css.chips}>
+          <legend className={css.srOnly}>Filter by state</legend>
+          {STATES.map((state) => (
+            <button
+              key={state.value}
+              type="button"
+              className={`${css.chip} ${url.state === state.value ? css.chipOn : ''}`}
+              aria-pressed={url.state === state.value}
+              onClick={() => go(withFilter(url, { state: state.value }))}
+            >
+              {state.label}
+            </button>
+          ))}
+        </fieldset>
+
+        {/* Only when there is a choice to make. One page type means the chip set
+            would be "All" and one other thing that selects the same rows. */}
+        {showType ? (
+          <fieldset className={css.chips}>
+            <legend className={css.srOnly}>Filter by type</legend>
+            <button
+              type="button"
+              className={`${css.chip} ${url.type === undefined ? css.chipOn : ''}`}
+              aria-pressed={url.type === undefined}
+              onClick={() => go(withFilter(url, { type: undefined }))}
+            >
+              Any type
+            </button>
+            {pageTypes.map((type) => (
+              <button
+                key={type.name}
+                type="button"
+                className={`${css.chip} ${url.type === type.name ? css.chipOn : ''}`}
+                aria-pressed={url.type === type.name}
+                onClick={() => go(withFilter(url, { type: type.name }))}
+              >
+                {type.label}
+              </button>
+            ))}
+          </fieldset>
+        ) : null}
+
+        {url.view === 'flat' ? (
+          <label className={css.sort}>
+            Sort
+            <select
+              value={url.sort}
+              onChange={(e) => go({ ...url, sort: e.target.value as FlatSort })}
+            >
+              {SORTS.map((sort) => (
+                <option key={sort.value} value={sort.value}>
+                  {sort.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
       </div>
 
-      {loading ? (
+      {bar.count > 0 ? (
+        <SelectionBar
+          summary={bar}
+          busy={busy}
+          onClear={() => setSelection(new Set())}
+          onRun={(action) => {
+            if (action === 'move') setMoving(true)
+            else void runBulk(action, chosen)
+          }}
+        />
+      ) : null}
+
+      {firstLoad ? (
         <div className={css.skeletons} aria-hidden="true">
           {/* Skeleton rows, not a spinner: `--row-h` is fixed, so the shape of the
               answer is known before it arrives and the screen does not jump. */}
@@ -146,90 +450,422 @@ export function Content({
             <div className={css.skeleton} key={key} />
           ))}
         </div>
-      ) : rows.length === 0 ? (
+      ) : stories.length === 0 ? (
         <EmptyState
-          title={tree.length === 0 ? 'No pages yet' : 'Nothing matches'}
+          title={isNarrowed(filter) ? 'Nothing matches' : 'No pages yet'}
           body={
-            tree.length === 0
-              ? 'A page is a document in the tree. Every one of them has a URL.'
-              : 'Try a different state, or clear the search.'
+            isNarrowed(filter)
+              ? 'Try a different state, or clear the search.'
+              : 'A page is a document in the tree. Every one of them has a URL.'
           }
           action={
-            tree.length === 0 ? null : (
-              <Button size="sm" onClick={() => onQuery({ state: undefined, q: undefined })}>
+            isNarrowed(filter) ? (
+              <Button size="sm" onClick={() => go(withView(url, 'tree'))}>
                 Clear filters
               </Button>
-            )
+            ) : null
           }
         />
       ) : (
-        <List label="Pages">
-          {rows.map((row) => (
-            <Row
-              key={row.node.id}
-              depth={row.depth}
-              selected={row.node.id === selected}
-              handle={
-                row.node.children.length > 0 ? (
-                  <button
-                    type="button"
-                    className={css.twisty}
-                    data-open={closed.has(row.node.id) ? undefined : ''}
-                    aria-label={`${closed.has(row.node.id) ? 'Expand' : 'Collapse'} ${row.node.title}`}
-                    aria-expanded={!closed.has(row.node.id)}
-                    onClick={(e) => {
-                      // The row's own click opens the document. A twisty inside it
-                      // must not do both.
-                      e.stopPropagation()
-                      toggle(row.node.id)
-                    }}
-                  >
-                    ›
-                  </button>
-                ) : (
-                  <span className={css.twistySpacer} />
-                )
-              }
-              meta={row.node.slug === '' ? '/' : row.node.slug}
-              trailing={
-                // Fixed-width columns rather than a flex run of chips. Right-aligned
-                // metadata is the correct pattern for a list row, but the first
-                // version let each cell size to its content, so `live · 2m ago` and
-                // `draft · 22 Jan` put their badges at different x positions on
-                // adjacent rows — which is what makes a wide list read as scattered
-                // instead of tabular.
-                <span className={css.cols} data-typed={showType ? '' : undefined}>
-                  {showType ? <Badge>{row.node.type}</Badge> : null}
-                  <Badge tone={stateTone(row.node.state)}>{row.node.state}</Badge>
-                  <span className={css.stamp}>{when(row.node)}</span>
-                </span>
-              }
-              onOpen={() => onOpen({ name: 'edit', id: row.node.id })}
-            >
-              {/* A real link inside the row, so the title is cmd-clickable and
-                  copyable even though the whole row is clickable too. */}
-              <a
-                className={css.title}
-                href={href({ name: 'edit', id: row.node.id }, mount)}
-                // The row is already handling the click and navigating; letting
-                // this bubble would do it twice.
-                onClick={(e) => e.stopPropagation()}
-              >
-                {row.node.title || <span className={css.untitled}>Untitled</span>}
-              </a>
-            </Row>
-          ))}
+        <List
+          label={url.view === 'tree' ? 'Page tree' : 'Pages'}
+          tree={url.view === 'tree'}
+          multiselect
+          onUnhandledKey={onRowKey}
+        >
+          {rows.map((row) =>
+            row.kind === 'more' ? (
+              <MoreRow
+                key={`more:${row.parent}`}
+                row={row}
+                onMore={() => data.moreOfLevel(row.parent)}
+              />
+            ) : (
+              <PageRow
+                key={row.row.id}
+                at={row}
+                tree={url.view === 'tree'}
+                mount={mount}
+                showType={showType}
+                typeLabel={pageTypes.find((t) => t.name === row.row.type)?.label}
+                ticked={selection.has(row.row.id)}
+                current={row.row.id === props.selected}
+                onToggleOpen={() => toggleOpen(row.row)}
+                onToggleTick={() => setSelection((prev) => toggleSelected(prev, row.row.id))}
+                onOpen={() => onOpen({ name: 'edit', id: row.row.id })}
+              />
+            ),
+          )}
         </List>
       )}
 
-      <p className={css.footnote}>
-        {rows.length} of {countAll(tree)} pages. Unpaged, deliberately: this reads the tree route as
-        it is today, and paging it is <code>ROADMAP.md</code>&rsquo;s next foundation item.
-      </p>
+      <div className={css.footer}>
+        <button
+          type="button"
+          className={css.selectAll}
+          onClick={() => setSelection((prev) => toggleAllShown(prev, visibleIds))}
+          disabled={visibleIds.length === 0}
+        >
+          {visibleIds.every((id) => selection.has(id)) && visibleIds.length > 0
+            ? 'Deselect all shown'
+            : 'Select all shown'}
+        </button>
+        {/*
+          `Showing n of N`, which is the owner's answer to the paging control
+          (Resolved 5): next / previous plus an exact count, never "page 3 of 7".
+          In tree mode the count is the *top level*'s, because that is the list the
+          number is next to — a site-wide total beside a tree would be a number
+          nothing on screen adds up to.
+        */}
+        <span className={css.count}>
+          {total === undefined
+            ? `${stories.length} shown`
+            : url.view === 'tree'
+              ? `${rootLevel?.rows.length ?? 0} of ${total} top-level pages`
+              : `${stories.length} of ${total} pages`}
+        </span>
+        {url.view === 'flat' ? (
+          <span className={css.pager}>
+            <Button
+              size="sm"
+              disabled={!data.canGoBack}
+              reason="This is the first page"
+              onClick={data.prevPage}
+            >
+              Previous
+            </Button>
+            <Button
+              size="sm"
+              disabled={data.flat.cursor === null}
+              reason="This is the last page"
+              onClick={data.nextPage}
+            >
+              Next
+            </Button>
+          </span>
+        ) : null}
+      </div>
+
+      {moving ? (
+        <MoveDialog
+          apiBase={apiBase}
+          count={chosen.length}
+          onClose={() => setMoving(false)}
+          onConfirm={(parentId) => {
+            setMoving(false)
+            void runBulk('move', chosen, parentId)
+          }}
+        />
+      ) : null}
     </div>
   )
 }
 
-function countAll(tree: readonly StoryNode[]): number {
-  return tree.reduce((n, node) => n + 1 + countAll(node.children), 0)
+/* ------------------------------------------------------------------- a row --- */
+
+function PageRow({
+  at,
+  tree,
+  mount,
+  showType,
+  typeLabel,
+  ticked,
+  current,
+  onToggleOpen,
+  onToggleTick,
+  onOpen,
+}: {
+  at: { kind: 'story' } & TreeRow
+  tree: boolean
+  mount: string
+  showType: boolean
+  typeLabel: string | undefined
+  ticked: boolean
+  current: boolean
+  onToggleOpen: () => void
+  onToggleTick: () => void
+  onOpen: () => void
+}) {
+  const { row } = at
+  return (
+    <Row
+      depth={at.depth}
+      tree={tree}
+      {...(at.expandable ? { expanded: at.expanded } : {})}
+      selected={ticked}
+      current={current}
+      onOpen={onOpen}
+      onSelect={onToggleTick}
+      lead={
+        <input
+          type="checkbox"
+          className={css.tick}
+          checked={ticked}
+          // Held out of the tab order: the list is one tab stop by design (roving
+          // tabindex), and a checkbox per row would make a hundred-row list a
+          // hundred stops. Space on the focused row is the keyboard route, which
+          // is `Row`'s `onSelect`.
+          tabIndex={-1}
+          aria-label={`Select ${row.title || 'Untitled'}`}
+          onClick={(e) => e.stopPropagation()}
+          onChange={onToggleTick}
+        />
+      }
+      handle={
+        at.expandable ? (
+          <button
+            type="button"
+            className={css.twisty}
+            data-open={at.expanded ? '' : undefined}
+            aria-label={`${at.expanded ? 'Collapse' : 'Expand'} ${row.title}`}
+            // No `aria-expanded` here: the treeitem around it already carries it,
+            // and two elements announcing the same state is one of them lying as
+            // soon as they disagree.
+            onClick={(e) => {
+              // The row's own click opens the document. A twisty inside it must
+              // not do both.
+              e.stopPropagation()
+              onToggleOpen()
+            }}
+          >
+            ›
+          </button>
+        ) : (
+          // A leaf still owes the column its width, or every leaf title sits 16px
+          // left of its siblings' and the indent stops reading as depth.
+          <span className={css.twistySpacer} />
+        )
+      }
+      /*
+       * The slug in tree mode, the **full path** in flat.
+       *
+       * `pagination.md` phase 7 item 3, and it is the opposite rule in each view
+       * for one reason: inside a tree the indent carries the ancestry, so a path
+       * would repeat what the shape already says; in a flat list there is no
+       * indent, so the slug alone cannot tell `/about/team` from `/careers/team`.
+       */
+      meta={tree ? (row.slug === '' ? '/' : row.slug) : row.path === '' ? '/' : `/${row.path}`}
+      trailing={
+        // Fixed-width columns rather than a flex run of chips. Right-aligned
+        // metadata is the correct pattern for a list row, but the first version
+        // let each cell size to its content, so `live · 2m ago` and `draft · 22 Jan`
+        // put their badges at different x positions on adjacent rows — which is
+        // what makes a wide list read as scattered instead of tabular.
+        <span className={css.cols} data-typed={showType ? '' : undefined}>
+          {showType ? <Badge>{typeLabel ?? row.type}</Badge> : null}
+          <Badge tone={stateTone(row.state)}>{row.state}</Badge>
+          <span className={css.stamp}>{when(row)}</span>
+        </span>
+      }
+    >
+      {/* A real link inside the row, so the title is cmd-clickable and copyable
+          even though the whole row is clickable too. */}
+      <a
+        className={css.title}
+        href={href({ name: 'edit', id: row.id }, mount)}
+        // The row is already handling the click and navigating; letting this
+        // bubble would do it twice.
+        onClick={(e) => e.stopPropagation()}
+      >
+        {row.title || <span className={css.untitled}>Untitled</span>}
+      </a>
+    </Row>
+  )
+}
+
+/** The rest of an incomplete level. See `Level` in `content-model.ts` for why a
+ * tree appends rather than paging next / previous. */
+function MoreRow({
+  row,
+  onMore,
+}: {
+  row: Extract<VisibleRow, { kind: 'more' }>
+  onMore: () => void
+}) {
+  const remaining = row.total === undefined ? undefined : row.total - row.loaded
+  return (
+    <div className={css.moreRow} style={{ '--depth': row.depth } as CSSProperties}>
+      <span className={css.moreIndent} />
+      <button type="button" className={css.more} disabled={row.loading} onClick={onMore}>
+        {row.loading
+          ? 'Loading…'
+          : remaining === undefined
+            ? 'Show more'
+            : `Show ${remaining} more`}
+      </button>
+    </div>
+  )
+}
+
+/* --------------------------------------------------------------- the bar --- */
+
+function SelectionBar({
+  summary,
+  busy,
+  onClear,
+  onRun,
+}: {
+  summary: ReturnType<typeof summarise>
+  busy: boolean
+  onClear: () => void
+  onRun: (action: BulkAction) => void
+}) {
+  return (
+    // `role="status"`, so the count and the mode are announced when they change:
+    // "acting on more than you can see" is the hazard this bar exists to name, and
+    // a sighted user reads it while a screen reader user would otherwise not be
+    // told at all.
+    <div className={css.bar} role="status">
+      <span className={css.barCount}>{summary.text}</span>
+      <span className={css.barActions}>
+        <Button size="sm" disabled={busy} onClick={() => onRun('publish')}>
+          Publish
+        </Button>
+        <Button size="sm" disabled={busy} onClick={() => onRun('unpublish')}>
+          Unpublish
+        </Button>
+        <Button size="sm" disabled={busy} onClick={() => onRun('duplicate')}>
+          Duplicate
+        </Button>
+        <Button size="sm" disabled={busy} onClick={() => onRun('move')}>
+          Move…
+        </Button>
+        <Button size="sm" variant="danger" disabled={busy} onClick={() => onRun('delete')}>
+          Delete
+        </Button>
+        <Button size="sm" variant="subtle" onClick={onClear}>
+          Clear
+        </Button>
+      </span>
+    </div>
+  )
+}
+
+/* ------------------------------------------------------------------ create --- */
+
+/**
+ * One affordance while there is one thing it could mean; a menu the moment there
+ * is a choice — the rule `document-types.md` phase 3 already established for the
+ * old tree's `+ New`.
+ *
+ * `under` is deliberately **not** applied here: the button creates at the top
+ * level, and every declared page type can go there unless its own `under` says
+ * otherwise. Creating *inside* a page is the row's `+`, which port phase 7 brings
+ * back with the editor — this is the screen-level create and nothing more.
+ */
+function NewPageButton({
+  types,
+  apiBase,
+  onCreated,
+  onNotice,
+}: {
+  types: readonly DocumentType[]
+  apiBase: string
+  onCreated: (id: string) => void
+  onNotice: (message: string) => void
+}) {
+  const [pending, setPending] = useState(false)
+  const top = types.filter((t) => (t.under ?? []).length === 0)
+
+  const create = async (type: string | undefined) => {
+    setPending(true)
+    try {
+      const res = await fetch(`${apiBase}/stories`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Untitled', parentId: null, ...(type ? { type } : {}) }),
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
+        throw new Error(body.error?.message ?? `Could not create the page (${res.status})`)
+      }
+      onCreated(((await res.json()) as { id: string }).id)
+    } catch (e) {
+      onNotice((e as Error).message)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  if (top.length > 1) {
+    return (
+      <Menu
+        align="end"
+        trigger="New page"
+        items={top.map((type) => ({
+          id: type.name,
+          label: type.label,
+          run: () => void create(type.name),
+        }))}
+      />
+    )
+  }
+  return (
+    <Button
+      variant="primary"
+      size="sm"
+      disabled={pending || top.length === 0}
+      reason={top.length === 0 ? 'No page type may be created at the top level' : 'Creating…'}
+      onClick={() => void create(top[0]?.name)}
+    >
+      New page
+    </Button>
+  )
+}
+
+/* ------------------------------------------------------------------ writes --- */
+
+/**
+ * One bulk action against one document.
+ *
+ * Every one of these is a route that already existed for the single-document case,
+ * which is the point of decision 7: `duplicate` is `duplicate-and-paste.md`'s call
+ * in a loop, `move` is the same `PATCH` a drag performs, and `delete` keeps its
+ * `?redirect=true` default so a bulk delete leaves the same redirects a single one
+ * would (`redirects.md` decision 4).
+ */
+async function writeFor(
+  apiBase: string,
+  action: BulkAction,
+  story: StoryMeta,
+  moveTo?: string | null,
+): Promise<void> {
+  const id = encodeURIComponent(story.id)
+  const [method, path, body] =
+    action === 'publish'
+      ? (['POST', `/story/${id}/publish`, undefined] as const)
+      : action === 'unpublish'
+        ? (['POST', `/story/${id}/unpublish`, undefined] as const)
+        : action === 'duplicate'
+          ? (['POST', `/stories/${id}/duplicate`, {}] as const)
+          : action === 'delete'
+            ? (['DELETE', `/stories/${id}?redirect=true`, undefined] as const)
+            : // `index: 0` — a bulk move lands the set at the top of the
+              // destination, in the order the loop runs. Anything else would need
+              // the destination's sibling count, which is a read per item for an
+              // ordering nobody specified.
+              (['PATCH', `/stories/${id}`, { parentId: moveTo ?? null, index: 0 }] as const)
+
+  const res = await fetch(`${apiBase}${path}`, {
+    method,
+    ...(body === undefined
+      ? {}
+      : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  })
+  if (!res.ok) {
+    const parsed = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
+    throw new Error(parsed.error?.message ?? `HTTP ${res.status}`)
+  }
+}
+
+/**
+ * Which gesture an ⌥-arrow means. A table rather than a nested ternary, because
+ * four two-word branches read as four rules and a ternary chain reads as one
+ * expression nobody checks.
+ */
+const GESTURES: Record<string, Gesture | undefined> = {
+  ArrowUp: 'up',
+  ArrowDown: 'down',
+  ArrowLeft: 'out',
+  ArrowRight: 'in',
 }

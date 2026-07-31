@@ -182,7 +182,9 @@ check(
 
 /* --- restoring an old header version is one ordinary transaction --------- */
 
-const versions = await json(`${API}/story/${header.id}/versions`)
+// `.rows`: `GET /story/:id/versions` answers a `Page` since
+// `foundation/pagination.md` phase 4 paged it.
+const versions = (await json(`${API}/story/${header.id}/versions`)).rows
 const firstPublish = versions.find((v) => v.id === pub1.version.id)
 check('the first publish is still in the header’s own history', Boolean(firstPublish))
 

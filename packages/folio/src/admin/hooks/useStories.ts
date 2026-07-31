@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { StoryMeta, StoryNode } from '../../core/story'
+import type { Page } from '../../core/pagination'
+import { buildTree, type StoryMeta, type StoryNode } from '../../core/story'
 import type { IndexedValues } from '../../server/content-index'
 import { expectJson, expectOk, send } from '../api'
 import type { Notify } from './useNotice'
@@ -48,6 +49,47 @@ function flatten(nodes: StoryNode[]): StoryNode[] {
   return nodes.flatMap((n) => [n, ...flatten(n.children)])
 }
 
+/** Pages per request while walking the tree below. The route clamps at 200. */
+const WALK_LIMIT = 200
+
+/**
+ * The whole page tree, assembled by walking `?flat=1` to exhaustion.
+ *
+ * **A deliberate stopgap, and it dies with this file.** `GET {base}/api/stories`
+ * used to answer the whole tree in one request; it now answers one level at a
+ * time (`docs/specs/foundation/pagination.md` decision 2), which is what makes a
+ * collapsed node cost nothing and what the rebuilt Content screen is built on.
+ * This editor is the *old* single-screen admin — it holds `flat` for
+ * `buildResolution`, the link picker, the reference picker and the parent picker,
+ * every one of which wants every story — so it cannot page without being
+ * rewritten, and it is deleted at `docs/ui-architecture.md`'s port phase 7.
+ *
+ * So: N bounded requests instead of one unbounded one. Worse for the server than
+ * the query it replaces, better than the route staying dishonest for five more
+ * phases, and it transfers exactly what this screen already transferred. The
+ * thing it does buy is that the *route* is now correct for the screens being
+ * built against it.
+ *
+ * `sort=path` rather than the default `edited`: paths are unique and stable, so a
+ * page inserted mid-walk cannot shift a later page's boundary the way a
+ * re-editable timestamp can. `buildTree` re-sorts siblings by `compareSiblings`
+ * anyway, so the walk order never reaches the screen.
+ */
+async function wholeTree(apiBase: string): Promise<StoryNode[]> {
+  const rows: StoryMeta[] = []
+  let cursor: string | null = null
+  do {
+    const query = new URLSearchParams({ flat: '1', sort: 'path', limit: String(WALK_LIMIT) })
+    if (cursor) query.set('cursor', cursor)
+    const res = await fetch(`${apiBase}/stories?${query}`)
+    if (!res.ok) break
+    const page = (await res.json()) as Page<StoryMeta>
+    rows.push(...page.rows)
+    cursor = page.cursor
+  } while (cursor)
+  return buildTree(rows)
+}
+
 /**
  * The story tree, the CRUD that changes it, and which story the editor is on.
  *
@@ -78,11 +120,8 @@ export function useStories(
    * the tree request must not be responsible for.
    */
   const reload = useCallback(async () => {
-    const [treeRes, docsRes] = await Promise.all([
-      fetch(`${apiBase}/stories`),
-      fetch(`${apiBase}/documents`),
-    ])
-    if (treeRes.ok) setTree((await treeRes.json()) as StoryNode[])
+    const [pages, docsRes] = await Promise.all([wholeTree(apiBase), fetch(`${apiBase}/documents`)])
+    setTree(pages)
     if (docsRes.ok) {
       const body = (await docsRes.json()) as { documents: StoryMeta[]; indexed?: IndexedValues }
       // Given `children: []` so one list can hold both kinds: nothing nests

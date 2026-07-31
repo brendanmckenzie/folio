@@ -210,8 +210,12 @@ check(
 )
 
 // Renaming a branch cascades to descendants, so a link to the child follows too.
-const tree = await json(`${API}/stories`)
-const team = tree.flatMap((n) => n.children).find((c) => c.id === 'sty_team')
+//
+// `?parentId=` rather than a walk of the whole tree: the route pages one level at a
+// time now (`foundation/pagination.md` decision 2), and this only ever wanted one
+// parent's children.
+const kids = (await json(`${API}/stories?parentId=sty_about&limit=200`)).rows
+const team = kids.find((c) => c.id === 'sty_team')
 check('descendant paths cascade on rename', team?.path === 'partners/team', team?.path)
 
 await json(`${API}/stories/sty_about`, {
@@ -879,11 +883,11 @@ check(
   `${ada.url} ${ada.previewUrl}`,
 )
 
-const treeIds = (nodes) => nodes.flatMap((n) => [n.id, ...treeIds(n.children)])
-check(
-  'a record is absent from GET /folio/api/stories',
-  !treeIds(await json(`${API}/stories`)).includes(ada.id),
-)
+// Flat mode is "every routed page", which is the strongest form of this claim: a
+// record is absent from the page tree at *any* depth, not merely from the level
+// that happens to be loaded.
+const routedIds = (await json(`${API}/stories?flat=1&limit=200`)).rows.map((n) => n.id)
+check('a record is absent from GET /folio/api/stories', !routedIds.includes(ada.id))
 const docs = await json(`${API}/documents?type=person`)
 check(
   'a record is present in GET /folio/api/documents?type=person',
