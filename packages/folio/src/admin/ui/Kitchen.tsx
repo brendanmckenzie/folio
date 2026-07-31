@@ -16,6 +16,7 @@ import {
   type PaletteAction,
   Row,
   SAVE_NOTICE,
+  scoped,
   Select,
   type Sort,
   Table,
@@ -201,7 +202,7 @@ export function Kitchen() {
   })
 
   return (
-    <div className={`folio-ui ${css.page}`} data-theme={theme === 'system' ? undefined : theme}>
+    <div className={scoped(css.page)} data-theme={theme === 'system' ? undefined : theme}>
       <header className={css.bar}>
         <strong>Folio</strong>
         <span className={css.slug}>design system</span>

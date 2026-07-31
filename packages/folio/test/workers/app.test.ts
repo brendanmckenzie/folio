@@ -159,4 +159,27 @@ describe('the pages Folio serves itself are never cached', () => {
     expect(res?.status).toBe(200)
     expect(res?.headers.get('cache-control')).toBe('private, no-store')
   })
+
+  /**
+   * The admin document undoes the user agent's `body { margin: 8px }`, and it has to
+   * do it *in the document* rather than in the admin stylesheet.
+   *
+   * Two reasons, both load-bearing. `tokens.css`'s global layer is scoped under
+   * `.folio-ui` (`admin/ui/scope.ts`) and a class on an element inside the body
+   * cannot restyle the body it is inside. And the stylesheet is a hashed Vite asset
+   * fetched over the network, so a rule living there paints inset first and then
+   * jumps.
+   *
+   * Left undone, `Shell.module.css`'s `100dvh` app is 16px taller and wider than the
+   * viewport — the whole admin scrolls in both axes and an 8px strip of the browser's
+   * canvas, white even in dark mode, frames every screen. It shipped that way for the
+   * whole port and was reported as the inspector missing padding on its right edge.
+   */
+  it('resets the body margin in the document, not in the stylesheet', async () => {
+    for (const path of ['/folio', '/folio/edit/sty_appmw01']) {
+      const html = await (await get(folio(), path))?.text()
+      expect([path, html?.includes('class="folio-admin"')]).toEqual([path, true])
+      expect([path, html?.includes('body.folio-admin { margin: 0 }')]).toEqual([path, true])
+    }
+  })
 })

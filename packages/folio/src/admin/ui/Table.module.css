@@ -25,6 +25,26 @@
  * its natural width. The first column is the right one to pick because it is always
  * the variable-length one — a title, a path, an email — and it is what `onOpen`
  * hangs off.
+ *
+ * **This rule and the `white-space: nowrap` below it are right for a table that
+ * lists records, and wrong for a table that explains something.** Both assume a cell
+ * is a short identifier. Settings' tables are prose — a column of *why* a setting is
+ * what it is — and under `nowrap` two of them overflowed their container, one by
+ * 502px, clipped mid-word with macOS's invisible overlay scrollbar as the only cue.
+ *
+ * `Settings.module.css` overrides both from the screen, by **specificity** rather
+ * than by stylesheet order (`.screen tbody td` outweighs `.table td` on element
+ * count, so it does not depend on which module the bundler loads first — that
+ * dependency is the thing that makes CSS-module overrides flaky). Note the second
+ * override is not optional once the first lands: a percentage column in table
+ * auto-layout is satisfied *before* the others, so the remaining columns fall back
+ * to min-content, which is identical to max-content under `nowrap` and much smaller
+ * once cells wrap. Wrapping alone gave `Type` 400px and squeezed a four-line
+ * `Where it can live` into 145px.
+ *
+ * If a second explanatory table ever appears, promote these to props on `Table`
+ * (`wrap`, and which column absorbs the slack) rather than write a second
+ * screen-level override. One override is a special case; two is a missing option.
  */
 .table th:first-child,
 .table td:first-child {

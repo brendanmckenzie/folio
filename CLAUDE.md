@@ -185,6 +185,30 @@ are free to go the next time that code is touched.
   before the trap reads `activeElement` to remember the opener. The admin's toast is a
   permanently mounted `role="status"` live region; making it conditional again breaks
   announcement, which is why the unconditional render carries a comment.
+- **`tokens.css`'s global layer is opt-in, and a subtree that forgets it looks like a
+  padding bug.** Everything in that file outside `:root` is scoped under
+  `.folio-ui` — deliberately, because the admin mounts into a *host's* document and
+  must not restyle it. Apply it with `scoped()` from `admin/ui/scope.ts`, never a
+  string literal. Without it a subtree silently loses `box-sizing: border-box`, so
+  **every `width: 100%` control is its own padding-plus-border wider than its parent
+  and is clipped at the parent's edge** — plus the one focus treatment, the UI font
+  and the reduced-motion override.
+
+  This shipped. For the whole eight-phase port the class was on `Kitchen.tsx` and
+  nowhere else — the design system was reviewed on the kitchen-sink page, the one
+  page that had it — so in the real admin every inspector input and every record
+  field was 18px too wide. It was reported as "the right panel has no padding",
+  three components away from the omission.
+
+  **A portal must re-declare it**: `createPortal` moves a subtree to `document.body`,
+  outside the shell, and CSS scoping does not follow. Four surfaces portal today and
+  each carries it. `test/unit/admin/ui-scope.test.ts` asserts that, and that
+  `color-scheme` is the only real property allowed outside the scope (the user agent
+  reads it for the scrollbar; a subtree cannot reach that).
+- **A hover-only control must not hold layout, and a `.ticked`-style edge must not be
+  an inset `box-shadow`.** An inset shadow is clipped by the border radius, so a 2px
+  left edge on a rounded row draws a curved bracket `(`, not a bar. `List.module.css`
+  uses a `::before`. Both of these are UI-review findings that no test could catch.
 
 ## Where things live
 

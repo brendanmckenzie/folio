@@ -3,6 +3,7 @@ import { useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useFocusTrap } from '../hooks/useFocusTrap'
 import css from './Dialog.module.css'
+import { scoped } from './scope'
 
 interface Props {
   title: ReactNode
@@ -72,7 +73,9 @@ export function Dialog({
   useFocusTrap(panel, onClose)
 
   return createPortal(
-    <div className={css.wrap}>
+    // A portal lands on `document.body`, outside the shell, so the styling scope
+    // does not follow it — every portal root re-declares it (`scope.ts`).
+    <div className={scoped(css.wrap)}>
       {/*
         A real button so the scrim is a click target with a name, held out of the
         tab cycle because Escape is the keyboard way out and a nameless stop

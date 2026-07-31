@@ -27,6 +27,13 @@ import type { FolioBindings } from './types'
  */
 
 /**
+ * The whole of the admin document's own styling. Everything else the admin looks
+ * like is a CSS module in `admin/ui/`; this is the one rule that has to reach the
+ * `body`, which no scoped class can. `shellPage` explains why it is inline.
+ */
+const ADMIN_STYLE = `body.folio-admin { margin: 0 }`
+
+/**
  * The rebuilt admin's shell, for any screen under its mount.
  *
  * One handler for every screen, because the router is on the client: the server's
@@ -45,8 +52,29 @@ export function shellPage(rt: FolioRuntime, bindings?: FolioBindings): Promise<R
     <Shell
       title="Folio"
       stylesheets={stylesheets}
+      bodyClass="folio-admin"
       head={
         <>
+          {/*
+            The user agent's `body { margin: 8px }`, undone.
+
+            `admin/ui/Shell.module.css` sizes the app at `100dvh`, so an 8px body
+            margin makes it 16px taller and wider than the viewport: the whole admin
+            scrolls in both axes, and an 8px strip of the browser's own canvas — white,
+            in dark mode — frames every screen. It was reported as the inspector
+            lacking padding on its right edge, which is the one place the strip is
+            adjacent to something that looks like it should own the gap.
+
+            **Inline, and not in `tokens.css`, for two reasons.** That file's global
+            layer is scoped under `.folio-ui` on purpose (`admin/ui/scope.ts`) and a
+            class cannot restyle the `body` it is mounted inside. And the admin's
+            stylesheet is a hashed Vite asset that arrives over the network, so a rule
+            living there would leave the first paint inset and then jump. Same reason
+            and same shape as `LOGIN_STYLE`'s own `body.folio-login { margin: 0 }`
+            below — the login page had this right and the admin shell never got it.
+          */}
+          {/* biome-ignore lint/security/noDangerouslySetInnerHtml: a static literal stylesheet, no interpolation */}
+          <style dangerouslySetInnerHTML={{ __html: ADMIN_STYLE }} />
           {rt.dev ? <ReactRefreshPreamble /> : null}
           {/*
             Two values, not one, and the distinction is the point: `base` is the
