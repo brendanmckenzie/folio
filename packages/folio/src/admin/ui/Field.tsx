@@ -16,6 +16,13 @@ interface FieldProps {
   required?: boolean
   /** Right of the label. A locale note, a peer's name, "shared". */
   note?: ReactNode
+  /**
+   * The control sits **beside** the label rather than under it, with the help text
+   * under the label. For a boolean and nothing else: every other control fills the
+   * column, and a 16px checkbox under its own label reads as a field whose value has
+   * gone missing. `Field.module.css`'s `.inline` argues the layout.
+   */
+  inline?: boolean
   /** Receives the generated id, so the label points at the real control. */
   children: (id: string) => ReactNode
 }
@@ -30,10 +37,10 @@ interface FieldProps {
  * inventing an id, and an unlabelled input in a CMS is a field nobody can
  * describe to a translator.
  */
-export function Field({ label, help, error, required, note, children }: FieldProps) {
+export function Field({ label, help, error, required, note, inline, children }: FieldProps) {
   const id = useId()
   return (
-    <div className={css.field}>
+    <div className={inline ? `${css.field} ${css.inline}` : css.field}>
       <label className={css.label} htmlFor={id}>
         {label}
         {required ? (

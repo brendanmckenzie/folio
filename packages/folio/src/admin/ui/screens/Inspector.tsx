@@ -118,7 +118,7 @@ export function Inspector(props: InspectorProps) {
 
   if (props.globalHint) {
     return (
-      <div className={css.panel}>
+      <div className={css.empty}>
         <EmptyState
           title={`This block belongs to ${props.globalHint.label}`}
           body="It is edited in that document, not this one — a global appears on every page that includes it."
@@ -138,7 +138,7 @@ export function Inspector(props: InspectorProps) {
 
   if (!blok) {
     return (
-      <div className={css.panel}>
+      <div className={css.empty}>
         <EmptyState
           title="Nothing selected"
           body="Pick a block in the preview or in the rail beside it."
@@ -153,7 +153,7 @@ export function Inspector(props: InspectorProps) {
     // block whose type no schema declares still has data, and hiding it is how content
     // disappears without anybody deleting it.
     return (
-      <div className={css.panel}>
+      <div className={css.empty}>
         <EmptyState
           title={`Unknown block “${blok.type}”`}
           body="No block by that name is declared. Its content is untouched — a schema migration is what reaches it."
@@ -165,8 +165,14 @@ export function Inspector(props: InspectorProps) {
   const entries = visibleEntries(def.fields, blok.data)
 
   return (
-    <div className={css.panel}>
-      <div className={css.head}>
+    // The gutter and the rhythm are the panel's, and form mode widens both: the same
+    // fields on a 34rem card want more air between them than they do in a 340px
+    // column, and one class rather than two components is what keeps them the same
+    // fields.
+    <div className={props.form ? `${css.panel} ${css.panelForm}` : css.panel}>
+      {/* In form mode the head is the card's header — a heading, the uid, and a rule
+          under it — so it is the one part of the panel that changes shape. */}
+      <div className={props.form ? `${css.head} ${css.headForm}` : css.head}>
         {/* Only in form mode. `EditorShell` puts the block's label at the top of the
             340px column already; in form mode there is no column and no heading. */}
         {props.form ? <h2 className={css.title}>{def.label}</h2> : null}

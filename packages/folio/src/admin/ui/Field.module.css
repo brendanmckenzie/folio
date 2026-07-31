@@ -36,6 +36,43 @@
   color: var(--state-danger-fg);
 }
 
+/*
+ * The one other arrangement a field has: the control **beside** the label rather
+ * than under it.
+ *
+ * For a boolean and nothing else, and it is the container's call — `FieldRow` passes
+ * it from `isInlineControl`. Every other control fills the column, so a label above
+ * it is the only thing that fits; a 16px checkbox under a label reads as a field
+ * whose value has gone missing, and the label is the larger half of the hit target.
+ *
+ * A grid rather than a reordered flex row, because a field is up to three children —
+ * label, control, one line of help — and the help belongs under the *label*, not
+ * under the box. The two explicit placements below leave exactly one free cell and
+ * auto-flow puts the control in it, so `Field` does not have to wrap `children(id)`
+ * in an element of its own in order to be able to name it here.
+ *
+ * Declared after `.label` and `.help` on purpose: these are the higher-specificity
+ * rules and a lower one following them is what `noDescendingSpecificity` is for.
+ */
+.inline {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--space-2);
+  row-gap: var(--space-1);
+}
+
+.inline > .label {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.inline > .help,
+.inline > .error {
+  grid-column: 2;
+  grid-row: 2;
+}
+
 .control {
   width: 100%;
   min-width: 0;

@@ -220,11 +220,19 @@ export function controlFor(kind: Field['kind']): ControlKind {
  * instead of under it, which is the difference between one line and two for the
  * commonest field in any schema.
  *
- * What this deliberately does *not* do is move the label beside the box. `Field`
- * renders its label above its children and that is the primitive's shape; bypassing
- * it for one field kind would mean a checkbox whose label came from somewhere else
- * than every other label in the panel, which is exactly the per-panel divergence the
- * fixed primitive set exists to stop.
+ * **It now moves the label beside the box too, and an earlier version of this
+ * comment forbade that.** The prohibition was aimed at the right hazard and drew the
+ * wrong line: it said a label beside the box would mean "a checkbox whose label came
+ * from somewhere else than every other label in the panel", which is true of
+ * *bypassing* `Field` and hand-rolling a label, and not true of what shipped. `Field`
+ * grew an opt-in `inline` prop, so the label is still the primitive's own `<label
+ * htmlFor>` — the same element, the same styling, the same association — placed in a
+ * two-column grid instead of stacked. One predicate now drives both the row layout
+ * and the label placement, which is one fewer way for them to disagree.
+ *
+ * The divergence the fixed primitive set exists to stop is a *second* way of
+ * rendering a label. Teaching the one primitive a second arrangement is the opposite
+ * of that, and it is why the prop is on `Field` rather than in this file.
  */
 export function isInlineControl(kind: Field['kind']): boolean {
   return controlFor(kind) === 'checkbox'
