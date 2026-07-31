@@ -200,3 +200,245 @@ describe('externalUpdate', () => {
     expect(externalUpdate(B, A, A, true)).toBe('defer')
   })
 })
+
+/* ===========================================================================
+ * Port phase 7b: `admin/ui/screens/inspector-model.ts`
+ *
+ * The new panel's own model. The describes above cover `admin/Inspector.tsx`,
+ * which still serves `{base}/edit/:id` until the whole of phase 7 lands; these
+ * cover the copy that `admin/ui/screens/Inspector.tsx` reads, plus the five
+ * things that are genuinely new there — `controlFor`, `isEditable`,
+ * `writeLocale`, `canFocus` and the focus-mode measure.
+ *
+ * Both sets exist on purpose. When the old admin is deleted the describes above
+ * go with it, and nothing below has to move.
+ * ========================================================================= */
+
+import type { Blok, Json } from '../../../src/core/doc'
+import type { SchemaIndex } from '../../../src/core/schema'
+import {
+  boundValue,
+  canFocus,
+  FOCUS_MEASURE_CH,
+  fieldMode,
+  isEditable,
+  isReadableMeasure,
+  sourceText,
+  visibleEntries as visibleEntriesNew,
+  watcherLabel as watcherLabelNew,
+  writeLocale,
+} from '../../../src/admin/ui/screens/inspector-model'
+
+const blok = (over: Partial<Blok> = {}): Blok => ({
+  uid: 'hero',
+  type: 'hero',
+  parent: null,
+  slot: null,
+  order: 'a0',
+  data: {},
+  ...over,
+})
+
+describe('inspector-model: the port is a copy, not a rewrite', () => {
+  /**
+   * The load-bearing property of the duplication: the two files answer
+   * identically, so the new panel cannot draw a different set of fields from
+   * the one the old panel drew for the same block.
+   */
+  it('draws the same fields the old inspector drew', () => {
+    const cases: Record<string, Json>[] = [
+      {},
+      { layout: 'split' },
+      { layout: 'split', image: 'x.png' },
+      { layout: 'full', image: 'x.png' },
+    ]
+    for (const data of cases) {
+      expect(visibleEntriesNew(fields, data).map(([n]) => n)).toEqual(
+        visibleEntries(fields, data).map(([n]) => n),
+      )
+    }
+  })
+
+  it('says the same thing about a peer ring', () => {
+    const peer = ann({ uid: 'hero', field: 'heading' }, 'fr')
+    expect(watcherLabelNew(peer, null)).toBe(watcherLabel(peer, null))
+    expect(watcherLabelNew(peer, 'fr')).toBe(watcherLabel(peer, 'fr'))
+  })
+})
+
+/*
+ * localisation.md decision 4 and its resolved open question. Three states, and
+ * they are exhaustive — the whole reason `fieldMode` is a named function rather
+ * than two inline conditions.
+ */
+describe('fieldMode / boundValue', () => {
+  const translatable: Field = { kind: 'text', translatable: true }
+  const shared: Field = { kind: 'text' }
+
+  it('is source on the source locale, whatever the field says', () => {
+    expect(fieldMode(translatable, true)).toBe('source')
+    expect(fieldMode(shared, true)).toBe('source')
+  })
+
+  it('splits translatable from shared off the source locale', () => {
+    expect(fieldMode(translatable, false)).toBe('translate')
+    expect(fieldMode(shared, false)).toBe('shared')
+  })
+
+  /**
+   * The property worth pinning on its own: a `translate` input reads the raw
+   * locale map, so an untranslated field is *empty* and never the fallback. An
+   * input pre-filled with the English would copy it into the translation the
+   * moment somebody typed one character, and "untranslated" would become
+   * unreachable.
+   */
+  it('binds a translation to the locale’s own raw value, never the fallback', () => {
+    const b = blok({ data: { heading: 'Hello' }, i18n: { fr: {} } })
+    expect(boundValue(b, 'heading', 'translate', 'fr')).toBeNull()
+    expect(boundValue(b, 'heading', 'source', 'fr')).toBe('Hello')
+    // A shared field is bound to the source so it is legible, and disabled so it
+    // cannot be written — the editor half of decision 4's asymmetry.
+    expect(boundValue(b, 'heading', 'shared', 'fr')).toBe('Hello')
+  })
+
+  it('binds a real translation once it exists', () => {
+    const b = blok({ data: { heading: 'Hello' }, i18n: { fr: { heading: 'Bonjour' } } })
+    expect(boundValue(b, 'heading', 'translate', 'fr')).toBe('Bonjour')
+  })
+
+  /** Decision 5: `''` is a deliberate emptiness and survives. */
+  it('treats a deliberately empty translation as a translation', () => {
+    const b = blok({ data: { heading: 'Hello' }, i18n: { fr: { heading: '' } } })
+    expect(boundValue(b, 'heading', 'translate', 'fr')).toBe('')
+  })
+})
+
+describe('isEditable / writeLocale', () => {
+  it('is two independent refusals about two different things', () => {
+    expect(isEditable('source', false)).toBe(true)
+    // The document: a past version is on the stage, or the role may not edit.
+    expect(isEditable('source', true)).toBe(false)
+    expect(isEditable('translate', true)).toBe(false)
+    // The field: not translatable, in a non-source locale.
+    expect(isEditable('shared', false)).toBe(false)
+  })
+
+  /**
+   * The one door every translation goes through. `'shared'` returning undefined
+   * rather than the locale is what makes decision 4's editor half safe rather
+   * than merely unlikely: even if a shared control were somehow reachable, no
+   * locale-scoped `set` could leave it.
+   */
+  it('scopes a write to the locale only while translating', () => {
+    expect(writeLocale('translate', 'fr')).toBe('fr')
+    expect(writeLocale('source', 'fr')).toBeUndefined()
+    expect(writeLocale('shared', 'fr')).toBeUndefined()
+  })
+})
+
+/*
+ * ui-architecture.md decision 5: focus mode exists for one field kind, because
+ * 340px is right for the other twenty and wrong for prose.
+ */
+describe('canFocus', () => {
+  const schema = {
+    hero: {
+      label: 'Hero',
+      fields: { heading: { kind: 'text' }, body: { kind: 'richtext' } },
+    },
+  } as unknown as SchemaIndex
+
+  it('is richtext and nothing else', () => {
+    const b = blok()
+    expect(canFocus(schema, b, 'body')).toBe(true)
+    expect(canFocus(schema, b, 'heading')).toBe(false)
+  })
+
+  it('is false with nothing selected, nothing focused, or an unknown block', () => {
+    expect(canFocus(schema, null, 'body')).toBe(false)
+    expect(canFocus(schema, blok(), null)).toBe(false)
+    expect(canFocus(schema, blok({ type: 'nope' }), 'body')).toBe(false)
+    expect(canFocus(schema, blok(), 'nope')).toBe(false)
+  })
+})
+
+describe('the focus-mode measure', () => {
+  /**
+   * A real regression guard rather than a tautology: the band is what makes the
+   * overlay worth having, so somebody widening it to 90 characters because the
+   * panel looked narrow fails here instead of shipping unreadable prose.
+   */
+  it('is inside the 60–75 character band typography has agreed on', () => {
+    expect(isReadableMeasure(FOCUS_MEASURE_CH)).toBe(true)
+    expect(isReadableMeasure(50)).toBe(false)
+    expect(isReadableMeasure(90)).toBe(false)
+  })
+})
+
+/*
+ * The read-only source column. Everything except richtext renders as text,
+ * because that is all there is to show — and the unwrapping matters, because a
+ * raw object would read "[object Object]" beside a translation input.
+ */
+describe('sourceText', () => {
+  it('is empty for nothing at all', () => {
+    expect(sourceText({ kind: 'text' }, null)).toBe('')
+    expect(sourceText({ kind: 'text' }, undefined as never)).toBe('')
+  })
+
+  it('names an asset by its filename and counts the plurals', () => {
+    expect(sourceText({ kind: 'asset' }, { key: 'k', filename: 'a.png' } as never)).toBe('a.png')
+    expect(sourceText({ kind: 'multiasset' }, [1, 2] as never)).toBe('2 files')
+    expect(sourceText({ kind: 'multiasset' }, [1] as never)).toBe('1 file')
+  })
+
+  /** A count, not the ids: raw `sty_…` strings tell a translator nothing. */
+  it('counts references rather than listing ids', () => {
+    expect(sourceText({ kind: 'references' }, ['sty_a', 'sty_b'] as never)).toBe('2 documents')
+    expect(sourceText({ kind: 'references' }, ['sty_a'] as never)).toBe('1 document')
+  })
+
+  it('reads a select through its own option label', () => {
+    const field: Field = { kind: 'select', options: [{ label: 'Split', value: 'split' }] }
+    expect(sourceText(field, 'split')).toBe('Split')
+    // A stored value the schema no longer offers still shows something.
+    expect(sourceText(field, 'gone')).toBe('gone')
+  })
+
+  it('says yes and no rather than true and false', () => {
+    expect(sourceText({ kind: 'boolean' }, true)).toBe('yes')
+    expect(sourceText({ kind: 'boolean' }, false)).toBe('no')
+  })
+
+  it('flattens richtext to its text', () => {
+    const doc = {
+      type: 'doc',
+      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hi' }] }],
+    }
+    expect(sourceText({ kind: 'richtext' }, doc as never)).toContain('Hi')
+  })
+})
+
+/*
+ * The seam, asserted at compile time.
+ *
+ * Port phase 7a hands the inspector an `EditorSlot` and the wiring is
+ * `inspector={(slot) => <Inspector {...slot} />}` — so every *required* prop of
+ * `InspectorProps` has to exist on `EditorSlot`, with a compatible type. This
+ * assignment is what says so: a prop added here that the slot does not carry, or a
+ * key renamed on either side, is a type error in this file rather than a surprise in
+ * whichever file does the wiring.
+ *
+ * Not a runtime `it()`, because there is nothing to run. `tsc` covers `test/`, which
+ * is what makes a type-only assertion a real gate.
+ */
+import type { EditorSlot } from '../../../src/admin/ui/screens/EditorShell'
+import type { InspectorProps } from '../../../src/admin/ui/screens/Inspector'
+
+const inspectorTakesAnEditorSlot: (slot: EditorSlot) => InspectorProps = (slot) => slot
+
+describe('the 7a seam', () => {
+  it('is a type-level assertion, and this keeps the import from reading as dead', () => {
+    expect(typeof inspectorTakesAnEditorSlot).toBe('function')
+  })
+})

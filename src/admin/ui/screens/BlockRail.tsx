@@ -10,6 +10,8 @@ import { List, Row } from '../List'
 import { Menu, type MenuItem } from '../Menu'
 import css from './BlockRail.module.css'
 import {
+  type AddTarget,
+  addTargetOf,
   type BlockGesture,
   type BlockMove,
   blockGesture,
@@ -38,6 +40,13 @@ interface Props {
   onDuplicate: (uid: string) => void
   onCopy: (uid: string) => void
   onNotice: (message: string) => void
+  /**
+   * Port phase 7c's seam. Present, and `+ Add` opens the searchable picker instead
+   * of the grouped menu below — same slot, same `onAdd`, a different affordance in
+   * front of it. Absent keeps the menu, which is what makes the rail complete on
+   * its own rather than waiting on another phase.
+   */
+  onRequestAdd?: (target: AddTarget) => void
   /** `⌘\`, and the `«` in the header. Held above this component so the shortcut
    * and the button drive the same value. */
   onCollapse: () => void
@@ -156,10 +165,16 @@ export function BlockRail(props: Props) {
 
     if (e.altKey) {
       const which = GESTURES[e.key]
+      // An ⌥ chord that is not one of the four is the browser's, so it keeps its
+      // default — which is why the guard is before `preventDefault` and not after.
+      if (!which) return
+      e.preventDefault()
+      // Read-only for either reason (a past version on screen, a role that may not
+      // edit): the row's own ↑ ↓ controls are absent too, so silence here is
+      // consistent rather than a swallowed gesture.
+      if (readOnly) return
       // The root block *is* the document: it has no siblings to move among and no
       // parent to move out of, and saying so beats a gesture that looks broken.
-      if (!which || readOnly) return
-      e.preventDefault()
       if (at.kind === 'root') {
         onNotice('The document itself cannot be moved')
         return
@@ -209,6 +224,9 @@ export function BlockRail(props: Props) {
                     row={row}
                     schema={schema}
                     onAdd={props.onAdd}
+                    {...(props.onRequestAdd && doc
+                      ? { onRequest: () => props.onRequestAdd?.(addTargetOf(row, doc)) }
+                      : {})}
                   />
                 )
               ) : (
@@ -393,11 +411,27 @@ function AddRow({
   row,
   schema,
   onAdd,
+  onRequest,
 }: {
   row: RailAddRow
   schema: SchemaIndex
   onAdd: (parent: string, slot: string, type: string, index: number, preset?: string) => void
+  /** Opens the picker instead of the menu. See `Props.onRequestAdd`. */
+  onRequest?: () => void
 }) {
+  const label = row.slotLabel ? `+ ${row.slotLabel}` : '+ Add block'
+
+  if (onRequest) {
+    return (
+      <div className={css.addRow} style={{ '--depth': row.depth } as CSSProperties}>
+        <span className={css.addIndent} />
+        <Button size="sm" variant="subtle" onClick={onRequest}>
+          {label}
+        </Button>
+      </div>
+    )
+  }
+
   const items: MenuItem[] = menuGroups(schema, row.allow).flatMap((group) => [
     ...(group.bare
       ? [
@@ -418,11 +452,7 @@ function AddRow({
   return (
     <div className={css.addRow} style={{ '--depth': row.depth } as CSSProperties}>
       <span className={css.addIndent} />
-      <Menu
-        align="start"
-        trigger={row.slotLabel ? `+ ${row.slotLabel}` : '+ Add block'}
-        items={items}
-      />
+      <Menu align="start" trigger={label} items={items} />
     </div>
   )
 }

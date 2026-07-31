@@ -29,7 +29,10 @@ import { Redirects } from './screens/Redirects'
 import { Settings } from './screens/Settings'
 import type { ViewMode } from './screens/content-model'
 import { EditorShell } from './screens/EditorShell'
+import { BlockPicker } from './screens/BlockPicker'
+import { HistoryPanel } from './screens/HistoryPanel'
 import { Home } from './screens/Home'
+import { Inspector } from './screens/Inspector'
 import { Keys } from './screens/Keys'
 import { Stub } from './screens/Stub'
 import { Shell } from './Shell'
@@ -76,6 +79,15 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
   const [notice, setNotice] = useState<string | null>(null)
   const [palette, setPalette] = useState(false)
   const [keys, setKeys] = useState(false)
+  /**
+   * The history slide-over, opened by `⌘H`.
+   *
+   * Shell state rather than the editor's, because the chord is the shell's:
+   * `useShortcuts` is bound once here and the editor is one screen among eight. Named
+   * `historyOpen` and not `history`, because `history` is a DOM global and shadowing
+   * it inside the component that owns the router is asking for the wrong one.
+   */
+  const [historyOpen, setHistoryOpen] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -235,6 +247,12 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
     // inventing a second chord.
     'mod+\\': () => (editing ? blockRail.toggle() : sidebar.toggle()),
     'mod+.': () => inspector.toggle(),
+    // Only where there is a document to have a history. Bound unconditionally and
+    // guarded here rather than added to the map conditionally, so the binding map is
+    // one literal and `?`'s row for it is always true.
+    'mod+h': () => {
+      if (editing) setHistoryOpen((open) => !open)
+    },
     // The owner's call: ⌘S saves nothing because nothing needs saving, and says
     // so rather than being swallowed silently.
     'mod+s': () => setNotice(SAVE_NOTICE),
@@ -307,6 +325,8 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
           contentView,
           contentSort,
           assetView,
+          historyOpen,
+          setHistoryOpen,
           preview: previewFor(open, previewType, previewHost, boot.base),
         })}
       </Shell>
@@ -363,6 +383,11 @@ interface ScreenArgs {
   contentView: ReturnType<typeof useRememberedString<ViewMode>>
   contentSort: ReturnType<typeof useRememberedString<FlatSort>>
   assetView: ReturnType<typeof useRememberedString<AssetView>>
+  /** The history slide-over's open state and its setter. Not `useRemembered`: a
+   * reference surface you consult and dismiss should not be open because it was open
+   * last week. */
+  historyOpen: boolean
+  setHistoryOpen: (open: boolean) => void
   /** The open document's iframe src. See `EditorShell`'s `preview`. */
   preview: string | undefined
 }
@@ -430,6 +455,55 @@ function screenFor(a: ScreenArgs) {
           onToggleRail={a.blockRail.toggle}
           inspectorCollapsed={a.inspector.value}
           onToggleInspector={a.inspector.toggle}
+          /*
+           * The three panels, as **render props over the slot** rather than nodes.
+           *
+           * `EditorShell` creates the store, the selection and the block mutations
+           * inside itself — a node built out here could not reach any of them, so a
+           * `ReactNode` prop would have forced the store up into the shell and made
+           * every screen pay for the editor's machinery. `EditorSlot` is the seam,
+           * and `Inspector`'s props are a strict subset of it: a compile-time
+           * assertion in `inspector.test.ts` fails if a key is ever renamed, so this
+           * spread cannot drift into a runtime `undefined`.
+           */
+          inspector={(slot) => <Inspector {...slot} />}
+          history={(slot) =>
+            // No document yet means no history to consult, and `HistoryPanel` needs a
+            // `Doc` to phrase an activity entry against. The slide-over cannot be open
+            // in that state anyway — it is opened from a document.
+            slot.doc ? (
+              <HistoryPanel
+                open={slot.historyOpen}
+                onClose={slot.onCloseHistory}
+                doc={slot.doc}
+                schema={slot.schema}
+                versionTrail={slot.versionTrail}
+                activityTrail={slot.versions.activityTrail}
+                onReload={slot.versions.reload}
+                busy={slot.versions.busy}
+                viewingId={slot.versions.viewing?.version.id ?? null}
+                onCheckpoint={slot.versions.checkpoint}
+                onView={slot.versions.view}
+                onExitView={slot.versions.exit}
+                onRestore={slot.versions.restore}
+                peerNames={Object.fromEntries(slot.peers.map((p) => [p.actor, p.name]))}
+              />
+            ) : null
+          }
+          historyOpen={a.historyOpen}
+          onCloseHistory={() => a.setHistoryOpen(false)}
+          picker={(slot) =>
+            slot.adding ? (
+              <BlockPicker
+                schema={slot.schema}
+                parentType={slot.doc?.bloks[slot.adding.parent]?.type ?? ''}
+                slot={slot.adding.slot}
+                filled={slot.adding.filled}
+                onClose={slot.onCloseAdd}
+                onPick={slot.onAddBlock}
+              />
+            ) : null
+          }
         />
       )
 

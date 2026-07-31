@@ -5,6 +5,9 @@
 }
 
 .row {
+  /* The containing block for `.actions`, which overlays rather than reserving a
+     column — see the comment above `.actions` for the measurement that forced it. */
+  position: relative;
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -109,11 +112,45 @@
  * whole list jump under the cursor. Carried forward from `admin.css`, where it
  * was learned the hard way.
  */
+/*
+ * **The row's actions overlay the row; they do not reserve a column.**
+ *
+ * A UI-review finding, and the measurement is the argument. `visibility: hidden`
+ * hides an element while keeping its box, so a `flex: none` strip of four buttons was
+ * 107px of layout on every row, always. On Content's 1400px rows that is invisible
+ * waste. On the editor's **240px block rail** it left a block's summary **5px** —
+ * `Gallery` rendered its `Multiasset` summary as a single letter and an ellipsis,
+ * which is worse than showing nothing, because a truncation implies there is a way to
+ * read the rest.
+ *
+ * So the strip comes out of the flow: absolutely positioned against the row, revealed
+ * on hover or focus, over a short gradient so a long title fades under it rather than
+ * colliding with it. The text now gets the whole row at every width.
+ *
+ * This is the same mistake `Table.module.css` was fixed for one phase earlier — there
+ * the reserved strip *was* the slack, and the first column had to be told to absorb
+ * it. Two instances of one error is the point at which it is worth stating: a
+ * hover-only control must not hold layout, and `visibility: hidden` is the property
+ * that makes it look as though it does not.
+ *
+ * Rejected: `display: none` until hover. It reflows the row under the cursor as the
+ * pointer crosses it, which makes the buttons jump away from where they appeared.
+ * Rejected: shrinking the strip on a narrow list with a container query. That is the
+ * fix `.meta` above already records as wrong for this rail, for the same reason —
+ * choosing a width at which information starts disappearing.
+ */
 .actions {
+  position: absolute;
+  right: var(--space-2);
   display: flex;
   align-items: center;
   gap: var(--space-1);
-  flex: none;
+  height: 100%;
+  padding-left: var(--space-4);
+  /* The row's own background, so a title running under the strip fades out rather
+     than showing through it. `--bg-hover` because the strip only ever appears while
+     the row is hovered or focused, which is when the row is already tinted. */
+  background: linear-gradient(to right, transparent, var(--bg-hover) var(--space-4));
   visibility: hidden;
 }
 

@@ -1,0 +1,135 @@
+/*
+ * Richtext focus mode: one prose field alone over the stage, at a readable measure.
+ *
+ * `docs/ui-architecture.md`'s decision 5 rejected "a wider inspector for everyone" —
+ * 340px is right for the twenty other field kinds and wrong for one, and widening for
+ * the outlier costs preview width on every screen where prose is not being edited.
+ * So this is a container and not a second editor: the surface inside it is the same
+ * ProseMirror view the inspector was showing, re-parented.
+ */
+
+.wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: start center;
+  padding: var(--space-6) var(--space-4);
+  overflow-y: auto;
+}
+
+/* A real button so the scrim is a click target with a name, held out of the tab
+   cycle because Escape is the keyboard way out — the same shape `Dialog` uses, and
+   the same reason. */
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-overlay);
+  border: 0;
+}
+
+/*
+ * Sized by the measure, not by a breakpoint. `--measure` is set by the component from
+ * `FOCUS_MEASURE_CH`, so the number lives in one place and a Node test guards the
+ * band it has to stay inside. The padding is added to it rather than taken out of it:
+ * the measure is the *text*, and a panel whose content box is 68ch minus 32px of
+ * padding is a 64-character measure pretending to be a 68-character one.
+ */
+.panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: calc(var(--measure) + var(--space-6) * 2);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-dialog);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.note {
+  color: var(--fg-subtle);
+  font-size: var(--text-xs);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.hint {
+  color: var(--fg-subtle);
+  font-size: var(--text-xs);
+}
+
+/*
+ * The surface, relaxed.
+ *
+ * `[data-folio-prose]` rather than a class: the class on that element is
+ * `fields.module.css`'s and is hashed by another module, and `[contenteditable]`
+ * stops matching in read-only mode — which is exactly when a past version is on the
+ * stage and this overlay still has to look right. `useRichtext` sets the attribute
+ * and says the same thing from the other end.
+ *
+ * Every declaration here overrides one of `.surface`'s, which is why they are all
+ * restated rather than only the additions: the inspector's version is deliberately
+ * cramped (a 340px column and prose defaults waste it) and every one of those
+ * compromises is wrong at this width.
+ */
+.body [data-folio-prose] {
+  max-width: var(--measure);
+  min-height: 55vh;
+  max-height: none;
+  margin: 0 auto;
+  padding: 0;
+  overflow: visible;
+  font-size: var(--text-lg);
+  line-height: 1.65;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+
+/* No ring and no border on the surface itself — the panel is the boundary, and a
+   focus outline drawn around 60vh of prose is a box, not a signal. The caret is the
+   focus indicator here, which is what it is in every other writing surface. */
+.body [data-folio-prose]:focus-visible {
+  outline: 0;
+}
+
+.body [data-folio-prose] :is(p, ul, ol, blockquote, pre) {
+  margin: 0 0 var(--space-4);
+}
+
+.body [data-folio-prose] :is(h1, h2, h3, h4, h5, h6) {
+  margin: var(--space-5) 0 var(--space-2);
+  font-size: var(--text-xl);
+}
+
+/* The source-locale column, at the same measure so a translator's eye travels the
+   same distance in both. Below rather than beside: two 68-character columns need
+   1,100px and this overlay is deliberately not that wide. */
+.source {
+  max-width: var(--measure);
+  margin: 0 auto;
+  width: 100%;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}

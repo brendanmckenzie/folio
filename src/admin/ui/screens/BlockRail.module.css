@@ -124,3 +124,24 @@
   border-radius: var(--radius-md);
   background: var(--bg-inset);
 }
+
+/*
+ * The second of the admin's two breakpoints. **`EditorShell.module.css`'s header is
+ * where both are decided and why**: 1100px for the inspector, 800px for this. The
+ * rule lives here rather than there because the element is this file's, and the
+ * containing block is `.editor`'s `position: relative` — a DOM fact, not a
+ * stylesheet one, so the two modules do not have to see each other.
+ *
+ * An overlay, not a drawer: it stops taking `--rail-w` from the stage and floats
+ * over it. Nothing becomes modal, so `⌘\` and its own `«` still work unchanged and
+ * there is no focus trap to get wrong.
+ */
+@media (max-width: 800px) {
+  .rail {
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    z-index: 3;
+    box-shadow: var(--shadow-menu);
+  }
+}

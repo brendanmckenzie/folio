@@ -1,7 +1,41 @@
 /*
- * `240px | flexible | --inspector-w`, with hairlines between and no padding
- * anywhere: the stage is the page, so every pixel the chrome does not need
+ * The editor: `--rail-w | flexible | --inspector-w`, with hairlines between and no
+ * padding anywhere. The stage is the page, so every pixel the chrome does not need
  * belongs to it.
+ *
+ * ---------------------------------------------------------------------------
+ * THE ADMIN'S TWO BREAKPOINTS, AND THIS IS WHERE THEY ARE ESTABLISHED
+ * ---------------------------------------------------------------------------
+ *
+ * `ui-architecture.md`'s `## Cross-cutting`: **below 1100px the inspector becomes
+ * an overlay, below 800px the sidebar does too.** There were zero media queries in
+ * the admin before this file, so the two widths are stated here once and any
+ * second screen that needs them copies these two numbers rather than picking its
+ * own.
+ *
+ * Three things about them are deliberate:
+ *
+ * - **They are literals, twice, and they have to be.** A media query cannot read a
+ *   custom property — `@media (max-width: var(--x))` is invalid CSS, and
+ *   `@custom-media` needs a PostCSS step this admin does not have and should not
+ *   grow (`tokens.css` explains why the token layer is plain CSS: the server
+ *   inlines it for the login page). So `editor-model.ts` states the same two
+ *   numbers for any JavaScript that needs them, and the pair must agree by hand.
+ * - **An overlay, not a drawer.** The panel stops taking width and floats over the
+ *   stage with a shadow; it does not become modal, does not trap focus and does not
+ *   get a scrim. `⌘.` and its own `»` still open and close it, so nothing new has
+ *   to be learned at a narrow window — and a non-modal panel needs no focus trap,
+ *   which is the rule `useFocusTrap` exists to keep to one place.
+ * - **`max-width`, not a container query.** The thing being reacted to is the
+ *   *viewport*: at 1000px there is not room for three columns whatever this
+ *   element's own width says, and a container query on `.editor` would answer the
+ *   same question one indirection later.
+ *
+ * The second breakpoint's other half — the shell's own sidebar — is
+ * `Sidebar.module.css`'s to write, and it is not this phase's file. What is here is
+ * the editor's *left* column, which is what `⌘\` means inside the editor
+ * (`Prototype.tsx` resolves that ambiguity by context) and which has the same
+ * problem at the same width.
  */
 
 .editor {
@@ -9,109 +43,318 @@
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
+  position: relative;
 }
 
-.rail {
-  display: flex;
-  flex-direction: column;
-  width: 240px;
-  flex: 0 0 auto;
-  border-right: 1px solid var(--border);
-  background: var(--bg-panel);
-  overflow-y: auto;
-}
-
-.railHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-2);
-  height: 32px;
-  flex: 0 0 auto;
-  padding: 0 var(--space-2) 0 var(--space-3);
-  border-bottom: 1px solid var(--border);
-}
-
-.railTitle {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--fg-subtle);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.placeholder {
-  margin: 0;
-  padding: var(--space-3);
-  font-size: var(--text-sm);
-  color: var(--fg-subtle);
-  line-height: 1.5;
-}
-
-.placeholder code {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-}
-
-.stage {
+.main {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-width: 0;
-  background: var(--bg-app);
+  min-height: 0;
 }
 
-.stageBar {
+/* ------------------------------------------------------------------- the bar --- */
+
+.bar {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  height: 32px;
+  height: var(--row-h);
   flex: 0 0 auto;
   padding: 0 var(--space-2);
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
 }
 
+/* Paths are content, not decoration (the brief's third commitment). */
 .path {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--fg-muted);
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+ * The socket's state as a sentence. `--fg-subtle` because it is true almost all
+ * the time and reads as furniture; the clickable form is the one that matters, and
+ * it earns the accent.
+ */
+.statusFlat {
+  flex: none;
+  font-size: var(--text-sm);
+  color: var(--fg-subtle);
+}
+
+.status {
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .spacer {
   flex: 1 1 auto;
 }
 
-/*
- * The hero. No border of its own, no radius, no shadow — the stage bar's hairline
- * above it is the only line, and `--bg-panel` behind means a page with a
- * transparent background does not show the app's own grey through it.
- */
-.frame {
-  flex: 1 1 auto;
-  width: 100%;
-  min-height: 0;
-  border: 0;
-  background: #fff;
-  display: block;
+.locale {
+  flex: none;
+  height: 22px;
+  max-width: 140px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
 }
 
-.noPreview,
-.missing,
-.loading {
+/*
+ * The viewport switcher. A `<fieldset>` with a hidden `<legend>` because it is a
+ * group of related controls, which is the rule `Documents.module.css` states and
+ * says is not optional: three unlabelled toggle buttons announce as three
+ * unrelated buttons.
+ */
+.viewports {
+  display: flex;
+  gap: 0;
+  flex: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.segment {
+  padding: 0 var(--space-2);
+  height: 20px;
+  border: 0;
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.segment + .segment {
+  border-left: 1px solid var(--border);
+}
+
+.segment:hover {
+  background: var(--bg-hover);
+}
+
+.segmentOn {
+  background: var(--bg-active);
+  color: var(--fg);
+}
+
+.live {
+  flex: none;
+  color: var(--fg-accent);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- in flow --- */
+
+/*
+ * A persistent condition, in flow, never an overlay. Amber is drift and history,
+ * which is exactly what "this document has not been migrated" is.
+ */
+.banner {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--state-warn-border);
+  background: var(--state-warn-bg);
+  color: var(--state-warn-fg);
+  font-size: var(--text-sm);
+}
+
+.viewbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  border-bottom: 1px solid var(--state-warn-border);
+  background: var(--state-warn-bg);
+  color: var(--state-warn-fg);
+  font-size: var(--text-sm);
+}
+
+.viewdot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--state-warn-fg);
+}
+
+.viewtext {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ----------------------------------------------------------------- the stage --- */
+
+/*
+ * Edge to edge. No card, no shadow, no radius: the bar's hairline above it is the
+ * only line the stage owns, and the rail and the inspector carry their own — so a
+ * page at Desktop width touches all three of its neighbours directly, which is the
+ * whole point of the redesign's stage.
+ */
+.stage {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg-app);
+}
+
+.frameWrap {
+  flex: 0 0 auto;
+  min-width: 0;
+  max-width: 100%;
+  height: 100%;
+  position: relative;
+  background: #fff;
+}
+
+/*
+ * A narrowed viewport centres, with `--bg-app` either side, and gains the hairline
+ * a device edge needs. At Desktop the frame *is* the column and a border would be
+ * a line down the middle of two panels that already have one.
+ */
+.stage[data-narrow] {
+  justify-content: center;
+  padding: var(--space-3) 0;
+}
+
+.stage[data-narrow] .frameWrap {
+  border: 1px solid var(--border);
+}
+
+/*
+ * The one time a coloured frame has something true to say: a past version is on
+ * screen and what you are looking at is not the draft. An `outline` rather than a
+ * border, so it paints over the iframe's own content and costs no layout — a
+ * border here would resize the page mid-preview and reflow whatever is in it.
+ */
+.stage[data-viewing] .frameWrap {
+  outline: 2px solid var(--state-warn-fg);
+  outline-offset: -2px;
+}
+
+.frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+
+.blank {
   display: grid;
   place-items: center;
   flex: 1 1 auto;
-  min-height: 0;
+  min-width: 0;
   padding: var(--space-5);
+}
+
+/* ------------------------------------------------------------------ the form --- */
+
+/*
+ * A record has no page, so the fields are the screen: one column at a measure they
+ * can be read at, centred, scrolling on its own. 46rem rather than the inspector's
+ * 340px is the whole difference — the same fields, at a width prose fits in.
+ */
+.form {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-5) var(--space-4);
+  background: var(--bg-app);
+}
+
+/*
+ * A wrapper of this screen's own rather than `.form > *`, because what is inside is
+ * the inspector — another phase's component — and a descendant selector over
+ * somebody else's markup gives every child a card the moment they render two.
+ */
+.formInner {
+  max-width: 46rem;
+  margin: 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+}
+
+/* ------------------------------------------------------------- the inspector --- */
+
+.inspector {
+  display: flex;
+  flex-direction: column;
+  width: var(--inspector-w);
+  flex: 0 0 auto;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.inspectorHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  height: var(--row-h);
+  flex: 0 0 auto;
+  padding: 0 var(--space-1) 0 var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+
+.inspectorTitle {
+  overflow: hidden;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--fg-subtle);
-  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspectorBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 /*
@@ -122,10 +365,10 @@
   width: 5px;
   flex: 0 0 auto;
   margin-inline: -2px;
-  cursor: col-resize;
-  background: transparent;
   position: relative;
   z-index: 1;
+  background: transparent;
+  cursor: col-resize;
   touch-action: none;
 }
 
@@ -140,44 +383,98 @@
 
 .grip:hover::after,
 .grip:focus-visible::after {
-  background: var(--fg-accent);
   width: 2px;
+  background: var(--fg-accent);
 }
 
 .grip:focus-visible {
   outline: none;
 }
 
-.inspector {
+/* ------------------------------------------------------------------- states --- */
+
+.pending {
+  padding: var(--space-4);
+}
+
+.missing {
+  display: grid;
+  place-items: center;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--space-5);
+}
+
+/*
+ * Skeletons, not a spinner: the shape of this screen is known before its document
+ * arrives — three columns at three known widths — so the wait can look like what
+ * is coming rather than like nothing.
+ */
+.booting {
   display: flex;
-  flex-direction: column;
-  width: var(--inspector-w);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.bootRail {
+  width: var(--rail-w);
+  flex: 0 0 auto;
+  border-right: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.bootStage {
+  flex: 1 1 auto;
+  background: var(--bg-app);
+}
+
+.bootInspector {
+  width: 340px;
   flex: 0 0 auto;
   border-left: 1px solid var(--border);
   background: var(--bg-panel);
-  overflow-y: auto;
 }
 
-.facts {
-  display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: var(--space-1) var(--space-2);
+.gaps {
   margin: 0;
-  padding: 0 var(--space-3) var(--space-3);
+  padding-left: var(--space-4);
   font-size: var(--text-sm);
+  line-height: 1.6;
 }
 
-.facts dt {
+.note {
+  margin: 0;
+  font-size: var(--text-sm);
   color: var(--fg-subtle);
 }
 
-.facts dd {
-  margin: 0;
-  color: var(--fg);
-  overflow-wrap: anywhere;
+/* --------------------------------------------------------------- responsive --- */
+
+/*
+ * Below 1100px: the inspector floats over the stage instead of taking 340px of it.
+ * See the header of this file for why this is a literal, why it is an overlay
+ * rather than a drawer, and where the number is restated.
+ */
+@media (max-width: 1100px) {
+  .inspector {
+    position: absolute;
+    inset-block: 0;
+    right: 0;
+    z-index: 2;
+    box-shadow: var(--shadow-menu);
+  }
+
+  /* The grip resizes a column that is no longer a column. Hidden rather than
+     disabled: there is nothing to explain, and a separator with nothing either
+     side of it is noise to a screen reader as much as to a cursor. */
+  .grip {
+    display: none;
+  }
 }
 
-.mono {
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-}
+/*
+ * The 800px half is `BlockRail.module.css`'s, because the element it moves is that
+ * file's — a `:global()` reach across two CSS modules to keep both rules in one
+ * place would trade the module boundary for the appearance of tidiness. The rule
+ * there carries a pointer back here, and here is where the numbers are decided.
+ */
