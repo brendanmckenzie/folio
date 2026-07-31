@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test'
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { Doc } from '../../src/core/doc'
+import type { Page } from '../../src/core/pagination'
 import type { ActivityEntry } from '../../src/core/protocol'
 import { applySeedFixture } from './seed-fixture'
 
@@ -128,7 +129,7 @@ describe('workers harness: D1', () => {
  */
 interface StoryStub {
   getOrInit(seed: Doc): Promise<Doc>
-  recent(limit?: number): Promise<ActivityEntry[]>
+  recent(limit?: number, cursor?: string): Promise<Page<ActivityEntry>>
 }
 
 const storyStub = (id: string) => env.STORY.get(env.STORY.idFromName(id)) as unknown as StoryStub
@@ -141,7 +142,7 @@ describe('workers harness: StoryDO', () => {
     expect(doc.root).toBe('root0000')
     expect(doc.bloks.root0000?.data.title).toBe('Home')
     // Nothing has been transacted, so the activity log is empty.
-    expect(await stub.recent()).toEqual([])
+    expect((await stub.recent()).rows).toEqual([])
   })
 
   it('keeps the draft it created, so a later seed is ignored', async () => {

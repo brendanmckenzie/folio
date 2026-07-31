@@ -13,8 +13,10 @@ import {
   type ServerMsg,
   txCapError,
 } from '../core/protocol'
+import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
 import { decodeIdentity, IDENTITY_HEADER, type SocketIdentity } from './auth/identity'
 import type { Role } from './auth/roles'
+import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
 import {
   CLOSE_PURGED,
   CLOSE_VERSION,
@@ -25,6 +27,13 @@ import {
 
 /** Beyond this many missed deltas it is cheaper to re-send the whole document. */
 const MAX_CATCHUP = 200
+
+/**
+ * The activity trail's order: newest first, over the log's own monotonic
+ * `sync_id`. One column, because that is the case a unique primary allows — see
+ * `Keyset`.
+ */
+const ACTIVITY_ORDER: Keyset = { columns: ['sync_id'], direction: 'desc' }
 
 /**
  * How long after the last logged transaction the debounced watermark alarm
@@ -624,12 +633,28 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
     }
 
     /**
-     * Most recent transactions, newest first. This is the fine-grained activity
-     * trail — useful for "who changed this", not for restoring. Restores go
-     * through versions in D1.
+     * Most recent transactions, newest first, **paged over a cursor**. This is the
+     * fine-grained activity trail — useful for "who changed this", not for
+     * restoring. Restores go through versions in D1.
+     *
+     * `foundation/pagination.md` phase 4 named this route and only converted the
+     * versions route beside it, which left the two disagreeing in a way that read
+     * as an oversight in the e2e scripts and was a real difference in the routes:
+     * `versions.rows`, `activity` unadorned. Both are `Page<T>` now.
+     *
+     * The keyset is **one column**, and this is the case `Keyset` allows it for:
+     * `sync_id` is assigned by the log itself and is monotonic within one
+     * document, so it is already a total order and a tiebreak could never fire.
+     *
+     * The log is unbounded and grows with every transaction (`ROADMAP.md` records
+     * that it wants compaction), so this is the one reader here where paging is
+     * not a nicety — the old cap answered at most 500 of however many there are,
+     * with no way to reach the rest.
      */
-    async recent(limit = 80): Promise<ActivityEntry[]> {
-      return this.sql
+    async recent(limit = 80, cursor?: string): Promise<Page<ActivityEntry>> {
+      const size = clampLimit(limit, 80, 500)
+      const resume = keysetWhere(ACTIVITY_ORDER, cursor ? decodeCursor(cursor) : null)
+      const rows = this.sql
         .exec<{
           sync_id: number
           actor: string
@@ -637,8 +662,12 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
           mutations: string
           at: number
         }>(
-          'select sync_id, actor, actor_name, mutations, at from log order by sync_id desc limit ?',
-          Math.min(Math.max(limit, 1), 500),
+          `select sync_id, actor, actor_name, mutations, at from log
+           ${whereOf(resume.sql)} ${orderBy(ACTIVITY_ORDER)} limit ?`,
+          ...resume.binds,
+          // One more than asked for, which is how `paginate` knows there is a next
+          // page without a second query.
+          size + 1,
         )
         .toArray()
         .map((r) => ({
@@ -646,8 +675,9 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
           actor: r.actor,
           actorName: r.actor_name,
           at: r.at,
-          mutations: JSON.parse(r.mutations),
+          mutations: JSON.parse(r.mutations) as ActivityEntry['mutations'],
         }))
+      return paginate(rows, size, (row) => [row.syncId])
     }
 
     /**

@@ -1,7 +1,7 @@
 import { createExecutionContext, env, runInDurableObject } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { blocks, defineBlock, text } from '../../src/core'
-import type { ActivityEntry, ClientMsg, ServerFrame, ServerMsg } from '../../src/core/protocol'
+import type { ClientMsg, ServerFrame, ServerMsg } from '../../src/core/protocol'
 import { PROTOCOL_VERSION } from '../../src/core/protocol'
 import type { AuthConfig, MagicLinkMail, Role } from '../../src/server'
 import { createFolio, magicLink } from '../../src/server'
@@ -569,7 +569,7 @@ describe('the sync socket', () => {
     })
     // Nothing logged: the refusal is at the door, exactly like an invalid
     // mutation, and the client's own `reject` handling drops the tx.
-    expect(await runInDurableObject(stubFor(id), (o) => o.recent())).toEqual([])
+    expect((await runInDurableObject(stubFor(id), (o) => o.recent())).rows).toEqual([])
     peer.ws.close()
   })
 
@@ -610,7 +610,7 @@ describe('the sync socket', () => {
     annSocket.send({ type: 'tx', txId: 'a1', mutations: setTitle(boot.doc.root, 'Ann was here') })
     await frame(annSocket, 'delta')
 
-    const trail = (await runInDurableObject(stubFor(id), (o) => o.recent())) as ActivityEntry[]
+    const trail = (await runInDurableObject(stubFor(id), (o) => o.recent())).rows
     expect(trail[0]).toMatchObject({ actor: ann.user.id, actorName: 'Ann' })
     annSocket.ws.close()
     watcher.ws.close()
@@ -717,7 +717,7 @@ describe('the sync socket', () => {
     peer.send({ type: 'tx', txId: 'x1', mutations: setTitle(boot.doc.root, 'Too late') })
 
     expect(await closeCode(peer)).toBe(4003)
-    expect(await runInDurableObject(stubFor(id), (o) => o.recent())).toEqual([])
+    expect((await runInDurableObject(stubFor(id), (o) => o.recent())).rows).toEqual([])
   })
 
   it('picks up an explicit revocation at the next re-check, and not before', async () => {
@@ -747,7 +747,7 @@ describe('the sync socket', () => {
     expect(await closeCode(peer)).toBe(4003)
 
     // What they had already logged stays, attributed to them.
-    const trail = (await runInDurableObject(stubFor(id), (o) => o.recent())) as ActivityEntry[]
+    const trail = (await runInDurableObject(stubFor(id), (o) => o.recent())).rows
     expect(trail.map((e) => e.syncId)).toEqual([1])
   })
 
@@ -816,7 +816,7 @@ describe('the sync socket', () => {
       }),
     )
     for (let i = 0; i < 300 && !inbox.some((f) => f.type === 'delta'); i++) await tick()
-    const trail = (await runInDurableObject(stubFor(id), (o) => o.recent())) as ActivityEntry[]
+    const trail = (await runInDurableObject(stubFor(id), (o) => o.recent())).rows
     // Advisory identity is still the only identity there is here.
     expect(trail[0]).toMatchObject({ actor: 'self-reported', actorName: 'Anon' })
     ws.close()

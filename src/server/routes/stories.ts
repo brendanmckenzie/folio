@@ -11,7 +11,6 @@ import type { DocumentType } from '../../core/schema'
 import { ancestorPaths, type StoryMeta } from '../../core/story'
 import { actorString } from '../auth/roles'
 import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
-import { indexedValuesFor } from '../content-index'
 import { FolioError, rethrow } from '../errors'
 import type { StoryChange } from '../hooks'
 import { hookCtx, loadStory, requireAccess } from '../middleware'
@@ -23,14 +22,17 @@ import {
   documentUsage,
   duplicateStory,
   ensureSingleton,
-  listDocuments,
+  listDocumentPage,
+  listSingletons,
   listStoriesFlat,
   listStoryLevel,
+  searchStories,
   storiesForChunked,
   updateStoryStatement,
 } from '../stories'
 import type { FolioEnv } from '../types'
 import {
+  documentSortQuery,
   flatSortQuery,
   idListQuery,
   idParam,
@@ -39,6 +41,9 @@ import {
   parseOptionalBody,
   pathListQuery,
   requireCursor,
+  searchKindQuery,
+  searchSortQuery,
+  sortDirQuery,
   StoryCreateBody,
   StoryDuplicateBody,
   StoryPatchBody,
@@ -156,46 +161,104 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   })
 
   /**
-   * The flat per-type listing records and singletons are addressed through,
-   * since they are deliberately not in the tree. Pagination and filtering arrive
-   * with `../../../docs/specs/content-model/collections.md`; this is the minimum
-   * the admin's Data section needs.
+   * The per-type listing records and singletons are addressed through, since they
+   * are deliberately not in the tree — and the Documents screen's whole data
+   * source (`../../../docs/ui-architecture.md` port phase 3).
    *
-   * Asking is what creates a singleton (architecture decision 7): an editor
-   * never does, so first *access* is the only moment left for it to happen. With
-   * no `?type`, every declared singleton is ensured and every unrouted document
-   * returned — one request for the whole Data section.
+   * **This was the last unbounded read in the admin.** It stayed that way on
+   * purpose while the screen over it was undecided (`foundation/pagination.md`'s
+   * implementation notes say so), because two things about its shape were the
+   * screen's to settle and deciding them twice would have been the cost of doing
+   * it earlier. Both are settled here:
+   *
+   *   `?kind=singleton`  ensures every declared singleton and returns them,
+   *                      **uncursored** — the set is bounded by the schema rather
+   *                      than by content, so it is a batch and not a page.
+   *                      *Asking is what creates a singleton* now lives here.
+   *   `?type=&sort=`     one type's documents, keyset over `(ord, id)`,
+   *                      `(title, id)` or `(coalesce(draft_updated_at,
+   *                      updated_at), id)`. Every row carries the published values
+   *                      of its type's `indexed` fields, on the row rather than in
+   *                      a sibling map — see `DocumentRow`.
+   *
+   * A singleton type asked for by `?type=` is ensured too, so the one document
+   * exists whichever way you arrive at it. No `?type` is every unrouted document
+   * across every type, paged, and ensures nothing: a write must not depend on
+   * which page was requested.
    */
   app.get('/documents', requireAccess<Env>(rt, READ), async (c) => {
-    const raw = c.req.query('type')
     const bindings = c.var.bindings()
+
+    if (c.req.query('kind') === 'singleton') {
+      const rows = await listSingletons(bindings.db, rt.types, rt.schemaId)
+      return c.json({ rows: rows.map(rt.withUrls) })
+    }
+
+    const raw = c.req.query('type')
     const wanted = raw === undefined ? undefined : requireType(typeNameQuery(raw))
+    if (wanted?.kind === 'singleton') await ensureSingleton(bindings.db, wanted, rt.schemaId)
 
-    const singletons = wanted
-      ? wanted.kind === 'singleton'
-        ? [wanted]
-        : []
-      : rt.types.filter((t) => t.kind === 'singleton')
-    for (const type of singletons) await ensureSingleton(bindings.db, type, rt.schemaId)
+    const cursor = c.req.query('cursor')
+    requireCursor(cursor)
+    const page = await listDocumentPage(
+      bindings.db,
+      wanted?.name,
+      documentSortQuery(c.req.query('sort')),
+      {
+        limit: limitParam(c.req.query('limit'), 50, 200),
+        cursor,
+        filter: storyFilterQuery(c.req),
+        count: c.req.query('count') === '1',
+        dir: sortDirQuery(c.req.query('dir')),
+        // Skipped on a site that marks nothing `indexed`, where the query would
+        // be a round trip for an empty answer.
+        indexed: rt.indexedFields.size > 0,
+      },
+    )
+    return c.json(decorated(rt, page))
+  })
 
-    const documents = await listDocuments(bindings.db, wanted?.name)
-    // The `indexed` field values the Data list view draws its columns from
-    // (`../../../docs/specs/content-model/data-documents.md` decision 2). One
-    // query for the whole list, additive on the response, and skipped entirely on
-    // a site that marks nothing `indexed` — so a caller written before this
-    // reads the identical payload it always did.
-    const indexed =
-      rt.indexedFields.size > 0
-        ? await indexedValuesFor(
-            bindings.db,
-            documents.map((d) => d.id),
-          )
-        : {}
-
-    return c.json({
-      documents: documents.map(rt.withUrls),
-      ...(Object.keys(indexed).length > 0 ? { indexed } : {}),
-    })
+  /**
+   * One search route for the palette, every screen's search box and both pickers
+   * (`foundation/pagination.md` decision 8).
+   *
+   * The palette got page search from `?flat=1&q=` when the shell stopped holding
+   * every story, which answered the urgent half and left two things owed: a
+   * *record* was unreachable from it, and `content_index`'s values were unreachable
+   * from any search box at all. Both are what this adds — `?kind=` is the axis that
+   * makes one route serve a picker narrowed to pages and a palette that is not.
+   *
+   * `Page<StoryMeta>` rather than a `StoryRef` projection, which is what the spec
+   * named. A ref is `{ id, title, url }` and every consumer wants more: the palette
+   * shows a path to tell two same-titled pages apart, a picker shows the state
+   * badge, and a screen's search box shows the row it would show anyway. Sending
+   * the row the other list routes already send means one shape to consume and no
+   * second projection to keep in step.
+   */
+  app.get('/search', requireAccess<Env>(rt, READ), async (c) => {
+    const cursor = c.req.query('cursor')
+    requireCursor(cursor)
+    // `kind` becomes a list of declared type names here rather than in the
+    // reader: nothing on a story row records a kind, so the manifest is the only
+    // thing that can answer it. A kind no type declares resolves to an **empty
+    // list**, which the reader reads as "no type matches" rather than "every
+    // type" — the distinction absent-versus-empty that `?parentId=` also turns
+    // on. Not a 400: the request is well-formed and the honest answer is that this
+    // site declares none.
+    const kind = searchKindQuery(c.req.query('kind'))
+    return c.json(
+      decorated(
+        rt,
+        await searchStories(c.var.bindings().db, {
+          ...(kind ? { types: rt.types.filter((t) => t.kind === kind).map((t) => t.name) } : {}),
+          sort: searchSortQuery(c.req.query('sort')),
+          limit: limitParam(c.req.query('limit'), 20, 100),
+          cursor,
+          filter: storyFilterQuery(c.req),
+          count: c.req.query('count') === '1',
+        }),
+      ),
+    )
   })
 
   /**

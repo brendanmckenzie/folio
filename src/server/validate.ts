@@ -19,7 +19,16 @@
  */
 import * as v from 'valibot'
 import { decodeCursor } from '../core/pagination'
-import { DEFAULT_FLAT_SORT, type FlatSort, type StoryFilter } from '../core/story'
+import type { DocumentType } from '../core/schema'
+import {
+  DEFAULT_DOCUMENT_SORT,
+  DEFAULT_FLAT_SORT,
+  DEFAULT_SEARCH_SORT,
+  type DocumentSort,
+  type FlatSort,
+  type SearchSort,
+  type StoryFilter,
+} from '../core/story'
 import { FolioError } from './errors'
 
 /**
@@ -771,5 +780,59 @@ export function flatSortQuery(raw: string | undefined): FlatSort {
     v.picklist(['edited', 'title', 'path'], 'must be one of: edited, title, path'),
     raw,
     'sort',
+  )
+}
+
+/**
+ * The Documents screen's ordering, defaulting to `title` — same rule as
+ * `flatSortQuery`: the default is the answer to the question the list exists for,
+ * and an *unknown* sort still 400s because it is a typo or a stale link and
+ * quietly serving the default would make the URL lie about what is on screen.
+ *
+ * `ord` and not the name of an `indexed` field, deliberately. `core/story.ts`'s
+ * `DocumentSort` carries the argument; the refusal here is what a client written
+ * against the old client-side sort meets, and the message names what it can have.
+ */
+export function documentSortQuery(raw: string | undefined): DocumentSort {
+  if (raw === undefined || raw === '') return DEFAULT_DOCUMENT_SORT
+  return parseOrThrow(
+    v.picklist(['ord', 'title', 'edited'], 'must be one of: ord, title, edited'),
+    raw,
+    'sort',
+  )
+}
+
+/**
+ * `?dir=` — reverses a sort. Absent means the ordering's own natural direction,
+ * which is what a column header shows on its first click, so this is only ever
+ * present once somebody has clicked twice.
+ */
+export function sortDirQuery(raw: string | undefined): 'asc' | 'desc' | undefined {
+  if (raw === undefined || raw === '') return undefined
+  return parseOrThrow(v.picklist(['asc', 'desc'], 'must be one of: asc, desc'), raw, 'dir')
+}
+
+/** `?sort=` on the search route. See `core/story.ts`'s `SearchSort` for why the
+ * two values are `title` and `edited` and why the choice matters at all when the
+ * consumer does the ranking. */
+export function searchSortQuery(raw: string | undefined): SearchSort {
+  if (raw === undefined || raw === '') return DEFAULT_SEARCH_SORT
+  return parseOrThrow(v.picklist(['title', 'edited'], 'must be one of: title, edited'), raw, 'sort')
+}
+
+/**
+ * `?kind=` on the search route: which *declared kind* of document to look in.
+ *
+ * Absent means every kind, which is what the palette wants. A picker narrowed to
+ * pages passes `page`; a `reference()` picker passes `record`. Resolved by the
+ * route into a list of type names, because nothing on a `stories` row records a
+ * kind — it is a property of the type the host declared.
+ */
+export function searchKindQuery(raw: string | undefined): DocumentType['kind'] | undefined {
+  if (raw === undefined || raw === '') return undefined
+  return parseOrThrow(
+    v.picklist(['page', 'record', 'singleton'], 'must be one of: page, record, singleton'),
+    raw,
+    'kind',
   )
 }

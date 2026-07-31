@@ -9,6 +9,28 @@
   border-collapse: collapse;
 }
 
+/*
+ * **The first column absorbs the slack; every other one shrinks to its content.**
+ *
+ * A UI-review finding rather than a nicety. `width: 100%` on the table plus
+ * `white-space: nowrap` on every cell sizes each column to its content and hands
+ * the leftover width to whichever column the layout algorithm reaches last — which
+ * is the *actions* column, so the Documents screen rendered five columns crammed
+ * into the left two-thirds with a 250px void on the right where the hover controls
+ * live. Nothing was wrong with any single cell; the table just did not look like a
+ * table.
+ *
+ * `width: 100%` on one cell in a shrink-to-fit row is the standard way to say "this
+ * one takes the rest": the browser satisfies it last, after every nowrap column has
+ * its natural width. The first column is the right one to pick because it is always
+ * the variable-length one — a title, a path, an email — and it is what `onOpen`
+ * hangs off.
+ */
+.table th:first-child,
+.table td:first-child {
+  width: 100%;
+}
+
 .table th {
   position: sticky;
   top: 0;
@@ -91,16 +113,38 @@
   color: var(--fg-accent);
 }
 
-.actionsHead {
-  width: 4rem;
-}
-
+/*
+ * No width: the column sizes to its own controls now that the first column takes
+ * the slack. `4rem` was a guess that the layout ignored anyway — it is a minimum in
+ * table layout, and the actual buttons are wider than it.
+ */
 .actions {
   text-align: right;
+  /*
+   * `visibility` rather than `display: none`, so the column keeps its width and the
+   * row does not reflow the moment a pointer crosses it. The cost is a reserved
+   * strip on every row, which is why the first column absorbing the slack matters:
+   * without it, that strip *was* the slack.
+   */
   visibility: hidden;
 }
 
 .table tbody tr:hover .actions,
 .table tbody tr:focus-within .actions {
   visibility: visible;
+}
+
+/* Hidden from sight, present for a screen reader — the same rule the screens use
+   for a `<legend>`. Not `display: none`: that removes it from the accessibility
+   tree too, which is the one thing it exists for. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }

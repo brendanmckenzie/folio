@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import './tokens.css'
-import type { DocumentType, Manifest } from '../../core/schema'
+import {
+  type DocumentType,
+  indexManifest,
+  type Manifest,
+  type SchemaIndex,
+} from '../../core/schema'
 import { DEFAULT_FLAT_SORT, type FlatSort, type StoryMeta } from '../../core/story'
 import { globalPreviewUrl } from '../GlobalsList'
 import { actorLabel, fetchMe, type Me, OPEN } from '../me'
@@ -11,6 +16,7 @@ import { Palette, type PaletteAction } from './Palette'
 import { type Crumb, type CrumbContext, crumbs, documentTitle, href } from './route'
 import { useRemembered, useRememberedString } from './remembered'
 import { Content } from './screens/Content'
+import { Documents } from './screens/Documents'
 import type { ViewMode } from './screens/content-model'
 import { EditorShell } from './screens/EditorShell'
 import { Home } from './screens/Home'
@@ -19,7 +25,7 @@ import { Shell } from './Shell'
 import { SAVE_NOTICE, useShortcuts } from './shortcuts'
 import { Toast } from './Toast'
 import { useRouter } from './useRouter'
-import { usePageSearch } from './usePageSearch'
+import { useSearch } from './useSearch'
 import { usePreviewHost, useStory } from './useStory'
 
 export interface PrototypeBoot {
@@ -35,27 +41,26 @@ export interface PrototypeBoot {
 /**
  * The shell.
  *
- * Phase 1 of `docs/ui-architecture.md`'s port plan, now with phase 2's Content
- * screen real rather than a prototype — which is what removed the thing this
- * file's comment used to be about. It booted from four requests, **two of which
- * returned every row in a table**, and said so as a finding.
+ * Phase 1 of `docs/ui-architecture.md`'s port plan, carrying phases 2 and 3 — the
+ * Content and Documents screens — as real screens rather than stubs.
  *
- * One of the two is gone. The tree is no longer fetched here at all: Content owns
- * its own paged reads, and the three things the shell genuinely needs about a
- * document — the row, its ancestors, and a global's preview host — come from
- * `useStory` and `usePreviewHost`, each asking for the ids or paths it needs
+ * **The boot path holds no unbounded read.** That is worth stating because it was
+ * this file's standing finding through two phases: four requests, two of which
+ * returned every row in a table. The tree went with phase 2 (Content pages its own
+ * levels); the records went with phase 3. What is left is the schema, who you are,
+ * and `?kind=singleton` — a set bounded by the host's own `types` literal, so it
+ * cannot grow when somebody publishes.
+ *
+ * The three things the shell genuinely needs about a *document* — the row, its
+ * ancestors, and a global's preview host — come from `useStory` and `usePreviewHost`,
+ * each asking for the ids or paths it needs
  * (`docs/specs/foundation/pagination.md` decision 7).
- *
- * `/documents` is the one left, and it is deliberate rather than overlooked:
- * asking for it is what *creates* a declared singleton (`ensureSingleton`), so it
- * is load-bearing in the boot path, and its shape is the Documents screen's to
- * decide at port phase 3. Paging it now would mean deciding that shape twice.
  */
 export function Prototype({ boot }: { boot: PrototypeBoot }) {
   const { route, go, replace } = useRouter(boot.base)
   const [manifest, setManifest] = useState<Manifest | null>(null)
   const [me, setMe] = useState<Me>(OPEN)
-  const [unrouted, setUnrouted] = useState<readonly StoryMeta[]>([])
+  const [globals, setGlobals] = useState<readonly StoryMeta[]>([])
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
   const [palette, setPalette] = useState(false)
@@ -66,26 +71,35 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
       fetch(`${boot.apiBase}/schema`).then((r) => r.json() as Promise<Manifest>),
       fetchMe(boot.apiBase, boot.base),
       /**
-       * The records and singletons, which are **not in the tree**: `storyTree`
-       * drops every unrouted row, so a global's document is not in the paged
-       * `/stories` walk at all.
+       * The **singletons**, which are not in the tree: `storyTree` drops every
+       * unrouted row, so a global's document is not in the paged `/stories` walk at
+       * all.
        *
        * A finding the prototype produced by failing: the sidebar links a global
        * straight at `sng_<type>` (its id is derived), the router resolved the id
        * against the tree, found nothing, and drew "No such document" under a
-       * correctly highlighted nav item. Asking is also what *creates* a singleton
-       * on first access (`stories.ts`'s `ensureSingleton`) — so this call is
-       * load-bearing, not merely convenient.
+       * correctly highlighted nav item. Asking is also what *creates* a singleton on
+       * first access, so this call is load-bearing rather than merely convenient.
+       *
+       * **This used to be every record too**, and was the last unbounded read in the
+       * boot path. `?kind=singleton` is the load-bearing half on its own: the set is
+       * bounded by the *schema* — `types` is a literal in the host's `createFolio`
+       * call — so it cannot grow when somebody publishes, which is why it is
+       * uncursored and why that is not an exception to the rule. Records left the
+       * boot path entirely: the Documents screen pages them, `useStory` resolves an
+       * open one by id, and the palette searches for them.
        */
-      fetch(`${boot.apiBase}/documents`, { headers: { accept: 'application/json' } })
-        .then((r) => (r.ok ? (r.json() as Promise<{ documents: StoryMeta[] }>) : { documents: [] }))
-        .then((body) => body.documents),
+      fetch(`${boot.apiBase}/documents?kind=singleton`, {
+        headers: { accept: 'application/json' },
+      })
+        .then((r) => (r.ok ? (r.json() as Promise<{ rows: StoryMeta[] }>) : { rows: [] }))
+        .then((body) => body.rows),
     ])
-      .then(([m, who, documents]) => {
+      .then(([m, who, singletons]) => {
         if (!live) return
         setManifest(m)
         setMe(who)
-        setUnrouted(documents)
+        setGlobals(singletons)
         setLoading(false)
       })
       .catch((e: Error) => {
@@ -99,16 +113,17 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
   }, [boot.apiBase, boot.base])
 
   const types = manifest?.types ?? []
+  const schema = useMemo(() => (manifest ? indexManifest(manifest) : {}), [manifest])
   const pageTypes = useMemo(() => types.filter((t) => t.kind === 'page'), [types])
   const screen = route.screen
 
   /**
    * The open document, resolved by id rather than looked up in a tree the shell no
-   * longer holds. An unrouted document is already in `unrouted`, so it is answered
-   * without a request — which matters because that list is also what brought the
-   * singleton into existence.
+   * longer holds. A **global** is already in `globals`, so it is answered without a
+   * request — which matters because that list is also what brought the singleton
+   * into existence. Everything else, records included, is one `?ids=` fetch.
    */
-  const local = screen.name === 'edit' ? unrouted.find((n) => n.id === screen.id) : undefined
+  const local = screen.name === 'edit' ? globals.find((n) => n.id === screen.id) : undefined
   const fetched = useStory(boot.apiBase, screen.name === 'edit' && !local ? screen.id : undefined)
   const open = local ?? fetched.story
 
@@ -124,8 +139,10 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
       ...(open
         ? {
             chain: local
-              ? // A record or a global is one crumb: it has no ancestor chain,
-                // because it is not in the tree.
+              ? // A global is one crumb: it has no ancestor chain, because it is
+                // not in the tree. A record is the same shape and reaches it
+                // through `fetched.chain`, which `?ancestors=1` answers as one
+                // entry for a row whose path is null.
                 [{ id: local.id, title: local.title || local.id }]
               : fetched.chain,
             root: rootCrumbFor(types.find((t) => t.name === open.type)),
@@ -167,15 +184,8 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
     return () => clearTimeout(t)
   }, [notice])
 
-  const search = usePageSearch(boot.apiBase, palette)
-  const actions = usePaletteActions({
-    groups,
-    pages: search.pages,
-    unrouted,
-    mount: boot.base,
-    go,
-    label,
-  })
+  const search = useSearch(boot.apiBase, palette)
+  const actions = usePaletteActions({ groups, found: search.rows, mount: boot.base, go, label })
 
   const user: MenuItem[] = [
     { id: 'ui', label: 'Design system', run: () => go({ name: 'ui' }) },
@@ -217,6 +227,7 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
           boot,
           loading,
           types,
+          schema,
           pageTypes,
           open,
           label,
@@ -249,6 +260,9 @@ interface ScreenArgs {
   boot: PrototypeBoot
   loading: boolean
   types: Manifest['types']
+  /** The block schema, indexed by name. Documents needs it to read a type's
+   * `indexed` fields and their labels; nothing else does yet. */
+  schema: SchemaIndex
   pageTypes: readonly DocumentType[]
   open: StoryMeta | undefined
   label: (name: string) => string | undefined
@@ -307,14 +321,37 @@ function screenFor(a: ScreenArgs) {
         />
       )
 
-    case 'documents':
+    case 'documents': {
+      const wanted = route.screen.type
+      const type = a.types.find((t) => t.name === wanted)
+      // A type the manifest does not declare. Not a `missing` route — the path is
+      // perfectly well formed and the shell knows what it *was* — so it says which
+      // type, which is the only useful thing it can say. An orphaned document of
+      // that type is reachable through the audit panel (port phase 5), which is
+      // where `DataList.tsx`'s "Unknown type" heading goes.
+      if (!type) {
+        return (
+          <Stub title={wanted}>
+            No document type named <code>{wanted}</code> is declared. It was renamed or removed in
+            code; documents still carrying it are listed by <code>GET {boot.apiBase}/audit</code>.
+          </Stub>
+        )
+      }
       return (
-        <Stub title={a.label(route.screen.type) ?? route.screen.type}>
-          One type&rsquo;s records as a table, with columns from its <code>indexed</code> fields.
-          Replaces <code>DataList.tsx</code> and <code>DataTable.tsx</code>, and stops the inspector
-          sitting beside a list describing an unrelated page.
-        </Stub>
+        <Documents
+          type={type}
+          schema={a.schema}
+          apiBase={boot.apiBase}
+          query={route.query}
+          onQuery={(next) =>
+            a.replace({ name: 'documents', type: type.name }, { ...route.query, ...next })
+          }
+          onOpen={a.go}
+          onNotice={a.notify}
+          {...(a.open ? { selected: a.open.id } : {})}
+        />
       )
+    }
 
     case 'assets':
       return (
@@ -384,29 +421,26 @@ function screenFor(a: ScreenArgs) {
  * The palette's actions: every screen, plus the documents matching what has been
  * typed.
  *
- * **Pages are searched, not held.** The prototype ranked its two boot payloads in
- * memory, which was only possible because one of them was every story on the site.
- * Now the query goes to `?flat=1&q=` (debounced) and the records — already in hand,
- * and small by construction — are ranked locally, so the palette finds a page on a
- * site of any size.
+ * **Nothing is held; everything is searched.** The first version ranked the two boot
+ * payloads in memory, which was only possible because one of them was every story on
+ * the site. The second replaced half of that with `?flat=1&q=` and kept ranking the
+ * records it still held — so a page was findable on a site of any size and a person
+ * was findable only because the admin had already fetched every person.
  *
- * This is decision 8's job in the end: `GET {base}/api/search` unifies the palette,
- * every screen's search box and both pickers over one route that also reaches
- * `content_index`'s values. Until it exists, the flat mode of the tree route
- * answers the same question for pages, which is the part the palette was worst at.
+ * `GET {base}/api/search` (decision 8) closes it: one route, every kind, and
+ * `content_index`'s values as well as the three columns on the row. So the palette
+ * finds a record by the field that identifies it, and holds nothing.
  */
 function usePaletteActions({
   groups,
-  pages,
-  unrouted,
+  found,
   mount,
   go,
   label,
 }: {
   groups: ReturnType<typeof nav>
-  /** Pages matching what has been typed, from `usePageSearch`. */
-  pages: readonly StoryMeta[]
-  unrouted: readonly StoryMeta[]
+  /** Documents matching what has been typed, from `useSearch`. */
+  found: readonly StoryMeta[]
   mount: string
   go: ReturnType<typeof useRouter>['go']
   label: (name: string) => string | undefined
@@ -421,7 +455,7 @@ function usePaletteActions({
         run: () => go(item.screen),
       })),
     )
-    const documents: PaletteAction[] = [...pages, ...unrouted].map((node) => {
+    const documents: PaletteAction[] = found.map((node) => {
       // The path, because that is the thing that tells two pages with the same
       // title apart — and `design-system.md`'s third commitment says an identifier
       // is a typographic citizen rather than something to hide. It is also a
@@ -436,7 +470,7 @@ function usePaletteActions({
       }
     })
     return [...screens, ...documents]
-  }, [groups, pages, unrouted, mount, go, label])
+  }, [groups, found, mount, go, label])
 }
 
 /* ------------------------------------------------------------------ preview --- */

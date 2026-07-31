@@ -191,6 +191,76 @@ export type FlatSort = 'edited' | 'title' | 'path'
  * to answer, so a URL that omits the sort wants it rather than an error. */
 export const DEFAULT_FLAT_SORT: FlatSort = 'edited'
 
+/**
+ * The Documents screen's ordering — one type's records as a table
+ * (`ui-architecture.md` port phase 3).
+ *
+ * Three, and **every one of them is a column on `stories`**. That is the decision
+ * rather than an accident of what was easy: the screen's other columns come from
+ * the type's `indexed` fields, whose values live in `content_index`, and sorting
+ * by one of those means a keyset over a joined row — which does not work here for
+ * three separate reasons.
+ *
+ *  - A value is **two columns** (`num_value` then `text_value`, and
+ *    `content-index.ts`'s `IndexedValue` says why), so the key is a triple and
+ *    `server/keyset.ts`'s `Keyset` holds a pair.
+ *  - Index rows are written **inside the publish batch**, so an unpublished
+ *    document has none and the sort column is null. `core/pagination.ts`'s
+ *    `CursorPart` is non-nullable on purpose: a cursor over a nullable column
+ *    cannot express "resume after null" in a way that agrees with SQL's own null
+ *    ordering.
+ *  - No index helps. `content_index_lookup (field, locale, text_value)` cannot be
+ *    intersected with `stories.type = ?`, so it is a sort either way.
+ *
+ * The consequence is small in practice and worth stating: `dataColumns`' rule —
+ * carried into `documents-model.ts` — skips the type's `titleField` as a field
+ * column, because its value *is* the title. So the one sort anybody reaches for on
+ * a record list ("people by name") is `title`, and it is a real indexed column.
+ *
+ * **Rejected: widening `Keyset` to three components** and coalescing both index
+ * columns to sentinels. Exact, and it pages stably; it also collapses every
+ * unpublished document into one sentinel block ordered by id, and it is still a
+ * sort rather than an index walk — so it buys reach at the cost of the one thing
+ * that made a keyset worth having. It is the shape this takes when somebody asks.
+ *
+ * **Rejected: offset paging when the sort names an `indexed` field**, reusing the
+ * join `server/query.ts` already writes. Two envelopes on one route told apart by
+ * a query parameter, page numbers back in a live admin list (decision 1), and
+ * `query.ts` filters `published_doc is not null` — so it is a parallel
+ * implementation, not a call.
+ */
+export type DocumentSort = 'ord' | 'title' | 'edited'
+
+/**
+ * `title`, the default, because it is what the list this replaces showed:
+ * `DataTable.tsx` opened on `{ key: 'title', dir: 'asc' }` over the whole set.
+ *
+ * Not `ord`, even though that is the order the rows come out of the table in. A
+ * record list is read alphabetically; `ord` is offered because a record *has* a
+ * manual position (`createStory` appends, so it reads as creation order and the
+ * screen labels it "Added"), not because it is the useful default.
+ */
+export const DEFAULT_DOCUMENT_SORT: DocumentSort = 'title'
+
+/**
+ * `GET {base}/api/search`'s ordering (`pagination.md` decision 8).
+ *
+ * Two, and `edited` is the one that earns its keep. The route narrows and the
+ * *consumer* ranks — `admin/ui/rank.ts`, shared by the palette and both pickers —
+ * so what the ordering decides is **which twenty rows get ranked**, not what order
+ * they end up in. Recency is a far better prior for that than the alphabet: a
+ * palette showing the twenty most recently edited matches has the page you were
+ * working on in it, and one showing the twenty alphabetically first has whatever
+ * begins with "A".
+ *
+ * `path` is absent because a record has none, and this route spans every kind.
+ */
+export type SearchSort = 'title' | 'edited'
+
+/** `title`, so a picker that opens with no query reads as a list rather than a
+ * feed. The palette asks for `edited` explicitly, because it *is* a feed. */
+export const DEFAULT_SEARCH_SORT: SearchSort = 'title'
+
 export function joinPath(parentPath: string, slug: string): string {
   if (!slug) return parentPath
   return parentPath ? `${parentPath}/${slug}` : slug

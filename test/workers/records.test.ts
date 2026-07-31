@@ -189,39 +189,73 @@ describe('a record has no URL', () => {
 
   it('lists them in GET /documents instead, unrouted and with no url', async () => {
     const body = (await (await get('/folio/api/documents?type=recPersonType'))!.json()) as {
-      documents: { id: string; path: string | null; url?: string }[]
+      rows: { id: string; path: string | null; url?: string }[]
     }
-    expect(body.documents.map((d) => d.id).sort()).toEqual([ADA, GRACE])
-    expect(body.documents.every((d) => d.path === null)).toBe(true)
-    expect(body.documents.every((d) => d.url === undefined)).toBe(true)
+    expect(body.rows.map((d) => d.id).sort()).toEqual([ADA, GRACE])
+    expect(body.rows.every((d) => d.path === null)).toBe(true)
+    expect(body.rows.every((d) => d.url === undefined)).toBe(true)
   })
 })
 
 /* ------------------------------------------------- indexed list columns --- */
 
+/**
+ * The values are **on the row**, not in a sibling map keyed by id, which is what
+ * this route answered with before it was paged. `server/stories.ts`'s `DocumentRow`
+ * carries the reason; the short version is that a map covering one page's ids is a
+ * structure the client has to zip against `rows`, and a map left over from the
+ * previous page would quietly supply values for rows no longer on screen.
+ */
 describe('GET /documents carries the indexed values the list view columns need', () => {
-  it('returns one entry per document, keyed by field', async () => {
-    const body = (await (await get('/folio/api/documents'))!.json()) as {
-      indexed?: Record<string, Record<string, { text: string; num: number | null }>>
-    }
-    expect(body.indexed?.[ADA]?.fullName?.text).toBe('Ada Lovelace')
-    expect(body.indexed?.[ADA]?.role?.text).toBe('Analyst')
-    expect(body.indexed?.[SYDNEY]?.city?.text).toBe('Sydney')
+  type Row = { id: string; indexed: Record<string, { text: string; num: number | null }> }
+
+  it('carries each document’s own values, keyed by field', async () => {
+    const body = (await (await get('/folio/api/documents'))!.json()) as { rows: Row[] }
+    const byId = new Map(body.rows.map((r) => [r.id, r]))
+    expect(byId.get(ADA)?.indexed.fullName?.text).toBe('Ada Lovelace')
+    expect(byId.get(ADA)?.indexed.role?.text).toBe('Analyst')
+    expect(byId.get(SYDNEY)?.indexed.city?.text).toBe('Sydney')
   })
 
-  it('leaves a document with nothing published out, so its cells read blank', async () => {
+  it('gives a document with nothing published an empty object, so its cells read blank', async () => {
     const created = (await (await send('/folio/api/stories', 'POST', {
       title: 'Unpublished Person',
       type: 'recPersonType',
     }))!.json()) as { id: string }
     const body = (await (await get('/folio/api/documents?type=recPersonType'))!.json()) as {
-      documents: { id: string }[]
-      indexed?: Record<string, unknown>
+      rows: Row[]
     }
     // The row IS in the list — the admin lists documents, not published content.
-    expect(body.documents.map((d) => d.id)).toContain(created.id)
-    expect(body.indexed?.[created.id]).toBeUndefined()
+    const row = body.rows.find((r) => r.id === created.id)
+    expect(row).toBeDefined()
+    // `{}` rather than absent: a cell renderer that had to tell "no values" from
+    // "no entry" would need a second branch for a distinction with no meaning.
+    expect(row?.indexed).toEqual({})
     await send(`/folio/api/stories/${created.id}`, 'DELETE')
+  })
+
+  /**
+   * `filterRows`' one interesting assertion, moved server-side: it matched the
+   * title *and every indexed value* on screen, so a person searching People for
+   * `Analyst` found the row. `?q=` reaches `content_index` for exactly that
+   * reason — see `storyFilters`' `indexedText` option, which the tree and flat
+   * reads deliberately do not pass.
+   */
+  it('searches indexed values, not only the title', async () => {
+    const body = (await (await get(
+      '/folio/api/documents?type=recPersonType&q=analyst',
+    ))!.json()) as { rows: Row[] }
+    expect(body.rows.map((r) => r.id)).toEqual([ADA])
+  })
+
+  it('does not let an indexed value match on the tree or flat reads', async () => {
+    // Those rows show title, slug, path and state — nothing on them comes from
+    // `content_index`, so a match there would return a page for a reason the list
+    // cannot show.
+    const body = (await (await get('/folio/api/stories?flat=1&q=analyst'))!.json()) as {
+      rows: { id: string }[]
+    }
+    expect(body.rows).toEqual([])
   })
 })
 
@@ -502,5 +536,78 @@ describe('deleting a referenced record proceeds', () => {
     await env.DB.prepare('delete from stories where id in (?, ?)')
       .bind('rec_paused', 'rec_naming')
       .run()
+  })
+})
+
+/* --------------------------------------------------------------- the search --- */
+
+/**
+ * `GET {base}/api/search` — `foundation/pagination.md` decision 8's "one route,
+ * three consumers". The palette is the first; the link and reference pickers adopt
+ * it with their own ports, which is why `?kind=` exists before anything passes it.
+ *
+ * The route this replaces for the palette was `?flat=1&q=`, and the two things it
+ * could not do are the two things asserted here: reach a *record*, and reach a
+ * value that lives in `content_index` rather than on the row.
+ */
+describe('GET /api/search', () => {
+  type Found = { rows: { id: string; type: string; title: string }[]; total?: number }
+  const search = async (query: string) =>
+    (await (await get(`/folio/api/search?${query}`))!.json()) as Found
+
+  it('spans every kind, so a record is reachable where flat mode could not reach it', async () => {
+    const found = await search('q=lovelace')
+    expect(found.rows.map((r) => r.id)).toContain(ADA)
+  })
+
+  it('reaches an indexed value, not only the title', async () => {
+    const found = await search('q=analyst')
+    expect(found.rows.map((r) => r.id)).toEqual([ADA])
+  })
+
+  it('narrows to a declared kind, which is what a picker needs', async () => {
+    const records = await search('kind=record')
+    expect(
+      records.rows.every((r) => r.type === 'recPersonType' || r.type === 'recOfficeType'),
+    ).toBe(true)
+    const pages = await search('kind=page')
+    expect(pages.rows.some((r) => r.id === ADA)).toBe(false)
+  })
+
+  /**
+   * Absent `types` is every type; an **empty** list is none. The distinction only
+   * shows up here: a kind no type declares has to answer an empty page rather than
+   * the whole table, and getting it wrong would silently offer every document in a
+   * picker narrowed to something the site does not have.
+   */
+  it('answers an empty page for a kind this site declares none of', async () => {
+    const found = await search('kind=singleton&count=1')
+    expect(found.rows).toEqual([])
+    expect(found.total).toBe(0)
+  })
+
+  it('answers every candidate for no query at all, which is what a picker opens on', async () => {
+    const found = await search('limit=100')
+    expect(found.rows.length).toBeGreaterThan(1)
+  })
+
+  it('refuses an unknown kind and an unknown sort', async () => {
+    const kind = await get('/folio/api/search?kind=widget')
+    expect(kind?.status).toBe(400)
+    const sort = await get('/folio/api/search?sort=path')
+    expect(sort?.status).toBe(400)
+  })
+
+  it('pages over a cursor like every other admin list', async () => {
+    const first = (await (await get('/folio/api/search?limit=1&count=1'))!.json()) as Found & {
+      cursor: string | null
+    }
+    expect(first.rows).toHaveLength(1)
+    expect(first.cursor).not.toBeNull()
+
+    const second = (await (await get(
+      `/folio/api/search?limit=1&cursor=${encodeURIComponent(first.cursor ?? '')}`,
+    ))!.json()) as Found
+    expect(second.rows[0]?.id).not.toBe(first.rows[0]?.id)
   })
 })

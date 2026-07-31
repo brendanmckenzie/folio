@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { diff, summariseDiff } from '../../core/diff'
 import type { Doc } from '../../core/doc'
+import type { Page } from '../../core/pagination'
 import { type ActivityEntry, MAX_TX_MUTATIONS } from '../../core/protocol'
 import type { VersionMeta } from '../../server/versions'
 import { afterWrite, expectOk, send } from '../api'
 import type { StoryStore } from '../store'
 import type { Notify } from './useNotice'
-import type { Page } from '../../core/pagination'
 
 /**
  * What the preview iframe is showing. The editor has exactly two modes and this
@@ -119,7 +119,11 @@ export function useVersions({
       reloadVersions(),
       fetch(`${apiBase}/story/${encodeURIComponent(storyId)}/activity`),
     ])
-    if (a.ok) setActivity((await a.json()) as ActivityEntry[])
+    // `Page<ActivityEntry>` now, matching the versions route beside it — the two
+    // used to disagree, one answering `{ rows }` and the other a bare array. This
+    // panel shows the first page and the old admin is deleted at port phase 7, so
+    // it reads `rows` and does not follow the cursor.
+    if (a.ok) setActivity(((await a.json()) as Page<ActivityEntry>).rows)
   }, [apiBase, reloadVersions, storyId])
 
   useEffect(() => {

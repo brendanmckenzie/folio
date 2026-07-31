@@ -16,6 +16,24 @@ interface Props {
    * action. The action carries its own variant. */
   actions?: ReactNode
   children?: ReactNode
+  /**
+   * This dialog's action destroys something.
+   *
+   * `docs/design-system.md`'s primitive table specifies this prop and the first
+   * implementation dropped it, which showed up as soon as there was a destructive
+   * dialog to look at: `variant="danger"` is a **quiet** button by design — red
+   * text, tinted only on hover — because it also serves a row's controls and a bulk
+   * bar, where a solid red slab per row would be shouting. In a dialog footer that
+   * left Cancel, which has a border, looking heavier than Delete, which did not.
+   * The affirmative action reading as the lesser of the two is the worst possible
+   * hierarchy for the one control that cannot be undone.
+   *
+   * So the *dialog* carries the signal rather than the button growing a fifth
+   * variant: a red top edge on the panel, and the footer's danger button rendered
+   * at its own hover weight — bordered and tinted at rest. Both use the existing
+   * `--state-danger-*` tokens, so both themes are covered by construction.
+   */
+  danger?: boolean
 }
 
 /**
@@ -46,6 +64,7 @@ export function Dialog({
   onClose,
   actions,
   children,
+  danger,
 }: Props) {
   const panel = useRef<HTMLDivElement>(null)
   const titleId = useId()
@@ -73,7 +92,9 @@ export function Dialog({
         aria-labelledby={titleId}
         aria-describedby={description ? descId : undefined}
         tabIndex={-1}
-        className={`${css.panel} ${size === 'wide' ? css.wide : ''}`}
+        className={[css.panel, size === 'wide' ? css.wide : '', danger ? css.danger : '']
+          .filter(Boolean)
+          .join(' ')}
       >
         <div className={css.head}>
           <h2 id={titleId} className={css.title}>

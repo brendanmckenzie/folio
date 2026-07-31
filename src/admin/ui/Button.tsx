@@ -45,6 +45,14 @@ export function Button({
       type={type}
       disabled={disabled}
       title={disabled ? (reason ?? title) : title}
+      /*
+       * The variant, addressable from a container. CSS modules hash the class
+       * names, so `.danger .foot button` in `Dialog.module.css` has no way to say
+       * "the danger one" without this — and a destructive dialog needs to raise its
+       * own action's weight without `Button` growing a fifth variant that only ever
+       * made sense inside one component. See `Dialog`'s `danger` prop.
+       */
+      data-variant={variant}
       className={[css.btn, css[variant], css[size], block ? css.block : ''].join(' ')}
     >
       {children}

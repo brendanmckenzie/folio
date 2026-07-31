@@ -19,28 +19,44 @@ import type { CursorPart } from '../core/pagination'
 export type Direction = 'asc' | 'desc'
 
 export interface Keyset {
-  /** `(primary, tiebreak)` column expressions, in the order they are sorted. The
+  /**
+   * `(primary, tiebreak)` column expressions, in the order they are sorted. The
    * tiebreak must be unique — in practice always a primary key — or a page
-   * boundary landing on a tie can still repeat or skip. */
-  columns: [string, string]
+   * boundary landing on a tie can still repeat or skip.
+   *
+   * **One column is allowed, and only when that column is already unique.** The
+   * tiebreak exists to make the boundary total, and a unique column already is:
+   * the DO's activity log sorts by `sync_id`, which is monotonic per document, so
+   * a second component would emit `(a < ? or (a = ? and a < ?))` — correct, and a
+   * clause that can never fire. Everything with a non-unique primary needs two.
+   *
+   * `path` in flat mode is the deliberate exception on the other side: it *is*
+   * unique over non-null paths and still carries `id`, so all three flat sorts go
+   * through one shape. Uniformity is worth a redundant clause there and is not
+   * worth a fictional column here.
+   */
+  columns: [string, string] | [string]
   direction: Direction
 }
 
 /**
- * The `order by` clause for a keyset. Both columns, same direction, always —
+ * The `order by` clause for a keyset. Every column, same direction, always —
  * which is the property that makes the cursor a total order.
  */
 export function orderBy(keyset: Keyset): string {
-  const [primary, tiebreak] = keyset.columns
   const dir = keyset.direction === 'desc' ? 'desc' : 'asc'
-  return `order by ${primary} ${dir}, ${tiebreak} ${dir}`
+  return `order by ${keyset.columns.map((column) => `${column} ${dir}`).join(', ')}`
 }
 
 /**
  * The `where` fragment that resumes strictly after `cursor`, and its binds.
  *
  * Returns empty for a null cursor, so a caller can always concatenate: the first
- * page and a later one differ by a clause, not by a code path.
+ * page and a later one differ by a clause, not by a code path. It also returns
+ * empty for a cursor whose width disagrees with the keyset's, which is
+ * unreachable through a route — `requireCursor` refuses a malformed one and a
+ * well-formed one from a *different* ordering is the case `useDocuments` and
+ * `useContent` both reset the stack for.
  *
  * `<` and `>` rather than `<=`/`>=`: the cursor names the **last row already
  * shown**, so resuming must exclude it. That is also why `paginate` keys on the
@@ -50,10 +66,13 @@ export function keysetWhere(
   keyset: Keyset,
   cursor: readonly CursorPart[] | null,
 ): { sql: string; binds: CursorPart[] } {
-  if (!cursor || cursor.length !== 2) return { sql: '', binds: [] }
-  const [primary, tiebreak] = keyset.columns
-  const [at, after] = cursor as [CursorPart, CursorPart]
+  if (!cursor || cursor.length !== keyset.columns.length) return { sql: '', binds: [] }
   const cmp = keyset.direction === 'desc' ? '<' : '>'
+  const [primary, tiebreak] = keyset.columns
+  const [at, after] = cursor as [CursorPart, CursorPart?]
+  if (tiebreak === undefined || after === undefined) {
+    return { sql: `${primary} ${cmp} ?`, binds: [at] }
+  }
   return {
     sql: `(${primary} ${cmp} ? or (${primary} = ? and ${tiebreak} ${cmp} ?))`,
     binds: [at, at, after],

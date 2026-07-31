@@ -39,6 +39,7 @@ describe('the /api partition', () => {
     '/folio/api/me',
     '/folio/api/stories',
     '/folio/api/documents',
+    '/folio/api/search',
     '/folio/api/assets',
     '/folio/api/redirects',
     '/folio/api/content',

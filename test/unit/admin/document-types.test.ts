@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { rootSettingsLabel } from '../../../src/admin/BlockTree'
-import { dataTypes, documentsOfType, orphanedDocuments } from '../../../src/admin/DataList'
 import { referenceCandidates } from '../../../src/admin/Inspector'
 import { linkCandidates } from '../../../src/admin/LinkInput'
 import { creatableUnder, dropRefusal, typeChip } from '../../../src/admin/StoryTree'
@@ -188,31 +187,26 @@ describe('referenceCandidates', () => {
   })
 })
 
-describe('the Data rail’s grouping', () => {
-  const documents = [
-    node({ id: 'ada', type: 'person', path: null }),
-    node({ id: 'grace', type: 'person', path: null }),
-    node({ id: 'sng_settings', type: 'settings', path: null }),
-    node({ id: 'stray', type: 'vanished', path: null }),
-  ]
-
-  it('takes every non-page type, in declaration order', () => {
-    expect(dataTypes(TYPES).map((t) => t.name)).toEqual(['person', 'settings'])
-  })
-
-  it('groups documents by type', () => {
-    expect(documentsOfType(documents, 'person').map((d) => d.id)).toEqual(['ada', 'grace'])
-    expect(documentsOfType(documents, 'settings').map((d) => d.id)).toEqual(['sng_settings'])
-  })
-
-  it('keeps a row whose type is gone reachable under its own heading', () => {
-    expect(orphanedDocuments(documents, TYPES).map((d) => d.id)).toEqual(['stray'])
-  })
-
-  it('reports no orphans when every type is declared', () => {
-    expect(orphanedDocuments(documents.slice(0, 3), TYPES)).toEqual([])
-  })
-})
+/*
+ * `describe('the Data rail\u2019s grouping')` was here, over `DataList.tsx`'s
+ * `dataTypes`, `documentsOfType` and `orphanedDocuments`. All three are gone with
+ * the file (`../../../../docs/ui-architecture.md` port phase 3), and each is worth
+ * saying where it went:
+ *
+ *  - `dataTypes` \u2014 the sidebar generates a nav item per declared type from the
+ *    manifest, so "every non-page type, in declaration order" is `admin/ui/nav.ts`
+ *    and is tested in `nav.test.ts`.
+ *  - `documentsOfType` \u2014 grouping client-side over every record on the site is
+ *    what `GET {base}/api/documents?type=` answers, paged.
+ *  - `orphanedDocuments` \u2014 a row whose type is no longer declared. **This one is
+ *    a capability, not a mechanism**, and it is the only part of the rail with
+ *    nowhere to go yet: the nav is generated from the manifest, so an undeclared
+ *    type has no screen. `GET {base}/audit` already reports `unknown types` in
+ *    full, and `ui-architecture.md` puts the audit panel on Model at port phase 5 \u2014
+ *    which is where it lands, with a link per finding. Until then the Documents
+ *    screen names the type and points at the audit route rather than pretending the
+ *    documents do not exist.
+ */
 
 describe('rootSettingsLabel', () => {
   const def = (label: string): BlockSchema => ({ name: 'x', label, fields: {} })

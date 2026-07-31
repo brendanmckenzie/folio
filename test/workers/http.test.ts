@@ -686,7 +686,9 @@ describe('versions and restore', () => {
     after.close()
     expect(restored.bloks[root]?.data.title).toBe('First')
 
-    const activity = await getJson<ActivityEntry[]>(`/folio/api/story/${story.id}/activity`)
+    const { rows: activity } = await getJson<Page<ActivityEntry>>(
+      `/folio/api/story/${story.id}/activity`,
+    )
     expect(activity[0]!.syncId).toBeGreaterThan(activity.at(-1)!.syncId)
     expect(
       activity.some((e) =>
@@ -709,8 +711,46 @@ describe('activity', () => {
     const res = await SELF.fetch(`${API}/story/${story.id}/activity?limit=not-a-number`)
     expect(res.status).toBe(200)
 
-    const activity = await res.json<ActivityEntry[]>()
-    expect(activity.length).toBeGreaterThan(0)
+    const activity = await res.json<Page<ActivityEntry>>()
+    expect(activity.rows.length).toBeGreaterThan(0)
+  })
+
+  /**
+   * The trail is a `Page<T>` like the versions route beside it, and it pages —
+   * `foundation/pagination.md` phase 4 named it and left it capped. The log grows
+   * with every transaction, so before this the 501st entry was unreachable by any
+   * means.
+   */
+  it('pages over a cursor, newest first, with no row on two pages', async () => {
+    const story = await createStory('Activity Paging')
+    const conn = await connect(story.id)
+    const doc = await conn.hello('alice')
+    for (let i = 0; i < 4; i++) {
+      await conn.tx(`page${i}`, [{ t: 'set', uid: doc.root, field: 'title', value: `V${i}` }])
+    }
+    conn.close()
+
+    const first = await getJson<Page<ActivityEntry>>(
+      `/folio/api/story/${story.id}/activity?limit=2`,
+    )
+    expect(first.rows).toHaveLength(2)
+    expect(first.cursor).not.toBeNull()
+
+    const second = await getJson<Page<ActivityEntry>>(
+      `/folio/api/story/${story.id}/activity?limit=2&cursor=${encodeURIComponent(first.cursor ?? '')}`,
+    )
+    const seen = new Set(first.rows.map((e) => e.syncId))
+    expect(second.rows.some((e) => seen.has(e.syncId))).toBe(false)
+    // Newest first across the boundary, not just within a page.
+    expect(Math.min(...first.rows.map((e) => e.syncId))).toBeGreaterThan(
+      Math.max(...second.rows.map((e) => e.syncId)),
+    )
+  })
+
+  it('refuses a malformed cursor rather than silently answering the first page', async () => {
+    const story = await createStory('Activity Bad Cursor')
+    const res = await SELF.fetch(`${API}/story/${story.id}/activity?cursor=not-a-cursor`)
+    expect(res.status).toBe(400)
   })
 })
 
@@ -1970,11 +2010,9 @@ describe('document types: GET /folio/api/stories vs GET /folio/api/documents', (
     expect(ids).toContain(page.id)
     expect(ids).not.toContain(ada.id)
 
-    const { documents } = await dtJson<{ documents: StoryMeta[] }>(
-      '/folio/api/documents?type=person',
-    )
-    expect(documents.map((d) => d.id)).toContain(ada.id)
-    expect(documents.every((d) => d.type === 'person')).toBe(true)
+    const { rows } = await dtJson<Page<StoryMeta>>('/folio/api/documents?type=person')
+    expect(rows.map((d) => d.id)).toContain(ada.id)
+    expect(rows.every((d) => d.type === 'person')).toBe(true)
   })
 
   it('answers `unsupported` for an undeclared type', async () => {
@@ -1983,18 +2021,70 @@ describe('document types: GET /folio/api/stories vs GET /folio/api/documents', (
     expect(body.error.code).toBe('unsupported')
   })
 
-  it('creates every declared singleton on first access, and only once', async () => {
-    const first = await dtJson<{ documents: StoryMeta[] }>('/folio/api/documents')
-    const settings = first.documents.filter((d) => d.type === 'settings')
+  /**
+   * `?kind=singleton` is where *asking is what creates a singleton* lives now, and
+   * the move is the point: ensuring is a **write**, and hanging it off an
+   * unqualified list meant `?cursor=` decided whether a document came into
+   * existence. The set is bounded by the host's `types` literal rather than by
+   * content, so this answers uncursored — a batch, not a page.
+   */
+  it('creates every declared singleton when asked for them, and only once', async () => {
+    const first = await dtJson<{ rows: StoryMeta[] }>('/folio/api/documents?kind=singleton')
+    const settings = first.rows.filter((d) => d.type === 'settings')
     expect(settings).toHaveLength(1)
     expect(settings[0]?.id).toBe('sng_settings')
+    // Uncursored: a bounded set is not a page.
+    expect(first).not.toHaveProperty('cursor')
 
-    const second = await dtJson<{ documents: StoryMeta[] }>('/folio/api/documents')
-    expect(second.documents.filter((d) => d.type === 'settings')).toHaveLength(1)
+    const second = await dtJson<{ rows: StoryMeta[] }>('/folio/api/documents?kind=singleton')
+    expect(second.rows.filter((d) => d.type === 'settings')).toHaveLength(1)
+  })
+
+  it('ensures the one singleton named by `?type=` too, so either route creates it', async () => {
+    const page = await dtJson<Page<StoryMeta>>('/folio/api/documents?type=settings')
+    expect(page.rows.map((d) => d.id)).toEqual(['sng_settings'])
+  })
+
+  it('pages one type over a cursor, and answers a total only when asked', async () => {
+    for (const title of ['Page Ada', 'Page Grace', 'Page Katherine']) {
+      await dtCreate({ title, type: 'person' })
+    }
+
+    const first = await dtJson<Page<StoryMeta>>(
+      '/folio/api/documents?type=person&limit=2&count=1&sort=title',
+    )
+    expect(first.rows).toHaveLength(2)
+    expect(first.total).toBeGreaterThanOrEqual(3)
+    expect(first.cursor).not.toBeNull()
+
+    const second = await dtJson<Page<StoryMeta>>(
+      `/folio/api/documents?type=person&limit=2&sort=title&cursor=${encodeURIComponent(first.cursor ?? '')}`,
+    )
+    expect(second).not.toHaveProperty('total')
+    // No row appears on both pages: the keyset resumes strictly after the cursor.
+    const firstIds = new Set(first.rows.map((r) => r.id))
+    expect(second.rows.some((r) => firstIds.has(r.id))).toBe(false)
+  })
+
+  it('refuses a sort naming an `indexed` field rather than silently ignoring it', async () => {
+    // The one visible cost of `DocumentSort` being three `stories` columns: a
+    // client written against the old client-side sort gets told, rather than
+    // getting a list ordered by something else that looks plausible.
+    const { status, body } = await dtFailure('/folio/api/documents?type=person&sort=role')
+    expect(status).toBe(400)
+    expect(body.error.message).toContain('ord, title, edited')
+  })
+
+  it('reverses a sort with `?dir=`', async () => {
+    const asc = await dtJson<Page<StoryMeta>>('/folio/api/documents?type=person&sort=title&dir=asc')
+    const desc = await dtJson<Page<StoryMeta>>(
+      '/folio/api/documents?type=person&sort=title&dir=desc',
+    )
+    expect(desc.rows.map((r) => r.title)).toEqual([...asc.rows.map((r) => r.title)].reverse())
   })
 
   it('seeds a singleton’s document from its own root block', async () => {
-    await dtJson<{ documents: StoryMeta[] }>('/folio/api/documents?type=settings')
+    await dtJson<Page<StoryMeta>>('/folio/api/documents?type=settings')
     const { doc } = await dtJson<{ doc: Doc }>('/folio/api/story/sng_settings/document')
     expect(doc.bloks[doc.root]?.type).toBe('settingsRoot')
   })
@@ -2130,10 +2220,8 @@ describe('document types: a second page type serves from the tree', () => {
     // Both the row and the retained version record the fullName, from a root
     // block that has no `title` field to have read instead.
     expect(res.version.title).toBe('Ada Byron')
-    const { documents } = await dtJson<{ documents: StoryMeta[] }>(
-      '/folio/api/documents?type=person',
-    )
-    expect(documents.find((d) => d.id === person.id)?.title).toBe('Ada Byron')
+    const { rows } = await dtJson<Page<StoryMeta>>('/folio/api/documents?type=person')
+    expect(rows.find((d) => d.id === person.id)?.title).toBe('Ada Byron')
   })
 })
 

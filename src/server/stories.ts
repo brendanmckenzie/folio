@@ -10,10 +10,13 @@ import {
 } from '../core/schema'
 import {
   buildTree,
+  DEFAULT_SEARCH_SORT,
   derivePaths,
   descendants,
+  type DocumentSort,
   draftState,
   type FlatSort,
+  type SearchSort,
   joinPath,
   newStoryId,
   slugify,
@@ -22,11 +25,13 @@ import {
   type StoryMeta,
   type StoryNode,
 } from '../core/story'
-import { type Keyset, keysetWhere, orderBy, SIBLING_ORDER, whereOf } from './keyset'
+import { type Direction, type Keyset, keysetWhere, orderBy, SIBLING_ORDER, whereOf } from './keyset'
 import {
   clearIndexStatements,
   clearInboundRefStatements,
   countReferencesTo,
+  type IndexedValue,
+  indexedValuesFor,
   referencesTo,
 } from './content-index'
 import type { StoryChange } from './hooks'
@@ -259,30 +264,46 @@ export interface StoryLevelRow extends StoryMeta {
 }
 
 /**
- * The three flat orderings, as keysets.
+ * Every ordering a story list can be read in, as keysets — flat mode's three
+ * (`FlatSort`) and the Documents screen's three (`DocumentSort`), which overlap
+ * in two.
  *
- * `edited` is the one with an argument behind it. `draft_updated_at` is nullable
- * — null until a document's first debounced write — and SQLite sorts nulls last
- * under `desc`, so ordering by the bare column puts a page created five minutes
- * ago *below* one last edited three years ago, in a list called "last edited".
- * The coalesce is what makes it mean what it says, and `stories_edited` indexes
- * exactly this expression (`migrations/0001_init.sql`).
+ * One table rather than one per reader, because `edited` is a **rule** and not
+ * merely a column list. `draft_updated_at` is nullable — null until a document's
+ * first debounced write — and SQLite sorts nulls last under `desc`, so ordering by
+ * the bare column puts a page created five minutes ago *below* one last edited
+ * three years ago, in a list called "last edited". The coalesce is what makes it
+ * mean what it says, `stories_edited` indexes exactly that expression
+ * (`migrations/0001_init.sql`), and `admin/ui/screens/content-rows.ts`'s `when()`
+ * is the same rule a third time in TypeScript. Two copies of it in this file was
+ * one too many.
  *
  * `path` needs no real tiebreak — `stories_path` is unique over non-null paths —
- * but it gets `id` anyway so all three sorts go through one code path.
+ * but it gets `id` anyway so every sort goes through one code path.
  */
-const FLAT_KEYSETS: Record<FlatSort, Keyset> = {
+const ORDERS = {
+  ord: SIBLING_ORDER,
   edited: { columns: ['coalesce(draft_updated_at, updated_at)', 'id'], direction: 'desc' },
   title: { columns: ['title', 'id'], direction: 'asc' },
   path: { columns: ['path', 'id'], direction: 'asc' },
-}
+} satisfies Record<FlatSort | DocumentSort, Keyset>
 
-/** The sort key of a row, component for component with `FLAT_KEYSETS`. The
- * correspondence is the one thing `paginate` cannot check for its caller. */
-function flatKeyOf(sort: FlatSort, row: StoryMeta): [string | number, string] {
-  if (sort === 'edited') return [row.draftUpdatedAt ?? row.updatedAt, row.id]
-  if (sort === 'title') return [row.title, row.id]
-  return [row.path ?? '', row.id]
+/**
+ * The sort key of a row, component for component with `ORDERS`. The
+ * correspondence is the one thing `paginate` cannot check for its caller, which
+ * is why both live in one place rather than beside their own reader.
+ */
+function keyOf(order: keyof typeof ORDERS, row: StoryMeta): [string | number, string] {
+  switch (order) {
+    case 'ord':
+      return [row.ord, row.id]
+    case 'edited':
+      return [row.draftUpdatedAt ?? row.updatedAt, row.id]
+    case 'title':
+      return [row.title, row.id]
+    case 'path':
+      return [row.path ?? '', row.id]
+  }
 }
 
 export interface StoryPageOptions {
@@ -303,7 +324,10 @@ export interface StoryPageOptions {
  * makes a state chip answerable server-side once the list is paged: a
  * client-side predicate over one page filters the page, not the site.
  */
-function storyFilters(filter: StoryFilter | undefined): { sql: string[]; binds: unknown[] } {
+function storyFilters(
+  filter: StoryFilter | undefined,
+  opts: { indexedText?: boolean } = {},
+): { sql: string[]; binds: unknown[] } {
   const sql: string[] = []
   const binds: unknown[] = []
   if (!filter) return { sql, binds }
@@ -320,12 +344,46 @@ function storyFilters(filter: StoryFilter | undefined): { sql: string[]; binds: 
     // page, and the same three `matches` compared client-side in the prototype.
     // `coalesce(path, '')` because an unrouted row has none and `null like ?` is
     // null rather than false — which would drop the whole row from an OR chain.
-    sql.push("(title like ? or slug like ? or coalesce(path, '') like ?)")
     const like = `%${filter.q}%`
-    binds.push(like, like, like)
+    if (opts.indexedText) {
+      sql.push(`(title like ? or slug like ? or coalesce(path, '') like ? or ${INDEXED_TEXT})`)
+      binds.push(like, like, like, like)
+    } else {
+      sql.push("(title like ? or slug like ? or coalesce(path, '') like ?)")
+      binds.push(like, like, like)
+    }
   }
   return { sql, binds }
 }
+
+/**
+ * Does any of this document's **indexed values** contain the search term?
+ *
+ * Opt-in rather than always on, because it changes what a search box reaches and
+ * therefore what it costs. Two callers want it and one does not:
+ *
+ *  - The **Documents screen's** search box does. `DataTable.tsx`'s `filterRows`
+ *    matched the title *and every indexed value* on screen, so a person searching
+ *    People for `Analyst` found the row. Dropping that when the search moved
+ *    server-side would be a silent regression in the one place the values are the
+ *    columns.
+ *  - `GET {base}/api/search` does, and it is half of what
+ *    `pagination.md` decision 8 specifies: "over `stories.title`, `slug`, `path`
+ *    **and `content_index`'s text values**".
+ *  - The **tree and flat reads** do not. Their columns are title, slug, path and
+ *    state — nothing on those rows comes from `content_index`, so matching on it
+ *    would return pages for a reason the list cannot show.
+ *
+ * A correlated `exists` probing `(story_id, locale, …)`, which is
+ * `content_index`'s primary-key prefix, so it is one index probe per candidate
+ * row rather than a scan of the table. `locale = ''` matches
+ * `indexedValuesFor`: the source locale is what the columns show, so it is what
+ * the search over those columns reaches.
+ */
+const INDEXED_TEXT = `exists (select 1 from content_index ci
+                              where ci.story_id = stories.id
+                                and ci.locale = ''
+                                and ci.text_value like ?)`
 
 /**
  * One parent's children, paged over `(ord, id)`.
@@ -400,7 +458,7 @@ export async function listStoriesFlat(
 ): Promise<Page<StoryMeta>> {
   const limit = clampLimit(opts.limit, 50, 200)
   const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
-  const keyset = FLAT_KEYSETS[sort]
+  const keyset = ORDERS[sort]
   const resume = keysetWhere(keyset, cursor)
   const filters = storyFilters(opts.filter)
   const narrow = ['path is not null', ...filters.sql]
@@ -420,27 +478,245 @@ export async function listStoriesFlat(
       : null,
   ])
 
-  const page = paginate(rows.results.map(withState), limit, (row) => flatKeyOf(sort, row))
+  const page = paginate(rows.results.map(withState), limit, (row) => keyOf(sort, row))
   return total ? { ...page, total: total.n } : page
 }
 
+/* ---------------------------------------------------- the document listing --- */
+
 /**
- * A flat list of one type's documents, for the admin's Data section and the
- * content API (`GET /folio/documents?type=person`). Querying, filtering and
- * pagination over a type belong to `../content-model/collections.md`; this is
- * the minimum an admin list needs and nothing more.
+ * One document row as the Documents screen's table wants it: the story, plus the
+ * **published** values of its type's `indexed` fields.
  *
- * With no `type`, every *unrouted* document across every type — what the admin
- * loads in one request to render the whole Data section. With a `type`, that
- * type's rows whether they are routed or not, so a second page type's flat list
- * is available too.
+ * On the row rather than in a sibling map keyed by id, which is what the unpaged
+ * route answered with. `StoryLevelRow`'s `childCount` set the precedent one phase
+ * ago, and paging is what turns the precedent into a rule: a map covering one
+ * page's ids is a structure the client has to zip against `rows`, and a map left
+ * over from the *previous* page would quietly supply values for rows no longer on
+ * screen. A self-describing row cannot do that.
+ *
+ * Two honest limits, both inherited from `indexedValuesFor` and both visible in
+ * the UI rather than hidden. Values are **published**, because `content_index` is
+ * written inside the publish batch — so a draft document's cells are blank, and
+ * the screen's `changed` badge is what explains a cell that disagrees with the
+ * document. And they are the **source locale** only: a column per locale is a
+ * second dimension nobody asked for.
  */
-export async function listDocuments(db: D1Database, type?: string): Promise<StoryMeta[]> {
-  const { results } = type
-    ? await db.prepare(`select ${COLS} from stories where type = ?`).bind(type).all<StoryRow>()
-    : await db.prepare(`select ${COLS} from stories where path is null`).all<StoryRow>()
-  return results.map(withState).sort((a, b) => compareSiblings(a.ord, a.id, b.ord, b.id))
+export interface DocumentRow extends StoryMeta {
+  indexed: Record<string, IndexedValue>
 }
+
+export interface DocumentPageOptions extends StoryPageOptions {
+  /** Fetch the `indexed` values. Skipped on a site that marks nothing `indexed`,
+   * where the query would be one round trip for an empty answer. */
+  indexed?: boolean
+  /**
+   * Reverses the ordering. Absent means each sort's natural direction — `title`
+   * ascending, `edited` newest first — which is what a column header shows on its
+   * first click.
+   *
+   * Free to support and worth supporting: `keysetWhere` and `orderBy` both read
+   * the direction off the `Keyset`, so flipping one flips the comparison and the
+   * `order by` together and cannot leave them disagreeing. `DataTable.tsx` toggled
+   * direction on every column, so a paged replacement that could only sort one way
+   * would be a regression somebody notices on the first click.
+   */
+  dir?: Direction
+}
+
+/**
+ * One type's documents, paged — the Documents screen's list
+ * (`ui-architecture.md` port phase 3), and the last unbounded read the admin had.
+ *
+ * `sort` is one of three `stories` columns and never an `indexed` field;
+ * `core/story.ts`'s `DocumentSort` carries that argument and the two shapes it
+ * beat. `ord` rides the `stories_type (type, ord)` index that already exists,
+ * which is the ordering this listing had before it was paged.
+ *
+ * With a `type`, that type's rows **whether they are routed or not**, so a page
+ * type's flat listing is reachable too. With no `type`, every *unrouted* document
+ * across every type — records and singletons, which is what "not in the tree"
+ * means.
+ *
+ * **It no longer ensures singletons.** That moved to `listSingletons`, because
+ * ensuring is a write and a write must not depend on which page was asked for:
+ * `?cursor=` would otherwise decide whether a document comes into existence. The
+ * route keeps the rule the old one embodied — *asking is what creates a
+ * singleton* — by making the thing you ask for the singletons themselves.
+ */
+export async function listDocumentPage(
+  db: D1Database,
+  type: string | undefined,
+  sort: DocumentSort,
+  opts: DocumentPageOptions = {},
+): Promise<Page<DocumentRow>> {
+  const limit = clampLimit(opts.limit, 50, 200)
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
+  const keyset: Keyset = opts.dir ? { ...ORDERS[sort], direction: opts.dir } : ORDERS[sort]
+  const resume = keysetWhere(keyset, cursor)
+  // `type` is the positional argument and not `filter.type`, for the same reason
+  // `parentId` is on the level reader: it is the list's identity rather than a
+  // narrowing of it, and its absence means something specific (every unrouted
+  // document) rather than "any type".
+  const filters = storyFilters(opts.filter, { indexedText: true })
+  const narrow = type ? ['type = ?', ...filters.sql] : ['path is null', ...filters.sql]
+  const narrowBinds = type ? [type, ...filters.binds] : filters.binds
+
+  const [rows, total] = await Promise.all([
+    db
+      .prepare(
+        `select ${COLS} from stories ${whereOf(...narrow, resume.sql)} ${orderBy(keyset)} limit ?`,
+      )
+      .bind(...narrowBinds, ...resume.binds, limit + 1)
+      .all<StoryRow>(),
+    opts.count
+      ? db
+          .prepare(`select count(*) as n from stories ${whereOf(...narrow)}`)
+          .bind(...narrowBinds)
+          .first<{ n: number }>()
+      : null,
+  ])
+
+  const page = paginate(rows.results.map(withState), limit, (row) => keyOf(sort, row))
+  // Over the page's ids only, and *after* the window has been cut rather than
+  // over the over-fetched row too: the extra row exists to answer "is there
+  // more" and is never shown, so fetching its values would be work for a cell
+  // nobody draws.
+  const indexed = opts.indexed
+    ? await indexedValuesFor(
+        db,
+        page.rows.map((row) => row.id),
+      )
+    : {}
+  const rowsWithValues = page.rows.map((row) => ({ ...row, indexed: indexed[row.id] ?? {} }))
+  return total
+    ? { ...page, rows: rowsWithValues, total: total.n }
+    : { ...page, rows: rowsWithValues }
+}
+
+/**
+ * Every declared singleton, ensured into existence and returned.
+ *
+ * **Uncursored, and that is not an exception to "no list is unbounded".** A
+ * singleton set is bounded by the *schema* rather than by content: `types` is a
+ * literal in the host's `createFolio` call, so this list cannot grow when somebody
+ * publishes. `?ids=` is uncursored for the same reason — a batch whose size the
+ * caller already knows is not a page.
+ *
+ * This is where "asking is what creates a singleton" now lives. An editor never
+ * creates one — there is exactly one and its id is derived — so first *access* is
+ * the only moment left, and the admin's shell needs them to exist before anybody
+ * clicks a global in the sidebar (`nav.ts` links straight at `sng_<type>`). One
+ * bounded request at boot replaces the whole-table read that used to carry this
+ * side effect.
+ */
+export async function listSingletons(
+  db: D1Database,
+  types: readonly DocumentType[],
+  schemaId: string | null = null,
+): Promise<StoryMeta[]> {
+  const singletons = types.filter((t) => t.kind === 'singleton')
+  const rows: StoryMeta[] = []
+  // Sequential rather than `Promise.all`: each is a read then a conditional
+  // insert on the same table, and a site declares a handful of globals, not
+  // hundreds. Declaration order is also the order the sidebar shows them in.
+  for (const type of singletons) rows.push(await ensureSingleton(db, type, schemaId))
+  return rows
+}
+
+/* ------------------------------------------------------------------ search --- */
+
+export interface SearchOptions extends StoryPageOptions {
+  /**
+   * Restrict to these declared type names. The route resolves `?kind=` into it,
+   * because `kind` is a property of a *declared type* and nothing on a story row
+   * records one.
+   *
+   * **Absent is every type; empty is none** — the same absent-versus-empty
+   * distinction `?parentId=` turns on, and it matters for exactly one case:
+   * `?kind=singleton` on a site that declares no singleton has to answer an empty
+   * page, not the whole table.
+   */
+  types?: readonly string[]
+  /** Which twenty rows get ranked. See `core/story.ts`'s `SearchSort`. */
+  sort?: SearchSort
+}
+
+/**
+ * Documents matching a string, across every kind — the one route the palette,
+ * both pickers and every screen's search box share
+ * (`../../../docs/specs/foundation/pagination.md` decision 8).
+ *
+ * Substring, not full-text: `like` over title, slug and path plus a probe into
+ * `content_index`'s values, which is what makes a *record* findable by the field
+ * that identifies it rather than only by the title cache. FTS5 is rejected in
+ * decision 8 — a second index with a second write path, for a fuzziness nobody has
+ * asked for.
+ *
+ * **Ordered by title, and the consumer ranks.** That is a deliberate limit rather
+ * than an oversight, and the reason is consistency with the decision one screen
+ * over: a relevance tier ("a title match beats a hidden field value") would make
+ * the sort key a triple, and `DocumentSort` has just finished explaining why a
+ * three-component keyset is not worth its machinery here. Every consumer shows one
+ * page of twenty and `admin/ui/rank.ts` already ranks what it is given, so the
+ * ordering that matters is the one on screen. Cross-page relevance is what FTS5
+ * would be for.
+ *
+ * No `q` at all is a legitimate request and answers every candidate row by title,
+ * which is what a picker wants the moment it opens.
+ */
+export async function searchStories(
+  db: D1Database,
+  opts: SearchOptions = {},
+): Promise<Page<StoryMeta>> {
+  const limit = clampLimit(opts.limit, 20, 100)
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
+  const sort = opts.sort ?? DEFAULT_SEARCH_SORT
+  const keyset = ORDERS[sort]
+  const resume = keysetWhere(keyset, cursor)
+  const filters = storyFilters(opts.filter, { indexedText: true })
+
+  // `1 = 0` rather than an early return, so `count` is answered by the same code
+  // path and comes back as 0 instead of being quietly absent.
+  const types = opts.types
+  const scope =
+    types === undefined
+      ? ''
+      : types.length > 0
+        ? `type in (${types.map(() => '?').join(', ')})`
+        : '1 = 0'
+  const narrow = [scope, ...filters.sql]
+  const narrowBinds = [...(types ?? []), ...filters.binds]
+
+  const [rows, total] = await Promise.all([
+    db
+      .prepare(
+        `select ${COLS} from stories ${whereOf(...narrow, resume.sql)} ${orderBy(keyset)} limit ?`,
+      )
+      .bind(...narrowBinds, ...resume.binds, limit + 1)
+      .all<StoryRow>(),
+    opts.count
+      ? db
+          .prepare(`select count(*) as n from stories ${whereOf(...narrow)}`)
+          .bind(...narrowBinds)
+          .first<{ n: number }>()
+      : null,
+  ])
+
+  const page = paginate(rows.results.map(withState), limit, (row) => keyOf(sort, row))
+  return total ? { ...page, total: total.n } : page
+}
+
+/*
+ * `listDocuments(db, type?)` was here, unpaged, and it is **deleted** rather than
+ * kept beside the paged reader above.
+ *
+ * Its one non-test caller was the route `listDocumentPage` replaces. `storyTree`
+ * survived the same treatment one phase ago because it has server-side callers
+ * that need the whole shape; this had none, and a reader with only tests behind it
+ * is the shape `stories_draft_updated` was in when it turned out to have been
+ * indexing a column nothing read for ten migrations.
+ */
 
 /**
  * One document that points at another, as the delete confirmation names it. The

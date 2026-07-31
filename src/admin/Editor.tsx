@@ -11,8 +11,6 @@ import { type DocumentType, type SchemaIndex, singletonId, typeByName } from '..
 import type { StoryNode } from '../core/story'
 import { Access } from './Access'
 import { BlockTree } from './BlockTree'
-import { DataList } from './DataList'
-import { DataTable } from './DataTable'
 import { DeleteDialog } from './DeleteDialog'
 import { DiscardDialog } from './DiscardDialog'
 import { DuplicateDialog } from './DuplicateDialog'
@@ -74,7 +72,17 @@ interface Props {
   base: string
 }
 
-type Rail = 'content' | 'data' | 'blocks' | 'history' | 'redirects' | 'model' | 'access'
+/**
+ * `'data'` was here, and it is gone with `DataList.tsx` and `DataTable.tsx`
+ * (`../../../docs/ui-architecture.md` port phase 3). The records and singletons
+ * this rail listed are a **screen** now, at `{base}/documents/:type`, which is what
+ * stops a list of people from being rendered in the stage of a page editor with an
+ * inspector beside it describing that page.
+ *
+ * This editor still *edits* a record — it is reached by id, from the new screen —
+ * so nothing about the form half moved. Only the listing did.
+ */
+type Rail = 'content' | 'blocks' | 'history' | 'redirects' | 'model' | 'access'
 
 /**
  * Composition and layout only. Every domain — the story tree, versions, the
@@ -434,18 +442,6 @@ export function Editor({
     current && currentType?.kind === 'singleton'
       ? globalPreviewUrl(currentType, flat, base)
       : undefined
-  const hasDataTypes = types.some((t) => t.kind !== 'page')
-
-  /**
-   * The type whose list view the stage is showing, or null for the ordinary
-   * preview. Set by clicking a type in the Data rail and cleared by opening a
-   * document, so the table is a *destination* rather than a mode you have to get
-   * out of.
-   */
-  const [dataType, setDataType] = useState<string | null>(null)
-  const openedType = dataType ? typeByName(types, dataType) : undefined
-  const listing = rail === 'data' && openedType ? openedType : undefined
-
   /**
    * Form mode (checkpoint 3): the rails go full width and the stage is gone
    * entirely. A layout branch, not a rewrite — `Editor` has been a composition
@@ -455,7 +451,7 @@ export function Editor({
    * Publish, History, undo, presence and multiplayer are all untouched, because
    * none of them ever depended on there being a preview.
    */
-  const formMode = Boolean(current) && !routed && !globalPreview && !listing
+  const formMode = Boolean(current) && !routed && !globalPreview
 
   /**
    * In form mode there is no preview to click, so nothing would ever select the
@@ -609,17 +605,6 @@ export function Editor({
               >
                 Content
               </button>
-              {/* Only when the site actually has records or singletons: an
-                  empty Data tab on a pages-only site is noise. */}
-              {hasDataTypes ? (
-                <button
-                  type="button"
-                  className={rail === 'data' ? 'is-active' : ''}
-                  onClick={() => setRail('data')}
-                >
-                  Data
-                </button>
-              ) : null}
               <button
                 type="button"
                 className={rail === 'blocks' ? 'is-active' : ''}
@@ -696,17 +681,6 @@ export function Editor({
                 onNotice={notify}
                 presence={spaceChannel.peers}
               />
-            ) : rail === 'data' ? (
-              <DataList
-                documents={stories.documents}
-                selectedType={dataType}
-                currentId={storyId}
-                onSelectType={setDataType}
-                onOpen={(story) => {
-                  setDataType(null)
-                  stories.open(story.id)
-                }}
-              />
             ) : rail === 'history' ? (
               state.doc ? (
                 <History
@@ -763,45 +737,13 @@ export function Editor({
               apologising for having nothing in it — the rails simply take the
               width (`data-documents.md` checkpoint 3). */}
           {formMode ? null : (
-            <div className={`stage ${listing ? 'stage--list' : ''}`}>
+            <div className="stage">
               {/* A banner, never a lock (checkpoint 4): refusing to serve the
                 editor until somebody runs a migration would turn a schema drift
                 into an outage. An empty field that is explained is a different
                 experience from an empty field that is mysterious. */}
               <MigrationBanner status={migrations.status} />
-              {listing ? (
-                /* The per-type list view (`data-documents.md` decision 2, and the
-                 piece collections.md deferred here). In the stage rather than the
-                 rail: twenty-four people do not fit in a 280px column, and this
-                 is the only wide space the editor has. */
-                <DataTable
-                  type={listing}
-                  documents={stories.documents.filter((d) => d.type === listing.name)}
-                  indexed={stories.indexed}
-                  currentId={storyId}
-                  canManage={mayManage}
-                  canCreate={mayCreate}
-                  onOpen={(story) => {
-                    setDataType(null)
-                    stories.open(story.id)
-                  }}
-                  onCreate={
-                    mayCreate
-                      ? async (title, parentId, type) => {
-                          setDataType(null)
-                          await stories.create(title, parentId, type)
-                        }
-                      : async () => {
-                          refuseCreate()
-                        }
-                  }
-                  onDelete={mayManage ? (story) => setConfirmingDeleteFor(story) : refuseManage}
-                  onDuplicate={
-                    mayCreate ? (story) => setConfirmingDuplicateFor(story) : refuseCreate
-                  }
-                />
-              ) : null}
-              {!listing && viewing ? (
+              {viewing ? (
                 <ViewingBar
                   version={viewing.version}
                   doc={viewing.doc}
@@ -814,23 +756,21 @@ export function Editor({
                 />
               ) : null}
 
-              {listing ? null : (
-                <div
-                  className={`stage__frame ${readOnly ? 'is-viewing' : ''}`}
-                  style={{ width: VIEWPORTS[viewport] }}
-                >
-                  {current && routed && previewUrl ? (
-                    <iframe
-                      key={`${current.id}:${locale}`}
-                      ref={frame}
-                      title="Preview"
-                      src={previewUrl}
-                    />
-                  ) : current && globalPreview ? (
-                    <iframe key={current.id} ref={frame} title="Preview" src={globalPreview} />
-                  ) : null}
-                </div>
-              )}
+              <div
+                className={`stage__frame ${readOnly ? 'is-viewing' : ''}`}
+                style={{ width: VIEWPORTS[viewport] }}
+              >
+                {current && routed && previewUrl ? (
+                  <iframe
+                    key={`${current.id}:${locale}`}
+                    ref={frame}
+                    title="Preview"
+                    src={previewUrl}
+                  />
+                ) : current && globalPreview ? (
+                  <iframe key={current.id} ref={frame} title="Preview" src={globalPreview} />
+                ) : null}
+              </div>
             </div>
           )}
 
