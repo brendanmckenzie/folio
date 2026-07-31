@@ -15,45 +15,16 @@ import { Bootstrap, ReactRefreshPreamble, Shell } from './Document'
 import type { FolioRuntime } from './runtime'
 import type { FolioBindings } from './types'
 
-/**
- * The editor shell. The admin bundle takes over from `__FOLIO_ADMIN__`.
+/*
+ * `adminPage` was here — the old single-screen editor's HTML, bootstrapping
+ * `__FOLIO_ADMIN__`. **Deleted** with the admin it served (`ui-architecture.md` port
+ * phase 8); `routes/editor.ts` has served `shellPage` at `{base}/edit/:id` since
+ * phase 7, so it had no caller.
  *
- * `space` is how the admin feature-detects the space channel
- * (`../../../docs/specs/editing/live-collaboration.md`): a host that has not
- * declared the binding must not have its console filled with a socket retrying
- * forever, so the answer travels in the bootstrap rather than being discovered by
- * a failed upgrade.
+ * One field of its bootstrap was **not** dead and has moved below: `space`. It is how
+ * the admin feature-detects the space channel, and losing it would have quietly closed
+ * off cross-story presence for the rebuilt editor.
  */
-export function adminPage(
-  rt: FolioRuntime,
-  bindings: FolioBindings,
-  story: StoryMeta,
-): Promise<Response> {
-  const { entries, stylesheets } = rt.page('admin')
-  return html(
-    <Shell
-      title={`${story.title} · Folio`}
-      stylesheets={stylesheets}
-      head={
-        <>
-          {rt.dev ? <ReactRefreshPreamble /> : null}
-          <Bootstrap
-            global="__FOLIO_ADMIN__"
-            value={{
-              storyId: story.id,
-              base: rt.base,
-              apiBase: `${rt.base}/api`,
-              space: Boolean(bindings.space),
-            }}
-          />
-        </>
-      }
-    >
-      <div id="folio-admin" />
-    </Shell>,
-    entries,
-  )
-}
 
 /**
  * The rebuilt admin's shell, for any screen under its mount.
@@ -68,7 +39,7 @@ export function adminPage(
  * the application there; here `/edit/:id` is one route among eleven and the id is
  * in the URL where it belongs.
  */
-export function shellPage(rt: FolioRuntime): Promise<Response> {
+export function shellPage(rt: FolioRuntime, bindings?: FolioBindings): Promise<Response> {
   const { entries, stylesheets } = rt.page('admin')
   return html(
     <Shell
@@ -83,9 +54,29 @@ export function shellPage(rt: FolioRuntime): Promise<Response> {
             the internal JSON lives. They were one field until the prefix move, and
             four of its uses turned out not to be JSON at all.
           */}
+          {/*
+            `space` is how the admin **feature-detects the space channel**
+            (`../../../docs/specs/editing/live-collaboration.md`): a host that has not
+            declared the binding must not have its console filled with a socket
+            retrying forever, so the answer travels in the bootstrap rather than being
+            discovered by a failed upgrade.
+            
+            It arrives here from the deleted `adminPage`, which was the only place it
+            had ever been answered. **`bindings` is optional and only the editor route
+            passes it** — `routes/shell.ts`'s wildcard deliberately does not, because
+            `app.test.ts` builds a Folio whose accessor *throws* and asserts the shell
+            still answers 200. Making the wildcard resolve the environment would give
+            eight screens a dependency on it for a boolean one of them needs. Absent
+            means `false`, which is the safe reading: no channel announced is no channel
+            attempted.
+          */}
           <Bootstrap
             global="__FOLIO_SHELL__"
-            value={{ base: rt.base, apiBase: `${rt.base}/api` }}
+            value={{
+              base: rt.base,
+              apiBase: `${rt.base}/api`,
+              space: Boolean(bindings?.space),
+            }}
           />
         </>
       }

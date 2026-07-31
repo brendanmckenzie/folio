@@ -49,6 +49,25 @@ export interface PrototypeBoot {
   base: string
   /** Where the admin's internal JSON lives — `${base}/api`. */
   apiBase: string
+  /**
+   * Whether the host declared the `SPACE` binding
+   * (`../../../docs/specs/editing/live-collaboration.md`).
+   *
+   * False and everything that channel carries — cross-story presence, a tree that
+   * updates itself when somebody else renames a page — is absent, with nothing
+   * attempted and nothing logged. Feature-detected through the bootstrap rather than
+   * by a failed socket upgrade, so a host that has not declared it does not get a
+   * console full of retries.
+   *
+   * **Nothing reads it yet.** The rebuilt editor has per-story presence off the
+   * document socket and has not joined the space channel, which is what
+   * `ui-architecture.md` open question 7 still owes — and `admin/spaceStore.ts` and
+   * `hooks/useSpace.ts` were kept through port phase 8 precisely so that work is a
+   * wiring job rather than a rewrite. The flag is here because the *route* that
+   * answers it is here; it arrived with the deletion of `adminPage`, which was the
+   * only page that had ever carried it.
+   */
+  space?: boolean
 }
 
 /**

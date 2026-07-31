@@ -144,7 +144,7 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * cannot use, because `useStory` fetches by id through `?ids=` anyway and a
      * server-rendered row would be a second source of truth for the same document.
      */
-    return shellPage(rt)
+    return shellPage(rt, bindings)
   })
 
   app.get('/edit', requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {

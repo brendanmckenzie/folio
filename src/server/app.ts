@@ -9,6 +9,7 @@ import { accessRoutes } from './routes/access'
 import { API_VERSION, apiRoutes } from './routes/api'
 import { assetFileRoutes, assetRoutes } from './routes/assets'
 import { authRoutes, sessionRoutes } from './routes/auth'
+import { bulkRoutes } from './routes/bulk'
 import { contentRoutes } from './routes/content'
 import { editorPageRoutes, editorRoutes } from './routes/editor'
 import { historyRoutes } from './routes/history'
@@ -122,6 +123,10 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // not load-bearing here — `/story/:id/schedule` is a distinct literal segment,
   // not a `:param` either one could swallow — and it reads next to its siblings.
   app.route('/api', scheduleRoutes<Env>(rt))
+  // Also after `storyRoutes`, and order is not load-bearing here either: `/bulk/*`
+  // shares no prefix with anything else on this mount. It reads next to the routes
+  // whose per-document twins it performs in a loop.
+  app.route('/api', bulkRoutes<Env>(rt))
   app.route('/api', historyRoutes<Env>(rt))
   app.route('/api', assetRoutes<Env>(rt))
   app.route('/api', editorRoutes<Env>(rt))
@@ -167,14 +172,12 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // wildcard cannot do. What changed is what it *renders* — the shell, not the old
   // admin's bootstrap.
   //
-  // The old admin's *page* is gone; its **components** are not, and the
-  // difference matters for port phase 8. `admin/Editor.tsx` and everything under
-  // `admin/` outside `admin/ui/` is now unreachable through any URL, but the new
-  // editor still imports six pure functions out of it (`menuGroups`,
-  // `publishStatus`, `behindNotice`, `describeAgainstDraft`, `formatWhen`,
-  // `globalPreviewUrl`) plus `keyAssets` and `externalUpdate`. Those are the
-  // new→old edges phase 8 has to move before it can delete the files, and they are
-  // listed in `docs/editor-port-plan.md` rather than discovered by a failing build.
+  // **Port phase 8 landed too**: the old admin is deleted, so there is no longer a
+  // second application to keep unreachable. The comment that used to be here listed
+  // eight pure functions the new editor imported out of it, as the prerequisite for
+  // deleting the files — there turned out to be **ten**, the ninth being a *hook*,
+  // which a list assembled by reasoning about pure functions could not see. All ten
+  // moved to the file that uses them.
   app.route('/', editorPageRoutes<Env>(rt))
   app.route('/', shellRoutes<Env>(rt))
 
