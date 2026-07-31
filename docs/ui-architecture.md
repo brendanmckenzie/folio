@@ -885,14 +885,39 @@ because a list route and the screen over it are one decision:
    ancestry, would stop meaning anything. Flat mode gets the real next / previous,
    so the rule survives everywhere it can hold. `content-model.ts`'s `Level` carries
    the argument.
-6. **Does a bulk action need select-all-matching to be useful?** Deferred, and
-   deliberately absent rather than disabled. Explicit selection plus the five actions
-   is built, as N per-item calls with the counts reported. Select-all-matching is
-   decision 7a's flag-plus-captured-filter-plus-count, and the reason that shape
-   works is that the *server* re-runs the filter and executes a batched job —
-   dependency 7, which does not exist. Offering it over per-item client calls would
-   mean fetching 51,420 rows to loop over them, which is the one thing the shape
-   exists to avoid.
+6. ~~**Does a bulk action need select-all-matching to be useful?**~~ **Built**
+   2026-07-31, once dependency 7 existed. The affordance was absent rather than
+   disabled for a reason that was about the client's shape and not the product's:
+   the five actions were N per-item calls, so "select all 51,420 matching" would have
+   meant fetching 51,420 rows to loop over them — the one thing decision 7a's
+   flag-plus-captured-filter-plus-count exists to avoid. `platform/bulk-writes.md`
+   removed exactly that blocker, so the client half is one `POST
+   {base}/api/bulk/{action}` per **batch**, looped on `continueFrom`. Four things a
+   later reader should know, all of which the wiring found rather than the plan:
+   - **`routed: true` is captured with the filter**, and without it the guard refuses
+     every select-all forever: flat mode's header counts `path is not null`, so a
+     captured filter missing that axis counts records too and no re-confirmation can
+     ever close the gap. A wall, which this decision forbids by name.
+   - **The client has to evaluate the captured filter itself**, in `matchesFilter`,
+     because a selection that survives a filter change means the visible list may
+     hold rows that are *not* in the set. Without it a live page shows ticked under a
+     `state: draft` capture and clicking it does nothing — the "reads as broken
+     software" failure this decision names, arriving through the other door. The
+     server re-runs the filter in SQL and remains the authority; this only decides
+     whether to draw a tick.
+   - **A row outside the captured conditions cannot be added to a select-all**, and
+     the click is refused with the reason. The wire has one selection with two shapes
+     and no way to say "every draft, plus this live page" — a mixed body is refused
+     server-side deliberately — so the honest answer is a sentence rather than a
+     checkbox that will not stay ticked.
+   - **The control is absent in tree mode**, because `expected` has to be the count
+     of the set the guard re-runs and the only count a tree is shown is the *top
+     level*'s. Capturing 12 and meaning 51,420 is not a version of this a tree can
+     honestly draw, so there is nothing to disable.
+   The **per-item loop was also wrong in two ways** a selection bar made easy to hit,
+   and both are fixed by the same rewrite: it acted on the visible part of the
+   selection only (publishing three of twelve, under a bar that said twelve), and it
+   passed `index: 0` per document, which landed a moved set reversed.
 7. **Which Content columns are still owed?** Two of the seven. **Translations** wants
    a single query over `published_doc` rather than N Durable Object reads
    (`ROADMAP.md` already records this). **Editing now** wants the space channel, and

@@ -33,12 +33,23 @@ import { messageOf } from './useContent'
 export function MoveDialog({
   apiBase,
   count,
+  note,
   onClose,
   onConfirm,
 }: {
   apiBase: string
   /** How many pages are moving, for the title. */
   count: number
+  /**
+   * What a confirmation would have said — the invisible part of the selection, and
+   * the conditions a select-all captured.
+   *
+   * This dialog **is** the move's confirmation, so it carries the sentence rather
+   * than a second dialog appearing behind it: "Move 12 pages? 9 are not shown by
+   * the current filter" and "pick a destination" are one question, and asking them
+   * separately is two modals for one gesture.
+   */
+  note?: string
   onClose: () => void
   /** `null` is the top level, which is a real destination rather than "no
    * choice" — hence a separate radio rather than an empty selection. */
@@ -91,7 +102,10 @@ export function MoveDialog({
   return (
     <Dialog
       title={`Move ${count} ${count === 1 ? 'page' : 'pages'}`}
-      description="Pick a destination. Each move is a separate write, and any the tree refuses are reported."
+      // "In the order you see them" is a promise the server keeps: the set lands in
+      // walk order from the index given, rather than each page pushing the last one
+      // down — which is what `index: 0` per document used to do.
+      description="Pick a destination. They arrive in the order you see them, each move is its own write, and any the tree refuses are reported."
       size="wide"
       onClose={onClose}
       actions={
@@ -103,6 +117,7 @@ export function MoveDialog({
         </>
       }
     >
+      {note ? <p className={css.dialogNote}>{note}</p> : null}
       <input
         className={css.search}
         type="search"
