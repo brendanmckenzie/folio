@@ -4,13 +4,52 @@
  * phase 7a — so nothing here positions anything.
  *
  * Deliberately thin. Every control is `fields.module.css` or a primitive; what is
- * here is the head, the two standing notes, and the gap between fields.
+ * here is the gutter, the head, the two standing notes, and the gap between fields.
  */
 
+/*
+ * The panel's gutter, and the one left edge everything inside it shares — grouped or
+ * not. `--space-3` matches `EditorShell.module.css`'s `.inspectorHead`, so a field
+ * label sits directly under the "PAGE" the column is titled with rather than 12px to
+ * the left of it.
+ *
+ * A `--gutter` custom property rather than a bare `padding`, for two reasons and both
+ * are used below: form mode widens it in one declaration, and the two things that are
+ * *meant* to reach the panel's edge — the address band, the form's header rule — bleed
+ * back out with `calc(-1 * var(--gutter))` instead of restating a number they would
+ * then have to be kept in step with.
+ *
+ * The gutter is the panel's rather than the container's because the panel is the only
+ * thing that knows which of its children want to escape it. `.inspectorBody` and
+ * `.formInner` deliberately have none.
+ */
 .panel {
+  --gutter: var(--space-3);
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--gutter);
+}
+
+/*
+ * Form mode: a record has no stage, so this panel is the whole screen inside
+ * `EditorShell`'s card. At that measure 12px of gutter reads as none at all, and the
+ * rhythm between fields opens up with it — 16px is a clear break in a 340px column
+ * and an accident in a 34rem one, where a help line and the next label end up the
+ * same distance apart as a label and its own control.
+ */
+.panelForm {
+  --gutter: var(--space-5);
+  gap: var(--space-5);
+}
+
+/*
+ * The three empty states are their own container. `EmptyState` brings 32px of padding
+ * of its own, so stacking the gutter on top of it only moves the message down and
+ * off-centre.
+ */
+.empty {
   min-width: 0;
 }
 
@@ -26,6 +65,18 @@
   align-items: baseline;
   gap: var(--space-2);
   min-width: 0;
+}
+
+/*
+ * Form mode only, where the head carries a heading and is therefore the card's
+ * header: it gets a rule under it. Full bleed, because a card header's rule that
+ * stops short of the card's own edge reads as a separator between two fields rather
+ * than as the bottom of a header.
+ */
+.headForm {
+  margin-inline: calc(-1 * var(--gutter));
+  padding: 0 var(--gutter) var(--space-4);
+  border-bottom: 1px solid var(--border);
 }
 
 .title {
@@ -104,16 +155,35 @@
   border: 0;
 }
 
+/* The fieldset is its own flex container, so it needs the wider rhythm stated a second
+   time rather than inheriting it. Both numbers are `.panelForm`'s and the comment
+   there is the argument for them. */
+.panelForm .fields {
+  gap: var(--space-5);
+}
+
 /* ------------------------------------------------------------------ address --- */
 
+/*
+ * Routing lives in D1 rather than in the document, and the band is what says so
+ * without a sentence having to.
+ *
+ * **A full-bleed band and not an inset card.** It was a rounded box with 12px of its
+ * own padding, which gave the panel two different left edges — the slug's label 12px
+ * inside the group and the document's own labels hard against the panel wall — and a
+ * 340px column can afford that least of anywhere. Bleeding to the panel's edge and
+ * restating the gutter as its own padding keeps the group visible and puts every
+ * label in the panel on one line.
+ */
 .address {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-3);
+  margin-inline: calc(-1 * var(--gutter));
+  padding: var(--space-3) var(--gutter);
   background: var(--bg-inset);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 .addressTitle {

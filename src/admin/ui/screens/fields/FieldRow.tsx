@@ -134,6 +134,11 @@ export function FieldRow(props: Props) {
         {...(field.required ? { required: true } : {})}
         {...(field.help ? { help: field.help } : {})}
         {...(mode === 'shared' || watchers.length ? { note } : {})}
+        // The same predicate that lays this row out *across* rather than down also
+        // asks `Field` to put the label beside the box, because for a boolean those
+        // are one decision: a 16px checkbox with 300px of empty column to its right
+        // and its label stranded above it is not a field anybody reads as on or off.
+        {...(isInlineControl(field.kind) ? { inline: true } : {})}
       >
         {(id) => (
           // Down the row for every kind but one. See `isInlineControl`: a 16px

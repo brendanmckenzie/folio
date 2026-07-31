@@ -298,8 +298,8 @@
 
 /*
  * A record has no page, so the fields are the screen: one column at a measure they
- * can be read at, centred, scrolling on its own. 46rem rather than the inspector's
- * 340px is the whole difference — the same fields, at a width prose fits in.
+ * can be read at, centred, scrolling on its own. Wider than the inspector's 340px is
+ * the whole difference — the same fields, at a width prose fits in.
  */
 .form {
   flex: 1 1 auto;
@@ -313,9 +313,27 @@
  * A wrapper of this screen's own rather than `.form > *`, because what is inside is
  * the inspector — another phase's component — and a descendant selector over
  * somebody else's markup gives every child a card the moment they render two.
+ *
+ * **No padding here on purpose.** The card's inner gutter is `Inspector.module.css`'s
+ * `--gutter`, because the panel is the only thing that knows which of its children
+ * want to bleed back out to this border — the record's header rule does. A padding on
+ * both would be 40px of it.
+ *
+ * **34rem, down from 46rem, and the measure is why.** 46rem left the content column
+ * about 89 characters wide, which put every text input and the prose surface past the
+ * band `inspector-model.ts`'s `isReadableMeasure` sanctions (60–75ch) and made a text
+ * field holding an ISO date 690px of empty box. 34rem minus the gutter is ~75ch: the
+ * top of that band, so prose still has room and no single-line field is absurd.
+ * Narrower than this and form mode stops being different from the 340px column it
+ * exists to be an alternative to.
+ *
+ * The grey either side is deliberate and is what a centred single column costs. It
+ * reads as a document on a desk rather than as a broken layout because the card is a
+ * card — a border, a radius, a header rule and a real gutter. It was none of those
+ * things while its content sat flush against its own border.
  */
 .formInner {
-  max-width: 46rem;
+  max-width: 34rem;
   margin: 0 auto;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -356,6 +374,10 @@
   white-space: nowrap;
 }
 
+/* The scroll container and nothing else. Its gutter is `Inspector.module.css`'s
+   `--gutter`, for the reason `.formInner` gives: the band the address group draws has
+   to reach this element's edge, and it can only do that if the padding it is escaping
+   is the panel's own. */
 .inspectorBody {
   flex: 1 1 auto;
   min-height: 0;
