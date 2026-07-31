@@ -48,6 +48,23 @@ export function shellRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * application they are signed in to, and the recovery is one click away in a
    * sidebar the server cannot draw.
    */
+  /**
+   * **No `bindings` here, deliberately**, and a test enforces it: `app.test.ts`'s "is
+   * never invoked by a route that answers from the config alone" builds a Folio whose
+   * `bindings` accessor *throws*, then asserts these two routes still answer 200.
+   *
+   * I passed `c.var.bindings()` here first, so the bootstrap could carry the `space`
+   * flag on every screen, and that test caught it immediately. It was right to: the
+   * shell's HTML is `rt.page('admin')` plus a bootstrap of two strings, and the client
+   * router decides everything else — so making it resolve the host's environment would
+   * give **eight screens** a dependency on it for a boolean **one** of them needs.
+   *
+   * `routes/editor.ts` passes them instead. It has already resolved the environment by
+   * the time it renders (it reads the story to 404 an unknown id), and the space
+   * channel is the editor's concern. If presence ever has to be site-wide, the flag
+   * belongs on `GET {base}/api/me` — which resolves the environment anyway — rather
+   * than back here.
+   */
   app.get('/', requireHtmlAccess<Env>(rt, READ_DRAFT), () => shellPage(rt))
   app.get('/*', requireHtmlAccess<Env>(rt, READ_DRAFT), () => shellPage(rt))
 
