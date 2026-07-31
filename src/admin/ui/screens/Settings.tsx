@@ -84,22 +84,30 @@ export function Settings(props: Props) {
    */
   const data = useSettings(manifest, me.policy, url)
 
+  /*
+   * Wrapped, to cancel the row gutter `ListHeader` carries — see `.head` in the
+   * stylesheet for the measurement. The wrapper rather than a bare `ListHeader`
+   * because every screen names itself the same way and that is worth keeping; what
+   * is wrong is a *row* gutter on a screen whose body has no rows.
+   */
   const header = (
-    <ListHeader
-      level={1}
-      actions={
-        <input
-          className={css.search}
-          type="search"
-          value={url.q}
-          placeholder="Filter settings"
-          aria-label="Filter settings"
-          onChange={(e) => onQuery(settingsQuery({ q: e.target.value }))}
-        />
-      }
-    >
-      Settings
-    </ListHeader>
+    <div className={css.head}>
+      <ListHeader
+        level={1}
+        actions={
+          <input
+            className={css.search}
+            type="search"
+            value={url.q}
+            placeholder="Filter settings"
+            aria-label="Filter settings"
+            onChange={(e) => onQuery(settingsQuery({ q: e.target.value }))}
+          />
+        }
+      >
+        Settings
+      </ListHeader>
+    </div>
   )
 
   /*
@@ -178,9 +186,14 @@ export function Settings(props: Props) {
 /* ---------------------------------------------------------------- scaffold --- */
 
 /**
- * A section's frame. `h3`, not `h2`: `ListHeader` above renders the screen's own
- * heading as an `h2`, and a section that skipped to `h2` beside it would put two
- * levels of the outline at the same depth.
+ * A section's frame.
+ *
+ * **`h2`, and it used to be an `h3` for a reason that expired.** The comment here
+ * said `ListHeader` renders the screen's heading as an `h2`, so a section had to
+ * start at `h3`. That was true before `ListHeader` grew its `level` prop; with
+ * `level={1}` above, the outline ran `h1` → `h3` → `h4` and skipped a level, which
+ * is the one thing a heading structure is not allowed to do. Sections are `h2` and
+ * the tables inside them are `h3` (`.subHeading`).
  *
  * The count sits outside the heading rather than inside it, so a screen reader
  * announcing the section says "Document types" rather than "Document types 4 of
@@ -199,9 +212,9 @@ function SectionBlock({
   return (
     <section className={css.section} id={section.anchor} aria-labelledby={`${section.anchor}-h`}>
       <div className={css.sectionHead}>
-        <h3 className={css.heading} id={`${section.anchor}-h`}>
+        <h2 className={css.heading} id={`${section.anchor}-h`}>
           {section.label}
-        </h3>
+        </h2>
         <span className={css.count}>{count}</span>
       </div>
       {body}
@@ -268,18 +281,26 @@ function Types({
     {
       key: 'type',
       label: 'Type',
+      /*
+       * `.stack`, not a bare `.pair`: the label, then the name and its badges on a
+       * declared second line. This is the one first column that shares its row with
+       * seven others, so it is the one where a wrapping `.pair` ran out of width and
+       * broke at a different point on every row — see `.stack` in the stylesheet.
+       */
       cell: (row) => (
-        <span className={css.pair}>
+        <span className={css.stack}>
           <span className={css.pairLabel}>{row.label}</span>
-          <span className={css.name}>{row.name}</span>
-          {row.isDefault ? (
-            <Badge title="A bare “New page” creates this type.">default</Badge>
-          ) : null}
-          {row.isGlobal ? (
-            <Badge tone="accent" title="Named in `globals`, so it is loaded into every render.">
-              global
-            </Badge>
-          ) : null}
+          <span className={css.pair}>
+            <span className={css.name}>{row.name}</span>
+            {row.isDefault ? (
+              <Badge title="A bare “New page” creates this type.">default</Badge>
+            ) : null}
+            {row.isGlobal ? (
+              <Badge tone="accent" title="Named in `globals`, so it is loaded into every render.">
+                global
+              </Badge>
+            ) : null}
+          </span>
         </span>
       ),
     },
@@ -340,7 +361,11 @@ function Types({
           </span>
         ),
     },
-    { key: 'where', label: 'Where it can live', cell: (row) => row.where },
+    {
+      key: 'where',
+      label: 'Where it can live',
+      cell: (row) => <span className={css.clause}>{row.where}</span>,
+    },
     {
       key: 'top',
       label: 'Top level',
@@ -481,10 +506,14 @@ function Fields({ card }: { card: BlockCard }) {
     {
       key: 'field',
       label: 'Field',
+      /* `help` is a second line by declaration, not by flex wrapping — see `.help`
+       * in the stylesheet for the two tables that disagreed about it. */
       cell: (row) => (
-        <span className={css.pair}>
-          <span className={css.pairLabel}>{row.label}</span>
-          <span className={css.name}>{row.name}</span>
+        <span className={css.stack}>
+          <span className={css.pair}>
+            <span className={css.pairLabel}>{row.label}</span>
+            <span className={css.name}>{row.name}</span>
+          </span>
           {row.help ? <span className={css.help}>{row.help}</span> : null}
         </span>
       ),
@@ -514,7 +543,7 @@ function Fields({ card }: { card: BlockCard }) {
   ]
   return (
     <>
-      <h4 className={css.subHeading}>Fields</h4>
+      <h3 className={css.subHeading}>Fields</h3>
       <Table
         label={`${card.label} fields`}
         columns={columns}
@@ -607,7 +636,7 @@ function Slots({ card }: { card: BlockCard }) {
   ]
   return (
     <>
-      <h4 className={css.subHeading}>Slots</h4>
+      <h3 className={css.subHeading}>Slots</h3>
       <Table
         label={`${card.label} slots`}
         columns={columns}
@@ -661,7 +690,7 @@ function Presets({ card }: { card: BlockCard }) {
   ]
   return (
     <>
-      <h4 className={css.subHeading}>Presets</h4>
+      <h3 className={css.subHeading}>Presets</h3>
       <Table
         label={`${card.label} presets`}
         columns={columns}
@@ -807,8 +836,12 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
         </span>
       ),
     },
-    { key: 'flow', label: 'Flow', cell: (row) => row.flow },
-    { key: 'unknown', label: 'An email with no account', cell: (row) => row.unknownEmail },
+    { key: 'flow', label: 'Flow', cell: (row) => <span className={css.clause}>{row.flow}</span> },
+    {
+      key: 'unknown',
+      label: 'An email with no account',
+      cell: (row) => <span className={css.clause}>{row.unknownEmail}</span>,
+    },
   ]
 
   return (
@@ -957,7 +990,7 @@ function Facts({
   ]
   return (
     <>
-      {heading ? <h4 className={css.subHeading}>{heading}</h4> : null}
+      {heading ? <h3 className={css.subHeading}>{heading}</h3> : null}
       <Table label={label} columns={columns} rows={rows} rowKey={(row) => row.label} />
     </>
   )
