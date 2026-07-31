@@ -108,6 +108,20 @@ export interface EditorApi {
    * at the instant Publish is clicked rather than as of the last fetch. */
   gaps: ReturnType<typeof translationGaps>
   versions: ReturnType<typeof useVersions>
+  /**
+   * The **version** list's paged trail, which `versions` does not carry.
+   *
+   * `useVersionsList` and `useVersions` are two hooks over two routes, and only the
+   * second's return value was exposed here — so the history slide-over could reach
+   * the activity trail and not the version one. Found by wiring 7a's slot to 7c's
+   * panel: two agents agreed on the shape of every field except this one, which
+   * neither could see was missing from its own side.
+   *
+   * The list itself stays where it is (`usePublishedDoc` needs its newest `publish`
+   * on every load, unconditionally), so this is the same array under a second name
+   * rather than a second read.
+   */
+  versionTrail: ReturnType<typeof useVersionsList>['trail']
   published: ReturnType<typeof usePublishedDoc>
   publish: ReturnType<typeof usePublish>
   migrations: ReturnType<typeof useMigrations>
@@ -279,6 +293,7 @@ export function useEditor(opts: EditorOptions): EditorApi {
     translation,
     gaps,
     versions,
+    versionTrail: versionsList.trail,
     published,
     publish,
     migrations,

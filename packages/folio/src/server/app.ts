@@ -14,6 +14,7 @@ import { editorPageRoutes, editorRoutes } from './routes/editor'
 import { historyRoutes } from './routes/history'
 import { migrationRoutes } from './routes/migrations'
 import { redirectRoutes } from './routes/redirects'
+import { scheduleRoutes } from './routes/schedules'
 import { shellRoutes } from './routes/shell'
 import { spaceRoutes } from './routes/space'
 import { storyRoutes } from './routes/stories'
@@ -117,6 +118,10 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   app.route('/api', sessionRoutes<Env>(rt))
   app.route('/api', accessRoutes<Env>(rt))
   app.route('/api', storyRoutes<Env>(rt))
+  // After `storyRoutes`, which owns `/story/:id/publish` and `/unpublish`. Order is
+  // not load-bearing here — `/story/:id/schedule` is a distinct literal segment,
+  // not a `:param` either one could swallow — and it reads next to its siblings.
+  app.route('/api', scheduleRoutes<Env>(rt))
   app.route('/api', historyRoutes<Env>(rt))
   app.route('/api', assetRoutes<Env>(rt))
   app.route('/api', editorRoutes<Env>(rt))
@@ -150,11 +155,26 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   app.route('/', authRoutes<Env>(rt))
   app.route('/', assetFileRoutes<Env>())
 
-  // (3) `editorPageRoutes` **must** precede `shellRoutes`, whose wildcard covers
-  // every bare path. That ordering is what keeps the working single-screen editor
-  // at `{base}/edit/:id` while the rebuilt shell owns everything else; deleting
-  // those two registrations is the whole of what hands the URL to the new editor
-  // at port phase 7.
+  // (3) `shellRoutes`' wildcard covers every bare path, and it now covers
+  // `{base}/edit/:id` too — **port phase 7 landed, so the rebuilt editor owns the
+  // URL.** `editorPageRoutes` used to be registered ahead of it for exactly the
+  // reason the comment here recorded: that ordering is what kept the working
+  // single-screen editor serving while the shell was built around it, and removing
+  // the registration was the whole of the handover.
+  //
+  // `editorPageRoutes` still precedes it, and still must: it resolves `/edit/:id`
+  // server-side and 404s an unknown id before the host's bindings are taken, which a
+  // wildcard cannot do. What changed is what it *renders* — the shell, not the old
+  // admin's bootstrap.
+  //
+  // The old admin's *page* is gone; its **components** are not, and the
+  // difference matters for port phase 8. `admin/Editor.tsx` and everything under
+  // `admin/` outside `admin/ui/` is now unreachable through any URL, but the new
+  // editor still imports six pure functions out of it (`menuGroups`,
+  // `publishStatus`, `behindNotice`, `describeAgainstDraft`, `formatWhen`,
+  // `globalPreviewUrl`) plus `keyAssets` and `externalUpdate`. Those are the
+  // new→old edges phase 8 has to move before it can delete the files, and they are
+  // listed in `docs/editor-port-plan.md` rather than discovered by a failing build.
   app.route('/', editorPageRoutes<Env>(rt))
   app.route('/', shellRoutes<Env>(rt))
 

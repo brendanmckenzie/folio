@@ -10,7 +10,7 @@ import { Hono } from 'hono'
 import { type SocketIdentity, withIdentity } from '../auth/identity'
 import { READ_DRAFT } from '../auth/roles'
 import { requireHtmlAccess } from '../middleware'
-import { adminPage, previewPage } from '../pages'
+import { shellPage, previewPage } from '../pages'
 import type { FolioRuntime } from '../runtime'
 import { ensureSingleton, listStories, storyById, storyByPath } from '../stories'
 import type { FolioEnv } from '../types'
@@ -126,7 +126,25 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const bindings = c.var.bindings()
     const story = await storyById(bindings.db, id)
     if (!story) return c.notFound()
-    return adminPage(rt, bindings, story)
+    /**
+     * **The rebuilt shell, not `adminPage`** — port phase 7 landed and this URL is
+     * the new editor's.
+     *
+     * The route survives rather than being deleted in favour of `shellRoutes`'
+     * wildcard, and the two lines above are why: it resolves the id *server-side* and
+     * 404s an unknown one before the host's bindings are taken, which the wildcard
+     * cannot do because it does not know a path segment is a story id.
+     * `test/workers/app.test.ts` pins exactly that — an id that cannot name a story
+     * never touches the host's environment — and handing the URL to a wildcard would
+     * have traded a real 404 for a shell that boots, fetches, and *then* says the
+     * document is not there.
+     *
+     * `story` is now read and discarded, which looks wasteful and is not: the read
+     * **is** the check. Passing it into the page would be an optimisation the shell
+     * cannot use, because `useStory` fetches by id through `?ids=` anyway and a
+     * server-rendered row would be a second source of truth for the same document.
+     */
+    return shellPage(rt)
   })
 
   app.get('/edit', requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {

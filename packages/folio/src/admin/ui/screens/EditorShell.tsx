@@ -2,16 +2,17 @@ import type { CSSProperties, ReactNode } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Blok, Doc } from '../../../core/doc'
 import type { LocaleConfig, LocaleContext } from '../../../core/locales'
-import type { DocumentType, SchemaIndex } from '../../../core/schema'
-import type { StoryMeta } from '../../../core/story'
-import type { Blocks } from '../../hooks/useBlocks'
-import { behindNotice } from '../../Migrations'
-import { canEdit, canPublish, type Me, whyNot } from '../../me'
+import type { Presence } from '../../../core/protocol'
 import type { Resolution } from '../../../core/resolve'
+import { type DocumentType, type SchemaIndex, singletonId } from '../../../core/schema'
+import type { StoryMeta } from '../../../core/story'
+import { formatWhen } from '../../History'
+import type { Blocks } from '../../hooks/useBlocks'
+import { canPublish, type Me, whyNot } from '../../me'
+import { behindNotice } from '../../Migrations'
 import type { StoryStore } from '../../store'
 import { publishStatus } from '../../TopBar'
 import { describeAgainstDraft } from '../../ViewingBar'
-import { formatWhen } from '../../History'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { Dialog } from '../Dialog'
@@ -21,6 +22,7 @@ import { BlockRail } from './BlockRail'
 import { stateTone } from './content-rows'
 import css from './EditorShell.module.css'
 import {
+  type AddTarget,
   clampInspector,
   DEFAULT_INSPECTOR,
   editorLayout,
@@ -69,6 +71,13 @@ export interface EditorSlot {
   /** Viewing a past version, or a role that may not edit. */
   readOnly: boolean
   blocks: Blocks
+  /** Per-story presence, off the document socket. The inspector's field rings read
+   * `selection.field`; the history panel's `peerNames` reads `actor` → `name`. */
+  peers: readonly Presence[]
+  /** The whole store state, for the two things a pane may need that are not broken
+   * out above: `connected` / `inflight` for a saving indicator, `focus` for which
+   * field this client is in. */
+  state: ReturnType<typeof useEditor>['state']
   story: StoryMeta
   /** The document has a URL of its own, so the root block's row also edits its
    * address (`PageAddress`). False for a record and for a global. */
@@ -79,6 +88,9 @@ export interface EditorSlot {
   globalHint: { name: string; label: string } | null
   onEditGlobal: (name: string) => void
   versions: ReturnType<typeof useEditor>['versions']
+  /** The version list's paged trail. See `useEditor`'s own comment for why it is a
+   * second name rather than a second read. */
+  versionTrail: ReturnType<typeof useEditor>['versionTrail']
   onNotice: (message: string) => void
   /**
    * There is no stage: this document is a form, so the inspector *is* the screen
@@ -87,6 +99,22 @@ export interface EditorSlot {
    * know about.
    */
   form: boolean
+
+  /* ------------------------------------------------- port phase 7c's seams --- */
+
+  /** Whether the history slide-over should be showing. `⌘H` is the shell's, not
+   * this screen's, so it arrives as a prop and is passed straight through. */
+  historyOpen: boolean
+  onCloseHistory: () => void
+  /**
+   * The slot a block is being added to, or null. Set by `+ Add` in the rail and by
+   * `⌘⇧A`; the picker reads it, and `onAddBlock` is what a pick calls — so the
+   * picker never learns where in the slot the block lands.
+   */
+  adding: AddTarget | null
+  onRequestAdd: (target: AddTarget) => void
+  onCloseAdd: () => void
+  onAddBlock: (type: string, preset?: string) => void
 }
 
 interface Props {
@@ -133,9 +161,21 @@ interface Props {
   onToggleInspector: () => void
   /** Port phase 7b. Absent draws a placeholder rather than an empty column. */
   inspector?: (slot: EditorSlot) => ReactNode
-  /** Port phase 7c: the history slide-over, over the inspector, full height. */
+  /**
+   * Port phase 7c: the history slide-over, over the inspector, full height. It
+   * mounts itself against `slot.historyOpen`, so this is called on every render
+   * rather than conditionally — `HistoryPanel` returns null when closed.
+   */
   history?: (slot: EditorSlot) => ReactNode
+  /** `⌘H`, which belongs to the shell's shortcut map rather than to this screen. */
   historyOpen?: boolean
+  onCloseHistory?: () => void
+  /**
+   * Port phase 7c: the block picker. Present, and the rail's `+ Add` opens it
+   * instead of the grouped menu; absent, the menu stays and the rail is complete
+   * without it.
+   */
+  picker?: (slot: EditorSlot) => ReactNode
 }
 
 /**
@@ -196,6 +236,12 @@ type Confirm = 'publish' | 'unpublish' | 'discard'
 function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
   const [viewport, setViewport] = useState<Viewport>('Desktop')
   const [confirm, setConfirm] = useState<Confirm | null>(null)
+  /**
+   * Which slot the picker is open for. Held here rather than in the rail because
+   * `⌘⇧A` can open it too and the rail may be collapsed at the time — the same
+   * reason `railCollapsed` lives above this component.
+   */
+  const [adding, setAdding] = useState<AddTarget | null>(null)
 
   /**
    * A block was picked in the preview. There are no tabs to bring forward any
@@ -274,6 +320,8 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
     doc: editor.shownDoc,
     readOnly: editor.readOnly,
     blocks: editor.blocks,
+    peers: editor.state.peers,
+    state: editor.state,
     story,
     routed,
     isRootBlok: Boolean(
@@ -286,10 +334,23 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
             props.types.find((type) => type.name === editor.globalHint)?.label ?? editor.globalHint,
         }
       : null,
-    onEditGlobal: (name) => props.onOpenDocument?.(singletonIdOf(name)),
+    onEditGlobal: (name) => props.onOpenDocument?.(singletonId(name)),
     versions: editor.versions,
+    versionTrail: editor.versionTrail,
     onNotice: props.onNotice,
     form: layout.form,
+    historyOpen: props.historyOpen ?? false,
+    onCloseHistory: () => props.onCloseHistory?.(),
+    adding,
+    onRequestAdd: setAdding,
+    onCloseAdd: () => setAdding(null),
+    onAddBlock: (type, preset) => {
+      if (!adding) return
+      editor.blocks.add(adding.parent, adding.slot, type, adding.index, preset)
+      // Closed by the pick rather than by the picker, so a picker that forgets to
+      // close cannot leave a dialog over a block it has already inserted.
+      setAdding(null)
+    },
   }
 
   const inspectorNode = props.inspector ? (
@@ -304,11 +365,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
   )
 
   return (
-    <div
-      className={css.editor}
-      data-form={layout.form ? '' : undefined}
-      style={{ '--inspector-w': `${width.value}px` } as CSSProperties}
-    >
+    <div className={css.editor} style={{ '--inspector-w': `${width.value}px` } as CSSProperties}>
       {layout.rail ? (
         <BlockRail
           doc={editor.shownDoc}
@@ -323,6 +380,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
           onDuplicate={editor.blocks.duplicate}
           onCopy={(uid) => void editor.blocks.copy(uid)}
           onNotice={props.onNotice}
+          {...(props.picker ? { onRequestAdd: setAdding } : {})}
           onCollapse={props.onToggleRail}
         />
       ) : null}
@@ -502,7 +560,8 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                 {viewing.version.label ||
                   (viewing.version.kind === 'publish' ? 'a published version' : 'a checkpoint')}
               </strong>{' '}
-              from {formatWhen(viewing.version.createdAt)} · {describeAgainstDraft(editor.versions.delta)}
+              from {formatWhen(viewing.version.createdAt)} ·{' '}
+              {describeAgainstDraft(editor.versions.delta)}
             </span>
             <Button size="sm" variant="subtle" onClick={editor.versions.exit}>
               Close
@@ -533,7 +592,9 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
         {layout.form ? (
           // No stage at all, and not a stage apologising for having nothing in it:
           // a record's fields *are* the screen, at a measure prose can be read at.
-          <div className={css.form}>{inspectorNode}</div>
+          <div className={css.form}>
+            <div className={css.formInner}>{inspectorNode}</div>
+          </div>
         ) : (
           <div
             className={css.stage}
@@ -571,7 +632,9 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
           <aside className={css.inspector} aria-label="Inspector">
             <div className={css.inspectorHead}>
               <span className={css.inspectorTitle}>
-                {editor.selected ? (props.schema[editor.selected.type]?.label ?? 'Block') : 'Fields'}
+                {editor.selected
+                  ? (props.schema[editor.selected.type]?.label ?? 'Block')
+                  : 'Fields'}
               </span>
               <Button
                 size="sm"
@@ -588,6 +651,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
       )}
 
       {props.history?.(slot)}
+      {props.picker?.(slot)}
 
       {confirm === 'publish' ? (
         <Dialog
@@ -794,20 +858,3 @@ function labelOf(types: readonly DocumentType[], name: string): string {
 function localeLabel(locales: LocaleConfig | undefined, code: string): string {
   return locales?.available.find((l) => l.code === code)?.label ?? code
 }
-
-/**
- * A singleton's story id, derived from its type name — `core/schema.ts`'s
- * `singletonId` by hand, because importing it here would be the only reason this
- * file reads from `core/schema` at runtime rather than for types.
- *
- * Kept as a one-liner beside its one caller: "Edit ‹global› →" is the only thing
- * in this screen that navigates to a document by type rather than by id.
- */
-function singletonIdOf(name: string): string {
-  return `sng_${name}`
-}
-
-/** Whether this deployment lets the person in it write at all. Exported for the
- * shell's own use of `canEdit`, which is otherwise only reached through
- * `useEditor`'s `readOnly`. */
-export const mayEdit = canEdit

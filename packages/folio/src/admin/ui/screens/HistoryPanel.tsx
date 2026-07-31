@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react'
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Doc } from '../../../core/doc'
-import type { Page } from '../../../core/pagination'
 import type { ActivityEntry } from '../../../core/protocol'
 import type { SchemaIndex } from '../../../core/schema'
 import type { VersionMeta } from '../../../server/versions'
 import { useFocusTrap } from '../../hooks/useFocusTrap'
+import type { Trail } from '../../hooks/useVersions'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { EmptyState } from '../EmptyState'
@@ -16,7 +16,6 @@ import {
   type ActorForm,
   actorForm,
   actorNames,
-  appendRows,
   describeEdit,
   historyExactly,
   historyWhen,
@@ -25,7 +24,6 @@ import {
   versionTitle,
   versionTone,
 } from './history-model'
-import { messageOf } from './useContent'
 
 export interface HistoryPanelProps {
   /**
@@ -35,11 +33,19 @@ export interface HistoryPanelProps {
    */
   open: boolean
   onClose: () => void
-  apiBase: string
-  storyId: string
   /** The live draft, for the labels in an activity phrase. */
   doc: Doc
   schema: SchemaIndex
+  /**
+   * `useVersionsList().trail` — the version list with its cursor. **Not a second
+   * copy**: it is the same state `usePublishedDoc` and the viewing machinery read,
+   * which is what makes a checkpoint saved from this panel appear in it.
+   */
+  versionTrail: Trail<VersionMeta>
+  /** `useVersions().activityTrail`. */
+  activityTrail: Trail<ActivityEntry>
+  /** `useVersions.reload` — both lists, for the panel's own Reload. */
+  onReload: () => Promise<void>
   /** `useVersions`' own flag: a version request is in flight, so its controls stay
    * disabled. */
   busy: boolean
@@ -91,100 +97,33 @@ export interface HistoryPanelProps {
  *    close, Tab cycles, Escape dismisses. There is no `autoFocus` anywhere inside,
  *    including in the checkpoint form — React applies it during commit, before the
  *    trap reads `activeElement` to learn who opened the panel, and the two fight.
- * 3. **It owns its own reads of both lists.** `useVersions` and `useVersionsList`
- *    keep the first page and drop the cursor, because until now no history list
- *    had a paging control at all. A cursor is opaque by construction
- *    (`core/pagination.ts` says so and means it), so the tail cannot be derived
- *    from the rows the hook holds — it has to come from a response. The hook's
- *    copy stays what it is for, which is `usePublishedDoc` and the viewing
- *    machinery; this is the display copy, fetched on open and dropped on close.
+ * 3. **It reads both lists from the hooks and holds no copy of its own.** It has to:
+ *    `checkpoint` and `restore` refresh what `useVersions` holds, so a panel with
+ *    its own copy would be showing a list that does not contain the checkpoint the
+ *    button beside it just made — which reads as the button having done nothing.
+ *    The first attempt did fetch its own, because the hooks kept `page.rows` and
+ *    dropped `page.cursor` and a cursor is opaque by construction
+ *    (`core/pagination.ts` says so and means it), so the tail could not be derived
+ *    from rows already in hand. The fix was to widen the hooks — `Trail<T>` in
+ *    `useVersions.ts` — rather than to keep two lists that can disagree.
  */
 export function HistoryPanel(props: HistoryPanelProps) {
-  // The early return is what makes `open` mean *mounted*: the focus trap's memory
-  // of the opener, and both trails' first read, are mount effects.
+  // The early return is what makes `open` mean *mounted*, which the focus trap's
+  // memory of the opener depends on. It is also what makes `active` — and therefore
+  // the activity trail's first read — the shell's `open` state and nothing else.
   if (!props.open) return null
   return <Panel {...props} />
-}
-
-/* ------------------------------------------------------------------ paging --- */
-
-interface Trail<T> {
-  rows: readonly T[]
-  /** Null when the list is fully loaded. */
-  cursor: string | null
-  loading: boolean
-  error?: string
-}
-
-/** Module-level so they are stable identities and `read` is not rebuilt per
- * render. */
-const versionKey = (row: VersionMeta) => row.id
-const activityKey = (row: ActivityEntry) => row.syncId
-
-/**
- * One paged, appending list over a `Page<T>` route.
- *
- * `appendRows` carries the argument for appending rather than paging; what is here
- * is only the fetch and the state it lands in, kept thin for the same reason
- * `useContent.ts` is.
- */
-function useTrail<T>(url: string, keyOf: (row: T) => string | number) {
-  const [trail, setTrail] = useState<Trail<T>>({ rows: [], cursor: null, loading: true })
-  const live = useRef(true)
-  useEffect(
-    () => () => {
-      live.current = false
-    },
-    [],
-  )
-
-  const read = useCallback(
-    async (from: string | null) => {
-      setTrail((prev) => ({ ...prev, loading: true, error: undefined }))
-      try {
-        const res = await fetch(from === null ? url : `${url}?cursor=${encodeURIComponent(from)}`)
-        if (!res.ok) throw new Error(await messageOf(res))
-        const page = (await res.json()) as Page<T>
-        if (!live.current) return
-        setTrail((prev) => ({
-          // `from === null` is a reload and replaces; a cursor appends. The held
-          // rows come from `prev` rather than from the closure, so two reads in
-          // flight cannot drop one another's page.
-          rows: from === null ? page.rows : appendRows(prev.rows, page.rows, keyOf),
-          cursor: page.cursor,
-          loading: false,
-        }))
-      } catch (e) {
-        if (live.current) {
-          setTrail((prev) => ({ ...prev, loading: false, error: (e as Error).message }))
-        }
-      }
-    },
-    [keyOf, url],
-  )
-
-  useEffect(() => {
-    void read(null)
-  }, [read])
-
-  const more = useCallback(() => {
-    if (trail.cursor !== null) void read(trail.cursor)
-  }, [read, trail.cursor])
-  const reload = useCallback(() => {
-    void read(null)
-  }, [read])
-
-  return { trail, more, reload }
 }
 
 /* ------------------------------------------------------------------- panel --- */
 
 function Panel({
   onClose,
-  apiBase,
-  storyId,
   doc,
   schema,
+  versionTrail,
+  activityTrail,
+  onReload,
   busy,
   viewingId,
   onCheckpoint,
@@ -199,41 +138,22 @@ function Panel({
   const activityId = useId()
   useFocusTrap(panel, onClose)
 
-  const story = encodeURIComponent(storyId)
-  const versions = useTrail<VersionMeta>(`${apiBase}/story/${story}/versions`, versionKey)
-  const activity = useTrail<ActivityEntry>(`${apiBase}/story/${story}/activity`, activityKey)
-
   const [naming, setNaming] = useState(false)
 
   const names = useMemo(
-    () => actorNames(activity.trail.rows, peerNames),
-    [activity.trail.rows, peerNames],
+    () => actorNames(activityTrail.rows, peerNames),
+    [activityTrail.rows, peerNames],
   )
 
-  const reloadBoth = useCallback(() => {
-    versions.reload()
-    activity.reload()
-  }, [activity, versions])
-
+  // No reload of either list here, and that is the point of the widening:
+  // `useVersions.checkpoint` and `.restore` already refresh both through
+  // `afterWrite`, and the rows they refresh are the rows this panel is drawing.
   const checkpoint = useCallback(
     async (label: string) => {
       await onCheckpoint(label)
       setNaming(false)
-      // Both, and unconditionally: a checkpoint writes a version row, and the hook
-      // swallows its own failure into a toast, so there is nothing here to branch
-      // on. Re-reading a list that did not change costs one request.
-      reloadBoth()
     },
-    [onCheckpoint, reloadBoth],
-  )
-
-  const restore = useCallback(
-    async (version: VersionMeta) => {
-      await onRestore(version)
-      // Activity only: a restore is a transaction on the document, not a version.
-      activity.reload()
-    },
-    [activity, onRestore],
+    [onCheckpoint],
   )
 
   return createPortal(
@@ -271,7 +191,7 @@ function Panel({
           >
             New checkpoint
           </Button>
-          <Button size="sm" variant="subtle" onClick={reloadBoth}>
+          <Button size="sm" variant="subtle" onClick={() => void onReload()}>
             Reload
           </Button>
           <Button size="sm" variant="subtle" title="Close (Esc)" onClick={onClose}>
@@ -293,9 +213,7 @@ function Panel({
             ) : null}
 
             <TrailList
-              trail={versions.trail}
-              onMore={versions.more}
-              onRetry={versions.reload}
+              trail={versionTrail}
               noun="versions"
               empty={
                 <EmptyState
@@ -309,7 +227,7 @@ function Panel({
                 />
               }
             >
-              {versions.trail.rows.map((version) => (
+              {versionTrail.rows.map((version) => (
                 <VersionRow
                   key={version.id}
                   version={version}
@@ -318,7 +236,7 @@ function Panel({
                   viewing={version.id === viewingId}
                   onView={onView}
                   onExitView={onExitView}
-                  onRestore={restore}
+                  onRestore={onRestore}
                 />
               ))}
             </TrailList>
@@ -333,9 +251,7 @@ function Panel({
             </div>
 
             <TrailList
-              trail={activity.trail}
-              onMore={activity.more}
-              onRetry={activity.reload}
+              trail={activityTrail}
               noun="edits"
               empty={
                 <EmptyState
@@ -344,7 +260,7 @@ function Panel({
                 />
               }
             >
-              {activity.trail.rows.map((entry) => (
+              {activityTrail.rows.map((entry) => (
                 <li key={entry.syncId} className={css.row}>
                   <span className={css.rowMain}>
                     <span className={css.rowTitle}>
@@ -380,15 +296,13 @@ const SKELETON = ['h1', 'h2', 'h3', 'h4']
  */
 function TrailList<T>({
   trail,
-  onMore,
-  onRetry,
   noun,
   empty,
   children,
 }: {
+  /** `useVersions.ts`'s `Trail`, which carries its own `more` and `reload`: the
+   * controls belong to the state, so the panel never has to hold a cursor. */
   trail: Trail<T>
-  onMore: () => void
-  onRetry: () => void
   /** Plural, for the count and the failure line. */
   noun: string
   empty: ReactNode
@@ -409,7 +323,7 @@ function TrailList<T>({
         title={`Could not load ${noun}`}
         body={trail.error}
         action={
-          <Button size="sm" onClick={onRetry}>
+          <Button size="sm" onClick={() => void trail.reload()}>
             Try again
           </Button>
         }
@@ -430,7 +344,7 @@ function TrailList<T>({
             {trail.rows.length} {noun} loaded
           </span>
           {trail.cursor === null ? null : (
-            <Button size="sm" disabled={trail.loading} onClick={onMore}>
+            <Button size="sm" disabled={trail.loading} onClick={() => void trail.more()}>
               {trail.loading ? 'Loading…' : 'Show older'}
             </Button>
           )}

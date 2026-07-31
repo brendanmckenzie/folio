@@ -26,50 +26,13 @@ import type { BlockSchema, SchemaIndex } from '../../../core/schema'
 import type { VersionKind, VersionMeta } from '../../../server/versions'
 import type { BadgeTone } from '../Badge'
 
-/* ------------------------------------------------------------------ paging --- */
-
-/**
- * A held list plus the page that continues it, appending rather than replacing.
- *
- * **Appending is the control both of these lists get** (`ui-architecture.md`'s
- * editor section gives history a cursor for the first time), and the reason is not
- * the one `content-model.ts`'s `Level` gives even though the shape is identical.
- * There, a tree level appends because its rows have expanded descendants nested
- * inside them and replacing page one would orphan them. Here both lists are one
- * **chronology**, and the newest row is the reference point every other row is
- * understood against: a version list is read as "what changed since *that*", which
- * is the same comparison the amber frame and the top bar are showing. Paging the
- * newest publish off the top of the panel would remove the thing being compared
- * to.
- *
- * Rejected: next / previous, which is every other list in this admin
- * (`ui-architecture.md` Resolved 5) and right for a table you scan for one row.
- * A log is scanned for *when*, so "older" is a direction rather than a page, and
- * nobody wants to link to page 3 of a history that grows on every keystroke.
- *
- * Rejected: fetching on scroll. A reference surface you consult and dismiss must
- * not issue requests because a trackpad moved, and an infinite list has no end for
- * a keyboard to reach.
- *
- * Deduplicated by key, which is not defensive padding: a checkpoint saved from
- * this very panel between two pages of the same list would otherwise appear twice,
- * because the keyset moved under the cursor.
+/*
+ * Paging is deliberately **not** here. It was, briefly, when the panel held its own
+ * copy of both lists; the copy could disagree with the one `useVersions` refreshes
+ * after a checkpoint, so the state and the appending moved into that hook — see
+ * `Trail` and `appendRows` in `admin/hooks/useVersions.ts`, which carry the argument
+ * for why the control appends rather than paging next / previous.
  */
-export function appendRows<T>(
-  held: readonly T[],
-  incoming: readonly T[],
-  keyOf: (row: T) => string | number,
-): T[] {
-  const seen = new Set(held.map(keyOf))
-  const out = [...held]
-  for (const row of incoming) {
-    const key = keyOf(row)
-    if (seen.has(key)) continue
-    seen.add(key)
-    out.push(row)
-  }
-  return out
-}
 
 /* ---------------------------------------------------------------- versions --- */
 

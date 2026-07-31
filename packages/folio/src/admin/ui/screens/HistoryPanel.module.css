@@ -20,10 +20,25 @@
  * has declined to grow, and the perceptible half of a slide-over is the arrival.
  */
 
+/*
+ * 35, which puts it **below** `Dialog` (40) and the palette (50) rather than above
+ * them. Deliberate: a dialog opened while this is showing — a publish confirmation,
+ * a delete — is a question that has to be answered before anything else, and its own
+ * tinted scrim should cover this panel. The slide-over is the only overlay in the
+ * system that another overlay can legitimately appear over.
+ */
 .wrap {
   position: fixed;
-  inset: 0;
-  z-index: 45;
+  /*
+   * Below the top bar, not over it. `TopBar.module.css`'s 40px is what makes the
+   * editor's geometry a known quantity, and it is also load-bearing here: while a
+   * past version is on the stage the top bar carries **the comparison** — how the
+   * draft differs from what you are looking at — so a panel for choosing versions
+   * that covered it would hide the sentence it exists to produce. "Full height" in
+   * the design means the height of the editor, which is what this is.
+   */
+  inset: 40px 0 0;
+  z-index: 35;
   display: flex;
   justify-content: flex-end;
 }

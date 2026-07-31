@@ -179,6 +179,44 @@ export function railRows(
   return out
 }
 
+/**
+ * Where a block is about to be added, as the picker needs it.
+ *
+ * The seam for port phase 7c: `+ Add` and `⌘⇧A` both mean "offer what this slot
+ * accepts", and `BlockPicker` narrows its offer from `parentType`, `slot` and how
+ * many the slot already holds. This is that set, derived from the add row the rail
+ * already has — so the picker needs no knowledge of where in the slot the block
+ * lands, and the rail needs none of the picker.
+ */
+export interface AddTarget {
+  parent: string
+  /** The parent block's type, which is what a slot's `allow` hangs off. */
+  parentType: string
+  slot: string
+  /** Its declared label, or the slot's own name. Never empty, so a title can use
+   * it without a fallback of its own. */
+  slotLabel: string
+  /** How many blocks the slot already holds, so a full slot can refuse rather than
+   * offering a list every entry of which would be rejected. */
+  filled: number
+  /** Where the new block lands: the end of the slot. */
+  index: number
+}
+
+export function addTargetOf(row: RailAddRow, doc: Doc): AddTarget {
+  return {
+    parent: row.parent,
+    parentType: doc.bloks[row.parent]?.type ?? '',
+    slot: row.slot,
+    slotLabel: row.slotLabel ?? row.slot,
+    // `railRows` puts the add row at the end of the slot, so its index *is* how
+    // many are already there. Stated here rather than recounted, because the two
+    // disagreeing would append in the wrong place.
+    filled: row.index,
+    index: row.index,
+  }
+}
+
 /** The blok rows of a rail, which is what a keyboard gesture acts on and what
  * `List`'s row indices count. */
 export function blokRowsOf(rows: readonly RailRow[]): RailBlokRow[] {
