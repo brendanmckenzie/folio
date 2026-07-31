@@ -225,7 +225,7 @@ export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
      * The log position alone, with no document attached — the coarse signal the
      * tree-wide badge is built from and the debounced alarm below writes into
      * D1. A story whose object has never been touched reads 0, matching the
-     * `default 0` on `stories.draft_sync_id` (migrations/0005_draft_watermark.sql).
+     * `default 0` on `stories.draft_sync_id` (migrations/0001_init.sql).
      */
     async head(): Promise<{ syncId: number }> {
       return { syncId: this.read()?.syncId ?? 0 }

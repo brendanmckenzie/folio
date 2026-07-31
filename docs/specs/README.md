@@ -138,11 +138,23 @@ source-locale write, forever).
 ## D1 migration ledger
 
 `packages/folio/migrations/` is shared by every consuming project (the demo points
-`migrations_dir` at it). `0001` and `0002` exist. Numbers below are assigned in build
-order and must be renumbered together if that order changes.
+`migrations_dir` at it).
 
-| Migration | Spec | Contents |
+**There is one migration: `0001_init.sql`.** It holds the whole schema, and it
+replaced the ten below as spec 18's phase 1 (`foundation/pagination.md` decision 10).
+They were sequenced only because they were written in sequence; nothing is deployed
+and there is no remote, so the history they recorded had no audience. The next
+migration is `0002` and, like every one after it, is expected to be a plain
+`alter table`.
+
+The table is kept as a **record of what each spec added**, since each spec's own
+*Wire & schema changes* section still names its migration and those sections are
+history rather than instructions:
+
+| Was | Spec | Contents |
 | --- | --- | --- |
+| `0001_initial.sql` | — | `stories`, `versions`, `assets` |
+| `0002_slug_unique.sql` | — | `stories_parent_slug` |
 | `0003_unpublish.sql` | unpublish | `stories.unpublished_at`, `unpublished_by` |
 | `0004_redirects.sql` | redirects | `redirects` table |
 | `0005_draft_watermark.sql` | unpublished-changes | `stories.draft_sync_id`, `draft_updated_at`, `published_sync_id` |
@@ -152,20 +164,25 @@ order and must be renumbered together if that order changes.
 | `0009_locales.sql` | localisation | `stories.title_i18n` |
 | `0010_content_index.sql` | collections | `content_index`, `content_refs` |
 
-**`0006` is the one to be careful with.** It rebuilds `stories` to make `path`
-nullable, so it must carry every column added before it — `0003`'s two and `0005`'s
-three — or the rebuild silently drops them. Columns added *after* it are ordinary
-`alter table` statements. That is the whole reason the two `stories`-touching quick
-wins are numbered ahead of it.
+**The rule `0006` established still applies.** A rebuild of `stories` has to carry
+every column forward explicitly, because a positional copy is how a rebuild loses one
+silently. `0001_init.sql` has no copy step, so the hazard is not live today — but the
+next spec that needs to drop a `not null` will meet it again.
 
-Six specs need no migration at all: conditional fields, defaults and presets,
-duplicate and paste and lifecycle hooks are code-only; globals and data documents build
-on `0006`'s `type` column; the content API builds on `0007`'s `api_tokens`.
+The collapse also **dropped one index rather than carrying it forward**:
+`stories_draft_updated` was never read by anything, and
+`test/workers/migrations.test.ts` now asserts its absence. See
+`foundation/pagination.md` decision 2a.
+
+Six specs needed no migration at all: conditional fields, defaults and presets,
+duplicate and paste and lifecycle hooks are code-only; globals and data documents
+build on the `type` column; the content API builds on `api_tokens`.
 
 ## Status
 
 Each spec carries its own `> **Status:**` stamp. All sixteen specs in the quick-wins and
 main-line tables are **done**, restamped in place with an `## Implementation notes`
-section recording what actually landed. Spec 17 (caching) is **ready**: written and
-argued, not yet implemented. A spec that gets built is restamped the same way, the way
-`../../PARITY.md` records what landed.
+section recording what actually landed. Spec 17 (caching) is **done** too. Spec 18
+(pagination) is **in-progress**: its phase 1, the schema collapse, has landed. A spec
+that gets built is restamped the same way, the way `../../PARITY.md` records
+what landed.

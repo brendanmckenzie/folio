@@ -171,9 +171,9 @@ The site has at least five root types: `Page`, `Insights`, `Resources`,
 
 - **Document types: done.** `createFolio` takes a `types` array, each entry naming
   its own root block, so an insight is not a page with six unused fields.
-  `stories` gained a `type` column and `path` became nullable
-  (`migrations/0006_document_types.sql`). `root: 'page'` still works, as sugar
-  for a single `page` type.
+  `stories` carries a `type` column and a nullable `path`
+  (`migrations/0001_init.sql`). `root: 'page'` still works, as sugar for a single
+  `page` type.
 
   One thing the reference project has that Folio deliberately does **not**: a
   per-type routing rule. That is a Next.js artefact. Folio derives a path from

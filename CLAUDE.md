@@ -89,8 +89,9 @@ overrides every instinct toward compatibility you will find in this repo's histo
 
 - **Backwards compatibility is not a constraint.** Not for the wire, not for the
   schema, not for stored documents or logs. There is no old data to be kind to.
-- **All ten migrations can be rolled into one whenever it is convenient.** They are
-  not a ledger anybody depends on.
+- **The migrations were rolled into one, and that was fine.** Ten became
+  `0001_init.sql` in July 2026. They were not a ledger anybody depended on, and the
+  next one to be in the way can go the same way.
 - **A thing existing is not an argument for keeping it.** If a design is wrong,
   replace it; do not extend it to avoid a rewrite.
 - **Pivots are allowed.** Nothing here is set in stone.
@@ -106,13 +107,27 @@ than a scatter.
 
 ## The two ledgers
 
-**D1 migrations** (`packages/folio/migrations/`). `0001`–`0010` exist and are
-sequenced only because they were written in sequence. A new one is normally the next
-number and a plain `alter table`, but rebuilding a table — `stories` included — is
-fair game when the shape is wrong; `0006` already did it once. A rebuild has to
+**D1 migrations** (`packages/folio/migrations/`). **There is one:
+`0001_init.sql`**, holding the whole schema — the ten that preceded it were
+collapsed into it (`docs/specs/README.md` keeps the record of what each added). A
+new one is the next number and normally a plain `alter table`, but rebuilding a
+table — `stories` included — is fair game when the shape is wrong. A rebuild has to
 carry every column and recreate every index, which is a correctness chore, not a
-reason to avoid it. `test/workers/migrations.test.ts` pins the current shape and is
-meant to be updated alongside.
+reason to avoid it.
+
+`0001_init.sql` uses plain `create table`, not `if not exists`: applying it over an
+existing database should fail loudly, and the fix is to reset. Two things it does
+that are easy to undo by accident, and both are pinned by
+`test/workers/migrations.test.ts`:
+
+- **`stories_edited` is an expression index** over
+  `coalesce(draft_updated_at, updated_at)`. `draft_updated_at` is null until a
+  document's first debounced write and SQLite sorts nulls last under `desc`, so
+  ordering by the bare column puts a page created minutes ago *below* one edited
+  years ago. Every reader of "last edited" wants the coalesce.
+- **`stories_draft_updated` is deliberately absent.** It existed for ten migrations
+  and nothing ever ordered by it. Do not restore it by copying an old file; the test
+  asserts the absence.
 
 **`PROTOCOL_VERSION`** (`packages/folio/src/core/protocol.ts`) is carried by every
 socket frame and every admin↔preview postMessage frame; a mismatch is refused, not

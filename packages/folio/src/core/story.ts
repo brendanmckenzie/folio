@@ -2,7 +2,7 @@ import { compareSiblings } from './doc'
 
 /**
  * Story *structure*. Page metadata lives in the document's root block, not
- * here — see migrations/0001_initial.sql. The only content field mirrored into this table is
+ * here — see migrations/0001_init.sql. The only content field mirrored into this table is
  * `title`, cached so the tree renders without loading every Durable Object.
  */
 export interface StoryMeta {
@@ -36,7 +36,7 @@ export interface StoryMeta {
    * that was actually published — `unpublished-changes.md`'s watermark pair.
    * Both start at 0 for a story whose object has never been touched or never
    * published, which reads as "nothing changed" rather than "everything
-   * changed" (see migrations/0005_draft_watermark.sql).
+   * changed" (see `stories.draft_sync_id` in migrations/0001_init.sql).
    */
   draftSyncId: number
   /** When the watermark above was last written. Null until the first debounced write. */

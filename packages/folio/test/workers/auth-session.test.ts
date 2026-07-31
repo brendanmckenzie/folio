@@ -22,7 +22,7 @@ import {
 } from '../../src/server/auth/users'
 
 /**
- * The session store against real D1 and the real `0007_identity.sql`: what the
+ * The session store against real D1 and the real `sessions` schema: what the
  * database actually holds, when a credential stops working, and what revocation
  * costs.
  *

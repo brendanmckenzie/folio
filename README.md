@@ -1195,13 +1195,16 @@ run it once and never against a real deployment. `node scripts/seed-demo.mjs`
 adds the field-type showcase through the running dev server's API afterwards, and
 is safe to rerun because it creates its own stories.
 
-If you have a database from before migrations existed — created by the old
-`packages/folio/schema.sql` — it has no `d1_migrations` table, so the first apply
-runs the whole history against it. `0001_initial.sql` is written to adopt exactly
-that database untouched; `0002_slug_unique.sql` adds a unique index over sibling
-slugs and will refuse a database that already contains a duplicate pair (its own
-comment has the query that finds them). Locally, deleting `.wrangler/state` and
-starting from `pnpm db:local` is the shorter route.
+There is **one migration**, `0001_init.sql`, holding the whole schema. It replaced
+ten sequential ones, which were sequenced only because they were written in
+sequence — nothing is deployed and there is no remote, so the history they recorded
+had no audience. What each of them added is still recorded, in its own spec's
+*Wire & schema changes* section and in the table in `docs/specs/README.md`.
+
+It is a plain `create table` file, so applying it over a database that already has
+those tables **fails loudly** rather than adopting it. That is deliberate: a silent
+adoption would leave an older schema in place. If you have a database from before
+the collapse, delete `.wrangler/state` and start from `pnpm db:local`.
 
 - `/folio/edit` the editor (redirects to the root story)
 - `/` the root story's published page — 404 until you hit Publish

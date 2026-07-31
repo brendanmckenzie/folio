@@ -209,14 +209,42 @@ const editorPublish = await fetch(`${API}/story/${STORY}/publish`, {
   headers: { cookie: editorCookie },
 })
 check('an editor may not publish', editorPublish.status === 403, `status=${editorPublish.status}`)
+
+/**
+ * An editor **may** create. This assertion used to be its opposite, and it went
+ * stale within a day: `CREATE` became `{ role: 'editor' }` on 2026-07-30 and this
+ * script was last touched on 2026-07-29 — so it has been failing ever since,
+ * unnoticed, because these scripts cannot gate CI (`CLAUDE.md`). Found while
+ * running them against the collapsed schema.
+ *
+ * The reasoning behind the split, from `admin/me.ts`: a new document is an
+ * unpublished draft at a path nothing links to yet, so starting one withdraws
+ * nothing. Changing or removing an existing URL is what stays `publisher`.
+ */
 const editorCreate = await fetch(`${API}/stories`, {
   method: 'POST',
   headers: { cookie: editorCookie, 'content-type': 'application/json' },
-  body: JSON.stringify({ title: 'Editor tried to create this' }),
+  body: JSON.stringify({ title: 'Editor created this' }),
 })
-check('nor create a page', editorCreate.status === 403, `status=${editorCreate.status}`)
+check('but may create a page', editorCreate.status === 200, `status=${editorCreate.status}`)
+
+// Deleting is the other half of the split, and it stays `publisher`. Asserted here
+// so "an editor may create" cannot quietly widen into "an editor may do anything".
+const created = editorCreate.status === 200 ? (await editorCreate.json()).id : null
+if (created) {
+  const editorDelete = await fetch(`${API}/stories/${created}`, {
+    method: 'DELETE',
+    headers: { cookie: editorCookie },
+  })
+  check(
+    'and may not delete what they created',
+    editorDelete.status === 403,
+    `status=${editorDelete.status}`,
+  )
+}
+
 check(
-  'but may read the tree',
+  'and may read the tree',
   (await fetch(`${API}/stories`, { headers: { cookie: editorCookie } })).status === 200,
 )
 
@@ -224,6 +252,16 @@ const viewerCookie = await signInAs(DEMO_VIEWER)
 check(
   'a viewer may read',
   (await fetch(`${API}/stories`, { headers: { cookie: viewerCookie } })).status === 200,
+)
+const viewerCreate = await fetch(`${API}/stories`, {
+  method: 'POST',
+  headers: { cookie: viewerCookie, 'content-type': 'application/json' },
+  body: JSON.stringify({ title: 'Viewer tried to create this' }),
+})
+check(
+  'but may not create — which is the line `CREATE` actually draws',
+  viewerCreate.status === 403,
+  `status=${viewerCreate.status}`,
 )
 const viewerSocket = socket({ cookie: viewerCookie })
 await viewerSocket.ready()

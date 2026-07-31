@@ -17,7 +17,7 @@ import { createFolio } from '../../src/server'
 import type { FolioBindings } from '../../src/server'
 
 /**
- * Collections against real D1 and the real `0010_content_index.sql`
+ * Collections against real D1 and the real `content_index` schema
  * (`../../../docs/specs/content-model/collections.md`): the publish batch, the
  * delete cascade, every operator, reindex, and the narrowed resolution.
  *

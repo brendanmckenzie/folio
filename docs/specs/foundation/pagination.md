@@ -3,7 +3,7 @@
 > **Group:** foundation
 > **Build order:** 18, per docs/specs/README.md
 > **Size:** L ≈ a week or two
-> **Status:** draft
+> **Status:** in-progress — phase 1 landing; checkpoints and open questions all closed
 > **Wire version:** none — no socket frame changes shape
 > **Migration:** `0001_init.sql` (the ten existing migrations collapse into one)
 > **Last updated:** 2026-07-31
@@ -816,12 +816,15 @@ spec, because building it out found a dead index and a null-ordering bug.
 
 ## Open questions
 
-- **Should the `state` expression live in a SQL view** rather than being
-  interpolated next to `COLS`? A view is tidier and D1 supports it; it also puts a
-  rule the tests pin into the migration rather than into the code they test. Leaning
-  towards interpolation, because `draftState` in `core/` is the definition and a
-  view would make the migration a second place to read it.
-- **Does flat mode want `sort=state`?** It is the one filter that is also a
-  plausible ordering ("show me everything, drafts first"), and it is the one sort
-  with no index and only four distinct values. Cheap to add later; guessing now
-  would add a fourth index for a sort nobody has asked for.
+None. The last two closed themselves once written down, 2026-07-31:
+
+- **The `state` expression is interpolated next to `COLS`, not a SQL view.**
+  `draftState` in `core/story.ts` is the definition; a view would be a second place
+  to read the same rule, and the migration is the worst place to keep a rule the
+  tests pin — a schema file is the one thing this spec is trying to make legible in
+  a single read.
+- **Flat mode ships without `sort=state`.** It would need a fourth index for a sort
+  nobody has asked for, over a column that does not exist and four distinct values.
+  Adding it later is one index and one `order by`; guessing now is a write cost on
+  every story forever — which is precisely the mistake `stories_draft_updated`
+  already made once.

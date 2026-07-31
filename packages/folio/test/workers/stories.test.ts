@@ -744,7 +744,7 @@ describe('listStories', () => {
     expect(about?.publishedSyncId).toBe(3)
 
     // A never-published story reads clean, not "everything changed": both
-    // watermarks default to 0 (migrations/0005_draft_watermark.sql).
+    // watermarks default to 0 (migrations/0001_init.sql).
     const home = rows.find((r) => r.id === 'sty_home')
     expect(home?.state).toBe('draft')
     expect(home?.hasUnpublishedChanges).toBe(false)
@@ -1165,7 +1165,7 @@ describe('concurrent creates and the conflict envelope', () => {
     // `slug` at the root), so two calls racing to the same (parentId, slug)
     // also race to the same `path` — the pre-existing `path text not null
     // unique` already refuses the loser here, and would with or without
-    // `stories_parent_slug` (migrations/0002_slug_unique.sql) existing. What
+    // `stories_parent_slug` (migrations/0001_init.sql) existing. What
     // this test actually pins down is the translation: whichever index D1
     // reports, `rethrow` maps a raw UNIQUE violation to the same conflict
     // envelope. See the next describe block for a case only 0002 catches.
@@ -1199,7 +1199,7 @@ describe('concurrent creates and the conflict envelope', () => {
   })
 })
 
-describe('migrations/0002_slug_unique.sql: stories_parent_slug', () => {
+describe('stories_parent_slug, the sibling-slug invariant', () => {
   it('refuses two rows sharing (parent_id, slug) even when their paths differ', async () => {
     // Every write this codebase makes (createStory/updateStory,
     // src/server/stories.ts) derives `path` as `${parentPath}/${slug}`, so a
