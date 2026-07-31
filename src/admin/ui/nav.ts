@@ -12,27 +12,32 @@
  */
 import { type DocumentType, singletonId } from '../../core/schema'
 import { canManageAccess, type Me } from '../me'
+// Type-only, and it has to stay that way: `verbatimModuleSyntax` erases this
+// import entirely, so naming an icon here does not pull `icons.tsx` — or React —
+// into a module the Node tests import.
+import type { IconName } from './icons'
 import type { Screen } from './route'
 
 export interface NavItem {
   label: string
   screen: Screen
   /**
-   * A single glyph, which is what the 48px collapsed rail shows. Deliberately
-   * data rather than JSX so this module stays free of React.
+   * Which icon the item draws — a *name*, resolved to inline SVG by `icons.tsx`,
+   * which is what the 48px collapsed rail shows and all it shows.
    *
-   * **Every one of these is a placeholder, and there is no icon system yet.**
-   * These are unicode characters in the UI font, so their weight, size and
-   * optical alignment are whatever that font happens to do — not a design. No
-   * doc has decided what the real answer is; `ROADMAP.md` records the question
-   * under the UI rebuild. Nothing here should be read as a judgement about
-   * iconography.
+   * A name rather than the drawing so this module stays free of React, and a
+   * closed union rather than a string so an item that forgets an icon is a type
+   * error instead of a blank box. It was a unicode glyph until the set existed,
+   * which meant nine icons in whatever weights and optical sizes the UI font
+   * happened to have — `⚿` had no glyph at all, and `⚙` was doing duty for both
+   * Model and Settings.
    *
-   * What *is* deliberate: `docs/ui-review.md`'s complaint about the two bare `↻`
-   * buttons applies to any glyph without an accessible name, so `Sidebar` gives
-   * every one of these a label even when it draws only the icon.
+   * What has not changed: `docs/ui-review.md`'s complaint about the two bare `↻`
+   * buttons applies to any icon without an accessible name, so `Sidebar` gives
+   * every one of these a label even when it draws only the icon — and the SVG
+   * itself is `aria-hidden`, so the label is the only name.
    */
-  icon: string
+  icon: IconName
 }
 
 export interface NavGroup {
@@ -82,16 +87,21 @@ function primary(types: readonly DocumentType[]): NavItem[] {
   const records = types.filter((t) => t.kind === 'record')
   const inline = records.length > GROUP_AT || records.some((t) => t.group) ? [] : records
   return [
-    { label: 'Home', icon: '⌂', screen: { name: 'home' } },
-    { label: 'Content', icon: '☰', screen: { name: 'content' } },
+    { label: 'Home', icon: 'home', screen: { name: 'home' } },
+    { label: 'Content', icon: 'content', screen: { name: 'content' } },
     ...inline.map(itemFor),
-    { label: 'Assets', icon: '⬚', screen: { name: 'assets' } },
+    { label: 'Assets', icon: 'assets', screen: { name: 'assets' } },
   ]
 }
 
+/**
+ * Every record type draws the same table icon. A per-type icon would have to be a
+ * manifest field, and until one exists the nav cannot invent a drawing for a type
+ * it has never seen — the label is what tells Person from Office.
+ */
 const itemFor = (type: DocumentType): NavItem => ({
   label: type.label,
-  icon: '▤',
+  icon: 'records',
   screen: { name: 'documents', type: type.name },
 })
 
@@ -150,10 +160,10 @@ function globalsGroup(singles: readonly DocumentType[], globals: readonly string
       return [
         {
           label: type.label,
-          // `·` first, matching the mock in `ui-architecture.md` — and illegible
-          // at 48px, where the glyph is the only thing on screen. A placeholder
-          // still has to be visible.
-          icon: '◆',
+          // A globe, for the group the heading calls Globals. Every singleton gets
+          // it, including the ones `Manifest.globals` never declared: the
+          // distinction the ordering makes is not one an icon can carry.
+          icon: 'global',
           screen: { name: 'edit' as const, id: singletonId(type) },
         },
       ]
@@ -175,12 +185,12 @@ function globalsGroup(singles: readonly DocumentType[], globals: readonly string
  */
 function administration(me: Me): NavItem[] {
   return [
-    { label: 'Model', icon: '⚙', screen: { name: 'model' } },
-    { label: 'Redirects', icon: '↪', screen: { name: 'redirects' } },
+    { label: 'Model', icon: 'model', screen: { name: 'model' } },
+    { label: 'Redirects', icon: 'redirects', screen: { name: 'redirects' } },
     ...(canManageAccess(me)
-      ? [{ label: 'Access', icon: '⚿', screen: { name: 'access' as const } }]
+      ? [{ label: 'Access', icon: 'access' as const, screen: { name: 'access' as const } }]
       : []),
-    { label: 'Settings', icon: '⚙', screen: { name: 'settings' } },
+    { label: 'Settings', icon: 'settings', screen: { name: 'settings' } },
   ]
 }
 
