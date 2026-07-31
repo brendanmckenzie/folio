@@ -182,9 +182,46 @@ describe('nav', () => {
     expect(editor).toContain('Settings')
   })
 
-  it('gives every item a glyph, since the collapsed rail draws nothing else', () => {
-    const groups = nav({ types: [PAGE, type('person', 'record')], globals: [], me: ADMIN })
-    for (const item of groups.flatMap((g) => g.items)) expect(item.icon).not.toBe('')
+  /**
+   * The icons are names now, resolved to inline SVG by `ui/icons.tsx` — which
+   * this file deliberately does not import, because it is a `.tsx` and these
+   * tests run in Node and mount nothing. So the assertion is on the names, and
+   * `ICONS` being a `Record<IconName, …>` is what makes a name that has no
+   * drawing a type error rather than something a test has to catch.
+   */
+  it('names an icon for every item, since the collapsed rail draws nothing else', () => {
+    const groups = nav({
+      types: [PAGE, type('person', 'record'), type('header', 'singleton')],
+      globals: ['header'],
+      me: ADMIN,
+    })
+    expect(groups.flatMap((g) => g.items).map((i) => [i.label, i.icon])).toEqual([
+      ['Home', 'home'],
+      ['Content', 'content'],
+      ['Person', 'records'],
+      ['Assets', 'assets'],
+      ['Header', 'global'],
+      ['Model', 'model'],
+      ['Redirects', 'redirects'],
+      ['Access', 'access'],
+      ['Settings', 'settings'],
+    ])
+  })
+
+  it('draws Model and Settings differently: they were the same ⚙ until the set existed', () => {
+    const items = nav({ types: [PAGE], globals: [], me: ADMIN }).flatMap((g) => g.items)
+    const iconOf = (label: string) => items.find((i) => i.label === label)?.icon
+    expect(iconOf('Model')).not.toBe(iconOf('Settings'))
+  })
+
+  it('gives every record type the same icon, since the label is what tells them apart', () => {
+    const groups = nav({
+      types: [PAGE, type('person', 'record'), type('office', 'record')],
+      globals: [],
+      me: OPEN,
+    })
+    const records = groups[0]?.items.filter((i) => i.screen.name === 'documents')
+    expect(records?.map((i) => i.icon)).toEqual(['records', 'records'])
   })
 })
 

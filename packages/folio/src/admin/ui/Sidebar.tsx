@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ICONS } from './icons'
 import { href, type Screen } from './route'
 import css from './Sidebar.module.css'
 import type { NavGroup } from './nav'
@@ -29,8 +30,9 @@ const key = (screen: Screen): string =>
  * browser's own affordances — `useRouter` intercepts the click, it does not
  * replace the link. And **collapsed items keep their accessible name**: the
  * review's complaint about the two bare `↻` buttons was an unlabelled glyph, and
- * a 48px rail is nothing but glyphs, so each carries a `title` and an
- * `aria-label` and the label text stays in the DOM for a screen reader.
+ * a 48px rail is nothing but icons, so each carries a `title` and the label text
+ * stays in the DOM for a screen reader. The icons themselves are `aria-hidden`
+ * (`icons.tsx`), which is what keeps that one name from being announced twice.
  */
 export function Sidebar({ groups, active, mount, collapsed, onToggle }: Props) {
   const activeKey = key(active)
@@ -118,8 +120,13 @@ function Group({
                 aria-current={on ? 'page' : undefined}
                 title={collapsed ? item.label : undefined}
               >
+                {/* The lookup lives here, not in `nav.ts`: the nav is data and
+                    stays free of React, so it carries the icon's name and this
+                    is where a name becomes a drawing. `ICONS` is a `Record` over
+                    the same union, so there is no missing case to fall back
+                    for. */}
                 <span className={css.icon} aria-hidden="true">
-                  {item.icon}
+                  {ICONS[item.icon]}
                 </span>
                 <span className={collapsed ? css.hidden : css.label}>{item.label}</span>
               </a>

@@ -162,13 +162,32 @@ h2.heading {
   font-weight: 500;
 }
 
+/*
+ * A 16px box for a 16px drawing, and `--fg-muted` rather than `--fg-subtle`: a
+ * 1.5px stroke on a 24 grid puts far less ink on screen than a glyph did, and at
+ * `--fg-subtle` the icons went quieter than the label beside them. The stroke is
+ * `currentColor` (`icons.tsx`), so these three rules are the whole of the icons'
+ * colour, in both themes and in the collapsed rail as well.
+ */
 .icon {
   display: grid;
   place-items: center;
   width: 16px;
+  height: 16px;
   flex: 0 0 auto;
-  font-size: var(--text-sm);
-  color: var(--fg-subtle);
+  color: var(--fg-muted);
+}
+
+.icon svg {
+  display: block;
+}
+
+/* The label goes to `--fg` on hover, so the icon does too, or the row brightens
+   in two steps. `:not(.on)` because hover is a stronger selector than `.on` and
+   without it hovering the current section would take the accent *off* its icon —
+   the one place the colour is carrying state. */
+.item:hover:not(.on) .icon {
+  color: var(--fg);
 }
 
 .on .icon {
