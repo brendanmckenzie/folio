@@ -1313,6 +1313,57 @@ describe('redirects: GET/POST/DELETE /folio/redirects', () => {
     const res = await SELF.fetch(`${API}/redirects/a/b/c`, { method: 'DELETE' })
     expect((await res.json<{ deleted: boolean }>()).deleted).toBe(true)
   })
+
+  /**
+   * The cursor walk itself, which nothing covered before: every other test here
+   * reads the first page and stops. This route is the **only** paged one in the
+   * codebase and the pattern the other eight are being built to copy
+   * (`docs/specs/foundation/pagination.md` phase 4), so the walk is worth pinning
+   * once, here, rather than eight times later.
+   */
+  it('pages to exhaustion over the cursor, every row exactly once', async () => {
+    // Enough to need three pages at limit=2, all created in one test so they share
+    // a millisecond as often as not — which is precisely the tie the cursor's
+    // second component exists for.
+    const froms = ['pagewalk-a', 'pagewalk-b', 'pagewalk-c', 'pagewalk-d', 'pagewalk-e']
+    for (const from of froms) await postJson('/folio/redirects', { from, to: 'pagewalk-target' })
+
+    const seen: string[] = []
+    let cursor: string | null = null
+    for (let guard = 0; guard < 10; guard++) {
+      const query: string = cursor ? `?limit=2&cursor=${encodeURIComponent(cursor)}` : '?limit=2'
+      const page = await getJson<{ rows: Redirect[]; cursor: string | null }>(
+        `/folio/redirects${query}`,
+      )
+      expect(page.rows.length).toBeLessThanOrEqual(2)
+      seen.push(...page.rows.map((r) => r.from))
+      cursor = page.cursor
+      if (!cursor) break
+    }
+
+    // The property that matters, and the one offset paging cannot give: no row
+    // repeated, none skipped.
+    const ours = seen.filter((from) => from.startsWith('pagewalk-'))
+    expect(ours.sort()).toEqual([...froms].sort())
+    expect(new Set(seen).size).toBe(seen.length)
+    expect(cursor).toBeNull()
+  })
+
+  it('clamps an out-of-range limit rather than refusing it', async () => {
+    // The asymmetry with the cursor below is deliberate: a stale bookmark carrying
+    // `limit=5000` has an obvious right answer, and "resume after ???" does not.
+    const page = await getJson<{ rows: Redirect[] }>('/folio/redirects?limit=5000')
+    expect(page.rows.length).toBeLessThanOrEqual(200)
+  })
+
+  it('refuses a malformed cursor rather than silently starting over', async () => {
+    // Silently restarting reads as a list that jumped, which is unactionable. The
+    // cursor is opaque, so a client sending a bad one has a bug.
+    const res = await SELF.fetch(`${API}/redirects?cursor=not-a-cursor`)
+    expect(res.status).toBe(400)
+    const body = await res.json<{ error: { code: string } }>()
+    expect(body.error.code).toBe('bad_request')
+  })
 })
 
 describe('redirects: the host 404 branch (test/workers/worker.ts)', () => {

@@ -144,6 +144,33 @@ export function draftState(
   return base === 'live' && draftSyncId > publishedSyncId ? 'changed' : base
 }
 
+/**
+ * What narrows a list of stories, as one flat serialisable object.
+ *
+ * **Three things hold this same shape, and that is the whole reason it is flat**
+ * (`../../../docs/specs/foundation/pagination.md` decision 9): the query string on
+ * the Content screen, the argument to a paged read, and the `filter` a select-all
+ * *captures* at the moment it was clicked (`docs/ui-architecture.md` decision 7a).
+ * A filter that needed a class or a closure could not be put in a URL or stored in
+ * a batched job, so anything added here has to stay JSON.
+ *
+ * Every field is optional and absent means "do not narrow on this", with one
+ * exception worth stating: `parentId: null` is **not** the same as absent. Null
+ * means the top level of the tree; absent means every level, which is what flat
+ * mode asks for.
+ */
+export interface StoryFilter {
+  /** `null` for the top level. Absent for "any parent" — see above. */
+  parentId?: string | null
+  /** A document type name. */
+  type?: string
+  state?: StoryState
+  /** Substring, matched against title, slug and path. */
+  q?: string
+  /** A locale code, for translation completeness. */
+  locale?: string
+}
+
 export function joinPath(parentPath: string, slug: string): string {
   if (!slug) return parentPath
   return parentPath ? `${parentPath}/${slug}` : slug
