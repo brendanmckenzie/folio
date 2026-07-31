@@ -48,11 +48,28 @@
  * are still distinguishable when they are the same row. A second background
  * would make one of the two facts invisible exactly when both matter.
  *
- * `inset` rather than a border, so a row does not change height or reflow its
- * indent when it is ticked.
+ * **A pseudo-element, not `box-shadow: inset`.** That was the first version and it
+ * was a UI-review finding: an inset shadow is clipped by the border radius, so a
+ * 2px left edge on a `--radius-md` row does not draw a bar — it draws a curved
+ * bracket, `(`, bulging inward at the middle. Sitting 6px from the selection
+ * checkbox it read as a bracket *enclosing the checkbox*, which is what the owner
+ * saw and reported as odd. A `::before` ignores the parent's radius and is
+ * genuinely straight.
+ *
+ * Inset from the row's top and bottom rather than full height, so it reads as a
+ * marker against the row instead of a border on it. Absolutely positioned for the
+ * reason the shadow was chosen over a real border: a ticked row must not change
+ * height or reflow its indent.
  */
-.ticked {
-  box-shadow: inset 2px 0 0 var(--fg-accent);
+.ticked::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--fg-accent);
 }
 
 .lead {
@@ -215,6 +232,28 @@
   letter-spacing: -0.01em;
   color: var(--fg);
 }
+
+/*
+ * **`.header`'s `padding: 0 var(--space-2)` is a *row* gutter, and it stays.**
+ *
+ * Worth stating because the obvious-looking change is wrong. A screen title looked
+ * 8px over-indented on Settings, and the tempting fix is to drop the padding when
+ * `level === 1` — a heading has no rows to align to, so the gutter reads as a
+ * mistake. On Content, Assets and every other `List`-bodied screen it is not a
+ * mistake: `.row` carries the same 8px, so the title and its rows share one left
+ * edge *because* of this padding, and removing it would misalign five screens to
+ * fix one.
+ *
+ * The gutter's real job is to match **whatever the screen's body is**, which is a
+ * property of the screen and not of the heading level. So a screen whose body has
+ * no rows cancels it locally — `Settings.module.css`'s `.head` does, with a
+ * `margin: 0 -8px` and a comment. That is the precedent to copy.
+ *
+ * The table-bodied screens (Access, Model, Redirects) are 4px out for the same
+ * reason at a smaller scale: a header gutter of 8px against a cell gutter of 12px.
+ * Recorded in ROADMAP.md rather than fixed here, because getting it right is an
+ * alignment pass over every screen, not a change to this rule.
+ */
 
 /*
  * The list's own focus ring. It is the one tab stop (see `TAB_STOP` in `List.tsx`),

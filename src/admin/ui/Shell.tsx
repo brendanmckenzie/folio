@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import type { MenuItem } from './Menu'
 import type { NavGroup } from './nav'
 import type { Crumb, Screen } from './route'
+import { scoped } from './scope'
 import css from './Shell.module.css'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
@@ -47,7 +48,9 @@ export function Shell({
   bare,
 }: Props) {
   return (
-    <div className={css.shell}>
+    // `scoped`, not `css.shell` alone: this is the root of every screen, and
+    // `tokens.css`'s global layer only exists under `UI_SCOPE`. See `scope.ts`.
+    <div className={scoped(css.shell)}>
       <Sidebar
         groups={groups}
         active={active}

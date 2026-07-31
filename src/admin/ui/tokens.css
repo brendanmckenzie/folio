@@ -136,6 +136,18 @@
      (brief, commitment 3). */
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
+  /*
+   * The one real property this file sets outside `.folio-ui`, and it has to be
+   * here: `color-scheme` is what the *user agent* reads to decide the colour of
+   * things Folio never draws — the scrollbar, a native form control, the canvas
+   * behind the document. Scoped to `.folio-ui` it would leave a dark admin inside
+   * a light scrollbar.
+   *
+   * So it is a deliberate exception to the rule the rest of the file follows, and
+   * `ui-scope.test.ts` names it as the only one. It is also the mildest thing to
+   * leak into a host's document: `color-scheme` follows the system by default, so
+   * on a host page that already respects the system preference it changes nothing.
+   */
   color-scheme: light;
 }
 

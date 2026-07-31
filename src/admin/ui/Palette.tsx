@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import css from './Palette.module.css'
 import { highlight, nextIndex, rank, type Rankable } from './rank'
+import { scoped } from './scope'
 
 export interface PaletteAction extends Rankable {
   id: string
@@ -78,7 +79,8 @@ export function Palette({ actions, onClose, onQuery }: Props) {
   }
 
   return createPortal(
-    <div className={css.wrap}>
+    // See `scope.ts`: a portal leaves the shell, so it carries the scope itself.
+    <div className={scoped(css.wrap)}>
       <button
         type="button"
         className={css.scrim}

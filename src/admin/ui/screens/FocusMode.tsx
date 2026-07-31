@@ -3,6 +3,7 @@ import { useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useFocusTrap } from '../../hooks/useFocusTrap'
 import { Button } from '../Button'
+import { scoped } from '../scope'
 import css from './FocusMode.module.css'
 import { FOCUS_MEASURE_CH } from './inspector-model'
 
@@ -48,7 +49,11 @@ export function FocusMode({ title, note, source, children, onClose }: Props) {
   useFocusTrap(panel, onClose)
 
   return createPortal(
-    <div className={css.wrap} style={{ '--measure': `${FOCUS_MEASURE_CH}ch` } as CSSProperties}>
+    // See `scope.ts`: a portal leaves the shell, so it carries the scope itself.
+    <div
+      className={scoped(css.wrap)}
+      style={{ '--measure': `${FOCUS_MEASURE_CH}ch` } as CSSProperties}
+    >
       <button
         type="button"
         className={css.scrim}

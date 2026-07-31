@@ -10,6 +10,7 @@ import type { Trail } from '../../hooks/useVersions'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { EmptyState } from '../EmptyState'
+import { scoped } from '../scope'
 import css from './HistoryPanel.module.css'
 import {
   ACTIVITY_NOTE,
@@ -157,7 +158,8 @@ function Panel({
   )
 
   return createPortal(
-    <div className={css.wrap}>
+    // See `scope.ts`: a portal leaves the shell, so it carries the scope itself.
+    <div className={scoped(css.wrap)}>
       {/*
         A real button so dismissing by pointer has a name, held out of the tab
         cycle because Escape is the keyboard way out — `Dialog`'s scrim, minus the
