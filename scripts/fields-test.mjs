@@ -408,13 +408,22 @@ check(
 const reorder = diffOf({ images: [one.value, two.value] }, { images: [two.value, one.value] })
 check('reordering a multiasset is a single set', reorder.length === 1 && reorder[0].t === 'set')
 
-const libraryBefore = await json(`${API}/assets`)
+// `Page<AssetRow>` since foundation/pagination.md phase 4, with a filename search
+// that is the whole reason asset 201 is reachable at all.
+const libraryBefore = (await json(`${API}/assets?limit=200`)).rows
 await fetch(`${API}/assets/${two.asset.id}`, { method: 'DELETE' })
-const libraryAfter = await json(`${API}/assets`)
+const libraryAfter = (await json(`${API}/assets?limit=200`)).rows
 check(
   'deleting removes the library row',
   libraryBefore.length - libraryAfter.length === 1 &&
     !libraryAfter.some((a) => a.id === two.asset.id),
+)
+const counted = await json(`${API}/assets?limit=1&count=1`)
+check(
+  'the library reports a total only when asked',
+  counted.total === libraryAfter.length &&
+    (await json(`${API}/assets?limit=1`)).total === undefined,
+  `total=${counted.total} rows=${libraryAfter.length}`,
 )
 check(
   'deleting an asset leaves referencing documents alone',

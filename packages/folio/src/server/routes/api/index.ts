@@ -15,7 +15,7 @@
  */
 import { Hono } from 'hono'
 import {
-  listAssets,
+  listAssetsByPage,
   MAX_UPLOAD_BYTES,
   readCappedBody,
   toAssetValue,
@@ -26,7 +26,7 @@ import { FolioError, rethrow } from '../../errors'
 import { requireAccess } from '../../middleware'
 import type { FolioRuntime } from '../../runtime'
 import type { FolioEnv } from '../../types'
-import { contentLengthHeader, filenameQuery } from '../../validate'
+import { contentLengthHeader, filenameQuery, limitParam } from '../../validate'
 import { documentRoutes } from './documents'
 
 /** The one version there is. A `v2` would be a second `Hono` mounted beside this. */
@@ -62,9 +62,23 @@ export function apiRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * has no envelope, and giving it a second URL would only mean two of them to
    * keep narrow.
    */
-  app.get('/assets', requireAccess<Env>(rt, READ), async (c) =>
-    c.json({ assets: await listAssets(c.var.bindings().db) }),
-  )
+  /**
+   * Paged in **v1's own idiom**, which is page numbers — the shape
+   * `collections.md` established for `/documents` and the shape a script listing a
+   * media library wants. The admin's own `/api/assets` pages by cursor instead,
+   * because its list is live (`../../../../docs/specs/foundation/pagination.md`
+   * decision 1).
+   *
+   * So this route keeps its `{ assets }` envelope and gains `page`, `perPage` and
+   * `total` beside it. That is additive: a caller reading `assets` still reads
+   * `assets`, which is what `{base}/api/v1` promises.
+   */
+  app.get('/assets', requireAccess<Env>(rt, READ), async (c) => {
+    const perPage = limitParam(c.req.query('perPage'), 50, 200)
+    const page = Math.max(1, Math.trunc(Number(c.req.query('page') ?? 1)) || 1)
+    const listed = await listAssetsByPage(c.var.bindings().db, { page, perPage })
+    return c.json({ assets: listed.assets, page, perPage, total: listed.total })
+  })
 
   app.post('/assets', requireAccess<Env>(rt, ASSETS), async (c) => {
     const { db, media } = c.var.bindings()

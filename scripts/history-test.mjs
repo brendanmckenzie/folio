@@ -146,12 +146,31 @@ check(
   pub.version?.title,
 )
 
-const list = await json(`${API}/story/${STORY}/versions`)
+// `Page<VersionMeta>` since foundation/pagination.md phase 4: `{ rows, cursor }`,
+// keyset over (created_at, id), which was already this route's own `order by`.
+const page = await json(`${API}/story/${STORY}/versions`)
+const list = page.rows
 check('versions listed newest first', list[0]?.id === pub.version.id, list[0]?.kind)
 check('both versions present', list.length >= 2, `n=${list.length}`)
 check(
   'list omits the doc payload',
   list.every((v) => v.doc === undefined),
+)
+check('and a short history has no next page', page.cursor === null, String(page.cursor))
+
+// Paging it, which is what the cap of 50 used to make impossible.
+const firstOfOne = await json(`${API}/story/${STORY}/versions?limit=1`)
+check(
+  'limit=1 answers one row and a cursor',
+  firstOfOne.rows.length === 1 && Boolean(firstOfOne.cursor),
+)
+const secondOfOne = await json(
+  `${API}/story/${STORY}/versions?limit=1&cursor=${encodeURIComponent(firstOfOne.cursor)}`,
+)
+check(
+  'and the next page is a different version',
+  secondOfOne.rows[0]?.id !== firstOfOne.rows[0]?.id,
+  `${firstOfOne.rows[0]?.id} then ${secondOfOne.rows[0]?.id}`,
 )
 
 /* --- restore, the way the admin does it --------------------------------- */
@@ -219,7 +238,7 @@ check(
 const stillLive = await fetch(`${HTTP}/`)
 check('the page serves before unpublish', stillLive.status !== 404, `status=${stillLive.status}`)
 
-const beforeVersions = await json(`${API}/story/${STORY}/versions`)
+const beforeVersions = (await json(`${API}/story/${STORY}/versions`)).rows
 
 const unpub = await json(`${API}/story/${STORY}/unpublish`, { method: 'POST' })
 check('unpublish reports ok and a timestamp', unpub.ok === true && unpub.unpublishedAt > 0)
@@ -237,7 +256,7 @@ check(
   `status=${neverExisted.status}`,
 )
 
-const afterUnpublishVersions = await json(`${API}/story/${STORY}/versions`)
+const afterUnpublishVersions = (await json(`${API}/story/${STORY}/versions`)).rows
 check(
   'unpublish writes no version: it is not a document snapshot',
   afterUnpublishVersions.length === beforeVersions.length,
@@ -267,7 +286,7 @@ check(
 const backUp = await fetch(`${HTTP}/`)
 check('the page serves again once republished', backUp.status !== 404, `status=${backUp.status}`)
 
-const finalVersions = await json(`${API}/story/${STORY}/versions`)
+const finalVersions = (await json(`${API}/story/${STORY}/versions`)).rows
 check(
   'republishing retained a further version',
   finalVersions.length === afterUnpublishVersions.length + 1,
@@ -314,7 +333,7 @@ check(
 
 /* --- compare: the draft against the newest publish version --------------- */
 
-const versionsBeforeDiscard = await json(`${API}/story/${STORY}/versions`)
+const versionsBeforeDiscard = (await json(`${API}/story/${STORY}/versions`)).rows
 const newestPublish = versionsBeforeDiscard.find((v) => v.kind === 'publish')
 check(
   'the newest publish version is the republish from earlier',

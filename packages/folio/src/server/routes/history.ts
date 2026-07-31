@@ -10,7 +10,7 @@ import { hookCtx, loadStory, requireAccess } from '../middleware'
 import { checkpoint } from '../publish'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
-import { CheckpointBody, idParam, limitParam, parseOptionalBody } from '../validate'
+import { CheckpointBody, idParam, limitParam, parseOptionalBody, requireCursor } from '../validate'
 import { getVersion, listVersions } from '../versions'
 
 export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
@@ -18,9 +18,16 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
   // Deliberately no existence check: a story with no versions and a story that
   // never existed both have an empty history.
-  app.get('/story/:id/versions', requireAccess<Env>(rt, READ), async (c) =>
-    c.json(await listVersions(c.var.bindings().db, idParam('id', c.req.param('id')))),
-  )
+  app.get('/story/:id/versions', requireAccess<Env>(rt, READ), async (c) => {
+    const cursor = c.req.query('cursor')
+    requireCursor(cursor)
+    return c.json(
+      await listVersions(c.var.bindings().db, idParam('id', c.req.param('id')), {
+        limit: limitParam(c.req.query('limit'), 50, 200),
+        cursor,
+      }),
+    )
+  })
 
   /**
    * `loadStory` ahead of the body, not after it: an id that names nothing is a

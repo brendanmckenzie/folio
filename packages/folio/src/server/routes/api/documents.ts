@@ -50,17 +50,18 @@ import {
 } from '../../stories'
 import type { FolioBindings, FolioEnv } from '../../types'
 import {
+  CheckpointBody,
   ContentPutBody,
   DocumentCreateBody,
   FieldsPatchBody,
   idempotencyKeyHeader,
   idParam,
+  limitParam,
   localeQuery,
   parseBody,
   parseOptionalBody,
-  storyPathParam,
   StoryPatchBody,
-  CheckpointBody,
+  storyPathParam,
 } from '../../validate'
 import { deleteVersionsStatement, listVersions } from '../../versions'
 import { commitAll, writeDocument, type WriteActor } from '../../write'
@@ -266,7 +267,16 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   }
 
   app.get('/documents/:id/versions', requireAccess<Env>(rt, READ), async (c) =>
-    c.json({ versions: await listVersions(c.var.bindings().db, idParam('id', c.req.param('id'))) }),
+    c.json({
+      // `.rows` rather than the envelope: this route's contract is a `versions`
+      // array, and v1 does not change shape. Paging it with numbers is its own
+      // change, and nobody has asked for a hundredth version of a document.
+      versions: (
+        await listVersions(c.var.bindings().db, idParam('id', c.req.param('id')), {
+          limit: limitParam(c.req.query('perPage'), 50, 200),
+        })
+      ).rows,
+    }),
   )
 
   /* ------------------------------------------------------------- writing --- */

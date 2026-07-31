@@ -340,9 +340,9 @@ describe('a record publishes and versions like a page', () => {
     expect(second.ok).toBe(true)
 
     const list = (await (await get(`/folio/api/story/${created.id}/versions`))!.json()) as {
-      kind: string
-    }[]
-    expect(list.filter((v) => v.kind === 'publish').length).toBeGreaterThanOrEqual(2)
+      rows: { kind: string }[]
+    }
+    expect(list.rows.filter((v) => v.kind === 'publish').length).toBeGreaterThanOrEqual(2)
 
     // Still no route to it, published or not.
     expect(await folio.published(env, created.id)).toBeNull()
