@@ -586,6 +586,35 @@ an unsorted flat list, which stops working somewhere around 15.
 
 ## Known smaller issues
 
+- **Four whole-table reads remain, and they are on the server's *write* paths.**
+  `server/stories.ts` calls the unbounded `listStories(db)` in `storyTree` (243),
+  `createStory` (1277), `updateStoryStatement` (1487) and `deleteStoryStatement`
+  (1627) — so creating, renaming, moving or deleting one document reads every
+  document on the site, and `duplicateStory` inherits it through `createStory`.
+
+  This is the same class of defect as the five the pagination work closed, and it
+  survived that sweep because those were the *admin's* reads: every list route
+  pages now, and a reviewer checking "are the unbounded reads gone" against the
+  admin finds nothing. Found while reading `createStory` for the create-dialog
+  change, not by a test — nothing here fails at demo scale.
+
+  The narrow queries each one wants are known: siblings-in-group for
+  `uniqueSlug`, `max(ord)` within the group for the position, and a path-prefix
+  query for the descendant rewrite. It is not a passing tidy-up, though —
+  fractional ordering, slug dedupe and path rebuilding are exactly the three
+  things that are subtly wrong when a query is narrowed by guess, so it wants
+  its own change with the ordering tests in front of it.
+- **The table-bodied screens' headings are 4px out from their own cells.** `Access`,
+  `Model` and `Redirects` put a section heading in `ListHeader` — an 8px row gutter —
+  above `Table` cells with a 12px gutter, so nothing quite lines up vertically. It is
+  the same defect the Settings h1 had at 8px, and it has the same cause:
+  `.header`'s padding exists to align a title with `List` **rows**, and a screen whose
+  body is a table has no rows. Settings cancels it locally and `List.module.css` says
+  why that is the right shape rather than a `level === 1` special case.
+
+  Fixing it properly is an alignment pass over every screen — deciding one gutter and
+  making the header, the rows and the cells all consume it — not an edit to one rule.
+  Cosmetic at 4px, which is why it is here and not in the change that found it.
 - The space channel does not carry a sibling **reorder**: nothing in `stories`
   changes path when two siblings swap places, so `pathsChanged` does not fire and a
   peer's tree keeps the old order until its next load. Closing it means a second
