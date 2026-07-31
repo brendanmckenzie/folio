@@ -1,6 +1,6 @@
 import type { CSSProperties, KeyboardEvent } from 'react'
 import { useCallback, useMemo, useState } from 'react'
-import type { DocumentType } from '../../../core/schema'
+import type { DocumentType, SchemaIndex } from '../../../core/schema'
 import type { BulkAction, FlatSort } from '../../../core/story'
 import type { BulkRefusal } from '../../../server/bulk'
 import { Badge } from '../Badge'
@@ -54,6 +54,8 @@ import {
 import { ConfirmBulkDialog } from './ConfirmBulkDialog'
 import { stateTone, when } from './content-rows'
 import css from './Content.module.css'
+import { CreateDialog } from './CreateDialog'
+import type { CreateBody } from './create-model'
 import { MoveDialog } from './MoveDialog'
 import { messageOf, useContent } from './useContent'
 
@@ -73,6 +75,17 @@ interface Props {
   selected?: string
   /** Declared page types, for the type chips and the create menu. */
   pageTypes: readonly DocumentType[]
+  /**
+   * The block schema, indexed by name — for the create dialog, which labels its
+   * one field with the type's title field's own label.
+   *
+   * **Optional, and the screen is correct without it**: `createForm` falls back to
+   * `Title`, which is what every declared `page` type's title field is called in
+   * practice. It is optional rather than required because `Prototype.tsx` does not
+   * pass it yet and that file is not this screen's to edit; the fix there is one
+   * line, `schema={a.schema}`, and `a.schema` is already in scope.
+   */
+  schema?: SchemaIndex
   /** The remembered view and sort, used when the URL names neither. */
   remembered: { view: ViewMode; sort: FlatSort }
   onRemember: (next: { view: ViewMode; sort: FlatSort }) => void
@@ -414,6 +427,7 @@ export function Content(props: Props) {
             />
             <NewPageButton
               types={pageTypes}
+              schema={props.schema}
               apiBase={apiBase}
               onCreated={(id) => {
                 data.reload()
@@ -919,37 +933,54 @@ const ACTION_LABELS: Record<BulkAction, string> = {
  * is a choice — the rule `document-types.md` phase 3 already established for the
  * old tree's `+ New`.
  *
- * `under` is deliberately **not** applied here: the button creates at the top
- * level, and every declared page type can go there unless its own `under` says
- * otherwise. Creating *inside* a page is the row's `+`, which port phase 7 brings
- * back with the editor — this is the screen-level create and nothing more.
+ * **Both routes open `CreateDialog` rather than creating.** The menu picks the
+ * *type*, which is a different question from the name, and answering it used to
+ * post immediately — so choosing "Insight" from the menu created an `Untitled`
+ * insight and put you in the editor. Picking a type now chooses the dialog's type,
+ * and the dialog is the only thing that writes.
+ *
+ * `under` is deliberately **not** applied to the top-level list: the button
+ * creates at the top level, and every declared page type can go there unless its
+ * own `under` says otherwise. Creating *inside* a page is the row's `+`, which
+ * port phase 7 brings back with the editor — `CreateDialog` already takes the
+ * `parentId` and `parentPath` that will need, which is why they are props rather
+ * than a picker inside it.
  */
 function NewPageButton({
   types,
+  schema,
   apiBase,
   onCreated,
   onNotice,
 }: {
   types: readonly DocumentType[]
+  schema: SchemaIndex | undefined
   apiBase: string
   onCreated: (id: string) => void
   onNotice: (message: string) => void
 }) {
   const [pending, setPending] = useState(false)
+  /** The type being created, and the dialog's open state in one value: there is
+   * no create without a type to create. */
+  const [creating, setCreating] = useState<DocumentType | null>(null)
   const top = types.filter((t) => (t.under ?? []).length === 0)
 
-  const create = async (type: string | undefined) => {
+  /** The one write, with the name the dialog collected. Closes on success only:
+   * a failed POST leaves the dialog open with what was typed still in it, and the
+   * message in the toast above it. */
+  const create = async (body: CreateBody) => {
     setPending(true)
     try {
       const res = await fetch(`${apiBase}/stories`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: 'Untitled', parentId: null, ...(type ? { type } : {}) }),
+        body: JSON.stringify(body),
       })
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
-        throw new Error(body.error?.message ?? `Could not create the page (${res.status})`)
+        const answer = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
+        throw new Error(answer.error?.message ?? `Could not create the page (${res.status})`)
       }
+      setCreating(null)
       onCreated(((await res.json()) as { id: string }).id)
     } catch (e) {
       onNotice((e as Error).message)
@@ -958,29 +989,42 @@ function NewPageButton({
     }
   }
 
-  if (top.length > 1) {
-    return (
-      <Menu
-        align="end"
-        trigger="New page"
-        items={top.map((type) => ({
-          id: type.name,
-          label: type.label,
-          run: () => void create(type.name),
-        }))}
-      />
-    )
-  }
   return (
-    <Button
-      variant="primary"
-      size="sm"
-      disabled={pending || top.length === 0}
-      reason={top.length === 0 ? 'No page type may be created at the top level' : 'Creating…'}
-      onClick={() => void create(top[0]?.name)}
-    >
-      New page
-    </Button>
+    <>
+      {top.length > 1 ? (
+        <Menu
+          align="end"
+          trigger="New page"
+          items={top.map((type) => ({
+            id: type.name,
+            label: type.label,
+            run: () => setCreating(type),
+          }))}
+        />
+      ) : (
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={top.length === 0}
+          reason="No page type may be created at the top level"
+          onClick={() => {
+            const only = top[0]
+            if (only) setCreating(only)
+          }}
+        >
+          New page
+        </Button>
+      )}
+      {creating ? (
+        <CreateDialog
+          type={creating}
+          schema={schema}
+          pending={pending}
+          onClose={() => setCreating(null)}
+          onCreate={(body) => void create(body)}
+        />
+      ) : null}
+    </>
   )
 }
 
