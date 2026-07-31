@@ -7,7 +7,6 @@ import {
   type SchemaIndex,
 } from '../../core/schema'
 import { DEFAULT_FLAT_SORT, type FlatSort, type StoryMeta } from '../../core/story'
-import { globalPreviewUrl } from '../GlobalsList'
 import { actorLabel, fetchMe, type Me, OPEN } from '../me'
 import { Kitchen } from './Kitchen'
 import type { MenuItem } from './Menu'
@@ -40,7 +39,7 @@ import { type Bindings, SAVE_NOTICE, useShortcuts } from './shortcuts'
 import { Toast } from './Toast'
 import { useRouter } from './useRouter'
 import { useSearch } from './useSearch'
-import { usePreviewHost, useStory } from './useStory'
+import { globalPreviewUrl, usePreviewHost, useStory } from './useStory'
 
 export interface PrototypeBoot {
   /**
@@ -691,7 +690,7 @@ function previewFor(
   if (!story) return undefined
   if (story.previewUrl) return story.previewUrl
   if (type?.kind !== 'singleton') return undefined
-  return globalPreviewUrl(type, host ? [{ ...host, children: [] }] : [], base)
+  return globalPreviewUrl(type, host ? [host] : [], base)
 }
 
 /* -------------------------------------------------------------- breadcrumbs --- */

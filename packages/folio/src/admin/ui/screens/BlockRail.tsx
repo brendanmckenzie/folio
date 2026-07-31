@@ -4,7 +4,6 @@ import type { Doc } from '../../../core/doc'
 import type { LocaleContext } from '../../../core/locales'
 import type { Presence } from '../../../core/protocol'
 import type { SchemaIndex } from '../../../core/schema'
-import { menuGroups } from '../../BlockTree'
 import { Button } from '../Button'
 import { List, Row } from '../List'
 import { Menu, type MenuItem } from '../Menu'
@@ -15,6 +14,7 @@ import {
   type BlockGesture,
   type BlockMove,
   blockGesture,
+  menuGroups,
   type RailAddRow,
   type RailBlokRow,
   type RailRootRow,
@@ -72,9 +72,11 @@ const GESTURES: Record<string, BlockGesture | undefined> = {
  * (`ui-architecture.md` decision 4): history is a slide-over, and redirects, the
  * content model and access are screens of their own.
  *
- * This is `BlockTree.tsx` ported. Its logic was right and is reused where it is
- * already pure (`menuGroups`); what changed is everything around it, and three of
- * those are fixes rather than restyling:
+ * This is `BlockTree.tsx` ported. Its logic was right and is reused where it was
+ * already pure — `menuGroups`, which was imported from that file until port phase 8
+ * deleted it and now lives in `editor-model.ts` beside the rest of the rail's
+ * arithmetic. What changed is everything around it, and three of those are fixes
+ * rather than restyling:
  *
  * 1. **It is a real tree with a real keyboard.** The old rail was nested `<ul>`s
  *    of `<div onClick>` with no roles, which is why it could not be reached from

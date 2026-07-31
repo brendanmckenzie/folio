@@ -295,9 +295,12 @@ describe('rendering a published page per locale', () => {
     })
     await publish(
       'lrich',
-      // biome-ignore lint/suspicious/noExplicitAny: a stored richtext document is plain Json
       doc({
-        heroData: { prose: prose('English prose') as any },
+        // `as unknown as string`, matching the locale branch below: a suppression on
+        // the `doc(` line above suppressed nothing — biome-ignore applies to the next
+        // line, not to the expression's whole subtree — so the `any` it named was
+        // reported anyway. Two identical casts is the fix rather than a third comment.
+        heroData: { prose: prose('English prose') as unknown as string },
         heroI18n: {
           fr: { prose: prose('Prose française') as unknown as string },
         },

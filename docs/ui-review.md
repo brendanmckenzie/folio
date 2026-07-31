@@ -458,3 +458,122 @@ forever. The client that produces those frames is free to be rebuilt around
 URL-driven state; the frames are not.
 
 The plan those answers produce lives in `docs/design-system.md`.
+
+## Closed, 2026-07-31
+
+`ui-architecture.md` port phase 8 deleted the admin this document reviewed: 29 source
+files, 9,057 lines, `admin.css` 2,544 of them. Every number above was re-measured
+against `packages/folio/src/admin/` afterwards rather than assumed, because "the counts
+are all zero" was the phase's acceptance criterion and a criterion nobody checks is a
+wish. Each row below is a count from the sections above with its value today.
+
+Nothing in the sections above has been rewritten. This document is the review, and a
+review edited to agree with what happened next stops being evidence.
+
+### The stylesheet
+
+| What the review counted | Then | Now |
+| --- | --- | --- |
+| `admin/admin.css` | 2,544 lines | **0** — the file does not exist |
+| Distinct hex literals past the tokens (and occurrences) | 51 / 105 | **0 / 0** outside `ui/tokens.css` |
+| Tokens referenced and never declared (`--bg-soft`, `--ok`, `--fg`) | 3 | **0** |
+| Distinct `font-size` values | 13, mixing units | **5** scale steps, plus 2 optical exceptions (below) |
+| Distinct `padding` declarations | 56 | **34**, 30 of them composed from `var(--space-*)` |
+| Distinct `border-radius` values | 10 | **4** tokens plus `0` |
+| `@media` occurrences | 0 | **7** across six modules, plus 3 in the token layer |
+| `:focus-visible` rules | 2 | **39** across 16 modules |
+| `prefers-reduced-motion` guards | 0 | **4** |
+
+Two font sizes are raw rather than scale steps and both are deliberate: `0.95em` on
+`code`/`kbd`/`.mono`, because the mono face runs optically larger than the UI face at
+the same size and this is a *relative* correction rather than a step, and `9px` on the
+extension chip inside a 24px asset tile, which is below `--text-xs`. Four paddings are
+raw for the same optical reason (`0 4px`, `2px …`, `padding-top: 1px`, and the
+palette's `12vh` from the top of the viewport). Named here so a later reader knows they
+were seen.
+
+**One `#fff` pair moved into the token layer while closing this list**, and it is worth
+recording as the only genuine finding the re-measurement produced: the editor's preview
+frame and its wrapper both hardcoded white. That is now `--bg-paper`, **the one semantic
+token that does not flip with the theme** — what sits on it is the *host's* page in an
+iframe, and an iframe with no background of its own would show a dark admin through a
+light site. A theme-invariant token is still a token; a literal in a component is what
+this document counted.
+
+### The primitives
+
+| What the review counted | Then | Now |
+| --- | --- | --- |
+| Overlay namespaces each with their own scrim CSS | 5 (`.library`, `.unpublish`, `.delete-story`, `.duplicate-story`, `.discard`) | **1 `Dialog`**, 12 mounts |
+| `__scrim` rules | 8 | **4**, one per *distinct* overlay behaviour: dialog, palette, slide-over, focus mode |
+| Dialogs for those namespaces (one wearing another's name) | 6 | **1 implementation** |
+| Hand-rolled popovers, each with its own scrim and z-index | 5 | **1 `Menu`** |
+| List views independently implementing hover / selected / actions | 4 | **1 `List`** and **1 `Table`** |
+| Badge implementations | 5 | **1 `Badge`** |
+| Focus traps | 1 (correct, and kept) | **1** — `hooks/useFocusTrap.ts`, unchanged |
+
+### Navigation, keyboard, a11y
+
+| What the review counted | Then | Now |
+| --- | --- | --- |
+| Screens | 1 | **10 client routes** plus the server-rendered login — the 11 `ui-architecture.md`'s screen table names — each reachable by URL |
+| Rail tabs, and how many were unclickable | 7, of which 2 (464px of strip in a 279px rail) | **0** — the rail holds the block tree and nothing else |
+| Search inputs in the whole admin | 1, client-side, one type at a time | **9**, all over `GET {base}/api/search` or a paged route |
+| Rows of the keyboard map | 4 bindings, undocumented | **25**, and `?` draws them |
+| Tree rows reachable by keyboard | 0 (`<div onClick>`, no role, no tabIndex) | **all** — `treeitem`s with a roving tabindex |
+| Biome a11y rules | off in `biome.json` | **`"a11y": "on"` globally**, and it finds nothing |
+
+The last row is the one with a trap in it. Removing the `overrides` entry is *not* the
+same as turning the rules on: `recommended` carries a subset of the a11y group, so the
+override's `"a11y": "on"` was stricter than the preset, and dropping it alone would have
+quietly disabled four rules for `admin/ui/**` — including the one a suppression in
+`FieldRow.tsx` names, which is how the mistake surfaced. The explicit `"a11y": "on"` in
+the top-level rule set is what makes the switch a widening.
+
+### The nine defects
+
+All nine were deliberately left unfixed (Resolved 1), because all nine lived in
+surfaces the rebuild replaces. Each is now unreachable because its file is gone, and
+where the behaviour was worth keeping the replacement is named:
+
+1. **Two unreachable tabs** — no tab strip exists.
+2. **An asset deleted with no confirmation** — `AssetDeleteDialog.tsx` confirms, and
+   names the documents that reference the file (`GET {base}/api/assets/:id/usage`).
+3. **`Updated` wrong by a factor of 1000** — `content-rows.ts`'s `when` takes ms, and
+   `documents-model.ts` has no `* 1000` anywhere.
+4. **A version's author as an opaque id** — `history-model.ts`'s `actorForm` resolves
+   four shapes, `token:` included, and badges a programmatic write.
+5. **The parent-page select offering documents that cannot be parents** — `Content.tsx`
+   narrows creation to types whose `under` permits the top level, and a move reports
+   the server's own refusal sentence.
+6. **The "belongs to another document" hint not clearing** — `Editor.tsx` is deleted.
+7. **The unstyled search input** — every input is `Field`'s `Input`.
+8. **Two unlabelled `↻` buttons** — no glyph-only control survives; `Button` takes a
+   label and a `reason`.
+9. **Three undeclared custom properties** — 0, measured above.
+
+### What was named as needing to survive, and did
+
+`## What must survive the sweep` listed five things. Four are intact: **the comments**
+(every primitive under `admin/ui/` cites what it replaced and why — `grep -r admin.css
+packages/folio/src/admin/` answers 12: nine citations of this kind across eight files
+in `ui/`, and three in `main.tsx` explaining why a `/folio-admin.css` still exists to
+be linked), **the state vocabulary** (ten states, now one `Badge` tone table rather
+than eight amber tints),
+**`useFocusTrap` and the always-mounted toast** (both unchanged), and **optimistic local
+state** (`store.ts` is untouched by the port).
+
+The fifth — **controls that hide rather than disable** — survived as a rule and is
+*partly* unenforced: `ui-architecture.md`'s open question 8 records that a viewer is
+still offered a Delete the server refuses, on two screens, and says why that wants one
+rule applied everywhere rather than a branch in whichever screen was touched last.
+
+**Two absences worth stating, because neither is closed by this phase.** The
+**two-design-systems** finding still holds: `server/pages.tsx` gives the login and
+error pages their own inline stylesheet, for the documented reason that a page which
+must render when the build is broken cannot link a hashed asset. What changed is that
+`ui/tokens.css` is now plain custom properties with no build step *specifically so the
+server can inline them* — the drift is addressable rather than structural, and the token
+layer's header says so. And the **space channel** is unwired: `spaceStore.ts`,
+`hooks/useSpace.ts` and `followLabel` were kept with no caller, because the rebuilt
+editor has per-story presence but does not join the cross-story channel yet.

@@ -1,29 +1,31 @@
 import { describe, expect, it } from 'vitest'
-import { boundValue, fieldMode } from '../../../src/admin/Inspector'
-import { localeLabel, missingSummary, percentDone } from '../../../src/admin/PublishDialog'
-import { localeTitle, translationPercent } from '../../../src/admin/StoryTree'
+import { boundValue, fieldMode } from '../../../src/admin/ui/screens/inspector-model'
 import type { Blok } from '../../../src/core/doc'
 import { asset, blocks, richtext, select, text } from '../../../src/core/fields'
-import type { LocaleConfig, TranslationStatus } from '../../../src/core/locales'
-import type { StoryNode } from '../../../src/core/story'
 
 /**
- * The admin half of `localisation.md`: which of the three states a field's input
- * is in, what it is bound to, and how the tree and the publish confirmation put
- * a number and a name on an incomplete translation.
+ * The admin half of `localisation.md`: which of the three states a field's input is
+ * in, and what it is bound to.
  *
  * All pure, so none of it needs the panel mounted — the same discipline
  * `visibleEntries` and `publishStatus` already follow.
+ *
+ * **Four things this file used to cover went with port phase 8** rather than moving,
+ * and they are worth naming because each is a coverage loss rather than a tidy-up:
+ *
+ *   - `StoryTree.tsx`'s `localeTitle` and `translationPercent` — the Content tree's
+ *     translations column, which `ui-architecture.md`'s open question 7 records as
+ *     still owed. The rebuilt tree has no such column yet, so there was nowhere for
+ *     either to go; whatever answers that question wants both back.
+ *   - `PublishDialog.tsx`'s `missingSummary` and `percentDone`. The rebuilt publish
+ *     confirmation lists one line per incomplete locale with a field *count*, which
+ *     is bounded by the number of declared locales — so the truncate-at-five rule
+ *     `missingSummary` existed for has nothing left to truncate, and the arithmetic
+ *     `percentDone` did is not displayed at all.
+ *
+ * `localeLabel` is not in that list: `EditorShell.tsx` has its own private copy with
+ * the same fallback, exercised through the dialog rather than directly.
  */
-
-const LOCALES: LocaleConfig = {
-  default: 'en',
-  available: [
-    { code: 'en', label: 'English' },
-    { code: 'fr', label: 'Français' },
-    { code: 'de', label: 'Deutsch' },
-  ],
-}
 
 const blok = (
   data: Record<string, string>,
@@ -106,128 +108,5 @@ describe('boundValue', () => {
   it('shows the source in shared mode', () => {
     const b = blok({ align: 'left' }, { fr: { align: 'droite' } })
     expect(boundValue(b, 'align', 'shared', 'fr')).toBe('left')
-  })
-})
-
-/* ------------------------------------------------------------ tree label --- */
-
-const node = (over: Partial<StoryNode> = {}): StoryNode =>
-  ({
-    id: 'sty_1',
-    type: 'page',
-    parentId: null,
-    slug: 'about',
-    path: 'about',
-    ord: 'a0',
-    title: 'About',
-    publishedAt: null,
-    unpublishedAt: null,
-    updatedAt: 0,
-    draftSyncId: 0,
-    draftUpdatedAt: null,
-    publishedSyncId: 0,
-    state: 'draft',
-    hasUnpublishedChanges: false,
-    children: [],
-    ...over,
-  }) as StoryNode
-
-describe('localeTitle', () => {
-  it('is the source title on the source locale, even with a cache present', () => {
-    expect(localeTitle(node({ titleI18n: { fr: 'À propos' } }), 'en', true)).toBe('About')
-  })
-
-  it('is the cached translated title in another locale', () => {
-    expect(localeTitle(node({ titleI18n: { fr: 'À propos' } }), 'fr', false)).toBe('À propos')
-  })
-
-  /** The cache is written by publish, so a page whose French title exists only in
-   * the draft reads in the source language until it goes live. Best-effort by
-   * design (decision 7): a wrong label in a tree, never wrong content on a page. */
-  it('falls back to the source title with no cache entry', () => {
-    expect(localeTitle(node(), 'fr', false)).toBe('About')
-    expect(localeTitle(node({ titleI18n: { de: 'Über' } }), 'fr', false)).toBe('About')
-  })
-
-  it('falls back for an empty cached title rather than showing a blank row', () => {
-    expect(localeTitle(node({ titleI18n: { fr: '' } }), 'fr', false)).toBe('About')
-  })
-})
-
-/* ---------------------------------------------------------- percentages --- */
-
-const status = (over: Partial<TranslationStatus> = {}): TranslationStatus => ({
-  locale: 'fr',
-  total: 10,
-  translated: 8,
-  missing: [],
-  ...over,
-})
-
-describe('translationPercent / percentDone', () => {
-  it('rounds to a whole percentage', () => {
-    expect(translationPercent(status())).toBe(80)
-    expect(percentDone(status({ total: 3, translated: 1 }))).toBe(33)
-  })
-
-  /** A page with nothing translatable owes no work, so a permanent 0% warning on
-   * it would be wrong rather than merely noisy. */
-  it('reads a page with nothing translatable as complete', () => {
-    expect(translationPercent(status({ total: 0, translated: 0 }))).toBe(100)
-    expect(percentDone(status({ total: 0, translated: 0 }))).toBe(100)
-  })
-
-  it('agrees with itself: the tree and the dialog use the same arithmetic', () => {
-    for (const [total, translated] of [
-      [10, 0],
-      [10, 5],
-      [3, 2],
-      [7, 7],
-      [0, 0],
-    ] as const) {
-      const s = status({ total, translated })
-      expect(translationPercent(s)).toBe(percentDone(s))
-    }
-  })
-})
-
-/* -------------------------------------------------- the publish warning --- */
-
-describe('missingSummary', () => {
-  const gaps = (n: number): TranslationStatus =>
-    status({
-      total: n,
-      translated: 0,
-      missing: Array.from({ length: n }, (_, i) => ({
-        uid: `u${i}`,
-        type: 'hero',
-        field: `f${i}`,
-        label: `Field ${i}`,
-      })),
-    })
-
-  it('names every missing field when there are few', () => {
-    expect(missingSummary(gaps(2))).toBe('Field 0, Field 1')
-  })
-
-  /** A warning nobody reads is the same as no warning: five names and a count is
-   * legible, forty names is a wall. */
-  it('truncates to five and counts the rest', () => {
-    expect(missingSummary(gaps(9))).toBe('Field 0, Field 1, Field 2, Field 3, Field 4 and 4 more')
-  })
-
-  it('is empty when nothing is missing', () => {
-    expect(missingSummary(status({ missing: [] }))).toBe('')
-  })
-})
-
-describe('localeLabel', () => {
-  it('is the declared label', () => {
-    expect(localeLabel(LOCALES, 'fr')).toBe('Français')
-  })
-
-  it('falls back to the bare code for an undeclared one, or no config', () => {
-    expect(localeLabel(LOCALES, 'kl')).toBe('kl')
-    expect(localeLabel(undefined, 'fr')).toBe('fr')
   })
 })

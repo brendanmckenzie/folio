@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { DocumentType } from '../../core/schema'
 import { ancestorPaths, type StoryMeta } from '../../core/story'
 
 /**
@@ -89,7 +90,7 @@ export function chainOf(
  * A story row by path, for the one caller that has a path and needs a URL: a
  * global's preview.
  *
- * `globalPreviewUrl` puts a singleton's draft on top of a real host page via
+ * `globalPreviewUrl` below puts a singleton's draft on top of a real host page via
  * `&as=<name>`, and it finds that page by `type.previewPath`. It used to search the
  * whole tree for it; now it asks for the one row.
  */
@@ -119,4 +120,32 @@ export function usePreviewHost(apiBase: string, path: string | undefined): Story
   }, [apiBase, path])
 
   return row
+}
+
+/**
+ * The iframe src for previewing `type`'s singleton in context (`globals.md`
+ * decision 4): the `previewPath` story's own preview URL with `&as=<name>`
+ * appended, or the bare preview route (`server/routes/editor.ts`'s
+ * `/preview/global/:name`) when there is no `previewPath` declared, or no story
+ * currently lives at the one that is.
+ *
+ * Moved here from `admin/GlobalsList.tsx` when port phase 8 deleted the old admin,
+ * next to `usePreviewHost` — the hook that now supplies its one candidate. Pure and
+ * exported so it is tested without an iframe.
+ *
+ * `candidates` is a `StoryMeta[]` rather than the old signature's `StoryNode[]`:
+ * the search is the server's now, so the caller has one flat row and had been
+ * fabricating an empty `children` to satisfy a type this never read.
+ */
+export function globalPreviewUrl(
+  type: Pick<DocumentType, 'name' | 'previewPath'>,
+  candidates: readonly Pick<StoryMeta, 'path' | 'previewUrl'>[],
+  /** The bare mount, not `apiBase`: `/preview/global/:name` renders HTML. */
+  base: string,
+): string {
+  if (type.previewPath !== undefined) {
+    const host = candidates.find((s) => s.path === type.previewPath)
+    if (host?.previewUrl) return `${host.previewUrl}&as=${encodeURIComponent(type.name)}`
+  }
+  return `${base}/preview/global/${encodeURIComponent(type.name)}`
 }

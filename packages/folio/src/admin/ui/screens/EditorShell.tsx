@@ -6,13 +6,9 @@ import type { Presence } from '../../../core/protocol'
 import type { Resolution } from '../../../core/resolve'
 import { type DocumentType, type SchemaIndex, singletonId } from '../../../core/schema'
 import type { StoryMeta } from '../../../core/story'
-import { formatWhen } from '../../History'
 import type { Blocks } from '../../hooks/useBlocks'
 import { canPublish, type Me, whyNot } from '../../me'
-import { behindNotice } from '../../Migrations'
 import type { StoryStore } from '../../store'
-import { publishStatus } from '../../TopBar'
-import { describeAgainstDraft } from '../../ViewingBar'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { Dialog } from '../Dialog'
@@ -23,17 +19,21 @@ import { stateTone } from './content-rows'
 import css from './EditorShell.module.css'
 import {
   type AddTarget,
+  behindNotice,
   clampInspector,
   DEFAULT_INSPECTOR,
+  describeAgainstDraft,
   editorLayout,
   hasNestedBloks,
   isNarrowedViewport,
   MAX_INSPECTOR,
   MIN_INSPECTOR,
+  publishStatus,
   type Viewport,
   VIEWPORT_NAMES,
   VIEWPORTS,
 } from './editor-model'
+import { historyWhen } from './history-model'
 import { useEditor } from './useEditor'
 
 /**
@@ -560,7 +560,12 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                 {viewing.version.label ||
                   (viewing.version.kind === 'publish' ? 'a published version' : 'a checkpoint')}
               </strong>{' '}
-              from {formatWhen(viewing.version.createdAt)} ·{' '}
+              {/* `historyWhen`, not the old admin's `formatWhen`: the two said the
+                  same thing, one rounding and one flooring, and the slide-over
+                  beside this banner already used this one. `formatWhen` went with
+                  `History.tsx` rather than moving, since keeping both would have
+                  been two clocks in one screen. */}
+              from {historyWhen(viewing.version.createdAt)} ·{' '}
               {describeAgainstDraft(editor.versions.delta)}
             </span>
             <Button size="sm" variant="subtle" onClick={editor.versions.exit}>

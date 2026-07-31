@@ -1,12 +1,11 @@
 import { useRef, useState } from 'react'
 import type { Json } from '../../../../core/doc'
 import { asAsset, asAssets, type AssetValue, isImageAsset } from '../../../../core/values'
-import { keyAssets, type KeyedAsset } from '../../../AssetInput'
 import { useUpload } from '../../../hooks/useUpload'
 import { Button } from '../../Button'
 import { Field, Input } from '../../Field'
 import { AssetPicker } from '../AssetPicker'
-import { humanSize } from '../assets-model'
+import { humanSize, keyAssets, type KeyedAsset } from '../assets-model'
 import css from './fields.module.css'
 
 interface Props {
@@ -114,13 +113,13 @@ export function AssetField({ id, value, accept, apiBase, mount, editable, onChan
  * being produced now, not one paint later. It is idempotent, so StrictMode's double
  * render produces the same ids.
  *
- * The algorithm itself is **imported** from `admin/AssetInput.tsx` rather than
- * copied. It is two passes over a pool of previous ids and the order of the passes
- * is the whole point — byte-identical first so a reorder moves DOM nodes instead of
- * remounting them, same-media second so typing in a card's alt box does not remount
- * it after one character — and it is already pinned by `test/unit/admin/
- * asset-keys.test.ts`. Duplicating that is exactly what `editor-port-plan.md` means
- * by porting the styling and not the logic.
+ * The algorithm itself is `assets-model.ts`'s `keyAssets`, which is where it landed
+ * when port phase 8 deleted `admin/AssetInput.tsx` — imported across the seam until
+ * then rather than copied, so there was never a second version to reconcile. It is
+ * two passes over a pool of previous ids and the order of the passes is the whole
+ * point — byte-identical first so a reorder moves DOM nodes instead of remounting
+ * them, same-media second so typing in a card's alt box does not remount it after
+ * one character — and it stays pinned by `test/unit/admin/asset-keys.test.ts`.
  */
 function useAssetKeys(assets: readonly AssetValue[]): KeyedAsset[] {
   const previous = useRef<KeyedAsset[]>([])

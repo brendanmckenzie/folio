@@ -6,7 +6,8 @@
 > language and the primitives). This document is the product: what the screens
 > are, what is on them, and what the editor becomes.
 > **Precedes:** the screen ports. The sweep is done when every screen here exists
-> and `admin/admin.css` is deleted.
+> and `admin/admin.css` is deleted — **which it is, as of 2026-07-31.** All eight
+> port phases have landed; `## The port plan` carries each one's notes.
 
 ## Summary
 
@@ -768,7 +769,43 @@ reaches the surface with sync, presence and preview in it.
    focus mode. The largest phase and the one that benefits most from primitives
    already proven five times over.
 8. **Deletion** — `admin/admin.css` is gone, `admin/ui/` is the only styling, and
-   `docs/ui-review.md`'s counts are all zero.
+   `docs/ui-review.md`'s counts are all zero. **Done** 2026-07-31: 36 files and
+   9,712 lines removed — 29 source files (9,057 lines, `admin.css` 2,544 of them) and
+   7 test files. `ui-review.md`'s `## Closed` section records every count with its
+   measured value. Five things a later reader should know:
+   - **Nine new→old edges had to move first, not eight.** The eight
+     `editor-port-plan.md` listed were right; the ninth was `useStoreState`, out of
+     `FolioContext.tsx`, and it is exactly the kind a list assembled by hand misses —
+     it is a *hook*, not one of the pure functions the list was reasoning about, and
+     the rebuilt editor imported it from a provider it never mounts. A tenth followed
+     transitively: `globalTypes` had no `ui/` caller at all, only
+     `hooks/useGlobalDocs.ts`, so cutting `GlobalsList.tsx` needed it moved too.
+     Where each went is in the commit; the pattern is that a function goes to the
+     `*-model.ts` beside its consumer, because the admin's tests run in Node and
+     cannot mount.
+   - **`formatWhen` did not move — it was replaced.** `history-model.ts`'s
+     `historyWhen` was already the same clock with a `now` parameter and its own
+     tests, and the version banner sat right beside the slide-over that used it. Two
+     clocks on one screen is worse than a rounding difference.
+   - **The a11y switch is `"a11y": "on"`, not the absence of `"off"`.** Removing the
+     `overrides` entry and letting the `recommended` preset apply looks equivalent and
+     is not: `recommended` carries a subset of the group, so `ui/**` would have
+     *lost* four rules — including the one a suppression in `FieldRow.tsx` names, which
+     is how it was caught. Turned on globally the rules find **nothing**, in `src/`,
+     `test/`, `scripts/` or `examples/demo`.
+   - **`folio-admin.css` still exists, and `ui/tokens.css` is why.** The Vite plugin
+     links `/folio-admin.css` in production, and that asset is whatever CSS is
+     reachable from `main.tsx`'s *static* graph — which used to be `admin.css` and is
+     now `tokens.css` plus every `*.module.css` under `ui/`. 82.7 kB, 579 hashed
+     classes, and `:root` is the only global selector left in it: the bare `button`
+     and `body` rules `main.tsx`'s comment warned were leaking into the rebuilt shell
+     went with the file they came from.
+   - **Two pieces were kept deliberately, with no caller.** `spaceStore.ts` and
+     `hooks/useSpace.ts` are the cross-story presence channel, and `followLabel` moved
+     onto the former rather than being deleted with `TopBar.tsx`. The rebuilt editor
+     has per-story presence and has **not** joined the space channel, so open question
+     7's "editing now" column and the top bar's avatars are both still owed — deleting
+     a tested client for a live server feature would have meant writing it again.
 
 Acceptance for every phase: the screen is reachable by URL, linkable in the state
 it is in, fully keyboard-operable, correct in both themes, and paged if it is a

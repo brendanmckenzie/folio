@@ -3,15 +3,17 @@ import { select, text } from '../../../src/core/fields'
 import type { ContentPage } from '../../../src/core/query'
 import { queryToParams } from '../../../src/core/query'
 import type { SchemaIndex } from '../../../src/core/schema'
-import type { StoryNode } from '../../../src/core/story'
-import { filterField, filterValue, withFilter } from '../../../src/admin/CollectionInput'
 import {
   keysToFetch,
   loadCollections,
   mergeCollections,
   NO_COLLECTIONS,
 } from '../../../src/admin/hooks/useCollections'
-import { LEVEL_LIMIT, visibleAt } from '../../../src/admin/StoryTree'
+import {
+  filterField,
+  filterValue,
+  withFilter,
+} from '../../../src/admin/ui/screens/fields/CollectionField'
 
 /**
  * The admin half of collections (`collections.md` decision 5, phase 3 and 4).
@@ -20,6 +22,14 @@ import { LEVEL_LIMIT, visibleAt } from '../../../src/admin/StoryTree'
  * render. `useCollections` keys off the *set* of queries, so the tests below are of
  * the pure pieces that make that possible — which keys are outstanding, and what a
  * load's outcome folds into.
+ *
+ * The three filter helpers moved with the field: `admin/CollectionInput.tsx` became
+ * `admin/ui/screens/fields/CollectionField.tsx` in port phase 7b, which carried them
+ * over unchanged, and phase 8 deleted the original. `StoryTree.tsx`'s `visibleAt` and
+ * `LEVEL_LIMIT` were tested here too and did **not** move — the rebuilt tree pages a
+ * level server-side with `Show 25 more` rather than truncating a whole level it has
+ * already fetched, so `content-model.ts`'s `Level` replaces both and
+ * `ui-content-model.test.ts` covers it.
  */
 
 const schema: SchemaIndex = {
@@ -153,36 +163,5 @@ describe('useCollections: the pure pieces', () => {
     expect(seen).toContain('/folio/api/content?')
     expect(seen).toContain('type=insight')
     expect(seen).toContain('perPage=4')
-  })
-})
-
-/* ------------------------------------------------------ the truncated tree --- */
-
-const node = (id: string, children: StoryNode[] = []): StoryNode =>
-  ({ id, children }) as unknown as StoryNode
-
-describe('visibleAt', () => {
-  it('draws a short level whole', () => {
-    const nodes = Array.from({ length: 4 }, (_, i) => node(`n${i}`))
-    expect(visibleAt(nodes, 'n0')).toHaveLength(4)
-  })
-
-  it('truncates a long level', () => {
-    const nodes = Array.from({ length: 800 }, (_, i) => node(`n${i}`))
-    expect(visibleAt(nodes, 'n0')).toHaveLength(LEVEL_LIMIT)
-  })
-
-  it('never hides the row that is open', () => {
-    const nodes = Array.from({ length: 800 }, (_, i) => node(`n${i}`))
-    const shown = visibleAt(nodes, 'n700')
-    expect(shown).toHaveLength(701)
-    expect(shown[shown.length - 1]!.id).toBe('n700')
-  })
-
-  it('never hides an ANCESTOR of the row that is open', () => {
-    const nodes = Array.from({ length: 800 }, (_, i) =>
-      i === 600 ? node('n600', [node('deep')]) : node(`n${i}`),
-    )
-    expect(visibleAt(nodes, 'deep').some((n) => n.id === 'n600')).toBe(true)
   })
 })

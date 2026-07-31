@@ -12,8 +12,9 @@
  * It replaces the decidable half of `AssetInput.tsx`'s `MediaLibrary`, which had
  * almost none: that surface fetched page one of `GET {base}/assets` and rendered
  * it, with no search, no filter, no sort, no metadata and no usage. Everything
- * below is new rather than ported, with two exceptions noted where they appear
- * (`humanSize` and the thumbnail URL shape).
+ * below is new rather than ported, with three exceptions noted where they appear
+ * (`humanSize`, the thumbnail URL shape, and `keyAssets` at the foot of the file —
+ * the last of which is a *field's* concern rather than this screen's, and says so).
  */
 import type { AssetSort } from '../../../core/story'
 import type { AssetValue } from '../../../core/values'
@@ -617,4 +618,98 @@ export function uploadSummary(entries: readonly UploadEntry[]): UploadSummary {
     failed,
     text: done === 0 ? `${failed} failed` : `${done} uploaded · ${failed} failed`,
   }
+}
+
+/* ------------------------------------------------------------- field cards --- */
+
+/*
+ * `keyAssets` and its two comparisons, moved here from `admin/AssetInput.tsx` when
+ * port phase 8 deleted the old admin. It belongs to a `multiasset` *field* rather
+ * than to this screen, and it is here anyway because it is the only asset
+ * arithmetic in the port that a Node test can reach: the field is
+ * `screens/fields/AssetField.tsx`, whose `useAssetKeys` is the hook around this and
+ * cannot be tested without a renderer.
+ */
+
+/**
+ * One card's stable React key, paired with the asset it is drawn from.
+ *
+ * The key is **local and minted here**. It is never written back: a `multiasset`
+ * value is an array of `AssetValue`, and adding an id to it would put a
+ * client-side render detail into the mutation log, where it would outlive every
+ * deploy. So identity is reconstructed on each render instead, from the previous
+ * render's answer.
+ */
+export interface KeyedAsset {
+  /** Minted, not stored. Only ever a React key. */
+  id: string
+  asset: AssetValue
+}
+
+/** The R2 key, or the absolute URL for an asset hosted elsewhere. Not unique —
+ * the same file may legitimately appear twice in one list, which is exactly why
+ * the index was being used as a key in the first place. */
+const mediaOf = (a: AssetValue) => a.key ?? a.url ?? ''
+
+/** Whole-value equality: the card is showing precisely this, alt and focal
+ * point included. */
+const sameAsset = (a: AssetValue, b: AssetValue) =>
+  a.key === b.key &&
+  a.url === b.url &&
+  a.filename === b.filename &&
+  a.contentType === b.contentType &&
+  a.size === b.size &&
+  a.width === b.width &&
+  a.height === b.height &&
+  a.alt === b.alt &&
+  a.focal?.x === b.focal?.x &&
+  a.focal?.y === b.focal?.y
+
+/**
+ * Carry the previous render's card ids onto this render's assets, minting one
+ * wherever nothing matches. Pure and exported so the reorder case is tested
+ * without mounting.
+ *
+ * `asAssets` rebuilds every object on every render, so object identity is worth
+ * nothing here and the match has to be made on content. It happens in two
+ * passes, and the order is the whole point:
+ *
+ * 1. **Byte-identical first.** A reorder moves values around without changing
+ *    any of them, so every card finds its own id and React moves DOM nodes
+ *    instead of remounting them. That is what stops a reorder dropping focus.
+ * 2. **Then same media, edited.** Typing in a card's alt box changes the value
+ *    but not the card, so an unclaimed entry with the same `key`/`url` hands its
+ *    id over. Without this pass every keystroke would remount the card and the
+ *    caret would be lost after one character — a worse bug than the one being
+ *    fixed.
+ *
+ * Both passes consume from the same pool, so two copies of one file get two
+ * distinct ids and keep them.
+ */
+export function keyAssets(
+  previous: readonly KeyedAsset[],
+  assets: readonly AssetValue[],
+  mint: () => string,
+): KeyedAsset[] {
+  const spare: (KeyedAsset | undefined)[] = [...previous]
+  const out: (KeyedAsset | undefined)[] = assets.map(() => undefined)
+
+  const claim = (at: number, asset: AssetValue): KeyedAsset => {
+    const taken = spare[at]!
+    spare[at] = undefined
+    return { id: taken.id, asset }
+  }
+
+  assets.forEach((asset, i) => {
+    const at = spare.findIndex((e) => e !== undefined && sameAsset(e.asset, asset))
+    if (at !== -1) out[i] = claim(at, asset)
+  })
+
+  assets.forEach((asset, i) => {
+    if (out[i]) return
+    const at = spare.findIndex((e) => e !== undefined && mediaOf(e.asset) === mediaOf(asset))
+    out[i] = at === -1 ? { id: mint(), asset } : claim(at, asset)
+  })
+
+  return out as KeyedAsset[]
 }
