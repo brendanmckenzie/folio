@@ -1,7 +1,8 @@
 import type { CSSProperties, KeyboardEvent } from 'react'
 import { useCallback, useMemo, useState } from 'react'
 import type { DocumentType } from '../../../core/schema'
-import type { FlatSort, StoryMeta } from '../../../core/story'
+import type { BulkAction, FlatSort } from '../../../core/story'
+import type { BulkRefusal } from '../../../server/bulk'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { EmptyState } from '../EmptyState'
@@ -9,34 +10,52 @@ import { List, ListHeader, Row } from '../List'
 import { Menu } from '../Menu'
 import { href, type Screen } from '../route'
 import {
-  type BulkAction,
+  actionsFor,
+  allShownSelected,
+  type BulkAnswer,
+  type BulkRequest,
+  confirmOf,
   type ContentUrl,
   contentQuery,
+  type Destination,
   filterOf,
   type Gesture,
   gestureMove,
+  isAll,
   isNarrowed,
+  isSelected,
   type LevelRow,
+  type Matchable,
   type Move,
+  NOTHING,
   parseContentUrl,
+  progressOf,
+  refusalOf,
   reportOf,
+  retryLabel,
   ROOT,
+  runBulkJob,
+  selectAllLabel,
+  selectAllMatching,
   type Selection,
   storyRowsOf,
   summarise,
   toggleAllShown,
   toggleSelected,
   type TreeRow,
+  urlOfCaptured,
+  verbOf,
   type ViewMode,
   type VisibleRow,
   visibleRows,
   withFilter,
   withView,
 } from './content-model'
+import { ConfirmBulkDialog } from './ConfirmBulkDialog'
 import { stateTone, when } from './content-rows'
 import css from './Content.module.css'
 import { MoveDialog } from './MoveDialog'
-import { useContent } from './useContent'
+import { messageOf, useContent } from './useContent'
 
 interface Props {
   /** Where Folio is mounted, for the real `<a href>` inside each row. */
@@ -112,11 +131,24 @@ export function Content(props: Props) {
   const data = useContent(apiBase, url)
 
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
-  const [selection, setSelection] = useState<Selection>(new Set())
+  const [selection, setSelection] = useState<Selection>(NOTHING)
   const [moving, setMoving] = useState(false)
   const [busy, setBusy] = useState(false)
+  /** The job's own `seen`/`total`, while a run takes more than one call. */
+  const [progress, setProgress] = useState<string | null>(null)
+  /** A confirmation waiting on an answer. */
+  const [pending, setPending] = useState<Job | null>(null)
+  /** The 409, with the job it refused — so one button can re-post with the count
+   * the server just reported. */
+  const [refused, setRefused] = useState<{ job: Job; refusal: BulkRefusal } | null>(null)
 
   const showType = pageTypes.length > 1
+  /** Type name → label, so a captured `type` reads as the chip did rather than as
+   * the wire value. */
+  const labels = useMemo(
+    () => Object.fromEntries(pageTypes.map((type) => [type.name, type.label])),
+    [pageTypes],
+  )
 
   const go = useCallback(
     (next: ContentUrl) => {
@@ -151,8 +183,11 @@ export function Content(props: Props) {
     [url.view, data.levels, data.flat.rows, expanded],
   )
   const stories = useMemo(() => storyRowsOf(rows), [rows])
-  const visibleIds = useMemo(() => stories.map((r) => r.row.id), [stories])
-  const bar = summarise(selection, visibleIds)
+  /** The rows themselves rather than their ids: a select-all is a *filter*, so
+   * deciding whether a row is in it means evaluating that filter against the row.
+   * `content-model.ts`'s `isSelected` is where it happens. */
+  const visible = useMemo<Matchable[]>(() => stories.map((r) => r.row), [stories])
+  const bar = summarise(selection, visible, labels)
 
   const rootLevel = data.levels[ROOT]
   const loading = url.view === 'tree' ? (rootLevel?.loading ?? true) : data.flat.loading
@@ -261,42 +296,88 @@ export function Content(props: Props) {
 
   /* ------------------------------------------------------------------ bulk --- */
 
-  const chosen = useMemo(
-    () => stories.filter((r) => selection.has(r.row.id)).map((r) => r.row),
-    [stories, selection],
-  )
+  /**
+   * Ticking a row. In select-all mode this adds to `exclude`, and a row outside the
+   * captured conditions cannot join at all — refused with the reason rather than
+   * silently doing nothing, which is `toggleSelected`'s whole argument.
+   *
+   * Computed here rather than inside the `setSelection` updater: an updater has to
+   * be a pure function of the previous state, and React calls it twice in
+   * development to prove it.
+   */
+  const tick = (row: Matchable) => {
+    const outcome = toggleSelected(selection, row)
+    if ('refusal' in outcome) {
+      onNotice(outcome.refusal)
+      return
+    }
+    setSelection(outcome.selection)
+  }
 
   /**
-   * The five bulk actions, as **N sequential per-item calls** — which is what
-   * `ui-architecture.md` decision 7 sanctions and what its "report successes and
-   * failures with counts" exists for. Nothing here is atomic and the report says
-   * so.
+   * A whole bulk job: **one `POST {apiBase}/bulk/{action}` per batch**, looped on
+   * the report's `continueFrom` until it comes back null.
    *
-   * Sequential rather than `Promise.all`: every one of these writes goes through
-   * `updateStoryStatement` or `publish`, both of which read the story table and
-   * derive paths from it, so firing forty in parallel is forty readers racing over
-   * the same rows. The ordering also makes the failure report deterministic.
+   * This used to be N sequential per-item calls, and that shape is what made
+   * select-all-matching impossible to offer — "select all 51,420 matching" over a
+   * per-item loop means fetching 51,420 rows to iterate. It was also quietly wrong
+   * in two ways a selection bar makes easy to hit: the loop acted on the *visible*
+   * part of the selection only, so publishing a selection that survived a filter
+   * change published three of twelve pages; and it passed `index: 0` per document,
+   * which landed a moved set reversed.
+   *
+   * `override` is the corrected selection a 409 re-confirmation carries. It is an
+   * argument rather than a state write followed by a run, because the state write
+   * would not be visible to this closure until the next render.
    */
-  const runBulk = useCallback(
-    async (action: BulkAction, targets: readonly StoryMeta[], moveTo?: string | null) => {
+  const run = useCallback(
+    async (job: Job, override?: Selection) => {
+      const target = override ?? selection
       setBusy(true)
-      let done = 0
-      const failures: { title: string; message: string }[] = []
-      for (const story of targets) {
-        try {
-          await writeFor(apiBase, action, story, moveTo)
-          done += 1
-        } catch (e) {
-          failures.push({ title: story.title, message: (e as Error).message })
+      setProgress(null)
+      try {
+        const result = await runBulkJob((body) => postBulk(apiBase, job.action, body), target, {
+          ...(job.destination ? { destination: job.destination } : {}),
+          onProgress: (seen, total) => setProgress(progressOf(seen, total)),
+        })
+        if ('refused' in result) {
+          setRefused({ job, refusal: result.refused })
+          return
         }
+        setSelection(NOTHING)
+        data.reload()
+        // Once, at the end, over the summed `done` and the concatenated `failed`:
+        // both are per call by design, because the server cannot know what an
+        // earlier call did.
+        onNotice(reportOf(job.action, result.done, result.failed))
+      } catch (e) {
+        onNotice((e as Error).message)
+      } finally {
+        setBusy(false)
+        setProgress(null)
       }
-      setBusy(false)
-      setSelection(new Set())
-      data.reload()
-      onNotice(reportOf(action, done, failures))
     },
-    [apiBase, data, onNotice],
+    [apiBase, data, onNotice, selection],
   )
+
+  /** What a confirmation would say, or null when the action can be taken as read.
+   * The rule is `confirmOf`'s; the captured filter is only passed in select-all
+   * mode, because that is the only mode with conditions to restate. */
+  const confirmation = (action: BulkAction) =>
+    confirmOf(action, bar, isAll(selection) ? selection.filter : undefined, labels)
+
+  /** A bar button. Move opens its destination picker, which is its confirmation;
+   * everything else asks first when there is something to say. */
+  const start = (action: BulkAction) => {
+    if (action === 'move') {
+      setMoving(true)
+      return
+    }
+    if (confirmation(action)) setPending({ action })
+    else void run({ action })
+  }
+
+  const ask = pending ? confirmation(pending.action) : null
 
   /* ------------------------------------------------------------------ view --- */
 
@@ -435,11 +516,13 @@ export function Content(props: Props) {
         <SelectionBar
           summary={bar}
           busy={busy}
-          onClear={() => setSelection(new Set())}
-          onRun={(action) => {
-            if (action === 'move') setMoving(true)
-            else void runBulk(action, chosen)
-          }}
+          progress={progress}
+          actions={actionsFor(selection)}
+          onClear={() => setSelection(NOTHING)}
+          onRun={start}
+          // Only a select-all can show what it selected: a captured filter is a URL
+          // and twelve ids are not. `urlOfCaptured` carries the argument.
+          onShowSelected={isAll(selection) ? () => go(urlOfCaptured(url, selection)) : undefined}
         />
       ) : null}
 
@@ -489,10 +572,10 @@ export function Content(props: Props) {
                 mount={mount}
                 showType={showType}
                 typeLabel={pageTypes.find((t) => t.name === row.row.type)?.label}
-                ticked={selection.has(row.row.id)}
+                ticked={isSelected(selection, row.row)}
                 current={row.row.id === props.selected}
                 onToggleOpen={() => toggleOpen(row.row)}
-                onToggleTick={() => setSelection((prev) => toggleSelected(prev, row.row.id))}
+                onToggleTick={() => tick(row.row)}
                 onOpen={() => onOpen({ name: 'edit', id: row.row.id })}
               />
             ),
@@ -504,13 +587,29 @@ export function Content(props: Props) {
         <button
           type="button"
           className={css.selectAll}
-          onClick={() => setSelection((prev) => toggleAllShown(prev, visibleIds))}
-          disabled={visibleIds.length === 0}
+          onClick={() => setSelection((prev) => toggleAllShown(prev, visible))}
+          disabled={visible.length === 0}
         >
-          {visibleIds.every((id) => selection.has(id)) && visibleIds.length > 0
-            ? 'Deselect all shown'
-            : 'Select all shown'}
+          {allShownSelected(selection, visible) ? 'Deselect all shown' : 'Select all shown'}
         </button>
+        {/*
+          Select-all-matching, and **only in flat mode**. `expected` has to be the
+          count of the set the guard will re-run, and the only count this screen is
+          shown is the one beside it: in flat mode that is the whole filter's total,
+          while in tree mode it is the *top level*'s. Offering it over the tree's
+          number would capture 12 and mean 51,420, so the control is absent there
+          rather than disabled — there is no version of it a tree can honestly draw.
+        */}
+        {url.view === 'flat' && total !== undefined && !isAll(selection) ? (
+          <button
+            type="button"
+            className={css.selectAll}
+            onClick={() => setSelection(selectAllMatching(filter, total))}
+            disabled={total === 0}
+          >
+            {selectAllLabel(total)}
+          </button>
+        ) : null}
         {/*
           `Showing n of N`, which is the owner's answer to the paging control
           (Resolved 5): next / previous plus an exact count, never "page 3 of 7".
@@ -550,16 +649,61 @@ export function Content(props: Props) {
       {moving ? (
         <MoveDialog
           apiBase={apiBase}
-          count={chosen.length}
+          count={bar.count}
+          // The picker is the move's confirmation, so it carries the sentence about
+          // the invisible part rather than a second dialog appearing behind it.
+          note={confirmation('move')?.body}
           onClose={() => setMoving(false)}
           onConfirm={(parentId) => {
             setMoving(false)
-            void runBulk('move', chosen, parentId)
+            void run({ action: 'move', destination: { parentId } })
+          }}
+        />
+      ) : null}
+
+      {pending && ask ? (
+        <ConfirmBulkDialog
+          confirmation={ask}
+          confirmLabel={verbOf(pending.action)}
+          onClose={() => setPending(null)}
+          onConfirm={() => {
+            const job = pending
+            setPending(null)
+            void run(job)
+          }}
+        />
+      ) : null}
+
+      {/*
+        The 409. A door rather than a wall: the set moved between the number the
+        person read and the button they pressed, so the new count is in the sentence
+        and one button re-posts with it as `expected`. Only reachable in select-all
+        mode, because the count guard is what an explicit id list does not have — the
+        ids *are* the version of the set.
+      */}
+      {refused && isAll(selection) ? (
+        <ConfirmBulkDialog
+          confirmation={refusalOf(refused.job.action, refused.refusal)}
+          confirmLabel={retryLabel(refused.job.action, refused.refusal)}
+          onClose={() => setRefused(null)}
+          onConfirm={() => {
+            const { job, refusal } = refused
+            const corrected: Selection = { ...selection, expected: refusal.actual }
+            setRefused(null)
+            setSelection(corrected)
+            void run(job, corrected)
           }}
         />
       ) : null}
     </div>
   )
+}
+
+/** One bulk job in flight or awaiting confirmation: what to do, and for a move,
+ * where. */
+interface Job {
+  action: BulkAction
+  destination?: Destination
 }
 
 /* ------------------------------------------------------------------- a row --- */
@@ -703,43 +847,69 @@ function MoreRow({
 function SelectionBar({
   summary,
   busy,
+  progress,
+  actions,
   onClear,
   onRun,
+  onShowSelected,
 }: {
   summary: ReturnType<typeof summarise>
   busy: boolean
+  /** The job's own progress, while a run takes more than one call. */
+  progress: string | null
+  /** Which of the five this selection may be given — `duplicate` is absent for a
+   * select-all, because the server refuses it there and an impossible control is
+   * absent rather than disabled. */
+  actions: readonly BulkAction[]
   onClear: () => void
   onRun: (action: BulkAction) => void
+  /** Absent for an explicit selection: twelve ids are not a filter, so there is no
+   * URL that shows them. */
+  onShowSelected?: () => void
 }) {
   return (
     // `role="status"`, so the count and the mode are announced when they change:
     // "acting on more than you can see" is the hazard this bar exists to name, and
     // a sighted user reads it while a screen reader user would otherwise not be
-    // told at all.
+    // told at all. A literal rather than an expression, because an `aria-*` or a
+    // `role` computed from state is one Biome cannot verify — and switching from
+    // twelve ids to "all 51,420 matching" changes this text, which is exactly the
+    // change that has to be announced.
     <div className={css.bar} role="status">
-      <span className={css.barCount}>{summary.text}</span>
+      <span className={css.barCount}>{progress ?? summary.text}</span>
       <span className={css.barActions}>
-        <Button size="sm" disabled={busy} onClick={() => onRun('publish')}>
-          Publish
-        </Button>
-        <Button size="sm" disabled={busy} onClick={() => onRun('unpublish')}>
-          Unpublish
-        </Button>
-        <Button size="sm" disabled={busy} onClick={() => onRun('duplicate')}>
-          Duplicate
-        </Button>
-        <Button size="sm" disabled={busy} onClick={() => onRun('move')}>
-          Move…
-        </Button>
-        <Button size="sm" variant="danger" disabled={busy} onClick={() => onRun('delete')}>
-          Delete
-        </Button>
-        <Button size="sm" variant="subtle" onClick={onClear}>
+        {onShowSelected ? (
+          <Button size="sm" variant="subtle" disabled={busy} onClick={onShowSelected}>
+            Show only selected
+          </Button>
+        ) : null}
+        {actions.map((action) => (
+          <Button
+            key={action}
+            size="sm"
+            {...(action === 'delete' ? { variant: 'danger' as const } : {})}
+            disabled={busy}
+            onClick={() => onRun(action)}
+          >
+            {ACTION_LABELS[action]}
+          </Button>
+        ))}
+        <Button size="sm" variant="subtle" disabled={busy} onClick={onClear}>
           Clear
         </Button>
       </span>
     </div>
   )
+}
+
+/** The bar's buttons. `Move…` keeps its ellipsis because it opens a dialog rather
+ * than acting, which is the same convention the palette follows. */
+const ACTION_LABELS: Record<BulkAction, string> = {
+  publish: 'Publish',
+  unpublish: 'Unpublish',
+  duplicate: 'Duplicate',
+  move: 'Move…',
+  delete: 'Delete',
 }
 
 /* ------------------------------------------------------------------ create --- */
@@ -817,46 +987,43 @@ function NewPageButton({
 /* ------------------------------------------------------------------ writes --- */
 
 /**
- * One bulk action against one document.
+ * One batch of one bulk action: `POST {apiBase}/bulk/{action}`.
  *
- * Every one of these is a route that already existed for the single-document case,
- * which is the point of decision 7: `duplicate` is `duplicate-and-paste.md`'s call
- * in a loop, `move` is the same `PATCH` a drag performs, and `delete` keeps its
- * `?redirect=true` default so a bulk delete leaves the same redirects a single one
- * would (`redirects.md` decision 4).
+ * **One route per action, not one route with the action in the body**, and the
+ * reason is the gate: each of the five carries the same `requireAccess` its
+ * single-document twin carries, so bulk publishing forty pages is neither more nor
+ * less privileged than publishing forty pages by hand (`bulk-writes.md`
+ * decision 1). `delete` keeps `redirect` at its default rather than sending it, for
+ * the same reason the single-document route defaults it to true.
+ *
+ * A **409 is not an error here.** It is the count guard refusing a set that moved,
+ * and its body is the error envelope *plus* the two counts — so it comes back as a
+ * value the caller can offer a button for, rather than a thrown message.
  */
-async function writeFor(
+async function postBulk(
   apiBase: string,
   action: BulkAction,
-  story: StoryMeta,
-  moveTo?: string | null,
-): Promise<void> {
-  const id = encodeURIComponent(story.id)
-  const [method, path, body] =
-    action === 'publish'
-      ? (['POST', `/story/${id}/publish`, undefined] as const)
-      : action === 'unpublish'
-        ? (['POST', `/story/${id}/unpublish`, undefined] as const)
-        : action === 'duplicate'
-          ? (['POST', `/stories/${id}/duplicate`, {}] as const)
-          : action === 'delete'
-            ? (['DELETE', `/stories/${id}?redirect=true`, undefined] as const)
-            : // `index: 0` — a bulk move lands the set at the top of the
-              // destination, in the order the loop runs. Anything else would need
-              // the destination's sibling count, which is a read per item for an
-              // ordering nobody specified.
-              (['PATCH', `/stories/${id}`, { parentId: moveTo ?? null, index: 0 }] as const)
-
-  const res = await fetch(`${apiBase}${path}`, {
-    method,
-    ...(body === undefined
-      ? {}
-      : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
+  body: BulkRequest,
+): Promise<BulkAnswer> {
+  const res = await fetch(`${apiBase}/bulk/${action}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
   })
-  if (!res.ok) {
-    const parsed = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
-    throw new Error(parsed.error?.message ?? `HTTP ${res.status}`)
+  if (res.status === 409) {
+    const body = (await res.json().catch(() => ({}))) as Partial<BulkRefusal> & {
+      error?: { message?: string }
+    }
+    // Narrowed rather than trusted: `error` is where every client already looks, so
+    // a 409 that is *not* the count guard — a conflict thrown by a hook, say — still
+    // reads as a sentence rather than as a refusal with `undefined` in it.
+    if (body.refused === 'count' && typeof body.actual === 'number') {
+      return { refused: 'count', expected: body.expected ?? 0, actual: body.actual }
+    }
+    throw new Error(body.error?.message ?? 'HTTP 409')
   }
+  if (!res.ok) throw new Error(await messageOf(res))
+  return (await res.json()) as BulkAnswer
 }
 
 /**

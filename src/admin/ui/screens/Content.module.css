@@ -450,6 +450,15 @@
   color: var(--state-danger-fg);
 }
 
+/* The invisible part of a selection, above the destination list. `--fg-muted`
+   rather than `--fg-subtle`: it is the sentence the dialog exists to make somebody
+   read, so it cannot be the quietest thing in it. */
+.dialogNote {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .twisty {
     /* biome-ignore lint/complexity/noImportantStyles: beats the transition above
