@@ -59,9 +59,47 @@ export type Bindings = Record<string, (e: KeyboardEvent) => void>
  * A modified chord always fires, because `⌘S` inside a textarea still has a
  * browser dialog to suppress.
  *
- * Chord matching only. `g c`-style sequences are a state machine this does not
- * have yet and `url-and-shell.md` will need.
+ * **Two-key sequences as well as chords**, because `ui-architecture.md`'s keyboard
+ * map specifies `g` then `h c d a m r x s`. A sequence is written with a space —
+ * `'g c'` — and matched by `LEAD_MS` of memory, which is the whole state machine:
+ * a bare leader key arms, the next bare key resolves, and anything else disarms.
+ *
+ * Two rules the obvious implementation gets wrong:
+ *
+ * - **A leader only arms when it is not itself a binding.** `g` is not bound alone,
+ *   so pressing it is unambiguous; a key that were both would have to wait `LEAD_MS`
+ *   before doing anything, which is a shortcut that feels broken.
+ * - **`preventDefault` on the leader, but only if a sequence starts with it.**
+ *   Otherwise typing `g` anywhere outside a field would be swallowed by a mechanism
+ *   that had no binding to run.
+ *
+ * The timeout exists so an armed leader cannot ambush a keystroke a minute later.
+ * Rejected: arming until the next keypress whatever it is, which turns one stray `g`
+ * into a navigation the next time you press `h`.
  */
+/**
+ * How long a sequence leader stays armed. Long enough to be typed deliberately by
+ * somebody who knows the map, short enough that a stray press cannot capture an
+ * unrelated keystroke later.
+ */
+const LEAD_MS = 1200
+
+/**
+ * The leader keys a binding map declares, e.g. `{'g'}` for `'g c'`.
+ *
+ * Exported for the test, because it is the one part of the sequence machine that is a
+ * pure function over the map — the rest lives in an effect that owns a timer, and no
+ * admin test mounts anything.
+ */
+export function leadersOf(bindings: Bindings): Set<string> {
+  const out = new Set<string>()
+  for (const key of Object.keys(bindings)) {
+    const space = key.indexOf(' ')
+    if (space > 0) out.add(key.slice(0, space))
+  }
+  return out
+}
+
 export function useShortcuts(bindings: Bindings) {
   // Held in a ref rather than named as a dependency: a map written inline is a
   // fresh object every render, and re-subscribing a window listener per render
@@ -70,13 +108,43 @@ export function useShortcuts(bindings: Bindings) {
   latest.current = bindings
 
   useEffect(() => {
+    /** The armed leader, and when it expires. Null when nothing is armed. */
+    let armed: { key: string; at: number } | null = null
+
     const onKey = (e: KeyboardEvent) => {
-      const run = latest.current[chord(e)]
-      if (!run) return
       const bare = !e.metaKey && !e.ctrlKey && !e.altKey
-      if (bare && !isPlainFocus()) return
-      e.preventDefault()
-      run(e)
+      const map = latest.current
+      const pressed = chord(e)
+
+      // A sequence's second key. Checked before anything else, so an armed `g`
+      // followed by `c` cannot also be read as the bare chord `c`.
+      if (armed && bare) {
+        const expired = Date.now() - armed.at > LEAD_MS
+        const run = expired ? undefined : map[`${armed.key} ${pressed}`]
+        armed = null
+        if (run) {
+          e.preventDefault()
+          run(e)
+          return
+        }
+        // Fall through: an unrecognised or expired second key is an ordinary
+        // keypress, not a swallowed one.
+      }
+
+      const run = map[pressed]
+      if (run) {
+        if (bare && !isPlainFocus()) return
+        e.preventDefault()
+        run(e)
+        return
+      }
+
+      // Arm, if this key leads a sequence and is not a binding of its own. Never
+      // while focus is in a field: `g` belongs to whoever is typing.
+      if (bare && isPlainFocus() && leadersOf(map).has(pressed)) {
+        armed = { key: pressed, at: Date.now() }
+        e.preventDefault()
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

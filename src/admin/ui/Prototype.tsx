@@ -13,7 +13,7 @@ import { Kitchen } from './Kitchen'
 import type { MenuItem } from './Menu'
 import { activeItem, nav } from './nav'
 import { Palette, type PaletteAction } from './Palette'
-import { type Crumb, type CrumbContext, crumbs, documentTitle, href } from './route'
+import { type Crumb, type CrumbContext, crumbs, documentTitle, href, type Screen } from './route'
 import { useRemembered, useRememberedString } from './remembered'
 import { Access } from './screens/Access'
 // `ASSET_VIEW_KEY` and not a string literal: the picker is mounted by an asset
@@ -30,9 +30,10 @@ import { Settings } from './screens/Settings'
 import type { ViewMode } from './screens/content-model'
 import { EditorShell } from './screens/EditorShell'
 import { Home } from './screens/Home'
+import { Keys } from './screens/Keys'
 import { Stub } from './screens/Stub'
 import { Shell } from './Shell'
-import { SAVE_NOTICE, useShortcuts } from './shortcuts'
+import { type Bindings, SAVE_NOTICE, useShortcuts } from './shortcuts'
 import { Toast } from './Toast'
 import { useRouter } from './useRouter'
 import { useSearch } from './useSearch'
@@ -74,6 +75,7 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
   const [palette, setPalette] = useState(false)
+  const [keys, setKeys] = useState(false)
 
   useEffect(() => {
     let live = true
@@ -184,8 +186,48 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
     document.title = documentTitle(route, crumbContext)
   }, [route, crumbContext])
 
+  /**
+   * `g` then a letter, from `ui-architecture.md`'s keyboard map.
+   *
+   * Built as a table rather than eight entries in the map below, because the *set* is
+   * the thing worth reading: a chord that goes to a screen the site does not have is
+   * the failure mode, and `nav.ts` already role-gates Access and Model. So a
+   * destination that is not in the nav is not bound — the chord does nothing rather
+   * than navigating a viewer into a 403.
+   *
+   * `g d` is the odd one: Documents needs a *type*, and `ui-architecture.md`'s map
+   * writes it as one letter. The first declared record type is the honest reading —
+   * it is the one the sidebar lists first — and on a site with no record types the
+   * chord is absent rather than pointing at `/documents/undefined`.
+   */
+  const goTo = useMemo((): Bindings => {
+    const reachable = new Set(groups.flatMap((group) => group.items.map((i) => i.screen.name)))
+    const firstRecord = types.find((t) => t.kind === 'record')
+    const table: [string, Screen][] = [
+      ['h', { name: 'home' }],
+      ['c', { name: 'content' }],
+      ['a', { name: 'assets' }],
+      ['m', { name: 'model' }],
+      ['r', { name: 'redirects' }],
+      ['x', { name: 'access' }],
+      ['s', { name: 'settings' }],
+      ...(firstRecord
+        ? ([['d', { name: 'documents', type: firstRecord.name }]] as [string, Screen][])
+        : []),
+    ]
+    return Object.fromEntries(
+      table
+        .filter(([, screen]) => screen.name === 'home' || reachable.has(screen.name))
+        .map(([letter, screen]) => [`g ${letter}`, () => go(screen)]),
+    )
+  }, [groups, types, go])
+
   useShortcuts({
+    ...goTo,
     'mod+k': () => setPalette(true),
+    // `?` and not `shift+/`: `chord()` names shift only when it is not already
+    // encoded in the character, and a question mark arrives as `?`.
+    '?': () => setKeys(true),
     // One chord, one meaning: hide the left column. In the editor that is the
     // block rail — the sidebar is already a 48px strip there by default — and on a
     // platform screen it is the sidebar itself. `ui-architecture.md` calls both
@@ -246,6 +288,9 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
           route,
           boot,
           loading,
+          // `useStory`'s own flight, separate from the boot's: the editor needs to
+          // tell "the row is on its way" from "there is no such row".
+          openLoading: fetched.loading,
           globals: manifest?.globals ?? [],
           manifest,
           me,
@@ -268,6 +313,7 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
       {palette ? (
         <Palette actions={actions} onQuery={search.setQuery} onClose={() => setPalette(false)} />
       ) : null}
+      {keys ? <Keys onClose={() => setKeys(false)} /> : null}
       <Toast message={notice} />
     </>
   )
@@ -285,6 +331,10 @@ interface ScreenArgs {
   route: ReturnType<typeof useRouter>['route']
   boot: PrototypeBoot
   loading: boolean
+  /** The open document's own fetch is in flight (`useStory`). Distinct from
+   * `loading`, which is the shell's boot: only the editor cares about the
+   * difference, and it cares because "no such document" must not flash. */
+  openLoading: boolean
   /** `FolioConfig.globals` — a subset of the declared singleton types, so Home can
    * draw a card per global without a second request. Off the manifest, which the
    * shell already holds. */
@@ -363,7 +413,19 @@ function screenFor(a: ScreenArgs) {
         <EditorShell
           story={a.open}
           preview={a.preview}
-          loading={a.loading}
+          // The boot flag *and* the row's own fetch: with `loading` false and no
+          // story, the editor says "no such document", so passing only the boot
+          // flag makes that flash on every open.
+          loading={a.loading || a.openLoading}
+          apiBase={boot.apiBase}
+          mount={boot.base}
+          schema={a.schema}
+          types={a.types}
+          globals={a.globals}
+          {...(a.manifest?.locales ? { locales: a.manifest.locales } : {})}
+          me={a.me}
+          onNotice={a.notify}
+          onOpenDocument={(id) => a.go({ name: 'edit', id })}
           railCollapsed={a.blockRail.value}
           onToggleRail={a.blockRail.toggle}
           inspectorCollapsed={a.inspector.value}

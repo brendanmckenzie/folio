@@ -89,3 +89,24 @@
   background: var(--state-danger-bg);
   border-color: var(--state-danger-border);
 }
+
+/*
+ * **The panel itself shows no focus ring.**
+ *
+ * `useFocusTrap` focuses the panel on open so the trap has somewhere to start and so
+ * a screen reader announces the dialog's name — the panel carries `role="dialog"` and
+ * `aria-labelledby`. But a programmatic focus on a `tabIndex={-1}` container still
+ * matches `:focus-visible` in Chrome, so `tokens.css`'s one focus treatment drew a
+ * 2px ring around the entire dialog. It read as a selected box rather than as focus,
+ * and it was the first thing the eye went to in a dialog whose whole job is to ask a
+ * question.
+ *
+ * Scoped to the panel and nothing inside it: every control in the dialog keeps the
+ * global ring, which is the one that means something. Rejected: dropping the
+ * `tabIndex` so it cannot be focused at all — that is what the trap uses to remember
+ * the opener and to keep `Tab` inside, so it would trade a cosmetic ring for a real
+ * behaviour.
+ */
+.panel:focus-visible {
+  outline: none;
+}
