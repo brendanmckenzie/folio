@@ -59,6 +59,30 @@ interface ListProps {
  * `content-model.ts` holds their arithmetic. A container that decided them would
  * have to know what a story is.
  */
+/**
+ * **`TAB_STOP`: the container is the list's one tab stop, and no row is.**
+ *
+ * This was a real defect and it was invisible in the one place it was tested. `Row`
+ * set `tabIndex={current ? 0 : -1}`, where `current` means "this is the document you
+ * have open" — a *selection*, not a focus position. So a list with nothing selected
+ * had **no tab stop at all** and the whole keyboard model was unreachable: Content
+ * looked fine only because arriving from the editor marks a row `current`, and Home's
+ * lists have no notion of one.
+ *
+ * Conflating selection with focus is the bug. Fixed by separating them: the container
+ * takes the tab stop, rows never do, and the arrow keys move real DOM focus among
+ * them — which is what `onKeyDown` below already assumed, and what its comment about
+ * "the state after tabbing in" describes. `current` keeps its `aria-current` and its
+ * styling and stops deciding what is focusable.
+ *
+ * Rejected: marking row 0 `current` when nothing else is. It renders `aria-current`
+ * and the selected background over a row nobody chose, which is a lie told to make a
+ * tab stop appear.
+ *
+ * The cost is that tabbing away and back returns to the container rather than to the
+ * row you left, which is the standard trade for this pattern and is why the container
+ * needs its own focus ring.
+ */
 export function List({ label, tree, multiselect, onUnhandledKey, children }: ListProps) {
   const box = useRef<HTMLDivElement>(null)
 
@@ -109,6 +133,8 @@ export function List({ label, tree, multiselect, onUnhandledKey, children }: Lis
       role="tree"
       aria-label={label}
       aria-multiselectable={multiselect ? true : undefined}
+      /* See `TAB_STOP` above the component. */
+      tabIndex={0}
       onKeyDown={onKeyDown}
     >
       {children}
@@ -120,6 +146,8 @@ export function List({ label, tree, multiselect, onUnhandledKey, children }: Lis
       role="listbox"
       aria-label={label}
       aria-multiselectable={multiselect ? true : undefined}
+      /* See `TAB_STOP` above the component. */
+      tabIndex={0}
       onKeyDown={onKeyDown}
     >
       {children}
@@ -248,28 +276,53 @@ export function Row({
   // interactive role that is not focusable" while the focusability was sitting in
   // the spread three lines up.
   return tree ? (
-    <div
-      {...shared}
-      role="treeitem"
-      tabIndex={current ? 0 : -1}
-      aria-level={depth + 1}
-      aria-expanded={expanded}
-    >
+    <div {...shared} role="treeitem" tabIndex={-1} aria-level={depth + 1} aria-expanded={expanded}>
       {inner}
     </div>
   ) : (
-    <div {...shared} role="option" tabIndex={current ? 0 : -1}>
+    <div {...shared} role="option" tabIndex={-1}>
       {inner}
     </div>
   )
 }
 
-/** The uppercase micro-header above a list. The one place `--text-xs` tracking
- * is allowed. */
-export function ListHeader({ children, actions }: { children: ReactNode; actions?: ReactNode }) {
+/**
+ * The header above a list, in one of two registers.
+ *
+ * **`level={1}` is the screen's own title; the default is a section label.** One
+ * component with two registers rather than two components, because the *actions*
+ * slot is identical either way — a screen's search box and a section's `New token`
+ * button sit in the same place and want the same layout.
+ *
+ * The distinction was found by looking at the finished screens side by side and it
+ * was a real defect, not a preference. Every platform screen used this as its page
+ * title, and its style is a **section label** — `--text-xs`, uppercase, tracked,
+ * `--fg-subtle`. So a screen's name rendered smaller and greyer than the breadcrumb
+ * above it, which is inverted hierarchy; Home, which had rolled its own `h1`, looked
+ * like a different application; and because this emitted `h2`, **no platform screen
+ * had an `h1` at all**, which is the a11y half of the same mistake.
+ *
+ * The uppercase micro-header is still the right thing for a section, and it is still
+ * the one place `--text-xs` tracking is allowed — Access's two tables and Home's five
+ * blocks both want it. It is just not what a page is called.
+ */
+export function ListHeader({
+  children,
+  actions,
+  level = 2,
+}: {
+  children: ReactNode
+  actions?: ReactNode
+  /** `1` for the screen's title, `2` for a section inside it. */
+  level?: 1 | 2
+}) {
   return (
     <div className={css.header}>
-      <h2 className={css.headerTitle}>{children}</h2>
+      {level === 1 ? (
+        <h1 className={css.headerScreen}>{children}</h1>
+      ) : (
+        <h2 className={css.headerTitle}>{children}</h2>
+      )}
       {actions ? <div className={css.headerActions}>{actions}</div> : null}
     </div>
   )

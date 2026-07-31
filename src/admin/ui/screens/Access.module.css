@@ -1,0 +1,389 @@
+/*
+ * The Access screen. Two tables and two dialogs, so most of this file is the scope
+ * control — the one thing on the screen that is not already a primitive.
+ *
+ * Everything table-shaped is `Table.module.css`, and the footer, skeleton and
+ * `srOnly` rules are the same objects Documents and Content already have. They are
+ * repeated rather than shared because a CSS module is per-component by design and
+ * three near-identical footers is the cost of that; the alternative — a shared
+ * `screens.css` — is a fourth place to look for the rule that is breaking.
+ */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 1400px;
+}
+
+/* One per table. `--space-2` inside a section against `--space-5` between them, so
+   the two halves read as two things rather than one long list — the review's
+   complaint about the old rail was partly that Editors and API tokens ran
+   together. */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------- cells --- */
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/*
+ * The presence hue, as a dot.
+ *
+ * `--dot` comes in as an inline custom property rather than an inline `background`,
+ * so the fallback lives here with the rest of the styling: a row whose colour has
+ * not resolved is a subtle dot rather than a transparent gap. `design-system.md`'s
+ * state palette says presence is "the peer's own hue, as a ring or dot" and is
+ * never one of the semantic hues, which is why nothing else on this screen is
+ * round.
+ */
+.dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background: var(--dot, var(--fg-subtle));
+}
+
+.name {
+  font-weight: 550;
+}
+
+/*
+ * The column this screen exists for.
+ *
+ * No `max-width` and no `text-overflow`, deliberately — `docs/ui-review.md`'s
+ * sharpest finding was `demo@example.…` in a 280px rail, and the fix is not a
+ * wider ellipsis. `Table`'s cells are `nowrap` and its scroll container takes the
+ * overflow, so a long address widens the table and the table scrolls, which is
+ * recoverable. Mono because an address is an identifier a person retypes, and
+ * commitment 3 says identifiers are typographic citizens: `rn` against `m` matters
+ * when you are checking one against a support ticket.
+ */
+.email {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+/* The `<select>` is `width: 100%` from `Field.module.css`, so the cell decides how
+   wide it is. Enough for `publisher` plus the arrow, and fixed so the four roles do
+   not resize the column as they change. */
+.roleCell {
+  display: block;
+  width: 8.5rem;
+}
+
+.stamp {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A fact that is absent rather than a value that is empty: an invited account has
+   no provider until its first sign-in. Muted rather than blank, so the cell reads
+   as deliberate. */
+.blank {
+  color: var(--fg-subtle);
+}
+
+.scopeList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+/* ------------------------------------------------------------------ layout --- */
+
+.skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.skeleton {
+  height: var(--row-h);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+}
+
+.pager {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* A link that has to carry a button's weight, because signing in leaves the shell
+   for a server-rendered page and an anchor is what survives a middle-click. Kept to
+   `Button`'s primary geometry by hand rather than by adding an `as` prop to the
+   primitive — one anchor in eleven screens is not a case for widening the API. */
+.signIn {
+  display: inline-flex;
+  align-items: center;
+  height: var(--row-h);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--fg);
+  color: var(--fg-inverse);
+  font-size: var(--text-base);
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.signIn:hover {
+  background: var(--fg-muted);
+}
+
+.signIn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* ----------------------------------------------------------------- dialogs --- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.dialogNote {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.dialogNote:first-child {
+  margin-top: 0;
+}
+
+.inlineCode {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--fg);
+}
+
+/*
+ * The minted token, once.
+ *
+ * Wrapping and selectable, both load-bearing: the fallback when
+ * `navigator.clipboard` is unavailable — plain HTTP on anything but localhost — is a
+ * person selecting it by hand, and a 71-character secret clipped to one line cannot
+ * be selected in full. `user-select: all` makes one click take the whole value.
+ */
+.secret {
+  display: block;
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  word-break: break-all;
+  user-select: all;
+}
+
+/* --------------------------------------------------- the scope control --- */
+
+/*
+ * The fieldset reset, and the same comment Content and Documents carry because it
+ * is the same non-optional thing: a group of related controls is a `<fieldset>`
+ * with a visually hidden `<legend>` per Biome's `useSemanticElements`, and a bare
+ * fieldset arrives with a border, a margin and a legend rendered inside that
+ * border.
+ */
+.presets,
+.scopes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  border: 0;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The visible name of the group, matching `Field`'s label rather than the 11px
+   uppercase micro-header — this is a control's label, not a section heading. */
+.groupLabel {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  color: var(--fg);
+}
+
+/*
+ * One preset. A whole row is the click target, which is the substantive difference
+ * from six checkboxes in two ragged columns: there the target was an 11px word, and
+ * here it is the label, the description and the scope badges together.
+ */
+.preset,
+.scope {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+}
+
+.preset:hover,
+.scope:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+/* The native control, kept and not replaced. A hand-rolled radio is a focus ring,
+   a checked state and a keyboard model to re-implement; the browser's already has
+   all three and arrow-key navigation within the group for free. */
+.preset input,
+.scope input {
+  flex: none;
+  margin: 2px 0 0;
+  accent-color: var(--ring);
+}
+
+.preset:focus-within,
+.scope:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.presetOn {
+  border-color: var(--fg-accent);
+  background: var(--bg-selected);
+}
+
+/* Blue is selection and attention; red is withdrawal and refusal — so the
+   everything-granting preset gets a red edge only once it is the chosen one, where
+   it is a statement about what is about to be minted rather than a warning
+   attached to an option nobody picked. */
+.presetDanger.presetOn {
+  border-color: var(--state-danger-border);
+  background: var(--state-danger-bg);
+}
+
+.presetBody,
+.scopeBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.presetLabel {
+  font-size: var(--text-base);
+  font-weight: 550;
+  color: var(--fg);
+}
+
+.presetNote,
+.scopeNote {
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.presetScopes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin-top: 2px;
+}
+
+/* Not a sixth radio: there is nothing for it to select, and a disabled control that
+   cannot act should be absent (`## Cross-cutting`). A line of text reporting the
+   state the group is in. */
+.presetCustom {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.scopeDetails {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+
+/* A real `<summary>`: focusable, announced as expandable, and it toggles with no
+   JavaScript at all. The marker is left alone deliberately — the disclosure
+   triangle is the one glyph every platform already agrees on. */
+.scopeSummary {
+  font-size: var(--text-sm);
+  font-weight: 550;
+  color: var(--fg-accent);
+  cursor: pointer;
+}
+
+.scopeSummary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.scopes {
+  margin-top: var(--space-2);
+}
+
+.scopeLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+  font-weight: 550;
+  color: var(--fg);
+}
+
+/*
+ * A scope something else already grants.
+ *
+ * Ticked and disabled, with its note replaced by what grants it — the fact six
+ * independent checkboxes could not express at all. Dimmed rather than hidden,
+ * because "this is on, and here is why you cannot turn it off" is the whole point:
+ * hiding it would take the implication table back out of sight, which is where it
+ * was.
+ */
+.scopeImplied {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.scopeImplied:hover {
+  border-color: var(--border);
+  background: none;
+}

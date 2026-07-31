@@ -1,0 +1,287 @@
+/*
+ * The history slide-over. Full height, from the right, over the inspector.
+ *
+ * **This is the first animating thing in the system**, which `ui-architecture.md`'s
+ * cross-cutting note allows for exactly two surfaces: "Slide-overs and the palette
+ * animate; rows, badges and menus do not". So it uses the two durations and the one
+ * easing that already exist in `tokens.css` (`--dur-fast`, `--dur-base`, `--ease`)
+ * and invents nothing.
+ *
+ * **There is no `prefers-reduced-motion` branch here on purpose.** `tokens.css`
+ * states the guard once, globally, and its comment says why a component must not
+ * carry its own: every transition in the system lives in a CSS module whose load
+ * order relative to that file is the bundler's to decide, so a second rule at equal
+ * specificity would win or lose at random. The guard clamps `animation-duration`,
+ * which is why the entrance below is a keyframe animation rather than a transition
+ * on a class that a mount effect adds — one declaration, already covered.
+ *
+ * The exit is deliberately not animated. Animating out means holding a closed panel
+ * in the tree until a transition ends, which is a state machine every dialog here
+ * has declined to grow, and the perceptible half of a slide-over is the arrival.
+ */
+
+.wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/*
+ * Transparent, and that is the decision: it captures the click-away and names it
+ * for a pointer, but it must not dim the stage. See `HistoryPanel`'s note 1 — the
+ * panel exists so a past version can be compared against the amber-framed preview,
+ * and `--bg-overlay` over that would be dimming the subject.
+ */
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: none;
+  border: 0;
+  cursor: default;
+}
+
+.panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(400px, 100%);
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-dialog);
+  animation: slide-in var(--dur-base) var(--ease);
+}
+
+@keyframes slide-in {
+  from {
+    transform: translateX(100%);
+  }
+}
+
+.head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-1);
+  height: 40px;
+  padding: 0 var(--space-2) 0 var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+.title {
+  margin: 0 auto 0 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+/*
+ * Two panes rather than one scroll, so the versions list cannot be pushed off the
+ * top by an activity trail that grows on every keystroke. Versions take what they
+ * need up to 45% and activity takes the rest, which is the reading order the design
+ * asks for — "versions above, activity below" — with neither able to starve the
+ * other.
+ */
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.versions {
+  flex: 0 1 auto;
+  max-height: 45%;
+  border-bottom: 1px solid var(--border);
+}
+
+.activity {
+  flex: 1 1 auto;
+}
+
+.sectionHead {
+  flex: none;
+  padding: var(--space-3) var(--space-4) var(--space-2);
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+/*
+ * What each list is, in words. `server/routes/history.ts`'s own header states the
+ * distinction — versions in D1 are coarse and restorable, the activity trail from
+ * the Durable Object's mutation log is fine-grained and not — and the whole risk of
+ * stacking two lists in one panel is that they read as interchangeable. Stated,
+ * rather than implied by which of them has buttons.
+ */
+.note {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.scroller {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.list {
+  margin: 0;
+  padding: 0 var(--space-2);
+  list-style: none;
+}
+
+/*
+ * A two-line row, which `design-system.md` makes an opt-in costing 20px. It is
+ * earned here: the second line carries when and who, and both are the reason
+ * somebody is reading this panel at all.
+ */
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    "main actions"
+    "meta actions";
+  align-items: center;
+  gap: 0 var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.row:hover {
+  background: var(--bg-hover);
+}
+
+/* The row whose version is on the stage. Amber, tying the row to the frame around
+   the preview — the one time the frame has something true to say. */
+.rowViewing {
+  background: var(--state-warn-bg);
+  box-shadow: inset 2px 0 0 var(--state-warn-border);
+}
+
+.rowViewing:hover {
+  background: var(--state-warn-bg);
+}
+
+.rowMain {
+  display: flex;
+  grid-area: main;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.rowTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  display: flex;
+  grid-area: meta;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.rowActions {
+  display: flex;
+  grid-area: actions;
+  flex: none;
+  gap: var(--space-1);
+}
+
+.when {
+  flex: none;
+}
+
+.actor {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An unresolved `usr_…`. Mono because it is an identifier and this system treats
+   one as a typographic citizen rather than something to hide. */
+.actorId {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4) var(--space-3);
+}
+
+/*
+ * `N loaded`, not `N of M`. Neither history route answers `?count=1`, and a total
+ * this panel could only guess at is worse than the honest half — the same
+ * distinction `content-model.ts`'s `MoreRow` draws for a tree level.
+ */
+.count {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.error {
+  margin: 0;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--state-danger-fg);
+}
+
+.checkpoint {
+  display: flex;
+  flex: none;
+  gap: var(--space-1);
+  padding: 0 var(--space-4) var(--space-2);
+}
+
+.checkpointInput {
+  flex: 1;
+  min-width: 0;
+  height: var(--row-h);
+  padding: 0 var(--space-2);
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+/* Skeleton rows, not a spinner, because the row height is known — the rule the
+   whole admin follows. */
+.skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-4);
+}
+
+.skeleton {
+  height: 40px;
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+}

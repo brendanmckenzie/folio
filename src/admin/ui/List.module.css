@@ -160,3 +160,36 @@
   gap: var(--space-1);
   margin-left: auto;
 }
+
+/*
+ * A screen's own title. See `ListHeader`'s `level` prop for why this exists: every
+ * platform screen was using `.headerTitle` — a *section* label — as its page
+ * heading, so a screen's name rendered smaller and greyer than the breadcrumb above
+ * it, and none of them had an `h1`.
+ *
+ * Sized against the tokens rather than picking a number: this is the one heading on
+ * the screen, so it takes the largest step the scale offers and nothing more. The
+ * subject of a platform screen is the *list*, not its name.
+ */
+.headerScreen {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+
+/*
+ * The list's own focus ring. It is the one tab stop (see `TAB_STOP` in `List.tsx`),
+ * so tabbing to it has to be visible — without this the keyboard model is reachable
+ * and silent, which is worse than unreachable because a person cannot tell whether
+ * the arrow keys will do anything.
+ *
+ * Inset, so it reads as "this list has focus" rather than as a row's ring: a ring
+ * outside the box on a full-width list draws a line down both edges of the screen.
+ */
+.list:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+  border-radius: var(--radius-md);
+}

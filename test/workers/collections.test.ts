@@ -365,7 +365,7 @@ describe('the index', () => {
 
     const refs = (
       await env.DB.prepare(
-        'select to_story as target, kind from content_refs where from_story = ? order by kind, target',
+        'select to_id as target, kind from content_refs where from_story = ? order by kind, target',
       )
         .bind('col_credits')
         .all<{ target: string; kind: string }>()
@@ -407,7 +407,7 @@ describe('the index', () => {
     await folio.reindex(env, { batch: 200 })
 
     const refs = (
-      await env.DB.prepare('select to_story as target from content_refs where from_story = ?')
+      await env.DB.prepare('select to_id as target from content_refs where from_story = ?')
         .bind('col_prose')
         .all<{ target: string }>()
     ).results

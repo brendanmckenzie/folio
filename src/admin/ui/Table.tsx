@@ -25,7 +25,27 @@ interface Props<T> {
   sort?: Sort
   onSort?: (key: string) => void
   onOpen?: (row: T) => void
-  /** Right-aligned trailing cell, revealed on row hover. */
+  /**
+   * Right-aligned trailing cell, revealed on row hover or focus.
+   *
+   * **Only usable when something else in the row can take focus.** `visibility:
+   * hidden` removes descendants from the tab order, so `tr:focus-within` cannot be
+   * reached *from inside* the hidden cell — a row whose only focusable element is an
+   * action here is a row whose actions are mouse-only. Documents is fine because its
+   * first cell is an `onOpen` button: focus lands there, `:focus-within` fires, and
+   * the actions become tabbable.
+   *
+   * A table with no `onOpen` and no other control wants a **named `Actions` column**
+   * instead — an ordinary always-visible column, which is what Access does for its
+   * tokens table. `admin.css` reached the same conclusion once before, in a comment
+   * saying the version button is always visible "because hover-only is unreachable
+   * by keyboard".
+   *
+   * Found by building Access. Not fixed by making this always visible, because that
+   * puts two buttons on every row of every table and the hover reveal is what keeps a
+   * dense list readable — the constraint is real and worth stating rather than
+   * designing around.
+   */
   actions?: (row: T) => ReactNode
   empty?: ReactNode
 }

@@ -314,6 +314,42 @@ describe('role gates', () => {
     expect(res.status).toBe(409)
   })
 
+  /**
+   * Found while building the Access screen. The delete above has guarded self-removal
+   * since it was written; a self-**demotion** reached the identical state — a site
+   * with nobody who can manage access — through a control that looks reversible, and
+   * the session revoke below made it instant. The recovery is a `wrangler d1 execute`
+   * against production.
+   */
+  it('refuses an admin changing their own role, which is the same lockout', async () => {
+    const admin = await signIn('admin')
+    const res = await call(`/folio/api/users/${admin.user.id}`, {
+      method: 'PATCH',
+      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'viewer' }),
+    })
+    expect(res.status).toBe(409)
+
+    // And the role really did not change — a refusal that had already written the row
+    // would be the worst of both.
+    const me = (await (await call('/folio/api/me', {
+      headers: { cookie: admin.cookie },
+    }))!.json()) as { actor: { role: string } | null }
+    expect(me.actor?.role).toBe('admin')
+  })
+
+  /** The guard is on the *role*, not on the row: an admin renaming themselves is
+   * ordinary, and refusing it would be paternalism rather than a lockout guard. */
+  it('lets an admin patch their own name', async () => {
+    const admin = await signIn('admin')
+    const res = await call(`/folio/api/users/${admin.user.id}`, {
+      method: 'PATCH',
+      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Renamed Themselves' }),
+    })
+    expect(res.status).toBe(200)
+  })
+
   it('signs a user out of every browser when their role changes', async () => {
     const admin = await signIn('admin')
     const target = await signIn('editor')

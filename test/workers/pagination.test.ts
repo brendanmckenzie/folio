@@ -44,12 +44,25 @@ async function walk<T>(path: string, limit: number): Promise<T[]> {
   throw new Error(`cursor never exhausted for ${path}`)
 }
 
-const upload = (filename: string, byte: number) =>
+const upload = (filename: string, byte: number, padding = 0) =>
   SELF.fetch(`${API}/assets?filename=${encodeURIComponent(filename)}`, {
     method: 'POST',
     headers: { 'content-type': 'image/png' },
-    // A minimal PNG signature so the type sniffer is satisfied.
-    body: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, byte]),
+    // A minimal PNG signature so the type sniffer is satisfied, plus `padding`
+    // bytes so a test can choose a row's `size` — the one sort whose natural
+    // direction is descending.
+    body: new Uint8Array([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0x1a,
+      0x0a,
+      byte,
+      ...Array(padding).fill(0),
+    ]),
   })
 
 describe('GET /api/assets', () => {
@@ -123,6 +136,112 @@ describe('GET /api/assets', () => {
     )
     const overlap = second.rows.filter((r) => first.rows.some((f) => f.id === r.id))
     expect(overlap).toEqual([])
+  })
+})
+
+/**
+ * The Assets screen's sort axis (`core/story.ts`'s `AssetSort`), which the library
+ * did not have: it was hard-wired to `NEWEST_FIRST`.
+ *
+ * Each sort is **walked to exhaustion** rather than read one page at a time,
+ * because the property at risk is the one a single page cannot show: an `order by`
+ * and a resume clause that disagree page correctly *once* and then skip or repeat
+ * at the boundary. `size` and `filename` have no index behind them either
+ * (`0002_asset_refs.sql` says why), so this is also the only assertion that they
+ * page at all.
+ */
+describe('GET /api/assets?sort=', () => {
+  /** Distinct sizes and deliberately un-alphabetical filenames, so every ordering
+   * below is a different sequence and none of them agrees with insertion order. */
+  const fixtures = [
+    { name: 'sorted-zebra.png', padding: 300 },
+    { name: 'sorted-apple.png', padding: 100 },
+    { name: 'sorted-mango.png', padding: 200 },
+  ]
+
+  const ours = <T extends { filename: string }>(rows: T[]) =>
+    rows.filter((r) => r.filename.startsWith('sorted-'))
+
+  beforeAll(async () => {
+    for (const [i, f] of fixtures.entries()) {
+      expect((await upload(f.name, i, f.padding)).status).toBe(201)
+    }
+  })
+
+  it('sorts by filename ascending, the way a file browser shows a folder', async () => {
+    const rows = await walk<{ filename: string }>('/assets?sort=filename', 2)
+    expect(ours(rows).map((r) => r.filename)).toEqual([
+      'sorted-apple.png',
+      'sorted-mango.png',
+      'sorted-zebra.png',
+    ])
+  })
+
+  it('sorts by size DESCENDING, because nobody looks for the smallest file', async () => {
+    // The one direction worth arguing about. Ascending would put a row of tiny
+    // favicons on page one every time; somebody sorting a media library by size is
+    // looking for whatever is making the bucket bigger than they expected.
+    const rows = await walk<{ filename: string; size: number }>('/assets?sort=size', 2)
+    expect(ours(rows).map((r) => r.filename)).toEqual([
+      'sorted-zebra.png',
+      'sorted-mango.png',
+      'sorted-apple.png',
+    ])
+  })
+
+  it('reverses either one with `dir`, which is a column header’s second click', async () => {
+    const byName = await walk<{ filename: string }>('/assets?sort=filename&dir=desc', 2)
+    expect(ours(byName).map((r) => r.filename)).toEqual([
+      'sorted-zebra.png',
+      'sorted-mango.png',
+      'sorted-apple.png',
+    ])
+
+    const bySize = await walk<{ filename: string }>('/assets?sort=size&dir=asc', 2)
+    expect(ours(bySize).map((r) => r.filename)).toEqual([
+      'sorted-apple.png',
+      'sorted-mango.png',
+      'sorted-zebra.png',
+    ])
+  })
+
+  it('defaults to `created`, newest first, when no sort is named', async () => {
+    const dated = await json<Page<{ filename: string; createdAt: number }>>('/assets?limit=200')
+    const defaulted = await json<Page<{ filename: string }>>('/assets?limit=200&sort=created')
+    expect(dated.rows.map((r) => r.filename)).toEqual(defaulted.rows.map((r) => r.filename))
+
+    // Non-increasing timestamps rather than a literal sequence. Every upload in this
+    // file lands in the same millisecond or two, so `created_at` ties and the
+    // tiebreak is `id desc` over a random uuid — an exact expected order here would
+    // pass or fail on the shape of a uuid, which is the definition of a flaky test.
+    // What is actually being asserted is that the ordering *is* the timestamp.
+    const stamps = dated.rows.map((r) => r.createdAt)
+    expect(stamps).toEqual([...stamps].sort((a, b) => b - a))
+    expect(ours(dated.rows)).toHaveLength(3)
+  })
+
+  it('narrows the same way under a filter, so a sort and a search compose', async () => {
+    const page = await json<Page<{ filename: string }>>('/assets?q=sorted-&sort=size&count=1')
+    expect(page.total).toBe(3)
+    expect(page.rows.map((r) => r.filename)).toEqual([
+      'sorted-zebra.png',
+      'sorted-mango.png',
+      'sorted-apple.png',
+    ])
+  })
+
+  it('refuses an unknown sort or dir rather than quietly serving the default', async () => {
+    // A URL that says one thing and shows another is worse than a refusal somebody
+    // can read: `?sort=bytes` is a typo or a stale link, and answering it with
+    // `created` would make the screen lie about what is on it.
+    for (const query of ['sort=bytes', 'sort=SIZE', 'dir=descending']) {
+      const bad = await SELF.fetch(`${API}/assets?${query}`)
+      expect([query, bad.status]).toEqual([query, 400])
+      expect((await bad.json<{ error: { code: string } }>()).error.code).toBe('bad_request')
+    }
+    // An empty value is absence, not a typo — a screen that clears its sort control
+    // should get the default rather than a 400.
+    expect((await SELF.fetch(`${API}/assets?sort=&dir=`)).status).toBe(200)
   })
 })
 

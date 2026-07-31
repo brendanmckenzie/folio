@@ -1,0 +1,292 @@
+/*
+ * The Model screen. Two stacked sections rather than a table plus a sidebar, which
+ * is the whole point of it being a screen — `admin/Migrations.tsx` had 280px and
+ * spent all of it on the migration list, which is why the audit had no surface.
+ *
+ * Nothing here restyles a primitive: the migration list is `Table`, every badge is
+ * `Badge` and both buttons are `Button`. What is here is the page's own vertical
+ * rhythm, the banner, the report's stat grid, and a finding row.
+ */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  /* Wider than Documents' 1400: a finding's detail sentence is prose, and the
+     audit's `document-size` detail runs long by design. */
+  max-width: 1400px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Section headings. Deliberately heavier than `ListHeader`'s 11px uppercase, which
+   is a section *label*: `ui-architecture.md`'s open question 3 found that the
+   greyer of two competing headings was reading as the screen's title, and whichever
+   way that is resolved, the heading inside a screen needs the weight. */
+.heading {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.subheading {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* One paragraph of explanation, at reading measure rather than screen width: a
+   sentence 1400px wide is one nobody's eye can track back from. */
+.note {
+  max-width: 78ch;
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--fg-muted);
+}
+
+.error {
+  max-width: 78ch;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--state-danger-fg);
+}
+
+/* --------------------------------------------------------------- banner --- */
+
+/* In flow, full width, amber. `warn` is drift in `design-system.md`'s palette and
+   that is exactly what a pending migration is: nothing is broken, something is
+   owed. Not `position: sticky` and not an overlay — it must be scrollable past. */
+.banner {
+  max-width: 78ch;
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--state-warn-border);
+  border-radius: var(--radius-md);
+  background: var(--state-warn-bg);
+  color: var(--state-warn-fg);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+/* --------------------------------------------------------------- actions --- */
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+}
+
+/* The count sentence sits left and pushes the buttons right, the same shape
+   Documents' footer uses for `Showing n of N` beside its pager. */
+.behind {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- report --- */
+
+.report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+}
+
+.reportHead {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+/* Batch N. Tabular so a counter climbing from 9 to 10 does not shift the row. */
+.progress {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A grid rather than a list, because these are six numbers to compare rather than
+   six sentences to read. `auto-fit` so it is one row on a wide screen and wraps
+   without a media query. */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+}
+
+.statLabel {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.statValue {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------- findings --- */
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+
+.family {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.familyTitle {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 550;
+  color: var(--fg);
+}
+
+.findings {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* One finding, one line where it fits and wrapping where it does not — a
+   `document-size` detail is a full sentence and truncating it would hide the only
+   number an operator is about to act on. */
+.finding {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-height: var(--row-h);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+}
+
+.finding:hover {
+  background: var(--bg-hover);
+}
+
+.counts {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+/* The per-row varying half of a finding: a field kind, a byte count, a refusal.
+   Short by construction — the shared explanation is the family's paragraph above,
+   which is why this is the only prose on a row. */
+.rowNote {
+  flex: 1 1 24ch;
+  min-width: 0;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+/* One link, two parts: the document's name, and its id. Both inside the anchor, so
+   the accessible name carries both and there is one hit target rather than two. */
+.link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-1);
+  min-width: 0;
+  font-size: var(--text-xs);
+  color: var(--fg-accent);
+  text-decoration: none;
+}
+
+.linkTitle {
+  max-width: 28ch;
+  overflow: hidden;
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The id stays visible even when a title resolved — `design-system.md`'s third
+   commitment, and the practical reason: two pages may share a title. Subdued, since
+   the name is what a person reads and the id is what they quote. */
+.linkId {
+  font-family: var(--font-mono);
+  color: var(--fg-subtle);
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.link:hover .linkId {
+  color: var(--fg-accent);
+}
+
+.link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.more {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+/* --------------------------------------------------------------- loading --- */
+
+/* Skeleton rows, not a spinner. A spinner is for an action in flight and belongs
+   in the button that started it, which is where `Button`'s disabled state puts it. */
+.skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.skeleton {
+  height: var(--row-h);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+}

@@ -63,6 +63,7 @@ export type {
   MigrationStatus,
 } from './migrate'
 export type {
+  AuditOptions,
   AuditReport,
   ContentFinding,
   DocumentSizeFinding,
@@ -359,7 +360,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         opts,
       )
     },
-    audit: (env) =>
-      audit(config.bindings(env).db, rt.schema, { locales: rt.locales, types: rt.types }),
+    audit: (env, opts) =>
+      audit(config.bindings(env).db, rt.schema, { locales: rt.locales, types: rt.types }, opts),
   }
 }

@@ -1,3 +1,11 @@
+/*
+ * The Home screen. Five blocks stacked in one column, at a measure narrow enough
+ * that a row's title, its place and its timestamp are one glance apart rather than
+ * a screen's width apart — which is the opposite of what Content and Documents
+ * wanted from the same port, and the reason this is the one platform screen with a
+ * `max-width`.
+ */
+
 .screen {
   display: flex;
   flex-direction: column;
@@ -12,32 +20,90 @@
   letter-spacing: -0.01em;
 }
 
+/* A block's heading and its one trailing link, on the row height every list header
+   in the admin uses — `List.module.css`'s `.header`, matched rather than imported,
+   because `ListHeader` emits an `<h2>` with no `id` for a section to point at. */
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: var(--row-h);
+  padding: 0 var(--space-2);
+}
+
 .heading {
-  margin: 0 0 var(--space-3);
+  margin: 0;
   font-size: var(--text-xs);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--fg-subtle);
 }
 
+.more {
+  margin-left: auto;
+  font-size: var(--text-sm);
+  color: var(--fg-accent);
+  text-decoration: none;
+}
+
+.more:hover {
+  text-decoration: underline;
+}
+
+.more:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* A block's footnote: the admission on Latest changes, the audit's real scope on
+   Needs attention. Prose, so it wraps rather than truncating. */
+.note {
+  margin: var(--space-2) 0 0;
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  line-height: 1.5;
+  max-width: 70ch;
+}
+
+/* A persistent condition, in flow. Same treatment as Model's, since it is the same
+   sentence about the same ledger. */
+.banner {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--state-warn-border);
+  border-radius: var(--radius-md);
+  background: var(--state-warn-bg);
+  color: var(--state-warn-fg);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------ cards --- */
+
 .cards {
   display: grid;
   /* Auto-fill rather than a fixed column count: the number of cards is the number
-     of document types a host declared, which is not something the CSS can know. */
+     of document types a host declared plus its globals, which is not something the
+     CSS can know. */
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: var(--space-2);
 }
 
+/*
+ * A card is a container, not the link — the link is `.cardFace` inside it, so the
+ * create action can be a real `<button>` beside it rather than nested in an anchor.
+ * The hover and focus treatments therefore live on the container and are driven by
+ * the child, which is what keeps one card reading as one object.
+ */
 .card {
-  display: grid;
-  gap: 2px;
-  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--bg-panel);
-  color: var(--fg);
-  text-decoration: none;
 }
 
 .card:hover {
@@ -45,7 +111,21 @@
   background: var(--bg-hover);
 }
 
-.card:focus-visible {
+.card:focus-within {
+  border-color: var(--border-strong);
+}
+
+.cardFace {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 auto;
+  padding: var(--space-3);
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.cardFace:focus-visible {
+  border-radius: var(--radius-lg);
   outline: 2px solid var(--ring);
   outline-offset: 1px;
 }
@@ -55,7 +135,16 @@
   font-weight: 500;
 }
 
+/*
+ * The number, and the empty line where one would be.
+ *
+ * `min-height` rather than conditional rendering: a global's card has no count by
+ * design and a record's has none until `/counts` answers, and without the reserved
+ * line the notes below would sit at three different heights across one grid and
+ * then jump when the request lands.
+ */
 .cardCount {
+  min-height: 1.2em;
   font-size: var(--text-lg);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
@@ -66,17 +155,156 @@
   color: var(--fg-subtle);
 }
 
-.pending {
-  margin: 0;
-  padding-left: var(--space-4);
-  display: grid;
-  gap: var(--space-2);
-  font-size: var(--text-sm);
-  color: var(--fg-muted);
-  line-height: 1.5;
+.cardAction {
+  display: flex;
+  padding: 0 var(--space-2) var(--space-2);
 }
 
-.pending code {
+/* The file input the upload button clicks. `display: none` takes it out of the tab
+   order and the accessibility tree at once, which is right: the button beside it is
+   the control. */
+.file {
+  display: none;
+}
+
+/* ------------------------------------------------------------------- rows --- */
+
+.stamp {
+  font-size: var(--text-sm);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A document with no title yet. Italic rather than a dash: the row is real and
+   openable, it just has nothing to be called. */
+.untitled {
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+
+/* An actor whose display name could not be resolved. An identifier, typeset as one
+   — `design-system.md`'s third commitment. */
+.actorId {
   font-family: var(--font-mono);
   font-size: var(--text-xs);
+}
+
+/* The live page, in a row's hover-revealed actions. Reachable by keyboard because
+   the row itself is focusable, which makes `.row:focus-visible .actions` fire before
+   Tab reaches inside — the constraint `Table.tsx`'s `actions` comment states. */
+.view {
+  font-size: var(--text-sm);
+  color: var(--fg-accent);
+  text-decoration: none;
+}
+
+.view:hover {
+  text-decoration: underline;
+}
+
+/* ------------------------------------------------------------------ tiles --- */
+
+/*
+ * The same `auto-fill` floor as the Assets grid, so the newest uploads are the same
+ * size here as they are there and the two screens read as one library.
+ */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--space-3);
+  min-width: 0;
+  padding: 0 var(--space-2);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--space-1);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.tile:hover {
+  background: var(--bg-hover);
+}
+
+.tile:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.tileFrame {
+  display: grid;
+  place-items: center;
+  /* A fixed 1:1 frame with `overflow: hidden`, so a row of tiles has one baseline
+     whatever the aspect ratios in it are — a tall image and a wide one would
+     otherwise put their filenames at two different heights. */
+  aspect-ratio: 1;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
+}
+
+.tileImage {
+  width: 100%;
+  height: 100%;
+  /* `cover` in the browser rather than `fit=cover` in the transform query: the crop
+     is free here and would be a second billable Images variant of every file there. */
+  object-fit: cover;
+}
+
+.tileExt {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg-subtle);
+  letter-spacing: 0.04em;
+}
+
+.tileName {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tileMeta {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------- skeletons --- */
+
+/*
+ * Skeleton rows and tiles, never a spinner — a row height is known everywhere
+ * (`--row-h` is fixed), and a spinner is for an action in flight.
+ *
+ * Both are `aria-hidden` at the call site: a live region announcing four empty
+ * placeholders is worse than silence, and the block's heading is already on screen.
+ */
+.skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 var(--space-2);
+}
+
+/* The same flat `--bg-inset` block Content, Documents and Model use — not a shimmer.
+   Four of these animating on one screen would be the busiest thing on a launchpad. */
+.skeleton {
+  height: var(--row-h);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+}
+
+.tileSkeleton {
+  aspect-ratio: 1;
+  border-radius: var(--radius-sm);
+  background: var(--bg-inset);
 }

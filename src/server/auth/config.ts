@@ -155,3 +155,94 @@ export function resolveAuth<Env>(auth: AuthConfig<Env> | OpenAuth | undefined): 
 export function screenScopes(value: unknown): Scope[] {
   return Array.isArray(value) ? value.filter(isScope) : []
 }
+
+/* -------------------------------------------------- describing it to a client --- */
+
+/**
+ * One sign-in provider, **projected** — the four facts that describe it, and
+ * deliberately not the provider object.
+ *
+ * `AuthProvider` carries `send`, `start` and `callback`. Those are the host's own
+ * functions and they are where every credential in an auth configuration lives: a
+ * `send` closes over a mail API key, a `start` over an OIDC client secret. A
+ * spread would *look* safe — `JSON.stringify` drops a function silently — while
+ * carrying every other key a host happened to hang off the object, so the day
+ * somebody writes `{ id, label, redirect, start, clientSecret }` for their own
+ * convenience the secret ships. Naming the fields makes that impossible rather
+ * than unlikely, which is the same rule `presenceOf()` follows for a socket
+ * attachment.
+ */
+export interface AuthPolicyProvider {
+  id: string
+  label: string
+  /** A redirect flow (OIDC) rather than an emailed link. */
+  redirect: boolean
+  /** What happens to an identity the provider verified that matches no user row. */
+  provision: 'refuse' | 'create'
+  /** Role a provisioned user is created with, when `provision` is `'create'`. */
+  provisionRole?: Role
+}
+
+/**
+ * The sign-in providers and session policy, as `GET {base}/api/me` answers them
+ * for the Settings screen (`../../../../docs/ui-architecture.md` decision 6).
+ *
+ * **This lived on the manifest for one commit and that was a security mistake.**
+ * `GET {base}/api/schema` is ungated on purpose, and the licence for that is
+ * narrow: it describes *declarations a client needs before it can authenticate*.
+ * None of this qualifies. `provision` answers "does signing in with any account at
+ * that IdP get me an editor, and at what role" for an unauthenticated stranger,
+ * and `linksPerHour` publishes the exact throttle — neither makes the site more
+ * exploitable (an attacker learns both by trying, and the try succeeds either
+ * way), but both turn something you had to attempt into something you can read,
+ * which is the difference between a posture and a disclosure. `sessionDays` is the
+ * mildest of the three and travels with them rather than splitting a coherent
+ * block across two routes over a judgement call.
+ *
+ * `/me` is the right home for the whole block for one reason: it is the route that
+ * already knows who is asking, and it already refuses an unauthenticated caller in
+ * session mode. The auth **mode** is on the same response for the same reason.
+ */
+export interface AuthPolicy {
+  providers: AuthPolicyProvider[]
+  /** `AuthConfig.sessionDays`, resolved — the default is 30, never absent here. */
+  sessionDays: number
+  /** `AuthConfig.linksPerHour`, resolved. Default 5. */
+  linksPerHour: number
+}
+
+/**
+ * `ResolvedAuth` as a client may see it, or undefined under `auth: 'open'` —
+ * where there are no providers, no session length and no throttle, so absence is
+ * the honest answer rather than a block of zeroes.
+ *
+ * Pure and config-only: no bindings, no actor, no I/O. The *caller* decides who
+ * may see the result, which is why this sits beside `resolveAuth` rather than in
+ * the route — one place builds it, and `routes/auth.ts` is the only place allowed
+ * to hand it out.
+ */
+export function authPolicy(auth: ResolvedAuth<unknown>): AuthPolicy | undefined {
+  if (auth.mode === 'open') return undefined
+  return {
+    providers: auth.config.providers.map((p) => ({
+      id: p.id,
+      label: p.label,
+      redirect: Boolean(p.redirect),
+      provision: provisions(p.provision) ? 'create' : 'refuse',
+      // Only when it would mean something. `provision: 'refuse'` with a role
+      // beside it is a contradiction to read past, not a fact.
+      ...(provisions(p.provision) && p.provision.role ? { provisionRole: p.provision.role } : {}),
+    })),
+    // The *resolved* numbers, not `config.sessionDays` — a screen saying "not set"
+    // where the answer is "30 days" has answered nothing.
+    sessionDays: auth.sessionDays,
+    linksPerHour: auth.linksPerHour,
+  }
+}
+
+/** Narrows `Provisioning` to its object arm, so the two reads above agree. */
+function provisions(
+  provision: Provisioning | undefined,
+): provision is { create: true; role?: Role } {
+  return provision !== undefined && provision !== 'refuse'
+}

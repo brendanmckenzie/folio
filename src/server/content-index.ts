@@ -90,10 +90,17 @@ export function indexStatements(
     // `or ignore`, not a plain insert: the same target can legitimately appear
     // twice in one document (two links to the same page), and the primary key
     // makes the second row a duplicate rather than a second fact.
+    //
+    // `to_id` holds whatever `kind` says: a story id for `link` and `reference`,
+    // an R2 object key for `asset` (`migrations/0002_asset_refs.sql`). Asset rows
+    // land in the same batch as everything else here, which is the property this
+    // file's header is about — the index can never describe a document that is not
+    // published, and that has to be as true of "which pages use this photograph"
+    // as it is of "which pages reference this record".
     const values = refs.map(() => '(?, ?, ?)').join(', ')
     out.push(
       db
-        .prepare(`insert or ignore into content_refs (from_story, to_story, kind) values ${values}`)
+        .prepare(`insert or ignore into content_refs (from_story, to_id, kind) values ${values}`)
         .bind(...refs.flatMap((r) => [storyId, r.to, r.kind])),
     )
   }
@@ -112,6 +119,12 @@ export function indexStatements(
  *
  * A delete is the case where the target stops existing, and it pairs this with
  * `clearInboundRefStatements` in the same batch.
+ *
+ * Asset edges are outbound rows too, so unpublishing a page stops it counting as
+ * a usage of the photograph on it — which is correct without any code here, and is
+ * the reason asset usage was widened into this table rather than given its own
+ * (`migrations/0002_asset_refs.sql`). "Used by N **published** documents" is the
+ * claim the Assets panel makes.
  */
 export function clearIndexStatements(
   db: D1Database,
@@ -126,16 +139,22 @@ export function clearIndexStatements(
 }
 
 /**
- * Drops the *inbound* ref rows for a set of stories: the edges where one of
- * `ids` is the target. What a delete adds on top of `clearIndexStatements`.
+ * Drops the *inbound* ref rows for a set of targets: the edges where one of
+ * `targets` is pointed at. What a delete adds on top of `clearIndexStatements`.
  *
  * The row `(A → B)` is the fact "A names B", and deleting B does not stop A
- * naming it — but nothing reads that fact once B is gone. Both readers of
- * `to_story` (`countReferencesTo`, `referencesTo`) are asked about a document
+ * naming it — but nothing reads that fact once B is gone. Every reader of `to_id`
+ * (`countReferencesTo`, `referencesTo`, `assetReferences`) is asked about a thing
  * somebody is looking at, and `documentUsage` already drops a row whose source
  * has vanished. Left behind, the row is only ever rewritten when A is next
  * published, so a site that never republishes accumulates edges to ids with no
  * document behind them.
+ *
+ * **`targets`, not `ids`, and that is the widening earning its keep**: a deleted
+ * *asset* is exactly the same operation with an R2 key in place of a story id
+ * (`deleteAsset`). No kind filter, deliberately — the statement means "nothing
+ * points at these any more", which is true of every kind of edge at once, and a
+ * key cannot collide with a story id in the first place.
  *
  * Separate from `clearIndexStatements` rather than a flag on it, because the two
  * callers genuinely differ: an unpublish must keep them and a delete must not.
@@ -144,24 +163,28 @@ export function clearIndexStatements(
  */
 export function clearInboundRefStatements(
   db: D1Database,
-  ids: readonly string[],
+  targets: readonly string[],
 ): D1PreparedStatement[] {
-  if (ids.length === 0) return []
-  const placeholders = ids.map(() => '?').join(', ')
-  return [db.prepare(`delete from content_refs where to_story in (${placeholders})`).bind(...ids)]
+  if (targets.length === 0) return []
+  const placeholders = targets.map(() => '?').join(', ')
+  return [db.prepare(`delete from content_refs where to_id in (${placeholders})`).bind(...targets)]
 }
 
 /**
  * How many published documents point at `id`, by kind
  * (`data-documents.md`: "deleting a referenced record warns with a count, and
  * proceeds"). Published references only, which is what the table holds.
+ *
+ * `total` is `links + references` rather than the sum of the group-by, so an
+ * `asset` row could not contribute to it even if a key somehow equalled a story
+ * id. The two namespaces do not overlap, so this is belt over braces.
  */
 export async function countReferencesTo(
   db: D1Database,
   id: string,
 ): Promise<{ total: number; links: number; references: number }> {
   const { results } = await db
-    .prepare('select kind, count(*) as n from content_refs where to_story = ? group by kind')
+    .prepare('select kind, count(*) as n from content_refs where to_id = ? group by kind')
     .bind(id)
     .all<{ kind: string; n: number }>()
   const links = results.find((r) => r.kind === 'link')?.n ?? 0
@@ -233,10 +256,39 @@ export async function referencesTo(
   id: string,
 ): Promise<{ from: string; kind: string }[]> {
   const { results } = await db
-    .prepare(
-      'select from_story as "from", kind from content_refs where to_story = ? order by "from"',
-    )
+    .prepare('select from_story as "from", kind from content_refs where to_id = ? order by "from"')
     .bind(id)
     .all<{ from: string; kind: string }>()
   return results
+}
+
+/**
+ * The published documents using one asset, by its R2 key — the inbound half of
+ * `content_refs` for an `asset` edge (`docs/ui-architecture.md` dependency 4).
+ *
+ * Story ids, unadorned. One row per document rather than per use: the primary key
+ * is `(from_story, to_id, kind)` and every asset edge is one kind, so a page that
+ * embeds a photograph *and* links to it appears once, which is what "used by 4
+ * published pages" counts. `server/assets.ts`'s `assetUsage` turns these into rows
+ * a dialog can name.
+ *
+ * Its own reader rather than `referencesTo(db, key)`, which would in fact return
+ * the same rows — a key cannot collide with a story id, so the kind filter is not
+ * what makes this correct. It exists because a caller asking "who uses this asset"
+ * should not have to know that the answer happens to fall out of a story reader,
+ * and because the `and kind = ?` is the one line that would have to be added if
+ * an asset ever *did* share a namespace with anything else in this column.
+ *
+ * `kind` is bound rather than interpolated, like every other value in this file:
+ * the moment one literal goes inline, the next one is a field name off a request.
+ */
+export async function assetReferences(db: D1Database, key: string): Promise<string[]> {
+  const { results } = await db
+    .prepare(
+      `select from_story as "from" from content_refs
+       where to_id = ? and kind = ? order by "from"`,
+    )
+    .bind(key, 'asset')
+    .all<{ from: string }>()
+  return results.map((row) => row.from)
 }

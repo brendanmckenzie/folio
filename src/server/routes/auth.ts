@@ -18,7 +18,7 @@ import {
   createChallenge,
   recentChallengeCount,
 } from '../auth/challenges'
-import type { AuthProvider, OidcState } from '../auth/config'
+import { type AuthProvider, authPolicy, type OidcState } from '../auth/config'
 import {
   clearOidcCookies,
   clearSessionCookies,
@@ -337,6 +337,15 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * admin asks this on every load and needs to be able to tell "no auth
    * configured here" apart from "not signed in", and only the first of those is
    * a reason to keep the anonymous presence identity it generates itself.
+   *
+   * **It also answers the sign-in policy**, for the Settings screen
+   * (`../../../../docs/ui-architecture.md` decision 6): which providers are
+   * configured, how long a session lasts, and how many links an address may
+   * request per hour. That block briefly lived on the ungated `/api/schema` and
+   * this is where it belongs — `auth/config.ts`'s `AuthPolicy` carries the
+   * argument, and `server/app.ts` states the rule it follows. The route needed no
+   * new gate to hold it: session mode already refuses a caller with no actor two
+   * lines below, and `auth: 'open'` has no policy to describe.
    */
   app.get('/me', async (c) => {
     const credential = credentialOf(c.req.raw)
@@ -361,7 +370,16 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
               role: actor.role,
             }
           : { kind: 'token' as const, id: actor.id, name: actor.name, scopes: actor.scopes }
-    return c.json({ mode: rt.auth.mode, actor: safe, loginUrl: `${rt.base}/login` })
+    // Omitted rather than null under `auth: 'open'`, where there are no providers,
+    // no session length and no throttle: absence is the honest answer, and a block
+    // of zeroes would be a policy the screen would then have to explain away.
+    const policy = authPolicy(rt.auth)
+    return c.json({
+      mode: rt.auth.mode,
+      actor: safe,
+      loginUrl: `${rt.base}/login`,
+      ...(policy ? { policy } : {}),
+    })
   })
 
   return app

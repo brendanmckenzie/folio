@@ -13,10 +13,13 @@
  * - `upsertRedirect` is a single `insert or replace` for a redirect an editor adds
  *   by hand. There is no path being vacated here, so the three-statement collapse
  *   does not apply — running it would silently rewrite or delete unrelated rows
- *   just because they happened to share a `to_path`. The two checks a caller
- *   (the POST route) must run first — a live story occupying `from`, a target
- *   that already redirects back to `from` — are what keep a manual add from
- *   creating a trap, not a rewrite of rows nobody asked to touch.
+ *   just because they happened to share a `to_path`. The three checks a caller
+ *   (the POST route) must run first — `from` equal to `to`, a live story
+ *   occupying `from`, a target that already redirects back to `from` — are what
+ *   keep a manual add from creating a trap, not a rewrite of rows nobody asked
+ *   to touch. Note that `redirectStatements` needs only the first of the three,
+ *   and gets it for free in its own guard below: the other two cannot arise from
+ *   a path that a write has just this moment vacated.
  */
 import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
 import { isSafeHref } from '../core/values'
@@ -36,6 +39,21 @@ const COLS = `from_path as "from", to_path as "to", status, source, story_id as 
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i
 
 /**
+ * Is this an absolute URL rather than a path on this site?
+ *
+ * The one predicate for the question, asked by `normaliseTarget` below and by the
+ * admin's Redirects screen — which needs it twice: to render an off-site target
+ * whole instead of rooting it at `/`, and to refuse a `from` written as a full URL
+ * before the round trip. Deriving it from `normaliseTarget`'s output instead was
+ * the first attempt and it is wrong in the ordinary case: a lowercase URL with no
+ * trailing slash survives `normalisePath` unchanged, so the two agree and the test
+ * says "path".
+ */
+export function isAbsoluteTarget(input: string): boolean {
+  return SCHEME.test(input.trim())
+}
+
+/**
  * The same rule `stories.path` follows (server/index.tsx), applied identically
  * to a write and a lookup so trailing-slash and case variants of a path hit the
  * same row: no leading or trailing slash, lowercased, query string stripped.
@@ -52,10 +70,16 @@ export function normalisePath(input: string): string {
  * domain and an external path are not `stories.path` and case can matter there.
  * Only the query string is stripped, matching decision 3: the host reattaches
  * `url.search` itself.
+ *
+ * Exported because the POST route has to compare a typed `to` against a typed
+ * `from` to refuse a self-redirect, and comparing the *raw* strings is not the
+ * same test: `/Offers/` and `offers` are one row here and two strings anywhere
+ * else. A second copy of this rule in the route would be a second answer to
+ * "are these the same target".
  */
-function normaliseTarget(input: string): string {
+export function normaliseTarget(input: string): string {
   const trimmed = input.trim()
-  if (SCHEME.test(trimmed)) return trimmed.split('?')[0] ?? trimmed
+  if (isAbsoluteTarget(trimmed)) return trimmed.split('?')[0] ?? trimmed
   return normalisePath(trimmed)
 }
 
@@ -141,6 +165,22 @@ export async function lookupRedirect(
 export interface ListRedirectsOptions {
   limit?: number
   source?: 'auto' | 'manual'
+  /**
+   * Substring match over **both** paths, because both are questions a person
+   * asks of this table: "what happens to /old-services" is a `from` search and
+   * "what still points at /offers" is a `to` search, and a redirect is the one
+   * kind of row where the second matters as much as the first. Nothing on the
+   * screen distinguishes which side matched, and it does not need to — both
+   * columns are on the row.
+   */
+  q?: string
+  /**
+   * Adds `total` for the same filter — one extra `count(*)`, only when asked
+   * (`../../../docs/specs/foundation/pagination.md` decision 5). The Redirects
+   * screen's header asks, because `Showing n of N` is the paging control
+   * (`ui-architecture.md` Resolved 5); a caller walking the cursor should not.
+   */
+  count?: boolean
   /** Opaque cursor from a previous page's `RedirectPage.cursor`. */
   cursor?: string
 }
@@ -167,6 +207,12 @@ export type RedirectPage = Page<Redirect>
  * The cursor's components are `(created_at, from_path)`, in the same order as the
  * `order by` below, which is the correspondence `paginate` cannot check for a
  * caller.
+ *
+ * **One ordering, and there is no `sort` parameter.** Newest first is the only
+ * thing this table is ever read in: the cursor is `(created_at, from_path)` and a
+ * second ordering means a second keyset with its own tie-breaking, for a column
+ * (`from`, alphabetically) that the screen's search box already answers better —
+ * you look for a path, you do not scroll to it.
  */
 export async function listRedirects(
   db: D1Database,
@@ -179,27 +225,54 @@ export async function listRedirects(
   // is the right answer for that path: `folio.redirects()` passing nonsense is a
   // programming error, and a first page is a better failure than an exception in a
   // host's own handler.
-  const clauses: string[] = []
-  const params: unknown[] = []
+
+  // `narrow` is the filter and `narrow` alone is what the count counts: a
+  // `count(*)` that also carried the cursor clause would answer "how many rows are
+  // left" rather than "how many match", and the header reads `n of N` where N is
+  // the whole filter. The same split `listStoryLevel` makes, for the same reason.
+  const narrow: string[] = []
+  const narrowBinds: unknown[] = []
   if (opts.source) {
-    clauses.push('source = ?')
-    params.push(opts.source)
+    narrow.push('source = ?')
+    narrowBinds.push(opts.source)
   }
+  if (opts.q) {
+    // The same unescaped `like` `storyFilters` uses, deliberately: `%` and `_` in
+    // a search term are the user's wildcards rather than an injection (the term is
+    // a bound parameter), and making them literal here alone would leave the two
+    // search boxes in the admin behaving differently.
+    const like = `%${opts.q}%`
+    narrow.push('(from_path like ? or to_path like ?)')
+    narrowBinds.push(like, like)
+  }
+
+  const clauses = [...narrow]
+  const params = [...narrowBinds]
   if (cursor) {
     const [createdAt, from] = cursor
     clauses.push('(created_at < ? or (created_at = ? and from_path < ?))')
     params.push(createdAt, createdAt, from)
   }
-  const where = clauses.length ? `where ${clauses.join(' and ')}` : ''
+  const whereOf = (parts: readonly string[]) => (parts.length ? `where ${parts.join(' and ')}` : '')
 
-  const { results } = await db
-    .prepare(
-      `select ${COLS} from redirects ${where} order by created_at desc, from_path desc limit ?`,
-    )
-    .bind(...params, limit + 1)
-    .all<Redirect>()
+  const [rows, total] = await Promise.all([
+    db
+      .prepare(
+        `select ${COLS} from redirects ${whereOf(clauses)}
+         order by created_at desc, from_path desc limit ?`,
+      )
+      .bind(...params, limit + 1)
+      .all<Redirect>(),
+    opts.count
+      ? db
+          .prepare(`select count(*) as n from redirects ${whereOf(narrow)}`)
+          .bind(...narrowBinds)
+          .first<{ n: number }>()
+      : null,
+  ])
 
-  return paginate(results, limit, (row) => [row.createdAt, row.from])
+  const page = paginate(rows.results, limit, (row) => [row.createdAt, row.from])
+  return total ? { ...page, total: total.n } : page
 }
 
 export interface UpsertRedirectInput {

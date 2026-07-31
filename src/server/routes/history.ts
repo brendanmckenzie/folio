@@ -11,7 +11,7 @@ import { checkpoint } from '../publish'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
 import { CheckpointBody, idParam, limitParam, parseOptionalBody, requireCursor } from '../validate'
-import { getVersion, listVersions } from '../versions'
+import { getVersion, listRecentPublishes, listVersions } from '../versions'
 
 export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
@@ -90,6 +90,35 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         .stub(c.var.bindings(), c.var.story.id)
         .recent(limitParam(c.req.query('limit'), 60, 200), cursor),
     )
+  })
+
+  /**
+   * The most recent publishes across the whole site — Home's *Latest published*
+   * block (`ui-architecture.md` dependency 5).
+   *
+   * Here rather than on the stories routes because it reads `versions`, and that is
+   * what this file is: the two halves of history, deliberately not conflated. A
+   * publish is a version row, so "what went live lately" is a question about this
+   * table and not about `stories`.
+   *
+   * `READ`, matching the versions route above it: it reports on content that is
+   * published, so there is nothing here a reader could not already fetch.
+   */
+  app.get('/published', requireAccess<Env>(rt, READ), async (c) => {
+    const cursor = c.req.query('cursor')
+    requireCursor(cursor)
+    const page = await listRecentPublishes(c.var.bindings().db, {
+      limit: limitParam(c.req.query('limit'), 20, 100),
+      cursor,
+    })
+    // `withUrls` over the **story** half of each row, so a block can link to the
+    // live page. A URL is the host's own `route()` answer, so neither this route nor
+    // the reader derives one — which is also why `RecentPublish` keeps the whole
+    // `StoryMeta` rather than just the path it would need to fake it.
+    return c.json({
+      ...page,
+      rows: page.rows.map((row) => ({ ...row, story: rt.withUrls(row.story) })),
+    })
   })
 
   return app

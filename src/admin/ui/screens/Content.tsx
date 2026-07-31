@@ -303,7 +303,7 @@ export function Content(props: Props) {
   if (error && stories.length === 0) {
     return (
       <div className={css.screen}>
-        <ListHeader>Content</ListHeader>
+        <ListHeader level={1}>Content</ListHeader>
         <EmptyState
           title="Could not load the page tree"
           body={error}
@@ -320,6 +320,7 @@ export function Content(props: Props) {
   return (
     <div className={css.screen}>
       <ListHeader
+        level={1}
         actions={
           <>
             <input

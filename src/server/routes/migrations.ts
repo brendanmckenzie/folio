@@ -9,12 +9,12 @@
  */
 import { Hono } from 'hono'
 import { actorString, ADMIN, READ_DRAFT } from '../auth/roles'
-import { audit } from '../audit'
+import { audit, DEFAULT_AUDIT_BATCH, MAX_AUDIT_BATCH } from '../audit'
 import { migrationStatus, runMigrations } from '../migrate'
 import { hookCtx, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
-import { idParam, MigrateBody, parseOptionalBody } from '../validate'
+import { idParam, limitParam, MigrateBody, parseOptionalBody } from '../validate'
 
 export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
@@ -87,10 +87,32 @@ export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * checks (`../content-model/collections.md`) are config-dependent, and a route
    * that answered differently from the method would be a report nobody could
    * trust.
+   *
+   * **Batched, like `/migrate` above** (`../../../../docs/specs/foundation/
+   * pagination.md`'s route table): `?continueFrom=&batch=` reads one window of
+   * published documents and answers a cursor, and the client merges the reports.
+   * It read the whole table until the admin's Model screen was built on it, which
+   * is the one place a read-only report can still take a Worker down.
+   *
+   * `continueFrom` is an `idParam` and a bad one is a 400 — it names a story, so
+   * unlike an opaque keyset cursor it can be checked without decoding. `batch`
+   * clamps rather than refusing, per `limitParam`: an out-of-range limit is a
+   * stale bookmark with an obvious right answer.
    */
-  app.get('/audit', requireAccess<Env>(rt, ADMIN), async (c) =>
-    c.json(await audit(c.var.bindings().db, rt.schema, { locales: rt.locales, types: rt.types })),
-  )
+  app.get('/audit', requireAccess<Env>(rt, ADMIN), async (c) => {
+    const raw = c.req.query('continueFrom')
+    return c.json(
+      await audit(
+        c.var.bindings().db,
+        rt.schema,
+        { locales: rt.locales, types: rt.types },
+        {
+          continueFrom: raw === undefined ? null : idParam('continueFrom', raw),
+          batch: limitParam(c.req.query('batch'), DEFAULT_AUDIT_BATCH, MAX_AUDIT_BATCH),
+        },
+      ),
+    )
+  })
 
   return app
 }

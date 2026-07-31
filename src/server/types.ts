@@ -25,7 +25,7 @@ import type { StoryMeta, StoryNode } from '../core/story'
 import type { AuthConfig, OpenAuth } from './auth/config'
 import type { Actor } from './auth/roles'
 import type { FolioHooks } from './hooks'
-import type { AuditReport } from './audit'
+import type { AuditOptions, AuditReport } from './audit'
 import type { MigrateOptions, MigrateReport } from './migrate'
 import type { ReindexOptions, ReindexReport } from './reindex'
 import type { ResolveOptions } from './runtime'
@@ -423,12 +423,17 @@ export interface Folio<Env> {
   migrate: (env: Env, opts?: MigrateOptions) => Promise<MigrateReport>
   /**
    * The drift report (`schema-migrations.md` decision 7): orphaned keys, unknown
-   * block types and missing fields across every *published* document, plus the
-   * schema-only checks. Read-only — nothing is modified, and it is deliberately
-   * not part of the migrate path, since an audit that runs as a side effect of a
-   * write is an audit nobody reads.
+   * block and document types, missing fields and document size across the
+   * *published* documents, plus the schema-only checks. Read-only — nothing is
+   * modified, and it is deliberately not part of the migrate path, since an audit
+   * that runs as a side effect of a write is an audit nobody reads.
+   *
+   * **Batched like `migrate`**: one call reads up to `opts.batch` published
+   * documents and answers `continueFrom`; re-call with it until it is null and add
+   * the tallies up. A caller that stops early has audited a prefix of the site, so
+   * `documents` and every count are that prefix's.
    */
-  audit: (env: Env) => Promise<AuditReport>
+  audit: (env: Env, opts?: AuditOptions) => Promise<AuditReport>
 }
 
 /**

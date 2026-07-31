@@ -83,10 +83,31 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // else, so a token and a session cookie are resolved by the same middleware.
   app.route(`/api/${API_VERSION}`, apiRoutes<Env>(rt))
 
-  // The manifest is derived from the config alone: no bindings, no I/O, no way for
-  // the host's environment to turn this into a 500. Deliberately ungated — it
-  // describes the code, not the content, and the admin bundle needs it before it
-  // can render a sign-in prompt of its own.
+  /**
+   * The manifest is derived from the config alone: no bindings, no I/O, no way for
+   * the host's environment to turn this into a 500. Deliberately ungated, because
+   * the admin bundle needs it before it can render a sign-in prompt of its own.
+   *
+   * **The rule for what may go in it, since "it describes the code, not the
+   * content" has already been read too widely once.** The manifest carries the
+   * *declarations a client needs before it can authenticate* — document types,
+   * block schemas, locales, globals, declared publish hooks. **Anything that
+   * describes a security decision belongs behind `withActor` instead, however
+   * configuration-shaped it looks.**
+   *
+   * The case that set the rule: sign-in providers and session policy were added
+   * here for the Settings screen and taken straight back out. `provision` told an
+   * unauthenticated stranger whether any account at the configured IdP becomes an
+   * editor and at what role, and `linksPerHour` published the exact throttle on
+   * the sign-in flow. Neither made the site more exploitable — an attacker learns
+   * both by trying — but both turned something you had to attempt into something
+   * you could read, and a public route is the wrong place to answer either. They
+   * live on `GET {base}/api/me` now, which is the route that already knows who is
+   * asking; `auth/config.ts`'s `AuthPolicy` carries the argument in full.
+   *
+   * So, before adding a field here: would you be content to see it in an
+   * unauthenticated `curl`? If the answer needs a caveat, it goes on `/me`.
+   */
   app.get('/api/schema', (c) => c.json(rt.manifest))
 
   // (2) Inside `/api`, `/login/verify` has no counterpart to be confused with, but

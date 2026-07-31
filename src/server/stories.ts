@@ -624,6 +624,90 @@ export async function listSingletons(
   return rows
 }
 
+/* ------------------------------------------------------- site-wide recency --- */
+
+/**
+ * The most recently edited documents, **across every type** — pages, records and
+ * singletons together.
+ *
+ * `ui-architecture.md` dependency 5, and the other half of what Home's *Latest
+ * changes* block is. `listStoriesFlat` looks like it already answers this and does
+ * not: it filters `path is not null`, so it is every routed *page*. "What was
+ * touched last" on a site whose editors spend the afternoon on People has to
+ * include People.
+ *
+ * That one dropped clause is the whole difference in the SQL and the whole point of
+ * the reader existing separately rather than gaining a flag. A `routed?: boolean`
+ * option on `listStoriesFlat` would have been smaller and would have made the flat
+ * *screen* one boolean away from silently listing records in the page tree's twin —
+ * which is exactly the confusion `path is not null` exists to prevent.
+ *
+ * Ordered by the `edited` coalesce, so `stories_edited` covers it with no new index:
+ * `draft_updated_at` is null until a document's first debounced write, and SQLite
+ * sorts nulls last under `desc`, so the bare column would put a document created
+ * five minutes ago below one last edited three years ago. The same rule
+ * `content-rows.ts`'s `when()` states in TypeScript and `ORDERS.edited` states in
+ * SQL, and the reason both say so out loud.
+ */
+export async function listRecentlyEdited(
+  db: D1Database,
+  opts: StoryPageOptions = {},
+): Promise<Page<StoryMeta>> {
+  const limit = clampLimit(opts.limit, 20, 100)
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
+  const keyset = ORDERS.edited
+  const resume = keysetWhere(keyset, cursor)
+  const filters = storyFilters(opts.filter)
+
+  const [rows, total] = await Promise.all([
+    db
+      .prepare(
+        `select ${COLS} from stories ${whereOf(...filters.sql, resume.sql)} ${orderBy(keyset)} limit ?`,
+      )
+      .bind(...filters.binds, ...resume.binds, limit + 1)
+      .all<StoryRow>(),
+    opts.count
+      ? db
+          .prepare(`select count(*) as n from stories ${whereOf(...filters.sql)}`)
+          .bind(...filters.binds)
+          .first<{ n: number }>()
+      : null,
+  ])
+
+  const page = paginate(rows.results.map(withState), limit, (row) => keyOf('edited', row))
+  return total ? { ...page, total: total.n } : page
+}
+
+/**
+ * How many documents match a filter, and nothing else.
+ *
+ * Home's quick-access cards want a number per type and no rows at all. Asking the
+ * list route for `?limit=1&count=1` answers it and pays for a row nobody draws plus
+ * a cursor nobody follows — which is what Home's page-count card does today, and it
+ * is fine for one card and wrong for one per declared type.
+ *
+ * The same `count(*)` the list routes run, over the same `storyFilters`, so the
+ * number on a card and the number in `Showing n of N` cannot disagree — which is the
+ * property `pagination.md` decision 5 asks for when it says one count implementation
+ * serves the header and the bulk guard.
+ */
+export async function countStories(
+  db: D1Database,
+  filter?: StoryFilter,
+  /** `true` for routed pages only, `false` for unrouted documents only, absent for
+   * every document. The tree and the Documents screen are different lists and a
+   * card for each has to be able to say which it means. */
+  routed?: boolean,
+): Promise<number> {
+  const filters = storyFilters(filter)
+  const scope = routed === undefined ? '' : routed ? 'path is not null' : 'path is null'
+  const row = await db
+    .prepare(`select count(*) as n from stories ${whereOf(scope, ...filters.sql)}`)
+    .bind(...filters.binds)
+    .first<{ n: number }>()
+  return row?.n ?? 0
+}
+
 /* ------------------------------------------------------------------ search --- */
 
 export interface SearchOptions extends StoryPageOptions {
@@ -765,7 +849,23 @@ export async function documentUsage(db: D1Database, id: string): Promise<Documen
   const [counts, rows] = await Promise.all([countReferencesTo(db, id), referencesTo(db, id)])
   if (rows.length === 0) return { published: [], total: 0, links: 0, references: 0 }
 
-  const sources = await storiesFor(db, [...new Set(rows.map((r) => r.from))])
+  /**
+   * `storiesForChunked`, not `storiesFor` — and the difference is a real bug rather
+   * than a tidy-up.
+   *
+   * `storiesFor` binds every id in one statement. Outbound edges are capped at
+   * `MAX_ROWS` (400) per document by `indexStatements`, so the *from* side of this
+   * table is bounded; **inbound edges are not capped by anything.** A record every
+   * page on the site references — an office in a footer, a person in a byline — has
+   * as many inbound edges as there are pages, and this is the reader behind a delete
+   * confirmation, which is exactly when somebody is looking at a heavily referenced
+   * document. Past D1's bind limit the query fails, so the dialog reports an error
+   * on the one document where the warning matters most.
+   *
+   * Found by the agent building asset usage, which hit the same shape and reached for
+   * the chunked reader from the start.
+   */
+  const sources = await storiesForChunked(db, [...new Set(rows.map((r) => r.from))])
   const byId = new Map(sources.map((s) => [s.id, s]))
 
   const published: UsageRef[] = []
@@ -948,23 +1048,16 @@ export function stampSchemaStatement(
         .bind(schemaId, JSON.stringify(publishedDoc), id)
 }
 
-/**
- * Every published document, for the drift audit (`schema-migrations.md`
- * decision 7). One query, no Durable Objects: the audit reports on what the
- * site is *serving*, which is the copy an operator can see is wrong.
+/*
+ * `publishedDocsAll` was here — every published document in one query, for the drift
+ * audit. It is **deleted**: `GET {base}/api/audit` walks `publishedDocsAfter` over a
+ * `continueFrom` cursor now (port phase 5), so its only caller is gone.
+ *
+ * It was also the last of the five unbounded reads `pagination.md` opened with, and
+ * the one that survived longest because the audit is an operator's tool rather than a
+ * screen — which is precisely the argument for paging it: an operator runs it on the
+ * site that has a problem, and that is the big one.
  */
-export async function publishedDocsAll(
-  db: D1Database,
-): Promise<{ id: string; type: string; doc: Doc }[]> {
-  const { results } = await db
-    .prepare('select id, type, published_doc from stories where published_doc is not null')
-    .all<{ id: string; type: string; published_doc: string }>()
-  return results.map((row) => ({
-    id: row.id,
-    type: row.type,
-    doc: JSON.parse(row.published_doc) as Doc,
-  }))
-}
 
 /**
  * One batch of published documents, in `id` order, starting after `after` —
@@ -979,7 +1072,7 @@ export async function publishedDocsAfter(
   db: D1Database,
   after: string | null,
   limit: number,
-): Promise<{ id: string; type: string; doc: Doc }[]> {
+): Promise<PublishedDocRow[]> {
   const { results } = await db
     .prepare(
       `select id, type, published_doc from stories
@@ -992,6 +1085,23 @@ export async function publishedDocsAfter(
     type: row.type,
     doc: JSON.parse(row.published_doc) as Doc,
   }))
+}
+
+/**
+ * One published document as a batch reader hands it over.
+ *
+ * Deliberately **no `title`**, even though the audit panel wants one to label a
+ * finding's link with. Adding it here was the first attempt and it was the wrong
+ * place: it denormalises a column into a reporting module that has no other use for
+ * it, and `reindex` — the other caller — would carry the wider projection for nothing.
+ * `GET {base}/api/stories?ids=` already resolves a batch of ids to rows, chunked, and
+ * exists for exactly this (`pagination.md` decision 7), so the *screen* resolves the
+ * ids it is about to draw.
+ */
+export interface PublishedDocRow {
+  id: string
+  type: string
+  doc: Doc
 }
 
 /**

@@ -1,0 +1,186 @@
+/*
+ * The Redirects screen. Thin, like Documents': the table is `Table.module.css`, the
+ * dialogs are `Dialog.module.css`, and the chips, search box and footer are the same
+ * objects Content and Documents already have — which is the point of a fixed
+ * primitive set rather than a per-screen stylesheet.
+ *
+ * What is here that the other two do not need is `.path`: this screen is two
+ * columns of paths and nothing else, so `design-system.md`'s third commitment (an
+ * identifier is a typographic citizen, set in mono and treated as content) is not a
+ * detail of one cell here, it is the screen's texture.
+ */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 1400px;
+}
+
+.search {
+  height: 26px;
+  width: 200px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.search:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
+  border-color: var(--fg-accent);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+/* The same fieldset reset Content and Documents need, and for the same reason: a
+   group of related controls is a `<fieldset>` with a hidden `<legend>` per Biome's
+   `useSemanticElements`, and a bare one arrives with a border, a margin and a legend
+   rendered inside that border. Not optional — without it the chip row grows a box
+   nobody asked for. */
+.controls fieldset {
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  border: 0;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.chip {
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* Inverted rather than tinted, the same rule Documents' chips follow: a chip must
+   not be a second thing wearing a state hue. */
+.chipOn {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--fg-inverse);
+}
+
+/* ------------------------------------------------------------------- cells --- */
+
+/* A path or an absolute URL. Full contrast rather than muted: this is the content of
+   the row, not an annotation on it. Truncates with an ellipsis and keeps its title,
+   because an off-site URL can be arbitrarily long and a table that reflows on one
+   row is worse than one that clips it. */
+.path {
+  display: inline-block;
+  max-width: 42ch;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--fg);
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.status {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-muted);
+}
+
+.stamp {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-1);
+  justify-content: flex-end;
+}
+
+/* ------------------------------------------------------------------ layout --- */
+
+.skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.skeleton {
+  height: var(--row-h);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+}
+
+.pager {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* ----------------------------------------------------------------- dialogs --- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.dialogNote {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
