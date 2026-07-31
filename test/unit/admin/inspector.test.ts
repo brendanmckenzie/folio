@@ -1,11 +1,26 @@
 import { describe, expect, it } from 'vitest'
-import { fieldWatchers, visibleEntries, watcherLabel } from '../../../src/admin/Inspector'
+import { externalUpdate } from '../../../src/admin/ui/screens/fields/useRichtext'
+import {
+  fieldWatchers,
+  visibleEntries,
+  watcherLabel,
+} from '../../../src/admin/ui/screens/inspector-model'
 import type { Field } from '../../../src/core/fields'
-import { externalUpdate } from '../../../src/admin/RichTextInput'
 import type { Presence } from '../../../src/core/protocol'
 
+/*
+ * The inspector's model, in Node.
+ *
+ * Until port phase 8 the three describes below ran against `admin/Inspector.tsx`
+ * and a fourth asserted that `inspector-model.ts` answered identically — the
+ * duplication was deliberate while both panels existed. The old panel is deleted, so
+ * they point at the surviving copy and the comparison went with its other half.
+ * `externalUpdate` came the same way, out of `admin/RichTextInput.tsx` and into
+ * `screens/fields/useRichtext.ts`.
+ */
+
 // conditional-fields.md's architecture decision 2: the filter happens once,
-// in the parent. `FieldInput` never learns about visibility, so these tests
+// in the parent. `FieldRow` never learns about visibility, so these tests
 // cover `visibleEntries` directly rather than mounting the component.
 
 const layout: Field = {
@@ -202,30 +217,19 @@ describe('externalUpdate', () => {
 })
 
 /* ===========================================================================
- * Port phase 7b: `admin/ui/screens/inspector-model.ts`
- *
- * The new panel's own model. The describes above cover `admin/Inspector.tsx`,
- * which still serves `{base}/edit/:id` until the whole of phase 7 lands; these
- * cover the copy that `admin/ui/screens/Inspector.tsx` reads, plus the five
- * things that are genuinely new there — `controlFor`, `isEditable`,
- * `writeLocale`, `canFocus` and the focus-mode measure.
- *
- * Both sets exist on purpose. When the old admin is deleted the describes above
- * go with it, and nothing below has to move.
+ * The five things port phase 7b added rather than ported — `controlFor`,
+ * `isEditable`, `writeLocale`, `canFocus` and the focus-mode measure — plus the
+ * locale arithmetic the old panel had too.
  * ========================================================================= */
 
-import type { Blok, Json } from '../../../src/core/doc'
+import type { Blok } from '../../../src/core/doc'
 import type { SchemaIndex } from '../../../src/core/schema'
 import {
-  boundValue,
   canFocus,
   FOCUS_MEASURE_CH,
-  fieldMode,
   isEditable,
   isReadableMeasure,
   sourceText,
-  visibleEntries as visibleEntriesNew,
-  watcherLabel as watcherLabelNew,
   writeLocale,
 } from '../../../src/admin/ui/screens/inspector-model'
 
@@ -239,80 +243,12 @@ const blok = (over: Partial<Blok> = {}): Blok => ({
   ...over,
 })
 
-describe('inspector-model: the port is a copy, not a rewrite', () => {
-  /**
-   * The load-bearing property of the duplication: the two files answer
-   * identically, so the new panel cannot draw a different set of fields from
-   * the one the old panel drew for the same block.
-   */
-  it('draws the same fields the old inspector drew', () => {
-    const cases: Record<string, Json>[] = [
-      {},
-      { layout: 'split' },
-      { layout: 'split', image: 'x.png' },
-      { layout: 'full', image: 'x.png' },
-    ]
-    for (const data of cases) {
-      expect(visibleEntriesNew(fields, data).map(([n]) => n)).toEqual(
-        visibleEntries(fields, data).map(([n]) => n),
-      )
-    }
-  })
-
-  it('says the same thing about a peer ring', () => {
-    const peer = ann({ uid: 'hero', field: 'heading' }, 'fr')
-    expect(watcherLabelNew(peer, null)).toBe(watcherLabel(peer, null))
-    expect(watcherLabelNew(peer, 'fr')).toBe(watcherLabel(peer, 'fr'))
-  })
-})
-
 /*
- * localisation.md decision 4 and its resolved open question. Three states, and
- * they are exhaustive — the whole reason `fieldMode` is a named function rather
- * than two inline conditions.
+ * `fieldMode` and `boundValue` are covered in `localisation.test.ts`, which holds the
+ * richer set — it exercises every field kind through `core/fields`' builders. Both
+ * used to be tested twice because there were two implementations; port phase 8 left
+ * one, so the thinner copy of the tests went with the thinner copy of the function.
  */
-describe('fieldMode / boundValue', () => {
-  const translatable: Field = { kind: 'text', translatable: true }
-  const shared: Field = { kind: 'text' }
-
-  it('is source on the source locale, whatever the field says', () => {
-    expect(fieldMode(translatable, true)).toBe('source')
-    expect(fieldMode(shared, true)).toBe('source')
-  })
-
-  it('splits translatable from shared off the source locale', () => {
-    expect(fieldMode(translatable, false)).toBe('translate')
-    expect(fieldMode(shared, false)).toBe('shared')
-  })
-
-  /**
-   * The property worth pinning on its own: a `translate` input reads the raw
-   * locale map, so an untranslated field is *empty* and never the fallback. An
-   * input pre-filled with the English would copy it into the translation the
-   * moment somebody typed one character, and "untranslated" would become
-   * unreachable.
-   */
-  it('binds a translation to the locale’s own raw value, never the fallback', () => {
-    const b = blok({ data: { heading: 'Hello' }, i18n: { fr: {} } })
-    expect(boundValue(b, 'heading', 'translate', 'fr')).toBeNull()
-    expect(boundValue(b, 'heading', 'source', 'fr')).toBe('Hello')
-    // A shared field is bound to the source so it is legible, and disabled so it
-    // cannot be written — the editor half of decision 4's asymmetry.
-    expect(boundValue(b, 'heading', 'shared', 'fr')).toBe('Hello')
-  })
-
-  it('binds a real translation once it exists', () => {
-    const b = blok({ data: { heading: 'Hello' }, i18n: { fr: { heading: 'Bonjour' } } })
-    expect(boundValue(b, 'heading', 'translate', 'fr')).toBe('Bonjour')
-  })
-
-  /** Decision 5: `''` is a deliberate emptiness and survives. */
-  it('treats a deliberately empty translation as a translation', () => {
-    const b = blok({ data: { heading: 'Hello' }, i18n: { fr: { heading: '' } } })
-    expect(boundValue(b, 'heading', 'translate', 'fr')).toBe('')
-  })
-})
-
 describe('isEditable / writeLocale', () => {
   it('is two independent refusals about two different things', () => {
     expect(isEditable('source', false)).toBe(true)

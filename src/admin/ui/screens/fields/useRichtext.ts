@@ -15,7 +15,6 @@ import {
   sanitiseRichtext,
 } from '../../../../core/richtext'
 import { asLink } from '../../../../core/values'
-import { externalUpdate } from '../../../RichTextInput'
 
 /**
  * The prose editor itself: one TipTap instance, its schema built from the field's
@@ -32,12 +31,55 @@ import { externalUpdate } from '../../../RichTextInput'
  * `store.tx` per keystroke serve both — there is no second editor to disagree with
  * the first.
  *
- * `externalUpdate` is imported from `admin/RichTextInput.tsx` rather than copied: it
- * is the three-way decision `live-collaboration.md` phase 4 turns on and it is
- * already pinned by `test/unit/admin/inspector.test.ts`. `extensionsFor` and
- * `FolioLink` below *are* copied, because that file does not export them and port
- * phase 7b may not edit it.
+ * `externalUpdate` was imported from `admin/RichTextInput.tsx` rather than copied
+ * while both admins existed, and **moved here when port phase 8 deleted that file**.
+ * It is the three-way decision `live-collaboration.md` phase 4 turns on and it stays
+ * pinned by `test/unit/admin/inspector.test.ts`. `extensionsFor` and `FolioLink`
+ * below were copied instead, because that file did not export them and port phase 7b
+ * could not edit it; they are now the only versions there are.
  */
+
+/**
+ * What to do with a value that arrived from outside this editor
+ * (`../../../../../docs/specs/editing/live-collaboration.md` phase 4, step 1).
+ *
+ * Three answers, and the middle one is the whole point of this spec's phase 4:
+ *
+ *   - `'ignore'` — it is what this editor already holds. Either the round trip of
+ *     our own keystroke or a value the surface already shows; pushing it in would
+ *     reset the caret for nothing.
+ *   - `'defer'` — it differs, **and this field has focus**. Pushing it in calls
+ *     `setContent`, which resets the selection, so a peer typing in the same
+ *     richtext field would yank the caret out of the middle of your sentence.
+ *     Held instead, and applied on blur.
+ *   - `'apply'` — it differs and nobody is typing here. Exactly the pre-v4
+ *     behaviour: another editor over the socket, an undo, or a version restore.
+ *
+ * This is not a merge and does not pretend to be one: last write still wins
+ * (CRDTs are out of scope, and `README.md` says why). What it fixes is that
+ * last-write-wins was *unusable* with two people in one prose field, rather than
+ * merely lossy — and it costs nothing, because the deferred value is never
+ * snapshotted. `'defer'` simply skips this pass; the effect re-runs on blur and
+ * reads whatever the authoritative value is by then, which is the peer's value if
+ * they wrote last and yours if you did.
+ *
+ * Pure and exported so all three branches are tested without a DOM or a TipTap
+ * instance.
+ */
+export type ExternalUpdate = 'apply' | 'defer' | 'ignore'
+
+export function externalUpdate(
+  /** The incoming value, serialised. */
+  incoming: string,
+  /** The last value this editor emitted, serialised — the round-trip guard. */
+  localEcho: string,
+  /** What the surface currently shows, serialised. */
+  shown: string,
+  focused: boolean,
+): ExternalUpdate {
+  if (incoming === localEcho || incoming === shown) return 'ignore'
+  return focused ? 'defer' : 'apply'
+}
 
 /**
  * A link inside prose stores the same `LinkValue` a `multilink` field does, so an

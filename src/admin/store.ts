@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react'
 import { type Doc, newUid } from '../core/doc'
 import { applyAll, invertAll, type Mutation } from '../core/mutations'
 import {
@@ -727,4 +728,17 @@ export class StoryStore {
       })
     }, wait)
   }
+}
+
+/**
+ * The document store's state, subscribed to. Safe to call from any panel.
+ *
+ * Moved here from `admin/FolioContext.tsx` when port phase 8 deleted that file. The
+ * context it lived beside was the old editor's answer to props travelling five
+ * components deep; the rebuilt editor passes an `EditorSlot` instead, so what
+ * survived the deletion is this one line — and it belongs with the store it
+ * subscribes to rather than in a provider nothing provides any more.
+ */
+export function useStoreState(store: StoryStore): StoreState {
+  return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
 }

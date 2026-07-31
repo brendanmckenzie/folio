@@ -1,20 +1,26 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import type { summariseDiff } from '../../../src/core/diff'
 import type { Blok, Doc } from '../../../src/core/doc'
+import type { Presence } from '../../../src/core/protocol'
 import type { BlockSchema, SchemaIndex } from '../../../src/core/schema'
 import type { StoryMeta } from '../../../src/core/story'
 import {
   addTargetOf,
+  behindNotice,
   blockGesture,
   blokRowsOf,
   clampInspector,
   DEFAULT_INSPECTOR,
+  describeAgainstDraft,
   editorLayout,
   hasNestedBloks,
   isNarrowedViewport,
   MAX_INSPECTOR,
+  menuGroups,
   MIN_INSPECTOR,
   previewFrame,
+  publishStatus,
   type RailAddRow,
   type RailBlokRow,
   railRows,
@@ -22,6 +28,7 @@ import {
   VIEWPORTS,
 } from '../../../src/admin/ui/screens/editor-model'
 import { wantedStoryIds } from '../../../src/admin/ui/screens/useEditor'
+import type { MigrationStatus } from '../../../src/server/migrate'
 
 /*
  * The editor screen's arithmetic, in Node. No admin test mounts a component, so
@@ -646,5 +653,249 @@ describe('the admin has two breakpoints', () => {
     const shell = read('EditorShell.module.css')
     expect(shell).toContain('below 1100px')
     expect(shell).toContain('below 800px')
+  })
+})
+
+/* ------------------------------------------------------------- the add menu --- */
+
+/*
+ * `field-defaults-and-presets.md`'s architecture decision 5: one group per type, in
+ * declaration order, the bare block first unless `presetsOnly` hides it, presets
+ * nested beneath.
+ *
+ * These moved here from `block-tree.test.ts` with `menuGroups` itself, when port
+ * phase 8 deleted `admin/BlockTree.tsx`. Unchanged: the function was imported across
+ * the seam rather than copied, so there is nothing to re-derive.
+ */
+describe('menuGroups', () => {
+  const button: BlockSchema = {
+    name: 'button',
+    label: 'Button',
+    fields: {},
+    presets: [
+      { name: 'primary', label: 'Primary button' },
+      { name: 'ghost', label: 'Ghost button' },
+    ],
+  }
+
+  const bareHero: BlockSchema = { name: 'hero', label: 'Hero', fields: {} }
+
+  const card: BlockSchema = {
+    name: 'card',
+    label: 'Card',
+    fields: {},
+    presetsOnly: true,
+    presets: [{ name: 'a', label: 'Card — A' }],
+  }
+
+  const menuSchema: SchemaIndex = { button, hero: bareHero, card }
+
+  it('groups by type, in the given (declaration) order', () => {
+    const groups = menuGroups(menuSchema, ['hero', 'button', 'card'])
+    expect(groups.map((g) => g.type)).toEqual(['hero', 'button', 'card'])
+  })
+
+  it('nests a type’s presets under its own group, in schema order', () => {
+    const [group] = menuGroups(menuSchema, ['button'])
+    expect(group!.presets.map((p) => p.name)).toEqual(['primary', 'ghost'])
+  })
+
+  it('offers the bare block for an ordinary type', () => {
+    const [group] = menuGroups(menuSchema, ['hero'])
+    expect(group!.bare).toBe(true)
+    expect(group!.presets).toEqual([])
+  })
+
+  it('hides the bare block for a presetsOnly type, offering only its presets', () => {
+    const [group] = menuGroups(menuSchema, ['card'])
+    expect(group!.bare).toBe(false)
+    expect(group!.presets.map((p) => p.name)).toEqual(['a'])
+  })
+
+  it('falls back to the type name when a type is missing from the schema', () => {
+    const [group] = menuGroups(menuSchema, ['nope'])
+    expect(group).toEqual({ type: 'nope', label: 'nope', bare: true, presets: [] })
+  })
+
+  it('uses the block’s label, not its type name, as the group label', () => {
+    const [group] = menuGroups(menuSchema, ['button'])
+    expect(group!.label).toBe('Button')
+  })
+})
+
+/*
+ * `editing/live-collaboration.md` decision 3: the block rail keeps one dot per
+ * *block*, derived by ignoring `Presence.selection.field`. The field-level ring
+ * belongs to the inspector; the rail's grain is the block.
+ *
+ * The derivation is one line inside `BlockRail`'s row, so what is held still here is
+ * the rule rather than an importable function — the same shape this test had against
+ * `BlockTree.tsx`, which is where it came from.
+ */
+describe('per-block presence dots', () => {
+  const peer = (uid: string | null, field: string | null = null): Presence => ({
+    actor: `usr_${uid ?? 'nowhere'}`,
+    name: 'Ann',
+    colour: '#e5484d',
+    selection: uid === null ? null : { uid, field },
+    locale: null,
+  })
+
+  /** Exactly the derivation `BlockRail.tsx`'s row performs. Kept in step with it. */
+  const watchers = (peers: Presence[], uid: string) => peers.filter((p) => p.selection?.uid === uid)
+
+  it('shows a dot for a peer in the block whether or not they hold a field', () => {
+    const peers = [peer('hero'), peer('hero', 'heading')]
+    expect(watchers(peers, 'hero')).toHaveLength(2)
+  })
+
+  it('shows nothing for a peer elsewhere or nowhere', () => {
+    expect(watchers([peer('other', 'heading'), peer(null)], 'hero')).toEqual([])
+  })
+})
+
+/* --------------------------------------------------------------- the state --- */
+
+/*
+ * The three sentences the top of the editor says about a document. All three moved
+ * here with their functions when port phase 8 deleted the old admin — from
+ * `top-bar.test.ts`, `migrations.test.ts` and `viewing-bar.test.ts` respectively.
+ */
+
+type Delta = ReturnType<typeof summariseDiff>
+
+const delta = (total: number, over: Partial<Delta> = {}): Delta => ({
+  added: 0,
+  removed: 0,
+  moved: 0,
+  retyped: 0,
+  edited: total,
+  translated: 0,
+  locales: [],
+  total,
+  ...over,
+})
+
+// unpublished-changes.md's phase 1, step 3: the editor's publish state machine,
+// replacing the bare "Synced" label.
+describe('publishStatus', () => {
+  it('reads "Connecting…" before the socket connects, whatever else is true', () => {
+    expect(publishStatus(false, 0, true, true, delta(3)).label).toBe('Connecting…')
+    expect(publishStatus(false, 1, false, false, null).label).toBe('Connecting…')
+  })
+
+  it('reads "Saving…" while a transaction is in flight, once connected', () => {
+    expect(publishStatus(true, 1, true, true, null).label).toBe('Saving…')
+  })
+
+  it('reads "Not published yet" for a story with no publish version at all', () => {
+    const status = publishStatus(true, 0, false, false, null)
+    expect(status.label).toBe('Not published yet')
+    expect(status.clickable).toBe(false)
+    expect(status.nothingToPublish).toBe(false)
+  })
+
+  it('reads "Up to date" and disables Publish for a live story identical to what was published', () => {
+    const status = publishStatus(true, 0, true, true, delta(0))
+    expect(status.label).toBe('Up to date')
+    expect(status.clickable).toBe(false)
+    expect(status.nothingToPublish).toBe(true)
+  })
+
+  it('reads "N unpublished changes", clickable, with Publish enabled, once the draft has diverged', () => {
+    const status = publishStatus(true, 0, true, true, delta(3))
+    expect(status.label).toBe('3 unpublished changes')
+    expect(status.clickable).toBe(true)
+    expect(status.nothingToPublish).toBe(false)
+  })
+
+  it('singularises the count for exactly one change', () => {
+    expect(publishStatus(true, 0, true, true, delta(1)).label).toBe('1 unpublished change')
+  })
+
+  // A story taken down (unpublish.md's 'unpublished' state) can be byte-identical
+  // to its last publish and still have something worth publishing: bringing it
+  // back live. "Nothing to publish" only applies while the page is actually live.
+  it('does not disable Publish for an unpublished (taken down) story even if unchanged since its last publish', () => {
+    const status = publishStatus(true, 0, true, false, delta(0))
+    expect(status.nothingToPublish).toBe(false)
+  })
+})
+
+describe('behindNotice', () => {
+  const status = (over: Partial<MigrationStatus['story']> = {}): MigrationStatus => ({
+    migrations: [],
+    pending: [],
+    behind: 0,
+    story: {
+      id: 'sty_a',
+      schemaId: null,
+      behind: true,
+      pending: [{ id: '0001-a', description: 'hero.heading → hero.title' }],
+      ...over,
+    },
+  })
+
+  it('names the pending change for a story that is behind', () => {
+    expect(behindNotice(status())).toBe(
+      'This page has not been updated for the latest content model: hero.heading → hero.title',
+    )
+  })
+
+  it('counts and lists when several are pending', () => {
+    const notice = behindNotice(
+      status({
+        pending: [
+          { id: '0001-a', description: 'hero.heading → hero.title' },
+          { id: '0002-b', description: 'hero.align defaults to left' },
+        ],
+      }),
+    )
+    expect(notice).toContain('(2 changes)')
+    expect(notice).toContain('hero.align defaults to left')
+  })
+
+  /**
+   * Null, not an empty string: the caller renders `{behindNotice(...)}` and must
+   * not draw a wrapper around nothing.
+   */
+  it('is null when there is nothing to say', () => {
+    expect(behindNotice(null)).toBeNull()
+    expect(behindNotice(status({ behind: false, pending: [] }))).toBeNull()
+    // Behind with nothing listed would be a banner an editor cannot act on.
+    expect(behindNotice(status({ behind: true, pending: [] }))).toBeNull()
+  })
+
+  it('is null when the status carries no story at all', () => {
+    expect(behindNotice({ migrations: [], pending: ['0001-a'], behind: 3 })).toBeNull()
+  })
+})
+
+/*
+ * versions-and-history.md: the viewing banner is phrased from the viewer's
+ * standpoint. They are looking at the version, so a difference is what the *draft*
+ * has done since — `diff(live, version)` turns the draft into the version, so an
+ * `insert` is a block the draft lacks and a `remove` is one it gained afterwards.
+ */
+describe('describeAgainstDraft', () => {
+  it('says so when the version and the draft are the same', () => {
+    expect(describeAgainstDraft(null)).toBe('identical to the current draft')
+    expect(describeAgainstDraft(delta(0))).toBe('identical to the current draft')
+  })
+
+  it('describes an edit as changed *since* the version', () => {
+    expect(describeAgainstDraft(delta(2))).toBe('2 blocks changed since')
+  })
+
+  it('inverts add and remove, because the diff runs from the draft to the version', () => {
+    expect(describeAgainstDraft(delta(0, { added: 1, total: 1 }))).toBe('1 block later deleted')
+    expect(describeAgainstDraft(delta(0, { removed: 3, total: 3 }))).toBe('3 blocks added since')
+  })
+
+  it('joins every non-zero part, and singularises each on its own count', () => {
+    const d = delta(1, { added: 1, removed: 2, moved: 1, total: 5 })
+    expect(describeAgainstDraft(d)).toBe(
+      '1 block changed since, 1 block later deleted, 2 blocks added since, 1 moved',
+    )
   })
 })

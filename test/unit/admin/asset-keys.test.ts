@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type KeyedAsset, keyAssets } from '../../../src/admin/AssetInput'
+import { type KeyedAsset, keyAssets } from '../../../src/admin/ui/screens/assets-model'
 import type { AssetValue } from '../../../src/core/values'
 
 /**
@@ -12,6 +12,11 @@ import type { AssetValue } from '../../../src/core/values'
  * deploy — so identity is minted client-side and reconstructed each render by
  * `keyAssets`. These tests pin the reconstruction, which is the only part that
  * can be wrong.
+ *
+ * `keyAssets` moved from `admin/AssetInput.tsx` to `ui/screens/assets-model.ts` when
+ * port phase 8 deleted the old admin. `ui/screens/fields/AssetField.tsx`'s
+ * `useAssetKeys` is the hook around it now, and it is the same two-pass function
+ * rather than a second copy — which is what these tests continue to guard.
  */
 
 let seq = 0

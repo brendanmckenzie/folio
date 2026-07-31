@@ -13,15 +13,26 @@
  *
  * What is **not** here is anything that already exists. The document store, the
  * block mutations, the preview bridge, versions, publish and the migration status
- * are hooks under `admin/hooks/` and stay there; four small pure functions the old
- * admin already tested (`menuGroups`, `rootSettingsLabel`, `publishStatus`,
- * `globalPreviewUrl`) are imported by `EditorShell.tsx` rather than restated here.
- * This file holds the arithmetic the *new layout* needs and nothing else.
+ * are hooks under `admin/hooks/` and stay there.
+ *
+ * Four pure functions the old admin owned and tested — `menuGroups`,
+ * `publishStatus`, `behindNotice` and `describeAgainstDraft` — were *imported*
+ * across the seam while both admins existed, and **moved into this file when port
+ * phase 8 deleted the old one**. They arrived unchanged, which is the point of
+ * having imported rather than copied them: there was never a second version to
+ * reconcile. `rootSettingsLabel` and `formatWhen` did not come with them, because
+ * `railRootRow`'s label and `history-model.ts`'s `historyWhen` had already restated
+ * both with a `now` parameter and their own tests.
  */
+import type { summariseDiff } from '../../../core/diff'
 import { childrenOf, type Doc } from '../../../core/doc'
 import type { LocaleContext } from '../../../core/locales'
 import { type SchemaIndex, slotsOf, summarise } from '../../../core/schema'
 import type { StoryMeta } from '../../../core/story'
+import type { MigrationStatus } from '../../../server/migrate'
+
+/** What `summariseDiff` answers: how a draft and a version differ, in counts. */
+type Delta = ReturnType<typeof summariseDiff>
 
 /* ----------------------------------------------------------------- the rail --- */
 
@@ -221,6 +232,40 @@ export function addTargetOf(row: RailAddRow, doc: Doc): AddTarget {
  * `List`'s row indices count. */
 export function blokRowsOf(rows: readonly RailRow[]): RailBlokRow[] {
   return rows.filter((row): row is RailBlokRow => row.kind === 'blok')
+}
+
+export interface MenuGroup {
+  type: string
+  label: string
+  /** False for a `presetsOnly` block: no bare version to offer. */
+  bare: boolean
+  presets: { name: string; label: string }[]
+}
+
+/**
+ * One group per allowed type, in declaration order
+ * (`field-defaults-and-presets.md` decision 5): the type's label as a heading, the
+ * bare block first unless `presetsOnly` hides it, then its presets nested beneath.
+ *
+ * Moved here from `BlockTree.tsx` when port phase 8 deleted the old admin. It was
+ * imported across the seam rather than copied for the whole time both admins
+ * existed, which is why there is one of it and not two that disagree.
+ *
+ * This is the `+ Add` menu's grouping, *not* `BlockPicker`'s — the palette narrows
+ * from an `AddTarget` and ranks by a query (`block-picker-model.ts`). Presets
+ * multiply entries on top of a menu `ROADMAP.md` already flags as breaking around
+ * 15 types; grouping is the minimum that keeps a plain `Menu` legible.
+ */
+export function menuGroups(schema: SchemaIndex, allow: readonly string[]): MenuGroup[] {
+  return allow.map((type) => {
+    const def = schema[type]
+    return {
+      type,
+      label: def?.label ?? type,
+      bare: !def?.presetsOnly,
+      presets: (def?.presets ?? []).map((p) => ({ name: p.name, label: p.label })),
+    }
+  })
 }
 
 /** Whether this document has anything under its root at all — the one fact form
@@ -466,4 +511,103 @@ export const MAX_INSPECTOR = 640
  * tested without a pointer. */
 export function clampInspector(width: number): number {
   return Math.min(MAX_INSPECTOR, Math.max(MIN_INSPECTOR, Math.round(width)))
+}
+
+/* ---------------------------------------------------------------- the state --- */
+
+/*
+ * The three sentences the top of the editor says about a document: what publishing
+ * would do, whether the model has moved on without it, and — while a past version
+ * is on screen — how the draft differs from what is being looked at.
+ *
+ * All three moved here from the old admin in port phase 8 (`TopBar.tsx`,
+ * `Migrations.tsx`, `ViewingBar.tsx`). They were imported across the seam rather
+ * than copied for as long as both admins existed, so what lands here is the tested
+ * original and not a second version of it.
+ */
+
+export interface PublishStatus {
+  label: string
+  /** Only the "N unpublished changes" state is; it is the door into the
+   * comparison view. */
+  clickable: boolean
+  /** Publish is pointless when true (owner decision 2): the story is
+   * currently live and identical to what was published. */
+  nothingToPublish: boolean
+}
+
+/**
+ * The editor's publish state machine (`unpublished-changes.md`'s phase 1, step 3),
+ * replacing the bare "Synced" label. Order matters: connection state first, since
+ * neither "up to date" nor a count means anything while the socket has not
+ * settled; then whether this story has ever been published at all; only then the
+ * draft-vs-published diff itself.
+ *
+ * `isLive` is the story's *current* state, not merely "has a publish version ever
+ * existed": a story taken down (`unpublish.md`'s `'unpublished'` state) can be
+ * identical to its last publish and still have something worth publishing —
+ * bringing it back live — so "nothing to publish" only applies while the page is
+ * actually serving the public.
+ */
+export function publishStatus(
+  connected: boolean,
+  inflight: number,
+  everPublished: boolean,
+  isLive: boolean,
+  delta: Delta | null,
+): PublishStatus {
+  if (!connected) return { label: 'Connecting…', clickable: false, nothingToPublish: false }
+  if (inflight > 0) return { label: 'Saving…', clickable: false, nothingToPublish: false }
+  if (!everPublished) {
+    return { label: 'Not published yet', clickable: false, nothingToPublish: false }
+  }
+  if (!delta || delta.total === 0) {
+    return { label: 'Up to date', clickable: false, nothingToPublish: isLive }
+  }
+  return {
+    label: `${delta.total} unpublished change${delta.total === 1 ? '' : 's'}`,
+    clickable: true,
+    nothingToPublish: false,
+  }
+}
+
+/**
+ * The banner an editor sees when the page they have open has not been migrated
+ * (`schema-migrations.md` checkpoint 4).
+ *
+ * A **banner, not a lock**. Refusing to serve the editor until somebody runs a
+ * migration would turn a schema drift into an outage, and the honest choice
+ * between "editing against a stale model" and "not editing at all" is the first
+ * one — an empty field that is *explained* is a different experience from an
+ * empty field that is mysterious.
+ *
+ * Null when there is nothing to say, so the caller renders the notice and never a
+ * wrapper around nothing.
+ */
+export function behindNotice(status: MigrationStatus | null): string | null {
+  const pending = status?.story?.pending ?? []
+  if (!status?.story?.behind || pending.length === 0) return null
+  const what = pending.map((m) => m.description).join('; ')
+  return pending.length === 1
+    ? `This page has not been updated for the latest content model: ${what}`
+    : `This page has not been updated for the latest content model (${pending.length} changes): ${what}`
+}
+
+/**
+ * Phrased from the viewer's standpoint: they are looking at the version, so
+ * differences are described as what the *draft* has done since.
+ *
+ * `diff(live, version)` turns the draft into the version, so an `insert` is a
+ * block this version has that the draft lacks, and a `remove` is one the draft
+ * gained afterwards.
+ */
+export function describeAgainstDraft(d: Delta | null): string {
+  if (!d || d.total === 0) return 'identical to the current draft'
+  const parts = [
+    d.edited && `${d.edited} block${d.edited === 1 ? '' : 's'} changed since`,
+    d.added && `${d.added} block${d.added === 1 ? '' : 's'} later deleted`,
+    d.removed && `${d.removed} block${d.removed === 1 ? '' : 's'} added since`,
+    d.moved && `${d.moved} moved`,
+  ].filter(Boolean)
+  return parts.join(', ')
 }

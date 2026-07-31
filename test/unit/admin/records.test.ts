@@ -19,10 +19,24 @@
  *    contain") is a workers test now, because it is a `where` clause.
  *  - `pageCount` — there are no page numbers. `Showing n of N` plus next/previous,
  *    per `ui-architecture.md` Resolved 5.
+ *
+ * **Four more left with port phase 8**, when the old admin's files were deleted, and
+ * none of the four found a new home because each answers to a mechanism that changed:
+ *
+ *  - `ReferencesInput.tsx`'s `referenceEntries` and `unpickedCandidates`. The rebuilt
+ *    `fields/ReferenceField.tsx` picks from a *paged, searched* route rather than from
+ *    a client-side copy of every story, so narrowing is `fields/candidates.ts`'s
+ *    `narrow` plus `candidateRequests` — both covered in `fields.test.ts`. The rule
+ *    those two pinned that still holds is decision 3's: a deleted target stays in the
+ *    list as a missing entry, which the new control draws rather than computes.
+ *  - `DeleteDialog.tsx`'s `usageSentence` and `deleteConfirmation`. The rebuilt
+ *    dialog fetches `{base}/api/documents/:id/usage` itself and renders four states
+ *    inline — unknown, checking, none, and a named list — so there is no one sentence
+ *    to assert. `deleteConfirmation`'s `unrouted` and `descendantCount` are gone with
+ *    the redirect checkbox: Content sends `?redirect=true` unconditionally now
+ *    (`redirects.md` decision 4), so there is nothing left to decide.
  */
 import { describe, expect, it } from 'vitest'
-import { deleteConfirmation, usageSentence } from '../../../src/admin/DeleteDialog'
-import { referenceEntries, unpickedCandidates } from '../../../src/admin/ReferencesInput'
 import {
   cellText,
   type DocumentRow,
@@ -37,10 +51,9 @@ import {
   parseDocumentsUrl,
   withSort,
 } from '../../../src/admin/ui/screens/documents-model'
-import type { Json } from '../../../src/core/doc'
 import { boolean, number, richtext, text } from '../../../src/core/fields'
 import type { DocumentType, SchemaIndex } from '../../../src/core/schema'
-import type { StoryMeta, StoryNode } from '../../../src/core/story'
+import type { StoryNode } from '../../../src/core/story'
 
 function node(overrides: Partial<StoryNode> & { id: string }): StoryNode {
   return {
@@ -349,105 +362,5 @@ describe('documentsParams', () => {
     // A null cursor is the first page, which is the absence of the parameter
     // rather than an empty one — `?cursor=` would be a malformed cursor and a 400.
     expect(params({}, { limit: 50, cursor: null }).cursor).toBeUndefined()
-  })
-})
-
-/* ------------------------------------------------------ references input --- */
-
-describe('referenceEntries', () => {
-  const stories = [
-    node({ id: 'sty_ada', title: 'Ada' }),
-    node({ id: 'sty_grace', title: 'Grace' }),
-    node({ id: 'sty_about', type: 'page', path: 'about', title: 'About' }),
-  ]
-
-  it('pairs each stored id with its story, in the stored order', () => {
-    const entries = referenceEntries(['sty_grace', 'sty_ada'] as unknown as Json, stories)
-    expect(entries.map((e) => e.id)).toEqual(['sty_grace', 'sty_ada'])
-    expect(entries.map((e) => e.story?.title)).toEqual(['Grace', 'Ada'])
-  })
-
-  it('KEEPS a deleted target as a missing entry — the editor half of decision 3', () => {
-    const entries = referenceEntries(['sty_ada', 'sty_gone'] as unknown as Json, stories)
-    expect(entries).toHaveLength(2)
-    expect(entries[1]).toEqual({ id: 'sty_gone', story: undefined })
-  })
-
-  it('is empty for an absent value', () => {
-    expect(referenceEntries(null, stories)).toEqual([])
-  })
-})
-
-describe('unpickedCandidates', () => {
-  const stories = [
-    node({ id: 'sty_ada', title: 'Ada' }),
-    node({ id: 'sty_grace', title: 'Grace' }),
-    node({ id: 'sty_about', type: 'page', path: 'about', title: 'About' }),
-  ]
-
-  it('narrows by the field’s types, so a page cannot be picked into a person list', () => {
-    expect(unpickedCandidates(stories, [], ['person']).map((s) => s.id)).toEqual([
-      'sty_ada',
-      'sty_grace',
-    ])
-  })
-
-  it('drops what is already picked, so nothing can be added twice', () => {
-    expect(unpickedCandidates(stories, ['sty_ada'], ['person']).map((s) => s.id)).toEqual([
-      'sty_grace',
-    ])
-  })
-
-  it('offers every type when the field names none, records included', () => {
-    expect(
-      unpickedCandidates(stories, [])
-        .map((s) => s.id)
-        .sort(),
-    ).toEqual(['sty_about', 'sty_ada', 'sty_grace'])
-  })
-})
-
-/* --------------------------------------------------- delete confirmation --- */
-
-describe('usageSentence', () => {
-  const usage = (total: number) => ({ published: [], total, links: 0, references: total })
-
-  it('names the count, plural', () => {
-    expect(usageSentence(usage(4))).toBe('Used on 4 published documents.')
-  })
-
-  it('is singular for one', () => {
-    expect(usageSentence(usage(1))).toBe('Used on 1 published document.')
-  })
-
-  it('says nothing when nothing points here', () => {
-    expect(usageSentence(usage(0))).toBeNull()
-  })
-
-  it('says nothing when the count could not be fetched — never a false reassurance', () => {
-    expect(usageSentence(null)).toBeNull()
-  })
-})
-
-describe('deleteConfirmation for an unrouted document', () => {
-  const person: StoryMeta = node({ id: 'sty_ada', title: 'Ada Lovelace', path: null })
-
-  it('labels it by title, since it has no path to name it by', () => {
-    expect(deleteConfirmation(person, [person]).label).toBe('Ada Lovelace')
-  })
-
-  it('marks it unrouted, which is what suppresses the redirect checkbox', () => {
-    expect(deleteConfirmation(person, [person]).unrouted).toBe(true)
-  })
-
-  it('counts no descendants: nothing nests under a record', () => {
-    expect(deleteConfirmation(person, [person]).descendantCount).toBe(0)
-  })
-
-  it('still labels a routed page by path, unchanged', () => {
-    const about: StoryMeta = node({ id: 'about', type: 'page', path: 'about' })
-    const result = deleteConfirmation(about, [about])
-    expect(result.label).toBe('/about')
-    expect(result.unrouted).toBe(false)
   })
 })

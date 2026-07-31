@@ -332,3 +332,25 @@ export function avatarsOf(peers: readonly SpacePresence[]): SpaceAvatar[] {
 export function peersIn(peers: readonly SpacePresence[], storyId: string): SpaceAvatar[] {
   return avatarsOf(peers.filter((p) => p.storyId === storyId))
 }
+
+/**
+ * What a peer's avatar says: their name, where they are, and how many tabs.
+ *
+ * "on a list screen" is a real answer rather than a missing one — an editor
+ * browsing the tree is present and worth showing, and saying so is better than an
+ * avatar that looks broken. Pure and exported so the wording is tested without
+ * mounting anything.
+ *
+ * Moved here from `admin/TopBar.tsx` when port phase 8 deleted it, next to the
+ * `SpaceAvatar` it describes. **Nothing renders it today**, and that is a real gap
+ * rather than dead code: the rebuilt editor has per-story presence but has not yet
+ * joined the space channel, so the top bar has no avatars to label. See
+ * `ui-architecture.md`'s open question 7.
+ */
+export function followLabel(peer: SpaceAvatar): string {
+  const tabs = peer.tabs > 1 ? ` · ${peer.tabs} tabs` : ''
+  if (peer.storyId === null) return `${peer.name} — on a list screen${tabs}`
+  const where = peer.storyTitle ?? 'a document'
+  const locale = peer.locale ? ` (${peer.locale})` : ''
+  return `${peer.name} — ${where}${locale}${tabs}`
+}

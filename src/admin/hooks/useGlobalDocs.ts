@@ -1,7 +1,27 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Doc } from '../../core/doc'
 import { singletonId, type DocumentType } from '../../core/schema'
-import { globalTypes } from '../GlobalsList'
+
+/**
+ * The configured globals (`FolioConfig.globals`, `../../../docs/specs/content-
+ * model/globals.md`), in the order they were declared — a subset of the declared
+ * `singleton` types, not every one of them (the spec's resolved open question:
+ * explicit costs one line of config and keeps the per-request read set obvious).
+ *
+ * Moved here from `admin/GlobalsList.tsx` when port phase 8 deleted the old admin.
+ * This hook is its only caller: the sidebar's own globals group orders them itself
+ * (`ui/nav.ts`'s `globalsGroup`), because it also has to say something about the
+ * singletons `globals` does *not* name. Pure and exported so the ordering is tested
+ * without a fetch.
+ */
+export function globalTypes(
+  types: readonly DocumentType[],
+  globals: readonly string[],
+): DocumentType[] {
+  return globals
+    .map((name) => types.find((t) => t.name === name))
+    .filter((t): t is DocumentType => Boolean(t))
+}
 
 export interface GlobalDocs {
   docs: Readonly<Record<string, Doc>>

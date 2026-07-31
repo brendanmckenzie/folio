@@ -61,6 +61,19 @@
   --bg-active: var(--n-200);
   --bg-selected: var(--blue-50);
   --bg-overlay: rgb(21 24 29 / 45%);
+  /*
+   * The preview stage, and **the one semantic colour that does not flip with the
+   * theme** — which is why it is a token rather than the `#fff` the editor's
+   * stylesheet used to hold twice.
+   *
+   * What sits on it is the *host's* page in an iframe, not the admin. An iframe with
+   * no background of its own shows what is behind it, so an editor in dark mode
+   * would get a dark flash under a light site on every navigation. The admin has no
+   * opinion about the site's own colours; it just must not lend it one. Restated in
+   * `[data-theme]` below rather than left to inherit, so a reader who greps the dark
+   * block finds it stated and does not "fix" the omission.
+   */
+  --bg-paper: var(--n-0);
 
   --fg: var(--n-900);
   --fg-muted: var(--n-600);
@@ -143,6 +156,9 @@
     --bg-active: var(--n-700);
     --bg-selected: #182746;
     --bg-overlay: rgb(0 0 0 / 60%);
+    /* Not restated as a dark value: the preview frame holds the host's page, and
+       the admin's theme is none of its business. See the light block. */
+    --bg-paper: var(--n-0);
 
     --fg: var(--n-50);
     --fg-muted: var(--n-400);
@@ -191,6 +207,8 @@
   --bg-active: var(--n-700);
   --bg-selected: #182746;
   --bg-overlay: rgb(0 0 0 / 60%);
+  /* Deliberately the light value here too — see the light block. */
+  --bg-paper: var(--n-0);
 
   --fg: var(--n-50);
   --fg-muted: var(--n-400);
