@@ -5,6 +5,7 @@ import { expectJson, expectOk } from './api'
 import { useFolio } from './FolioContext'
 import { useFocusTrap } from './hooks/useFocusTrap'
 import { useUpload } from './hooks/useUpload'
+import type { Page } from '../core/pagination'
 
 /** A row of the media library, as `GET /assets` returns it. */
 interface AssetRow {
@@ -413,7 +414,10 @@ function MediaLibrary({
 
   const load = useCallback(async () => {
     try {
-      setRows(await expectJson<AssetRow[]>(await fetch(`${apiBase}/assets`)))
+      // `Page<AssetRow>` since `foundation/pagination.md` phase 4 — and this modal
+      // still shows only the first page, which is the honest interim: the route can
+      // now reach asset 201, and the Assets *screen* is what will.
+      setRows((await expectJson<Page<AssetRow>>(await fetch(`${apiBase}/assets`))).rows)
     } catch (e) {
       // A library that could not be read is not an empty one: rendering `[]`
       // alone would say "Nothing uploaded yet" about media that is still there.

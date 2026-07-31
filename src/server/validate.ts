@@ -18,6 +18,7 @@
  * itself.
  */
 import * as v from 'valibot'
+import { decodeCursor } from '../core/pagination'
 import { FolioError } from './errors'
 
 /**
@@ -626,4 +627,22 @@ const LIMIT = v.pipe(v.string(), v.transform(Number), v.number(), v.finite())
 export function limitParam(raw: string | undefined, fallback: number, max: number): number {
   const n: number = v.parse(v.fallback(LIMIT, fallback), raw)
   return Math.min(Math.max(Math.trunc(n), 1), max)
+}
+
+/**
+ * Refuses a malformed pagination cursor with the one error envelope.
+ *
+ * A **400, never a silent first page** (`../../../docs/specs/foundation/
+ * pagination.md`, edge cases): the cursor is opaque, so a client that sent a bad
+ * one has a bug, and quietly restarting surfaces as a list that jumped — which
+ * nobody can act on.
+ *
+ * Note the asymmetry with `limitParam`, which clamps rather than refusing. An
+ * out-of-range limit is a stale bookmark and still has an obvious right answer;
+ * "resume after ???" has none.
+ */
+export function requireCursor(raw: string | undefined): void {
+  if (raw !== undefined && decodeCursor(raw) === null) {
+    throw new FolioError('bad_request', 'Malformed pagination cursor')
+  }
 }

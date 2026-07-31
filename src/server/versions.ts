@@ -1,6 +1,8 @@
 import type { Doc } from '../core/doc'
 import { migrateDoc, type Migration, pendingFor } from '../core/migrate'
 import type { DocumentType, SchemaIndex } from '../core/schema'
+import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
+import { keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
 
 export type VersionKind = 'publish' | 'checkpoint'
 
@@ -36,19 +38,28 @@ function newVersionId(): string {
   return `ver_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
 }
 
-/** Newest first. Excludes the document payload so this stays cheap to list. */
+/**
+ * Newest first, paged over `(created_at, id)` — which `versions_story` already
+ * indexes, and which was already this route's `order by`. Excludes the document
+ * payload so listing stays cheap.
+ *
+ * Was capped at 50 with no cursor: a page published weekly for a year had a
+ * history that stopped a year short.
+ */
 export async function listVersions(
   db: D1Database,
   storyId: string,
-  limit = 50,
-): Promise<VersionMeta[]> {
+  opts: { limit?: number; cursor?: string } = {},
+): Promise<Page<VersionMeta>> {
+  const limit = clampLimit(opts.limit, 50, 200)
+  const resume = keysetWhere(NEWEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null)
   const { results } = await db
     .prepare(
-      `select ${META} from versions where story_id = ? order by created_at desc, id desc limit ?`,
+      `select ${META} from versions ${whereOf('story_id = ?', resume.sql)} ${orderBy(NEWEST_FIRST)} limit ?`,
     )
-    .bind(storyId, limit)
+    .bind(storyId, ...resume.binds, limit + 1)
     .all<VersionMeta>()
-  return results
+  return paginate(results, limit, (row) => [row.createdAt, row.id])
 }
 
 /**

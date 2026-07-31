@@ -6,6 +6,7 @@ import type { VersionMeta } from '../../server/versions'
 import { afterWrite, expectOk, send } from '../api'
 import type { StoryStore } from '../store'
 import type { Notify } from './useNotice'
+import type { Page } from '../../core/pagination'
 
 /**
  * What the preview iframe is showing. The editor has exactly two modes and this
@@ -46,7 +47,10 @@ export function useVersionsList(apiBase: string, storyId: string): VersionsList 
 
   const reload = useCallback(async () => {
     const res = await fetch(`${apiBase}/story/${encodeURIComponent(storyId)}/versions`)
-    if (res.ok) setVersions((await res.json()) as VersionMeta[])
+    // `Page<VersionMeta>` since `foundation/pagination.md` phase 4. This panel
+    // shows the first page and no more; the slide-over that replaces it
+    // (`ui-architecture.md`, the editor) is where a cursor gets a control.
+    if (res.ok) setVersions(((await res.json()) as Page<VersionMeta>).rows)
   }, [apiBase, storyId])
 
   useEffect(() => {

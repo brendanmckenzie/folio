@@ -33,6 +33,7 @@ import type {
 } from '../../src/server/hooks'
 import type { Redirect } from '../../src/server/redirects'
 import { createFolio } from '../../src/server'
+import type { Page } from '../../src/core/pagination'
 import type { VersionMeta } from '../../src/server/versions'
 import { applySeedFixture } from './seed-fixture'
 
@@ -353,8 +354,9 @@ describe('duplicate: POST /folio/api/stories/:id/duplicate', () => {
     expect(clonedLink?.data).toEqual({ label: 'Original Link', href: null })
 
     // Checkpoint 4: no version history of its own.
-    const versions = await getJson<VersionMeta[]>(`/folio/api/story/${created.id}/versions`)
-    expect(versions).toEqual([])
+    const versions = await getJson<Page<VersionMeta>>(`/folio/api/story/${created.id}/versions`)
+    expect(versions.rows).toEqual([])
+    expect(versions.cursor).toBeNull()
 
     // The source is untouched by its own duplication.
     const { doc: stillSource } = await getJson<{ doc: Doc }>(
@@ -533,8 +535,8 @@ describe('unpublish', () => {
     expect(preview).toContain('The Offer')
 
     // Version history survives.
-    const versions = await getJson<VersionMeta[]>(`/folio/api/story/${story.id}/versions`)
-    expect(versions.some((v) => v.id === pub.version.id)).toBe(true)
+    const versions = await getJson<Page<VersionMeta>>(`/folio/api/story/${story.id}/versions`)
+    expect(versions.rows.some((v) => v.id === pub.version.id)).toBe(true)
 
     conn.close()
   })
@@ -575,8 +577,8 @@ describe('unpublish', () => {
     const html = await htmlOf(`/${story.path}`)
     expect(html).toContain('Second')
 
-    const versions = await getJson<VersionMeta[]>(`/folio/api/story/${story.id}/versions`)
-    expect(versions.length).toBeGreaterThanOrEqual(2)
+    const versions = await getJson<Page<VersionMeta>>(`/folio/api/story/${story.id}/versions`)
+    expect(versions.rows.length).toBeGreaterThanOrEqual(2)
 
     conn.close()
   })
@@ -635,13 +637,13 @@ describe('versions and restore', () => {
     await conn.tx('v2', [{ t: 'set', uid: doc.root, field: 'title', value: 'Version Two' }])
     const pub2 = await publish(story.id)
 
-    const list = await getJson<Array<VersionMeta & { doc?: unknown }>>(
+    const list = await getJson<Page<VersionMeta & { doc?: unknown }>>(
       `/folio/api/story/${story.id}/versions`,
     )
 
-    expect(list[0]?.id).toBe(pub2.version.id)
-    expect(list.some((v) => v.id === pub1.version.id)).toBe(true)
-    expect(list.every((v) => v.doc === undefined)).toBe(true)
+    expect(list.rows[0]?.id).toBe(pub2.version.id)
+    expect(list.rows.some((v) => v.id === pub1.version.id)).toBe(true)
+    expect(list.rows.every((v) => v.doc === undefined)).toBe(true)
 
     conn.close()
   })
@@ -1535,8 +1537,8 @@ describe('validation and the error envelope', () => {
     })
 
     expect(res.status).toBe(200)
-    const versions = await getJson<VersionMeta[]>(`/folio/api/story/${story.id}/versions`)
-    expect(versions[0]?.actor).toBeNull()
+    const versions = await getJson<Page<VersionMeta>>(`/folio/api/story/${story.id}/versions`)
+    expect(versions.rows[0]?.actor).toBeNull()
   })
 
   it('refuses a body that is valid JSON but not an object, without echoing it back', async () => {

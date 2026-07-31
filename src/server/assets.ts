@@ -15,6 +15,8 @@ import type { AssetValue } from '../core/values'
 import type { AssetTransform } from '../core/resolve'
 import { FolioError } from './errors'
 import { DOWNLOAD_CONTENT_TYPE, SERVED_CONTENT_TYPES } from './validate'
+import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
+import { keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
 
 /** Matches the Images binding's own input ceiling, so failures happen up front. */
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -34,12 +36,63 @@ export interface AssetRow {
 const COLS = `id, key, filename, content_type as contentType, size, width, height,
               alt, created_at as createdAt`
 
-export async function listAssets(db: D1Database, limit = 200): Promise<AssetRow[]> {
-  const { results } = await db
-    .prepare(`select ${COLS} from assets order by created_at desc limit ?`)
-    .bind(Math.min(Math.max(limit, 1), 500))
-    .all<AssetRow>()
-  return results
+export interface ListAssetsOptions {
+  limit?: number
+  cursor?: string
+  /** Substring of the filename. The media library had no search at all, which is
+   * what made asset 201 unreachable once the list was capped at 200. */
+  q?: string
+  /** A `content_type` prefix — `image`, `video`, `application`. */
+  kind?: string
+  /** Adds `total` for the same filter. One extra `count(*)`, only when asked
+   * (`../../../docs/specs/foundation/pagination.md` decision 5). */
+  count?: boolean
+}
+
+/**
+ * Newest first, paged over `(created_at, id)` — which is what `assets_created`
+ * indexes.
+ *
+ * Was `listAssets(db, limit = 200)`, capped and clamped to 500 with no cursor and
+ * no search, so the 201st asset could not be reached by any route.
+ */
+export async function listAssets(
+  db: D1Database,
+  opts: ListAssetsOptions = {},
+): Promise<Page<AssetRow>> {
+  const limit = clampLimit(opts.limit, 50, 200)
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
+  const resume = keysetWhere(NEWEST_FIRST, cursor)
+
+  const filters: string[] = []
+  const binds: unknown[] = []
+  if (opts.q) {
+    filters.push('filename like ?')
+    binds.push(`%${opts.q}%`)
+  }
+  if (opts.kind) {
+    filters.push('content_type like ?')
+    binds.push(`${opts.kind}%`)
+  }
+  const where = whereOf(...filters, resume.sql)
+
+  const [rows, total] = await Promise.all([
+    db
+      .prepare(`select ${COLS} from assets ${where} ${orderBy(NEWEST_FIRST)} limit ?`)
+      .bind(...binds, ...resume.binds, limit + 1)
+      .all<AssetRow>(),
+    // The count ignores the cursor deliberately: it counts the whole filter, which
+    // is what a header means by "of 1,284" and what a bulk guard would compare.
+    opts.count
+      ? db
+          .prepare(`select count(*) as n from assets ${whereOf(...filters)}`)
+          .bind(...binds)
+          .first<{ n: number }>()
+      : null,
+  ])
+
+  const page = paginate(rows.results, limit, (row) => [row.createdAt, row.id])
+  return total ? { ...page, total: total.n } : page
 }
 
 export async function assetById(db: D1Database, id: string): Promise<AssetRow | null> {
@@ -606,4 +659,33 @@ function jpegSize(bytes: Uint8Array, view: DataView): { width: number; height: n
     offset += 2 + view.getUint16(offset + 2)
   }
   return null
+}
+
+/**
+ * The same listing, paged by **number** for `{base}/api/v1/assets`.
+ *
+ * Two idioms on purpose (`../../../docs/specs/foundation/pagination.md`
+ * decision 1): the admin's list is live and pages by cursor, while a script
+ * walking a media library wants "page 3 of 7" over content that is not being
+ * edited underneath it. Sharing the reader would mean giving one of them the
+ * wrong one.
+ *
+ * Offset paging is the correct trade here and the reason is worth stating: a
+ * skipped or repeated row costs a script one duplicate, and it buys a total and a
+ * page count that a cursor cannot give.
+ */
+export async function listAssetsByPage(
+  db: D1Database,
+  opts: { page: number; perPage: number },
+): Promise<{ assets: AssetRow[]; total: number }> {
+  const perPage = clampLimit(opts.perPage, 50, 200)
+  const page = Math.max(1, Math.trunc(opts.page) || 1)
+  const [rows, total] = await Promise.all([
+    db
+      .prepare(`select ${COLS} from assets order by created_at desc, id desc limit ? offset ?`)
+      .bind(perPage, (page - 1) * perPage)
+      .all<AssetRow>(),
+    db.prepare('select count(*) as n from assets').first<{ n: number }>(),
+  ])
+  return { assets: rows.results, total: total?.n ?? 0 }
 }

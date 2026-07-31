@@ -11,6 +11,7 @@ import { createToken } from '../../src/server/auth/tokens'
 import { createUser } from '../../src/server/auth/users'
 import type { StoryDO } from '../../src/server'
 import type { VersionMeta } from '../../src/server/versions'
+import type { Page } from '../../src/core/pagination'
 
 /**
  * Enforcement: every route's gate, the socket's terminal refusals, and the two
@@ -213,7 +214,7 @@ describe('role gates', () => {
 
     // No version row and no published snapshot: the refusal is at the door.
     const versions = await call(`/folio/api/story/${id}/versions`, { headers: { cookie } })
-    expect(await versions.json<VersionMeta[]>()).toEqual([])
+    expect((await versions.json<Page<VersionMeta>>()).rows).toEqual([])
     const row = await env.DB.prepare('select published_doc, published_at from stories where id = ?')
       .bind(id)
       .first<{ published_doc: string | null; published_at: number | null }>()
@@ -277,8 +278,8 @@ describe('role gates', () => {
 
     const versions = await (
       await call(`/folio/api/story/${id}/versions`, { headers: { cookie } })
-    ).json<VersionMeta[]>()
-    expect(versions[0]?.actor).toBe(user.id)
+    ).json<Page<VersionMeta>>()
+    expect(versions.rows[0]?.actor).toBe(user.id)
   })
 
   it('reserves the access surface for an admin, and 404s it when auth is open', async () => {

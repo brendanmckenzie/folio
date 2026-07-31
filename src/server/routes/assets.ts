@@ -21,20 +21,32 @@ import { requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
 import {
-  AssetPatchBody,
   assetKeyParam,
+  AssetPatchBody,
   contentLengthHeader,
   filenameQuery,
   idParam,
+  limitParam,
   parseOptionalBody,
+  requireCursor,
 } from '../validate'
 
 export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
 
-  app.get('/assets', requireAccess<Env>(rt, READ), async (c) =>
-    c.json(await listAssets(c.var.bindings().db)),
-  )
+  app.get('/assets', requireAccess<Env>(rt, READ), async (c) => {
+    const cursor = c.req.query('cursor')
+    requireCursor(cursor)
+    return c.json(
+      await listAssets(c.var.bindings().db, {
+        limit: limitParam(c.req.query('limit'), 50, 200),
+        cursor,
+        q: c.req.query('q'),
+        kind: c.req.query('kind'),
+        count: c.req.query('count') === '1',
+      }),
+    )
+  })
 
   /**
    * Raw body upload with the filename in a query parameter, rather than
