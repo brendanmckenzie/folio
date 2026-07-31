@@ -14,7 +14,7 @@ import type { DocumentType, SchemaIndex } from '../../../src/core/schema'
 /**
  * The publish-time projection (`collections.md` architecture decision 1). Pure, so
  * every rule about what gets indexed is pinned here without a database — which is
- * also what lets `POST /folio/reindex` rebuild rows by running this rather than by
+ * also what lets `POST /folio/api/reindex` rebuild rows by running this rather than by
  * restating the rules in SQL.
  */
 

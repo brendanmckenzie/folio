@@ -134,7 +134,7 @@ function setup() {
   const sockets: FakeSocket[] = []
   const applied: Mutation[][] = []
   const resets: Doc[] = []
-  const store = new StoryStore('page-1', '/folio', {
+  const store = new StoryStore('page-1', '/folio/api', {
     createSocket: (path) => {
       const socket = new FakeSocket(path)
       sockets.push(socket)
@@ -192,7 +192,7 @@ describe('admin sync store', () => {
       h.store.connect()
 
       expect(h.sockets).toHaveLength(1)
-      expect(h.last().path).toBe('/folio/story/page-1/socket')
+      expect(h.last().path).toBe('/folio/api/story/page-1/socket')
       // Nothing is sent before the socket is open.
       expect(h.last().frames).toEqual([])
 

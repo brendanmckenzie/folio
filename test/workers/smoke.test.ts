@@ -5,7 +5,7 @@ import type { ActivityEntry } from '../../src/core/protocol'
 import { applySeedFixture } from './seed-fixture'
 
 /**
- * Migrations (packages/folio/migrations/**) are structure only — no seed rows
+ * Migrations (packages/folio/api/migrations/**) are structure only — no seed rows
  * ship with them, unlike the old drop-and-reseed schema.sql — so this file
  * seeds its own fixture by running the actual examples/demo/seed.sql (see
  * seed-fixture.ts), the same file `pnpm db:seed` runs. That is what makes the

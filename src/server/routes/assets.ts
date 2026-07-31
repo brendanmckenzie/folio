@@ -77,16 +77,28 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return c.json({ deleted: true })
   })
 
-  /**
-   * Public, and the one deliberate hole in the auth posture: published pages
-   * point their `<img>` tags here, so it is exactly as public as the page that
-   * embeds it (`identity-and-access.md`'s route table). Resizing lives behind
-   * this route so a stored value never names a resizing service.
-   *
-   * The narrowness of `assetKeyParam` is what makes that acceptable: it is
-   * anchored to Folio's own mint format rather than being a charset screen, so
-   * this route cannot be turned into a read primitive for a co-tenanted key.
-   */
+  return app
+}
+
+/**
+ * Serving a file, which is **not** part of the admin's JSON API and therefore not
+ * under `{base}/api` (`../../../docs/specs/foundation/pagination.md` decision 3).
+ *
+ * Two reasons it stays on the bare mount. It is public — published pages point
+ * their `<img>` tags here, so it is exactly as public as the page embedding it —
+ * and its URL is **baked into published HTML** through `Resolution.assetBase`
+ * (`runtime.ts`), so moving it would rewrite every rendered page's image sources
+ * for no gain.
+ *
+ * Resizing lives behind this route so a stored value never names a resizing
+ * service. The narrowness of `assetKeyParam` is what makes a public read
+ * acceptable: it is anchored to Folio's own mint format rather than being a
+ * charset screen, so this cannot be turned into a read primitive for a
+ * co-tenanted key.
+ */
+export function assetFileRoutes<Env>(): Hono<FolioEnv<Env>> {
+  const app = new Hono<FolioEnv<Env>>()
+
   app.get('/asset/:key', async (c) => {
     const { media, images } = c.var.bindings()
     if (!media) throw new FolioError('unsupported', 'No media bucket is configured')

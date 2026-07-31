@@ -229,9 +229,9 @@ describe('construction validation', () => {
   })
 
   it('publishes `locales` on the manifest, and omits it for a single-locale site', async () => {
-    const withLocales = await get(makeFolio(EN_FR_DE), '/folio/schema')
+    const withLocales = await get(makeFolio(EN_FR_DE), '/folio/api/schema')
     expect((await withLocales?.json<{ locales?: LocaleConfig }>())?.locales).toEqual(EN_FR_DE)
-    const without = await get(makeFolio(), '/folio/schema')
+    const without = await get(makeFolio(), '/folio/api/schema')
     expect(await without?.json<{ locales?: LocaleConfig }>()).not.toHaveProperty('locales')
   })
 })
@@ -452,7 +452,7 @@ describe('the per-locale title cache', () => {
     ])
 
     const posted = await folio.handle(
-      new Request(`${ORIGIN}/folio/story/${id}/publish`, { method: 'POST' }),
+      new Request(`${ORIGIN}/folio/api/story/${id}/publish`, { method: 'POST' }),
       env,
       createExecutionContext(),
     )
@@ -468,7 +468,7 @@ describe('the per-locale title cache', () => {
     const id = await publish('ltitlesbare', doc({}), 'Bare')
     await seedDraft(id, doc({}))
     await folio.handle(
-      new Request(`${ORIGIN}/folio/story/${id}/publish`, { method: 'POST' }),
+      new Request(`${ORIGIN}/folio/api/story/${id}/publish`, { method: 'POST' }),
       env,
       createExecutionContext(),
     )
@@ -507,7 +507,7 @@ describe('GET {base}/story/:id/translation', () => {
       { t: 'set', uid: 'hero0001', field: 'heading', value: 'Bonjour', locale: 'fr' },
     ])
 
-    const res = await get(folio, `/folio/story/${id}/translation?locale=fr`)
+    const res = await get(folio, `/folio/api/story/${id}/translation?locale=fr`)
     expect(res?.status).toBe(200)
     const body = await res!.json<{
       locale: string
@@ -527,15 +527,15 @@ describe('GET {base}/story/:id/translation', () => {
     const folio = makeFolio(EN_FR_DE)
     const id = await publish('ltransbad', doc({}), 'Bad')
     await seedDraft(id, doc({}))
-    expect((await get(folio, `/folio/story/${id}/translation`))?.status).toBe(400)
-    expect((await get(folio, `/folio/story/${id}/translation?locale=kl`))?.status).toBe(501)
+    expect((await get(folio, `/folio/api/story/${id}/translation`))?.status).toBe(400)
+    expect((await get(folio, `/folio/api/story/${id}/translation?locale=kl`))?.status).toBe(501)
   })
 
   it('501s every locale on a site with none configured', async () => {
     const folio = makeFolio()
     const id = await publish('ltransnone', doc({}), 'None')
     await seedDraft(id, doc({}))
-    expect((await get(folio, `/folio/story/${id}/translation?locale=fr`))?.status).toBe(501)
+    expect((await get(folio, `/folio/api/story/${id}/translation?locale=fr`))?.status).toBe(501)
   })
 })
 

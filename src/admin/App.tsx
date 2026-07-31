@@ -12,6 +12,17 @@ import { fetchMe, type Me, OPEN } from './me'
  */
 export interface Boot {
   storyId: string
+  /**
+   * Where Folio is mounted. For **pages and public bytes**: the sign-in flow, a
+   * story's preview, an asset's `<img src>`.
+   */
+  base: string
+  /**
+   * Where the admin's internal JSON lives — `${base}/api`
+   * (`../../../docs/specs/foundation/pagination.md` decision 3). Every `fetch` in
+   * the admin goes through this, which is why the prefix move cost the client two
+   * strings rather than a sweep.
+   */
   apiBase: string
   /**
    * Whether the host declared the `SPACE` binding
@@ -54,16 +65,17 @@ export function App({ boot }: { boot: Boot }) {
    * Together because the editor's whole shape depends on both: a role decides
    * whether the inspector is read-only, whether Publish is offered and whether
    * the Access rail exists at all, and rendering it once as an editor and then
-   * again as a viewer is worse than a moment of "Loading". `/folio/schema` is
-   * ungated, so it answers even when `/folio/me` says nobody is signed in — which
-   * is what lets the sign-in prompt below be a Folio page rather than a blank one.
+   * again as a viewer is worse than a moment of "Loading". `{base}/api/schema` is
+   * ungated, so it answers even when `{base}/api/me` says nobody is signed in —
+   * which is what lets the sign-in prompt below be a Folio page rather than a blank
+   * one.
    */
   useEffect(() => {
     Promise.all([
       fetch(`${boot.apiBase}/schema`).then((r) =>
         r.ok ? r.json() : Promise.reject(new Error(`schema ${r.status}`)),
       ),
-      fetchMe(boot.apiBase),
+      fetchMe(boot.apiBase, boot.base),
     ])
       .then(([m, who]) => {
         const manifest = m as Manifest
@@ -76,7 +88,7 @@ export function App({ boot }: { boot: Boot }) {
         setMe(who)
       })
       .catch((e: Error) => setError(e.message))
-  }, [boot.apiBase])
+  }, [boot.apiBase, boot.base])
 
   // The one place a 401 from any mutating call becomes a navigation rather than a
   // toast (`identity-and-access.md` phase 4, step 1). Registered per api base,
@@ -127,6 +139,7 @@ export function App({ boot }: { boot: Boot }) {
       me={me}
       space={boot.space ?? false}
       apiBase={boot.apiBase}
+      base={boot.base}
     />
   )
 }

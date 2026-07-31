@@ -35,7 +35,7 @@ const bindings = (e: Cloudflare.Env): FolioBindings => ({
   images: e.IMAGES,
 })
 
-describe('GET /folio/schema: showIf and hidden survive the trip', () => {
+describe('GET /folio/api/schema: showIf and hidden survive the trip', () => {
   it('carries a showIf condition and a hidden flag through, structurally unchanged', async () => {
     const folio = createFolio<Cloudflare.Env>({
       blocks: [hero],
@@ -46,7 +46,7 @@ describe('GET /folio/schema: showIf and hidden survive the trip', () => {
     })
 
     const res = await folio.handle(
-      new Request(`${ORIGIN}/folio/schema`),
+      new Request(`${ORIGIN}/folio/api/schema`),
       env,
       createExecutionContext(),
     )
@@ -140,7 +140,7 @@ describe('a starting document is the root block’s own default preset', () => {
   })
 })
 
-describe('GET /folio/schema: field defaults and block presets survive the trip', () => {
+describe('GET /folio/api/schema: field defaults and block presets survive the trip', () => {
   it('carries a field default and a block’s presets/presetsOnly through, structurally unchanged', async () => {
     const folio = createFolio<Cloudflare.Env>({
       blocks: [insightRoot, button, prose],
@@ -151,7 +151,7 @@ describe('GET /folio/schema: field defaults and block presets survive the trip',
     })
 
     const res = await folio.handle(
-      new Request(`${ORIGIN}/folio/schema`),
+      new Request(`${ORIGIN}/folio/api/schema`),
       env,
       createExecutionContext(),
     )

@@ -271,7 +271,7 @@ describe('the index', () => {
     expect(committed).not.toHaveProperty('rejected')
 
     const res = await folio.handle(
-      new Request(`${ORIGIN}/folio/story/col_moved/publish`, { method: 'POST' }),
+      new Request(`${ORIGIN}/folio/api/story/col_moved/publish`, { method: 'POST' }),
       env,
       createExecutionContext(),
     )
@@ -300,7 +300,7 @@ describe('the index', () => {
     expect(await rowsFor('col_gone')).not.toHaveLength(0)
 
     const unpub = await folio.handle(
-      new Request(`${ORIGIN}/folio/story/col_gone/unpublish`, { method: 'POST' }),
+      new Request(`${ORIGIN}/folio/api/story/col_gone/unpublish`, { method: 'POST' }),
       env,
       createExecutionContext(),
     )
@@ -319,7 +319,7 @@ describe('the index', () => {
     expect(await rowsFor('col_deleted')).not.toHaveLength(0)
 
     const del = await folio.handle(
-      new Request(`${ORIGIN}/folio/stories/col_deleted`, { method: 'DELETE' }),
+      new Request(`${ORIGIN}/folio/api/stories/col_deleted`, { method: 'DELETE' }),
       env,
       createExecutionContext(),
     )
@@ -599,10 +599,10 @@ describe('query', () => {
 
 /* ------------------------------------------------------- GET /content --- */
 
-describe('GET /folio/content', () => {
+describe('GET /folio/api/content', () => {
   it('answers a ContentPage for a query spelled as parameters', async () => {
     const res = await get(
-      '/folio/content?type=colInsight&where=topic:eq:policy&order=published:desc&perPage=4&page=1',
+      '/folio/api/content?type=colInsight&where=topic:eq:policy&order=published:desc&perPage=4&page=1',
     )
     expect(res?.status).toBe(200)
     const body = (await res!.json()) as { items: { id: string }[]; total: number; pages: number }
@@ -612,7 +612,7 @@ describe('GET /folio/content', () => {
   })
 
   it('400s naming the field for a filter on something unindexed', async () => {
-    const res = await get('/folio/content?type=colInsight&where=secret:eq:x')
+    const res = await get('/folio/api/content?type=colInsight&where=secret:eq:x')
     expect(res?.status).toBe(400)
     const body = (await res!.json()) as { error: { code: string; message: string } }
     expect(body.error.code).toBe('bad_request')
@@ -621,12 +621,12 @@ describe('GET /folio/content', () => {
 
   it('cannot be injected through a field name or a value', async () => {
     const injected = await get(
-      `/folio/content?where=${encodeURIComponent("topic' or 1=1 --:eq:x")}`,
+      `/folio/api/content?where=${encodeURIComponent("topic' or 1=1 --:eq:x")}`,
     )
     expect(injected?.status).toBe(400)
 
     const value = await get(
-      `/folio/content?type=colInsight&where=${encodeURIComponent("topic:eq:x'; drop table stories; --")}`,
+      `/folio/api/content?type=colInsight&where=${encodeURIComponent("topic:eq:x'; drop table stories; --")}`,
     )
     expect(value?.status).toBe(200)
     // The table is still there, which is the whole assertion.

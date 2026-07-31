@@ -54,7 +54,14 @@ function flatten(nodes: StoryNode[]): StoryNode[] {
  * Switching pages is client-side: the rail keeps its state, the tree stays put,
  * and there is no full reload — so this hook owns the history entries too.
  */
-export function useStories(apiBase: string, initialStoryId: string, notify: Notify): Stories {
+export function useStories(
+  apiBase: string,
+  /** The bare mount: this hook owns the editor page's history entries, and
+   * `/edit/:id` is a page rather than JSON. */
+  base: string,
+  initialStoryId: string,
+  notify: Notify,
+): Stories {
   const [storyId, setStoryId] = useState(initialStoryId)
   const [tree, setTree] = useState<StoryNode[]>([])
   const [documents, setDocuments] = useState<StoryNode[]>([])
@@ -95,9 +102,9 @@ export function useStories(apiBase: string, initialStoryId: string, notify: Noti
     (id: string) => {
       if (id === storyId) return
       setStoryId(id)
-      window.history.pushState({ folioStoryId: id }, '', `${apiBase}/edit/${id}`)
+      window.history.pushState({ folioStoryId: id }, '', `${base}/edit/${id}`)
     },
-    [apiBase, storyId],
+    [base, storyId],
   )
 
   useEffect(() => {

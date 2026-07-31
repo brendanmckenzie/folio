@@ -266,7 +266,7 @@ describe('folio.migrate: a rename reaches every copy of a document', () => {
     const folio = makeFolio([RENAME])
     await seedStory(folio, 'mig_live', [blok('h1', 'hero', { heading: 'Hi' })])
 
-    const res = await req(folio, '/folio/story/mig_live/socket', {
+    const res = await req(folio, '/folio/api/story/mig_live/socket', {
       headers: { Upgrade: 'websocket' },
     })
     const ws = res?.webSocket
@@ -567,7 +567,7 @@ describe('versions are migrated on read, never rewritten', () => {
       .bind(JSON.stringify(doc), Date.now())
       .run()
 
-    const res = await req(folio, '/folio/versions/ver_pre')
+    const res = await req(folio, '/folio/api/versions/ver_pre')
     const body = await res?.json<{ doc: Doc; migrated: string[]; meta: { schemaId: null } }>()
     expect(body?.doc.bloks.h1?.data).toEqual({ heading: null, title: 'Then' })
     expect(body?.migrated).toEqual(['0001-hero-heading-to-title'])
@@ -592,7 +592,7 @@ describe('versions are migrated on read, never rewritten', () => {
       .bind(JSON.stringify(doc), Date.now())
       .run()
 
-    const res = await req(folio, '/folio/versions/ver_now')
+    const res = await req(folio, '/folio/api/versions/ver_now')
     const body = await res?.json<{ migrated: string[] }>()
     expect(body?.migrated).toEqual([])
   })
@@ -609,7 +609,7 @@ describe('versions are migrated on read, never rewritten', () => {
     const folio = makeFolio([RENAME])
     await seedStory(folio, 'mig_pub', [blok('h1', 'hero', { heading: 'Then' })])
 
-    const before = await req(folio, '/folio/story/mig_pub/publish', { method: 'POST' })
+    const before = await req(folio, '/folio/api/story/mig_pub/publish', { method: 'POST' })
     expect(before?.status).toBe(200)
     const behindRow = await env.DB.prepare(
       'select id, schema_id from versions where story_id = ? order by created_at desc',
@@ -619,14 +619,14 @@ describe('versions are migrated on read, never rewritten', () => {
     expect(behindRow?.schema_id).toBeNull()
 
     // And so it is migrated on read, which is the whole point of recording it.
-    const version = await req(folio, `/folio/versions/${behindRow!.id}`)
+    const version = await req(folio, `/folio/api/versions/${behindRow!.id}`)
     const body = await version?.json<{ doc: Doc; migrated: string[] }>()
     expect(body?.migrated).toEqual(['0001-hero-heading-to-title'])
     expect(body?.doc.bloks.h1?.data).toEqual({ heading: null, title: 'Then' })
 
     // Once the story is migrated, a fresh publish records the new watermark.
     await folio.migrate(env)
-    await req(folio, '/folio/story/mig_pub/publish', { method: 'POST' })
+    await req(folio, '/folio/api/story/mig_pub/publish', { method: 'POST' })
     const currentRow = await env.DB.prepare(
       'select schema_id from versions where story_id = ? order by created_at desc',
     )
@@ -639,7 +639,7 @@ describe('versions are migrated on read, never rewritten', () => {
 describe('a document created now is born up to date', () => {
   it('stamps the latest migration on a new story, so it is never reported behind', async () => {
     const folio = makeFolio([RENAME, DEFAULT_ALIGN])
-    const res = await req(folio, '/folio/stories', {
+    const res = await req(folio, '/folio/api/stories', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ title: 'Born Migrated' }),
@@ -647,7 +647,7 @@ describe('a document created now is born up to date', () => {
     const story = await res?.json<{ id: string }>()
     expect(await schemaIdOf(story!.id)).toBe('0002-hero-align-default')
 
-    const status = await req(folio, `/folio/migrations?story=${story!.id}`)
+    const status = await req(folio, `/folio/api/migrations?story=${story!.id}`)
     expect((await status?.json<MigrationStatus>())?.story).toMatchObject({
       behind: false,
       pending: [],
@@ -655,12 +655,12 @@ describe('a document created now is born up to date', () => {
   })
 })
 
-describe('GET /folio/migrations', () => {
+describe('GET /folio/api/migrations', () => {
   it('reports what is configured, what has run, and whether one story is behind', async () => {
     const folio = makeFolio([RENAME, DEFAULT_ALIGN])
     await seedStory(folio, 'mig_status', [blok('h1', 'hero', { heading: 'Hi' })])
 
-    const before = await req(folio, '/folio/migrations?story=mig_status')
+    const before = await req(folio, '/folio/api/migrations?story=mig_status')
     expect(await before?.json<MigrationStatus>()).toMatchObject({
       migrations: [
         { id: '0001-hero-heading-to-title', applied: false },
@@ -680,7 +680,7 @@ describe('GET /folio/migrations', () => {
 
     await folio.migrate(env)
 
-    const after = await req(folio, '/folio/migrations?story=mig_status')
+    const after = await req(folio, '/folio/api/migrations?story=mig_status')
     expect(await after?.json<MigrationStatus>()).toMatchObject({
       pending: [],
       behind: 0,
@@ -691,18 +691,18 @@ describe('GET /folio/migrations', () => {
   /** The banner is an explanation; refusing the request over an id the editor is
    * closing anyway would surface as an error toast. */
   it('reports an unknown story as up to date rather than 404ing', async () => {
-    const res = await req(makeFolio([RENAME]), '/folio/migrations?story=sty_nope')
+    const res = await req(makeFolio([RENAME]), '/folio/api/migrations?story=sty_nope')
     expect(res?.status).toBe(200)
     expect((await res?.json<MigrationStatus>())?.story).toMatchObject({ behind: false })
   })
 })
 
-describe('POST /folio/migrate', () => {
+describe('POST /folio/api/migrate', () => {
   it('runs a batch and answers the report, cursor and all', async () => {
     const folio = makeFolio([RENAME])
     await seedStory(folio, 'mig_route', [blok('h1', 'hero', { heading: 'Hi' })])
 
-    const res = await req(folio, '/folio/migrate', {
+    const res = await req(folio, '/folio/api/migrate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ batch: 50 }),
@@ -712,12 +712,12 @@ describe('POST /folio/migrate', () => {
   })
 
   it('accepts an empty body as "run everything"', async () => {
-    const res = await req(makeFolio([RENAME]), '/folio/migrate', { method: 'POST' })
+    const res = await req(makeFolio([RENAME]), '/folio/api/migrate', { method: 'POST' })
     expect(res?.status).toBe(200)
   })
 
   it('refuses a batch outside the bounds', async () => {
-    const res = await req(makeFolio([RENAME]), '/folio/migrate', {
+    const res = await req(makeFolio([RENAME]), '/folio/api/migrate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ batch: 5000 }),
@@ -726,7 +726,7 @@ describe('POST /folio/migrate', () => {
   })
 })
 
-describe('GET /folio/audit', () => {
+describe('GET /folio/api/audit', () => {
   it('reports orphan keys and unknown block types over published documents', async () => {
     const folio = makeFolio([])
     await seedStory(
@@ -737,7 +737,7 @@ describe('GET /folio/audit', () => {
     )
     await seedStory(folio, 'aud_b', [blok('bq', 'bigQuote', { text: 'x' })], { publish: true })
 
-    const res = await req(folio, '/folio/audit')
+    const res = await req(folio, '/folio/api/audit')
     expect(res?.status).toBe(200)
     const report = await res?.json<AuditReport>()
     expect(report?.orphanKeys).toEqual([{ type: 'hero', field: 'heading', documents: 1 }])
@@ -768,7 +768,7 @@ describe('GET /folio/audit', () => {
       auth: 'open',
     })
     const res = await folio.handle(
-      new Request(`${ORIGIN}/folio/audit`),
+      new Request(`${ORIGIN}/folio/api/audit`),
       env,
       createExecutionContext(),
     )

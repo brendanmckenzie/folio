@@ -181,14 +181,14 @@ describe('a record has no URL', () => {
   })
 
   it('leaves the page tree free of records', async () => {
-    const tree = (await (await get('/folio/stories'))!.json()) as { id: string }[]
+    const tree = (await (await get('/folio/api/stories'))!.json()) as { id: string }[]
     const ids = JSON.stringify(tree)
     expect(ids).not.toContain(ADA)
     expect(ids).not.toContain(SYDNEY)
   })
 
   it('lists them in GET /documents instead, unrouted and with no url', async () => {
-    const body = (await (await get('/folio/documents?type=recPersonType'))!.json()) as {
+    const body = (await (await get('/folio/api/documents?type=recPersonType'))!.json()) as {
       documents: { id: string; path: string | null; url?: string }[]
     }
     expect(body.documents.map((d) => d.id).sort()).toEqual([ADA, GRACE])
@@ -201,7 +201,7 @@ describe('a record has no URL', () => {
 
 describe('GET /documents carries the indexed values the list view columns need', () => {
   it('returns one entry per document, keyed by field', async () => {
-    const body = (await (await get('/folio/documents'))!.json()) as {
+    const body = (await (await get('/folio/api/documents'))!.json()) as {
       indexed?: Record<string, Record<string, { text: string; num: number | null }>>
     }
     expect(body.indexed?.[ADA]?.fullName?.text).toBe('Ada Lovelace')
@@ -210,18 +210,18 @@ describe('GET /documents carries the indexed values the list view columns need',
   })
 
   it('leaves a document with nothing published out, so its cells read blank', async () => {
-    const created = (await (await send('/folio/stories', 'POST', {
+    const created = (await (await send('/folio/api/stories', 'POST', {
       title: 'Unpublished Person',
       type: 'recPersonType',
     }))!.json()) as { id: string }
-    const body = (await (await get('/folio/documents?type=recPersonType'))!.json()) as {
+    const body = (await (await get('/folio/api/documents?type=recPersonType'))!.json()) as {
       documents: { id: string }[]
       indexed?: Record<string, unknown>
     }
     // The row IS in the list — the admin lists documents, not published content.
     expect(body.documents.map((d) => d.id)).toContain(created.id)
     expect(body.indexed?.[created.id]).toBeUndefined()
-    await send(`/folio/stories/${created.id}`, 'DELETE')
+    await send(`/folio/api/stories/${created.id}`, 'DELETE')
   })
 })
 
@@ -229,7 +229,7 @@ describe('GET /documents carries the indexed values the list view columns need',
 
 describe('GET /documents/:id/usage', () => {
   it('counts the four published pages referencing an office, and names them', async () => {
-    const usage = (await (await get(`/folio/documents/${SYDNEY}/usage`))!.json()) as {
+    const usage = (await (await get(`/folio/api/documents/${SYDNEY}/usage`))!.json()) as {
       published: { id: string; title: string; url: string; kind: string }[]
       total: number
       links: number
@@ -250,7 +250,7 @@ describe('GET /documents/:id/usage', () => {
   })
 
   it('counts a hand-picked references() list as a usage of every member', async () => {
-    const grace = (await (await get(`/folio/documents/${GRACE}/usage`))!.json()) as {
+    const grace = (await (await get(`/folio/api/documents/${GRACE}/usage`))!.json()) as {
       published: { id: string }[]
       total: number
     }
@@ -261,7 +261,7 @@ describe('GET /documents/:id/usage', () => {
   })
 
   it('counts one document once even when it both references and lists the target', async () => {
-    const ada = (await (await get(`/folio/documents/${ADA}/usage`))!.json()) as {
+    const ada = (await (await get(`/folio/api/documents/${ADA}/usage`))!.json()) as {
       published: { id: string; kind: string }[]
       total: number
       references: number
@@ -274,21 +274,21 @@ describe('GET /documents/:id/usage', () => {
   })
 
   it('is empty and does not 404 for a document nothing points at', async () => {
-    const created = (await (await send('/folio/stories', 'POST', {
+    const created = (await (await send('/folio/api/stories', 'POST', {
       title: 'Nobody',
       type: 'recPersonType',
     }))!.json()) as { id: string }
-    const usage = (await (await get(`/folio/documents/${created.id}/usage`))!.json()) as {
+    const usage = (await (await get(`/folio/api/documents/${created.id}/usage`))!.json()) as {
       published: unknown[]
       total: number
     }
     expect(usage.total).toBe(0)
     expect(usage.published).toEqual([])
-    await send(`/folio/stories/${created.id}`, 'DELETE')
+    await send(`/folio/api/stories/${created.id}`, 'DELETE')
   })
 
   it('is empty for an id that never existed, rather than an error', async () => {
-    const res = (await get('/folio/documents/rec_nope/usage'))!
+    const res = (await get('/folio/api/documents/rec_nope/usage'))!
     expect(res.status).toBe(200)
     expect(((await res.json()) as { total: number }).total).toBe(0)
   })
@@ -296,19 +296,19 @@ describe('GET /documents/:id/usage', () => {
   it('excludes unpublished references, and says so by simply not having them', async () => {
     // A draft page referencing the office. Never published, so nothing was ever
     // written to `content_refs` for it — which is the whole honesty caveat.
-    const created = (await (await send('/folio/stories', 'POST', {
+    const created = (await (await send('/folio/api/stories', 'POST', {
       title: 'Draft Referrer',
     }))!.json()) as { id: string }
     await folio.handle(
-      new Request(`${ORIGIN}/folio/story/${created.id}/document`),
+      new Request(`${ORIGIN}/folio/api/story/${created.id}/document`),
       env,
       createExecutionContext(),
     )
-    const usage = (await (await get(`/folio/documents/${SYDNEY}/usage`))!.json()) as {
+    const usage = (await (await get(`/folio/api/documents/${SYDNEY}/usage`))!.json()) as {
       total: number
     }
     expect(usage.total).toBe(4)
-    await send(`/folio/stories/${created.id}`, 'DELETE')
+    await send(`/folio/api/stories/${created.id}`, 'DELETE')
   })
 })
 
@@ -316,47 +316,53 @@ describe('GET /documents/:id/usage', () => {
 
 describe('a record publishes and versions like a page', () => {
   it('publishes twice and retains two versions, with no path involved', async () => {
-    const created = (await (await send('/folio/stories', 'POST', {
+    const created = (await (await send('/folio/api/stories', 'POST', {
       title: 'Versioned Person',
       type: 'recPersonType',
     }))!.json()) as { id: string; path: string | null }
     expect(created.path).toBeNull()
 
     // Opening the document is what seeds the Durable Object; publish reads it.
-    await get(`/folio/story/${created.id}/document`)
-    const first = (await (await send(`/folio/story/${created.id}/publish`, 'POST'))!.json()) as {
+    await get(`/folio/api/story/${created.id}/document`)
+    const first = (await (await send(
+      `/folio/api/story/${created.id}/publish`,
+      'POST',
+    ))!.json()) as {
       ok: boolean
     }
     expect(first.ok).toBe(true)
-    const second = (await (await send(`/folio/story/${created.id}/publish`, 'POST'))!.json()) as {
+    const second = (await (await send(
+      `/folio/api/story/${created.id}/publish`,
+      'POST',
+    ))!.json()) as {
       ok: boolean
     }
     expect(second.ok).toBe(true)
 
-    const list = (await (await get(`/folio/story/${created.id}/versions`))!.json()) as {
+    const list = (await (await get(`/folio/api/story/${created.id}/versions`))!.json()) as {
       kind: string
     }[]
     expect(list.filter((v) => v.kind === 'publish').length).toBeGreaterThanOrEqual(2)
 
     // Still no route to it, published or not.
     expect(await folio.published(env, created.id)).toBeNull()
-    await send(`/folio/stories/${created.id}`, 'DELETE')
+    await send(`/folio/api/stories/${created.id}`, 'DELETE')
   })
 
   it('refuses to duplicate a singleton but happily duplicates a record', async () => {
-    const created = (await (await send('/folio/stories', 'POST', {
+    const created = (await (await send('/folio/api/stories', 'POST', {
       title: 'Copy Me',
       type: 'recPersonType',
     }))!.json()) as { id: string }
-    await get(`/folio/story/${created.id}/document`)
-    const res = (await send(`/folio/stories/${created.id}/duplicate`, 'POST', {
+    await get(`/folio/api/story/${created.id}/document`)
+    const res = (await send(`/folio/api/stories/${created.id}/duplicate`, 'POST', {
       title: 'Copy Me 2',
     }))!
     expect(res.status).toBe(201)
     const copy = ((await res.json()) as { story: { id: string; path: string | null } }).story
     expect(copy.path).toBeNull()
-    await send(`/folio/stories/${copy.id}`, 'DELETE')
-    await send(`/folio/stories/${created.id}`, 'DELETE')
+    await send(`/folio/api/stories/${copy.id}`, 'DELETE')
+    await send(`/folio/api/stories/${created.id}`, 'DELETE')
   })
 })
 
@@ -364,7 +370,7 @@ describe('a record publishes and versions like a page', () => {
 
 describe('deleting a referenced record proceeds', () => {
   it('removes the row, its index rows, and leaves the referring pages alone', async () => {
-    const created = (await (await send('/folio/stories', 'POST', {
+    const created = (await (await send('/folio/api/stories', 'POST', {
       title: 'Doomed Office',
       type: 'recOfficeType',
     }))!.json()) as { id: string }
@@ -376,14 +382,14 @@ describe('deleting a referenced record proceeds', () => {
     })
     await folio.reindex(env, { batch: 200 })
 
-    const before = (await (await get(`/folio/documents/${created.id}/usage`))!.json()) as {
+    const before = (await (await get(`/folio/api/documents/${created.id}/usage`))!.json()) as {
       total: number
     }
     expect(before.total).toBe(1)
 
     // Warns with a count, and proceeds (decision 4): the delete is not gated on
     // the usage being zero.
-    const res = (await send(`/folio/stories/${created.id}`, 'DELETE'))!
+    const res = (await send(`/folio/api/stories/${created.id}`, 'DELETE'))!
     expect(res.status).toBe(200)
     expect(((await res.json()) as { deleted: string[] }).deleted).toEqual([created.id])
 
@@ -439,7 +445,7 @@ describe('deleting a referenced record proceeds', () => {
       .bind('rec_pointer', 'rec_hub', 'link')
       .run()
 
-    const res = (await send('/folio/stories/rec_hub?redirect=false', 'DELETE'))!
+    const res = (await send('/folio/api/stories/rec_hub?redirect=false', 'DELETE'))!
     expect(res.status).toBe(200)
 
     const rows = await env.DB.prepare(
@@ -479,7 +485,7 @@ describe('deleting a referenced record proceeds', () => {
     })
     await folio.reindex(env, { batch: 200 })
 
-    expect((await send('/folio/story/rec_paused/unpublish', 'POST'))!.status).toBe(200)
+    expect((await send('/folio/api/story/rec_paused/unpublish', 'POST'))!.status).toBe(200)
 
     // Its own projection is gone: an unpublished document leaves every collection.
     const own = await env.DB.prepare('select count(*) as n from content_index where story_id = ?')
@@ -488,7 +494,7 @@ describe('deleting a referenced record proceeds', () => {
     expect(own?.n).toBe(0)
 
     // The inbound edge is not.
-    const usage = (await (await get('/folio/documents/rec_paused/usage'))!.json()) as {
+    const usage = (await (await get('/folio/api/documents/rec_paused/usage'))!.json()) as {
       total: number
     }
     expect(usage.total).toBe(1)

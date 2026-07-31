@@ -117,11 +117,14 @@ export function whyNot(me: Me, need: 'edit' | 'create' | 'publish' | 'manage'): 
  * as open rather than as locked, because the routes are the authority and the
  * only cost of guessing wrong here is an affordance the server then refuses.
  */
-export async function fetchMe(apiBase: string): Promise<Me> {
+export async function fetchMe(apiBase: string, base: string): Promise<Me> {
   try {
     const res = await fetch(`${apiBase}/me`)
     if (res.status === 401) {
-      return { mode: 'session', actor: null, loginUrl: `${apiBase}/login` }
+      // `base`, not `apiBase`: the sign-in flow is HTML on the bare mount, and a
+      // 401 is the one path that has to build this URL itself rather than reading
+      // the `loginUrl` a 200 carries.
+      return { mode: 'session', actor: null, loginUrl: `${base}/login` }
     }
     if (!res.ok) return OPEN
     return (await res.json()) as Me

@@ -19,9 +19,12 @@ interface AssetRow {
   createdAt: number
 }
 
-const thumb = (apiBase: string, asset: AssetValue, width = 320) => {
+/** `base`, not `apiBase`: `/asset/:key` serves bytes into an `<img>` and stays on
+ * the bare mount, because its URL is also baked into published HTML through
+ * `Resolution.assetBase`. */
+const thumb = (base: string, asset: AssetValue, width = 320) => {
   if (!asset.key) return asset.url!
-  return `${apiBase}/asset/${asset.key}?w=${width}&f=webp`
+  return `${base}/asset/${asset.key}?w=${width}&f=webp`
 }
 
 const humanSize = (bytes: number) =>

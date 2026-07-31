@@ -69,21 +69,26 @@ describe('the bindings middleware', () => {
     })
 
     // A pure derived manifest, with a shape worth confirming came back whole.
-    const schema = await get(folio, '/folio/schema')
+    const schema = await get(folio, '/folio/api/schema')
     expect(schema?.status).toBe(200)
     expect((await schema?.json<{ root: string }>())?.root).toBe('page')
 
     const cases: [string, RequestInit | undefined, number][] = [
-      // Nothing is mounted at the bare base, or at an unknown path under it.
-      ['/folio', undefined, 404],
-      ['/folio/not-a-route', undefined, 404],
+      // **The rebuilt shell is mounted at the bare base**, on a wildcard, so both
+      // of these now serve its HTML rather than 404ing — and the interesting part
+      // is that they do so *without* touching the host's environment. The shell
+      // page is `rt.page('admin')` plus a bootstrap of two strings; the router on
+      // the client decides what the path means, and an unknown one becomes its own
+      // "not found" screen with the nav still around it.
+      ['/folio', undefined, 200],
+      ['/folio/not-a-route', undefined, 200],
       // The socket route refuses a request that is not an upgrade before it
       // looks at anything else, and the editor page rejects an id that cannot
       // name a story without a lookup — see routes/editor.ts. 'bad id' is
       // malformed in the sense `isId` means: a space is not in the id charset,
       // where a hyphen is (so 'not-an-id' would be looked up, and 404 for the
       // ordinary reason).
-      ['/folio/story/sty_appmw01/socket', undefined, 426],
+      ['/folio/api/story/sty_appmw01/socket', undefined, 426],
       ['/folio/edit/bad%20id', undefined, 404],
     ]
 
@@ -102,13 +107,13 @@ describe('the bindings middleware', () => {
       return real(e)
     })
 
-    expect((await get(folio, '/folio/stories'))?.status).toBe(200)
+    expect((await get(folio, '/folio/api/stories'))?.status).toBe(200)
     expect(calls).toBe(1)
 
     // `loadStory` and the handler behind it both ask, and the runtime asks again
     // for the Durable Object stub: one memoised call for the request, not three.
     calls = 0
-    expect((await get(folio, '/folio/story/sty_appmw01/document'))?.status).toBe(200)
+    expect((await get(folio, '/folio/api/story/sty_appmw01/document'))?.status).toBe(200)
     expect(calls).toBe(1)
   })
 })

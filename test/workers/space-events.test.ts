@@ -161,7 +161,7 @@ describe('structural events', () => {
   it('emits exactly one story.created after a create, and none after a refused one', async () => {
     const l = await listen()
 
-    const ok = await call(folio, 'POST', '/folio/stories', {
+    const ok = await call(folio, 'POST', '/folio/api/stories', {
       title: 'Made',
       parentId: 'sty_spaceev1',
     })
@@ -180,7 +180,7 @@ describe('structural events', () => {
     })
 
     // A refused create writes nothing, so it says nothing.
-    const bad = await call(folio, 'POST', '/folio/stories', {
+    const bad = await call(folio, 'POST', '/folio/api/stories', {
       title: 'Nowhere',
       parentId: 'sty_does_not_exist',
     })
@@ -193,15 +193,15 @@ describe('structural events', () => {
   it('emits one story.updated naming every path that moved', async () => {
     const l = await listen()
     const made = (await (
-      await call(folio, 'POST', '/folio/stories', { title: 'Parent', parentId: 'sty_spaceev1' })
+      await call(folio, 'POST', '/folio/api/stories', { title: 'Parent', parentId: 'sty_spaceev1' })
     )?.json<{ id: string; path: string }>())!
     const child = (await (
-      await call(folio, 'POST', '/folio/stories', { title: 'Child', parentId: made.id })
+      await call(folio, 'POST', '/folio/api/stories', { title: 'Child', parentId: made.id })
     )?.json<{ id: string; path: string }>())!
     await waitForEvents(l, 2)
     l.events.length = 0
 
-    const res = await call(folio, 'PATCH', `/folio/stories/${made.id}`, { slug: 'renamed' })
+    const res = await call(folio, 'PATCH', `/folio/api/stories/${made.id}`, { slug: 'renamed' })
     expect(res?.status).toBe(200)
 
     const event = (await waitForEvents(l, 1))[0]!
@@ -217,7 +217,7 @@ describe('structural events', () => {
     // re-derived from the title when no slug is given, so renaming a page does
     // move its URL — which is precisely why this event exists.)
     l.events.length = 0
-    await call(folio, 'PATCH', `/folio/stories/${made.id}`, { slug: 'renamed' })
+    await call(folio, 'PATCH', `/folio/api/stories/${made.id}`, { slug: 'renamed' })
     await settle()
     expect(l.events).toHaveLength(0)
     l.ws.close()
@@ -226,12 +226,12 @@ describe('structural events', () => {
   it('emits one story.deleted with every removed id', async () => {
     const l = await listen()
     const made = (await (
-      await call(folio, 'POST', '/folio/stories', { title: 'Doomed', parentId: 'sty_spaceev1' })
+      await call(folio, 'POST', '/folio/api/stories', { title: 'Doomed', parentId: 'sty_spaceev1' })
     )?.json<{ id: string }>())!
     await waitForEvents(l, 1)
     l.events.length = 0
 
-    const res = await call(folio, 'DELETE', `/folio/stories/${made.id}`)
+    const res = await call(folio, 'DELETE', `/folio/api/stories/${made.id}`)
     expect(res?.status).toBe(200)
 
     const event = (await waitForEvents(l, 1))[0]!
@@ -239,7 +239,7 @@ describe('structural events', () => {
 
     // The root refuses to be deleted, and a refusal is not an event.
     l.events.length = 0
-    const refused = await call(folio, 'DELETE', '/folio/stories/sty_spaceev1')
+    const refused = await call(folio, 'DELETE', '/folio/api/stories/sty_spaceev1')
     expect(refused?.status).toBeGreaterThanOrEqual(400)
     await settle()
     expect(l.events).toHaveLength(0)
@@ -249,12 +249,15 @@ describe('structural events', () => {
   it('emits one story.published naming the version', async () => {
     const l = await listen()
     const made = (await (
-      await call(folio, 'POST', '/folio/stories', { title: 'Goes live', parentId: 'sty_spaceev1' })
+      await call(folio, 'POST', '/folio/api/stories', {
+        title: 'Goes live',
+        parentId: 'sty_spaceev1',
+      })
     )?.json<{ id: string }>())!
     await waitForEvents(l, 1)
     l.events.length = 0
 
-    const res = await call(folio, 'POST', `/folio/story/${made.id}/publish`)
+    const res = await call(folio, 'POST', `/folio/api/story/${made.id}/publish`)
     expect(res?.status).toBe(200)
 
     const event = (await waitForEvents(l, 1))[0]!
@@ -266,7 +269,7 @@ describe('structural events', () => {
 
     // Publishing a story that does not exist is refused and says nothing.
     l.events.length = 0
-    const missing = await call(folio, 'POST', '/folio/story/sty_nope000000000000/publish')
+    const missing = await call(folio, 'POST', '/folio/api/story/sty_nope000000000000/publish')
     expect(missing?.status).toBeGreaterThanOrEqual(400)
     await settle()
     expect(l.events).toHaveLength(0)
@@ -280,7 +283,7 @@ describe('structural events', () => {
    */
   it('writes succeed with no space binding at all, and broadcast nothing', async () => {
     const l = await listen()
-    const res = await call(blind, 'POST', '/folio/stories', {
+    const res = await call(blind, 'POST', '/folio/api/stories', {
       title: 'No channel here',
       parentId: 'sty_spaceev1',
     })

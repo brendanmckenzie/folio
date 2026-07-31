@@ -294,6 +294,22 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     })
   })
 
+  return app
+}
+
+/**
+ * The two JSON routes of the session: who am I, and sign me out.
+ *
+ * Split from the sign-in flow above because they land on opposite sides of the
+ * `{base}/api` line (`../../../docs/specs/foundation/pagination.md` decision 3).
+ * The flow is HTML and redirects — a form post, an emailed link, an OIDC callback,
+ * and a page that deliberately ships no JavaScript — so it keeps the bare mount
+ * where a browser can be sent to it. These two are the admin talking to its own
+ * server, so they move.
+ */
+export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
+  const app = new Hono<FolioEnv<Env>>()
+
   /**
    * Signs out. Reads the cookie itself rather than `c.var.actor`, so a browser
    * holding a session that has already been revoked server-side still gets its
