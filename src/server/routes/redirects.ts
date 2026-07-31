@@ -5,6 +5,7 @@
  * stay distinct.
  */
 import { Hono } from 'hono'
+import { decodeCursor } from '../../core/pagination'
 import { actorString, MANAGE, READ } from '../auth/roles'
 import { FolioError } from '../errors'
 import { hookCtx, requireAccess } from '../middleware'
@@ -41,6 +42,17 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const limit = limitParam(c.req.query('limit'), 50, 200)
     const cursor = c.req.query('cursor')
     const source = c.req.query('source')
+    // A malformed cursor is a 400, not a silent first page
+    // (`../../../docs/specs/foundation/pagination.md`, edge cases). The cursor is
+    // opaque, so a client that sent a bad one has a bug, and quietly restarting
+    // surfaces as a list that jumped — which nobody can act on.
+    //
+    // Note the asymmetry with `limit`, which clamps instead of refusing: an
+    // out-of-range limit is a stale bookmark and still has an obvious right
+    // answer, whereas "resume after ???" has none.
+    if (cursor !== undefined && decodeCursor(cursor) === null) {
+      throw new FolioError('bad_request', 'Malformed pagination cursor')
+    }
     return c.json(
       await listRedirects(db, {
         limit,

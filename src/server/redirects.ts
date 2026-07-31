@@ -18,6 +18,7 @@
  *   that already redirects back to `from` — are what keep a manual add from
  *   creating a trap, not a rewrite of rows nobody asked to touch.
  */
+import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
 import { isSafeHref } from '../core/values'
 
 export interface Redirect {
@@ -144,35 +145,40 @@ export interface ListRedirectsOptions {
   cursor?: string
 }
 
-export interface RedirectPage {
-  rows: Redirect[]
-  /** Pass as `cursor` to fetch the next page; null once this is the last one. */
-  cursor: string | null
-}
+/**
+ * `Page<Redirect>` by another name, kept as an alias because this route's shape is
+ * already public through `folio.redirects()`.
+ */
+export type RedirectPage = Page<Redirect>
 
-/** `created_at`+`from_path` packed into one opaque string, so a page boundary
- * that lands on two rows sharing a millisecond still resumes exactly. */
-function encodeCursor(createdAt: number, from: string): string {
-  return `${createdAt}_${from}`
-}
-
-function decodeCursor(raw: string): { createdAt: number; from: string } | null {
-  const i = raw.indexOf('_')
-  if (i < 0) return null
-  const createdAt = Number(raw.slice(0, i))
-  if (!Number.isFinite(createdAt)) return null
-  return { createdAt, from: raw.slice(i + 1) }
-}
-
-/** Newest first, paginated. `source` filters to only the automatic or only the
- * manual rows; omitted, both. */
+/**
+ * Newest first, paginated. `source` filters to only the automatic or only the
+ * manual rows; omitted, both.
+ *
+ * **The first caller of `core/pagination.ts`.** This route hand-rolled the whole
+ * pattern — a `${createdAt}_${from}` cursor split on the first underscore, the
+ * `limit + 1` over-fetch, and the last-page condition — and was the precedent every
+ * other route is now being built to follow
+ * (`../../../docs/specs/foundation/pagination.md` decision 6). Moving it onto the
+ * shared codec is what makes that precedent real rather than aspirational, and it
+ * is the reason `listRedirects`'s tests still pass unchanged: the behaviour is
+ * identical, the cursor string is not.
+ *
+ * The cursor's components are `(created_at, from_path)`, in the same order as the
+ * `order by` below, which is the correspondence `paginate` cannot check for a
+ * caller.
+ */
 export async function listRedirects(
   db: D1Database,
   opts: ListRedirectsOptions = {},
 ): Promise<RedirectPage> {
-  const limit = Math.max(1, Math.min(opts.limit ?? 50, 200))
+  const limit = clampLimit(opts.limit, 50, 200)
   const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
-
+  // A malformed cursor is refused by the route (a 400), so reaching here with one
+  // means the caller is a method rather than a request. Treating it as "no cursor"
+  // is the right answer for that path: `folio.redirects()` passing nonsense is a
+  // programming error, and a first page is a better failure than an exception in a
+  // host's own handler.
   const clauses: string[] = []
   const params: unknown[] = []
   if (opts.source) {
@@ -180,8 +186,9 @@ export async function listRedirects(
     params.push(opts.source)
   }
   if (cursor) {
+    const [createdAt, from] = cursor
     clauses.push('(created_at < ? or (created_at = ? and from_path < ?))')
-    params.push(cursor.createdAt, cursor.createdAt, cursor.from)
+    params.push(createdAt, createdAt, from)
   }
   const where = clauses.length ? `where ${clauses.join(' and ')}` : ''
 
@@ -192,10 +199,7 @@ export async function listRedirects(
     .bind(...params, limit + 1)
     .all<Redirect>()
 
-  const hasMore = results.length > limit
-  const rows = hasMore ? results.slice(0, limit) : results
-  const last = rows.at(-1)
-  return { rows, cursor: hasMore && last ? encodeCursor(last.createdAt, last.from) : null }
+  return paginate(results, limit, (row) => [row.createdAt, row.from])
 }
 
 export interface UpsertRedirectInput {

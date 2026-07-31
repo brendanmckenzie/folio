@@ -35,6 +35,35 @@ const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18
               schema_id as schemaId`
 
 /**
+ * `StoryState`, in SQL — the same rule `core/story.ts`'s `draftState` states in
+ * TypeScript, over the same four stored columns.
+ *
+ * Needed because a state filter has to be answered **server-side** once a list is
+ * paged: a client-side predicate over one page filters the page, not the site
+ * (`../../../docs/specs/foundation/pagination.md` decision 4).
+ *
+ * A SQL expression rather than a stored `state` column, deliberately. A column
+ * would be indexable and faster to filter, and it would be a denormalisation of
+ * four values that can disagree with them — which here decides whether a page
+ * appears in a publisher's list at all. Every input is already stored, so there is
+ * nothing to gain by storing the conclusion too.
+ *
+ * **The risk this creates is two implementations of one rule**, so it is answered
+ * with a test rather than a comment: `test/workers/story-state.test.ts` runs this
+ * expression and `draftState` over the same rows and asserts they agree, including
+ * the case where an edit that cancelled itself out still reads `changed`.
+ *
+ * Unqualified column names, matching `COLS`: every reader uses `from stories` with
+ * no alias.
+ */
+export const STATE_EXPR = `case
+  when published_at is not null and draft_sync_id > published_sync_id then 'changed'
+  when published_at is not null then 'live'
+  when unpublished_at is not null then 'unpublished'
+  else 'draft'
+end`
+
+/**
  * `COLS`, for the one module that assembles its own `select` over `stories`:
  * `query.ts`, which joins `content_index` and therefore cannot go through any of
  * the readers here. Exported rather than duplicated so a column added to a story
