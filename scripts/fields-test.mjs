@@ -891,8 +891,8 @@ check('a record is absent from GET /folio/api/stories', !routedIds.includes(ada.
 const docs = await json(`${API}/documents?type=person`)
 check(
   'a record is present in GET /folio/api/documents?type=person',
-  docs.documents?.some((d) => d.id === ada.id),
-  JSON.stringify(docs.documents?.map((d) => d.id)),
+  docs.rows?.some((d) => d.id === ada.id),
+  JSON.stringify(docs.rows?.map((d) => d.id)),
 )
 
 // A page may still take the slug a record already uses: different namespaces.
@@ -1041,12 +1041,21 @@ check(
 const settings = await json(`${API}/documents?type=settings`)
 check(
   'a singleton is created on first access, under a derived id',
-  settings.documents?.length === 1 && settings.documents[0].id === 'sng_settings',
-  JSON.stringify(settings.documents?.map((d) => d.id)),
+  settings.rows?.length === 1 && settings.rows[0].id === 'sng_settings',
+  JSON.stringify(settings.rows?.map((d) => d.id)),
 )
 check(
   'asking again returns the same one, never a second',
-  (await json(`${API}/documents?type=settings`)).documents?.length === 1,
+  (await json(`${API}/documents?type=settings`)).rows?.length === 1,
+)
+// `?kind=singleton` is the other door to the same write, and the one the admin's
+// shell boots through: bounded by the schema rather than by content, so it is
+// uncursored (`ui-architecture.md` port phase 3).
+const everySingleton = await json(`${API}/documents?kind=singleton`)
+check(
+  'and `?kind=singleton` ensures every declared one, uncursored',
+  everySingleton.rows?.some((d) => d.id === 'sng_settings') && everySingleton.cursor === undefined,
+  JSON.stringify(everySingleton.rows?.map((d) => d.id)),
 )
 check(
   'a singleton refuses to be deleted',

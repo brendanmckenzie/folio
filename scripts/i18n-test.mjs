@@ -327,7 +327,7 @@ check(
 // log: replaying every mutation it holds must produce exactly the document it
 // serves. A `set` with no locale in that log is a source-locale write, and one
 // with a locale is not — the same log, the same reducer, no migration.
-const activity = await json(`${API}/story/${page.id}/activity`)
+const { rows: activity } = await json(`${API}/story/${page.id}/activity`)
 const logged = [...activity].reverse().flatMap((entry) => entry.mutations)
 const sourceSets = logged.filter((m) => m.t === 'set' && m.locale === undefined)
 const localeSets = logged.filter((m) => m.t === 'set' && m.locale !== undefined)

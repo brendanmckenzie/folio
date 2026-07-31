@@ -3,8 +3,9 @@
 > **Group:** foundation
 > **Build order:** 18, per docs/specs/README.md
 > **Size:** L ≈ a week or two
-> **Status:** in-progress — phases 1–4 and 7 done; phase 5 partly done, phase 6 moot.
-> See `## Implementation notes`.
+> **Status:** done — every phase landed. Phase 4's last route (`documents`) and
+> phase 5's last route (`search`) went with `ui-architecture.md`'s port phase 3;
+> phase 6 was moot. See `## Implementation notes`.
 > **Wire version:** none — no socket frame changes shape
 > **Migration:** `0001_init.sql` (the ten existing migrations collapse into one)
 > **Last updated:** 2026-07-31
@@ -901,18 +902,41 @@ to auto-expand.
 
 ### Where the spec was wrong
 
-- **"`GET {base}/api/documents` … `?type=&cursor=&limit=&state=&q=&count=`"** —
-  **not done.** It is the last unbounded read in the boot path, and it stayed that
-  way deliberately: its envelope also carries the `indexed` column values and
-  ensuring singletons is a side effect of asking, both of which are the Documents
-  screen's shape to settle at port phase 3. Paging it now would mean deciding that
-  shape twice. Named in `ROADMAP.md` so it is a decision rather than an oversight.
-- **`GET {base}/api/search` (decision 8) is not built.** The palette needed page
-  search the moment the shell stopped holding every story, and got it from
-  `?flat=1&q=` (debounced) rather than waiting for the shared route. So the palette
-  now finds a page on a site of any size, which is what it was worst at — but the
-  *three consumers, one route* part of decision 8 is still owed, and `content_index`
-  values are still unreachable from any search box.
+- **"`GET {base}/api/documents` … `?type=&cursor=&limit=&state=&q=&count=`"** — done
+  at port phase 3, and waiting was the right call: **both of the things that were the
+  screen's to settle came back differently from the spec's guess.**
+  - The `indexed` values are **on the row**, not in a sibling map keyed by id.
+    `StoryLevelRow`'s `childCount` set the precedent and paging turned it into a
+    rule: a map covering one page's ids is a structure the client has to zip against
+    `rows`, and a map left over from the *previous* page would quietly supply values
+    for rows no longer on screen.
+  - *Asking is what creates a singleton* moved to its own request,
+    **`?kind=singleton`**, because ensuring is a **write** and hanging it off an
+    unqualified list meant `?cursor=` decided whether a document came into existence.
+    That request is uncursored, and it is not an exception to the rule: a singleton
+    set is bounded by the host's `types` literal rather than by content, so it cannot
+    grow when somebody publishes. `?ids=` is uncursored for the same reason.
+  - A third thing the spec did not predict: **sorting by an `indexed` field is not
+    offered.** It is a keyset over a two-column value (`num_value` then `text_value`)
+    in another table that is *null* for anything unpublished, with no index able to
+    intersect it with `stories.type` — so it is a sort either way, and a three-part
+    keyset with sentinel coalescing buys reach at the cost of the one property that
+    made a keyset worth having. `core/story.ts`'s `DocumentSort` carries it and names
+    the shape it takes when somebody asks.
+- **`GET {base}/api/search` (decision 8) landed at port phase 3**, not with this
+  spec. The palette could not wait — it needed page search the moment the shell
+  stopped holding every story — so it got `?flat=1&q=` (debounced) as a stopgap, and
+  the two things that stopgap could not do are what the real route added: reach a
+  *record*, and reach `content_index`'s values. One correction to the decision as
+  written: it answers **`Page<StoryMeta>`, not a `StoryRef` projection**, because
+  every consumer wants more than `{ id, title, url }` — the palette shows a path to
+  tell two same-titled pages apart, a picker shows the state badge — and sending the
+  row the other list routes already send means one shape to consume. It also gained
+  `?sort=title|edited`: the route narrows and the *consumer* ranks
+  (`admin/ui/rank.ts`), so the ordering decides **which twenty rows get ranked**, and
+  recency is a far better prior for that than the alphabet. **Both pickers are still
+  owed** — they filter a full list in memory, and `?kind=page` / `?kind=record` is
+  the axis they will need.
 - **`Editor.tsx:252`'s `buildResolution`** still reads a full list. The old
   single-screen editor holds `flat` for four different consumers, and it is deleted
   at port phase 7, so it was given a **documented stopgap** instead of a rewrite:
@@ -922,11 +946,15 @@ to auto-expand.
   correct for the screens being built against it.
 - **`runtime.ts:525`'s `wantAll` branch** was not revisited. Still server-side, still
   not a route response.
-- **`{base}/api/story/:id/activity` is still capped, not cursored.** Phase 4 named it
-  and the versions route beside it; only versions was converted. It is
-  `limitParam(query, 60, 200)` and answers a bare array, which is why
-  `history-test.mjs` reads `versions.rows` and `activity` unadorned — a difference
-  that looks like an oversight in the scripts and is a real difference in the routes.
+- **`{base}/api/story/:id/activity` was still capped, not cursored** — converted at
+  port phase 3, which is what closed the difference that had `history-test.mjs`
+  reading `versions.rows` and `activity` unadorned. Its keyset is the first
+  **one-column** one: `sync_id` is assigned by the DO's own log and monotonic within
+  a document, so it is already a total order and a tiebreak could never fire.
+  `Keyset` gained `[string] | [string, string]` for it, and says why `path` stays
+  two-column anyway. This was the one route here where paging is not a nicety: the
+  log grows with every transaction, so before it the 501st entry was unreachable by
+  any means.
 
 ### The e2e scripts were the expensive part, and half of it was not this work
 

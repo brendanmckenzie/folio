@@ -472,7 +472,7 @@ describe('PUT /content', () => {
     // syncId 0 is what `getOrInit` wrote: nothing has been logged since.
     expect(await json<WriteResult>(res)).toEqual({ changed: 0, transactions: 0, syncId: 0 })
     // No transaction, which is what "no delta was broadcast" reduces to.
-    expect(await activityOf(id)).toEqual([])
+    expect((await activityOf(id)).rows).toEqual([])
   })
 
   it('preserves every uid across a round trip', async () => {
@@ -712,7 +712,7 @@ describe('Idempotency-Key', () => {
     await patchWithKey(id, 'Once', 'import-once')
     await patchWithKey(id, 'Once', 'import-once')
 
-    const entries = await open.draft(env, id).then(() => activityOf(id))
+    const { rows: entries } = await open.draft(env, id).then(() => activityOf(id))
     expect(entries.filter((e) => e.mutations.length > 0)).toHaveLength(1)
   })
 
@@ -739,7 +739,7 @@ async function activityOf(id: string) {
   const res = await call(`${ORIGIN}/folio/api/story/${id}/activity`, {
     headers: await cookieFor('admin'),
   })
-  return json<{ mutations: unknown[] }[]>(res)
+  return json<{ rows: { mutations: unknown[] }[]; cursor: string | null }>(res)
 }
 
 /* -------------------------------------------------------- broadcast to an editor --- */

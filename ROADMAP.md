@@ -557,6 +557,14 @@ an unsorted flat list, which stops working somewhere around 15.
   row; a route exists (`GET /folio/story/:id/translation`) for a caller that wants
   one story's answer, and a tree-wide answer wants a single query over
   `published_doc` rather than N Durable Object reads.
+- **A row whose document type is no longer declared has no screen.** `DataList.tsx`
+  listed these under an "Unknown type" heading, on the grounds that a row made
+  invisible by a code change is a row nobody can recover; the nav is generated from
+  the manifest, so an undeclared type has no `/documents/:type` to list them on.
+  `GET /folio/audit` already reports `unknown types` in full, so this lands with the
+  audit panel — the entry below. Until then `/documents/:type` for an undeclared type
+  names the type and points at the audit route rather than pretending the rows are
+  gone.
 - The audit has no admin surface. `GET /folio/audit` answers in full, but
   `Migrations.tsx` renders migration status and nothing else, so every drift
   finding — orphan keys, unknown types, missing fields, and now document size —
@@ -570,14 +578,23 @@ an unsorted flat list, which stops working somewhere around 15.
 - A collection's `order` takes a single field. One was enough everywhere it was
   looked at, and a second is additive — but it has to be threaded through the
   canonical form, the query string and the SQL, so it is not free.
-- The Data list view sorts, searches and pages **client-side**, over the whole list
-  `GET /folio/documents` returns in one request. Correct and free at the scale
-  examined, and the same ceiling collections sets — but a type with thousands of
-  documents wants the paging pushed into SQL, which means a `stories`-sourced query
-  that can also `order by` a joined `content_index` row.
-- The Data list view's columns are **published** values, source locale. A draft
-  document's cells are blank (the footer says so), and a translated value is not a
-  column. Both would want the same server-side query as the point above.
+- **Sorting a Documents column by an `indexed` field is not offered.** The list
+  itself sorts, searches and pages server-side now (`ui-architecture.md` port phase
+  3), over three `stories` columns — `ord`, `title`, `coalesce(draft_updated_at,
+  updated_at)`. An `indexed` field is the one axis missing, and it is missing for
+  three reasons rather than for effort: the value is two columns (`num_value` then
+  `text_value`), index rows are written inside the publish batch so the column is
+  **null** for anything unpublished, and `content_index_lookup` cannot be intersected
+  with `stories.type`. `core/story.ts`'s `DocumentSort` names the shape it takes when
+  somebody asks — a three-component keyset with sentinel coalescing — and why that
+  buys reach at the cost of the property a keyset is for. Mitigated in practice:
+  `documentColumns` skips the type's `titleField` as a field column because its value
+  *is* the title, so the sort anybody reaches for on a record list is `title`.
+- The Documents screen's columns are **published** values, source locale. A draft
+  document's cells are blank and the row's own `changed`/`draft` badge is what says
+  why — which replaced a standing footer note apologising for it on every page. A
+  translated value is still not a column, and would want a second dimension nobody
+  has asked for.
 - `references()` reorders with ↑ ↓ buttons rather than drag-and-drop. Keyed by story
   id, so it never needed the local ids `MultiAssetInput` now mints — but the spec
   asked for drag, and that is the same a11y-shaped work as the tree's keyboard

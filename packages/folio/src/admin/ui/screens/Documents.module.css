@@ -1,0 +1,203 @@
+/*
+ * The Documents screen. Deliberately thin: the table itself is `Table.module.css`
+ * and the chips, search box and footer are the same objects Content already has —
+ * which is the point of a fixed primitive set. What is here is the handful of
+ * classes a table of *records* needs and a tree does not.
+ */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 1400px;
+}
+
+.search {
+  height: 26px;
+  width: 200px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.search:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
+  border-color: var(--fg-accent);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+/* The same fieldset reset Content needs, and for the same reason: a group of
+   related controls is a `<fieldset>` with a hidden `<legend>` per Biome's
+   `useSemanticElements`, and a bare one arrives with a border, a margin and a
+   legend rendered inside that border. */
+.controls fieldset {
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  border: 0;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.chip {
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* Inverted rather than tinted, so a chip named `live` beside a `live` badge is not
+   two greens meaning different things. */
+.chipOn {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--fg-inverse);
+}
+
+/* ------------------------------------------------------------------- cells --- */
+
+.stamp {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A value nobody has published. Muted rather than absent, so an empty cell reads
+   as deliberate — the row's `changed` or `draft` badge is what says why. */
+.blank {
+  color: var(--fg-subtle);
+}
+
+.untitled {
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-1);
+  justify-content: flex-end;
+}
+
+/* ------------------------------------------------------------------ layout --- */
+
+.skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.skeleton {
+  height: var(--row-h);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+}
+
+.pager {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* ---------------------------------------------------------- delete dialog --- */
+
+.dialogNote {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 30vh;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.usage li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.usageTitle {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usagePath {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--fg-subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

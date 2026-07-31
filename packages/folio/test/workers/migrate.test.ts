@@ -204,7 +204,7 @@ describe('folio.migrate: a rename reaches every copy of a document', () => {
     const draft = await folio.draft(env, 'mig_rename')
     expect(draft.bloks.h1!.data).toEqual({ heading: null, title: 'Hi' })
     const stub = env.STORY.get(env.STORY.idFromName('mig_rename'))
-    const trail = await runInDurableObject(stub, (instance) => instance.recent())
+    const trail = (await runInDurableObject(stub, (instance) => instance.recent())).rows
     expect(trail[0]).toMatchObject({
       actor: 'migration:0001-hero-heading-to-title',
       actorName: 'Migration 0001-hero-heading-to-title',
@@ -311,14 +311,14 @@ describe('folio.migrate: re-running does nothing', () => {
     await folio.migrate(env)
 
     const stub = env.STORY.get(env.STORY.idFromName('mig_again'))
-    const before = (await runInDurableObject(stub, (i) => i.recent())).length
+    const before = (await runInDurableObject(stub, (i) => i.recent())).rows.length
     // The ledger is not the mechanism. Prove it.
     await env.DB.prepare('delete from schema_migrations').run()
     await env.DB.prepare('update stories set schema_id = null where id = ?').bind('mig_again').run()
 
     const second = await folio.migrate(env)
     expect(second).toMatchObject({ stories: 1, changed: 0, unchanged: 1, mutations: 0 })
-    expect((await runInDurableObject(stub, (i) => i.recent())).length).toBe(before)
+    expect((await runInDurableObject(stub, (i) => i.recent())).rows.length).toBe(before)
   })
 })
 
@@ -363,7 +363,7 @@ describe('folio.migrate: dry run', () => {
 
     // Nothing logged, nothing published, no ledger row, no watermark.
     const stub = env.STORY.get(env.STORY.idFromName('mig_dry'))
-    expect(await runInDurableObject(stub, (i) => i.recent())).toHaveLength(1) // just the seed
+    expect((await runInDurableObject(stub, (i) => i.recent())).rows).toHaveLength(1) // just the seed
     expect(publishedHero(await publishedDocOf('mig_dry'))).toEqual({ heading: 'Hi' })
     expect(await schemaIdOf('mig_dry')).toBeNull()
     const ledger = await env.DB.prepare('select count(*) as n from schema_migrations').first<{
@@ -460,7 +460,7 @@ describe('folio.migrate: oversized documents are chunked, not refused', () => {
     }
     // Three transactions, each within the wire cap.
     const stub = env.STORY.get(env.STORY.idFromName('mig_big'))
-    const trail = await runInDurableObject(stub, (i) => i.recent())
+    const trail = (await runInDurableObject(stub, (i) => i.recent())).rows
     const migrationTxs = trail.filter((t) => t.actor.startsWith('migration:'))
     expect(migrationTxs).toHaveLength(3)
     for (const tx of migrationTxs) expect(tx.mutations.length).toBeLessThanOrEqual(MAX_TX_MUTATIONS)

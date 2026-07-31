@@ -341,7 +341,7 @@ describe('StoryDO: transactions', () => {
     peer.send({ type: 'tx', txId: 'tx-1', mutations: setTitle('Renamed') })
     await frame(peer, 'delta')
 
-    const trail = await runInDurableObject(stub, (instance) => instance.recent())
+    const trail = (await runInDurableObject(stub, (instance) => instance.recent())).rows
     expect(trail).toHaveLength(1)
     expect(trail[0]).toMatchObject({
       syncId: 1,
@@ -372,7 +372,7 @@ describe('StoryDO: transactions', () => {
       )
     })
 
-    const trail = await runInDurableObject(stub, (instance) => instance.recent())
+    const trail = (await runInDurableObject(stub, (instance) => instance.recent())).rows
     expect(trail[0]).toMatchObject({ actor: 'unknown', actorName: null })
   })
 })
@@ -395,7 +395,7 @@ describe('StoryDO: commit (the transaction RPC)', () => {
     )
     expect(result).toEqual({ syncId: 1, txId: 'commit-1' })
 
-    const trail = await runInDurableObject(stub, (instance) => instance.recent())
+    const trail = (await runInDurableObject(stub, (instance) => instance.recent())).rows
     expect(trail[0]).toMatchObject({
       syncId: 1,
       actor: 'migration:0001-test',
@@ -483,7 +483,7 @@ describe('StoryDO: commit (the transaction RPC)', () => {
     expect(second).toEqual({ syncId: 1, txId: 'commit-same', replay: true })
     // The second call's mutations never ran: the log has one row and the
     // document still holds the first call's value.
-    expect(await runInDurableObject(stub, (instance) => instance.recent())).toHaveLength(1)
+    expect((await runInDurableObject(stub, (instance) => instance.recent())).rows).toHaveLength(1)
     const doc = await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
     expect(doc.bloks.root0000?.data.title).toBe('Once')
   })
@@ -524,7 +524,7 @@ describe('StoryDO: commit (the transaction RPC)', () => {
     expect(result).toEqual({
       rejected: `too many mutations: ${MAX_TX_MUTATIONS + 1} exceeds the ${MAX_TX_MUTATIONS} cap`,
     })
-    expect(await runInDurableObject(stub, (instance) => instance.recent())).toEqual([])
+    expect((await runInDurableObject(stub, (instance) => instance.recent())).rows).toEqual([])
   })
 
   /**
@@ -548,7 +548,7 @@ describe('StoryDO: commit (the transaction RPC)', () => {
     )
 
     expect(result).toEqual({ rejected: 'root remove: the root cannot be removed' })
-    expect(await runInDurableObject(stub, (instance) => instance.recent())).toEqual([])
+    expect((await runInDurableObject(stub, (instance) => instance.recent())).rows).toEqual([])
     const doc = await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
     expect(doc.bloks.root0000?.data.title).toBe('Home')
   })
@@ -636,10 +636,10 @@ describe('StoryDO: activity trail', () => {
       }
     })
 
-    const all = await runInDurableObject(stub, (instance) => instance.recent())
-    const capped = await runInDurableObject(stub, (instance) => instance.recent(2))
+    const all = (await runInDurableObject(stub, (instance) => instance.recent())).rows
+    const capped = (await runInDurableObject(stub, (instance) => instance.recent(2))).rows
     // A limit below 1 is clamped to 1 rather than returning nothing.
-    const clamped = await runInDurableObject(stub, (instance) => instance.recent(0))
+    const clamped = (await runInDurableObject(stub, (instance) => instance.recent(0))).rows
 
     expect(all.map((e) => e.syncId)).toEqual([3, 2, 1])
     expect(capped.map((e) => e.syncId)).toEqual([3, 2])
@@ -914,7 +914,7 @@ describe('StoryDO: protocol discipline', () => {
       mutations: setTitle('Renamed'),
     })
     expect([...new Set(deltas.map((d) => d.syncId))]).toEqual([1])
-    const trail = await runInDurableObject(stub, (instance) => instance.recent())
+    const trail = (await runInDurableObject(stub, (instance) => instance.recent())).rows
     expect(trail.map((e) => e.syncId)).toEqual([1])
     const doc = await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
     expect(doc.bloks.root0000?.data.title).toBe('Renamed')
@@ -1021,7 +1021,7 @@ describe('StoryDO: protocol discipline', () => {
     // Atomic: the half that could have applied did not, nothing was logged, and
     // no peer was told about an edit that does not exist.
     expect(await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))).toEqual(seed())
-    expect(await runInDurableObject(stub, (instance) => instance.recent())).toEqual([])
+    expect((await runInDurableObject(stub, (instance) => instance.recent())).rows).toEqual([])
     expect(framesOf(ada, 'delta')).toEqual([])
     expect(framesOf(bo, 'delta')).toEqual([])
     ada.ws.close()
@@ -1131,7 +1131,7 @@ describe('StoryDO: protocol discipline', () => {
     await settle()
     expect(framesOf(peer, 'delta')).toEqual([])
     expect(await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))).toEqual(seed())
-    expect(await runInDurableObject(stub, (instance) => instance.recent())).toEqual([])
+    expect((await runInDurableObject(stub, (instance) => instance.recent())).rows).toEqual([])
     expect(closes).toEqual([4001])
   })
 
@@ -1180,7 +1180,7 @@ describe('StoryDO: wire caps', () => {
     expect(err.reason).toContain('too large')
     expect(err.reason).toContain(String(MAX_FRAME_BYTES))
     await settle()
-    expect(await runInDurableObject(stub, (instance) => instance.recent())).toEqual([])
+    expect((await runInDurableObject(stub, (instance) => instance.recent())).rows).toEqual([])
 
     // Still open: a well-formed tx right after is applied and acknowledged.
     peer.send({ type: 'tx', txId: 'tx-good', mutations: setTitle('Renamed') })
@@ -1211,7 +1211,7 @@ describe('StoryDO: wire caps', () => {
     expect(reject.txId).toBe('tx-over')
     expect(reject.reason).toContain(String(MAX_TX_MUTATIONS))
     await settle()
-    expect(await runInDurableObject(stub, (instance) => instance.recent())).toEqual([])
+    expect((await runInDurableObject(stub, (instance) => instance.recent())).rows).toEqual([])
     expect(closes).toEqual([])
 
     peer.send({ type: 'tx', txId: 'tx-good', mutations: setTitle('Renamed') })
@@ -1339,7 +1339,7 @@ describe('StoryDO: wire caps', () => {
     expect(reject.reason).toContain(String(MAX_DOC_BLOKS))
     await settle()
     // Refused at the door like any other cap: nothing logged, doc unchanged.
-    expect(await runInDurableObject(stub, (instance) => instance.recent())).toEqual([])
+    expect((await runInDurableObject(stub, (instance) => instance.recent())).rows).toEqual([])
     const doc = await runInDurableObject(stub, (instance) => instance.getOrInit(seed()))
     expect(doc.bloks.oneTooMany).toBeUndefined()
 
@@ -1366,5 +1366,59 @@ describe('StoryDO: wire caps', () => {
     expect(err.reason).toContain('unset')
     await settle()
     expect(closes).toEqual([4001])
+  })
+})
+
+/**
+ * The activity trail's paging (`foundation/pagination.md` phase 4, finished at
+ * port phase 3 — it was the one route the phase named and did not convert).
+ *
+ * The keyset is **one column**: `sync_id` is assigned by the log and monotonic
+ * within a document, so it is already a total order. `Keyset` allows a single
+ * column for exactly that case, and these are the assertions that make it safe —
+ * every entry seen exactly once, and a boundary that resumes strictly after the
+ * cursor rather than repeating it.
+ */
+describe('recent(): the activity trail pages over a cursor', () => {
+  /** Any actor will do here: these tests are about the cursor, not attribution. */
+  const ACTOR = { id: 'test:activity', name: 'Activity Test' }
+
+  it('walks a log to exhaustion with no repeat and no gap', async () => {
+    const stub = story('activity-paging')
+    await runInDurableObject(stub, (o) => o.getOrInit(seed()))
+    for (let i = 0; i < 7; i++) {
+      await runInDurableObject(stub, (o) => o.commit(setTitle(`Edit ${i}`), ACTOR))
+    }
+
+    const seen: number[] = []
+    let cursor: string | null = null
+    let requests = 0
+    do {
+      const page: Awaited<ReturnType<StoryDO['recent']>> = await runInDurableObject(stub, (o) =>
+        o.recent(3, cursor ?? undefined),
+      )
+      seen.push(...page.rows.map((r) => r.syncId))
+      cursor = page.cursor
+      requests += 1
+      expect(requests).toBeLessThan(10)
+    } while (cursor !== null)
+
+    // Newest first, every syncId exactly once.
+    expect(seen).toEqual([...seen].sort((a, b) => b - a))
+    expect(new Set(seen).size).toBe(seen.length)
+    expect(seen).toHaveLength(7)
+    // Three pages of 3, 3 and 1 — and the last one's cursor is null rather than a
+    // key for a page that would come back empty.
+    expect(requests).toBe(3)
+  })
+
+  it('clamps a silly limit rather than refusing it, and ends with a null cursor', async () => {
+    const stub = story('activity-clamp')
+    await runInDurableObject(stub, (o) => o.getOrInit(seed()))
+    await runInDurableObject(stub, (o) => o.commit(setTitle('One'), ACTOR))
+
+    const page = await runInDurableObject(stub, (o) => o.recent(100_000))
+    expect(page.rows).toHaveLength(1)
+    expect(page.cursor).toBeNull()
   })
 })

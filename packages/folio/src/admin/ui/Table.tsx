@@ -91,7 +91,18 @@ export function Table<T>({
                 )}
               </th>
             ))}
-            {actions ? <th className={css.actionsHead} /> : null}
+            {/*
+              Named, not empty. A header cell with no accessible name leaves every
+              cell under it announced as belonging to a column called nothing, and
+              this one holds the row's controls. Visually hidden because a visible
+              "Actions" label over two hover-revealed buttons is noise on every row
+              of every table.
+            */}
+            {actions ? (
+              <th>
+                <span className={css.srOnly}>Actions</span>
+              </th>
+            ) : null}
           </tr>
         </thead>
         <tbody>

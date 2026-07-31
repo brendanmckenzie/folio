@@ -170,41 +170,70 @@ check(
 
 /* --- the Data list view's data ------------------------------------------- */
 
-const people = await json(`${API}/documents?type=person`)
+const people = await json(`${API}/documents?type=person&count=1`)
+const personRow = (id) => people.rows.find((d) => d.id === id)
 check(
   'GET /documents?type=person lists every person',
-  people.documents.length === 3,
-  `${people.documents.length} people`,
+  people.rows.length === 3,
+  `${people.rows.length} people`,
+)
+check(
+  'and answers an exact total when asked, which is the list header\u2019s `Showing n of N`',
+  people.total === 3,
+  String(people.total),
 )
 check(
   'including the one nobody has published — the admin lists documents, not published content',
-  people.documents.some((d) => d.id === katherine.id),
+  Boolean(personRow(katherine.id)),
 )
 check(
   "and marks her state 'draft', which is the list view's Status column",
-  people.documents.find((d) => d.id === katherine.id)?.state === 'draft',
-  people.documents.find((d) => d.id === katherine.id)?.state,
+  personRow(katherine.id)?.state === 'draft',
+  personRow(katherine.id)?.state,
+)
+// On the row rather than in a sibling map keyed by id: paging is what turned that
+// from a preference into a rule, since a map covering one page's ids is a
+// structure the client has to zip against `rows` (`DocumentRow`).
+check(
+  'the indexed values the columns read come back on the row itself',
+  personRow(ada.id)?.indexed?.fullName?.text === 'Ada Lovelace' &&
+    personRow(ada.id)?.indexed?.role?.text === 'Analyst',
+  JSON.stringify(personRow(ada.id)?.indexed ?? null),
 )
 check(
-  'the indexed values the columns read come back in the same request',
-  people.indexed?.[ada.id]?.fullName?.text === 'Ada Lovelace' &&
-    people.indexed?.[ada.id]?.role?.text === 'Analyst',
-  JSON.stringify(people.indexed?.[ada.id] ?? null),
+  'a published record with nothing indexed yet has an empty object, so its cells read blank',
+  Object.keys(personRow(katherine.id)?.indexed ?? { x: 1 }).length === 0,
 )
 check(
-  'a published record with nothing indexed yet simply has no entry, so its cells read blank',
-  people.indexed?.[katherine.id] === undefined,
+  'an ISO date field carries num as well as text, which is what `content_index` has two columns for',
+  typeof personRow(ada.id)?.indexed?.since?.num === 'number',
+  String(personRow(ada.id)?.indexed?.since?.num),
 )
+// The search box reaches `content_index`, which is what `filterRows` did
+// client-side and what would have been silently lost when the search moved to the
+// server: nothing in Ada's title contains "Analyst".
+const byRole = await json(`${API}/documents?type=person&q=analyst`)
 check(
-  'an ISO date field carries num as well as text, which is what makes the column sort by date',
-  typeof people.indexed?.[ada.id]?.since?.num === 'number',
-  String(people.indexed?.[ada.id]?.since?.num),
+  'the search box matches an indexed value the title does not contain',
+  byRole.rows.length === 1 && byRole.rows[0].id === ada.id,
+  JSON.stringify(byRole.rows.map((d) => d.id)),
+)
+// Sorting is the server's now, over `stories` columns only — `core/story.ts`'s
+// `DocumentSort` argues why an `indexed` column is not one of them, and this is
+// the refusal a client written against the old client-side sort meets.
+const badSort = await fetch(`${API}/documents?type=person&sort=role`)
+check('a sort naming an indexed field is refused, not silently ignored', badSort.status === 400)
+const byTitle = await json(`${API}/documents?type=person&sort=title&dir=desc`)
+check(
+  'and `?dir=` reverses one that is supported',
+  byTitle.rows[0].title >= byTitle.rows[byTitle.rows.length - 1].title,
+  byTitle.rows.map((d) => d.title).join(' | '),
 )
 
 const offices = await json(`${API}/documents?type=office`)
 check(
   'a second record type lists separately',
-  offices.documents.length === 1 && offices.documents[0].id === sydney.id,
+  offices.rows.length === 1 && offices.rows[0].id === sydney.id,
 )
 
 /* --- a page with a references() field ------------------------------------ */
@@ -351,9 +380,9 @@ check('with still no client JavaScript', !page3.includes('<script'))
 
 const afterDelete = await json(`${API}/documents?type=person`)
 check(
-  'and the Data list is one shorter',
-  afterDelete.documents.length === 2,
-  `${afterDelete.documents.length} people`,
+  'and the Documents list is one shorter',
+  afterDelete.rows.length === 2,
+  `${afterDelete.rows.length} people`,
 )
 
 /* --- records publish and version like pages ------------------------------ */
@@ -388,9 +417,11 @@ check(
   page4.includes('First programmer'),
 )
 
-const adaIndexed = (await json(`${API}/documents?type=person`)).indexed?.[ada.id]
+const adaIndexed = (await json(`${API}/documents?type=person`)).rows.find(
+  (d) => d.id === ada.id,
+)?.indexed
 check(
-  'and the Data list column follows the same publish',
+  'and the Documents list column follows the same publish',
   adaIndexed?.role?.text === 'First programmer',
   adaIndexed?.role?.text,
 )

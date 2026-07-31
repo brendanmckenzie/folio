@@ -247,7 +247,7 @@ check(
   delta.actor,
 )
 
-const trail = await json(`${API}/story/${pageA.id}/activity`)
+const { rows: trail } = await json(`${API}/story/${pageA.id}/activity`)
 check(
   'the migration is in the activity trail',
   trail.some((e) => e.mutations?.some((m) => m.field === 'credit')),
@@ -326,9 +326,9 @@ check(
   JSON.stringify({ stories: again.stories, mutations: again.mutations }),
 )
 
-const trailBefore = await json(`${API}/story/${pageA.id}/activity`)
+const { rows: trailBefore } = await json(`${API}/story/${pageA.id}/activity`)
 await post(`${API}/migrate`, {})
-const trailAfter = await json(`${API}/story/${pageA.id}/activity`)
+const { rows: trailAfter } = await json(`${API}/story/${pageA.id}/activity`)
 check(
   're-running wrote no new transaction',
   trailAfter.length === trailBefore.length,

@@ -114,7 +114,7 @@ check(
 /* --- the header singleton: created by asking, same as document-types.md -- */
 
 const headerDocs = await json(`${API}/documents?type=header`)
-const header = headerDocs.documents?.[0]
+const header = headerDocs.rows?.[0]
 check('the header singleton exists under its derived id', header?.id === 'sng_header', header?.id)
 
 const ed = client('globals-editor', header.id)

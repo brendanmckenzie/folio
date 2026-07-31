@@ -633,6 +633,31 @@ reaches the surface with sync, presence and preview in it.
      `ROADMAP.md`. All four are one `PATCH /stories/:id { parentId, index }` with
      different arguments.
 3. **Documents** — the table as a screen. Retires `DataList.tsx`, `DataTable.tsx`.
+   **Done** 2026-07-31, with four amendments:
+   - **An `indexed` column cannot be sorted**, and the two that can are `stories`
+     columns: title and last-edited. Sorting by a joined `content_index` row is a
+     keyset over a two-column value in another table that is null for anything
+     unpublished; `core/story.ts`'s `DocumentSort` carries the argument and the two
+     shapes it beat. The cost is small because `documentColumns` skips the type's
+     `titleField` as a field column — its value *is* the title — so "people by name"
+     is `sort=title` and sorts.
+   - **`GET {base}/api/documents` is paged, and `?kind=singleton` is where *asking
+     is what creates a singleton* now lives.** Ensuring is a write, and hanging it
+     off an unqualified list meant `?cursor=` decided whether a document came into
+     existence. A singleton set is bounded by the host's `types` literal rather than
+     by content, so that request is uncursored — which is why it is not an exception
+     to "no list is unbounded". **The boot path now holds no unbounded read at all.**
+   - **`GET {base}/api/search` landed with it** (`pagination.md` decision 8), and the
+     palette moved onto it. It spans every kind and reaches `content_index`'s values,
+     so a *record* is findable by the field that identifies it — two things
+     `?flat=1&q=` could not do. Both pickers are still owed.
+   - **`orphanedDocuments` has nowhere to go yet.** `DataList.tsx` listed rows whose
+     type is no longer declared under their own heading, because "a row that has
+     become invisible because the code changed is a row nobody can recover". The nav
+     is generated from the manifest, so an undeclared type has no screen; `GET
+     {base}/audit` already reports `unknown types` in full, so it lands with the
+     audit panel at phase 5. Until then `/documents/:type` for an undeclared type
+     names the type and points at the audit route.
 4. **Assets** — the new screen, and the picker as one `Dialog` mount of it. Retires
    the library half of `AssetInput.tsx`.
 5. **Access, Model, Redirects, Settings** — four tables and the audit panel.
@@ -696,6 +721,19 @@ because a list route and the screen over it are one decision:
    and once as the heading beneath it. Either the screens drop the heading and let the
    breadcrumb title them, or the breadcrumb stops rendering a one-segment trail.
    Found in the shell prototype; a decision for `admin/url-and-shell.md`.
+   **Evidence added while building Documents:** it is not only duplication, it is
+   *inverted* hierarchy. `ListHeader` renders its text as 11px uppercase
+   `--fg-subtle`, which is a section label; the breadcrumb above it is 13px at full
+   contrast. So the smaller, greyer of the two is the one that is actually the
+   screen's heading. Whichever way the duplication is resolved, the surviving one
+   needs the weight.
+8. **Should a control a role cannot use be absent on a list screen?** Content's bulk
+   Delete and Documents' per-row Delete are both offered to a viewer and refused by
+   the server, with the refusal reported. `## Cross-cutting` says impossible controls
+   are absent and refusable ones explain themselves — a viewer's delete is
+   *impossible*, so both screens are wrong in the same way. Named rather than
+   half-fixed: the fix is one rule applied to every screen at once (the shell already
+   holds `me`), not a branch in whichever screen was touched last.
 4. **Does flat mode want `sort=state`?** The one filter that is also a plausible
    ordering, and the one sort with no index. Deferred in `pagination.md` rather than
    guessed.

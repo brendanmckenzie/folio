@@ -73,13 +73,24 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return c.json(found)
   })
 
-  app.get('/story/:id/activity', requireAccess<Env>(rt, READ), loadStory<Env>(), async (c) =>
-    c.json(
+  /**
+   * The activity trail, paged — the same `Page<T>` envelope as the versions route
+   * above it, which is the whole of this change.
+   *
+   * `foundation/pagination.md` phase 4 named both and converted only versions, so
+   * for one commit the two routes beside each other on the same panel answered
+   * different shapes: `versions.rows` and `activity` as a bare array. That reads as
+   * an oversight in whoever consumes them and was a real difference in the routes.
+   */
+  app.get('/story/:id/activity', requireAccess<Env>(rt, READ), loadStory<Env>(), async (c) => {
+    const cursor = c.req.query('cursor')
+    requireCursor(cursor)
+    return c.json(
       await rt
         .stub(c.var.bindings(), c.var.story.id)
-        .recent(limitParam(c.req.query('limit'), 60, 200)),
-    ),
-  )
+        .recent(limitParam(c.req.query('limit'), 60, 200), cursor),
+    )
+  })
 
   return app
 }

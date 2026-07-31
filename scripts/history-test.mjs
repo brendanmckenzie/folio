@@ -215,7 +215,7 @@ check('diff of identical docs is empty', diff(target, target).length === 0)
 
 /* --- activity trail ---------------------------------------------------- */
 
-const activity = await json(`${API}/story/${STORY}/activity`)
+const { rows: activity } = await json(`${API}/story/${STORY}/activity`)
 check('activity records transactions', activity.length >= 3, `n=${activity.length}`)
 check('activity is newest first', activity[0].syncId > activity.at(-1).syncId)
 // The socket's identity is server-supplied now: `hello` still carries actor,
@@ -380,7 +380,7 @@ check(
   liveDuringDiscard.includes('Version One'),
 )
 
-const activityAfterDiscard = await json(`${API}/story/${STORY}/activity`)
+const { rows: activityAfterDiscard } = await json(`${API}/story/${STORY}/activity`)
 check(
   'the discard lands in the activity trail like any other transaction',
   activityAfterDiscard[0]?.mutations?.some((m) => m.t === 'set' && m.value === 'Version One'),

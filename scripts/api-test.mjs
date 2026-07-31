@@ -250,7 +250,7 @@ check(
 /* --- the activity trail, and undo --------------------------------------- */
 
 await wait(200)
-const trail = await asAdmin(`/story/${id}/activity`)
+const { rows: trail } = await asAdmin(`/story/${id}/activity`)
 check(
   'the activity trail records the script by name',
   trail.some((e) => e.actor === 'token:local dev'),
@@ -399,7 +399,7 @@ check(
 )
 
 await wait(200)
-const keyedTrail = await asAdmin(`/story/${id}/activity`)
+const { rows: keyedTrail } = await asAdmin(`/story/${id}/activity`)
 const descriptionWrites = keyedTrail.filter((e) =>
   (e.mutations ?? []).some((m) => m.field === 'description' && m.value === 'Idempotent'),
 )

@@ -61,3 +61,31 @@
   gap: var(--space-2);
   padding: var(--space-4);
 }
+
+/*
+ * A destructive dialog. See `Dialog`'s `danger` prop for the argument; the short
+ * version is that `variant="danger"` is a quiet button on purpose, and quiet is
+ * wrong for the affirmative action of a dialog that deletes something.
+ *
+ * Two marks, both from existing theme-aware tokens:
+ */
+
+/* One — the panel's own top edge, so the dialog reads as destructive before the
+   eye reaches the footer. A red *heading* was the alternative and it turns a
+   question into an alarm. */
+.danger {
+  border-top: 2px solid var(--state-danger-border);
+}
+
+/*
+ * Two — the footer's danger button at its resting weight raised to what it
+ * otherwise only shows on hover, so it out-weighs the bordered Cancel beside it.
+ *
+ * A descendant selector reaching into `Button`'s own class is deliberate and is the
+ * reason `danger` is a prop on *this* component: the alternative was a fifth button
+ * variant that only ever made sense in one container.
+ */
+.danger .foot :global(button[data-variant="danger"]) {
+  background: var(--state-danger-bg);
+  border-color: var(--state-danger-border);
+}

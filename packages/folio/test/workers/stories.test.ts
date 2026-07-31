@@ -12,7 +12,8 @@ import {
   deleteStoryStatement,
   duplicateStory,
   ensureSingleton,
-  listDocuments,
+  listDocumentPage,
+  listSingletons,
   listStories,
   publishedDoc,
   publishedDocsByIds,
@@ -827,8 +828,11 @@ describe('document types: createStory per kind', () => {
     // Both start a fresh sequence: the two seeded top-level pages already hold
     // 'a0' and 'a1', so sharing their group would have pushed these past them.
     expect(a.ord < b.ord).toBe(true)
-    const listed = await listDocuments(env.DB, 'person')
-    expect(listed.map((r) => r.id)).toEqual([a.id, b.id])
+    // `sort: 'ord'` rather than the default, which is `title`: this is the one
+    // assertion in the file that is *about* `ord`, so reading it under any other
+    // ordering would prove nothing.
+    const listed = await listDocumentPage(env.DB, 'person', 'ord')
+    expect(listed.rows.map((r) => r.id)).toEqual([a.id, b.id])
   })
 
   it('a second page type routes from the tree, exactly like the first', async () => {
@@ -887,13 +891,14 @@ describe('document types: createStory per kind', () => {
   })
 })
 
-describe('document types: listDocuments', () => {
+describe('document types: listDocumentPage', () => {
+  const rowsOf = async (type?: string) => (await listDocumentPage(env.DB, type, 'title')).rows
+
   it('returns only unrouted documents when no type is named', async () => {
     const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
     await createStory(env.DB, { title: 'A page', type: PAGE }, TYPES)
 
-    const all = await listDocuments(env.DB)
-    expect(all.map((r) => r.id)).toEqual([ada.id])
+    expect((await rowsOf()).map((r) => r.id)).toEqual([ada.id])
   })
 
   it('returns one type’s rows when a type is named', async () => {
@@ -901,14 +906,73 @@ describe('document types: listDocuments', () => {
     await createStory(env.DB, { title: 'Grace', type: PERSON }, TYPES)
     await createStory(env.DB, { title: 'Something else', type: PAGE }, TYPES)
 
-    expect((await listDocuments(env.DB, 'person')).map((r) => r.title)).toEqual(['Ada', 'Grace'])
-    expect((await listDocuments(env.DB, 'page')).map((r) => r.id)).toContain('sty_home')
-    expect((await listDocuments(env.DB, 'person')).map((r) => r.id)).not.toContain('sty_home')
+    expect((await rowsOf('person')).map((r) => r.title)).toEqual(['Ada', 'Grace'])
+    expect((await rowsOf('page')).map((r) => r.id)).toContain('sty_home')
+    expect((await rowsOf('person')).map((r) => r.id)).not.toContain('sty_home')
     expect(ada.path).toBeNull()
   })
 
   it('answers an empty list for a type with no rows', async () => {
-    expect(await listDocuments(env.DB, 'person')).toEqual([])
+    expect(await rowsOf('person')).toEqual([])
+  })
+
+  it('carries an `indexed` object on every row, empty when nothing is indexed', async () => {
+    await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+
+    // `indexed: false` is what a site marking nothing `indexed` passes, and the
+    // key is still present: a row whose values are absent and a row whose values
+    // were not asked for look the same to the table, which is what keeps the cell
+    // renderer from needing a second branch.
+    const [row] = (await listDocumentPage(env.DB, 'person', 'title', { indexed: false })).rows
+    expect(row?.indexed).toEqual({})
+  })
+
+  it('pages over a keyset and stops with a null cursor', async () => {
+    for (const title of ['Ada', 'Barbara', 'Grace', 'Katherine']) {
+      await createStory(env.DB, { title, type: PERSON }, TYPES)
+    }
+
+    const first = await listDocumentPage(env.DB, 'person', 'title', { limit: 2, count: true })
+    expect(first.rows.map((r) => r.title)).toEqual(['Ada', 'Barbara'])
+    expect(first.total).toBe(4)
+    expect(first.cursor).not.toBeNull()
+
+    const second = await listDocumentPage(env.DB, 'person', 'title', {
+      limit: 2,
+      ...(first.cursor ? { cursor: first.cursor } : {}),
+    })
+    expect(second.rows.map((r) => r.title)).toEqual(['Grace', 'Katherine'])
+    expect(second.cursor).toBeNull()
+    // Asked for on the first page only, so page two carries no aggregate — the
+    // count is over the whole filter and would be the same answer twice.
+    expect(second.total).toBeUndefined()
+  })
+
+  it('filters by state, server-side, over the whole type rather than a page', async () => {
+    await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    const grace = await createStory(env.DB, { title: 'Grace', type: PERSON }, TYPES)
+    await env.DB.prepare('update stories set published_at = ? where id = ?')
+      .bind(Date.now(), grace.id)
+      .run()
+
+    const live = await listDocumentPage(env.DB, 'person', 'title', { filter: { state: 'live' } })
+    expect(live.rows.map((r) => r.title)).toEqual(['Grace'])
+  })
+})
+
+describe('document types: listSingletons', () => {
+  it('ensures every declared singleton and returns them in declaration order', async () => {
+    const rows = await listSingletons(env.DB, TYPES)
+
+    expect(rows.map((r) => r.id)).toEqual(['sng_settings'])
+    // Idempotent, which is what makes it safe as the admin's boot call: it runs
+    // on every load and creates a row once.
+    expect((await listSingletons(env.DB, TYPES)).map((r) => r.id)).toEqual(['sng_settings'])
+    expect((await listDocumentPage(env.DB, 'settings', 'title')).rows).toHaveLength(1)
+  })
+
+  it('answers an empty list for a site that declares none', async () => {
+    expect(await listSingletons(env.DB, [PAGE, PERSON])).toEqual([])
   })
 })
 
@@ -929,7 +993,7 @@ describe('document types: ensureSingleton', () => {
     const second = await ensureSingleton(env.DB, SETTINGS)
 
     expect(second.id).toBe(first.id)
-    const rows = await listDocuments(env.DB, 'settings')
+    const rows = (await listDocumentPage(env.DB, 'settings', 'title')).rows
     expect(rows).toHaveLength(1)
   })
 
@@ -948,7 +1012,7 @@ describe('document types: ensureSingleton', () => {
 
     expect(a?.id).toBe('sng_settings')
     expect(b?.id).toBe('sng_settings')
-    expect(await listDocuments(env.DB, 'settings')).toHaveLength(1)
+    expect((await listDocumentPage(env.DB, 'settings', 'title')).rows).toHaveLength(1)
   })
 
   it('refuses a type that is not a singleton', async () => {
@@ -1119,7 +1183,7 @@ describe('document types: delete and the deleted-hook paths', () => {
   it('deletes a record without touching the tree', async () => {
     const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
     expect(await deleteStory(env.DB, ada.id, TYPES)).toEqual([ada.id])
-    expect(await listDocuments(env.DB, 'person')).toEqual([])
+    expect((await listDocumentPage(env.DB, 'person', 'title')).rows).toEqual([])
     expect(await storyByPath(env.DB, 'about/team')).not.toBeNull()
   })
 })
