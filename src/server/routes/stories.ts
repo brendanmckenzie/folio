@@ -480,15 +480,17 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       if (!found) return c.json({ deleted: [] })
 
       // One batch for the story rows, their version history, their query-index
-      // rows and (optionally) the redirect to the parent: all four disappear or
-      // land together, so a reader never finds versions for a story that is
-      // already gone, a collection that still lists it, or a redirect for a
-      // delete that never actually committed.
+      // rows, their pending schedules and (optionally) the redirect to the
+      // parent: all five disappear or land together, so a reader never finds
+      // versions for a story that is already gone, a collection that still lists
+      // it, a schedule due to publish it next Tuesday, or a redirect for a delete
+      // that never actually committed.
       const versions = deleteVersionsStatement(bindings.db, found.ids)
       await bindings.db.batch([
         found.statement,
         ...found.redirectStatements,
         ...found.indexStatements,
+        ...found.scheduleStatements,
         ...(versions ? [versions] : []),
       ])
     } catch (e) {

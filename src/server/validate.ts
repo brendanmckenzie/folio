@@ -28,6 +28,8 @@ import {
   DEFAULT_SEARCH_SORT,
   type DocumentSort,
   type FlatSort,
+  type ScheduleAction,
+  type ScheduleStatus,
   type SearchSort,
   type StoryFilter,
 } from '../core/story'
@@ -272,6 +274,100 @@ export const ReindexBody = v.object(
 )
 
 export type ReindexInput = v.InferOutput<typeof ReindexBody>
+
+/* -------------------------------------------------------------- schedules --- */
+
+/**
+ * The two things a schedule can do (`../../../docs/specs/platform/
+ * scheduled-publishing.md`). Screened against the picklist rather than any string,
+ * so a typo is a 400 naming what it can be instead of a pending row whose action
+ * the sweep will refuse three times.
+ */
+const SCHEDULE_ACTION = v.picklist(['publish', 'unpublish'], 'must be one of: publish, unpublish')
+
+/** `?action=` on the cancel route, where it is **required**: cancelling "the
+ * schedule" for a document is ambiguous when a campaign window has two. */
+export function scheduleActionQuery(raw: string | undefined): ScheduleAction {
+  return parseOrThrow(SCHEDULE_ACTION, raw, 'action')
+}
+
+/** The same as an optional list filter, where absent means both. */
+export function scheduleActionFilter(raw: string | undefined): ScheduleAction | undefined {
+  if (raw === undefined || raw === '') return undefined
+  return scheduleActionQuery(raw)
+}
+
+/** `?status=`. Absent means both, which is what "what is scheduled" means. */
+export function scheduleStatusQuery(raw: string | undefined): ScheduleStatus | undefined {
+  if (raw === undefined || raw === '') return undefined
+  return parseOrThrow(
+    v.picklist(['pending', 'failed'], 'must be one of: pending, failed'),
+    raw,
+    'status',
+  )
+}
+
+/**
+ * `POST {base}/api/story/:id/schedule`.
+ *
+ * `at` is bounded here only as "a whole non-negative number of milliseconds";
+ * whether it is in the future, and not absurdly far into it, is
+ * `checkScheduleTime`'s answer in `server/schedules.ts` — it needs the current
+ * time, which a static schema does not have, and it is a rule about the product
+ * rather than about what may reach a column.
+ *
+ * `actor` is deliberately not a field, for the reason `CheckpointBody` records:
+ * "who scheduled this" is not a value anybody should be able to type. The route
+ * reads `c.var.actor`.
+ */
+export const ScheduleBody = v.object(
+  {
+    action: SCHEDULE_ACTION,
+    at: v.pipe(
+      v.number('must be a number'),
+      v.integer('must be a whole number of milliseconds'),
+      v.minValue(0, 'must be 0 or greater'),
+    ),
+  },
+  OBJECT,
+)
+
+export type ScheduleInput = v.InferOutput<typeof ScheduleBody>
+
+/**
+ * `POST {base}/api/schedules/run`. Shaped like `MigrateBody` and `ReindexBody`,
+ * because it is the same kind of run — batched, resumable, safe to dry-run — so an
+ * empty body means "fire the first batch of whatever is due".
+ *
+ * `continueFrom` is a **cursor**, not an id, and that is the one difference from
+ * the two bodies above: the sweep runs in due order, so its resume key is the
+ * `(at, id)` pair rather than a primary key (`dueSchedules`). It is screened for
+ * length here and decoded by `requireCursor` at the route.
+ *
+ * **`now` is deliberately absent.** The runner takes one so a test can fire next
+ * Tuesday's schedule today, and exposing it over HTTP would turn a `publisher` into
+ * somebody who can fire *every* future schedule on the site at once by posting a
+ * date far enough ahead — a real capability nothing else in this surface grants.
+ */
+export const RunSchedulesBody = v.object(
+  {
+    dryRun: v.optional(v.boolean('must be true or false')),
+    continueFrom: v.nullish(
+      v.pipe(v.string('must be a string'), v.maxLength(500, 'is not a pagination cursor')),
+    ),
+    batch: v.optional(
+      v.pipe(
+        v.number('must be a number'),
+        v.integer('must be a whole number'),
+        v.minValue(1, 'must be at least 1'),
+        v.maxValue(200, 'must be 200 or fewer'),
+      ),
+    ),
+  },
+  OBJECT,
+)
+
+export type RunSchedulesInput = v.InferOutput<typeof RunSchedulesBody>
 
 /* ------------------------------------------------------------ content API --- */
 

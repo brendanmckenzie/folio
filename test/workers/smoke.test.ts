@@ -59,6 +59,7 @@ describe('workers harness: D1', () => {
       'd1_migrations',
       'login_challenges',
       'redirects',
+      'schedules',
       'schema_migrations',
       'sessions',
       'stories',

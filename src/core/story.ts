@@ -104,6 +104,17 @@ export interface StoryNode extends StoryMeta {
  * not derivable from `publishedAt`/`unpublishedAt` alone; it needs a watermark
  * comparison (or, for the story currently open, a real diff). `storyState`
  * below never returns it; `draftState` wraps it to do so.
+ *
+ * **Four, and `'scheduled'` is deliberately not a fifth**
+ * (`../../../docs/specs/platform/scheduled-publishing.md` decision 1). These four
+ * are mutually exclusive descriptions of what a document is doing *now*, which is
+ * what lets `server/stories.ts`'s `STATE_EXPR` be a `case` returning exactly one
+ * of them. A schedule is a fact about the *future* and is orthogonal to all four:
+ * a draft can carry one, and so can a live page with an embargo end. A fifth
+ * value would have to displace one of these, so a live page with a scheduled
+ * unpublish would stop answering `?state=live` — a filter that no longer lists
+ * the page that is, in fact, live. A schedule is read separately (`Schedule`
+ * below), and a screen draws it as its own marker beside the state chip.
  */
 export type StoryState = 'draft' | 'unpublished' | 'live' | 'changed'
 
@@ -142,6 +153,64 @@ export function draftState(
 ): StoryState {
   const base = storyState(publishedAt, unpublishedAt)
   return base === 'live' && draftSyncId > publishedSyncId ? 'changed' : base
+}
+
+/**
+ * What a schedule does when it fires (`../../../docs/specs/platform/scheduled-publishing.md`).
+ *
+ * Both, not just publish, and they are the same mechanism: an embargo ending and a
+ * campaign page coming down are the two halves of one product feature, and
+ * `unpublish()` was written to take no `Request` for exactly this
+ * (`../../../docs/specs/editing/unpublish.md` decision 3 said so in 2026-07).
+ *
+ * Here rather than in `server/schedules.ts` for the same reason `StoryFilter` and
+ * `FlatSort` are: the value travels in a URL and in a request body, so the screen
+ * that writes it and the reader that answers it have to share one vocabulary, and
+ * `core/` is the only thing both import.
+ */
+export type ScheduleAction = 'publish' | 'unpublish'
+
+/**
+ * Where a schedule has got to.
+ *
+ * Two values, and the absence of a third is the design. There is no `'done'`: a
+ * schedule that fires is deleted, because the publish it performed already left a
+ * `versions` row attributed to the same actor — the identical record a manual
+ * publish leaves — so a retained row would be a second, weaker copy of history
+ * that nothing prunes. There is no `'cancelled'` either: cancelling deletes the
+ * row, and "an editor changed their mind" is not a fact worth a permanent row.
+ *
+ * `'failed'` *is* retained, because a failure is recorded nowhere else. A schedule
+ * nobody can see fail is the bug this feature has.
+ */
+export type ScheduleStatus = 'pending' | 'failed'
+
+/**
+ * One scheduled publish or unpublish, as stored.
+ *
+ * Deliberately carries **no title and no path**: a schedule is a row about a
+ * document, and resolving a batch of ids to rows is what `GET {base}/api/stories?ids=`
+ * already exists for (`../../../docs/specs/foundation/pagination.md` decision 7).
+ * Joining `stories` here would denormalise two columns into a reader that has no
+ * other use for them, and the screen that draws a schedule is drawing a document
+ * it can already name.
+ */
+export interface Schedule {
+  id: string
+  storyId: string
+  action: ScheduleAction
+  /** Epoch milliseconds, UTC. Rendering it in an editor's timezone is the
+   * screen's job — Folio stores no timezone anywhere. */
+  at: number
+  status: ScheduleStatus
+  /** Who scheduled it. Passed to `publish(deps, story, actor)` when it fires, so
+   * the version row names the person rather than the cron. */
+  actor: string | null
+  createdAt: number
+  /** Failed attempts so far. Non-zero with `status: 'pending'` means the sweep
+   * will try again; see `server/scheduler.ts`'s `MAX_SCHEDULE_ATTEMPTS`. */
+  attempts: number
+  lastError: string | null
 }
 
 /**

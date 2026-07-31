@@ -36,6 +36,7 @@ import {
 } from './content-index'
 import type { StoryChange } from './hooks'
 import { clearRedirectAtStatement, redirectStatements } from './redirects'
+import { clearSchedulesStatements } from './schedules'
 
 const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18n,
               published_at as publishedAt, unpublished_at as unpublishedAt,
@@ -1590,6 +1591,23 @@ export async function deleteStoryStatement(
    * them forever.
    */
   indexStatements: D1PreparedStatement[]
+  /**
+   * Pending and failed schedules for the same ids
+   * (`../platform/scheduled-publishing.md`), for the same batch.
+   *
+   * A schedule must **not** outlive its story, which is the opposite of a
+   * `redirect`: a redirect exists precisely because the page stopped being at that
+   * path, whereas an instruction to publish a document that no longer exists is not
+   * an instruction. Left behind, the row would be retried three times and then sit
+   * in `?status=failed` naming a document nothing can show.
+   *
+   * A separate array rather than an `on delete cascade` in the DDL, matching
+   * `deleteUser`'s explicit session delete: whether D1 enforces foreign keys is a
+   * property of the database, and `test/workers/auth-session.test.ts` already says
+   * so in as many words. The sweep drops an orphan too, for the delete that races
+   * it.
+   */
+  scheduleStatements: D1PreparedStatement[]
 } | null> {
   const rows = await listStories(db)
   const target = rows.find((r) => r.id === id)
@@ -1631,6 +1649,7 @@ export async function deleteStoryStatement(
     statement,
     redirectStatements: redirects,
     indexStatements: [...clearIndexStatements(db, ids), ...clearInboundRefStatements(db, ids)],
+    scheduleStatements: clearSchedulesStatements(db, ids),
   }
 }
 
@@ -1642,7 +1661,7 @@ export async function deleteStory(
 ): Promise<string[]> {
   const found = await deleteStoryStatement(db, id, {}, types)
   if (!found) return []
-  await db.batch([found.statement, ...found.indexStatements])
+  await db.batch([found.statement, ...found.indexStatements, ...found.scheduleStatements])
   return found.ids
 }
 
