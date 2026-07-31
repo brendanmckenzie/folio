@@ -12,6 +12,7 @@ import { previewPage } from './pages'
 import { lookupRedirect } from './redirects'
 import { reindex } from './reindex'
 import { alarmHookCtx, createRuntime } from './runtime'
+import { runSchedules } from './scheduler'
 import {
   listStories,
   publishedDoc,
@@ -76,6 +77,18 @@ export type {
  * block renders, ship from `folio/core` with the rest of the field builders.
  */
 export type { ReindexOptions, ReindexReport } from './reindex'
+/**
+ * Scheduled publishing (`../../../docs/specs/platform/scheduled-publishing.md`):
+ * what `folio.runSchedules` takes and reports, and the row itself — a host writing
+ * its own dashboard, or a deploy check asserting nothing is stuck in `failed`,
+ * reads the same shape the admin does. `Schedule` and its two vocabularies come
+ * from `folio/core`'s `story.ts`, since they travel in URLs and the admin reads
+ * them too; they are re-exported here so a host holding a `folio` object needs one
+ * import rather than two.
+ */
+export type { ScheduleFailure, ScheduleRunOptions, ScheduleRunReport } from './scheduler'
+export { MAX_SCHEDULE_ATTEMPTS } from './scheduler'
+export type { Schedule, ScheduleAction, ScheduleStatus } from '../core/story'
 export type {
   ContentOrder,
   ContentPage,
@@ -321,6 +334,24 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         },
         opts,
       ),
+    /**
+     * The scheduler's sweep (`../../../docs/specs/platform/scheduled-publishing.md`).
+     *
+     * `alarmHookCtx(env)` for the hook context, exactly as `reindex` and `migrate`
+     * above: a `scheduled()` handler does have an `ExecutionContext`, but this
+     * method's signature deliberately does not take one — a deploy script calling
+     * the same sweep has none to offer, and Folio's own internal hooks (the space
+     * broadcast, the cache purge) are awaited either way, so a purge lands before
+     * this call returns.
+     *
+     * Assembled from `publishDeps` and nothing else, which is the point of
+     * `publish.ts` taking no Request: a scheduled publish reaches the identical
+     * workflow an editor's button does, so it retains a version, writes
+     * `content_index`, fires `published` and purges the cache without any of that
+     * being restated here.
+     */
+    runSchedules: (env, opts) =>
+      runSchedules(rt.publishDeps(config.bindings(env), alarmHookCtx(env)), opts),
     render: (doc, opts) => (
       <FolioDoc doc={doc} registry={rt.registry} edit={opts?.edit} resolution={opts?.resolution} />
     ),

@@ -26,6 +26,32 @@
   "cache": {
     "enabled": true
   },
+  // Scheduled publish and unpublish (docs/specs/platform/scheduled-publishing.md).
+  // **This key plus the `scheduled()` handler in src/index.tsx is the whole of the
+  // host's integration** — no queue, no polling loop, no external cron service.
+  //
+  // Every minute, which is the finest granularity Cloudflare cron offers and is
+  // best-effort within it. That is the granularity of the feature: a schedule fires
+  // on the first sweep at or after its due time, so it is never early and is late by
+  // at most one tick. "9:00" means "9:00, give or take the minute", which is the
+  // right trade for a CMS publishing a press release.
+  //
+  // Rejected: a Durable Object alarm per story, which ROADMAP.md predicted. A
+  // Durable Object has exactly one alarm and StoryDO already spends it on the
+  // debounced draft watermark — see server/scheduler.ts's header for the two ways
+  // that collides.
+  //
+  // A minute is also cheap because a site with nothing scheduled pays for one
+  // indexed read over an *empty* partial index (`schedules_due`). Widen it to
+  // "*/5 * * * *" if a five-minute window is close enough; nothing in Folio assumes
+  // the period.
+  //
+  // Locally, `wrangler dev` does not run crons on a timer. `POST
+  // /folio/api/schedules/run` is the manual trigger, which is what
+  // scripts/scheduled-test.mjs uses.
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
   "d1_databases": [
     {
       "binding": "DB",

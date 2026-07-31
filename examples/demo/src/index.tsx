@@ -289,6 +289,50 @@ export default {
       ...folio.cacheHeaders(resolution, { story: story?.id ?? null }),
     })
   },
+
+  /**
+   * Scheduled publish and unpublish (`platform/scheduled-publishing.md`).
+   *
+   * **This handler and `triggers.crons` in wrangler.jsonc are the entire host-side
+   * cost of the feature.** Everything else — which documents are due, publishing
+   * them through the same workflow the editor's button uses, the retained version,
+   * the `content_index` write, the `published` hook, Folio's own cache purge, and
+   * clearing the row afterwards — is inside `runSchedules`.
+   *
+   * The loop is the batching contract, not a nicety: one call fires up to 25
+   * schedules and answers a cursor, because a site with 500 pages queued for 9am
+   * would otherwise be one invocation over its CPU limit. **Loop on `continueFrom`
+   * and never on `report.remaining`** — a schedule that failed transiently in this
+   * sweep is still pending and still due, so that loop spins on it.
+   *
+   * The guard bounds one tick to 20 batches (500 documents). Whatever is left is
+   * still due on the next minute's tick, which is the correct way to be behind: a
+   * cron that never returns is a cron that gets killed.
+   *
+   * Awaited rather than `ctx.waitUntil`-ed: a cron invocation exists to do this
+   * work, so there is no response whose latency is being protected.
+   */
+  async scheduled(_controller, env, _ctx) {
+    let cursor: string | null = null
+    let batches = 0
+    do {
+      const report = await folio.runSchedules(env, { continueFrom: cursor })
+      cursor = report.continueFrom
+      // Worth a line in the log: a scheduled publish happens with nobody watching,
+      // so the run that fired nothing and the run that could not are the two things
+      // an operator needs to be able to tell apart after the fact.
+      if (report.published.length || report.unpublished.length || report.failed.length) {
+        console.log(
+          `folio: fired ${report.published.length} publish, ${report.unpublished.length} unpublish, ${report.failed.length} failed`,
+        )
+        for (const failure of report.failed) {
+          console.error(
+            `folio: schedule ${failure.id} (${failure.action} ${failure.storyId}) failed on attempt ${failure.attempts}${failure.givenUp ? ', giving up' : ''}: ${failure.reason}`,
+          )
+        }
+      }
+    } while (cursor !== null && ++batches < 20)
+  },
 } satisfies ExportedHandler<Env>
 
 /** The locales this site serves, mirroring `locales.available` above. */

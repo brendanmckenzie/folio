@@ -42,6 +42,10 @@ describe('the /api partition', () => {
     '/folio/api/search',
     '/folio/api/assets',
     '/folio/api/redirects',
+    // `scheduled-publishing.md`. Internal, so it may change shape in any commit —
+    // and deliberately *not* `{base}/api/v1/schedules`, which would be a promise to
+    // somebody's script about a surface nothing outside the admin reads yet.
+    '/folio/api/schedules',
     '/folio/api/content',
     '/folio/api/migrations',
     '/folio/api/audit',

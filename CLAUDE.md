@@ -170,8 +170,8 @@ are free to go the next time that code is touched.
   `tx` for keystrokes. Writing `published_doc` or the object's `doc` row directly is
   faster and breaks sync, undo, presence and the activity trail — visible only to
   whoever had the page open.
-- `deleteStoryStatement` returns four things now, including `indexStatements`, which a
-  caller must batch. Those statements clear `content_refs` in **both** directions on a
+- `deleteStoryStatement` returns **five** things now, including `indexStatements` and
+  `scheduleStatements`, all of which a caller must batch. Those statements clear `content_refs` in **both** directions on a
   delete; **unpublish deliberately clears only the outbound half**, because the story
   still exists and "used by N" is still a true warning about it. Two builders
   (`clearIndexStatements`, `clearInboundRefStatements`) rather than one with a flag,

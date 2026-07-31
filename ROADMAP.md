@@ -455,13 +455,37 @@ Not urgent, and deliberately not on the critical path: the collapsed rail is the
 only place an icon carries meaning alone, and every item there already has a
 `title` and an accessible name.
 
-### 2. Scheduled publishing
+### 2. Scheduled publishing. Done — and *not* with a DO alarm
 
-A DO alarm per story. Small, and a real Cloudflare advantage: no cron worker, no
-queue, no polling. Now unblocked: a scheduled publish writes a version like any
-other. Scheduled *un*publishing (an expiry date) is a one-line addition to the
-same alarm once this exists: `unpublish()` (`server/publish.ts`) already takes
-no `Request` and no `Env`, for exactly this reason.
+Shipped as `docs/specs/platform/scheduled-publishing.md` (spec 19), the first of
+`docs/completion-plan.md`'s delivery gaps. A `schedules` table (`0003`), four routes
+under `{base}/api/`, `folio.runSchedules(env)` for a host's own `scheduled()` handler,
+and a cron trigger in `examples/demo/wrangler.jsonc`. Both actions: a publish and an
+unpublish are one `action` column, so a campaign window is two rows.
+
+**This entry used to say "a DO alarm per story. Small, and a real Cloudflare
+advantage: no cron worker, no queue, no polling." It was wrong**, for a reason that is
+only visible from `server/story-do.ts`: **a Durable Object has exactly one alarm, and
+`StoryDO` already spends it** on the debounced draft watermark (`applyTransaction` sets
+it 2s out, guarded by `getAlarm() === null` meaning "already scheduled"). The two uses
+cannot coexist. A publish alarm set for Tuesday makes `getAlarm()` non-null for days,
+so no watermark is ever written and the tree stops reporting unpublished changes on
+that page; let the watermark win instead and any keystroke on Monday resets the alarm
+to `now + 2s`, at which point `alarm()` has to decide which job it is — and the honest
+version of that is `where at <= ?` reimplemented in SQLite inside every object.
+
+A cron also answers a question an alarm structurally cannot: **"what is scheduled
+across this site"** is one indexed D1 read, where an alarm-based design would have to
+wake every Durable Object. A schedule nobody can list is a schedule nobody trusts,
+which is why `GET {base}/api/schedules` exists and why a failed schedule is retained.
+
+What the prediction got right: `unpublish()` taking no `Request` and no `Env` is
+exactly what made the second half free, and a scheduled publish does write a version
+like any other — attributed to whoever scheduled it, not to the cron.
+
+The cost of a cron is granularity: a minute at finest, best-effort within it, so a
+schedule fires on the first sweep *at or after* its due time. Never early, late by at
+most one tick. A site with nothing scheduled pays one probe of an empty partial index.
 
 ## Uncovered from the reference project
 

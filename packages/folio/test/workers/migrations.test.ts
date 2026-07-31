@@ -496,6 +496,130 @@ describe('content migrations ledger', () => {
   })
 })
 
+/**
+ * `schedules` (`0003_schedules.sql`) — scheduled publish and unpublish.
+ *
+ * Three things here are decisions rather than mechanics, and all three are pinned:
+ * the two partial indexes, the *absence* of a third, and the absence of a CHECK on
+ * `action` and `status`.
+ */
+describe('schedules', () => {
+  const insert = (id: string, storyId: string, action: string, at: number, status = 'pending') =>
+    env.DB.prepare(
+      `insert into schedules (id, story_id, action, at, status, created_at) values (?, ?, ?, ?, ?, 1)`,
+    )
+      .bind(id, storyId, action, at, status)
+      .run()
+
+  beforeEach(async () => {
+    await env.DB.prepare('delete from schedules').run()
+  })
+
+  it('has every column, in order, with the defaults a fresh row relies on', async () => {
+    expect((await columnsOf('schedules')).map((c) => c.name)).toEqual([
+      'id',
+      'story_id',
+      'action',
+      'at',
+      'status',
+      'actor',
+      'created_at',
+      'attempts',
+      'last_error',
+    ])
+    const byName = new Map((await columnsOf('schedules')).map((c) => [c.name, c]))
+    expect(byName.get('id')?.pk).toBe(1)
+    expect(byName.get('status')?.dflt_value).toBe("'pending'")
+    expect(byName.get('attempts')?.dflt_value).toBe('0')
+    expect(byName.get('actor')?.notnull).toBe(0)
+    expect(byName.get('last_error')?.notnull).toBe(0)
+
+    // Proven rather than read off the schema: an insert naming none of the three.
+    await insert('sch_defaults', 'sty_home', 'publish', 5000)
+    const row = await env.DB.prepare(
+      'select status, attempts, last_error, actor from schedules where id = ?',
+    )
+      .bind('sch_defaults')
+      .first<{ status: string; attempts: number; last_error: null; actor: null }>()
+    expect(row).toEqual({ status: 'pending', attempts: 0, last_error: null, actor: null })
+  })
+
+  it('has exactly two indexes, both partial on status', async () => {
+    // The third one somebody will reach for is `(story_id)`, and it is deliberately
+    // absent — see the last test in this block.
+    expect(await indexesOf('schedules')).toEqual(['schedules_due', 'schedules_story_action'])
+    for (const name of ['schedules_due', 'schedules_story_action']) {
+      expect([name, await indexSql(name)]).toEqual([
+        name,
+        expect.stringMatching(/where status = 'pending'/i),
+      ])
+    }
+    // `(at, id)` is the sweep's order and the list route's keyset, in that order.
+    expect(await indexSql('schedules_due')).toMatch(/\(\s*at\s*,\s*id\s*\)/i)
+  })
+
+  it('is what makes a site with nothing scheduled pay nothing', async () => {
+    // The partial condition is the whole of that claim: with no pending row, the
+    // index the sweep probes is an empty B-tree. Asserted as a query plan rather
+    // than as prose, because "the sweep uses `schedules_due`" is the property, and
+    // an index added later without the `where` would silently stop it being true.
+    const { results } = await env.DB.prepare(
+      `explain query plan
+       select id from schedules where status = 'pending' and at <= 1 order by at, id limit 2`,
+    ).all<{ detail: string }>()
+    expect(results.map((r) => r.detail).join(' ')).toContain('schedules_due')
+  })
+
+  it('allows one pending schedule per document per action, and a window of two', async () => {
+    await insert('sch_a', 'sty_home', 'publish', 1000)
+    // The other half of a campaign window: same document, different action.
+    await insert('sch_b', 'sty_home', 'unpublish', 2000)
+    // A second pending publish for the same document is what the unique index is
+    // for: a queue of contradictory instructions has no answer to "when does this
+    // go live".
+    await expect(insert('sch_c', 'sty_home', 'publish', 3000)).rejects.toThrow(
+      /UNIQUE constraint failed/i,
+    )
+  })
+
+  it('lets a retained failure sit beside a fresh pending schedule', async () => {
+    // The reason both indexes are partial. A failed row is kept so somebody can see
+    // it (`ScheduleStatus`), and it must not block rescheduling the same thing.
+    await insert('sch_old', 'sty_home', 'publish', 1000, 'failed')
+    await insert('sch_new', 'sty_home', 'publish', 9000)
+    const row = await env.DB.prepare('select count(*) as n from schedules').first<{ n: number }>()
+    expect(row?.n).toBe(2)
+  })
+
+  it('constrains neither `action` nor `status`, so widening either costs no DDL', async () => {
+    // The lesson `versions.kind` taught and `content_refs.kind` acted on: SQLite
+    // cannot widen a CHECK without rebuilding the table, and an unpublish is not
+    // representable in `versions` to this day because of it. A third action — a
+    // scheduled checkpoint — is one enum value here and no migration.
+    await insert('sch_future', 'sty_home', 'checkpoint', 1)
+    await insert('sch_state', 'sty_about', 'publish', 1, 'whatever')
+    const rows = await env.DB.prepare('select action, status from schedules order by id').all<{
+      action: string
+      status: string
+    }>()
+    expect(rows.results).toEqual([
+      { action: 'checkpoint', status: 'pending' },
+      { action: 'publish', status: 'whatever' },
+    ])
+  })
+
+  it('does NOT have `schedules_story`, for a query that is a scan over a tiny table', async () => {
+    // `?story=` without a status cannot use the partial unique index, so it scans —
+    // over a table bounded by "pending plus broken". `stories_draft_updated` was an
+    // index created for a query nobody had written and it cost every story write for
+    // ten migrations; `assets` records the same refusal for its two new sorts.
+    //
+    // Asserted as an absence so adding one is a deliberate act with a measurement
+    // behind it, which means this assertion failing is the conversation.
+    expect(await indexesOf('schedules')).not.toContain('schedules_story')
+  })
+})
+
 describe('content index', () => {
   it('creates `content_index` keyed on (story, locale, field) with both value columns', async () => {
     expect((await columnsOf('content_index')).map((c) => c.name)).toEqual([

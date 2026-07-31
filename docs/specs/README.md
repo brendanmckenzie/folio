@@ -46,13 +46,15 @@ the rest can land in any order.
 
 ## After the main line (17–)
 
-Specs written once 1–16 were done, from `ROADMAP.md` rather than from the original
-wants. Numbered in the same sequence because the dependency graph is the same one.
+Specs written once 1–16 were done, from `ROADMAP.md` and then from
+`../completion-plan.md` rather than from the original wants. Numbered in the same
+sequence because the dependency graph is the same one.
 
 | # | Spec | Group | Size | Wire | Migration | From |
 | --- | --- | --- | --- | --- | --- | --- |
 | 17 | [Caching and purge](platform/caching.md) | platform | M | — | — | roadmap: uncovered |
 | 18 | [Pagination, everywhere](foundation/pagination.md) | foundation | L | — | `0001_init` | roadmap: next 1 + 1a |
+| 19 | [Scheduled publishing](platform/scheduled-publishing.md) | platform | M | — | `0003` | completion plan: gap 1 |
 
 Sizing matches `PARITY.md`: **S** ≈ a day, **M** ≈ a few days, **L** ≈ a week
 or two. Relative weight, not a quote.
@@ -80,6 +82,9 @@ or two. Relative weight, not a quote.
 
 17 caching ───────────── needs 7's seam, 9's globals and 13's collections to
                          know what a rendered page actually depends on
+
+19 scheduled publishing ─ needed 1's unpublish() and 7's alarmHookCtx before it
+                         could be a cron rather than a request
 ```
 
 - **1–2 first** because both are near-bug-fixes, and because both add `stories`
@@ -109,6 +114,12 @@ or two. Relative weight, not a quote.
   decision is that a page's cache tags are computed from what a render loaded, and
   globals and collections are the two things that make that set larger than "this
   page" — neither existed to be discovered when **7** predicted this work.
+- **19** is the first of `../completion-plan.md`'s delivery gaps rather than a spec from
+  the original set, and two earlier specs are what made it small. **1** wrote
+  `unpublish()` against D1 alone so a scheduled unpublish could reach it, and **7**
+  built `alarmHookCtx` so a caller with no `ExecutionContext` fires the same
+  after-commit hooks — which is what lets a cron-driven publish purge the cache and
+  broadcast to open editors without restating either.
 
 ## Wire version ledger
 
@@ -140,12 +151,18 @@ source-locale write, forever).
 `packages/folio/migrations/` is shared by every consuming project (the demo points
 `migrations_dir` at it).
 
-**There is one migration: `0001_init.sql`.** It holds the whole schema, and it
-replaced the ten below as spec 18's phase 1 (`foundation/pagination.md` decision 10).
-They were sequenced only because they were written in sequence; nothing is deployed
-and there is no remote, so the history they recorded had no audience. The next
-migration is `0002` and, like every one after it, is expected to be a plain
-`alter table`.
+**`0001_init.sql` holds the whole schema**, and it replaced the ten below as spec 18's
+phase 1 (`foundation/pagination.md` decision 10). They were sequenced only because they
+were written in sequence; nothing is deployed and there is no remote, so the history
+they recorded had no audience. Two have landed since:
+
+| # | Spec | Contents |
+| --- | --- | --- |
+| `0002_asset_refs.sql` | (asset usage, port phase 4) | `content_refs.to_story` → `to_id`, plus a third `kind` value |
+| `0003_schedules.sql` | scheduled publishing | `schedules` table, two partial indexes |
+
+`0002` was a plain rename and `0003` a plain `create table`, which is what every one
+after them is expected to be.
 
 The table is kept as a **record of what each spec added**, since each spec's own
 *Wire & schema changes* section still names its migration and those sections are
@@ -172,7 +189,16 @@ next spec that needs to drop a `not null` will meet it again.
 The collapse also **dropped one index rather than carrying it forward**:
 `stories_draft_updated` was never read by anything, and
 `test/workers/migrations.test.ts` now asserts its absence. See
-`foundation/pagination.md` decision 2a.
+`foundation/pagination.md` decision 2a. That absence is a pattern now rather than a
+one-off — `0002` records the same refusal for `assets.filename`/`size` and `0003` for
+`schedules(story_id)`, each asserted, so adding one of them later is a deliberate act
+with a measurement behind it.
+
+**Two rules about a CHECK constraint, both learned the expensive way.**
+`versions.kind` carries one, and it is the whole reason an unpublish has no version row
+to this day: SQLite cannot widen a CHECK without rebuilding the table.
+`content_refs.kind` (`0002`) and `schedules.action`/`status` (`0003`) therefore carry
+none, so a new enum value in any of the three costs no DDL at all.
 
 Six specs needed no migration at all: conditional fields, defaults and presets,
 duplicate and paste and lifecycle hooks are code-only; globals and data documents
@@ -182,7 +208,7 @@ build on the `type` column; the content API builds on `api_tokens`.
 
 Each spec carries its own `> **Status:**` stamp. All sixteen specs in the quick-wins and
 main-line tables are **done**, restamped in place with an `## Implementation notes`
-section recording what actually landed. Spec 17 (caching) is **done** too. Spec 18
-(pagination) is **in-progress**: its phase 1, the schema collapse, has landed. A spec
-that gets built is restamped the same way, the way `../../PARITY.md` records
-what landed.
+section recording what actually landed. Spec 17 (caching) is **done** too, and so is
+spec 19 (scheduled publishing). Spec 18 (pagination) is **in-progress**: its phase 1,
+the schema collapse, has landed. A spec that gets built is restamped the same way, the
+way `../../PARITY.md` records what landed.

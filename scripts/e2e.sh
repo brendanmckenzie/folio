@@ -32,7 +32,13 @@ fi
 cd "$ROOT"
 
 # Any dev server holds the local state files open.
-pkill -f 'vite' 2>/dev/null || true
+#
+# `vite/bin/vite.js` and not `vite`: the loose pattern **also matches `vitest`**, so
+# running an e2e script killed a unit-test run in the same checkout. Found while six
+# agents were working in this tree at once, which is the only condition under which it
+# ever mattered — and it cost two aborted runs before anybody noticed the two commands
+# share a prefix.
+pkill -f 'vite/bin/vite.js' 2>/dev/null || true
 sleep 2
 
 rm -rf examples/demo/.wrangler/state/v3
@@ -59,4 +65,4 @@ node "$SCRIPT" > "$OUT" 2>&1 || true
 grep -iE '^FAIL|passed$|Error' "$OUT" | tail -25
 echo "(full output: $OUT — dev server log: /tmp/folio-e2e-dev.log)"
 
-pkill -f 'vite' 2>/dev/null || true
+pkill -f 'vite/bin/vite.js' 2>/dev/null || true

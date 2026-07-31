@@ -29,6 +29,7 @@ import type { AuditOptions, AuditReport } from './audit'
 import type { MigrateOptions, MigrateReport } from './migrate'
 import type { ReindexOptions, ReindexReport } from './reindex'
 import type { ResolveOptions } from './runtime'
+import type { ScheduleRunOptions, ScheduleRunReport } from './scheduler'
 import type { SpaceDO } from './space-do'
 import type { StoryDO } from './story-do'
 import type { WriteResult } from './write'
@@ -328,6 +329,42 @@ export interface Folio<Env> {
    * harmless.
    */
   reindex: (env: Env, opts?: ReindexOptions) => Promise<ReindexReport>
+  /**
+   * Fires every publish and unpublish that is now due
+   * (`../../../docs/specs/platform/scheduled-publishing.md`).
+   *
+   * **This is what a host calls from its own `scheduled()` handler**, and the cron
+   * trigger in `wrangler.jsonc` is the whole of the integration:
+   *
+   * ```jsonc
+   * // wrangler.jsonc
+   * "triggers": { "crons": ["* * * * *"] }
+   * ```
+   *
+   * ```ts
+   * async scheduled(_controller, env, ctx) {
+   *   let cursor: string | null = null
+   *   do {
+   *     const report = await folio.runSchedules(env, { continueFrom: cursor })
+   *     cursor = report.continueFrom
+   *   } while (cursor !== null)
+   * }
+   * ```
+   *
+   * Batched and resumable exactly like `migrate` and `reindex`: one call fires up
+   * to `opts.batch` schedules and answers `continueFrom`, so a backlog of 500
+   * pages cannot exceed one invocation's CPU limit. **Loop on `continueFrom`, not
+   * on the report's `remaining`** — a schedule that failed transiently in this
+   * sweep is still pending and still due, so the second loop spins.
+   *
+   * Granularity is the cron's. A schedule fires on the first sweep at or after its
+   * due time, so it is never early and is late by at most one cron period.
+   *
+   * Without a cron the routes still work and nothing fires: `POST
+   * {base}/api/schedules/run` is the manual trigger, and a site with nothing
+   * scheduled costs one indexed read over an empty partial index.
+   */
+  runSchedules: (env: Env, opts?: ScheduleRunOptions) => Promise<ScheduleRunReport>
   registry: Registry
   /**
    * Context the document deliberately does not contain: story ids to their

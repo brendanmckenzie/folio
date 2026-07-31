@@ -508,6 +508,9 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         found.statement,
         ...found.redirectStatements,
         ...found.indexStatements,
+        // A schedule must not outlive its story (`../../schedules.ts`), so it goes
+        // in the same batch the admin's own delete route puts it in.
+        ...found.scheduleStatements,
         ...(versions ? [versions] : []),
       ])
     } catch (e) {
