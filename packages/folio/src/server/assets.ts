@@ -15,8 +15,11 @@ import type { AssetValue } from '../core/values'
 import type { AssetTransform } from '../core/resolve'
 import { FolioError } from './errors'
 import { DOWNLOAD_CONTENT_TYPE, SERVED_CONTENT_TYPES } from './validate'
-import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
-import { keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
+import { clampLimit, type CursorPart, decodeCursor, type Page, paginate } from '../core/pagination'
+import { type AssetSort, DEFAULT_ASSET_SORT, type StoryMeta } from '../core/story'
+import { assetReferences, clearInboundRefStatements } from './content-index'
+import { type Direction, type Keyset, keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
+import { storiesForChunked } from './stories'
 
 /** Matches the Images binding's own input ceiling, so failures happen up front. */
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -36,6 +39,37 @@ export interface AssetRow {
 const COLS = `id, key, filename, content_type as contentType, size, width, height,
               alt, created_at as createdAt`
 
+/**
+ * The three orderings the Assets screen offers, and their natural directions.
+ * `core/story.ts`'s `AssetSort` carries the argument for each direction — the
+ * interesting one is `size` descending, because nobody sorts a media library
+ * looking for the smallest file.
+ *
+ * Only `created` has an index behind it (`assets_created`); the other two are a
+ * scan and a sort over a table bounded by what somebody uploaded by hand, which is
+ * a deliberate non-decision recorded in `migrations/0002_asset_refs.sql` and pinned
+ * as an *absence* by `migrations.test.ts`.
+ */
+const ORDERS = {
+  created: NEWEST_FIRST,
+  filename: { columns: ['filename', 'id'], direction: 'asc' },
+  size: { columns: ['size', 'id'], direction: 'desc' },
+} satisfies Record<AssetSort, Keyset>
+
+/** The sort key of a row, component for component with `ORDERS` — the one
+ * correspondence `paginate` cannot check for its caller, which is why the two live
+ * next to each other. */
+function keyOf(sort: AssetSort, row: AssetRow): [CursorPart, CursorPart] {
+  switch (sort) {
+    case 'created':
+      return [row.createdAt, row.id]
+    case 'filename':
+      return [row.filename, row.id]
+    case 'size':
+      return [row.size, row.id]
+  }
+}
+
 export interface ListAssetsOptions {
   limit?: number
   cursor?: string
@@ -47,14 +81,29 @@ export interface ListAssetsOptions {
   /** Adds `total` for the same filter. One extra `count(*)`, only when asked
    * (`../../../docs/specs/foundation/pagination.md` decision 5). */
   count?: boolean
+  /** One of `core/story.ts`'s `AssetSort` values. Absent is `created`. */
+  sort?: AssetSort
+  /**
+   * Reverses the ordering. Absent means the sort's own natural direction, which is
+   * what a column header shows on its first click.
+   *
+   * Free and correct for the same reason it is on `listDocumentPage`: `keysetWhere`
+   * and `orderBy` both read the direction off one `Keyset`, so flipping it flips
+   * the resume comparison and the `order by` together and cannot leave them
+   * disagreeing about which way the list runs.
+   */
+  dir?: Direction
 }
 
 /**
- * Newest first, paged over `(created_at, id)` — which is what `assets_created`
- * indexes.
+ * The media library, paged. Newest first by default over `(created_at, id)`,
+ * which is what `assets_created` indexes.
  *
  * Was `listAssets(db, limit = 200)`, capped and clamped to 500 with no cursor and
- * no search, so the 201st asset could not be reached by any route.
+ * no search, so the 201st asset could not be reached by any route. Then paged, and
+ * hard-wired to `NEWEST_FIRST`; the sort axis is the Assets screen's
+ * (`docs/ui-architecture.md`: "filename search, type and size filters, sort by
+ * date or name or size").
  */
 export async function listAssets(
   db: D1Database,
@@ -62,7 +111,9 @@ export async function listAssets(
 ): Promise<Page<AssetRow>> {
   const limit = clampLimit(opts.limit, 50, 200)
   const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
-  const resume = keysetWhere(NEWEST_FIRST, cursor)
+  const sort = opts.sort ?? DEFAULT_ASSET_SORT
+  const keyset: Keyset = opts.dir ? { ...ORDERS[sort], direction: opts.dir } : ORDERS[sort]
+  const resume = keysetWhere(keyset, cursor)
 
   const filters: string[] = []
   const binds: unknown[] = []
@@ -78,7 +129,7 @@ export async function listAssets(
 
   const [rows, total] = await Promise.all([
     db
-      .prepare(`select ${COLS} from assets ${where} ${orderBy(NEWEST_FIRST)} limit ?`)
+      .prepare(`select ${COLS} from assets ${where} ${orderBy(keyset)} limit ?`)
       .bind(...binds, ...resume.binds, limit + 1)
       .all<AssetRow>(),
     // The count ignores the cursor deliberately: it counts the whole filter, which
@@ -91,12 +142,82 @@ export async function listAssets(
       : null,
   ])
 
-  const page = paginate(rows.results, limit, (row) => [row.createdAt, row.id])
+  const page = paginate(rows.results, limit, (row) => keyOf(sort, row))
   return total ? { ...page, total: total.n } : page
 }
 
 export async function assetById(db: D1Database, id: string): Promise<AssetRow | null> {
   return db.prepare(`select ${COLS} from assets where id = ?`).bind(id).first<AssetRow>()
+}
+
+/* ------------------------------------------------------------------ usage --- */
+
+/**
+ * Which published documents use one asset — `docs/ui-architecture.md`
+ * dependency 4, for the detail panel's "where it is used" and for a delete
+ * confirmation that names what it will break.
+ *
+ * Deliberately the same shape and the same rules as `stories.ts`'s
+ * `documentUsage`, one field narrower:
+ *
+ *  - **Published usage only, and the dialog says so.** `content_refs` is written
+ *    inside the publish batch, so that is all the table holds. Covering drafts
+ *    would mean an edge table maintained per keystroke or a scan of every Durable
+ *    Object, for a confirmation dialog.
+ *  - **It warns and proceeds; it does not gate the delete.** Same call as for a
+ *    referenced record (`data-documents.md` decision 4): maintaining referential
+ *    integrity across drafts nobody can see costs more than a broken reference,
+ *    which already degrades safely — a missing image renders as a missing image,
+ *    which is visible and fixable, whereas a delete that refuses leaves an editor
+ *    with no way to remove a file at all.
+ *  - **No `kind` and no by-kind counts**, which is the one difference. Every asset
+ *    edge is one kind (`refs.ts`'s `outboundRefs` says why), so a `kind` column
+ *    would be the same word on every row and `links`/`references` would both be
+ *    zero. **Rejected: carrying them anyway** so the two usage payloads are
+ *    byte-identical — a field that is always the same value is not a shape, it is
+ *    noise, and a client that reads `usage.total` reads it the same either way.
+ *
+ * Keyed by the **R2 key** rather than the asset id, because that is what a
+ * document stores and therefore what the edge holds. The route looks the row up
+ * first, which it has to do anyway to 404 an unknown id.
+ *
+ * In `assets.ts` rather than beside `documentUsage`: this is the reader for an
+ * asset, and `stories.ts` would otherwise have to import the media library to turn
+ * an id into a key. It reaches the other way instead — one import of
+ * `storiesForChunked`, and `stories.ts` learns nothing about assets.
+ *
+ * `storiesForChunked`, not `storiesFor`: outbound edges are capped at 400 rows per
+ * document, but *inbound* ones are not, and a logo used on every page of a
+ * 500-page site is the normal case for an asset rather than the pathological one.
+ * `storiesFor` binds every id in one statement.
+ */
+export interface AssetUsage {
+  /** Published documents using this asset. Routed first, by path; then unrouted
+   * by title — an editor scanning "what breaks" wants the pages before the
+   * records. */
+  published: StoryMeta[]
+  /** Distinct published documents, which is what "Used on N published pages"
+   * counts. Equal to `published.length`; named so a caller reading only the count
+   * does not have to know that. */
+  total: number
+}
+
+export async function assetUsage(db: D1Database, key: string): Promise<AssetUsage> {
+  const from = await assetReferences(db, key)
+  if (from.length === 0) return { published: [], total: 0 }
+
+  // A row whose source story has since been deleted is dropped rather than
+  // reported as an untitled usage. `deleteStoryStatement` clears a deleted story's
+  // edges in both directions, so this should not happen on a live site — but an
+  // import that wrote edges directly would otherwise put a usage with no title and
+  // no URL in front of somebody about to delete a file.
+  const published = await storiesForChunked(db, from)
+  published.sort(
+    (a, b) =>
+      (a.path === null ? 1 : 0) - (b.path === null ? 1 : 0) ||
+      (a.path ?? a.title).localeCompare(b.path ?? b.title),
+  )
+  return { published, total: published.length }
 }
 
 /**
@@ -247,10 +368,22 @@ export async function updateAsset(db: D1Database, id: string, patch: { alt?: str
 }
 
 /**
- * Removes the library row and the object. Documents already referencing the key
- * are deliberately left alone: rewriting other stories' drafts from here would
- * bypass the mutation log, and a missing image is easier to spot and fix than a
- * silent edit nobody saw.
+ * Removes the library row, its inbound `content_refs` edges, and the object.
+ *
+ * **The documents are deliberately left alone.** Rewriting other stories' drafts
+ * from here would bypass the mutation log, and a missing image is easier to spot
+ * and fix than a silent edit nobody saw. `assetUsage` is what warns first, and the
+ * confirmation names the pages — the same "warn and proceed" the delete of a
+ * referenced record does.
+ *
+ * **The edges are not.** `content_refs` rows naming this key are the fact "page A
+ * uses this asset", and nothing reads that fact once the asset is gone: every
+ * reader of `to_id` is asked about a thing somebody is looking at. Left behind,
+ * such a row is only rewritten when A is next published, so a site that never
+ * republishes accumulates edges to keys with nothing behind them — exactly the
+ * reasoning `clearInboundRefStatements` was written for a deleted *story*, which is
+ * why this calls it unchanged rather than writing a second delete
+ * (`migrations/0002_asset_refs.sql`).
  */
 export async function deleteAsset(db: D1Database, bucket: R2Bucket, id: string): Promise<boolean> {
   const row = await assetById(db, id)
@@ -259,7 +392,13 @@ export async function deleteAsset(db: D1Database, bucket: R2Bucket, id: string):
   // listed and still resolves, so a retry is exactly a retry. Deleting the
   // object first and then failing the D1 delete would leave a row that points
   // at nothing, silently breaking whatever still references it.
-  await db.prepare('delete from assets where id = ?').bind(id).run()
+  //
+  // Batched, so the library row and its edges go together: a surviving edge to a
+  // key with no row is a usage count for an asset that no longer exists.
+  await db.batch([
+    db.prepare('delete from assets where id = ?').bind(id),
+    ...clearInboundRefStatements(db, [row.key]),
+  ])
   try {
     await bucket.delete(row.key)
   } catch {

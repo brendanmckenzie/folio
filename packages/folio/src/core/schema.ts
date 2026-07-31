@@ -100,6 +100,23 @@ export interface DocumentType {
   previewPath?: string
 }
 
+/**
+ * Which after-commit hooks the host declared (`platform/publish-hooks.md`), for
+ * the one question a settings screen can answer about them: does publishing this
+ * site do anything else.
+ *
+ * Event **names** only. A hook is a function in the host's Worker; there is
+ * nothing about its body that survives JSON and nothing about it a reader needs
+ * beyond that it exists. Absent when the host declared no hooks at all, so the
+ * screen's empty state is a fact rather than an empty array to interpret.
+ */
+export interface ManifestHooks {
+  /** Declared event names, in the order `Object.keys` gave them. */
+  declared: string[]
+  /** `FolioHooks.await` — the subset a write waits for before responding. */
+  awaited: string[]
+}
+
 export interface Manifest {
   /** Every declared document type, in declaration order. */
   types: DocumentType[]
@@ -122,6 +139,20 @@ export interface Manifest {
    * draw and no second inspector column to show.
    */
   locales?: LocaleConfig
+  /**
+   * Declared publish hooks, for the Settings screen
+   * (`../../../docs/ui-architecture.md` decision 6). Absent when the host
+   * declared none. See `ManifestHooks`.
+   *
+   * Additive: every reader of `types`, `blocks`, `root`, `globals` and `locales`
+   * is untouched.
+   *
+   * **There is deliberately no `auth` here, and there was for one commit.** Sign-in
+   * providers and session policy are answered by `GET {base}/api/me` instead —
+   * `server/app.ts` states the rule this obeys, and it is worth reading before
+   * adding a field to this interface.
+   */
+  hooks?: ManifestHooks
 }
 
 export function indexManifest(manifest: Manifest): SchemaIndex {

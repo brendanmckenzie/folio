@@ -5,8 +5,17 @@
  *
  * Read-only, and deliberately **not** part of the migrate path: an audit that
  * runs as a side effect of a write is an audit nobody reads. It costs one D1
- * query (`publishedDocsAll`) and no Durable Object, because it reports on what
- * the site is *serving* — the copy an operator can see is wrong.
+ * query per batch (`publishedDocsAfter`) and no Durable Object, because it
+ * reports on what the site is *serving* — the copy an operator can see is wrong.
+ *
+ * **Batched and resumable by `continueFrom`**, the same shape `runMigrations` and
+ * `reindex` take (`../../../docs/specs/foundation/pagination.md`'s route table
+ * and its audit edge case). One call reads up to `batch` published documents and
+ * answers a cursor; the caller re-calls until it is null and merges the reports.
+ * It read the whole table in one query until the Model screen was built on it,
+ * which is the one thing on this route that could not scale: every published
+ * document, JSON-parsed, in one request whose CPU limit is the same one
+ * `runMigrations` is batched to stay under.
  *
  * ## Adding a check
  *
@@ -43,7 +52,7 @@ import { isIndexableKind } from '../core/index-projection'
 import { isTranslatable, type LocaleConfig } from '../core/locales'
 import { docBytes, MAX_DOC_BYTES, utf8Bytes } from '../core/protocol'
 import { type BlockSchema, type DocumentType, type SchemaIndex, slotsOf } from '../core/schema'
-import { publishedDocsAll } from './stories'
+import { publishedDocsAfter } from './stories'
 
 /**
  * Config a check needs beyond the schema and the blok in front of it.
@@ -81,6 +90,68 @@ export interface ContentFinding extends Finding {
   documents: number
   /** Bloks with this finding, across those documents. */
   bloks: number
+  /**
+   * The first `FINDING_SAMPLE` documents carrying it, in the order the walk met
+   * them, so a count can still be *opened*.
+   *
+   * A count and a sample rather than one or the other, and the tension is real:
+   * the comment above says a site with 400 heroes carrying an orphan key needs
+   * the number, not 400 rows — and that stands, which is why the list is capped
+   * at five rather than complete. But a number nobody can act on is a report,
+   * and the admin's audit panel exists to be a tool
+   * (`../../../docs/ui-architecture.md`, Model): "each finding links to the
+   * document it is about". Five links plus "and 395 more" answers both.
+   *
+   * Empty when the caller passed documents with no id — `auditDocuments` is
+   * callable with a bare `{ doc }` literal from a test, which the file header
+   * treats as worth keeping.
+   */
+  sample: string[]
+}
+
+/**
+ * How many documents a `ContentFinding` names. Five, because the sample is a way
+ * *in* rather than a listing: enough that a spot check is not the same document
+ * twice, few enough that a row stays one line.
+ */
+export const FINDING_SAMPLE = 5
+
+/**
+ * A finding that explains itself in prose — and the short form a UI shows instead.
+ *
+ * The reason the second field exists is a fault the admin's audit panel made visible
+ * the first time it drew nine rows.
+ *
+ * Every `detail` here is a **varying head and a boilerplate tail**: `not-translatable`
+ * says "`'role'` is a text field with no `translatable: true` — a translator never
+ * sees it, and nothing in the editor says why", and the clause after the dash is
+ * identical on all nine rows. A panel is *scanned*, so nine copies of one sentence
+ * are nine lines of noise competing with the one token that differs, and the screen
+ * already states the shared half once, above the family.
+ *
+ * So there are two fields for two audiences and neither is derived from the other:
+ *
+ *   - **`detail` stays whole**, because its audience is a developer reading JSON out
+ *     of `curl` with no family prose anywhere near it. It is documented as "not for
+ *     a UI to parse" and that stands — this is the alternative to parsing it.
+ *   - **`note` is what differs**, in a few words, or **absent when nothing does**.
+ *     Absent is a real answer and the useful one: it tells a UI that this family's
+ *     rows are distinguished by their identifier alone, which is a property of the
+ *     *check* rather than something a screen should special-case per family.
+ *
+ * Rejected: splitting `detail` into two fields and asking a caller to join them.
+ * That changes what an existing consumer reads for the benefit of one that has not
+ * shipped, and the joined sentence is better prose than a mechanical concatenation
+ * — `document-size`'s reads as one thought and would not survive being cut in half.
+ */
+interface Explained {
+  /** Written for a developer reading a report, not for a UI to parse. */
+  detail: string
+  /**
+   * The part of `detail` that differs from its siblings', short enough to sit
+   * beside an identifier. Absent when the identifier is the whole difference.
+   */
+  note?: string
 }
 
 /**
@@ -92,14 +163,12 @@ export interface ContentFinding extends Finding {
  * carries a story id where the others carry a block type — a report that said
  * "one document is nearly too big" without saying which is not actionable.
  */
-export interface StoryFinding {
+export interface StoryFinding extends Explained {
   check: string
   /** The story whose published document this is about. */
   story: string
   /** Its document type, as `stories.type` records it. */
   type: string
-  /** Written for a developer reading a report, not for a UI to parse. */
-  detail: string
 }
 
 /**
@@ -122,17 +191,15 @@ export interface DocumentSizeFinding extends StoryFinding {
 }
 
 /** A finding about the declarations alone: no document is involved. */
-export interface SchemaFinding {
+export interface SchemaFinding extends Explained {
   check: string
   /** Block type whose declaration is at fault. */
   block: string
   field: string | null
-  /** Written for a developer reading a report, not for a UI to parse. */
-  detail: string
 }
 
 export interface AuditReport {
-  /** Published documents examined. */
+  /** Published documents examined **by this call**, not by the whole walk. */
   documents: number
   /**
    * Every content check's tally, most documents first. The extensible surface:
@@ -150,6 +217,29 @@ export interface AuditReport {
   orphanKeys: { type: string; field: string; documents: number }[]
   unknownTypes: { type: string; documents: number }[]
   missingFields: { type: string; field: string; documents: number }[]
+  /**
+   * The story id to resume after, or null when the sweep reached the end — the
+   * same contract `MigrateReport.continueFrom` carries, deliberately, because it
+   * is the same job shape and a second convention would be one more thing for a
+   * client to get subtly wrong.
+   *
+   * A caller that stops at the first batch has audited a *prefix* of the site, so
+   * `documents` and every tally are that prefix's. The admin's Model screen says
+   * so out loud rather than presenting one batch as the whole answer.
+   */
+  continueFrom: string | null
+}
+
+/** How many published documents one call reads. */
+export const DEFAULT_AUDIT_BATCH = 100
+
+/** Ceiling on `batch`, so a caller cannot ask for a read that outlives the request. */
+export const MAX_AUDIT_BATCH = 500
+
+export interface AuditOptions {
+  /** Resume after this story id — the `continueFrom` of the previous call. */
+  continueFrom?: string | null
+  batch?: number
 }
 
 /* ------------------------------------------------------- content checks --- */
@@ -345,8 +435,16 @@ function localeWeights(doc: Doc): { code: string; bytes: number }[] {
     .sort((a, b) => b.bytes - a.bytes || a.code.localeCompare(b.code))
 }
 
-/** The sentence. Says the size, the share, and — when there is one — where the weight went. */
-function sizeDetail(bytes: number, locales: { code: string; bytes: number }[]): string {
+/**
+ * The numbers, and nothing else — `Explained.note` for this check.
+ *
+ * This is the family that argues *against* dropping a detail from a UI: every figure
+ * in it differs per row and the figures are the entire point of the check, so a row
+ * showing only a story id would be a size warning with no size in it. So the note
+ * carries the whole varying half, including the per-locale attribution, and only the
+ * standing advice about what happens at the cap is left to `sizeDetail`.
+ */
+function sizeNote(bytes: number, locales: { code: string; bytes: number }[]): string {
   const translated = locales.reduce((n, l) => n + l.bytes, 0)
   const named = locales.slice(0, 3).map((l) => `${l.code} ${mb(l.bytes)}`)
   if (locales.length > named.length) named.push(`${locales.length - named.length} more`)
@@ -354,7 +452,21 @@ function sizeDetail(bytes: number, locales: { code: string; bytes: number }[]): 
     translated > 0 ? `, of which ${mb(translated)} is translations (${named.join(', ')})` : ''
   return (
     `${mb(bytes)} serialised, ${Math.round((bytes / MAX_DOC_BYTES) * 100)}% of the ` +
-    `${mb(MAX_DOC_BYTES)} document cap${where} — the transaction that crosses the cap is ` +
+    `${mb(MAX_DOC_BYTES)} document cap${where}`
+  )
+}
+
+/**
+ * The sentence: the note plus the standing consequence.
+ *
+ * Composed rather than written twice, which makes the relationship between the two
+ * fields visible in the one family where it decomposes cleanly — `detail` is `note`
+ * plus the advice a family heading states once. It does not decompose for every
+ * check, so this is not generalised into the walker; see `Explained`.
+ */
+function sizeDetail(bytes: number, locales: { code: string; bytes: number }[]): string {
+  return (
+    `${sizeNote(bytes, locales)} — the transaction that crosses the cap is ` +
     `refused whole, so the edit that does it is the one that is lost`
   )
 }
@@ -391,14 +503,73 @@ const documentSize: StoryCheck = (stories) => {
       type,
       bytes,
       locales,
+      note: sizeNote(bytes, locales),
       detail: sizeDetail(bytes, locales),
     })
   }
   return out.sort((a, b) => b.bytes - a.bytes || a.story.localeCompare(b.story))
 }
 
-/** See "Adding a check" in the file header. */
-export const STORY_CHECKS: readonly StoryCheck[] = [documentSize]
+/**
+ * A published document whose **document type** nothing declares any more.
+ *
+ * Not the same finding as `unknownType` above, and the difference is the whole
+ * reason this exists: that one is about a `blok.type` inside a document, this one
+ * is about `stories.type` — the document's own kind. A site can have a perfectly
+ * valid tree of bloks in a document of a type that was renamed in code.
+ *
+ * **This is where `DataList.tsx`'s "Unknown type" heading went**
+ * (`../../../docs/ui-architecture.md` port phase 3, and `ROADMAP.md`'s "a row
+ * whose document type is no longer declared has no screen"). The admin's nav is
+ * generated from the manifest, so an undeclared type has no `/documents/:type`
+ * to list its rows on — which made a code change able to hide content with no
+ * way back to it. A finding that names the story is the way back, so the audit
+ * panel's link is not a nicety here: it is the only route to the document.
+ *
+ * `ROADMAP.md` claimed the audit "already reports `unknown types` in full" and
+ * that was wrong — it reported *block* types. This check is what makes the claim
+ * true.
+ *
+ * Two honest limits, both narrower than what `DataList.tsx` could see:
+ *
+ *   - **Published documents only**, because that is the only copy this report
+ *     reads. An unrouted draft of an undeclared type is still unreachable, and
+ *     fixing that needs a `stories` read this report deliberately does not make.
+ *   - **Silent without `ctx.types`**, matching `unusableIndex`: no declared types
+ *     means "cannot judge", not "every type is undeclared". `auditSchema` and its
+ *     neighbours stay callable from a test with a bare literal.
+ */
+const undeclaredDocumentType: StoryCheck = (stories, ctx) => {
+  const declared = new Set((ctx.types ?? []).map((t) => t.name))
+  if (declared.size === 0) return []
+  return stories
+    .filter((s) => !declared.has(s.type))
+    .map(({ id, type }) => ({
+      check: 'unknown-document-type',
+      story: id,
+      // The orphaned type name is the varying fact, and it is on the finding as
+      // `type` as well — but a UI reading it off there would be a screen deciding
+      // per family which structured field to draw, which is the thing `note` exists
+      // to stop.
+      type,
+      note: `type '${type}'`,
+      // Worded to match `runMigrations`' failure for the same drift, which
+      // reports it from the other direction: a migration cannot run over a
+      // document whose type it has no `MigrationContext.type` for.
+      detail:
+        `document type '${type}' is not declared any more — nothing lists this document, ` +
+        `and a migration cannot run over it until a type by that name exists again`,
+    }))
+}
+
+/**
+ * See "Adding a check" in the file header.
+ *
+ * `undeclaredDocumentType` first, and the order is the panel's reading order: a
+ * document nothing can reach is a worse problem than one that is merely getting
+ * heavy, and the admin renders families in the order their findings appear.
+ */
+export const STORY_CHECKS: readonly StoryCheck[] = [undeclaredDocumentType, documentSize]
 
 /* -------------------------------------------------------- schema checks --- */
 
@@ -423,6 +594,10 @@ const unknownConditionField: SchemaCheck = (schema) => {
           check: 'unknown-condition-field',
           block,
           field,
+          // The missing name is the one fact not already in `block` and `field`, so
+          // it is the note. A row reading only `broken.caption` would be a finding
+          // whose subject is invisible.
+          note: `showIf names '${c.field}'`,
           detail: `showIf names '${c.field}', which '${block}' does not declare — the input is never drawn`,
         })
       }
@@ -464,6 +639,9 @@ const hiddenSummaryField: SchemaCheck = (schema) => {
         check: 'unknown-summary-field',
         block: def.name,
         field: def.summary,
+        // No note: `block` and `field` are the entire finding, and every row of this
+        // family says the same thing about a different pair. See `Explained.note` —
+        // absent is the answer, not an omission.
         detail: `summary names '${def.summary}', which '${def.name}' does not declare — every tree row is unlabelled`,
       })
       continue
@@ -474,6 +652,8 @@ const hiddenSummaryField: SchemaCheck = (schema) => {
         check: 'hidden-summary-field',
         block: def.name,
         field: def.summary,
+        // Which of the two ways it is hidden, which is the only thing that varies.
+        note: why,
         detail: `summary names '${def.summary}', which carries ${why} — the tree labels every row with a value the inspector never shows`,
       })
     }
@@ -511,6 +691,9 @@ const untranslatableText: SchemaCheck = (schema, ctx) => {
         check: 'not-translatable',
         block: def.name,
         field: name,
+        // The kind, which is the only varying word in a sentence that is otherwise
+        // identical on every row — this is the family the note exists for.
+        note: field.kind,
         detail: `'${name}' is a ${field.kind} field with no 'translatable: true' — a translator never sees it, and nothing in the editor says why`,
       })
     }
@@ -550,6 +733,7 @@ const unusableIndex: SchemaCheck = (schema, ctx) => {
           check: 'indexed-unsupported',
           block: def.name,
           field: name,
+          note: field.kind,
           detail: `'${name}' is a ${field.kind} field marked 'indexed' — only text, textarea, number, boolean and select project to a scalar, so nothing is indexed`,
         })
         continue
@@ -561,6 +745,8 @@ const unusableIndex: SchemaCheck = (schema, ctx) => {
           check: 'indexed-not-root',
           block: def.name,
           field: name,
+          // No note: the block and the field are the whole finding, exactly as in
+          // `unknown-summary-field`.
           detail: `'${name}' is marked 'indexed' on '${def.name}', which is no document type's root block — only a root block is projected, so this does nothing`,
         })
       }
@@ -596,26 +782,36 @@ export function auditStories(
   return STORY_CHECKS.flatMap((check) => [...check(stories, ctx)])
 }
 
-/** The content half on its own, over documents a caller already has. */
+/**
+ * The content half on its own, over documents a caller already has.
+ *
+ * `id` is optional so a test can pass a bare `{ doc }` literal, which the file
+ * header treats as worth keeping; a caller that has one gets it back in each
+ * finding's `sample`, which is what lets a tally still be opened.
+ */
 export function auditDocuments(
-  docs: readonly { doc: { bloks: Record<string, Blok> } }[],
+  docs: readonly { id?: string; doc: { bloks: Record<string, Blok> } }[],
   schema: SchemaIndex,
   ctx: AuditContext = NO_CONTEXT,
 ): ContentFinding[] {
   const tally = new Map<string, ContentFinding>()
 
-  for (const { doc } of docs) {
+  for (const { id, doc } of docs) {
     const seenInDoc = new Set<string>()
     for (const blok of Object.values(doc.bloks)) {
       const def = schema[blok.type]
       for (const check of DOCUMENT_CHECKS) {
         for (const finding of check(blok, def, ctx)) {
           const key = `${finding.check} ${finding.type} ${finding.field ?? ''}`
-          const row = tally.get(key) ?? { ...finding, documents: 0, bloks: 0 }
+          const row = tally.get(key) ?? { ...finding, documents: 0, bloks: 0, sample: [] }
           row.bloks++
           if (!seenInDoc.has(key)) {
             seenInDoc.add(key)
             row.documents++
+            // Under the cap only: `documents` is already the answer to "how
+            // many". Sampled per *document* rather than per blok, because two
+            // faulty bloks on one page are one thing to go and look at.
+            if (id !== undefined && row.sample.length < FINDING_SAMPLE) row.sample.push(id)
           }
           tally.set(key, row)
         }
@@ -623,26 +819,55 @@ export function auditDocuments(
     }
   }
 
-  return [...tally.values()].sort(
-    (a, b) =>
-      b.documents - a.documents ||
-      a.check.localeCompare(b.check) ||
-      a.type.localeCompare(b.type) ||
-      (a.field ?? '').localeCompare(b.field ?? ''),
+  return [...tally.values()].sort(compareContentFindings)
+}
+
+/**
+ * The report's reading order: the widest drift first, then a stable tiebreak.
+ *
+ * Named rather than inlined because a client walking the batches has to **re-sort
+ * the merged tally** — two batches each sorted by their own counts are not sorted
+ * by the sum — so there is a second implementation of this ordering, in
+ * `admin/ui/screens/model-model.ts`. It is restated there rather than imported
+ * from here, because importing it would drag this module's `./stories` dependency
+ * and the whole D1 layer into a browser bundle; that file's comment carries the
+ * argument, and a unit test pins the two together.
+ */
+function compareContentFindings(a: ContentFinding, b: ContentFinding): number {
+  return (
+    b.documents - a.documents ||
+    a.check.localeCompare(b.check) ||
+    a.type.localeCompare(b.type) ||
+    (a.field ?? '').localeCompare(b.field ?? '')
   )
 }
 
+/**
+ * One batch of the walk. See the file header: up to `batch` published documents,
+ * in `id` order, resumed after `continueFrom`.
+ *
+ * The schema half runs on **every** batch even though no document is involved, so
+ * that a single response is self-describing — a caller reading one batch gets the
+ * whole code-level answer with it, and a caller merging several can simply keep
+ * the last one. Recomputing a pure walk over the `SchemaIndex` costs nothing next
+ * to parsing a hundred documents.
+ */
 export async function audit(
   db: D1Database,
   schema: SchemaIndex,
   ctx: AuditContext = NO_CONTEXT,
+  opts: AuditOptions = {},
 ): Promise<AuditReport> {
-  const docs = await publishedDocsAll(db)
+  const size = Math.min(Math.max(opts.batch ?? DEFAULT_AUDIT_BATCH, 1), MAX_AUDIT_BATCH)
+  const docs = await publishedDocsAfter(db, opts.continueFrom ?? null, size)
   const content = auditDocuments(docs, schema, ctx)
   const named = (check: string) => content.filter((f) => f.check === check)
 
   return {
     documents: docs.length,
+    // A short batch means the sweep reached the end of the table — the same test
+    // `runMigrations` makes, and it costs one comparison rather than a count.
+    continueFrom: docs.length === size ? (docs[docs.length - 1]?.id ?? null) : null,
     content,
     stories: auditStories(docs, ctx),
     schema: auditSchema(schema, ctx),

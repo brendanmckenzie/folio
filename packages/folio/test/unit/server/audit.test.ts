@@ -5,10 +5,11 @@ import {
   auditSchema,
   auditStories,
   type DocumentSizeFinding,
+  FINDING_SAMPLE,
   WARN_DOC_BYTES,
 } from '../../../src/server/audit'
 import type { Blok, Doc, Json } from '../../../src/core/doc'
-import { asset, blocks, boolean, select, text } from '../../../src/core/fields'
+import { asset, blocks, boolean, select, text, textarea } from '../../../src/core/fields'
 import { docBytes, MAX_DOC_BYTES } from '../../../src/core/protocol'
 import type { SchemaIndex } from '../../../src/core/schema'
 
@@ -32,7 +33,14 @@ const b = (uid: string, type: string, data: Record<string, Json> = {}): Blok => 
   data,
 })
 
-const doc = (bloks: Blok[]): { doc: Doc } => ({
+/**
+ * One published document. `id` defaults, because most tests here are about *one*
+ * document and its findings — but it is a parameter rather than a constant, since
+ * `ContentFinding.sample` is per document and a fixture that reused one id would
+ * make the sample look like it deduplicates when it does not.
+ */
+const doc = (bloks: Blok[], id = 'sty_1'): { id: string; doc: Doc } => ({
+  id,
   doc: {
     root: 'root',
     bloks: {
@@ -56,8 +64,11 @@ describe('auditDocuments: orphan keys', () => {
   it('counts a key the schema no longer declares, per document and per blok', () => {
     const findings = auditDocuments(
       [
-        doc([b('a', 'hero', { title: 'A', heading: 'old' }), b('b', 'hero', { heading: 'old' })]),
-        doc([b('c', 'hero', { heading: 'old' })]),
+        doc(
+          [b('a', 'hero', { title: 'A', heading: 'old' }), b('b', 'hero', { heading: 'old' })],
+          'sty_1',
+        ),
+        doc([b('c', 'hero', { heading: 'old' })], 'sty_2'),
       ],
       SCHEMA,
     )
@@ -67,6 +78,9 @@ describe('auditDocuments: orphan keys', () => {
       field: 'heading',
       documents: 2,
       bloks: 3,
+      // One id per *document*, not per blok: two faulty bloks on one page are one
+      // thing to go and look at.
+      sample: ['sty_1', 'sty_2'],
     })
   })
 
@@ -92,8 +106,8 @@ describe('auditDocuments: unknown types', () => {
   it('counts a blok whose type nothing declares any more', () => {
     const findings = auditDocuments(
       [
-        doc([b('a', 'bigQuote'), b('b', 'bigQuote')]),
-        doc([b('c', 'hero', { title: '', align: '' })]),
+        doc([b('a', 'bigQuote'), b('b', 'bigQuote')], 'sty_1'),
+        doc([b('c', 'hero', { title: '', align: '' })], 'sty_2'),
       ],
       SCHEMA,
     )
@@ -103,7 +117,40 @@ describe('auditDocuments: unknown types', () => {
       field: null,
       documents: 1,
       bloks: 2,
+      sample: ['sty_1'],
     })
+  })
+})
+
+/**
+ * `ContentFinding.sample`: what turns a count into something an operator can open.
+ *
+ * The tally is deliberately a count rather than a row per blok — a site with 400
+ * heroes carrying an orphan key needs the number — and the admin's audit panel is
+ * required to link each finding to the document it is about. Five ids plus the
+ * remaining count is the answer to both.
+ */
+describe('auditDocuments: the sample', () => {
+  it('caps at FINDING_SAMPLE while the count keeps climbing', () => {
+    const docs = Array.from({ length: 9 }, (_, i) =>
+      doc([b('a', 'hero', { title: 'A', align: 'left', gone: 1 })], `sty_${i}`),
+    )
+    const finding = auditDocuments(docs, SCHEMA)[0]!
+    expect(finding.documents).toBe(9)
+    expect(finding.sample).toEqual(['sty_0', 'sty_1', 'sty_2', 'sty_3', 'sty_4'])
+    expect(finding.sample).toHaveLength(FINDING_SAMPLE)
+  })
+
+  /**
+   * A caller with no ids gets a count with nothing to open, rather than an error.
+   * `auditDocuments` is callable with a bare `{ doc }` literal and the file header
+   * treats that as worth keeping.
+   */
+  it('is empty for documents passed with no id', () => {
+    const bare = [{ doc: doc([b('a', 'hero', { title: 'A', heading: 'old' })]).doc }]
+    const finding = auditDocuments(bare, SCHEMA)[0]!
+    expect(finding.documents).toBe(1)
+    expect(finding.sample).toEqual([])
   })
 })
 
@@ -116,6 +163,7 @@ describe('auditDocuments: missing fields', () => {
       field: 'align',
       documents: 1,
       bloks: 1,
+      sample: ['sty_1'],
     })
   })
 
@@ -136,9 +184,9 @@ describe('auditDocuments: ordering and emptiness', () => {
   it('sorts by document count, most first', () => {
     const findings = auditDocuments(
       [
-        doc([b('a', 'hero', { title: 'A', align: 'left', gone: 1 })]),
-        doc([b('b', 'hero', { title: 'B', align: 'left', gone: 1 })]),
-        doc([b('c', 'hero', { title: 'C', align: 'left', other: 1 })]),
+        doc([b('a', 'hero', { title: 'A', align: 'left', gone: 1 })], 'sty_1'),
+        doc([b('b', 'hero', { title: 'B', align: 'left', gone: 1 })], 'sty_2'),
+        doc([b('c', 'hero', { title: 'C', align: 'left', other: 1 })], 'sty_3'),
       ],
       SCHEMA,
     )
@@ -265,6 +313,141 @@ describe('auditStories: a document approaching MAX_DOC_BYTES', () => {
 })
 
 /**
+ * `unknown-document-type`: where `DataList.tsx`'s deleted "Unknown type" heading
+ * went (`docs/ui-architecture.md` port phase 3 → 5).
+ *
+ * Not the same finding as `unknown-type` above, and the difference is the reason it
+ * exists: that one is a `blok.type` inside a document, this one is `stories.type` —
+ * the document's own kind. The admin's nav is generated from the manifest, so an
+ * undeclared type has no list screen, which made a code change able to hide content
+ * with no way back to it. The finding names the story, so the audit panel's link is
+ * the way back.
+ */
+describe('auditStories: a document whose type is no longer declared', () => {
+  const TYPES = [{ name: 'page', label: 'Page', kind: 'page' as const, root: 'page' }]
+  const row = (id: string, type: string): AuditedStory => ({
+    id,
+    type,
+    doc: { root: 'root', bloks: {} },
+  })
+
+  it('names the story and its orphaned type', () => {
+    const findings = auditStories([row('sty_a', 'page'), row('sty_b', 'profile')], {
+      types: TYPES,
+    })
+    expect(findings).toEqual([
+      {
+        check: 'unknown-document-type',
+        story: 'sty_b',
+        type: 'profile',
+        note: "type 'profile'",
+        detail: expect.stringContaining("document type 'profile' is not declared any more"),
+      },
+    ])
+  })
+
+  /**
+   * Silent without declared types, matching `unusableIndex`: no types means "cannot
+   * judge", not "every type is undeclared". Otherwise every call with a bare schema
+   * — which is how half this file's tests are written — would report every document.
+   */
+  it('says nothing when no types are declared at all', () => {
+    expect(auditStories([row('sty_b', 'profile')])).toEqual([])
+  })
+
+  /** It reports before `document-size`, which is the panel's reading order: a
+   * document nothing can reach is worse than one that is merely getting heavy. */
+  it('comes before the size finding', () => {
+    const heavy: AuditedStory = {
+      id: 'sty_big',
+      type: 'page',
+      doc: {
+        root: 'root',
+        bloks: {
+          root: { uid: 'root', type: 'page', parent: null, slot: null, order: 'a0', data: {} },
+          body: {
+            uid: 'body',
+            type: 'hero',
+            parent: 'root',
+            slot: 'body',
+            order: 'a0',
+            data: { title: 'x'.repeat(WARN_DOC_BYTES) },
+          },
+        },
+      },
+    }
+    const findings = auditStories([heavy, row('sty_lost', 'profile')], { types: TYPES })
+    expect(findings.map((f) => f.check)).toEqual(['unknown-document-type', 'document-size'])
+  })
+})
+
+/**
+ * `Explained.note`: the short varying half of a `detail`, and whether it is there
+ * at all.
+ *
+ * The reason it exists is a fault the audit panel made visible: nine
+ * `not-translatable` findings rendered as nine copies of one sentence whose only
+ * varying token was the first. So the *check* says what differs, and a check whose
+ * rows differ only by their identifier says nothing — which is what stops the admin
+ * needing a branch per family to work that out.
+ */
+describe('a finding’s note', () => {
+  it('is the varying word where the sentence is otherwise identical', () => {
+    const findings = auditSchema(
+      { hero: { name: 'hero', label: 'Hero', fields: { title: text(), body: textarea() } } },
+      // A locale config is what makes the translatable checks speak at all: on a
+      // single-locale site they are silent by design.
+      { locales: { default: 'en', available: [{ code: 'en', label: 'English' }] } },
+    )
+    const notes = findings.filter((f) => f.check === 'not-translatable').map((f) => f.note)
+    expect(notes).toEqual(['text', 'textarea'])
+    // And the whole sentence survives for the developer reading JSON.
+    expect(findings[0]?.detail).toContain("no 'translatable: true'")
+  })
+
+  /** Absent is an answer: `block` and `field` are the entire finding. */
+  it('is absent when the identifier is the whole difference', () => {
+    const findings = auditSchema({
+      hero: { name: 'hero', label: 'Hero', summary: 'nope', fields: { title: text() } },
+    })
+    expect(findings[0]?.check).toBe('unknown-summary-field')
+    expect(findings[0]?.note).toBeUndefined()
+  })
+
+  /**
+   * `document-size` is the family that argues against hiding a detail: every figure
+   * in it varies and the figures are the point, so the note carries all of them and
+   * only the standing consequence is left to `detail`.
+   */
+  it('carries every figure for document-size, leaving only the advice in detail', () => {
+    const over: AuditedStory = {
+      id: 'sty_big',
+      type: 'page',
+      doc: {
+        root: 'root',
+        bloks: {
+          root: { uid: 'root', type: 'page', parent: null, slot: null, order: 'a0', data: {} },
+          body: {
+            uid: 'body',
+            type: 'hero',
+            parent: 'root',
+            slot: 'body',
+            order: 'a0',
+            data: { title: 'x'.repeat(WARN_DOC_BYTES) },
+          },
+        },
+      },
+    }
+    const finding = auditStories([over])[0]!
+    expect(finding.note).toContain('% of the 8.0 MB document cap')
+    // Composed, not written twice: the detail is the note plus the consequence.
+    expect(finding.detail.startsWith(finding.note ?? '')).toBe(true)
+    expect(finding.detail).toContain('refused whole')
+    expect(finding.note).not.toContain('refused whole')
+  })
+})
+
+/**
  * `conditional-fields.md`'s deferred debt, first half. Spec 4's plan asked for
  * this check and its agent correctly declined to edit another spec's file.
  */
@@ -285,6 +468,10 @@ describe('auditSchema: a showIf naming a field that does not exist', () => {
         check: 'unknown-condition-field',
         block: 'hero',
         field: 'caption',
+        // The missing name is the one fact `block` and `field` do not carry, so it
+        // is the note — a row reading only `hero.caption` would not say what is
+        // wrong with it. See `Explained`.
+        note: "showIf names 'showCaption'",
         detail: expect.stringContaining("showIf names 'showCaption'"),
       },
     ])
@@ -345,6 +532,7 @@ describe('auditSchema: a summary naming a hidden field', () => {
         check: 'hidden-summary-field',
         block: 'hero',
         field: 'internalRef',
+        note: 'hidden: true',
         detail: expect.stringContaining('hidden: true'),
       },
     ])

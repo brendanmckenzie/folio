@@ -15,8 +15,18 @@ import { activeItem, nav } from './nav'
 import { Palette, type PaletteAction } from './Palette'
 import { type Crumb, type CrumbContext, crumbs, documentTitle, href } from './route'
 import { useRemembered, useRememberedString } from './remembered'
+import { Access } from './screens/Access'
+// `ASSET_VIEW_KEY` and not a string literal: the picker is mounted by an asset
+// *field* and reads the remembered view itself, so the two mounts of one grid have to
+// agree on the key or they remember different views. `AssetPicker` itself is not
+// mounted here — it belongs to a field, and the field is port phase 7's.
+import { ASSET_VIEW_KEY } from './screens/AssetPicker'
+import { Assets } from './screens/Assets'
 import { Content } from './screens/Content'
 import { Documents } from './screens/Documents'
+import { Model } from './screens/Model'
+import { Redirects } from './screens/Redirects'
+import { Settings } from './screens/Settings'
 import type { ViewMode } from './screens/content-model'
 import { EditorShell } from './screens/EditorShell'
 import { Home } from './screens/Home'
@@ -159,6 +169,16 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
   const inspector = useRemembered('folio.editor.inspector', false)
   const contentView = useRememberedString<ViewMode>('folio.content.view', 'tree', isViewMode)
   const contentSort = useRememberedString<FlatSort>('folio.content.sort', DEFAULT_FLAT_SORT, isSort)
+  /**
+   * The Assets screen's grid/table choice, on **the key the picker reads for
+   * itself** (`ASSET_VIEW_KEY`) rather than one spelled out here.
+   *
+   * The picker is mounted by an asset *field*, which has no shell above it to be
+   * wired from, so it reads the remembered value directly. Two mounts of one grid
+   * remembering two different views is the bug that key exists to prevent, and
+   * importing the constant is what stops the two drifting apart in a rename.
+   */
+  const assetView = useRememberedString<AssetView>(ASSET_VIEW_KEY, 'grid', isAssetView)
 
   useEffect(() => {
     document.title = documentTitle(route, crumbContext)
@@ -226,6 +246,9 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
           route,
           boot,
           loading,
+          globals: manifest?.globals ?? [],
+          manifest,
+          me,
           types,
           schema,
           pageTypes,
@@ -238,6 +261,7 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
           notify: setNotice,
           contentView,
           contentSort,
+          assetView,
           preview: previewFor(open, previewType, previewHost, boot.base),
         })}
       </Shell>
@@ -249,6 +273,8 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
   )
 }
 
+type AssetView = 'grid' | 'table'
+const isAssetView = (raw: string): raw is AssetView => raw === 'grid' || raw === 'table'
 const isViewMode = (raw: string): raw is ViewMode => raw === 'tree' || raw === 'flat'
 const isSort = (raw: string): raw is FlatSort =>
   raw === 'edited' || raw === 'title' || raw === 'path'
@@ -259,6 +285,19 @@ interface ScreenArgs {
   route: ReturnType<typeof useRouter>['route']
   boot: PrototypeBoot
   loading: boolean
+  /** `FolioConfig.globals` — a subset of the declared singleton types, so Home can
+   * draw a card per global without a second request. Off the manifest, which the
+   * shell already holds. */
+  globals: readonly string[]
+  /** The whole manifest, for the one screen that mirrors it. Passed rather than
+   * re-fetched: the shell already holds it, and a second fetch of the same thing is
+   * how two views of one declaration start disagreeing. Null while the boot is in
+   * flight, which is the screen's cue to draw skeletons. */
+  manifest: Manifest | null
+  /** Who is signed in, and the auth mode. Screens that gate on a role read it;
+   * `admin/me.ts`'s `OPEN` is the optimistic default until `/me` answers, which is
+   * why `loading` travels beside it. */
+  me: Me
   types: Manifest['types']
   /** The block schema, indexed by name. Documents needs it to read a type's
    * `indexed` fields and their labels; nothing else does yet. */
@@ -273,6 +312,7 @@ interface ScreenArgs {
   notify: (message: string) => void
   contentView: ReturnType<typeof useRememberedString<ViewMode>>
   contentSort: ReturnType<typeof useRememberedString<FlatSort>>
+  assetView: ReturnType<typeof useRememberedString<AssetView>>
   /** The open document's iframe src. See `EditorShell`'s `preview`. */
   preview: string | undefined
 }
@@ -287,7 +327,17 @@ function screenFor(a: ScreenArgs) {
   const { route, boot } = a
   switch (route.screen.name) {
     case 'home':
-      return <Home types={a.types} apiBase={boot.apiBase} mount={boot.base} />
+      return (
+        <Home
+          apiBase={boot.apiBase}
+          mount={boot.base}
+          types={a.types}
+          globals={a.globals}
+          me={a.me}
+          onOpen={a.go}
+          onNotice={a.notify}
+        />
+      )
 
     case 'content':
       return (
@@ -355,52 +405,56 @@ function screenFor(a: ScreenArgs) {
 
     case 'assets':
       return (
-        <Stub
-          title="Assets"
-          needs={
-            <>
-              <li>Usage counts, so a delete can name what references the file.</li>
-            </>
-          }
-        >
-          The media library as a place: grid or table, search, filters, a detail panel with alt text
-          and where it is used. The field picker becomes the same grid in a <code>Dialog</code>.
-        </Stub>
+        <Assets
+          apiBase={boot.apiBase}
+          mount={boot.base}
+          query={route.query}
+          onQuery={(next) => a.replace({ name: 'assets' }, { ...route.query, ...next })}
+          onNotice={a.notify}
+          remembered={{ view: a.assetView.value }}
+          onRemember={(next) => a.assetView.set(next.view)}
+        />
       )
 
     case 'access':
       return (
-        <Stub title="Access">
-          Editors and API tokens, as two tables with room for an email address — the review&rsquo;s
-          sharpest illustration was this surface rendered in 280px with every address truncated.
-        </Stub>
+        <Access
+          apiBase={boot.apiBase}
+          me={a.me}
+          // The boot is in flight, so `me` is still the optimistic `OPEN` guess
+          // (`admin/me.ts` argues that default well, and it is harmless everywhere
+          // else). On *this* screen it is a false statement — an admin arriving cold
+          // would read "this deployment has no accounts" for one round trip — so the
+          // screen draws skeletons instead.
+          loading={a.loading}
+          query={route.query}
+          onQuery={(next) => a.replace({ name: 'access' }, { ...route.query, ...next })}
+          onNotice={a.notify}
+        />
       )
 
     case 'model':
-      return (
-        <Stub title="Model">
-          Migrations with their dry-run report, and <b>the audit panel</b>:{' '}
-          <code>GET {boot.apiBase}/audit</code> answers in full across four families today and
-          nothing renders it.
-        </Stub>
-      )
+      return <Model apiBase={boot.apiBase} mount={boot.base} me={a.me} onNotice={a.notify} />
 
     case 'redirects':
       return (
-        <Stub title="Redirects">
-          The table it already is — and the one list route in the codebase that already paged
-          properly, over a keyset cursor.
-        </Stub>
+        <Redirects
+          apiBase={boot.apiBase}
+          query={route.query}
+          onQuery={(next) => a.replace({ name: 'redirects' }, { ...route.query, ...next })}
+          onNotice={a.notify}
+        />
       )
 
     case 'settings':
       return (
-        <Stub title="Settings">
-          A <b>mirror of code, not a form</b>: locales, globals, document types, block types, auth
-          providers, cache configuration, each read-only and each showing where the host declared
-          it. Editing any of it would be a second source of truth for the one thing that must have
-          exactly one.
-        </Stub>
+        <Settings
+          manifest={a.manifest}
+          me={a.me}
+          mount={boot.base}
+          query={route.query}
+          onQuery={(next) => a.replace({ name: 'settings' }, { ...route.query, ...next })}
+        />
       )
 
     case 'ui':

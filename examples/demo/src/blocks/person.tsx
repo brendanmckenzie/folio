@@ -31,13 +31,18 @@ export const personRecord = defineRecord({
     // queryable through `folio.query`. Root-block only, same rule as everywhere.
     fullName: text({ label: 'Full name', required: true, indexed: true }),
     role: text({ label: 'Role', indexed: true }),
-    // A sortable column that is not a name: the list view sorts this
-    // numerically, because the projection fills `num_value` for a number field.
+    // A column that is not a name, and the reason `content_index` has two value
+    // columns: the projection fills `num_value` with the epoch for an ISO date, so
+    // a `folio.query` ordering by this field is chronological rather than
+    // lexicographic. The **Documents screen** does not offer it as a sort — an
+    // `indexed` field lives in another table, is two columns wide and is null for
+    // anything unpublished (`core/story.ts`'s `DocumentSort`) — so the help text
+    // says what is true rather than what the old client-side sort used to do.
     since: text({
       label: 'Joined',
       indexed: true,
       placeholder: '2019-04-01',
-      help: 'ISO 8601. Sorted as a date in the Data list, not as text.',
+      help: 'ISO 8601. Queryable as a date through folio.query, not as text.',
     }),
     portrait: asset({ label: 'Portrait', accept: 'image/*' }),
     bio: richtext({

@@ -330,6 +330,20 @@ describe('versions', () => {
 })
 
 describe('assets', () => {
+  it('has exactly one index, and the two new sorts deliberately have none', async () => {
+    // The Assets screen sorts by filename and by size as well as by date
+    // (`core/story.ts`'s `AssetSort`), and neither got an index. An asset table is
+    // bounded by what somebody uploaded by hand, so the scan-and-sort is over
+    // hundreds of rows while an index is a write cost on every upload forever.
+    //
+    // Asserted as an absence for the same reason `stories_draft_updated` is: that
+    // index was created for a query nobody had written and cost every story write
+    // for ten migrations. Adding one here should be a deliberate act with a
+    // measurement behind it, not a reflex — which means this assertion failing is
+    // the conversation, not an obstacle to it.
+    expect(await indexesOf('assets')).toEqual(['assets_created'])
+  })
+
   it('has every column and a unique R2 key', async () => {
     expect((await columnsOf('assets')).map((c) => c.name)).toEqual([
       'id',
@@ -499,13 +513,43 @@ describe('content index', () => {
     expect(await indexesOf('content_index')).toEqual(['content_index_lookup', 'content_index_num'])
   })
 
-  it('creates `content_refs` keyed on (from, to, kind), indexed inbound', async () => {
+  it('creates `content_refs` keyed on (from, to_id, kind), indexed inbound', async () => {
+    // `to_id`, not `to_story`: the column holds whatever `kind` says it holds — a
+    // story id for `link` and `reference`, an R2 object key for `asset`
+    // (`0002_asset_refs.sql`). The rename is what keeps the column from lying about
+    // what is in it now that asset usage lives in the same table.
     expect((await columnsOf('content_refs')).map((c) => c.name)).toEqual([
       'from_story',
-      'to_story',
+      'to_id',
       'kind',
     ])
     // Inbound is the direction "used by N documents" reads.
     expect(await indexesOf('content_refs')).toEqual(['content_refs_to'])
+  })
+
+  it('carries the inbound index and the primary key through the rename', async () => {
+    // SQLite rewrites the schema text of every index naming a renamed column, so
+    // this should be automatic — and "the index quietly points at nothing now" is
+    // the failure a rename has, so it is asserted rather than assumed.
+    expect(await indexSql('content_refs_to')).toMatch(/\(\s*to_id\s*\)/i)
+
+    const table = await env.DB.prepare(
+      "select sql from sqlite_master where name = 'content_refs'",
+    ).first<{ sql: string }>()
+    expect(table?.sql).toMatch(/primary key\s*\(\s*from_story\s*,\s*to_id\s*,\s*kind\s*\)/i)
+  })
+
+  it('takes a third kind of edge, because `kind` was never CHECK-constrained', async () => {
+    // The whole of what "widen `content_refs`" cost, proven: an asset edge inserts
+    // with an R2 key as its target and no DDL was needed to allow it. Had `kind`
+    // carried a CHECK, this would be a table rebuild instead of a rename.
+    await env.DB.prepare('insert into content_refs (from_story, to_id, kind) values (?, ?, ?)')
+      .bind('sty_page', 'ast_abc123abc123-logo.svg', 'asset')
+      .run()
+    const row = await env.DB.prepare(
+      "select from_story as f, to_id as t from content_refs where kind = 'asset'",
+    ).first<{ f: string; t: string }>()
+    expect(row).toEqual({ f: 'sty_page', t: 'ast_abc123abc123-logo.svg' })
+    await env.DB.prepare('delete from content_refs').run()
   })
 })

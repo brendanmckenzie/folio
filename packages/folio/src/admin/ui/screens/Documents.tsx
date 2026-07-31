@@ -158,7 +158,7 @@ export function Documents(props: Props) {
   if (data.page.error && data.page.rows.length === 0) {
     return (
       <div className={css.screen}>
-        <ListHeader>{type.label}</ListHeader>
+        <ListHeader level={1}>{type.label}</ListHeader>
         <EmptyState
           title={`Could not load ${type.label.toLowerCase()}`}
           body={data.page.error}
@@ -177,6 +177,7 @@ export function Documents(props: Props) {
   return (
     <div className={css.screen}>
       <ListHeader
+        level={1}
         actions={
           <>
             <input

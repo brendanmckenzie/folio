@@ -265,6 +265,28 @@ export function documentTypes<Env>(config: FolioConfig<Env>): readonly DocumentT
   )
 }
 
+/**
+ * Which publish hooks the host declared, by name. Absent when there are none, so
+ * the screen can tell "no hooks" from "hooks I failed to read".
+ *
+ * On the manifest, and staying there: a declared hook is a fact about the host's
+ * *code*, which is exactly what `server/app.ts`'s rule for the ungated `/schema`
+ * route covers. Its sibling — the sign-in providers and session policy — started
+ * here and moved to `GET {base}/api/me`, because a security decision is not a
+ * declaration and does not inherit that licence. See `auth/config.ts`'s
+ * `AuthPolicy`.
+ *
+ * `Object.keys` rather than a list checked against `HOOK_EVENTS`: `validateHooks`
+ * has already thrown for anything not in that vocabulary, so every key here is a
+ * real event and a new event needs no edit in this function.
+ */
+export function manifestHooks<Env>(hooks: FolioHooks<Env> | undefined): Pick<Manifest, 'hooks'> {
+  if (!hooks) return {}
+  const declared = Object.keys(hooks).filter((key) => key !== 'await')
+  if (declared.length === 0) return {}
+  return { hooks: { declared, awaited: [...(hooks.await ?? [])] } }
+}
+
 export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const registry = toRegistry(config.blocks)
   const schema = toSchemaIndex(registry)
@@ -724,7 +746,19 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   return {
     registry,
     schema,
-    manifest: toManifest(registry, types, globals, locales),
+    /**
+     * The manifest, plus the one thing `toManifest` cannot know.
+     *
+     * Spread here rather than by widening `toManifest`'s signature: that function
+     * lives in `core/block.ts` and takes a registry, the types, the globals and
+     * the locales — all four of which are *content model*. `hooks` is server
+     * configuration, so making `core` take it would have meant `core/block.ts`
+     * importing `server/hooks.ts`.
+     */
+    manifest: {
+      ...toManifest(registry, types, globals, locales),
+      ...manifestHooks(config.hooks),
+    },
     types,
     globals,
     locales,

@@ -21,6 +21,8 @@ import * as v from 'valibot'
 import { decodeCursor } from '../core/pagination'
 import type { DocumentType } from '../core/schema'
 import {
+  type AssetSort,
+  DEFAULT_ASSET_SORT,
   DEFAULT_DOCUMENT_SORT,
   DEFAULT_FLAT_SORT,
   DEFAULT_SEARCH_SORT,
@@ -797,6 +799,25 @@ export function documentSortQuery(raw: string | undefined): DocumentSort {
   if (raw === undefined || raw === '') return DEFAULT_DOCUMENT_SORT
   return parseOrThrow(
     v.picklist(['ord', 'title', 'edited'], 'must be one of: ord, title, edited'),
+    raw,
+    'sort',
+  )
+}
+
+/**
+ * The Assets screen's ordering, defaulting to `created` — the same rule as the two
+ * above: the default answers the question the list exists for ("what did I just
+ * upload"), and an *unknown* sort 400s rather than quietly serving the default,
+ * because a URL that silently means something else than it says is worse than a
+ * refusal somebody can read.
+ *
+ * `core/story.ts`'s `AssetSort` carries which direction each one runs in and why
+ * `size` is the one that descends.
+ */
+export function assetSortQuery(raw: string | undefined): AssetSort {
+  if (raw === undefined || raw === '') return DEFAULT_ASSET_SORT
+  return parseOrThrow(
+    v.picklist(['created', 'filename', 'size'], 'must be one of: created, filename, size'),
     raw,
     'sort',
   )

@@ -341,16 +341,43 @@ Audited 2026-07-30, and the state is three-tiered:
 - `GET /users`, `GET /tokens` → `listUsers`, `listTokens`, whole table each.
 - `GET /audit` → no limit anywhere in `server/audit.ts`.
 
-**Status 2026-07-31: all of the above are paged except `GET {base}/api/documents`,
-which is the last unbounded read in the admin's boot path.** It stayed that way on
-purpose. Its envelope also carries the `indexed` column values, and *asking* for it
-is what creates a declared singleton (`ensureSingleton`) — both of which are the
-Documents screen's shape to settle at `ui-architecture.md`'s port phase 3, so paging
-it now would mean deciding that shape twice. `docs/specs/foundation/pagination.md`'s
-implementation notes record what else it left owed: `GET {base}/api/search` (the
-palette got page search from `?flat=1&q=` instead), and `Editor.tsx`'s
-`buildResolution`, which still reads a full list through a documented stopgap that
-dies with the old editor.
+**Status 2026-07-31: every read on this list is paged, and the list is closed.**
+It took two passes and the second one is the interesting one.
+
+`docs/specs/foundation/pagination.md` paged assets, versions, users, tokens and the
+stories tree. Three survived it deliberately, each because paging them meant deciding
+a *screen's* shape and deciding it twice was the cost of doing it early — and all
+three then came back differently from the spec's guess when the screen was built:
+
+- **`GET {base}/api/documents`** (`ui-architecture.md` port phase 3). Its envelope
+  carries the `indexed` column values, which turned out to belong **on the row** and
+  not in a sibling map keyed by id — paging is what makes that a rule rather than a
+  preference, since a map left over from the previous page would quietly supply
+  values for rows no longer on screen. And *asking is what creates a singleton* moved
+  to its own request, `?kind=singleton`, because ensuring is a **write** and hanging
+  it off an unqualified list meant `?cursor=` decided whether a document came into
+  existence. That request is uncursored and is not an exception to the rule: a
+  singleton set is bounded by the host's own `types` literal, so it cannot grow when
+  somebody publishes.
+- **`GET {base}/api/story/:id/activity`** (same phase). The one where paging was not
+  a nicety: the Durable Object's log grows with every transaction, so before it the
+  501st entry was unreachable by any means. Its keyset is the first **one-column**
+  one — `sync_id` is monotonic within a document, so a tiebreak could never fire, and
+  `Keyset` grew `[string] | [string, string]` rather than accept a fictional second
+  column.
+- **`GET {base}/api/audit`** (port phase 5, with the Model screen). It read the whole
+  `stories` table through `publishedDocsAll`, and it survived longest because the
+  audit is an operator's tool rather than a screen — which is precisely the argument
+  for paging it: an operator runs it on the site that has a problem, and that is the
+  big one. It now walks `publishedDocsAfter` over a `continueFrom` cursor and the
+  panel merges batches client-side, the way `migrate` already did. `publishedDocsAll`
+  is deleted; the audit was its only caller.
+
+Two things `pagination.md` also left owed are done: **`GET {base}/api/search`** is
+real and the palette is on it (the `?flat=1&q=` stopgap could reach neither a record
+nor a `content_index` value), and the admin's **boot path holds no unbounded read at
+all**. What is still owed is `Editor.tsx`'s `buildResolution`, which reads a full
+list through a documented stopgap and dies with the old editor at port phase 7.
 
 The UI half is the same story from the other end. Every admin list is one unpaged
 request; `DataTable` then pages **20 rows client-side over the full list**, and
@@ -557,20 +584,42 @@ an unsorted flat list, which stops working somewhere around 15.
   row; a route exists (`GET /folio/story/:id/translation`) for a caller that wants
   one story's answer, and a tree-wide answer wants a single query over
   `published_doc` rather than N Durable Object reads.
-- **A row whose document type is no longer declared has no screen.** `DataList.tsx`
-  listed these under an "Unknown type" heading, on the grounds that a row made
-  invisible by a code change is a row nobody can recover; the nav is generated from
-  the manifest, so an undeclared type has no `/documents/:type` to list them on.
-  `GET /folio/audit` already reports `unknown types` in full, so this lands with the
-  audit panel — the entry below. Until then `/documents/:type` for an undeclared type
-  names the type and points at the audit route rather than pretending the rows are
-  gone.
-- The audit has no admin surface. `GET /folio/audit` answers in full, but
-  `Migrations.tsx` renders migration status and nothing else, so every drift
-  finding — orphan keys, unknown types, missing fields, and now document size —
-  is reachable only by a script or a curl. The report shape is stable and three
-  families wide now, which is the argument for building the panel rather than
-  against it.
+- **A row whose document type is no longer declared is reachable again** —
+  `unknown-document-type`, a story check on `GET {base}/api/audit`, drawn by the Model
+  screen's audit panel with a link per row. `DataList.tsx` listed these under an
+  "Unknown type" heading, on the grounds that a row made invisible by a code change is
+  a row nobody can recover, and the generated nav means an undeclared type has no
+  `/documents/:type` to list them on — so the panel's link is not a convenience here,
+  it is the only route to the document.
+
+  **This entry used to claim the audit "already reports `unknown types` in full", and
+  that was false in a way that mattered.** `unknown-type` is about a `blok.type` —
+  a *block* inside a document whose definition is gone. `DataList`'s heading was about
+  `stories.type`, the document's own kind. Two different faults, one of which was not
+  reported at all, which is why building the panel needed a new check rather than a
+  new view. The distinction is easy to lose again: both read as "unknown type" in
+  prose.
+
+  **Narrower than `DataList`'s was, in two ways**, so do not assume parity. It sees
+  **published documents only**, because that is the only copy the audit reads
+  (`publishedDocsAfter`, no Durable Object) — an unrouted *draft* of an undeclared type
+  is still unreachable, and reaching it means a `stories` read this report deliberately
+  does not make. And it is **silent when no document types are declared**, matching
+  `unusableIndex`: no types means "cannot judge", not "every type is undeclared".
+- **The audit has an admin surface**: the Model screen's audit panel
+  (`ui-architecture.md` port phase 5). All four families are drawn — orphan keys,
+  unknown block types, missing fields, document size — plus the schema-only checks and
+  the new `unknown-document-type`, grouped by which of `server/audit.ts`'s three arrays
+  they came from, and **each finding links to the documents it is about**. Three things
+  the panel needed that the route did not have, all now landed:
+  - **`?continueFrom=&batch=`.** It read the whole `stories` table in one query,
+    which was the last unbounded read in the admin and the one place a *read-only*
+    report could exceed a request's CPU limit. `publishedDocsAll` is deleted.
+  - **`ContentFinding.sample`.** A tally is a count by design, so a finding had no
+    document to link to. Five ids per finding plus the remaining count answers both.
+  - **`Explained.note`.** Every `detail` was a varying head and a boilerplate tail, so
+    nine findings drew as nine copies of one sentence. The check now says what
+    *differs*, and omits the field when nothing does.
 - `content_index` is keyed on the field *name*, not on (type, field). So filtering
   one document type on a field only another type declares matches nothing rather
   than 400ing, and two blocks declaring the same indexed name are one queryable

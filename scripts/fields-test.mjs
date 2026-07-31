@@ -412,6 +412,70 @@ check(
 const reorder = diffOf({ images: [one.value, two.value] }, { images: [two.value, one.value] })
 check('reordering a multiasset is a single set', reorder.length === 1 && reorder[0].t === 'set')
 
+/* --- asset usage, and the library's sort axis ---------------------------- */
+
+// ui-architecture.md dependency 4. `content_refs` gained an `asset` kind whose
+// target is the R2 key (migrations/0002_asset_refs.sql), written in the publish
+// batch like every other edge — so the home page has to be published before it
+// counts as a usage of the image on it. That "published only" rule is the whole
+// caveat the Assets panel states, and this is the check that it is real.
+const usageBeforePublish = await json(`${API}/assets/${one.asset.id}/usage`)
+check(
+  'an unpublished draft is not yet a usage',
+  usageBeforePublish.total === 0,
+  `total=${usageBeforePublish.total}`,
+)
+
+await fetch(`${API}/story/${STORY}/publish`, { method: 'POST' })
+
+const usage = await json(`${API}/assets/${one.asset.id}/usage`)
+check(
+  'usage names the published page using the asset',
+  usage.total === 1 && usage.published[0]?.id === STORY && usage.published[0]?.url === '/',
+  JSON.stringify(usage),
+)
+// `two` is only in the gallery, which is a `multiasset`, and `one` is in both an
+// `asset` field and the gallery — one row per document either way, because a
+// document that uses a file four ways is still one document to warn about.
+const galleryUsage = await json(`${API}/assets/${two.asset.id}/usage`)
+check(
+  'a multiasset member counts as a usage too',
+  galleryUsage.total === 1 && galleryUsage.published[0]?.id === STORY,
+  JSON.stringify(galleryUsage),
+)
+check(
+  'an unknown asset id is a 404, not an empty usage',
+  (await fetch(`${API}/assets/ast_000000000000/usage`)).status === 404,
+)
+
+// The three orderings, over real SQLite rather than a unit test's array. Only
+// `created` has an index; the other two are a deliberate scan (core/story.ts's
+// `AssetSort`), so this is also the check that they page at all.
+const names = async (query) =>
+  (await json(`${API}/assets?limit=200&${query}`)).rows.map((a) => a.filename)
+const byName = await names('sort=filename')
+check(
+  'sort=filename is ascending',
+  JSON.stringify(byName) === JSON.stringify([...byName].sort()),
+  byName.join(','),
+)
+const bySize = await json(`${API}/assets?limit=200&sort=size`)
+check(
+  'sort=size is descending, biggest first',
+  bySize.rows.every((row, i) => i === 0 || bySize.rows[i - 1].size >= row.size),
+  bySize.rows.map((r) => r.size).join(','),
+)
+const reversed = await names('sort=filename&dir=desc')
+check(
+  'dir reverses a sort',
+  JSON.stringify(reversed) === JSON.stringify([...byName].reverse()),
+  reversed.join(','),
+)
+check(
+  'an unknown sort is refused rather than quietly defaulted',
+  (await fetch(`${API}/assets?sort=bytes`)).status === 400,
+)
+
 // `Page<AssetRow>` since foundation/pagination.md phase 4, with a filename search
 // that is the whole reason asset 201 is reachable at all.
 const libraryBefore = (await json(`${API}/assets?limit=200`)).rows
@@ -432,6 +496,19 @@ check(
 check(
   'deleting an asset leaves referencing documents alone',
   (await preview()).includes(two.value.key),
+)
+check(
+  'usage 404s once the library row is gone',
+  (await fetch(`${API}/assets/${two.asset.id}/usage`)).status === 404,
+)
+// That the *edges* go with it — same batch as the library row, because nothing
+// reads "page A uses this asset" once the asset does not exist — needs a look at
+// `content_refs`, which no route exposes. It is asserted in
+// packages/folio/test/workers/asset-usage.test.ts, where D1 is in reach. What this
+// script can add is that deleting one asset did not disturb another's usage.
+check(
+  'deleting one asset leaves another’s usage intact',
+  (await json(`${API}/assets/${one.asset.id}/usage`)).total === 1,
 )
 
 /* --- richtext ------------------------------------------------------------ */

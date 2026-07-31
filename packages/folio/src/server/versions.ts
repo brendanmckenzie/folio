@@ -1,8 +1,10 @@
 import type { Doc } from '../core/doc'
 import { migrateDoc, type Migration, pendingFor } from '../core/migrate'
 import type { DocumentType, SchemaIndex } from '../core/schema'
+import type { StoryMeta } from '../core/story'
 import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
 import { keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
+import { storiesFor } from './stories'
 
 export type VersionKind = 'publish' | 'checkpoint'
 
@@ -207,4 +209,80 @@ export async function deleteVersionsFor(
   storyIds: readonly string[],
 ): Promise<void> {
   await deleteVersionsStatement(db, storyIds)?.run()
+}
+
+/* ---------------------------------------------------------- site-wide reads --- */
+
+/**
+ * One recent publish, across the whole site: the version row and the story it
+ * belongs to.
+ *
+ * **Both, not a merged row**, and the split is load-bearing in two directions. The
+ * *version* carries the title as it was **at the moment of publishing**, which is the
+ * right label for "what went live" — a page renamed since is not what was published.
+ * The *story* is what a link needs, and it has to be a whole `StoryMeta` because
+ * `rt.withUrls` is typed on one: a URL is the host's own `route()` function's answer,
+ * so neither this reader nor the route may derive one from a path.
+ *
+ * It is also what stops the two colliding. `versions` and `stories` both have an
+ * `id`, a `title` and a timestamp, so a single flat row would need every column
+ * aliased twice and one of each pair would end up meaning whichever the driver
+ * returned last.
+ *
+ * `ui-architecture.md` dependency 5, and the spec calls it "cheap and exact"
+ * correctly: `versions` already holds one row per publish with its actor and its
+ * timestamp, so this is a query over data written for another purpose. Nothing new is
+ * stored to answer it.
+ */
+export interface RecentPublish {
+  version: VersionMeta
+  story: StoryMeta
+}
+
+/**
+ * The most recent publishes, newest first.
+ *
+ * **`kind = 'publish'` and not every version.** A checkpoint is a version too and is
+ * not a publish; a list called "latest published" that counted an editor's private
+ * save point as a release would be worse than no list.
+ *
+ * **Two queries rather than a join**, which is the interesting choice here. The join
+ * version needs both projections in one row, and `versions` and `stories` share
+ * three column names — so it needs every column aliased and a reader that unpicks
+ * them, which is how a column silently starts meaning the wrong table's value. This
+ * pages the versions over `versions_story`'s ordering and then asks `storiesFor` for
+ * the ids it found, which is one extra round trip for a reader anybody can check by
+ * eye. The page size is at most 100, so the second query binds at most 100 ids.
+ *
+ * A version whose story is **gone** is dropped rather than returned with a null
+ * story. `deleteStoryStatement` batches `deleteVersionsStatement` alongside the story
+ * rows, so this cannot normally happen; dropping means a bug there shows up as a
+ * missing row rather than as a link to nothing. It does mean a page can come back
+ * shorter than `limit` — which is why the cursor comes off the *version* rows and not
+ * off what survived the join.
+ */
+export async function listRecentPublishes(
+  db: D1Database,
+  opts: { limit?: number; cursor?: string } = {},
+): Promise<Page<RecentPublish>> {
+  const limit = clampLimit(opts.limit, 20, 100)
+  const resume = keysetWhere(NEWEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null)
+  const { results } = await db
+    .prepare(
+      `select ${META} from versions ${whereOf("kind = 'publish'", resume.sql)}
+       ${orderBy(NEWEST_FIRST)} limit ?`,
+    )
+    .bind(...resume.binds, limit + 1)
+    .all<VersionMeta>()
+
+  const page = paginate(results, limit, (row) => [row.createdAt, row.id])
+  const stories = await storiesFor(db, [...new Set(page.rows.map((row) => row.storyId))])
+  const byId = new Map(stories.map((story) => [story.id, story]))
+  return {
+    ...page,
+    rows: page.rows.flatMap((version) => {
+      const story = byId.get(version.storyId)
+      return story ? [{ version, story }] : []
+    }),
+  }
 }

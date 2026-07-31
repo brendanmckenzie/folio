@@ -593,8 +593,17 @@ work:
 3. **`GET {base}/stories?ids=`** — so the editor can resolve the link targets in the
    open document without fetching every story. `storiesFor(db, ids, paths)` already
    does the work server-side.
-4. **Asset usage counts** — for the Assets detail panel and a safe delete. Wants
-   asset keys in `content_refs`.
+4. ~~**Asset usage counts** — for the Assets detail panel and a safe delete. Wants
+   asset keys in `content_refs`.~~ **Done** 2026-07-31: `content_refs` was widened
+   (`migrations/0002_asset_refs.sql`) and `GET {base}/api/assets/:id/usage` answers the
+   same shape the document usage route does, one field narrower — `assetUsage` says why
+   there is no `kind`. The edges hold the **R2 key**, exactly as this item said, and it
+   is worth stating why the alternative was never available: a stored `AssetValue`
+   carries no asset id at all, so the key is the only identifier a document has. Two
+   consequences fell out of it — the usage read is `storiesForChunked` rather than
+   `storiesFor`, because inbound edges are uncapped and a logo on a 500-page site is
+   the normal case; and `deleteAsset` clears the inbound edges while deliberately
+   leaving the documents alone.
 5. **Two site-wide recency queries** — most recently edited documents
    (`draftUpdatedAt`) and most recent publishes (`versions` rows of kind `publish`,
    which already carry actor and timestamp). Both for Home, both over data written
@@ -659,8 +668,101 @@ reaches the surface with sync, presence and preview in it.
      audit panel at phase 5. Until then `/documents/:type` for an undeclared type
      names the type and points at the audit route.
 4. **Assets** — the new screen, and the picker as one `Dialog` mount of it. Retires
-   the library half of `AssetInput.tsx`.
+   the library half of `AssetInput.tsx`. **Done** 2026-07-31, with four amendments:
+   - **There is no size filter. There is a size *sort*.** The `Assets` section above
+     asks for "type and size filters" and the server has no size predicate — only
+     `?q=` and `?kind=` — so a size chip could only have been a client-side filter
+     over the fetched page, which filters the page rather than the library and is the
+     exact mistake `foundation/pagination.md` exists to prevent. `sort=size`
+     descending answers the question a size filter is actually asked ("the bucket is
+     bigger than I expected, find the 8MB PNG somebody dropped in"), and the chips
+     were left absent rather than disabled. **`?minBytes=`/`?maxBytes=` on
+     `{base}/api/assets` is what would close it**, and nothing else is needed.
+   - **The type chips are All / Images / Files**, not the three prefixes this document
+     names. `uploadAsset` stores what an upload's *bytes* say they are, screened
+     against `SERVED_CONTENT_TYPES` — five raster types — and everything else as
+     `application/octet-stream`. So no row can ever carry a `video/` content type and
+     a `Video` chip would be a filter guaranteed to select nothing. Two reachable
+     prefixes, and `Files` is the honest name for the second.
+   - **The focal point is not in the detail panel, and cannot be.** There is no column
+     for it on `assets`, `toAssetValue` does not carry one, and `PATCH /assets/:id`
+     takes `alt` only. That is right rather than missing: a focal point answers "what
+     must stay in frame when *this block* crops it", which is a different answer for a
+     wide hero and a square avatar of the same file, so it belongs to the field value
+     and not to the library row. The panel says so in one line, because somebody will
+     come looking for it.
+   - **`AssetInput.tsx` is not deleted**, the same amendment phase 2 made for
+     `StoryTree.tsx`: it belongs to the *old* single-screen editor, which owns
+     `{base}/edit/:id` until phase 7. What dies with that file is the **library** half
+     — `MediaLibrary`, the `.library*` CSS namespace and its hand-rolled focus trap,
+     all three replaced by `AssetPicker` over the one `useFocusTrap`. What survives as
+     the **field** half is `AssetCard`, `keyAssets` and the single-file `useUpload`
+     path, which the editor port re-homes rather than retires.
 5. **Access, Model, Redirects, Settings** — four tables and the audit panel.
+   **Model done** 2026-07-31, with three amendments — all three because the audit
+   route had never had a consumer, so nothing had tested what it answers:
+   - **`GET {base}/api/audit` is paged**, `?continueFrom=&batch=`, which
+     `pagination.md`'s route table specified and phase 4 skipped. It read every
+     published document in one query, JSON-parsed, and that is the one place a
+     *read-only* report can still exceed a request's CPU limit. So the screen walks it
+     the way it walks a migration run — **and only the first batch on load**, then
+     offers the rest: opening this screen must not become a full-site scan for a panel
+     the visitor may only be here to read the migration half of. Until it is asked, the
+     panel says how far the report actually reaches, because one batch presented as the
+     whole answer is worse than no panel.
+   - **A run that answers `200` with a `continueFrom` is not a finished run**, and that
+     is the single correctness point on this screen. The report is merged across
+     batches and progress is published per batch; `isUnfinished` is checked before
+     anything is reported, so a partial run reads as *"Stopped after N documents: 12
+     still behind"* rather than a summary under a heading saying "Run".
+   - **The audit's shape had two gaps that only a screen could find.** A
+     `ContentFinding` is a tally, so it had no document to link to — it now carries a
+     five-id `sample`, since "each finding links to the document it is about" is what
+     makes this a tool. And `ROADMAP.md`'s claim that the audit "already reports
+     `unknown types` in full" was **wrong**: that check is about a `blok.type`, while
+     phase 3's `orphanedDocuments` note is about `stories.type`. A new story check,
+     `unknown-document-type`, is where `DataList.tsx`'s heading actually went.
+   - **Access** — the scope control is the design task, and six checkboxes was not the
+     only thing wrong with it. `auth/roles.ts`'s `IMPLIES` is real, so the old control
+     let you tick three boxes to mean one thing and left three *unticked* boxes
+     describing permissions the token would have had anyway. Presets over a
+     disclosure, with a scope something else grants rendered ticked, disabled and
+     naming what grants it. It also found a **lockout**: `PATCH /users/:id` guarded
+     self-*deletion* and not self-*demotion*, and revoked your sessions in the same
+     breath — the recovery was a `wrangler d1 execute` against production.
+   - **Redirects** — "the table it already is" understated it. The route could not
+     filter by path or answer a count, and it accepted `{ from: 'a', to: 'a' }`, which
+     a browser follows until it gives up. The screen also states a truth the spec
+     glosses: `redirects.md`'s "a loop is unrepresentable" holds for *auto* rows only,
+     so a hand-written chain is two hops a browser really does follow.
+   - **Settings** — read-only, and the two most load-bearing sections are the ones
+     that explain a **refusal** an editor meets and cannot account for: `under` (why
+     an Insight will not go at the top level — declaring `under` closes it, because
+     the top level has no type to match) and `indexed` (why a collection query is
+     refused). Two more things a later reader should know:
+     - **The manifest gained `auth` and `hooks`, and then `auth` came straight back
+       off it.** `GET {base}/api/schema` is ungated, and the comment justifying that
+       — "it describes the code, not the content" — was read too widely: sign-in
+       providers and session policy are neither. `provision` told an unauthenticated
+       stranger whether any account at the configured IdP becomes an editor and at
+       what role, and `linksPerHour` published the exact throttle on the sign-in
+       flow. Neither makes a site more exploitable, since an attacker learns both by
+       trying and the try succeeds either way, but both turn something you had to
+       *attempt* into something you can *read*. The block lives on
+       `GET {base}/api/me` now, which is the route that already knows who is asking
+       and already refuses a caller it cannot identify. `hooks` stayed: a declared
+       event is a fact about the host's code, which is what the licence actually
+       covers. **The rule is now written at the route** (`server/app.ts`) rather than
+       left to be re-derived, and a workers test asserts an unauthenticated
+       `/api/schema` carries no `auth` block — the assertion that fails if somebody
+       moves it back for convenience.
+     - **`bindings` is the one thing in `FolioConfig` this screen genuinely cannot
+       show**, because `/api/schema` is I/O-free by design and must not invoke the
+       host's binding function. So "why is the media library read-only" and "why is
+       there no cross-story presence" — both answered by which optional bindings
+       exist — are the screen's one real gap rather than a judgement call about what
+       is worth showing. The shell's bootstrap already learns about the space
+       channel, which is where closing it would start.
 6. **Home** — last of the platform screens, because it links to all of them.
 7. **The editor** — rail, inspector, preview, history slide-over, block picker,
    focus mode. The largest phase and the one that benefits most from primitives

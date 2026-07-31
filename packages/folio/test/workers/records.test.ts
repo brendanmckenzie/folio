@@ -439,7 +439,7 @@ describe('deleting a referenced record proceeds', () => {
     // And the inbound edge goes with the target. It used to survive until the
     // referrer's next publish rewrote it, which meant a site that never
     // republishes accumulated edges to ids with no document behind them.
-    const refs = await env.DB.prepare('select count(*) as n from content_refs where to_story = ?')
+    const refs = await env.DB.prepare('select count(*) as n from content_refs where to_id = ?')
       .bind(created.id)
       .first<{ n: number }>()
     expect(refs?.n).toBe(0)
@@ -475,7 +475,7 @@ describe('deleting a referenced record proceeds', () => {
     // A `link`-kind edge on top of the two `reference` ones the walk produced —
     // the shape a richtext link mark writes. Inserted after the reindex, because
     // a reindex rewrites `rec_pointer`'s whole outbound set.
-    await env.DB.prepare('insert into content_refs (from_story, to_story, kind) values (?, ?, ?)')
+    await env.DB.prepare('insert into content_refs (from_story, to_id, kind) values (?, ?, ?)')
       .bind('rec_pointer', 'rec_hub', 'link')
       .run()
 
@@ -483,7 +483,7 @@ describe('deleting a referenced record proceeds', () => {
     expect(res.status).toBe(200)
 
     const rows = await env.DB.prepare(
-      'select count(*) as n from content_refs where from_story = ? or to_story = ?',
+      'select count(*) as n from content_refs where from_story = ? or to_id = ?',
     )
       .bind('rec_hub', 'rec_hub')
       .first<{ n: number }>()
@@ -492,7 +492,7 @@ describe('deleting a referenced record proceeds', () => {
     // `rec_pointer` itself is untouched — only the edge naming the deleted page
     // went, not every edge it owns.
     const survivors = await env.DB.prepare(
-      'select to_story as target from content_refs where from_story = ? order by target',
+      'select to_id as target from content_refs where from_story = ? order by target',
     )
       .bind('rec_pointer')
       .all<{ target: string }>()

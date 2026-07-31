@@ -780,4 +780,75 @@ describe('GET /folio/api/audit', () => {
       ]),
     )
   })
+
+  /**
+   * The route is batched and resumable, like `/migrate`
+   * (`../../../docs/specs/foundation/pagination.md`'s route table). It read the
+   * whole `stories` table in one query until the Model screen was built on it, which
+   * is the one place a *read-only* report could still exceed a request's CPU limit:
+   * every published document, JSON-parsed, walked blok by blok.
+   */
+  it('pages the walk by continueFrom and merges as the admin does', async () => {
+    const folio = makeFolio([])
+    for (const id of ['aub_1', 'aub_2', 'aub_3']) {
+      await seedStory(folio, id, [blok('h1', 'hero', { heading: 'orphaned', title: id })], {
+        publish: true,
+      })
+    }
+
+    // A set: one document produces several findings (an orphan key *and* a missing
+    // field), and each of them samples it, so the interesting claim is which
+    // documents the walk reached rather than how many findings named them.
+    const seen = new Set<string>()
+    let documents = 0
+    let cursor: string | null = null
+    let calls = 0
+    do {
+      const params = new URLSearchParams({ batch: '1' })
+      if (cursor) params.set('continueFrom', cursor)
+      const res = await req(folio, `/folio/api/audit?${params}`)
+      expect(res?.status).toBe(200)
+      const page = await res?.json<AuditReport>()
+      documents += page?.documents ?? 0
+      for (const finding of page?.content ?? []) for (const id of finding.sample) seen.add(id)
+      cursor = page?.continueFrom ?? null
+      calls++
+    } while (cursor !== null && calls < 10)
+
+    // One per batch of one, plus the short final batch that ends the walk.
+    expect(calls).toBe(4)
+    expect(documents).toBe(3)
+    // Every document seen exactly once, which is the property a cursor buys over an
+    // OFFSET: `sample` is per finding, so this is also the batched half of the
+    // admin's "each finding links to the document it is about".
+    expect([...seen].filter((id) => id.startsWith('aub_')).sort()).toEqual([
+      'aub_1',
+      'aub_2',
+      'aub_3',
+    ])
+  })
+
+  /** A short batch ends the walk, so an unbatched call over a small site is one
+   * request with a null cursor — the shape every existing caller already reads. */
+  it('answers a null cursor when one call reached the end', async () => {
+    const res = await req(makeFolio([]), '/folio/api/audit')
+    expect((await res?.json<AuditReport>())?.continueFrom).toBeNull()
+  })
+
+  /**
+   * `continueFrom` names a story, so unlike an opaque keyset cursor it can be
+   * checked without decoding — and a bad one is a 400 rather than a silent first
+   * page, per `pagination.md`'s edge cases.
+   */
+  it('refuses a malformed continueFrom', async () => {
+    const res = await req(makeFolio([]), '/folio/api/audit?continueFrom=not%20an%20id')
+    expect(res?.status).toBe(400)
+  })
+
+  /** `batch` clamps rather than refusing: an out-of-range limit is a stale bookmark
+   * with an obvious right answer (`limitParam`'s own asymmetry with `requireCursor`). */
+  it('clamps an out-of-range batch instead of refusing it', async () => {
+    const res = await req(makeFolio([]), '/folio/api/audit?batch=99999')
+    expect(res?.status).toBe(200)
+  })
 })

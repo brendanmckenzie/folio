@@ -22,7 +22,9 @@ import {
   documentUsage,
   duplicateStory,
   ensureSingleton,
+  countStories,
   listDocumentPage,
+  listRecentlyEdited,
   listSingletons,
   listStoriesFlat,
   listStoryLevel,
@@ -147,6 +149,19 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       count: c.req.query('count') === '1',
     }
 
+    /**
+     * `?recent=1` — the most recently edited documents across **every** type, which
+     * `?flat=1` deliberately is not: flat mode filters `path is not null`, so it is
+     * every routed *page*. "What was touched last" on a site whose editors spent the
+     * afternoon on People has to include People.
+     *
+     * Checked before `flat`, so a request naming both gets the wider set. Same
+     * most-specific-first rule the `?ids=` branch above follows.
+     */
+    if (c.req.query('recent') === '1') {
+      return c.json(decorated(rt, await listRecentlyEdited(db, opts)))
+    }
+
     if (c.req.query('flat') === '1') {
       return c.json(
         decorated(rt, await listStoriesFlat(db, flatSortQuery(c.req.query('sort')), opts)),
@@ -216,6 +231,42 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       },
     )
     return c.json(decorated(rt, page))
+  })
+
+  /**
+   * How many documents there are, per declared type — the Home screen's quick-access
+   * cards, and nothing else so far.
+   *
+   * **One request rather than one per type**, and that is the whole reason this route
+   * exists rather than the cards each asking `?type=X&limit=1&count=1`. Home shows a
+   * card per declared type plus one for pages and one for assets; on a site with
+   * twenty record types that is twenty requests to render a screen whose entire job
+   * is being the fast way to somewhere else. A count per type is inherently a *set*,
+   * so it gets a route shaped like one.
+   *
+   * A screen-shaped route is a smell and this is deliberately not one: it answers a
+   * question about the content model — "how many of each" — that any caller might
+   * ask, and it takes no parameters that only Home would send. What makes it safe to
+   * add at all is decision 3's rule that `{base}/api/*` with no version segment is
+   * internal to the admin and may change shape in any commit.
+   *
+   * `pages` is separate from the per-type counts on purpose: a page type's documents
+   * and *the tree* are different lists — a second page type's records are in the tree
+   * too — so a card labelled "Pages" wants the routed count, not the sum of the page
+   * kinds. `countStories`' third argument is that distinction.
+   */
+  app.get('/counts', requireAccess<Env>(rt, READ), async (c) => {
+    const db = c.var.bindings().db
+    // Sequential over a handful of declared types would be a round trip each, and
+    // these are independent aggregates over one indexed table.
+    const [pages, ...perType] = await Promise.all([
+      countStories(db, undefined, true),
+      ...rt.types.map((type) => countStories(db, { type: type.name })),
+    ])
+    return c.json({
+      pages,
+      types: Object.fromEntries(rt.types.map((type, at) => [type.name, perType[at] ?? 0])),
+    })
   })
 
   /**

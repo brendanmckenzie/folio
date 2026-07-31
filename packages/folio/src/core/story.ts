@@ -261,6 +261,51 @@ export type SearchSort = 'title' | 'edited'
  * feed. The palette asks for `edited` explicitly, because it *is* a feed. */
 export const DEFAULT_SEARCH_SORT: SearchSort = 'title'
 
+/**
+ * The Assets screen's ordering — `docs/ui-architecture.md`'s Assets section asks
+ * for "sort by date or name or size", and the library was hard-wired to newest
+ * first before it.
+ *
+ * Here rather than in `server/assets.ts` for the same reason the three sorts above
+ * are here: the value travels in a URL, so the screen that writes it and the
+ * reader that answers it have to share one vocabulary, and `core/` is the only
+ * thing both import.
+ *
+ * **Each one's natural direction is the one a person means by naming it**, and
+ * `?dir=` reverses it (`server/validate.ts`'s `sortDirQuery`). That is not
+ * decoration — it is what makes a column header's *first* click useful:
+ *
+ *  - `created` **descending**. Newest first, and the only ordering with an index
+ *    behind it (`assets_created`). What you want after an upload is the file you
+ *    just uploaded.
+ *  - `filename` **ascending**. Alphabetical, the way every file browser shows a
+ *    folder, so `a-logo.svg` is where a person expects to find it.
+ *  - `size` **descending**, and this is the one worth arguing. Nobody sorts a
+ *    media library to find the smallest file; they sort it because the bucket is
+ *    bigger than they expected and they are looking for the 8MB PNG somebody
+ *    dropped in. Ascending would put a row of 1KB favicons on page one every
+ *    time. **Rejected: ascending for consistency with `filename`** — a shared
+ *    direction across unrelated columns is not something anybody perceives, and
+ *    it would spend the useful click on the useless end.
+ *
+ * Three and no fourth. `contentType` is the obvious next one and is deliberately
+ * absent: `?kind=` already filters on a content-type prefix, which is what
+ * somebody grouping by type actually wants, and sorting by it would order by the
+ * spelling of a MIME string.
+ */
+export type AssetSort = 'created' | 'filename' | 'size'
+
+/**
+ * `created`, because the library is a feed: a person arriving at Assets has
+ * usually just uploaded something, and "what is newest" is the question the screen
+ * opens on. It is also the one sort an index already covers.
+ *
+ * **It beat `filename`**, which is what a filesystem defaults to and what the old
+ * picker's grid looked like — alphabetical buries a fresh upload in the middle of
+ * the list, where the person who just made it has no idea to look.
+ */
+export const DEFAULT_ASSET_SORT: AssetSort = 'created'
+
 export function joinPath(parentPath: string, slug: string): string {
   if (!slug) return parentPath
   return parentPath ? `${parentPath}/${slug}` : slug

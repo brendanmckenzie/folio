@@ -86,8 +86,17 @@ async function upload(name, bytes) {
 /* --------------------------------------------------------------- stories --- */
 
 async function storyBySlug(slug, title, parentId = null) {
-  const flatten = (ns) => ns.flatMap((n) => [n, ...flatten(n.children)])
-  const existing = flatten(await json(`${API}/stories`)).find((s) => s.slug === slug)
+  // `?flat=1`, not the bare route. This walked a nested tree until the stories route
+  // started paging one level at a time (`foundation/pagination.md` decision 2) — and
+  // it is the stale caller phase 2's sweep missed, because `e2e.sh` only globs
+  // `*-test.mjs` and this is a seeder. It failed exactly as those notes predict: a
+  // `TypeError` reading `nodes.flatMap is not a function`, which looks like a library
+  // bug rather than a caller reading a shape that no longer exists.
+  //
+  // Flat mode is also the stronger read here: it is *every* routed page rather than
+  // whichever level happened to be loaded, so a slug match holds at any depth.
+  const { rows } = await json(`${API}/stories?flat=1&limit=200`)
+  const existing = rows.find((s) => s.slug === slug)
   if (existing) return existing
   return json(`${API}/stories`, {
     method: 'POST',

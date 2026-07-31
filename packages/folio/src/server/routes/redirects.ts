@@ -15,6 +15,7 @@ import {
   listRedirects,
   lookupRedirect,
   normalisePath,
+  normaliseTarget,
   type Redirect,
   upsertRedirect,
 } from '../redirects'
@@ -42,6 +43,7 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const limit = limitParam(c.req.query('limit'), 50, 200)
     const cursor = c.req.query('cursor')
     const source = c.req.query('source')
+    const q = c.req.query('q')
     // A malformed cursor is a 400, not a silent first page
     // (`../../../docs/specs/foundation/pagination.md`, edge cases). The cursor is
     // opaque, so a client that sent a bad one has a bug, and quietly restarting
@@ -58,22 +60,53 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         limit,
         cursor,
         source: source === 'auto' || source === 'manual' ? source : undefined,
+        // Trimmed and bounded rather than refused, on the `limit` side of the
+        // asymmetry above: a 300-character search term is a paste accident with an
+        // obvious right answer, and there is no state a client can be left in by
+        // truncating one. 200 is `validate.ts`'s `SEARCH_Q` bound, restated here
+        // because that schema is private to the module that owns story filters and
+        // a redirect is not a story.
+        q: q?.trim().slice(0, 200) || undefined,
+        // `Showing n of N` is the paging control for every list screen
+        // (`../../../docs/specs/foundation/pagination.md` decision 5), and this
+        // route is the one that predates it — hence opt-in, so a cursor walk that
+        // only wants rows does not drag an aggregate behind every page.
+        count: c.req.query('count') === '1',
       }),
     )
   })
 
   /**
-   * A redirect that can never fire is a trap, not a row, so two things are
-   * checked before anything is written: `from` must not be a path a story
-   * currently occupies (of any state — a draft sitting there is still a trap,
-   * not only a published page), and `to` must not already redirect straight
-   * back to `from`, which is the one loop a manual add can create (auto rows
-   * cannot loop by construction — decision 3).
+   * A redirect that can never fire is a trap, not a row, so three things are
+   * checked before anything is written: `from` must not be the same path as `to`,
+   * `from` must not be a path a story currently occupies (of any state — a draft
+   * sitting there is still a trap, not only a published page), and `to` must not
+   * already redirect straight back to `from`, which is the one *two-row* loop a
+   * manual add can create (auto rows cannot loop by construction — decision 3).
+   *
+   * **The self-redirect check was missing**, and it is the one trap this route
+   * could create in a single row: `redirectStatements` guards `from === to`
+   * because a title-only edit reaches it constantly, and `upsertRedirect` never
+   * did — so `POST { from: 'a', to: 'a' }` wrote `a → a`, which a browser follows
+   * until it gives up. Same class as the two checks below, same answer.
+   *
+   * What none of the three catch, and what the screen therefore says rather than
+   * promises: a **longer** manual chain or cycle. `a → b` plus `b → c` is two hops
+   * a browser follows, and `a → b`, `b → c`, `c → a` is a cycle no pairwise check
+   * sees. Refusing those needs a bounded walk at write time, which is a design
+   * call for `redirects.md` rather than something to slip in here.
    */
   app.post('/redirects', requireAccess<Env>(rt, MANAGE), async (c) => {
     const db = c.var.bindings().db
     const body = await parseBody(c.req, RedirectCreateBody)
     const from = normalisePath(body.from)
+
+    if (from === normaliseTarget(body.to)) {
+      throw new FolioError(
+        'conflict',
+        `/${from || ''} cannot redirect to itself; a browser would follow it forever.`,
+      )
+    }
 
     const occupied = await storyByPath(db, from)
     if (occupied) {

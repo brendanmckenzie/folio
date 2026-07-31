@@ -103,6 +103,37 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const id = idParam('id', c.req.param('id'))
     const body = await parseBody(c.req, UserPatchBody)
     const db = c.var.bindings().db
+    const self = c.var.actor
+
+    /**
+     * **You cannot change your own role.** Found while building the Access screen:
+     * the delete below has guarded self-removal since it was written, on the grounds
+     * that it is "the one delete that can leave a site with no way to manage access
+     * at all" — and a self-*demotion* reaches the identical state through a control
+     * that looks reversible. Worse, the session revoke immediately above makes it
+     * instant: an admin who picks `viewer` from their own row is signed out and comes
+     * back unable to reach this route, and the recovery is a `wrangler d1 execute`
+     * against production.
+     *
+     * `conflict`, matching the delete's own refusal, and worded the same way. The
+     * screen disables the control with a reason as well — the rule the whole admin
+     * follows is that a refusal explains itself before the click — but the guard
+     * belongs here, because a control that is only disabled in one client is not a
+     * guard at all.
+     *
+     * Not "unless you are the last admin". Counting admins to decide makes the answer
+     * depend on a race with whoever else is being demoted in another tab, and "you
+     * may demote yourself only while a colleague still outranks you" is a rule nobody
+     * can hold in their head. Somebody else changes your role; that is what having
+     * more than one admin is for.
+     */
+    if (body.role !== undefined && self?.kind === 'user' && self.id === id) {
+      throw new FolioError(
+        'conflict',
+        'You cannot change your own role. Ask another admin to change it for you.',
+      )
+    }
+
     const updated = await updateUser(db, id, body)
     if (!updated) throw new FolioError('not_found', 'Unknown user')
     if (body.role !== undefined) await revokeUserSessions(db, id)

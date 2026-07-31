@@ -1,0 +1,70 @@
+-- `content_refs` learns a third kind of edge: a document's use of an asset.
+--
+-- `docs/ui-architecture.md` dependency 4 ("asset usage counts — for the Assets
+-- detail panel and a safe delete. Wants asset keys in `content_refs`") is the
+-- reason. The Assets screen has to answer two questions about one asset: how many
+-- published documents use it, and which ones, so the detail panel can say where it
+-- is used and the delete confirmation can name what it will break.
+--
+-- The whole schema change is the rename below, plus one new value in `kind`
+-- (`'asset'`, alongside `'link'` and `'reference'`). `kind` has no CHECK
+-- constraint, deliberately — see the table's own comment in `0001_init.sql` —
+-- so widening it costs no DDL at all.
+--
+-- **Why widen `content_refs` rather than add an `asset_refs` table.**
+--
+-- The machine that maintains this table already gets three hard things right, and
+-- every one of them would have to be written a second time for a second table:
+--
+--   1. The rows are written *inside the publish batch* (`content-index.ts`'s
+--      header), so the index can never describe a document that is not published.
+--   2. `clearIndexStatements` drops the **outbound** half on an unpublish and
+--      `clearInboundRefStatements` drops the **inbound** half only on a delete —
+--      a distinction `records.test.ts` pins, and the exact distinction asset
+--      edges need too (unpublishing a page stops it counting as a usage; deleting
+--      an asset must prune the edges naming it).
+--   3. `deleteStoryStatement` already batches both directions with the story
+--      delete, so a deleted page's asset edges go with it for free.
+--
+-- A separate table reads more cleanly on the day it is written and duplicates the
+-- write path, the two clear paths and the delete batch forever after. The reuse
+-- is not theoretical: `deleteAsset` now calls `clearInboundRefStatements`
+-- unchanged, passing a key where a story id used to go.
+--
+-- **Rejected: a separate `asset_refs (from_story, asset_key)` table.** Its column
+-- names would be honest with no rename, and `content_refs`' comment about being
+-- "outbound edges of a published document" would stay narrowly true. It loses on
+-- everything above, and `CLAUDE.md` is explicit that avoiding a migration is not
+-- a reason for a design.
+--
+-- **The cost of widening, paid here:** `to_story` was named for the only thing it
+-- could hold. It now holds whatever `kind` says it holds, so it is renamed
+-- `to_id`. That is a rename over five statements in `server/content-index.ts` and
+-- nothing else in `src/` — no other module names the column.
+--
+-- **What an asset edge stores is the R2 key, not the asset id**, and that is
+-- forced rather than chosen: a stored `AssetValue` (`core/values.ts`) carries
+-- `key`, `filename`, `size` and no id at all, and the projection walk that
+-- produces these rows is pure and synchronous, so it cannot look an id up. `key`
+-- is `not null unique` on `assets`, so it is as total an identity as the id is.
+--   - Rejected: deriving the id from the key (`ast_<hex>-<filename>`.split). It
+--     couples the projection to `uploadAsset`'s key format and produces a
+--     confidently wrong id for any key an import wrote.
+--   - Rejected: resolving key → id at publish time. That is a D1 read inside
+--     `contentProjection`, which is a pure function shared with `reindex`.
+--
+-- **No new index on `assets`.** The Assets screen's two new sorts (`filename`
+-- ascending, `size` descending — `core/story.ts`'s `AssetSort`) are unindexed on
+-- purpose. An asset table is bounded by what somebody uploaded by hand, so the
+-- scan-and-sort is over hundreds of rows, while an index is a write cost on every
+-- upload forever. `stories_draft_updated` was exactly this mistake made once
+-- already: an index created for a query nobody had written. `migrations.test.ts`
+-- asserts the absence, so adding one later is a deliberate act.
+
+alter table content_refs rename column to_story to to_id;
+
+-- SQLite rewrites the schema text of every index, trigger and view naming a
+-- renamed column, so `content_refs_to` still indexes the same column under its new
+-- name and the primary key `(from_story, to_id, kind)` is intact. Nothing to
+-- recreate here — `migrations.test.ts` asserts both, because "the index quietly
+-- points at nothing now" is the failure this would have.

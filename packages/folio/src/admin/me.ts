@@ -7,6 +7,7 @@
  * here is about not offering an affordance the server will refuse, never about
  * enforcement. The reject path has to be correct even when this is wrong.
  */
+import type { AuthPolicy } from '../server/auth/config'
 import { atLeast, type Role, type Scope } from '../server/auth/roles'
 
 export interface MeUser {
@@ -28,8 +29,33 @@ export interface Me {
   /** `'open'` is a deployment with no accounts at all. */
   mode: 'open' | 'session'
   actor: MeUser | MeToken | null
-  /** Where "sign in" goes. Empty under `auth: 'open'`. */
+  /**
+   * Where "sign in" goes.
+   *
+   * **Always populated by `GET /folio/me`**, including under `auth: 'open'` — the
+   * route builds it from `rt.base` unconditionally. The `''` below is only the
+   * pre-boot guess, so it is not a discriminator for the auth mode: read `mode` for
+   * that. This comment said the opposite until a screen tried to tell a real `open`
+   * response from the optimistic default by looking here, which works by accident.
+   */
   loginUrl: string
+  /**
+   * The sign-in providers and session policy, for the Settings screen
+   * (`../../../docs/ui-architecture.md` decision 6). Absent under `auth: 'open'`,
+   * and absent from `OPEN` below because that is a guess made before any response.
+   *
+   * **On this response and not on the manifest, deliberately.** `GET
+   * {base}/api/schema` is ungated, and `provision` plus `linksPerHour` describe a
+   * security decision rather than a declaration — see `server/auth/config.ts`'s
+   * `AuthPolicy` for the argument and `server/app.ts` for the rule. This route
+   * already refuses an unauthenticated caller in session mode, so the block needed
+   * no gate of its own.
+   *
+   * Nothing here is a permission, so none of the predicates below read it: it is
+   * the answer to "what is this site configured as", which is a different question
+   * from "what may I do".
+   */
+  policy?: AuthPolicy
 }
 
 /**

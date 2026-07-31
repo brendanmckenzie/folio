@@ -1424,6 +1424,67 @@ describe('redirects: GET/POST/DELETE /folio/api/redirects', () => {
     const body = await res.json<{ error: { code: string } }>()
     expect(body.error.code).toBe('bad_request')
   })
+
+  /**
+   * The three things the Redirects screen needed and this route could not answer
+   * (`docs/ui-architecture.md` port phase 5). All three are additive: `?count=1` and
+   * `?q=` are opt-in, and the refusal closes a hole rather than changing an answer.
+   */
+  it('counts the whole filter when asked, and only when asked', async () => {
+    await postJson('/folio/api/redirects', { from: 'count-probe-a', to: 'count-target' })
+    await postJson('/folio/api/redirects', { from: 'count-probe-b', to: 'count-target' })
+
+    // Absent unless asked for (`foundation/pagination.md` decision 5): keyset paging
+    // does not need a count and the same aggregate is the guard on a bulk write, so
+    // it has to be one deliberate query rather than a number every page drags along.
+    const bare = await getJson<{ rows: Redirect[]; total?: number }>('/folio/api/redirects')
+    expect(bare.total).toBeUndefined()
+
+    // The count is over the *filter*, not the page — which is what `Showing n of N`
+    // means. A `count(*)` that also carried the cursor clause would answer "how many
+    // are left".
+    const counted = await getJson<{ rows: Redirect[]; total?: number }>(
+      '/folio/api/redirects?limit=1&count=1',
+    )
+    expect(counted.rows).toHaveLength(1)
+    expect(counted.total ?? 0).toBeGreaterThanOrEqual(2)
+  })
+
+  it('searches both paths, because both are questions the table is asked', async () => {
+    await postJson('/folio/api/redirects', { from: 'search-from-side', to: 'search-elsewhere' })
+    await postJson('/folio/api/redirects', { from: 'search-other', to: 'search-to-side' })
+
+    const fromSide = await getJson<{ rows: Redirect[] }>('/folio/api/redirects?q=from-side')
+    expect(fromSide.rows.map((r) => r.from)).toContain('search-from-side')
+
+    // "What still points at /offers" is as real a question as "what happens to
+    // /old-services", and a client-side predicate over one page could answer
+    // neither.
+    const toSide = await getJson<{ rows: Redirect[] }>('/folio/api/redirects?q=to-side')
+    expect(toSide.rows.map((r) => r.from)).toContain('search-other')
+    expect(toSide.rows.map((r) => r.from)).not.toContain('search-from-side')
+
+    // And it composes with `source`, so a chip and a search box narrow together.
+    const both = await getJson<{ rows: Redirect[]; total?: number }>(
+      '/folio/api/redirects?q=to-side&source=auto&count=1',
+    )
+    expect(both.total).toBe(0)
+  })
+
+  it('POST refuses a redirect from a path to itself', async () => {
+    // The one trap this route could write in a single row, and it was missing:
+    // `redirectStatements` guards `from === to` because a title-only edit reaches it
+    // constantly, and `upsertRedirect` never did — so `a → a` was stored, and a
+    // browser follows it until it gives up. Normalised on both sides, or `/Self/`
+    // and `self` read as two paths.
+    const { status, body } = await failureOf(
+      '/folio/api/redirects',
+      jsonPost(JSON.stringify({ from: '/Self-Redirect/', to: 'self-redirect' })),
+    )
+    expect(status).toBe(409)
+    expect(body.error.code).toBe('conflict')
+    expect(body.error.message).toContain('forever')
+  })
 })
 
 describe('redirects: the host 404 branch (test/workers/worker.ts)', () => {
