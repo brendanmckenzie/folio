@@ -8,7 +8,9 @@ import type { TokenRow } from '../../server/auth/tokens'
 import { afterWrite, expectJson, expectOk, send } from '../api'
 import type { Notify } from './useNotice'
 
-/** A user as `GET /folio/users` returns one. */
+/** A user as `GET {base}/api/users` returns one. That route answers
+ * `{ users, cursor, total? }` since `foundation/pagination.md` phase 4; this hook
+ * reads the first page, which is every editor on any real site. */
 export interface AccessUser {
   id: string
   email: string

@@ -1,6 +1,8 @@
-import { SELF } from 'cloudflare:test'
+import { env, SELF } from 'cloudflare:test'
 import { beforeAll, describe, expect, it } from 'vitest'
 import type { Page } from '../../src/core/pagination'
+import { listTokens } from '../../src/server/auth/tokens'
+import { listUsers } from '../../src/server/auth/users'
 
 /**
  * Route-level paging: the boundary, the walk, and the two refusals.
@@ -121,5 +123,62 @@ describe('GET /api/assets', () => {
     )
     const overlap = second.rows.filter((r) => first.rows.some((f) => f.id === r.id))
     expect(overlap).toEqual([])
+  })
+})
+
+/**
+ * `users` and `tokens` are the two that were **whole-table reads with no cap at
+ * all** — not truncated, unbounded. Both are administered lists that only grow
+ * (a token is revoked, never deleted), so paging them is the difference between a
+ * roster and a table scan.
+ *
+ * Under this worker's `auth: 'open'` the routes 404, so these exercise the
+ * readers directly. `auth-http.test.ts` covers the routes under a session.
+ */
+describe('listUsers and listTokens', () => {
+  it('pages users oldest first, which is roster order not feed order', async () => {
+    for (let i = 0; i < 5; i++) {
+      await env.DB.prepare(
+        'insert into users (id, email, name, role, created_at) values (?, ?, ?, ?, ?)',
+      )
+        .bind(`usr_p${i}`, `p${i}@x.test`, `P${i}`, 'editor', 1000 + i)
+        .run()
+    }
+
+    const first = await listUsers(env.DB, { limit: 2 })
+    expect(first.rows.map((u) => u.id)).toEqual(['usr_p0', 'usr_p1'])
+    expect(first.cursor).not.toBeNull()
+
+    const seen: string[] = [...first.rows.map((u) => u.id)]
+    let cursor = first.cursor
+    while (cursor) {
+      const next = await listUsers(env.DB, { limit: 2, cursor })
+      seen.push(...next.rows.map((u) => u.id))
+      cursor = next.cursor
+    }
+    expect(seen).toEqual(['usr_p0', 'usr_p1', 'usr_p2', 'usr_p3', 'usr_p4'])
+
+    expect((await listUsers(env.DB, { limit: 2 })).total).toBeUndefined()
+    expect((await listUsers(env.DB, { limit: 2, count: true })).total).toBe(5)
+    await env.DB.prepare('delete from users').run()
+  })
+
+  it('pages tokens newest first, revoked ones included', async () => {
+    for (let i = 0; i < 4; i++) {
+      await env.DB.prepare(
+        'insert into api_tokens (id, name, scopes, created_at, revoked_at) values (?, ?, ?, ?, ?)',
+      )
+        .bind(`tok_p${i}`, `t${i}`, '["admin"]', 2000 + i, i === 0 ? 3000 : null)
+        .run()
+    }
+    const first = await listTokens(env.DB, { limit: 3 })
+    // Newest first, and the revoked one is still listed: revoking keeps the name
+    // answerable, which is exactly why this list only ever grows.
+    expect(first.rows.map((t) => t.id)).toEqual(['tok_p3', 'tok_p2', 'tok_p1'])
+    const rest = await listTokens(env.DB, { limit: 3, cursor: first.cursor ?? '' })
+    expect(rest.rows.map((t) => t.id)).toEqual(['tok_p0'])
+    expect(rest.rows[0]?.revokedAt).toBe(3000)
+    expect(rest.cursor).toBeNull()
+    await env.DB.prepare('delete from api_tokens').run()
   })
 })
