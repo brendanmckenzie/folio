@@ -171,7 +171,10 @@ are free to go the next time that code is touched.
   faster and breaks sync, undo, presence and the activity trail — visible only to
   whoever had the page open.
 - `deleteStoryStatement` returns **five** things now, including `indexStatements` and
-  `scheduleStatements`, all of which a caller must batch. Those statements clear `content_refs` in **both** directions on a
+  `scheduleStatements`, all of which a caller must batch — and there is now exactly
+  **one** caller that does: `deleteDocument` in `server/documents.ts`. Four places used
+  to batch those arrays and the fifth was added by forgetting one of them, which is
+  what `documents.ts` exists to stop. Those statements clear `content_refs` in **both** directions on a
   delete; **unpublish deliberately clears only the outbound half**, because the story
   still exists and "used by N" is still a true warning about it. Two builders
   (`clearIndexStatements`, `clearInboundRefStatements`) rather than one with a flag,

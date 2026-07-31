@@ -319,11 +319,25 @@ export interface StoryPageOptions {
 }
 
 /**
- * The `where` fragments and binds for the filters three story reads share.
+ * The `where` fragments and binds for the filters the story reads share.
  *
  * `state` goes through `STATE_EXPR` rather than a stored column, which is what
  * makes a state chip answerable server-side once the list is paged: a
  * client-side predicate over one page filters the page, not the site.
+ *
+ * **`parentId` and `routed` are here but no list route sends them.** Each paged
+ * reader below states its own scope positionally — `listStoryLevel` takes the
+ * parent, `listStoriesFlat` and `listDocumentPage` hardcode their side of `path is
+ * not null` — because for those two readers the scope is the list's *identity*
+ * rather than a narrowing of it, and `storyFilterQuery` deliberately reads neither
+ * off a query string. The one caller that sends them is a **captured selection**
+ * (`../../../docs/specs/platform/bulk-writes.md`), which has no positional
+ * arguments to state a scope with: it is a JSON object that has to reproduce the
+ * exact set a list header counted. A filter carrying `routed: true` into
+ * `listStoriesFlat` would therefore emit `path is not null` twice, which is a
+ * harmless no-op, and one carrying `routed: false` would emit a contradiction and
+ * answer nothing — so don't; the two keys belong to `countStories` and
+ * `storiesMatching`.
  */
 function storyFilters(
   filter: StoryFilter | undefined,
@@ -332,6 +346,20 @@ function storyFilters(
   const sql: string[] = []
   const binds: unknown[] = []
   if (!filter) return { sql, binds }
+  // Absent is every level; `null` is the top one. `!== undefined` rather than
+  // `in`, because a valibot-parsed body carries the key with an `undefined` value
+  // for an absent optional and the two must stay tellable apart.
+  if (filter.parentId !== undefined) {
+    if (filter.parentId === null) {
+      sql.push('parent_id is null')
+    } else {
+      sql.push('parent_id = ?')
+      binds.push(filter.parentId)
+    }
+  }
+  if (filter.routed !== undefined) {
+    sql.push(filter.routed ? 'path is not null' : 'path is null')
+  }
   if (filter.type) {
     sql.push('type = ?')
     binds.push(filter.type)
@@ -690,23 +718,66 @@ export async function listRecentlyEdited(
  * The same `count(*)` the list routes run, over the same `storyFilters`, so the
  * number on a card and the number in `Showing n of N` cannot disagree — which is the
  * property `pagination.md` decision 5 asks for when it says one count implementation
- * serves the header and the bulk guard.
+ * serves the header and the bulk guard. **It is now literally the bulk guard**
+ * (`../../../docs/specs/platform/bulk-writes.md` decision 3): the number a person
+ * read and the number the server re-checks come out of this one function.
+ *
+ * `routed` used to be a third positional argument. It is `filter.routed` now, for
+ * the reason the field's own doc gives: a captured selection is JSON and has no
+ * positional arguments to put a scope in, and two ways of saying "pages only" is
+ * exactly the drift decision 5 exists to prevent.
  */
-export async function countStories(
-  db: D1Database,
-  filter?: StoryFilter,
-  /** `true` for routed pages only, `false` for unrouted documents only, absent for
-   * every document. The tree and the Documents screen are different lists and a
-   * card for each has to be able to say which it means. */
-  routed?: boolean,
-): Promise<number> {
+export async function countStories(db: D1Database, filter?: StoryFilter): Promise<number> {
   const filters = storyFilters(filter)
-  const scope = routed === undefined ? '' : routed ? 'path is not null' : 'path is null'
   const row = await db
-    .prepare(`select count(*) as n from stories ${whereOf(scope, ...filters.sql)}`)
+    .prepare(`select count(*) as n from stories ${whereOf(...filters.sql)}`)
     .bind(...filters.binds)
     .first<{ n: number }>()
   return row?.n ?? 0
+}
+
+/**
+ * One batch of the documents a filter matches, walked by `id`, for a bulk write
+ * (`../../../docs/specs/platform/bulk-writes.md`).
+ *
+ * **By `id` rather than by any of the orderings a screen offers**, because the set
+ * this walks is *changing as it is walked*: a bulk publish removes each row it
+ * touches from `state = 'draft'`, a delete removes it from everything. `id` is the
+ * primary key, it is stable under every write here, and it is the same reason
+ * `storiesBehind` and `publishedDocsAfter` walk by it. A keyset over
+ * `coalesce(draft_updated_at, updated_at)` would resume after a value the job had
+ * just changed.
+ *
+ * `exclude` is applied in **SQL** rather than by filtering the rows afterwards, so a
+ * batch does `limit` documents of *work* rather than reading `limit` rows and
+ * skipping most of them. It is bounded by what a person can tick off, which is what
+ * makes `id not in (…)` an acceptable shape here and not in general.
+ *
+ * No `Page<T>`: a bulk job's cursor carries a second component that has nothing to
+ * do with sorting (how many documents the job has consumed against its ceiling), so
+ * it is `bulk.ts`'s own encoding rather than this reader's.
+ */
+export async function storiesMatching(
+  db: D1Database,
+  filter: StoryFilter,
+  opts: { limit: number; after?: string | null; exclude?: readonly string[] },
+): Promise<StoryMeta[]> {
+  const filters = storyFilters(filter)
+  const sql = [...filters.sql]
+  const binds = [...filters.binds]
+  if (opts.after) {
+    sql.push('id > ?')
+    binds.push(opts.after)
+  }
+  if (opts.exclude && opts.exclude.length > 0) {
+    sql.push(`id not in (${opts.exclude.map(() => '?').join(', ')})`)
+    binds.push(...opts.exclude)
+  }
+  const { results } = await db
+    .prepare(`select ${COLS} from stories ${whereOf(...sql)} order by id limit ?`)
+    .bind(...binds, opts.limit)
+    .all<StoryRow>()
+  return results.map(withState)
 }
 
 /* ------------------------------------------------------------------ search --- */

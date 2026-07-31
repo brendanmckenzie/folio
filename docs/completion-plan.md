@@ -31,28 +31,36 @@ in a browser before it is called done.
    Three real defects fell out: a self-demotion lockout on `PATCH /users/:id`, a
    `from === to` redirect the route accepted, and `GET /audit` reading the whole
    `stories` table — the last of the five unbounded reads `pagination.md` opened with.
-3. **Port phase 6 — Home.** In flight. Its two site-wide recency readers and a
-   `/counts` route are done and tested (`test/workers/recency.test.ts`), which is what
-   removed `ui-architecture.md` dependency 5.
-4. **Port phase 7 — the editor.** The largest, and the one an editor spends the day
-   in. Split by *what does not share state* — see `docs/editor-port-plan.md`, which
-   argues why splitting it four ways and merging would produce four views of one store
-   that disagree at the seams. 7a (shell, rail, preview) and 7c (history slide-over,
-   block picker) are in flight; 7b (inspector, focus mode) follows, because it needs
-   7a's seam to exist. The server mount at `{base}/edit/:id` still serves the **old**
-   admin and gets flipped only when all three are in.
-5. **Port phase 8 — deletion.** `admin/admin.css` gone, `admin/ui/` the only
-   styling, Biome's a11y rules global rather than scoped to `admin/ui/**`.
+3. **Port phase 6 — Home.** Done. Its two site-wide recency readers and a `/counts`
+   route are tested in `test/workers/recency.test.ts`, which is what removed
+   `ui-architecture.md` dependency 5.
+4. **Port phase 7 — the editor.** Done (`c6776f5`). Split by *what does not share
+   state*, per `docs/editor-port-plan.md`. `{base}/edit/:id` serves the shell now, and
+   `useRefStories` closed the last thing `pagination.md` left owed: the editor no
+   longer holds every story on the site to resolve its preview's links.
+5. **Port phase 8 — deletion.** In flight. `admin/admin.css` gone, `admin/ui/` the
+   only styling, Biome's a11y rules global rather than scoped to `admin/ui/**`.
+   Blocked first on moving eight pure functions the new editor still imports out of the
+   old one — they were imported rather than copied on purpose, because a copy of a pure
+   function is a copy that drifts.
 6. **The gaps that stop a real delivery.** In priority order, each judged against
    what the reference products actually ship:
-   - **Scheduled publish and unpublish.** Every comparable product has it; Folio has
-     the `publish` workflow already factored to take a story rather than a request,
-     and `routes/stories.ts` already says a scheduled publish has to check existence
-     itself. Wants a `scheduled_at` column, a cron trigger and a UI.
-   - **Bulk write endpoints** (`ui-architecture.md` dependency 7 / decision 7a).
-     The shape is fully designed — `{ all, filter, expected, exclude }`, count
-     validated once, batched with `continueFrom` — and unbuilt, which is why
-     select-all-matching is deliberately absent from Content.
+   - **Scheduled publish and unpublish.** Done (`6bc1c55`),
+     `docs/specs/platform/scheduled-publishing.md`. A cron trigger, not a Durable
+     Object alarm — `StoryDO` has exactly one alarm and already spends it on the
+     debounced watermark, so a publish alarm set for Tuesday would have silently
+     stopped the tree reporting unpublished changes for that page. `scheduled` is
+     deliberately **not** a fifth `StoryState`: a live page with a scheduled unpublish
+     is still live. **No admin surface yet** — the routes are built and a screen wants
+     `GET {base}/api/schedules?story=`.
+   - **Bulk write endpoints.** Done, `docs/specs/platform/bulk-writes.md`. Five routes
+     under `{base}/api/bulk/`, one per action, because each carries its
+     single-document twin's gate and a token holding only `publish` must not lose bulk
+     publish. `{ all, filter, expected, exclude }` as designed, plus one thing decision
+     7a did not name: **the count is the job's ceiling as well as its guard**, so a set
+     that grows under a long run cannot enlarge it. No migration and no wire change.
+     **No admin surface yet** — what Content's selection bar needs is six precise
+     steps, listed in the spec's implementation notes.
    - **Outbound webhooks.** `publish-hooks.md` exists server-side for a host's own
      code; a *configured* webhook with a delivery log is what a client asks for on
      day one.

@@ -106,6 +106,48 @@ describe('the /api partition', () => {
     }
   })
 
+  /**
+   * The internal routes that only answer `POST`, so `routed()` above cannot see
+   * them: an unmatched *method* falls through to the `/api/*` terminator and 404s
+   * exactly as an unmatched path does.
+   *
+   * They belong here for one reason — a version segment is a promise, and
+   * `{base}/api/bulk/*` writes to every document in a selection. Adding
+   * `{base}/api/v1/bulk/publish` by reflex has to fail CI.
+   */
+  const INTERNAL_POST = [
+    '/folio/api/migrate',
+    '/folio/api/schedules/run',
+    // `bulk-writes.md`. Five paths rather than one `/bulk/:action`, because each
+    // carries its single-document twin's gate.
+    '/folio/api/bulk/publish',
+    '/folio/api/bulk/unpublish',
+    '/folio/api/bulk/duplicate',
+    '/folio/api/bulk/move',
+    '/folio/api/bulk/delete',
+  ]
+
+  const posted = async (path: string): Promise<number> =>
+    (await SELF.fetch(`${ORIGIN}${path}`, { method: 'POST' })).status
+
+  it('answers every internal POST route, and answers none of them to a GET', async () => {
+    for (const path of INTERNAL_POST) {
+      // Anything but 404 means routed: a bulk route with no body is a 400.
+      expect([path, await posted(path)]).not.toEqual([path, 404])
+      expect([path, await routed(path)]).toEqual([path, false])
+    }
+  })
+
+  it('keeps the internal POST routes off the versioned surface', async () => {
+    for (const path of INTERNAL_POST) {
+      const name = path.slice('/folio/api/'.length)
+      for (const version of ['v1', 'v2']) {
+        const versioned = `/folio/api/${version}/${name}`
+        expect([versioned, await posted(versioned)]).toEqual([versioned, 404])
+      }
+    }
+  })
+
   it('has no v2 at all, so a promise has not been made twice', async () => {
     for (const name of V1_SEGMENTS) {
       const path = `/folio/api/v2/${name}`

@@ -4,25 +4,22 @@
  */
 import type { Context } from 'hono'
 import { Hono } from 'hono'
-import { cloneDoc } from '../../core/clone'
 import { isKnownLocale, translationStatus } from '../../core/locales'
 import type { Page } from '../../core/pagination'
 import type { DocumentType } from '../../core/schema'
 import { ancestorPaths, type StoryMeta } from '../../core/story'
 import { actorString } from '../auth/roles'
 import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
+import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from '../documents'
 import { FolioError, rethrow } from '../errors'
-import type { StoryChange } from '../hooks'
 import { hookCtx, loadStory, requireAccess } from '../middleware'
 import { publish, unpublish } from '../publish'
 import type { FolioRuntime } from '../runtime'
 import {
-  createStory,
-  deleteStoryStatement,
-  documentUsage,
-  duplicateStory,
-  ensureSingleton,
   countStories,
+  createStory,
+  documentUsage,
+  ensureSingleton,
   listDocumentPage,
   listRecentlyEdited,
   listSingletons,
@@ -30,7 +27,6 @@ import {
   listStoryLevel,
   searchStories,
   storiesForChunked,
-  updateStoryStatement,
 } from '../stories'
 import type { FolioEnv } from '../types'
 import {
@@ -52,7 +48,6 @@ import {
   storyFilterQuery,
   typeNameQuery,
 } from '../validate'
-import { deleteVersionsStatement } from '../versions'
 
 /**
  * Who did this, for a hook payload and for `versions.actor`.
@@ -81,6 +76,24 @@ function decorated<T extends StoryMeta>(rt: FolioRuntime, page: Page<T>): Page<T
 
 export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
+
+  /**
+   * What `documents.ts`' three workflows need, off this request.
+   *
+   * The same object `routes/bulk.ts` assembles, minus `PublishDeps`' half — which is
+   * the point of the split: duplicate, move and delete need the declared types and
+   * the Durable Object stub and know nothing about publishing.
+   */
+  const documentDeps = (c: Context<FolioEnv<Env>>): DocumentDeps<unknown> => {
+    const bindings = c.var.bindings()
+    return {
+      db: bindings.db,
+      types: rt.types,
+      stub: (id: string) => rt.stub(bindings, id),
+      draft: (story: StoryMeta) => rt.draftFor(bindings, story),
+      hooks: rt.hookRunner(hookCtx(c)),
+    }
+  }
 
   /**
    * A declared document type by name, or `unsupported` (501) — not `not_found`:
@@ -253,14 +266,16 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * `pages` is separate from the per-type counts on purpose: a page type's documents
    * and *the tree* are different lists — a second page type's records are in the tree
    * too — so a card labelled "Pages" wants the routed count, not the sum of the page
-   * kinds. `countStories`' third argument is that distinction.
+   * kinds. `StoryFilter.routed` is that distinction — it was `countStories`' third
+   * positional argument until a captured selection needed to be able to *say* it
+   * (`../../../docs/specs/platform/bulk-writes.md` decision 4).
    */
   app.get('/counts', requireAccess<Env>(rt, READ), async (c) => {
     const db = c.var.bindings().db
     // Sequential over a handful of declared types would be a round trip each, and
     // these are independent aggregates over one indexed table.
     const [pages, ...perType] = await Promise.all([
-      countStories(db, undefined, true),
+      countStories(db, { routed: true }),
       ...rt.types.map((type) => countStories(db, { type: type.name })),
     ])
     return c.json({
@@ -382,40 +397,22 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return c.json(rt.withUrls(story))
   })
 
+  /**
+   * Rename, reslug, reparent or reorder. A translation layer over
+   * `moveDocument` (`../documents.ts`), which owns the statements, the redirects
+   * and both hooks — the same function `POST {base}/api/bulk/move` calls per
+   * document, so a bulk move and a drag cannot come to disagree about what a move
+   * *is*.
+   */
   app.patch('/stories/:id', requireAccess<Env>(rt, MANAGE), async (c) => {
     const id = idParam('id', c.req.param('id'))
     const body = await parseBody(c.req, StoryPatchBody)
-    const bindings = c.var.bindings()
 
     let next: StoryMeta
-    let changes: { id: string; from: string; to: string }[]
-    let updated: StoryChange[]
     try {
-      const result = await updateStoryStatement(bindings.db, id, body, rt.types)
-      next = result.next
-      changes = result.changes
-      updated = result.updated
-      if (result.statements.length) await bindings.db.batch(result.statements)
+      next = (await moveDocument(documentDeps(c), id, body, actorFor(c))).next
     } catch (e) {
       rethrow(e)
-    }
-
-    const actor = actorFor(c)
-    // Nothing renamed or moved (a plain title edit, say) has no old path for
-    // a host to purge, so `pathsChanged` stays silent rather than firing an
-    // empty `changes` array.
-    if (changes.length) {
-      await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('pathsChanged', { changes, actor })
-    }
-    // ...and `updated` is the event that fires for exactly the case
-    // `pathsChanged` skips (`../../../docs/specs/platform/caching.md`): a
-    // title-only patch changes `StoryRef.title` on every page linking here and
-    // used to fire nothing at all. Both fire for a rename, which is correct —
-    // they describe different facts about the same write.
-    if (updated.length) {
-      await rt
-        .publishDeps(bindings, hookCtx(c))
-        .hooks?.run('updated', { story: next, changed: updated, actor })
     }
 
     return c.json(rt.withUrls(next))
@@ -443,96 +440,41 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     requireAccess<Env>(rt, CREATE),
     loadStory<Env>(),
     async (c) => {
-      const bindings = c.var.bindings()
-      const source = c.var.story
       const body = await parseOptionalBody(c.req, StoryDuplicateBody)
 
-      let created: Awaited<ReturnType<typeof duplicateStory>>
+      let created: StoryMeta
       try {
-        created = await duplicateStory(bindings.db, source.id, body, rt.types)
+        created = await duplicateDocument(documentDeps(c), c.var.story, body, actorFor(c))
       } catch (e) {
         rethrow(e)
       }
-
-      // Fired the moment the row exists, same as a plain create: the D1 insert
-      // already committed, and a story with no draft seeded yet is a state this
-      // system already understands (a page someone created and never filled in).
-      const actor = actorFor(c)
-      await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('created', { story: created, actor })
-
-      const draft = await rt.draftFor(bindings, source)
-      await rt.stub(bindings, created.id).getOrInit(cloneDoc(draft))
 
       return c.json({ story: rt.withUrls(created) }, 201)
     },
   )
 
+  /**
+   * Delete a document and everything beneath it. `deleteDocument`
+   * (`../documents.ts`) owns the five-statement batch, the purge-after-commit
+   * ordering and the `deleted` hook, and answers `null` for an id nothing is behind
+   * — which this route reports as `{ deleted: [] }` rather than a 404, because the
+   * caller asked for a state of the world and has it.
+   */
   app.delete('/stories/:id', requireAccess<Env>(rt, MANAGE), async (c) => {
-    const bindings = c.var.bindings()
     const target = idParam('id', c.req.param('id'))
     // redirects.md's architecture decision 4: checked by default in the admin's
     // confirmation, an escape hatch for a page that should genuinely 404.
     const redirect = c.req.query('redirect') !== 'false'
 
-    let found: Awaited<ReturnType<typeof deleteStoryStatement>>
     try {
-      found = await deleteStoryStatement(bindings.db, target, { redirect }, rt.types)
-      if (!found) return c.json({ deleted: [] })
-
-      // One batch for the story rows, their version history, their query-index
-      // rows, their pending schedules and (optionally) the redirect to the
-      // parent: all five disappear or land together, so a reader never finds
-      // versions for a story that is already gone, a collection that still lists
-      // it, a schedule due to publish it next Tuesday, or a redirect for a delete
-      // that never actually committed.
-      const versions = deleteVersionsStatement(bindings.db, found.ids)
-      await bindings.db.batch([
-        found.statement,
-        ...found.redirectStatements,
-        ...found.indexStatements,
-        ...found.scheduleStatements,
-        ...(versions ? [versions] : []),
-      ])
+      const found = await deleteDocument(documentDeps(c), target, { redirect }, actorFor(c))
+      return c.json({ deleted: found?.deleted ?? [] })
     } catch (e) {
-      // Nothing has committed yet at this point, so reporting a failure here
-      // is accurate. `Cannot delete the root story` is a conflict; a failed
-      // batch is internal.
+      // `Cannot delete the root story` is a conflict; a failed batch is internal.
+      // Nothing beyond the batch can throw — the purge swallows its own failure,
+      // inside `deleteDocument`, for the reason recorded there.
       rethrow(e)
     }
-
-    // The Durable Object is purged only once that batch has committed.
-    // Purging first and then failing the D1 write would leave this id
-    // deletable-again while its object already has a blank doc — the
-    // opposite of the bug this guards against, but a data-loss bug all the
-    // same. Purging after means a crash between the two leaves an orphaned
-    // object rather than a resurrected one, which is the safer side to fail on.
-    //
-    // This runs outside the try/catch above on purpose: the D1 rows are
-    // already gone by now, so a purge failure must never be reported back as
-    // a failed delete — the caller already got what it asked for. It is
-    // best-effort cleanup of an object that a reused id would otherwise
-    // resurrect from; an object left un-purged here still cannot be reached
-    // under this id (D1 no longer has it), only under a *reused* one, which is
-    // the narrow, already-documented window above.
-    await Promise.all(
-      found.ids.map((id) =>
-        rt
-          .stub(bindings, id)
-          .purge()
-          .catch(() => {}),
-      ),
-    )
-
-    // Fires even if a purge above failed: the rows are gone regardless, and a
-    // host's cache must be purged regardless (`publish-hooks.md`'s edge case
-    // "partial success in the delete path"). The purge failure is swallowed
-    // above, as it already was before this hook existed.
-    const actor = actorFor(c)
-    await rt
-      .publishDeps(bindings, hookCtx(c))
-      .hooks?.run('deleted', { ids: found.ids, paths: found.paths, types: found.types, actor })
-
-    return c.json({ deleted: found.ids })
   })
 
   /**

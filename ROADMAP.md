@@ -376,14 +376,16 @@ three then came back differently from the spec's guess when the screen was built
 Two things `pagination.md` also left owed are done: **`GET {base}/api/search`** is
 real and the palette is on it (the `?flat=1&q=` stopgap could reach neither a record
 nor a `content_index` value), and the admin's **boot path holds no unbounded read at
-all**. What is still owed is `Editor.tsx`'s `buildResolution`, which reads a full
-list through a documented stopgap and dies with the old editor at port phase 7.
+all**. `Editor.tsx`'s `buildResolution` was the last unpaged read and it **went with
+the file**: port phase 8 deleted the old editor, and the rebuilt one resolves an open
+document from `useEditor`'s narrowed id set instead.
 
-The UI half is the same story from the other end. Every admin list is one unpaged
-request; `DataTable` then pages **20 rows client-side over the full list**, and
-`StoryTree` caps a level at 50 rows with "Show all N" — a *render* cap over data
-already transferred, which is the worst of both: it pays the cost and hides the
-rows anyway.
+The UI half is the same story from the other end, and is now history. Every admin
+list *was* one unpaged request; `DataTable` paged **20 rows client-side over the full
+list**, and `StoryTree` capped a level at 50 rows with "Show all N" — a *render* cap
+over data already transferred, which is the worst of both: it paid the cost and hid
+the rows anyway. Both files are deleted; every screen under `admin/ui/` reads a paged
+route, and the tree appends a level at a time.
 
 **Why this is a spec and not a sweep of `limit` clauses.** Three things depend on
 `GET /stories` returning everything, and each needs a different answer:
@@ -487,6 +489,47 @@ The cost of a cron is granularity: a minute at finest, best-effort within it, so
 schedule fires on the first sweep *at or after* its due time. Never early, late by at
 most one tick. A site with nothing scheduled pays one probe of an empty partial index.
 
+### 3. Bulk write endpoints. Done — and the count turned out to be two mechanisms
+
+Shipped as `docs/specs/platform/bulk-writes.md` (spec 20), the second of
+`docs/completion-plan.md`'s delivery gaps and `docs/ui-architecture.md`'s dependency 7.
+Five routes under `{base}/api/bulk/` — publish, unpublish, duplicate, move, delete —
+over a selection that is either the ids somebody ticked or `{ all: true, filter,
+expected, exclude }`, with no ids materialised at all. No migration, no wire change: the
+guard is the same `count(*)` a list header opts into and the job's state is one opaque
+cursor in the caller's hand, exactly as `migrate`, `reindex` and `runSchedules` work.
+
+**`ui-architecture.md` decision 7a specified this in unusual detail and one thing was
+missing from it.** "The count is validated once, at the start of the job" leaves nothing
+to stop a set that *grows* under a long run from enlarging it — publish all 12 matching
+drafts, somebody creates nine more while the job walks, and a cursorless-set walk
+publishes 21. So the count is also the **ceiling**: a run touches at most
+`expected - exclude.length` documents however many batches it takes, carried in the
+cursor so it survives the caller re-calling. "Delete all 12 matching" can never delete
+13.
+
+Two smaller findings worth keeping:
+
+- **`routed` had to become a `StoryFilter` key before the guard could work at all.** A
+  list route states its scope positionally (`listStoryLevel(db, parentId)`,
+  `path is not null` hardcoded in flat mode) and a captured filter is JSON with no
+  positions, so the guard counted records too and refused every select-all Content could
+  make — permanently, which is a wall rather than a door. This is the concrete form of
+  `foundation/pagination.md` decision 5's warning that the header's count and the bulk
+  guard must not drift, and it was invisible until the third reader of `StoryFilter`
+  existed.
+- **Duplicate is the one action that cannot take a select-all**, and refusing it is not
+  a shortcut: a copy of a draft is a draft, so it joins the very filter the job is
+  walking. Excluding what the job created means remembering the ids it created, which is
+  materialising the id list the shape exists to avoid.
+
+Nothing here is atomic and the report says so — successes counted, refusals named, one
+document at a time in its own `try`. The three per-document workflows (duplicate, move,
+delete) moved out of their routes into `server/documents.ts` on the way, because the
+delete batch already existed in two copies and a third is where one of them forgets the
+schedule cleanup.
+
+
 ## Uncovered from the reference project
 
 **Cookie-based draft mode.** Preview today is iframe-only (`?_folio=preview`).
@@ -588,14 +631,19 @@ an unsorted flat list, which stops working somewhere around 15.
   entry called "a UI question before it is an a11y one" was answered by moving one
   page at a time, so "between these two siblings" never has to be expressed.
   `content-model.ts`'s `gestureMove` is the arithmetic and is unit tested.
-  What is left is the **sweep**, not the design. Biome's a11y rules are on for
-  `packages/folio/src/admin/ui/**` via an `overrides` entry and off everywhere else,
-  because turning them on globally means fixing every file in the old admin — which
-  port phase 8 deletes. The global switch flips there. Two things the scoped rules
-  already caught in code that had passed review: `Table.tsx` carried `aria-sort` on
-  the sort *button* rather than the header cell, where it is announced by nothing,
-  and a `role={x ? 'a' : 'b'}` expression makes every `aria-*` on the element
-  unverifiable — literal roles per branch are the fix.
+  **The sweep is done too** (2026-07-31, port phase 8): `biome.json`'s `overrides`
+  entry is gone and `"a11y": "on"` sits in the top-level rule set, so the rules apply
+  to the whole tree — `src/`, `test/`, `scripts/` and `examples/demo` alike. It found
+  **nothing**, which is the expected result rather than a suspicious one: every file
+  the scoped rules did not cover was the old admin, and phase 8 deleted all of it.
+  Note the switch is `"a11y": "on"` and not merely dropping `"a11y": "off"` — the
+  `recommended` preset carries a *subset* of the group, so removing the override
+  without the explicit `on` would have quietly turned four rules off for `ui/**`,
+  including the `noNoninteractiveElementInteractions` a suppression in `FieldRow.tsx`
+  depends on. Two things the rules caught earlier, in code that had passed review:
+  `Table.tsx` carried `aria-sort` on the sort *button* rather than the header cell,
+  where it is announced by nothing, and a `role={x ? 'a' : 'b'}` expression makes
+  every `aria-*` on the element unverifiable — literal roles per branch are the fix.
   Still open: `references()` reorders with ↑ ↓ buttons and the tree has no *drag*
   at all (the keyboard is the only route today; a pointer user must use the row
   menus).
@@ -704,12 +752,15 @@ honest.
 - `useReferencedDocs` walks every locale, through the same
   `referencedIdsAllLocales` the server resolves with, so the editor no longer
   misses a target that only a translation points at.
-- `MultiAssetInput` mints a stable local card id per entry, so reordering a
+- A `multiasset` field mints a stable local card id per entry, so reordering a
   gallery moves DOM nodes instead of remounting them. The stored value is
   untouched — the ids are React keys and nothing else. Matching is two-pass,
   byte-identical first for a reorder and then `key ?? url`, because one pass would
   remount the card on every alt-text keystroke, which is a worse bug than the one
-  being fixed.
+  being fixed. `keyAssets` was `MultiAssetInput`'s and now lives in
+  `admin/ui/screens/assets-model.ts`, with the same test — it was imported across the
+  old/new seam for the whole port rather than copied, so port phase 8 moved one
+  function instead of reconciling two.
 - Every dialog in the admin is a real modal, over one implementation
   (`hooks/useFocusTrap.ts`): focus in on open, back to the opener on close, Tab
   cycling, Escape to close. The five confirmations had none of it and were

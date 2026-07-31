@@ -55,6 +55,7 @@ sequence because the dependency graph is the same one.
 | 17 | [Caching and purge](platform/caching.md) | platform | M | — | — | roadmap: uncovered |
 | 18 | [Pagination, everywhere](foundation/pagination.md) | foundation | L | — | `0001_init` | roadmap: next 1 + 1a |
 | 19 | [Scheduled publishing](platform/scheduled-publishing.md) | platform | M | — | `0003` | completion plan: gap 1 |
+| 20 | [Bulk write endpoints](platform/bulk-writes.md) | platform | M | — | — | completion plan: gap 2 |
 
 Sizing matches `PARITY.md`: **S** ≈ a day, **M** ≈ a few days, **L** ≈ a week
 or two. Relative weight, not a quote.
@@ -85,6 +86,9 @@ or two. Relative weight, not a quote.
 
 19 scheduled publishing ─ needed 1's unpublish() and 7's alarmHookCtx before it
                          could be a cron rather than a request
+
+20 bulk writes ───────── 18's StoryFilter is what a selection captures, and 18's
+                         opt-in count is what guards it
 ```
 
 - **1–2 first** because both are near-bug-fixes, and because both add `stories`
@@ -120,6 +124,13 @@ or two. Relative weight, not a quote.
   built `alarmHookCtx` so a caller with no `ExecutionContext` fires the same
   after-commit hooks — which is what lets a cron-driven publish purge the cache and
   broadcast to open editors without restating either.
+- **20** could only be written after **18**, and the dependency is exact rather than
+  thematic: a select-all captures `StoryFilter` and is guarded by the *same*
+  `count(*)` the list header opts into, so **18** had to settle both shapes first.
+  Building it is also what proved decision 5's warning about drift — the guard could
+  not reproduce the header's number until the routed/unrouted axis moved onto the
+  filter, because a list route states that scope positionally and a captured filter
+  has no positions.
 
 ## Wire version ledger
 

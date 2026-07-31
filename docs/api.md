@@ -406,5 +406,8 @@ we turn it off" stays answerable.
   model for a read-only external subscriber does not.
 - **Bulk endpoints across documents.** Per-document idempotency makes a client-side
   loop correct and resumable, which is easier to reason about than a batch endpoint
-  that is partially applied.
+  that is partially applied. The admin has them (`{base}/api/bulk/*`,
+  `docs/specs/platform/bulk-writes.md`) and they are deliberately **not** here: what
+  they exist for is "act on every document matching this filter" without materialising
+  the ids, which is a UI problem. A script has the ids.
 - **Draft queries.** See the query section: one document at a time, by design.

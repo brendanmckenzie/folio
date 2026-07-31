@@ -863,6 +863,168 @@ export function storyFilterQuery(req: { query: (key: string) => string | undefin
   }
 }
 
+/* ------------------------------------------------------------ bulk writes --- */
+
+/**
+ * How many ids one selection may name, on either side.
+ *
+ * The same 500 a `?ids=` query is capped at, and it is a bound on *what a person can
+ * have ticked* rather than a technical one: you can only tick what you can see, a
+ * page at a time, and a list page is 200 rows at most. Past this, "select all
+ * matching" is the shape that exists — it names no ids at all.
+ */
+const MAX_SELECTION_IDS = 500
+
+const SELECTION_IDS = v.pipe(
+  v.array(ID, 'must be an array of document ids'),
+  v.minLength(1, 'must name at least one document'),
+  v.maxLength(MAX_SELECTION_IDS, `must name ${MAX_SELECTION_IDS} documents or fewer`),
+)
+
+/**
+ * The `StoryFilter` a select-all **captured**, as a body field rather than a query
+ * string (`../../../docs/specs/foundation/pagination.md` decision 9 — the third of the
+ * three things that read this shape).
+ *
+ * Two keys `storyFilterQuery` never produces are readable here, and both are
+ * deliberate: `parentId` (where `null` is the top level and absent is every level) and
+ * `routed`. A list route states its scope positionally because for a list the scope is
+ * an identity; a captured selection has only JSON, and it has to be able to count the
+ * exact set the list header counted or the guard refuses every select-all Content
+ * makes.
+ */
+const CAPTURED_FILTER = v.object(
+  {
+    parentId: v.nullish(ID),
+    type: v.optional(TYPE_NAME),
+    state: v.optional(STORY_STATE),
+    q: v.optional(SEARCH_Q),
+    locale: v.optional(LOCALE_CODE),
+    routed: v.optional(v.boolean('must be true or false')),
+  },
+  OBJECT,
+)
+
+/**
+ * A selection, in the two shapes `core/story.ts`'s `BulkSelection` describes:
+ * `{ ids }`, or `{ all: true, filter, expected, exclude? }`.
+ *
+ * A union of two shapes rather than one object with everything optional, so a body
+ * that names both an id list *and* a filter is **refused** rather than silently
+ * reconciled: that client has not decided which selection it made, and guessing for
+ * it means writing to a set nobody described.
+ *
+ * **`v.strictObject`, which nothing else in this file uses**, and this is the one
+ * place it earns the departure. Everywhere else an undeclared key is stripped in
+ * silence and that is right — a stale tab still sending `actor` is not asking for
+ * anything (`CheckpointBody` says so). Here a stripped key changes *which documents
+ * get written to*: `{ ids, expected }` would become a plain id list with the count
+ * guard quietly dropped, and `{ all: true, filter, expected, ids }` would ignore the
+ * ids entirely. Both are silent, both are wrong in the direction of doing more than
+ * was asked.
+ *
+ * **`expected` is required with `all` and unrepresentable without it.** The count is
+ * the guard, and an explicit id list needs none — the ids *are* the version of the
+ * set, and one that has since been deleted is reported as a single named failure
+ * rather than refusing the other eleven.
+ */
+const SELECTION = v.union(
+  [
+    v.strictObject(
+      {
+        all: v.literal(true, 'must be true'),
+        filter: CAPTURED_FILTER,
+        expected: v.pipe(
+          v.number('must be a number'),
+          v.integer('must be a whole number'),
+          v.minValue(0, 'must be 0 or greater'),
+        ),
+        exclude: v.optional(
+          v.pipe(
+            v.array(ID, 'must be an array of document ids'),
+            v.maxLength(MAX_SELECTION_IDS, `must name ${MAX_SELECTION_IDS} documents or fewer`),
+          ),
+        ),
+      },
+      OBJECT,
+    ),
+    v.strictObject({ ids: SELECTION_IDS }, OBJECT),
+  ],
+  'must be either { ids } or { all: true, filter, expected }',
+)
+
+/**
+ * The job-control half of every bulk body, shaped exactly like `MigrateBody`,
+ * `ReindexBody` and `RunSchedulesBody` because it is the same kind of run: batched,
+ * resumable, safe to dry-run.
+ *
+ * `continueFrom` is an opaque cursor rather than an id, like the schedule sweep's and
+ * for a related reason — it carries a second component, the count of documents the job
+ * has already consumed against its ceiling. Screened for length here and decoded by
+ * `runBulk`.
+ */
+const BULK_CONTROL = {
+  selection: SELECTION,
+  dryRun: v.optional(v.boolean('must be true or false')),
+  continueFrom: v.nullish(
+    v.pipe(v.string('must be a string'), v.maxLength(500, 'is not a pagination cursor')),
+  ),
+  batch: v.optional(
+    v.pipe(
+      v.number('must be a number'),
+      v.integer('must be a whole number'),
+      v.minValue(1, 'must be at least 1'),
+      v.maxValue(200, 'must be 200 or fewer'),
+    ),
+  ),
+}
+
+/** `POST {base}/api/bulk/publish`, `/unpublish` and `/duplicate` — the three actions
+ * that take no argument beyond the selection. */
+export const BulkBody = v.object(BULK_CONTROL, OBJECT)
+
+/**
+ * `POST {base}/api/bulk/move`. `parentId` is **required** and nullable: null is the
+ * top level, and leaving it out would make "move" mean "move to wherever you already
+ * are", which is not an operation anybody asked for.
+ *
+ * `index` is where the first document lands among its new siblings; the rest follow it
+ * in order. Absent is 0, which is the top.
+ */
+export const BulkMoveBody = v.object(
+  {
+    ...BULK_CONTROL,
+    parentId: v.nullable(ID),
+    index: v.optional(
+      v.pipe(
+        v.number('must be a number'),
+        v.integer('must be a whole number'),
+        v.minValue(0, 'must be 0 or greater'),
+      ),
+    ),
+  },
+  OBJECT,
+)
+
+/**
+ * `POST {base}/api/bulk/delete`. `redirect` defaults to **true**, matching
+ * `DELETE {base}/api/stories/:id?redirect=` (`../platform/redirects.md` decision 4):
+ * a bulk delete has to leave the redirects a hundred single deletes would, and the
+ * escape hatch is for a page that should genuinely 404.
+ *
+ * In the body rather than the query string, unlike the single-document route, because
+ * everything else about a bulk call is in the body and a caller assembling one should
+ * not have to know that one parameter went somewhere else.
+ */
+export const BulkDeleteBody = v.object(
+  { ...BULK_CONTROL, redirect: v.optional(v.boolean('must be true or false')) },
+  OBJECT,
+)
+
+export type BulkInput = v.InferOutput<typeof BulkBody>
+export type BulkMoveInput = v.InferOutput<typeof BulkMoveBody>
+export type BulkDeleteInput = v.InferOutput<typeof BulkDeleteBody>
+
 /**
  * Flat mode's ordering, defaulting to `edited`.
  *
