@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import './tokens.css'
 import {
   type DocumentType,
@@ -169,6 +169,30 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
   const fetched = useStory(boot.apiBase, screen.name === 'edit' && !local ? screen.id : undefined)
   const open = local ?? fetched.story
 
+  /**
+   * The open row again, after a write moved it — `useEditor`'s `onStoryChanged`.
+   *
+   * It reloads whichever source supplied the row, which is why it is here rather
+   * than inside `useStory`: a global's row does not come from `useStory` at all
+   * (`local`, above), it comes from the boot's `?kind=singleton` call, so a
+   * singleton publishing would otherwise refresh nothing. Two sources, one seam.
+   *
+   * Unwired, a publish left `story.state` at `draft` on a document that was now
+   * live, and `publishStatus` reads that as `isLive: false` — so the Publish button
+   * stayed enabled beside a status line reading "Up to date".
+   */
+  const reloadGlobals = useCallback(() => {
+    fetch(`${boot.apiBase}/documents?kind=singleton`, { headers: { accept: 'application/json' } })
+      .then((r) => (r.ok ? (r.json() as Promise<{ rows: StoryMeta[] }>) : { rows: [] }))
+      .then((body) => setGlobals(body.rows))
+      .catch(() => {
+        // A failed refresh leaves the row it already has. The publish itself
+        // succeeded; re-reporting a stale badge as an error would be a lie about
+        // which write failed.
+      })
+  }, [boot.apiBase])
+  const onStoryChanged = local ? reloadGlobals : fetched.reload
+
   const groups = useMemo(
     () => nav({ types, globals: manifest?.globals ?? [], me }),
     [types, manifest?.globals, me],
@@ -334,6 +358,7 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
           schema,
           pageTypes,
           open,
+          onStoryChanged,
           label,
           go,
           replace,
@@ -392,6 +417,9 @@ interface ScreenArgs {
   schema: SchemaIndex
   pageTypes: readonly DocumentType[]
   open: StoryMeta | undefined
+  /** Re-read `open` because a write moved it — see `reloadGlobals` for why the
+   * shell owns this rather than `useStory`. */
+  onStoryChanged: () => void
   label: (name: string) => string | undefined
   go: ReturnType<typeof useRouter>['go']
   replace: ReturnType<typeof useRouter>['replace']
@@ -443,6 +471,13 @@ function screenFor(a: ScreenArgs) {
           onNotice={a.notify}
           {...(a.open ? { selected: a.open.id } : {})}
           pageTypes={a.pageTypes}
+          // The create dialog labels its name field with the *type's own* title
+          // field — "Title" for a page, "Full name" for a person — which it can only
+          // resolve through `titleFieldOf` against the schema. Documents was handed
+          // one from the start; Content was not, and without it the dialog cannot
+          // tell "this type has no title field" from "I was not told", so it stays
+          // silent rather than printing a false claim about the schema.
+          schema={a.schema}
           remembered={{ view: a.contentView.value, sort: a.contentSort.value }}
           onRemember={(next) => {
             a.contentView.set(next.view)
@@ -468,6 +503,10 @@ function screenFor(a: ScreenArgs) {
           {...(a.manifest?.locales ? { locales: a.manifest.locales } : {})}
           me={a.me}
           onNotice={a.notify}
+          // A publish, an unpublish or a rename moved the row the shell handed
+          // down. Without this the badge and — because `publishStatus` reads
+          // `story.state` as `isLive` — the Publish button both go stale.
+          onStoryChanged={a.onStoryChanged}
           onOpenDocument={(id) => a.go({ name: 'edit', id })}
           railCollapsed={a.blockRail.value}
           onToggleRail={a.blockRail.toggle}

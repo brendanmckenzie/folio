@@ -65,11 +65,19 @@ export interface EditorOptions {
    * The story row this screen was handed is out of date — a publish or an
    * unpublish moved its state, and it is the *caller's* row.
    *
-   * Optional, and the shell works without it: the version list and the publish
-   * status re-read themselves, so only the state badge goes stale. Wiring it is
-   * one line at the call site (`useStory` grows a `reload`), and this is the seam
-   * for it rather than a second fetch of the same row from in here, which is how
-   * two views of one document start disagreeing.
+   * The seam is here rather than a second fetch of the same row from in here,
+   * which is how two views of one document start disagreeing. `Prototype` supplies
+   * it; `useStory` grew a `reload` for the purpose, and a global's row is refreshed
+   * from the boot's singleton call instead, because that is where it came from.
+   *
+   * **It is optional in the type and must not be treated as optional in practice**,
+   * and an earlier version of this comment got that wrong. It claimed the shell
+   * worked without it because "only the state badge goes stale". The state is also
+   * `publishStatus`'s `isLive` argument, and `everPublished && !isLive && delta 0`
+   * is how a *taken-down* page looks — so an unrefreshed row left the Publish
+   * button **enabled on a document that had just been published**, next to a status
+   * line reading "Up to date". Pinned by `editor-shell.test.ts`'s
+   * "the open row is refreshed after a write".
    */
   onStoryChanged?: () => void
   /** True while the history slide-over is open: the activity trail loads with it,
