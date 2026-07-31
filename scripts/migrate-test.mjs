@@ -17,7 +17,7 @@
 import './lib/ts-resolve.mjs'
 
 // The demo configures a real sign-in provider (identity-and-access.md), so every
-// route here needs a session, and `POST /folio/migrate` needs an *admin* one.
+// route here needs a session, and `POST /folio/api/migrate` needs an *admin* one.
 // The seeded `demo@example.com` is that admin.
 import { signInGlobally } from './lib/auth.mjs'
 
@@ -28,7 +28,8 @@ const { PROTOCOL_VERSION } = await import(
 )
 
 const HTTP = 'http://localhost:5199'
-const API = `${HTTP}/folio`
+const BASE = `${HTTP}/folio`
+const API = `${BASE}/api`
 
 const results = []
 const check = (label, ok, detail = '') => {
@@ -46,7 +47,7 @@ const post = (url, body) =>
   })
 
 function client(name, storyId) {
-  const ws = new WebSocket(`ws://localhost:5199/folio/story/${storyId}/socket`)
+  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/${storyId}/socket`)
   const inbox = []
   const waiters = []
   ws.addEventListener('message', (e) => {
@@ -100,7 +101,7 @@ check('the wire version is 4', PROTOCOL_VERSION === 4, String(PROTOCOL_VERSION))
 
 const status0 = await json(`${API}/migrations`)
 check(
-  'GET /folio/migrations lists the configured migrations in run order',
+  'GET /folio/api/migrations lists the configured migrations in run order',
   status0.migrations?.map((m) => m.id).join(',') ===
     '0001-pullquote-attribution-to-credit,0002-pullquote-tone-default',
   JSON.stringify(status0.migrations?.map((m) => m.id)),
@@ -113,7 +114,7 @@ check(
 /* --- two stories, one published, both holding pre-migration documents ----- */
 
 // **The seeded rows, deliberately, not two fresh ones.** A story created through
-// `POST /folio/stories` is stamped with the latest migration id, because
+// `POST /folio/api/stories` is stamped with the latest migration id, because
 // `blankSubtree` seeds its document from the current schema — it is born up to
 // date and correctly never migrated. `examples/demo/seed.sql` writes its three
 // rows with no `schema_id` at all, which is exactly what a site that existed

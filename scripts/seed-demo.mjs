@@ -21,7 +21,8 @@ const { PROTOCOL_VERSION } = await import(
 )
 
 const HTTP = 'http://localhost:5199'
-const API = `${HTTP}/folio`
+const BASE = `${HTTP}/folio`
+const API = `${BASE}/api`
 
 const json = (url, init) => fetch(url, init).then((r) => r.json())
 const log = (...a) => console.log(...a)
@@ -97,7 +98,7 @@ async function storyBySlug(slug, title, parentId = null) {
 
 /** Opens a socket, replaces the story's body, and closes. */
 async function seed(storyId, build) {
-  const ws = new WebSocket(`ws://localhost:5199/folio/story/${storyId}/socket`)
+  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/${storyId}/socket`)
   const doc = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`bootstrap timeout for ${storyId}`)), 8000)
     ws.addEventListener('message', (e) => {
@@ -381,5 +382,5 @@ log('')
 log('Published. Have a look at:')
 log(`  ${HTTP}${showcase.url}                  the page, zero JavaScript`)
 log(`  ${HTTP}${showcase.url}?_folio=preview   the same page in preview mode`)
-log(`  ${API}/edit/${showcase.id}       the editor`)
+log(`  ${BASE}/edit/${showcase.id}       the editor`)
 log(`  ${HTTP}${details.url}      the referenced page on its own`)

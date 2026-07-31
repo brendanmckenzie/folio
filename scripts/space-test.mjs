@@ -14,7 +14,7 @@
 //   - a rename through the HTTP API reaches the space socket as `story.updated`,
 //     naming every path that moved (the subtree, not just the row);
 //   - the renaming client and a peer both converge on the new tree from
-//     `GET /folio/stories`, which is what the client reloads on the event;
+//     `GET /folio/api/stories`, which is what the client reloads on the event;
 //   - **per-block presence on a story socket is unchanged by any of it** — the
 //     regression that would matter most, since the space channel duplicates the
 //     selection deliberately (decision 2) and must not have replaced anything.
@@ -38,7 +38,8 @@ const { PROTOCOL_VERSION } = await import(
 )
 
 const HTTP = 'http://localhost:5199'
-const API = `${HTTP}/folio`
+const BASE = `${HTTP}/folio`
+const API = `${BASE}/api`
 
 const results = []
 const check = (label, ok, detail = '') => {
@@ -80,9 +81,10 @@ function socket(name, url, cookie) {
 }
 
 const storySocket = (name, storyId, cookie) =>
-  socket(name, `ws://localhost:5199/folio/story/${storyId}/socket`, cookie)
+  socket(name, `ws://localhost:5199/folio/api/story/${storyId}/socket`, cookie)
 
-const spaceSocket = (name, cookie) => socket(name, 'ws://localhost:5199/folio/space/socket', cookie)
+const spaceSocket = (name, cookie) =>
+  socket(name, 'ws://localhost:5199/folio/api/space/socket', cookie)
 
 /* ------------------------------------------------------------------ setup --- */
 

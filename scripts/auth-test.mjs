@@ -17,7 +17,8 @@ const { PROTOCOL_VERSION } = await import(
 )
 
 const HTTP = 'http://localhost:5199'
-const API = `${HTTP}/folio`
+const BASE = `${HTTP}/folio`
+const API = `${BASE}/api`
 const STORY = 'sty_home'
 
 const results = []
@@ -30,7 +31,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
 /* --- the closed door ---------------------------------------------------- */
 
-const editorPage = await fetch(`${API}/edit/${STORY}`, { redirect: 'manual' })
+const editorPage = await fetch(`${BASE}/edit/${STORY}`, { redirect: 'manual' })
 check(
   'the editor redirects when signed out',
   editorPage.status === 302,
@@ -58,7 +59,7 @@ check(
 const schema = await fetch(`${API}/schema`)
 check('the manifest stays public', schema.status === 200, `status=${schema.status}`)
 
-const loginPage = await fetch(`${API}/login`)
+const loginPage = await fetch(`${BASE}/login`)
 const loginHtml = await loginPage.text()
 check('the login page renders', loginPage.status === 200 && loginHtml.includes('name="email"'))
 check('and ships no JavaScript at all', !loginHtml.includes('<script'))
@@ -66,7 +67,7 @@ check('and ships no JavaScript at all', !loginHtml.includes('<script'))
 /* --- an unauthenticated socket is refused terminally -------------------- */
 
 function socket(headers = {}) {
-  const ws = new WebSocket(`ws://localhost:5199/folio/story/${STORY}/socket`, { headers })
+  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/${STORY}/socket`, { headers })
   const inbox = []
   const closes = []
   ws.addEventListener('message', (e) => inbox.push(JSON.parse(e.data)))
@@ -112,7 +113,7 @@ check(
 /* --- email addresses are not enumerable -------------------------------- */
 
 async function requestLink(email) {
-  const res = await fetch(`${API}/login/email`, {
+  const res = await fetch(`${BASE}/login/email`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ email }),
@@ -148,12 +149,12 @@ check(
 
 const me = await (await fetch(`${API}/me`, { headers: { cookie } })).json()
 check(
-  '/folio/me names the signed-in admin',
+  '/folio/api/me names the signed-in admin',
   me?.actor?.name === 'Demo Admin' && me?.actor?.role === 'admin',
   JSON.stringify(me?.actor),
 )
 
-const editorSignedIn = await fetch(`${API}/edit/${STORY}`, { headers: { cookie } })
+const editorSignedIn = await fetch(`${BASE}/edit/${STORY}`, { headers: { cookie } })
 check('the editor serves once signed in', editorSignedIn.status === 200)
 
 /* --- editing and publishing as that session ---------------------------- */
@@ -346,7 +347,7 @@ check(
 const assets = await (await fetch(`${API}/assets`, { headers: { cookie } })).json()
 const firstAsset = (Array.isArray(assets) ? assets : assets?.assets)?.[0]
 if (firstAsset?.key) {
-  const asset = await fetch(`${API}/asset/${firstAsset.key}`)
+  const asset = await fetch(`${BASE}/asset/${firstAsset.key}`)
   check('an asset serves with no credential', asset.status === 200, `status=${asset.status}`)
 } else {
   // Nothing uploaded in this database; the route's public-ness is pinned in
@@ -367,7 +368,7 @@ check(
 
 const afterLogout = await fetch(`${API}/stories`, { headers: { cookie } })
 check('the API refuses the old cookie', afterLogout.status === 401, `status=${afterLogout.status}`)
-const editorAfterLogout = await fetch(`${API}/edit/${STORY}`, {
+const editorAfterLogout = await fetch(`${BASE}/edit/${STORY}`, {
   headers: { cookie },
   redirect: 'manual',
 })

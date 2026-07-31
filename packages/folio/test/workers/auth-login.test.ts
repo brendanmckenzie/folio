@@ -326,11 +326,11 @@ describe('sessions over HTTP', () => {
     return `${SECURE_COOKIE}=${cookieFrom(res, SECURE_COOKIE)}`
   }
 
-  it('GET /folio/me names the actor and their role', async () => {
+  it('GET /folio/api/me names the actor and their role', async () => {
     const folio = folioWith(magicAuth)
     const cookie = await signedIn(folio)
 
-    const res = await call(folio, '/folio/me', { headers: { cookie } })
+    const res = await call(folio, '/folio/api/me', { headers: { cookie } })
     expect(res.status).toBe(200)
     expect(await res.json()).toMatchObject({
       mode: 'session',
@@ -339,14 +339,14 @@ describe('sessions over HTTP', () => {
     })
   })
 
-  it('GET /folio/me is 401 with no cookie', async () => {
-    const res = await call(folioWith(magicAuth), '/folio/me')
+  it('GET /folio/api/me is 401 with no cookie', async () => {
+    const res = await call(folioWith(magicAuth), '/folio/api/me')
     expect(res.status).toBe(401)
     expect(await res.json()).toMatchObject({ error: { code: 'unauthorized' } })
   })
 
-  it("GET /folio/me answers mode 'open' with a null actor when auth is open", async () => {
-    const res = await call(folioWith('open'), '/folio/me')
+  it("GET /folio/api/me answers mode 'open' with a null actor when auth is open", async () => {
+    const res = await call(folioWith('open'), '/folio/api/me')
     // 200, not 404: the admin has to tell "no auth configured" apart from "not
     // signed in", because only the first is a reason to keep its own generated
     // presence identity.
@@ -354,12 +354,12 @@ describe('sessions over HTTP', () => {
     expect(await res.json()).toMatchObject({ mode: 'open', actor: null })
   })
 
-  it('POST /folio/logout revokes the session and clears both cookie names', async () => {
+  it('POST /folio/api/logout revokes the session and clears both cookie names', async () => {
     const folio = folioWith(magicAuth)
     const cookie = await signedIn(folio)
     const token = cookie.split('=')[1]!
 
-    const res = await call(folio, '/folio/logout', { method: 'POST', headers: { cookie } })
+    const res = await call(folio, '/folio/api/logout', { method: 'POST', headers: { cookie } })
     expect(res.status).toBe(200)
     expect(await readSession(env.DB, token)).toBeNull()
     const cleared = setCookies(res)
@@ -369,9 +369,9 @@ describe('sessions over HTTP', () => {
     expect(cleared.some((c) => c.startsWith(`${PLAIN_COOKIE}=;`))).toBe(true)
   })
 
-  it('POST /folio/logout still clears the cookie for an already-dead session', async () => {
+  it('POST /folio/api/logout still clears the cookie for an already-dead session', async () => {
     const folio = folioWith(magicAuth)
-    const res = await call(folio, '/folio/logout', {
+    const res = await call(folio, '/folio/api/logout', {
       method: 'POST',
       headers: { cookie: `${SECURE_COOKIE}=${'b'.repeat(64)}` },
     })

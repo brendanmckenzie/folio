@@ -98,6 +98,24 @@ export function editorRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return rt.stub(bindings, story.id).fetch(withIdentity(c.req.raw, identity))
   })
 
+  return app
+}
+
+/**
+ * The editor's own HTML, and a singleton's bare preview. **Not** under
+ * `{base}/api` (`../../../docs/specs/foundation/pagination.md` decision 3): these
+ * are pages a browser is navigated to, not JSON the admin fetches.
+ *
+ * `/edit/:id` is the **old single-screen editor**, and it keeps the canonical URL
+ * on purpose. The rebuilt shell's wildcard covers every bare path, but this route
+ * is registered ahead of it, so the working editor wins until port phase 7
+ * replaces it (`docs/ui-architecture.md`'s port plan). Deleting these two
+ * registrations is the whole of what hands `/edit/:id` to the new editor — the
+ * shell already routes it.
+ */
+export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
+  const app = new Hono<FolioEnv<Env>>()
+
   app.get('/edit/:id', requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {
     const id = c.req.param('id')
     // An HTML route: an id nothing is behind — malformed or simply gone — is a

@@ -51,7 +51,7 @@ const SETTINGS: DocumentType = {
 const TYPES = [PAGE, INSIGHT, PERSON, SETTINGS]
 
 /**
- * Migrations (packages/folio/migrations/**) are structure only, so this file
+ * Migrations (packages/folio/api/migrations/**) are structure only, so this file
  * seeds its own fixture rather than inheriting one, by re-running the actual
  * examples/demo/seed.sql each time (see seed-fixture.ts) instead of a hand-
  * typed insert that could drift from it and from the same three rows in
@@ -1179,7 +1179,7 @@ describe('concurrent creates and the conflict envelope', () => {
     expect(fulfilled).toHaveLength(1)
     expect(rejected).toHaveLength(1)
 
-    // `rethrow` is the same translation the /folio/stories route applies to
+    // `rethrow` is the same translation the /folio/api/stories route applies to
     // whatever `createStory` throws (routes/stories.ts): the point of this
     // test is that D1's raw constraint violation lands on the client as the
     // ordinary conflict envelope, never as an unhandled 500.

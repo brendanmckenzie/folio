@@ -23,7 +23,8 @@ import type { VersionMeta } from '../../src/server/versions'
  */
 
 const ORIGIN = 'https://folio.test'
-const API = `${ORIGIN}/folio`
+const BASE = `${ORIGIN}/folio`
+const API = `${BASE}/api`
 
 const page = defineBlock({
   name: 'page',
@@ -133,7 +134,7 @@ describe('the editor is closed', () => {
   })
 
   it('401s the JSON API with the one error envelope', async () => {
-    const res = await call('/folio/stories')
+    const res = await call('/folio/api/stories')
     expect(res.status).toBe(401)
     expect(await res.json<ErrorEnvelope>()).toEqual({
       error: { code: 'unauthorized', message: 'Sign in to continue.' },
@@ -143,7 +144,7 @@ describe('the editor is closed', () => {
   it('leaves /schema and the public asset route open', async () => {
     // The manifest describes the code, not the content, and the admin bundle
     // needs it before it can render a sign-in prompt of its own.
-    expect((await call('/folio/schema')).status).toBe(200)
+    expect((await call('/folio/api/schema')).status).toBe(200)
     // A published page's <img> points here: exactly as public as the page.
     const asset = await call('/folio/asset/ast_000000000000-none.png')
     expect(asset.status).not.toBe(401)
@@ -169,7 +170,7 @@ describe('the editor is closed', () => {
     const ctx = createExecutionContext()
     const res = await open.handle(new Request(`${API}/stories`), env, ctx)
     expect(res?.status).toBe(200)
-    const edit = await open.handle(new Request(`${API}/edit/${id}`), env, createExecutionContext())
+    const edit = await open.handle(new Request(`${BASE}/edit/${id}`), env, createExecutionContext())
     expect(edit?.status).toBe(200)
   })
 })
@@ -181,11 +182,15 @@ describe('role gates', () => {
     const id = await seedStory()
     const { cookie } = await signIn('viewer')
 
-    expect((await call('/folio/stories', { headers: { cookie } })).status).toBe(200)
-    expect((await call(`/folio/story/${id}/document`, { headers: { cookie } })).status).toBe(200)
-    expect((await call(`/folio/story/${id}/versions`, { headers: { cookie } })).status).toBe(200)
+    expect((await call('/folio/api/stories', { headers: { cookie } })).status).toBe(200)
+    expect((await call(`/folio/api/story/${id}/document`, { headers: { cookie } })).status).toBe(
+      200,
+    )
+    expect((await call(`/folio/api/story/${id}/versions`, { headers: { cookie } })).status).toBe(
+      200,
+    )
 
-    const publish = await call(`${'/folio'}/story/${id}/publish`, {
+    const publish = await call(`/folio/api/story/${id}/publish`, {
       method: 'POST',
       headers: { cookie },
     })
@@ -200,11 +205,14 @@ describe('role gates', () => {
     const id = await seedStory()
     const { cookie } = await signIn('editor')
 
-    const res = await call(`/folio/story/${id}/publish`, { method: 'POST', headers: { cookie } })
+    const res = await call(`/folio/api/story/${id}/publish`, {
+      method: 'POST',
+      headers: { cookie },
+    })
     expect(res.status).toBe(403)
 
     // No version row and no published snapshot: the refusal is at the door.
-    const versions = await call(`/folio/story/${id}/versions`, { headers: { cookie } })
+    const versions = await call(`/folio/api/story/${id}/versions`, { headers: { cookie } })
     expect(await versions.json<VersionMeta[]>()).toEqual([])
     const row = await env.DB.prepare('select published_doc, published_at from stories where id = ?')
       .bind(id)
@@ -222,7 +230,7 @@ describe('role gates', () => {
     const viewer = await signIn('viewer')
 
     const post = (cookie: string, title: string) =>
-      call('/folio/stories', {
+      call('/folio/api/stories', {
         method: 'POST',
         headers: { cookie, 'content-type': 'application/json' },
         body: JSON.stringify({ title }),
@@ -238,7 +246,7 @@ describe('role gates', () => {
     const publisher = await signIn('publisher')
 
     const patch = (cookie: string) =>
-      call(`/folio/stories/${id}`, {
+      call(`/folio/api/stories/${id}`, {
         method: 'PATCH',
         headers: { cookie, 'content-type': 'application/json' },
         body: JSON.stringify({ title: 'Renamed' }),
@@ -247,8 +255,12 @@ describe('role gates', () => {
     expect((await patch(publisher.cookie)).status).toBe(200)
 
     expect(
-      (await call(`/folio/stories/${id}`, { method: 'DELETE', headers: { cookie: editor.cookie } }))
-        .status,
+      (
+        await call(`/folio/api/stories/${id}`, {
+          method: 'DELETE',
+          headers: { cookie: editor.cookie },
+        })
+      ).status,
     ).toBe(403)
   })
 
@@ -256,7 +268,7 @@ describe('role gates', () => {
     const id = await seedStory()
     const { user, cookie } = await signIn('publisher')
 
-    const res = await call(`/folio/story/${id}/publish`, {
+    const res = await call(`/folio/api/story/${id}/publish`, {
       method: 'POST',
       // Ignored: the header is gone, and this is what "cannot be spoofed" means.
       headers: { cookie, 'x-folio-actor': 'somebody-else' },
@@ -264,7 +276,7 @@ describe('role gates', () => {
     expect(res.status).toBe(200)
 
     const versions = await (
-      await call(`/folio/story/${id}/versions`, { headers: { cookie } })
+      await call(`/folio/api/story/${id}/versions`, { headers: { cookie } })
     ).json<VersionMeta[]>()
     expect(versions[0]?.actor).toBe(user.id)
   })
@@ -273,9 +285,13 @@ describe('role gates', () => {
     const publisher = await signIn('publisher')
     const admin = await signIn('admin')
 
-    expect((await call('/folio/users', { headers: { cookie: publisher.cookie } })).status).toBe(403)
-    expect((await call('/folio/users', { headers: { cookie: admin.cookie } })).status).toBe(200)
-    expect((await call('/folio/tokens', { headers: { cookie: admin.cookie } })).status).toBe(200)
+    expect((await call('/folio/api/users', { headers: { cookie: publisher.cookie } })).status).toBe(
+      403,
+    )
+    expect((await call('/folio/api/users', { headers: { cookie: admin.cookie } })).status).toBe(200)
+    expect((await call('/folio/api/tokens', { headers: { cookie: admin.cookie } })).status).toBe(
+      200,
+    )
 
     // Under `auth: 'open'` there is no admin and no way to become one, so the
     // surface does not exist rather than standing wide open.
@@ -289,7 +305,7 @@ describe('role gates', () => {
 
   it('refuses an admin removing their own account', async () => {
     const admin = await signIn('admin')
-    const res = await call(`/folio/users/${admin.user.id}`, {
+    const res = await call(`/folio/api/users/${admin.user.id}`, {
       method: 'DELETE',
       headers: { cookie: admin.cookie },
     })
@@ -301,7 +317,7 @@ describe('role gates', () => {
     const admin = await signIn('admin')
     const target = await signIn('editor')
 
-    const res = await call(`/folio/users/${target.user.id}`, {
+    const res = await call(`/folio/api/users/${target.user.id}`, {
       method: 'PATCH',
       headers: { cookie: admin.cookie, 'content-type': 'application/json' },
       body: JSON.stringify({ role: 'viewer' }),
@@ -309,7 +325,9 @@ describe('role gates', () => {
     expect(res.status).toBe(200)
     // A downgrade an admin just made deliberately must not sit in an open
     // socket's attachment for the bounded window a revocation may.
-    expect((await call('/folio/stories', { headers: { cookie: target.cookie } })).status).toBe(401)
+    expect((await call('/folio/api/stories', { headers: { cookie: target.cookie } })).status).toBe(
+      401,
+    )
   })
 })
 
@@ -321,9 +339,9 @@ describe('api tokens', () => {
     const { token } = await createToken(env.DB, { name: 'importer', scopes: ['content:read'] })
     const headers = { authorization: `Bearer ${token}` }
 
-    expect((await call('/folio/stories', { headers })).status).toBe(200)
+    expect((await call('/folio/api/stories', { headers })).status).toBe(200)
 
-    const res = await call('/folio/stories', {
+    const res = await call('/folio/api/stories', {
       method: 'POST',
       headers: { ...headers, 'content-type': 'application/json' },
       body: JSON.stringify({ title: 'From a script' }),
@@ -334,7 +352,7 @@ describe('api tokens', () => {
 
   it('stamps last_used_at even on the request it refuses', async () => {
     const { row, token } = await createToken(env.DB, { name: 'importer', scopes: ['content:read'] })
-    await call('/folio/stories', {
+    await call('/folio/api/stories', {
       method: 'DELETE',
       headers: { authorization: `Bearer ${token}` },
     })
@@ -351,13 +369,13 @@ describe('api tokens', () => {
       .bind(Date.now(), row.id)
       .run()
 
-    const res = await call('/folio/stories', { headers: { authorization: `Bearer ${token}` } })
+    const res = await call('/folio/api/stories', { headers: { authorization: `Bearer ${token}` } })
     expect(res.status).toBe(401)
   })
 
   it('mints a token exactly once, and never hands the value back afterwards', async () => {
     const admin = await signIn('admin')
-    const created = await call('/folio/tokens', {
+    const created = await call('/folio/api/tokens', {
       method: 'POST',
       headers: { cookie: admin.cookie, 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'import-script', scopes: ['content:read', 'content:write'] }),
@@ -367,14 +385,16 @@ describe('api tokens', () => {
     expect(body.token).toMatch(/^folio_[0-9a-f]{64}$/)
     expect(body.row.scopes).toEqual(['content:read', 'content:write'])
 
-    const listed = await (await call('/folio/tokens', { headers: { cookie: admin.cookie } })).text()
+    const listed = await (
+      await call('/folio/api/tokens', { headers: { cookie: admin.cookie } })
+    ).text()
     // Only the hash exists after this point; there is nothing to leak.
     expect(listed).not.toContain(body.token)
   })
 
   it('refuses a scope that does not exist rather than quietly dropping it', async () => {
     const admin = await signIn('admin')
-    const res = await call('/folio/tokens', {
+    const res = await call('/folio/api/tokens', {
       method: 'POST',
       headers: { cookie: admin.cookie, 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'bad', scopes: ['content:destroy'] }),
@@ -390,7 +410,7 @@ describe('the origin check', () => {
     const id = await seedStory()
     const { cookie } = await signIn('publisher')
 
-    const res = await call(`/folio/story/${id}/publish`, {
+    const res = await call(`/folio/api/story/${id}/publish`, {
       method: 'POST',
       headers: { cookie, origin: 'https://evil.example' },
     })
@@ -404,7 +424,7 @@ describe('the origin check', () => {
 
     expect(
       (
-        await call(`/folio/story/${id}/publish`, {
+        await call(`/folio/api/story/${id}/publish`, {
           method: 'POST',
           headers: { cookie, origin: ORIGIN },
         })
@@ -413,13 +433,14 @@ describe('the origin check', () => {
     // No Origin means curl, a script or a server: none of which can be tricked
     // into replaying somebody's cookie.
     expect(
-      (await call(`/folio/story/${id}/publish`, { method: 'POST', headers: { cookie } })).status,
+      (await call(`/folio/api/story/${id}/publish`, { method: 'POST', headers: { cookie } }))
+        .status,
     ).toBe(200)
   })
 
   it('leaves a bearer-token mutation alone: a token is not an ambient credential', async () => {
     const { token } = await createToken(env.DB, { name: 'importer', scopes: ['content:write'] })
-    const res = await call('/folio/stories', {
+    const res = await call('/folio/api/stories', {
       method: 'POST',
       headers: {
         authorization: `Bearer ${token}`,
@@ -442,7 +463,7 @@ interface Peer {
 }
 
 async function openSocket(id: string, headers: Record<string, string> = {}) {
-  const res = await call(`/folio/story/${id}/socket`, {
+  const res = await call(`/folio/api/story/${id}/socket`, {
     headers: { Upgrade: 'websocket', ...headers },
   })
   expect(res.status).toBe(101)

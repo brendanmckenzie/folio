@@ -70,6 +70,8 @@ interface Props {
    */
   space?: boolean
   apiBase: string
+  /** The bare mount, for asset URLs and a global's preview page. */
+  base: string
 }
 
 type Rail = 'content' | 'data' | 'blocks' | 'history' | 'redirects' | 'model' | 'access'
@@ -89,6 +91,7 @@ export function Editor({
   me,
   space = false,
   apiBase,
+  base,
 }: Props) {
   const [rail, setRail] = useState<Rail>('blocks')
   const [viewport, setViewport] = useState<Viewport>('Desktop')
@@ -100,7 +103,7 @@ export function Editor({
   const localeCtx = useMemo(() => localeContext(locales, locale), [locales, locale])
 
   const { notice, notify } = useNotice()
-  const stories = useStories(apiBase, initialStoryId, notify)
+  const stories = useStories(apiBase, base, initialStoryId, notify)
   const { storyId, flat, current } = stories
 
   const store = useMemo(() => new StoryStore(storyId, apiBase), [storyId, apiBase])
@@ -249,7 +252,10 @@ export function Editor({
    * resolve with no extra fetching. Rebuilt only when the tree changes, which is
    * exactly when a rename or move can have altered a URL.
    */
-  const base = useMemo(() => buildResolution(flat, `${apiBase}/asset`), [apiBase, flat])
+  // Named for what it is rather than `base`, which is now the mount: this is the
+  // story half of a `Resolution`, before docs, globals and collections are spread
+  // onto it below.
+  const storyResolution = useMemo(() => buildResolution(flat, `${base}/asset`), [base, flat])
   const docs = useReferencedDocs(apiBase, state.doc, schema)
   // Fetched once per global, not per keystroke: the admin's own copy exists
   // only so a clicked uid can be traced back to the global it belongs to
@@ -262,8 +268,8 @@ export function Editor({
   // content, marked `stale`, exactly as the server's own preview branch resolves it.
   const collections = useCollections(apiBase, state.doc, schema, localeCtx)
   const resolution = useMemo(
-    () => ({ ...base, docs, globals: globalDocs.docs, collections }),
-    [base, collections, docs, globalDocs.docs],
+    () => ({ ...storyResolution, docs, globals: globalDocs.docs, collections }),
+    [storyResolution, collections, docs, globalDocs.docs],
   )
 
   /**
@@ -426,7 +432,7 @@ export function Editor({
   const currentType = current ? typeByName(types, current.type) : undefined
   const globalPreview =
     current && currentType?.kind === 'singleton'
-      ? globalPreviewUrl(currentType, flat, apiBase)
+      ? globalPreviewUrl(currentType, flat, base)
       : undefined
   const hasDataTypes = types.some((t) => t.kind !== 'page')
 

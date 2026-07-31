@@ -9,10 +9,11 @@ import { Prototype, type PrototypeBoot } from './ui/Prototype'
  * shipped** rather than by sniffing the URL:
  *
  * - `__FOLIO_SHELL__` — the rebuilt admin (`server/routes/shell.ts`), whose own
- *   router owns every path under its mount. This replaces the `?_ui` query flag
- *   that carried the design-system screen: `{base}/ui/ui` is a route now.
- * - `__FOLIO_ADMIN__` — the current single-screen editor, untouched, still at
- *   `{base}/edit/:id`.
+ *   router owns every path under its mount. This replaced the `?_ui` query flag
+ *   that carried the design-system screen: `{base}/ui` is a route now.
+ * - `__FOLIO_ADMIN__` — the current single-screen editor, still at
+ *   `{base}/edit/:id`, which it keeps by being registered ahead of the shell's
+ *   wildcard (`server/app.ts`) until port phase 7 replaces it.
  *
  * Both are **static** imports, and that matters: the Vite plugin tells the server
  * to link `/folio-admin.css` in production (`src/vite/index.ts`), and that file

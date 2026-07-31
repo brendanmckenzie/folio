@@ -64,7 +64,7 @@ const IDENTITY = { actor: 'anon-1', name: 'Editor abc', colour: '#0090ff' }
 function setup() {
   const sockets: FakeSocket[] = []
   const events: SpaceEvent[] = []
-  const store = new SpaceStore('/folio', IDENTITY, {
+  const store = new SpaceStore('/folio/api', IDENTITY, {
     createSocket: (path) => {
       const socket = new FakeSocket(path)
       sockets.push(socket)
@@ -106,7 +106,7 @@ describe('space store', () => {
     it('opens the space socket and says hello with its advisory identity', () => {
       const h = setup()
       h.store.connect()
-      expect(h.last().path).toBe('/folio/space/socket')
+      expect(h.last().path).toBe('/folio/api/space/socket')
       // Nothing before the socket is open.
       expect(h.last().frames).toEqual([])
 

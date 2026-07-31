@@ -23,7 +23,8 @@ const { PROTOCOL_VERSION } = await import(
 )
 
 const HTTP = 'http://localhost:5199'
-const API = `${HTTP}/folio`
+const BASE = `${HTTP}/folio`
+const API = `${BASE}/api`
 const STORY = 'sty_home'
 
 const results = []
@@ -52,7 +53,7 @@ const diffOf = (before, after) => diff(docWith(before), docWith(after))
  * rather than the hard-coded constant it used to be.
  */
 function client(name, storyId = STORY) {
-  const ws = new WebSocket(`ws://localhost:5199/folio/story/${storyId}/socket`)
+  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/${storyId}/socket`)
   const inbox = []
   const waiters = []
   ws.addEventListener('message', (e) => {
@@ -626,7 +627,7 @@ check('the richtext tree restored intact', (await preview()).includes('<h2>A hea
 // Give the About page some content of its own to be pulled in.
 const about = client('about')
 const aboutDoc = await new Promise((resolve) => {
-  const ws = new WebSocket(`ws://localhost:5199/folio/story/sty_about/socket`)
+  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/sty_about/socket`)
   const inbox = []
   ws.addEventListener('message', (e) => {
     const msg = JSON.parse(e.data)
@@ -871,12 +872,12 @@ check(
 
 const treeIds = (nodes) => nodes.flatMap((n) => [n.id, ...treeIds(n.children)])
 check(
-  'a record is absent from GET /folio/stories',
+  'a record is absent from GET /folio/api/stories',
   !treeIds(await json(`${API}/stories`)).includes(ada.id),
 )
 const docs = await json(`${API}/documents?type=person`)
 check(
-  'a record is present in GET /folio/documents?type=person',
+  'a record is present in GET /folio/api/documents?type=person',
   docs.documents?.some((d) => d.id === ada.id),
   JSON.stringify(docs.documents?.map((d) => d.id)),
 )

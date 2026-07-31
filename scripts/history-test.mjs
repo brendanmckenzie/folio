@@ -17,7 +17,8 @@ const { PROTOCOL_VERSION } = await import(
 )
 
 const HTTP = 'http://localhost:5199'
-const API = `${HTTP}/folio`
+const BASE = `${HTTP}/folio`
+const API = `${BASE}/api`
 const STORY = 'sty_home'
 const HERO = 'hero0001'
 
@@ -30,7 +31,7 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 const json = (url, init) => fetch(url, init).then((r) => r.json())
 
 function client(name, colour) {
-  const ws = new WebSocket(`ws://localhost:5199/folio/story/${STORY}/socket`)
+  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/${STORY}/socket`)
   const inbox = []
   const waiters = []
   ws.addEventListener('message', (e) => {

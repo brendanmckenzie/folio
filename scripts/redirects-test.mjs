@@ -20,7 +20,8 @@ const { PROTOCOL_VERSION } = await import(
 )
 
 const HTTP = 'http://localhost:5199'
-const API = `${HTTP}/folio`
+const BASE = `${HTTP}/folio`
+const API = `${BASE}/api`
 
 const results = []
 const check = (label, ok, detail = '') => {
@@ -48,7 +49,7 @@ const patch = (path, body) =>
  * Mirrors `scripts/fields-test.mjs`'s client, trimmed to what this file needs.
  */
 function client(storyId) {
-  const ws = new WebSocket(`ws://localhost:5199/folio/story/${storyId}/socket`)
+  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/${storyId}/socket`)
   const inbox = []
   const waiters = []
   ws.addEventListener('message', (e) => {

@@ -21,7 +21,7 @@
  * The ids are the run order and they sort lexicographically, so they are
  * zero-padded. `createFolio` checks that rather than trusting it.
  *
- * Nothing runs on boot. `POST /folio/migrate` (admin), or `folio.migrate(env)`
+ * Nothing runs on boot. `POST /folio/api/migrate` (admin), or `folio.migrate(env)`
  * from a deploy step.
  */
 import { defineMigration, field } from 'folio/engine'

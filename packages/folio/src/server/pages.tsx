@@ -39,7 +39,12 @@ export function adminPage(
           {rt.dev ? <ReactRefreshPreamble /> : null}
           <Bootstrap
             global="__FOLIO_ADMIN__"
-            value={{ storyId: story.id, apiBase: rt.base, space: Boolean(bindings.space) }}
+            value={{
+              storyId: story.id,
+              base: rt.base,
+              apiBase: `${rt.base}/api`,
+              space: Boolean(bindings.space),
+            }}
           />
         </>
       }
@@ -63,7 +68,7 @@ export function adminPage(
  * the application there; here `/edit/:id` is one route among eleven and the id is
  * in the URL where it belongs.
  */
-export function shellPage(rt: FolioRuntime, mount: string): Promise<Response> {
+export function shellPage(rt: FolioRuntime): Promise<Response> {
   const { entries, stylesheets } = rt.page('admin')
   return html(
     <Shell
@@ -72,7 +77,16 @@ export function shellPage(rt: FolioRuntime, mount: string): Promise<Response> {
       head={
         <>
           {rt.dev ? <ReactRefreshPreamble /> : null}
-          <Bootstrap global="__FOLIO_SHELL__" value={{ apiBase: rt.base, mount }} />
+          {/*
+            Two values, not one, and the distinction is the point: `base` is the
+            mount, for screens, the sign-in flow and asset URLs; `apiBase` is where
+            the internal JSON lives. They were one field until the prefix move, and
+            four of its uses turned out not to be JSON at all.
+          */}
+          <Bootstrap
+            global="__FOLIO_SHELL__"
+            value={{ base: rt.base, apiBase: `${rt.base}/api` }}
+          />
         </>
       }
     >

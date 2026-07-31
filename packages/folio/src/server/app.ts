@@ -7,10 +7,10 @@ import { envelope, FolioError, INTERNAL } from './errors'
 import { withActor, withBindings } from './middleware'
 import { accessRoutes } from './routes/access'
 import { API_VERSION, apiRoutes } from './routes/api'
-import { assetRoutes } from './routes/assets'
-import { authRoutes } from './routes/auth'
+import { assetFileRoutes, assetRoutes } from './routes/assets'
+import { authRoutes, sessionRoutes } from './routes/auth'
 import { contentRoutes } from './routes/content'
-import { editorRoutes } from './routes/editor'
+import { editorPageRoutes, editorRoutes } from './routes/editor'
 import { historyRoutes } from './routes/history'
 import { migrationRoutes } from './routes/migrations'
 import { redirectRoutes } from './routes/redirects'
@@ -56,42 +56,86 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // (identity-and-access.md architecture decision 5).
   app.use('*', withActor(rt))
 
-  // The manifest is derived from the config alone: no bindings, no I/O, no way
-  // for the host's environment to turn this into a 500. Deliberately left
-  // ungated: it describes the code, not the content, and the admin bundle needs
-  // it before it can render a sign-in prompt of its own.
-  app.get('/schema', (c) => c.json(rt.manifest))
+  /*
+   * ## Where a route goes, and why
+   *
+   * **A version segment is a promise. Its absence is the absence of one.**
+   * (`../../../docs/specs/foundation/pagination.md` decision 3.)
+   *
+   *   `{base}/api/v1/*`  a contract with somebody's script. Changes by adding a
+   *                      `v2`, never by changing what `v1` answers.
+   *   `{base}/api/*`     internal to the admin. Ships in the same deploy as its
+   *                      only caller and may change shape in any commit.
+   *   `{base}/*`         pages and public files: the shell's screens, the sign-in
+   *                      flow, a story's preview, an asset's bytes.
+   *
+   * The two `/api` surfaces look like siblings and are not, which was the
+   * objection to sharing one prefix. `test/workers/api-partition.test.ts` asserts
+   * the split rather than leaving it to a reader's memory, so adding
+   * `{base}/api/v1/stories` by reflex fails CI. **An internal route may never be
+   * named `v1` or `v2`.**
+   *
+   * Mount order below is load-bearing in three places, each marked.
+   */
 
-  // Ahead of the resource routes: `/login/verify` must not be read as
-  // `/login/:provider`, and neither may be shadowed by a `:id` pattern further
-  // down. Nothing in here needs a credential, which is what makes it safe to
-  // mount before any gate exists (identity-and-access.md).
-  app.route('/', authRoutes<Env>(rt))
-  app.route('/', accessRoutes<Env>(rt))
-
-  // Ahead of the resource routes, so `/api/v1/documents/:id` is never read as one
-  // of their `:id` patterns. Two surfaces over one set of services
-  // (`../../../docs/specs/platform/content-api.md` decision 2): everything below
-  // this line is internal to the admin and free to change with it, everything
-  // under `/api/v1` is a contract with somebody's script. Mounted *after*
-  // `withActor`, like everything else, so a token and a session cookie are
-  // resolved by the same middleware and each route declares what it needs at its
-  // own mount.
+  // (1) `/api/v1` first, so `/api/v1/documents/:id` is never read as one of the
+  // internal routes' `:id` patterns. Mounted *after* `withActor`, like everything
+  // else, so a token and a session cookie are resolved by the same middleware.
   app.route(`/api/${API_VERSION}`, apiRoutes<Env>(rt))
 
-  // Ahead of the resource routes, so its wildcard is never reached for a path one
-  // of them owns — and it only matches under its own prefix anyway, which is the
-  // reason that prefix exists (see routes/shell.ts).
-  app.route('/', shellRoutes<Env>(rt))
+  // The manifest is derived from the config alone: no bindings, no I/O, no way for
+  // the host's environment to turn this into a 500. Deliberately ungated — it
+  // describes the code, not the content, and the admin bundle needs it before it
+  // can render a sign-in prompt of its own.
+  app.get('/api/schema', (c) => c.json(rt.manifest))
 
-  app.route('/', storyRoutes<Env>(rt))
-  app.route('/', historyRoutes<Env>(rt))
-  app.route('/', assetRoutes<Env>(rt))
-  app.route('/', editorRoutes<Env>(rt))
-  app.route('/', redirectRoutes<Env>(rt))
-  app.route('/', migrationRoutes<Env>(rt))
-  app.route('/', contentRoutes<Env>(rt))
-  app.route('/', spaceRoutes<Env>(rt))
+  // (2) Inside `/api`, `/login/verify` has no counterpart to be confused with, but
+  // `/story/:id/...` patterns are still shadow-prone, so the specific ones go
+  // first. Nothing in `sessionRoutes` needs a credential to *reach*, which is what
+  // makes it safe ahead of any gate.
+  app.route('/api', sessionRoutes<Env>(rt))
+  app.route('/api', accessRoutes<Env>(rt))
+  app.route('/api', storyRoutes<Env>(rt))
+  app.route('/api', historyRoutes<Env>(rt))
+  app.route('/api', assetRoutes<Env>(rt))
+  app.route('/api', editorRoutes<Env>(rt))
+  app.route('/api', redirectRoutes<Env>(rt))
+  app.route('/api', migrationRoutes<Env>(rt))
+  app.route('/api', contentRoutes<Env>(rt))
+  app.route('/api', spaceRoutes<Env>(rt))
+
+  /**
+   * An unmatched path under `/api` is a **JSON 404**, and this line is what makes
+   * it one.
+   *
+   * Without it the shell's wildcard below catches everything unmatched — including
+   * a typo'd or retired API path — and answers 200 with an HTML document. A `fetch`
+   * then fails inside `res.json()` with a syntax error pointing at `<!doctype`,
+   * which is about as far from the real problem as a message can get.
+   * `test/workers/api-partition.test.ts` found this, and now asserts it.
+   *
+   * `app.all`, not `app.get`: a POST to a path that no longer exists deserves the
+   * same answer as a GET to one.
+   */
+  app.all('/api/*', () => {
+    throw new FolioError('not_found', 'No such API route')
+  })
+
+  // The bare mount: pages and public bytes. All of these are navigated to or
+  // embedded in HTML, so none of them may move under `/api`.
+  //
+  // `authRoutes` stays ahead of the rest for its original reason: `/login/verify`
+  // must not be read as `/login/:provider`.
+  app.route('/', authRoutes<Env>(rt))
+  app.route('/', assetFileRoutes<Env>())
+
+  // (3) `editorPageRoutes` **must** precede `shellRoutes`, whose wildcard covers
+  // every bare path. That ordering is what keeps the working single-screen editor
+  // at `{base}/edit/:id` while the rebuilt shell owns everything else; deleting
+  // those two registrations is the whole of what hands the URL to the new editor
+  // at port phase 7.
+  app.route('/', editorPageRoutes<Env>(rt))
+  app.route('/', shellRoutes<Env>(rt))
 
   return app
 }

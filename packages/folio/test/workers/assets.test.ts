@@ -21,7 +21,8 @@ import type { AssetRow } from '../../src/server/assets'
  */
 
 const ORIGIN = 'https://example.com'
-const API = `${ORIGIN}/folio`
+const BASE = `${ORIGIN}/folio`
+const API = `${BASE}/api`
 
 interface ErrorEnvelope {
   error: { code: string; message: string }
@@ -84,7 +85,7 @@ describe('serving: five raster types render inline, everything else downloads', 
       asset: AssetRow
     }>()
 
-    const served = await SELF.fetch(`${API}/asset/${asset.key}`)
+    const served = await SELF.fetch(`${BASE}/asset/${asset.key}`)
     expect(served.headers.get('content-type')).toBe('image/png')
     expect(served.headers.get('x-content-type-options')).toBe('nosniff')
     expect(served.headers.get('content-disposition')).toBe('inline')
@@ -98,7 +99,7 @@ describe('serving: five raster types render inline, everything else downloads', 
       asset: AssetRow
     }>()
 
-    const served = await SELF.fetch(`${API}/asset/${asset.key}`)
+    const served = await SELF.fetch(`${BASE}/asset/${asset.key}`)
     expect(served.headers.get('content-type')).toBe('application/octet-stream')
     expect(served.headers.get('content-disposition')).toBe('attachment')
     expect(served.headers.get('x-content-type-options')).toBe('nosniff')
@@ -116,7 +117,7 @@ describe('serving: five raster types render inline, everything else downloads', 
     }>()
     expect(asset.contentType).toBe('image/gif')
 
-    const served = await SELF.fetch(`${API}/asset/${asset.key}`)
+    const served = await SELF.fetch(`${BASE}/asset/${asset.key}`)
     expect(served.headers.get('content-type')).toBe('image/gif')
     expect(served.headers.get('x-content-type-options')).toBe('nosniff')
     expect(served.headers.get('content-security-policy')).toBe("default-src 'none'; sandbox")
@@ -141,7 +142,7 @@ describe('the public asset route only ever reads a key Folio itself minted', () 
 
 describe('upload size cap: enforced before the body is fully buffered', () => {
   it('refuses an oversized upload on the declared Content-Length, before reading anything', async () => {
-    const { status, body } = await failureOf('/folio/assets?filename=huge.png', {
+    const { status, body } = await failureOf('/folio/api/assets?filename=huge.png', {
       method: 'POST',
       headers: {
         'content-type': 'image/png',
@@ -263,7 +264,7 @@ describe('transform responses are wrapped in the Cache API, keyed on the full UR
     await env.MEDIA.put(key, PNG_1X1, { httpMetadata: { contentType: 'image/png' } })
 
     const { images, invocations } = fakeImages(new Uint8Array([9, 9, 9]).buffer, 'image/webp')
-    const request = new Request(`${API}/asset/${key}?w=100`)
+    const request = new Request(`${BASE}/asset/${key}?w=100`)
     const transform = parseTransform(new URL(request.url).searchParams)
 
     const first = await serveAsset(env.MEDIA, images, key, transform, request)
@@ -281,8 +282,8 @@ describe('transform responses are wrapped in the Cache API, keyed on the full UR
     await env.MEDIA.put(key, PNG_1X1, { httpMetadata: { contentType: 'image/png' } })
     const { images, invocations } = fakeImages(new Uint8Array([1]).buffer, 'image/webp')
 
-    const reqA = new Request(`${API}/asset/${key}?w=100`)
-    const reqB = new Request(`${API}/asset/${key}?w=200`)
+    const reqA = new Request(`${BASE}/asset/${key}?w=100`)
+    const reqB = new Request(`${BASE}/asset/${key}?w=200`)
     await serveAsset(env.MEDIA, images, key, parseTransform(new URL(reqA.url).searchParams), reqA)
     await serveAsset(env.MEDIA, images, key, parseTransform(new URL(reqB.url).searchParams), reqB)
 
@@ -301,7 +302,7 @@ describe('transform responses are wrapped in the Cache API, keyed on the full UR
     // minting unlimited billable transforms behind a single asset URL.
     const rawQueries = ['w=99999', `w=${MAX_TRANSFORM_DIMENSION}`, 'w=2400&cachebust=1', 'w=+2400']
     for (const q of rawQueries) {
-      const req = new Request(`${API}/asset/${key}?${q}`)
+      const req = new Request(`${BASE}/asset/${key}?${q}`)
       await serveAsset(env.MEDIA, images, key, parseTransform(new URL(req.url).searchParams), req)
     }
 
@@ -313,7 +314,7 @@ describe('transform responses are wrapped in the Cache API, keyed on the full UR
     await env.MEDIA.put(key, PNG_1X1, { httpMetadata: { contentType: 'image/png' } })
     const { images, invocations } = fakeImages(new Uint8Array([3]).buffer, 'image/webp')
 
-    const request = new Request(`${API}/asset/${key}?w=100`, { method: 'HEAD' })
+    const request = new Request(`${BASE}/asset/${key}?w=100`, { method: 'HEAD' })
     const transform = parseTransform(new URL(request.url).searchParams)
 
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -336,7 +337,7 @@ describe('transform responses are wrapped in the Cache API, keyed on the full UR
     const key = 'ast_cachetest6-photo.png'
     await env.MEDIA.put(key, PNG_1X1, { httpMetadata: { contentType: 'image/png' } })
 
-    const request = new Request(`${API}/asset/${key}?w=100`)
+    const request = new Request(`${BASE}/asset/${key}?w=100`)
     const transform = parseTransform(new URL(request.url).searchParams)
     const res = await serveAsset(env.MEDIA, undefined, key, transform, request)
 
@@ -363,7 +364,7 @@ describe('transform responses are wrapped in the Cache API, keyed on the full UR
       hosted: {},
     } as unknown as ImagesBinding
 
-    const request = new Request(`${API}/asset/${key}?w=100`)
+    const request = new Request(`${BASE}/asset/${key}?w=100`)
     const transform = parseTransform(new URL(request.url).searchParams)
 
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})

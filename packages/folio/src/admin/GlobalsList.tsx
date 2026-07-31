@@ -30,13 +30,14 @@ export function globalTypes(
 export function globalPreviewUrl(
   type: DocumentType,
   flat: readonly StoryNode[],
-  apiBase: string,
+  /** The bare mount, not `apiBase`: `/preview/global/:name` renders HTML. */
+  base: string,
 ): string {
   if (type.previewPath !== undefined) {
     const host = flat.find((s) => s.path === type.previewPath)
     if (host?.previewUrl) return `${host.previewUrl}&as=${encodeURIComponent(type.name)}`
   }
-  return `${apiBase}/preview/global/${encodeURIComponent(type.name)}`
+  return `${base}/preview/global/${encodeURIComponent(type.name)}`
 }
 
 interface Props {

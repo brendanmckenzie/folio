@@ -8,16 +8,13 @@
  * (`vitest.config.ts`), so the router is parsing and formatting, and the hook that
  * talks to `history` holds no knowledge of its own.
  *
- * **Every path here is relative to a mount prefix**, and that is not only about
- * `basePath` being host-configurable. It is what lets the prototype live under
- * `{base}/ui` while the admin's internal JSON still owns the bare namespace:
- * `{base}/content`, `{base}/assets`, `{base}/documents` and `{base}/redirects` are
- * all JSON routes today, so a screen cannot take those paths until they move.
- *
- * They move to `{base}/api/` in `docs/specs/foundation/pagination.md` phase 3, at
- * which point this file needs **no edit at all** — the mount changes in
- * `server/routes/shell.ts` and every URL here follows. That is the whole return on
- * making the router prefix-relative rather than absolute.
+ * **Every path here is relative to a mount prefix**, because `basePath` is
+ * host-configurable — and that paid for itself immediately. The shell was mounted
+ * at `{base}/ui` while the admin's internal JSON still owned the bare namespace;
+ * when the JSON moved to `{base}/api` (`docs/specs/foundation/pagination.md`
+ * phase 3) and the screens took the bare paths, **this file needed no edit at
+ * all**. The mount changed in `server/routes/shell.ts` and every URL here
+ * followed.
  */
 
 /** The screens. `docs/ui-architecture.md`'s table, minus `login`, which is
@@ -32,10 +29,8 @@ export type Screen =
   | { name: 'model' }
   | { name: 'redirects' }
   | { name: 'settings' }
-  /** The kitchen sink. Dev only, and the one screen whose URL is a little silly
-   * while the prototype is mounted at `{base}/ui`: `{base}/ui/ui`. Left alone
-   * deliberately — the awkwardness is a reminder the prefix is temporary, and
-   * the table needs no edit when it goes. */
+  /** The kitchen sink. Dev only, at `{base}/ui` — which it now has to itself,
+   * having read `{base}/ui/ui` while the shell was under its own `/ui` prefix. */
   | { name: 'ui' }
   | { name: 'missing'; path: string }
 

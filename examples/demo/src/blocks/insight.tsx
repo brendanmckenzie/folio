@@ -43,7 +43,7 @@ export const insightPage = defineBlock({
     // `indexed: true` is what makes this queryable, and it is only ever declared on
     // a root block (`content-model/collections.md` decision 2): the index is a
     // fixed projection of a document, so it cannot depend on which blocks happen
-    // to be inside one. `GET /folio/audit` reports the flag on anything else.
+    // to be inside one. `GET /folio/api/audit` reports the flag on anything else.
     //
     // Translatable *and* indexed: a French index page filtering a French title
     // matches, because the projection writes a row per locale.

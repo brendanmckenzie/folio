@@ -77,7 +77,7 @@ describe('withFilter / filterValue', () => {
 })
 
 describe('queryToParams', () => {
-  it('spells a query exactly as GET /folio/content reads it', () => {
+  it('spells a query exactly as GET /folio/api/content reads it', () => {
     const params = queryToParams(
       {
         type: 'insight',
@@ -115,7 +115,7 @@ describe('useCollections: the pure pieces', () => {
 
   it('remembers a refused query, so the effect cannot retry it forever', async () => {
     const result = await loadCollections(
-      '/folio',
+      '/folio/api',
       [['k', { type: 'insight' }]],
       async () => new Response('{"error":{}}', { status: 400 }),
     )
@@ -124,7 +124,7 @@ describe('useCollections: the pure pieces', () => {
   })
 
   it('does NOT remember a transport failure, which is no answer about the query', async () => {
-    const result = await loadCollections('/folio', [['k', { type: 'insight' }]], async () => {
+    const result = await loadCollections('/folio/api', [['k', { type: 'insight' }]], async () => {
       throw new Error('offline')
     })
     expect(result.failed).toEqual([])
@@ -137,7 +137,7 @@ describe('useCollections: the pure pieces', () => {
   it('marks every answer stale: the admin reads PUBLISHED content', async () => {
     const page: ContentPage = { items: [], total: 3, page: 1, perPage: 6, pages: 1 }
     const result = await loadCollections(
-      '/folio',
+      '/folio/api',
       [['k', { type: 'insight' }]],
       async () => new Response(JSON.stringify(page), { status: 200 }),
     )
@@ -146,11 +146,11 @@ describe('useCollections: the pure pieces', () => {
 
   it('sends the query to the content route, encoded', async () => {
     let seen = ''
-    await loadCollections('/folio', [['k', { type: 'insight', perPage: 4 }]], async (url) => {
+    await loadCollections('/folio/api', [['k', { type: 'insight', perPage: 4 }]], async (url) => {
       seen = String(url)
       return new Response('{"items":[],"total":0,"page":1,"perPage":4,"pages":0}')
     })
-    expect(seen).toContain('/folio/content?')
+    expect(seen).toContain('/folio/api/content?')
     expect(seen).toContain('type=insight')
     expect(seen).toContain('perPage=4')
   })

@@ -25,7 +25,7 @@ const { cloneSubtree } = await import(
 )
 const { keyAtIndex } = await import(new URL('../packages/folio/src/core/doc.ts', import.meta.url))
 
-const BASE = 'ws://localhost:5199/folio/story/sty_home/socket'
+const BASE = 'ws://localhost:5199/folio/api/story/sty_home/socket'
 const HTTP = 'http://localhost:5199'
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -240,7 +240,7 @@ check(
 )
 
 // --- publish snapshots draft to D1 ---
-const pub = await fetch(`${HTTP}/folio/story/sty_home/publish`, { method: 'POST' }).then((r) =>
+const pub = await fetch(`${HTTP}/folio/api/story/sty_home/publish`, { method: 'POST' }).then((r) =>
   r.json(),
 )
 check('publish returns ok', pub.ok === true)

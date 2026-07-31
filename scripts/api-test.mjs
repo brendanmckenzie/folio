@@ -29,7 +29,7 @@
 //
 // The seeded token (examples/demo/seed.sql) is deliberately not used for the scope
 // checks: it holds `admin`, so it would pass everything. Narrow tokens are minted
-// through `POST /folio/tokens` as an admin, which is what a person would do.
+// through `POST /folio/api/tokens` as an admin, which is what a person would do.
 
 import './lib/ts-resolve.mjs'
 
@@ -40,7 +40,11 @@ const { PROTOCOL_VERSION } = await import(
 )
 
 const HTTP = 'http://localhost:5199'
-const ADMIN = `${HTTP}/folio`
+// The admin's **internal** JSON, which is what `asAdmin` below reaches for: the
+// activity trail and the token list are not part of the v1 contract. Unversioned on
+// purpose — a version segment is a promise, and this surface makes none
+// (`docs/specs/foundation/pagination.md` decision 3).
+const ADMIN = `${HTTP}/folio/api`
 const API = `${HTTP}/folio/api/v1`
 
 /** The fixed local-dev token seeded by examples/demo/seed.sql. */
@@ -168,7 +172,7 @@ check(
 /* --- a write reaches an open editor ------------------------------------- */
 
 function client(name, storyId) {
-  const ws = new WebSocket(`ws://localhost:5199/folio/story/${storyId}/socket`)
+  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/${storyId}/socket`)
   const inbox = []
   const waiters = []
   ws.addEventListener('message', (e) => {

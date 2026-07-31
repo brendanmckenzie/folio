@@ -1,35 +1,31 @@
 /**
- * The rebuilt admin's HTML, at every path its router owns.
+ * The rebuilt admin's HTML, at every path its router owns — which is **every bare
+ * path under the mount**, via a wildcard.
  *
- * # Why it is mounted at `{base}/ui` and not at `{base}`
+ * That is possible because the admin's internal JSON moved to `{base}/api/`
+ * (`../../../docs/specs/foundation/pagination.md` decision 3, phase 3). Before it
+ * did, four screens collided head-on with JSON routes — `{base}/content`,
+ * `{base}/assets`, `{base}/documents/:type`, `{base}/redirects` — and the shell had
+ * to live under a `/ui` prefix. The collision was total rather than incidental: the
+ * screens and the API are named after the same resources because they are about
+ * the same resources.
  *
- * `docs/ui-architecture.md` gives the screens the bare paths — `{base}/content`,
- * `{base}/assets`, `{base}/documents/:type`, `{base}/redirects`. **Four of those
- * are JSON routes today**, and one of them (`GET {base}/content`) is the content
- * index query the published site itself uses. A screen cannot take a path a
- * fetch is already answering on, and the collision is total rather than
- * incidental: the screens and the API are named after the same resources, because
- * they are about the same resources.
- *
- * So the shell is mounted under a prefix until the API moves out of the way.
- *
- * **Decided 2026-07-31** (`docs/specs/foundation/pagination.md` decision 3, its
- * phase 3): the admin's internal JSON moves to `{base}/api/`, beside the existing
- * `{base}/api/v1/*`, and the screens take the bare paths. One rule keeps the two
- * apart, and it is worth knowing before adding any route here:
+ * One rule keeps the two `/api` surfaces apart, and it is worth knowing before
+ * adding any route anywhere in `server/`:
  *
  * > **A version segment is a promise. Its absence is the absence of one.**
  * > `{base}/api/v1/*` is a contract with somebody's script and changes by adding a
  * > `v2`. `{base}/api/*` with no version is internal to the admin, ships in the
  * > same deploy as its only caller, and may change shape in any commit.
  *
- * A workers test pins that partition, because the objection to sharing one prefix
- * was that the two surfaces would look like siblings — which they do, so the
- * difference is asserted rather than left to a reader's memory.
+ * `test/workers/api-partition.test.ts` asserts that split, because the objection
+ * to sharing one prefix was that the two surfaces would look like siblings — which
+ * they do, so the difference is a test rather than a reader's memory.
  *
- * When that lands, this file loses `SHELL_PREFIX` and mounts at `{base}`. The
- * client needs no edit: `admin/ui/route.ts` is relative to its mount by necessity,
- * since `basePath` is host-configurable.
+ * **This wildcard is registered last on purpose.** Anything that must keep a bare
+ * path registers ahead of it in `app.ts`: the sign-in flow, an asset's bytes, a
+ * singleton's preview, and `{base}/edit/:id`, which the working single-screen
+ * editor keeps until port phase 7 replaces it.
  */
 import { Hono } from 'hono'
 import { READ_DRAFT } from '../auth/roles'
@@ -38,13 +34,8 @@ import { shellPage } from '../pages'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
 
-/** The one segment. Exported so a test and the client's own boot value cannot
- * drift from it. */
-export const SHELL_PREFIX = 'ui'
-
 export function shellRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
-  const mount = `${rt.base}/${SHELL_PREFIX}`
 
   /**
    * Gated exactly like the editor page (`READ_DRAFT`), and for the same reason:
@@ -57,8 +48,8 @@ export function shellRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * application they are signed in to, and the recovery is one click away in a
    * sidebar the server cannot draw.
    */
-  app.get(`/${SHELL_PREFIX}`, requireHtmlAccess<Env>(rt, READ_DRAFT), () => shellPage(rt, mount))
-  app.get(`/${SHELL_PREFIX}/*`, requireHtmlAccess<Env>(rt, READ_DRAFT), () => shellPage(rt, mount))
+  app.get('/', requireHtmlAccess<Env>(rt, READ_DRAFT), () => shellPage(rt))
+  app.get('/*', requireHtmlAccess<Env>(rt, READ_DRAFT), () => shellPage(rt))
 
   return app
 }

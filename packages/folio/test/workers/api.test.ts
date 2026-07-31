@@ -736,7 +736,7 @@ describe('Idempotency-Key', () => {
 })
 
 async function activityOf(id: string) {
-  const res = await call(`${ORIGIN}/folio/story/${id}/activity`, {
+  const res = await call(`${ORIGIN}/folio/api/story/${id}/activity`, {
     headers: await cookieFor('admin'),
   })
   return json<{ mutations: unknown[] }[]>(res)
@@ -748,7 +748,7 @@ describe('a write reaches an open editor', () => {
   it('broadcasts the delta to a connected socket, attributed to the token', async () => {
     const id = await seed({})
     const { cookie } = await cookieFor('editor')
-    const upgrade = await call(`${ORIGIN}/folio/story/${id}/socket`, {
+    const upgrade = await call(`${ORIGIN}/folio/api/story/${id}/socket`, {
       headers: { upgrade: 'websocket', cookie },
     })
     const ws = upgrade.webSocket!

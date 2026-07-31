@@ -52,7 +52,8 @@ import { applySeedFixture } from './seed-fixture'
  */
 
 const ORIGIN = 'https://example.com'
-const API = `${ORIGIN}/folio`
+const BASE = `${ORIGIN}/folio`
+const API = `${BASE}/api`
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const res = await SELF.fetch(`${ORIGIN}${path}`, {
@@ -81,7 +82,7 @@ async function htmlOf(path: string): Promise<string> {
 }
 
 function createStory(title: string, parentId?: string): Promise<StoryMeta> {
-  return postJson<StoryMeta>('/folio/stories', { title, parentId })
+  return postJson<StoryMeta>('/folio/api/stories', { title, parentId })
 }
 
 interface ErrorEnvelope {
@@ -131,7 +132,7 @@ interface Socket {
 
 /**
  * Opens a real WebSocket to a story's sync endpoint, the same upgrade a
- * browser performs against `/folio/story/:id/socket`. `SELF.fetch` dispatches
+ * browser performs against `/folio/api/story/:id/socket`. `SELF.fetch` dispatches
  * straight into this pool's Worker, so the 101 response carries a live
  * `webSocket`; `.accept()` starts it flowing, exactly as it would for any
  * Worker-to-Worker upgrade.
@@ -204,7 +205,7 @@ async function connect(storyId: string): Promise<Socket> {
 }
 
 /**
- * Migrations (packages/folio/migrations/**) are structure only — no seed
+ * Migrations (packages/folio/api/migrations/**) are structure only — no seed
  * rows, unlike the old drop-and-reseed schema.sql — so this suite seeds its
  * own fixture once, up front, by running the actual examples/demo/seed.sql
  * (see seed-fixture.ts) rather than a hand-typed insert that could drift from
@@ -218,7 +219,7 @@ beforeAll(async () => {
   await applySeedFixture(env.DB)
 })
 
-describe('stories: CRUD over /folio/stories', () => {
+describe('stories: CRUD over /folio/api/stories', () => {
   it('creates a story with a slug derived from the title and resolved urls', async () => {
     const story = await createStory('CRUD Parent')
 
@@ -239,7 +240,7 @@ describe('stories: CRUD over /folio/stories', () => {
   })
 
   it('lists every story in the tree, seeded and created', async () => {
-    const tree = await getJson<StoryNode[]>('/folio/stories')
+    const tree = await getJson<StoryNode[]>('/folio/api/stories')
     const flat = flatten(tree)
 
     expect(flat.some((n) => n.id === 'sty_home')).toBe(true)
@@ -249,7 +250,7 @@ describe('stories: CRUD over /folio/stories', () => {
   it('renames a story: title, slug and path move together', async () => {
     const created = await createStory('Rename Before')
 
-    const renamed = await patchJson<StoryMeta>(`/folio/stories/${created.id}`, {
+    const renamed = await patchJson<StoryMeta>(`/folio/api/stories/${created.id}`, {
       title: 'Rename After',
       slug: 'rename-after',
     })
@@ -268,7 +269,7 @@ describe('stories: CRUD over /folio/stories', () => {
 
     expect(new Set(body.deleted)).toEqual(new Set([parent.id, child.id]))
 
-    const tree = await getJson<StoryNode[]>('/folio/stories')
+    const tree = await getJson<StoryNode[]>('/folio/api/stories')
     expect(flatten(tree).some((n) => n.id === parent.id)).toBe(false)
   })
 
@@ -311,7 +312,7 @@ describe('stories: CRUD over /folio/stories', () => {
 // getOrInit needs no new Durable Object entry point), decision 4 (the
 // *draft* is cloned, not the published snapshot), checkpoint 3 (uids always
 // re-allocated), checkpoint 4 (no version history of its own).
-describe('duplicate: POST /folio/stories/:id/duplicate', () => {
+describe('duplicate: POST /folio/api/stories/:id/duplicate', () => {
   it('seeds the new story with the source draft, uids re-allocated, versions empty', async () => {
     const source = await createStory('Duplicate Source')
     const conn = await connect(source.id)
@@ -342,7 +343,7 @@ describe('duplicate: POST /folio/stories/:id/duplicate', () => {
     expect(created.publishedAt).toBeNull()
     expect(created.title).toBe('Duplicate Source (copy)')
 
-    const { doc: cloned } = await getJson<{ doc: Doc }>(`/folio/story/${created.id}/document`)
+    const { doc: cloned } = await getJson<{ doc: Doc }>(`/folio/api/story/${created.id}/document`)
     expect(cloned.bloks[cloned.root]?.data.title).toBe('Edited Draft Title')
 
     // Checkpoint 3: every uid re-allocated, including the root.
@@ -352,11 +353,13 @@ describe('duplicate: POST /folio/stories/:id/duplicate', () => {
     expect(clonedLink?.data).toEqual({ label: 'Original Link', href: null })
 
     // Checkpoint 4: no version history of its own.
-    const versions = await getJson<VersionMeta[]>(`/folio/story/${created.id}/versions`)
+    const versions = await getJson<VersionMeta[]>(`/folio/api/story/${created.id}/versions`)
     expect(versions).toEqual([])
 
     // The source is untouched by its own duplication.
-    const { doc: stillSource } = await getJson<{ doc: Doc }>(`/folio/story/${source.id}/document`)
+    const { doc: stillSource } = await getJson<{ doc: Doc }>(
+      `/folio/api/story/${source.id}/document`,
+    )
     expect(stillSource.root).toBe(sourceDoc.root)
     expect(stillSource.bloks['dup-lnk1']).toBeDefined()
   })
@@ -384,7 +387,7 @@ describe('duplicate: POST /folio/stories/:id/duplicate', () => {
     const pub = await publish(created.id)
     expect(pub.ok).toBe(true)
 
-    const tree = await getJson<StoryNode[]>('/folio/stories')
+    const tree = await getJson<StoryNode[]>('/folio/api/stories')
     const row = flatten(tree).find((n) => n.id === created.id)
     expect(row?.publishedAt).not.toBeNull()
 
@@ -394,7 +397,7 @@ describe('duplicate: POST /folio/stories/:id/duplicate', () => {
   })
 
   it('404s duplicating an unknown story', async () => {
-    const { status } = await failureOf(`/folio/stories/sty_nope/duplicate`, jsonPost('{}'))
+    const { status } = await failureOf(`/folio/api/stories/sty_nope/duplicate`, jsonPost('{}'))
     expect(status).toBe(404)
   })
 })
@@ -479,7 +482,7 @@ describe('publish', () => {
     await conn.tx('w2', [{ t: 'set', uid: doc.root, field: 'title', value: 'Second' }])
     expect(await runDurableObjectAlarm(stub)).toBe(true)
 
-    const tree = await getJson<StoryNode[]>('/folio/stories')
+    const tree = await getJson<StoryNode[]>('/folio/api/stories')
     const row = flatten(tree).find((n) => n.id === story.id)
     expect(row?.state).toBe('changed')
     expect(row?.hasUnpublishedChanges).toBe(true)
@@ -501,7 +504,7 @@ async function unpublish(storyId: string): Promise<UnpublishResult> {
 }
 
 async function stateOf(storyId: string): Promise<string | undefined> {
-  const tree = await getJson<StoryNode[]>('/folio/stories')
+  const tree = await getJson<StoryNode[]>('/folio/api/stories')
   return flatten(tree).find((n) => n.id === storyId)?.state
 }
 
@@ -524,13 +527,13 @@ describe('unpublish', () => {
     expect(await stateOf(story.id)).toBe('unpublished')
 
     // The draft is byte-unchanged and still editable/previewable.
-    const stored = await getJson<{ doc: Doc }>(`/folio/story/${story.id}/document`)
+    const stored = await getJson<{ doc: Doc }>(`/folio/api/story/${story.id}/document`)
     expect(stored.doc.bloks[doc.root]?.data.title).toBe('The Offer')
     const preview = await htmlOf(story.previewUrl!)
     expect(preview).toContain('The Offer')
 
     // Version history survives.
-    const versions = await getJson<VersionMeta[]>(`/folio/story/${story.id}/versions`)
+    const versions = await getJson<VersionMeta[]>(`/folio/api/story/${story.id}/versions`)
     expect(versions.some((v) => v.id === pub.version.id)).toBe(true)
 
     conn.close()
@@ -548,7 +551,7 @@ describe('unpublish', () => {
   })
 
   it('404s for an unknown story', async () => {
-    const { status, body } = await failureOf(`/folio/story/sty_nope/unpublish`, {
+    const { status, body } = await failureOf(`/folio/api/story/sty_nope/unpublish`, {
       method: 'POST',
     })
     expect(status).toBe(404)
@@ -572,7 +575,7 @@ describe('unpublish', () => {
     const html = await htmlOf(`/${story.path}`)
     expect(html).toContain('Second')
 
-    const versions = await getJson<VersionMeta[]>(`/folio/story/${story.id}/versions`)
+    const versions = await getJson<VersionMeta[]>(`/folio/api/story/${story.id}/versions`)
     expect(versions.length).toBeGreaterThanOrEqual(2)
 
     conn.close()
@@ -604,11 +607,11 @@ describe('unpublish', () => {
     expect((await SELF.fetch(`${ORIGIN}/`)).status).toBe(404)
 
     // Still editable.
-    const stored = await getJson<{ doc: Doc }>(`/folio/story/sty_home/document`)
+    const stored = await getJson<{ doc: Doc }>(`/folio/api/story/sty_home/document`)
     expect(stored.doc.bloks[doc.root]?.data.title).toBe('Root Home')
 
     // Delete is still refused, as today — unpublish is not delete.
-    const del = await failureOf('/folio/stories/sty_home', { method: 'DELETE' })
+    const del = await failureOf('/folio/api/stories/sty_home', { method: 'DELETE' })
     expect(del.status).toBe(409)
 
     conn.close()
@@ -633,7 +636,7 @@ describe('versions and restore', () => {
     const pub2 = await publish(story.id)
 
     const list = await getJson<Array<VersionMeta & { doc?: unknown }>>(
-      `/folio/story/${story.id}/versions`,
+      `/folio/api/story/${story.id}/versions`,
     )
 
     expect(list[0]?.id).toBe(pub2.version.id)
@@ -650,14 +653,14 @@ describe('versions and restore', () => {
     const root = doc.root
 
     await conn.tx('r1', [{ t: 'set', uid: root, field: 'title', value: 'First' }])
-    const checkpoint = await postJson<VersionMeta>(`/folio/story/${story.id}/versions`, {
+    const checkpoint = await postJson<VersionMeta>(`/folio/api/story/${story.id}/versions`, {
       label: 'first',
       actor: 'alice',
     })
 
     await conn.tx('r2', [{ t: 'set', uid: root, field: 'title', value: 'Second' }])
 
-    const { doc: target } = await getJson<{ doc: Doc }>(`/folio/versions/${checkpoint.id}`)
+    const { doc: target } = await getJson<{ doc: Doc }>(`/folio/api/versions/${checkpoint.id}`)
     const probe = await connect(story.id)
     const current = await probe.hello('bob')
     probe.close()
@@ -675,7 +678,7 @@ describe('versions and restore', () => {
     after.close()
     expect(restored.bloks[root]?.data.title).toBe('First')
 
-    const activity = await getJson<ActivityEntry[]>(`/folio/story/${story.id}/activity`)
+    const activity = await getJson<ActivityEntry[]>(`/folio/api/story/${story.id}/activity`)
     expect(activity[0]!.syncId).toBeGreaterThan(activity.at(-1)!.syncId)
     expect(
       activity.some((e) =>
@@ -727,7 +730,7 @@ describe('rename updates links', () => {
     const before = await htmlOf(source.previewUrl!)
     expect(before).toContain(`href="${target.url}"`)
 
-    const renamed = await patchJson<StoryMeta>(`/folio/stories/${target.id}`, {
+    const renamed = await patchJson<StoryMeta>(`/folio/api/stories/${target.id}`, {
       slug: 'renamed-target',
     })
 
@@ -737,14 +740,14 @@ describe('rename updates links', () => {
 
     // The document itself is untouched by the rename: it still stores an id,
     // never a path.
-    const stored = await getJson<{ doc: Doc }>(`/folio/story/${source.id}/document`)
+    const stored = await getJson<{ doc: Doc }>(`/folio/api/story/${source.id}/document`)
     expect(stored.doc.bloks.linkblok1?.data.href).toEqual({ kind: 'story', id: target.id })
 
     conn.close()
   })
 })
 
-describe('DELETE /folio/stories/:id and the redirect option (redirects.md)', () => {
+describe('DELETE /folio/api/stories/:id and the redirect option (redirects.md)', () => {
   it('defaults to redirecting the deleted page to its parent', async () => {
     const parent = await createStory('Delete-Redirect Parent')
     const child = await createStory('Delete-Redirect Child', parent.id)
@@ -752,7 +755,7 @@ describe('DELETE /folio/stories/:id and the redirect option (redirects.md)', () 
     const res = await SELF.fetch(`${API}/stories/${child.id}`, { method: 'DELETE' })
     expect(res.ok).toBe(true)
 
-    const list = await getJson<{ rows: Redirect[] }>('/folio/redirects')
+    const list = await getJson<{ rows: Redirect[] }>('/folio/api/redirects')
     expect(list.rows.find((r) => r.from === child.path)?.to).toBe(parent.path)
   })
 
@@ -762,7 +765,7 @@ describe('DELETE /folio/stories/:id and the redirect option (redirects.md)', () 
 
     await SELF.fetch(`${API}/stories/${child.id}?redirect=false`, { method: 'DELETE' })
 
-    const list = await getJson<{ rows: Redirect[] }>('/folio/redirects')
+    const list = await getJson<{ rows: Redirect[] }>('/folio/api/redirects')
     expect(list.rows.some((r) => r.from === child.path)).toBe(false)
   })
 })
@@ -829,7 +832,7 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
       },
     })
 
-    const res = await callHooked(folio2, `/folio/story/${story.id}/publish`, { method: 'POST' })
+    const res = await callHooked(folio2, `/folio/api/story/${story.id}/publish`, { method: 'POST' })
     const pub = await res.json<{ publishedAt: number; version: VersionMeta }>()
 
     expect(calls).toHaveLength(1)
@@ -861,7 +864,7 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
     })
 
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const res = await callHooked(folio2, `/folio/story/${story.id}/publish`, { method: 'POST' })
+    const res = await callHooked(folio2, `/folio/api/story/${story.id}/publish`, { method: 'POST' })
     const body = await res.json<{ ok: boolean }>()
 
     expect(res.status).toBe(200)
@@ -874,7 +877,9 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
     const calls: unknown[] = []
     const folio2 = folioWithHooks({ published: (e) => calls.push(e) })
 
-    const res = await callHooked(folio2, '/folio/story/sty_hook_nope/publish', { method: 'POST' })
+    const res = await callHooked(folio2, '/folio/api/story/sty_hook_nope/publish', {
+      method: 'POST',
+    })
 
     expect(res.status).toBe(404)
     expect(calls).toEqual([])
@@ -894,7 +899,7 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
 
     const res = await callHooked(
       folio2,
-      `/folio/story/${story.id}/versions`,
+      `/folio/api/story/${story.id}/versions`,
       jsonPost(JSON.stringify({ label: 'hook checkpoint' })),
     )
     const version = await res.json<VersionMeta>()
@@ -922,7 +927,7 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
       deleted: (e) => deletedCalls.push(e),
     })
 
-    const unpubRes = await callHooked(folio2, `/folio/story/${parent.id}/unpublish`, {
+    const unpubRes = await callHooked(folio2, `/folio/api/story/${parent.id}/unpublish`, {
       method: 'POST',
     })
     const unpub = await unpubRes.json<{ unpublishedAt: number }>()
@@ -932,7 +937,7 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
     expect(unpublishedCalls[0]!.story.unpublishedAt).toBe(unpub.unpublishedAt)
     expect(unpublishedCalls[0]!.actor).toBeNull()
 
-    const delRes = await callHooked(folio2, `/folio/stories/${parent.id}?redirect=false`, {
+    const delRes = await callHooked(folio2, `/folio/api/stories/${parent.id}?redirect=false`, {
       method: 'DELETE',
     })
     const del = await delRes.json<{ deleted: string[] }>()
@@ -956,7 +961,7 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
 
     const calls: unknown[] = []
     const folio2 = folioWithHooks({ unpublished: (e) => calls.push(e) })
-    await callHooked(folio2, `/folio/story/${story.id}/unpublish`, { method: 'POST' })
+    await callHooked(folio2, `/folio/api/story/${story.id}/unpublish`, { method: 'POST' })
 
     expect(calls).toEqual([])
   })
@@ -968,7 +973,7 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
     const calls: PathsChangedHookPayload<Cloudflare.Env>[] = []
     const folio2 = folioWithHooks({ pathsChanged: (e) => calls.push(e) })
 
-    const res = await callHooked(folio2, `/folio/stories/${section.id}`, {
+    const res = await callHooked(folio2, `/folio/api/stories/${section.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ slug: 'hook-section-renamed' }),
@@ -994,7 +999,7 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
     // `slug` pinned to its current value: leaving it out would fall back to
     // the new title (`updateStoryStatement`'s own rule) and move the path
     // anyway, which is not the "nothing moved" case this test wants.
-    await callHooked(folio2, `/folio/stories/${story.id}`, {
+    await callHooked(folio2, `/folio/api/stories/${story.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ title: 'Hook No Rename Retitled', slug: story.slug }),
@@ -1009,7 +1014,7 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
 
     const res = await callHooked(
       folio2,
-      '/folio/stories',
+      '/folio/api/stories',
       jsonPost(JSON.stringify({ title: 'Hook Created Target' })),
     )
     const story = await res.json<StoryMeta>()
@@ -1017,7 +1022,11 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0]!.story.id).toBe(story.id)
 
-    const dupRes = await callHooked(folio2, `/folio/stories/${story.id}/duplicate`, jsonPost('{}'))
+    const dupRes = await callHooked(
+      folio2,
+      `/folio/api/stories/${story.id}/duplicate`,
+      jsonPost('{}'),
+    )
     const { story: dup } = await dupRes.json<{ story: StoryMeta }>()
 
     expect(calls).toHaveLength(2)
@@ -1028,7 +1037,7 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
     const calls: unknown[] = []
     const folio2 = folioWithHooks({ created: (e) => calls.push(e) })
 
-    const res = await callHooked(folio2, '/folio/stories', jsonPost(JSON.stringify({})))
+    const res = await callHooked(folio2, '/folio/api/stories', jsonPost(JSON.stringify({})))
 
     expect(res.status).toBe(400)
     expect(calls).toEqual([])
@@ -1039,7 +1048,7 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
 
     const calls: DeletedHookPayload<Cloudflare.Env>[] = []
     const folio2 = folioWithHooks({ deleted: (e) => calls.push(e) })
-    await callHooked(folio2, `/folio/stories/${story.id}?redirect=false`, { method: 'DELETE' })
+    await callHooked(folio2, `/folio/api/stories/${story.id}?redirect=false`, { method: 'DELETE' })
 
     expect(calls).toHaveLength(1)
     const i = calls[0]!.ids.indexOf(story.id)
@@ -1070,7 +1079,7 @@ describe('the caching lifecycle hooks (caching.md)', () => {
 
     // `slug` pinned, so nothing moves: this is exactly the write that alters
     // `StoryRef.title` on every page linking here and used to be silent.
-    await callHooked(folio2, `/folio/stories/${story.id}`, {
+    await callHooked(folio2, `/folio/api/stories/${story.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ title: 'Hook Updated Retitled', slug: story.slug }),
@@ -1088,7 +1097,7 @@ describe('the caching lifecycle hooks (caching.md)', () => {
 
     const calls: unknown[] = []
     const folio2 = folioWithHooks({ updated: (e) => calls.push(e) })
-    await callHooked(folio2, `/folio/stories/${story.id}`, {
+    await callHooked(folio2, `/folio/api/stories/${story.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ title: story.title, slug: story.slug }),
@@ -1107,7 +1116,7 @@ describe('the caching lifecycle hooks (caching.md)', () => {
       pathsChanged: (e) => paths.push(e),
     })
 
-    await callHooked(folio2, `/folio/stories/${story.id}`, {
+    await callHooked(folio2, `/folio/api/stories/${story.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ slug: 'hook-updated-renamed' }),
@@ -1142,7 +1151,7 @@ describe('the caching lifecycle hooks (caching.md)', () => {
 
     const calls: ReindexedHookPayload<Cloudflare.Env>[] = []
     const folio2 = folioWithHooks({ reindexed: (e) => calls.push(e) })
-    const res = await callHooked(folio2, '/folio/reindex', jsonPost('{}'))
+    const res = await callHooked(folio2, '/folio/api/reindex', jsonPost('{}'))
     const report = await res.json<{ documents: number }>()
 
     expect(report.documents).toBeGreaterThan(0)
@@ -1153,7 +1162,7 @@ describe('the caching lifecycle hooks (caching.md)', () => {
   it('does not fire reindexed for a dry run, which writes nothing', async () => {
     const calls: unknown[] = []
     const folio2 = folioWithHooks({ reindexed: (e) => calls.push(e) })
-    await callHooked(folio2, '/folio/reindex', jsonPost(JSON.stringify({ dryRun: true })))
+    await callHooked(folio2, '/folio/api/reindex', jsonPost(JSON.stringify({ dryRun: true })))
 
     expect(calls).toEqual([])
   })
@@ -1164,7 +1173,7 @@ describe('the caching lifecycle hooks (caching.md)', () => {
 
     const created = await callHooked(
       folio2,
-      '/folio/redirects',
+      '/folio/api/redirects',
       jsonPost(JSON.stringify({ from: '/hook-redirect-source', to: '/hook-redirect-target' })),
     )
     expect(created.status).toBe(201)
@@ -1172,7 +1181,7 @@ describe('the caching lifecycle hooks (caching.md)', () => {
     // Normalised: no leading slash, matching what `lookupRedirect` matches on.
     expect(calls[0]!.from).toEqual(['hook-redirect-source'])
 
-    const removed = await callHooked(folio2, '/folio/redirects/hook-redirect-source', {
+    const removed = await callHooked(folio2, '/folio/api/redirects/hook-redirect-source', {
       method: 'DELETE',
     })
     expect(await removed.json<{ deleted: boolean }>()).toEqual({ deleted: true })
@@ -1183,7 +1192,9 @@ describe('the caching lifecycle hooks (caching.md)', () => {
   it('does not fire redirectsChanged for a delete that removed nothing', async () => {
     const calls: unknown[] = []
     const folio2 = folioWithHooks({ redirectsChanged: (e) => calls.push(e) })
-    await callHooked(folio2, '/folio/redirects/hook-redirect-never-existed', { method: 'DELETE' })
+    await callHooked(folio2, '/folio/api/redirects/hook-redirect-never-existed', {
+      method: 'DELETE',
+    })
 
     expect(calls).toEqual([])
   })
@@ -1211,7 +1222,7 @@ describe('the cache purge hook under a runtime with no Workers Cache (caching.md
     // No hooks of its own: the purge is an *internal* hook, registered by
     // `createRuntime` on every instance, so this exercises the real one.
     const folio2 = folioWithHooks({})
-    const res = await callHooked(folio2, `/folio/story/${story.id}/publish`, { method: 'POST' })
+    const res = await callHooked(folio2, `/folio/api/story/${story.id}/publish`, { method: 'POST' })
 
     expect(res.status).toBe(200)
     expect(await res.json<{ ok: boolean }>()).toMatchObject({ ok: true })
@@ -1226,7 +1237,7 @@ describe('the cache purge hook under a runtime with no Workers Cache (caching.md
     const warned = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const folio2 = folioWithHooks({})
 
-    const res = await callHooked(folio2, '/folio/reindex', jsonPost('{}'))
+    const res = await callHooked(folio2, '/folio/api/reindex', jsonPost('{}'))
 
     expect(res.status).toBe(200)
     expect(logged).not.toHaveBeenCalled()
@@ -1236,16 +1247,16 @@ describe('the cache purge hook under a runtime with no Workers Cache (caching.md
   })
 })
 
-describe('redirects: GET/POST/DELETE /folio/redirects', () => {
+describe('redirects: GET/POST/DELETE /folio/api/redirects', () => {
   it('a rename recorded automatically shows up in the list, newest first', async () => {
     const story = await createStory('List-Redirect Source')
     const oldPath = story.path
-    const renamed = await patchJson<StoryMeta>(`/folio/stories/${story.id}`, {
+    const renamed = await patchJson<StoryMeta>(`/folio/api/stories/${story.id}`, {
       slug: 'list-redirect-target',
     })
     expect(renamed.path).toBe('list-redirect-target')
 
-    const page = await getJson<{ rows: Redirect[]; cursor: string | null }>('/folio/redirects')
+    const page = await getJson<{ rows: Redirect[]; cursor: string | null }>('/folio/api/redirects')
     const row = page.rows.find((r) => r.from === oldPath)
     expect(row).toMatchObject({
       to: 'list-redirect-target',
@@ -1256,7 +1267,7 @@ describe('redirects: GET/POST/DELETE /folio/redirects', () => {
   })
 
   it('POST adds a manual redirect', async () => {
-    const created = await postJson<Redirect>('/folio/redirects', {
+    const created = await postJson<Redirect>('/folio/api/redirects', {
       from: 'manual-redirect-source',
       to: 'manual-redirect-target',
     })
@@ -1267,7 +1278,7 @@ describe('redirects: GET/POST/DELETE /folio/redirects', () => {
       source: 'manual',
     })
 
-    const filtered = await getJson<{ rows: Redirect[] }>('/folio/redirects?source=manual')
+    const filtered = await getJson<{ rows: Redirect[] }>('/folio/api/redirects?source=manual')
     expect(filtered.rows.some((r) => r.from === 'manual-redirect-source')).toBe(true)
   })
 
@@ -1275,7 +1286,7 @@ describe('redirects: GET/POST/DELETE /folio/redirects', () => {
     const story = await createStory('Occupied Redirect Target')
 
     const { status, body } = await failureOf(
-      '/folio/redirects',
+      '/folio/api/redirects',
       jsonPost(JSON.stringify({ from: story.path, to: 'somewhere-else' })),
     )
     expect(status).toBe(409)
@@ -1284,10 +1295,10 @@ describe('redirects: GET/POST/DELETE /folio/redirects', () => {
   })
 
   it('POST refuses a manual redirect whose target already redirects back to its source', async () => {
-    await postJson('/folio/redirects', { from: 'loop-a', to: 'loop-b' })
+    await postJson('/folio/api/redirects', { from: 'loop-a', to: 'loop-b' })
 
     const { status, body } = await failureOf(
-      '/folio/redirects',
+      '/folio/api/redirects',
       jsonPost(JSON.stringify({ from: 'loop-b', to: 'loop-a' })),
     )
     expect(status).toBe(409)
@@ -1295,7 +1306,7 @@ describe('redirects: GET/POST/DELETE /folio/redirects', () => {
   })
 
   it('DELETE removes a redirect and reports whether one was actually there', async () => {
-    await postJson('/folio/redirects', { from: 'delete-redirect-me', to: 'elsewhere' })
+    await postJson('/folio/api/redirects', { from: 'delete-redirect-me', to: 'elsewhere' })
 
     const removed = await SELF.fetch(`${API}/redirects/delete-redirect-me`, { method: 'DELETE' })
     expect((await removed.json<{ deleted: boolean }>()).deleted).toBe(true)
@@ -1303,12 +1314,12 @@ describe('redirects: GET/POST/DELETE /folio/redirects', () => {
     const again = await SELF.fetch(`${API}/redirects/delete-redirect-me`, { method: 'DELETE' })
     expect((await again.json<{ deleted: boolean }>()).deleted).toBe(false)
 
-    const list = await getJson<{ rows: Redirect[] }>('/folio/redirects')
+    const list = await getJson<{ rows: Redirect[] }>('/folio/api/redirects')
     expect(list.rows.some((r) => r.from === 'delete-redirect-me')).toBe(false)
   })
 
   it('DELETE accepts a multi-segment path', async () => {
-    await postJson('/folio/redirects', { from: 'a/b/c', to: 'somewhere' })
+    await postJson('/folio/api/redirects', { from: 'a/b/c', to: 'somewhere' })
 
     const res = await SELF.fetch(`${API}/redirects/a/b/c`, { method: 'DELETE' })
     expect((await res.json<{ deleted: boolean }>()).deleted).toBe(true)
@@ -1326,14 +1337,15 @@ describe('redirects: GET/POST/DELETE /folio/redirects', () => {
     // a millisecond as often as not — which is precisely the tie the cursor's
     // second component exists for.
     const froms = ['pagewalk-a', 'pagewalk-b', 'pagewalk-c', 'pagewalk-d', 'pagewalk-e']
-    for (const from of froms) await postJson('/folio/redirects', { from, to: 'pagewalk-target' })
+    for (const from of froms)
+      await postJson('/folio/api/redirects', { from, to: 'pagewalk-target' })
 
     const seen: string[] = []
     let cursor: string | null = null
     for (let guard = 0; guard < 10; guard++) {
       const query: string = cursor ? `?limit=2&cursor=${encodeURIComponent(cursor)}` : '?limit=2'
       const page = await getJson<{ rows: Redirect[]; cursor: string | null }>(
-        `/folio/redirects${query}`,
+        `/folio/api/redirects${query}`,
       )
       expect(page.rows.length).toBeLessThanOrEqual(2)
       seen.push(...page.rows.map((r) => r.from))
@@ -1352,7 +1364,7 @@ describe('redirects: GET/POST/DELETE /folio/redirects', () => {
   it('clamps an out-of-range limit rather than refusing it', async () => {
     // The asymmetry with the cursor below is deliberate: a stale bookmark carrying
     // `limit=5000` has an obvious right answer, and "resume after ???" does not.
-    const page = await getJson<{ rows: Redirect[] }>('/folio/redirects?limit=5000')
+    const page = await getJson<{ rows: Redirect[] }>('/folio/api/redirects?limit=5000')
     expect(page.rows.length).toBeLessThanOrEqual(200)
   })
 
@@ -1370,7 +1382,7 @@ describe('redirects: the host 404 branch (test/workers/worker.ts)', () => {
   it('a renamed page 301s from its old path to the new one', async () => {
     const story = await createStory('Host-Redirect Rename')
     const oldPath = story.path
-    await patchJson<StoryMeta>(`/folio/stories/${story.id}`, { slug: 'host-redirect-renamed' })
+    await patchJson<StoryMeta>(`/folio/api/stories/${story.id}`, { slug: 'host-redirect-renamed' })
 
     const res = await SELF.fetch(`${ORIGIN}/${oldPath}`, { redirect: 'manual' })
     expect(res.status).toBe(301)
@@ -1380,7 +1392,9 @@ describe('redirects: the host 404 branch (test/workers/worker.ts)', () => {
   it('preserves the query string across the redirect', async () => {
     const story = await createStory('Host-Redirect Query')
     const oldPath = story.path
-    await patchJson<StoryMeta>(`/folio/stories/${story.id}`, { slug: 'host-redirect-query-new' })
+    await patchJson<StoryMeta>(`/folio/api/stories/${story.id}`, {
+      slug: 'host-redirect-query-new',
+    })
 
     const res = await SELF.fetch(`${ORIGIN}/${oldPath}?utm_source=x`, { redirect: 'manual' })
     expect(res.headers.get('location')).toBe(`${ORIGIN}/host-redirect-query-new?utm_source=x`)
@@ -1389,16 +1403,18 @@ describe('redirects: the host 404 branch (test/workers/worker.ts)', () => {
   it('a live story at the path always wins over a redirect, and creating one deletes the trap', async () => {
     const story = await createStory('Host-Redirect Reoccupy Source')
     const oldPath = story.path
-    await patchJson<StoryMeta>(`/folio/stories/${story.id}`, { slug: 'host-redirect-reoccupy-new' })
+    await patchJson<StoryMeta>(`/folio/api/stories/${story.id}`, {
+      slug: 'host-redirect-reoccupy-new',
+    })
     expect(
-      (await getJson<{ rows: Redirect[] }>('/folio/redirects')).rows.some(
+      (await getJson<{ rows: Redirect[] }>('/folio/api/redirects')).rows.some(
         (r) => r.from === oldPath,
       ),
     ).toBe(true)
 
     // A fresh story created at exactly the vacated path makes it live again —
     // reoccupying the trap rather than merely shadowing it.
-    const reoccupied = await postJson<StoryMeta>('/folio/stories', {
+    const reoccupied = await postJson<StoryMeta>('/folio/api/stories', {
       title: 'Reoccupier',
       slug: oldPath,
     })
@@ -1408,7 +1424,7 @@ describe('redirects: the host 404 branch (test/workers/worker.ts)', () => {
     const res = await SELF.fetch(`${ORIGIN}/${oldPath}`, { redirect: 'manual' })
     expect(res.status).not.toBe(301)
 
-    const list = await getJson<{ rows: Redirect[] }>('/folio/redirects')
+    const list = await getJson<{ rows: Redirect[] }>('/folio/api/redirects')
     expect(list.rows.some((r) => r.from === oldPath)).toBe(false)
   })
 
@@ -1468,7 +1484,7 @@ describe('preview and host fallthrough', () => {
 describe('validation and the error envelope', () => {
   it('rejects a body with the wrong type for a field, naming the field it refused', async () => {
     const { status, body } = await failureOf(
-      '/folio/stories',
+      '/folio/api/stories',
       jsonPost(JSON.stringify({ title: 7 })),
     )
 
@@ -1478,7 +1494,7 @@ describe('validation and the error envelope', () => {
   })
 
   it('rejects a body that is not JSON at all, rather than letting it become a 500', async () => {
-    const { status, body } = await failureOf('/folio/stories', jsonPost('{"title": '))
+    const { status, body } = await failureOf('/folio/api/stories', jsonPost('{"title": '))
 
     expect(status).toBe(400)
     expect(body.error.code).toBe('bad_request')
@@ -1486,19 +1502,22 @@ describe('validation and the error envelope', () => {
 
   it('rejects a title past the cap, and writes no row', async () => {
     const title = 'x'.repeat(301)
-    const { status, body } = await failureOf('/folio/stories', jsonPost(JSON.stringify({ title })))
+    const { status, body } = await failureOf(
+      '/folio/api/stories',
+      jsonPost(JSON.stringify({ title })),
+    )
 
     expect(status).toBe(400)
     expect(body.error.code).toBe('bad_request')
     expect(body.error.message).toContain('300')
 
     // The cap exists to stop the write, not to describe it after the fact.
-    const tree = await getJson<StoryNode[]>('/folio/stories')
+    const tree = await getJson<StoryNode[]>('/folio/api/stories')
     expect(flatten(tree).every((n) => n.title.length <= 300)).toBe(true)
   })
 
   it('rejects an id that could not name a row', async () => {
-    const { status, body } = await failureOf('/folio/story/not%20an%20id/document')
+    const { status, body } = await failureOf('/folio/api/story/not%20an%20id/document')
 
     expect(status).toBe(400)
     expect(body.error.code).toBe('bad_request')
@@ -1516,7 +1535,7 @@ describe('validation and the error envelope', () => {
     })
 
     expect(res.status).toBe(200)
-    const versions = await getJson<VersionMeta[]>(`/folio/story/${story.id}/versions`)
+    const versions = await getJson<VersionMeta[]>(`/folio/api/story/${story.id}/versions`)
     expect(versions[0]?.actor).toBeNull()
   })
 
@@ -1526,7 +1545,7 @@ describe('validation and the error envelope', () => {
     // body schema passes its own message for that reason.
     const marker = 'LEAK-ME-BACK'
     const { status, text, body } = await failureOf(
-      '/folio/stories',
+      '/folio/api/stories',
       jsonPost(JSON.stringify(`<img src=x onerror=alert(1)>${marker}`)),
     )
 
@@ -1551,7 +1570,7 @@ describe('validation and the error envelope', () => {
     // a D1 column. U+202E reorders a rendered title away from what was stored.
     for (const title of ['broken \ud800 half', 'invoice\u202egnp.exe']) {
       const { status, body } = await failureOf(
-        '/folio/stories',
+        '/folio/api/stories',
         jsonPost(JSON.stringify({ title })),
       )
       expect(status).toBe(400)
@@ -1560,7 +1579,7 @@ describe('validation and the error envelope', () => {
   })
 
   it('404s a story that does not exist, as an envelope rather than a bare status', async () => {
-    const { status, body } = await failureOf('/folio/story/sty_nothing/document')
+    const { status, body } = await failureOf('/folio/api/story/sty_nothing/document')
 
     expect(status).toBe(404)
     expect(body.error.code).toBe('not_found')
@@ -1575,7 +1594,7 @@ describe('validation and the error envelope', () => {
     // request, and the reason `loadStory` runs ahead of the body parse in
     // routes/history.ts rather than letting the workflow do the lookup.
     const { status, body } = await failureOf(
-      '/folio/story/sty_abcdefgh/versions',
+      '/folio/api/story/sty_abcdefgh/versions',
       jsonPost(JSON.stringify({ label: 12345 })),
     )
 
@@ -1585,7 +1604,7 @@ describe('validation and the error envelope', () => {
   })
 
   it('404s an unknown version the same way', async () => {
-    const { status, body } = await failureOf('/folio/versions/ver_nothing')
+    const { status, body } = await failureOf('/folio/api/versions/ver_nothing')
 
     expect(status).toBe(404)
     expect(body.error.code).toBe('not_found')
@@ -1598,7 +1617,7 @@ describe('validation and the error envelope', () => {
     // unique index is what refuses it, and its message names the table and
     // the column.
     const { status, text, body } = await failureOf(
-      '/folio/stories',
+      '/folio/api/stories',
       jsonPost(JSON.stringify({ title: 'About', parentId: 'sty_home' })),
     )
 
@@ -1624,7 +1643,7 @@ describe('validation and the error envelope', () => {
   })
 
   it('reports refusing to delete the root story as a conflict', async () => {
-    const { status, body } = await failureOf('/folio/stories/sty_home', { method: 'DELETE' })
+    const { status, body } = await failureOf('/folio/api/stories/sty_home', { method: 'DELETE' })
 
     expect(status).toBe(409)
     expect(body.error.code).toBe('conflict')
@@ -1646,14 +1665,14 @@ describe('validation and the error envelope', () => {
 
     const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
-      const { status, text, body } = await failureOf(`/folio/versions/${id}`)
+      const { status, text, body } = await failureOf(`/folio/api/versions/${id}`)
 
       expect(status).toBe(500)
       expect(body.error.code).toBe('internal')
       // Nothing about the parse, the table or the row travels.
       expect(text).not.toMatch(/JSON|SyntaxError|versions|token/i)
       // The route is the context the log line owes whoever reads it.
-      expect(String(logged.mock.calls[0]?.[0])).toContain(`GET /folio/versions/${id}`)
+      expect(String(logged.mock.calls[0]?.[0])).toContain(`GET /folio/api/versions/${id}`)
     } finally {
       logged.mockRestore()
     }
@@ -1677,7 +1696,7 @@ function upload(filename: string, contentType: string, body: BodyInit): Promise<
 }
 
 /**
- * `POST /folio/assets` takes a raw body from a client that (until auth lands) is
+ * `POST /folio/api/assets` takes a raw body from a client that (until auth lands) is
  * anyone, and `GET /folio/asset/:key` serves it back from the site's own origin
  * — the URL published pages carry in their `<img>` tags. What the first route
  * agrees to store is therefore what the second is willing to execute.
@@ -1690,7 +1709,7 @@ describe('asset uploads and serving', () => {
     expect(asset.contentType).toBe('image/png')
     expect(asset.width).toBe(1)
 
-    const served = await SELF.fetch(`${API}/asset/${asset.key}`)
+    const served = await SELF.fetch(`${BASE}/asset/${asset.key}`)
     expect(served.headers.get('content-type')).toBe('image/png')
     expect(served.headers.get('x-content-type-options')).toBe('nosniff')
   })
@@ -1705,7 +1724,7 @@ describe('asset uploads and serving', () => {
     const { asset } = await res.json<{ asset: AssetRow }>()
     expect(asset.contentType).toBe('application/octet-stream')
 
-    const served = await SELF.fetch(`${API}/asset/${asset.key}`)
+    const served = await SELF.fetch(`${BASE}/asset/${asset.key}`)
     expect(served.headers.get('content-type')).toBe('application/octet-stream')
     expect(served.headers.get('x-content-type-options')).toBe('nosniff')
     // Decoded rather than `.text()`: the response is deliberately not text now.
@@ -1721,7 +1740,7 @@ describe('asset uploads and serving', () => {
     }>()
 
     expect(asset.contentType).toBe('application/octet-stream')
-    const served = await SELF.fetch(`${API}/asset/${asset.key}`)
+    const served = await SELF.fetch(`${BASE}/asset/${asset.key}`)
     expect(served.headers.get('content-type')).toBe('application/octet-stream')
   })
 
@@ -1734,7 +1753,7 @@ describe('asset uploads and serving', () => {
   })
 
   it('refuses an oversized upload on the declared length, before reading the body', async () => {
-    const { status, body } = await failureOf('/folio/assets?filename=huge.png', {
+    const { status, body } = await failureOf('/folio/api/assets?filename=huge.png', {
       method: 'POST',
       headers: { 'content-type': 'image/png', 'content-length': String(21 * 1024 * 1024) },
       body: PNG_1X1,
@@ -1747,7 +1766,7 @@ describe('asset uploads and serving', () => {
   })
 
   it('refuses a filename past the cap', async () => {
-    const { status, body } = await failureOf(`/folio/assets?filename=${'a'.repeat(201)}.png`, {
+    const { status, body } = await failureOf(`/folio/api/assets?filename=${'a'.repeat(201)}.png`, {
       method: 'POST',
       headers: { 'content-type': 'image/png' },
       body: PNG_1X1,
@@ -1844,15 +1863,15 @@ async function dtFailure(
 }
 
 function dtCreate(body: Record<string, unknown>): Promise<StoryMeta> {
-  return dtJson<StoryMeta>('/folio/stories', jsonPost(JSON.stringify(body)))
+  return dtJson<StoryMeta>('/folio/api/stories', jsonPost(JSON.stringify(body)))
 }
 
-describe('document types: GET /folio/schema', () => {
+describe('document types: GET /folio/api/schema', () => {
   it('carries every type through, and keeps `root` as the default page type’s root block', async () => {
     const manifest = await dtJson<{
       types: { name: string; kind: string; root: string; under?: string[] }[]
       root: string
-    }>('/folio/schema')
+    }>('/folio/api/schema')
 
     expect(manifest.types.map((t) => t.name)).toEqual(['page', 'insight', 'person', 'settings'])
     expect(manifest.types.find((t) => t.name === 'insight')).toEqual({
@@ -1868,7 +1887,7 @@ describe('document types: GET /folio/schema', () => {
   })
 })
 
-describe('document types: POST /folio/stories', () => {
+describe('document types: POST /folio/api/stories', () => {
   it('defaults to the default page type when the body names none', async () => {
     const story = await dtCreate({ title: 'Untyped create' })
     expect(story.type).toBe('page')
@@ -1887,7 +1906,7 @@ describe('document types: POST /folio/stories', () => {
 
   it('answers `unsupported` (501) for a type the config does not declare', async () => {
     const { status, body } = await dtFailure(
-      '/folio/stories',
+      '/folio/api/stories',
       jsonPost(JSON.stringify({ title: 'X', type: 'nosuchtype' })),
     )
     // Not 404: the request is well-formed, the server just has no such type.
@@ -1899,7 +1918,7 @@ describe('document types: POST /folio/stories', () => {
   it('refuses a record with a parentId', async () => {
     const parent = await dtCreate({ title: 'Somewhere' })
     const { status, body } = await dtFailure(
-      '/folio/stories',
+      '/folio/api/stories',
       jsonPost(JSON.stringify({ title: 'Ada', type: 'person', parentId: parent.id })),
     )
     expect(status).toBe(400)
@@ -1908,7 +1927,7 @@ describe('document types: POST /folio/stories', () => {
 
   it('refuses creating a singleton: it exists because the schema says so', async () => {
     const { status, body } = await dtFailure(
-      '/folio/stories',
+      '/folio/api/stories',
       jsonPost(JSON.stringify({ title: 'Another one', type: 'settings' })),
     )
     expect(status).toBe(409)
@@ -1917,7 +1936,7 @@ describe('document types: POST /folio/stories', () => {
 
   it('refuses an `under` violation with a notice naming the allowed parents', async () => {
     const { status, body } = await dtFailure(
-      '/folio/stories',
+      '/folio/api/stories',
       jsonPost(JSON.stringify({ title: 'Loose insight', type: 'insight' })),
     )
     expect(status).toBe(400)
@@ -1926,7 +1945,7 @@ describe('document types: POST /folio/stories', () => {
 
   it('screens a malformed type name before it reaches the config lookup', async () => {
     const { status, body } = await dtFailure(
-      '/folio/stories',
+      '/folio/api/stories',
       jsonPost(JSON.stringify({ title: 'X', type: 'not a type' })),
     )
     expect(status).toBe(400)
@@ -1934,46 +1953,48 @@ describe('document types: POST /folio/stories', () => {
   })
 })
 
-describe('document types: GET /folio/stories vs GET /folio/documents', () => {
+describe('document types: GET /folio/api/stories vs GET /folio/api/documents', () => {
   it('keeps records out of the tree and lists them flat instead', async () => {
     const page = await dtCreate({ title: 'A visible page' })
     const ada = await dtCreate({ title: 'Ada In Tree Test', type: 'person' })
 
-    const tree = await dtJson<StoryNode[]>('/folio/stories')
+    const tree = await dtJson<StoryNode[]>('/folio/api/stories')
     const ids = flatten(tree).map((n) => n.id)
     expect(ids).toContain(page.id)
     expect(ids).not.toContain(ada.id)
 
-    const { documents } = await dtJson<{ documents: StoryMeta[] }>('/folio/documents?type=person')
+    const { documents } = await dtJson<{ documents: StoryMeta[] }>(
+      '/folio/api/documents?type=person',
+    )
     expect(documents.map((d) => d.id)).toContain(ada.id)
     expect(documents.every((d) => d.type === 'person')).toBe(true)
   })
 
   it('answers `unsupported` for an undeclared type', async () => {
-    const { status, body } = await dtFailure('/folio/documents?type=nope')
+    const { status, body } = await dtFailure('/folio/api/documents?type=nope')
     expect(status).toBe(501)
     expect(body.error.code).toBe('unsupported')
   })
 
   it('creates every declared singleton on first access, and only once', async () => {
-    const first = await dtJson<{ documents: StoryMeta[] }>('/folio/documents')
+    const first = await dtJson<{ documents: StoryMeta[] }>('/folio/api/documents')
     const settings = first.documents.filter((d) => d.type === 'settings')
     expect(settings).toHaveLength(1)
     expect(settings[0]?.id).toBe('sng_settings')
 
-    const second = await dtJson<{ documents: StoryMeta[] }>('/folio/documents')
+    const second = await dtJson<{ documents: StoryMeta[] }>('/folio/api/documents')
     expect(second.documents.filter((d) => d.type === 'settings')).toHaveLength(1)
   })
 
   it('seeds a singleton’s document from its own root block', async () => {
-    await dtJson<{ documents: StoryMeta[] }>('/folio/documents?type=settings')
-    const { doc } = await dtJson<{ doc: Doc }>('/folio/story/sng_settings/document')
+    await dtJson<{ documents: StoryMeta[] }>('/folio/api/documents?type=settings')
+    const { doc } = await dtJson<{ doc: Doc }>('/folio/api/story/sng_settings/document')
     expect(doc.bloks[doc.root]?.type).toBe('settingsRoot')
   })
 
   it('seeds a record’s document from its own root block, with the title in its own field', async () => {
     const person = await dtCreate({ title: 'Grace Hopper', type: 'person' })
-    const { doc } = await dtJson<{ doc: Doc }>(`/folio/story/${person.id}/document`)
+    const { doc } = await dtJson<{ doc: Doc }>(`/folio/api/story/${person.id}/document`)
     const root = doc.bloks[doc.root]
 
     expect(root?.type).toBe('personRoot')
@@ -1989,7 +2010,7 @@ describe('document types: PATCH and DELETE refusals', () => {
     const ada = await dtCreate({ title: 'Ada Patch Test', type: 'person' })
     const page = await dtCreate({ title: 'Patch Target' })
 
-    const { status, body } = await dtFailure(`/folio/stories/${ada.id}`, {
+    const { status, body } = await dtFailure(`/folio/api/stories/${ada.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ parentId: page.id }),
@@ -2000,7 +2021,7 @@ describe('document types: PATCH and DELETE refusals', () => {
 
   it('refuses changing a document’s type', async () => {
     const page = await dtCreate({ title: 'Retype Me' })
-    const { status, body } = await dtFailure(`/folio/stories/${page.id}`, {
+    const { status, body } = await dtFailure(`/folio/api/stories/${page.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ type: 'insight' }),
@@ -2011,7 +2032,7 @@ describe('document types: PATCH and DELETE refusals', () => {
 
   it('renames a record without giving it a path', async () => {
     const ada = await dtCreate({ title: 'Ada Rename Test', type: 'person' })
-    const patched = await dtJson<StoryMeta>(`/folio/stories/${ada.id}`, {
+    const patched = await dtJson<StoryMeta>(`/folio/api/stories/${ada.id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ title: 'Grace Rename Test' }),
@@ -2021,15 +2042,17 @@ describe('document types: PATCH and DELETE refusals', () => {
   })
 
   it('refuses deleting a singleton', async () => {
-    await dtJson('/folio/documents?type=settings')
-    const { status, body } = await dtFailure('/folio/stories/sng_settings', { method: 'DELETE' })
+    await dtJson('/folio/api/documents?type=settings')
+    const { status, body } = await dtFailure('/folio/api/stories/sng_settings', {
+      method: 'DELETE',
+    })
     expect(status).toBe(409)
     expect(body.error.message).toBe('Cannot delete a singleton document')
   })
 
   it('refuses duplicating a singleton — the debt duplicate-and-paste.md deferred here', async () => {
-    await dtJson('/folio/documents?type=settings')
-    const { status, body } = await dtFailure('/folio/stories/sng_settings/duplicate', {
+    await dtJson('/folio/api/documents?type=settings')
+    const { status, body } = await dtFailure('/folio/api/stories/sng_settings/duplicate', {
       method: 'POST',
     })
     expect(status).toBe(409)
@@ -2038,7 +2061,7 @@ describe('document types: PATCH and DELETE refusals', () => {
 
   it('duplicates a record as another record of the same type', async () => {
     const ada = await dtCreate({ title: 'Ada Dup Test', type: 'person' })
-    const { story } = await dtJson<{ story: StoryMeta }>(`/folio/stories/${ada.id}/duplicate`, {
+    const { story } = await dtJson<{ story: StoryMeta }>(`/folio/api/stories/${ada.id}/duplicate`, {
       method: 'POST',
     })
     expect(story.type).toBe('person')
@@ -2048,7 +2071,7 @@ describe('document types: PATCH and DELETE refusals', () => {
 
   it('deletes a record, and reports no path for it', async () => {
     const ada = await dtCreate({ title: 'Ada Delete Test', type: 'person' })
-    const { deleted } = await dtJson<{ deleted: string[] }>(`/folio/stories/${ada.id}`, {
+    const { deleted } = await dtJson<{ deleted: string[] }>(`/folio/api/stories/${ada.id}`, {
       method: 'DELETE',
     })
     expect(deleted).toEqual([ada.id])
@@ -2069,8 +2092,8 @@ describe('document types: a second page type serves from the tree', () => {
 
     // Published, and still not servable: `folio.published` matches on `path`,
     // and an unrouted row stores NULL.
-    await dtCall(`/folio/story/${insight.id}/publish`, { method: 'POST' })
-    await dtCall(`/folio/story/${ada.id}/publish`, { method: 'POST' })
+    await dtCall(`/folio/api/story/${insight.id}/publish`, { method: 'POST' })
+    await dtCall(`/folio/api/story/${ada.id}/publish`, { method: 'POST' })
 
     expect(await typedFolio().published(env, 'insights-landing/a-real-insight')).not.toBeNull()
     expect(await typedFolio().published(env, 'ada-route-test')).toBeNull()
@@ -2093,14 +2116,16 @@ describe('document types: a second page type serves from the tree', () => {
     await conn.tx('dttitle1', [{ t: 'set', uid: doc.root, field: 'fullName', value: 'Ada Byron' }])
     conn.close()
 
-    const res = await dtJson<PublishResult>(`/folio/story/${person.id}/publish`, {
+    const res = await dtJson<PublishResult>(`/folio/api/story/${person.id}/publish`, {
       method: 'POST',
     })
 
     // Both the row and the retained version record the fullName, from a root
     // block that has no `title` field to have read instead.
     expect(res.version.title).toBe('Ada Byron')
-    const { documents } = await dtJson<{ documents: StoryMeta[] }>('/folio/documents?type=person')
+    const { documents } = await dtJson<{ documents: StoryMeta[] }>(
+      '/folio/api/documents?type=person',
+    )
     expect(documents.find((d) => d.id === person.id)?.title).toBe('Ada Byron')
   })
 })
@@ -2154,7 +2179,7 @@ describe('document types: createFolio validates its config at construction', () 
       auth: 'open',
     })
     const ctx = createExecutionContext()
-    const res = await folio.handle(new Request(`${ORIGIN}/folio/schema`), env, ctx)
+    const res = await folio.handle(new Request(`${ORIGIN}/folio/api/schema`), env, ctx)
     await waitOnExecutionContext(ctx)
 
     const manifest = await res?.json<{ types: { name: string; root: string }[]; root: string }>()

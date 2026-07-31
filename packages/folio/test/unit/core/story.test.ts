@@ -84,7 +84,7 @@ describe('buildTree', () => {
   })
 
   // document-types.md checkpoint 2: records and singletons leave the page tree
-  // entirely, which is what makes `GET /folio/stories` page-types-only without a
+  // entirely, which is what makes `GET /folio/api/stories` page-types-only without a
   // `where` clause of its own.
   describe('with unrouted rows present', () => {
     it('drops them rather than surfacing them as extra top-level nodes', () => {

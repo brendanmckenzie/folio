@@ -20,12 +20,13 @@ import { Toast } from './Toast'
 import { useRouter } from './useRouter'
 
 export interface PrototypeBoot {
-  /** Where the admin's JSON lives: `rt.base`. */
+  /**
+   * Where Folio is mounted, and therefore where every screen lives: the router is
+   * relative to it, which is what made the prefix move free on the client.
+   */
+  base: string
+  /** Where the admin's internal JSON lives — `${base}/api`. */
   apiBase: string
-  /** Where the shell is mounted — `{base}/ui` today, `{base}` once the screens
-   * take the bare namespace (`server/routes/shell.ts`). Every URL in the router is
-   * relative to it, so this is the whole cost of that move on the client. */
-  mount: string
 }
 
 /**
@@ -43,7 +44,7 @@ export interface PrototypeBoot {
  * sequenced behind pagination rather than in front of it.
  */
 export function Prototype({ boot }: { boot: PrototypeBoot }) {
-  const { route, go, replace } = useRouter(boot.mount)
+  const { route, go, replace } = useRouter(boot.base)
   const [manifest, setManifest] = useState<Manifest | null>(null)
   const [me, setMe] = useState<Me>(OPEN)
   const [tree, setTree] = useState<readonly StoryNode[]>([])
@@ -56,7 +57,7 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
     let live = true
     Promise.all([
       fetch(`${boot.apiBase}/schema`).then((r) => r.json() as Promise<Manifest>),
-      fetchMe(boot.apiBase),
+      fetchMe(boot.apiBase, boot.base),
       fetch(`${boot.apiBase}/stories`, { headers: { accept: 'application/json' } }).then((r) =>
         r.ok ? (r.json() as Promise<StoryNode[]>) : [],
       ),
@@ -96,7 +97,7 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
     return () => {
       live = false
     }
-  }, [boot.apiBase])
+  }, [boot.apiBase, boot.base])
 
   const types = manifest?.types ?? []
   // Tree first, then the unrouted documents: one list for the palette, the
@@ -155,7 +156,7 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
     return () => clearTimeout(t)
   }, [notice])
 
-  const actions = usePaletteActions({ groups, flat, mount: boot.mount, go, label })
+  const actions = usePaletteActions({ groups, flat, mount: boot.base, go, label })
 
   const user: MenuItem[] = [
     { id: 'ui', label: 'Design system', run: () => go({ name: 'ui' }) },
@@ -178,7 +179,7 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
         groups={groups}
         active={activeItem(groups, route.screen, open?.type)}
         crumbs={trail}
-        mount={boot.mount}
+        mount={boot.base}
         collapsed={sidebar.value}
         onToggleSidebar={sidebar.toggle}
         onSearch={() => setPalette(true)}
@@ -199,7 +200,7 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
           blockRail,
           inspector,
           pageTypesInUse: new Set(flat.filter((n) => n.path !== null).map((n) => n.type)).size,
-          preview: previewFor(open, types, flatten(tree), boot.apiBase),
+          preview: previewFor(open, types, flatten(tree), boot.base),
         })}
       </Shell>
       {palette ? <Palette actions={actions} onClose={() => setPalette(false)} /> : null}
@@ -239,14 +240,14 @@ function screenFor(a: ScreenArgs) {
   const { route, boot } = a
   switch (route.screen.name) {
     case 'home':
-      return <Home types={a.types} tree={a.tree} mount={boot.mount} />
+      return <Home types={a.types} tree={a.tree} mount={boot.base} />
 
     case 'content':
       return (
         <Content
           tree={a.tree}
           loading={a.loading}
-          mount={boot.mount}
+          mount={boot.base}
           query={route.query}
           onQuery={(next) => a.replace({ name: 'content' }, { ...route.query, ...next })}
           onOpen={a.go}
@@ -404,12 +405,13 @@ function previewFor(
   story: StoryMeta | undefined,
   types: readonly DocumentType[],
   tree: readonly StoryNode[],
-  apiBase: string,
+  /** The bare mount: a global's preview is an HTML page. */
+  base: string,
 ): string | undefined {
   if (!story) return undefined
   if (story.previewUrl) return story.previewUrl
   const type = types.find((t) => t.name === story.type)
-  return type?.kind === 'singleton' ? globalPreviewUrl(type, tree, apiBase) : undefined
+  return type?.kind === 'singleton' ? globalPreviewUrl(type, tree, base) : undefined
 }
 
 /* -------------------------------------------------------------- breadcrumbs --- */

@@ -116,7 +116,7 @@ const folio = createFolio<Env>({
   // `default` is the *source* locale — the one `Blok.data` holds — and everything
   // else is a per-field override in `Blok.i18n`. Marking a field
   // `translatable: true` is what puts it in front of a translator; see
-  // src/blocks/*.tsx, and `GET /folio/audit` for the ones nobody marked.
+  // src/blocks/*.tsx, and `GET /folio/api/audit` for the ones nobody marked.
   locales: {
     default: 'en',
     available: [
@@ -143,7 +143,7 @@ const folio = createFolio<Env>({
   globals: ['header', 'settings'],
   // schema-migrations.md: content migrations, in run order, each a pure function
   // from a document to a list of mutations. Nothing runs on boot — `POST
-  // /folio/migrate` (admin) or `folio.migrate(env)` from a deploy step, because
+  // /folio/api/migrate` (admin) or `folio.migrate(env)` from a deploy step, because
   // a migration that runs itself on the first request after a deploy runs inside
   // a request whose CPU limit it can exceed, on a cold Worker, with nobody
   // watching. See src/migrations.ts.
