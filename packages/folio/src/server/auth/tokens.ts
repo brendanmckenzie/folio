@@ -8,6 +8,8 @@
  */
 import { type Actor, type Scope, parseScopes } from './roles'
 import { hashToken, mintApiToken } from './secrets'
+import { clampLimit, decodeCursor, type Page, paginate } from '../../core/pagination'
+import { keysetWhere, NEWEST_FIRST, orderBy, whereOf } from '../keyset'
 
 export interface TokenRow {
   id: string
@@ -83,11 +85,30 @@ export async function createToken(
   return { row, token }
 }
 
-export async function listTokens(db: D1Database): Promise<TokenRow[]> {
-  const { results } = await db
-    .prepare(`select ${COLUMNS} from api_tokens order by created_at desc`)
-    .all<RawToken>()
-  return results.map(toToken)
+/**
+ * Newest first, paged over `(created_at, id)` — `api_tokens_created` indexes the
+ * first component and `id` is the primary key.
+ *
+ * Revoked rows stay in the list, which is why this needs paging at all: nothing is
+ * ever deleted here, so the list only grows.
+ */
+export async function listTokens(
+  db: D1Database,
+  opts: { limit?: number; cursor?: string; count?: boolean } = {},
+): Promise<Page<TokenRow>> {
+  const limit = clampLimit(opts.limit, 50, 200)
+  const resume = keysetWhere(NEWEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null)
+  const [rows, total] = await Promise.all([
+    db
+      .prepare(
+        `select ${COLUMNS} from api_tokens ${whereOf(resume.sql)} ${orderBy(NEWEST_FIRST)} limit ?`,
+      )
+      .bind(...resume.binds, limit + 1)
+      .all<RawToken>(),
+    opts.count ? db.prepare('select count(*) as n from api_tokens').first<{ n: number }>() : null,
+  ])
+  const page = paginate(rows.results.map(toToken), limit, (row) => [row.createdAt, row.id])
+  return total ? { ...page, total: total.n } : page
 }
 
 /**

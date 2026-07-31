@@ -192,8 +192,8 @@ const versions = await (
 ).json()
 check(
   'the version records the signed-in user, ignoring the old actor header',
-  versions[0]?.actor === 'usr_demoadmin1',
-  versions[0]?.actor,
+  versions.rows[0]?.actor === 'usr_demoadmin1',
+  versions.rows[0]?.actor,
 )
 
 /* --- roles ------------------------------------------------------------- */

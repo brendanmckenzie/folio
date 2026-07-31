@@ -9,6 +9,8 @@
 import { fallbackColour } from '../../core/protocol'
 import { type Role, isRole } from './roles'
 import { mintId } from './secrets'
+import { clampLimit, decodeCursor, type Page, paginate } from '../../core/pagination'
+import { keysetWhere, OLDEST_FIRST, orderBy, whereOf } from '../keyset'
 
 export interface UserRow {
   id: string
@@ -83,11 +85,33 @@ export async function userByEmail(db: D1Database, email: string): Promise<UserRo
   return row ? toUser(row) : null
 }
 
-export async function listUsers(db: D1Database): Promise<UserRow[]> {
-  const { results } = await db
-    .prepare(`select ${COLUMNS} from users order by created_at`)
-    .all<RawUser>()
-  return results.map(toUser)
+/**
+ * Editors, in the order they joined, paged over `(created_at, id)` — which
+ * `users_created` indexes, added by the schema collapse because this reader had
+ * been ordering by an unindexed column
+ * (`../../../docs/specs/foundation/pagination.md`).
+ *
+ * Oldest first, unlike every other paged list here: an editors table is read as a
+ * roster rather than as a feed, and the person who set the site up belongs at the
+ * top.
+ */
+export async function listUsers(
+  db: D1Database,
+  opts: { limit?: number; cursor?: string; count?: boolean } = {},
+): Promise<Page<UserRow>> {
+  const limit = clampLimit(opts.limit, 50, 200)
+  const resume = keysetWhere(OLDEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null)
+  const [rows, total] = await Promise.all([
+    db
+      .prepare(
+        `select ${COLUMNS} from users ${whereOf(resume.sql)} ${orderBy(OLDEST_FIRST)} limit ?`,
+      )
+      .bind(...resume.binds, limit + 1)
+      .all<RawUser>(),
+    opts.count ? db.prepare('select count(*) as n from users').first<{ n: number }>() : null,
+  ])
+  const page = paginate(rows.results.map(toUser), limit, (row) => [row.createdAt, row.id])
+  return total ? { ...page, total: total.n } : page
 }
 
 export interface UserInput {

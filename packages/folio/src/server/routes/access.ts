@@ -29,6 +29,7 @@ import { requireAccess, requireAuthConfigured } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
 import { idParam, parseBody, TokenCreateBody, UserCreateBody, UserPatchBody } from '../validate'
+import { limitParam, requireCursor } from '../validate'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -59,9 +60,19 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.use('/tokens', requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, ADMIN))
   app.use('/tokens/*', requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, ADMIN))
 
-  app.get('/users', async (c) =>
-    c.json({ users: (await listUsers(c.var.bindings().db)).map(toJson) }),
-  )
+  app.get('/users', async (c) => {
+    const cursor = c.req.query('cursor')
+    requireCursor(cursor)
+    const page = await listUsers(c.var.bindings().db, {
+      limit: limitParam(c.req.query('limit'), 50, 200),
+      cursor,
+      count: c.req.query('count') === '1',
+    })
+    // The `users` key stays, so the shape is `{ users, cursor }` rather than
+    // `{ rows, cursor }`: this route names its own collection and the admin's
+    // Access screen reads it by name.
+    return c.json({ users: page.rows.map(toJson), cursor: page.cursor, total: page.total })
+  })
 
   /**
    * Invites an editor. There is no mail here and deliberately so: the row *is*
@@ -120,7 +131,16 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   })
 
   /** Never carries a token value: the hash is all that exists after creation. */
-  app.get('/tokens', async (c) => c.json({ tokens: await listTokens(c.var.bindings().db) }))
+  app.get('/tokens', async (c) => {
+    const cursor = c.req.query('cursor')
+    requireCursor(cursor)
+    const page = await listTokens(c.var.bindings().db, {
+      limit: limitParam(c.req.query('limit'), 50, 200),
+      cursor,
+      count: c.req.query('count') === '1',
+    })
+    return c.json({ tokens: page.rows, cursor: page.cursor, total: page.total })
+  })
 
   /**
    * Mints a token. **The only response in the whole server that contains a

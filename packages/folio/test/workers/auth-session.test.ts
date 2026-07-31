@@ -89,7 +89,7 @@ describe('users', () => {
     // access now" is the whole point of the feature.
     expect(await readSession(env.DB, a.token)).toBeNull()
     expect(await readSession(env.DB, b.token)).toBeNull()
-    expect(await listUsers(env.DB)).toEqual([])
+    expect((await listUsers(env.DB)).rows).toEqual([])
     expect(await deleteUser(env.DB, user.id)).toBe(false)
   })
 })
@@ -234,7 +234,7 @@ describe('api tokens', () => {
     await readToken(env.DB, token)
     // The question the column answers is "is this credential in use", not "did
     // it succeed" — so the stamp happens in the read, before any scope check.
-    const [after] = await listTokens(env.DB)
+    const [after] = (await listTokens(env.DB)).rows
     expect(after?.lastUsedAt).toBeTypeOf('number')
     expect(after?.id).toBe(row.id)
   })
@@ -245,7 +245,7 @@ describe('api tokens', () => {
     expect(await readToken(env.DB, token)).toBeNull()
     // Revoked, not deleted: the name stays answerable, and the hash can never
     // be minted again by chance.
-    expect((await listTokens(env.DB))[0]?.revokedAt).toBeTypeOf('number')
+    expect((await listTokens(env.DB)).rows[0]?.revokedAt).toBeTypeOf('number')
     expect(await revokeToken(env.DB, row.id)).toBe(false)
   })
 
