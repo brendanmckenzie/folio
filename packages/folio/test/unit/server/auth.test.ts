@@ -4,9 +4,15 @@ import {
   cookieName,
   PLAIN_COOKIE,
   readCookie,
+  MAX_SHARE_COOKIE_TOKENS,
+  PLAIN_SHARE_COOKIE,
   readSessionCookie,
   SECURE_COOKIE,
+  SECURE_SHARE_COOKIE,
   serialiseCookie,
+  shareCookieName,
+  shareCookieTokens,
+  withShareToken,
 } from '../../../src/server/auth/cookie'
 import { resolveAuth, screenScopes } from '../../../src/server/auth/config'
 import {
@@ -28,6 +34,7 @@ import {
   type Actor,
   type Role,
 } from '../../../src/server/auth/roles'
+import { DEFAULT_SHARE_DAYS, MAX_SHARE_DAYS, shareExpiry } from '../../../src/server/auth/shares'
 import { bearerToken } from '../../../src/server/auth/tokens'
 import { safeNext } from '../../../src/server/validate'
 
@@ -265,5 +272,98 @@ describe('resolveAuth: construction refuses ambiguity', () => {
   it('refuses a nonsensical session length', () => {
     const providers = [{ id: 'magic', label: 'Email', redirect: false, send: () => {} }]
     expect(() => resolveAuth({ providers, sessionDays: 0 })).toThrow(/positive number of days/)
+  })
+})
+
+/**
+ * Draft preview sharing's pure half (`../../../../docs/specs/platform/draft-sharing.md`):
+ * the cookie that carries a *list* of grants, and the bound on how long one lasts.
+ *
+ * Both are here rather than in a workers suite for the reason this file's header
+ * gives: neither touches D1 or a Request. The cookie parser in particular is worth
+ * testing alone, because it is the screen that decides what may ever reach
+ * `hashToken` and a D1 bind — everything it emits is 64 lowercase hex characters, and
+ * a regression there is not visible from any route's behaviour.
+ */
+describe('the share cookie carries a list', () => {
+  const NAME = SECURE_SHARE_COOKIE
+  const a = 'a'.repeat(64)
+  const b = 'b'.repeat(64)
+  const c = 'c'.repeat(64)
+
+  it('reads under either name, preferring the prefixed one', () => {
+    expect(shareCookieName('https://x.test')).toBe(SECURE_SHARE_COOKIE)
+    expect(shareCookieName('http://localhost:5199')).toBe(PLAIN_SHARE_COOKIE)
+    expect(shareCookieTokens(`${PLAIN_SHARE_COOKIE}=${a}`)).toEqual([a])
+    expect(shareCookieTokens(`${PLAIN_SHARE_COOKIE}=${b}; ${NAME}=${a}`)).toEqual([a])
+  })
+
+  it('is not the session cookie, which is the whole reason a share reaches nothing', () => {
+    // `readSessionCookie` looks for exactly two names and neither is this one, so a
+    // browser holding only a share cookie resolves to no actor at all.
+    expect(readSessionCookie(`${NAME}=${a}`)).toBeNull()
+    expect(readSessionCookie(`${PLAIN_SHARE_COOKIE}=${a}`)).toBeNull()
+  })
+
+  it('screens every part, so nothing unbounded reaches a hash or a bind', () => {
+    expect(shareCookieTokens(`${NAME}=`)).toEqual([])
+    expect(shareCookieTokens(null)).toEqual([])
+    // Uppercase is not what `mintSecret()` produces; neither is 63 or 65 characters.
+    expect(shareCookieTokens(`${NAME}=${'A'.repeat(64)}`)).toEqual([])
+    expect(shareCookieTokens(`${NAME}=${'a'.repeat(63)}`)).toEqual([])
+    expect(shareCookieTokens(`${NAME}=${'a'.repeat(65)}`)).toEqual([])
+    // A malformed part is dropped rather than failing the cookie: a stale value from
+    // an older deploy must not lock a reviewer out of a link that is still good.
+    expect(shareCookieTokens(`${NAME}=junk.${a}.${'!'.repeat(64)}`)).toEqual([a])
+  })
+
+  it('caps and de-duplicates, newest first', () => {
+    const many = Array.from({ length: 9 }, (_, i) => String(i).repeat(64))
+    expect(shareCookieTokens(`${NAME}=${many.join('.')}`)).toHaveLength(MAX_SHARE_COOKIE_TOKENS)
+    expect(shareCookieTokens(`${NAME}=${a}.${a}.${b}`)).toEqual([a, b])
+  })
+
+  it('appends rather than replaces, so a second link does not unseat the first', () => {
+    // The behaviour the whole list exists for: without it, clicking a second link
+    // would silently stop the first one working in that browser.
+    expect(withShareToken(`${NAME}=${b}`, a)).toBe(`${a}.${b}`)
+    expect(withShareToken(null, a)).toBe(a)
+    // Re-clicking a link it already holds moves it to the front rather than doubling it.
+    expect(withShareToken(`${NAME}=${b}.${a}`, a)).toBe(`${a}.${b}`)
+    // Overflow evicts the oldest, never the one just clicked.
+    const full = [b, c, '1'.repeat(64), '2'.repeat(64), '3'.repeat(64)]
+    const written = withShareToken(`${NAME}=${full.join('.')}`, a)
+    expect(written.split('.')).toHaveLength(MAX_SHARE_COOKIE_TOKENS)
+    expect(written.startsWith(a)).toBe(true)
+    expect(written).not.toContain('3'.repeat(64))
+  })
+})
+
+describe('how long a preview link may last', () => {
+  const NOW = 1_800_000_000_000
+  const DAY = 24 * 60 * 60 * 1000
+
+  it('defaults to a week and honours a shorter ask', () => {
+    expect(shareExpiry(undefined, NOW)).toBe(NOW + DEFAULT_SHARE_DAYS * DAY)
+    expect(DEFAULT_SHARE_DAYS).toBe(7)
+    expect(shareExpiry(1, NOW)).toBe(NOW + DAY)
+    expect(shareExpiry(MAX_SHARE_DAYS, NOW)).toBe(NOW + MAX_SHARE_DAYS * DAY)
+  })
+
+  it('refuses rather than clamps, so a UI can never promise longer than it gets', () => {
+    // `checkScheduleTime`'s rule: silently giving somebody ninety days while their
+    // screen says two years is the worst of both answers.
+    expect(() => shareExpiry(MAX_SHARE_DAYS + 1, NOW)).toThrow(/more than 90 days/)
+    expect(() => shareExpiry(0, NOW)).toThrow(/at least a day/)
+    expect(() => shareExpiry(-5, NOW)).toThrow(/at least a day/)
+    expect(() => shareExpiry(Number.NaN, NOW)).toThrow(/at least a day/)
+  })
+
+  it('has no "never expires", unlike an API token', () => {
+    // A token with no expiry is a legitimate shape; a preview link with none is a
+    // permanent public URL for unpublished content. The type says so — there is no
+    // value of the argument that produces null — and the column says so too
+    // (`expires_at not null`, pinned in migrations.test.ts).
+    expect(Number.isFinite(shareExpiry(undefined, NOW))).toBe(true)
   })
 })

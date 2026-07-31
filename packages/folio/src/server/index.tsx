@@ -4,8 +4,10 @@ import { singletonId } from '../core/schema'
 import { FolioDoc, renderGlobalNode } from '../preview/Render'
 import { createApp } from './app'
 import { audit } from './audit'
+import { shareCookieTokens } from './auth/cookie'
 import { credentialOf, resolveActor } from './auth/resolve'
 import { allows, READ_DRAFT } from './auth/roles'
+import { claimShare } from './auth/shares'
 import { FolioError } from './errors'
 import { runMigrations } from './migrate'
 import { previewPage } from './pages'
@@ -149,6 +151,17 @@ export type {
 } from './auth/config'
 export type { UserRow } from './auth/users'
 export type { TokenRow } from './auth/tokens'
+/**
+ * Draft preview sharing (`../../../docs/specs/platform/draft-sharing.md`): the row a
+ * screen draws, and the two bounds on a link's life.
+ *
+ * `ShareRow` carries no token and no hash, so it is safe to hand anywhere the row is
+ * wanted. **`ShareGrant` is deliberately not exported**: it is what a live link
+ * authorises, it is meaningful only inside `handle()`'s preview branch, and putting
+ * it on the public surface would invite somebody to build a second gate out of it.
+ */
+export type { ShareRow, ShareState } from './auth/shares'
+export { DEFAULT_SHARE_DAYS, MAX_SHARE_DAYS } from './auth/shares'
 export { FolioDoc } from '../preview/Render'
 export { Shell, serializeJson } from './Document'
 export type { StoryMeta, StoryNode } from '../core/story'
@@ -208,9 +221,32 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       // an unauthenticated visitor the flag then means nothing at all and the
       // host serves its ordinary published page, which is both the safe answer
       // and the least surprising one.
+      /**
+       * A share token in the browser's cookie is the *second* way this branch can be
+       * satisfied (`../../../docs/specs/platform/draft-sharing.md`), and it is
+       * deliberately narrower than the first in every dimension:
+       *
+       *   - It is **not an actor.** `claimShare` answers a `ShareGrant` — an id, one
+       *     story id, an expiry — which `allows()` cannot be called with, so no route
+       *     gate anywhere in the server can be satisfied by it. This branch is the
+       *     only code that can act on one at all.
+       *   - It authorises **one document**, checked against the story the requested
+       *     path actually resolves to, below. Another page's URL with the same cookie
+       *     is handed back to the host exactly as an unauthenticated one is.
+       *   - It cannot ask for `?as=`, also below.
+       *
+       * Only reached when the ordinary gate has already failed, and only when the
+       * cookie exists at all, so the "no D1 read for a request with no credential"
+       * discipline is intact: a stranger appending the flag to a random URL still
+       * costs the database nothing.
+       */
+      let shared: string[] = []
       if (rt.auth.mode === 'session') {
         const actor = await resolveActor(() => bindings.db, rt.auth, credentialOf(req))
-        if (!allows(actor, READ_DRAFT)) return null
+        if (!allows(actor, READ_DRAFT)) {
+          shared = shareCookieTokens(req.headers.get('cookie'))
+          if (shared.length === 0) return null
+        }
       }
 
       // `?locale=` is what the admin's switcher appends (`localisation.md`
@@ -234,11 +270,30 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       // (`document-types.md`), not an accident of SQL semantics.
       if (!story || story.path === null) return null
 
+      /**
+       * The share gate, and the reason it is *here* rather than beside the actor
+       * check: a grant names one story id, and the story is only known once the
+       * requested path has been resolved. A cookie for another document is refused
+       * the same way everything else in this branch is — by handing the request
+       * back, so the visitor sees the host's ordinary published page.
+       *
+       * One D1 round trip, which also stamps the view (`claimShare`).
+       */
+      if (shared.length > 0 && !(await claimShare(bindings.db, shared, story.id))) return null
+
       // `as` previews a singleton in the context of this page (`globals.md`
       // decision 4). Naming anything that is not a configured global is the
       // same refusal shape as a path with no story: null, so the host's own
       // routes win rather than Folio guessing at what was meant.
       const as = url.searchParams.get('as')
+      /**
+       * **A share grant may not use it.** `?as=` swaps the editable document for a
+       * *global's* draft — the site header, site settings — and the grant covers one
+       * page, not a singleton every page carries. Refused before the global is even
+       * looked up, so the refusal cannot depend on which globals happen to be
+       * configured.
+       */
+      if (as !== null && shared.length > 0) return null
       if (as !== null) {
         const type = rt.typeOf(as)
         if (type?.kind !== 'singleton' || !rt.globals.includes(as)) return null

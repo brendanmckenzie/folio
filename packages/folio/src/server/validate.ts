@@ -535,10 +535,50 @@ export const TokenCreateBody = v.object(
   OBJECT,
 )
 
+/**
+ * `POST {base}/api/story/:id/share` (`../../../docs/specs/platform/draft-sharing.md`).
+ *
+ * Both fields optional, so an empty body means "a link for this document, on the
+ * default terms" — which is the request an editor actually makes.
+ *
+ * `expiresInDays` is bounded here *and* in `shareExpiry`, and neither is redundant:
+ * this bounds what may reach the column, and that states the product rule
+ * (`MAX_SHARE_DAYS`) so a programmatic caller and `folio.handle`'s own callers meet
+ * the same refusal. The pairing `POST /migrate` uses for `batch`.
+ *
+ * There is no `storyId` field: which document is in the path, so a body cannot ask
+ * for a link to something other than the document whose gate was just checked. And
+ * no `createdBy` — "who made this link" is not a value anybody should be able to
+ * type, for the reason `CheckpointBody` and `ScheduleBody` both record.
+ */
+export const ShareCreateBody = v.object(
+  {
+    expiresInDays: v.optional(
+      v.pipe(
+        v.number('must be a number'),
+        v.integer('must be a whole number of days'),
+        v.minValue(1, 'must be 1 or greater'),
+        v.maxValue(90, 'must be 90 or fewer'),
+      ),
+    ),
+    /** What the editor calls it, for the list. "For Rachel's Friday review". */
+    note: v.optional(bounded(200)),
+  },
+  OBJECT,
+)
+
+/** `?state=` on the share list. Absent means both, which is what "which links exist"
+ * means; `live` is "what is outstanding right now" and is the interesting one. */
+export function shareStateQuery(raw: string | undefined): 'live' | 'lapsed' | undefined {
+  if (raw === undefined || raw === '') return undefined
+  return parseOrThrow(v.picklist(['live', 'lapsed'], 'must be one of: live, lapsed'), raw, 'state')
+}
+
 export type LoginEmailInput = v.InferOutput<typeof LoginEmailBody>
 export type UserCreateInput = v.InferOutput<typeof UserCreateBody>
 export type UserPatchInput = v.InferOutput<typeof UserPatchBody>
 export type TokenCreateInput = v.InferOutput<typeof TokenCreateBody>
+export type ShareCreateInput = v.InferOutput<typeof ShareCreateBody>
 
 /**
  * Where to send a browser after signing in, screened to a same-origin path.

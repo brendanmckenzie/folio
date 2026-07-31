@@ -52,3 +52,31 @@ insert into users (id, email, name, role, created_at) values
 insert into api_tokens (id, name, scopes, created_by, created_at) values
   ('69032e6a6159cb3e492e3caec563abb20287e2395ec75bc036d5b5eb2b900f74',
    'local dev', '["admin"]', 'usr_demoadmin1', unixepoch() * 1000);
+
+-- A draft preview link, for platform/draft-sharing.md. Same reasoning as the API
+-- token above, and the same shape: the whole point of this feature is a URL you can
+-- open with **no account and no cookie**, so a seeded one means the flow is one
+-- paste away the moment `pnpm db:seed` finishes rather than three API calls away:
+--
+--   open http://localhost:5199/folio/share?t=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+--
+-- That lands on `/?_folio=preview` — sty_home's own URL, per the demo's `route`
+-- config — and renders its live *draft* to a browser holding nothing else. Try the
+-- same URL without going through /folio/share first and you get the published page,
+-- which is the refusal working.
+--
+-- `id` is `shr_`-prefixed and synthetic; `token_hash` is the lowercase-hex SHA-256 of
+-- the token, because that is the only form the database ever holds
+-- (packages/folio/src/server/auth/secrets.ts) — so this file cannot compute it and
+-- carries it precomputed, with the plaintext existing nowhere but the comment above.
+--
+-- LOCAL DEV ONLY, and the token is deliberately unmistakable (`0123456789abcdef`
+-- four times) so a copy of it turning up in a real deployment's `shares` table is
+-- obvious at a glance. Thirty days, which is inside MAX_SHARE_DAYS; a real one is
+-- minted per review through `POST /folio/api/story/:id/share` and defaults to seven.
+insert into shares (id, token_hash, story_id, created_by, created_at, expires_at, note) values
+  ('shr_localdev01',
+   'a8ae6e6ee929abea3afcfc5258c8ccd6f85273e0d4626d26c7279f3250f77c8e',
+   'sty_home', 'usr_demoadmin1', unixepoch() * 1000,
+   (unixepoch() + 30 * 24 * 60 * 60) * 1000,
+   'local dev');

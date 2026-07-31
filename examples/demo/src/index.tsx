@@ -227,6 +227,16 @@ export default {
     // --- Folio: editor, its API, and preview renders ---------------------
     // Returns null for anything it does not own, including a preview request
     // for a path with no story behind it.
+    //
+    // **Draft preview sharing (platform/draft-sharing.md) costs this host exactly
+    // nothing, and that is worth noticing rather than glossing.** A reviewer with no
+    // account opens `/folio/share?t=…`, which is inside this call; it hands them a
+    // cookie and redirects them to the document's own `?_folio=preview` URL, which is
+    // also inside this call. Both answer `no-store`, so nothing about the arrangement
+    // interacts with the `cacheHeaders` pair set on the published response below —
+    // and the same URL with no cookie falls straight through to that published page,
+    // which is the refusal rather than an error. There is no binding to add, no route
+    // to write, and no branch here to keep in step. Seeded link: see seed.sql.
     const handled = await folio.handle(req, env, ctx)
     if (handled) return handled
 

@@ -56,6 +56,8 @@ sequence because the dependency graph is the same one.
 | 18 | [Pagination, everywhere](foundation/pagination.md) | foundation | L | — | `0001_init` | roadmap: next 1 + 1a |
 | 19 | [Scheduled publishing](platform/scheduled-publishing.md) | platform | M | — | `0003` | completion plan: gap 1 |
 | 20 | [Bulk write endpoints](platform/bulk-writes.md) | platform | M | — | — | completion plan: gap 2 |
+| 21 | [Draft preview sharing](platform/draft-sharing.md) | platform | M | — | `0004` | completion plan: gap 4 |
+| 22 | [Build artifacts and `.d.ts`](foundation/package-build.md) | foundation | S | — | — | completion plan: gap 5 |
 
 Sizing matches `PARITY.md`: **S** ≈ a day, **M** ≈ a few days, **L** ≈ a week
 or two. Relative weight, not a quote.
@@ -89,6 +91,9 @@ or two. Relative weight, not a quote.
 
 20 bulk writes ───────── 18's StoryFilter is what a selection captures, and 18's
                          opt-in count is what guards it
+
+21 draft sharing ─────── 10 built the credential discipline it reuses and the actor
+                         model it deliberately stays outside of
 ```
 
 - **1–2 first** because both are near-bug-fixes, and because both add `stories`
@@ -131,6 +136,20 @@ or two. Relative weight, not a quote.
   not reproduce the header's number until the routed/unrouted axis moved onto the
   filter, because a list route states that scope positionally and a captured filter
   has no positions.
+- **21** needed **10** twice over, and in opposite directions. It *reuses* the
+  credential discipline — `auth/secrets.ts` is the only place a bearer secret is minted
+  or hashed, so a share link cost no new crypto and no new secret to configure — and it
+  deliberately stays *outside* the `Actor` model that file's spec built: a
+  `ShareGrant` has no role and no scopes, so `allows()` cannot be called with one and
+  no route gate in the server can be satisfied by it. It also needed **9**, for the
+  opposite reason again: `?as=<global>` renders a singleton's draft in a page's
+  context, which is the one thing a per-document grant had to be taught to refuse.
+- **22** is last because it is the only one that is not a feature: it is the same
+  library, packaged. It depends on nothing and nothing depends on it, which is exactly
+  why it kept getting deferred. It is also the only spec whose central decision is
+  about what *stays* source — `folio/preview` and `folio/admin-entry` are entry points
+  of the host's bundle, not modules a host imports, and the 82KB `folio-admin.css`
+  that `pnpm build` produces is the reason.
 
 ## Wire version ledger
 
@@ -171,9 +190,10 @@ they recorded had no audience. Two have landed since:
 | --- | --- | --- |
 | `0002_asset_refs.sql` | (asset usage, port phase 4) | `content_refs.to_story` → `to_id`, plus a third `kind` value |
 | `0003_schedules.sql` | scheduled publishing | `schedules` table, two partial indexes |
+| `0004_shares.sql` | draft preview sharing | `shares` table, one unique index and one ordinary one |
 
-`0002` was a plain rename and `0003` a plain `create table`, which is what every one
-after them is expected to be.
+`0002` was a plain rename and `0003` and `0004` plain `create table`s, which is what
+every one after them is expected to be.
 
 The table is kept as a **record of what each spec added**, since each spec's own
 *Wire & schema changes* section still names its migration and those sections are
@@ -201,15 +221,18 @@ The collapse also **dropped one index rather than carrying it forward**:
 `stories_draft_updated` was never read by anything, and
 `test/workers/migrations.test.ts` now asserts its absence. See
 `foundation/pagination.md` decision 2a. That absence is a pattern now rather than a
-one-off — `0002` records the same refusal for `assets.filename`/`size` and `0003` for
-`schedules(story_id)`, each asserted, so adding one of them later is a deliberate act
-with a measurement behind it.
+one-off — `0002` records the same refusal for `assets.filename`/`size`, `0003` for
+`schedules(story_id)` and `0004` for `shares(story_id)`, each asserted, so adding one of
+them later is a deliberate act with a measurement behind it.
 
 **Two rules about a CHECK constraint, both learned the expensive way.**
 `versions.kind` carries one, and it is the whole reason an unpublish has no version row
 to this day: SQLite cannot widen a CHECK without rebuilding the table.
 `content_refs.kind` (`0002`) and `schedules.action`/`status` (`0003`) therefore carry
-none, so a new enum value in any of the three costs no DDL at all.
+none, so a new enum value in any of the three costs no DDL at all. `0004` answers the
+lesson a third way — by having no enum column: `shares`' `live`/`lapsed` vocabulary is
+`revoked_at is null and expires_at > now`, computed in the `where` clause, so there is
+nothing stored that could disagree with the clock.
 
 Six specs needed no migration at all: conditional fields, defaults and presets,
 duplicate and paste and lifecycle hooks are code-only; globals and data documents
@@ -219,7 +242,8 @@ build on the `type` column; the content API builds on `api_tokens`.
 
 Each spec carries its own `> **Status:**` stamp. All sixteen specs in the quick-wins and
 main-line tables are **done**, restamped in place with an `## Implementation notes`
-section recording what actually landed. Spec 17 (caching) is **done** too, and so is
-spec 19 (scheduled publishing). Spec 18 (pagination) is **in-progress**: its phase 1,
-the schema collapse, has landed. A spec that gets built is restamped the same way, the
-way `../../PARITY.md` records what landed.
+section recording what actually landed. Spec 17 (caching) is **done** too, and so are
+specs 19 (scheduled publishing), 20 (bulk writes) and 21 (draft preview sharing). Spec
+18 (pagination) is **in-progress**: its phase 1, the schema collapse, has landed. A spec
+that gets built is restamped the same way, the way `../../PARITY.md` records
+what landed.
