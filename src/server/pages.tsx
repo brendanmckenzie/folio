@@ -287,10 +287,73 @@ export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Res
   )
 }
 
+/* ------------------------------------------------------- a lapsed share --- */
+
+/** Styles for the lapsed-link page. Inline, for the reason `loginPage` documents:
+ * a page whose whole job is to explain a failure must not depend on a built asset. */
+const LAPSED_STYLE = `
+  body.folio-lapsed { margin: 0; font: 15px/1.5 system-ui, sans-serif; color: #111;
+    background: #f6f6f7; display: grid; place-items: center; min-height: 100vh; }
+  .folio-lapsed__card { background: #fff; border: 1px solid #e3e3e6; border-radius: 10px;
+    padding: 28px 32px; max-width: 420px; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+  .folio-lapsed__card h1 { font-size: 17px; margin: 0 0 10px; }
+  .folio-lapsed__card p { margin: 0 0 10px; color: #555; font-size: 14px; }
+  .folio-lapsed__card p:last-child { margin-bottom: 0; }
+`
+
 /**
- * All three pages here are private by construction — the editor, a story's
- * *draft* preview, and the sign-in form — so all three say `no-store` and none
- * of them carries a `Cache-Tag`
+ * What `GET {base}/share?t=…` answers for a link that does not work.
+ *
+ * **A page rather than a bare 404, and 404 rather than 410.** The two halves of
+ * that are answering different questions. The *prose* is there because the reader is
+ * a client with no account who was sent a URL and has no way to interpret a status
+ * code — "ask whoever sent this for a new one" is the entire useful content of the
+ * response, and a plain 404 conveys none of it. The *status* is 404 because there is
+ * nothing here to serve, and because 410 would be a claim about history.
+ *
+ * **The text is identical for expired, revoked, and never-issued**, which is the
+ * part that matters. Distinguishing them would make this route an oracle for
+ * "was this string ever one of our tokens" — harmless in practice against a
+ * 256-bit secret, and worth nothing, because the reader's next action is the same
+ * in all three cases. Usefulness comes from the explanation, not from the diagnosis.
+ *
+ * No JavaScript, for `loginPage`'s reason, and `no-store`: it is a response to a
+ * credential.
+ *
+ * Takes no runtime, unlike every other page here, and that is the honest signature
+ * rather than an oversight: it must not name the site, link into it, or say which
+ * document the dead link was for. A reviewer whose link has lapsed has no standing
+ * to be told any of those, and the page they get should not imply otherwise.
+ */
+export function expiredLinkPage(): Promise<Response> {
+  return html(
+    <Shell
+      title="This preview link has expired"
+      bodyClass="folio-lapsed"
+      head={
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: a static literal stylesheet, no interpolation
+        <style dangerouslySetInnerHTML={{ __html: LAPSED_STYLE }} />
+      }
+    >
+      <div className="folio-lapsed__card">
+        <h1>This preview link no longer works</h1>
+        <p>
+          Preview links are temporary. This one has either run out or been turned off, so there is
+          nothing to show you.
+        </p>
+        <p>Ask whoever sent it to you for a new link.</p>
+      </div>
+    </Shell>,
+    // No client entry: there is nothing here to hydrate.
+    [],
+    404,
+  )
+}
+
+/**
+ * All four pages here are private by construction — the editor, a story's
+ * *draft* preview, the sign-in form, and a lapsed preview link — so all of them
+ * say `no-store` and none of them carries a `Cache-Tag`
  * (`../../../docs/specs/platform/caching.md` decision 7).
  *
  * The preview is the one that matters. The same URL returns draft HTML to an
@@ -302,9 +365,10 @@ export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Res
  * `_folio=preview`, because the failure mode is bad enough to be worth saying
  * twice.
  */
-async function html(node: ReactElement, bootstrapModules: string[]) {
+async function html(node: ReactElement, bootstrapModules: string[], status = 200) {
   const stream = await renderToReadableStream(node, { bootstrapModules })
   return new Response(stream, {
+    status,
     headers: {
       'content-type': 'text/html; charset=utf-8',
       'cache-control': NO_STORE,

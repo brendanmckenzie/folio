@@ -677,3 +677,151 @@ describe('content index', () => {
     await env.DB.prepare('delete from content_refs').run()
   })
 })
+
+/**
+ * `shares` (`0004_shares.sql`) — draft preview links.
+ *
+ * Four things here are decisions rather than mechanics: the **absence** of any role
+ * or scope column (which is what stops a share becoming an `Actor`), `expires_at`
+ * being `not null` where `api_tokens.expires_at` is nullable, the named unique index
+ * on `token_hash` rather than a column constraint, and the absence of
+ * `shares_story`. All four are pinned.
+ */
+describe('shares', () => {
+  const insert = (
+    id: string,
+    hash: string,
+    storyId: string,
+    expiresAt: number,
+    revokedAt: number | null = null,
+  ) =>
+    env.DB.prepare(
+      `insert into shares (id, token_hash, story_id, created_at, expires_at, revoked_at)
+       values (?, ?, ?, 1, ?, ?)`,
+    )
+      .bind(id, hash, storyId, expiresAt, revokedAt)
+      .run()
+
+  beforeEach(async () => {
+    await env.DB.prepare('delete from shares').run()
+  })
+
+  it('has every column, in order, with the defaults a fresh row relies on', async () => {
+    expect((await columnsOf('shares')).map((c) => c.name)).toEqual([
+      'id',
+      'token_hash',
+      'story_id',
+      'created_by',
+      'created_at',
+      'expires_at',
+      'revoked_at',
+      'last_viewed_at',
+      'views',
+      'note',
+    ])
+    const byName = new Map((await columnsOf('shares')).map((c) => [c.name, c]))
+    expect(byName.get('id')?.pk).toBe(1)
+    expect(byName.get('views')?.dflt_value).toBe('0')
+    expect(byName.get('revoked_at')?.notnull).toBe(0)
+    expect(byName.get('last_viewed_at')?.notnull).toBe(0)
+    expect(byName.get('note')?.notnull).toBe(0)
+
+    await insert('shr_defaults', 'hash_defaults', 'sty_home', 9_000_000)
+    const row = await env.DB.prepare(
+      'select views, revoked_at, last_viewed_at, note, created_by from shares where id = ?',
+    )
+      .bind('shr_defaults')
+      .first<Record<string, unknown>>()
+    expect(row).toEqual({
+      views: 0,
+      revoked_at: null,
+      last_viewed_at: null,
+      note: null,
+      created_by: null,
+    })
+  })
+
+  it('carries no role and no scope column, which is what keeps a share out of the actor model', async () => {
+    // The load-bearing absence of the whole feature. `users` has `role`,
+    // `api_tokens` has `scopes`, and both resolve into the `Actor` every route gate
+    // reads. A column here of either shape is the change that would quietly turn a
+    // review link into a credential, so it is asserted rather than remembered.
+    const names = (await columnsOf('shares')).map((c) => c.name)
+    expect(names).not.toContain('role')
+    expect(names).not.toContain('scopes')
+    expect(names).not.toContain('user_id')
+  })
+
+  it('requires an expiry, unlike `api_tokens`', async () => {
+    // A token with no expiry is a legitimate shape (a CI job that outlives every
+    // person who set it up). A preview link with no expiry is a permanent public URL
+    // for unpublished content, which is the one thing this feature must not become —
+    // so the column insists, and the ceiling is MAX_SHARE_DAYS in auth/shares.ts.
+    expect((await columnsOf('shares')).find((c) => c.name === 'expires_at')?.notnull).toBe(1)
+    expect((await columnsOf('api_tokens')).find((c) => c.name === 'expires_at')?.notnull).toBe(0)
+    await expect(
+      env.DB.prepare(
+        'insert into shares (id, token_hash, story_id, created_at) values (?, ?, ?, 1)',
+      )
+        .bind('shr_forever', 'hash_forever', 'sty_home')
+        .run(),
+    ).rejects.toThrow(/NOT NULL constraint failed/i)
+  })
+
+  it('has exactly two indexes, and the token lookup is a *named* unique one', async () => {
+    // Named rather than left to a `unique` column constraint, which SQLite would call
+    // `sqlite_autoindex_shares_1` — filtered out by `indexesOf`, so the uniqueness of
+    // the feature's whole lookup path would be the one property no test could see.
+    expect(await indexesOf('shares')).toEqual(['shares_created', 'shares_token'])
+    expect(await indexSql('shares_token')).toMatch(/unique/i)
+    expect(await indexSql('shares_token')).toMatch(/\(\s*token_hash\s*\)/i)
+    expect(await indexSql('shares_created')).toMatch(/\(\s*created_at\s+desc\s*\)/i)
+  })
+
+  it('refuses two rows sharing a token hash, so one secret is one grant', async () => {
+    await insert('shr_a', 'hash_same', 'sty_home', 9_000_000)
+    await expect(insert('shr_b', 'hash_same', 'sty_about', 9_000_000)).rejects.toThrow(
+      /UNIQUE constraint failed/i,
+    )
+  })
+
+  it('lets one document carry several links at once', async () => {
+    // Three reviewers, three individually revocable links. There is deliberately no
+    // unique index on `story_id` — contrast `schedules_story_action`, where a queue of
+    // contradictory instructions has no answer to "when does this go live".
+    await insert('shr_1', 'hash_1', 'sty_home', 9_000_000)
+    await insert('shr_2', 'hash_2', 'sty_home', 9_000_000)
+    await insert('shr_3', 'hash_3', 'sty_home', 9_000_000, 5)
+    const row = await env.DB.prepare('select count(*) as n from shares').first<{ n: number }>()
+    expect(row?.n).toBe(3)
+  })
+
+  it('computes live/lapsed from two columns and the clock, with no status column', async () => {
+    // `revoked_at is null and expires_at > now` is the whole state machine, which is
+    // why there is no enum to widen here and therefore no CHECK to rebuild the table
+    // over — the lesson `versions.kind` taught, answered by not having the column.
+    await insert('shr_live', 'hash_live', 'sty_home', 9_000_000)
+    await insert('shr_expired', 'hash_expired', 'sty_home', 100)
+    await insert('shr_revoked', 'hash_revoked', 'sty_about', 9_000_000, 50)
+    const { results } = await env.DB.prepare(
+      'select id from shares where revoked_at is null and expires_at > ? order by id',
+    )
+      .bind(1000)
+      .all<{ id: string }>()
+    expect(results.map((r) => r.id)).toEqual(['shr_live'])
+  })
+
+  it('does NOT have `shares_story`, for a query that is a scan over a tiny table', async () => {
+    // `?story=` scans, over a table bounded by links somebody typed by hand — the
+    // identical measurement `schedules_story` refused on and `assets.filename`/`size`
+    // before it. `stories_draft_updated` is the standing example of the other choice.
+    //
+    // Asserted as an absence so adding one is a deliberate act with a measurement
+    // behind it, which means this assertion failing is the conversation.
+    expect(await indexesOf('shares')).not.toContain('shares_story')
+  })
+
+  // That 0004 leaves `stories` alone needs no test of its own: every assertion in
+  // this file runs against the schema the whole directory produced, so `stories`'
+  // own "has exactly these seven indexes" above is already the check.
+})

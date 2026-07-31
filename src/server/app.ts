@@ -14,6 +14,7 @@ import { contentRoutes } from './routes/content'
 import { editorPageRoutes, editorRoutes } from './routes/editor'
 import { historyRoutes } from './routes/history'
 import { migrationRoutes } from './routes/migrations'
+import { shareRoutes, sharePageRoutes } from './routes/preview'
 import { redirectRoutes } from './routes/redirects'
 import { scheduleRoutes } from './routes/schedules'
 import { shellRoutes } from './routes/shell'
@@ -127,6 +128,11 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // shares no prefix with anything else on this mount. It reads next to the routes
   // whose per-document twins it performs in a loop.
   app.route('/api', bulkRoutes<Env>(rt))
+  // After `storyRoutes` for the same reason `scheduleRoutes` is: `/story/:id/share`
+  // is a distinct literal segment that no `:param` here can swallow, so the order
+  // is for reading rather than for correctness. `/shares` and `/shares/:id` share no
+  // prefix with anything on this mount.
+  app.route('/api', shareRoutes<Env>(rt))
   app.route('/api', historyRoutes<Env>(rt))
   app.route('/api', assetRoutes<Env>(rt))
   app.route('/api', editorRoutes<Env>(rt))
@@ -159,6 +165,14 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // must not be read as `/login/:provider`.
   app.route('/', authRoutes<Env>(rt))
   app.route('/', assetFileRoutes<Env>())
+  /**
+   * `{base}/share?t=…` — the one route in the server a stranger holding a credential
+   * may reach (`../../../docs/specs/platform/draft-sharing.md`). It has to be here,
+   * ahead of `shellRoutes`' wildcard, or a reviewer with no account is redirected to
+   * a sign-in page they can never complete. It answers 404 entirely under
+   * `auth: 'open'`, where the whole mechanism would be ceremony around an open door.
+   */
+  app.route('/', sharePageRoutes<Env>(rt))
 
   // (3) `shellRoutes`' wildcard covers every bare path, and it now covers
   // `{base}/edit/:id` too — **port phase 7 landed, so the rebuilt editor owns the
