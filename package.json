@@ -18,17 +18,17 @@
   "exports": {
     "./core": {
       "development": "./src/core/index.ts",
-      "types": "./src/core/index.ts",
+      "types": "./dist/types/core/index.d.ts",
       "default": "./dist/core.js"
     },
     "./engine": {
       "development": "./src/core/engine.ts",
-      "types": "./src/core/engine.ts",
+      "types": "./dist/types/core/engine.d.ts",
       "default": "./dist/engine.js"
     },
     "./server": {
       "development": "./src/server/index.tsx",
-      "types": "./src/server/index.tsx",
+      "types": "./dist/types/server/index.d.ts",
       "default": "./dist/server.js"
     },
     "./vite": {

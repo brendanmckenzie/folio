@@ -121,10 +121,30 @@ interface DefaultSpaceEnv {
 }
 
 /**
+ * The space object's public surface, declared rather than inferred, for the
+ * reason `StoryDOInstance` states in full: a factory returning a class
+ * expression has no name to write into a `.d.ts`, and tsc refuses to serialise
+ * one that has private or protected members — `ctx` and `env` off
+ * `DurableObject` are enough on their own.
+ */
+export interface SpaceDOInstance<Env> extends DurableObject<Env> {
+  fetch(req: Request): Promise<Response>
+  broadcastEvent(event: SpaceEvent): Promise<void>
+  webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void>
+  webSocketClose(ws: WebSocket): Promise<void>
+  webSocketError(ws: WebSocket): Promise<void>
+}
+
+/**
  * Builds the space Durable Object class bound to a host's own env shape. A
  * factory for the same reason `createStoryDO` is one — see `SpaceDOConfig`.
  */
-export function createSpaceDO<Env>(config: SpaceDOConfig<Env>) {
+export function createSpaceDO<Env>(
+  config: SpaceDOConfig<Env>,
+): new (
+  ctx: DurableObjectState,
+  env: Env,
+) => SpaceDOInstance<Env> {
   return class SpaceDOImpl extends DurableObject<Env> {
     async fetch(req: Request): Promise<Response> {
       if (req.headers.get('Upgrade') !== 'websocket') {

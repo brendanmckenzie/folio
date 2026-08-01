@@ -4,29 +4,35 @@
   // `dist/types/**`. The JavaScript comes from esbuild — see `build:js` — so
   // nothing here emits `.js`.
   //
-  // ## Why `src/server` is not in `include`
+  // ## Why `src/server` took a source change to get in here
   //
-  // Not a tidy-up, and not an oversight. Declaration emit for it **fails**:
+  // Declaration emit for it used to fail outright, and the failure mode is worth
+  // keeping written down because it is silent:
   //
   //   src/server/story-do.ts(173,17): error TS4094: Property 'sql' of exported
   //     anonymous class type may not be private or protected.
-  //   src/server/space-do.ts(127,17): error TS4094: Property 'broadcast' of
-  //     exported anonymous class type may not be private or protected.
   //
   // `createStoryDO` / `createSpaceDO` each `return class ... extends
-  // DurableObject` — a class expression tsc cannot name — and those classes hold
-  // `private` members. Thirteen of them across the two files. tsc has no way to
-  // write that type into a `.d.ts`, so it writes *no file at all*: `story-do.d.ts`
-  // and `space-do.d.ts` are simply absent, and `server/types.d.ts` needs
-  // `StoryDO` for `DurableObjectNamespace<StoryDO>`. `--noCheck` does not help;
-  // the diagnostic comes from the declaration emitter, not the checker.
+  // DurableObject` — a class expression tsc cannot name — so the emitter has to
+  // serialise the type inline, and it refuses to serialise one carrying a
+  // private or protected member. It then writes **no file at all** rather than
+  // an incomplete one: `story-do.d.ts` and `space-do.d.ts` were simply absent,
+  // and `server/types.d.ts` dangled on `DurableObjectNamespace<StoryDO>`.
+  // `--noCheck` does not help; the diagnostic comes from the emitter, not the
+  // checker.
   //
-  // The fix is in those two files: declare a return type on each factory, or make
-  // the members `#private` (ECMAScript private, which tsc emits as `#private;`).
-  // Until then `folio/core`, `folio/engine` and `folio/server` all keep `types`
-  // pointing at source in `package.json`.
+  // **The `#private` half of the old fix note was wrong.** Converting all
+  // thirteen members to ECMAScript private changes nothing — tsc reports
+  // `Property '#sql' ...` in the same place, and reports `ctx` and `env` too,
+  // which are `protected` on `DurableObject` itself and are not ours to rename.
+  // A class expression extending `DurableObject` can never be serialised
+  // inline, whatever we do to our own members.
   //
-  // ## Why they keep it *together*
+  // So the fix is the other one: both factories declare their return type, and
+  // `StoryDOInstance` / `SpaceDOInstance` are the names the emitter writes. Each
+  // interface header says why it exists.
+  //
+  // ## Why the three `types` conditions moved together
   //
   // Half-and-half does not work, and it fails in the least obvious place.
   // Structurally identical declarations of a generic type are **not**
@@ -38,21 +44,22 @@
   //
   // fails with "Type 'BlockDef<{...}>' is not assignable to type 'AnyBlockDef'"
   // — `AnyBlockDef` is `BlockDef<any>`, and across two declarations
-  // `strictFunctionTypes` compares `render`'s parameter structurally instead. That
-  // is the first call in every host's file. So the `types` condition moves for
-  // core, engine and server in one commit or not at all.
+  // `strictFunctionTypes` compares `render`'s parameter structurally instead.
+  // That is the first call in every host's file, which is why `package.json`
+  // moves core, engine and server in one commit or not at all.
   //
-  // `dist/types/core/**` is emitted anyway: it is the artifact the move needs, it
-  // is what proves the pipeline works today, and an out-of-tree consumer
-  // typechecks against it. `folio/vite` already points at it, and can, because
-  // its whole surface is `FolioPluginOptions` and Vite's `Plugin` — it shares no
-  // type with `core`, so there is nothing to be inconsistent with.
-  //
-  // ## Why `src/admin` and `src/preview` are absent
+  // ## Why `src/admin` and `src/preview` are not in `include`
   //
   // A different and permanent reason: they are entry points to the *host's*
   // client bundle, so they ship as source and are never imported as types. See
   // `package.json`'s `exports` and `src/vite/index.ts`.
+  //
+  // Note that `dist/types/preview/Render.d.ts` and `RichText.d.ts` are emitted
+  // anyway, and correctly: `src/server/index.tsx` re-exports `FolioDoc` from
+  // `../preview/Render`, so the server's own declarations reference them. Being
+  // reachable from an included file is what pulls a declaration in, not being
+  // listed here — which is also why `preview/mount.tsx`, reachable from nothing
+  // on this side, stays out.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": false,
@@ -64,5 +71,5 @@
     "rootDir": "src",
     "outDir": "dist/types"
   },
-  "include": ["src/core", "src/vite"]
+  "include": ["src/core", "src/server", "src/vite"]
 }
