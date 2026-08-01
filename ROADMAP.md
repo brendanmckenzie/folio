@@ -650,18 +650,23 @@ an unsorted flat list, which stops working somewhere around 15.
     construction, and prebuilding the admin would move the
     "`/folio-admin.css` exists and is not a hashed chunk asset" tripwire out of
     `pnpm build`, which is the only thing that catches it.
-  - `folio/core`, `folio/engine` and `folio/server` still point `types` at source.
-    **Declaration emit for `src/server` fails**, and it is one small source change
-    away: `createStoryDO` (`src/server/story-do.ts:173`) and `createSpaceDO`
-    (`src/server/space-do.ts:127`) each `return class ... extends DurableObject`
-    with `private` members, which is TS4094 — "Property 'sql' of exported
-    anonymous class type may not be private or protected" — and tsc writes no
-    `.d.ts` for either file at all. Give each factory a declared return type, or
-    make those thirteen members `#private`. The three entries move together
-    because a *half*-built type surface is worse than none: with `folio/core`
-    resolved to `dist/types` and `folio/server` to source, `createFolio({ blocks:
-    [defineBlock({…})] })` fails, since TypeScript's variance fast path only
-    applies to two references to the *same* declaration.
+  - **`folio/core`, `folio/engine` and `folio/server` now point `types` at
+    `dist/types`, all three together** (2026-08-01). `src/server` emits
+    declarations at last, and the entry this bullet used to hold was wrong about
+    how: it offered `#private` as the cheap alternative to a declared return
+    type, and `#private` fixes nothing. tsc reports `Property '#sql' …` in the
+    same place and reports `ctx` and `env` besides, which are `protected` on
+    `DurableObject` and are not ours to rename — **a class expression extending
+    `DurableObject` cannot be serialised into a `.d.ts` at all**. So
+    `createStoryDO` and `createSpaceDO` declare their return types, and
+    `StoryDOInstance` / `SpaceDOInstance` are the names the emitter writes.
+
+    `examples/demo/dts-probe/` came out of it and stayed: everything else in the
+    repo resolves `folio/*` through the `development` condition, so nothing
+    compiled against the emitted declarations. It is one `createFolio` call in a
+    tsconfig without `customConditions` — `pnpm --filter demo typecheck:dist` —
+    and it reproduces the split-entries failure on demand. A tool, not CI,
+    because `dist/` is gitignored.
   - Flipping `private: true` is the actual release step, along with a version, a
     licence and a package-level README. `pnpm pack` already produces the right
     tarball: 292 files, `dist/` + `src/` + `migrations/`.

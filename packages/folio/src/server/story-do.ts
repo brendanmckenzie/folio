@@ -161,6 +161,46 @@ interface DefaultStoryEnv {
 }
 
 /**
+ * The story object's public surface, **declared rather than inferred**, and the
+ * reason is declaration emit rather than documentation.
+ *
+ * `createStoryDO` returns a class *expression*, which has no name tsc can write
+ * into a `.d.ts`, so the emitter has to serialise the type inline — and it
+ * refuses (TS4094) the moment such a type carries a private or protected
+ * member. Ours held nine; making them `#private` does not help, because `ctx`
+ * and `env` inherited from `DurableObject` are protected too and are reported
+ * exactly the same way. The failure is silent in the worst way: tsc writes *no*
+ * `story-do.d.ts` at all rather than an incomplete one, and `server/types.d.ts`
+ * then dangles on `DurableObjectNamespace<StoryDO>`.
+ *
+ * Naming the return type is what fixes it. The cost is that this list is a
+ * second statement of the public surface — but only in one direction: the class
+ * expression is checked against it, so a signature that drifts fails the build,
+ * and a *new* public method is simply not public until it is added here.
+ *
+ * `fetch` is redeclared even though `DurableObject` has it, because the base's
+ * is optional and `StoryStub` (`server/types.ts`) picks it.
+ */
+export interface StoryDOInstance<Env> extends DurableObject<Env> {
+  getOrInit(seed: Doc): Promise<Doc>
+  getOrInitWithSyncId(seed: Doc): Promise<{ doc: Doc; syncId: number }>
+  head(): Promise<{ syncId: number }>
+  purge(): Promise<void>
+  alarm(): Promise<void>
+  fetch(req: Request): Promise<Response>
+  commit(
+    mutations: Mutation[],
+    actor: { id: string; name: string },
+    txId?: string,
+  ): Promise<CommitResult>
+  webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void>
+  webSocketClose(ws: WebSocket): Promise<void>
+  webSocketError(ws: WebSocket): Promise<void>
+  recent(limit?: number, cursor?: string): Promise<Page<ActivityEntry>>
+  hasTx(txId: string): Promise<{ syncId: number; mutations: number } | null>
+}
+
+/**
  * Builds the story Durable Object class bound to a host's own env shape. See
  * `StoryDOConfig` for why this is a factory rather than a plain class.
  *
@@ -170,7 +210,12 @@ interface DefaultStoryEnv {
  * Deliberately knows nothing about block schemas: the host application seeds it
  * with an initial document and it treats the contents as opaque.
  */
-export function createStoryDO<Env>(config: StoryDOConfig<Env>) {
+export function createStoryDO<Env>(
+  config: StoryDOConfig<Env>,
+): new (
+  ctx: DurableObjectState,
+  env: Env,
+) => StoryDOInstance<Env> {
   return class StoryDOImpl extends DurableObject<Env> {
     private sql: SqlStorage
 

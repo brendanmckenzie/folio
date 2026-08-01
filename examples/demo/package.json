@@ -8,6 +8,7 @@
     "build": "pnpm --filter folio build && vite build",
     "deploy": "pnpm run build && wrangler deploy",
     "typecheck": "tsc --noEmit",
+    "typecheck:dist": "tsc -p dts-probe/tsconfig.json",
     "db:local": "wrangler d1 migrations apply folio --local",
     "db:remote": "wrangler d1 migrations apply folio --remote",
     "db:seed": "wrangler d1 execute folio --local --file=./seed.sql",

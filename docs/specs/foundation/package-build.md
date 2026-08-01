@@ -235,6 +235,12 @@ The fix is in those two files — a declared return type on each factory, or
 `#private` members — and it is deliberately **not** in this spec's diff, because
 `src/server/` was owned by two other agents while this landed.
 
+> **Landed 2026-08-01, and the `#private` half of that sentence was wrong.** See
+> *Implementation notes*: converting all thirteen members changes nothing,
+> because `ctx` and `env` off `DurableObject` are protected and are reported the
+> same way. Both factories declare a return type instead, `include` gained
+> `src/server`, and the three `types` conditions moved together as written.
+
 ## Acceptance criteria
 
 ### The artifact
@@ -350,3 +356,80 @@ directory fails on a clean checkout. What covers it instead:
 ## Open questions
 
 None. Decision 6's phase 2 is a known task, not an open question.
+
+## Implementation notes
+
+Phase 2 landed 2026-08-01. Decision 6 predicted the outcome correctly and got the
+*mechanism* half wrong, in a way worth recording because the wrong half was the
+cheap-looking one.
+
+**`#private` does not fix TS4094, and it is not close.** The spec offered two
+fixes and named `#private` first because it is thirteen mechanical renames. Doing
+it produces:
+
+```
+src/server/story-do.ts(173,17): error TS4094: Property '#sql' of exported
+  anonymous class type may not be private or protected.
+src/server/story-do.ts(173,17): error TS4094: Property 'ctx' of exported
+  anonymous class type may not be private or protected.
+src/server/story-do.ts(173,17): error TS4094: Property 'env' of exported
+  anonymous class type may not be private or protected.
+```
+
+Two things there. ECMAScript private members are reported exactly as `private`
+ones are — the belief that tsc collapses them to `#private;` in a declaration is
+true of a *named* class and irrelevant to an anonymous one. And `ctx` and `env`
+are `protected` on `DurableObject` itself, so **a class expression extending
+`DurableObject` can never be serialised inline whatever we do to our own
+members**. There was never a version of the cheap fix that worked.
+
+So both factories declare a return type: `StoryDOInstance<Env>` and
+`SpaceDOInstance<Env>`, each an interface extending `DurableObject<Env>` and
+listing the public methods, with `createStoryDO` returning
+`new (ctx: DurableObjectState, env: Env) => StoryDOInstance<Env>`. Three
+consequences worth knowing:
+
+- **It is a second statement of the public surface, but only in one direction.**
+  The class expression is checked against the interface, so a signature that
+  drifts fails the build. A newly *added* public method is not caught — it is
+  simply not public until it is listed, which is the safe direction to fail in.
+- **`fetch` has to be redeclared** even though `DurableObject` has it: the base's
+  is optional, and `StoryStub` / `SpaceStub` (`server/types.ts`) `Pick` it.
+- **`InstanceType<typeof StoryDO>` still works**, so the `StoryDO` type export
+  and `DurableObjectNamespace<StoryDO>` are unchanged at every call site. The
+  interface extends `DurableObject`, which is what carries the RPC brand.
+
+**`include` is `["src/core", "src/server", "src/vite"]`**, not the plan's
+`include: ["src"]` plus an `exclude`. Same set, and it states the three shipped
+entries positively rather than describing them by subtraction.
+
+**`dist/types/preview/` is emitted, and that is correct.** `src/server/index.tsx`
+re-exports `FolioDoc` from `../preview/Render`, so the server's declarations
+reference it and tsc follows. Only `Render.d.ts` and `RichText.d.ts` come
+across — `preview/mount.tsx` is reachable from nothing on this side and stays
+out. Reachability from an included file is what pulls a declaration in, not
+membership of `include`, which the old comment's "why `src/preview` is absent"
+section read as if it were.
+
+**`examples/demo/dts-probe/` is new, and is the only thing in the repo that
+resolves through `types`.** Everything else goes through `development` →
+source, deliberately (that is the demo tsconfig's `customConditions`), which
+means the whole of `dist/types` had no gate over it at all. The probe is one
+`createFolio({ blocks: [defineBlock(…)] })` in a tsconfig with no
+`customConditions`, run as `pnpm --filter demo typecheck:dist`.
+
+It was written to verify decision 6 rather than to be kept, and kept because it
+does verify it: pointing `./core` back at source while the other two stay on
+`dist` reproduces
+
+```
+Type 'BlockDef<{…}>' is not assignable to type 'AnyBlockDef'
+  Types of property 'render' are incompatible.
+```
+
+exactly as the decision claims, and moving it back makes it pass. **Not CI**, for
+the reason `scripts/cache-probe.mjs` is not: it reads a gitignored directory, so
+it needs a build ordered in front of it.
+
+What is still owed for an actual release is unchanged and is `ROADMAP.md`'s:
+`private: true`, a version, a licence, a package-level README.

@@ -1,0 +1,24 @@
+{
+  // Deliberately does NOT extend the demo's `tsconfig.json`, and the one option
+  // it is avoiding is `customConditions: ["development"]`. Dropping that is the
+  // whole point: resolution falls through to the `types` condition in the
+  // library's `exports`, so this program compiles against
+  // `packages/folio/dist/types` the way an installed consumer would. See
+  // `probe.tsx`.
+  //
+  // `worker-configuration.d.ts` comes in for the Cloudflare runtime globals
+  // (`D1Database`, `DurableObjectNamespace`), which the probe's env shape needs
+  // and which `@cloudflare/workers-types` is not installed here to supply.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": []
+  },
+  "include": ["probe.tsx", "../worker-configuration.d.ts"]
+}

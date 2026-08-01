@@ -72,11 +72,15 @@ in a browser before it is called done.
      33-row data table in both the workers test and the e2e script, so a route family
      added later without a gate fails there rather than being missed. **No admin
      surface yet** — the spec lists what a "Share a preview" control needs.
-   - **Build artifacts and `.d.ts`.** In flight,
-     `docs/specs/foundation/package-build.md`. `ROADMAP.md` calls it out: the library
-     ships TypeScript source and the host compiles it, "fine for now, wrong for a
-     release". Until it lands, Folio cannot be installed by anyone outside this
-     workspace — which is the difference between a codebase and a product.
+   - **Build artifacts and `.d.ts`.** Done,
+     `docs/specs/foundation/package-build.md`. The library ships built JavaScript
+     and emitted declarations, and all three of `folio/core`, `folio/engine` and
+     `folio/server` resolve `types` to `dist/types` together. The last blocker was
+     TS4094 on the two Durable Object factories, and the spec's suggested cheap fix
+     (`#private` members) turned out not to work at all — `ctx` and `env` are
+     protected on `DurableObject` itself, so the return types had to be declared.
+     What remains is not engineering: `private: true`, a version, a licence and a
+     package-level README.
 
 ## What is deliberately NOT in this run
 
