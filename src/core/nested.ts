@@ -38,7 +38,7 @@
  * `server/errors.ts`'s `rethrow` translates one into the other.
  */
 import { type Blok, type Doc, type Json, keysBetween, newUid, subtree } from './doc'
-import type { Field } from './fields'
+import { defaultValue, type Field } from './fields'
 import { dataOf } from './locales'
 import type { LocaleContext } from './locales'
 import { type BlockSchema, type SchemaIndex, slotsOf } from './schema'
@@ -536,6 +536,36 @@ function scalarData(
   // key clears the value.
   const data: Record<string, Json> =
     ctx.mode === 'merge' && at.baseBlok ? { ...at.baseBlok.data } : {}
+
+  /**
+   * A **new** blok starts with a key for every declared field, exactly as
+   * `subtreeRecipe` gives one created in the editor.
+   *
+   * Without this, a document written through the content API or an importer is
+   * missing a key for every field the payload omitted — and "this blok has no
+   * key for a field the schema declares" is precisely what the audit's
+   * `missing-field` check reads as *a field added after the document was
+   * written*. So every API-created document reported drift forever, and the one
+   * panel meant to surface real problems was all false positives on a clean
+   * site. Reported as "Missing fields" on Home the first time a real host
+   * imported content.
+   *
+   * It also fixes a quieter one. `core/schema.ts` says `field.default` is
+   * consulted at creation "and only here" — which was true of the editor's path
+   * and false of this one, so an imported blok silently missed every declared
+   * default.
+   *
+   * Keyed on `at.baseBlok` rather than on the mode, because the question is
+   * whether this blok is being created, not how the write was framed. A
+   * *replace* over an existing blok still starts from `{}` and still clears an
+   * absent scalar, which is its documented job.
+   */
+  if (!at.baseBlok && def) {
+    for (const [name, field] of Object.entries(def.fields)) {
+      if (field.kind === 'blocks' || slots.has(name)) continue
+      data[name] = field.default ?? defaultValue(field)
+    }
+  }
 
   for (const [name, value] of Object.entries(supplied)) {
     if (slots.has(name)) continue
