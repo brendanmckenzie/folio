@@ -39,6 +39,34 @@ export function folio(options: FolioPluginOptions): Plugin[] {
       const preview = isDev ? `/@id/__x00__${VIRTUAL_PREVIEW}` : '/folio-preview.js'
       return {
         environments: {
+          /**
+           * `react-dom/server.edge` is **CommonJS**, and left external it stops
+           * the host's Worker booting.
+           *
+           * `folio/server` imports it to render the admin and preview shells.
+           * When the library resolves to `dist/`, that import comes from inside
+           * `node_modules`, which Vite externalises by default — so workerd
+           * loads react-dom's CJS file raw and throws
+           * `ReferenceError: require is not defined` *during startup*, from a
+           * stack that names the runner and nothing else. Naming it here makes
+           * Vite pre-bundle it with the interop it needs.
+           *
+           * Declared by the plugin rather than left to each host because no
+           * host could reasonably deduce it: the error mentions neither Folio
+           * nor react-dom. Folio's own demo never sees it, since that project
+           * resolves the library to TypeScript source through the `development`
+           * export condition — which is exactly why this went unnoticed until a
+           * second project installed the built package.
+           *
+           * The environment is named `ssr` because that is what the Cloudflare
+           * Vite plugin calls the Worker environment; a host that renames it
+           * (`cloudflare({ viteEnvironment: { name: … } })`) has to repeat this.
+           */
+          ssr: {
+            optimizeDeps: {
+              include: ['react-dom/server.edge'],
+            },
+          },
           client: {
             build: {
               rollupOptions: {

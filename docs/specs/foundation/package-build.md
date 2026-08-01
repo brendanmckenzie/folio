@@ -433,3 +433,36 @@ it needs a build ordered in front of it.
 
 What is still owed for an actual release is unchanged and is `ROADMAP.md`'s:
 `private: true`, a version, a licence, a package-level README.
+
+### What a second consumer found, immediately
+
+`examples/demo/dts-probe/` typechecks against the artifact; it does not *run* it.
+The first project to install the built package (`consumer-site-b`, a React
+Router 7 site on Workers) hit two things in the first hour, and both are now
+fixed here rather than there.
+
+**`react-dom/server.edge` is CommonJS, and left external it stops the Worker
+booting.** `dist/server.js` imports it for the admin and preview shells. When the
+library resolves to `dist/` the import comes from inside `node_modules`, which
+Vite externalises, so workerd loads react-dom's CJS file raw and throws
+`ReferenceError: require is not defined` **during startup** — from a stack naming
+the Cloudflare plugin's runner and nothing else. Not the route, not Folio, not
+react-dom.
+
+The fix is one `optimizeDeps.include` in the *Vite plugin*'s `environments.ssr`
+config, not in each host's, because the error gives a host nothing to search for.
+This is the concrete cost of decision 5's `development` condition: the demo takes
+the source path on every run, so **no gate in this repo had ever executed
+`dist/server.js`**, and `pnpm build` proves the bundle is *written*, not that it
+loads. The probe is the same shape of gap one level up.
+
+**There was no client-safe way to render a document.** A host that wants a Folio
+document *inside* its own React tree — an ordinary framework route, keeping its
+own layout, `meta` and SEO helpers — needs `FolioDoc`, and `folio/server` was the
+only entry that exported it. Importing it from a route module pulls Hono, D1 and
+the auth stack toward the browser bundle.
+
+`./render` → `src/preview/Render.tsx` now exists for exactly that, and it ships as
+**source** rather than built, which is the same rule `./preview` and
+`./admin-entry` already follow: it is an input to the *host's* bundler, not a
+module the host's server imports. No new build output, no new condition.
