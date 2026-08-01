@@ -16,7 +16,7 @@ import {
   validateHooks,
 } from '../../../src/server/hooks'
 import { normalisePath, redirectStatements } from '../../../src/server/redirects'
-import { alarmHookCtx } from '../../../src/server/runtime'
+import { alarmHookCtx, validateAssets } from '../../../src/server/runtime'
 
 // ---------------------------------------------------------------------------
 // imageSize
@@ -1199,5 +1199,43 @@ describe('validateHooks', () => {
     expect(() => validateHooks({ publish: () => {} } as unknown as FolioHooks<Env>)).toThrow(
       /unknown hook "publish"/,
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// validateAssets
+// ---------------------------------------------------------------------------
+
+/**
+ * The guard exists because the failure it replaces is invisible. With no
+ * `assets`, the admin answers 200 with a mount point and no script tag: a blank
+ * white page, an empty console, and every network request successful. A test
+ * that only checked "throws" would pass against a message nobody could act on,
+ * so these check that the message names the fix.
+ */
+describe('validateAssets', () => {
+  const good = { admin: '/folio-admin.js', preview: '/folio-preview.js' }
+
+  it('accepts what the Vite plugin defines', () => {
+    expect(() => validateAssets(good)).not.toThrow()
+    expect(() => validateAssets({ ...good, devClient: '/@vite/client' })).not.toThrow()
+  })
+
+  it('throws when the key is missing, saying what goes wrong and how to fix it', () => {
+    expect(() => validateAssets(undefined)).toThrow(/blank screen/)
+    expect(() => validateAssets(undefined)).toThrow(/assets: __FOLIO_ASSETS__/)
+  })
+
+  it('throws on a hand-rolled object missing either entry', () => {
+    expect(() => validateAssets({ preview: '/p.js' } as never)).toThrow(/'assets.admin'/)
+    expect(() => validateAssets({ admin: '/a.js' } as never)).toThrow(/'assets.preview'/)
+  })
+
+  /**
+   * An empty string is the shape a host lands on by reading a define that was
+   * never substituted, which is the exact case this whole guard is about.
+   */
+  it('treats an empty string as absent', () => {
+    expect(() => validateAssets({ admin: '', preview: '/p.js' })).toThrow(/'assets.admin'/)
   })
 })

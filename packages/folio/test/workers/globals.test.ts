@@ -49,6 +49,7 @@ function makeFolio(types: DocumentType[], globals: string[]) {
     globals,
     bindings,
     basePath: '/folio',
+    assets: { admin: '/folio-admin.js', preview: '/folio-preview.js' },
     auth: 'open',
     route: (p) => (p ? `/${p}` : '/'),
   })

@@ -11,6 +11,7 @@ import {
   type PreviewToAdminMsg,
 } from '../core/protocol'
 import { EMPTY_RESOLUTION, type Resolution } from '../core/resolve'
+import { type PreviewWrap, wrapPreview } from '../core/render-wrap'
 import { FolioDoc } from './Render'
 
 declare global {
@@ -45,10 +46,12 @@ function PreviewApp({
   initial,
   initialResolution,
   registry,
+  wrap,
 }: {
   initial: Doc
   initialResolution: Resolution
   registry: Registry
+  wrap?: PreviewWrap
 }) {
   const [doc, setDoc] = useState(initial)
   const [resolution, setResolution] = useState(initialResolution)
@@ -87,7 +90,10 @@ function PreviewApp({
     return () => window.removeEventListener('message', onMessage)
   }, [])
 
-  return <FolioDoc doc={doc} registry={registry} edit resolution={resolution} />
+  // The same helper the server render uses, so the two trees cannot differ in
+  // how the wrapper is applied — a mismatch React would report as a hydration
+  // error and then silently discard the server markup over.
+  return wrapPreview(wrap, <FolioDoc doc={doc} registry={registry} edit resolution={resolution} />)
 }
 
 function markSelected(uid: string | null) {
@@ -149,7 +155,10 @@ function attachBridge() {
  * Called by the preview entry that `folio/vite` generates, with the project's
  * own blocks. This is the one client bundle that needs your components.
  */
-export function mountPreview(blocks: readonly AnyBlockDef[] | Registry) {
+export function mountPreview(
+  blocks: readonly AnyBlockDef[] | Registry,
+  opts?: { wrap?: PreviewWrap },
+) {
   const boot = window.__FOLIO__
   if (!boot) return
   // Editing a global in context (`editing.mount`) hydrates its own wrapper
@@ -165,6 +174,7 @@ export function mountPreview(blocks: readonly AnyBlockDef[] | Registry) {
       initial={boot.doc}
       initialResolution={boot.resolution ?? EMPTY_RESOLUTION}
       registry={toRegistry(blocks)}
+      wrap={opts?.wrap}
     />,
   )
   attachBridge()
