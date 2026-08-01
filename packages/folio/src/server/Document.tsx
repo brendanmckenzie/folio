@@ -35,6 +35,21 @@ export function Bootstrap({ global, value }: { global: string; value: unknown })
  * has loaded, which can be before an inline module script in `<head>` runs.
  * Being a classic inline script makes this run during parse, ahead of both.
  *
+ * **It sets the globals and does not load the refresh runtime**, which it used
+ * to do with `import RefreshRuntime from "/@react-refresh"`. That path is
+ * `@vitejs/plugin-react`'s; a host on a framework plugin that owns Fast Refresh
+ * its own way does not serve it, and the import then failed the whole module —
+ * surfacing in a React Router project as the router's own
+ * `No route matches URL "/@react-refresh"`, naming a path the host never wrote.
+ * Making it a caught dynamic import silenced the page and still left a 404 per
+ * preview load in the host's dev log, for a path Folio was guessing at.
+ *
+ * Nothing here needs it. The guard reads the flag and the transform calls the
+ * two stubs; the runtime only adds state-preserving rebinds on hot update, which
+ * is worth little in an iframe whose document is pushed in over postMessage and
+ * whose owner is the Durable Object. Fast Refresh belongs to whichever plugin
+ * owns it, and Folio guessing its URL is not a service.
+ *
  * It shipped as a single module script and the race was invisible in this repo,
  * because the demo's only transformed modules are Folio's own and they live in
  * `node_modules`, which the React plugins skip. The first host to put *its*
@@ -45,34 +60,16 @@ export function Bootstrap({ global, value }: { global: string; value: unknown })
  */
 export function ReactRefreshPreamble() {
   return (
-    <>
-      <script
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: static literal script, no interpolation
-        dangerouslySetInnerHTML={{
-          __html: [
-            `window.$RefreshReg$ = () => {}`,
-            `window.$RefreshSig$ = () => (type) => type`,
-            `window.__vite_plugin_react_preamble_installed__ = true`,
-          ].join('\n'),
-        }}
-      />
-      {/*
-        The runtime itself, which can only be reached by a module. Separate and
-        second because it is the half that may lose the race and can afford to:
-        without it Fast Refresh does not rebind on edit, which costs a reload.
-        Without the flag above, nothing renders at all.
-      */}
-      <script
-        type="module"
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: static literal script, no interpolation
-        dangerouslySetInnerHTML={{
-          __html: [
-            `import RefreshRuntime from "/@react-refresh"`,
-            `RefreshRuntime.injectIntoGlobalHook(window)`,
-          ].join('\n'),
-        }}
-      />
-    </>
+    <script
+      // biome-ignore lint/security/noDangerouslySetInnerHtml: static literal script, no interpolation
+      dangerouslySetInnerHTML={{
+        __html: [
+          `window.$RefreshReg$ = () => {}`,
+          `window.$RefreshSig$ = () => (type) => type`,
+          `window.__vite_plugin_react_preamble_installed__ = true`,
+        ].join('\n'),
+      }}
+    />
   )
 }
 

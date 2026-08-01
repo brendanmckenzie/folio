@@ -257,12 +257,35 @@
  * document and must not restyle it — the same discipline that keeps
  * `folio.handle()` from intercepting a host's routes.
  */
+/*
+ * **No `background` here, and its absence is load-bearing.**
+ *
+ * This class is inherited, not painted: type, colour, box-sizing. It used to
+ * also set `background: var(--bg-app)`, which reads as harmless — the shell
+ * wants that canvas — and was not, because of the rule directly above it.
+ * *Every portal must re-declare `.folio-ui`* (see `scope.ts`; a portal's subtree
+ * leaves the shell and CSS scoping does not follow), so the scope class painted
+ * an opaque app background onto the root of every portalled surface.
+ *
+ * All four of them then covered the page instead of floating over it, and each
+ * one's own `.scrim { background: var(--bg-overlay) }` — the dim they were
+ * designed around — was drawing underneath something already opaque and doing
+ * nothing at all. Invisible for `Dialog`, `Palette` and `FocusMode`, which look
+ * plausible either way. Fatal for `HistoryPanel`, whose `.wrap` is
+ * `inset: 40px 0 0` and whose own comment says the stage must not be dimmed
+ * "because the panel exists so a past version can be compared against the
+ * amber-framed preview" — the comparison was behind an opaque sheet, so
+ * *viewing* a version showed a blank editor.
+ *
+ * The shell paints its own canvas (`Shell.module.css`), which is where a
+ * background belongs: on the thing that is a surface, not on the thing that
+ * carries the tokens.
+ */
 .folio-ui {
   font-family: var(--font-ui);
   font-size: var(--text-base);
   line-height: 1.45;
   color: var(--fg);
-  background: var(--bg-app);
   -webkit-font-smoothing: antialiased;
 }
 
