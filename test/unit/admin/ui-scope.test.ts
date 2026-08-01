@@ -134,3 +134,32 @@ describe('scoped()', () => {
     expect(scoped()).toBe(UI_SCOPE)
   })
 })
+
+/**
+ * `.folio-ui` carries tokens, not paint.
+ *
+ * Every portal must re-declare the class, so anything painted from it lands on
+ * the root of every portalled surface. `background: var(--bg-app)` was there and
+ * made all four of them opaque sheets over the page: each one's own
+ * `.scrim { background: var(--bg-overlay) }` was drawing underneath something
+ * already solid and doing nothing. Harmless-looking for the dialog, the palette
+ * and focus mode; fatal for the history slide-over, whose whole purpose is
+ * comparing a past version against the live preview it was covering.
+ *
+ * A regression here is invisible in every test that does not render a browser,
+ * which is all of them, so this asserts on the stylesheet text.
+ */
+describe('the scope class paints nothing', () => {
+  it('declares no background, so a portal root is transparent', () => {
+    const tokensCss = src('ui/tokens.css')
+    const rule = tokensCss.slice(tokensCss.indexOf('\n.folio-ui {'))
+    const body = rule.slice(0, rule.indexOf('}'))
+    expect(body).toContain('color:')
+    expect(body).not.toContain('background')
+  })
+
+  /** The canvas belongs to the surface that is one. */
+  it('leaves the shell to paint its own', () => {
+    expect(src('ui/Shell.module.css')).toContain('background: var(--bg-app)')
+  })
+})
