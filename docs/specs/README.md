@@ -58,6 +58,7 @@ sequence because the dependency graph is the same one.
 | 20 | [Bulk write endpoints](platform/bulk-writes.md) | platform | M | — | — | completion plan: gap 2 |
 | 21 | [Draft preview sharing](platform/draft-sharing.md) | platform | M | — | `0004` | completion plan: gap 4 |
 | 22 | [Build artifacts and `.d.ts`](foundation/package-build.md) | foundation | S | — | — | completion plan: gap 5 |
+| 23 | [Many sites in one deployment](foundation/multi-site.md) | foundation | XL | 5 | `0005` | owner, 2026-08-01 |
 
 Sizing matches `PARITY.md`: **S** ≈ a day, **M** ≈ a few days, **L** ≈ a week
 or two. Relative weight, not a quote.
@@ -243,7 +244,13 @@ build on the `type` column; the content API builds on `api_tokens`.
 Each spec carries its own `> **Status:**` stamp. All sixteen specs in the quick-wins and
 main-line tables are **done**, restamped in place with an `## Implementation notes`
 section recording what actually landed. Spec 17 (caching) is **done** too, and so are
-specs 19 (scheduled publishing), 20 (bulk writes) and 21 (draft preview sharing). Spec
-18 (pagination) is **in-progress**: its phase 1, the schema collapse, has landed. A spec
-that gets built is restamped the same way, the way `../../PARITY.md` records
-what landed.
+specs 19 (scheduled publishing), 20 (bulk writes), 21 (draft preview sharing) and 22
+(build artifacts). Spec 18 (pagination) is **in-progress**: its phase 1, the schema
+collapse, has landed. Spec 23 (multi-site) is **draft** and unstarted. A spec that gets
+built is restamped the same way, the way `../../PARITY.md` records what
+landed.
+
+Spec 23 is the first one whose ordering is a real constraint rather than a preference:
+it rebuilds four unique indexes and scopes every list route, and spec 18 reshapes those
+same routes. Landing them in the wrong order means resolving two sets of conflicts
+across the ~265 literal paths pagination already touches.
