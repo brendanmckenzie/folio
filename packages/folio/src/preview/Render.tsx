@@ -122,14 +122,43 @@ export function RenderBlok({
 
   // Storyblok makes each block author remember to spread {...storyblokEditable(blok)}.
   // Deriving it here means a block cannot forget to be editable.
-  if (isValidElement(el)) {
+  //
+  // **`typeof el.type === 'string'` is the load-bearing half of that promise.**
+  // `cloneElement` only reaches the DOM for a *host* element: hand these two
+  // attributes to a custom component and they arrive as props it is free to
+  // ignore — which every ordinary component does — and hand them to a Fragment
+  // and React drops them with a warning. Either way no marker is written, and a
+  // block with no marker cannot be hovered, selected or clicked in the preview.
+  // It is not a degraded state that announces itself; the block simply does
+  // nothing, and the click falls through to whichever ancestor *is* marked.
+  //
+  // The condition was `isValidElement(el)` alone, which is true of both cases,
+  // so the wrapper below only ever caught a string or an array. Found the first
+  // time a host wrapped its existing components — `render: (p) => <SectionHead
+  // {...p} />` is the most natural thing to write when adopting Folio into a
+  // site that already has a design system, and it was exactly the shape that
+  // silently opted out of editing.
+  if (isValidElement(el) && typeof el.type === 'string') {
     return cloneElement(el as ReactElement<Record<string, unknown>>, {
       'data-folio-uid': uid,
       'data-folio-type': blok.type,
     })
   }
+  /**
+   * Everything else gets a wrapper, because the selection outline is drawn with
+   * `position: relative` and an `::after` inset on the marked element, so the
+   * marker has to be something that generates a box. `display: contents` would
+   * leave the layout untouched and take the outline with it.
+   *
+   * The cost is honest and worth stating: in **edit mode only**, a block that
+   * returns a component renders one extra `<div>` that the published page does
+   * not have. In normal flow that is invisible; as a direct child of a grid or
+   * flex container it can shift. `folio-marker` is on it so a host that hits
+   * that can say `.folio-marker { display: contents }` and trade the outline
+   * back for the layout.
+   */
   return (
-    <div data-folio-uid={uid} data-folio-type={blok.type}>
+    <div className="folio-marker" data-folio-uid={uid} data-folio-type={blok.type}>
       {el}
     </div>
   )
