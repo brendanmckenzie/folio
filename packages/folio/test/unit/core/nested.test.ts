@@ -96,23 +96,40 @@ function mkDoc(bloks: Blok[]): Doc {
 }
 
 /** Root + hero(a0) with two buttons + prose(a1). The spec's own example shape. */
+/**
+ * Every declared non-slot field carries a key, on every blok.
+ *
+ * Not tidiness: that is what a document actually looks like, because
+ * `subtreeRecipe` seeds every field at creation and `fromNested` now does the
+ * same for a blok it creates. A fixture that omitted `noindex` and `link` was
+ * describing a document no code path produces, and the round-trip test that
+ * compared against it was asserting the wrong invariant — it passed only while
+ * `fromNested` was failing to apply defaults.
+ */
 function sample(): Doc {
   return mkDoc([
-    { uid: ROOT, type: 'page', parent: null, slot: null, order: 'a0', data: { title: 'About us' } },
+    {
+      uid: ROOT,
+      type: 'page',
+      parent: null,
+      slot: null,
+      order: 'a0',
+      data: { title: 'About us', noindex: false },
+    },
     blk('h', { type: 'hero', order: 'a0', data: { heading: 'Hello', align: 'left' } }),
     blk('b1', {
       type: 'button',
       parent: 'h',
       slot: 'actions',
       order: 'a0',
-      data: { label: 'One' },
+      data: { label: 'One', link: null },
     }),
     blk('b2', {
       type: 'button',
       parent: 'h',
       slot: 'actions',
       order: 'a1',
-      data: { label: 'Two' },
+      data: { label: 'Two', link: null },
     }),
     blk('p', { type: 'prose', order: 'a1', data: { body: null } }),
   ])
@@ -223,6 +240,66 @@ describe('toNested', () => {
 // ---------------------------------------------------------------------------
 // fromNested — round trip
 // ---------------------------------------------------------------------------
+
+/**
+ * A blok `fromNested` creates carries a key for every declared field, exactly as
+ * one created in the editor does.
+ *
+ * This is the audit's `missing-field` premise, and the check is only meaningful
+ * while it holds: "this blok has no key for a declared field" is read as *the
+ * field was added after the document was written*. Before this, every document
+ * written through the content API or an importer was missing a key for every
+ * field its payload omitted, so a clean site reported drift on every optional
+ * field nobody had filled in.
+ */
+describe('fromNested seeds declared fields on a new blok', () => {
+  it('writes a key for every non-slot field the payload omitted', () => {
+    const doc = fromNested({ type: 'page', fields: { title: 'Hi' } }, schema)
+    const root = doc.bloks[doc.root]!
+    expect(root.data).toEqual({ title: 'Hi', noindex: false })
+    // `blocks` fields are children, not a value on the parent — no key to seed.
+    expect('body' in root.data).toBe(false)
+  })
+
+  it('applies a declared `default` rather than the kind default', () => {
+    const withDefault: SchemaIndex = {
+      ...schema,
+      button: {
+        name: 'button',
+        label: 'Button',
+        fields: { label: text({ default: 'Read more' }), link: multilink() },
+      },
+    }
+    const doc = fromNested({ type: 'button', fields: {} }, withDefault)
+    expect(doc.bloks[doc.root]!.data.label).toBe('Read more')
+  })
+
+  it('seeds a nested child too, not only the root', () => {
+    const doc = fromNested(
+      { type: 'page', fields: { title: 'Hi', body: [{ type: 'hero', fields: {} }] } },
+      schema,
+    )
+    const hero = Object.values(doc.bloks).find((b) => b.type === 'hero')!
+    expect(Object.keys(hero.data).sort()).toEqual(['align', 'heading'])
+  })
+
+  /**
+   * The distinction the fix turns on: seeding is keyed on *this blok is new*,
+   * not on the write mode. A `replace` over an existing blok still clears an
+   * absent scalar, which is the whole difference between replace and merge.
+   */
+  it('does not seed over an existing blok, so replace still clears', () => {
+    const base = fromNested({ type: 'page', fields: { title: 'Hi', noindex: true } }, schema)
+    const after = fromNested({ type: 'page', fields: {} }, schema, base, { mode: 'replace' })
+    expect(after.bloks[after.root]!.data).toEqual({})
+  })
+
+  it('leaves a merge over an existing blok alone', () => {
+    const base = fromNested({ type: 'page', fields: { title: 'Hi', noindex: true } }, schema)
+    const after = fromNested({ type: 'page', fields: {} }, schema, base)
+    expect(after.bloks[after.root]!.data).toEqual({ title: 'Hi', noindex: true })
+  })
+})
 
 describe('fromNested round trip', () => {
   it('reproduces the document exactly, against its own base', () => {
