@@ -36,6 +36,7 @@
       "types": "./dist/types/vite/index.d.ts",
       "default": "./dist/vite.js"
     },
+    "./render": "./src/preview/Render.tsx",
     "./preview": "./src/preview/mount.tsx",
     "./admin-entry": "./src/admin/main.tsx"
   },
