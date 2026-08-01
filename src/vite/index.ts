@@ -68,6 +68,33 @@ export function folio(options: FolioPluginOptions): Plugin[] {
             },
           },
           client: {
+            /**
+             * `@tiptap/react` imports `useSyncExternalStore` **by name** from
+             * `use-sync-external-store/shim`, which is CommonJS. Pre-bundled,
+             * esbuild inlines it and the named import works; loaded raw, the
+             * browser throws
+             *
+             *   SyntaxError: The requested module '…/use-sync-external-store/
+             *   shim/index.js' does not provide an export named
+             *   'useSyncExternalStore'
+             *
+             * and the admin never mounts — a blank page whose only clue is one
+             * console line naming two packages the host has never heard of.
+             *
+             * It is not pre-bundled by default because Vite's dep scanner
+             * crawls the *host's* entries, and the admin entry is a file inside
+             * `node_modules`. Every dependency reached only from there is
+             * invisible to it. Naming the one package that needs interop is
+             * enough; the rest of the admin's tiptap imports come along inside
+             * the same optimised bundle.
+             *
+             * `@tiptap/pm` must **not** be added here: it has no `.` export,
+             * only subpaths, so naming it fails config resolution outright with
+             * `Missing "." specifier`.
+             */
+            optimizeDeps: {
+              include: ['@tiptap/react'],
+            },
             build: {
               rollupOptions: {
                 input: {
@@ -118,10 +145,16 @@ export function folio(options: FolioPluginOptions): Plugin[] {
       if (id !== RESOLVED_PREVIEW) return null
       // Generated so the preview bundle contains the project's own components
       // while the entry itself stays owned by the library.
+      //
+      // `import * as m` rather than a named import of `wrap`, because `wrap` is
+      // optional: a named import of a missing export is a hard ESM error, and
+      // most projects will never need one. See `PreviewWrapper` — it exists so
+      // a host whose blocks sit inside a router or a theme provider can supply
+      // it, which is not exotic and had no expression at all before.
       return [
         `import { mountPreview } from 'folio/preview'`,
-        `import { blocks } from ${JSON.stringify(resolveBlocks())}`,
-        `mountPreview(blocks)`,
+        `import * as m from ${JSON.stringify(resolveBlocks())}`,
+        `mountPreview(m.blocks, { wrap: m.wrap })`,
       ].join('\n')
     },
   }

@@ -210,3 +210,4 @@ export type {
 // primitive, so it ships with the public API even though it is defined
 // alongside the sync wire in `protocol.ts`.
 export type { ActivityEntry } from './protocol'
+export type { PreviewWrap } from './render-wrap'

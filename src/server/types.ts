@@ -30,6 +30,7 @@ import type { MigrateOptions, MigrateReport } from './migrate'
 import type { ReindexOptions, ReindexReport } from './reindex'
 import type { ResolveOptions } from './runtime'
 import type { ScheduleRunOptions, ScheduleRunReport } from './scheduler'
+import type { PreviewWrap } from '../core/render-wrap'
 import type { SpaceDO } from './space-do'
 import type { StoryDO } from './story-do'
 import type { WriteResult } from './write'
@@ -167,6 +168,28 @@ export interface FolioConfig<Env> {
   locales?: LocaleConfig
   adminCss?: string[]
   previewCss?: string[]
+  /**
+   * Wraps the previewed document in the host's own providers, for the **server**
+   * render of the preview page.
+   *
+   * Blocks are the host's components, and a real host's components sit inside
+   * providers: a router, a theme, an i18n context. On a published page those
+   * come from the host's own tree, but Folio's preview mounts a document and
+   * nothing else — so a block calling `useLocation()` or rendering a `<Link>`
+   * throws before a byte is sent, from a stack that names the block and not the
+   * missing provider.
+   *
+   * **Its client half is a `wrap` export from the blocks module**, which the
+   * Vite plugin's generated preview entry passes to `mountPreview`. Both are
+   * required: this one alone and hydration throws, that one alone and the
+   * server render throws, different ones and React discards the server markup
+   * as a mismatch. Export the component once and name it in both places.
+   *
+   * A memory router rather than a browser one is usually right — the iframe's
+   * URL is Folio's, not the page's — but that is the host's call and Folio has
+   * no opinion.
+   */
+  previewWrap?: PreviewWrap
   /** Pass the `__FOLIO_ASSETS__` global the Vite plugin defines. */
   assets?: {
     admin: string

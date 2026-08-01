@@ -25,6 +25,7 @@ import {
   type ResolvedCollection,
 } from '../core/query'
 import { linkedIds, referencedIdsAllLocales } from '../core/refs'
+import { type PreviewWrap } from '../core/render-wrap'
 import { buildResolution, type Resolution } from '../core/resolve'
 import {
   blankSubtree,
@@ -98,6 +99,11 @@ export interface ResolveOptions {
 
 export interface FolioRuntime {
   registry: Registry
+  /**
+   * `FolioConfig.previewWrap`, unchanged. See its doc comment, and the note at
+   * the render site in `server/pages.tsx`.
+   */
+  previewWrap: PreviewWrap | undefined
   /** The block schemas, indexed by name. What a migration and the audit both walk. */
   schema: SchemaIndex
   /** What `GET {base}/schema` answers. Contains no functions. */
@@ -285,6 +291,49 @@ export function manifestHooks<Env>(hooks: FolioHooks<Env> | undefined): Pick<Man
   const declared = Object.keys(hooks).filter((key) => key !== 'await')
   if (declared.length === 0) return {}
   return { hooks: { declared, awaited: [...(hooks.await ?? [])] } }
+}
+
+/**
+ * Checks `FolioConfig.assets` **at the point the admin or preview page is
+ * built**, not at construction, and the timing is the decision.
+ *
+ * The failure it replaces is the worst one in the config surface: with no
+ * `assets`, the page below builds an empty `entries` array and the admin answers
+ * *200 with a mount point and no script tag* — a blank white page, an empty
+ * console, and a network tab in which every request succeeded. Nothing about it
+ * points at the cause.
+ *
+ * The value is the `__FOLIO_ASSETS__` global `folio/vite` defines, and the host
+ * has to hand it over rather than Folio reading it, because a `define` only
+ * rewrites the source the host's own Vite compiles — Folio's server code is a
+ * dependency and is never transformed. That extra step is what makes it easy to
+ * forget.
+ *
+ * **Not** in `createRuntime` beside `validateAuth` and friends, even though it
+ * reads like one of them. Those describe the content model and are wrong for any
+ * host; this one is wrong only for a host that serves the admin, and sixteen
+ * workers fixtures construct a Folio to exercise routing and content without
+ * ever asking for an admin page. Making them all declare a field they do not use
+ * would be noise around the real signal. Failing here instead puts the error at
+ * the URL somebody is looking at while they are confused by it.
+ *
+ * The shape is checked as well as the presence, because the two fields that
+ * matter are the two a host is likely to fumble when hand-rolling the object
+ * instead of passing the global straight through.
+ */
+export function validateAssets(assets: FolioConfig<unknown>['assets']): void {
+  const fix =
+    "pass the plugin's global: `assets: __FOLIO_ASSETS__` in the same file as `createFolio`"
+  if (!assets) {
+    throw new Error(
+      `folio: 'assets' is required — without it the admin page renders no script tag and shows a blank screen. ${fix}`,
+    )
+  }
+  for (const key of ['admin', 'preview'] as const) {
+    if (typeof assets[key] !== 'string' || !assets[key]) {
+      throw new Error(`folio: 'assets.${key}' must be a non-empty string. ${fix}`)
+    }
+  }
 }
 
 export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
@@ -730,6 +779,8 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    */
   const page = (which: 'admin' | 'preview'): PageAssets => {
     const assets = config.assets
+    // Throws rather than serving a scriptless page. See `validateAssets`.
+    validateAssets(assets)
     return {
       entries: assets
         ? assets.devClient
@@ -745,6 +796,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
 
   return {
     registry,
+    previewWrap: config.previewWrap,
     schema,
     /**
      * The manifest, plus the one thing `toManifest` cannot know.

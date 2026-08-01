@@ -85,6 +85,7 @@ function makeFolio(locales?: LocaleConfig, route = prefixRoute) {
     root: 'page',
     bindings,
     basePath: '/folio',
+    assets: { admin: '/folio-admin.js', preview: '/folio-preview.js' },
     auth: 'open',
     route,
     ...(locales ? { locales } : {}),

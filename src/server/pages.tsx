@@ -9,6 +9,7 @@
 import type { ReactElement } from 'react'
 import { renderToReadableStream } from 'react-dom/server.edge'
 import { NO_STORE } from '../core/cache-tags'
+import { wrapPreview } from '../core/render-wrap'
 import type { StoryMeta } from '../core/story'
 import { FolioDoc, renderGlobalNode } from '../preview/Render'
 import { Bootstrap, ReactRefreshPreamble, Shell } from './Document'
@@ -195,8 +196,27 @@ export async function previewPage(
       }
     >
       {contextGlobals}
+      {/**
+       * `previewWrap` is the server half of the seam `mountPreview`'s `wrap` is
+       * the client half of, and both halves are required or neither works.
+       *
+       * This page is server-rendered and then hydrated by the preview bundle.
+       * A host whose blocks need a provider — a router is the ordinary case —
+       * has to get the same one around both trees: missing here, the render
+       * throws before a byte is sent; missing there, hydration throws instead;
+       * differing between them, React reports a mismatch and silently discards
+       * the server markup.
+       *
+       * Two hand-offs for one wrapper is not ideal and is inherent: this render
+       * runs in the Worker from `createFolio`'s config, the other in the browser
+       * from the blocks module the Vite plugin bundles. A host exports the
+       * component once and names it in both places.
+       */}
       <div id="folio-root">
-        <FolioDoc doc={doc} registry={rt.registry} edit={!editing} resolution={resolution} />
+        {wrapPreview(
+          rt.previewWrap,
+          <FolioDoc doc={doc} registry={rt.registry} edit={!editing} resolution={resolution} />,
+        )}
       </div>
       {opts?.bare ? (
         <p style={{ padding: '1em', font: '13px system-ui', color: '#666' }}>

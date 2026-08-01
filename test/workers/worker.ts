@@ -75,6 +75,15 @@ const folio = createFolio<Cloudflare.Env>({
     images: env.IMAGES,
   }),
   basePath: '/folio',
+  // Required, for the same reason `auth` is: absent, the admin page serves a
+  // mount point and no script tag, which is a blank screen behind a 200 rather
+  // than an error. A real host passes the `__FOLIO_ASSETS__` global its Vite
+  // plugin defines; there is no Vite here, so the fixture states the shape.
+  //
+  // The URLs are what the plugin emits for a production build, and no test
+  // fetches them — what the suites assert about is that the admin page *links*
+  // something, which is precisely the thing that used to be silently absent.
+  assets: { admin: '/folio-admin.js', preview: '/folio-preview.js' },
   // identity-and-access.md checkpoint 2: `auth` is required, so a test host
   // declares it too. 'open' keeps this fixture's own scenarios about routing
   // and content rather than about credentials; the auth suites build their own

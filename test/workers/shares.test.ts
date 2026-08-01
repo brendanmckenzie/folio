@@ -66,6 +66,7 @@ function build(mode: AuthConfig<Cloudflare.Env> | 'open' = auth) {
     ],
     bindings: (e) => ({ db: e.DB, story: e.STORY, media: e.MEDIA, images: e.IMAGES }),
     basePath: '/folio',
+    assets: { admin: '/folio-admin.js', preview: '/folio-preview.js' },
     auth: mode,
     route: (p) => (p ? `/${p}` : '/'),
   })
