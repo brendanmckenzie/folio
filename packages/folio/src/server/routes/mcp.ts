@@ -24,11 +24,32 @@ import { Hono as HonoApp } from 'hono'
 import type { Actor } from '../auth/roles'
 import { type ErrorEnvelope, FolioError } from '../errors'
 import { handleRpc, INVALID_PARAMS, RpcFault, type RpcMethod, rpcCodeFor } from '../mcp/rpc'
-import { fillPath, MCP_TOOLS, type McpTool, nonBodyKeys, toolByName, toolsFor } from '../mcp/tools'
+import { previewDocument, type PreviewDocumentContext } from '../mcp/shot'
+import {
+  fillPath,
+  MCP_TOOLS,
+  type McpTool,
+  nonBodyKeys,
+  type ToolMethod,
+  toolByName,
+  toolsFor,
+} from '../mcp/tools'
 import { ensureAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
 import { API_VERSION } from './api'
+
+/**
+ * A tool row that names a v1 route — every row but `preview_document`
+ * (`../mcp/tools.ts`'s header comment). `dispatch`, below, only ever runs
+ * against one of these; `hasRoute` is how `tools/call` tells the two apart
+ * without asserting.
+ */
+type RoutedTool = McpTool & { method: ToolMethod; path: string }
+
+function hasRoute(tool: McpTool): tool is RoutedTool {
+  return tool.path !== undefined
+}
 
 /**
  * The MCP revision this server implements. Answered rather than negotiated: the
@@ -97,9 +118,27 @@ export function mcpRoutes<Env>(
    * `{base}/api/v1` whatever an argument tries, so a tool can never address
    * `/mcp` or anything else on the mount.
    */
+  /**
+   * `authorization`/`cookie`, copied from the caller verbatim and nothing
+   * else. The one rule two callers share: `dispatch`'s internal `fetch`
+   * (below) and `preview_document`'s direct read of the request
+   * (`previewContext`, below that) both need the caller's credential and
+   * neither needs — nor should forward — anything else, `Origin` included
+   * (see `dispatch`'s own comment on why). Written once so neither can drift
+   * from the other.
+   */
+  const credentialHeaders = (c: Context<FolioEnv<Env>>): Record<string, string> => {
+    const headers: Record<string, string> = {}
+    const authorization = c.req.header('authorization')
+    if (authorization) headers.authorization = authorization
+    const cookie = c.req.header('cookie')
+    if (cookie) headers.cookie = cookie
+    return headers
+  }
+
   const dispatch = async (
     c: Context<FolioEnv<Env>>,
-    tool: McpTool,
+    tool: RoutedTool,
     args: Record<string, unknown>,
   ): Promise<Response> => {
     const url = new URL(`${rt.base}/api/${API_VERSION}${fillPath(tool.path, args)}`, c.req.url)
@@ -140,11 +179,7 @@ export function mcpRoutes<Env>(
       if (args[key] === true) url.searchParams.set(key, '1')
     }
 
-    const headers = new Headers()
-    const authorization = c.req.header('authorization')
-    if (authorization) headers.set('authorization', authorization)
-    const cookie = c.req.header('cookie')
-    if (cookie) headers.set('cookie', cookie)
+    const headers = new Headers(credentialHeaders(c))
 
     let body: BodyInit | undefined
     if (tool.body === 'json') {
@@ -229,6 +264,18 @@ export function mcpRoutes<Env>(
     return tool.description
   }
 
+  /**
+   * The one non-route tool's own context: the request's own URL — so a
+   * relative preview URL (a host's `route` may return one, and
+   * `{base}/preview/global/:name` always does) becomes an absolute one a
+   * remote browser can reach — and the same credential, copied the same
+   * way `dispatch` copies it.
+   */
+  const previewContext = (c: Context<FolioEnv<Env>>): PreviewDocumentContext => ({
+    origin: c.req.url,
+    headers: credentialHeaders(c),
+  })
+
   const methodsFor = (c: Context<FolioEnv<Env>>): Record<string, RpcMethod> => ({
     /**
      * `capabilities.tools` is an empty object rather than `{ listChanged: true }`:
@@ -276,9 +323,11 @@ export function mcpRoutes<Env>(
      * acceptance criterion rather than an oversight: a tool the credential
      * excludes is dispatched anyway so the refusal is *the v1 route's own*
      * `forbidden`, naming the missing scope, rather than a second gate the MCP
-     * layer invented and would have to keep in step. `delete_document` is the
-     * one exception, because its `admin` requirement is stricter than its
-     * route's — see `narrowed` in `../mcp/tools.ts`.
+     * layer invented and would have to keep in step. `delete_document` is one
+     * exception, because its `admin` requirement is stricter than its route's;
+     * `preview_document` is the other, because it has no route to do the
+     * refusing at all — both are `narrowed`, and `ensureAccess` below is the
+     * only gate either one gets (see `narrowed` in `../mcp/tools.ts`).
      */
     'tools/call': async (params) => {
       const name = params.name
@@ -296,6 +345,13 @@ export function mcpRoutes<Env>(
           : {}
 
       if (tool.narrowed) ensureAccess(rt, c.var.actor, tool.need)
+
+      // `preview_document` alone has no v1 route to dispatch to (decisions 5,
+      // 5a) — `ensureAccess` above is already its only gate, and it runs
+      // before this branch so that ordering holds whichever way it goes.
+      if (!hasRoute(tool)) {
+        return previewDocument(rt, c.var.bindings(), previewContext(c), args)
+      }
 
       return resultOf(await dispatch(c, tool, args))
     },

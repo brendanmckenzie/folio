@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { blocks, defineBlock, defineRecord, text } from '../../../src/core'
 import type { DocumentType } from '../../../src/core/schema'
 import { ADMIN, MANAGE } from '../../../src/server/auth/roles'
-import { fillPath, MCP_TOOLS, nonBodyKeys, toolByName } from '../../../src/server/mcp/tools'
+import { MAX_DIMENSION, MIN_DIMENSION } from '../../../src/server/mcp/shot'
+import {
+  fillPath,
+  MCP_TOOLS,
+  type McpTool,
+  nonBodyKeys,
+  toolByName,
+} from '../../../src/server/mcp/tools'
 import { apiRoutes } from '../../../src/server/routes/api'
 import { createRuntime } from '../../../src/server/runtime'
 import { STORY_STATE } from '../../../src/server/validate'
@@ -63,6 +70,15 @@ const v1Routes = new Set(apiRoutes(rt).routes.map((route) => `${route.method} ${
 const routeOf = (tool: { method: string; path: string }) => `${tool.method} ${tool.path}`
 
 /**
+ * Every row but `preview_document` (`../../../src/server/mcp/tools.ts`'s
+ * header comment): the one tool with no v1 route behind it, dispatched
+ * straight to `../../../src/server/mcp/shot.ts` by `routes/mcp.ts` instead of
+ * through the round-trip this file otherwise pins.
+ */
+const routed = (tool: McpTool): tool is McpTool & { method: string; path: string } =>
+  tool.path !== undefined
+
+/**
  * The v1 routes an agent deliberately does not get. Each one is a decision, not
  * an omission — which is the whole reason this list is named rather than
  * inferred.
@@ -94,18 +110,24 @@ const NOT_TOOLS: readonly string[] = [
 ]
 
 describe('the tool table', () => {
-  it('names fifteen tools, each once', () => {
-    // Sixteen in the spec's table; `preview_document` is the one that is not a
-    // v1 route (`?_folio=draft` plus a `browser` binding) and belongs to phases
-    // 4 and 5. When it lands it will need `NOT_TOOLS`' counterpart: a tool with
-    // no route, skipped by the round trip below.
-    expect(MCP_TOOLS).toHaveLength(15)
-    expect(new Set(MCP_TOOLS.map((tool) => tool.name)).size).toBe(15)
-    expect(MCP_TOOLS.map((tool) => tool.name)).not.toContain('preview_document')
+  it('names sixteen tools, each once — fifteen route-backed and preview_document with none', () => {
+    // Fifteen are a `{method, path}` over the v1 app; `preview_document` is
+    // `?_folio=draft` plus a `browser` binding (decisions 5, 5a) and has
+    // neither — `routes/mcp.ts`'s `tools/call` branches to it before the
+    // internal dispatch the other fifteen share.
+    expect(MCP_TOOLS).toHaveLength(16)
+    expect(new Set(MCP_TOOLS.map((tool) => tool.name)).size).toBe(16)
+    const preview = toolByName('preview_document')
+    expect(preview?.method).toBeUndefined()
+    expect(preview?.path).toBeUndefined()
+    expect(MCP_TOOLS.filter((tool) => !routed(tool)).map((tool) => tool.name)).toEqual([
+      'preview_document',
+    ])
   })
 
-  it('resolves every tool to a route the v1 app declares', () => {
+  it('resolves every route-backed tool to a route the v1 app declares', () => {
     for (const tool of MCP_TOOLS) {
+      if (!routed(tool)) continue
       expect([tool.name, routeOf(tool), v1Routes.has(routeOf(tool))]).toEqual([
         tool.name,
         routeOf(tool),
@@ -115,7 +137,10 @@ describe('the tool table', () => {
   })
 
   it('accounts for every v1 route: a tool, or a named exclusion', () => {
-    const claimed = new Set(MCP_TOOLS.map(routeOf))
+    // Over the route-backed tools only — `preview_document` names no v1 route
+    // at all, so it is neither a claim on `v1Routes` nor something that could
+    // shadow one.
+    const claimed = new Set(MCP_TOOLS.filter(routed).map(routeOf))
     for (const route of v1Routes) {
       const accounted = claimed.has(route) || NOT_TOOLS.includes(route)
       expect([route, accounted]).toEqual([route, true])
@@ -126,8 +151,10 @@ describe('the tool table', () => {
     for (const route of NOT_TOOLS) {
       expect([route, v1Routes.has(route)]).toEqual([route, true])
     }
-    // And the two lists partition the surface rather than overlapping it.
-    const claimed = new Set(MCP_TOOLS.map(routeOf))
+    // And the two lists partition the whole route-backed surface rather than
+    // overlapping it. `preview_document` is deliberately outside this count —
+    // it is accounted for above, by name, not by a route it does not have.
+    const claimed = new Set(MCP_TOOLS.filter(routed).map(routeOf))
     for (const route of NOT_TOOLS) expect(claimed.has(route)).toBe(false)
     expect(claimed.size + NOT_TOOLS.length).toBe(v1Routes.size)
   })
@@ -136,6 +163,7 @@ describe('the tool table', () => {
 
   it('declares every path parameter as a required argument', () => {
     for (const tool of MCP_TOOLS) {
+      if (!tool.path) continue
       for (const match of tool.path.matchAll(/:([A-Za-z_][A-Za-z0-9_]*)/g)) {
         const name = match[1]!
         expect([tool.name, name, tool.inputSchema.required ?? []]).toEqual([
@@ -195,6 +223,41 @@ describe('the tool table', () => {
     }
   })
 
+  /**
+   * `preview_document`'s `viewport` bounds are the one place this file has to
+   * pin a *number*, not a string enum: `../mcp/tools.ts` interpolates
+   * `MIN_DIMENSION`/`MAX_DIMENSION` from `shot.ts` into the description rather
+   * than retyping them, precisely so the advertised range cannot drift from
+   * the clamp `resolveViewport` actually applies. Same fork decision 2 exists
+   * to prevent, one layer in — pinned the same way `state`'s enum is pinned
+   * against `STORY_STATE`, above.
+   */
+  it('advertises the viewport bounds it actually clamps to', () => {
+    const viewport = toolByName('preview_document')?.inputSchema.properties?.viewport
+    const bounds = `${MIN_DIMENSION}-${MAX_DIMENSION}`
+    expect(viewport?.properties?.width?.description).toContain(bounds)
+    expect(viewport?.properties?.height?.description).toContain(bounds)
+    // Stated as a literal too, so the assertion above cannot pass by both
+    // sides moving together — a clamp edit has to be a deliberate change here.
+    expect([MIN_DIMENSION, MAX_DIMENSION]).toEqual([200, 4000])
+  })
+
+  /**
+   * `fullPage` and `blok` typed as what `previewDocument`
+   * (`../../../src/server/mcp/shot.ts`) actually reads off `args` —
+   * `args.fullPage === true` and `typeof args.blok === 'string'` — rather than
+   * as a guess. A schema that advertised, say, `blok` as an array would be a
+   * contract the tool does not honour.
+   */
+  it('types preview_document’s arguments as what previewDocument reads', () => {
+    const props = toolByName('preview_document')?.inputSchema.properties
+    expect(props?.viewport?.type).toBe('object')
+    expect(props?.viewport?.properties?.width?.type).toBe('integer')
+    expect(props?.viewport?.properties?.height?.type).toBe('integer')
+    expect(props?.fullPage?.type).toBe('boolean')
+    expect(props?.blok?.type).toBe('string')
+  })
+
   it('sends no body on a GET, and one on every route that reads one', () => {
     for (const tool of MCP_TOOLS) {
       if (tool.method === 'GET' || tool.method === 'DELETE') {
@@ -214,13 +277,14 @@ describe('the tool table', () => {
   /* --------------------------------------------------------- the narrowing --- */
 
   /**
-   * **`delete_document` is the one row whose `need` is stricter than its
-   * route's**, and therefore the one place the MCP layer gates a call itself.
-   * A delete is the only action in the table whose mistake is not recoverable by
-   * another tool call, which is how owner checkpoint 3 resolved "no confirmation
-   * argument": put the tool behind `admin` instead.
+   * **`narrowed` means two different things now** (`McpTool.narrowed`'s own
+   * comment): `delete_document`'s `need` is stricter than its route's, so the
+   * MCP layer has to gate it itself; `preview_document` has no route at all,
+   * so it has nothing else to be gated by. Both are the one place the MCP
+   * layer checks access itself rather than letting a v1 route refuse it — and
+   * nothing else in the table needs to.
    */
-  it('narrows delete_document to admin, and narrows nothing else', () => {
+  it('narrows delete_document to admin and preview_document for having no route, nothing else', () => {
     const deleteTool = toolByName('delete_document')
     expect(deleteTool?.need).toBe(ADMIN)
     expect(deleteTool?.narrowed).toBe(true)
@@ -228,7 +292,14 @@ describe('the tool table', () => {
     // rather than a restatement.
     expect(MANAGE.scope).toBe('content:write')
 
+    const preview = toolByName('preview_document')
+    expect(preview?.narrowed).toBe(true)
+    // Narrowed for the other reason `McpTool.narrowed` names: no route to
+    // narrow against at all, rather than a stricter `need` than one declares.
+    expect(preview?.path).toBeUndefined()
+
     expect(MCP_TOOLS.filter((tool) => tool.narrowed).map((tool) => tool.name)).toEqual([
+      'preview_document',
       'delete_document',
     ])
   })
@@ -241,6 +312,7 @@ describe('the tool table', () => {
       query_documents: 'content:read',
       get_document: 'content:read',
       list_versions: 'content:read',
+      preview_document: 'content:read:draft',
       create_document: 'content:write',
       write_content: 'content:write',
       patch_fields: 'content:write',

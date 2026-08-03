@@ -16,11 +16,13 @@
  * one site disagree about what exists. `get_schema` reports the fields;
  * `write_content` takes them.
  *
- * **`preview_document` is the sixteenth row and is not here yet.** It is the one
- * tool in the spec's table that is *not* a v1 route — it is `?_folio=draft` plus
- * a `browser` binding — and both belong to phases 4 and 5. When it lands, the
- * `method`/`path` pair becomes optional and `test/unit/mcp/tools.test.ts`'s
- * round-trip has to skip a tool that has none.
+ * **`preview_document` is the sixteenth row, and it is the one tool that is
+ * *not* a v1 route** — it is `?_folio=draft` plus a `browser` binding
+ * (decisions 5, 5a), so it has no `method`/`path` at all. Both fields are
+ * optional for exactly that one row; `test/unit/mcp/tools.test.ts`'s
+ * route-round-trip skips a tool with no path, and `routes/mcp.ts`'s
+ * `tools/call` branches to `../mcp/shot.ts`'s `previewDocument` instead of the
+ * internal-dispatch path the other fifteen share.
  */
 import {
   type Access,
@@ -33,8 +35,10 @@ import {
   MANAGE,
   PUBLISH,
   READ,
+  READ_DRAFT,
 } from '../auth/roles'
 import { FolioError } from '../errors'
+import { MAX_DIMENSION, MIN_DIMENSION } from './shot'
 
 type JsonType = 'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'null'
 
@@ -62,9 +66,13 @@ export interface McpTool {
   description: string
   /** MCP's own name for the JSON Schema of a tool's arguments. */
   inputSchema: JsonSchema
-  method: ToolMethod
+  /**
+   * Absent for exactly one row: `preview_document`, which has no v1 route
+   * behind it at all (decisions 5, 5a). Every other row carries both.
+   */
+  method?: ToolMethod
   /** The path under `{base}/api/v1`. Every `:name` is filled from that argument. */
-  path: string
+  path?: string
   /** Arguments that travel as query parameters. An array argument repeats the key. */
   query?: readonly string[]
   /**
@@ -87,9 +95,12 @@ export interface McpTool {
    */
   need: Access
   /**
-   * Set only where `need` is *stricter* than the route's own gate, which makes
-   * it a check the MCP layer has to make itself before dispatching. Exactly one
-   * row: see `delete_document`.
+   * Set where the dispatched route cannot be the one to refuse this call —
+   * because there is no route (`preview_document`, which has none at all), or
+   * because `need` is *stricter* than the one the route declares
+   * (`delete_document`, `admin` over the route's own `content:write`). Either
+   * way the MCP layer has to make the check itself, via `ensureAccess`, before
+   * doing anything else.
    */
   narrowed?: true
   /**
@@ -232,6 +243,61 @@ export const MCP_TOOLS: readonly McpTool[] = [
     path: '/documents/:id/versions',
     query: ['perPage'],
     need: READ,
+  },
+  /**
+   * **The one row with no `method`/`path`.** `?_folio=draft` plus a `browser`
+   * binding (decisions 5, 5a), dispatched by `routes/mcp.ts` straight to
+   * `../mcp/shot.ts`'s `previewDocument` rather than through the internal
+   * `fetch` every other row shares. Grouped with the reads above despite the
+   * stricter `need`: it is a read, just one that needs the draft scope
+   * `get_document`'s own `?status=draft` needs only inside its route.
+   *
+   * `viewport`'s bounds are interpolated from `shot.ts`'s own
+   * `MIN_DIMENSION`/`MAX_DIMENSION` rather than typed here a second time, so
+   * the advertised range cannot drift from the clamp that actually applies —
+   * `tools.test.ts` pins the two together anyway, the same way it pins
+   * `search_documents`' `state` enum against `STORY_STATE`.
+   */
+  {
+    name: 'preview_document',
+    description:
+      "Screenshot the draft as a page would look — no editor chrome, no dead links — so a layout, a responsive break, or a missing image can be checked rather than inferred from markup. Clip to one block with `blok`. Without a `browser` binding configured (always the case against a local dev server, since Cloudflare's browser cannot reach localhost) this answers the draft's URL and rendered HTML instead, and says so.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: ID,
+        viewport: {
+          type: 'object',
+          description:
+            'Pixel size of the browser window. Default 1440×900. Pass a mobile size to check a responsive break.',
+          properties: {
+            width: {
+              type: 'integer',
+              description: `${MIN_DIMENSION}-${MAX_DIMENSION}. Default 1440.`,
+            },
+            height: {
+              type: 'integer',
+              description: `${MIN_DIMENSION}-${MAX_DIMENSION}. Default 900.`,
+            },
+          },
+          additionalProperties: false,
+        },
+        fullPage: {
+          type: 'boolean',
+          description:
+            'Capture the whole scroll height instead of just the viewport. Default false — a long page can be over 10,000px tall, and a full-page image of that downscales into something unreadable. Ignored when `blok` is given.',
+        },
+        blok: {
+          type: 'string',
+          description:
+            "Clip to one block by uid, from get_document's content. A uid not present in the draft answers a message naming it; one that is present but renders no host element (a block whose render returns a component) falls back to the viewport and says so.",
+        },
+      },
+      required: ['id'],
+      additionalProperties: false,
+    },
+    need: READ_DRAFT,
+    narrowed: true,
   },
 
   /* -------------------------------------------------------------- writes --- */
@@ -501,9 +567,16 @@ export function fillPath(path: string, args: Readonly<Record<string, unknown>>):
   })
 }
 
-/** The argument names a tool sends anywhere other than the request body. */
+/**
+ * The argument names a tool sends anywhere other than the request body.
+ *
+ * Only ever called for a route-backed tool (`dispatch` in `routes/mcp.ts`
+ * reads `tool.body`, which no pathless row declares), but `tool.path` is
+ * optional on the type since `preview_document` has none — so this reads it
+ * defensively rather than asserting.
+ */
 export function nonBodyKeys(tool: McpTool): Set<string> {
   const keys = new Set<string>([...(tool.query ?? []), ...(tool.flags ?? [])])
-  for (const match of tool.path.matchAll(/:([A-Za-z_][A-Za-z0-9_]*)/g)) keys.add(match[1]!)
+  for (const match of (tool.path ?? '').matchAll(/:([A-Za-z_][A-Za-z0-9_]*)/g)) keys.add(match[1]!)
   return keys
 }

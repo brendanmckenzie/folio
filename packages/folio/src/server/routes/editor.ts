@@ -170,7 +170,23 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     if (type?.kind !== 'singleton') return c.notFound()
     const bindings = c.var.bindings()
     const story = await ensureSingleton(bindings.db, type, rt.schemaId)
-    return previewPage(rt, bindings, story, { bare: true })
+    /**
+     * `?mode=draft`, for `preview_document`'s benefit
+     * (`../../../docs/specs/platform/mcp-server.md` phase 5, decision 5a's
+     * fallback URL for a declared global). Without this, the route only ever
+     * rendered the editing chrome — `folio-editing`, a marker `<div>` around a
+     * component-returning global root, the postMessage bridge — which is worse
+     * than a bit of decoration: `preview.css`'s `position: relative` on every
+     * marked block re-parents any absolutely-positioned descendant (a geometry
+     * change), and clipping to `[data-folio-uid="…"]` **succeeds** via the
+     * marker div, so a screenshot would clip to the wrapper's box and report
+     * success — the "labelled as one block, geometrically wrong" failure the
+     * tool's edge cases exist to avoid. Absent still means `preview`, so the
+     * admin's own bare-preview URL (`admin/ui/useStory.ts`, which never sets
+     * this) is unchanged.
+     */
+    const mode = c.req.query('mode') === 'draft' ? 'draft' : 'preview'
+    return previewPage(rt, bindings, story, { bare: true, mode })
   })
 
   return app
