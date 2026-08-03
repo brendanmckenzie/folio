@@ -13,6 +13,7 @@ import { bulkRoutes } from './routes/bulk'
 import { contentRoutes } from './routes/content'
 import { editorPageRoutes, editorRoutes } from './routes/editor'
 import { historyRoutes } from './routes/history'
+import { mcpRoutes } from './routes/mcp'
 import { migrationRoutes } from './routes/migrations'
 import { shareRoutes, sharePageRoutes } from './routes/preview'
 import { redirectRoutes } from './routes/redirects'
@@ -140,6 +141,33 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   app.route('/api', migrationRoutes<Env>(rt))
   app.route('/api', contentRoutes<Env>(rt))
   app.route('/api', spaceRoutes<Env>(rt))
+
+  /**
+   * `{base}/mcp` — the MCP endpoint (`../../../docs/specs/platform/mcp-server.md`
+   * decision 8). **Outside `/api` and unversioned**, which is why it is mounted
+   * on the bare tree here rather than beside `apiRoutes` above: everything under
+   * `/api` answers `errors.ts`'s single envelope, and MCP answers JSON-RPC — a
+   * 200 carrying an `error` object with its own code space. One prefix with two
+   * error envelopes is the sibling confusion `api-partition.test.ts` exists to
+   * prevent, so `{base}/api/mcp` and `{base}/api/v1/mcp` both 404 and that file
+   * asserts it.
+   *
+   * Under `withActor`, like everything else, so a token and a session cookie are
+   * resolved by the same middleware — and it is mounted *before* the `/api/*`
+   * terminator only in reading order; the paths do not overlap.
+   *
+   * **On by default; `createFolio({ mcp: false })` opts out** (owner checkpoint
+   * 2). It is gated by the same token table as `/api/v1`, so "on" adds no
+   * reachable surface a token could not already reach — but a host with no tokens
+   * minted should be able to say so in config rather than by inference.
+   *
+   * `app` is passed to itself deliberately: every tool is a v1 route dispatched
+   * through this same app's `fetch`, so the gate, the validator and the error
+   * envelope have exactly one implementation (decision 2). Hono resolves a path
+   * at request time, so handing over a reference that is still being registered
+   * on is safe.
+   */
+  if (config.mcp !== false) app.route('/', mcpRoutes<Env>(rt, app))
 
   /**
    * An unmatched path under `/api` is a **JSON 404**, and this line is what makes

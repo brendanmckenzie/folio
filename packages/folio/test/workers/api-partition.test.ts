@@ -159,6 +159,42 @@ describe('the /api partition', () => {
     expect(await routed('/folio/api/v1/documents')).toBe(true)
   })
 
+  /**
+   * `mcp` is **not** an `/api` segment at all, and that is decision 8 of
+   * `docs/specs/platform/mcp-server.md` rather than an oversight: every route
+   * under `/api` answers `errors.ts`'s single envelope, and `{base}/mcp` answers
+   * JSON-RPC — a 200 carrying an `error` object with its own code space. One
+   * prefix with two error envelopes is exactly the confusion this file exists to
+   * prevent, so it lives on the bare mount and both `/api` spellings 404.
+   *
+   * It is also deliberately **unversioned**: MCP negotiates its own version in
+   * `initialize` and tools are discovered per session, so a version segment here
+   * would be a second ledger tracking a protocol that already has one.
+   */
+  it('keeps {base}/mcp off the /api partition, versioned or not', async () => {
+    for (const path of ['/folio/api/mcp', '/folio/api/v1/mcp', '/folio/api/v2/mcp']) {
+      expect([path, await posted(path)]).toEqual([path, 404])
+      expect([path, await routed(path)]).toEqual([path, false])
+    }
+  })
+
+  it('answers POST {base}/mcp on the bare mount', async () => {
+    const res = await SELF.fetch(`${BASE}/mcp`, {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json<{ jsonrpc: string; result: { serverInfo: { name: string } } }>()
+    expect(body.jsonrpc).toBe('2.0')
+    expect(body.result.serverInfo.name).toBe('folio')
+  })
+
+  it('answers a GET on it with 405 and Allow: POST, not the shell’s HTML', async () => {
+    const res = await SELF.fetch(`${BASE}/mcp`)
+    expect(res.status).toBe(405)
+    expect(res.headers.get('allow')).toBe('POST')
+  })
+
   it('answers an unmatched /api path with a JSON 404, not the shell’s HTML', async () => {
     // The bug this file found. The shell's wildcard covers every unmatched bare
     // path; without an explicit `/api/*` terminator it covered unmatched *API*

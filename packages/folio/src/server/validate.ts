@@ -872,8 +872,13 @@ function listQuery(
 
 /** The four states `core/story.ts`'s `StoryState` names. Screened here so a chip
  * value from a stale bookmark is a 400 rather than a filter that matches nothing
- * and looks like an empty site. */
-const STORY_STATE = v.picklist(
+ * and looks like an empty site.
+ *
+ * Exported for one reason: `mcp/tools.ts` advertises this domain to a model in an
+ * input schema, and an advertised list that drifts from this one is a refusal on
+ * every call. `test/unit/mcp/tools.test.ts` pins the two together by value, which
+ * needs the picklist itself rather than a second copy of its options. */
+export const STORY_STATE = v.picklist(
   ['draft', 'unpublished', 'live', 'changed'],
   'must be one of: draft, unpublished, live, changed',
 )

@@ -231,6 +231,20 @@ export interface FolioConfig<Env> {
    * step, or `POST {base}/migrate` (checkpoint 5).
    */
   migrations?: readonly Migration[]
+  /**
+   * `false` disables `{base}/mcp` entirely
+   * (`../../../docs/specs/platform/mcp-server.md` owner checkpoint 2). Default
+   * true.
+   *
+   * On by default because it is gated by the same `api_tokens` table as
+   * `/api/v1`: every tool is one of those routes, dispatched internally with the
+   * caller's own credential, so "on" adds no reachable surface a token could not
+   * already reach. What it does add is one more authenticated endpoint on every
+   * deployment that upgrades — so a host that has minted no tokens, or that does
+   * not want an agent surface at all, should be able to say so in config rather
+   * than leaving it to be inferred from an empty table.
+   */
+  mcp?: boolean
 }
 
 export interface Folio<Env> {
