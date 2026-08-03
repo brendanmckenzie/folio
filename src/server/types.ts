@@ -82,6 +82,27 @@ export interface FolioBindings {
    * Folio working on a bare `wrangler dev` with nothing else configured.
    */
   images?: ImagesBinding
+  /**
+   * Cloudflare Browser Rendering — "Browser Run" as of its rename — for
+   * `preview_document`'s screenshot (`../../../docs/specs/platform/
+   * mcp-server.md` decisions 5a, owner checkpoint 1). `{ "browser": {
+   * "binding": "BROWSER" } }` in `wrangler.jsonc`.
+   *
+   * **Optional, and its absence is a legible refusal**, exactly as `media`
+   * already works (`routes/api/index.ts`'s `if (!media) throw new
+   * FolioError('unsupported', ...)`): without it the tool answers the draft
+   * URL and the rendered HTML instead of an image, and says why. A paid
+   * add-on the owner has to provision, and the one thing in this library that
+   * does not work against a local `wrangler dev` at all — Cloudflare's browser
+   * is remote and cannot reach `localhost`.
+   *
+   * **No new runtime dependency.** This binding answers `quickAction()`
+   * directly (Cloudflare's Quick Actions surface), which returns a plain
+   * `Response` carrying image bytes — no `@cloudflare/puppeteer`, no browser
+   * automation library. `BrowserRun`'s type ships in `@cloudflare/workers-types`,
+   * already a devDependency for every other binding here.
+   */
+  browser?: BrowserRun
 }
 
 /**

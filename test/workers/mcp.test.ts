@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { blocks, defineBlock, text } from '../../src/core'
 import type { NestedDoc } from '../../src/core/nested'
 import type { DocumentType } from '../../src/core/schema'
+import { singletonId } from '../../src/core/schema'
 import type { AuthConfig, FolioBindings } from '../../src/server'
 import { createFolio, magicLink } from '../../src/server'
 import { SECURE_COOKIE } from '../../src/server/auth/cookie'
@@ -11,6 +12,7 @@ import { createSession } from '../../src/server/auth/session'
 import { createToken } from '../../src/server/auth/tokens'
 import { createUser } from '../../src/server/auth/users'
 import { MCP_PROTOCOL_VERSION } from '../../src/server/routes/mcp'
+import { ensureSingleton } from '../../src/server/stories'
 import { STORY_STATE } from '../../src/server/validate'
 
 /**
@@ -47,8 +49,35 @@ const pageRoot = defineBlock({
   render: () => null,
 })
 
+/** Unrouted (`document-types.md` decision 2): `preview_document`'s "nothing to
+ * render" edge case, since a record has no `draftUrl` and no bare preview. */
+const productRoot = defineBlock({
+  name: 'mcpProduct',
+  label: 'Product',
+  fields: { sku: text() },
+  render: () => null,
+})
+
+/** `preview_document`'s fallback URL for a declared global — the one that
+ * needed phase 4's `?mode=draft` fix on `/preview/global/:name`. */
+const settingsRoot = defineBlock({
+  name: 'mcpSettings',
+  label: 'Settings',
+  fields: { tagline: text() },
+  render: () => null,
+})
+
+const settingsType: DocumentType = {
+  name: 'mcpSettingsType',
+  label: 'Settings',
+  kind: 'singleton',
+  root: 'mcpSettings',
+}
+
 const types: DocumentType[] = [
   { name: 'mcpPageType', label: 'Page', kind: 'page', root: 'mcpPage', default: true },
+  { name: 'mcpProductType', label: 'Product', kind: 'record', root: 'mcpProduct' },
+  settingsType,
 ]
 
 const bindings = (e: Cloudflare.Env): FolioBindings => ({
@@ -73,12 +102,17 @@ const publishedIds: string[] = []
 
 function build(over: { mode?: AuthConfig<Cloudflare.Env> | 'open'; mcp?: boolean } = {}) {
   return createFolio<Cloudflare.Env>({
-    blocks: [pageRoot, hero],
+    blocks: [pageRoot, hero, productRoot, settingsRoot],
     types,
     bindings,
     basePath: '/folio',
     auth: over.mode ?? auth,
     route: (p) => (p ? `/${p}` : '/'),
+    // `preview_document`'s no-binding path renders the draft's HTML
+    // (`renderDraftHtml` in `mcp/shot.ts`), and `previewPage` refuses to run
+    // at all without this configured (`validateAssets`) — the same
+    // requirement any host has, not something the tool adds.
+    assets: { admin: '/mcp-admin.js', preview: '/mcp-preview.js' },
     hooks: {
       published: async (e) => {
         // Deliberately asynchronous: a hook that resolves on the microtask queue
@@ -172,7 +206,29 @@ async function callTool<T>(
   return { value: JSON.parse(answer.result!.content[0]!.text) as T }
 }
 
+/** A routed page, created with `content:write`, and the token that made it —
+ * shared by `tools/call` and `preview_document` below, both of which need a
+ * document with a `draftUrl` to work against. */
+const created = async (title = 'Pricing') => {
+  const headers = await tokenFor('content:write')
+  const answer = await callTool<{ id: string }>(
+    'create_document',
+    { title, content: { type: 'mcpPage', fields: { title, body: [] } } },
+    headers,
+  )
+  return { id: answer.value!.id, headers }
+}
+
 const READS = ['get_schema', 'search_documents', 'query_documents', 'get_document', 'list_versions']
+/**
+ * `READS` plus `preview_document` — the one tool whose own `need` is
+ * `READ_DRAFT`, not `READ`. `IMPLIES` (`auth/roles.ts`) grants
+ * `content:read:draft` from `content:write`, `publish` and `admin` as well as
+ * from itself, and a session role reaches it too (`READ_DRAFT.role` is the same
+ * `'viewer'` minimum `READ` declares) — so every case below except plain
+ * `content:read` sees it.
+ */
+const READS_DRAFT = [...READS, 'preview_document']
 
 beforeEach(async () => {
   publishedIds.length = 0
@@ -245,22 +301,35 @@ describe('initialize', () => {
 /* -------------------------------------------------------------- tools/list --- */
 
 describe('tools/list', () => {
-  it('content:read — the reads, and no write, publish or delete', async () => {
+  it('content:read — the reads, and no write, publish, delete or draft preview', async () => {
     const offered = await listed(await tokenFor('content:read'))
     expect(offered).toEqual(READS)
+    expect(offered).not.toContain('preview_document')
+  })
+
+  /**
+   * **`preview_document` needs the draft scope, not plain `content:read`.**
+   * `IMPLIES` is spelled out rather than derived from a chain, so this is the
+   * one place a token actually exercises the direction that matters: holding
+   * `content:read:draft` reaches it, holding only `content:read` does not.
+   */
+  it('content:read:draft adds preview_document to the same reads', async () => {
+    const offered = await listed(await tokenFor('content:read:draft'))
+    expect(offered).toEqual(READS_DRAFT)
   })
 
   it('content:write — the writes appear, delete_document does not', async () => {
     const offered = await listed(await tokenFor('content:write'))
     expect(offered).toContain('write_content')
     expect(offered).toContain('restore_version')
+    expect(offered).toContain('preview_document')
     expect(offered).not.toContain('delete_document')
     expect(offered).not.toContain('publish_document')
   })
 
-  it('publish — publish and unpublish, and no content write', async () => {
+  it('publish — publish, unpublish and the draft preview, and no content write', async () => {
     const offered = await listed(await tokenFor('publish'))
-    expect(offered).toEqual([...READS, 'publish_document', 'unpublish_document'])
+    expect(offered).toEqual([...READS_DRAFT, 'publish_document', 'unpublish_document'])
   })
 
   /** `IMPLIES` grants `assets:write` no content access at all, which is why it is
@@ -272,15 +341,18 @@ describe('tools/list', () => {
   it('admin — every tool, including delete_document', async () => {
     const offered = await listed(await tokenFor('admin'))
     expect(offered).toContain('delete_document')
-    expect(offered).toHaveLength(15)
+    expect(offered).toHaveLength(16)
   })
 
   /**
    * A session cookie reaches here too, and a `UserActor` is filtered by role
-   * through the same `Access` pair with no special case.
+   * through the same `Access` pair with no special case. `preview_document`'s
+   * `READ_DRAFT.role` is the same `'viewer'` minimum `READ` declares, so a
+   * role check cannot hold it back from a viewer the way a scope check holds
+   * it back from a plain `content:read` token.
    */
   it('filters a session cookie by role, with no special case', async () => {
-    expect(await listed(await cookieFor('viewer'))).toEqual(READS)
+    expect(await listed(await cookieFor('viewer'))).toEqual(READS_DRAFT)
     const publisher = await listed(await cookieFor('publisher'))
     expect(publisher).toContain('publish_document')
     expect(publisher).not.toContain('delete_document')
@@ -293,7 +365,7 @@ describe('tools/list', () => {
    * has no access control by choice, and MCP is not the place to invent some.
    */
   it('offers every tool on an open deployment, with no credential at all', async () => {
-    expect(await listed(undefined, open)).toHaveLength(15)
+    expect(await listed(undefined, open)).toHaveLength(16)
   })
 
   /** Names the site's own declared types, which is a bounded list of strings
@@ -305,7 +377,9 @@ describe('tools/list', () => {
       { headers: await tokenFor('content:write') },
     )
     const byName = new Map(answer.result!.tools.map((t) => [t.name, t.description]))
-    expect(byName.get('create_document')).toContain('Declared document types: mcpPageType.')
+    expect(byName.get('create_document')).toContain(
+      'Declared document types: mcpPageType, mcpProductType, mcpSettingsType.',
+    )
     expect(byName.get('write_content')).toContain('mcpHero')
     expect(byName.get('write_content')).toContain('mcpPage')
     // The *names*, never the fields — those come from get_schema.
@@ -316,16 +390,6 @@ describe('tools/list', () => {
 /* -------------------------------------------------------------- tools/call --- */
 
 describe('tools/call', () => {
-  const created = async (title = 'Pricing') => {
-    const headers = await tokenFor('content:write')
-    const answer = await callTool<{ id: string }>(
-      'create_document',
-      { title, content: { type: 'mcpPage', fields: { title, body: [] } } },
-      headers,
-    )
-    return { id: answer.value!.id, headers }
-  }
-
   it('dispatches a read to its v1 route and answers the route’s own JSON', async () => {
     const { id, headers } = await created()
     const answer = await callTool<{ id: string; source: string; content: NestedDoc }>(
@@ -491,6 +555,114 @@ describe('tools/call', () => {
     )
     expect(answer.error?.code).toBe(-32602)
     expect(answer.error?.message).toBe('id is required')
+  })
+})
+
+/* ---------------------------------------------------------- preview_document --- */
+
+/**
+ * `preview_document` (`../../../docs/specs/platform/mcp-server.md` decisions 5,
+ * 5a, phase 5) — every path that does not need an image, which is everything
+ * except the image itself. This fixture's `bindings` declares no `browser`, so
+ * every call here takes the no-binding shape of the answer — the only one a
+ * workerd test, or a local dev server, can ever reach (`shot.ts`'s own header
+ * comment).
+ */
+describe('preview_document', () => {
+  interface PreviewContent {
+    type: string
+    text?: string
+    data?: string
+    mimeType?: string
+  }
+
+  const preview = (args: Record<string, unknown>, headers?: Record<string, string>) =>
+    rpc<{ content: PreviewContent[] }>(
+      'tools/call',
+      { name: 'preview_document', arguments: args },
+      { headers },
+    )
+
+  /**
+   * **The default path against a local dev server, stated as an acceptance
+   * criterion rather than inferred**: no `browser` binding answers the draft
+   * URL and the rendered HTML instead of an image, says plainly why, and is
+   * not a JSON-RPC error — `answer.error` has to be `undefined`, not merely
+   * unchecked.
+   */
+  it('answers the draft URL and rendered HTML with no browser binding, and does not fail', async () => {
+    const { id, headers } = await created()
+    const answer = await preview({ id }, headers)
+    expect(answer.error).toBeUndefined()
+
+    const content = answer.result!.content
+    expect(content).toHaveLength(2)
+    expect(content[0]!.type).toBe('text')
+    expect(content[0]!.text).toContain('No `browser` binding is configured')
+    expect(content[0]!.text).toContain('_folio=draft')
+    expect(content[1]!.type).toBe('text')
+    // The second item is the rendered draft HTML itself, not a description of it.
+    expect(content[1]!.text).toContain('Pricing')
+  })
+
+  it('answers not_found for an unknown document id', async () => {
+    const answer = await preview({ id: 'sto_does_not_exist' }, await tokenFor('content:read:draft'))
+    expect(answer.error?.message).toBe('Unknown document')
+  })
+
+  /**
+   * A record has no `draftUrl` and no bare global preview — nothing to render
+   * at all — so the tool says so in one text item rather than answering an
+   * empty image or an error the caller has to guess the meaning of.
+   */
+  it('says a record has no page to render, rather than erroring', async () => {
+    const headers = await tokenFor('content:write')
+    const { value } = await callTool<{ id: string }>(
+      'create_document',
+      {
+        title: 'Widget',
+        type: 'mcpProductType',
+        content: { type: 'mcpProduct', fields: { sku: 'W-1' } },
+      },
+      headers,
+    )
+    const answer = await preview({ id: value!.id }, headers)
+    expect(answer.error).toBeUndefined()
+    expect(answer.result!.content).toHaveLength(1)
+    expect(answer.result!.content[0]!.text).toContain('no page of its own')
+  })
+
+  /**
+   * **A `blok` absent from the document names the uid, rather than an empty
+   * image.** An empty image and a component-returning block that renders no
+   * uid are indistinguishable from the outside, and the two have opposite
+   * fixes — this is the half of that distinction a no-binding test can still
+   * cover, since it happens before any capture is attempted.
+   */
+  it('names a blok uid absent from the document, not an empty image', async () => {
+    const { id, headers } = await created()
+    const answer = await preview({ id, blok: 'not_a_real_uid' }, headers)
+    expect(answer.error).toBeUndefined()
+    const content = answer.result!.content
+    expect(content).toHaveLength(1)
+    expect(content[0]!.text).toContain('not_a_real_uid')
+    expect(content[0]!.text).toContain('get_document')
+  })
+
+  /**
+   * **This is the fallback URL decision 5a names for a declared global**, and
+   * the one phase 4's review found still pointed at the editing chrome before
+   * `editor.ts`'s `?mode=draft` fix. `ensureSingleton` stands in for the
+   * "first access creates the row" step `/preview/global/:name` itself does —
+   * a test reaching straight for `storyById` would otherwise 404 before ever
+   * exercising `chooseTarget`'s global branch.
+   */
+  it('targets the bare global preview, in draft mode, for a singleton', async () => {
+    await ensureSingleton(env.DB, settingsType, null)
+    const id = singletonId(settingsType)
+    const answer = await preview({ id }, await tokenFor('content:read:draft'))
+    expect(answer.error).toBeUndefined()
+    expect(answer.result!.content[0]!.text).toContain('/preview/global/mcpSettingsType?mode=draft')
   })
 })
 
