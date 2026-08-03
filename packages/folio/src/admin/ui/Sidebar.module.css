@@ -19,10 +19,16 @@
   transition: width var(--dur-fast) var(--ease);
 }
 
+/*
+ * No `align-items: center` here either. It was, and it centred nothing: both of
+ * this element's children — the brand and each group — are full-width by their
+ * own rules, so the only thing it achieved was making `align-items: center` look
+ * like the house style for "centre the collapsed rail" and inviting the same
+ * declaration onto `.group`, where it breaks the expanded state.
+ */
 .collapsed {
   width: 48px;
   padding-inline: 0;
-  align-items: center;
 }
 
 .brand {
@@ -39,15 +45,14 @@
   flex: 0 0 auto;
 }
 
+/* The hairline this draws and the top bar's are one line across the window or
+   they are a smudge, so it has to span the rail — which it does by being a
+   stretched flex child, the default. It carried an explicit `align-self: stretch`
+   to undo an `align-items: center` on the parent that is now gone. */
 .collapsed .brand {
   justify-content: center;
   margin-inline: 0;
   padding-inline: 0;
-  /* The parent is `align-items: center` while collapsed, which shrank this to its
-     one button — leaving the hairline 22px wide and the sidebar's top border not
-     meeting the top bar's. The rule they form together is one line across the
-     window or it is a smudge. */
-  align-self: stretch;
 }
 
 .wordmark {
@@ -81,6 +86,11 @@
   outline-offset: 1px;
 }
 
+/*
+ * No `align-items` here, deliberately — see `.collapsed .item`. The column
+ * stretches its rows, which is what makes an expanded row a band across the rail
+ * rather than a pill the width of its own label.
+ */
 .group {
   display: flex;
   flex-direction: column;
@@ -199,9 +209,24 @@ h2.heading {
   text-overflow: ellipsis;
 }
 
+/*
+ * Collapsed, a row is the whole rail with its content centred in it. It was a
+ * 32px box, and a 32px box in a 48px column is only centred if something centres
+ * it: nothing did, so every icon sat 8px left of the rail's middle while the
+ * toggle above them — which does centre itself — sat dead on it.
+ *
+ * **`align-items: center` on `.group` is the obvious fix and it is the wrong one.**
+ * `.group` is the same element in both states, so centring there also shrinks
+ * every *expanded* row to the width of its own label: the hover background stops
+ * reaching the edges and the active row stops being a band across the rail. The
+ * width has to be stated in the collapsed state, which is the only state that
+ * wants it, and `justify-content` — already here — does the centring.
+ */
 .collapsed .item {
   justify-content: center;
-  width: 32px;
+  /* 4px rather than the expanded row's 8px: the same inset would leave a 32px
+     row, which is the box this rule exists to get rid of. */
+  margin-inline: var(--space-1);
   padding: 0;
 }
 
