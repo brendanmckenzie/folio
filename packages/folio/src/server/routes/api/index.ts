@@ -28,6 +28,7 @@ import type { FolioRuntime } from '../../runtime'
 import type { FolioEnv } from '../../types'
 import { contentLengthHeader, filenameQuery, limitParam } from '../../validate'
 import { documentRoutes } from './documents'
+import { searchRoutes } from './search'
 
 /** The one version there is. A `v2` would be a second `Hono` mounted beside this. */
 export const API_VERSION = 'v1'
@@ -47,6 +48,7 @@ export function apiRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.get('/schema', requireAccess<Env>(rt, READ), (c) => c.json(rt.manifest))
 
   app.route('/', documentRoutes<Env>(rt))
+  app.route('/', searchRoutes<Env>(rt))
 
   /**
    * The media library and uploads, re-exposed at `assets:write` — a scope that
