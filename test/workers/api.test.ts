@@ -14,6 +14,7 @@ import {
 import type { Doc, Json } from '../../src/core/doc'
 import { defineMigration, field } from '../../src/core/migrate'
 import type { NestedBlok, NestedDoc } from '../../src/core/nested'
+import type { Page } from '../../src/core/pagination'
 import { PROTOCOL_VERSION } from '../../src/core/protocol'
 import type { DocumentType } from '../../src/core/schema'
 import type { AuthConfig, FolioBindings, WriteResult } from '../../src/server'
@@ -1308,6 +1309,111 @@ describe('previewUrl and draftUrl', () => {
     const body = await json<{ previewUrl: string | null; draftUrl: string | null }>(res)
     expect(body.previewUrl).toBeNull()
     expect(body.draftUrl).toBeNull()
+  })
+})
+
+/* -------------------------------------------------------------------- search --- */
+
+/**
+ * `GET /search` — the twin of the admin's `GET /api/search` that reaches
+ * unpublished documents (`mcp-server.md` decision 4). The keyset-cursor tests
+ * below cover the property `pagination.test.ts` exists to assert for every
+ * paged route — see this phase's carryover note for why that file gains no
+ * duplicate of them.
+ */
+describe('GET /search', () => {
+  it('finds a document that has never been published, which GET /documents cannot', async () => {
+    const id = await seed({ path: 'apipricing', title: 'Pricing', published: false })
+
+    const found = await call(`${API}/search?q=pricing`, {
+      headers: await tokenFor('content:read'),
+    })
+    expect(found.status).toBe(200)
+    const page = await json<Page<{ id: string }>>(found)
+    expect(page.rows.map((r) => r.id)).toContain(id)
+
+    // The one route this fixes: `/documents` answers published content only,
+    // and this document has never been published.
+    const listed = await call(`${API}/documents?type=apiPageType&perPage=200`, {
+      headers: await tokenFor('content:read'),
+    })
+    const items = await json<{ items: { id: string }[] }>(listed)
+    expect(items.items.map((i) => i.id)).not.toContain(id)
+  })
+
+  it('refuses without content:read', async () => {
+    const res = await call(`${API}/search?q=anything`, { headers: await tokenFor('assets:write') })
+    expect(res.status).toBe(403)
+  })
+
+  /**
+   * The property offset paging does not have, and the reason this route is
+   * keyset rather than page-numbered (decision 4's second half): a cursor is
+   * anchored to the last row's own sort key, not to a position, so a row
+   * inserted *above* it — sorting before anything already seen — cannot make
+   * the next page repeat or skip a row.
+   */
+  it('pages by keyset cursor, unaffected by a document inserted above it mid-walk', async () => {
+    const a = await seed({ path: 'apikeyseta', title: 'Keyset A' })
+    const b = await seed({ path: 'apikeysetb', title: 'Keyset B' })
+    const c = await seed({ path: 'apikeysetc', title: 'Keyset C' })
+
+    const first = await call(`${API}/search?q=Keyset&limit=2`, {
+      headers: await tokenFor('content:read'),
+    })
+    const firstPage = await json<Page<{ id: string }>>(first)
+    expect(firstPage.rows.map((r) => r.id)).toEqual([a, b])
+    expect(firstPage.cursor).not.toBeNull()
+
+    // Sorts before all three above ("0" < "A" in title order), so it lands
+    // *above* the cursor's resume point — the case offset paging gets wrong.
+    const inserted = await seed({ path: 'apikeysetnew', title: 'Keyset 0' })
+
+    const second = await call(
+      `${API}/search?q=Keyset&limit=2&cursor=${encodeURIComponent(firstPage.cursor ?? '')}`,
+      { headers: await tokenFor('content:read') },
+    )
+    const secondPage = await json<Page<{ id: string }>>(second)
+
+    // Exactly the one row left over — not `a` or `b` again, and not the newly
+    // inserted row, even though it also matches `q=Keyset` and would sort
+    // first in a fresh, cursor-less request.
+    expect(secondPage.rows.map((r) => r.id)).toEqual([c])
+    expect(secondPage.rows.map((r) => r.id)).not.toContain(inserted)
+    expect(secondPage.cursor).toBeNull()
+  })
+
+  it('narrows by parentId and by routed', async () => {
+    const parentId = await seed({ path: 'apisearchparent', title: 'Search parent' })
+    const childId = 'api_search_child'
+    await env.DB.prepare(
+      `insert into stories (id, type, parent_id, slug, path, ord, title)
+       values (?, 'apiPageType', ?, ?, ?, 'a0', ?)`,
+    )
+      .bind(childId, parentId, 'apisearchchild', 'apisearchparent/apisearchchild', 'Search child')
+      .run()
+    const record = await seed({
+      id: 'api_search_record',
+      type: 'apiProductType',
+      path: null,
+      title: 'Search record',
+    })
+
+    const byParent = await json<Page<{ id: string }>>(
+      await call(`${API}/search?parentId=${parentId}`, {
+        headers: await tokenFor('content:read'),
+      }),
+    )
+    expect(byParent.rows.map((r) => r.id)).toEqual([childId])
+
+    // `record` is the only unrouted row among the three, though all three
+    // titles match `q=Search`.
+    const unrouted = await json<Page<{ id: string }>>(
+      await call(`${API}/search?routed=false&q=Search`, {
+        headers: await tokenFor('content:read'),
+      }),
+    )
+    expect(unrouted.rows.map((r) => r.id)).toEqual([record])
   })
 })
 

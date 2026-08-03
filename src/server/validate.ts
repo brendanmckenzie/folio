@@ -910,6 +910,37 @@ export function storyFilterQuery(req: { query: (key: string) => string | undefin
   }
 }
 
+/**
+ * `?parentId=` on `GET /api/v1/search` — the one caller `storyFilterQuery`
+ * deliberately excludes it for (`:887-891` above) that actually wants it as a
+ * filter rather than as a list's positional scope, because this route has no
+ * positional scope of its own to lean on.
+ *
+ * Carries `StoryFilter.parentId`'s own absent-vs-null distinction over a query
+ * string: absent means every level, `parentId=` (empty) means the top level
+ * (`null`), and anything else names a specific parent.
+ */
+export function parentIdQuery(raw: string | undefined): string | null | undefined {
+  if (raw === undefined) return undefined
+  return raw === '' ? null : idParam('parentId', raw)
+}
+
+/**
+ * `?routed=` on `GET /api/v1/search` — the other key `storyFilterQuery`
+ * excludes. Absent means both routed and unrouted documents, matching
+ * `StoryFilter.routed`'s own absent-means-both rule (`core/story.ts:250`).
+ * Anything other than `true`/`false` is refused rather than defaulted, the same
+ * choice `requireCursor` makes for a malformed cursor: a stale bookmark with a
+ * typo here has no silently-correct answer.
+ */
+export function routedQuery(raw: string | undefined): boolean | undefined {
+  if (raw === undefined || raw === '') return undefined
+  return (
+    parseOrThrow(v.picklist(['true', 'false'], 'must be `true` or `false`'), raw, 'routed') ===
+    'true'
+  )
+}
+
 /* ------------------------------------------------------------ bulk writes --- */
 
 /**

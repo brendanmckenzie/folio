@@ -98,6 +98,28 @@ export interface ApiDocument extends ApiDocumentMeta {
   content: NestedDoc
 }
 
+/**
+ * The `ApiDocumentMeta` projection of a story row, shared with
+ * `routes/api/search.ts` (`mcp-server.md` decision 4) — a search result and a
+ * `GET /documents/:id` answer describe a document identically, on purpose,
+ * rather than each carrying its own copy of this field list.
+ */
+export function toApiDocumentMeta(rt: FolioRuntime, story: StoryMeta): ApiDocumentMeta {
+  const decorated = rt.withUrls(story)
+  return {
+    id: story.id,
+    type: story.type,
+    title: story.title,
+    path: story.path,
+    url: decorated.url ?? null,
+    previewUrl: decorated.previewUrl ?? null,
+    draftUrl: decorated.draftUrl ?? null,
+    state: story.state,
+    publishedAt: story.publishedAt,
+    updatedAt: story.updatedAt,
+  }
+}
+
 /** The token's own name, or the person's id. Never anything a client sent. */
 function writeActor<Env>(c: Context<FolioEnv<Env>>): WriteActor {
   return {
@@ -139,21 +161,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return story
   }
 
-  const meta = (story: StoryMeta): ApiDocumentMeta => {
-    const decorated = rt.withUrls(story)
-    return {
-      id: story.id,
-      type: story.type,
-      title: story.title,
-      path: story.path,
-      url: decorated.url ?? null,
-      previewUrl: decorated.previewUrl ?? null,
-      draftUrl: decorated.draftUrl ?? null,
-      state: story.state,
-      publishedAt: story.publishedAt,
-      updatedAt: story.updatedAt,
-    }
-  }
+  const meta = (story: StoryMeta): ApiDocumentMeta => toApiDocumentMeta(rt, story)
 
   /**
    * One document, in the nested shape.
