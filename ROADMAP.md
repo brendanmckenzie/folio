@@ -586,6 +586,30 @@ an unsorted flat list, which stops working somewhere around 15.
 
 ## Known smaller issues
 
+- **A draft has no render inside the host's own layout, so "does this look right"
+  is answered against Folio's preview shell.** Spec 24 added `?_folio=draft` — the
+  draft with no editing chrome, no marker divs and no bridge — and its
+  `preview_document` tool screenshots it. But `folio.handle()` answering that URL
+  means the *host's* own page render never runs, so what a share link and a
+  screenshot both show is Folio's preview shell: the document's own content, on the
+  host's block CSS, with globals stacked above it rather than placed the way the
+  host places them. The document subtree is node-for-node what the published page
+  renders, which is what a screenshot clipped to one block is about; the chrome
+  around it is not the host's. `server/pages.tsx` has said so in place since long
+  before this ("a simplification, not a claim of visual fidelity"), and
+  `preview_document` now captions the limit in its own result rather than letting a
+  model infer the host's layout from Folio's approximation.
+
+  The mode split made the honest version possible and nothing uses it yet: a host
+  can call `folio.draft(env, id)` and render the result with
+  `folio.render(doc, { mode: 'mark' })` inside its own layout, which would be
+  genuinely production-shaped *and* addressable by `[data-folio-uid]`. That wants a
+  decision Folio has not made — whether the library offers a documented "render this
+  draft in your own page" path that a host wires into its own routing, or whether
+  `handle()` grows a way to hand a draft back for the host to render — plus an
+  answer for what a share link does on a host that has not wired it. A real feature,
+  not a fix. Recorded from spec 24's phase 4 review (2026-08-03).
+
 - **`adminCss` is hard-coded to `/folio-admin.css`, and a host with
   `build.cssCodeSplit: false` has no such file.** The Vite plugin computes
   `__FOLIO_ASSETS__` in its `config()` hook, before the client environment's CSS

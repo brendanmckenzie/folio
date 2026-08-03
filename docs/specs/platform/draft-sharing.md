@@ -652,6 +652,29 @@ landed as argued. Six things are worth recording.
    comment — a workers test cannot, because it would compute the hash the same way the
    server does and agree with itself.
 
+**Amended 2026-08-03 by spec 24 (`platform/mcp-server.md`): a share link now lands on
+`?_folio=draft`, not `?_folio=preview`.** This spec shipped a bug and nobody decided it.
+There was exactly one draft render and it was the *editing* one, so `preview.ts`'s redirect
+to `rt.withUrls(story).previewUrl` sent a client reviewing a draft into the editor's view of
+the page: `folio-editing` on the body, a dashed outline following their cursor
+(`mount.tsx`'s `attachBridge` is unconditional), and **every link on the page dead**,
+because the bridge calls `preventDefault` on any click inside a marked block. That is not
+what "send this to the client for review" means — decision 1's own framing here is a
+reviewer looking at the page, and a page whose links do not work is not the page.
+
+Spec 24 decision 5 added a second mode, `?_folio=draft`, which renders the same document
+with no `folio-editing`, no marker wrappers and **no client entry at all**, so the bridge
+cannot attach. `shareUrl` points there; the admin's own iframe keeps `preview`. A sanctioned
+behaviour change, and the only one this spec's work needed. `shares.test.ts` has one flipped
+expectation and one new test that follows the link and asserts the absence of both the
+chrome and the bridge; its other `?_folio=preview` assertions are untouched, because they
+pin the *gate*, which did not move.
+
+One limit spec 24 established and this spec never claimed either way: the draft render is
+Folio's own preview shell, not the host's page layout. A reviewer following a share link
+sees the document's own content correctly, on the host's block CSS, with globals stacked
+above it rather than placed as the host would place them.
+
 **Gates.** `pnpm typecheck` 0. `./node_modules/.bin/biome ci .` 0. `vitest run` 0 —
 93 files, 2798 tests, all passing. `./scripts/e2e.sh scripts/preview-share-test.mjs`
 47/47. `./scripts/e2e.sh scripts/auth-test.mjs` 44/44, unchanged by this work.

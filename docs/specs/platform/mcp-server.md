@@ -3,7 +3,7 @@
 > **Group:** platform
 > **Build order:** 24, per docs/specs/README.md
 > **Size:** M–L — the endpoint is a few days; the render split and the screenshot are the rest
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none — no socket frame changes shape, and MCP negotiates its own
 > **Migration:** none — `api_tokens` already models a non-human caller
 > **Last updated:** 2026-08-03
@@ -668,7 +668,12 @@ And one new **mode** rather than a new route, on the branch `handle()` already o
 | URL | Access | Renders |
 | --- | --- | --- |
 | `<page>?_folio=preview` | `READ_DRAFT` or a share cookie | unchanged: the editing render |
-| `<page>?_folio=draft` | `READ_DRAFT` or a share cookie | the draft with `edit={false}`, no `folio-editing`, no bridge |
+| `<page>?_folio=draft` | `READ_DRAFT` or a share cookie | the draft in render mode `mark`, no `folio-editing`, no bridge |
+
+**Corrected at implementation:** this row originally said `edit={false}`, which is the
+`off` mode — **no uid attributes at all**, so nothing to clip a screenshot to. Decision 5a
+and the acceptance criteria both require `mark`: uids on host elements, no marker div. The
+build followed 5a; the row was wrong. See note 4 in *Implementation notes*.
 
 `V1_SEGMENTS` in `api-partition.test.ts:96` becomes `['schema', 'documents', 'assets',
 'search']`, and `mcp` joins the list of names asserted to 404 under a version segment.
@@ -1137,3 +1142,128 @@ One thing deliberately left to implementation rather than decided here: whether
 `Render.tsx`'s three-state mode is spelled as a union (`'off' | 'mark' | 'edit'`) or as two
 booleans. The union reads better and the booleans diff smaller against `edit?: boolean`'s
 twelve call sites. Either satisfies decision 5a; neither changes anything observable.
+
+*Resolved at implementation:* the union, `RenderMode = 'off' | 'mark' | 'edit'`, exported
+from `preview/Render.tsx`. It names the states, where a boolean pair permits a fourth
+combination that means nothing.
+
+## Implementation notes
+
+Built in the five phases named, each committed on its own and green at every step. Every
+*Architecture decision* landed as argued; no rejected alternative was taken. Two phases
+were reviewed by an independent agent against the decisions rather than the code, which is
+where notes 2 and 6 come from.
+
+Ten things are worth recording.
+
+1. **Ground truth was accurate, unusually so.** A recon pass re-verified every `file:line`
+   claim before phase 1 and found only line drift: `hasScope` is `roles.ts:74` not `:73`,
+   `api_tokens` is `0001_init.sql:297` not `:312`, and `package.json` has six tiptap
+   dependencies rather than five (nine total, so decision 9's argument is unaffected). The
+   spec's own guess that five commits had landed after it was wrong — they are its
+   ancestors. Contrast the July run, where Ground truth was badly stale by mid-sequence.
+2. **The one real bug shipped in an `inputSchema`, and it is decision 2's own failure mode
+   one layer in.** `search_documents` advertised `state` values `['draft', 'published',
+   'unpublished', 'changed']`. `StoryState` has no `published`; the value meaning published
+   is **`live`**, and it was not advertised at all — so the value a model was most likely to
+   send was a guaranteed `bad_request`, and the correct one was invisible. **An `enum` in an
+   input schema is a second copy of the route's validation**, exactly the fork decision 2
+   exists to prevent, and nothing caught it because `tools.test.ts` pinned argument *names*
+   and not their domains. `STORY_STATE` is now exported from `validate.ts` so the advertised
+   list is pinned against the real picklist by value, and a workers test sends every
+   advertised value at the live route. Two further domain tests followed for
+   `preview_document`'s arguments. **If a later tool adds an `enum` or a nullable, pin it
+   the same way.**
+3. **`ping` makes the subset five messages, not decision 9's four.** That enumeration is of
+   the *tool* surface — the things that would have needed a stream or session state. `ping`
+   is a transport obligation of the base protocol, in the same category as the `GET`
+   answering 405 rather than an empty stream, which the spec already required for the same
+   reason. MCP requires a receiver to answer it promptly, and a client that keepalives reads
+   `-32601` as a dead peer and drops the session. For an endpoint whose premise is
+   reachability from a hosted client nobody here can patch, that is the most expensive kind
+   of deviation and the hardest to observe. `ping: () => ({})` — no state, no stream, no
+   declared capability.
+4. **`?_folio=draft` renders `mark`, not `edit={false}`.** The route table said the latter,
+   which is `off` — no uids, nothing to clip to, which would have made
+   `preview_document`'s whole `blok` argument impossible. Decision 5a and the acceptance
+   criteria are the contract and the build followed them; the table row is corrected in
+   place above.
+5. **`{base}/preview/global/:name` was still the editing render, and that would have
+   undermined the tool.** Decision 5a names it as the fallback URL for a declared global —
+   the documents an agent is most likely to be asked about, since they have no page URL —
+   but phase 4 changed only `handle()`'s branch, so this route kept its hard-coded
+   `preview`. Photographing it would have caught `folio-editing`'s `position: relative` on
+   every marked block, which re-parents any absolutely-positioned descendant. Worse:
+   **clipping to a uid *succeeds* there, via the marker div**, so the tool would have
+   clipped the wrapper's box and reported success — the "labelled as one block,
+   geometrically wrong" failure the edge cases exist to prevent. It now reads
+   `?mode=draft`, defaulting to `preview` so the admin is unchanged. Found by review, not
+   by a test.
+6. **`draft` renders Folio's preview shell, not the host's page, and decision 5 overstated
+   this.** *"It is the draft as the site would serve it"* is not what ships: globals stack
+   above the document instead of sitting in the host's layout, the title is
+   `Preview · <title>`, and `folio.handle()` answering means the host's own page render
+   never runs — `pages.tsx` has said so in place all along (*"a simplification, not a claim
+   of visual fidelity"*). The *document subtree* is node-for-node the published tree, which
+   is what a block screenshot is about, but the chrome is not the host's. **Not a
+   regression** — the share link already pointed at the same shell — but a model told "here
+   is the page" would draw conclusions about the host's layout from it, so
+   `preview_document` captions what it actually shows. The honest fix is a different
+   feature: the mode split makes `folio.draft(env, id)` + `folio.render(doc, { mode:
+   'mark' })` inside a host's *own* layout possible, which would be genuinely
+   production-shaped and addressable. Recorded in `ROADMAP.md`; nothing uses it yet.
+7. **Browser Rendering needed no new dependency, which the spec assumed it would.** Driving
+   it used to mean `@cloudflare/puppeteer`, and decision 9's argument against the MCP SDK
+   would have applied to that just as well. The binding now answers
+   `quickAction('screenshot', …)` directly and returns a plain `Response` carrying PNG
+   bytes, and `BrowserRun`'s type ships in `@cloudflare/workers-types`, already a
+   devDependency for every other binding in `FolioBindings`. So the binding costs nothing
+   to declare, not even an optional peer. Nine runtime dependencies, still nine.
+8. **Three places the spec promised more than the code could do, each resolved to the
+   spec's own leaning rather than by extending a shared function:**
+   - `POST /documents/:id/duplicate` takes `{ title?, parentId? }` and **no `index?`**.
+     `duplicateDocument` has no positioning argument and neither does the admin's own body
+     schema; a caller wanting a position has `PATCH /documents/:id`, which is two calls and
+     is also what dragging a duplicated row is.
+   - `GET /api/v1/search` parses `parentId` and `routed` **itself**. `storyFilterQuery`
+     excludes both deliberately — it is shared with the admin's screens, where each list
+     states its scope positionally — so the route layers them on top of its output, exactly
+     as the admin's `/api/search` already layers `types` for `?kind=`.
+   - `getVersion`'s third argument is a `VersionMigrations` **object**, not the
+     `Migration[]` the plan implied. The restore route reuses the assembly already in
+     `routes/history.ts` rather than building a fourth.
+9. **`need` on a tool row is an `Access`, not a bare `Scope`**, and this is what decision 6
+   already required rather than a departure from it: its last paragraph asks for a
+   `UserActor` to be filtered "by role through the same `Access` pair with no special
+   case", which a bare scope cannot satisfy at all since `hasScope` has nothing to read off
+   a user. Only the tool table's `need` *column* prints the scope half. `allows` handles
+   both currencies, and a test pins every row's `need.scope` against that column.
+10. **`StoryMeta` gained `draftUrl?`/`draftUrls?`, which "Core types: none" did not
+    anticipate.** `withUrls` is generic over `T extends StoryMeta`, so it cannot return
+    fields the type does not declare. Additive, no wire impact, `PROTOCOL_VERSION` still 4.
+
+**Deferred, deliberately:**
+
+- **Phase 6 — the admin calling the restore route** instead of computing
+  `diff(live, target)` in the browser. Not started. The hook works; this removes a second
+  implementation rather than fixing a bug, and it moves the `MAX_TX_MUTATIONS` message from
+  a notice into an error envelope, which is a UI change with its own review.
+- **Phase 0 — `docs/agent-api.md`**, the prose skill that teaches an agent to curl the API.
+  Nothing depends on it and `{base}/mcp` now covers the same ground with a contract instead
+  of prose.
+- **A draft render inside the host's own layout** (note 6). The real answer to "screenshot
+  the page as the site serves it", and a different feature.
+
+**What no test can cover, stated rather than implied:** the screenshot itself, the clip
+actually clipping, the `networkidle0` wait mattering, and the unclippable-block fallback
+firing for real. Browser Rendering is not simulated by miniflare — the same position
+`platform/caching.md` is in with Workers Cache, and the same answer: the URL chosen, the
+clip selector built and the viewport resolved are pure functions with unit tests, and the
+rest is `scripts/mcp-test.mjs` against a deployment, never CI. That script does assert the
+no-binding path end to end, because it is the only one localhost can reach.
+
+One thing the spec asked for that turned out impossible: `scripts/mcp-test.mjs` cannot
+**import the tool table from source**. `mcp/tools.ts` reaches `server/pages.tsx` through
+`shot.ts`, and Node's native TypeScript support strips types without transforming JSX, so
+the import chain will not load. The script names its tools as literals, the way
+`api-test.mjs` already names its routes.

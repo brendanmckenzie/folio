@@ -259,11 +259,18 @@ build on the `type` column; the content API builds on `api_tokens`.
 Each spec carries its own `> **Status:**` stamp. All sixteen specs in the quick-wins and
 main-line tables are **done**, restamped in place with an `## Implementation notes`
 section recording what actually landed. Spec 17 (caching) is **done** too, and so are
-specs 19 (scheduled publishing), 20 (bulk writes), 21 (draft preview sharing) and 22
-(build artifacts). Spec 18 (pagination) is **in-progress**: its phase 1, the schema
-collapse, has landed. Spec 23 (multi-site) is **draft** and unstarted. A spec that gets
-built is restamped the same way, the way `../../PARITY.md` records what
-landed.
+specs 19 (scheduled publishing), 20 (bulk writes), 21 (draft preview sharing), 22
+(build artifacts) and 24 (an MCP server). Spec 18 (pagination) is **in-progress**: its
+phase 1, the schema collapse, has landed. Spec 23 (multi-site) is **draft** and unstarted.
+A spec that gets built is restamped the same way, the way `../../PARITY.md`
+records what landed.
+
+**Spec 24 amended spec 21 in place.** A share link now lands on `?_folio=draft` rather
+than `?_folio=preview`, because there was only one draft render and it was the editing
+one — so a client sent a draft to review got the editor's outlines and dead links. Spec
+21's `## Implementation notes` records the change and why it counts as a fix rather than
+an extension. Spec 24 built out of order, before 23: it needs nothing 23 touches, and it
+reshapes no list route, so the ordering constraint below does not reach it.
 
 Spec 23 is the first one whose ordering is a real constraint rather than a preference:
 it rebuilds four unique indexes and scopes every list route, and spec 18 reshapes those
