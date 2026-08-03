@@ -399,10 +399,14 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    * `handle()` has to read it back and the path is the host's shape, not Folio's.
    * Omitted for the source locale, so a site with locales configured and viewing
    * its default produces the byte-identical preview URL it always did.
+   *
+   * `mode` defaults to `'preview'` so both existing call sites (`withUrls`,
+   * immediately below) are unchanged; `'draft'` is `platform/mcp-server.md`
+   * decision 5's chrome-free render, added by `withUrls` for `draftUrl`.
    */
-  const previewUrlFor = (path: string, locale?: string) => {
+  const previewUrlFor = (path: string, locale?: string, mode: 'preview' | 'draft' = 'preview') => {
     const url = route(path, locale)
-    const flagged = `${url}${url.includes('?') ? '&' : '?'}_folio=preview`
+    const flagged = `${url}${url.includes('?') ? '&' : '?'}_folio=${mode}`
     return locale === undefined || locale === locales?.default
       ? flagged
       : `${flagged}&locale=${encodeURIComponent(locale)}`
@@ -426,6 +430,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       ...story,
       url: route(path),
       previewUrl: previewUrlFor(path),
+      draftUrl: previewUrlFor(path, undefined, 'draft'),
     }
     if (!locales) return decorated
     return {
@@ -433,6 +438,9 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       urls: Object.fromEntries(locales.available.map((l) => [l.code, route(path, l.code)])),
       previewUrls: Object.fromEntries(
         locales.available.map((l) => [l.code, previewUrlFor(path, l.code)]),
+      ),
+      draftUrls: Object.fromEntries(
+        locales.available.map((l) => [l.code, previewUrlFor(path, l.code, 'draft')]),
       ),
     }
   }

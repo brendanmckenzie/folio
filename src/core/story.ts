@@ -77,6 +77,13 @@ export interface StoryMeta {
   url?: string
   previewUrl?: string
   /**
+   * The same document, rendered as the site would serve it rather than as the
+   * editor sees it (`platform/mcp-server.md` decision 5): no `folio-editing`
+   * body class, no uid markers on a component-returning block, no postMessage
+   * bridge. `previewUrl` is an editing surface; this is a page.
+   */
+  draftUrl?: string
+  /**
    * The same two, per locale, filled only when `FolioConfig.locales` is
    * configured — the host's own `route(path, locale)` called once per declared
    * language (`localisation.md`). Absent on a single-locale site, so its payload
@@ -89,6 +96,7 @@ export interface StoryMeta {
    */
   urls?: Record<string, string>
   previewUrls?: Record<string, string>
+  draftUrls?: Record<string, string>
 }
 
 export interface StoryNode extends StoryMeta {
