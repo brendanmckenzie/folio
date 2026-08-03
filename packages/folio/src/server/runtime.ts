@@ -25,7 +25,7 @@ import {
   type ResolvedCollection,
 } from '../core/query'
 import { linkedIds, referencedIdsAllLocales } from '../core/refs'
-import { type PreviewWrap } from '../core/render-wrap'
+import type { PreviewWrap } from '../core/render-wrap'
 import { buildResolution, type Resolution } from '../core/resolve'
 import {
   blankSubtree,
