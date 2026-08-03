@@ -59,6 +59,7 @@ sequence because the dependency graph is the same one.
 | 21 | [Draft preview sharing](platform/draft-sharing.md) | platform | M | — | `0004` | completion plan: gap 4 |
 | 22 | [Build artifacts and `.d.ts`](foundation/package-build.md) | foundation | S | — | — | completion plan: gap 5 |
 | 23 | [Many sites in one deployment](foundation/multi-site.md) | foundation | XL | 5 | `0005` | owner, 2026-08-01 |
+| 24 | [An MCP server](platform/mcp-server.md) | platform | M–L | — | — | feedback: ai-friendliness |
 
 Sizing matches `PARITY.md`: **S** ≈ a day, **M** ≈ a few days, **L** ≈ a week
 or two. Relative weight, not a quote.
@@ -151,6 +152,20 @@ or two. Relative weight, not a quote.
   about what *stays* source — `folio/preview` and `folio/admin-entry` are entry points
   of the host's bundle, not modules a host imports, and the 82KB `folio-admin.css`
   that `pnpm build` produces is the reason.
+- **24** could not have been written before **15**, and what it mostly does is *notice*
+  how much of itself already exists. Every write already goes through the mutation log,
+  so an agent's edit is live, attributed and undoable without a line of new sync code;
+  `api_tokens` already models a caller that is not a person; and `?_folio=preview`
+  already renders a draft to a bearer token, which is the one item `docs/feedback.md`
+  predicted the content API would not reach. So it is an endpoint plus the three verbs
+  v1 was missing — unpublish, duplicate, restore — and its central decision is that a
+  tool *is* a v1 route rather than a second path to the same service, which is what
+  makes the missing three a precondition rather than a nice-to-have. The exception is
+  preview, where the bar is not "read the content back" but *see whether the page looks
+  right* — so it needs an image, and photographing the only draft render there is would
+  photograph the editor's DOM rather than the page's. That is also why **24 changes 21's
+  behaviour**: a share link points at the editing render today, so a client reviewing a
+  draft gets hover outlines and dead links, and the chrome-free mode 24 adds is the fix.
 
 ## Wire version ledger
 
