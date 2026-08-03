@@ -1957,6 +1957,35 @@ Folio does *not* do is declare its own admin routes public: those ship inside th
 library and change with it, and `/api/v1` is a contract with somebody's script.
 Two surfaces over one set of services.
 
+## An MCP server, for assistants
+
+`{base}/mcp` is the same content again, for Claude or any other MCP client: sixteen
+tools, each one of the v1 routes above dispatched internally, so there is no second
+implementation of the access gate, the validation or the document shape. **Connecting one
+is documented in [`docs/mcp.md`](docs/mcp.md)** — mint a token on the admin's Access
+screen, then one `claude mcp add` command.
+
+```sh
+claude mcp add --transport http folio https://your-site.example/folio/mcp \
+  --header "authorization: Bearer $TOKEN"
+```
+
+Three things about it are worth knowing here, because they are design rather than detail:
+
+- **The tool list is filtered by the token's scopes.** A tool the token cannot call is
+  never offered, rather than offered and refused: the list is the only place an agent
+  learns what it may do, so a list that overstates the grant is a lie told at the moment
+  it decides what to attempt. A `content:read` token sees no write tools at all.
+- **An agent's edit is an ordinary edit.** It goes through the mutation log like a
+  keystroke, so it appears live in an open editor, reads as `token:<name>` in the activity
+  trail, and comes back under Cmd+Z.
+- **`preview_document` returns an image**, so an assistant can see whether a page looks
+  right rather than infer it from markup. That one needs a Cloudflare Browser Rendering
+  binding; without it the tool answers the draft URL and the rendered HTML and says why.
+  It cannot work against a local dev server, because Cloudflare's browser is remote.
+
+On by default; `createFolio({ mcp: false })` turns it off.
+
 ## Verified
 
 `scripts/sync-test.mjs` (17 checks) exercises the engine against both `vite dev`

@@ -7,6 +7,10 @@ way, `README.md`'s "Content API" section has the reasoning and
 Everything below assumes the library is mounted at `/folio` (`basePath`). Adjust
 the prefix if your host mounted it elsewhere.
 
+**Pointing an AI assistant at a site? Read `docs/mcp.md` instead.** `{base}/mcp` exposes
+these same routes as MCP tools — same token, same scopes, same envelope — so an assistant
+does not need to be taught this document.
+
 ---
 
 ## Authentication
@@ -50,6 +54,7 @@ implies nothing at all beyond itself.
 | Method | Path | Scope | Answers |
 | --- | --- | --- | --- |
 | `GET` | `/api/v1/schema` | `content:read` | `Manifest` — types, blocks, locales |
+| `GET` | `/api/v1/search` | `content:read` | `Page<DocumentMeta>` — keyset, **reaches drafts** |
 | `GET` | `/api/v1/documents` | `content:read` | `ContentPage` — a query over published content |
 | `GET` | `/api/v1/documents/:id` | `content:read` (+`:draft`) | `Document` |
 | `GET` | `/api/v1/documents/by-path/*` | `content:read` (+`:draft`) | `Document` |
@@ -58,13 +63,44 @@ implies nothing at all beyond itself.
 | `PATCH` | `/api/v1/documents/:id/fields` | `content:write` | `WriteResult` |
 | `PATCH` | `/api/v1/documents/:id` | `content:write` | `DocumentMeta` |
 | `DELETE` | `/api/v1/documents/:id` | `content:write` | `{ deleted: string[] }` |
+| `POST` | `/api/v1/documents/:id/duplicate` | `content:write` | `{ document: DocumentMeta }`, `201` |
+| `POST` | `/api/v1/documents/:id/restore` | `content:write` | `WriteResult` |
 | `POST` | `/api/v1/documents/:id/publish` | `publish` | `{ publishedAt, publishedSyncId, version }` |
+| `POST` | `/api/v1/documents/:id/unpublish` | `publish` | `{ story: DocumentMeta }` |
 | `POST` | `/api/v1/documents/:id/versions` | `publish` | `VersionMeta`, `201` |
 | `GET` | `/api/v1/documents/:id/versions` | `content:read` | `{ versions: VersionMeta[] }` |
 | `GET` | `/api/v1/assets` | `content:read` | `{ assets: AssetRow[] }` |
 | `POST` | `/api/v1/assets?filename=…` | `assets:write` | `{ asset, value }`, `201` |
 
-Two notes on that table:
+**`GET /search` is how you find a document that has never been published.** Everything else
+on this table that lists content reads published content only, because `queryFromParams`
+ends `status: 'published'` — so on a site mid-build, "find the page about X" could not be
+answered at all until this route existed. It reads the `stories` table directly, with no
+publication gate, and takes `?q=` (substring over title, slug and path), `?type=`,
+`?state=`, `?parentId=`, `?routed=`, `?limit=`, `?cursor=` and `?count=1`.
+
+`?state=` takes exactly `draft`, `unpublished`, **`live`** and `changed`. Note `live` and not
+`published`: those are `StoryState`'s own four names.
+
+**It pages by keyset cursor, unlike `GET /documents`, which uses page numbers.** That is
+deliberate rather than drift. Page numbers are right for a listing over published content,
+which does not move between requests; keyset is right here because a search across the draft
+tree is a live list, and over live content offset paging silently skips and repeats rows.
+Pass the previous answer's `cursor` for the next page; a document inserted above your cursor
+mid-walk changes neither page.
+
+**`POST /documents/:id/restore`** takes `{ versionId }` and is read-diff-commit, exactly as
+`PUT /content` is, with the version's document as the target. A version stored under an
+earlier `schemaId` is **migrated on read** before it is diffed, so a restore across a schema
+change cannot reintroduce a pre-migration field key. A `versionId` belonging to a different
+document is a `400`, not a `404`: version ids are globally unique, so the lookup would
+succeed and the diff would rewrite this document from a stranger's history.
+
+**`POST /documents/:id/duplicate`** takes `{ title?, parentId? }` and no position. To place
+a copy, `PATCH /documents/:id` afterwards — two calls, which is also what dragging a
+duplicated row is.
+
+Three further notes on that table:
 
 - **`PATCH /documents/:id` is the URL and the tree**, not content. A page's own
   title lives on its root block and is written through `PATCH /fields`; this route
@@ -91,6 +127,8 @@ own `parent`, `slot` and a fractional `order` string. The API speaks trees inste
   "title": "About us",         // the row's cached title
   "path": "about",             // null for a record or a singleton
   "url": "/about",             // null for the same
+  "previewUrl": "/about?_folio=preview",  // the editing render: outlines, dead links
+  "draftUrl": "/about?_folio=draft",      // the same draft rendered as a page
   "state": "live",             // draft | live | unpublished | changed
   "publishedAt": 1785300000000,
   "updatedAt": 1785300000000,
@@ -124,6 +162,15 @@ own `parent`, `slot` and a fractional `order` string. The API speaks trees inste
 - A block whose type was removed from the code, or a slot whose field was, still
   reads — as stored. Refusing to read content because code changed is worse than
   reporting it.
+- **`previewUrl` and `draftUrl` are two different renders of the same draft**, and which
+  one you want depends on what you are doing. `previewUrl` is the *editing* surface: a
+  `folio-editing` body class, uid markers on every block, and a postMessage bridge that
+  outlines whatever the cursor touches and cancels every click, so no link navigates. It is
+  what the admin's iframe loads. `draftUrl` is the draft *as a page* — no chrome, no bridge,
+  links live — which is what a share link lands on and what you want if you are showing a
+  draft to a person or photographing it. Both need `content:read:draft`, and both are `null`
+  for an unrouted document. Both answer `Cache-Control: private, no-store`; do not cache
+  either.
 
 ### Reading
 
@@ -410,4 +457,14 @@ we turn it off" stays answerable.
   `docs/specs/platform/bulk-writes.md`) and they are deliberately **not** here: what
   they exist for is "act on every document matching this filter" without materialising
   the ids, which is a UI problem. A script has the ids.
-- **Draft queries.** See the query section: one document at a time, by design.
+- **Draft *queries*, in the `content_index` sense.** `GET /documents` still reads published
+  content only, and that is by design: it is the query engine over `content_index`, and a
+  draft has no index rows at all because the projection is written at publish. "Include
+  drafts" is not a flag on that query, it is a different query against a different table.
+
+  **Finding a draft is no longer missing, though** — `GET /search` (added by
+  `docs/specs/platform/mcp-server.md`) searches title, slug and path across the whole
+  `stories` table regardless of publication state. What it does not do is filter on an
+  indexed *field*, which is what `?where=` is for and what a draft has nothing to answer
+  with. Reading a draft's content is still one document at a time:
+  `GET /documents/:id?status=draft`.

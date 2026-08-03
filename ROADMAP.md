@@ -586,6 +586,26 @@ an unsorted flat list, which stops working somewhere around 15.
 
 ## Known smaller issues
 
+- **`{base}/mcp` answers MCP revision `2025-06-18`, which the spec now classes as
+  "Legacy".** Checked 2026-08-03 while writing `docs/mcp.md`: the current revision is
+  `2026-07-28`, and it is not a cosmetic bump. It **drops the `initialize` handshake
+  entirely** in favour of per-request `_meta` fields
+  (`io.modelcontextprotocol/protocolVersion`) plus a mandatory `server/discover` RPC, and it
+  removes the optional GET/SSE stream from Streamable HTTP altogether — so a server that
+  implements only the current revision has no GET to design around, and Folio's 405 becomes
+  purely backward-compatibility handling.
+
+  **Nothing is broken today.** Every client in the wild — Claude Code, the Agent SDK, the
+  Messages API connector — is Legacy or dual-era, so negotiating `2025-06-18` works with
+  everything a user has installed. But the spec's own compatibility matrix is explicit that
+  a Modern-only client talking to a Legacy-only server **simply fails, with no fallback**,
+  so this is a "when", not an "if". The work is not large: `MCP_PROTOCOL_VERSION` in
+  `server/routes/mcp.ts` is one constant, `rpc.ts` is hand-rolled and pure, and the
+  `server/discover` shape is close to what `tools/list` already answers per request. Worth
+  doing before a Modern-only client appears rather than after a user reports a dead server.
+  Note the split is days old at time of writing, so re-read the versioning page before
+  starting.
+
 - **A draft has no render inside the host's own layout, so "does this look right"
   is answered against Folio's preview shell.** Spec 24 added `?_folio=draft` — the
   draft with no editing chrome, no marker divs and no bridge — and its
