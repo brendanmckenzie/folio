@@ -436,6 +436,13 @@ export const DocumentCreateBody = v.object(
   OBJECT,
 )
 
+/**
+ * `POST /api/v1/documents/:id/restore`. The version id, and nothing else — the
+ * route checks it against `getVersion`'s own `storyId`, so a mismatch is a 400
+ * from the route rather than something this schema could catch.
+ */
+export const RestoreBody = v.object({ versionId: ID }, OBJECT)
+
 export type ContentPutInput = v.InferOutput<typeof ContentPutBody>
 export type FieldsPatchInput = v.InferOutput<typeof FieldsPatchBody>
 export type DocumentCreateInput = v.InferOutput<typeof DocumentCreateBody>

@@ -12,6 +12,7 @@ import {
   text,
 } from '../../src/core'
 import type { Doc, Json } from '../../src/core/doc'
+import { defineMigration, field } from '../../src/core/migrate'
 import type { NestedBlok, NestedDoc } from '../../src/core/nested'
 import { PROTOCOL_VERSION } from '../../src/core/protocol'
 import type { DocumentType } from '../../src/core/schema'
@@ -739,7 +740,7 @@ async function activityOf(id: string) {
   const res = await call(`${ORIGIN}/folio/api/story/${id}/activity`, {
     headers: await cookieFor('admin'),
   })
-  return json<{ rows: { mutations: unknown[] }[]; cursor: string | null }>(res)
+  return json<{ rows: { actor: string; mutations: unknown[] }[]; cursor: string | null }>(res)
 }
 
 /* -------------------------------------------------------- broadcast to an editor --- */
@@ -999,6 +1000,314 @@ describe('publish and versions', () => {
       body: JSON.stringify({ label: 'x', actor: 'somebody else' }),
     })
     expect((await json<VersionMeta>(made)).actor).toBe('token:importer')
+  })
+})
+
+/* -------------------------------------------------------------- unpublish --- */
+
+describe('POST /documents/:id/unpublish', () => {
+  it('takes the document down and answers the taken-down state', async () => {
+    const id = await seed({ path: 'apiunpub' })
+    await call(`${API}/documents/${id}/publish`, {
+      method: 'POST',
+      headers: await tokenFor('publish'),
+    })
+
+    const res = await call(`${API}/documents/${id}/unpublish`, {
+      method: 'POST',
+      headers: await tokenFor('publish'),
+    })
+    expect(res.status).toBe(200)
+    expect((await json<{ story: { state: string } }>(res)).story.state).toBe('unpublished')
+
+    // The same D1 write `POST /story/:id/unpublish` makes: nothing left to serve.
+    const row = await env.DB.prepare('select published_at from stories where id = ?')
+      .bind(id)
+      .first<{ published_at: number | null }>()
+    expect(row?.published_at).toBeNull()
+  })
+
+  it("clears content_refs' outbound half and leaves the inbound half alone", async () => {
+    const id = await seed({ path: 'apiunpubrefs' })
+    await call(`${API}/documents/${id}/publish`, {
+      method: 'POST',
+      headers: await tokenFor('publish'),
+    })
+    // Manufactured edges, the same way `records.test.ts` does for its delete
+    // test: an outbound edge this document names, and an inbound edge some
+    // other document names pointing at it.
+    await env.DB.batch([
+      env.DB.prepare('insert into content_refs (from_story, to_id, kind) values (?, ?, ?)').bind(
+        id,
+        'api_other_target',
+        'link',
+      ),
+      env.DB.prepare('insert into content_refs (from_story, to_id, kind) values (?, ?, ?)').bind(
+        'api_other_source',
+        id,
+        'link',
+      ),
+    ])
+
+    const res = await call(`${API}/documents/${id}/unpublish`, {
+      method: 'POST',
+      headers: await tokenFor('publish'),
+    })
+    expect(res.status).toBe(200)
+
+    const outbound = await env.DB.prepare(
+      'select count(*) as n from content_refs where from_story = ?',
+    )
+      .bind(id)
+      .first<{ n: number }>()
+    expect(outbound?.n).toBe(0)
+
+    const inbound = await env.DB.prepare('select count(*) as n from content_refs where to_id = ?')
+      .bind(id)
+      .first<{ n: number }>()
+    expect(inbound?.n).toBe(1)
+  })
+
+  it('is idempotent: a second call answers the same timestamp and writes nothing new', async () => {
+    const id = await seed({ path: 'apiunpubtwice' })
+    await call(`${API}/documents/${id}/publish`, {
+      method: 'POST',
+      headers: await tokenFor('publish'),
+    })
+    await call(`${API}/documents/${id}/unpublish`, {
+      method: 'POST',
+      headers: await tokenFor('publish'),
+    })
+    const row = await env.DB.prepare('select unpublished_at from stories where id = ?')
+      .bind(id)
+      .first<{ unpublished_at: number }>()
+
+    const again = await call(`${API}/documents/${id}/unpublish`, {
+      method: 'POST',
+      headers: await tokenFor('publish'),
+    })
+    expect(again.status).toBe(200)
+    const row2 = await env.DB.prepare('select unpublished_at from stories where id = ?')
+      .bind(id)
+      .first<{ unpublished_at: number }>()
+    expect(row2?.unpublished_at).toBe(row?.unpublished_at)
+  })
+
+  it('refuses without the publish scope', async () => {
+    const id = await seed({})
+    const res = await call(`${API}/documents/${id}/unpublish`, {
+      method: 'POST',
+      headers: await tokenFor('content:write'),
+    })
+    expect(res.status).toBe(403)
+  })
+})
+
+/* -------------------------------------------------------------- duplicate --- */
+
+describe('POST /documents/:id/duplicate', () => {
+  it('copies the draft and answers { document } at 201', async () => {
+    const id = await seed({ path: 'apidupe', title: 'Original' })
+    const res = await call(`${API}/documents/${id}/duplicate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(await tokenFor('content:write')) },
+      body: JSON.stringify({}),
+    })
+    expect(res.status).toBe(201)
+    const body = await json<{ document: { id: string; title: string; path: string | null } }>(res)
+    expect(body.document.id).not.toBe(id)
+    expect(body.document.path).not.toBeNull()
+    // The row's own title gets the default suffix; the document is untouched.
+    expect(body.document.title).toBe('Original (copy)')
+
+    // The draft was cloned as-is — "give me what I am looking at" — not left
+    // blank and not renamed to match the row.
+    const copy = await draftOf(body.document.id)
+    expect(copy.bloks[copy.root]!.data.title).toBe('About us')
+    expect(Object.values(copy.bloks).some((b) => b.type === 'apiHero')).toBe(true)
+  })
+
+  it('accepts an explicit title and parentId', async () => {
+    const parent = await seed({ path: 'apidupeparent' })
+    const id = await seed({ path: 'apidupesource' })
+    const res = await call(`${API}/documents/${id}/duplicate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(await tokenFor('content:write')) },
+      body: JSON.stringify({ title: 'Renamed copy', parentId: parent }),
+    })
+    const body = await json<{ document: { title: string } }>(res)
+    expect(body.document.title).toBe('Renamed copy')
+  })
+
+  it('refuses without content:write', async () => {
+    const id = await seed({})
+    const res = await call(`${API}/documents/${id}/duplicate`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(await tokenFor('content:read')) },
+      body: JSON.stringify({}),
+    })
+    expect(res.status).toBe(403)
+  })
+})
+
+/* ----------------------------------------------------------------- restore --- */
+
+describe('POST /documents/:id/restore', () => {
+  const restore = async (id: string, versionId: string, scopes: Scope[] = ['content:write']) =>
+    call(`${API}/documents/${id}/restore`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(await tokenFor(...scopes)) },
+      body: JSON.stringify({ versionId }),
+    })
+
+  it('diffs the older version against the draft and reports the mutation count', async () => {
+    const id = await seed({})
+    const checkpointed = await call(`${API}/documents/${id}/versions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(await tokenFor('publish')) },
+      body: JSON.stringify({}),
+    })
+    const version = await json<VersionMeta>(checkpointed)
+
+    await put(id, { uid: 'r0', fields: { title: 'Changed after the checkpoint' } })
+    expect((await draftOf(id)).bloks.r0!.data.title).toBe('Changed after the checkpoint')
+
+    const res = await restore(id, version.id)
+    expect(res.status).toBe(200)
+    const body = await json<WriteResult>(res)
+    expect(body.changed).toBeGreaterThan(0)
+    expect(body.transactions).toBe(1)
+
+    expect((await draftOf(id)).bloks.r0!.data.title).toBe('About us')
+
+    // The activity trail's newest entry names the token, not a person.
+    const activity = await activityOf(id)
+    expect(activity.rows[0]!.actor).toBe('token:importer')
+  })
+
+  it('answers changed: 0 for a version byte-identical to the draft, writing nothing', async () => {
+    const id = await seed({})
+    const checkpointed = await call(`${API}/documents/${id}/versions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(await tokenFor('publish')) },
+      body: JSON.stringify({}),
+    })
+    const version = await json<VersionMeta>(checkpointed)
+    const before = await activityOf(id)
+
+    const res = await restore(id, version.id)
+    expect(res.status).toBe(200)
+    expect(await json<WriteResult>(res)).toEqual({ changed: 0, transactions: 0, syncId: 0 })
+
+    const after = await activityOf(id)
+    expect(after.rows).toEqual(before.rows)
+  })
+
+  it('refuses a version belonging to a different document, as a 400', async () => {
+    const a = await seed({})
+    const b = await seed({})
+    const checkpointed = await call(`${API}/documents/${b}/versions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(await tokenFor('publish')) },
+      body: JSON.stringify({}),
+    })
+    const version = await json<VersionMeta>(checkpointed)
+
+    const res = await restore(a, version.id)
+    expect(res.status).toBe(400)
+    expect((await json<Envelope>(res)).error.code).toBe('bad_request')
+  })
+
+  it('404s an unknown version id', async () => {
+    const id = await seed({})
+    const res = await restore(id, 'ver_nope')
+    expect(res.status).toBe(404)
+  })
+
+  it('refuses without content:write', async () => {
+    const id = await seed({})
+    const checkpointed = await call(`${API}/documents/${id}/versions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(await tokenFor('publish')) },
+      body: JSON.stringify({}),
+    })
+    const version = await json<VersionMeta>(checkpointed)
+    expect((await restore(id, version.id, ['content:read'])).status).toBe(403)
+  })
+
+  /**
+   * The criterion `versions.ts:93`'s whole doc comment exists for: a version
+   * stored under an earlier `schemaId`, with a migration pending, must be
+   * migrated on read before it is diffed against the live draft — otherwise the
+   * restore both reintroduces the old field key and blanks the new one, because
+   * the unmigrated document has no value under the current key at all.
+   */
+  it('restores a version stored under an earlier schema as the migrated document', async () => {
+    const RENAME_HEADING = defineMigration({
+      id: 'apiHero-headingOld-to-heading',
+      description: 'apiHero.headingOld -> apiHero.heading',
+      up: (_doc, ctx) => ctx.each('apiHero', (b) => field.rename(b, 'headingOld', 'heading')),
+    })
+    const migrated = createFolio<Cloudflare.Env>({
+      blocks: [pageRoot, hero, prose, button, priceRecord, settingsRoot],
+      types,
+      bindings,
+      basePath: '/folio',
+      auth,
+      route: (p, locale) => {
+        const prefix = locale && locale !== 'en' ? `/${locale}` : ''
+        return p ? `${prefix}/${p}` : prefix || '/'
+      },
+      migrations: [RENAME_HEADING],
+    })
+    const callMigrated = (path: string, init?: RequestInit) =>
+      migrated.handle(new Request(path, init), env, createExecutionContext()) as Promise<Response>
+
+    const id = await seed({})
+    expect((await draftOf(id)).bloks.h0!.data.heading).toBe('Hello')
+
+    // The stored bytes as they would have been written before the rename: the
+    // pre-migration key, and no value at all under the current one.
+    const staleDoc = pageDoc()
+    staleDoc.bloks.h0!.data = { headingOld: 'Old heading', align: 'left' }
+    await env.DB.prepare(
+      `insert into versions (id, story_id, kind, label, title, actor, doc, created_at, schema_id)
+       values ('ver_api_pre', ?, 'checkpoint', null, 'About us', null, ?, ?, null)`,
+    )
+      .bind(id, JSON.stringify(staleDoc), Date.now())
+      .run()
+
+    const res = await callMigrated(`${API}/documents/${id}/restore`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(await tokenFor('content:write')) },
+      body: JSON.stringify({ versionId: 'ver_api_pre' }),
+    })
+    expect(res.status).toBe(200)
+    expect((await json<WriteResult>(res)).changed).toBe(1)
+
+    const after = await draftOf(id)
+    expect(after.bloks.h0!.data.heading).toBe('Old heading')
+    expect('headingOld' in after.bloks.h0!.data).toBe(false)
+  })
+})
+
+/* ---------------------------------------------------- previewUrl / draftUrl --- */
+
+describe('previewUrl and draftUrl', () => {
+  it('carry _folio=preview and _folio=draft on a routed document', async () => {
+    const id = await seed({ path: 'apidrafturl' })
+    const res = await call(`${API}/documents/${id}`, { headers: await tokenFor('content:read') })
+    const body = await json<{ previewUrl: string; draftUrl: string }>(res)
+    expect(body.previewUrl).toMatch(/\?_folio=preview\b/)
+    expect(body.draftUrl).toMatch(/\?_folio=draft\b/)
+  })
+
+  it('are both null for an unrouted document', async () => {
+    const id = await seed({ id: 'api_rec2', type: 'apiProductType', path: null })
+    const res = await call(`${API}/documents/${id}`, { headers: await tokenFor('content:read') })
+    const body = await json<{ previewUrl: string | null; draftUrl: string | null }>(res)
+    expect(body.previewUrl).toBeNull()
+    expect(body.draftUrl).toBeNull()
   })
 })
 

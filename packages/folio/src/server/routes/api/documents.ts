@@ -34,10 +34,10 @@ import {
   READ,
   READ_DRAFT,
 } from '../../auth/roles'
-import { deleteDocument, type DocumentDeps, moveDocument } from '../../documents'
+import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from '../../documents'
 import { FolioError, rethrow } from '../../errors'
 import { ensureAccess, hookCtx, requireAccess } from '../../middleware'
-import { checkpoint, publish } from '../../publish'
+import { checkpoint, publish, unpublish } from '../../publish'
 import type { FolioRuntime } from '../../runtime'
 import {
   createStory,
@@ -58,10 +58,12 @@ import {
   localeQuery,
   parseBody,
   parseOptionalBody,
+  RestoreBody,
+  StoryDuplicateBody,
   StoryPatchBody,
   storyPathParam,
 } from '../../validate'
-import { listVersions } from '../../versions'
+import { getVersion, listVersions } from '../../versions'
 import { commitAll, writeDocument, type WriteActor } from '../../write'
 import { queryFromParams } from '../content'
 
@@ -74,6 +76,10 @@ export interface ApiDocumentMeta {
   /** `null` for an unrouted document — a record or a singleton has no URL. */
   path: string | null
   url: string | null
+  /** The editing render: `folio-editing`, uid markers, the postMessage bridge. */
+  previewUrl: string | null
+  /** The same document rendered as the site would serve it (`mcp-server.md` decision 5). */
+  draftUrl: string | null
   /** Lifecycle: never published, live, taken down, or live with newer draft. */
   state: StoryState
   publishedAt: number | null
@@ -141,6 +147,8 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       title: story.title,
       path: story.path,
       url: decorated.url ?? null,
+      previewUrl: decorated.previewUrl ?? null,
+      draftUrl: decorated.draftUrl ?? null,
       state: story.state,
       publishedAt: story.publishedAt,
       updatedAt: story.updatedAt,
@@ -546,6 +554,88 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       }),
       201,
     )
+  })
+
+  /**
+   * Take the document down. `unpublish()` (`../../publish.ts`) is idempotent —
+   * unpublishing an already-unpublished document answers the existing timestamp
+   * and writes nothing — so this route needs no guard of its own, matching the
+   * admin's own `/story/:id/unpublish` (`routes/stories.ts:503`).
+   *
+   * `unpublish()` reports only the timestamp, not the row, so the response
+   * re-loads it: cheaper than re-deriving the state transition `unpublish()`
+   * already computed and threw away.
+   */
+  app.post('/documents/:id/unpublish', requireAccess<Env>(rt, PUBLISH), async (c) => {
+    const bindings = c.var.bindings()
+    const id = idParam('id', c.req.param('id'))
+    const story = await load(bindings, id)
+    await unpublish(rt.publishDeps(bindings, hookCtx(c)), story, actorString(c.var.actor))
+    return c.json({ story: meta(await load(bindings, id)) })
+  })
+
+  /**
+   * Copy a document (mirrors `routes/stories.ts:439`'s `/stories/:id/duplicate`).
+   *
+   * No `index?` in the body, though the spec's own first draft of this route
+   * table had one: `duplicateDocument` (`../../documents.ts`) has no positioning
+   * argument, and neither does the admin's own `StoryDuplicateBody`. A caller
+   * wanting a specific position already has `PATCH /documents/:id` for a second
+   * call — two requests, which is also what dragging a duplicated row is.
+   */
+  app.post('/documents/:id/duplicate', requireAccess<Env>(rt, CREATE), async (c) => {
+    const bindings = c.var.bindings()
+    const story = await load(bindings, idParam('id', c.req.param('id')))
+    const body = await parseOptionalBody(c.req, StoryDuplicateBody)
+
+    let created: StoryMeta
+    try {
+      created = await duplicateDocument(documentDeps(c), story, body, actorString(c.var.actor))
+    } catch (e) {
+      rethrow(e)
+    }
+
+    return c.json({ document: meta(created) }, 201)
+  })
+
+  /**
+   * Restore a version: read-diff-commit, with the version's document as the
+   * target instead of a payload's — `writeDocument` (`../../write.ts:175`) is
+   * `PUT /content` in three lines, and this is the same three lines.
+   *
+   * `getVersion`'s third argument is load-bearing, not optional
+   * (`../../versions.ts:93`): a version stored under an earlier `schemaId` is
+   * migrated on read, so `diff(live, target)` never reintroduces a pre-migration
+   * field key. The object is assembled exactly as `routes/history.ts:70` already
+   * does for the version-read route — reused, not rebuilt.
+   *
+   * A version naming a different `story_id` is refused with 400, not 404: the
+   * version id is globally unique, so the lookup would succeed and the diff
+   * would rewrite this document from a stranger's history — a caller error,
+   * not a missing thing.
+   */
+  app.post('/documents/:id/restore', requireAccess<Env>(rt, EDIT), async (c) => {
+    const id = idParam('id', c.req.param('id'))
+    const body = await parseBody(c.req, RestoreBody)
+    const key = idempotencyKeyHeader(c.req.header('idempotency-key'))
+    const bindings = c.var.bindings()
+    const story = await load(bindings, id)
+
+    const found = await getVersion(bindings.db, body.versionId, {
+      migrations: rt.migrations,
+      schema: rt.schema,
+      typeOf: rt.typeOf,
+    })
+    if (!found) throw new FolioError('not_found', 'Unknown version')
+    if (found.meta.storyId !== id) {
+      throw new FolioError('bad_request', 'That version belongs to a different document')
+    }
+
+    try {
+      return c.json(await writeDocument(deps(bindings, story), () => found.doc, writeActor(c), key))
+    } catch (e) {
+      rethrow(e)
+    }
   })
 
   return app
