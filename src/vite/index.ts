@@ -84,16 +84,58 @@ export function folio(options: FolioPluginOptions): Plugin[] {
              * It is not pre-bundled by default because Vite's dep scanner
              * crawls the *host's* entries, and the admin entry is a file inside
              * `node_modules`. Every dependency reached only from there is
-             * invisible to it. Naming the one package that needs interop is
-             * enough; the rest of the admin's tiptap imports come along inside
-             * the same optimised bundle.
+             * invisible to it.
+             *
+             * **Every tiptap package the admin imports has to be named here, not
+             * just the one that needed interop.** This list used to be
+             * `['@tiptap/react']`, on the reasoning that the rest would come
+             * along inside the same optimised bundle. They do not: the admin
+             * imports `@tiptap/core`, `@tiptap/starter-kit` and the two extra
+             * marks *directly*, and an unlisted dependency of a file under
+             * `node_modules` is served raw. So `useEditor` came from the
+             * optimised chunk — with `prosemirror-state` bundled inside it —
+             * while `StarterKit` came from `/node_modules/@tiptap/starter-kit/
+             * dist/index.js`, which imports its own.
+             *
+             * Two copies of `prosemirror-state` means two copies of the
+             * module-level counter behind `createKey`, so each hands out
+             * `plugin$` for its first unkeyed plugin. Put both in one editor and
+             * ProseMirror throws
+             *
+             *   RangeError: Adding different instances of a keyed plugin (plugin$)
+             *
+             * on mount, which unmounts the admin: a white screen from clicking
+             * any block with a richtext field. Dev only — the build resolves one
+             * copy — which is the worst place for it, because dev is where the
+             * editor is used.
              *
              * `@tiptap/pm` must **not** be added here: it has no `.` export,
              * only subpaths, so naming it fails config resolution outright with
              * `Missing "." specifier`.
              */
             optimizeDeps: {
-              include: ['@tiptap/react'],
+              include: [
+                '@tiptap/react',
+                '@tiptap/core',
+                '@tiptap/starter-kit',
+                '@tiptap/extension-subscript',
+                '@tiptap/extension-superscript',
+              ],
+            },
+            /**
+             * The same hazard for anything that still escapes pre-bundling: one
+             * `prosemirror-state` in the graph, whichever route reaches it.
+             * Belt and braces, and it costs nothing when the list above is
+             * already doing its job.
+             */
+            resolve: {
+              dedupe: [
+                '@tiptap/core',
+                '@tiptap/pm',
+                'prosemirror-state',
+                'prosemirror-view',
+                'prosemirror-model',
+              ],
             },
             build: {
               rollupOptions: {
@@ -134,6 +176,7 @@ export function folio(options: FolioPluginOptions): Plugin[] {
 
     configResolved(resolved) {
       root = resolved.root
+      foldClientEntries(resolved)
     },
 
     resolveId(id) {
@@ -160,6 +203,65 @@ export function folio(options: FolioPluginOptions): Plugin[] {
   }
 
   return [main]
+}
+
+/**
+ * Fold the two entries this plugin adds back into one object, after Vite has
+ * merged every plugin's contribution.
+ *
+ * **`config()` cannot get this right on its own, and the failure is a build that
+ * never starts.** The hook returns a *named* input map, because the names are
+ * what `output.entryFileNames` matches on to emit `folio-admin.js` and
+ * `folio-preview.js` at fixed paths — the paths `__FOLIO_ASSETS__` hands the
+ * Worker. A framework plugin, meanwhile, declares the client's entries as an
+ * **array**: React Router lists `root`, the client entry and one module per
+ * route. Vite's `mergeConfig` concatenates when either side is an array, so the
+ * two contributions come out as `[...routeIds, { 'folio-admin': … }]` — an array
+ * with an object in it, which is not a shape Rollup accepts.
+ *
+ * What it actually looks like is `input$1.endsWith is not a function`, thrown out
+ * of Vite's own config resolution, naming nothing. And only for a host that sets
+ * `build.cssCodeSplit: false`, because that is the branch that happens to call
+ * `.endsWith` on every entry first; everything else reaches Rollup and fails
+ * later and differently. Folio's own demo has no framework plugin contributing an
+ * array, so its build was green throughout.
+ *
+ * Folding here rather than emitting chunks from `buildStart` keeps the naming in
+ * one place. The array's own entries keep working: an id becomes a name the way
+ * Rollup would have derived one, and those chunks are content-hashed anyway, so
+ * the name is cosmetic for everything but ours.
+ */
+function foldClientEntries(resolved: {
+  environments?: Record<string, { build?: { rollupOptions?: { input?: unknown } } }>
+}): void {
+  const build = resolved.environments?.client?.build
+  const input = build?.rollupOptions?.input
+  if (!build?.rollupOptions || !Array.isArray(input)) return
+
+  const named: Record<string, string> = {}
+  const ids: string[] = []
+  for (const entry of input) {
+    if (entry && typeof entry === 'object') Object.assign(named, entry)
+    else if (typeof entry === 'string') ids.push(entry)
+  }
+  // Nothing of ours in there: some other plugin's array, left alone.
+  if (Object.keys(named).length === 0) return
+
+  const folded: Record<string, string> = {}
+  for (const id of ids) {
+    let name = entryName(id)
+    // Two ids that reduce to the same name would silently drop one.
+    for (let n = 2; name in folded; n++) name = `${entryName(id)}${n}`
+    folded[name] = id
+  }
+  build.rollupOptions.input = { ...folded, ...named }
+}
+
+/** An id as Rollup would name its chunk: basename, no query, no extension. */
+function entryName(id: string): string {
+  const base = path.basename(id.split('?')[0] ?? id)
+  const ext = path.extname(base)
+  return ext ? base.slice(0, -ext.length) : base
 }
 
 /**

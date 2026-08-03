@@ -166,7 +166,19 @@ function extensionsFor(limits: RichtextLimits) {
     }),
   ]
 
-  if (marks.has('link')) out.push(FolioLink)
+  // **`.configure({})`, so this is a fresh instance.** `FolioLink` is declared
+  // once at module scope, and pushing it raw handed *the same* extension object
+  // to every editor, while the `EXTRA_MARKS` beside it are constructed per call.
+  // `configure` returns a copy, so this makes the two consistent.
+  //
+  // **Not the cause of anything observed**, and worth saying so plainly because
+  // it was written while chasing `RangeError: Adding different instances of a
+  // keyed plugin` and it did not fix it. That was two copies of
+  // `prosemirror-state` in the dev module graph — see `vite/index.ts`, which is
+  // where the fix lives. This is hygiene against a hazard nobody has hit:
+  // sharing one extension instance across editors is not something tiptap
+  // promises to support.
+  if (marks.has('link')) out.push(FolioLink.configure({}))
   for (const [name, make] of Object.entries(EXTRA_MARKS)) {
     if (marks.has(name)) out.push(make!())
   }
@@ -207,8 +219,31 @@ export function useRichtext(
    */
   const local = useRef<string>('')
 
+  /**
+   * **Built once per field, not once per render.**
+   *
+   * `extensions: extensionsFor(limits)` inline rebuilt the whole extension list —
+   * a new array of new instances — on every render of a mounted editor, and
+   * `useEditor` reads a changed `extensions` as a reconfigure. So every keystroke
+   * elsewhere in the inspector threw away and rebuilt this editor's plugins.
+   *
+   * A ref rather than `useMemo`, and built once rather than keyed on `limits`: a
+   * field's limits come from its block definition and cannot change while the
+   * field is mounted, so there is nothing to invalidate on. `useMemo` would also
+   * need `limits` in its dependency list, where it is a fresh object every render
+   * and would memoise nothing.
+   *
+   * **Also not the cause of the keyed-plugin RangeError**, though it was written
+   * looking for it. Same note as `FolioLink.configure({})` above: the fix for that
+   * is in `vite/index.ts`. This one stands on its own as waste that is now gone.
+   */
+  // `unknown[]`, because `extensionsFor` returns `as never` — TipTap's own
+  // extension union is not expressible here and the cast is the existing shape.
+  const built = useRef<unknown[] | null>(null)
+  if (built.current === null) built.current = extensionsFor(limits)
+
   const editor = useEditor({
-    extensions: extensionsFor(limits),
+    extensions: built.current as never,
     content: asRichtext(value) ?? undefined,
     editable,
     editorProps: {
