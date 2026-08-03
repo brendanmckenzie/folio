@@ -15,6 +15,7 @@ import {
   type ServerMsg,
 } from '../../src/core/protocol'
 import type { StoryDO } from '../../src/server'
+import { requireDb } from '../../src/server/story-do'
 
 /**
  * Behaviour pins for the story Durable Object.
@@ -1420,5 +1421,44 @@ describe('recent(): the activity trail pages over a cursor', () => {
     const page = await runInDurableObject(stub, (o) => o.recent(100_000))
     expect(page.rows).toHaveLength(1)
     expect(page.cursor).toBeNull()
+  })
+})
+
+/**
+ * The one binding a Durable Object has to be told about twice.
+ *
+ * `createFolio`'s `bindings` config is invisible to a DO — the runtime constructs
+ * it with the raw host env — so the story object takes its database through
+ * `createStoryDO({ db })`, and `export { StoryDO } from 'folio/server'` is a
+ * ready-made one that assumes the binding is called `DB`.
+ *
+ * A host whose binding is called something else got a working editor and a
+ * working publish, because the *only* reader is the debounced write of the draft
+ * watermark: a background alarm, two seconds after an edit, whose failure was
+ * caught and logged. What actually broke was the content tree, which stopped ever
+ * showing a document as having unpublished changes — three inferences away from
+ * `Cannot read properties of undefined (reading 'prepare')` in a dev log, which
+ * named neither the binding nor the fix.
+ */
+describe('requireDb', () => {
+  it('accepts anything that can prepare a statement', () => {
+    const db = { prepare: () => ({}) } as unknown as D1Database
+    expect(() => requireDb({ db: () => db }, {})).not.toThrow()
+  })
+
+  it('names the fix and what the env actually has', () => {
+    const hostEnv = { FOLIO_DB: {}, FOLIO_STORY: {} }
+    const bad = { db: (e: typeof hostEnv) => e.FOLIO_DB as unknown as D1Database }
+    expect(() => requireDb(bad, hostEnv)).toThrow(/did not resolve to a D1 binding/)
+    expect(() => requireDb(bad, hostEnv)).toThrow(/createStoryDO/)
+    // The listing is the point: it turns "which one did I mean" into a
+    // two-second fix rather than a grep through wrangler.jsonc.
+    expect(() => requireDb(bad, hostEnv)).toThrow(/FOLIO_DB, FOLIO_STORY/)
+  })
+
+  /** An R2 bucket or a KV namespace in the slot is the same mistake as nothing. */
+  it('rejects a binding of the wrong kind, not just a missing one', () => {
+    const notD1 = { get: () => null } as unknown as D1Database
+    expect(() => requireDb({ db: () => notD1 }, {})).toThrow(/D1 binding/)
   })
 })
