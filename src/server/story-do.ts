@@ -161,6 +161,37 @@ interface DefaultStoryEnv {
 }
 
 /**
+ * Refuse a `db` that does not resolve to a D1 binding, at construction.
+ *
+ * The one thing this object needs from the host env is the database, and it
+ * needs it in `alarm()` — a background write, two seconds after an edit, whose
+ * failure was caught and logged. So a host that re-exported the default
+ * `StoryDO` while naming its binding something other than `DB` got a working
+ * editor, a working publish, and a `draft_updated_at` that was **never written**:
+ * the content tree stopped reporting unpublished changes, and the only trace was
+ * a `Cannot read properties of undefined (reading 'prepare')` in the dev log that
+ * named neither the binding nor the fix.
+ *
+ * That is the same shape as the missing `assets` config that rendered a blank
+ * admin behind a 200, and it gets the same treatment: throw, at the earliest
+ * point the mistake is detectable, with the fix in the message.
+ */
+export function requireDb<Env>(config: StoryDOConfig<Env>, env: Env): void {
+  const db = config.db(env) as D1Database | undefined
+  if (db && typeof db.prepare === 'function') return
+  const names = Object.keys(env as object)
+    .sort()
+    .join(', ')
+  throw new Error(
+    "folio: StoryDO's `db` did not resolve to a D1 binding. " +
+      "`export { StoryDO } from 'folio/server'` assumes a binding named `DB`; " +
+      'for any other name build your own: ' +
+      '`export const StoryDO = createStoryDO<Env>({ db: (env) => env.MY_D1 })`. ' +
+      `Bindings on this env: ${names || '(none)'}`,
+  )
+}
+
+/**
  * The story object's public surface, **declared rather than inferred**, and the
  * reason is declaration emit rather than documentation.
  *
@@ -221,6 +252,7 @@ export function createStoryDO<Env>(
 
     constructor(ctx: DurableObjectState, env: Env) {
       super(ctx, env)
+      requireDb(config, env)
       this.sql = ctx.storage.sql
       this.sql.exec(`
       create table if not exists doc (

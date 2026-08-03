@@ -25,11 +25,26 @@ import {
   storyTree,
 } from './stories'
 import { SpaceDO } from './space-do'
-import { StoryDO } from './story-do'
+import { createStoryDO, StoryDO } from './story-do'
 import type { Folio, FolioConfig } from './types'
 import { commitAll } from './write'
 
-export { StoryDO }
+/**
+ * The story object, ready made for a host whose D1 binding is named `DB`.
+ *
+ * **If it is named anything else, build your own** — `createStoryDO` is exported
+ * beside this for exactly that, and it is one line:
+ *
+ *     export const StoryDO = createStoryDO<Env>({ db: (env) => env.MY_D1 })
+ *
+ * A Durable Object is constructed by the runtime with the raw host env and never
+ * sees `createFolio`'s `bindings`, so this is the one binding the object needs
+ * declared twice. Getting it wrong used to be near-silent — the constructor now
+ * refuses, because the only reader is a background alarm and the symptom was a
+ * content tree that never showed unpublished changes.
+ */
+export { StoryDO, createStoryDO }
+export type { StoryDOConfig, StoryDOInstance } from './story-do'
 /**
  * The space channel's Durable Object
  * (`../../../docs/specs/editing/live-collaboration.md`). A host exports this and
