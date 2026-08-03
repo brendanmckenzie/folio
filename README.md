@@ -1429,12 +1429,14 @@ overridable, because a host that wants a short edge TTL wants a different design
   carrying one, silently and with no error. If your published path rolls a session
   cookie, you get zero cache hits and nothing tells you. Folio's own published path
   sets none.
-- **Do not cache `?_folio=preview`.** Folio already answers it with
-  `Cache-Control: private, no-store` and no `Cache-Tag`, and so does the editor
-  shell. But a `Cookie` header neither bypasses Workers Cache nor forms part of its
-  key, so if your own middleware caches that request, an editor's draft and a
-  visitor's page collide on one entry — in the direction that serves an unpublished
-  draft to the public. Belt and braces.
+- **Do not cache `?_folio=`** — either mode. `preview` is the editor's iframe and
+  `draft` is the same draft rendered as a page (what a share link lands on); Folio
+  answers both with `Cache-Control: private, no-store` and no `Cache-Tag`, and so
+  does the editor shell. But a `Cookie` header neither bypasses Workers Cache nor
+  forms part of its key, so if your own middleware caches that request, an editor's
+  draft and a visitor's page collide on one entry — in the direction that serves an
+  unpublished draft to the public. `draft` is the worse of the two to get wrong,
+  because it looks exactly like the published page. Belt and braces.
 - **`Vary` is a cache variant.** Check what your stack adds. Vite's dev and preview
   servers add `Vary: Origin`; a deployed Worker does not, and nothing in Folio sets
   one.

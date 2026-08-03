@@ -60,10 +60,11 @@ insert into api_tokens (id, name, scopes, created_by, created_at) values
 --
 --   open http://localhost:5199/folio/share?t=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 --
--- That lands on `/?_folio=preview` — sty_home's own URL, per the demo's `route`
--- config — and renders its live *draft* to a browser holding nothing else. Try the
--- same URL without going through /folio/share first and you get the published page,
--- which is the refusal working.
+-- That lands on `/?_folio=draft` — sty_home's own URL, per the demo's `route` config —
+-- and renders its live *draft* to a browser holding nothing else, as a page rather than
+-- as an editing surface (platform/mcp-server.md decision 5: no editing outlines, and
+-- every link on it navigates). Try the same URL without going through /folio/share
+-- first and you get the published page, which is the refusal working.
 --
 -- `id` is `shr_`-prefixed and synthetic; `token_hash` is the lowercase-hex SHA-256 of
 -- the token, because that is the only form the database ever holds

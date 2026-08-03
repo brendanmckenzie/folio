@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { defineBlock, text, toRegistry } from '../../../src/core'
 import type { Doc } from '../../../src/core/doc'
 import type { Resolution } from '../../../src/core/resolve'
-import { renderGlobalNode } from '../../../src/preview/Render'
+import { type RenderMode, renderGlobalNode } from '../../../src/preview/Render'
 
 /**
  * `renderGlobalNode` is the one function behind both `Folio.renderGlobal` (a
@@ -66,9 +66,23 @@ describe('renderGlobalNode', () => {
   it('adds the data-folio-uid marker when edit is requested, exactly like any other block', () => {
     const resolution: Resolution = { ...baseResolution, globals: { header: headerDoc('x') } }
     const html = renderToStaticMarkup(
-      renderGlobalNode(registry, resolution, 'header', { edit: true }),
+      renderGlobalNode(registry, resolution, 'header', { mode: 'edit' }),
     )
     expect(html).toContain('data-folio-uid="hdr00001"')
+  })
+
+  /**
+   * A global is part of the page a `?_folio=draft` reviewer or a screenshot is
+   * looking at, so it is addressable there too — by the same attribute, with no
+   * marker `<div>` (`../../../docs/specs/platform/mcp-server.md` decision 5a).
+   */
+  it('marks a global in mark mode too, with no editing scaffolding around it', () => {
+    const resolution: Resolution = { ...baseResolution, globals: { header: headerDoc('x') } }
+    const html = renderToStaticMarkup(
+      renderGlobalNode(registry, resolution, 'header', { mode: 'mark' }),
+    )
+    expect(html).toContain('data-folio-uid="hdr00001"')
+    expect(html).not.toContain('folio-marker')
   })
 
   /**
@@ -166,12 +180,11 @@ describe('the edit marker survives every shape of render', () => {
     },
   })
 
-  const markup = (type: string) =>
+  const markupIn = (mode: RenderMode) => (type: string) =>
     renderToStaticMarkup(
-      renderGlobalNode(reg, { ...baseResolution, globals: { g: docOf(type) } }, 'g', {
-        edit: true,
-      }),
+      renderGlobalNode(reg, { ...baseResolution, globals: { g: docOf(type) } }, 'g', { mode }),
     )
+  const markup = markupIn('edit')
 
   it.each(['hostEl', 'component', 'fragment', 'bareString'])('marks a %s render', (type) => {
     expect(markup(type)).toContain('data-folio-uid="r0000001"')
@@ -202,4 +215,45 @@ describe('the edit marker survives every shape of render', () => {
       expect(html).not.toContain('folio-marker')
     }
   })
+
+  /**
+   * `mark` is the third state, and this describe block is where the trade it makes
+   * is visible in one place (`../../../docs/specs/platform/mcp-server.md` decision
+   * 5a): the attribute where it costs nothing, no wrapper anywhere, and therefore
+   * **no attribute at all** for the three shapes that have nowhere to put one.
+   *
+   * That asymmetry is the decision, not an oversight. Keeping the wrapper here
+   * would buy addressing for those blocks by reintroducing, for exactly those
+   * blocks, the extra grid child that is the most likely visual defect on the page
+   * — into the render whose job is to show whether the page looks right.
+   */
+  const marked = markupIn('mark')
+
+  it('puts the uid straight on a host element in mark mode, with no wrapper', () => {
+    expect(marked('hostEl')).toContain('<section data-folio-uid="r0000001"')
+    expect(marked('hostEl')).not.toContain('folio-marker')
+  })
+
+  it.each(['component', 'fragment', 'bareString'])(
+    'leaves a %s render un-marked in mark mode rather than wrapping it',
+    (type) => {
+      expect(marked(type)).not.toContain('folio-marker')
+      expect(marked(type)).not.toContain('data-folio-uid')
+    },
+  )
+
+  /**
+   * The property a screenshot depends on, asserted directly: `mark` adds
+   * attributes to the published tree and never a node. Compared against `off`'s
+   * own markup with the attributes stripped, so it cannot pass by both being empty.
+   */
+  it.each(['hostEl', 'component', 'fragment', 'bareString'])(
+    'renders node-for-node what a published page renders, for a %s',
+    (type) => {
+      const published = markupIn('off')(type)
+      const stripped = marked(type).replace(/ data-folio-(uid|type)="[^"]*"/g, '')
+      expect(stripped).toBe(published)
+      expect(published).not.toBe('')
+    },
+  )
 })

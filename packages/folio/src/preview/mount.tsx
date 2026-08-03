@@ -93,7 +93,19 @@ function PreviewApp({
   // The same helper the server render uses, so the two trees cannot differ in
   // how the wrapper is applied — a mismatch React would report as a hydration
   // error and then silently discard the server markup over.
-  return wrapPreview(wrap, <FolioDoc doc={doc} registry={registry} edit resolution={resolution} />)
+  //
+  // **`mode="edit"` is written out rather than left as a shorthand flag, and it
+  // is the right mode here whatever else grows one.** This bundle exists for the
+  // editor's iframe: it hydrates, it talks postMessage, and `mountPreview`
+  // attaches the bridge below it, so the markers and the marker wrapper are the
+  // point rather than a side effect. The chrome-free draft render
+  // (`../../../docs/specs/platform/mcp-server.md` decision 5) never reaches this
+  // file at all — that page ships no client entry and no `__FOLIO__`, so nothing
+  // here runs for it and no bridge is attached.
+  return wrapPreview(
+    wrap,
+    <FolioDoc doc={doc} registry={registry} mode="edit" resolution={resolution} />,
+  )
 }
 
 function markSelected(uid: string | null) {

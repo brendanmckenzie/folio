@@ -87,10 +87,10 @@ const SEEDED = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 const seededEntry = await anon(`/folio/share?t=${SEEDED}`)
 check(
   'the seeded demo link works straight out of seed.sql',
-  seededEntry.status === 302 && seededEntry.headers.get('location') === '/?_folio=preview',
+  seededEntry.status === 302 && seededEntry.headers.get('location') === '/?_folio=draft',
   `status=${seededEntry.status} location=${seededEntry.headers.get('location')}`,
 )
-const seededPreview = await anon('/?_folio=preview')
+const seededPreview = await anon('/?_folio=draft')
 const seededHtml = await seededPreview.text()
 check(
   'and renders the home page’s draft to a browser with nothing else',
@@ -126,15 +126,17 @@ check(
   liveHtml.includes(DRAFT_ONLY) ? 'the draft leaked to the public page' : '',
 )
 
-// The control that makes everything below mean something: the preview flag on its own
-// is worth nothing. `handle()` hands the request back and the host serves its page.
-const flagAlone = await anon('/about?_folio=preview')
-const flagAloneHtml = await flagAlone.text()
-check(
-  'the preview flag alone shows a stranger the published page, never the draft',
-  flagAlone.status === 200 && !flagAloneHtml.includes(DRAFT_ONLY),
-  `status=${flagAlone.status}`,
-)
+// The control that makes everything below mean something: the flag on its own is worth
+// nothing, in either mode. `handle()` hands the request back and the host serves its page.
+for (const mode of ['preview', 'draft']) {
+  const flagAlone = await anon(`/about?_folio=${mode}`)
+  const flagAloneHtml = await flagAlone.text()
+  check(
+    `the ${mode} flag alone shows a stranger the published page, never the draft`,
+    flagAlone.status === 200 && !flagAloneHtml.includes(DRAFT_ONLY),
+    `status=${flagAlone.status}`,
+  )
+}
 
 /* --- minting a link ------------------------------------------------------- */
 
@@ -166,8 +168,11 @@ check(
 const entry = await anon(`/folio/share?t=${token}`)
 check('opening the link redirects', entry.status === 302, `status=${entry.status}`)
 check(
-  'to the document’s own preview URL, built by the host’s route()',
-  entry.headers.get('location') === '/about?_folio=preview',
+  'to the document’s own draft URL, built by the host’s route()',
+  // `?_folio=draft`, not `?_folio=preview` (platform/mcp-server.md decision 5): the
+  // reviewer is reading the page, so they get the page rather than the editor's view
+  // of it. Asserted as a consequence a few lines below, not only as a URL.
+  entry.headers.get('location') === '/about?_folio=draft',
   entry.headers.get('location') ?? '',
 )
 check(
@@ -195,6 +200,17 @@ check(
   'and says no-store, so an unpublished draft cannot be cached at a public URL',
   (preview.headers.get('cache-control') ?? '').includes('no-store'),
   preview.headers.get('cache-control') ?? '',
+)
+// The bug this mode fixed, end to end and against a real bundle: the reviewer used to
+// land on the editing render, where `attachBridge()` calls `preventDefault()` on every
+// click inside a marked block and draws a dashed outline under the cursor. No body
+// class and no preview entry means neither can happen — nothing here is hydrated.
+check(
+  'as a page rather than as an editing surface: no chrome, no bridge, live links',
+  !previewHtml.includes('folio-editing') &&
+    !previewHtml.includes('__FOLIO__') &&
+    !previewHtml.includes('folio-marker'),
+  previewHtml.includes('folio-editing') ? 'the editing body class survived' : '',
 )
 
 /* --- and nothing else ----------------------------------------------------- */
@@ -255,7 +271,7 @@ check(
 // Another document's preview, which is the refusal that matters most: a grant names one
 // story id, so a sibling page's URL is handed back to the host exactly as it would be
 // for a stranger.
-const sibling = await anon('/about/team?_folio=preview')
+const sibling = await anon('/about/team?_folio=draft')
 const siblingHtml = await sibling.text()
 check(
   'and cannot walk to another document’s draft',
@@ -271,6 +287,10 @@ check(
 
 // `?as=` swaps the editable document for a *global's* draft — the site header, site
 // settings — which the grant does not cover.
+//
+// Deliberately asked in `preview` mode, which is the stronger question: `draft` refuses
+// `?as=` outright for everybody (mcp-server.md decision 5), so asking there would pass
+// without the share refusal existing at all.
 const asGlobal = await anon('/about?_folio=preview&as=header')
 const asGlobalHtml = await asGlobal.text()
 check(
@@ -322,16 +342,16 @@ check('a second link for a second document', second.status === 201, `status=${se
 const secondEntry = await anon(`/folio/share?t=${new URL(secondBody.url).searchParams.get('t')}`)
 check(
   'lands on that document’s URL',
-  secondEntry.headers.get('location') === '/about/team?_folio=preview',
+  secondEntry.headers.get('location') === '/about/team?_folio=draft',
   secondEntry.headers.get('location') ?? '',
 )
 
-const teamPreview = await anon('/about/team?_folio=preview')
+const teamPreview = await anon('/about/team?_folio=draft')
 check('and renders it', teamPreview.status === 200, `status=${teamPreview.status}`)
 await teamPreview.arrayBuffer()
 
 // The reason the cookie holds a list: the second click must not unseat the first.
-const stillAbout = await anon('/about?_folio=preview')
+const stillAbout = await anon('/about?_folio=draft')
 const stillAboutHtml = await stillAbout.text()
 check(
   'while the first link still works from the same browser',
@@ -388,7 +408,7 @@ const revoked = await editor(`/folio/api/shares/${mintedBody.share.id}`, { metho
 check('revoking answers 200', revoked.status === 200, `status=${revoked.status}`)
 check('and says so', (await json(revoked))?.revoked === true)
 
-const afterRevoke = await anon('/about?_folio=preview')
+const afterRevoke = await anon('/about?_folio=draft')
 const afterRevokeHtml = await afterRevoke.text()
 check(
   'the shared preview stops showing the draft immediately',
@@ -423,7 +443,7 @@ check(
 
 // The other link is untouched: revocation is per link, which is the whole reason a
 // grant covers one document rather than a subtree.
-const teamStillWorks = await anon('/about/team?_folio=preview')
+const teamStillWorks = await anon('/about/team?_folio=draft')
 check(
   'the other link is untouched',
   teamStillWorks.status === 200,

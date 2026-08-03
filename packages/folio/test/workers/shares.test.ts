@@ -300,8 +300,18 @@ describe('using the link', () => {
     // No cookie, no session, no bearer: exactly what a client with no account has.
     const res = await call(`/folio/share?t=${token}`)
     expect(res.status).toBe(302)
-    // The host's own `route()`, with the preview flag. Never assembled by this route.
-    expect(res.headers.get('location')).toBe(`${path}?_folio=preview`)
+    /**
+     * The host's own `route()`, with the **draft** flag. Never assembled by this
+     * route.
+     *
+     * `?_folio=draft`, not `?_folio=preview`, and the change is deliberate
+     * (`../../../docs/specs/platform/mcp-server.md` decision 5). This link had
+     * always landed a reviewer on the *editor's* render of the page: a dashed
+     * outline chasing their cursor and `preventDefault()` on every click inside a
+     * marked block, so nothing on the page navigated. The next test asserts the
+     * consequence rather than only the URL.
+     */
+    expect(res.headers.get('location')).toBe(`${path}?_folio=draft`)
     // The redirect carries a credential and a Set-Cookie; neither may be stored.
     expect(res.headers.get('cache-control')).toBe(NO_STORE)
 
@@ -330,6 +340,31 @@ describe('using the link', () => {
     expect(res.headers.get('cache-control')).toBe(NO_STORE)
     const html = await res.text()
     expect(html).toContain('Draft title')
+  })
+
+  /**
+   * The gate is the mode's, not the link's: a share cookie satisfies the branch,
+   * and the branch then renders whichever mode was asked for. What changed is only
+   * *which* one the link points at — so this asserts the reviewer's actual
+   * experience at the URL they are now sent to, which is the half of the fix that
+   * a `location` header cannot show.
+   */
+  it('answers the reviewer’s own draft URL with a page, not the editing chrome', async () => {
+    const { id, path } = await seedPage('reviewed', 'Reviewable title')
+    const { cookie } = await share(id)
+
+    expect(await raw(`${path}?_folio=draft`)).toBeNull()
+
+    const res = await call(`${path}?_folio=draft`, { headers: { cookie } })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe(NO_STORE)
+    const html = await res.text()
+    expect(html).toContain('Reviewable title')
+    // No editing body class, so `preview.css`'s outlines can match nothing…
+    expect(html).not.toContain('folio-editing')
+    // …and no preview bundle, so `attachBridge` never runs and links navigate.
+    expect(html).not.toContain('/folio-preview.js')
+    expect(html).not.toContain('__FOLIO__')
   })
 
   it('counts the views, so an editor can tell whether the client looked', async () => {

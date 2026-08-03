@@ -231,8 +231,9 @@ export default {
     // **Draft preview sharing (platform/draft-sharing.md) costs this host exactly
     // nothing, and that is worth noticing rather than glossing.** A reviewer with no
     // account opens `/folio/share?t=…`, which is inside this call; it hands them a
-    // cookie and redirects them to the document's own `?_folio=preview` URL, which is
-    // also inside this call. Both answer `no-store`, so nothing about the arrangement
+    // cookie and redirects them to the document's own `?_folio=draft` URL — the draft
+    // rendered as a page rather than as an editing surface (`platform/mcp-server.md`
+    // decision 5) — which is also inside this call. Both answer `no-store`, so nothing
     // interacts with the `cacheHeaders` pair set on the published response below —
     // and the same URL with no cookie falls straight through to that published page,
     // which is the refusal rather than an error. There is no binding to add, no route
