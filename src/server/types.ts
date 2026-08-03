@@ -22,6 +22,7 @@ import type { ContentPage, ContentQuery } from '../core/query'
 import type { Resolution } from '../core/resolve'
 import type { DocumentType } from '../core/schema'
 import type { StoryMeta, StoryNode } from '../core/story'
+import type { RenderMode } from '../preview/Render'
 import type { AuthConfig, OpenAuth } from './auth/config'
 import type { Actor } from './auth/roles'
 import type { FolioHooks } from './hooks'
@@ -40,6 +41,23 @@ import type { WriteResult } from './write'
  * something a host chooses: a published render always resolves published content.
  */
 export type HostResolveOptions = Omit<ResolveOptions, 'draft'>
+
+/**
+ * The two values `?_folio=` takes, and the only two `handle()` recognises
+ * (`../../../docs/specs/platform/mcp-server.md` decision 5). Anything else is
+ * handed back to the host, exactly as an unknown value always was.
+ *
+ * - `preview` — the editor's iframe: a `folio-editing` body, the postMessage
+ *   bridge, markers on every block whatever its `render` returns.
+ * - `draft` — the same document as a page. No body class, no client entry, no
+ *   bridge, and `RenderMode` `mark`: uids on host elements and no marker `<div>`.
+ *   This is what a share link lands on and what a screenshot photographs.
+ *
+ * A mode name rather than a boolean modifier on one mode: the two differ in what
+ * they *are* for, and `?_folio=preview&chrome=0` is how you end up with four
+ * combinations and two of them meaningless.
+ */
+export type PreviewMode = 'preview' | 'draft'
 
 export interface FolioBindings {
   db: D1Database
@@ -425,7 +443,18 @@ export interface Folio<Env> {
    * tree — and is exactly the old behaviour.
    */
   resolve: (env: Env, doc?: Doc, opts?: HostResolveOptions) => Promise<Resolution>
-  render: (doc: Doc, opts?: { edit?: boolean; resolution?: Resolution }) => ReactNode
+  /**
+   * The document, rendered.
+   *
+   * **`opts.mode` replaced `opts.edit?: boolean`** (`../../../docs/specs/platform/
+   * mcp-server.md` decision 5a). The boolean answered "am I being edited", which
+   * is a different question from "is this addressable", and it could not spell the
+   * third state at all: `mark` emits `data-folio-uid` on host elements and
+   * nothing else, so the DOM is the published one and a caller can still clip a
+   * screenshot to one block. Absent still means `off` — no markers — so a host
+   * rendering its published pages passes nothing and is unaffected.
+   */
+  render: (doc: Doc, opts?: { mode?: RenderMode; resolution?: Resolution }) => ReactNode
   /**
    * The cache tags a rendered page should carry, and whether the set had to be
    * coarsened (`../../../docs/specs/platform/caching.md`).
@@ -474,11 +503,12 @@ export interface Folio<Env> {
    * A global, rendered from an already-built `Resolution` — never fetches, so
    * it is safe to call per keystroke in the preview. Null when the resolution
    * carries nothing for `name`: a global nobody has published yet, or a name
-   * that was never in `FolioConfig.globals`. Passing `edit: true` outside a
-   * Folio-owned preview leaks `data-folio-uid` markers onto a published page;
-   * a host's own render call should not set it (`globals.md` edge case).
+   * that was never in `FolioConfig.globals`. Passing any `opts.mode` other than
+   * `off` outside a Folio-owned preview leaks `data-folio-uid` markers onto a
+   * published page; a host's own render call should not set it (`globals.md` edge
+   * case). Absent is `off`, so the ordinary call is unchanged.
    */
-  renderGlobal: (resolution: Resolution, name: string, opts?: { edit?: boolean }) => ReactNode
+  renderGlobal: (resolution: Resolution, name: string, opts?: { mode?: RenderMode }) => ReactNode
   /**
    * Runs the pending content migrations
    * (`../../../docs/specs/foundation/schema-migrations.md`). Explicit, never on

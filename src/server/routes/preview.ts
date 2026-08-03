@@ -12,12 +12,16 @@
  * ## What the entry route does, and what it deliberately does not
  *
  * `GET {base}/share?t=…` exchanges the token in the URL for a cookie and a 302 to
- * the document's **own** preview URL — `rt.withUrls(story).previewUrl`, which is the
- * host's `route()` function's answer with the preview flag on it. Nothing here
- * invents a URL, and nothing here renders a document: the redirect target is the
- * same `?_folio=preview` URL a signed-in editor's iframe loads, answered by the same
- * branch of `handle()`, rendered by the same `previewPage`. There is no second
- * renderer to drift.
+ * the document's **own** draft URL — `rt.withUrls(story).draftUrl`, which is the
+ * host's `route()` function's answer with `?_folio=draft` on it. Nothing here
+ * invents a URL, and nothing here renders a document: the redirect target is
+ * answered by the same branch of `handle()` and rendered by the same `previewPage`
+ * a signed-in editor's iframe reaches. There is no second renderer to drift.
+ *
+ * **The mode is `draft`, not `preview`, and that changed** (`../../../docs/specs/
+ * platform/mcp-server.md` decision 5): the reviewer is reading the page, not
+ * editing it, so they get the page — no editing body class, no hydration, no
+ * bridge, and every link on it live.
  *
  * The exchange exists to get the secret **out of the URL** — decision 2. A query
  * parameter is what a link can carry; a cookie is what a browser can hold without
@@ -242,10 +246,20 @@ export function sharePageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const story = await storyById(bindings.db, grant.storyId)
     if (!story || story.path === null) return expiredLinkPage()
 
-    // The host's own `route()`, with the preview flag on it. Never assembled here:
-    // only the host knows its URL shape, and the admin's iframe loads this same
-    // value (`runtime.ts`'s `previewUrlFor`).
-    const target = rt.withUrls(story).previewUrl
+    /**
+     * The host's own `route()`, with the draft flag on it. Never assembled here:
+     * only the host knows its URL shape, and both this and the admin's iframe come
+     * out of `runtime.ts`'s `previewUrlFor`.
+     *
+     * **`draftUrl`, not `previewUrl`, and that is a fix to shipped behaviour**
+     * (`../../../docs/specs/platform/mcp-server.md` decision 5). A reviewer landing
+     * on the `preview` mode got the *editor's* view of the page: a dashed blue
+     * rectangle following their cursor, and `preventDefault()` on every click
+     * inside a marked block, so no link on the page navigated. Nobody decided that
+     * — it is what having one draft render cost. The admin's own iframe keeps
+     * `previewUrl`, because for it the chrome is the feature.
+     */
+    const target = rt.withUrls(story).draftUrl
     if (!target) return expiredLinkPage()
 
     /**

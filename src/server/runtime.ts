@@ -56,7 +56,7 @@ import type { PublishDeps } from './publish'
 import { type QueryDeps, runQuery } from './query'
 import { SPACE_NAME, spaceBroadcastHooks } from './space-events'
 import { ensureSingleton, listStories, publishedDocsByIds, storiesFor, storyById } from './stories'
-import type { FolioBindings, FolioConfig, SpaceStub, StoryStub } from './types'
+import type { FolioBindings, FolioConfig, PreviewMode, SpaceStub, StoryStub } from './types'
 
 const DEFAULT_BASE = '/folio'
 
@@ -404,7 +404,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    * immediately below) are unchanged; `'draft'` is `platform/mcp-server.md`
    * decision 5's chrome-free render, added by `withUrls` for `draftUrl`.
    */
-  const previewUrlFor = (path: string, locale?: string, mode: 'preview' | 'draft' = 'preview') => {
+  const previewUrlFor = (path: string, locale?: string, mode: PreviewMode = 'preview') => {
     const url = route(path, locale)
     const flagged = `${url}${url.includes('?') ? '&' : '?'}_folio=${mode}`
     return locale === undefined || locale === locales?.default

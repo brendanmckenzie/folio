@@ -13,12 +13,37 @@ import {
 import { asRichtext, sanitiseRichtext } from '../core/richtext'
 import { RichText } from './RichText'
 
+/**
+ * How much of the editor's addressing a render carries
+ * (`../../../docs/specs/platform/mcp-server.md` decision 5a).
+ *
+ * - **`off`** — a published page. No attributes, no scaffolding, nothing a
+ *   visitor should not see. The default, because a caller that says nothing is
+ *   rendering for the public.
+ * - **`mark`** — `data-folio-uid` on every block whose `render` returns a *host
+ *   element*, and **nothing else**: node-for-node the DOM `off` produces. That is
+ *   what makes it photographable — a screenshot of it is a screenshot of the
+ *   page — while still letting a caller clip to one block by the selector the
+ *   editor's own `markSelected` uses.
+ * - **`edit`** — the editor's iframe. `mark` plus the marker wrapper below, the
+ *   empty-slot buttons, and the unknown/unrendered placeholders.
+ *
+ * The three exist because **the uid attribute and the marker `<div>` used to be
+ * one flag**, so a page could not be addressable without also carrying an extra
+ * grid child. See the wrapper's own comment for which way that trade is now
+ * resolved and why.
+ */
+export type RenderMode = 'off' | 'mark' | 'edit'
+
 interface Props {
   doc: Doc
   registry: Registry
   uid: string
-  /** Preview mode: tag every block so the bridge can map DOM back to uid. */
-  edit?: boolean
+  /**
+   * How much addressing to emit. Defaults to `off` — no attributes at all — so a
+   * host rendering a published page cannot leak the editor's markers by omission.
+   */
+  mode?: RenderMode
   /**
    * Context a document cannot hold: story ids to current URLs, and so on.
    * Defaulted so a caller with nothing to resolve stays a one-liner.
@@ -30,15 +55,23 @@ export function RenderBlok({
   doc,
   registry,
   uid,
-  edit = false,
+  mode = 'off',
   resolution = EMPTY_RESOLUTION,
 }: Props): ReactNode {
   const blok = doc.bloks[uid]
   if (!blok) return null
 
+  /**
+   * Every placeholder and affordance below is `edit` only, never `mark`: each one
+   * is a node the published page does not have, and `mark`'s whole claim is that
+   * it renders the same tree `off` does. An agent looking at a `mark` render of a
+   * broken document sees what a visitor would see, which is the honest answer.
+   */
+  const editing = mode === 'edit'
+
   const def = registry[blok.type]
   if (!def) {
-    return edit ? <div className="folio-unknown">Unknown block type “{blok.type}”</div> : null
+    return editing ? <div className="folio-unknown">Unknown block type “{blok.type}”</div> : null
   }
 
   /**
@@ -49,7 +82,7 @@ export function RenderBlok({
    * its slots would be scaffolding pretending to be a layout.
    */
   if (!def.render) {
-    return edit ? (
+    return editing ? (
       <div className="folio-unrendered">
         “{def.label || blok.type}” has no renderer. It is data other pages read.
       </div>
@@ -102,7 +135,9 @@ export function RenderBlok({
     }
     const kids = childrenOf(doc, uid, name)
     if (kids.length === 0) {
-      props[name] = edit ? <EmptySlot parent={uid} slot={name} label={field.label ?? name} /> : null
+      props[name] = editing ? (
+        <EmptySlot parent={uid} slot={name} label={field.label ?? name} />
+      ) : null
       continue
     }
     props[name] = kids.map((child) => (
@@ -111,14 +146,14 @@ export function RenderBlok({
         doc={doc}
         registry={registry}
         uid={child.uid}
-        edit={edit}
+        mode={mode}
         resolution={resolution}
       />
     ))
   }
 
   const el = def.render(props as never)
-  if (!edit) return el
+  if (mode === 'off') return el
 
   // Storyblok makes each block author remember to spread {...storyblokEditable(blok)}.
   // Deriving it here means a block cannot forget to be editable.
@@ -144,6 +179,22 @@ export function RenderBlok({
       'data-folio-type': blok.type,
     })
   }
+  /**
+   * **`mark` stops here, with no marker and therefore no uid for this block.**
+   * That is the deliberate half of the split (`../../../docs/specs/platform/
+   * mcp-server.md` decision 5a), and it is a trade rather than an omission: on a
+   * real host it costs addressing for 2 blocks in 82 and buys production
+   * geometry for those same 2, because the wrapper below is an extra grid or flex
+   * child. A screenshot taken to answer "does this look right" must not be the
+   * thing that makes it look wrong.
+   *
+   * Rejected: keep the wrapper in `mark` so every block is clippable — it
+   * reintroduces the single most likely visual defect into exactly the blocks a
+   * caller was asking about. Rejected: `display: contents` on the wrapper — no
+   * box, so no bounding rect, so nothing to clip to, which is the same reason the
+   * comment below gives for not using it for the outline.
+   */
+  if (mode === 'mark') return el
   /**
    * Everything else gets a wrapper, because the selection outline is drawn with
    * `position: relative` and an `::after` inset on the marked element, so the
@@ -174,11 +225,12 @@ export function RenderBlok({
  * gives `content: null`, so `{person.content ?? <MyOwnCard {...person.data} />}`
  * means what it says. An always-truthy element would make that fallback dead code.
  *
- * Rendered without `edit` and without uid markers: this content belongs to
- * another story, so clicking it here must not offer to edit it in the context of
- * this one. `docs` is emptied on the way down, which is what bounds resolution to
- * one level and stops a story that references itself from rendering until the
- * stack gives out.
+ * Rendered in `off` mode whatever the caller's own mode is, so without uid
+ * markers: this content belongs to another story, so clicking it here must not
+ * offer to edit it in the context of this one — and a uid on it would address a
+ * block of a document the caller is not looking at. `docs` is emptied on the way
+ * down, which is what bounds resolution to one level and stops a story that
+ * references itself from rendering until the stack gives out.
  */
 function referenceContent(doc: Doc, registry: Registry, resolution: Resolution): ReactNode {
   const root = doc.bloks[doc.root]
@@ -208,9 +260,9 @@ function EmptySlot({ parent, slot, label }: { parent: string; slot: string; labe
 }
 
 /** Renders a whole document. The public entry point for both site and preview. */
-export function FolioDoc({ doc, registry, edit, resolution }: Omit<Props, 'uid'>) {
+export function FolioDoc({ doc, registry, mode, resolution }: Omit<Props, 'uid'>) {
   return (
-    <RenderBlok doc={doc} registry={registry} uid={doc.root} edit={edit} resolution={resolution} />
+    <RenderBlok doc={doc} registry={registry} uid={doc.root} mode={mode} resolution={resolution} />
   )
 }
 
@@ -229,7 +281,7 @@ export function renderGlobalNode(
   registry: Registry,
   resolution: Resolution,
   name: string,
-  opts?: { edit?: boolean },
+  opts?: { mode?: RenderMode },
 ): ReactNode {
   const doc = resolution.globals?.[name]
   if (!doc) return null
@@ -242,7 +294,7 @@ export function renderGlobalNode(
   // add a key to a node it did not create.
   return (
     <div key={name} data-folio-global={name}>
-      <FolioDoc doc={doc} registry={registry} edit={opts?.edit} resolution={resolution} />
+      <FolioDoc doc={doc} registry={registry} mode={opts?.mode} resolution={resolution} />
     </div>
   )
 }

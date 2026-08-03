@@ -21,7 +21,7 @@ import {
 import type { Blok, Doc, Json } from '../../../src/core/doc'
 import { buildResolution, type Resolution } from '../../../src/core/resolve'
 import type { StoryMeta } from '../../../src/core/story'
-import { FolioDoc } from '../../../src/preview/Render'
+import { FolioDoc, type RenderMode } from '../../../src/preview/Render'
 
 /* --------------------------------------------------------------- schema --- */
 
@@ -116,9 +116,9 @@ const resolution: Resolution = {
   },
 }
 
-const html = (doc: Doc, opts?: { edit?: boolean }) =>
+const html = (doc: Doc, opts?: { mode?: RenderMode }) =>
   renderToStaticMarkup(
-    <FolioDoc doc={doc} registry={registry} edit={opts?.edit} resolution={resolution} />,
+    <FolioDoc doc={doc} registry={registry} mode={opts?.mode} resolution={resolution} />,
   )
 
 /* --------------------------------------------------------- no renderer ---- */
@@ -131,13 +131,13 @@ describe('a block definition with no render', () => {
   })
 
   it('renders a folio-unrendered placeholder naming the type in edit mode', () => {
-    const markup = html(office, { edit: true })
+    const markup = html(office, { mode: 'edit' })
     expect(markup).toContain('folio-unrendered')
     expect(markup).toContain('Office')
   })
 
   it('adds no data-folio-uid marker to the placeholder: there is no element to select', () => {
-    expect(html(office, { edit: true })).not.toContain('data-folio-uid')
+    expect(html(office, { mode: 'edit' })).not.toContain('data-folio-uid')
   })
 
   it('leaves a block that does have one completely alone', () => {
@@ -161,7 +161,7 @@ describe('reference.content for a record', () => {
 
   it('carries no uid markers into the referencing page’s edit mode', () => {
     const teamDoc = one('t', 'teamSection', { people: ['sty_ada'] })
-    const markup = html(teamDoc, { edit: true })
+    const markup = html(teamDoc, { mode: 'edit' })
     // The section itself is markable; the person inside it belongs to another
     // document and must not be.
     expect(markup).toContain('data-folio-uid="t"')

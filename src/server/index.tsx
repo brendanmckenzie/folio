@@ -178,6 +178,14 @@ export type { TokenRow } from './auth/tokens'
 export type { ShareRow, ShareState } from './auth/shares'
 export { DEFAULT_SHARE_DAYS, MAX_SHARE_DAYS } from './auth/shares'
 export { FolioDoc } from '../preview/Render'
+/**
+ * The two vocabularies the chrome-free draft render introduced
+ * (`../../../docs/specs/platform/mcp-server.md` decision 5): `RenderMode` is what
+ * `folio.render`/`folio.renderGlobal` take — it replaced an `edit?: boolean` that
+ * could not spell `mark` — and `PreviewMode` is the value of `?_folio=`.
+ */
+export type { RenderMode } from '../preview/Render'
+export type { PreviewMode } from './types'
 export { Shell, serializeJson } from './Document'
 export type { StoryMeta, StoryNode } from '../core/story'
 export type { Resolution } from '../core/resolve'
@@ -223,7 +231,16 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       return app.fetch(req, env as Env & object, ctx)
     }
 
-    if (url.searchParams.get('_folio') === 'preview') {
+    /**
+     * `_folio` is a **mode name**, and there are two (`../../../docs/specs/
+     * platform/mcp-server.md` decision 5): `preview` is the editor's iframe,
+     * `draft` is the same document served as a page. Anything else — a typo, a
+     * third name from a newer admin talking to an older Worker — is handed back to
+     * the host untouched, which is what an unrecognised value has always done here
+     * and is the only answer that keeps "a host's own routes win at any path" true.
+     */
+    const mode = url.searchParams.get('_folio')
+    if (mode === 'preview' || mode === 'draft') {
       const bindings = config.bindings(env)
 
       // A preview renders the *draft*, so it needs the same gate the API routes
@@ -307,15 +324,23 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
        * page, not a singleton every page carries. Refused before the global is even
        * looked up, so the refusal cannot depend on which globals happen to be
        * configured.
+       *
+       * **Nor may a `draft` request**, for a reason of the same kind: `?as=` names
+       * the document being *edited* in the context of this page, and `draft` renders
+       * no editing surface at all — no bootstrap for the client to read the name
+       * from, no bridge to select in. Accepting it there would leave a parameter
+       * that parses, is understood, and changes nothing, which is worse than a
+       * refusal. Refused by handing the request back, like every other refusal in
+       * this branch.
        */
-      if (as !== null && shared.length > 0) return null
+      if (as !== null && (shared.length > 0 || mode === 'draft')) return null
       if (as !== null) {
         const type = rt.typeOf(as)
         if (type?.kind !== 'singleton' || !rt.globals.includes(as)) return null
-        return previewPage(rt, bindings, story, { as, locale })
+        return previewPage(rt, bindings, story, { as, locale, mode })
       }
 
-      return previewPage(rt, bindings, story, { locale })
+      return previewPage(rt, bindings, story, { locale, mode })
     }
 
     return null
@@ -423,7 +448,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     runSchedules: (env, opts) =>
       runSchedules(rt.publishDeps(config.bindings(env), alarmHookCtx(env)), opts),
     render: (doc, opts) => (
-      <FolioDoc doc={doc} registry={rt.registry} edit={opts?.edit} resolution={opts?.resolution} />
+      <FolioDoc doc={doc} registry={rt.registry} mode={opts?.mode} resolution={opts?.resolution} />
     ),
     /**
      * Both are the pure functions from `core/cache-tags.ts`, re-exposed here

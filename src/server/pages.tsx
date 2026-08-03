@@ -11,10 +11,10 @@ import { renderToReadableStream } from 'react-dom/server.edge'
 import { NO_STORE } from '../core/cache-tags'
 import { wrapPreview } from '../core/render-wrap'
 import type { StoryMeta } from '../core/story'
-import { FolioDoc, renderGlobalNode } from '../preview/Render'
+import { FolioDoc, type RenderMode, renderGlobalNode } from '../preview/Render'
 import { Bootstrap, ReactRefreshPreamble, Shell } from './Document'
 import type { FolioRuntime } from './runtime'
-import type { FolioBindings } from './types'
+import type { FolioBindings, PreviewMode } from './types'
 
 /*
  * `adminPage` was here — the old single-screen editor's HTML, bootstrapping
@@ -117,7 +117,26 @@ export function shellPage(rt: FolioRuntime, bindings?: FolioBindings): Promise<R
 }
 
 /**
- * The story's live draft, rendered for the editor's iframe.
+ * The story's live draft — for the editor's iframe, or as a page.
+ *
+ * **`opts.mode` is which of those two** (`../../../docs/specs/platform/
+ * mcp-server.md` decision 5), and everything below that branches on it branches
+ * on the fact that a `draft` render is *not an editing surface*:
+ *
+ * - `preview` (the default, and unchanged): `folio-editing` on the body, the
+ *   preview bundle in `bootstrapModules`, `__FOLIO__` for it to hydrate from, and
+ *   `RenderMode` `edit` — the marker wrapper included.
+ * - `draft`: none of those four. No body class, **no client entry and no
+ *   bootstrap, which is precisely how it avoids the bridge** — `mountPreview` is
+ *   never loaded, and would return early on the missing `__FOLIO__` if a host
+ *   loaded it anyway — so links navigate, nothing outlines under the cursor, and
+ *   the render is `mark`: uids on host elements, no `<div>` production lacks.
+ *
+ * The stylesheets are the same in both, deliberately: `assets.previewCss` is
+ * where the *host's own* CSS for its blocks lands, so a draft page without them
+ * would be unstyled, which is the opposite of what it is for. Folio's own
+ * `preview.css` rides along and does nothing — every rule in it is scoped under
+ * `.folio-editing` or targets a node only `edit` renders.
  *
  * Every configured global rides along too (`../../../docs/specs/content-model/
  * globals.md`), read-only in the sense that clicking one is the admin's cue to
@@ -146,8 +165,9 @@ export async function previewPage(
   rt: FolioRuntime,
   bindings: FolioBindings,
   story: StoryMeta,
-  opts?: { as?: string; bare?: boolean; locale?: string },
+  opts?: { as?: string; bare?: boolean; locale?: string; mode?: PreviewMode },
 ): Promise<Response> {
+  const draft = opts?.mode === 'draft'
   const doc = await rt.draftFor(bindings, story)
   // `story` is what lets the narrowed resolution reach this page's ancestors (a
   // breadcrumb still has to resolve) and what lets a collection listing this very
@@ -167,32 +187,56 @@ export async function previewPage(
       ? { global: editingName, mount: `[data-folio-global="${editingName}"]` }
       : undefined
 
+  /**
+   * The page's own document, and the one line in this file where the split
+   * actually bites.
+   *
+   * **`preview`'s inversion is not a typo and must survive it.** `editing` is
+   * truthy only for `?as=<global>`, where the *global* is the document being
+   * edited and the page is context around it — so the page renders un-marked and
+   * the global's own overlay renders `edit` below. Reading the `!` as a bug and
+   * removing it breaks that flow.
+   *
+   * `draft` has no third case to answer: `handle()` refuses `?as=` in that mode,
+   * because swapping in a global's draft is an editing act and a draft page has
+   * no editor. So it is `mark` throughout.
+   */
+  const pageMode: RenderMode = draft ? 'mark' : editing ? 'off' : 'edit'
+
   // Every configured global, in declared order, above the page itself: Folio's
   // own preview shell knows nothing of the host's real layout (checkpoint 2),
   // so this is a simplification, not a claim of visual fidelity — the host's
   // own render is what a live page actually looks like.
+  //
+  // `mark` in a draft render for the page's own reason: a global is part of the
+  // page a reviewer is looking at, and a marker `<div>` around the site header is
+  // as capable of shifting a grid as one around a section.
   const contextGlobals = opts?.bare
     ? null
-    : rt.globals.map((name) => renderGlobalNode(rt.registry, resolution, name, { edit: true }))
+    : rt.globals.map((name) =>
+        renderGlobalNode(rt.registry, resolution, name, { mode: draft ? 'mark' : 'edit' }),
+      )
 
   return html(
     <Shell
       title={`Preview · ${story.title}`}
       stylesheets={stylesheets}
-      bodyClass="folio-editing"
+      bodyClass={draft ? undefined : 'folio-editing'}
       // The one piece of chrome Folio's own preview shell can get right about a
       // locale. A host's real page sets its own.
       lang={resolution.locale?.code}
       head={
-        <>
-          {rt.dev ? <ReactRefreshPreamble /> : null}
-          {/* The resolution rides along with the document so the client can
-              re-render per keystroke without going back to the network. */}
-          <Bootstrap
-            global="__FOLIO__"
-            value={editing ? { doc: editingDoc, resolution, editing } : { doc, resolution }}
-          />
-        </>
+        draft ? null : (
+          <>
+            {rt.dev ? <ReactRefreshPreamble /> : null}
+            {/* The resolution rides along with the document so the client can
+                re-render per keystroke without going back to the network. */}
+            <Bootstrap
+              global="__FOLIO__"
+              value={editing ? { doc: editingDoc, resolution, editing } : { doc, resolution }}
+            />
+          </>
+        )
       }
     >
       {contextGlobals}
@@ -215,7 +259,7 @@ export async function previewPage(
       <div id="folio-root">
         {wrapPreview(
           rt.previewWrap,
-          <FolioDoc doc={doc} registry={rt.registry} edit={!editing} resolution={resolution} />,
+          <FolioDoc doc={doc} registry={rt.registry} mode={pageMode} resolution={resolution} />,
         )}
       </div>
       {opts?.bare ? (
@@ -225,7 +269,12 @@ export async function previewPage(
         </p>
       ) : null}
     </Shell>,
-    entries,
+    // **The bridge is avoided here, not in `mount.tsx`.** `attachBridge()` runs
+    // unconditionally inside `mountPreview`, so the only way a draft page does not
+    // get dead links and a dashed outline under the cursor is for the module that
+    // calls it never to load. No entry, no module, no bridge — and a draft page is
+    // a page, so it wants no hydration in the first place.
+    draft ? [] : entries,
   )
 }
 
@@ -404,13 +453,15 @@ export function expiredLinkPage(): Promise<Response> {
  * say `no-store` and none of them carries a `Cache-Tag`
  * (`../../../docs/specs/platform/caching.md` decision 7).
  *
- * The preview is the one that matters. The same URL returns draft HTML to an
- * editor and published HTML to a visitor, decided by the session cookie, and a
- * `Cookie` header neither bypasses Workers Cache nor forms part of its key — so
- * without this an editor's draft and a visitor's page would collide on one
- * entry, in the direction that serves an unpublished draft to the public. Belt
- * and braces: the README also tells a host not to cache a request carrying
- * `_folio=preview`, because the failure mode is bad enough to be worth saying
+ * The preview is the one that matters, in **both** of its modes. The same URL
+ * returns draft HTML to an editor and published HTML to a visitor, decided by the
+ * session cookie, and a `Cookie` header neither bypasses Workers Cache nor forms
+ * part of its key — so without this an editor's draft and a visitor's page would
+ * collide on one entry, in the direction that serves an unpublished draft to the
+ * public. `?_folio=draft` makes that worse rather than better: it looks exactly
+ * like the published page, so a cached copy of it is indistinguishable from the
+ * real thing. Belt and braces: the README also tells a host not to cache a request
+ * carrying `_folio=`, because the failure mode is bad enough to be worth saying
  * twice.
  */
 async function html(node: ReactElement, bootstrapModules: string[], status = 200) {
