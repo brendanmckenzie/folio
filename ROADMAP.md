@@ -586,6 +586,28 @@ an unsorted flat list, which stops working somewhere around 15.
 
 ## Known smaller issues
 
+- **`adminCss` is hard-coded to `/folio-admin.css`, and a host with
+  `build.cssCodeSplit: false` has no such file.** The Vite plugin computes
+  `__FOLIO_ASSETS__` in its `config()` hook, before the client environment's CSS
+  strategy is resolved, and asserts the two stylesheets will be emitted beside the
+  two entry chunks. With code splitting off, Vite bundles every stylesheet into one
+  hashed `assets/style-<hash>.css` instead, so a production build links a
+  stylesheet that 404s and the admin renders unstyled behind a 200. Dev is fine —
+  Vite injects entry CSS from JS, which is why `adminCss` is `[]` there — so the
+  first sign of it is a deploy.
+
+  Found building the Harbour host, which sets `cssCodeSplit: false`; the
+  demo does not, so the demo's build is correct and proves nothing. The fix is not
+  a one-liner: a `define` is baked at transform time, so the plugin has to learn
+  the emitted filename at `generateBundle` and the Worker has to read it from
+  somewhere that is not a compile-time constant.
+
+- **A framework plugin's array of client entries used to break the build
+  outright**, and that half is fixed (`foldClientEntries`). Recorded here because
+  the shape recurs: this plugin's `config()` contributions are merged with every
+  other plugin's, and Vite concatenates when either side is an array. Anything it
+  returns under `build.rollupOptions` should assume a framework got there first.
+
 - **Four whole-table reads remain, and they are on the server's *write* paths.**
   `server/stories.ts` calls the unbounded `listStories(db)` in `storyTree` (243),
   `createStory` (1277), `updateStoryStatement` (1487) and `deleteStoryStatement`
