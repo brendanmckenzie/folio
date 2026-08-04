@@ -9,6 +9,7 @@ import {
   typeByName,
 } from '../core/schema'
 import {
+  ancestorPaths,
   buildTree,
   DEFAULT_SEARCH_SORT,
   derivePaths,
@@ -228,6 +229,37 @@ export async function storiesForChunked(
     for (const row of rows) seen.set(row.id, row)
   }
   return [...seen.values()]
+}
+
+/**
+ * `id` plus every descendant, read from the database instead of filtered out of
+ * every row on the site.
+ *
+ * **A recursive CTE over `parent_id`, deliberately, and not a `path like` prefix.**
+ * A prefix query would be cheaper and is wrong in two ways that matter: the root
+ * story's path is `''`, so no prefix describes its children, and a stored path that
+ * has drifted from its ancestor chain would put a row in or out of the subtree that
+ * `parent_id` says otherwise about. The pure `descendants` this replaces walks
+ * `parent_id`, so this walks `parent_id` — the point is to read fewer rows, not to
+ * quietly change which rows.
+ *
+ * `union` rather than `union all` is the cycle guard, and it is the same
+ * consideration `descendants` and `derivePaths` both carry a guard for: a
+ * `parent_id` loop terminates here instead of recursing until D1 gives up.
+ */
+export async function subtreeRows(db: D1Database, id: string): Promise<StoryMeta[]> {
+  const { results } = await db
+    .prepare(
+      `with recursive tree(id) as (
+         select id from stories where id = ?
+         union
+         select s.id from stories s join tree t on s.parent_id = t.id
+       )
+       select ${COLS} from stories where id in (select id from tree)`,
+    )
+    .bind(id)
+    .all<StoryRow>()
+  return results.map(withState)
 }
 
 /**
@@ -1197,6 +1229,35 @@ function inGroup(row: StoryMeta, group: SiblingGroup): boolean {
 }
 
 /**
+ * The rows of one sibling group: `inGroup`'s predicate, in SQL.
+ *
+ * This is the read that `uniqueSlug` and `orderAt` actually need, and the reason
+ * creating or renaming a document no longer costs a read of every document on the
+ * site. Both of those count over *siblings*, and a sibling group is what a slug is
+ * unique within and what a fractional `ord` is positioned inside — nothing either
+ * of them does looks outside it.
+ *
+ * `parent_id is null` rather than `= ?` for a top-level page: SQL equality against
+ * null is null, so the bound form silently returns nothing and every top-level page
+ * would think itself the only one — the first slug collision would go unnoticed and
+ * the unique index would refuse the insert instead.
+ *
+ * Kept beside `inGroup` on purpose. The two must agree, and the way they stop
+ * agreeing is one of them moving to another file.
+ */
+async function siblingGroupRows(db: D1Database, group: SiblingGroup): Promise<StoryMeta[]> {
+  const query = group.routed
+    ? group.parentId === null
+      ? db.prepare(`select ${COLS} from stories where path is not null and parent_id is null`)
+      : db
+          .prepare(`select ${COLS} from stories where path is not null and parent_id = ?`)
+          .bind(group.parentId)
+    : db.prepare(`select ${COLS} from stories where path is null and type = ?`).bind(group.type)
+  const { results } = await query.all<StoryRow>()
+  return results.map(withState)
+}
+
+/**
  * Fractional key placing a story at `index` among its siblings.
  *
  * Sorted through `compareSiblings`, the comparator `buildTree` uses, so the sibling
@@ -1274,14 +1335,27 @@ export async function createStory(
   input: CreateStoryInput,
   types: readonly DocumentType[] = [],
 ): Promise<StoryMeta> {
-  const rows = await listStories(db)
   const type = input.type
   const routed = isRouted(type)
 
   if (!routed && input.parentId) throw new Error('An unrouted document cannot have a parent')
 
   const parentId = routed ? (input.parentId ?? null) : null
-  const parent = parentId ? rows.find((r) => r.id === parentId) : undefined
+  const group: SiblingGroup = routed
+    ? { routed: true, parentId }
+    : { routed: false, type: type.name }
+
+  /**
+   * Two narrow reads in place of one read of every story on the site: the parent
+   * row, for its path and its type, and the sibling group, for the slug and the
+   * position. Concurrent because neither depends on the other — the group is
+   * derivable from the input alone, since a document's siblings are decided by the
+   * parent it is being created *under* rather than by anything about the parent row.
+   */
+  const [parent, siblings] = await Promise.all([
+    parentId ? storyById(db, parentId) : Promise.resolve(undefined),
+    siblingGroupRows(db, group),
+  ])
   if (parentId && !parent) throw new Error('Unknown parent')
   // A record has no path, so nothing beneath it could derive one.
   if (parent && parent.path === null) {
@@ -1289,17 +1363,14 @@ export async function createStory(
   }
   if (routed && !canNest(type, typeByName(types, parent?.type))) throw underError(type)
 
-  const group: SiblingGroup = routed
-    ? { routed: true, parentId }
-    : { routed: false, type: type.name }
-  const slug = uniqueSlug(rows, group, slugify(input.slug || input.title))
+  const slug = uniqueSlug(siblings, group, slugify(input.slug || input.title))
   const story: StoryMeta = {
     id: newStoryId(),
     type: type.name,
     parentId,
     slug,
     path: routed ? joinPath(parent?.path ?? '', slug) : null,
-    ord: orderAt(rows, group, rows.filter((r) => inGroup(r, group)).length),
+    ord: orderAt(siblings, group, siblings.length),
     title: input.title.trim() || 'Untitled',
     publishedAt: null,
     unpublishedAt: null,
@@ -1502,7 +1573,13 @@ export async function updateStoryStatement(
    */
   updated: StoryChange[]
 }> {
-  const rows = await listStories(db)
+  /**
+   * The subtree, not the site. Everything below reads one of three things: the row
+   * itself, its descendants (the cycle check and the path rewrite), or its new
+   * sibling group (the slug and the position) — and `siblingGroupRows` fetches the
+   * third once the new parent is known.
+   */
+  const rows = await subtreeRows(db, id)
   const current = rows.find((r) => r.id === id)
   if (!current) throw new Error('Unknown story')
   if (patch.type !== undefined && patch.type !== current.type) {
@@ -1525,7 +1602,7 @@ export async function updateStoryStatement(
       ? patch.parentId
       : current.parentId
   if (parentId && subtree.has(parentId)) throw new Error('Cannot move a story into its own subtree')
-  const parent = parentId ? rows.find((r) => r.id === parentId) : undefined
+  const parent = parentId ? await storyById(db, parentId) : undefined
   if (parentId && !parent) throw new Error('Unknown parent')
   if (parent && parent.path === null) {
     throw new Error('Cannot move a page under an unrouted document')
@@ -1541,21 +1618,33 @@ export async function updateStoryStatement(
   const group: SiblingGroup = unrouted
     ? { routed: false, type: current.type }
     : { routed: true, parentId }
+  const siblings = await siblingGroupRows(db, group)
   const next: StoryMeta = {
     ...current,
     title: patch.title?.trim() || current.title,
     slug: isRoot
       ? ''
-      : uniqueSlug(rows, group, slugify(patch.slug ?? patch.title ?? current.slug), id),
+      : uniqueSlug(siblings, group, slugify(patch.slug ?? patch.title ?? current.slug), id),
     parentId,
     ord:
       patch.index !== undefined || parentId !== current.parentId
-        ? orderAt(rows, group, patch.index ?? 0, id)
+        ? orderAt(siblings, group, patch.index ?? 0, id)
         : current.ord,
     updatedAt: Date.now(),
   }
 
-  const merged = rows.map((r) => (r.id === id ? next : r))
+  /**
+   * **The subtree alone is not enough to derive a path from, and the failure is
+   * silent.** `derivePaths` walks `parent_id` upwards and treats a row whose parent
+   * is absent from the set as top-level — so handed only the subtree it would derive
+   * the moved row's path as its bare slug, quietly promoting a nested page to the
+   * root on every rename. The chain above the new parent is therefore read too: one
+   * `in (…)` over `ancestorPaths`, which is the same one-query ancestor read
+   * `resolve()` makes, and the reason ancestors are addressed by path rather than
+   * walked up.
+   */
+  const chain = parent ? [parent, ...(await storiesFor(db, [], ancestorPaths(parent.path)))] : []
+  const merged = [...rows.map((r) => (r.id === id ? next : r)), ...chain]
   // Routed rows only: an unrouted one has no ancestor chain to derive from and
   // is absent from the map, so `paths.get(r.id) ?? r.path` keeps its null.
   const paths = derivePaths(merged)
@@ -1680,7 +1769,11 @@ export async function deleteStoryStatement(
    */
   scheduleStatements: D1PreparedStatement[]
 } | null> {
-  const rows = await listStories(db)
+  // The subtree is exactly what a delete cascades over, so it is exactly what this
+  // needs to read. The only row outside it that matters is the parent, and only
+  // when a redirect is being offered — fetched below, once, rather than found in a
+  // list of every story on the site.
+  const rows = await subtreeRows(db, id)
   const target = rows.find((r) => r.id === id)
   if (!target) return null
   if (target.path === '') throw new Error('Cannot delete the root story')
@@ -1703,7 +1796,7 @@ export async function deleteStoryStatement(
 
   const redirects: D1PreparedStatement[] = []
   if (opts.redirect) {
-    const parent = target.parentId ? rows.find((r) => r.id === target.parentId) : undefined
+    const parent = target.parentId ? await storyById(db, target.parentId) : undefined
     const parentPath = parent?.path ?? ''
     for (const descId of ids) {
       const row = rows.find((r) => r.id === descId)

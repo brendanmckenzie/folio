@@ -147,10 +147,19 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return shellPage(rt, bindings)
   })
 
+  /**
+   * `{base}/edit` with no id: open the root story, or *any* story on a site whose
+   * root has been deleted, or 404 on an empty one.
+   *
+   * The fallback reads **one** row. It used to read every story on the site and take
+   * the first, which is a whole-table read to answer "is there anything at all" —
+   * cheap to write and the same cost as rendering the tree, on a path that runs
+   * every time somebody opens the editor without a bookmark.
+   */
   app.get('/edit', requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {
     const db = c.var.bindings().db
     const root = await storyByPath(db, '')
-    const first = root ?? (await listStories(db))[0]
+    const first = root ?? (await listStories(db, { limit: 1, offset: 0 }))[0]
     return first ? c.redirect(`${rt.base}/edit/${first.id}`) : c.notFound()
   })
 
