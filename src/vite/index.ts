@@ -1,9 +1,18 @@
 import { createRequire } from 'node:module'
 import path from 'node:path'
-import type { Plugin } from 'vite'
+import type { Plugin, UserConfig } from 'vite'
 
 const VIRTUAL_PREVIEW = 'virtual:folio/preview'
 const RESOLVED_PREVIEW = `\0${VIRTUAL_PREVIEW}`
+
+/**
+ * Where the single stylesheet goes when a host has turned CSS code splitting off.
+ *
+ * Unhashed and at the root, exactly as `folio-admin.css` and `folio-preview.css`
+ * already are: the Worker links it from `__FOLIO_ASSETS__`, which is a
+ * compile-time constant, so the name cannot carry a content hash.
+ */
+const SINGLE_CSS_BUNDLE = 'folio-client.css'
 
 export interface FolioPluginOptions {
   /**
@@ -25,6 +34,8 @@ export interface FolioPluginOptions {
 export function folio(options: FolioPluginOptions): Plugin[] {
   const base = options.basePath ?? '/folio'
   let root = process.cwd()
+  /** Set in `config()`, read again in `configResolved`. See `cssBundledIntoOne`. */
+  let noSplit = false
 
   const resolveBlocks = () =>
     options.blocks.startsWith('.') ? path.resolve(root, options.blocks) : options.blocks
@@ -37,6 +48,7 @@ export function folio(options: FolioPluginOptions): Plugin[] {
       // In dev these are served by Vite's module graph, not as built files.
       const admin = isDev ? `/@fs${adminEntry()}` : '/folio-admin.js'
       const preview = isDev ? `/@id/__x00__${VIRTUAL_PREVIEW}` : '/folio-preview.js'
+      noSplit = cssBundledIntoOne(userConfig)
       return {
         environments: {
           /**
@@ -150,10 +162,28 @@ export function folio(options: FolioPluginOptions): Plugin[] {
                 output: {
                   entryFileNames: (chunk: { name: string }) =>
                     chunk.name.startsWith('folio-') ? '[name].js' : 'assets/[name]-[hash].js',
-                  assetFileNames: (asset: { names?: string[] }) =>
-                    asset.names?.some((n) => n.startsWith('folio-'))
+                  assetFileNames: (asset: { names?: string[] }) => {
+                    /**
+                     * With `cssCodeSplit: false` there is exactly **one**
+                     * stylesheet for the whole client build, and Vite names it
+                     * `style.css` — which does not start with `folio-`, so the
+                     * branch below would content-hash it into `assets/`. That is
+                     * a path nothing can name until the bundle is written, and
+                     * `__FOLIO_ASSETS__` is a `define` baked in `config()`. Pin
+                     * it instead, and point both stylesheet lists at it.
+                     *
+                     * The file holds the **host's** CSS as well as ours, because
+                     * one stylesheet is all there is. That is the cost of the
+                     * flag rather than of this branch, and it is why the fixed
+                     * name says `client` and not `admin`.
+                     */
+                    if (noSplit && asset.names?.some((n) => n.endsWith('.css'))) {
+                      return SINGLE_CSS_BUNDLE
+                    }
+                    return asset.names?.some((n) => n.startsWith('folio-'))
                       ? '[name][extname]'
-                      : 'assets/[name]-[hash][extname]',
+                      : 'assets/[name]-[hash][extname]'
+                  },
                 },
               },
             },
@@ -166,8 +196,8 @@ export function folio(options: FolioPluginOptions): Plugin[] {
             admin,
             preview,
             devClient: isDev ? '/@vite/client' : undefined,
-            adminCss: isDev ? [] : ['/folio-admin.css'],
-            previewCss: isDev ? [] : ['/folio-preview.css'],
+            adminCss: isDev ? [] : [noSplit ? `/${SINGLE_CSS_BUNDLE}` : '/folio-admin.css'],
+            previewCss: isDev ? [] : [noSplit ? `/${SINGLE_CSS_BUNDLE}` : '/folio-preview.css'],
           }),
           __FOLIO_BASE__: JSON.stringify(base),
         },
@@ -177,6 +207,7 @@ export function folio(options: FolioPluginOptions): Plugin[] {
     configResolved(resolved) {
       root = resolved.root
       foldClientEntries(resolved)
+      assertCssStrategyWasVisible(resolved, noSplit)
     },
 
     resolveId(id) {
@@ -203,6 +234,60 @@ export function folio(options: FolioPluginOptions): Plugin[] {
   }
 
   return [main]
+}
+
+/**
+ * Whether the client build will bundle every stylesheet into one file.
+ *
+ * Read from the **user's** config rather than the resolved one, because
+ * `__FOLIO_ASSETS__` is a `define` and is baked while `config()` runs — long
+ * before `configResolved` knows anything. `build.cssCodeSplit` is a flag a host
+ * sets in its own config, which is the object this hook is handed, so the case
+ * that actually happens is visible here.
+ *
+ * What is *not* visible here is a **plugin** setting it, or a
+ * `configEnvironment` hook doing so. `assertCssStrategyWasVisible` covers that
+ * by failing the build rather than by shipping a stylesheet link that 404s.
+ *
+ * Checked in both places it can be written: `build` applies to every
+ * environment, and `environments.client.build` overrides it for the one that
+ * matters.
+ */
+function cssBundledIntoOne(userConfig: UserConfig): boolean {
+  return (
+    userConfig.build?.cssCodeSplit === false ||
+    userConfig.environments?.client?.build?.cssCodeSplit === false
+  )
+}
+
+/**
+ * Fail the build when the client environment resolved to `cssCodeSplit: false`
+ * but `config()` could not see that coming.
+ *
+ * **This cannot repair the paths** — `__FOLIO_ASSETS__` is baked by now — so it
+ * refuses to ship them instead. What it replaces is a failure that is silent at
+ * build time and arrives at deploy: `adminCss` links `/folio-admin.css`, the
+ * build emitted one hashed `assets/style-<hash>.css` and no such file, and the
+ * admin renders unstyled behind a 200. Dev is unaffected, because Vite injects
+ * entry CSS from JS there, so the first sign of it is production.
+ *
+ * Only reachable when something other than the host's own config sets the flag.
+ * `build.lib` is the other route: it defaults `cssCodeSplit` to false, and a
+ * client build in library mode has the same broken link, so failing is right
+ * there too.
+ */
+function assertCssStrategyWasVisible(
+  resolved: { environments?: Record<string, { build?: { cssCodeSplit?: boolean } }> },
+  noSplit: boolean,
+): void {
+  if (noSplit) return
+  if (resolved.environments?.client?.build?.cssCodeSplit !== false) return
+  throw new Error(
+    "folio: the client build resolved to `cssCodeSplit: false`, but that was not set in this project's own Vite config — " +
+      'so the admin and preview stylesheet paths were already baked as if CSS were split per entry, and they will 404 in production. ' +
+      'Set `build.cssCodeSplit: false` (or `environments.client.build.cssCodeSplit: false`) in vite.config.ts so the plugin can see it, ' +
+      'or find the plugin that is setting it and let it be configured instead.',
+  )
 }
 
 /**
