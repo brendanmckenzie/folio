@@ -151,18 +151,41 @@ in a browser before it is called done.
      blocks patching the tree in place, and the space channel is already advisory and
      unordered. Plus the table-heading alignment pass at 12px, cancelling `.header`'s
      8px locally the way Settings already does.
-   - **F — three specs written, none built.** Spec 25 merges two `ROADMAP.md` entries
-     that are the same feature seen from different ends: "a draft has no render inside
-     the host's own layout" and *Uncovered*'s "cookie-based draft mode". Browsing the
-     real site in draft, across navigations, in the host's own layout is one feature.
-     Decided: a documented `folio.draft()` path the host wires into its own `fetch`,
-     the way it already wires `folio.published()` — consistent with *a host's own routes
-     win*, and rejecting a `handle()` that returns a value the host must act on, which
-     inverts a contract that today returns either a `Response` or `null` and would
-     serve nothing at all for a host that ignored it. What that leaves owed, and what
-     the spec has to answer, is what a share link does on a host that has not wired it.
-     Spec 26 is the icon system. Spec 23 (multi-site) exists and is `draft`; its
-     outstanding decision is the axis, not the mechanism.
+   - **F — specs written, none built.** Done, and one of the three turned out not to
+     exist as work.
+
+     **Spec 25 (`platform/draft-mode.md`) merges two `ROADMAP.md` entries that are the
+     same feature seen from different ends**: "a draft has no render inside the host's
+     own layout" and *Uncovered*'s "cookie-based draft mode". Browsing the real site in
+     draft, across navigations, in the host's own layout is one feature. Written around
+     a finding that made it much smaller than planned: **`folio.draft(env, id)` and
+     `folio.render(doc, { mode: 'mark' })` already exist**, and so does the share
+     cookie — so nothing has to be built to *get* a draft or to render one without
+     chrome. What is missing is a contract, `folio.draftAt(env, req, path)`, and an
+     answer to what a share link does on an unwired host, which is a `draftMode` config
+     key: with it, a share link lands on the page's real URL; without it, on
+     `?_folio=draft` exactly as today. Rejected a `handle()` that returns a value the
+     host must act on, which inverts a contract that today returns either a `Response`
+     or `null`.
+
+     **Spec 26, the icon system, was not written, because it is built.**
+     `admin/ui/icons.tsx` answers every question ROADMAP's entry 1b posed — drawn by
+     hand on a 24-unit grid, one `svg()` wrapper owning the stroke so no icon can state
+     its own weight, `IconName` a closed union. Writing the spec would have specified
+     finished work. The same sweep found the **dialog primitive** entry stale too:
+     `admin/ui/Dialog.tsx` exists and fifteen files use it. Both entries are corrected
+     in place. The lesson generalises and is worth more than either fix: ROADMAP's
+     *Known smaller issues* accumulated during the UI rebuild and the rebuild closed
+     some of them without editing the list, so an item there is a lead and not a fact.
+     Four of the remaining ones were checked against the tree in the same pass and are
+     real: no pointer drag in the tree, `references()` still reordering with ↑ ↓,
+     the 4px table-heading gutter, and the unbroadcast sibling reorder.
+
+     **Spec 23 (multi-site) needed no axis decision** — decision 1 already fixes it as
+     a `site_id` column on `stories`. Its three genuinely open questions are resolved
+     in place, each to the leaning it already carried: one `basePath`, `types` as a
+     per-site map, and an explicit `site` on `ContentQuery` for in-process callers
+     only. Still `draft` and unstarted.
 
    **Defaulted rather than asked, and recorded so the defaults are visible:**
    `required`/`min` enforcement becomes a *publish-time* check naming what is

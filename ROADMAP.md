@@ -439,23 +439,31 @@ through `boot.apiBase` and the rebuilt router is relative to its mount.
 **Specified in full** in `docs/specs/foundation/pagination.md` decision 3, as its
 phase 3 — a rename with no response body changed.
 
-### 1b. There is no icon system, and the sidebar is using text glyphs
+### 1b. The icon system. Done — drawn, not imported
 
-Also found by building the shell. `admin/ui/nav.ts` gives every nav item a
-single unicode character (`⌂ ☰ ▤ ⬚ ◆ ⚿`) rendered in the UI font, so weight, size
-and optical alignment are whatever that font does. It reads as a design and is
-not one.
+**This entry described the unicode glyphs as still shipping, and they have not been
+for some time.** Found 2026-08-04 while about to write a spec for work that was
+already built, which is the reason the correction is worth as much as the entry was:
+`admin/ui/icons.tsx` is the answer to every question this asked.
 
-Nothing has decided the answer, and none of `ui-review.md`,
-`design-system.md` or `ui-architecture.md` names it — which is the gap. The
-decision is at least: an inline SVG set (which set, or drawn?), sized on a token,
-with a fixed stroke weight; and whether icons appear anywhere other than the
-sidebar and the collapsed rail, because the design system's eleven primitives
-currently use none.
+Every question it posed, answered in that file: **drawn by hand**, not a set
+imported — a 24-unit box rendered at 16px, `stroke="currentColor"` with no `fill` so
+dark mode is free. **The grid, the stroke (1.5), the caps and the joins live in one
+`svg()` wrapper and no individual icon states any of them**, so an icon cannot
+express a different weight without editing the wrapper. `IconName` is a closed
+union and `ICONS` is a `Record` over it, so a tenth nav item that forgets a drawing
+is a type error in two places rather than a blank 16px box in the rail.
 
-Not urgent, and deliberately not on the critical path: the collapsed rail is the
-only place an icon carries meaning alone, and every item there already has a
-`title` and an accessible name.
+The defect it fixed is also recorded more precisely there than here: not that the
+glyphs were ugly, but that `⚿` had **no glyph at all** in most UI fonts and drew as
+tofu, `⚙` was doing duty for two different nav items, and `◆` is solid black beside
+`⌂`'s hairline. A set assembled from whatever a font happens to contain has no
+consistent weight, grid or optical size.
+
+Two things left, both small: the 16px render size is a literal rather than a token,
+and icons still appear only in the sidebar and the collapsed rail — the design
+system's primitives use none, which was the second half of this entry's question and
+remains unanswered because nothing has asked for one.
 
 ### 2. Scheduled publishing. Done — and *not* with a DO alarm
 
@@ -532,10 +540,16 @@ schedule cleanup.
 
 ## Uncovered from the reference project
 
-**Cookie-based draft mode.** Preview today is iframe-only (`?_folio=preview`).
-Editors also need to browse the *real* site in draft, across navigations. The
-reference does this with `/api/preview` + `/api/exit-preview` setting a signed
-cookie. We should do the same; it also makes share-a-preview-link work.
+**Cookie-based draft mode. Specified as spec 25** (`platform/draft-mode.md`), and
+merged with the host-layout draft render below, because they are one feature: browsing
+the *real* site in draft across navigations is what "a draft rendered in the host's own
+layout" means once you can follow a link. The reference does it with `/api/preview` +
+`/api/exit-preview` setting a signed cookie, and the shape carries over —
+`{base}/draft/enter` and `{base}/draft/exit` — but the cookie is not signed, because
+Folio's session and share cookies are both opaque tokens matched against D1 rather than
+HMACs, and a third mechanism to rotate is worse than reusing the two that exist.
+Share-a-preview-link is already built (spec 21); what this adds is that it lands on the
+host's own page.
 
 **Cache invalidation on publish (and unpublish). Done** — see *Caching* under
 *Done* above. Kept here because the shape of the answer is the useful part: the
@@ -623,15 +637,21 @@ an unsorted flat list, which stops working somewhere around 15.
   `preview_document` now captions the limit in its own result rather than letting a
   model infer the host's layout from Folio's approximation.
 
-  The mode split made the honest version possible and nothing uses it yet: a host
-  can call `folio.draft(env, id)` and render the result with
-  `folio.render(doc, { mode: 'mark' })` inside its own layout, which would be
-  genuinely production-shaped *and* addressable by `[data-folio-uid]`. That wants a
-  decision Folio has not made — whether the library offers a documented "render this
-  draft in your own page" path that a host wires into its own routing, or whether
-  `handle()` grows a way to hand a draft back for the host to render — plus an
-  answer for what a share link does on a host that has not wired it. A real feature,
-  not a fix. Recorded from spec 24's phase 4 review (2026-08-03).
+  **Specified 2026-08-04 as spec 25, `docs/specs/platform/draft-mode.md`**, which also
+  absorbs *Uncovered*'s "cookie-based draft mode" — browsing the real site in draft
+  across navigations is the same feature seen from the other end. The decision this
+  entry said Folio had not made is made there: a documented `folio.draftAt(env, req,
+  path)` the host branches on in its own `fetch`, rejecting a `handle()` that hands a
+  draft back, because that inverts a contract which today returns either a `Response`
+  or `null` and would serve nothing for a host that ignored the third case. The
+  unwired-host question is answered by a `draftMode` config key rather than by
+  inference: with it a share link lands on the page's real URL, without it on
+  `?_folio=draft` exactly as now.
+
+  Writing it turned up that most of the machinery is already public: `folio.draft(env,
+  id)` returns a draft, `folio.render(doc, { mode: 'mark' })` renders one with no
+  chrome, and the share cookie already scopes a grant to one story. What is missing is
+  the contract, not the capability. Still unbuilt.
 
 - **The admin still computes a restore in the browser, and the route that would do it
   server-side is already live.** `admin/hooks/useVersions.ts:375` builds
@@ -897,11 +917,20 @@ an unsorted flat list, which stops working somewhere around 15.
 - `min` on a `references()` field warns in the editor and is not enforced on write.
   Consistent with `required` across the whole field system, and it should be fixed
   in one place for every field rather than here first.
-- The admin has no dialog primitive. Six dialogs share one hand-rolled shell
-  (overlay, scrim button, panel) and `hooks/useFocusTrap.ts` is the only piece
-  actually factored out; the CSS is duplicated five times over too. A seventh
-  dialog is the point at which a `<Modal>` wrapper beats the hook, and the hook is
-  what it would be built on.
+- **The dialog primitive exists. This entry was stale**, found in the same
+  2026-08-04 sweep as the icon one. `admin/ui/Dialog.tsx` is the shell — portal,
+  scrim, panel, footer actions, `useFocusTrap` inside it rather than beside it — and
+  fifteen files render a `<Dialog>`, so the "seventh dialog is the point at which a
+  wrapper beats the hook" prediction was right and was acted on. It carries a
+  `danger` prop for the reason its own comment gives: `variant="danger"` is a
+  *quiet* button by design, which in a footer left Cancel looking heavier than
+  Delete — the affirmative action reading as the lesser of the two is the worst
+  hierarchy available for the one control that cannot be undone.
+
+  Five surfaces still call `useFocusTrap` directly rather than through `Dialog`
+  (`BlockPicker`, `DocumentPicker`, `RichTextField`, `FocusMode`, `HistoryPanel`).
+  That is not obviously wrong — a rail, a focus mode and a panel are not modal
+  questions — but it is the thing to look at before adding a sixth.
 
 ## Fixed 2026-07-30 (the small-items pass)
 

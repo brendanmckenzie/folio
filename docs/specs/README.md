@@ -60,6 +60,7 @@ sequence because the dependency graph is the same one.
 | 22 | [Build artifacts and `.d.ts`](foundation/package-build.md) | foundation | S | — | — | completion plan: gap 5 |
 | 23 | [Many sites in one deployment](foundation/multi-site.md) | foundation | XL | 5 | `0005` | owner, 2026-08-01 |
 | 24 | [An MCP server](platform/mcp-server.md) | platform | M–L | — | — | feedback: ai-friendliness |
+| 25 | [Draft mode](platform/draft-mode.md) | platform | M | — | — | roadmap, twice: host-layout draft + cookie draft mode |
 
 Sizing matches `PARITY.md`: **S** ≈ a day, **M** ≈ a few days, **L** ≈ a week
 or two. Relative weight, not a quote.
@@ -261,7 +262,9 @@ main-line tables are **done**, restamped in place with an `## Implementation not
 section recording what actually landed. Spec 17 (caching) is **done** too, and so are
 specs 19 (scheduled publishing), 20 (bulk writes), 21 (draft preview sharing), 22
 (build artifacts) and 24 (an MCP server). Spec 18 (pagination) is **in-progress**: its
-phase 1, the schema collapse, has landed. Spec 23 (multi-site) is **draft** and unstarted.
+phase 1, the schema collapse, has landed. Specs 23 (multi-site) and 25 (draft mode) are
+**draft** and unstarted; 23's three open questions were resolved in place on 2026-08-04
+without starting it, and 25 was written the same day.
 A spec that gets built is restamped the same way, the way `../../PARITY.md`
 records what landed.
 

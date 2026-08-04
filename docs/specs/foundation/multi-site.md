@@ -356,13 +356,27 @@ data is already scoped by the routes underneath it.
 
 ## Open questions
 
-1. **Does `basePath` stay one value?** The admin is on one origin (decision 5), so
-   probably yes — but a host that mounts Folio at `/folio` on each site's own
-   domain has a different answer, and preview already runs on the site's origin.
-2. **Should `types` be per-site or shared with a per-site allow-list?** Decision 3
-   says per-site map. A shared list of types with each site naming a subset is
-   less expressive and much less to keep in step.
-3. **What happens to `folio.query`'s `ContentQuery` when the caller is a host's
-   own Worker rather than a request?** It has no `Request` to resolve a site from.
-   Probably an explicit `site` on the query, which contradicts "no `?site=`
-   parameter" for a good reason: a host's own code is not an untrusted caller.
+**All three resolved 2026-08-04, each to the leaning it already carried.** Recorded
+as decisions rather than deleted, because the reasoning is what a reviewer needs and
+"the spec used to be unsure about this" is worth knowing.
+
+1. **`basePath` stays one value. Resolved: yes.** The admin is on one origin
+   (decision 5), so there is one mount to name. A host that wants Folio at `/folio`
+   on each site's own domain is asking for per-site *admin* origins, which decision 5
+   already rejected for a stronger reason than this one — one account signing in once
+   is the point. Preview running on the site's origin is not a counter-example: it is
+   reached by an absolute URL built from the host's own `route`, so it never needed
+   `basePath` to vary.
+2. **`types` is a per-site map. Resolved: as decision 3 says.** The alternative — one
+   shared list with each site naming a subset — is both less expressive (two sites
+   cannot have a differently-shaped `page`) and, contrary to first impression, *more*
+   to keep in step: a subset list is a second place a type's existence is recorded,
+   and the two drift the first time a type is renamed.
+3. **`ContentQuery` gains an explicit `site`, required for an in-process caller.
+   Resolved.** It does contradict "no `?site=` parameter", and the contradiction is
+   the point rather than a compromise: that rule exists so an *untrusted* caller
+   cannot select a site, and `folio.query(env, …)` is the host's own Worker, which is
+   trusted by construction and has no `Request` to resolve one from. The HTTP route
+   keeps resolving the site from the request and never reads a `site` field, so the
+   two paths cannot be confused — and a query with no `site` from in-process code is
+   a type error rather than a silent read of every site's content.
