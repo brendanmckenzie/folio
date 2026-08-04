@@ -254,6 +254,37 @@ describe('updateStory', () => {
     expect(await storyByPath(env.DB, 'about/team')).toBeNull()
   })
 
+  /**
+   * **Depth, which the cases either side of this one do not reach.** Both of them
+   * work on a page whose parent is the root or is null, so the ancestor chain above
+   * the row being rewritten is empty or one row long — and a path derivation that
+   * only ever climbed one level would pass them both.
+   *
+   * `createStory` and `updateStory` read the subtree rather than every story now,
+   * plus the chain above the *new* parent, because `derivePaths` walks `parent_id`
+   * upwards and silently treats a row whose parent is missing from its input as
+   * top-level. So a rename four levels down has to keep every ancestor's segment,
+   * and a *move* four levels down has to rebuild from the new chain — which is what
+   * the second half asserts, since a move is where a truncated chain shows up as a
+   * page promoted to the root rather than as a missing prefix.
+   */
+  it('keeps every ancestor segment when renaming and when moving deep in the tree', async () => {
+    const b = await createStory(env.DB, { title: 'B', parentId: 'sty_about', type: PAGE })
+    const c = await createStory(env.DB, { title: 'C', parentId: b.id, type: PAGE })
+    const d = await createStory(env.DB, { title: 'D', parentId: c.id, type: PAGE })
+    expect(d.path).toBe('about/b/c/d')
+
+    // Rename the middle of the chain: everything below it keeps the whole prefix.
+    await updateStory(env.DB, c.id, { title: 'See' })
+    expect((await storyById(env.DB, d.id))?.path).toBe('about/b/see/d')
+
+    // Move the leaf under a different deep parent: the prefix is rebuilt from the
+    // new chain, all four segments of it.
+    const other = await createStory(env.DB, { title: 'Other', parentId: 'sty_team', type: PAGE })
+    await updateStory(env.DB, d.id, { parentId: other.id })
+    expect((await storyById(env.DB, d.id))?.path).toBe('about/team/other/d')
+  })
+
   it('reparents a story, recomputing its path under the new parent', async () => {
     const dest = await createStory(env.DB, { title: 'Team Home', type: PAGE })
     const moved = await updateStory(env.DB, 'sty_team', { parentId: dest.id })

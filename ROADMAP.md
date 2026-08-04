@@ -681,35 +681,46 @@ an unsorted flat list, which stops working somewhere around 15.
   other plugin's, and Vite concatenates when either side is an array. Anything it
   returns under `build.rollupOptions` should assume a framework got there first.
 
-- **Three whole-table reads remain on the server's *write* paths**, plus one trivial
-  one on a request path. `server/stories.ts` calls the unbounded `listStories(db)` in
-  `createStory` (1277), `updateStoryStatement` (1505) and `deleteStoryStatement`
-  (1683) — so creating, renaming, moving or deleting one document reads every document
-  on the site, and `duplicateStory` inherits it through `createStory`. The fourth is
-  `routes/editor.ts:153`, where `/edit` takes `(await listStories(db))[0]` to find
-  somewhere to redirect to when there is no root story; that one wants `limit 1` and
-  nothing more.
+- **The write paths no longer read every story on the site. Done 2026-08-04.**
+  `createStory`, `updateStoryStatement` and `deleteStoryStatement` each called the
+  unbounded `listStories(db)`, so creating, renaming, moving or deleting one document
+  read every document on the site, and `duplicateStory` inherited it through
+  `createStory`. `routes/editor.ts`'s `/edit` fallback was a fourth, taking
+  `(await listStories(db))[0]` to answer "is there anything at all" — now `limit 1`.
 
-  **This entry used to count `storyTree` (243) among them, and that was wrong.** Its
-  one caller is `folio.tree(env)` (`server/index.tsx:409`), a documented public API
-  where handing back the whole tree is the entire point — a shape, not a list, as the
-  function's own comment says. `runtime.ts:604` is the `stories: 'all'` opt-in and is
-  likewise deliberate. Miscounting them mattered: a sweep that "fixed" either would
-  have broken the one call a host makes to build a navigation.
+  Two narrow readers replaced them, both sitting beside the pure function they feed:
+  `siblingGroupRows` is `inGroup`'s predicate in SQL, which is all `uniqueSlug` and
+  `orderAt` ever look at, and `subtreeRows` is `descendants` in SQL — a **recursive
+  CTE over `parent_id`**, not a `path like` prefix, because the root story's path is
+  `''` (no prefix describes its children) and a drifted path would move a row in or
+  out of a subtree that `parent_id` disagrees about. The point was to read fewer rows,
+  not to quietly change which rows.
 
-  This is the same class of defect as the five the pagination work closed, and it
-  survived that sweep because those were the *admin's* reads: every list route
-  pages now, and a reviewer checking "are the unbounded reads gone" against the
-  admin finds nothing. Found while reading `createStory` for the create-dialog
-  change, not by a test — nothing here fails at demo scale.
+  **Two hazards, both real, both already covered — verified by breaking the code
+  rather than by reading it.** Removing the ancestor chain from `updateStoryStatement`
+  fails 3 tests; writing `parent_id = ?` bound to null instead of `parent_id is null`
+  fails 8. The second is the SQL trap worth remembering: equality against null is
+  null, so every top-level page would have believed itself the only one and the first
+  slug collision would have surfaced as a unique-index refusal instead of a suffix.
+  The first is subtler — `derivePaths` treats a row whose parent is absent from its
+  input as top-level, so a subtree-only read silently promotes a moved page to the
+  root. One test was added for the case the suite could not reach: depth. Every
+  existing case works one level from the root or from null, so a derivation that only
+  ever climbed one level passed all of them.
 
-  The narrow queries each one wants are known: a row by id, siblings-in-group for
-  `uniqueSlug` and for the append position, and the subtree for the descendant
-  rewrite — a recursive CTE, since `descendants` walks `parent_id` rather than paths
-  and an unrouted document has no children at all. It is not a passing tidy-up,
-  though — fractional ordering, slug dedupe and path rebuilding are exactly the three
-  things that are subtly wrong when a query is narrowed by guess, so it wants its own
-  change with the ordering tests written *first*, against current behaviour.
+  **This entry used to count `storyTree` among them, and that was wrong.** Its one
+  caller is `folio.tree(env)` (`server/index.tsx:409`), a documented public API where
+  handing back the whole tree is the entire point — a shape, not a list, as the
+  function's own comment says. `runtime.ts`'s remaining call is the `stories: 'all'`
+  opt-in and is likewise deliberate. Both are untouched, and the miscount mattered: a
+  sweep that trusted this list would have broken the one call a host makes to build a
+  navigation.
+
+  One accidental capability is gone, named rather than mourned: because
+  `derivePaths` used to run over every row, a rename would repair *any* stored path
+  that had drifted from its ancestor chain, anywhere on the site. Nothing specified
+  that and nothing relied on it; it now repairs the subtree it is rewriting and the
+  chain above it.
 - **The table-bodied screens' headings are 4px out from their own cells.** `Access`,
   `Model` and `Redirects` put a section heading in `ListHeader` — an 8px row gutter —
   above `Table` cells with a 12px gutter, so nothing quite lines up vertically. It is
