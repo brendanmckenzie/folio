@@ -2092,13 +2092,11 @@ Custom field types defined by a host project. An **admin surface for outbound
 webhooks** — the publish hooks fire and a host's own code can act on them, but a
 *configured* webhook with a delivery log is what a client asks for on day one.
 
-The package build **has** landed (`docs/specs/foundation/package-build.md`): `folio`
-ships `dist/` with declaration files and source maps, so a consumer no longer
-transpiles `node_modules` or matches this repo's TypeScript version. One half is still
-owed and the spec spells it out — `folio/core`, `folio/engine` and `folio/server` point
-`types` at source rather than at `dist/types`, because `createStoryDO` and
-`createSpaceDO` each return an *anonymous* class holding `private` members, and tsc
-answers `TS4094` by emitting no declaration file for those modules at all.
+The package build has landed in full (`docs/specs/foundation/package-build.md`): `folio`
+ships `dist/` with declaration files and source maps, and `folio/core`, `folio/engine`
+and `folio/server` all resolve `types` to `dist/types`. What remains is release
+mechanics rather than engineering — `private: true`, a version, a licence and a
+package-level README.
 
 Within localisation: translated slugs (a French URL contains English words), and
 per-locale publishing. Both are deliberate and both are additive later — see the
@@ -2116,10 +2114,12 @@ separate write path and a separate ranking question, so it is its own spec), a
 stays a fixed projection of a document), **faceted counts** ("Policy (12), AI (8)" —
 one `group by` over the same predicate, genuinely easy and deliberately unbuilt
 until a design asks), per-field pagination on a page with two independently paged
-lists (`?page` is one number), **draft-status queries** (the index is published-only
-by construction, and the admin lists documents from `stories` instead — a list of
-documents, not a query over content), and a per-type admin list view with columns
-from the indexed fields, which belongs with the rest of the Data section.
+lists (`?page` is one number), and **filtering a query by draft state**. That last one
+wants care, because half of it exists now: `GET {base}/api/v1/search` finds a draft by
+title, path, type or state, so *reaching* one is no longer the gap it was. What
+`content_index` cannot do is filter or sort a draft on an `indexed` field, and it
+cannot in principle — those rows are written inside the publish batch, so an
+unpublished document has none.
 
 Within content migrations: no `down`, and no automated migration of a document
 from one *document type* to another (it needs a root retype plus a `stories.type`

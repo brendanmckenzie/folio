@@ -630,6 +630,18 @@ an unsorted flat list, which stops working somewhere around 15.
   answer for what a share link does on a host that has not wired it. A real feature,
   not a fix. Recorded from spec 24's phase 4 review (2026-08-03).
 
+- **The admin still computes a restore in the browser, and the route that would do it
+  server-side is already live.** `admin/hooks/useVersions.ts:375` builds
+  `diff(live, target)` client-side and posts the mutations; spec 24 shipped
+  `POST {base}/api/v1/documents/:id/restore`, which does the same read-diff-commit
+  behind one request and is tested. Nothing is broken — the client-side diff is the
+  same `diff()` the server runs, and the restore still lands as one ordinary
+  transaction — so this is duplication rather than a defect: two callers of the same
+  core function, one of which has to hold the whole target document in the browser to
+  call it. Spec 24 named this as its optional phase 6 and it was deliberately not
+  built, on the grounds that the route wanted a consumer chosen on purpose rather than
+  by reflex.
+
 - **`adminCss` is hard-coded to `/folio-admin.css`, and a host with
   `build.cssCodeSplit: false` has no such file.** The Vite plugin computes
   `__FOLIO_ASSETS__` in its `config()` hook, before the client environment's CSS
@@ -652,11 +664,21 @@ an unsorted flat list, which stops working somewhere around 15.
   other plugin's, and Vite concatenates when either side is an array. Anything it
   returns under `build.rollupOptions` should assume a framework got there first.
 
-- **Four whole-table reads remain, and they are on the server's *write* paths.**
-  `server/stories.ts` calls the unbounded `listStories(db)` in `storyTree` (243),
-  `createStory` (1277), `updateStoryStatement` (1487) and `deleteStoryStatement`
-  (1627) — so creating, renaming, moving or deleting one document reads every
-  document on the site, and `duplicateStory` inherits it through `createStory`.
+- **Three whole-table reads remain on the server's *write* paths**, plus one trivial
+  one on a request path. `server/stories.ts` calls the unbounded `listStories(db)` in
+  `createStory` (1277), `updateStoryStatement` (1505) and `deleteStoryStatement`
+  (1683) — so creating, renaming, moving or deleting one document reads every document
+  on the site, and `duplicateStory` inherits it through `createStory`. The fourth is
+  `routes/editor.ts:153`, where `/edit` takes `(await listStories(db))[0]` to find
+  somewhere to redirect to when there is no root story; that one wants `limit 1` and
+  nothing more.
+
+  **This entry used to count `storyTree` (243) among them, and that was wrong.** Its
+  one caller is `folio.tree(env)` (`server/index.tsx:409`), a documented public API
+  where handing back the whole tree is the entire point — a shape, not a list, as the
+  function's own comment says. `runtime.ts:604` is the `stories: 'all'` opt-in and is
+  likewise deliberate. Miscounting them mattered: a sweep that "fixed" either would
+  have broken the one call a host makes to build a navigation.
 
   This is the same class of defect as the five the pagination work closed, and it
   survived that sweep because those were the *admin's* reads: every list route
@@ -664,12 +686,13 @@ an unsorted flat list, which stops working somewhere around 15.
   admin finds nothing. Found while reading `createStory` for the create-dialog
   change, not by a test — nothing here fails at demo scale.
 
-  The narrow queries each one wants are known: siblings-in-group for
-  `uniqueSlug`, `max(ord)` within the group for the position, and a path-prefix
-  query for the descendant rewrite. It is not a passing tidy-up, though —
-  fractional ordering, slug dedupe and path rebuilding are exactly the three
-  things that are subtly wrong when a query is narrowed by guess, so it wants
-  its own change with the ordering tests in front of it.
+  The narrow queries each one wants are known: a row by id, siblings-in-group for
+  `uniqueSlug` and for the append position, and the subtree for the descendant
+  rewrite — a recursive CTE, since `descendants` walks `parent_id` rather than paths
+  and an unrouted document has no children at all. It is not a passing tidy-up,
+  though — fractional ordering, slug dedupe and path rebuilding are exactly the three
+  things that are subtly wrong when a query is narrowed by guess, so it wants its own
+  change with the ordering tests written *first*, against current behaviour.
 - **The table-bodied screens' headings are 4px out from their own cells.** `Access`,
   `Model` and `Redirects` put a section heading in `ListHeader` — an 8px row gutter —
   above `Table` cells with a 12px gutter, so nothing quite lines up vertically. It is

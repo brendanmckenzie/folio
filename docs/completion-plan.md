@@ -81,6 +81,98 @@ in a browser before it is called done.
      protected on `DurableObject` itself, so the return types had to be declared.
      What remains is not engineering: `private: true`, a version, a licence and a
      package-level README.
+7. **What `ROADMAP.md` and `README.md` still had outstanding**, audited 2026-08-04 once
+   spec 24 landed. The audit's own finding is that the two files disagreed with the tree
+   in four places, so the first batch is the documents rather than the code. Six
+   batches, each landable on its own:
+
+   - **A — the documents tell the truth again.** Done. Three stale passages in
+     `README.md`'s *Not built yet* (the package build's `.d.ts` half, which landed;
+     a per-type admin list view, which is the Documents screen; and draft-status
+     queries, which `GET {base}/api/v1/search` half-answered), plus `ROADMAP.md`'s
+     drifted line numbers, its miscount of the whole-table reads, and the spec-24
+     phase 6 item that was recorded nowhere.
+   - **B — `cssCodeSplit: false` breaks a production build.** The only item on either
+     list that is currently broken for a host that exists (Harbour sets the
+     flag; the demo does not, so `pnpm build` proves nothing). `adminCss` is
+     `['/folio-admin.css']` and with code splitting off Vite emits one
+     `assets/style-<hash>.css` instead, so the admin renders unstyled behind a 200.
+     **`ROADMAP.md` said this needed `generateBundle`, and it does not:**
+     `__FOLIO_ASSETS__` is computed in `config()`, which is handed `userConfig`, and
+     `build.cssCodeSplit` is set by the host in exactly that object. So it is a branch,
+     not an indirection. Decided: when the flag is off, pin the single emitted
+     stylesheet to a fixed name and point both `adminCss` and `previewCss` at it,
+     accepting that the admin page then also loads the host's CSS because one
+     stylesheet is all there is. Rejected forcing `cssCodeSplit: true` for the client
+     environment (it overrides a choice a host made deliberately, and a host that sets
+     it back is broken again silently) and the full `generateBundle` + manifest
+     indirection (correct however the flag is set, including by another plugin, but far
+     more machinery than the case needs). The missing tripwire matters as much as the
+     fix: a unit test over the plugin's own `config()` hook with
+     `{ build: { cssCodeSplit: false } }`, asserting the asset paths. It fails today.
+   - **C — the MCP server moves to protocol revision `2026-07-28`.** Folio answers
+     `2025-06-18`, which is two revisions behind (`2025-11-25` sits between them and is
+     also handshake-based). Decided: **implement the current revision only**, per the
+     greenfield rule. Two things make that cheaper and safer than it looks. The new
+     revision's headline is a *stateless core* — per-request negotiation through
+     `_meta` and an `MCP-Protocol-Version` header, no handshake, no session — which is
+     exactly the architecture `platform/mcp-server.md` already chose, so there is
+     nothing to unpick. And rejection is a typed `UnsupportedProtocolVersionError`
+     that lists the versions the server does support, so a client that cannot speak it
+     fails loudly and informatively rather than mysteriously.
+
+     The residual risk is real and is handled by sequencing rather than by argument.
+     Anthropic's client probes `server/discover` and falls back to `initialize` for
+     older servers, so it is dual-era and a Modern-only Folio works with it — but
+     support is being rolled out across Claude's surfaces and `docs/mcp.md` documents
+     four of them. **So dropping the handshake is the last commit in this batch, on its
+     own**: the current revision lands and is verified against a real client first, and
+     if a surface turns out to be stranded, restoring Legacy is one revert instead of a
+     rewrite. `server/discover` is a MUST in the new revision and returns supported
+     versions, capabilities and identity in one request, which is close to what
+     `tools/list` already answers per request.
+
+     Folio's credential stance survives unchanged, and it is worth writing down because
+     it looks like it should not: authorization is **OPTIONAL** in MCP, and the OAuth
+     2.1 apparatus — including the RFC 9728 Protected Resource Metadata **MUST** —
+     binds a server that conforms to the authorization specification. Folio does not
+     conform and uses its own `api_tokens` table, which is a deviation from a SHOULD
+     with a stated reason (Folio is an OIDC *client*, not a provider), exactly where it
+     already stood.
+   - **D — the whole-table reads on the write paths.** Three real sites plus one
+     trivial one, inventoried in `ROADMAP.md`. No product decision in it, and the
+     method is the whole content: fractional ordering, slug dedupe and path rebuilding
+     are the three things that go subtly wrong when a query is narrowed by guess, so
+     the ordering, slug and path tests get written **first**, against current
+     behaviour, and the narrowing has to leave them passing.
+   - **E — small correctness and cosmetics.** The sibling-reorder broadcast, which
+     should be an advisory `treeChanged` carrying no paths and no URLs — that sidesteps
+     the "a client cannot derive the URL of a page whose path just moved" problem that
+     blocks patching the tree in place, and the space channel is already advisory and
+     unordered. Plus the table-heading alignment pass at 12px, cancelling `.header`'s
+     8px locally the way Settings already does.
+   - **F — three specs written, none built.** Spec 25 merges two `ROADMAP.md` entries
+     that are the same feature seen from different ends: "a draft has no render inside
+     the host's own layout" and *Uncovered*'s "cookie-based draft mode". Browsing the
+     real site in draft, across navigations, in the host's own layout is one feature.
+     Decided: a documented `folio.draft()` path the host wires into its own `fetch`,
+     the way it already wires `folio.published()` — consistent with *a host's own routes
+     win*, and rejecting a `handle()` that returns a value the host must act on, which
+     inverts a contract that today returns either a `Response` or `null` and would
+     serve nothing at all for a host that ignored it. What that leaves owed, and what
+     the spec has to answer, is what a share link does on a host that has not wired it.
+     Spec 26 is the icon system. Spec 23 (multi-site) exists and is `draft`; its
+     outstanding decision is the axis, not the mechanism.
+
+   **Defaulted rather than asked, and recorded so the defaults are visible:**
+   `required`/`min` enforcement becomes a *publish-time* check naming what is
+   incomplete, not a write-time refusal, because a draft in progress is legitimately
+   incomplete and refusing writes would break importers and the API on content that is
+   fine. Versions retention and mutation-log compaction stay parked — both are "wants a
+   policy" with no pressure behind them, and a retention number chosen without a real
+   site's history is a guess. Tree drag for pointer users stays parked: keyboard
+   reordering works and the row menus cover pointer users, so drag is a feature with
+   a11y obligations of its own rather than a gap.
 
 ## What is deliberately NOT in this run
 
