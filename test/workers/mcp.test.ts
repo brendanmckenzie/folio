@@ -11,7 +11,12 @@ import type { Role, Scope } from '../../src/server/auth/roles'
 import { createSession } from '../../src/server/auth/session'
 import { createToken } from '../../src/server/auth/tokens'
 import { createUser } from '../../src/server/auth/users'
-import { MCP_PROTOCOL_VERSION } from '../../src/server/routes/mcp'
+import {
+  HEADER_MISMATCH,
+  MCP_PROTOCOL_VERSION,
+  SUPPORTED_VERSIONS,
+  UNSUPPORTED_PROTOCOL_VERSION,
+} from '../../src/server/mcp/rpc'
 import { ensureSingleton } from '../../src/server/stories'
 import { STORY_STATE } from '../../src/server/validate'
 
@@ -157,10 +162,28 @@ interface RpcAnswer<T = unknown> {
   jsonrpc: string
   id: number | string | null
   result?: T
-  error?: { code: number; message: string }
+  error?: { code: number; message: string; data?: unknown }
 }
 
 let nextId = 0
+
+/**
+ * The request metadata revision `2026-07-28` requires on every POST: the revision
+ * itself, the mirrored method, and the mirrored tool name for a `tools/call`.
+ *
+ * Derived here rather than written per test so that the forty-odd cases below go on
+ * exercising tools rather than headers — and so the handful of tests that mean to
+ * break one header do it through `call()` directly, where the absence is visible.
+ */
+function wireHeaders(method: string, params: Record<string, unknown>): Record<string, string> {
+  const name = params.name
+  return {
+    'content-type': 'application/json',
+    'mcp-protocol-version': MCP_PROTOCOL_VERSION,
+    'mcp-method': method,
+    ...(method === 'tools/call' && typeof name === 'string' ? { 'mcp-name': name } : {}),
+  }
+}
 
 async function rpc<T>(
   method: string,
@@ -169,19 +192,23 @@ async function rpc<T>(
     headers?: Record<string, string>
     on?: ReturnType<typeof build>
     ctx?: ExecutionContext
+    /** Expected HTTP status. 200 unless a test is about a status that is not. */
+    status?: number
   } = {},
 ): Promise<RpcAnswer<T>> {
   const res = await call(
     MCP,
     {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...(init.headers ?? {}) },
+      headers: { ...wireHeaders(method, params), ...(init.headers ?? {}) },
       body: JSON.stringify({ jsonrpc: '2.0', id: ++nextId, method, params }),
     },
     init.on ?? folio,
     init.ctx ?? createExecutionContext(),
   )
-  expect(res.status).toBe(200)
+  // Asserted rather than merely returned: the status is protocol-significant now,
+  // so a tool call that starts answering 400 should fail here and not silently.
+  expect(res.status).toBe(init.status ?? 200)
   return (await res.json()) as RpcAnswer<T>
 }
 
@@ -243,27 +270,53 @@ beforeEach(async () => {
   ])
 })
 
-/* -------------------------------------------------------------- initialize --- */
+/* ---------------------------------------------------------------- discovery --- */
 
-describe('initialize', () => {
+describe('server/discover', () => {
   /**
-   * **Succeeds with no credential, and that is deliberate.** An MCP client
-   * probes before it is configured, and a 401 at `initialize` presents as "the
-   * server is broken" rather than "the token is missing".
+   * **Succeeds with no credential, and that is deliberate.** An MCP client probes
+   * before it is configured, and a 401 at discovery presents as "the server is
+   * broken" rather than "the token is missing".
    */
-  it('answers an unauthenticated handshake', async () => {
+  it('answers an unauthenticated probe with versions, capabilities and identity', async () => {
     const answer = await rpc<{
-      protocolVersion: string
+      resultType: string
+      supportedVersions: string[]
       capabilities: { tools: unknown }
-      serverInfo: { name: string; version: string }
-    }>('initialize', { protocolVersion: MCP_PROTOCOL_VERSION, clientInfo: { name: 'probe' } })
+      instructions: string
+      _meta: Record<string, { name: string; version: string }>
+    }>('server/discover')
 
     expect(answer.error).toBeUndefined()
-    expect(answer.result).toEqual({
-      protocolVersion: MCP_PROTOCOL_VERSION,
-      capabilities: { tools: {} },
-      serverInfo: { name: 'folio', version: '0.0.0' },
+    expect(answer.result?.resultType).toBe('complete')
+    expect(answer.result?.supportedVersions).toEqual([...SUPPORTED_VERSIONS])
+    expect(answer.result?.capabilities).toEqual({ tools: {} })
+    expect(answer.result?._meta['io.modelcontextprotocol/serverInfo']).toEqual({
+      name: 'folio',
+      version: '0.0.0',
     })
+  })
+
+  /**
+   * Optional in the spec and deliberately used: `instructions` is the only place a
+   * server addresses the model in prose rather than through one tool's description,
+   * and the two facts that hold across every tool live nowhere else.
+   */
+  it('tells the model the list is already scope-filtered and that writes are live', async () => {
+    const answer = await rpc<{ instructions: string }>('server/discover')
+    expect(answer.result?.instructions).toContain('filtered')
+    expect(answer.result?.instructions).toContain('undoable')
+  })
+
+  /**
+   * **No cache directives.** Both are optional, and declaring one is a promise that
+   * this answer does not vary by caller. It does not today; promising it would be
+   * the thing quietly broken by the first capability that depends on who is asking.
+   */
+  it('declares no ttlMs or cacheScope', async () => {
+    const answer = await rpc<Record<string, unknown>>('server/discover')
+    expect(answer.result).not.toHaveProperty('ttlMs')
+    expect(answer.result).not.toHaveProperty('cacheScope')
   })
 
   /** The honest answer to "what may I do" with nothing presented: nothing. */
@@ -272,10 +325,10 @@ describe('initialize', () => {
   })
 
   /**
-   * Liveness, answered without a credential like the handshake above it. MCP
-   * requires a receiver to answer `ping` promptly; a client that keepalives reads
-   * a `-32601` as a dead peer and drops the session, which for a hosted client
-   * nobody here can patch is the most expensive way to be almost right.
+   * Liveness, answered without a credential like discovery above it. MCP requires a
+   * receiver to answer `ping` promptly; a client that keepalives reads a `-32601` as
+   * a dead peer and drops the connection, which for a hosted client nobody here can
+   * patch is the most expensive way to be almost right.
    */
   it('answers ping, with or without a credential', async () => {
     expect((await rpc('ping')).result).toEqual({})
@@ -291,10 +344,128 @@ describe('initialize', () => {
     expect(await res.text()).toBe('')
   })
 
-  it('refuses a GET with 405 and Allow: POST', async () => {
-    const res = await call(MCP)
-    expect(res.status).toBe(405)
-    expect(res.headers.get('allow')).toBe('POST')
+  /**
+   * `2026-07-28` removed the GET stream *and* protocol-level sessions, so both
+   * verbs of the older transport are refused. DELETE is how a session used to be
+   * terminated, and there has never been one here to terminate.
+   */
+  it('refuses a GET and a DELETE with 405 and Allow: POST', async () => {
+    for (const method of [undefined, 'DELETE']) {
+      const res = await call(MCP, method ? { method } : undefined)
+      expect(res.status).toBe(405)
+      expect(res.headers.get('allow')).toBe('POST')
+    }
+  })
+
+  /**
+   * The older transport's session header is **ignored**, not honoured and not
+   * refused — and nothing is ever echoed back, because a modern server mints no
+   * session ids at all.
+   */
+  it('ignores Mcp-Session-Id and Last-Event-ID without echoing a session', async () => {
+    const res = await call(MCP, {
+      method: 'POST',
+      headers: {
+        ...wireHeaders('ping', {}),
+        'mcp-session-id': 'pretend-session',
+        'last-event-id': '42',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('mcp-session-id')).toBeNull()
+  })
+})
+
+/* ------------------------------------------------------- the transport rules --- */
+
+describe('request metadata, over the wire', () => {
+  /** Post a body with exactly these headers and nothing added. */
+  const raw = (body: unknown, headers: Record<string, string>) =>
+    call(MCP, { method: 'POST', headers, body: JSON.stringify(body) })
+
+  /**
+   * A Legacy client's opening message. It cannot work — there is no handshake to
+   * answer — and the refusal has one job: name the versions that would work, since
+   * a Legacy client has no fall-forward and this is the only diagnostic its user
+   * will see. A *dual-era* client reads the same recognised modern error and retries
+   * as modern instead of falling back.
+   */
+  it('refuses initialize on a 400, naming the supported revisions', async () => {
+    const res = await raw(
+      { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } },
+      { 'content-type': 'application/json' },
+    )
+    expect(res.status).toBe(400)
+    const answer = (await res.json()) as RpcAnswer
+    expect(answer.error?.code).toBe(UNSUPPORTED_PROTOCOL_VERSION)
+    expect(answer.error?.data).toEqual({
+      supported: [...SUPPORTED_VERSIONS],
+      requested: '2025-06-18',
+    })
+  })
+
+  it('refuses a POST with no MCP-Protocol-Version header', async () => {
+    const res = await raw(
+      { jsonrpc: '2.0', id: 1, method: 'ping' },
+      { 'content-type': 'application/json', 'mcp-method': 'ping' },
+    )
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as RpcAnswer).error?.code).toBe(HEADER_MISMATCH)
+  })
+
+  it('refuses the revision it used to answer, listing the one it does', async () => {
+    const res = await raw(
+      { jsonrpc: '2.0', id: 1, method: 'ping' },
+      {
+        'content-type': 'application/json',
+        'mcp-protocol-version': '2025-06-18',
+        'mcp-method': 'ping',
+      },
+    )
+    expect(res.status).toBe(400)
+    const answer = (await res.json()) as RpcAnswer
+    expect(answer.error?.code).toBe(UNSUPPORTED_PROTOCOL_VERSION)
+    expect(answer.error?.data).toEqual({
+      supported: [...SUPPORTED_VERSIONS],
+      requested: '2025-06-18',
+    })
+  })
+
+  it('refuses a Mcp-Method header that disagrees with the body', async () => {
+    const res = await raw(
+      { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+      {
+        'content-type': 'application/json',
+        'mcp-protocol-version': MCP_PROTOCOL_VERSION,
+        'mcp-method': 'ping',
+      },
+    )
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as RpcAnswer).error?.code).toBe(HEADER_MISMATCH)
+  })
+
+  it('requires Mcp-Name on a tools/call', async () => {
+    const res = await raw(
+      { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_schema' } },
+      {
+        'content-type': 'application/json',
+        'mcp-protocol-version': MCP_PROTOCOL_VERSION,
+        'mcp-method': 'tools/call',
+      },
+    )
+    expect(res.status).toBe(400)
+    expect(((await res.json()) as RpcAnswer).error?.code).toBe(HEADER_MISMATCH)
+  })
+
+  /**
+   * 404 rather than a 200 carrying the error, because the status is how a client
+   * separates "this endpoint does not implement that" from a 404 served by
+   * something that is not an MCP endpoint at all.
+   */
+  it('answers an unimplemented method with 404 and -32601', async () => {
+    const answer = await rpc('resources/list', {}, { status: 404 })
+    expect(answer.error?.code).toBe(-32601)
   })
 })
 

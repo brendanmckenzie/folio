@@ -1,5 +1,6 @@
 import { SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
+import { MCP_PROTOCOL_VERSION } from '../../src/server/mcp/rpc'
 
 /**
  * The one rule that lets a contract and an unstable internal surface share the
@@ -167,9 +168,9 @@ describe('the /api partition', () => {
    * prefix with two error envelopes is exactly the confusion this file exists to
    * prevent, so it lives on the bare mount and both `/api` spellings 404.
    *
-   * It is also deliberately **unversioned**: MCP negotiates its own version in
-   * `initialize` and tools are discovered per session, so a version segment here
-   * would be a second ledger tracking a protocol that already has one.
+   * It is also deliberately **unversioned**: MCP carries its own revision on every
+   * request and tools are discovered rather than compiled against, so a version
+   * segment here would be a second ledger tracking a protocol that already has one.
    */
   it('keeps {base}/mcp off the /api partition, versioned or not', async () => {
     for (const path of ['/folio/api/mcp', '/folio/api/v1/mcp', '/folio/api/v2/mcp']) {
@@ -181,12 +182,20 @@ describe('the /api partition', () => {
   it('answers POST {base}/mcp on the bare mount', async () => {
     const res = await SELF.fetch(`${BASE}/mcp`, {
       method: 'POST',
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+      headers: {
+        'content-type': 'application/json',
+        'mcp-protocol-version': MCP_PROTOCOL_VERSION,
+        'mcp-method': 'server/discover',
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: {} }),
     })
     expect(res.status).toBe(200)
-    const body = await res.json<{ jsonrpc: string; result: { serverInfo: { name: string } } }>()
+    const body = await res.json<{
+      jsonrpc: string
+      result: { _meta: Record<string, { name: string }> }
+    }>()
     expect(body.jsonrpc).toBe('2.0')
-    expect(body.result.serverInfo.name).toBe('folio')
+    expect(body.result._meta['io.modelcontextprotocol/serverInfo']?.name).toBe('folio')
   })
 
   it('answers a GET on it with 405 and Allow: POST, not the shell’s HTML', async () => {
