@@ -1267,3 +1267,73 @@ One thing the spec asked for that turned out impossible: `scripts/mcp-test.mjs` 
 `shot.ts`, and Node's native TypeScript support strips types without transforming JSX, so
 the import chain will not load. The script names its tools as literals, the way
 `api-test.mjs` already names its routes.
+
+---
+
+## Amended 2026-08-04: the endpoint speaks revision `2026-07-28`, and only that one
+
+This spec shipped answering `2025-06-18`, which was the current revision when it was
+written and was classed **Legacy** within days of it landing. The bump is recorded here
+rather than in a spec of its own because nothing about the *design* changed: no new
+decision, no new route, no migration, no admin surface. What changed is the wire.
+
+**What `2026-07-28` actually did, and why this endpoint was already shaped for it.** The
+revision moved MCP to a *stateless core*: the `initialize` handshake is gone, replaced by
+per-request metadata; protocol-level sessions are gone; the server-to-client GET stream is
+gone. Decision 9 rejected the SDK, the SSE stream, the session and the Durable Object on
+the grounds that this server never initiates a message to a client — and every one of
+those rejections is now what the protocol *assumes* rather than a deviation it tolerates.
+The migration was a constant, a method rename and a validator, with no structural change
+at all. That is the unusual case of a design being vindicated by a spec revision, and it
+is worth recording because decision 9 read at the time like a shortcut.
+
+**Modern-only, deliberately, and the cost is real.** A Legacy-only client cannot talk to
+this endpoint and has no fall-forward. Folio is greenfield — both ends of a deploy ship
+together and there is no stored data with a version in it — so a second era to keep in
+step is a compatibility mechanism with nothing behind it. Rejected supporting both, which
+the spec explicitly permits (`MAY`) and which the reference SDK does by default: it means
+two lifecycles, two sets of semantics for the same method names, and a permanent branch
+on how a client opened.
+
+Six things the change required, none of them obvious from the changelog:
+
+1. **HTTP status became protocol-significant.** `handleRpc` used to answer every JSON-RPC
+   error on a `200`, which is ordinary JSON-RPC practice. It cannot now: `-32601` must be
+   a `404`, and the version and header errors must be `400`, because a dual-era client
+   *reads the status and the body together* to decide whether to fall back to a handshake.
+   So `handleRpc` returns an outcome — a status beside the response — and `httpStatusFor`
+   is the pure mapping, pinned by a test. Getting this wrong would not fail any request;
+   it would silently make a dual-era client fall back to `initialize` and then fail.
+2. **`initialize` is answered *before* any header is validated**, which looks backwards
+   and is the whole point. A modern-only server SHOULD name its supported versions in any
+   error it returns to `initialize`, because a Legacy client has no fall-forward and that
+   message is the only diagnostic its user will ever see. Validate headers first and the
+   answer becomes "missing header": true, and silent about the only fact that would help.
+3. **`server/discover` is a MUST**, unlike `initialize`, which was a handshake a client
+   had to complete. It carries `supportedVersions`, `capabilities`, `resultType` and the
+   server identity under `_meta['io.modelcontextprotocol/serverInfo']`. It is answered
+   without a credential for the same reason the old handshake was.
+4. **`instructions` is a genuine gain and had no equivalent before.** It is the one place
+   a server addresses the model in prose rather than through a single tool's description,
+   so it carries the two things true of every tool here and visible from none of them: the
+   list is already scope-filtered, and a write is a real edit that appears live in an open
+   editor and is undoable.
+5. **No `ttlMs` or `cacheScope`**, though the canonical example shows both. Declaring a
+   cache lifetime promises the answer does not vary by caller. It does not vary today, and
+   it is one small object to recompute — so the promise buys nothing and would be the thing
+   quietly broken by the first capability that depends on who is asking.
+6. **Three headers are now required and are validated against the body.** `Mcp-Method`
+   mirrors `method`; `Mcp-Name` mirrors `params.name` on a `tools/call`, after decoding the
+   Base64 sentinel a client must use for any value that is not plainly ASCII. The rule
+   exists because mirroring creates the vulnerability it then closes: a gateway routing on
+   a header while the server executes the body is two sources of truth. One deliberate
+   softening is recorded in `mcp/rpc.ts`: a body whose `params._meta` omits the version is
+   accepted when the header is present and supported, because a body that declares nothing
+   cannot disagree with anything.
+
+**What this does not resolve.** Which of Anthropic's client surfaces speak `2026-07-28`
+today is not knowable from the published documentation — the announcement says support is
+rolling out — and `docs/mcp.md` names four. The client probes `server/discover` and falls
+back to `initialize` for older servers, so a dual-era client works against this endpoint;
+a surface still pinned to Legacy will not, and gets a `400` naming the revision that would.
+That is the accepted cost of the decision rather than an open question about it.

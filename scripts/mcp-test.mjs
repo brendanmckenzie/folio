@@ -8,9 +8,10 @@
 //
 // The load-bearing checks, in order:
 //
-//  1. `initialize` succeeds with no credential, and the tools/list that
+//  1. `server/discover` succeeds with no credential, and the tools/list that
 //     follows is empty — the honest answer to a client that has not
-//     configured a token yet.
+//     configured a token yet. A Legacy `initialize` is refused with the
+//     supported-version list, which is the only diagnostic such a client gets.
 //  2. A minted token's tools/list offers exactly what its scopes grant.
 //  3. create_document -> write_content -> preview_document -> publish_document,
 //     the same round trip a person makes with the editor open, driven by an
@@ -79,13 +80,25 @@ async function mint(name, scopes) {
 let nextId = 0
 
 /**
+ * The MCP revision this endpoint speaks. A literal rather than an import for the
+ * reason the header comment gives — `mcp/rpc.ts` is reachable from Node, but the
+ * tool names beside it are not, and one import that works while the rest are
+ * literals reads as if the whole file were checked against source.
+ */
+const MCP_VERSION = '2026-07-28'
+
+/**
  * One JSON-RPC request over plain POST — no upgrade, no stream, no session.
- * **Deliberately stamps no wire version anywhere**, unlike every socket frame
- * in this codebase: MCP negotiates its own version inside `initialize`, and
- * this is not `PROTOCOL_VERSION`'s wire. Worth driving once with a completely
- * bare envelope rather than assuming it, since a socket frame missing `v` is
- * refused outright and this is the one caller in the whole test surface that
- * has no reason to ever send one.
+ *
+ * **This used to say it deliberately stamped no wire version anywhere, and that
+ * is now exactly backwards.** Revision `2026-07-28` removed the `initialize`
+ * handshake, so there is no negotiated session to carry a version for: every
+ * request declares its own, in an `MCP-Protocol-Version` header that must agree
+ * with the body's `_meta`, plus `Mcp-Method` and — for a `tools/call` —
+ * `Mcp-Name`, mirrored so an intermediary can route without parsing a body. So
+ * this is the one caller in the test surface that stamps *two* versions and
+ * neither of them is `PROTOCOL_VERSION`: MCP's revision here, and Folio's own on
+ * the socket elsewhere.
  *
  * Over `realFetch`, deliberately: the ordinary `fetch` in this process always
  * carries the signed-in admin's session cookie, which would make every "no
@@ -96,9 +109,17 @@ async function rpc(method, params = {}, token) {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
+      'mcp-protocol-version': MCP_VERSION,
+      'mcp-method': method,
+      ...(method === 'tools/call' ? { 'mcp-name': params.name } : {}),
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
-    body: JSON.stringify({ jsonrpc: '2.0', id: ++nextId, method, params }),
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: ++nextId,
+      method,
+      params: { ...params, _meta: { 'io.modelcontextprotocol/protocolVersion': MCP_VERSION } },
+    }),
   })
   let json = null
   try {
@@ -116,20 +137,59 @@ async function callTool(name, args, token) {
   return { value: JSON.parse(answer.json.result.content[0].text) }
 }
 
-/* --- initialize, with no credential -------------------------------------- */
+/* --- discovery, with no credential --------------------------------------- */
 
-const init = await rpc('initialize', {
-  protocolVersion: '2025-06-18',
-  clientInfo: { name: 'mcp-test.mjs' },
-})
+const found = await rpc('server/discover')
 check(
-  'initialize succeeds with no credential at all',
-  init.status === 200 && init.json?.result?.serverInfo?.name === 'folio',
-  JSON.stringify(init.json),
+  'server/discover succeeds with no credential at all',
+  found.status === 200 &&
+    found.json?.result?._meta?.['io.modelcontextprotocol/serverInfo']?.name === 'folio',
+  JSON.stringify(found.json),
 )
 check(
-  'a frame carrying no wire version at all is still answered normally',
-  init.json?.error === undefined,
+  'it advertises 2026-07-28 as a supported revision',
+  Array.isArray(found.json?.result?.supportedVersions) &&
+    found.json.result.supportedVersions.includes(MCP_VERSION),
+  JSON.stringify(found.json?.result?.supportedVersions),
+)
+
+// A Legacy client's opening message. Refused — there is no handshake to answer —
+// but the refusal has to name the versions that would work, because a Legacy
+// client has no fall-forward and this is the only diagnostic its user will see.
+// Sent through `realFetch` directly rather than `rpc`, because the whole point is
+// a request built the old way: no version header, no `_meta`.
+const legacy = await realFetch(MCP, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: { protocolVersion: '2025-06-18', clientInfo: { name: 'mcp-test.mjs' } },
+  }),
+})
+const legacyBody = await legacy.json().catch(() => null)
+check(
+  'a Legacy initialize is refused on a 400 naming the supported revisions',
+  legacy.status === 400 &&
+    legacyBody?.error?.code === -32022 &&
+    legacyBody.error.data?.supported?.includes(MCP_VERSION),
+  JSON.stringify(legacyBody?.error),
+)
+
+// The header is required, and its absence is a refusal rather than an assumed
+// revision — over real HTTP, because a header is the one thing an in-process
+// Request can be given by hand and a real client can still forget.
+const bare = await realFetch(MCP, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }),
+})
+const bareBody = await bare.json().catch(() => null)
+check(
+  'a POST with no MCP-Protocol-Version header is refused with -32020',
+  bare.status === 400 && bareBody?.error?.code === -32020,
+  JSON.stringify(bareBody?.error),
 )
 
 const anonList = await rpc('tools/list')
@@ -139,11 +199,15 @@ check(
   JSON.stringify(anonList.json?.result),
 )
 
+// Deliberately headerless, and deliberately a Legacy method name: the transport
+// defines no header rules for a notification POST, so this is the one shape that
+// is still accepted bare — which also means a Legacy client's `initialized` is
+// dropped quietly rather than erroring into a void it cannot read.
 const notified = await realFetch(MCP, {
   method: 'POST',
   body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
 })
-check('a notification gets 202 and no body', notified.status === 202)
+check('a headerless notification still gets 202 and no body', notified.status === 202)
 
 /* --- a scoped token sees exactly what its scopes grant -------------------- */
 

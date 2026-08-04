@@ -8,14 +8,22 @@
  * JSON-RPC: a 200 carrying an `error` object with its own code space. One prefix
  * with two error envelopes is exactly the sibling confusion
  * `test/workers/api-partition.test.ts` exists to prevent. Unversioned because MCP
- * negotiates its own version in `initialize` and tools are *discovered* per
- * session rather than compiled against — renaming a tool costs a client one
- * reconnect, not a deploy.
+ * carries its own revision on every request and tools are *discovered* rather than
+ * compiled against — renaming a tool costs a client one refresh of `tools/list`,
+ * not a deploy.
+ *
+ * **This endpoint is modern-only: MCP revision `2026-07-28`.** There is no
+ * handshake and no session. Every POST declares its revision in an
+ * `MCP-Protocol-Version` header that must agree with the body's `_meta`, and
+ * `server/discover` answers what used to take `initialize`. `initialize` itself is
+ * refused with the supported-version list, which is both the spec's SHOULD for a
+ * modern-only server and the signal a dual-era client needs. See `../mcp/rpc.ts`
+ * for the order those checks run in and why the order is the contract.
  *
  * **The route itself is ungated, and each tool call is gated by the route it
- * dispatches to.** `initialize` with no credential succeeds and `tools/list` is
- * then empty: an MCP client probes before it is configured, and a 401 at
- * `initialize` presents as "the server is broken" rather than "the token is
+ * dispatches to.** `server/discover` with no credential succeeds and `tools/list`
+ * is then empty: an MCP client probes before it is configured, and a 401 at
+ * discovery presents as "the server is broken" rather than "the token is
  * missing". The empty list is the honest answer, and it is the only thing an
  * uncredentialed caller learns here.
  */
@@ -23,7 +31,14 @@ import type { Context, Hono } from 'hono'
 import { Hono as HonoApp } from 'hono'
 import type { Actor } from '../auth/roles'
 import { type ErrorEnvelope, FolioError } from '../errors'
-import { handleRpc, INVALID_PARAMS, RpcFault, type RpcMethod, rpcCodeFor } from '../mcp/rpc'
+import {
+  handleRpc,
+  INVALID_PARAMS,
+  RpcFault,
+  type RpcMethod,
+  rpcCodeFor,
+  SUPPORTED_VERSIONS,
+} from '../mcp/rpc'
 import { previewDocument, type PreviewDocumentContext } from '../mcp/shot'
 import {
   fillPath,
@@ -51,15 +66,27 @@ function hasRoute(tool: McpTool): tool is RoutedTool {
   return tool.path !== undefined
 }
 
-/**
- * The MCP revision this server implements. Answered rather than negotiated: the
- * spec's own instruction to a client whose version differs is to disconnect, so
- * echoing back whatever was asked for would be a claim rather than an answer.
- */
-export const MCP_PROTOCOL_VERSION = '2025-06-18'
-
 /** `version` tracks the package's, which is pre-release and says so. */
 const SERVER_INFO = { name: 'folio', version: '0.0.0' } as const
+
+/**
+ * `DiscoverResult._meta`'s key for the server's own identity. Self-reported and
+ * unverified by the protocol, which is why the spec tells clients not to make
+ * behavioural or security decisions from it — it is for display and logs.
+ */
+const META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo'
+
+/**
+ * `instructions` is the one place a server can address the model in prose rather
+ * than through a tool description, so it carries the two things that are true of
+ * every tool here and are not visible from any single one: the list is filtered by
+ * what the credential may do, and a write is a real edit that people see.
+ */
+const INSTRUCTIONS = [
+  'Folio is a block-based CMS. Documents are trees of typed blocks; call get_schema first to learn the site’s block and field shapes before writing.',
+  'The tools offered are already filtered to what this credential may do, so anything listed is permitted and nothing else exists to try.',
+  'Writes go through the same log a human editor’s keystrokes do: an edit appears live in any open editor, is attributed to this token in the activity trail, and is undoable. Publishing is a separate, explicit step.',
+].join(' ')
 
 export function mcpRoutes<Env>(
   rt: FolioRuntime,
@@ -278,23 +305,34 @@ export function mcpRoutes<Env>(
 
   const methodsFor = (c: Context<FolioEnv<Env>>): Record<string, RpcMethod> => ({
     /**
+     * **Mandatory in `2026-07-28`** (`server/discover` is a MUST), and the whole
+     * of what used to be `initialize`: supported revisions, capabilities and
+     * identity in one request, with no session established and nothing remembered.
+     *
+     * Calling it is *optional for a client* — it may send any RPC inline and
+     * handle `UnsupportedProtocolVersionError` — so this is a convenience and a
+     * probe, never a gate. Like the rest of the endpoint it answers without a
+     * credential: a client discovers before it is configured, and refusing here
+     * would present as a broken server rather than a missing token.
+     *
      * `capabilities.tools` is an empty object rather than `{ listChanged: true }`:
      * the list is derived from the code and the credential, so it cannot change
-     * within a session and there is no notification to promise.
+     * under a client and there is no notification to promise. No `subscriptions`
+     * capability for the same reason — nothing here ever pushes.
+     *
+     * **No `ttlMs` or `cacheScope`.** Both are optional, and declaring a cache
+     * lifetime is a promise that this answer does not vary. It does not vary
+     * today, and it is one small object to recompute, so the promise buys nothing
+     * and would be the thing quietly broken by the first capability that depends
+     * on who is asking.
      */
-    initialize: () => ({
-      protocolVersion: MCP_PROTOCOL_VERSION,
+    'server/discover': () => ({
+      resultType: 'complete',
+      supportedVersions: SUPPORTED_VERSIONS,
       capabilities: { tools: {} },
-      serverInfo: SERVER_INFO,
+      instructions: INSTRUCTIONS,
+      _meta: { [META_SERVER_INFO]: SERVER_INFO },
     }),
-
-    /**
-     * The client saying it is ready. Nothing to do, and — being a notification —
-     * nothing to answer. It returns an empty object rather than `undefined` so
-     * that a client which mistakenly sends it *with* an id still gets a
-     * well-formed response instead of one carrying neither `result` nor `error`.
-     */
-    'notifications/initialized': () => ({}),
 
     /**
      * Liveness. **This is the fifth message, and decision 9's "four" did not
@@ -359,28 +397,42 @@ export function mcpRoutes<Env>(
 
   /* -------------------------------------------------------------- routes --- */
 
+  /**
+   * **The HTTP status comes from the outcome, not from this handler.** Since
+   * `2026-07-28` it is protocol-significant: a `400` carrying a recognised modern
+   * error is how a dual-era client learns to retry as modern instead of falling
+   * back to `initialize`, and a `404` with `-32601` separates "no such method" from
+   * a `404` served by something that is not an MCP endpoint at all. `rpc.ts` owns
+   * that mapping because it owns which error was raised.
+   */
   routes.post('/mcp', async (c) => {
-    const response = await handleRpc(await c.req.text(), methodsFor(c))
+    const { status, response } = await handleRpc(await c.req.text(), methodsFor(c), (name) =>
+      c.req.header(name),
+    )
     // A notification has no response, and 202 is what Streamable HTTP says to
     // answer when there is nothing to send back.
     if (!response) return c.body(null, 202)
-    return c.json(response)
+    return c.json(response, status as 200)
   })
 
   /**
-   * Streamable HTTP's GET opens the server-to-client SSE channel, and this
-   * server never initiates a message to the client (decision 9) — so there is
-   * nothing to stream. 405 with `Allow` is what the transport specifies for a
-   * server that does not offer it, and it is a legible answer rather than an
-   * empty stream a client would sit on.
+   * **`2026-07-28` removed the GET stream and protocol-level sessions from
+   * Streamable HTTP outright**, so this is no longer a server declining an optional
+   * channel — there is no such channel to decline. A server on this revision that
+   * receives the older transport's traffic is told to answer `405` to a GET *or a
+   * DELETE* (the latter was how a session was terminated), and to ignore
+   * `Mcp-Session-Id` and `Last-Event-ID` rather than honour them. Ignoring is what
+   * this endpoint has always done, having never had a session to name.
    */
-  routes.get('/mcp', (c) =>
+  const noStream = (c: Context<FolioEnv<Env>>) =>
     c.text(
-      'This endpoint speaks JSON-RPC over POST. It opens no server-to-client stream, so there is nothing to GET.',
+      'This endpoint speaks JSON-RPC over POST. MCP revision 2026-07-28 removed the GET stream and protocol-level sessions, so there is nothing to GET and no session to delete.',
       405,
       { allow: 'POST' },
-    ),
-  )
+    )
+
+  routes.get('/mcp', noStream)
+  routes.delete('/mcp', noStream)
 
   return routes
 }

@@ -5,6 +5,13 @@ default `basePath`. There is nothing to install and no second artifact to deploy
 route in the host Worker, authenticated by the same `api_tokens` table as `{base}/api/v1`,
 and it exists the moment a host upgrades.
 
+It speaks **MCP revision `2026-07-28`, and only that one.** That revision moved the
+protocol to a stateless core — no `initialize` handshake, no session, no server-to-client
+stream — which is the shape this endpoint already had, so there is nothing here holding
+state on your behalf. The cost of implementing one revision is that a client which can
+*only* speak a handshake-based revision (`2025-11-25` or earlier) cannot connect; it gets
+a `400` naming what would work. Current clients negotiate this automatically.
+
 Sixteen tools, each one an existing v1 route dispatched internally (see
 `docs/specs/platform/mcp-server.md` decision 2). So an assistant can do what a person can
 do, an agent's edit appears live in an open editor, and it lands in the activity trail
@@ -124,20 +131,37 @@ Ask the assistant to list its tools, or:
 ```bash
 curl -s -X POST https://your-site.example/folio/mcp \
   -H 'content-type: application/json' \
+  -H 'mcp-protocol-version: 2026-07-28' \
+  -H 'mcp-method: tools/list' \
   -H "authorization: Bearer $FOLIO_TOKEN" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | jq '.result.tools[].name'
 ```
 
+The two `mcp-*` headers are not optional decoration. Folio speaks **MCP revision
+`2026-07-28`**, which has no handshake: every request declares its own revision, and
+`Mcp-Method` mirrors the body's method so a gateway can route without parsing it. A
+`tools/call` needs `Mcp-Name` as well, matching `params.name`. Miss one and the answer
+is a `400` with code `-32020` naming the header, which is the fastest way to see what a
+hand-written request is missing. Real clients do all of this for you.
+
 **An empty tool list is the symptom of a missing or wrong credential, not of a broken
-server.** `initialize` deliberately succeeds with no credential at all — an MCP client
-probes before it is configured, and a 401 there presents as "the server is down" rather
-than "the token is missing" — so an unauthenticated session connects cleanly and then
-offers nothing. If `tools/list` is `[]`, check the header before anything else.
+server.** `server/discover` and `tools/list` deliberately succeed with no credential at
+all — an MCP client probes before it is configured, and a 401 there presents as "the
+server is down" rather than "the token is missing" — so an unauthenticated client
+connects cleanly and then sees nothing. If `tools/list` is `[]`, check the header before
+anything else.
 
 Other things that are working as intended:
 
-- **`GET {base}/mcp` answers 405** with `Allow: POST`. This server never initiates a
-  message to the client, so there is no stream to open and nothing to GET.
+- **`GET` and `DELETE` on `{base}/mcp` answer 405** with `Allow: POST`. `2026-07-28`
+  removed the GET stream and protocol-level sessions from the transport, so there is no
+  stream to open and no session to delete. An `Mcp-Session-Id` from an older client is
+  ignored rather than honoured, and nothing here ever mints one.
+- **`initialize` answers `400` with `-32022`**, listing the revisions this server does
+  support. That is not a fault to work around: Folio implements the current revision
+  only, and a client old enough to open with a handshake cannot proceed. A *dual-era*
+  client reads that same error and retries as a modern one, which is why the refusal
+  names versions instead of simply saying "no such method".
 - **`{base}/api/mcp` and `{base}/api/v1/mcp` both 404.** The endpoint sits outside the
   `/api` partition on purpose: everything under `/api` answers Folio's single error
   envelope, and MCP answers JSON-RPC's own. It is also unversioned, because MCP negotiates
