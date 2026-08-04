@@ -642,21 +642,35 @@ an unsorted flat list, which stops working somewhere around 15.
   built, on the grounds that the route wanted a consumer chosen on purpose rather than
   by reflex.
 
-- **`adminCss` is hard-coded to `/folio-admin.css`, and a host with
-  `build.cssCodeSplit: false` has no such file.** The Vite plugin computes
-  `__FOLIO_ASSETS__` in its `config()` hook, before the client environment's CSS
-  strategy is resolved, and asserts the two stylesheets will be emitted beside the
-  two entry chunks. With code splitting off, Vite bundles every stylesheet into one
-  hashed `assets/style-<hash>.css` instead, so a production build links a
-  stylesheet that 404s and the admin renders unstyled behind a 200. Dev is fine —
-  Vite injects entry CSS from JS, which is why `adminCss` is `[]` there — so the
-  first sign of it is a deploy.
+- **`adminCss` under `build.cssCodeSplit: false`. Fixed 2026-08-04, and the fix was
+  a branch rather than the mechanism this entry predicted.** The plugin computed
+  `__FOLIO_ASSETS__` as `['/folio-admin.css']` unconditionally; with code splitting
+  off, Vite bundles every stylesheet in the client build into one hashed
+  `assets/style-<hash>.css` and emits no such file, so a production build linked a
+  stylesheet that 404s and the admin rendered unstyled behind a 200. Dev was fine —
+  Vite injects entry CSS from JS there, which is why `adminCss` is `[]` — so the
+  first sign of it was a deploy. Found building the Harbour host, which sets
+  the flag; the demo does not, so the demo's build was correct and proved nothing.
 
-  Found building the Harbour host, which sets `cssCodeSplit: false`; the
-  demo does not, so the demo's build is correct and proves nothing. The fix is not
-  a one-liner: a `define` is baked at transform time, so the plugin has to learn
-  the emitted filename at `generateBundle` and the Worker has to read it from
-  somewhere that is not a compile-time constant.
+  **This entry said the fix needed `generateBundle` plus a runtime lookup, "not a
+  one-liner", and that was wrong.** A `define` is indeed baked at transform time, but
+  `config()` is handed the host's own `userConfig` — and `build.cssCodeSplit` is a
+  flag the host sets in exactly that object. So the strategy is visible at the moment
+  the constant is computed, and the fix is to read it: when it is off, the one
+  stylesheet is pinned to `folio-client.css` and both `adminCss` and `previewCss`
+  point there. It is named `client` and not `admin` because it holds the host's CSS
+  too — one stylesheet is all there is, which is the cost of the flag rather than of
+  the fix.
+
+  Two things worth keeping. The residual hole is a **plugin** setting the flag, which
+  `config()` cannot see; `configResolved` throws for that case, naming the cause,
+  because the paths are already baked by then and refusing to ship is all that is
+  left. And the missing **tripwire** mattered as much as the bug:
+  `test/unit/vite/plugin.test.ts` is the plugin's first test at all, driving the
+  `config()` hook directly, and two of its assertions fail against the old code. The
+  emitted name was verified against a real `cssCodeSplit: false` build rather than
+  guessed — Vite calls the bundle `style.css`, which is why it did not match the
+  `folio-` test that pins the other fixed names.
 
 - **A framework plugin's array of client entries used to break the build
   outright**, and that half is fixed (`foldClientEntries`). Recorded here because
