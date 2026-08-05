@@ -51,16 +51,22 @@ in a browser before it is called done.
      debounced watermark, so a publish alarm set for Tuesday would have silently
      stopped the tree reporting unpublished changes for that page. `scheduled` is
      deliberately **not** a fifth `StoryState`: a live page with a scheduled unpublish
-     is still live. **No admin surface yet** — the routes are built and a screen wants
-     `GET {base}/api/schedules?story=`.
+     is still live. **The site-wide screen landed 2026-08-05** and needed no new route:
+     `?story=` was already there. It reports an *outcome* rather than the `status`
+     column, and it diagnoses a missing cron — a pending row past due with no attempts
+     means nothing ran the sweep, which the server cannot report because to D1 that row
+     is simply pending. Still owed: the editor's own top bar, which is what `?story=`
+     was built for.
    - **Bulk write endpoints.** Done, `docs/specs/platform/bulk-writes.md`. Five routes
      under `{base}/api/bulk/`, one per action, because each carries its
      single-document twin's gate and a token holding only `publish` must not lose bulk
      publish. `{ all, filter, expected, exclude }` as designed, plus one thing decision
      7a did not name: **the count is the job's ceiling as well as its guard**, so a set
      that grows under a long run cannot enlarge it. No migration and no wire change.
-     **No admin surface yet** — what Content's selection bar needs is six precise
-     steps, listed in the spec's implementation notes.
+     **This said "No admin surface yet" and was stale**, found 2026-08-05: Content has
+     the selection bar, `content-model.ts` posts `{apiBase}/bulk/{action}` for all five,
+     and `ConfirmBulkDialog.tsx` asks the question. The six steps its spec listed were
+     followed and this line was not updated.
    - **Outbound webhooks.** Not built. `publish-hooks.md` exists server-side for a
      host's own code; a *configured* webhook with a delivery log is what a client asks
      for on day one. The seam is there — the hooks fire on publish, unpublish,

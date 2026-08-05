@@ -1,0 +1,197 @@
+/*
+ * The Schedules screen. Thin, like Redirects' and Documents': the table is
+ * `Table.module.css`, the dialog is `Dialog.module.css`, and the chips, footer and
+ * skeletons are the same objects three other screens already have.
+ *
+ * What is here that no other list screen needs is `.banner` and the two-line `.when`
+ * cell — the two places this screen says something the columns do not.
+ */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 1400px;
+}
+
+/* The same fieldset reset Content, Documents and Redirects need, and for the same
+   reason: a group of related controls is a `<fieldset>` with a hidden `<legend>` per
+   Biome's `useSemanticElements`, and a bare one arrives with a border, a margin and a
+   legend rendered inside that border. Not optional. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  border: 0;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.chip {
+  height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.chip:hover {
+  border-color: var(--border-strong);
+  color: var(--fg);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+/* Inverted rather than tinted, the same rule Documents' and Redirects' chips follow:
+   a chip must not be a second thing wearing a state hue. */
+.chipOn {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--fg-inverse);
+}
+
+/* ----------------------------------------------------------------- the banner --- */
+
+/*
+ * The configuration diagnosis. A tinted panel rather than a `Badge` or a toast: it is
+ * a standing condition of the site, not an event and not a property of a row, so it
+ * has to survive a reload and sit above the thing it is about.
+ *
+ * `data-tone` rather than two classes, because the only difference is the hue and a
+ * second rule block would be the same six properties twice.
+ */
+.banner {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.banner[data-tone="danger"] {
+  border-color: var(--state-danger-border);
+  background: var(--state-danger-bg);
+  color: var(--state-danger-fg);
+}
+
+.banner[data-tone="warn"] {
+  border-color: var(--state-warn-border);
+  background: var(--state-warn-bg);
+  color: var(--state-warn-fg);
+}
+
+/* ------------------------------------------------------------------- cells --- */
+
+/*
+ * Two lines in one cell, which no other table here does — so it is worth saying why
+ * it is not two columns. "Tue 12 Aug, 09:00" and "in 3 hours" are one fact answered
+ * two ways, and a reader compares them against each other rather than down the
+ * column. Split into two columns they would be sorted, aligned and scanned
+ * separately, which is the wrong reading of the same value twice.
+ */
+.when {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.3;
+}
+
+.absolute {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.relative {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  white-space: nowrap;
+}
+
+.outcome {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* `last_error` is capped at 500 characters server-side and a stack-shaped one would
+   set the row height for the whole table, so it clips and keeps its `title`. */
+.error {
+  overflow: hidden;
+  max-width: 32ch;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A row showing a story id rather than a title — either the lookup has not answered
+   or the document is gone. Muted and mono rather than a badge: it is the absence of a
+   name, not a state the schedule is in, and what is shown instead is an identifier,
+   which `design-system.md`'s third commitment sets in mono. */
+.unnamed {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--fg-subtle);
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-1);
+  justify-content: flex-end;
+}
+
+/* ------------------------------------------------------------------ layout --- */
+
+.skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.skeleton {
+  height: var(--row-h);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+}
+
+.pager {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}

@@ -28,6 +28,7 @@ describe('parse', () => {
     expect(parse('/folio/access', MOUNT).screen).toEqual({ name: 'access' })
     expect(parse('/folio/model', MOUNT).screen).toEqual({ name: 'model' })
     expect(parse('/folio/redirects', MOUNT).screen).toEqual({ name: 'redirects' })
+    expect(parse('/folio/schedules', MOUNT).screen).toEqual({ name: 'schedules' })
     expect(parse('/folio/settings', MOUNT).screen).toEqual({ name: 'settings' })
     // The kitchen sink, which finally has a sane URL: it read `/folio/ui/ui` while
     // the shell was itself under a `/ui` prefix.
@@ -111,6 +112,7 @@ describe('href', () => {
       { name: 'access' },
       { name: 'model' },
       { name: 'redirects' },
+      { name: 'schedules' },
       { name: 'settings' },
       { name: 'ui' },
       { name: 'documents', type: 'person' },

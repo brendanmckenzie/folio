@@ -665,8 +665,37 @@ keeps the real waits, which is what an e2e script is for.
 `vitest run` in the same checkout. Harmless alone and confusing with several agents in
 one repo; `pkill -f 'vite/bin/vite.js'` is the narrow form.
 
-**Deliberately deferred:** everything under *Out of scope*, and one thing worth naming
-again — the admin surface. What a screen needs is small and is listed in the route
-table above: `GET {base}/api/schedules?story=` for the editor's own top bar, the same
-route unfiltered for a site-wide panel, and `GET {base}/api/stories?ids=` to resolve
-titles, because `Schedule` deliberately carries none.
+**Deliberately deferred:** everything under *Out of scope*.
+
+**The site-wide admin surface landed 2026-08-05**, against the route table exactly as
+this note predicted: `GET {base}/api/schedules` unfiltered, plus
+`GET {base}/api/stories?ids=` to resolve titles, because `Schedule` deliberately carries
+none. **No route needed adding** — `?story=` was already there for the editor's own top
+bar, which is still owed.
+
+Three things the screen does that this spec did not anticipate, all of them consequences
+of decision 2 rather than new ideas:
+
+- **It reports an *outcome*, not the `status` column.** `pending` and `failed` do not
+  answer "what is going to happen": a pending row in the future, a pending row past due,
+  a failed row with attempts left, and a failed row at `MAX_SCHEDULE_ATTEMPTS` are four
+  different answers and two column values. `outcomeOf`
+  (`admin/ui/screens/schedules-model.ts`) separates them by comparing `at` to a clock and
+  `attempts` to the cap.
+- **It diagnoses a missing cron, which the server structurally cannot.** A pending row
+  whose time has passed with `attempts: 0` means nothing ran the sweep — and from D1's
+  point of view that row is simply pending. Seeing it takes a clock, so it takes a
+  client. The banner therefore names the *configuration* rather than counting rows: if
+  the sweep is not running then every pending row is equally affected, and "3 schedules
+  are overdue" invites fixing three rows instead of the one cause. A 90-second grace
+  period keeps it from crying wolf, since a schedule fires on the first sweep at or after
+  its due time and is legitimately late by up to one tick.
+- **The cancel confirmation says what it does *not* cancel.** `DELETE
+  {base}/api/story/:id/schedule?action=` narrows by action, so a campaign window is two
+  rows and cancelling one leaves the other. Left unsaid, an editor cancels the publish
+  and leaves a page scheduled to come down having never gone up.
+
+**`POST {base}/api/schedules/run` is deliberately not on the screen.** Decision 10 is
+careful that "a cron trigger is the mechanism and this route is not it", and a **Run
+now** button in an editor's UI would make the exception look like the mechanism. Its
+audience is an operator with a terminal; the banner names the configuration instead.

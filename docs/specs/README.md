@@ -261,10 +261,13 @@ Each spec carries its own `> **Status:**` stamp. All sixteen specs in the quick-
 main-line tables are **done**, restamped in place with an `## Implementation notes`
 section recording what actually landed. Spec 17 (caching) is **done** too, and so are
 specs 19 (scheduled publishing), 20 (bulk writes), 21 (draft preview sharing), 22
-(build artifacts) and 24 (an MCP server). Spec 18 (pagination) is **in-progress**: its
-phase 1, the schema collapse, has landed. Specs 23 (multi-site) and 25 (draft mode) are
-**draft** and unstarted; 23's three open questions were resolved in place on 2026-08-04
-without starting it, and 25 was written the same day.
+(build artifacts) and 24 (an MCP server). **Spec 18 (pagination) is done too**, and this
+paragraph said "in-progress: its phase 1, the schema collapse, has landed" until
+2026-08-05 — the spec's own stamp has read *"done — every phase landed"* since its last
+route went with `ui-architecture.md`'s port phase 3, so the index was a revision behind
+its own entry. Specs 23 (multi-site) and 25 (draft mode) are **draft** and unstarted;
+23's three open questions were resolved in place on 2026-08-04 without starting it, and
+25 was written the same day.
 A spec that gets built is restamped the same way, the way `../../PARITY.md`
 records what landed.
 
