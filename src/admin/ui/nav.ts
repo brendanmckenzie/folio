@@ -187,6 +187,20 @@ function administration(me: Me): NavItem[] {
   return [
     { label: 'Model', icon: 'model', screen: { name: 'model' } },
     { label: 'Redirects', icon: 'redirects', screen: { name: 'redirects' } },
+    /**
+     * Beside Redirects rather than up with Content, and it is a close call worth
+     * recording. A schedule is neither a thing you edit nor a thing you configure:
+     * it is work that is going to happen. Redirects is the existing item with that
+     * shape — a site-wide table of consequences, mostly written by the system as a
+     * side effect of editing — and grouping the two keeps "the site's operational
+     * tables" one idea instead of splitting a publish across two sections.
+     *
+     * Not gated. `GET {base}/api/schedules` is `READ`, so a viewer may see what is
+     * coming; cancelling is `PUBLISH` and the route refuses it, which is the right
+     * place for that to be enforced. Hiding the list from a viewer would hide *that
+     * a page changes on Tuesday* from the person most likely to be confused by it.
+     */
+    { label: 'Schedules', icon: 'schedules', screen: { name: 'schedules' } },
     ...(canManageAccess(me)
       ? [{ label: 'Access', icon: 'access' as const, screen: { name: 'access' as const } }]
       : []),

@@ -25,6 +25,7 @@ import { Content } from './screens/Content'
 import { Documents } from './screens/Documents'
 import { Model } from './screens/Model'
 import { Redirects } from './screens/Redirects'
+import { Schedules } from './screens/Schedules'
 import { Settings } from './screens/Settings'
 import type { ViewMode } from './screens/content-model'
 import { EditorShell } from './screens/EditorShell'
@@ -636,6 +637,17 @@ function screenFor(a: ScreenArgs) {
           query={route.query}
           onQuery={(next) => a.replace({ name: 'redirects' }, { ...route.query, ...next })}
           onNotice={a.notify}
+        />
+      )
+
+    case 'schedules':
+      return (
+        <Schedules
+          apiBase={boot.apiBase}
+          query={route.query}
+          onQuery={(next) => a.replace({ name: 'schedules' }, { ...route.query, ...next })}
+          onNotice={a.notify}
+          onOpen={(id) => a.go({ name: 'edit', id })}
         />
       )
 

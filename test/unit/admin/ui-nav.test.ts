@@ -175,10 +175,13 @@ describe('nav', () => {
     expect(labels(open).flat()).not.toContain('Access')
   })
 
-  it('keeps Model, Redirects and Settings for everyone', () => {
+  it('keeps Model, Redirects, Schedules and Settings for everyone', () => {
     const editor = labels(nav({ types: [PAGE], globals: [], me: EDITOR })).flat()
     expect(editor).toContain('Model')
     expect(editor).toContain('Redirects')
+    // Ungated on purpose: `GET {base}/api/schedules` is `READ`, so a viewer may see
+    // what is coming. Cancelling is `PUBLISH` and the route enforces it.
+    expect(editor).toContain('Schedules')
     expect(editor).toContain('Settings')
   })
 
@@ -203,6 +206,7 @@ describe('nav', () => {
       ['Header', 'global'],
       ['Model', 'model'],
       ['Redirects', 'redirects'],
+      ['Schedules', 'schedules'],
       ['Access', 'access'],
       ['Settings', 'settings'],
     ])

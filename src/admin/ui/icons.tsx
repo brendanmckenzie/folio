@@ -49,6 +49,7 @@ export type IconName =
   | 'global'
   | 'model'
   | 'redirects'
+  | 'schedules'
   | 'access'
   | 'settings'
 
@@ -162,6 +163,24 @@ export const ICONS: Record<IconName, ReactElement> = {
     <>
       <path d="M4.5 4.5v7a4 4 0 0 0 4 4h11" />
       <path d="M16 12l3.5 3.5L16 19" />
+    </>,
+  ),
+  /**
+   * A clock: face, hour hand up, minute hand to the lower right.
+   *
+   * Two shapes, and the hands are one path rather than two because a join at the
+   * centre is what reads as a pivot — drawn as two separate strokes they meet at a
+   * point and the 1.5 weight makes that point a blob at 16px.
+   *
+   * Rejected a calendar page, which is the more literal "schedule": at this size the
+   * grid inside it fills to a grey rectangle, and it would also be the third
+   * rounded-square outline in the rail after Content and Records. A clock is the only
+   * circular icon in the set, which is exactly what a nav item wants.
+   */
+  schedules: svg(
+    <>
+      <circle cx="12" cy="12" r="7.5" />
+      <path d="M12 7.5v5l3.25 2" />
     </>,
   ),
   /** A key: bow, shaft, one tooth. One rather than the usual two — two teeth

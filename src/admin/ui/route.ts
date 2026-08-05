@@ -28,6 +28,7 @@ export type Screen =
   | { name: 'access' }
   | { name: 'model' }
   | { name: 'redirects' }
+  | { name: 'schedules' }
   | { name: 'settings' }
   /** The kitchen sink. Dev only, at `{base}/ui` — which it now has to itself,
    * having read `{base}/ui/ui` while the shell was under its own `/ui` prefix. */
@@ -51,7 +52,16 @@ export interface Route {
 }
 
 /** Screens with no parameters, by their single path segment. */
-const FLAT = ['content', 'assets', 'access', 'model', 'redirects', 'settings', 'ui'] as const
+const FLAT = [
+  'content',
+  'assets',
+  'access',
+  'model',
+  'redirects',
+  'schedules',
+  'settings',
+  'ui',
+] as const
 
 /**
  * Splits a `pathname` + `search` string into a screen and its query.
@@ -194,6 +204,7 @@ const TITLES: Record<Exclude<ScreenName, 'documents' | 'edit' | 'missing'>, stri
   access: 'Access',
   model: 'Model',
   redirects: 'Redirects',
+  schedules: 'Schedules',
   settings: 'Settings',
   ui: 'Design system',
 }
