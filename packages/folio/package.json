@@ -10,6 +10,7 @@
     "build:types": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "prepack": "pnpm run clean && pnpm run build",
+    "prepare": "npm run build:js && npm run build:types",
     "typecheck": "tsc --noEmit -p .",
     "test": "vitest run",
     "test:watch": "vitest"
