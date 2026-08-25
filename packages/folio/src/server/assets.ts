@@ -14,7 +14,7 @@
 import type { AssetValue } from '../core/values'
 import type { AssetTransform } from '../core/resolve'
 import { FolioError } from './errors'
-import { DOWNLOAD_CONTENT_TYPE, SERVED_CONTENT_TYPES } from './validate'
+import { DOWNLOAD_CONTENT_TYPE, isInlineContentType, SERVED_CONTENT_TYPES } from './validate'
 import { clampLimit, type CursorPart, decodeCursor, type Page, paginate } from '../core/pagination'
 import { type AssetSort, DEFAULT_ASSET_SORT, type StoryMeta } from '../core/story'
 import { assetReferences, clearInboundRefStatements } from './content-index'
@@ -303,7 +303,7 @@ export async function uploadAsset(
   // known signature fall back to the download type, same as an explicit
   // mismatch would.
   const sniffed = sniffContentType(view)
-  const contentType = sniffed && SERVED_CONTENT_TYPES.has(sniffed) ? sniffed : DOWNLOAD_CONTENT_TYPE
+  const contentType = sniffed && isInlineContentType(sniffed) ? sniffed : DOWNLOAD_CONTENT_TYPE
   const dims = imageSize(view)
 
   // R2 first: the alternative (row first) can leave a library entry pointing at
@@ -500,9 +500,13 @@ const CSP = "default-src 'none'; sandbox"
  * site's own origin, so the browser must never be allowed to improve on it,
  * and a mis-sniffed upload must still not be able to run. `content-disposition`
  * is explicit in both directions rather than left to the browser's default:
- * `inline` for the five raster types this route renders, `attachment` for
- * everything else — svg included, since rendering it is a script-execution
- * vector on this origin the moment a browser is allowed to try.
+ * `inline` for the types this route renders, `attachment` for everything else.
+ *
+ * SVG renders inline, and the CSP above is the entire reason it may: a
+ * `sandbox` without `allow-scripts` is what stops an inline SVG on this origin
+ * being a script-execution vector. Weakening `CSP` therefore has to be read as
+ * a change to what `SANDBOXED_CONTENT_TYPES` is allowed to contain, not as a
+ * header tweak.
  */
 function serveHeaders(cacheControl: string, contentType: string): Record<string, string> {
   return {
@@ -510,7 +514,7 @@ function serveHeaders(cacheControl: string, contentType: string): Record<string,
     'cache-control': cacheControl,
     'x-content-type-options': 'nosniff',
     'content-security-policy': CSP,
-    'content-disposition': contentType === DOWNLOAD_CONTENT_TYPE ? 'attachment' : 'inline',
+    'content-disposition': isInlineContentType(contentType) ? 'inline' : 'attachment',
   }
 }
 
@@ -552,12 +556,12 @@ export async function serveAsset(
   const object = await bucket.get(key)
   if (!object) throw new FolioError('not_found', 'No such asset')
 
-  // Second gate on the same allowlist the upload applies (validate.ts): only the
-  // types this route is willing to serve inline are echoed back, so an object
-  // written by anything other than `uploadAsset` — or before that allowlist
-  // existed — downloads rather than rendering as HTML or SVG on this origin.
+  // Second gate on the same allowlists the upload applies (validate.ts): only
+  // the types this route is willing to serve inline are echoed back, so an
+  // object written by anything other than `uploadAsset` — or before those
+  // allowlists existed — downloads rather than rendering as HTML on this origin.
   const stored = object.httpMetadata?.contentType ?? ''
-  const contentType = SERVED_CONTENT_TYPES.has(stored) ? stored : DOWNLOAD_CONTENT_TYPE
+  const contentType = isInlineContentType(stored) ? stored : DOWNLOAD_CONTENT_TYPE
 
   const wantsTransform = Boolean(transform.width || transform.height || transform.format)
   // A transform only ever runs for a GET: the Cache API can only ever hold a
@@ -566,20 +570,26 @@ export async function serveAsset(
   // mint a billable Images invocation, and writing its result under a HEAD-keyed
   // request is what used to throw and get logged as a transform *failure* for a
   // transform that had, in fact, just succeeded.
+  //
+  // `SERVED_CONTENT_TYPES` rather than "not a download": a sandboxed type is
+  // served inline but never transformed. For SVG that is both pointless (vector
+  // — `srcFor({ width })` on one is a no-op by nature) and unwanted (the Images
+  // binding has no business decoding attacker-supplied XML), so it takes the
+  // untransformed branch below and keeps its immutable cache-control there.
   const canTransform =
     Boolean(images) &&
     wantsTransform &&
-    contentType !== DOWNLOAD_CONTENT_TYPE &&
+    SERVED_CONTENT_TYPES.has(contentType) &&
     request.method === 'GET'
 
   if (!canTransform) {
     // Nothing here was ever going to be transformed — the type isn't one this
-    // route reads, or no transform was requested at all — is the correct,
+    // route resizes, or no transform was requested at all — is the correct,
     // stable response for the URL it answers and can be pinned for a year. A
     // request that *did* ask for a transform but isn't getting one right now
     // (no Images binding configured, or a non-GET method choosing not to spend
     // one) is a degraded response and must not be.
-    const stable = !wantsTransform || contentType === DOWNLOAD_CONTENT_TYPE
+    const stable = !wantsTransform || !SERVED_CONTENT_TYPES.has(contentType)
     return new Response(object.body, {
       headers: {
         ...serveHeaders(stable ? IMMUTABLE : DEGRADED, contentType),
@@ -685,11 +695,12 @@ const ascii4 = (bytes: Uint8Array, offset: number): string =>
     : ''
 
 /**
- * The upload's real content type, off its own magic bytes. Covers exactly
- * `SERVED_CONTENT_TYPES` (validate.ts) — the formats `imageSize` already reads
- * (png, jpeg, gif, webp) plus avif, cheap to add since its signature is a
- * fixed 12-byte `ftyp` box. Returns `undefined` for anything else, which
- * `uploadAsset` stores as `DOWNLOAD_CONTENT_TYPE`.
+ * The upload's real content type, off its own magic bytes. Covers exactly the
+ * types validate.ts is willing to serve inline: `SERVED_CONTENT_TYPES` — the
+ * formats `imageSize` already reads (png, jpeg, gif, webp) plus avif, cheap to
+ * add since its signature is a fixed 12-byte `ftyp` box — and
+ * `SANDBOXED_CONTENT_TYPES`, which is SVG. Returns `undefined` for anything
+ * else, which `uploadAsset` stores as `DOWNLOAD_CONTENT_TYPE`.
  *
  * Every signature below checks its *full* length rather than a short, cheaper
  * prefix: this function's output becomes the stored — and later served —
@@ -697,6 +708,9 @@ const ascii4 = (bytes: Uint8Array, offset: number): string =>
  * partial match (a 4-byte PNG prefix, a 2-byte JPEG SOI, a 3-byte "GIF" with no
  * version) is a gap wide enough for an attacker-chosen payload with a matching
  * prefix to be stored and echoed back as that content-type.
+ *
+ * SVG has no magic bytes to check the length of, which is what `sniffSvg` is
+ * for and why it is stricter than a substring search.
  */
 export function sniffContentType(bytes: Uint8Array): string | undefined {
   if (
@@ -729,7 +743,87 @@ export function sniffContentType(bytes: Uint8Array): string | undefined {
   if (bytes.length >= 12 && ascii4(bytes, 4) === 'ftyp' && ascii4(bytes, 8) === 'avif') {
     return 'image/avif'
   }
+  if (sniffSvg(bytes)) return 'image/svg+xml'
   return undefined
+}
+
+/**
+ * How far into a file the root element is looked for. An SVG may open with a
+ * byte-order mark, an XML declaration, a DOCTYPE and any number of comments
+ * before `<svg`, and generators are fond of long licence comments — Illustrator
+ * and Inkscape both emit them. Bounded so this stays a header check rather than
+ * a scan of a multi-megabyte body.
+ */
+const SVG_SNIFF_BYTES = 4096
+
+/**
+ * Whether the first *element* in the document is `<svg`.
+ *
+ * Deliberately not "does `<svg` appear near the start": an HTML page carries an
+ * inline `<svg>` all the time, and matching one would store an HTML file as
+ * `image/svg+xml` and serve it back on this origin. So the prologue is walked —
+ * whitespace, a BOM, `<?xml …?>`, `<!DOCTYPE …>`, `<!-- … -->` — and whatever
+ * follows must be the root tag itself. `<html>` fails at exactly that point.
+ *
+ * The scan works on bytes rather than a decoded string. Every token it needs to
+ * recognise is ASCII, and a UTF-16 SVG (which would interleave NULs and fail
+ * here) is not a file this route needs to serve inline.
+ */
+function sniffSvg(bytes: Uint8Array): boolean {
+  const end = Math.min(bytes.length, SVG_SNIFF_BYTES)
+  // UTF-8 BOM. UTF-16's BOM is deliberately not skipped: see above.
+  let i = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0
+
+  const at = (offset: number, literal: string) => {
+    if (offset + literal.length > end) return false
+    for (let n = 0; n < literal.length; n++) {
+      if (bytes[offset + n] !== literal.charCodeAt(n)) return false
+    }
+    return true
+  }
+  /** Past the next occurrence of `literal`, or `-1` if it is not within range. */
+  const skipTo = (offset: number, literal: string) => {
+    for (let n = offset; n + literal.length <= end; n++) {
+      if (at(n, literal)) return n + literal.length
+    }
+    return -1
+  }
+
+  while (i < end) {
+    const byte = bytes[i]!
+    // Space, tab, LF, CR.
+    if (byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d) {
+      i++
+      continue
+    }
+    if (at(i, '<?xml')) {
+      i = skipTo(i, '?>')
+    } else if (at(i, '<!--')) {
+      i = skipTo(i, '-->')
+    } else if (at(i, '<!DOCTYPE') || at(i, '<!doctype')) {
+      // An internal subset (`[ … ]`) can itself contain `>`, so close on `]>`
+      // when one is opened. A DOCTYPE this route never serves is not worth
+      // parsing further than that.
+      const bracket = skipTo(i, '[')
+      const close = skipTo(i, '>')
+      i = bracket !== -1 && (close === -1 || bracket < close) ? skipTo(i, ']>') : close
+    } else {
+      // The first thing that is not prologue. It is the root tag or nothing.
+      // `<svg` must be followed by a delimiter, so `<svgfoo>` is not a match.
+      if (!at(i, '<svg')) return false
+      const next = bytes[i + 4]
+      return (
+        next === 0x20 ||
+        next === 0x09 ||
+        next === 0x0a ||
+        next === 0x0d ||
+        next === 0x2f || // /
+        next === 0x3e // >
+      )
+    }
+    if (i === -1) return false
+  }
+  return false
 }
 
 /* ------------------------------------------------------------ dimensions --- */

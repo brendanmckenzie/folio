@@ -1003,8 +1003,9 @@ workers (workerd). CI runs typecheck, Biome, both suites and the demo build.
   destroy rescued children (property-tested).
 - Every HTTP input is validated (valibot) and every failure is one envelope
   shape; wire frames are versioned, size-capped and shape-checked.
-- Uploads are typed by magic bytes and size-capped before buffering; SVG and
-  unknown types download instead of executing; transforms are clamped and
-  cached.
+- Uploads are typed by magic bytes and size-capped before buffering; unknown
+  types download instead of executing, and SVG renders inline only behind
+  `default-src 'none'; sandbox` and never through a transform; transforms are
+  clamped and cached.
 - `javascript:` URLs die in `asLink`, richtext link marks and `resolveLink`.
 - D1 has real migrations; `db:remote` can no longer drop tables.

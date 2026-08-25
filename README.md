@@ -765,6 +765,26 @@ credentials and no S3-compatible endpoint, so it works against `wrangler dev`'s
 local R2 with nothing configured. Presigning is a later optimisation that would
 not change a single stored value.
 
+**What may be stored is decided by the bytes, not the upload header.** Five
+raster types (png, jpeg, gif, webp, avif) plus SVG; everything else is kept but
+stored as `application/octet-stream` and served as an attachment, so a media
+library can hold a PDF without that PDF ever becoming a page on your origin.
+
+SVG is the one type with no magic bytes, so it is recognised by its *root
+element* — the prologue is walked past a BOM, an XML declaration, a DOCTYPE and
+any number of comments, and what follows must be `<svg`. An HTML document
+carrying an inline `<svg>` therefore does not match, which is the whole point:
+that file would otherwise be stored under an image content type and served back
+on the site's own origin.
+
+It renders inline, and what makes that safe is that `/folio/asset/:key` sends
+`Content-Security-Policy: default-src 'none'; sandbox` and
+`X-Content-Type-Options: nosniff` on **every** response, whatever the branch. A
+sandbox without `allow-scripts` forbids script, forms and origin-privileged
+execution outright, which is how GitHub and GitLab serve user-uploaded SVG. SVG
+also never reaches the Images binding: a resize on a vector is meaningless, and
+that binding has no business parsing untrusted XML.
+
 **Alt text and the focal point are stored per usage, not per file.** The library
 row holds a default that is copied in when you pick something, and after that the
 two are independent — the same photograph is a portrait in one place and a

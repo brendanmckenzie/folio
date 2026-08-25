@@ -1839,17 +1839,20 @@ describe('asset uploads and serving', () => {
     expect(new TextDecoder().decode(await served.arrayBuffer())).toBe(script)
   })
 
-  it('does not serve an uploaded SVG as an image', async () => {
-    // The transform path excludes SVG on purpose, so an allowed `image/svg+xml`
-    // would be streamed back verbatim — a script with an image's content type.
+  it('serves an uploaded SVG inline, streamed past the transform path', async () => {
+    // The transform path excludes SVG on purpose — it is vector, and the Images
+    // binding is not asked to parse it — so it is streamed back verbatim. What
+    // makes that safe is the sandbox CSP on every response from this route,
+    // asserted in full by assets.test.ts.
     const svg = '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
     const { asset } = await (await upload('logo.svg', 'image/svg+xml', svg)).json<{
       asset: AssetRow
     }>()
 
-    expect(asset.contentType).toBe('application/octet-stream')
+    expect(asset.contentType).toBe('image/svg+xml')
     const served = await SELF.fetch(`${BASE}/asset/${asset.key}`)
-    expect(served.headers.get('content-type')).toBe('application/octet-stream')
+    expect(served.headers.get('content-type')).toBe('image/svg+xml')
+    expect(served.headers.get('content-security-policy')).toBe("default-src 'none'; sandbox")
   })
 
   it('ignores a charset parameter on an otherwise served type', async () => {

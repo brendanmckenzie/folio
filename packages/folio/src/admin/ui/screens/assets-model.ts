@@ -32,11 +32,11 @@ export type { AssetRow }
  * rather than a second vocabulary the client would have to translate.
  *
  * **Two kinds and no third, and `video` is the one deliberately missing.**
- * `uploadAsset` stores what the *bytes* say they are, screened against
- * `SERVED_CONTENT_TYPES` — five raster image types — and stores everything else as
- * `application/octet-stream`. So no row in the table can ever have a `video/`
- * content type, and a `Video` chip would be a filter that is guaranteed to select
- * nothing. `ui-architecture.md` names `image`, `video` and `application` as the
+ * `uploadAsset` stores what the *bytes* say they are, screened against the two
+ * inline allowlists in validate.ts — five raster image types, plus SVG — and
+ * stores everything else as `application/octet-stream`. So no row in the table
+ * can ever have a `video/` content type, and a `Video` chip would be a filter
+ * that is guaranteed to select nothing. `ui-architecture.md` names `image`, `video` and `application` as the
  * examples of a prefix; two of them are reachable.
  *
  * **Rejected: offering it anyway** so the chips read like a complete taxonomy. A
@@ -360,11 +360,16 @@ export function extensionOf(filename: string): string {
  * **Deliberately not `core/values.ts`'s `isImageAsset`.** That one also accepts a
  * *filename* that looks like an image, which is right for a field value that may
  * point at an external URL. Here the bytes are ours and the stored content type has
- * already been screened at upload against `SERVED_CONTENT_TYPES`: an SVG is stored
- * as `application/octet-stream` and `serveAsset` echoes it back as an attachment,
- * on purpose, because rendering SVG on this origin is a script-execution vector. So
- * `logo.svg` passes `isImageAsset` and would get an `<img>` pointing at a download.
- * The content type is the only honest test.
+ * already been screened at upload against validate.ts's inline allowlists, so the
+ * content type is the only honest test: a `logo.svg` that failed the sniff is
+ * stored as `application/octet-stream` and served as an attachment, and it would
+ * still pass `isImageAsset` on its filename alone and get an `<img>` pointing at a
+ * download.
+ *
+ * An SVG that *did* pass the sniff is stored as `image/svg+xml`, served inline
+ * behind the sandbox CSP, and renders here — which is why this stayed a prefix
+ * test rather than becoming a set membership check against `SERVED_CONTENT_TYPES`
+ * when SVG was added.
  */
 export function isRenderableImage(row: Pick<AssetRow, 'contentType'>): boolean {
   return row.contentType.startsWith('image/')

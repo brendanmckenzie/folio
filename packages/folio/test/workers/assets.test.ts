@@ -79,7 +79,7 @@ describe('upload: content type is derived from magic bytes, never trusted from t
   })
 })
 
-describe('serving: five raster types render inline, everything else downloads', () => {
+describe('serving: raster types and SVG render inline, everything else downloads', () => {
   it('serves a PNG inline, with nosniff, CSP and an explicit inline disposition', async () => {
     const { asset } = await (await upload('photo.png', 'image/png', PNG_1X1)).json<{
       asset: AssetRow
@@ -92,18 +92,55 @@ describe('serving: five raster types render inline, everything else downloads', 
     expect(served.headers.get('content-security-policy')).toBe("default-src 'none'; sandbox")
   })
 
-  it('serves an uploaded SVG as an attachment, with nosniff — never inline as an image', async () => {
+  it('serves an uploaded SVG inline, inert behind the sandbox CSP even carrying a script tag', async () => {
+    // The script tag is the point. SVG renders inline now, so the CSP is the
+    // whole defence rather than a second layer behind `attachment`: a `sandbox`
+    // without `allow-scripts` is what stops this executing as the site's origin.
+    // If that header ever weakens, this is the test that should fail.
     const svg =
       '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(document.domain)</script></svg>'
     const { asset } = await (await upload('logo.svg', 'image/svg+xml', svg)).json<{
       asset: AssetRow
     }>()
+    expect(asset.contentType).toBe('image/svg+xml')
+
+    const served = await SELF.fetch(`${BASE}/asset/${asset.key}`)
+    expect(served.headers.get('content-type')).toBe('image/svg+xml')
+    expect(served.headers.get('content-disposition')).toBe('inline')
+    expect(served.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(served.headers.get('content-security-policy')).toBe("default-src 'none'; sandbox")
+    // Bytes travel intact — nothing is rewritten or stripped on the way through.
+    expect(await served.text()).toBe(svg)
+  })
+
+  it('does not mistake an HTML document carrying an inline <svg> for an SVG', async () => {
+    // The risk the SVG sniffer introduces, and the reason it walks the prologue
+    // instead of searching for `<svg`: almost every HTML page has one inside it,
+    // and storing this as `image/svg+xml` would put attacker HTML back on this
+    // origin under an image's content type.
+    const html = '<html><body><svg xmlns="http://www.w3.org/2000/svg"></svg></body></html>'
+    const { asset } = await (await upload('page.svg', 'image/svg+xml', html)).json<{
+      asset: AssetRow
+    }>()
+    expect(asset.contentType).toBe('application/octet-stream')
 
     const served = await SELF.fetch(`${BASE}/asset/${asset.key}`)
     expect(served.headers.get('content-type')).toBe('application/octet-stream')
     expect(served.headers.get('content-disposition')).toBe('attachment')
-    expect(served.headers.get('x-content-type-options')).toBe('nosniff')
-    // The file itself is kept intact — only its rendering is refused.
+  })
+
+  it('serves an SVG untransformed, and still pins it for a year', async () => {
+    // A transform query on a vector is a no-op by nature, so the untransformed
+    // branch answers it — and that answer is the permanent one for this URL, not
+    // a degraded stand-in waiting on an Images binding.
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>'
+    const { asset } = await (await upload('mark.svg', 'image/svg+xml', svg)).json<{
+      asset: AssetRow
+    }>()
+
+    const served = await SELF.fetch(`${BASE}/asset/${asset.key}?w=64`)
+    expect(served.headers.get('content-type')).toBe('image/svg+xml')
+    expect(served.headers.get('cache-control')).toBe('public, max-age=31536000, immutable')
     expect(await served.text()).toBe(svg)
   })
 

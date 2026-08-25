@@ -50,9 +50,10 @@ import {
  *   look identical and are not.
  * - **`gridStep` clamps where `nextIndex` wraps.** A grid's last tile stepping to its
  *   first crosses two axes at once and reads as focus having been lost.
- * - **An SVG is not a renderable image.** It is stored as `application/octet-stream`
- *   and served as an attachment on purpose, so `core/values.ts`'s `isImageAsset` —
- *   which believes a filename — would put an `<img>` in front of a download.
+ * - **The stored type decides renderability, not the filename.** Anything that
+ *   failed the upload sniff is stored as `application/octet-stream` and served as
+ *   an attachment, so `core/values.ts`'s `isImageAsset` — which believes a
+ *   filename — would put an `<img>` in front of a download.
  * - **A deleted file and a failed request are different answers.** `panelSubject`
  *   keeps them apart, because "could not load" about a 404 sends somebody hunting a
  *   network problem that is not there, and "that file is gone" about a dropped
@@ -317,10 +318,16 @@ describe('what a tile and a cell read', () => {
 
   it('calls an image renderable only when the stored type says so', () => {
     expect(isRenderableImage(row())).toBe(true)
-    // The trap. An SVG passes `core/values.ts`'s `isImageAsset` on its filename, is
-    // stored as `application/octet-stream` because rendering it on this origin is a
-    // script-execution vector, and comes back from `serveAsset` as an attachment. An
-    // `<img>` pointing at it renders nothing.
+    // An SVG that passed the upload sniff is stored as `image/svg+xml`, served
+    // inline behind the sandbox CSP, and renders here.
+    expect(isRenderableImage(row({ filename: 'logo.svg', contentType: 'image/svg+xml' }))).toBe(
+      true,
+    )
+    // The trap, which the filename cannot tell apart from the line above. This
+    // `.svg` failed the sniff — HTML wearing the extension, say — so it is stored
+    // as `application/octet-stream` and comes back as an attachment. It passes
+    // `core/values.ts`'s `isImageAsset` on its filename alone, and an `<img>`
+    // pointing at it renders nothing.
     expect(
       isRenderableImage(row({ filename: 'logo.svg', contentType: 'application/octet-stream' })),
     ).toBe(false)

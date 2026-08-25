@@ -389,6 +389,69 @@ describe('sniffContentType', () => {
     expect(sniffContentType(new Uint8Array([]))).toBeUndefined()
   })
 
+  /**
+   * SVG is the one type with no magic bytes, so it is recognised by its *root
+   * element* rather than a signature. That makes the false-positive direction the
+   * one worth testing hardest: `<svg` appears inside almost every HTML document,
+   * and matching one would store attacker HTML under an image content type on an
+   * origin published pages link to.
+   */
+  describe('svg', () => {
+    const svg = (text: string) => sniffContentType(new TextEncoder().encode(text))
+
+    it('accepts a bare root element', () => {
+      expect(svg('<svg xmlns="http://www.w3.org/2000/svg"></svg>')).toBe('image/svg+xml')
+      expect(svg('<svg/>')).toBe('image/svg+xml')
+      expect(svg('<svg>')).toBe('image/svg+xml')
+    })
+
+    it('walks a prologue: BOM, xml declaration, doctype, comments, whitespace', () => {
+      expect(svg('\uFEFF<svg xmlns="x"></svg>')).toBe('image/svg+xml')
+      expect(svg('<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="x"></svg>')).toBe(
+        'image/svg+xml',
+      )
+      expect(svg('<!-- Generator: Illustrator 27.0 -->\n<svg xmlns="x"></svg>')).toBe(
+        'image/svg+xml',
+      )
+      expect(
+        svg(
+          '<?xml version="1.0"?>\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" ' +
+            '"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg xmlns="x"></svg>',
+        ),
+      ).toBe('image/svg+xml')
+      expect(svg('   \n\t <svg xmlns="x"></svg>')).toBe('image/svg+xml')
+    })
+
+    it('refuses HTML that merely contains an inline <svg>', () => {
+      expect(svg('<html><body><svg xmlns="x"></svg></body></html>')).toBeUndefined()
+      expect(svg('<!DOCTYPE html>\n<html><svg></svg></html>')).toBeUndefined()
+      expect(svg('<div><svg/></div>')).toBeUndefined()
+    })
+
+    it('refuses an element merely starting with the same four characters', () => {
+      expect(svg('<svgfoo></svgfoo>')).toBeUndefined()
+      expect(svg('<svg-thing/>')).toBeUndefined()
+    })
+
+    it('refuses a root element hidden past the sniff window', () => {
+      // A prologue longer than 4 kB is not an SVG this route will serve. Bounded
+      // so this stays a header check rather than a scan of a whole body.
+      expect(svg(`<!--${'x'.repeat(5000)}-->\n<svg xmlns="x"></svg>`)).toBeUndefined()
+    })
+
+    it('refuses an unterminated prologue rather than reading past it', () => {
+      expect(svg('<!-- never closed <svg xmlns="x"></svg>')).toBeUndefined()
+      expect(svg('<?xml version="1.0"')).toBeUndefined()
+    })
+
+    it('refuses UTF-16, whose bytes interleave NULs', () => {
+      // Not a file this route needs to serve inline, and treating it as one would
+      // mean a second decoding path over untrusted bytes.
+      const utf16 = new Uint8Array([0xff, 0xfe, 0x3c, 0x00, 0x73, 0x00, 0x76, 0x00, 0x67, 0x00])
+      expect(sniffContentType(utf16)).toBeUndefined()
+    })
+  })
+
   it('is not fooled by a claimed type: only the bytes decide', () => {
     // The scenario uploadAsset relies on: a client-supplied header is never
     // consulted here at all, only the buffer.

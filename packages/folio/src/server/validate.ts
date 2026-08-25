@@ -707,17 +707,17 @@ export function filenameQuery(raw: string | undefined): string {
 
 /**
  * The types `serveAsset` is allowed to echo back as a response `Content-Type`,
- * and therefore the only ones an upload may store: the raster formats the
- * transform path in assets.ts actually reads and writes.
+ * and therefore the only ones the transform path in assets.ts will hand to the
+ * Images binding: the raster formats it actually reads and writes.
  *
  * This is an allowlist rather than a screen because the stored value *is* the
  * served value on a public, currently unauthenticated route that published pages
  * point their `<img>` tags at. A stored `text/html` would be script running on
- * the site's own origin; `image/svg+xml` is the same hazard wearing an image
- * type, and assets.ts deliberately streams it back untransformed.
+ * the site's own origin.
  *
- * Adding a type here is a deliberate act: it says the render path can serve that
- * type inline.
+ * Adding a type here is a deliberate act: it says the transform path can decode
+ * and re-encode that type. To serve a type inline *without* transforming it, see
+ * `SANDBOXED_CONTENT_TYPES`.
  */
 export const SERVED_CONTENT_TYPES: ReadonlySet<string> = new Set([
   'image/png',
@@ -727,6 +727,37 @@ export const SERVED_CONTENT_TYPES: ReadonlySet<string> = new Set([
   'image/avif',
 ])
 
+/**
+ * Types served **inline but never transformed**, and never decoded by anything
+ * on this origin.
+ *
+ * SVG is the whole set, and it sits apart from `SERVED_CONTENT_TYPES` because
+ * the two properties that make it awkward are separate. It cannot be
+ * transformed: it is vector, so a resize is meaningless, and the Images binding
+ * has no business parsing attacker-supplied XML. And it cannot simply be
+ * declared safe: an inline SVG on the site's own origin is a script-execution
+ * vector the moment a browser is allowed to try.
+ *
+ * What makes serving it acceptable is that `serveAsset` already sends
+ * `Content-Security-Policy: default-src 'none'; sandbox` and
+ * `X-Content-Type-Options: nosniff` on **every** response from this route,
+ * whatever the branch. A `sandbox` without `allow-scripts` forbids script, forms
+ * and origin-privileged execution outright — the same defence GitHub and GitLab
+ * serve user-uploaded SVG behind. So the file renders in an `<img>` and cannot
+ * execute, and this split keeps that reasoning attached to the type rather than
+ * to a reader's memory.
+ *
+ * What remains is a bug in the browser's own SVG parser, which neither `nosniff`
+ * nor the sandbox helps with. That is the exposure the five raster decoders
+ * above already carry, not a new one.
+ */
+export const SANDBOXED_CONTENT_TYPES: ReadonlySet<string> = new Set(['image/svg+xml'])
+
+/** Every type this route will send with `content-disposition: inline`. */
+export function isInlineContentType(type: string): boolean {
+  return SERVED_CONTENT_TYPES.has(type) || SANDBOXED_CONTENT_TYPES.has(type)
+}
+
 /** What anything else is stored and served as: kept, but never rendered. */
 export const DOWNLOAD_CONTENT_TYPE = 'application/octet-stream'
 
@@ -734,18 +765,18 @@ export const DOWNLOAD_CONTENT_TYPE = 'application/octet-stream'
  * The `content-type` of an upload, reduced to something safe to store and later
  * serve.
  *
- * Anything outside the allowlist — including SVG, HTML and every non-image file
- * a media library might legitimately hold — is stored as
- * `application/octet-stream`, which is already what an absent header produces in
- * assets.ts: the file is kept and downloads rather than rendering. Refusing the
- * upload outright would lose the file over a header the client chose, and
- * nothing needs the original string: the only reader of the column is
- * `isImageAsset` (core/values.ts), which falls back to the filename extension.
+ * Anything outside both allowlists — HTML, PDFs, and every other file a media
+ * library might legitimately hold — is stored as `application/octet-stream`,
+ * which is already what an absent header produces in assets.ts: the file is kept
+ * and downloads rather than rendering. Refusing the upload outright would lose
+ * the file over a header the client chose, and nothing needs the original
+ * string: the only reader of the column is `isImageAsset` (core/values.ts),
+ * which falls back to the filename extension.
  */
 export function contentTypeHeader(raw: string | undefined): string {
   // Parameters (`; charset=…`) are not part of the type being allowlisted.
   const type = (raw ?? '').split(';')[0]!.trim().toLowerCase()
-  return SERVED_CONTENT_TYPES.has(type) ? type : DOWNLOAD_CONTENT_TYPE
+  return isInlineContentType(type) ? type : DOWNLOAD_CONTENT_TYPE
 }
 
 /**
