@@ -210,6 +210,49 @@ are free to go the next time that code is touched.
   left edge on a rounded row draws a curved bracket `(`, not a bar. `List.module.css`
   uses a `::before`. Both of these are UI-review findings that no test could catch.
 
+## Releasing, and the split you will otherwise be confused by
+
+**`brendanmckenzie/folio` on GitHub is not this repository.** It holds a
+`git subtree split --prefix=packages/folio` of it — the package hoisted to the
+root, so `github:brendanmckenzie/folio#<sha>` finds a `package.json` where npm
+expects one. npm cannot install from a subdirectory of a git dependency, and that
+is the only reason the split exists.
+
+The consequences are worth holding in mind, because none of them are obvious from
+a clone:
+
+- **The two histories are unrelated.** No common ancestor, parallel commits with
+  the same messages and dates. `git log main..folio-package-only` is meaningless;
+  the counts differ because the split drops every commit that never touched
+  `packages/folio`.
+- **The public repo is the *package*, not the project.** `docs/`, `examples/`,
+  `prompts/`, `scripts/`, `README.md`, `ROADMAP.md`, this file and `.github/` are
+  all dropped by the split. So **CI has never actually run on GitHub** —
+  `.github/workflows/ci.yml` is not in what gets pushed. The four gates are local
+  until that is fixed.
+- **This repository is therefore the only copy of everything except the package.**
+
+Release with:
+
+```
+node scripts/release.mjs           # gate, split, print the push command
+node scripts/release.mjs --push    # …and push
+```
+
+It refuses a dirty tree or a branch other than `main`, runs the three gates by
+exit code, and refuses a non-fast-forward — which for a deterministic split means
+`main` was rewritten, and pushing would orphan every SHA a consumer has pinned.
+
+**Splitting is deterministic**, so re-splitting an unchanged history reproduces
+the published SHAs rather than orphaning anything. That is what makes a pin
+durable, and why a rewrite of `main` is the one thing the script will not push
+through.
+
+Consumers pin a full SHA (`github:brendanmckenzie/folio#<sha>`). Today that is
+`consumer-site-a` and `consumer-site-b`. A pinned SHA keeps resolving as long as
+it stays reachable from a pushed ref, so a release is additive for everyone who
+has not bumped.
+
 ## Where things live
 
 `core/schema.ts` holds `BlockSchema`, `Manifest`, `SchemaIndex`, `blankBlok`,
