@@ -86,6 +86,10 @@ console.log(`\nSplitting ${PREFIX} …`)
 const splitSha = execFileSync('git', ['subtree', 'split', `--prefix=${PREFIX}`, 'main'], {
   encoding: 'utf8',
   maxBuffer: 32 * 1024 * 1024,
+  // `git subtree split` writes a per-commit progress counter to stderr, which is
+  // hundreds of lines of noise around the one line that matters. Captured rather
+  // than silenced: `execFileSync` attaches it to the thrown error on a failure.
+  stdio: ['ignore', 'pipe', 'pipe'],
 })
   .trim()
   .split('\n')
