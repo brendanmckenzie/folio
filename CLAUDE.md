@@ -10,7 +10,7 @@ From the repo root:
 
 ```
 pnpm typecheck          # tsc across packages/folio and examples/demo
-pnpm exec biome ci .    # lint + format, exactly what CI runs
+pnpm exec biome ci .    # lint + format, one of the release gates
 pnpm test               # vitest: unit (Node) + workers (real workerd)
 pnpm build              # demo vite build
 ```
@@ -20,7 +20,7 @@ pnpm build              # demo vite build
 `| tail` can hide a red gate.
 
 - **Run `./node_modules/.bin/biome ci .` — the direct binary.** `pnpm exec biome ci .`
-  is what CI runs, but on a machine with a shell hook it can be rewritten into
+  is the documented form, but on a machine with a shell hook it can be rewritten into
   something that prints a plausible summary and never runs biome at all. It has
   reported `Lint: No issues found` over four real errors. `pnpm lint` is worse.
 - `echo "EXIT=$?"` **after a pipe reads the last command's status, not biome's**.
@@ -32,7 +32,8 @@ pnpm build              # demo vite build
   (`suppressions/parse`), and the rule it was meant to suppress stays reported. The
   group matters: `noImportantStyles` is `lint/complexity/`, not `lint/style/`.
 
-CI (`.github/workflows/ci.yml`) runs exactly those four.
+`scripts/release.mjs` runs the first three before it will publish, then smoke-tests
+the split. There is no GitHub Actions workflow — see "Releasing" below for why.
 
 ## End-to-end scripts
 
@@ -63,7 +64,7 @@ When writing a new one, follow two conventions that already exist:
 
 `scripts/cache-probe.mjs` is **not** one of these and `e2e.sh` does not glob it: it
 takes a deployment URL, because Workers Cache does not exist locally. A tool, not a
-test, and it cannot gate CI.
+test, and it cannot gate a release.
 
 ## Local login
 
@@ -226,10 +227,12 @@ a clone:
   the counts differ because the split drops every commit that never touched
   `packages/folio`.
 - **The public repo is the *package*, not the project.** `docs/`, `examples/`,
-  `prompts/`, `scripts/`, `README.md`, `ROADMAP.md`, this file and `.github/` are
-  all dropped by the split. So **CI has never actually run on GitHub** —
-  `.github/workflows/ci.yml` is not in what gets pushed. The four gates are local
-  until that is fixed.
+  `prompts/`, `scripts/` and `README.md`/`ROADMAP.md`/this file are all dropped by
+  the split. **The gates are local by design.** There is no GitHub Actions
+  workflow and there is nothing for one to run against: the split carries the
+  package, not the workspace, and `main` — the only branch a workflow could
+  check — is never pushed. `release.mjs` is the gate, and it refuses to publish
+  if any of them fails.
 - **This repository is therefore the only copy of everything except the package.**
 
 Release with:
@@ -242,6 +245,12 @@ node scripts/release.mjs --push    # …and push
 It refuses a dirty tree or a branch other than `main`, runs the three gates by
 exit code, and refuses a non-fast-forward — which for a deterministic split means
 `main` was rewritten, and pushing would orphan every SHA a consumer has pinned.
+
+Then, once there is actually something to push, it **installs the split the way a
+consumer does** — `git+file:` against this repo, so it runs before the push — and
+checks that every `exports` subpath resolves. That is the only check that
+exercises the package's own `prepare` build; the three gates above run against
+the workspace, and nobody installs the workspace.
 
 **Splitting is deterministic**, so re-splitting an unchanged history reproduces
 the published SHAs rather than orphaning anything. That is what makes a pin
@@ -285,7 +294,7 @@ One rule from it is worth knowing before adding any route: **a version segment i
 promise.** `{base}/api/v1/*` is a contract with somebody's script; `{base}/api/*`
 with no version is internal to the admin and may change shape in any commit. A
 workers test pins the partition, so adding `{base}/api/v1/stories` by reflex fails
-CI.
+`pnpm test`.
 
 Four things from 17 (`platform/caching.md`) are worth knowing before touching
 anything cache-shaped, because all four are wrong in ways that look right:

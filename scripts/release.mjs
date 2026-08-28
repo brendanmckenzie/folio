@@ -20,6 +20,9 @@
  * printed command is one paste.
  */
 import { execFileSync, spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 const PREFIX = 'packages/folio'
 const SPLIT_BRANCH = 'folio-package-only'
@@ -69,7 +72,7 @@ if (git('status', '--porcelain')) {
 // ── gates ────────────────────────────────────────────────────────────────────
 
 if (gate) {
-  console.log('Gates (CI runs exactly these):')
+  console.log('Gates:')
   runGate('tests', 'pnpm', ['test'])
   runGate('biome', './node_modules/.bin/biome', ['ci', '.'])
   runGate('typecheck', 'pnpm', ['typecheck'])
@@ -96,6 +99,69 @@ const splitSha = execFileSync('git', ['subtree', 'split', `--prefix=${PREFIX}`, 
   .pop()
 
 git('branch', '-f', SPLIT_BRANCH, splitSha)
+
+// ── smoke test ───────────────────────────────────────────────────────────────
+
+/**
+ * Installs the split the way a consumer does, from this repo over `git+file:`
+ * so it runs *before* the push rather than after.
+ *
+ * The gates above gate the monorepo. Nobody installs the monorepo. Consumers
+ * install this split branch and npm runs its `prepare`, which is an esbuild and
+ * a `tsc` — a build that exists only on the consumer's machine and that no gate
+ * here has ever executed. `packages/folio` typechecking says nothing about
+ * whether the package builds from a clean clone with only what `files` ships.
+ *
+ * Both export shapes are checked because the package uses both: `./core` and
+ * friends resolve into `dist/` and therefore prove `prepare` ran, while
+ * `./render`, `./preview` and `./admin-entry` are plain strings into `src/` that
+ * the consumer's own bundler compiles — those prove `files` still carries `src`.
+ * A build that half-works fails one set and not the other.
+ */
+function smokeTest(sha) {
+  const repoRoot = git('rev-parse', '--show-toplevel')
+  const dir = mkdtempSync(join(tmpdir(), 'folio-release-'))
+  try {
+    execFileSync('npm', ['init', '-y'], { cwd: dir, stdio: 'ignore' })
+
+    process.stdout.write('· consumer install (runs prepare) … ')
+    const install = spawnSync(
+      'npm',
+      ['install', `git+file://${repoRoot}#${sha}`, '--no-audit', '--no-fund'],
+      { cwd: dir, stdio: 'pipe' },
+    )
+    if (install.status !== 0) {
+      console.log('FAILED')
+      process.stderr.write(install.stderr?.toString() ?? '')
+      die('the split does not install. Nothing has been pushed.')
+    }
+    console.log('ok')
+
+    process.stdout.write('· exports resolve … ')
+    const root = join(dir, 'node_modules', 'folio')
+    const { exports: map } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+    const missing = []
+    // Conditions nest, so collect every leaf string rather than assuming a shape.
+    const walk = (subpath, node) => {
+      if (typeof node === 'string') {
+        if (!existsSync(join(root, node))) missing.push(`${subpath} -> ${node}`)
+        return
+      }
+      if (node && typeof node === 'object') {
+        for (const [, child] of Object.entries(node)) walk(subpath, child)
+      }
+    }
+    for (const [subpath, node] of Object.entries(map ?? {})) walk(subpath, node)
+    if (missing.length) {
+      console.log('FAILED')
+      for (const m of missing) console.error(`    missing: ${m}`)
+      die(`${missing.length} export target(s) absent from the built package.`)
+    }
+    console.log(`ok (${Object.keys(map ?? {}).length} subpaths)`)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
 
 let remoteHead = null
 try {
@@ -129,6 +195,13 @@ if (remoteHead) {
 }
 
 console.log(`· ${SPLIT_BRANCH} -> ${splitSha}`)
+
+if (gate) {
+  console.log('\nSmoke test (what a consumer actually runs):')
+  smokeTest(splitSha)
+} else {
+  console.log('Smoke test skipped (--no-gate).')
+}
 
 // ── publish ──────────────────────────────────────────────────────────────────
 
