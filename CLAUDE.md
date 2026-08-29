@@ -257,9 +257,9 @@ the published SHAs rather than orphaning anything. That is what makes a pin
 durable, and why a rewrite of `main` is the one thing the script will not push
 through.
 
-Consumers pin a full SHA (`github:brendanmckenzie/folio#<sha>`). Today that is
-`consumer-site-a` and `consumer-site-b`. A pinned SHA keeps resolving as long as
-it stays reachable from a pushed ref, so a release is additive for everyone who
+Consumers pin a full SHA (`github:brendanmckenzie/folio#<sha>`). Today that is two
+private sites. A pinned SHA keeps resolving as long as it stays reachable from a
+pushed ref, so a release is additive for everyone who
 has not bumped.
 
 ## Where things live

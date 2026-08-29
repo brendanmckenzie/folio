@@ -99,7 +99,7 @@ in a browser before it is called done.
      drifted line numbers, its miscount of the whole-table reads, and the spec-24
      phase 6 item that was recorded nowhere.
    - **B — `cssCodeSplit: false` breaks a production build.** The only item on either
-     list that is currently broken for a host that exists (Harbour sets the
+     list that is currently broken for a host that exists (a consumer site sets the
      flag; the demo does not, so `pnpm build` proves nothing). `adminCss` is
      `['/folio-admin.css']` and with code splitting off Vite emits one
      `assets/style-<hash>.css` instead, so the admin renders unstyled behind a 200.

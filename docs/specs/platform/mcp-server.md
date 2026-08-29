@@ -21,7 +21,7 @@ token-scoped routes over the same services the admin uses; every write goes thro
 mutation log (`server/write.ts:5`), so an agent's edit already appears live in an open
 editor, lands in the activity trail as `token:<name>` and comes back under Cmd+Z; and
 `?_folio=preview` already renders a draft server-side behind a gate a bearer token
-satisfies (`server/index.tsx:226`, `auth/resolve.ts:59`). The Harbour import
+satisfies (`server/index.tsx:226`, `auth/resolve.ts:59`). A real content import
 proved the whole path end to end: 23 documents and ~300 blocks authored by an agent
 through a bare `fetch` against `{BASE}/api/v1{path}` with a token and nothing else.
 

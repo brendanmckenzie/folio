@@ -11,8 +11,7 @@ why the load-bearing decisions were made.
 
 Your job is **Phase 1 of `PARITY.md`: content model completeness.** The
 field types currently in the library are POC placeholders, and nothing else can
-be built on them. In the real reference project (`the reference project`)
-the usage counts are: `multilink` 37, `asset` 32, `richtext` 31, `multiasset` 2.
+be built on them. In the reference project the usage counts are: `multilink` 37, `asset` 32, `richtext` 31, `multiasset` 2.
 
 ## Scope
 

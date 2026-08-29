@@ -437,8 +437,7 @@ What is still owed for an actual release is unchanged and is `ROADMAP.md`'s:
 ### What a second consumer found, immediately
 
 `examples/demo/dts-probe/` typechecks against the artifact; it does not *run* it.
-The first project to install the built package (`consumer-site-b`, a React
-Router 7 site on Workers) hit two things in the first hour, and both are now
+The first project to install the built package (a React Router 7 site on Workers) hit two things in the first hour, and both are now
 fixed here rather than there.
 
 **`react-dom/server.edge` is CommonJS, and left external it stops the Worker

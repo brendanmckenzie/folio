@@ -9,9 +9,9 @@
 
 ## Summary
 
-One Worker, one D1, one R2, one admin, and several brand sites inside it — All
-About Africa on `harbour.example`, Meridian on `meridian.example`, the next one
-on whatever it is called. Each with its own content tree, its own block set, its
+One Worker, one D1, one R2, one admin, and several brand sites inside it —
+Harbour on `harbour.example`, Meridian on `meridian.example`, the next one on
+whatever it is called. Each with its own content tree, its own block set, its
 own editors and its own domain.
 
 **Folio has no site dimension at all today**, and the absence is not a missing
@@ -19,10 +19,10 @@ column so much as an assumption threaded through the schema, the routing, the
 Durable Object naming, the auth cookie and the cache tags. This spec is the
 inventory of that assumption and the decision about which axis to add.
 
-The forcing case is real rather than hypothetical: `meridian/` holds two sibling
-sites on the same stack (React Router 7, Workers, Kestrel GraphQL), one agency, one
-team of editors, and — after `consumer-site-b`'s `folio-cms` branch —
-one of them with a CMS in it. The second one should not mean a second D1, a
+The forcing case is real rather than hypothetical: one client holds two sibling
+sites on the same stack (React Router 7, Workers, a shared GraphQL backend), one
+agency, one team of editors, and — since the first of them took a `folio-cms`
+branch — one of them with a CMS in it. The second one should not mean a second D1, a
 second R2, a second set of accounts and a second URL to sign in to.
 
 ## Ground truth
@@ -56,8 +56,8 @@ and it is exactly what breaks first: two sites cannot each have a `header`.
 (`server/space-events.ts:37`), reached with `ns.idFromName(SPACE_NAME)`
 (`runtime.ts:440`, `space-events.ts:72`). Every editor in the deployment lands in
 one presence channel and receives every structural event, so an editor working on
-Meridian would see Harbour's tree updates and the names of people
-editing a site they cannot open. `StoryDO` is keyed by story id and needs no
+Meridian would see Harbour's tree updates and the names of people editing a site
+they cannot open. `StoryDO` is keyed by story id and needs no
 change at all.
 
 **Path lookup takes a path and nothing else.** `storyByPath(db, path)`
@@ -98,8 +98,8 @@ from a story — the audit and the schedule sweep both do.
 
 ### An editor signs in once and works on two brands
 
-Signs in at `cms.meridian.example`, sees a site switcher naming both sites, opens All
-About Africa's tree, publishes a guide. The published page appears on
+Signs in at `cms.meridian.example`, sees a site switcher naming both sites, opens
+Harbour's tree, publishes a guide. The published page appears on
 `harbour.example`, not on the CMS domain.
 
 ### A developer adds a third brand

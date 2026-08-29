@@ -1,9 +1,9 @@
-# Parity roadmap: delivering the Reference site on Folio
+# Parity roadmap: delivering a production Storyblok site on Folio
 
-What Folio needs before `the reference project` could be rebuilt on it
-instead of Storyblok + Next.js.
+What Folio needs before the reference project could be rebuilt on it instead of
+Storyblok + Next.js.
 
-Derived from that repo: 87 block schemas, 38 component folders, Next 15 App
+Derived from that codebase: 87 block schemas, 38 component folders, Next 15 App
 Router, Lucia auth on Postgres, S3 uploads, visx charts.
 
 ## The important framing
@@ -362,5 +362,5 @@ links) → Phase 2 (types, querying) → Phase 6 spike (import 3 real pages to t
 the model against actual content) → Phase 3 (auth) → Phase 4 → Phase 5.
 
 Doing a *small* slice of Phase 6 early is the highest-value de-risking move
-available: importing three real Reference pages will expose model mismatches far
+available: importing three real pages from it will expose model mismatches far
 sooner than building the remaining field types on assumptions.

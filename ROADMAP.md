@@ -1,7 +1,7 @@
 # Roadmap
 
-Gaps, ordered. Informed by reading `the reference project`,
-a production Storyblok + Next.js build (87 block schemas, 38 component folders).
+Gaps, ordered. Informed by reading a production Storyblok + Next.js build
+(87 block schemas, 38 component folders) as a reference project.
 
 ## Done
 
@@ -672,7 +672,7 @@ an unsorted flat list, which stops working somewhere around 15.
   `assets/style-<hash>.css` and emits no such file, so a production build linked a
   stylesheet that 404s and the admin rendered unstyled behind a 200. Dev was fine —
   Vite injects entry CSS from JS there, which is why `adminCss` is `[]` — so the
-  first sign of it was a deploy. Found building the Harbour host, which sets
+  first sign of it was a deploy. Found building a consumer host, which sets
   the flag; the demo does not, so the demo's build was correct and proved nothing.
 
   **This entry said the fix needed `generateBundle` plus a runtime lookup, "not a
