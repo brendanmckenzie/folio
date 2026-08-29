@@ -1183,15 +1183,20 @@ letting you delete something.
 ## Layout
 
 ```
-packages/folio/
-  src/core/      document model, mutations, field builders, schema  (isomorphic)
-  src/server/    createFolio, StoryDO, SSR
-  src/preview/   renderer + the client that hydrates a previewed page
-  src/admin/     the editor SPA (prebuilt, schema-driven)
-  src/vite/      the plugin
-  migrations/    the D1 schema, as ordered migrations
-examples/demo/   a consuming project
+src/core/        document model, mutations, field builders, schema  (isomorphic)
+src/server/      createFolio, StoryDO, SSR
+src/preview/     renderer + the client that hydrates a previewed page
+src/admin/       the editor SPA (prebuilt, schema-driven)
+src/vite/        the plugin
+migrations/      the D1 schema, as ordered migrations
+examples/demo/   a consuming project  (not shipped)
+docs/            reference and specs  (api.md and mcp.md ship; the rest does not)
+scripts/         gates, end-to-end scripts, release  (not shipped)
 ```
+
+The package is the repository root: `package.json` sits beside `src/`, which is
+what makes `github:brendanmckenzie/folio#<sha>` installable. `files` ships
+`dist`, `src`, `migrations`, the two docs above and this README.
 
 ## Running it
 
@@ -1204,7 +1209,7 @@ pnpm dev
 ```
 
 Two steps, because the schema and the content are not the same thing.
-`packages/folio/migrations/` is the schema, and a consuming project points
+`migrations/` is the schema, and a consuming project points
 `migrations_dir` at it (see the demo's `wrangler.jsonc`) so it shares one
 migration history with the package. `wrangler d1 migrations apply` records what
 it ran, so it is re-runnable and never drops a table. Deploying is the same

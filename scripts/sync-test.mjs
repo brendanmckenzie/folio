@@ -17,13 +17,9 @@ await signInGlobally()
 const EDITOR_COOKIE = await signIn(undefined, DEMO_EDITOR)
 const EDITOR_ID = 'usr_demoeditor'
 
-const { PROTOCOL_VERSION } = await import(
-  new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
-)
-const { cloneSubtree } = await import(
-  new URL('../packages/folio/src/core/clone.ts', import.meta.url)
-)
-const { keyAtIndex } = await import(new URL('../packages/folio/src/core/doc.ts', import.meta.url))
+const { PROTOCOL_VERSION } = await import(new URL('../src/core/protocol.ts', import.meta.url))
+const { cloneSubtree } = await import(new URL('../src/core/clone.ts', import.meta.url))
+const { keyAtIndex } = await import(new URL('../src/core/doc.ts', import.meta.url))
 
 const BASE = 'ws://localhost:5199/folio/api/story/sty_home/socket'
 const HTTP = 'http://localhost:5199'

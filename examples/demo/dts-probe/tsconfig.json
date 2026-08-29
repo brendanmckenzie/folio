@@ -3,7 +3,7 @@
   // it is avoiding is `customConditions: ["development"]`. Dropping that is the
   // whole point: resolution falls through to the `types` condition in the
   // library's `exports`, so this program compiles against
-  // `packages/folio/dist/types` the way an installed consumer would. See
+  // `dist/types` the way an installed consumer would. See
   // `probe.tsx`.
   //
   // `worker-configuration.d.ts` comes in for the Cloudflare runtime globals

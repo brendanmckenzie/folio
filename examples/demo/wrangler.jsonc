@@ -67,7 +67,7 @@
       // in one file — the ten that preceded it were collapsed into it, and it uses
       // plain `create table` rather than `if not exists` on purpose, so applying it
       // over an existing database fails loudly and the fix is to reset.
-      "migrations_dir": "../../packages/folio/migrations"
+      "migrations_dir": "../../migrations"
     }
   ],
   "durable_objects": {

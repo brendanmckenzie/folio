@@ -12,9 +12,7 @@
 // which do not, so every header is explicit.
 import { DEMO_ADMIN, DEMO_EDITOR, DEMO_VIEWER, sessionCookieFrom } from './lib/auth.mjs'
 
-const { PROTOCOL_VERSION } = await import(
-  new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
-)
+const { PROTOCOL_VERSION } = await import(new URL('../src/core/protocol.ts', import.meta.url))
 
 const HTTP = 'http://localhost:5199'
 const BASE = `${HTTP}/folio`

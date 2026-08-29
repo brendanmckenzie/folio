@@ -2,9 +2,9 @@
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
   "files": {
     "includes": [
-      "packages/folio/src/**",
-      "packages/folio/test/**",
-      "packages/folio/*.ts",
+      "src/**",
+      "test/**",
+      "*.ts",
       "examples/demo/src/**",
       "examples/demo/vite.config.ts",
       "scripts/**"

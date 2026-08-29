@@ -63,6 +63,10 @@ sequence because the dependency graph is the same one.
 | 25 | [Draft mode](platform/draft-mode.md) | platform | M | — | — | roadmap, twice: host-layout draft + cookie draft mode |
 | 26 | [Documentation that ships](foundation/documentation.md) | foundation | M | — | — | owner, 2026-08-29 |
 
+Spec 26 is **done**, and its own `## Implementation notes` records that it shipped a
+different answer from the one it planned: the package moved to the repository root and
+the subtree split was deleted, rather than the docs moving inside the split prefix.
+
 Sizing matches `PARITY.md`: **S** ≈ a day, **M** ≈ a few days, **L** ≈ a week
 or two. Relative weight, not a quote.
 
@@ -268,10 +272,10 @@ paragraph said "in-progress: its phase 1, the schema collapse, has landed" until
 route went with `ui-architecture.md`'s port phase 3, so the index was a revision behind
 its own entry. Specs 23 (multi-site) and 25 (draft mode) are **draft** and unstarted;
 23's three open questions were resolved in place on 2026-08-04 without starting it, and
-25 was written the same day. Spec 26 (documentation that ships) is **draft**, written
-2026-08-29 after the owner observed that building a host meant pointing an assistant at
-*this* workspace — which is the only channel there is, because the split publishes no
-prose at all.
+25 was written the same day. Spec 26 (documentation that ships) is **done**, written and built on 2026-08-29 after
+the owner observed that building a host meant pointing an assistant at *this*
+workspace — which was the only channel there was, because the split published no prose
+at all. It shipped a structural answer rather than the editorial one it planned.
 A spec that gets built is restamped the same way, the way `../../PARITY.md`
 records what landed.
 
@@ -287,7 +291,7 @@ it rebuilds four unique indexes and scopes every list route, and spec 18 reshape
 same routes. Landing them in the wrong order means resolving two sets of conflicts
 across the ~265 literal paths pagination already touches.
 
-**Spec 26 has no ordering constraint at all** and is the one to take first if the
-question is "what unblocks somebody else". It adds no route, no migration and no wire
-change, touching only Markdown, `package.json`'s `files` and one assertion in
-`release.mjs` — so it neither conflicts with 23 and 25 nor waits on them.
+**Spec 26 had no ordering constraint** and was taken first for that reason. It moved
+the package to the repository root and deleted the subtree split, so every path in the
+specs above that reads `packages/folio/src/...` is now `src/...`. Ground truth written
+before 2026-08-29 carries the old prefix; the file it names is otherwise unchanged.

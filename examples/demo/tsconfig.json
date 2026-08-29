@@ -14,10 +14,10 @@
     "resolveJsonModule": true,
     // Resolve `folio/*` the way `vite dev` does: through the `development`
     // condition in the library's `exports`, which points at its TypeScript
-    // source. This keeps `pnpm typecheck` independent of `packages/folio/dist`,
+    // source. This keeps `pnpm typecheck` independent of `dist`,
     // and it keeps every `folio/*` entry on *one* copy of the library's types —
     // which matters once `types` starts pointing at `dist/types` for some entries
-    // and not others. See `packages/folio/tsconfig.build.json`.
+    // and not others. See `tsconfig.build.json`.
     "customConditions": ["development"],
     "types": ["vite/client", "node"]
   },

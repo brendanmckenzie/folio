@@ -33,9 +33,7 @@ const EDITOR_COOKIE = await signIn(undefined, DEMO_EDITOR)
 const EDITOR_ID = 'usr_demoeditor'
 const ADMIN_ID = 'usr_demoadmin1'
 
-const { PROTOCOL_VERSION } = await import(
-  new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
-)
+const { PROTOCOL_VERSION } = await import(new URL('../src/core/protocol.ts', import.meta.url))
 
 const HTTP = 'http://localhost:5199'
 const BASE = `${HTTP}/folio`

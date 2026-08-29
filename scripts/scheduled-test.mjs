@@ -12,7 +12,7 @@
 // The route refuses to read `now` off a body — that would let a publisher bring
 // every future schedule on the site forward — so a live test has to let time pass.
 // The due-instant boundary itself is pinned with an injected `now` in
-// packages/folio/test/workers/schedules.test.ts.
+// test/workers/schedules.test.ts.
 //
 // The demo configures a real sign-in provider, so every route here needs a session:
 // this signs in as the seeded admin and makes this process's `fetch` and
@@ -21,9 +21,7 @@ import { signInGlobally } from './lib/auth.mjs'
 
 await signInGlobally()
 
-const { PROTOCOL_VERSION } = await import(
-  new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
-)
+const { PROTOCOL_VERSION } = await import(new URL('../src/core/protocol.ts', import.meta.url))
 
 const HTTP = 'http://localhost:5199'
 const BASE = `${HTTP}/folio`

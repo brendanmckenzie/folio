@@ -3,7 +3,7 @@
 > **Group:** foundation
 > **Build order:** 26, per docs/specs/README.md
 > **Size:** M
-> **Status:** draft
+> **Status:** done — but not as planned; see `## Implementation notes`
 > **Wire version:** none
 > **Migration:** none
 > **Last updated:** 2026-08-29
@@ -11,10 +11,10 @@
 ## Summary
 
 Folio has 2,878 lines of documentation and a consumer receives none of it. The
-subtree split carries `packages/folio` and nothing else, so
+subtree split carried `packages/folio` and nothing else, so
 `brendanmckenzie/folio` — the repository the two private sites actually install
-from — has seven entries at its root, no README, no licence and no prose of any
-kind. Everything a host developer needs is in this workspace, which is not the
+from — had seven entries at its root, no README, no licence and no prose of any
+kind. Everything a host developer needs was in this workspace, which is not the
 artifact they get.
 
 That is the distribution half. The other half is that what exists is
@@ -22,11 +22,12 @@ That is the distribution half. The other half is that what exists is
 is and why it is shaped that way. Nothing states how to build a host, in what
 order, or what a newcomer will get wrong — and we know what they get wrong,
 because the one real integration outside the demo found four traps, none of
-which is written down anywhere a consumer or their coding agent can read.
+which was written down anywhere a consumer or their coding agent could read.
 
-This moves the product documentation into the package, adds an agent-facing file
-that states **one sanctioned integration shape**, and makes the release gate
-refuse to publish a package with no docs in it.
+**The answer turned out to be structural rather than editorial.** The package
+moved to the repository root and the split was deleted, so the README a
+consumer receives is simply the README, with no copy, no move and no second
+artifact to keep in step. See `## Implementation notes`.
 
 ## Ground truth
 
@@ -153,20 +154,33 @@ commit rather than two repositories.
 
 ## Architecture decisions
 
-### 1. The docs move inside the split prefix, and nothing else changes about the split
+### 1. The package moves to the repository root, and the split is deleted
 
-`packages/folio/README.md` is hoisted to the public repository's root by
-`git subtree split --prefix=packages/folio`, so one file placement fixes both the
-installed package and the GitHub front page — which today renders nothing at all.
-Consumer reference (`api.md`, `mcp.md`) moves to `packages/folio/docs/` and joins
-`files`.
+The whole problem is that the package lived in `packages/folio/` and npm cannot
+install from a subdirectory of a git dependency. Every consequence followed from
+that one fact: the second repository, the unrelated history, the determinism
+rule, the release incantation, and a package that shipped no prose because the
+prose lived above the split prefix.
 
-Rejected: **a documentation site.** A second artifact to build, deploy, version
-and keep in step with a pinned SHA, and it is not where either a developer with
-`node_modules` open or an agent reading a dependency actually looks. Rejected:
-**leaving the root README as the only copy and pointing consumers at this
-repository.** They cannot see it; it is not what the split publishes, and a
-private workspace is a strange thing to cite in a public package.
+So `package.json` moves to the root, beside `src/`, `test/` and `migrations/`.
+`github:brendanmckenzie/folio#<sha>` then finds it where npm expects it, `git
+push` becomes the whole of publishing, and the README a consumer gets is the
+README — npm includes it automatically. `docs/`, `examples/` and `scripts/`
+remain siblings that `files` does not ship.
+
+Rejected: **moving the docs inside the split prefix**, which was this spec's
+original decision 1. It solves the symptom — a package with no README — while
+leaving the mechanism that caused it, and it makes the workspace's own front page
+a stub pointing at a subdirectory. Rejected: **a documentation site**, a second
+artifact to build, deploy and version, and not where either a developer with
+`node_modules` open or an agent reading a dependency looks. Rejected: **publishing
+to npm**, which would also retire the split, on the owner's instruction that
+installing from GitHub stays the primary flow.
+
+The cost, and it is the real one: `docs/`, `ROADMAP.md`, `CLAUDE.md` and
+`docs/feedback.md` become publicly visible, because the repository consumers
+install from is now the repository the work happens in. Confirmed by the owner
+before the move.
 
 ### 2. One sanctioned integration shape, stated as *the* shape
 
@@ -429,3 +443,58 @@ Leaves the tree green: no source changes, no test changes.
 
 - Checkpoint 2's distribution mechanism is the only one, and it blocks phase 3
   alone.
+
+## Implementation notes
+
+Landed 2026-08-29, in one commit, and **the plan above is the second answer to
+the question rather than the one that shipped**. The spec was written assuming
+the split was a fixed constraint and that the fix was editorial: move the prose
+inside the split prefix so it rides along. The owner's response to reading it was
+that the split itself was the confusing thing, and that installing from GitHub —
+not publishing to npm — is the flow to preserve. That reframing made a structural
+answer available which is strictly simpler than the editorial one, and decision 1
+above was rewritten in place to record it.
+
+What actually landed:
+
+- **`packages/folio/*` moved to the repository root.** `src/`, `test/`,
+  `migrations/`, both `tsconfig`s and `vitest.config.ts`. The two `package.json`s
+  merged: the library's fields plus the workspace scripts. `pnpm-workspace.yaml`
+  gained `.` so `examples/demo`'s `"folio": "workspace:*"` still resolves.
+- **`scripts/release.mjs` lost the split** and kept everything that was never
+  about it: the three gates by exit code, the consumer-shaped smoke test (now
+  `git+file:` against this repo directly), the non-fast-forward refusal. It gained
+  a `--force` documented for exactly one act, the cutover from the old history.
+- **The smoke test now also asserts `README.md` and `AGENTS.md` are in the
+  installed package**, which is decision 6 and the only place such a check means
+  anything.
+- **`AGENTS.md` is new** and is decision 2's sanctioned shape, decision 4's
+  symptom table, the rules and the do-not list.
+- **`package.json` `files`** gained `README.md`, `AGENTS.md`, `docs/api.md` and
+  `docs/mcp.md`.
+
+Three findings worth keeping:
+
+- **Phase 1's link chore was much larger than "fix the relative links", and the
+  links were already broken.** 170 relative `docs/*.md` references live in source
+  comments; **168 of them did not resolve** before the move, at three
+  inconsistent depths. They were decorative and had never worked. The move made
+  the correct depth computable per file, so all 170 resolve now — a repair the
+  spec did not anticipate because it assumed they were correct and at risk.
+- **`files` is respected on a git install**, verified against a real consumer's
+  `node_modules/folio`: `test/` and `vitest.config.ts` are absent from it despite
+  being in the published repo. This is what makes one repo safe — the workspace's
+  own material is visible on GitHub but never reaches a consumer's tree.
+- **The `api/migrations/**` paths in three workers tests were already wrong**
+  before the move and were corrected on the way past. Nothing referenced that
+  directory.
+
+Deferred, unchanged from the plan: checkpoint 2's distribution mechanism (how the
+guidance reaches an agent working in a *consumer* repo, since `AGENTS.md` in
+`node_modules` is not read by one) and checkpoint 3's licence. Phase 3 is the only
+phase not built.
+
+One consequence to watch: the first push after this is **not a fast-forward** of
+the old split history and never can be, because the two histories are unrelated by
+construction. It orphans the SHA both consumers pin, so both need re-pinning in
+the same sitting. That is the one-time cost of the move and it does not recur.

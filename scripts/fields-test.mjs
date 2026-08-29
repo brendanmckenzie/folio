@@ -17,10 +17,8 @@ import { signInGlobally } from './lib/auth.mjs'
 
 await signInGlobally()
 
-const { diff } = await import(new URL('../packages/folio/src/core/diff.ts', import.meta.url))
-const { PROTOCOL_VERSION } = await import(
-  new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
-)
+const { diff } = await import(new URL('../src/core/diff.ts', import.meta.url))
+const { PROTOCOL_VERSION } = await import(new URL('../src/core/protocol.ts', import.meta.url))
 
 const HTTP = 'http://localhost:5199'
 const BASE = `${HTTP}/folio`
@@ -504,7 +502,7 @@ check(
 // That the *edges* go with it — same batch as the library row, because nothing
 // reads "page A uses this asset" once the asset does not exist — needs a look at
 // `content_refs`, which no route exposes. It is asserted in
-// packages/folio/test/workers/asset-usage.test.ts, where D1 is in reach. What this
+// test/workers/asset-usage.test.ts, where D1 is in reach. What this
 // script can add is that deleting one asset did not disturb another's usage.
 check(
   'deleting one asset leaves another’s usage intact',
@@ -514,7 +512,7 @@ check(
 /* --- richtext ------------------------------------------------------------ */
 
 const { sanitiseRichtext, richtextToText, asRichtext } = await import(
-  new URL('../packages/folio/src/core/richtext.ts', import.meta.url)
+  new URL('../src/core/richtext.ts', import.meta.url)
 )
 
 const rt = (...content) => ({ type: 'doc', content })

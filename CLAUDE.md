@@ -9,10 +9,11 @@ this file is how to work on it without rediscovering things the hard way.
 From the repo root:
 
 ```
-pnpm typecheck          # tsc across packages/folio and examples/demo
+pnpm typecheck          # tsc across the library and examples/demo
 pnpm exec biome ci .    # lint + format, one of the release gates
 pnpm test               # vitest: unit (Node) + workers (real workerd)
-pnpm build              # demo vite build
+pnpm build              # the library build (esbuild + .d.ts)
+pnpm build:demo         # demo vite build
 ```
 
 **Gate on exit codes, not on output.** `biome ci` prints a reassuring
@@ -108,7 +109,7 @@ than a scatter.
 
 ## The two ledgers
 
-**D1 migrations** (`packages/folio/migrations/`). **There is one:
+**D1 migrations** (`migrations/`). **There is one:
 `0001_init.sql`**, holding the whole schema — the ten that preceded it were
 collapsed into it (`docs/specs/README.md` keeps the record of what each added). A
 new one is the next number and normally a plain `alter table`, but rebuilding a
@@ -130,7 +131,7 @@ that are easy to undo by accident, and both are pinned by
   and nothing ever ordered by it. Do not restore it by copying an old file; the test
   asserts the absence.
 
-**`PROTOCOL_VERSION`** (`packages/folio/src/core/protocol.ts`) is carried by every
+**`PROTOCOL_VERSION`** (`src/core/protocol.ts`) is carried by every
 socket frame and every admin↔preview postMessage frame; a mismatch is refused, not
 guessed at. It is at **4**. Both ends ship in the same deploy, so a version is a
 guard against a stale tab, not a compatibility mechanism — bumping is cheap, and so
@@ -211,56 +212,49 @@ are free to go the next time that code is touched.
   left edge on a rounded row draws a curved bracket `(`, not a bar. `List.module.css`
   uses a `::before`. Both of these are UI-review findings that no test could catch.
 
-## Releasing, and the split you will otherwise be confused by
+## Releasing
 
-**`brendanmckenzie/folio` on GitHub is not this repository.** It holds a
-`git subtree split --prefix=packages/folio` of it — the package hoisted to the
-root, so `github:brendanmckenzie/folio#<sha>` finds a `package.json` where npm
-expects one. npm cannot install from a subdirectory of a git dependency, and that
-is the only reason the split exists.
+**This repository is the package.** `package.json` is at the root, `src/`,
+`test/` and `migrations/` beside it, and `docs/`, `examples/` and `scripts/` are
+siblings that `files` does not ship. `github:brendanmckenzie/folio#<sha>` finds
+the `package.json` where npm expects it, so **`git push` is the whole of
+publishing** and `origin/main` is what consumers install.
 
-The consequences are worth holding in mind, because none of them are obvious from
-a clone:
+**This replaced a `git subtree split` in August 2026**, and the history is worth
+knowing only so nobody reintroduces it. The package used to live in
+`packages/folio/`, npm cannot install from a subdirectory of a git dependency, so
+a second repository held a split of that one directory with the package hoisted
+to its root. Two unrelated histories, re-derived on every release, which had to
+stay byte-identical or every pinned SHA was orphaned. All of that machinery was
+paying for the subdirectory. The subdirectory is gone.
 
-- **The two histories are unrelated.** No common ancestor, parallel commits with
-  the same messages and dates. `git log main..folio-package-only` is meaningless;
-  the counts differ because the split drops every commit that never touched
-  `packages/folio`.
-- **The public repo is the *package*, not the project.** `docs/`, `examples/`,
-  `scripts/` and `README.md`/`ROADMAP.md`/this file are all dropped by
-  the split. **The gates are local by design.** There is no GitHub Actions
-  workflow and there is nothing for one to run against: the split carries the
-  package, not the workspace, and `main` — the only branch a workflow could
-  check — is never pushed. `release.mjs` is the gate, and it refuses to publish
-  if any of them fails.
-- **This repository is therefore the only copy of everything except the package.**
+What survives from it, because it was never about the split:
+
+- **The gates are local by design.** There is no GitHub Actions workflow.
+  `release.mjs` is the gate and it refuses to publish if any of the three fails.
+- **A pinned SHA keeps resolving** as long as it stays reachable from a pushed
+  ref, so a release is additive for everyone who has not bumped. Consumers pin a
+  full 40-character SHA; today that is two private sites.
+- **A non-fast-forward push is refused**, because it would orphan those pins.
 
 Release with:
 
 ```
-node scripts/release.mjs           # gate, split, print the push command
+node scripts/release.mjs           # gate, smoke-test, print the push command
 node scripts/release.mjs --push    # …and push
 ```
 
 It refuses a dirty tree or a branch other than `main`, runs the three gates by
-exit code, and refuses a non-fast-forward — which for a deterministic split means
-`main` was rewritten, and pushing would orphan every SHA a consumer has pinned.
+exit code, then **installs this repo the way a consumer does** — `git+file:`
+against itself, so it runs before the push — and checks that every `exports`
+subpath resolves and that `README.md` and `AGENTS.md` are in the installed
+package. That is the only check that exercises the package's own `prepare`
+build: the three gates run against the workspace, and nobody installs the
+workspace.
 
-Then, once there is actually something to push, it **installs the split the way a
-consumer does** — `git+file:` against this repo, so it runs before the push — and
-checks that every `exports` subpath resolves. That is the only check that
-exercises the package's own `prepare` build; the three gates above run against
-the workspace, and nobody installs the workspace.
-
-**Splitting is deterministic**, so re-splitting an unchanged history reproduces
-the published SHAs rather than orphaning anything. That is what makes a pin
-durable, and why a rewrite of `main` is the one thing the script will not push
-through.
-
-Consumers pin a full SHA (`github:brendanmckenzie/folio#<sha>`). Today that is two
-private sites. A pinned SHA keeps resolving as long as it stays reachable from a
-pushed ref, so a release is additive for everyone who
-has not bumped.
+`--force` exists for exactly one act, the cutover from the old split history,
+whose commits are unrelated to these by construction. It is not a way past a
+conflict.
 
 ## Where things live
 

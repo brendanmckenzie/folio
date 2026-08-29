@@ -4,7 +4,7 @@
  * Everything else in this repo resolves `folio/*` through the `development`
  * condition, which points at TypeScript source (see the demo's own
  * `tsconfig.json`). So `pnpm typecheck` cannot observe the `types` condition at
- * all, and the declarations in `packages/folio/dist/types` are unreached by any
+ * all, and the declarations in `dist/types` are unreached by any
  * gate. This file is the one place they are reached.
  *
  * It exists for `foundation/package-build.md` decision 6: the `types` conditions

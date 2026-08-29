@@ -787,7 +787,7 @@ an unsorted flat list, which stops working somewhere around 15.
   a `wrangler d1 execute` deploy step.
 - Passkeys, TOTP and password login are all out. Magic link plus OIDC covers both
   audiences, and a password store is a liability nobody asked for.
-- The library ships built JavaScript now — `packages/folio/dist`, esbuild, one
+- The library ships built JavaScript now — `dist/`, esbuild, one
   bundle per entry with source maps and no minification, and `exports` pointing at
   it (`docs/specs/foundation/package-build.md`). Two things are deliberately still
   source, and one is deliberately still blocked:

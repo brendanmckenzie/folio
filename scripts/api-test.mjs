@@ -35,9 +35,7 @@ import './lib/ts-resolve.mjs'
 
 import { signInGlobally } from './lib/auth.mjs'
 
-const { PROTOCOL_VERSION } = await import(
-  new URL('../packages/folio/src/core/protocol.ts', import.meta.url)
-)
+const { PROTOCOL_VERSION } = await import(new URL('../src/core/protocol.ts', import.meta.url))
 
 const HTTP = 'http://localhost:5199'
 // The admin's **internal** JSON, which is what `asAdmin` below reaches for: the

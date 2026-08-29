@@ -68,7 +68,7 @@ insert into api_tokens (id, name, scopes, created_by, created_at) values
 --
 -- `id` is `shr_`-prefixed and synthetic; `token_hash` is the lowercase-hex SHA-256 of
 -- the token, because that is the only form the database ever holds
--- (packages/folio/src/server/auth/secrets.ts) — so this file cannot compute it and
+-- (src/server/auth/secrets.ts) — so this file cannot compute it and
 -- carries it precomputed, with the plaintext existing nowhere but the comment above.
 --
 -- LOCAL DEV ONLY, and the token is deliberately unmistakable (`0123456789abcdef`
