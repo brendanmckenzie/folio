@@ -227,7 +227,7 @@ a clone:
   the counts differ because the split drops every commit that never touched
   `packages/folio`.
 - **The public repo is the *package*, not the project.** `docs/`, `examples/`,
-  `prompts/`, `scripts/` and `README.md`/`ROADMAP.md`/this file are all dropped by
+  `scripts/` and `README.md`/`ROADMAP.md`/this file are all dropped by
   the split. **The gates are local by design.** There is no GitHub Actions
   workflow and there is nothing for one to run against: the split carries the
   package, not the workspace, and `main` — the only branch a workflow could
@@ -285,10 +285,17 @@ section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
 
-**18 (`foundation/pagination.md`) is the current one and is `draft`.** It carries the
-API-prefix move with it — the admin's internal JSON goes to `{base}/api/` so screens
-can own the bare paths — so it touches every list route and ~265 literal paths in
-`test/` and `scripts/`. Nothing else should reshape a list route until it lands.
+**Specs 1–22 and 24 are done. Three are `draft` and unstarted: 23
+(`foundation/multi-site.md`, XL), 25 (`platform/draft-mode.md`, M) and 26
+(`foundation/documentation.md`, M).** 26 is the one with no ordering constraint —
+Markdown, `files` and one `release.mjs` assertion — so it neither waits on the other
+two nor conflicts with them. 23 does have one: it scopes every list route, so it and
+anything else reshaping a list route must not land out of order.
+
+This paragraph said "18 (`foundation/pagination.md`) is the current one and is
+`draft`" until 2026-08-29, long after pagination and its API-prefix move had landed
+in full. A `draft` stamp in this file is a claim about a moving target; check the
+spec's own stamp before believing it.
 
 One rule from it is worth knowing before adding any route: **a version segment is a
 promise.** `{base}/api/v1/*` is a contract with somebody's script; `{base}/api/*`

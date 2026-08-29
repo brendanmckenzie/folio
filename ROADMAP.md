@@ -701,6 +701,17 @@ an unsorted flat list, which stops working somewhere around 15.
   other plugin's, and Vite concatenates when either side is an array. Anything it
   returns under `build.rollupOptions` should assume a framework got there first.
 
+- **A block's `render` gets no `Resolution`**, so it cannot `resolveAsset` a
+  *referenced* document's asset field — it works only while such assets use the `url`
+  arm. `core/block.ts:38` is the signature:
+  `render?: (props: PropsOf<F> & { uid: string }) => ReactNode`. Found by the first
+  host outside the demo (2026-08-01) and recorded until now only in that project's own
+  code comment, which is why `foundation/documentation.md` moved it here: a defect a
+  consumer meets on day one, written down in a repository the consumer does not have,
+  is not written down. The fix is a second argument rather than a wider props object —
+  a resolution is not a field and merging it into `props` puts it in the type a block
+  author reads as "my fields".
+
 - **The write paths no longer read every story on the site. Done 2026-08-04.**
   `createStory`, `updateStoryStatement` and `deleteStoryStatement` each called the
   unbounded `listStories(db)`, so creating, renaming, moving or deleting one document
