@@ -22,6 +22,40 @@ need `esbuild` and `typescript` to succeed.
 
 Peer dependencies: React 19, React DOM 19, Vite 7 or 8.
 
+**When you bump the pin, delete `node_modules/folio` first.** npm skips the
+package's build if the directory is already there, leaving no `dist/`.
+
+## Point your own agent at this file
+
+An agent working in *your* repository reads *your* root instructions, not this
+file buried in `node_modules`. Paste this into your `AGENTS.md` or `CLAUDE.md`
+so it knows to come here. The markers exist so it can be replaced wholesale on
+an upgrade without disturbing anything around it.
+
+```markdown
+<!-- folio:begin -->
+## Folio (CMS)
+
+This project uses Folio, a Cloudflare-native block CMS mounted as a library.
+**Before changing anything that touches it — blocks, the Worker entry, routing,
+the Vite config — read `node_modules/folio/AGENTS.md`.** It states the one
+sanctioned integration shape and the traps that read as library bugs when you
+hit them.
+
+The three rules broken most often:
+
+- `folio.handle()` runs **first** in the Worker's `fetch` and returns `null` for
+  anything it does not own. Your router runs after it, not before.
+- A published page is **your** route, calling `folio.published()` in its loader.
+  Never render pages in the Worker entry — it works, and silently bypasses your
+  framework's layout, meta and error boundaries.
+- Read fields with `fieldValue()` / `dataOf()` from `folio/core`, never
+  `blok.data[name]`, or translations silently fall back to the source locale.
+
+After bumping the pinned SHA, `rm -rf node_modules/folio` before installing.
+<!-- folio:end -->
+```
+
 ## The integration shape
 
 There is one correct arrangement. Use it.
@@ -117,6 +151,7 @@ build and the asset constants. Do not hand-roll them.
 | A page taken down reads as 404 instead of 410 | You did not call `folio.status()`. It exists to tell "unpublished on purpose" from "never existed". |
 | Login appears to do nothing | The `users` table is empty. The login route answers 200 identically whether or not an address is known, so it cannot enumerate accounts — an unknown email looks exactly like a successful one. |
 | Editor loads but shows no other cursors and the tree never updates | The optional `space` binding is absent. Nothing else depends on it. |
+| After bumping the pinned SHA, imports fail or `dist/` is missing from `node_modules/folio` | npm skipped the package's `prepare` build because a `node_modules/folio` directory was already there. `rm -rf node_modules/folio` and install again. A clean install has never had this problem, which is why it survives so long unnoticed. |
 
 ## Limitations worth knowing before you design around them
 

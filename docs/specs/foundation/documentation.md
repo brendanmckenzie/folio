@@ -129,11 +129,21 @@ Verified against the tree at `cdcfec2`.
      before the host boots.
 
    Recommended: the paste block now, `npx folio init` named as the follow-up, MCP
-   rejected for the bootstrap reason above. Confirm before phase 3.
+   rejected for the bootstrap reason above. **Resolved 2026-08-30: the paste
+   block**, carried in `AGENTS.md` under "Point your own agent at this file" and
+   delimited by `<!-- folio:begin -->` / `<!-- folio:end -->` so an upgrade can
+   replace it wholesale without disturbing what surrounds it. The markers are the
+   whole of what `npx folio init` would need later; shipping them now costs
+   nothing and means the follow-up is not a migration.
 
 3. **A licence.** The package has none, which makes "two private sites pin a SHA"
    a question nobody has asked out loud yet. Out of scope for this spec's
    engineering but it is the same commit, and the answer wants to be the owner's.
+   **Resolved 2026-08-30: MIT**, owner's call, on the reasoning that the repository
+   is public, the consumers are client sites built by the owner's own agency, and a
+   permissive licence is the one that puts no friction on that. Copyleft would
+   have to be arguing against something, and there is nothing here it is arguing
+   against.
 
 ## User stories
 
@@ -473,6 +483,14 @@ What actually landed:
 - **`package.json` `files`** gained `README.md`, `AGENTS.md`, `docs/api.md` and
   `docs/mcp.md`.
 
+A fourth trap, found the moment the two consumers were re-pinned and worth more
+than the three below because it breaks a working install: **npm skips a git
+dependency's `prepare` when `node_modules/<pkg>` already exists**, so bumping a
+pinned SHA in place leaves the package with no `dist/` and no error. It is what
+had left one of the two consumers stale for weeks. A clean install has never
+reproduced it, which is exactly why it survives unnoticed. Recorded in
+`AGENTS.md`'s symptom table and beside the install instruction.
+
 Three findings worth keeping:
 
 - **Phase 1's link chore was much larger than "fix the relative links", and the
@@ -489,10 +507,15 @@ Three findings worth keeping:
   before the move and were corrected on the way past. Nothing referenced that
   directory.
 
-Deferred, unchanged from the plan: checkpoint 2's distribution mechanism (how the
-guidance reaches an agent working in a *consumer* repo, since `AGENTS.md` in
-`node_modules` is not read by one) and checkpoint 3's licence. Phase 3 is the only
-phase not built.
+**Phase 3 landed 2026-08-30**, a day after the rest, once the owner answered both
+open checkpoints: the paste block for distribution and MIT for the licence. Both
+are recorded against their checkpoints above. `LICENSE` is at the root and
+`package.json` carries `"license": "MIT"`; npm includes a licence file in the pack
+regardless of `files`, the same as a README.
+
+`npx folio init` remains unbuilt and is now cheaper than it was: the paste block
+ships with the markers it would rewrite, so the follow-up is a `bin` that
+substitutes between two delimiters rather than a format migration.
 
 One consequence to watch: the first push after this is **not a fast-forward** of
 the old split history and never can be, because the two histories are unrelated by

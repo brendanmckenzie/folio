@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Cloudflare-native block CMS with a live visual editor",
+  "license": "MIT",
   "scripts": {
     "dev": "pnpm --filter demo dev",
     "build": "pnpm run build:js && pnpm run build:types",
