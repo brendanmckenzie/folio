@@ -713,6 +713,27 @@ an unsorted flat list, which stops working somewhere around 15.
   other plugin's, and Vite concatenates when either side is an array. Anything it
   returns under `build.rollupOptions` should assume a framework got there first.
 
+- **`GET /documents/:id` then `PUT /documents/:id/content` is not a round trip.**
+  `toNested` emits every stored field, including one the schema no longer declares;
+  `fromNested` validates against the schema and refuses it — `body[3].fields.buttonLabel
+  is not a field of 'feature'`. So reading a document and writing it straight back
+  **fails on unmodified content**, which is the one thing a round trip must not do.
+
+  Found 2026-08-30 repairing a real environment, on documents left half-migrated by a
+  host's own content migration: a retype dropped the old block type but its
+  `field.remove` sat inside an `if` that a null value skipped, so the keys survived as
+  nulls. The host's bug, but Folio is what made it unrecoverable — every write path
+  refused the document, and the only way to see why was to diff the payload against the
+  schema by hand.
+
+  Two candidate answers and they are not the same feature. **Drop unknown fields on
+  read** makes the round trip total and silently discards content a migration has not
+  reached yet. **Accept and preserve them on write** keeps the data and makes the
+  validator's promise weaker. The audit already reports orphan keys
+  (`server/audit.ts`), so the third answer is that neither end changes and the *error*
+  says which field, which document and that `POST /folio/migrate` is the fix — it
+  currently says only the first of the three.
+
 - **A story whose D1 row arrives without its Durable Object is unrecoverable through
   any supported write.** Found 2026-08-30 on a real staging environment, and it is the
   predictable consequence of copying a database between environments: `stories` and

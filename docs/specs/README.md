@@ -62,6 +62,7 @@ sequence because the dependency graph is the same one.
 | 24 | [An MCP server](platform/mcp-server.md) | platform | M–L | — | — | feedback: ai-friendliness |
 | 25 | [Draft mode](platform/draft-mode.md) | platform | M | — | — | roadmap, twice: host-layout draft + cookie draft mode |
 | 26 | [Documentation that ships](foundation/documentation.md) | foundation | M | — | — | owner, 2026-08-29 |
+| 27 | [A draft seeds from what is published](foundation/draft-seeding.md) | foundation | M | — | — | staging incident, 2026-08-30 |
 
 Spec 26 is **done**, and its own `## Implementation notes` records that it shipped a
 different answer from the one it planned: the package moved to the repository root and
@@ -292,6 +293,11 @@ Spec 23 is the first one whose ordering is a real constraint rather than a prefe
 it rebuilds four unique indexes and scopes every list route, and spec 18 reshapes those
 same routes. Landing them in the wrong order means resolving two sets of conflicts
 across the ~265 literal paths pagination already touches.
+
+**Spec 27 is a bug fix with a spec**, written because the fix is a lifecycle change
+rather than a patch: it moves when a draft's seed is built so it can be built from
+something other than blank. Found by a real environment where every document was
+unrecoverable. No ordering constraint — it touches the seed path and nothing else.
 
 **Spec 26 had no ordering constraint** and was taken first for that reason. It moved
 the package to the repository root and deleted the subtree split, so every path in the
