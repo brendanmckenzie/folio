@@ -713,6 +713,38 @@ an unsorted flat list, which stops working somewhere around 15.
   other plugin's, and Vite concatenates when either side is an array. Anything it
   returns under `build.rollupOptions` should assume a framework got there first.
 
+- **A story whose D1 row arrives without its Durable Object is unrecoverable through
+  any supported write.** Found 2026-08-30 on a real staging environment, and it is the
+  predictable consequence of copying a database between environments: `stories` and
+  `versions` copy, Durable Object storage cannot. The first editor open then calls
+  `draftFor` → `getOrInit(seed(...))`, which seeds a **blank** document with a **fresh
+  root uid** (`runtime.ts`'s `seed` mints one through `blankSubtree`; it is not derived
+  from the story id, so purging and reopening produces a third one).
+
+  From there every write path is closed, because `diff` refuses documents with
+  different roots (`core/diff.ts:29`) and its own comment states the assumption that
+  has just been broken: *"Both documents must share a root uid. They always do for a
+  given story, since the root block is created once and never replaced."* True when a
+  document is created through Folio, false when its row was imported. So `POST
+  /documents/:id/restore` and `PUT /documents/:id/content` **both** fail, the second
+  only when the payload names the old root — and the admin's Restore button reports
+  `Cannot diff documents with different roots`, which describes the mechanism and not
+  the cause.
+
+  The escape that does exist is not obvious: `fromNested` uses `base.root` rather than
+  the payload's (`core/nested.ts:313`), so `PUT /documents/:id/content` **with the
+  root's `uid` omitted** rebuilds the published content under whatever root the draft
+  already has, and the diff then succeeds. That is a workaround, not a fix — it
+  requires knowing the internals to find.
+
+  The fix is to seed from the published document instead of from blank when one
+  exists: a story with `published_doc` and no draft should draft from what is live,
+  which is the only case whose behaviour changes (a document created through Folio has
+  no published copy at seed time). The cost is that the seed has to become lazy —
+  `getOrInit` takes a `Doc`, so today the seed is computed on every draft read and used
+  almost never, and reading `published_doc` eagerly to build it would put a D1 read on
+  the hot path. Wants a spec rather than a patch.
+
 - **A block's `render` gets no `Resolution`**, so it cannot `resolveAsset` a
   *referenced* document's asset field — it works only while such assets use the `url`
   arm. `core/block.ts:38` is the signature:
