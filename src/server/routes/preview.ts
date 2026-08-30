@@ -259,7 +259,19 @@ export function sharePageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * — it is what having one draft render cost. The admin's own iframe keeps
      * `previewUrl`, because for it the chrome is the feature.
      */
-    const target = rt.withUrls(story).draftUrl
+    /**
+     * **Where `draftMode` changes what a reviewer sees**
+     * (`../../../docs/specs/platform/draft-mode.md` decision 4). With it the host
+     * has promised its own `fetch` calls `draftAt`, so the reviewer is sent to the
+     * page's *real* URL and gets the draft inside the host's layout. Without it
+     * they get `draftUrl`, which Folio answers itself — the document's content on
+     * the host's block CSS, with globals stacked above it rather than placed.
+     *
+     * The cookie is identical either way, and so is the grant: this decides a
+     * destination, not an authority.
+     */
+    const urls = rt.withUrls(story)
+    const target = rt.draftMode ? urls.url : urls.draftUrl
     if (!target) return expiredLinkPage()
 
     /**

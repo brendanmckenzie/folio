@@ -3,10 +3,10 @@
 > **Group:** platform
 > **Build order:** 25, per docs/specs/README.md
 > **Size:** M
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** none
-> **Last updated:** 2026-08-04
+> **Last updated:** 2026-08-30
 
 ## Summary
 
@@ -333,3 +333,57 @@ THEN it answers null without reading D1
 
 None. Both checkpoints have a recommendation and decision 4 answers the unwired-host
 question `ROADMAP.md` left open.
+
+## Implementation notes
+
+Built 2026-08-30, all four phases, and the plan held: `draftAt` as the whole
+contract, a cookie that is a flag rather than a credential, `noStore` exported
+beside `cacheHeaders`, and `draftMode` as the host's promise. Nothing in the
+architecture decisions was overturned.
+
+**Four corrections to Ground truth**, all of which were accurate when written and
+stale by the time it was built:
+
+- **`ResolveOptions.draft` already existed.** The spec said the type "gains" it.
+  What actually needed changing was `HostResolveOptions`, which was deliberately
+  `Omit<ResolveOptions, 'draft'>` with a comment saying a published render always
+  resolves published content — the exact premise this feature breaks. It is now
+  the full type, and the comment says why.
+- **`shares.test.ts` has no binding spy**, though the spec's testing section cites
+  "the same shape `shares.test.ts` uses for its no-read assertion". No such
+  assertion exists there. `draft-mode.test.ts` writes the first one, a `Proxy`
+  counting `prepare` calls, and it is the single most load-bearing test in the
+  file: `draftAt` runs ahead of `published` on every page a wired host serves, so
+  a D1 read to decide "no" would double the query count of an entire site.
+- **The `next` screen is `safeNext` in `validate.ts`**, not something belonging to
+  `lookupRedirect`. It **falls back to a default rather than answering 400**, and
+  the routes follow it rather than the spec's edge case: consistency with the
+  login route beat a distinction no caller can act on. The edge-case table's
+  "→ 400" is wrong and the behaviour is a 302 to `/`.
+- **File paths moved.** Ground truth cites `packages/folio/src/...`; the package
+  is the repository root since spec 26, so those are `src/...`.
+
+**One behaviour worth stating plainly, because it surprised the implementation.**
+`READ_DRAFT` is `{ role: 'viewer', scope: 'content:read:draft' }` — the *lowest*
+role — so **every signed-in account can enter draft mode**, viewer included. That
+is correct rather than lax: a viewer can already open any draft in the admin's
+preview, and refusing them the identical bytes at the page's real URL would be a
+distinction with nothing behind it. A test pins it, because the reflex on reading
+`draftAt` is that browsing the live site in draft feels more privileged than
+opening the editor, and it is not.
+
+**`draftAt` deliberately does not share code with `handle()`'s preview branch.**
+They agree on who may see a draft and differ on everything else — the render, the
+response, the shape of a refusal. Folding them together would be one function with
+a mode flag deciding four unrelated things.
+
+**The e2e script found the thing no unit test could.** Its discriminator is that
+the unpublished heading appears inside the *demo's own* `Shell` — asserted through
+`/site.css`, which only the host's page links. The first attempt keyed on the
+`header` global's wrapper and failed against a perfectly ordinary published page,
+because the demo's seed leaves that singleton empty and `renderGlobal` then emits
+nothing. Also worth knowing for the next script: **`signInGlobally` keeps no cookie
+jar** — it wraps `fetch` with one fixed session header and never records a
+`Set-Cookie` — so a script needing a second cookie has to carry it by hand.
+
+Deferred: nothing. The demo wires it, so the contract has a consumer.

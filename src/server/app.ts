@@ -15,6 +15,7 @@ import { editorPageRoutes, editorRoutes } from './routes/editor'
 import { historyRoutes } from './routes/history'
 import { mcpRoutes } from './routes/mcp'
 import { migrationRoutes } from './routes/migrations'
+import { draftRoutes } from './routes/draft'
 import { shareRoutes, sharePageRoutes } from './routes/preview'
 import { redirectRoutes } from './routes/redirects'
 import { scheduleRoutes } from './routes/schedules'
@@ -201,6 +202,9 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
    * `auth: 'open'`, where the whole mechanism would be ceremony around an open door.
    */
   app.route('/', sharePageRoutes<Env>(rt))
+  // Browser navigations that set and clear the draft flag, so they sit with the
+  // other HTML routes rather than under `/api`.
+  app.route('/', draftRoutes<Env>(rt))
 
   // (3) `shellRoutes`' wildcard covers every bare path, and it now covers
   // `{base}/edit/:id` too — **port phase 7 landed, so the rebuilt editor owns the

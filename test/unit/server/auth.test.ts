@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   clearSessionCookies,
   cookieName,
+  hasDraftCookie,
   PLAIN_COOKIE,
+  PLAIN_DRAFT_COOKIE,
+  SECURE_DRAFT_COOKIE,
   readCookie,
   MAX_SHARE_COOKIE_TOKENS,
   PLAIN_SHARE_COOKIE,
@@ -285,6 +288,42 @@ describe('resolveAuth: construction refuses ambiguity', () => {
  * `hashToken` and a D1 bind — everything it emits is 64 lowercase hex characters, and
  * a regression there is not visible from any route's behaviour.
  */
+describe('the draft flag is a flag, not a credential', () => {
+  /**
+   * `hasDraftCookie` is the short-circuit that keeps a visitor with no cookies off
+   * D1 entirely (`../../../docs/specs/platform/draft-mode.md` decision 2), so it
+   * has to be a pure string test with no parse behind it and no binding in reach.
+   *
+   * It answers *presence*, never authority. Every one of these is true for a
+   * browser that grants nothing at all — the session cookie and its role are what
+   * `draftAt` actually consults, and this is only whether the editor asked.
+   */
+  it('sees either name, and nothing else', () => {
+    expect(hasDraftCookie(`${SECURE_DRAFT_COOKIE}=1`)).toBe(true)
+    expect(hasDraftCookie(`${PLAIN_DRAFT_COOKIE}=1`)).toBe(true)
+    // Alongside other cookies, in any position.
+    expect(hasDraftCookie(`a=b; ${PLAIN_DRAFT_COOKIE}=1; c=d`)).toBe(true)
+  })
+
+  it('is false for no header, an empty one, and every other Folio cookie', () => {
+    expect(hasDraftCookie(null)).toBe(false)
+    expect(hasDraftCookie(undefined)).toBe(false)
+    expect(hasDraftCookie('')).toBe(false)
+    expect(hasDraftCookie(`${SECURE_COOKIE}=abc`)).toBe(false)
+    expect(hasDraftCookie(`${SECURE_SHARE_COOKIE}=abc`)).toBe(false)
+  })
+
+  /**
+   * A name that merely *contains* the cookie's name is not the cookie. Worth
+   * pinning because the cheap implementation of a presence test is
+   * `header.includes(name)`, which this would pass.
+   */
+  it('is false for a cookie whose name only looks like it', () => {
+    expect(hasDraftCookie('not_folio_draft=1')).toBe(false)
+    expect(hasDraftCookie('folio_draft_other=1')).toBe(false)
+  })
+})
+
 describe('the share cookie carries a list', () => {
   const NAME = SECURE_SHARE_COOKIE
   const a = 'a'.repeat(64)

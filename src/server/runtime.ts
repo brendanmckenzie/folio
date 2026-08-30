@@ -176,6 +176,12 @@ export interface FolioRuntime {
   base: string
   /** True when a Vite dev client is configured, so the pages ship the preamble. */
   dev: boolean
+  /**
+   * The host's promise that its `fetch` calls `folio.draftAt`
+   * (`../../docs/specs/platform/draft-mode.md` decision 4). Read in exactly one
+   * place — where a share link picks its destination.
+   */
+  draftMode: boolean
   /** A story's public URL, and the same URL with the preview flag on it. */
   withUrls: <T extends StoryMeta>(story: T) => T
   /** `withUrls` over a whole tree. */
@@ -833,6 +839,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     titlesFor,
     base,
     dev: Boolean(config.assets?.devClient),
+    draftMode: config.draftMode === true,
     withUrls,
     decorate,
     seed,

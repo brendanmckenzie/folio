@@ -540,7 +540,7 @@ schedule cleanup.
 
 ## Uncovered from the reference project
 
-**Cookie-based draft mode. Specified as spec 25** (`platform/draft-mode.md`), and
+**Cookie-based draft mode. Done 2026-08-30, as spec 25** (`platform/draft-mode.md`),
 merged with the host-layout draft render below, because they are one feature: browsing
 the *real* site in draft across navigations is what "a draft rendered in the host's own
 layout" means once you can follow a link. The reference does it with `/api/preview` +
@@ -651,7 +651,19 @@ an unsorted flat list, which stops working somewhere around 15.
   Writing it turned up that most of the machinery is already public: `folio.draft(env,
   id)` returns a draft, `folio.render(doc, { mode: 'mark' })` renders one with no
   chrome, and the share cookie already scopes a grant to one story. What is missing is
-  the contract, not the capability. Still unbuilt.
+  the contract, not the capability.
+
+  **Built 2026-08-30.** `folio.draftAt(env, req, path, locale)` is that contract: a
+  host calls it in its own miss branch before `published`, and Folio answers only
+  "may this request see this draft". Two credentials satisfy it — an editor holding
+  a session whose role reaches `READ_DRAFT` *and* the `folio_draft` flag set at
+  `{base}/draft/enter`, which drafts every page; or a reviewer's share cookie, which
+  drafts exactly the granted story. A request carrying neither costs **no D1 read**,
+  which is what makes a call on every page render affordable and is the one
+  assertion the tests spend a binding spy on. `folio.noStore()` ships beside
+  `cacheHeaders` because the two look interchangeable and one of them caches
+  unpublished content at the edge under the page's real URL. `draftMode: true` is
+  the host's promise that the branch exists, and it flips where a share link lands.
 
 - **The admin still computes a restore in the browser, and the route that would do it
   server-side is already live.** `admin/hooks/useVersions.ts:375` builds

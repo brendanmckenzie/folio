@@ -101,6 +101,21 @@ SEO helpers. It works because `Resolution` is plain JSON — the rich objects
 (`asset.srcFor`, a reference's `content`) are rebuilt from it at render time, so
 it survives a loader boundary.
 
+**Optionally, draft mode**: one call before `published`, so editors and reviewers
+see the page rendered from its draft at its own URL. Set `draftMode: true` in
+`createFolio` to go with it.
+
+```tsx
+const draft = await folio.draftAt(env, req, path, locale)
+const doc = draft ?? (await folio.published(env, path, locale))
+// …then, at the end:
+const resolution = await folio.resolve(env, doc, { locale, draft: draft !== null })
+return html(page, draft ? folio.noStore() : folio.cacheHeaders(resolution, { story: story.id }))
+```
+
+`draftAt` costs nothing for an ordinary visitor — it answers `null` on a cookie
+check, before touching the database — so it is safe on the hot path.
+
 **3. Add the Vite plugin.** `folio/vite` supplies the admin entry, the client
 build and the asset constants. Do not hand-roll them.
 
@@ -158,10 +173,13 @@ build and the asset constants. Do not hand-roll them.
 - **A block's `render` receives no `Resolution`** (above). If a block must show
   data from a document it references, that data has to arrive through the
   reference's own resolved `content`.
-- **Draft preview is Folio's shell, not your layout.** A share link and the
-  editor preview render the document on your block CSS but with Folio's chrome
-  around it, not your page. Rendering a draft inside the host's own layout is
-  specified (`docs/specs/platform/draft-mode.md`) and not built.
+- **Draft mode is opt-in, and forgetting the branch fails quietly.** Set
+  `draftMode: true` *and* call `folio.draftAt(env, req, path, locale)` in your miss
+  branch, before `folio.published`. Setting the key without writing the branch
+  sends reviewers to a published page that looks correct and is stale, which is the
+  one way to hold this wrong. A drafted response must use `folio.noStore()`, never
+  `folio.cacheHeaders()` — the two look interchangeable and the wrong one caches
+  unpublished content at the edge under the page's real URL.
 - **One site per deployment.** There is no site dimension in the schema; several
   brand sites in one Folio is specified (`docs/specs/foundation/multi-site.md`)
   and not built.

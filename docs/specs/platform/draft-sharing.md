@@ -705,3 +705,24 @@ above it rather than placed as the host would place them.
   not this: `GET {base}/api/shares` without `?story=` already answers it, and the
   natural home is a rail on the Access screen beside Tokens, where the other
   outstanding credentials are.
+
+
+### Amended again by spec 25 (draft mode), 2026-08-30
+
+**The share link's destination has now moved twice**, and this is the second time.
+Spec 24 moved it from `?_folio=preview` to `?_folio=draft`, because a reviewer was
+getting the editor's chrome. Spec 25 makes it **conditional**: on a host that sets
+`draftMode: true`, the link redirects to the story's *real* URL and the host's own
+render produces the page. Without the key it stays `?_folio=draft` exactly as spec
+24 left it.
+
+The grant, the cookie, the expiry and every gate are untouched — this decides a
+destination, not an authority, and `folio.draftAt` re-checks the same
+`claimShare` this spec built. Worth recording here because "where does a share link
+go" is now answered in two files, and the branch lives in `routes/preview.ts` beside
+the code this spec wrote.
+
+One property the amendment preserves deliberately: a reviewer's grant still names
+**one story**. Draft mode is what widens draft rendering to a whole site for an
+*editor*, and a share cookie must never inherit that — `draft-mode.test.ts` pins it
+with the same cookie on a second page answering the published bytes.

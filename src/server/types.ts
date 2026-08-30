@@ -37,10 +37,16 @@ import type { StoryDO } from './story-do'
 import type { WriteResult } from './write'
 
 /**
- * `ResolveOptions` minus `draft`, which is Folio's own preview mode and not
- * something a host chooses: a published render always resolves published content.
+ * What a host may ask `resolve` for.
+ *
+ * **This used to omit `draft`**, on the reasoning that it was Folio's own preview
+ * mode and a published render always resolves published content. Draft mode
+ * (`../../docs/specs/platform/draft-mode.md`) is exactly the case that reasoning
+ * did not cover: a host rendering a draft at the page's real URL must resolve the
+ * *targets* from their drafts too, or a drafted page links to and pulls in
+ * published copies of everything else and is internally inconsistent.
  */
-export type HostResolveOptions = Omit<ResolveOptions, 'draft'>
+export type HostResolveOptions = ResolveOptions
 
 /**
  * The two values `?_folio=` takes, and the only two `handle()` recognises
@@ -284,6 +290,25 @@ export interface FolioConfig<Env> {
    * than leaving it to be inferred from an empty table.
    */
   mcp?: boolean
+  /**
+   * **A promise that your `fetch` calls `folio.draftAt`**
+   * (`../../docs/specs/platform/draft-mode.md` decision 4). Default false.
+   *
+   * With it, a share link redirects a reviewer to the story's *real* URL, so they
+   * see the page inside your own layout. Without it they land on `?_folio=draft`,
+   * which Folio answers itself with its preview shell — the document's content on
+   * your block CSS, but with globals stacked above it rather than placed where you
+   * place them.
+   *
+   * Not inferred, because there is nothing to infer from: Folio cannot see whether
+   * a host's miss branch calls `draftAt`. Not defaulted on, because the failure
+   * mode of guessing wrong is the worst one available here — a reviewer
+   * confidently approving a *published* page that looks correct and is stale.
+   *
+   * **The one way to hold this wrong** is to set it and not write the branch. Then
+   * every share link lands on a published page and nothing says so.
+   */
+  draftMode?: boolean
 }
 
 export interface Folio<Env> {
@@ -464,6 +489,59 @@ export interface Folio<Env> {
    * tree — and is exactly the old behaviour.
    */
   resolve: (env: Env, doc?: Doc, opts?: HostResolveOptions) => Promise<Resolution>
+  /**
+   * The draft of the page at `path`, when this request is allowed to see it, and
+   * `null` otherwise (`../../docs/specs/platform/draft-mode.md` decision 1).
+   *
+   * This is the whole of draft mode's contract. Call it in your miss branch
+   * *before* `published`, and render whatever comes back in your own layout:
+   *
+   * ```tsx
+   * const draft = await folio.draftAt(env, req, path, locale)
+   * const doc = draft ?? (await folio.published(env, path, locale))
+   * if (!doc) { … }
+   * const resolution = await folio.resolve(env, doc, { locale, draft: draft !== null })
+   * return html(
+   *   <Shell>{folio.render(doc, { resolution, mode: draft ? 'mark' : 'off' })}</Shell>,
+   *   draft ? folio.noStore() : folio.cacheHeaders(resolution, { story: story.id }),
+   * )
+   * ```
+   *
+   * Two credentials satisfy it, and neither is inferred from the other: an
+   * **editor** holding a session whose role reaches `READ_DRAFT` *and* who has
+   * entered draft mode at `{base}/draft/enter`, which drafts every page; or a
+   * **reviewer** holding a share cookie, which drafts exactly the granted story
+   * and no other.
+   *
+   * **A request carrying none of those cookies costs no D1 read.** The test is a
+   * string check on the `Cookie` header and this returns null before touching a
+   * binding, so a stranger walking the site pays nothing — the same discipline
+   * `handle()`'s preview branch keeps.
+   *
+   * Answering `null` is not an error and must not be rendered as one: it is the
+   * ordinary case for every visitor, and the published page is what follows.
+   */
+  draftAt: (env: Env, req: Request, path: string, locale?: string) => Promise<Doc | null>
+  /**
+   * Whether this request asked for draft mode — the cookie, not the authority.
+   *
+   * For drawing a banner, and nothing else. It answers true for a browser that
+   * entered draft mode even where `draftAt` will refuse the document, so it must
+   * never gate what is rendered: the two questions are deliberately different, and
+   * only `draftAt` has looked at a role or a grant.
+   */
+  inDraftMode: (req: Request) => boolean
+  /**
+   * The headers a draft response must carry: `private, no-store`, no cache tag.
+   *
+   * Exported because the failure it prevents is catastrophic and silent. A draft
+   * cached at the edge under the page's real URL serves unpublished content to the
+   * public until it evicts, and `cacheHeaders` cannot help — it answers for a
+   * *published* render and will happily tag a draft for a week. The two calls look
+   * interchangeable and are not, so the safe one is as easy to reach as the
+   * dangerous one.
+   */
+  noStore: () => Record<string, string>
   /**
    * The document, rendered.
    *

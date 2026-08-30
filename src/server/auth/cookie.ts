@@ -33,6 +33,21 @@ export const SECURE_SHARE_COOKIE = '__Host-folio_share'
 export const PLAIN_SHARE_COOKIE = 'folio_share'
 
 /**
+ * Draft mode (`../../../docs/specs/platform/draft-mode.md` decision 2).
+ *
+ * **A flag, not a credential.** It carries no value anybody could forge into
+ * access: the authority to see drafts is the *session* cookie and its role, and
+ * this only says whether an editor who already has that authority currently wants
+ * it applied. Holding this cookie without a session grants nothing at all, which
+ * is why it can be a bare `1` and why `exit` needs no gate.
+ *
+ * A fourth name, so `readSessionCookie` and `shareCookieTokens` both continue to
+ * see exactly the names they were written for.
+ */
+export const SECURE_DRAFT_COOKIE = '__Host-folio_draft'
+export const PLAIN_DRAFT_COOKIE = 'folio_draft'
+
+/**
  * The name to *write* for this request: prefixed on HTTPS, plain otherwise. Both
  * are read on the way in (`readCookie`), so a developer moving between localhost
  * and a deployed worker is never stuck holding a cookie the server will not
@@ -48,6 +63,10 @@ export function oidcCookieName(url: URL | string): string {
 
 export function shareCookieName(url: URL | string): string {
   return isSecure(url) ? SECURE_SHARE_COOKIE : PLAIN_SHARE_COOKIE
+}
+
+export function draftCookieName(url: URL | string): string {
+  return isSecure(url) ? SECURE_DRAFT_COOKIE : PLAIN_DRAFT_COOKIE
 }
 
 function isSecure(url: URL | string): boolean {
@@ -198,4 +217,25 @@ export function clearOidcCookies(url: URL | string): string[] {
 
 export function clearShareCookies(url: URL | string): string[] {
   return clearCookies(url, SECURE_SHARE_COOKIE, PLAIN_SHARE_COOKIE)
+}
+
+export function clearDraftCookies(url: URL | string): string[] {
+  return clearCookies(url, SECURE_DRAFT_COOKIE, PLAIN_DRAFT_COOKIE)
+}
+
+/**
+ * Whether this request is *asking* for draft mode — the cookie's presence, not a
+ * grant. Every authority check happens after this, in `draftAt`.
+ *
+ * A string test over the raw header rather than a parse, because it is also the
+ * short-circuit that keeps a stranger's request off D1 entirely
+ * (`draft-mode.md` decision 2): a request with none of the three cookies must
+ * cost no binding call, and the cheapest way to be sure of that is to answer
+ * before anything is parsed.
+ */
+export function hasDraftCookie(header: string | null | undefined): boolean {
+  return (
+    readCookie(header, SECURE_DRAFT_COOKIE) !== null ||
+    readCookie(header, PLAIN_DRAFT_COOKIE) !== null
+  )
 }

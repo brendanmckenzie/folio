@@ -1301,6 +1301,56 @@ diff(live, target) -> Mutation[]  -> store.tx(mutations)
 So a restore reaches other editors, lands in the activity trail, and Cmd+Z undoes
 it. Reverting a title change plus one added block produces exactly two mutations.
 
+## Draft mode
+
+An editor browsing the real site as it *would* look, and a reviewer sent a share
+link seeing the host's own page rather than Folio's approximation of it. One call,
+in the host's miss branch, before `published`:
+
+```tsx
+const draft = await folio.draftAt(env, req, path, locale)
+const doc = draft ?? (await folio.published(env, path, locale))
+if (!doc) { /* redirect / status / 404, exactly as before */ }
+
+const resolution = await folio.resolve(env, doc, {
+  locale,
+  // A drafted page resolves its targets from their drafts too, or it links to
+  // published copies of everything else and is internally inconsistent.
+  ...(draft ? { draft: true } : {}),
+})
+return html(<Page doc={doc} resolution={resolution} draft={draft !== null} />, {
+  // Never cacheHeaders on a draft. The two look interchangeable and one of them
+  // caches unpublished content at the edge under the page's real URL.
+  ...(draft ? folio.noStore() : folio.cacheHeaders(resolution, { story: story?.id ?? null })),
+})
+```
+
+Plus `draftMode: true` in `createFolio`, which is the promise that this branch
+exists. With it a share link lands on the page's own URL; without it, on
+`?_folio=draft`, which Folio answers itself. Folio cannot infer the branch, so an
+unwired host keeps working exactly as before and a wired one gets the real page.
+
+**Two credentials satisfy `draftAt`, and neither implies the other.** An *editor*
+holding a session whose role reaches `READ_DRAFT` and who has entered draft mode at
+`{base}/draft/enter?next=/some/path` — that sets a `folio_draft` cookie and drafts
+every page until `{base}/draft/exit`. Or a *reviewer* holding a share link's
+cookie, which drafts exactly the story that link granted and no other. The flag and
+the authority are separate on purpose: an editor is signed in all day and should
+not see drafts of every page they visit until they ask.
+
+`READ_DRAFT` is a **viewer**-level gate, so every signed-in account can enter draft
+mode. That matches the admin, where a viewer can already open any draft in preview.
+
+**A request with none of those cookies costs no database read.** The test is a
+string check on the `Cookie` header and `draftAt` returns null before touching a
+binding, so calling it on every page render is affordable. `folio.inDraftMode(req)`
+reads the same cookie for drawing a banner — it has consulted no role and no grant,
+so never use it to decide what to render.
+
+`{base}/draft/exit` is deliberately ungated: a reviewer whose grant has expired
+must still be able to get out, and clearing a flag that grants nothing is safe for
+anyone to do.
+
 ## Redirects
 
 **Internal links never need a redirect.** A link stores the story's `id`, not its

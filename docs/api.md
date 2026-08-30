@@ -129,6 +129,8 @@ own `parent`, `slot` and a fractional `order` string. The API speaks trees inste
   "url": "/about",             // null for the same
   "previewUrl": "/about?_folio=preview",  // the editing render: outlines, dead links
   "draftUrl": "/about?_folio=draft",      // the same draft rendered as a page
+                                          // (a share link goes to /about itself
+                                          //  when the host sets `draftMode`)
   "state": "live",             // draft | live | unpublished | changed
   "publishedAt": 1785300000000,
   "updatedAt": 1785300000000,

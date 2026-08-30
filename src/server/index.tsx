@@ -1,10 +1,10 @@
-import { cacheHeaders, cacheTags } from '../core/cache-tags'
+import { cacheHeaders, cacheTags, NO_STORE } from '../core/cache-tags'
 import { isKnownLocale } from '../core/locales'
 import { singletonId } from '../core/schema'
 import { FolioDoc, renderGlobalNode } from '../preview/Render'
 import { createApp } from './app'
 import { audit } from './audit'
-import { shareCookieTokens } from './auth/cookie'
+import { hasDraftCookie, shareCookieTokens } from './auth/cookie'
 import { credentialOf, resolveActor } from './auth/resolve'
 import { allows, READ_DRAFT } from './auth/roles'
 import { claimShare } from './auth/shares'
@@ -366,6 +366,61 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     },
     redirect: (env, path) => lookupRedirect(config.bindings(env).db, path),
     draft: (env, id) => rt.draft(config.bindings(env), id),
+    inDraftMode: (req) => hasDraftCookie(req.headers.get('cookie')),
+    noStore: () => ({ 'cache-control': NO_STORE }),
+    /**
+     * Draft mode's whole contract (`../../docs/specs/platform/draft-mode.md`).
+     *
+     * The order of the checks is the design. **The cookie presence test comes
+     * first and reads no binding**, so a visitor with no credential costs nothing
+     * — the discipline spec 21 established for shares and the reason draft mode
+     * can be a call on every page render rather than a route somebody opts into.
+     *
+     * After that it mirrors `handle()`'s preview branch, and deliberately does not
+     * share code with it: that branch answers "may I serve Folio's own preview of
+     * this URL" and this answers "may the host serve its page from the draft".
+     * They agree today on who may see a draft and differ on everything else — the
+     * render, the response, the refusal shape — and folding them together would
+     * mean one function with a mode flag deciding four unrelated things.
+     */
+    draftAt: async (env, req, path, locale) => {
+      const header = req.headers.get('cookie')
+      const wants = hasDraftCookie(header)
+      const shared = shareCookieTokens(header)
+      // No credential of either kind: the overwhelmingly common case, answered
+      // before a binding is touched.
+      if (!wants && shared.length === 0) return null
+      if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null
+
+      const bindings = config.bindings(env)
+      const story = await storyByPath(bindings.db, path)
+      // Unrouted documents are unreachable here by construction (`storyByPath`
+      // matches `path = ?` and one stores NULL), but a record's draft not being
+      // the host's to render at a URL is a rule, not an accident of SQL.
+      if (!story || story.path === null) return null
+
+      /**
+       * An editor first, because it is the cheaper question: `resolveActor` is one
+       * indexed read and `claimShare` is a read plus a write that stamps a view.
+       * A browser holding both cookies is an editor who was also sent a link, and
+       * charging them a share view for reading their own site would make the
+       * share's view count a lie.
+       */
+      if (wants && rt.auth.mode === 'session') {
+        const actor = await resolveActor(() => bindings.db, rt.auth, credentialOf(req))
+        if (allows(actor, READ_DRAFT)) return rt.draftFor(bindings, story)
+      }
+      // `auth: 'open'` has no actor to resolve and no role to check, so the draft
+      // cookie alone is the authority — which is the same authority `handle()`'s
+      // preview branch grants there, on a site that has declared it has no editors
+      // to distinguish.
+      if (wants && rt.auth.mode !== 'session') return rt.draftFor(bindings, story)
+
+      if (shared.length > 0 && (await claimShare(bindings.db, shared, story.id))) {
+        return rt.draftFor(bindings, story)
+      }
+      return null
+    },
     /**
      * The in-process write (`content-api.md` decision 6), assembled from bindings
      * alone exactly as `publish` and `migrate` are — so a nightly sync job, a

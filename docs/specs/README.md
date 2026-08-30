@@ -270,9 +270,11 @@ specs 19 (scheduled publishing), 20 (bulk writes), 21 (draft preview sharing), 2
 paragraph said "in-progress: its phase 1, the schema collapse, has landed" until
 2026-08-05 — the spec's own stamp has read *"done — every phase landed"* since its last
 route went with `ui-architecture.md`'s port phase 3, so the index was a revision behind
-its own entry. Specs 23 (multi-site) and 25 (draft mode) are **draft** and unstarted;
-23's three open questions were resolved in place on 2026-08-04 without starting it, and
-25 was written the same day. Spec 26 (documentation that ships) is **done**, written and built on 2026-08-29 after
+its own entry. Spec 25 (draft mode) is **done**, built 2026-08-30 — its `## Implementation notes`
+record four Ground-truth corrections and the surprise that `READ_DRAFT` is a
+*viewer*-level gate, so every signed-in account can enter draft mode. Spec 23
+(multi-site) is the last one still **draft** and unstarted; its three open questions
+were resolved in place on 2026-08-04 without starting it. Spec 26 (documentation that ships) is **done**, written and built on 2026-08-29 after
 the owner observed that building a host meant pointing an assistant at *this*
 workspace — which was the only channel there was, because the split published no prose
 at all. It shipped a structural answer rather than the editorial one it planned.

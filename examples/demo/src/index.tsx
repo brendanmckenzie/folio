@@ -141,6 +141,15 @@ const folio = createFolio<Env>({
   // (`content-model/globals.md`). `settings` doubles as the footer here —
   // its root block already renders a `<footer>`.
   globals: ['header', 'settings'],
+  /**
+   * **A promise that `fetch` above calls `folio.draftAt`, and it does**
+   * (`platform/draft-mode.md` decision 4). With this key a share link redirects a
+   * reviewer to the page's own URL, so they approve the page as it will actually
+   * ship; without it they land on `?_folio=draft` and see Folio's preview shell
+   * instead. Folio cannot infer the branch, which is why this is a key rather than
+   * a default.
+   */
+  draftMode: true,
   // schema-migrations.md: content migrations, in run order, each a pure function
   // from a document to a list of mutations. Nothing runs on boot — `POST
   // /folio/api/migrate` (admin) or `folio.migrate(env)` from a deploy step, because
@@ -250,7 +259,23 @@ export default {
     // language — but it *is* checked: `/xx/about` answers null here and falls
     // through to the 404 below rather than serving English under a URL that means
     // nothing.
-    const doc = await folio.published(env, path, locale)
+    /**
+     * **Draft mode** (`platform/draft-mode.md`). One call, before `published`, and
+     * it is the whole host-side cost of browsing the real site from its drafts.
+     *
+     * `draftAt` answers null for every ordinary visitor — and does it without
+     * touching D1, because the test is the presence of a cookie — so this line is
+     * free on the hot path. It answers a document for exactly two callers: an
+     * editor who entered draft mode at `/folio/draft/enter`, and a reviewer
+     * holding a share link's cookie, who gets the one story they were granted.
+     *
+     * Because this branch exists, `createFolio` below says `draftMode: true`, and
+     * a share link therefore lands on the page's own URL rather than on
+     * `?_folio=draft`. The two go together: setting the key without writing this
+     * branch would send reviewers to a published page and say nothing.
+     */
+    const draft = await folio.draftAt(env, req, path, locale)
+    const doc = draft ?? (await folio.published(env, path, locale))
     if (!doc) {
       // A live story always wins: folio.published is checked first, and
       // creating a story at a redirected path deletes the row anyway, so the
@@ -288,7 +313,24 @@ export default {
       locale,
       page: Number.isFinite(page) && page >= 1 ? Math.trunc(page) : 1,
       ...(story ? { story } : {}),
+      // A drafted page resolves its *targets* from their drafts too, or it links
+      // to and pulls in published copies of everything else and is internally
+      // inconsistent — a page showing an unpublished title beside a teaser
+      // carrying the old one.
+      ...(draft ? { draft: true } : {}),
     })
+    if (draft) {
+      // `mark` rather than `off`: `data-folio-uid` on the host's own elements and
+      // nothing else — no marker divs, no bridge, no editing chrome. It costs
+      // nothing to a reader and is what lets a screenshot be clipped to one block.
+      //
+      // **`noStore`, never `cacheHeaders`.** The two calls look interchangeable
+      // and are not: a draft cached at the edge under the page's real URL serves
+      // unpublished content to the public until it evicts.
+      return html(<Page doc={doc} resolution={resolution} locale={locale} draft />, {
+        ...folio.noStore(),
+      })
+    }
     return html(<Page doc={doc} resolution={resolution} locale={locale} />, {
       // Two headers, always together — `Cache-Control` without `Cache-Tag`
       // would be a page cached for a week with no way to purge it, which fails
@@ -371,7 +413,17 @@ function parseLocale(pathname: string): { locale: string; path: string } {
 }
 
 /** Page metadata comes off the document's root block. */
-function Page({ doc, resolution, locale }: { doc: Doc; resolution: Resolution; locale: string }) {
+function Page({
+  doc,
+  resolution,
+  locale,
+  draft = false,
+}: {
+  doc: Doc
+  resolution: Resolution
+  locale: string
+  draft?: boolean
+}) {
   const root = doc.bloks[doc.root]
   // `dataOf` rather than `.data`: metadata is read straight off the root block
   // rather than through `render`, so reading it in the active locale is this
@@ -411,9 +463,35 @@ function Page({ doc, resolution, locale }: { doc: Doc; resolution: Resolution; l
         not Folio. Both come from the same `resolve()` call `doc` already
         needed, so this costs no extra request.
       */}
+      {/*
+        Draft mode's only visible cost to the host: a banner, so nobody mistakes an
+        unpublished page for a live one. Drawn from the `draft` flag this render
+        was given rather than from `folio.inDraftMode(req)` — the two answer
+        different questions, and only the first has been through a role or a grant.
+        A reviewer's share cookie drafts one page, so the banner must follow the
+        document, not the browser.
+      */}
+      {draft ? (
+        <div
+          style={{
+            background: '#8a5a00',
+            color: '#fff',
+            padding: '.5rem 1rem',
+            font: '500 14px system-ui, sans-serif',
+          }}
+        >
+          Draft — not published.{' '}
+          <a style={{ color: '#fff' }} href="/folio/draft/exit?next=/">
+            Exit draft mode
+          </a>
+        </div>
+      ) : null}
       {folio.renderGlobal(resolution, 'header')}
-      {/* No client entry, so a published page ships zero JavaScript. */}
-      <div id="folio-root">{folio.render(doc, { resolution })}</div>
+      {/* `mark` in draft so a block is addressable for a screenshot; `off` — the
+          default — on a published page, which ships zero JavaScript. */}
+      <div id="folio-root">
+        {folio.render(doc, { resolution, ...(draft ? { mode: 'mark' as const } : {}) })}
+      </div>
       {folio.renderGlobal(resolution, 'settings')}
     </Shell>
   )
