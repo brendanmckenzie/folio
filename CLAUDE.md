@@ -181,6 +181,28 @@ are free to go the next time that code is touched.
   Durable Object for it. `read-session.test.ts` pins the concurrency by
   asserting the send/receive order, which is the only way to see it — both
   orderings return identical rows.
+- **A page route calls `reader.page()`, and answers with the `headers` it
+  returns.** Two silent failures live in that one value: a draft answered with
+  `cacheHeaders` is unpublished content on the edge under the page's real URL,
+  and a published page answered with `Cache-Control` and no `Cache-Tag` is cached
+  for a week with no purge path (`caching.md` decision 2's half-configured
+  state). Assembling them by hand at a call site puts both back. `page()` also
+  reads the `stories` row once where `published` + `storyAt` read it twice — a
+  whole round trip for an id the caller already had.
+- **Caching is per-*entrypoint*, never Worker-wide, and that is a security
+  property.** Workers Caching is opt-out and stores a `200` with no
+  `Cache-Control` for two hours under heuristic freshness. The admin is
+  authenticated by a cookie, and a request cookie is not a bypass condition —
+  only `Set-Cookie` on the response is — so a Worker-wide `cache.enabled` puts
+  admin JSON in a shared cache. `cacheVerdictFor` (`server/cache-request.ts`) is
+  the gate, and its `'bypass'` rules are the load-bearing half: every non-asset
+  Folio path, and any request carrying a session, draft or share cookie. Note
+  `{base}/asset/:key` is public and `{base}/api/assets` is the admin's gated
+  list — one letter apart, pinned by `cache-request.test.ts`.
+  **The Cache API is a different store.** `cache.purge()` reaches Workers
+  Caching only, so anything a host puts in `caches.default` is unpurgeable by a
+  publish. `caching.md` predates the split and says "Workers Cache" throughout;
+  read it as Workers Caching.
 - **Build presence frames with `presenceOf()`. Never spread the attachment** — it
   carries `role`, `session` and `expiresAt`, and leaking a session id onto a broadcast
   is a security bug.

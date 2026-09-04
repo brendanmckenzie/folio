@@ -27,6 +27,7 @@ import type { AuthConfig, OpenAuth } from './auth/config'
 import type { Actor } from './auth/roles'
 import type { FolioHooks } from './hooks'
 import type { AuditOptions, AuditReport } from './audit'
+import type { CacheVerdict } from './cache-request'
 import type { FolioDb } from './db'
 import type { MigrateOptions, MigrateReport } from './migrate'
 import type { ReindexOptions, ReindexReport } from './reindex'
@@ -157,8 +158,64 @@ export type FolioMiss =
  * content only, which is the right default for a sitemap or a warm-up that must
  * not accidentally leak a draft into something cacheable.
  */
+/**
+ * Everything a host needs to answer one page request: `reader.page()`.
+ *
+ * Assembled from **one** read of the story row plus one resolve. The three-call
+ * shape it replaces (`published`, then `storyAt`, then `resolve`) read the same
+ * row twice, and left the host holding two things it could get silently wrong —
+ * whether this render is a draft, and whether the response carries a `Cache-Tag`
+ * to go with its `Cache-Control`.
+ */
+export interface FolioPage {
+  doc: Doc
+  /**
+   * The story behind the path, decorated with its urls.
+   *
+   * Returned rather than fetched separately because a page never appears in its
+   * own `Resolution` — `resolve()` loads what a document points *at* — so its id
+   * is the one cache tag that cannot be derived from the render, and it is the
+   * tag its own next publish purges by.
+   */
+  story: StoryMeta
+  resolution: Resolution
+  /**
+   * This render came from the draft rather than the published copy: draw a
+   * banner, and do not let it near a shared cache. `headers` has already taken
+   * care of the second half.
+   */
+  draft: boolean
+  /**
+   * The cache headers this response must carry, correct for whichever of the two
+   * cases this is: `no-store` for a draft, `Cache-Control` **and** `Cache-Tag`
+   * for a published page.
+   *
+   * Both halves are here because both are silent when wrong. A draft answered
+   * with the published headers is unpublished content on the edge under the
+   * page's real URL; a published page answered with `Cache-Control` and no
+   * `Cache-Tag` is cached for a week with no purge path.
+   */
+  headers: Record<string, string>
+}
+
+/** What `reader.page()` needs beyond the path. */
+export interface FolioPageOptions {
+  /** Refused if this site never declared it, exactly as `published` refuses it. */
+  locale?: string
+  /**
+   * The page number every `collection` field in the document offsets to
+   * (`collections.md` decision 5). The host reads `?page=`; Folio never does.
+   */
+  page?: number
+}
+
 export interface FolioReader {
   published: (path: string, locale?: string) => Promise<Doc | null>
+  /**
+   * One page request, answered from one row read plus one resolve — see
+   * `FolioPage`. This is what a page route should call.
+   */
+  page: (path: string, opts?: FolioPageOptions) => Promise<FolioPage | null>
   draftAt: (path: string, locale?: string) => Promise<Doc | null>
   resolve: (doc?: Doc, opts?: HostResolveOptions) => Promise<Resolution>
   status: (path: string) => Promise<'live' | 'unpublished' | 'unknown'>
@@ -686,6 +743,28 @@ export interface Folio<Env> {
    * two headers nothing acts on, and every purge is a no-op.
    */
   cacheHeaders: (resolution: Resolution, opts: CacheHeaderOptions) => CacheHeaders
+  /**
+   * Folio's verdict on whether a request may be served from a shared cache, or
+   * `null` when the path is the host's own to classify (`cache-request.ts`).
+   *
+   * Workers Caching is opt-*out* — a 200 with no `Cache-Control` is stored under
+   * heuristic freshness for two hours — so this question is asked about every
+   * request, and the knowledge to answer it is Folio's: which paths it owns,
+   * that `{base}/asset/:key` is public while `{base}/api/assets` is not, and
+   * which three cookies mean "this render may be a draft".
+   */
+  cacheVerdict: (req: Request) => CacheVerdict
+  /**
+   * The URL a request should be cached under, with click identifiers (`utm_*`,
+   * `gclid`, `fbclid`, …) removed and the survivors sorted.
+   *
+   * Pass it as `cf.cacheKey` on the loopback fetch to a cached entrypoint; a hit
+   * is answered before the Worker runs, so nothing can re-key an inbound
+   * request. Left in, `fbclid` and `gclid` are unique per click, so every paid
+   * and social visitor both misses the cache and writes an entry nobody will
+   * read again.
+   */
+  cacheKey: (url: string | URL) => string
   /**
    * Published document for a global, or null — `name` is not required to be
    * one of `FolioConfig.globals`, since a host may read a singleton by name

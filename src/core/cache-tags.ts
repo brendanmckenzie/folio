@@ -86,8 +86,15 @@ export interface CacheTagOptions {
   story: string | null
 }
 
-/** Folio's advice for a published response. The host sets these headers. */
-export interface CacheHeaders {
+/**
+ * Folio's advice for a published response. The host sets these headers.
+ *
+ * A type alias rather than an interface so it carries an implicit index
+ * signature and is therefore assignable to `Record<string, string>` — which is
+ * what `HeadersInit` and `FolioPage.headers` want, and what an interface would
+ * refuse. It is a data shape, not an extension point.
+ */
+export type CacheHeaders = {
   'cache-control': string
   'cache-tag': string
 }

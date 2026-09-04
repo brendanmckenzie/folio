@@ -281,9 +281,28 @@ export default {
      * `?_folio=draft`. The two go together: setting the key without writing this
      * branch would send reviewers to a published page and say nothing.
      */
-    const draft = await reader.draftAt(path, locale)
-    const doc = draft ?? (await reader.published(path, locale))
-    if (!doc) {
+    // `?page=` is the host's, not Folio's (`content-model/collections.md`
+    // decision 5): the host reads it and passes it in, and it offsets every
+    // `collection` field in the document. One number for the page, deliberately
+    // — per-field pagination keyed by uid is out of scope until something needs it.
+    const asked = Number(url.searchParams.get('page') ?? '1')
+    /**
+     * One call for the whole page: the draft-or-published document, the story
+     * row behind it, the resolution, and the cache headers this response must
+     * carry (`FolioPage`).
+     *
+     * It is one read of the `stories` row rather than the two `published` plus
+     * `storyAt` cost, and — the reason it exists — the headers cannot be
+     * half-configured. A draft answered with `cacheHeaders` is unpublished
+     * content on the edge under the page's real URL; a published page answered
+     * with `Cache-Control` and no `Cache-Tag` is cached for a week with no purge
+     * path. Both were the host's to remember and are now neither's to forget.
+     */
+    const page = await reader.page(path, {
+      locale,
+      page: Number.isFinite(asked) && asked >= 1 ? Math.trunc(asked) : 1,
+    })
+    if (!page) {
       // A live story always wins: `published` is checked first, and creating a
       // story at a redirected path deletes the row anyway, so the redirect can
       // never shadow a real page.
@@ -301,53 +320,24 @@ export default {
     }
 
     // Story links store an id, so hrefs are resolved per render rather than
-    // frozen at publish time. Renaming a page fixes every link to it.
+    // frozen at publish time. Renaming a page fixes every link to it. The locale
+    // rides on the resolution, which is what makes the whole render French:
+    // every field read in `folio.render` goes through it, and an untranslated
+    // field falls back to the source rather than leaving a hole.
     //
-    // The locale rides on the resolution, which is what makes the whole render
-    // French: every field read in `folio.render` goes through it, and an
-    // untranslated field falls back to the source rather than leaving a hole.
-    // `?page=` is the host's, not Folio's (`content-model/collections.md`
-    // decision 5): the host reads it and passes it in, and it offsets every
-    // `collection` field in the document. One number for the page, deliberately —
-    // per-field pagination keyed by uid is out of scope until something needs it.
-    const page = Number(url.searchParams.get('page') ?? '1')
-    // The row behind this path, for two things at once (`platform/caching.md`):
-    // `story` lets the resolution reach this page's ancestors, so a breadcrumb
-    // resolves; and its id is the one tag a page cannot derive from its own
-    // resolution, because a page never links to itself.
-    const story = await reader.storyAt(path)
-    const resolution = await reader.resolve(doc, {
-      locale,
-      page: Number.isFinite(page) && page >= 1 ? Math.trunc(page) : 1,
-      ...(story ? { story } : {}),
-      // A drafted page resolves its *targets* from their drafts too, or it links
-      // to and pulls in published copies of everything else and is internally
-      // inconsistent — a page showing an unpublished title beside a teaser
-      // carrying the old one.
-      ...(draft ? { draft: true } : {}),
-    })
-    if (draft) {
-      // `mark` rather than `off`: `data-folio-uid` on the host's own elements and
-      // nothing else — no marker divs, no bridge, no editing chrome. It costs
-      // nothing to a reader and is what lets a screenshot be clipped to one block.
-      //
-      // **`noStore`, never `cacheHeaders`.** The two calls look interchangeable
-      // and are not: a draft cached at the edge under the page's real URL serves
-      // unpublished content to the public until it evicts.
-      return html(<Page doc={doc} resolution={resolution} locale={locale} draft />, {
-        ...folio.noStore(),
-      })
-    }
-    return html(<Page doc={doc} resolution={resolution} locale={locale} />, {
-      // Two headers, always together — `Cache-Control` without `Cache-Tag`
-      // would be a page cached for a week with no way to purge it, which fails
-      // silently and is worse than not caching at all. `max-age` in there is 0
-      // on purpose: a purge reaches the edge and cannot reach a browser cache,
-      // so a visitor holding a stale copy is a stale copy nothing can evict.
-      // The edge's `s-maxage` is a week, because invalidation is the mechanism
-      // and the TTL is only the fallback for a purge that never arrived.
-      ...folio.cacheHeaders(resolution, { story: story?.id ?? null }),
-    })
+    // `mark` rather than `off` on a draft: `data-folio-uid` on the host's own
+    // elements and nothing else — no marker divs, no bridge, no editing chrome.
+    // It costs nothing to a reader and is what lets a screenshot be clipped to
+    // one block.
+    return html(
+      <Page
+        doc={page.doc}
+        resolution={page.resolution}
+        locale={locale}
+        {...(page.draft ? { draft: true } : {})}
+      />,
+      page.headers,
+    )
   },
 
   /**

@@ -378,3 +378,72 @@ describe('the bookmark cookie', () => {
     expect(cookieOn(res as Response)).toHaveLength(0)
   })
 })
+
+/**
+ * `reader.page()` — one row read plus one resolve, and headers that cannot be
+ * half-configured (`FolioPage`).
+ */
+describe('reader.page()', () => {
+  it('answers the document, its story, the resolution and both cache headers', async () => {
+    await insertPage('sty_rs_p1', 'rs-p1', 'Page One', pageDoc('Page One'))
+    const page = await makeFolio().reader(env).page('rs-p1')
+
+    expect(page?.doc.root).toBe('root0000')
+    expect(page?.story.id).toBe('sty_rs_p1')
+    expect(page?.draft).toBe(false)
+    // Both halves, always. `Cache-Control` without `Cache-Tag` is a page cached
+    // for a week with no purge path.
+    expect(page?.headers['cache-control']).toContain('s-maxage=')
+    expect(page?.headers['cache-tag']).toContain('story:sty_rs_p1')
+  })
+
+  it('reads the row once, where published + storyAt read it twice', async () => {
+    await insertPage('sty_rs_p2', 'rs-p2', 'Page Two', pageDoc('Page Two'))
+
+    const combined = spyOn(env.DB)
+    await makeFolio(combined.db).reader(env).page('rs-p2')
+
+    const apart = spyOn(env.DB)
+    const folio = makeFolio(apart.db)
+    const reader = folio.reader(env)
+    const doc = await reader.published('rs-p2')
+    const story = await reader.storyAt('rs-p2')
+    await reader.resolve(doc ?? undefined, { ...(story ? { story } : {}) })
+
+    // The saved query is the second read of the same row by the same indexed
+    // column — which a host only makes because `cacheHeaders` needs the id.
+    expect(combined.prepares).toBe(apart.prepares - 1)
+  })
+
+  it('answers no-store and no cache tag for a draft, so it cannot reach a shared cache', async () => {
+    await insertPage('sty_rs_p3', 'rs-p3', 'Page Three', pageDoc('Published Title'))
+    const folio = makeFolio()
+    // `auth: 'open'` makes the draft cookie the whole authority, which is the
+    // same authority `handle()`'s preview branch grants there.
+    const req = new Request(`${ORIGIN}/rs-p3`, { headers: { cookie: 'folio_draft=1' } })
+    const page = await folio.reader(env, req).page('rs-p3')
+
+    expect(page?.draft).toBe(true)
+    expect(page?.headers['cache-control']).toBe('private, no-store')
+    expect(page?.headers['cache-tag']).toBeUndefined()
+  })
+
+  it('answers null for a path with no story, and for a story with nothing to show', async () => {
+    await expect(makeFolio().reader(env).page('rs-no-such-page')).resolves.toBeNull()
+
+    // A row that exists but has never been published: `miss` is what tells a
+    // host whether that is a 404 or a 410, and `page` simply has nothing.
+    await env.DB.prepare(
+      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at)
+       values ('sty_rs_p4', 'page', null, 'rs-p4', 'rs-p4', 'a0', 'Never Published', ?)`,
+    )
+      .bind(Date.now())
+      .run()
+    await expect(makeFolio().reader(env).page('rs-p4')).resolves.toBeNull()
+  })
+
+  it('refuses a locale the site never declared, exactly as published does', async () => {
+    await insertPage('sty_rs_p5', 'rs-p5', 'Page Five', pageDoc('Five'))
+    await expect(makeFolio().reader(env).page('rs-p5', { locale: 'xx' })).resolves.toBeNull()
+  })
+})

@@ -1,9 +1,12 @@
 import { cacheHeaders, cacheTags, NO_STORE } from '../core/cache-tags'
+import type { Doc } from '../core/doc'
 import { isKnownLocale } from '../core/locales'
+import type { StoryMeta } from '../core/story'
 import { singletonId } from '../core/schema'
 import { FolioDoc, renderGlobalNode } from '../preview/Render'
 import { createApp } from './app'
 import { audit } from './audit'
+import { cacheKeyFor, cacheVerdictFor } from './cache-request'
 import { hasDraftCookie, shareCookieTokens } from './auth/cookie'
 import { credentialOf, resolveActor } from './auth/resolve'
 import { allows, READ_DRAFT } from './auth/roles'
@@ -18,6 +21,7 @@ import { alarmHookCtx, createRuntime } from './runtime'
 import { runSchedules } from './scheduler'
 import {
   listStories,
+  pageAt,
   pathMiss,
   publishedDoc,
   publishedDocsByIds,
@@ -209,11 +213,14 @@ export { ANY_TYPE_TAG, NO_STORE, SITE_TAG, globalTag, storyTag, typeTag } from '
  * what a block author needs. */
 export type { LocaleConfig, LocaleContext, LocaleDef, TranslationStatus } from '../core/locales'
 export type { AssetRow } from './assets'
+export type { CacheVerdict } from './cache-request'
 export type {
   Folio,
   FolioBindings,
   FolioConfig,
   FolioMiss,
+  FolioPage,
+  FolioPageOptions,
   FolioReader,
   ReadBindings,
 } from './types'
@@ -384,6 +391,56 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     const db = sessionFor(bound.db, { bookmark: readBookmark(req?.headers.get('cookie')) })
     const bindings: ReadBindings = { ...bound, db }
 
+    /**
+     * Is this request *asking* for a draft — the presence of a credential, not a
+     * grant.
+     *
+     * **Reads no binding**, which is the whole of `draft-mode.md` decision 2: a
+     * visitor with no cookie must cost nothing, and the cheapest way to be sure
+     * is to answer before anything is parsed. A reader built without a `Request`
+     * has nothing to ask and answers false, which is what keeps a sitemap build
+     * or a warm-up from pulling a draft into something cacheable.
+     */
+    const wantsDraft = (): boolean =>
+      req !== undefined &&
+      (hasDraftCookie(req.headers.get('cookie')) ||
+        shareCookieTokens(req.headers.get('cookie')).length > 0)
+
+    /**
+     * May this request see `story`'s draft, and if so, what is it.
+     *
+     * The authority half of draft mode, split from the lookup so `draftAt` and
+     * `page` share one implementation of the rule rather than two that agree
+     * today. Callers have already established that the request wants a draft.
+     *
+     * An editor is checked first because it is the cheaper question:
+     * `resolveActor` is one indexed read and `claimShare` is a read plus a write
+     * that stamps a view. A browser holding both cookies is an editor who was
+     * also sent a link, and charging them a share view for reading their own
+     * site would make the share's view count a lie.
+     */
+    const draftFor = async (story: StoryMeta): Promise<Doc | null> => {
+      if (!req || story.path === null) return null
+      const header = req.headers.get('cookie')
+      const wants = hasDraftCookie(header)
+
+      if (wants && rt.auth.mode === 'session') {
+        const actor = await resolveActor(() => db, rt.auth, credentialOf(req))
+        if (allows(actor, READ_DRAFT)) return rt.draftFor(bindings, story)
+      }
+      // `auth: 'open'` has no actor to resolve and no role to check, so the
+      // draft cookie alone is the authority — the same authority `handle()`'s
+      // preview branch grants there, on a site that has declared it has no
+      // editors to distinguish.
+      if (wants && rt.auth.mode !== 'session') return rt.draftFor(bindings, story)
+
+      const shared = shareCookieTokens(header)
+      if (shared.length > 0 && (await claimShare(db, shared, story.id))) {
+        return rt.draftFor(bindings, story)
+      }
+      return null
+    }
+
     return {
       published: async (path, locale) => {
         if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null
@@ -409,43 +466,59 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
        * four unrelated things.
        */
       draftAt: async (path, locale) => {
-        if (!req) return null
-        const header = req.headers.get('cookie')
-        const wants = hasDraftCookie(header)
-        const shared = shareCookieTokens(header)
-        // No credential of either kind: the overwhelmingly common case,
-        // answered before a query is sent.
-        if (!wants && shared.length === 0) return null
+        if (!wantsDraft()) return null
+        if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null
+        // Unrouted documents are unreachable here by construction (`storyByPath`
+        // matches `path = ?` and one stores NULL), but a record's draft not
+        // being the host's to render at a URL is a rule, not an accident of SQL.
+        const story = await storyByPath(db, path)
+        return story ? draftFor(story) : null
+      },
+      page: async (path, opts) => {
+        const locale = opts?.locale
         if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null
 
-        const story = await storyByPath(db, path)
-        // Unrouted documents are unreachable here by construction
-        // (`storyByPath` matches `path = ?` and one stores NULL), but a record's
-        // draft not being the host's to render at a URL is a rule, not an
-        // accident of SQL.
-        if (!story || story.path === null) return null
+        // One read for the row and its published document. `storyAt` and
+        // `published` select the same row by the same indexed column, and a host
+        // that sets cache tags needs both — a page never appears in its own
+        // resolution, so `story:<id>` is the one tag it cannot derive.
+        const found = await pageAt(db, path)
+        if (!found) return null
 
-        /**
-         * An editor first, because it is the cheaper question: `resolveActor` is
-         * one indexed read and `claimShare` is a read plus a write that stamps a
-         * view. A browser holding both cookies is an editor who was also sent a
-         * link, and charging them a share view for reading their own site would
-         * make the share's view count a lie.
-         */
-        if (wants && rt.auth.mode === 'session') {
-          const actor = await resolveActor(() => db, rt.auth, credentialOf(req))
-          if (allows(actor, READ_DRAFT)) return rt.draftFor(bindings, story)
-        }
-        // `auth: 'open'` has no actor to resolve and no role to check, so the
-        // draft cookie alone is the authority — which is the same authority
-        // `handle()`'s preview branch grants there, on a site that has declared
-        // it has no editors to distinguish.
-        if (wants && rt.auth.mode !== 'session') return rt.draftFor(bindings, story)
+        // Asked before the published document is used, not after: an editor in
+        // draft mode is reading this page *instead of* what is live, and a story
+        // with nothing published still has a draft to show them.
+        const drafted = wantsDraft() ? await draftFor(found.story) : null
+        const doc = drafted ?? found.doc
+        if (!doc) return null
 
-        if (shared.length > 0 && (await claimShare(db, shared, story.id))) {
-          return rt.draftFor(bindings, story)
+        const resolution = await rt.resolve(bindings, doc, {
+          ...(locale !== undefined ? { locale } : {}),
+          ...(opts?.page !== undefined ? { page: opts.page } : {}),
+          story: found.story,
+          // A drafted page resolves its targets from their drafts too, or it
+          // links to and pulls in published copies of everything else and is
+          // internally inconsistent.
+          ...(drafted ? { draft: true } : {}),
+        })
+
+        return {
+          doc,
+          story: found.story,
+          resolution,
+          draft: drafted !== null,
+          /**
+           * **The reason this method returns headers at all.** `cacheHeaders`
+           * and `noStore` look interchangeable and only one of them keeps
+           * unpublished content off the edge, and `Cache-Control` without
+           * `Cache-Tag` is a page cached for a week with no purge path — the
+           * half-configured state `caching.md` decision 2 calls worse than no
+           * caching. Both are now impossible to get wrong from here.
+           */
+          headers: drafted
+            ? { 'cache-control': NO_STORE }
+            : cacheHeaders(resolution, { story: found.story.id }),
         }
-        return null
       },
       resolve: (doc, opts) => rt.resolve(bindings, doc, opts),
       status: (path) => storyStatus(db, path),
@@ -581,6 +654,8 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      */
     cacheTags,
     cacheHeaders,
+    cacheVerdict: (req) => cacheVerdictFor(req, rt.base),
+    cacheKey: (url) => cacheKeyFor(url),
     global: (env, name) => reader(env).global(name),
     renderGlobal: (resolution, name, opts) => renderGlobalNode(rt.registry, resolution, name, opts),
     /**

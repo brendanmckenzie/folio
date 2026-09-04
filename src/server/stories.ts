@@ -1089,6 +1089,35 @@ export async function pathMiss(db: FolioDb, path: string): Promise<FolioMiss> {
     : { kind: 'not-found' }
 }
 
+/**
+ * The story row *and* its published document, in one read.
+ *
+ * `publishedDoc` and `storyByPath` select from the same row by the same indexed
+ * column, so a host that wants both — and a host that sets cache tags has to,
+ * because a page never appears in its own resolution and `story:<id>` is the tag
+ * its next publish purges by — was paying two round trips for one row. On a
+ * database a continent away that was a third of the render.
+ *
+ * Returns the story even when nothing is published: `folio.status` and the
+ * unpublished/never-existed distinction are about a row that exists with no
+ * document, so collapsing the two into "null" here would throw away the answer.
+ */
+export async function pageAt(
+  db: FolioDb,
+  path: string,
+): Promise<{ story: StoryMeta; doc: Doc | null } | null> {
+  const row = await db
+    .prepare(`select ${COLS}, published_doc from stories where path = ?`)
+    .bind(path)
+    .first<StoryRow & { published_doc: string | null }>()
+  if (!row) return null
+  const { published_doc, ...meta } = row
+  return {
+    story: withState(meta as StoryRow),
+    doc: published_doc ? (JSON.parse(published_doc) as Doc) : null,
+  }
+}
+
 export async function publishedDoc(db: FolioDb, path: string): Promise<Doc | null> {
   const row = await db
     .prepare('select published_doc from stories where path = ?')

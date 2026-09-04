@@ -46,7 +46,7 @@ The three rules broken most often:
 
 - `folio.handle()` runs **first** in the Worker's `fetch` and returns `null` for
   anything it does not own. Your router runs after it, not before.
-- A published page is **your** route, calling `folio.reader(env, req).published()` in its loader.
+- A published page is **your** route, calling `folio.reader(env, req).page()` in its loader.
   Never render pages in the Worker entry — it works, and silently bypasses your
   framework's layout, meta and error boundaries.
 - Read fields with `fieldValue()` / `dataOf()` from `folio/core`, never
@@ -85,15 +85,17 @@ intercepts, so it needs no blocklist and cannot swallow one of your paths.
 Worker entry. In your framework's loader (or handler, or controller):
 
 ```tsx
-const r = folio.reader(env, req)                       // one D1 session per request
-const doc = await r.published(path, locale)
-if (!doc) {
-  const miss = await r.miss(path)                      // redirect + state, one round trip
+const r = folio.reader(env, req)                  // one D1 session per request
+const page = await r.page(path, { locale })       // doc + story + resolution + headers
+if (!page) {
+  const miss = await r.miss(path)                 // redirect + state, one round trip
   if (miss.kind === 'redirect') return Response.redirect(miss.to, miss.status)
   return new Response('Not found', { status: miss.kind === 'gone' ? 410 : 404 })
 }
-const resolution = await r.resolve(doc, { locale })
-return <YourLayout>{folio.render(doc, { resolution })}</YourLayout>
+return html(
+  <YourLayout>{folio.render(page.doc, { resolution: page.resolution })}</YourLayout>,
+  page.headers,                                   // no-store on a draft, tags on a page
+)
 ```
 
 **Always `folio.reader(env, req)` for a page, never the top-level
@@ -103,7 +105,7 @@ answer them instead of the primary (which may be on another continent — it was
 ~280ms per query on the first production host), and it is what guarantees they
 all see the same version of the database. The top-level calls each open their
 own session and are for one-shot use from a cron or a deploy script. Pass the
-`Request`; it is what makes `draftAt` work and what carries an editor's
+`Request`; it is what makes draft mode work and what carries an editor's
 read-your-writes bookmark.
 
 This keeps your framework's layout, `meta`/`head` exports, error boundaries and
@@ -111,20 +113,15 @@ SEO helpers. It works because `Resolution` is plain JSON — the rich objects
 (`asset.srcFor`, a reference's `content`) are rebuilt from it at render time, so
 it survives a loader boundary.
 
-**Optionally, draft mode**: one call before `published`, so editors and reviewers
-see the page rendered from its draft at its own URL. Set `draftMode: true` in
-`createFolio` to go with it.
+**Draft mode comes with `page()`**, so editors and reviewers see the page
+rendered from its draft at its own URL: `page.draft` tells you to draw a banner
+and `page.headers` is already `no-store`. All you add is `draftMode: true` in
+`createFolio`, which is the promise to Folio that this branch exists — without
+it a share link lands on `?_folio=draft` and Folio answers with its own preview
+shell instead of your page.
 
-```tsx
-const draft = await r.draftAt(path, locale)
-const doc = draft ?? (await r.published(path, locale))
-// …then, at the end:
-const resolution = await r.resolve(doc, { locale, draft: draft !== null })
-return html(page, draft ? folio.noStore() : folio.cacheHeaders(resolution, { story: story.id }))
-```
-
-`draftAt` costs nothing for an ordinary visitor — it answers `null` on a cookie
-check, before touching the database — so it is safe on the hot path.
+It costs an ordinary visitor nothing: the credential is a cookie, so the test is
+a header read before any query.
 
 **3. Add the Vite plugin.** `folio/vite` supplies the admin entry, the client
 build and the asset constants. Do not hand-roll them.
@@ -185,12 +182,19 @@ build and the asset constants. Do not hand-roll them.
   data from a document it references, that data has to arrive through the
   reference's own resolved `content`.
 - **Draft mode is opt-in, and forgetting the branch fails quietly.** Set
-  `draftMode: true` *and* call `folio.draftAt(env, req, path, locale)` in your miss
-  branch, before `folio.published`. Setting the key without writing the branch
-  sends reviewers to a published page that looks correct and is stale, which is the
-  one way to hold this wrong. A drafted response must use `folio.noStore()`, never
-  `folio.cacheHeaders()` — the two look interchangeable and the wrong one caches
-  unpublished content at the edge under the page's real URL.
+  `draftMode: true` *and* render pages through `reader.page()`. Setting the key
+  without the branch sends reviewers to a published page that looks correct and
+  is stale, which is the one way to hold this wrong. Answer with `page.headers`
+  and never assemble your own: `folio.noStore()` and `folio.cacheHeaders()` look
+  interchangeable and the wrong one puts unpublished content at the edge under
+  the page's real URL.
+- **Caching goes on one entrypoint, never on the Worker.** Workers Caching is
+  opt-out and stores an untagged `200` for two hours, so enabling it Worker-wide
+  puts the admin's cookie-authenticated JSON in a shared cache. Disable it on the
+  default entrypoint, enable it on one cached entrypoint, and gate what reaches
+  that with `folio.cacheVerdict(req)`. Use Workers Caching and not the Cache API:
+  they are separate stores and `cache.purge()` — what a publish calls — only
+  reaches the former.
 - **One site per deployment.** There is no site dimension in the schema; several
   brand sites in one Folio is specified (`docs/specs/foundation/multi-site.md`)
   and not built.

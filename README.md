@@ -98,24 +98,25 @@ export default {
     // One reader per request, so every read below runs on one D1 session. That
     // is what lets them be served by a replica near the visitor instead of by
     // the primary wherever in the world it is, and what guarantees they all see
-    // the same version of the database. Use it for anything that makes more
-    // than one read. See "Reads and replicas".
-    const folioReader = folio.reader(env, req)
+    // the same version of the database. See "Reads and replicas".
+    const r = folio.reader(env, req)
 
-    // Published pages look however you want them to. `resolve` supplies the
-    // context a document deliberately lacks — story ids to current URLs.
-    // Your own `route` above decides how a locale is encoded, so reading it back
-    // out is yours too. Paths are locale-independent: /about and /fr/about are
-    // the same story. Passing the locale here refuses one you never declared.
+    // Published pages look however you want them to. Your own `route` above
+    // decides how a locale is encoded, so reading it back out is yours too.
+    // Paths are locale-independent: /about and /fr/about are the same story.
     const { locale, path } = parseLocale(url.pathname)
-    const doc = await folioReader.published(path, locale)
-    if (!doc) {
+
+    // One call: the document (draft or published), the story behind it, the
+    // resolution, and the cache headers this response must carry. See
+    // "One page, one call" below for why it returns headers.
+    const page = await r.page(path, { locale })
+    if (!page) {
       // What to do about a path with no live page, in one round trip: a rename
       // or move records a redirect for the path just vacated, and a page taken
       // down on purpose (410) is not one that never existed (404). Asked only
-      // once `published` has already said null, so a live page always wins —
-      // Folio never intercepts inside handle() either.
-      const miss = await folioReader.miss(path)
+      // once `page` has already said null, so a live page always wins — Folio
+      // never intercepts inside handle() either.
+      const miss = await r.miss(path)
       if (miss.kind === 'redirect') {
         const location = new URL(miss.to, url.origin)
         location.search = url.search // query strings survive a redirect
@@ -123,15 +124,12 @@ export default {
       }
       return new Response('Not found', { status: miss.kind === 'gone' ? 410 : 404 })
     }
-    // The locale rides on the resolution, which is what makes the whole render
-    // French: every field read goes through it, falling back to the source
-    // wherever a field is untranslated.
-    const resolution = await folioReader.resolve(doc, { locale })
     return render(
       <Shell title={title}>
-        {folio.renderGlobal(resolution, 'settings')}
-        {folio.render(doc, { resolution })}
+        {folio.renderGlobal(page.resolution, 'settings')}
+        {folio.render(page.doc, { resolution: page.resolution })}
       </Shell>,
+      { headers: page.headers },
     )
   },
 }
@@ -1466,8 +1464,7 @@ against an unreplicated database is an ordinary connection to the primary.
 
 ```ts
 const r = folio.reader(env, req)
-const doc = (await r.draftAt(path)) ?? (await r.published(path))
-const resolution = await r.resolve(doc)
+const page = await r.page(path)
 ```
 
 `folio.published(env, …)` and the other top-level reads still work and are the
@@ -1496,41 +1493,123 @@ cacheable.
 wrote, and not using the Sessions API is what keeps it on the primary by
 construction rather than by argument.
 
+### One page, one call
+
+`reader.page(path)` answers a `FolioPage`: `{ doc, story, resolution, draft,
+headers }`. It replaces `published` + `storyAt` + `resolve`, and it exists for
+two reasons beyond brevity.
+
+**It reads the row once.** `published(path)` and `storyAt(path)` select from the
+same row by the same indexed column. A host that sets cache tags needs both,
+because a page never appears in its own `Resolution` — `resolve()` loads what a
+document points *at* — so `story:<id>` is the one tag it cannot derive. That was
+a whole round trip for a value already in hand.
+
+**Its headers cannot be half-configured.** Two mistakes were the host's to make
+and are now nobody's: answering a draft with `cacheHeaders` puts unpublished
+content on the edge under the page's real URL, and answering a published page
+with `Cache-Control` and no `Cache-Tag` caches it for a week with no purge path.
+`page.headers` is already the right one of the two.
+
+Spread it and you are done:
+
+```tsx
+return html(<Page doc={page.doc} resolution={page.resolution} />, page.headers)
+```
+
+The individual reads are still there for anything that is not a page — a
+sitemap wants `stories()`, a search result page has no document of its own and
+calls `resolve()` with none.
+
 ### What a render actually costs
 
-A published page is **two round trips**, not three: the document, then the story
-map and the documents it references — those last two are independent, so they go
-together. `reader.miss()` is **one**, batching the redirect lookup and the
-published state that a 404 branch needs. A draft render is sequential, because
-there the "does this story still exist" filter is load-bearing: asking a deleted
-story for its draft would create a Durable Object for it.
+A published page is **two round trips**: the row (document *and* story together),
+then the story map and the documents it references — those last two are
+independent, so they go together. `reader.miss()` is **one**, batching the
+redirect lookup and the published state that a 404 branch needs. A draft render
+is sequential, because there the "does this story still exist" filter is
+load-bearing: asking a deleted story for its draft would create a Durable Object
+for it.
 
 ## Caching
 
-Two headers on your published response, one flag in `wrangler.jsonc`, and a publish
-purges the pages that rendered it — globally, from inside the Worker, with no
-webhook, no API token, no zone and no paid plan.
+A publish purges the pages that rendered it — globally, from inside the Worker,
+with no webhook, no API token, no zone and no paid plan.
+
+`page.headers` already carries the two headers that make it work, so the render
+side is done. What is left is telling Cloudflare which requests may be cached at
+all, and that is the part with a sharp edge.
+
+### Workers Caching, and why the entrypoint split is not optional
+
+Use [Workers Caching](https://developers.cloudflare.com/workers/cache/), not the
+Cache API. They are separate stores — "operations on one do not affect the
+other" — and `cache.purge()`, which is what Folio's publish hook calls, only
+reaches Workers Caching. A response you put in `caches.default` yourself can
+never be purged by a publish.
+
+**Workers Caching is opt-out.** With it enabled, a `200` carrying no
+`Cache-Control` is stored under RFC 9111 heuristic freshness for **two hours**.
+On a Worker that also serves the admin, that is the admin's JSON in a shared
+cache — authenticated by a *cookie*, which is not a bypass condition; only
+`Set-Cookie` on the response is. So caching goes on **one entrypoint**, not on
+the Worker, and the gateway decides what reaches it.
 
 ```jsonc
 // wrangler.jsonc
-"cache": { "enabled": true }
+"compatibility_flags": ["enable_ctx_exports"],
+"cache": { "enabled": true },
+"exports": {
+  "default":     { "type": "worker", "cache": { "enabled": false } },
+  "CachedPages": { "type": "worker", "cache": { "enabled": true } }
+}
 ```
 
-```tsx
-const r = folio.reader(env, req)
-// Independent lookups, so they go together rather than one after the other.
-const [story, doc] = await Promise.all([r.storyAt(path), r.published(path)])
-const resolution = await r.resolve(doc, { story })
+```ts
+import { WorkerEntrypoint } from 'cloudflare:workers'
 
-return new Response(await renderToReadableStream(<Page … />), {
-  headers: {
-    'content-type': 'text/html; charset=utf-8',
-    ...folio.cacheHeaders(resolution, { story: story?.id ?? null }),
-  },
-})
+/** The pipeline, unchanged — Folio first, then your router. */
+const pipeline = (req: Request, env: Env, ctx: ExecutionContext) => …
+
+/** Cached. Only what the gateway forwards ever reaches it. */
+export class CachedPages extends WorkerEntrypoint<Env> {
+  fetch(req: Request) { return pipeline(req, this.env, this.ctx) }
+}
+
+export default class extends WorkerEntrypoint<Env> {
+  async fetch(req: Request) {
+    // Folio answers for its own paths; `null` means this one is yours to judge.
+    const verdict = folio.cacheVerdict(req) ?? myOwnPublicPageRule(req)
+    if (verdict !== 'cache') return pipeline(req, this.env, this.ctx)
+    return this.ctx.exports.CachedPages.fetch(req, {
+      cf: { cacheKey: folio.cacheKey(req.url) },
+    })
+  }
+}
 ```
 
-That is the whole integration. `cacheHeaders` returns
+**`folio.cacheVerdict(req)`** answers `'cache'` for `{base}/asset/:key` — public,
+high volume, and the one Folio surface that must be cached — `'bypass'` for
+every other Folio path *and* for any request carrying a session, draft or share
+cookie, and `null` for a path Folio does not own. The bypass rules are the
+security-critical ones and they are Folio's because the knowledge is Folio's:
+that `{base}/asset/:key` is public while `{base}/api/assets` is the admin's
+gated list, and which three cookie names mean "this render may be a draft".
+
+**`folio.cacheKey(url)`** strips click identifiers — `utm_*`, `gclid`, `fbclid`,
+`msclkid` and the rest — and sorts what survives. This is not cosmetic:
+`fbclid` and `gclid` are unique *per click*, so left in the key every paid and
+social visitor misses the cache and writes an entry nobody will ever read again.
+A cache key cannot be changed on an inbound request — a hit is answered before
+the Worker runs — which is the whole reason the gateway exists. Anything not on
+the list stays in the key, because a query parameter is part of a URL's identity
+by default and the safe way to be wrong is a miss, not a wrong answer.
+
+Workers Caching also gives you `stale-while-revalidate` and request collapsing
+for free; both had to be hand-rolled over the Cache API, and neither is worth
+keeping.
+
+`page.headers` on a published response is:
 
 ```
 cache-control: public, max-age=0, s-maxage=604800, must-revalidate
