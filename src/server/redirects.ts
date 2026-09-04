@@ -23,6 +23,7 @@
  */
 import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
 import { isSafeHref } from '../core/values'
+import type { FolioDb } from './db'
 
 export interface Redirect {
   from: string
@@ -102,7 +103,7 @@ export interface RedirectWrite {
  * Returns no statements when there is nothing to record: `from` and `to` the
  * same path (a title-only edit; the root, which never moves) needs no redirect.
  */
-export function redirectStatements(db: D1Database, input: RedirectWrite): D1PreparedStatement[] {
+export function redirectStatements(db: FolioDb, input: RedirectWrite): D1PreparedStatement[] {
   const from = normalisePath(input.from)
   const to = normaliseTarget(input.to)
   if (!from || from === to) return []
@@ -133,7 +134,7 @@ export function redirectStatements(db: D1Database, input: RedirectWrite): D1Prep
  * the moment a story is created there (edge case: "a path vacated and
  * reoccupied by a different story").
  */
-export function clearRedirectAtStatement(db: D1Database, path: string): D1PreparedStatement {
+export function clearRedirectAtStatement(db: FolioDb, path: string): D1PreparedStatement {
   return db.prepare('delete from redirects where from_path = ?').bind(normalisePath(path))
 }
 
@@ -145,16 +146,34 @@ export function clearRedirectAtStatement(db: D1Database, path: string): D1Prepar
  * header — the row is refused and logged rather than handed to the host.
  */
 export async function lookupRedirect(
-  db: D1Database,
+  db: FolioDb,
   path: string,
 ): Promise<{ to: string; status: number } | null> {
   const from = normalisePath(path)
-  const row = await db
-    .prepare('select to_path as "to", status from redirects where from_path = ?')
-    .bind(from)
-    .first<{ to: string; status: number }>()
-  if (!row) return null
+  return redirectOf(from, await redirectAtStatement(db, path).first<RedirectRow>())
+}
 
+/** What a redirect lookup selects, before `redirectOf` has screened it. */
+export type RedirectRow = { to: string; status: number }
+
+/**
+ * The lookup half of `lookupRedirect`, as a statement rather than an answer, so
+ * a caller that is already asking the database something else can send both
+ * together. `pathMiss` in stories.ts is the one that does.
+ */
+export function redirectAtStatement(db: FolioDb, path: string): D1PreparedStatement {
+  return db
+    .prepare('select to_path as "to", status from redirects where from_path = ?')
+    .bind(normalisePath(path))
+}
+
+/**
+ * The screen `lookupRedirect` puts a row through, split out so a batched caller
+ * gets the identical refusal rather than a second copy of the rule — which is
+ * the rule that keeps a stored `javascript:` target out of a `Location` header.
+ */
+export function redirectOf(from: string, row: RedirectRow | null | undefined): RedirectRow | null {
+  if (!row) return null
   if (!isSafeHref(row.to)) {
     console.error(`folio: redirect ${from} -> ${row.to} refused an unsafe target`)
     return null
@@ -215,7 +234,7 @@ export type RedirectPage = Page<Redirect>
  * you look for a path, you do not scroll to it.
  */
 export async function listRedirects(
-  db: D1Database,
+  db: FolioDb,
   opts: ListRedirectsOptions = {},
 ): Promise<RedirectPage> {
   const limit = clampLimit(opts.limit, 50, 200)
@@ -285,10 +304,7 @@ export interface UpsertRedirectInput {
  * A manual redirect (decision 4's `source = 'manual'`): a single `insert or
  * replace`, not the three-statement collapse — see the module comment for why.
  */
-export async function upsertRedirect(
-  db: D1Database,
-  input: UpsertRedirectInput,
-): Promise<Redirect> {
+export async function upsertRedirect(db: FolioDb, input: UpsertRedirectInput): Promise<Redirect> {
   const from = normalisePath(input.from)
   const to = normaliseTarget(input.to)
   const status = input.status ?? 301
@@ -306,7 +322,7 @@ export async function upsertRedirect(
 }
 
 /** True when a row for `from` was actually removed. */
-export async function deleteRedirect(db: D1Database, from: string): Promise<boolean> {
+export async function deleteRedirect(db: FolioDb, from: string): Promise<boolean> {
   const result = await db
     .prepare('delete from redirects where from_path = ?')
     .bind(normalisePath(from))

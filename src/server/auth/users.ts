@@ -11,6 +11,7 @@ import { type Role, isRole } from './roles'
 import { mintId } from './secrets'
 import { clampLimit, decodeCursor, type Page, paginate } from '../../core/pagination'
 import { keysetWhere, OLDEST_FIRST, orderBy, whereOf } from '../keyset'
+import type { FolioDb } from '../db'
 
 export interface UserRow {
   id: string
@@ -69,7 +70,7 @@ export function normaliseEmail(email: string): string {
   return email.trim().toLowerCase()
 }
 
-export async function userById(db: D1Database, id: string): Promise<UserRow | null> {
+export async function userById(db: FolioDb, id: string): Promise<UserRow | null> {
   const row = await db
     .prepare(`select ${COLUMNS} from users where id = ?`)
     .bind(id)
@@ -77,7 +78,7 @@ export async function userById(db: D1Database, id: string): Promise<UserRow | nu
   return row ? toUser(row) : null
 }
 
-export async function userByEmail(db: D1Database, email: string): Promise<UserRow | null> {
+export async function userByEmail(db: FolioDb, email: string): Promise<UserRow | null> {
   const row = await db
     .prepare(`select ${COLUMNS} from users where email = ?`)
     .bind(normaliseEmail(email))
@@ -96,7 +97,7 @@ export async function userByEmail(db: D1Database, email: string): Promise<UserRo
  * top.
  */
 export async function listUsers(
-  db: D1Database,
+  db: FolioDb,
   opts: { limit?: number; cursor?: string; count?: boolean } = {},
 ): Promise<Page<UserRow>> {
   const limit = clampLimit(opts.limit, 50, 200)
@@ -127,7 +128,7 @@ export interface UserInput {
  * inviting someone is one field: they can be renamed, and an OIDC sign-in
  * overwrites it with the name the provider asserts.
  */
-export async function createUser(db: D1Database, input: UserInput): Promise<UserRow> {
+export async function createUser(db: FolioDb, input: UserInput): Promise<UserRow> {
   const email = normaliseEmail(input.email)
   const user: UserRow = {
     id: mintId('usr'),
@@ -154,7 +155,7 @@ export async function createUser(db: D1Database, input: UserInput): Promise<User
  * nulled, so a role change is one field and cannot silently rename anyone.
  */
 export async function updateUser(
-  db: D1Database,
+  db: FolioDb,
   id: string,
   patch: { name?: string; role?: Role; colour?: string | null },
 ): Promise<UserRow | null> {
@@ -183,7 +184,7 @@ export async function updateUser(
  * touched: `versions.actor` stores a string, not a foreign key, so an access
  * change never rewrites the record of who changed what.
  */
-export async function deleteUser(db: D1Database, id: string): Promise<boolean> {
+export async function deleteUser(db: FolioDb, id: string): Promise<boolean> {
   const existing = await userById(db, id)
   if (!existing) return false
   await db.batch([
@@ -195,10 +196,6 @@ export async function deleteUser(db: D1Database, id: string): Promise<boolean> {
 
 /** Stamped on sign-in, and nothing gates on it: it answers "is this account
  * still in use" for whoever is pruning the list. */
-export function touchUserStatement(
-  db: D1Database,
-  id: string,
-  at = Date.now(),
-): D1PreparedStatement {
+export function touchUserStatement(db: FolioDb, id: string, at = Date.now()): D1PreparedStatement {
   return db.prepare('update users set last_seen_at = ? where id = ?').bind(at, id)
 }

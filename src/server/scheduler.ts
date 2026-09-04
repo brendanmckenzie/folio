@@ -42,6 +42,7 @@
 import type { Schedule, ScheduleAction, ScheduleStatus } from '../core/story'
 import { FolioError } from './errors'
 import { publish, type PublishDeps, unpublish } from './publish'
+import type { FolioDb } from './db'
 import {
   completeScheduleStatement,
   countDue,
@@ -245,7 +246,7 @@ export async function runSchedules(
  * worked, so incrementing it would march a perfectly healthy schedule toward
  * `status: 'failed'` three sweeps from now.
  */
-async function clearRow(db: D1Database, row: Schedule): Promise<void> {
+async function clearRow(db: FolioDb, row: Schedule): Promise<void> {
   try {
     await completeScheduleStatement(db, row.id).run()
   } catch (err) {
@@ -257,11 +258,7 @@ async function clearRow(db: D1Database, row: Schedule): Promise<void> {
 }
 
 /** One failed attempt, written to the row and described for the report. */
-async function recordFailure(
-  db: D1Database,
-  row: Schedule,
-  reason: string,
-): Promise<ScheduleFailure> {
+async function recordFailure(db: FolioDb, row: Schedule, reason: string): Promise<ScheduleFailure> {
   const attempts = row.attempts + 1
   const givenUp = attempts >= MAX_SCHEDULE_ATTEMPTS
   const status: ScheduleStatus = givenUp ? 'failed' : 'pending'

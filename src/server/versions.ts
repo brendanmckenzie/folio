@@ -5,6 +5,7 @@ import type { StoryMeta } from '../core/story'
 import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
 import { keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
 import { storiesFor } from './stories'
+import type { FolioDb } from './db'
 
 export type VersionKind = 'publish' | 'checkpoint'
 
@@ -49,7 +50,7 @@ function newVersionId(): string {
  * history that stopped a year short.
  */
 export async function listVersions(
-  db: D1Database,
+  db: FolioDb,
   storyId: string,
   opts: { limit?: number; cursor?: string } = {},
 ): Promise<Page<VersionMeta>> {
@@ -91,7 +92,7 @@ export interface VersionMigrations {
  * deleted has no type to migrate against, so it is handed back as stored.
  */
 export async function getVersion(
-  db: D1Database,
+  db: FolioDb,
   id: string,
   migrate?: VersionMigrations,
 ): Promise<{ meta: VersionMeta; doc: Doc; migrated: string[] } | null> {
@@ -154,7 +155,7 @@ function buildVersionMeta(input: WriteVersionInput): VersionMeta {
 
 /** The insert, unrun: lets a caller batch it alongside another write it must
  * land atomically with (see `versionStatement` below and the publish route). */
-function versionStatement(db: D1Database, meta: VersionMeta, doc: Doc): D1PreparedStatement {
+function versionStatement(db: FolioDb, meta: VersionMeta, doc: Doc): D1PreparedStatement {
   return db
     .prepare(
       `insert into versions (id, story_id, kind, label, title, actor, doc, created_at, schema_id)
@@ -179,14 +180,14 @@ function versionStatement(db: D1Database, meta: VersionMeta, doc: Doc): D1Prepar
  * can never land disagreeing with each other.
  */
 export function buildVersionWrite(
-  db: D1Database,
+  db: FolioDb,
   input: WriteVersionInput,
 ): { meta: VersionMeta; statement: D1PreparedStatement } {
   const meta = buildVersionMeta(input)
   return { meta, statement: versionStatement(db, meta, input.doc) }
 }
 
-export async function writeVersion(db: D1Database, input: WriteVersionInput): Promise<VersionMeta> {
+export async function writeVersion(db: FolioDb, input: WriteVersionInput): Promise<VersionMeta> {
   const { meta, statement } = buildVersionWrite(db, input)
   await statement.run()
   return meta
@@ -196,7 +197,7 @@ export async function writeVersion(db: D1Database, input: WriteVersionInput): Pr
  * this alongside the stories-row delete so a story and its version history
  * disappear together. */
 export function deleteVersionsStatement(
-  db: D1Database,
+  db: FolioDb,
   storyIds: readonly string[],
 ): D1PreparedStatement | null {
   if (!storyIds.length) return null
@@ -204,10 +205,7 @@ export function deleteVersionsStatement(
   return db.prepare(`delete from versions where story_id in (${placeholders})`).bind(...storyIds)
 }
 
-export async function deleteVersionsFor(
-  db: D1Database,
-  storyIds: readonly string[],
-): Promise<void> {
+export async function deleteVersionsFor(db: FolioDb, storyIds: readonly string[]): Promise<void> {
   await deleteVersionsStatement(db, storyIds)?.run()
 }
 
@@ -262,7 +260,7 @@ export interface RecentPublish {
  * off what survived the join.
  */
 export async function listRecentPublishes(
-  db: D1Database,
+  db: FolioDb,
   opts: { limit?: number; cursor?: string } = {},
 ): Promise<Page<RecentPublish>> {
   const limit = clampLimit(opts.limit, 20, 100)

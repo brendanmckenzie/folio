@@ -85,22 +85,33 @@ function pageDoc(title = 'Hi'): Doc {
 }
 
 /** Counts every `db.prepare()` call, so "one query for stories, one more only
- * when there is something to fetch" is pinned rather than assumed. */
+ * when there is something to fetch" is pinned rather than assumed.
+ *
+ * **It has to follow `withSession` too.** Every read in the library now runs on
+ * a D1 session (`src/server/db.ts`), so a proxy that only wraps `prepare` on the
+ * binding observes nothing at all and every count silently reads zero — which is
+ * exactly how these two assertions failed when sessions landed, and is the
+ * failure mode this comment exists to stop somebody re-introducing. */
 function countedDb(real: D1Database): { db: D1Database; count: () => number } {
   let n = 0
-  const proxy = new Proxy(real, {
-    get(target, prop, receiver) {
-      const value = Reflect.get(target, prop, receiver)
-      if (prop === 'prepare') {
-        return (...args: unknown[]) => {
-          n++
-          return (value as (...a: unknown[]) => unknown).apply(target, args)
+  const counted = <T extends object>(target: T): T =>
+    new Proxy(target, {
+      get(t, prop, receiver) {
+        const value = Reflect.get(t, prop, receiver)
+        if (prop === 'prepare') {
+          return (...args: unknown[]) => {
+            n++
+            return (value as (...a: unknown[]) => unknown).apply(t, args)
+          }
         }
-      }
-      return value
-    },
-  })
-  return { db: proxy as D1Database, count: () => n }
+        if (prop === 'withSession') {
+          return (...args: unknown[]) =>
+            counted((value as (...a: unknown[]) => object).apply(t, args))
+        }
+        return value
+      },
+    })
+  return { db: counted(real), count: () => n }
 }
 
 const pageType: DocumentType = { name: 'page', label: 'Page', kind: 'page', root: 'page' }

@@ -20,8 +20,8 @@
  * written), which takes a URL and screenshot options and hands back a plain
  * `Response` carrying the PNG — no browser automation library, no CDP client,
  * nothing to install. `BrowserRun`'s type ships in `@cloudflare/workers-types`,
- * already a devDependency for every other binding in `FolioBindings`. So
- * `FolioBindings.browser?: BrowserRun` costs Folio nothing new at all, not even
+ * already a devDependency for every other binding in `ReadBindings`. So
+ * `ReadBindings.browser?: BrowserRun` costs Folio nothing new at all, not even
  * an optional peer dependency — the ambient type is free, and the binding
  * itself is the host's own opt-in `wrangler.jsonc` entry.
  *
@@ -39,7 +39,7 @@ import { FolioError } from '../errors'
 import { previewPage } from '../pages'
 import type { FolioRuntime } from '../runtime'
 import { storyById } from '../stories'
-import type { FolioBindings } from '../types'
+import type { ReadBindings } from '../types'
 
 /* -------------------------------------------------------------- viewport --- */
 
@@ -211,7 +211,7 @@ const text = (value: string): Content => ({ type: 'text', text: value })
 
 async function renderDraftHtml(
   rt: FolioRuntime,
-  bindings: FolioBindings,
+  bindings: ReadBindings,
   story: StoryMeta,
   target: PreviewTarget & { kind: 'page' | 'global' },
 ): Promise<string> {
@@ -243,7 +243,7 @@ function messageOf(err: unknown): string {
  */
 export function previewDocument(
   rt: FolioRuntime,
-  bindings: FolioBindings,
+  bindings: ReadBindings,
   ctx: PreviewDocumentContext,
   args: Record<string, unknown>,
 ): Promise<{ content: Content[] }> {
@@ -264,7 +264,7 @@ export function previewDocument(
 
 async function run(
   rt: FolioRuntime,
-  bindings: FolioBindings,
+  bindings: ReadBindings,
   ctx: PreviewDocumentContext,
   id: string,
   args: { blok?: string; viewport: Viewport; fullPage: boolean },

@@ -251,6 +251,13 @@ export default {
     if (handled) return handled
 
     // --- published pages -------------------------------------------------
+    // One reader for the whole render, so every read below runs on a single D1
+    // session: served by a replica near the visitor rather than by the primary
+    // wherever it is, and all of them agreeing on one version of the database.
+    // `folio.published(env, …)` and friends still exist and each open their own
+    // session — right for a cron, wrong for a page (`README.md`, "Reads and
+    // replicas"). The `req` is what makes `draftAt` possible at all.
+    const reader = folio.reader(env, req)
     // The inverse of `route` above, and this project's job rather than Folio's:
     // only the host knows how it encoded the locale (`localisation.md` decision
     // 5). One line, as the spec promised.
@@ -274,23 +281,23 @@ export default {
      * `?_folio=draft`. The two go together: setting the key without writing this
      * branch would send reviewers to a published page and say nothing.
      */
-    const draft = await folio.draftAt(env, req, path, locale)
-    const doc = draft ?? (await folio.published(env, path, locale))
+    const draft = await reader.draftAt(path, locale)
+    const doc = draft ?? (await reader.published(path, locale))
     if (!doc) {
-      // A live story always wins: folio.published is checked first, and
-      // creating a story at a redirected path deletes the row anyway, so the
-      // redirect can never shadow a real page.
-      const hit = await folio.redirect(env, path)
-      if (hit) {
-        const location = new URL(hit.to, url.origin)
+      // A live story always wins: `published` is checked first, and creating a
+      // story at a redirected path deletes the row anyway, so the redirect can
+      // never shadow a real page.
+      //
+      // One call, one round trip: `miss` batches the redirect lookup and the
+      // published state, and tells apart a page taken down on purpose (410)
+      // from one that never existed (404) instead of guessing.
+      const miss = await reader.miss(path)
+      if (miss.kind === 'redirect') {
+        const location = new URL(miss.to, url.origin)
         location.search = url.search
-        return Response.redirect(location.toString(), hit.status)
+        return Response.redirect(location.toString(), miss.status)
       }
-      // folio.status tells apart a page taken down on purpose from one that
-      // never existed, so a host can answer 410 for the former and 404 for
-      // the latter instead of guessing. Folio itself never assumes either.
-      const status = await folio.status(env, path)
-      return new Response('Not found', { status: status === 'unpublished' ? 410 : 404 })
+      return new Response('Not found', { status: miss.kind === 'gone' ? 410 : 404 })
     }
 
     // Story links store an id, so hrefs are resolved per render rather than
@@ -308,8 +315,8 @@ export default {
     // `story` lets the resolution reach this page's ancestors, so a breadcrumb
     // resolves; and its id is the one tag a page cannot derive from its own
     // resolution, because a page never links to itself.
-    const story = await folio.storyAt(env, path)
-    const resolution = await folio.resolve(env, doc, {
+    const story = await reader.storyAt(path)
+    const resolution = await reader.resolve(doc, {
       locale,
       page: Number.isFinite(page) && page >= 1 ? Math.trunc(page) : 1,
       ...(story ? { story } : {}),

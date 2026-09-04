@@ -1,30 +1,64 @@
 import type { Context, MiddlewareHandler } from 'hono'
+import { readSessionCookie } from './auth/cookie'
 import { credentialOf, originAllowed, resolveActor } from './auth/resolve'
 import { type Access, type Actor, allows, refusalOf } from './auth/roles'
+import { bookmarkCookie, type DbSession, readBookmark, sessionFor } from './db'
 import { FolioError } from './errors'
 import type { HookRunnerCtx } from './hooks'
 import type { FolioRuntime } from './runtime'
 import { storyById } from './stories'
-import type { FolioBindings, FolioConfig, FolioEnv } from './types'
+import type { ReadBindings, FolioConfig, FolioEnv } from './types'
 import { idParam, safeNext } from './validate'
 
 /**
- * The one place the host's `Env` becomes Folio's bindings. Every handler then
- * reads `c.var.bindings()`, instead of each one calling `config.bindings` on an
- * env it first has to cast.
+ * The one place the host's `Env` becomes Folio's bindings, and the one place a
+ * request gets the D1 session its queries run on.
  *
  * What is stored is a memoised thunk, not the bindings: this middleware runs
  * ahead of every route, and the ones that answer from the config alone — the
  * `/schema` manifest, a 404, a refused socket upgrade — answered without the
  * host's accessor before it existed and must keep doing so. See `FolioVars` in
  * types.ts. Memoising means the routes that do need it (and their own
- * middleware, which asks first) still call it exactly once per request.
+ * middleware, which asks first) still call it exactly once per request, and that
+ * one session covers every query the request makes.
+ *
+ * **The constraint is chosen by method, not by route.** A GET opens on whatever
+ * instance is nearest, which is the whole point of `db.ts` and is what makes
+ * `{base}/asset/:key` — public, high volume, one indexed read — cost a local
+ * round trip instead of a transcontinental one. Anything else is about to write,
+ * and a request that writes and then reads its own row back must not have opened
+ * on a replica that is behind it.
+ *
+ * **The bookmark cookie closes the gap between two requests**, and is written
+ * for exactly one population: a signed-in editor who just wrote something. Their
+ * next read then starts from a database version at least as new as their own
+ * write, so the tree cannot show a story they just published as still a draft.
+ * Deliberately not written for a GET, and not for an anonymous request: a
+ * `Set-Cookie` on `{base}/asset/:key` would make every media response
+ * uncacheable to buy nothing at all.
  */
 export function withBindings<Env>(config: FolioConfig<Env>): MiddlewareHandler<FolioEnv<Env>> {
   return async (c, next) => {
-    let resolved: FolioBindings | undefined
-    c.set('bindings', () => (resolved ??= config.bindings(c.env)))
+    const cookie = c.req.raw.headers.get('cookie')
+    const writes = c.req.method !== 'GET' && c.req.method !== 'HEAD'
+
+    let resolved: ReadBindings | undefined
+    let session: DbSession | undefined
+    c.set('bindings', () => {
+      if (!resolved) {
+        const bound = config.bindings(c.env)
+        session = sessionFor(bound.db, { bookmark: readBookmark(cookie), write: writes })
+        resolved = { ...bound, db: session }
+      }
+      return resolved
+    })
+
     await next()
+
+    if (!writes || !session) return
+    if (readSessionCookie(cookie) === null) return
+    const bookmark = session.getBookmark()
+    if (bookmark) c.res.headers.append('set-cookie', bookmarkCookie(c.req.url, bookmark))
   }
 }
 

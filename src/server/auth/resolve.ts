@@ -18,6 +18,7 @@ import { readSessionCookie } from './cookie'
 import type { Actor } from './roles'
 import { readSession } from './session'
 import { bearerToken, readToken } from './tokens'
+import type { FolioDb } from '../db'
 
 /**
  * The presented credential, without resolving it. Useful on its own: the CSRF
@@ -50,7 +51,7 @@ export function credentialOf(req: Request): Credential {
  * actor.
  */
 export async function resolveActor(
-  db: () => D1Database,
+  db: () => FolioDb,
   auth: ResolvedAuth<unknown>,
   credential: Credential,
 ): Promise<Actor | null> {

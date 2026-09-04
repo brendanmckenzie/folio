@@ -22,15 +22,12 @@ import {
 import { storyByPath } from '../stories'
 import type { FolioEnv } from '../types'
 import { limitParam, parseBody, RedirectCreateBody } from '../validate'
+import type { FolioDb } from '../db'
 
 /** True when `to` already redirects straight back to `from` — the one loop a
  * manual add can create that decision 3's write-time collapse never sees,
  * because there is no path being vacated here for that collapse to run on. */
-async function pointsBackAt(
-  db: D1Database,
-  to: string,
-  from: string,
-): Promise<Redirect['to'] | null> {
+async function pointsBackAt(db: FolioDb, to: string, from: string): Promise<Redirect['to'] | null> {
   const back = await lookupRedirect(db, to)
   return back && normalisePath(back.to) === from ? back.to : null
 }

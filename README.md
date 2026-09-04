@@ -95,34 +95,38 @@ export default {
     const handled = await folio.handle(req, env, ctx)
     if (handled) return handled
 
+    // One reader per request, so every read below runs on one D1 session. That
+    // is what lets them be served by a replica near the visitor instead of by
+    // the primary wherever in the world it is, and what guarantees they all see
+    // the same version of the database. Use it for anything that makes more
+    // than one read. See "Reads and replicas".
+    const folioReader = folio.reader(env, req)
+
     // Published pages look however you want them to. `resolve` supplies the
     // context a document deliberately lacks — story ids to current URLs.
     // Your own `route` above decides how a locale is encoded, so reading it back
     // out is yours too. Paths are locale-independent: /about and /fr/about are
     // the same story. Passing the locale here refuses one you never declared.
     const { locale, path } = parseLocale(url.pathname)
-    const doc = await folio.published(env, path, locale)
+    const doc = await folioReader.published(path, locale)
     if (!doc) {
-      // A rename or move recorded a redirect for the path just vacated;
-      // folio.redirect is the one indexed read that answers it. Checked only
-      // once folio.published has already said null, so a live page always
-      // wins — Folio never intercepts inside handle() either.
-      const hit = await folio.redirect(env, path)
-      if (hit) {
-        const location = new URL(hit.to, url.origin)
+      // What to do about a path with no live page, in one round trip: a rename
+      // or move records a redirect for the path just vacated, and a page taken
+      // down on purpose (410) is not one that never existed (404). Asked only
+      // once `published` has already said null, so a live page always wins —
+      // Folio never intercepts inside handle() either.
+      const miss = await folioReader.miss(path)
+      if (miss.kind === 'redirect') {
+        const location = new URL(miss.to, url.origin)
         location.search = url.search // query strings survive a redirect
-        return Response.redirect(location.toString(), hit.status)
+        return Response.redirect(location.toString(), miss.status)
       }
-      // folio.status tells apart a page taken down on purpose from one that
-      // never existed, so a host can answer 410 for the former and 404 for
-      // the latter instead of guessing. Folio itself never assumes either.
-      const status = await folio.status(env, path)
-      return new Response('Not found', { status: status === 'unpublished' ? 410 : 404 })
+      return new Response('Not found', { status: miss.kind === 'gone' ? 410 : 404 })
     }
     // The locale rides on the resolution, which is what makes the whole render
     // French: every field read goes through it, falling back to the source
     // wherever a field is untranslated.
-    const resolution = await folio.resolve(env, doc, { locale })
+    const resolution = await folioReader.resolve(doc, { locale })
     return render(
       <Shell title={title}>
         {folio.renderGlobal(resolution, 'settings')}
@@ -1308,11 +1312,12 @@ link seeing the host's own page rather than Folio's approximation of it. One cal
 in the host's miss branch, before `published`:
 
 ```tsx
-const draft = await folio.draftAt(env, req, path, locale)
-const doc = draft ?? (await folio.published(env, path, locale))
-if (!doc) { /* redirect / status / 404, exactly as before */ }
+const r = folio.reader(env, req)
+const draft = await r.draftAt(path, locale)
+const doc = draft ?? (await r.published(path, locale))
+if (!doc) { /* r.miss(path), exactly as before */ }
 
-const resolution = await folio.resolve(env, doc, {
+const resolution = await r.resolve(doc, {
   locale,
   // A drafted page resolves its targets from their drafts too, or it links to
   // published copies of everything else and is internally inconsistent.
@@ -1370,13 +1375,21 @@ existed in Folio at all (a print campaign, a legacy CMS); the **Redirects** tab
 lists both kinds, filterable by source, with add and delete.
 
 Folio never intercepts a redirect inside `handle()` — that would shadow a host
-route that legitimately lives at the same path now. Instead the host asks:
-`folio.redirect(env, path)` returns `{ to, status } | null`, checked only once
-`folio.published` has already answered null, so a live page always wins (creating
-a story at a redirected path deletes the row anyway). See "Mount it in your
-Worker" above for the three lines this takes, and note that `to` is only ever a
-path or an absolute URL that has passed `isSafeHref` — safe to hand straight to a
-`Location` header.
+route that legitimately lives at the same path now. Instead the host asks, once
+`published` has already answered null, so a live page always wins (creating a
+story at a redirected path deletes the row anyway).
+
+`reader.miss(path)` is the whole of a 404 branch and the call to reach for:
+`{ kind: 'redirect', to, status }`, `{ kind: 'gone' }` (taken down on purpose,
+answer 410) or `{ kind: 'not-found' }`. It asks the redirect table and the
+story's published state **in one batch**, because they are independent lookups
+and a 404 is the path a crawler spends its whole budget on. `folio.redirect(env,
+path)` and `folio.status(env, path)` are still there for a caller that wants one
+of the two on its own.
+
+`to` is only ever a path or an absolute URL that has passed `isSafeHref` — safe
+to hand straight to a `Location` header. Reattaching `url.search` is the host's
+job; only the host knows what it did with the rest of the URL.
 
 ## Hooks
 
@@ -1425,6 +1438,73 @@ delays the response; a cache purge that must land before the next read opts in w
 ordering between hooks. A host that needs that writes one line to a Cloudflare Queue
 inside the hook, which is the right tool for it.
 
+## Reads and replicas
+
+D1 puts your database in exactly one place. Every query is a network round trip
+to that place, so if your readers are not beside it, that round trip is the
+whole cost of a page: on the first host to run this in production the primary
+was in London and the visitors were in Melbourne, which made each query ~280ms
+and a page render ~900ms — against `sql_duration_ms` of 0.17. The database was
+doing nothing. The distance was doing everything.
+
+[Read replication](https://developers.cloudflare.com/d1/best-practices/read-replication/)
+fixes that, and it has one requirement: a query only reaches a replica if it is
+issued on a **session**. Without the Sessions API every query goes to the
+primary, wherever that is.
+
+**Folio issues every read on a session.** You do not have to do anything for
+that to be true, and it costs nothing while replication is off — a session
+against an unreplicated database is an ordinary connection to the primary.
+
+**Turn replication on** per database, in the dashboard under your D1 database's
+**Settings → Enable Read Replication**, or over the REST API with
+`read_replication.mode: auto`. Cloudflare maintains a replica in every D1 region
+(ENAM, WNAM, WEUR, EEUR, APAC, OC) at no extra cost — you are billed on
+`rows_read`/`rows_written` either way.
+
+**Use one reader per request.**
+
+```ts
+const r = folio.reader(env, req)
+const doc = (await r.draftAt(path)) ?? (await r.published(path))
+const resolution = await r.resolve(doc)
+```
+
+`folio.published(env, …)` and the other top-level reads still work and are the
+right shape for a one-shot call from a cron or a deploy script. They each open
+their own session. A page render should not: three reads on three sessions can
+be answered by three replicas at three different versions, and a document
+resolved against references older than itself renders a card that has since been
+retitled. One reader is one session, and a session is
+[sequentially consistent](https://developers.cloudflare.com/d1/best-practices/read-replication/#replica-lag-and-consistency-model).
+
+**Pass the `Request`.** It is what makes `reader.draftAt()` work at all, and it
+carries the bookmark an editor's browser picked up from their last write, so a
+signed-in editor never reads a replica that is behind something they just
+published. A caller with no request in hand (a sitemap build, a warm-up) omits
+it and reads published content only — which is also the safe default, since a
+reader with no request cannot accidentally pull a draft into something
+cacheable.
+
+**Read-your-writes inside the admin is handled.** Folio writes a short-lived
+`folio_bookmark` cookie on any write by a signed-in editor, and starts their
+next session from it. Nothing is written for a GET or for an anonymous request,
+so `{base}/asset/:key` responses stay free of `Set-Cookie` and therefore stay
+cacheable.
+
+**Durable Objects deliberately stay off sessions.** `StoryDO` reads what it just
+wrote, and not using the Sessions API is what keeps it on the primary by
+construction rather than by argument.
+
+### What a render actually costs
+
+A published page is **two round trips**, not three: the document, then the story
+map and the documents it references — those last two are independent, so they go
+together. `reader.miss()` is **one**, batching the redirect lookup and the
+published state that a 404 branch needs. A draft render is sequential, because
+there the "does this story still exist" filter is load-bearing: asking a deleted
+story for its draft would create a Durable Object for it.
+
 ## Caching
 
 Two headers on your published response, one flag in `wrangler.jsonc`, and a publish
@@ -1437,9 +1517,10 @@ webhook, no API token, no zone and no paid plan.
 ```
 
 ```tsx
-const story = await folio.storyAt(env, path)
-const doc = await folio.published(env, path)
-const resolution = await folio.resolve(env, doc, { story })
+const r = folio.reader(env, req)
+// Independent lookups, so they go together rather than one after the other.
+const [story, doc] = await Promise.all([r.storyAt(path), r.published(path)])
+const resolution = await r.resolve(doc, { story })
 
 return new Response(await renderToReadableStream(<Page … />), {
   headers: {

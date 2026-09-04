@@ -9,6 +9,7 @@
  */
 import { hashToken, mintSecret } from './secrets'
 import { normaliseEmail } from './users'
+import type { FolioDb } from '../db'
 
 /** How long a sign-in link works for. */
 export const CHALLENGE_TTL_MS = 15 * 60 * 1000
@@ -31,7 +32,7 @@ export interface NewChallenge {
 }
 
 export async function createChallenge(
-  db: D1Database,
+  db: FolioDb,
   email: string,
   now = Date.now(),
 ): Promise<NewChallenge> {
@@ -55,7 +56,7 @@ export async function createChallenge(
  * consume costs one D1 round trip.
  */
 export async function consumeChallenge(
-  db: D1Database,
+  db: FolioDb,
   token: string,
   now = Date.now(),
 ): Promise<string | null> {
@@ -83,7 +84,7 @@ export async function consumeChallenge(
  * zone rate-limiting rule.
  */
 export async function recentChallengeCount(
-  db: D1Database,
+  db: FolioDb,
   email: string,
   now = Date.now(),
 ): Promise<number> {
@@ -95,7 +96,7 @@ export async function recentChallengeCount(
 }
 
 /** Housekeeping. Consumed and expired challenges are dead weight, not history. */
-export async function deleteStaleChallenges(db: D1Database, now = Date.now()): Promise<number> {
+export async function deleteStaleChallenges(db: FolioDb, now = Date.now()): Promise<number> {
   const result = await db
     .prepare('delete from login_challenges where expires_at <= ? or consumed_at is not null')
     .bind(now)

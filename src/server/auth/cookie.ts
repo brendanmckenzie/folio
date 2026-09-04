@@ -69,7 +69,12 @@ export function draftCookieName(url: URL | string): string {
   return isSecure(url) ? SECURE_DRAFT_COOKIE : PLAIN_DRAFT_COOKIE
 }
 
-function isSecure(url: URL | string): boolean {
+/**
+ * The rule every `*CookieName` above shares, exported because `../db.ts`'s
+ * bookmark cookie needs the same one and a second copy of "is this HTTPS" is
+ * exactly how a cookie ends up prefixed on one surface and plain on another.
+ */
+export function isSecure(url: URL | string): boolean {
   return (typeof url === 'string' ? new URL(url) : url).protocol === 'https:'
 }
 

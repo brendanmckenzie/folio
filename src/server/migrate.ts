@@ -31,6 +31,7 @@ import type { HookRunner } from './hooks'
 import type { FolioRuntime } from './runtime'
 import { countBehind, stampSchemaStatement, storiesBehind } from './stories'
 import type { StoryStub } from './types'
+import type { FolioDb } from './db'
 
 /** How many documents one call sweeps before handing back a cursor. */
 export const DEFAULT_MIGRATE_BATCH = 25
@@ -125,7 +126,7 @@ export function chunk(ms: readonly Mutation[], size = MAX_TX_MUTATIONS): Mutatio
 }
 
 /** The migration ids `schema_migrations` already records, newest last. */
-export async function appliedMigrations(db: D1Database): Promise<string[]> {
+export async function appliedMigrations(db: FolioDb): Promise<string[]> {
   const { results } = await db
     .prepare('select id from schema_migrations order by id')
     .all<{ id: string }>()
@@ -162,7 +163,7 @@ export function outOfOrderMigration(
  * deploy script and a route must be able to reach this identically.
  */
 export interface MigrateDeps {
-  db: D1Database
+  db: FolioDb
   schema: SchemaIndex
   migrations: readonly Migration[]
   typeOf: FolioRuntime['typeOf']
@@ -348,7 +349,7 @@ export async function runMigrations(
 
 /** `insert or replace`, so a re-run refreshes the counts and clears `failed`. */
 async function writeLedger(
-  db: D1Database,
+  db: FolioDb,
   ids: readonly string[],
   report: MigrateReport,
   actor: string | null,
@@ -399,7 +400,7 @@ export interface MigrationStatus {
 }
 
 export async function migrationStatus(
-  db: D1Database,
+  db: FolioDb,
   migrations: readonly Migration[],
   storyId?: string,
 ): Promise<MigrationStatus> {

@@ -14,6 +14,7 @@
  */
 import { MAX_FRAME_BYTES } from '../core/protocol'
 import { sessionExpiry } from './auth/session'
+import type { FolioDb } from './db'
 
 /** Application close code: the peer speaks a wire version we do not implement. */
 export const CLOSE_VERSION = 4001
@@ -93,7 +94,7 @@ export interface SocketSession {
  * `label` only names the object in the one log line this can emit.
  */
 export async function liveSession<A extends SocketSession>(
-  db: D1Database,
+  db: FolioDb,
   ws: WebSocket,
   a: A,
   label: string,

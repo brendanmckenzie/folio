@@ -46,7 +46,7 @@ import {
   storyByPath,
   storyById,
 } from '../../stories'
-import type { FolioBindings, FolioEnv } from '../../types'
+import type { ReadBindings, FolioEnv } from '../../types'
 import {
   CheckpointBody,
   ContentPutBody,
@@ -151,7 +151,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * and predictable: only an id whose `sng_` prefix names a *declared* singleton
    * type can cause that write.
    */
-  const load = async (bindings: FolioBindings, id: string): Promise<StoryMeta> => {
+  const load = async (bindings: ReadBindings, id: string): Promise<StoryMeta> => {
     if (id.startsWith(SINGLETON_PREFIX)) {
       const type = typeByName(rt.types, id.slice(SINGLETON_PREFIX.length))
       if (type?.kind === 'singleton') return ensureSingleton(bindings.db, type, rt.schemaId)
@@ -194,7 +194,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return code
   }
 
-  const deps = (bindings: FolioBindings, story: StoryMeta) => ({
+  const deps = (bindings: ReadBindings, story: StoryMeta) => ({
     draft: () => rt.draftFor(bindings, story),
     stub: rt.stub(bindings, story.id),
   })
@@ -290,7 +290,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.get('/documents/by-path', requireAccess<Env>(rt, READ), byPath)
   app.get('/documents/by-path/:path{.*}', requireAccess<Env>(rt, READ), byPath)
 
-  const publishedFor = async (bindings: FolioBindings, story: StoryMeta): Promise<Doc> => {
+  const publishedFor = async (bindings: ReadBindings, story: StoryMeta): Promise<Doc> => {
     const docs = await publishedDocsByIds(bindings.db, [story.id])
     const doc = docs[story.id]
     if (!doc) {

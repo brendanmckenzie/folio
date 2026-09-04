@@ -56,7 +56,8 @@ import type { PublishDeps } from './publish'
 import { type QueryDeps, runQuery } from './query'
 import { SPACE_NAME, spaceBroadcastHooks } from './space-events'
 import { ensureSingleton, listStories, publishedDocsByIds, storiesFor, storyById } from './stories'
-import type { FolioBindings, FolioConfig, PreviewMode, SpaceStub, StoryStub } from './types'
+import type { ReadBindings, FolioConfig, PreviewMode, SpaceStub, StoryStub } from './types'
+import type { FolioDb } from './db'
 
 const DEFAULT_BASE = '/folio'
 
@@ -199,7 +200,7 @@ export interface FolioRuntime {
    * already does the same thing with `cloneDoc`.
    */
   seed: (type: DocumentType | undefined, title: string) => Doc
-  stub: (bindings: FolioBindings, id: string) => StoryStub
+  stub: (bindings: ReadBindings, id: string) => StoryStub
   /**
    * The one space object (`../editing/live-collaboration.md`), or null when the
    * host has not declared the binding — in which case everything that channel
@@ -209,21 +210,21 @@ export interface FolioRuntime {
    * can know who is in the site rather than in a document, and sharding it is
    * named as the escape hatch rather than built.
    */
-  space: (bindings: FolioBindings) => SpaceStub | null
+  space: (bindings: ReadBindings) => SpaceStub | null
   /**
    * The live draft for a story whose row the caller already has. Preferred over
    * `draft` wherever that is true: `draft` exists to look the row up.
    */
-  draftFor: (bindings: FolioBindings, story: StoryMeta) => Promise<Doc>
-  draft: (bindings: FolioBindings, id: string) => Promise<Doc>
+  draftFor: (bindings: ReadBindings, story: StoryMeta) => Promise<Doc>
+  draft: (bindings: ReadBindings, id: string) => Promise<Doc>
   /** `draftFor` plus the syncId it was read at, atomically. See `PublishDeps.draftWithSyncId`. */
   draftForWithSyncId: (
-    bindings: FolioBindings,
+    bindings: ReadBindings,
     story: StoryMeta,
   ) => Promise<{ doc: Doc; syncId: number }>
-  resolve: (bindings: FolioBindings, doc?: Doc, opts?: ResolveOptions) => Promise<Resolution>
+  resolve: (bindings: ReadBindings, doc?: Doc, opts?: ResolveOptions) => Promise<Resolution>
   /** `ContentQuery` over published content (`../content-model/collections.md`). */
-  query: (bindings: FolioBindings, q: ContentQuery) => Promise<ContentPage>
+  query: (bindings: ReadBindings, q: ContentQuery) => Promise<ContentPage>
   /**
    * Field names marked `indexed: true` on some declared type's root block — what a
    * `where` or an `order` is checked against before it reaches SQL, and what the
@@ -241,7 +242,7 @@ export interface FolioRuntime {
    * mutates a story reads `.hooks` off the result, not only the publish/
    * unpublish/checkpoint routes that also want the rest of `PublishDeps`.
    */
-  publishDeps: (bindings: FolioBindings, hookCtx: HookRunnerCtx) => PublishDeps
+  publishDeps: (bindings: ReadBindings, hookCtx: HookRunnerCtx) => PublishDeps
   /**
    * The hook runner on its own, for the two write paths that fire an event and
    * need none of the rest of `PublishDeps`: `runMigrations` and `reindex`
@@ -495,20 +496,20 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     return { root: root.uid, bloks: Object.fromEntries(bloks.map((b) => [b.uid, b])) }
   }
 
-  const stub = ({ story }: FolioBindings, id: string): StoryStub =>
+  const stub = ({ story }: ReadBindings, id: string): StoryStub =>
     story.get(story.idFromName(id)) as unknown as StoryStub
 
   /** The single space instance, or null for a host without the binding. */
-  const space = ({ space: ns }: FolioBindings): SpaceStub | null =>
+  const space = ({ space: ns }: ReadBindings): SpaceStub | null =>
     ns ? (ns.get(ns.idFromName(SPACE_NAME)) as unknown as SpaceStub) : null
 
-  const draftFor = (bindings: FolioBindings, story: StoryMeta) =>
+  const draftFor = (bindings: ReadBindings, story: StoryMeta) =>
     stub(bindings, story.id).getOrInit(seed(typeOf(story.type), story.title))
 
-  const draftForWithSyncId = (bindings: FolioBindings, story: StoryMeta) =>
+  const draftForWithSyncId = (bindings: ReadBindings, story: StoryMeta) =>
     stub(bindings, story.id).getOrInitWithSyncId(seed(typeOf(story.type), story.title))
 
-  const draft = async (bindings: FolioBindings, id: string) => {
+  const draft = async (bindings: ReadBindings, id: string) => {
     const meta = await storyById(bindings.db, id)
     return stub(bindings, id).getOrInit(seed(typeOf(meta?.type), meta?.title ?? 'Untitled'))
   }
@@ -577,7 +578,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    * show, no error thrown.
    */
   const resolve = async (
-    bindings: FolioBindings,
+    bindings: ReadBindings,
     doc?: Doc,
     opts?: ResolveOptions,
   ): Promise<Resolution> => {
@@ -605,25 +606,26 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     const remember = (rows: readonly StoryMeta[]) => {
       for (const row of rows) known.set(row.id, row)
     }
-    remember(
-      wantAll
-        ? await listStories(db)
-        : await storiesFor(
-            db,
-            [...new Set([...directIds, ...globalIds])],
-            ancestorPaths(opts?.story?.path ?? null),
-          ),
-    )
+    const pass1 = wantAll
+      ? listStories(db)
+      : storiesFor(
+          db,
+          [...new Set([...directIds, ...globalIds])],
+          ancestorPaths(opts?.story?.path ?? null),
+        )
 
     /** Pass two: the documents this one pulls in — references, and every global. */
     let docs: Record<string, Doc> = {}
     let globalDocs: Record<string, Doc> | undefined
-    // A reference to an id with no story row is unresolvable, and in draft mode
-    // asking for its draft would *create* a Durable Object for a deleted story.
-    const liveRefIds = refIds.filter((id) => known.has(id))
 
-    if (globals.length > 0 || liveRefIds.length > 0) {
-      if (opts?.draft) {
+    if (opts?.draft) {
+      remember(await pass1)
+      // A reference to an id with no story row is unresolvable, and in draft mode
+      // asking for its draft would *create* a Durable Object for a deleted story.
+      // That is what keeps this branch sequential where the published one below
+      // is not: the filter is load-bearing here and merely tidy there.
+      const liveRefIds = refIds.filter((id) => known.has(id))
+      if (globals.length > 0 || liveRefIds.length > 0) {
         const [refEntries, globalEntries] = await Promise.all([
           Promise.all(liveRefIds.map(async (id) => [id, await draft(bindings, id)] as const)),
           Promise.all(
@@ -636,19 +638,36 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         ])
         docs = Object.fromEntries(refEntries)
         globalDocs = globals.length ? Object.fromEntries(globalEntries) : undefined
-      } else {
-        const combined = await publishedDocsByIds(db, [...liveRefIds, ...globalIds])
-        docs = Object.fromEntries(
-          liveRefIds.filter((id) => combined[id]).map((id) => [id, combined[id]!]),
-        )
-        globalDocs = globals.length
-          ? Object.fromEntries(
-              globals
-                .map((name, i) => [name, combined[globalIds[i]!]] as const)
-                .filter((entry): entry is [string, Doc] => Boolean(entry[1])),
-            )
-          : undefined
       }
+    } else {
+      /**
+       * The published branch runs both passes at once, because on this branch
+       * pass two does not actually need pass one's answer: `publishedDocsByIds`
+       * returns nothing for an id with no row, and the `known.has` screen below
+       * drops the same ids the pre-filter used to. Waiting was costing a whole
+       * network round trip per page render for a filter that changes nothing —
+       * ~280ms of it on a host whose primary is a continent away.
+       */
+      const wanted = [...new Set([...refIds, ...globalIds])]
+      const [rows, combined] = await Promise.all([
+        pass1,
+        wanted.length > 0
+          ? publishedDocsByIds(db, wanted)
+          : Promise.resolve<Record<string, Doc>>({}),
+      ])
+      remember(rows)
+      docs = Object.fromEntries(
+        refIds
+          .filter((id) => known.has(id) && combined[id])
+          .map((id) => [id, combined[id]!] as const),
+      )
+      globalDocs = globals.length
+        ? Object.fromEntries(
+            globals
+              .map((name, i) => [name, combined[globalIds[i]!]] as const)
+              .filter((entry): entry is [string, Doc] => Boolean(entry[1])),
+          )
+        : undefined
     }
 
     /**
@@ -727,7 +746,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   }
 
   /** What `runQuery` needs, assembled from this runtime. */
-  const queryDeps = (db: D1Database): QueryDeps => ({
+  const queryDeps = (db: FolioDb): QueryDeps => ({
     db,
     indexed,
     // `''` for the source locale, an undeclared code, or a site with no locales —
@@ -736,7 +755,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     withUrls,
   })
 
-  const query = (bindings: FolioBindings, q: ContentQuery): Promise<ContentPage> =>
+  const query = (bindings: ReadBindings, q: ContentQuery): Promise<ContentPage> =>
     runQuery(queryDeps(bindings.db), q, { locale: localeOf(q.locale) })
 
   /**
@@ -776,7 +795,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       internalHooks,
     )
 
-  const publishDeps = (bindings: FolioBindings, hookCtx: HookRunnerCtx): PublishDeps => ({
+  const publishDeps = (bindings: ReadBindings, hookCtx: HookRunnerCtx): PublishDeps => ({
     db: bindings.db,
     draft: (story) => draftFor(bindings, story),
     draftWithSyncId: (story) => draftForWithSyncId(bindings, story),

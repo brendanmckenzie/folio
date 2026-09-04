@@ -9,6 +9,7 @@ import type { Actor, Role } from './roles'
 import { isRole } from './roles'
 import { hashToken, mintSecret } from './secrets'
 import { type UserRow, touchUserStatement, userColour } from './users'
+import type { FolioDb } from '../db'
 
 /** Default session length. Overridable with `AuthConfig.sessionDays`. */
 export const DEFAULT_SESSION_DAYS = 30
@@ -37,7 +38,7 @@ export interface NewSession {
  * leaked database yields no usable cookies.
  */
 export async function createSession(
-  db: D1Database,
+  db: FolioDb,
   userId: string,
   opts: { days?: number; userAgent?: string | null } = {},
 ): Promise<NewSession> {
@@ -82,7 +83,7 @@ interface SessionJoin {
  * nothing.
  */
 export async function readSession(
-  db: D1Database,
+  db: FolioDb,
   token: string,
   opts: { days?: number; now?: number } = {},
 ): Promise<Actor | null> {
@@ -139,7 +140,7 @@ export async function readSession(
 
 /** Whether a session id is still live, without loading the user. What the
  * Durable Object's periodic re-check asks (checkpoint 5). */
-export async function sessionExpiry(db: D1Database, sessionId: string): Promise<number | null> {
+export async function sessionExpiry(db: FolioDb, sessionId: string): Promise<number | null> {
   const row = await db
     .prepare('select expires_at from sessions where id = ?')
     .bind(sessionId)
@@ -149,7 +150,7 @@ export async function sessionExpiry(db: D1Database, sessionId: string): Promise<
 
 /** Signs out one browser. Takes the raw cookie token, since that is what the
  * logout route has. */
-export async function revokeSession(db: D1Database, token: string): Promise<void> {
+export async function revokeSession(db: FolioDb, token: string): Promise<void> {
   await db
     .prepare('delete from sessions where id = ?')
     .bind(await hashToken(token))
@@ -158,12 +159,12 @@ export async function revokeSession(db: D1Database, token: string): Promise<void
 
 /** Signs out every browser a user holds — what a role downgrade or a "sign out
  * everywhere" acts on. */
-export async function revokeUserSessions(db: D1Database, userId: string): Promise<void> {
+export async function revokeUserSessions(db: FolioDb, userId: string): Promise<void> {
   await db.prepare('delete from sessions where user_id = ?').bind(userId).run()
 }
 
 /** Housekeeping for sessions nobody returns to. Not on any request path. */
-export async function deleteExpiredSessions(db: D1Database, now = Date.now()): Promise<number> {
+export async function deleteExpiredSessions(db: FolioDb, now = Date.now()): Promise<number> {
   const result = await db.prepare('delete from sessions where expires_at <= ?').bind(now).run()
   return result.meta.changes ?? 0
 }

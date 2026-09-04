@@ -24,6 +24,7 @@ import { clampLimit, decodeCursor, type Page, paginate } from '../core/paginatio
 import type { Schedule, ScheduleAction, ScheduleStatus } from '../core/story'
 import { FolioError } from './errors'
 import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
+import type { FolioDb } from './db'
 
 const COLS = `id, story_id as storyId, action, at, status, actor,
               created_at as createdAt, attempts, last_error as lastError`
@@ -97,7 +98,7 @@ export interface ScheduleWrite {
  * two contradictory pending rows.
  */
 export function setScheduleStatements(
-  db: D1Database,
+  db: FolioDb,
   input: ScheduleWrite,
 ): { schedule: Schedule; statements: D1PreparedStatement[] } {
   const schedule: Schedule = {
@@ -143,7 +144,7 @@ export function setScheduleStatements(
  * same reason: the caller asked for a state of the world and got it.
  */
 export async function clearSchedule(
-  db: D1Database,
+  db: FolioDb,
   storyId: string,
   action: ScheduleAction,
 ): Promise<number> {
@@ -159,7 +160,7 @@ export async function clearSchedule(
  * batch. Empty in, empty out: `in ()` is not valid SQL.
  */
 export function clearSchedulesStatements(
-  db: D1Database,
+  db: FolioDb,
   storyIds: readonly string[],
 ): D1PreparedStatement[] {
   if (storyIds.length === 0) return []
@@ -168,7 +169,7 @@ export function clearSchedulesStatements(
 }
 
 /** Deletes one schedule by id — what the sweep runs after the publish it fired. */
-export function completeScheduleStatement(db: D1Database, id: string): D1PreparedStatement {
+export function completeScheduleStatement(db: FolioDb, id: string): D1PreparedStatement {
   return db.prepare('delete from schedules where id = ?').bind(id)
 }
 
@@ -181,7 +182,7 @@ export function completeScheduleStatement(db: D1Database, id: string): D1Prepare
  * two expressions that could disagree about the boundary.
  */
 export function failScheduleStatement(
-  db: D1Database,
+  db: FolioDb,
   id: string,
   attempts: number,
   status: ScheduleStatus,
@@ -218,7 +219,7 @@ export interface ListSchedulesOptions {
  * unbounded reads it opened with got there.
  */
 export async function listSchedules(
-  db: D1Database,
+  db: FolioDb,
   opts: ListSchedulesOptions = {},
 ): Promise<Page<Schedule>> {
   const limit = clampLimit(opts.limit, 50, 200)
@@ -282,7 +283,7 @@ export async function listSchedules(
  * run and never reach the rows behind it.
  */
 export async function dueSchedules(
-  db: D1Database,
+  db: FolioDb,
   now: number,
   cursor: string | null,
   limit: number,
@@ -308,7 +309,7 @@ export async function dueSchedules(
  * two runs that overlapped. **A diagnostic, not a loop condition** — see
  * `ScheduleRunReport.remaining`.
  */
-export async function countDue(db: D1Database, now: number): Promise<number> {
+export async function countDue(db: FolioDb, now: number): Promise<number> {
   const row = await db
     .prepare("select count(*) as n from schedules where status = 'pending' and at <= ?")
     .bind(now)

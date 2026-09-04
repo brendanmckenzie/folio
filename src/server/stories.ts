@@ -36,8 +36,17 @@ import {
   referencesTo,
 } from './content-index'
 import type { StoryChange } from './hooks'
-import { clearRedirectAtStatement, redirectStatements } from './redirects'
+import {
+  clearRedirectAtStatement,
+  normalisePath,
+  redirectAtStatement,
+  redirectOf,
+  type RedirectRow,
+  redirectStatements,
+} from './redirects'
+import type { FolioMiss } from './types'
 import { clearSchedulesStatements } from './schedules'
+import type { FolioDb } from './db'
 
 const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18n,
               published_at as publishedAt, unpublished_at as unpublishedAt,
@@ -152,7 +161,7 @@ export const toStoryMeta = withState
  * set — without an ORDER BY, SQLite's row order is not something to page over.
  */
 export async function listStories(
-  db: D1Database,
+  db: FolioDb,
   opts?: { limit: number; offset: number },
 ): Promise<StoryMeta[]> {
   const { results } = opts
@@ -175,7 +184,7 @@ export async function listStories(
  * no references and no ancestors should cost no read at all.
  */
 export async function storiesFor(
-  db: D1Database,
+  db: FolioDb,
   ids: readonly string[],
   paths: readonly string[] = [],
 ): Promise<StoryMeta[]> {
@@ -210,7 +219,7 @@ const BIND_CHUNK = 100
  * reading them in sequence.
  */
 export async function storiesForChunked(
-  db: D1Database,
+  db: FolioDb,
   ids: readonly string[],
   paths: readonly string[] = [],
 ): Promise<StoryMeta[]> {
@@ -247,7 +256,7 @@ export async function storiesForChunked(
  * consideration `descendants` and `derivePaths` both carry a guard for: a
  * `parent_id` loop terminates here instead of recursing until D1 gives up.
  */
-export async function subtreeRows(db: D1Database, id: string): Promise<StoryMeta[]> {
+export async function subtreeRows(db: FolioDb, id: string): Promise<StoryMeta[]> {
   const { results } = await db
     .prepare(
       `with recursive tree(id) as (
@@ -272,7 +281,7 @@ export async function subtreeRows(db: D1Database, id: string): Promise<StoryMeta
  * ones that genuinely need the whole shape — and the tree is a shape, not a list,
  * which is why it is still here rather than deleted.
  */
-export async function storyTree(db: D1Database): Promise<StoryNode[]> {
+export async function storyTree(db: FolioDb): Promise<StoryNode[]> {
   return buildTree(await listStories(db))
 }
 
@@ -461,7 +470,7 @@ const INDEXED_TEXT = `exists (select 1 from content_index ci
  * page tree would list every record on the site.
  */
 export async function listStoryLevel(
-  db: D1Database,
+  db: FolioDb,
   parentId: string | null,
   opts: StoryPageOptions = {},
 ): Promise<Page<StoryLevelRow>> {
@@ -513,7 +522,7 @@ const CHILD_COUNT = `(select count(*) from stories kids
  * `childCount`, because flat mode has no structure to disclose.
  */
 export async function listStoriesFlat(
-  db: D1Database,
+  db: FolioDb,
   sort: FlatSort,
   opts: StoryPageOptions = {},
 ): Promise<Page<StoryMeta>> {
@@ -606,7 +615,7 @@ export interface DocumentPageOptions extends StoryPageOptions {
  * singleton* — by making the thing you ask for the singletons themselves.
  */
 export async function listDocumentPage(
-  db: D1Database,
+  db: FolioDb,
   type: string | undefined,
   sort: DocumentSort,
   opts: DocumentPageOptions = {},
@@ -672,7 +681,7 @@ export async function listDocumentPage(
  * side effect.
  */
 export async function listSingletons(
-  db: D1Database,
+  db: FolioDb,
   types: readonly DocumentType[],
   schemaId: string | null = null,
 ): Promise<StoryMeta[]> {
@@ -711,7 +720,7 @@ export async function listSingletons(
  * SQL, and the reason both say so out loud.
  */
 export async function listRecentlyEdited(
-  db: D1Database,
+  db: FolioDb,
   opts: StoryPageOptions = {},
 ): Promise<Page<StoryMeta>> {
   const limit = clampLimit(opts.limit, 20, 100)
@@ -759,7 +768,7 @@ export async function listRecentlyEdited(
  * positional arguments to put a scope in, and two ways of saying "pages only" is
  * exactly the drift decision 5 exists to prevent.
  */
-export async function countStories(db: D1Database, filter?: StoryFilter): Promise<number> {
+export async function countStories(db: FolioDb, filter?: StoryFilter): Promise<number> {
   const filters = storyFilters(filter)
   const row = await db
     .prepare(`select count(*) as n from stories ${whereOf(...filters.sql)}`)
@@ -790,7 +799,7 @@ export async function countStories(db: D1Database, filter?: StoryFilter): Promis
  * it is `bulk.ts`'s own encoding rather than this reader's.
  */
 export async function storiesMatching(
-  db: D1Database,
+  db: FolioDb,
   filter: StoryFilter,
   opts: { limit: number; after?: string | null; exclude?: readonly string[] },
 ): Promise<StoryMeta[]> {
@@ -854,7 +863,7 @@ export interface SearchOptions extends StoryPageOptions {
  * which is what a picker wants the moment it opens.
  */
 export async function searchStories(
-  db: D1Database,
+  db: FolioDb,
   opts: SearchOptions = {},
 ): Promise<Page<StoryMeta>> {
   const limit = clampLimit(opts.limit, 20, 100)
@@ -949,7 +958,7 @@ export interface DocumentUsage {
  * no title and no URL. `total` counts what survives the join; `links` and
  * `references` come from the raw row counts and can exceed it.
  */
-export async function documentUsage(db: D1Database, id: string): Promise<DocumentUsage> {
+export async function documentUsage(db: FolioDb, id: string): Promise<DocumentUsage> {
   const [counts, rows] = await Promise.all([countReferencesTo(db, id), referencesTo(db, id)])
   if (rows.length === 0) return { published: [], total: 0, links: 0, references: 0 }
 
@@ -1001,7 +1010,7 @@ export async function documentUsage(db: D1Database, id: string): Promise<Documen
  * `document-types.md` checkpoint 2 buys. Same for `storyStatus` and
  * `publishedDoc` below.
  */
-export async function storyByPath(db: D1Database, path: string): Promise<StoryMeta | null> {
+export async function storyByPath(db: FolioDb, path: string): Promise<StoryMeta | null> {
   const row = await db
     .prepare(`select ${COLS} from stories where path = ?`)
     .bind(path)
@@ -1009,7 +1018,7 @@ export async function storyByPath(db: D1Database, path: string): Promise<StoryMe
   return row && withState(row)
 }
 
-export async function storyById(db: D1Database, id: string): Promise<StoryMeta | null> {
+export async function storyById(db: FolioDb, id: string): Promise<StoryMeta | null> {
   const row = await db
     .prepare(`select ${COLS} from stories where id = ?`)
     .bind(id)
@@ -1026,21 +1035,61 @@ export async function storyById(db: D1Database, id: string): Promise<StoryMeta |
  * served the public, so a host answering 404 for both is correct.
  */
 export async function storyStatus(
-  db: D1Database,
+  db: FolioDb,
   path: string,
 ): Promise<'live' | 'unpublished' | 'unknown'> {
-  const row = await db
+  return statusOf(await statusAtStatement(db, path).first<StatusRow>())
+}
+
+/** What a status lookup selects. */
+type StatusRow = { publishedAt: number | null; unpublishedAt: number | null }
+
+/** `storyStatus`'s query, as a statement a caller can batch alongside another. */
+function statusAtStatement(db: FolioDb, path: string): D1PreparedStatement {
+  return db
     .prepare(
       'select published_at as publishedAt, unpublished_at as unpublishedAt from stories where path = ?',
     )
     .bind(path)
-    .first<{ publishedAt: number | null; unpublishedAt: number | null }>()
+}
+
+/** `storyStatus`'s reading of a row, split out so `pathMiss` shares it exactly. */
+function statusOf(row: StatusRow | null | undefined): 'live' | 'unpublished' | 'unknown' {
   if (!row) return 'unknown'
   const state = storyState(row.publishedAt, row.unpublishedAt)
   return state === 'draft' ? 'unknown' : state
 }
 
-export async function publishedDoc(db: D1Database, path: string): Promise<Doc | null> {
+/**
+ * What to do about a path with no live page: one round trip, not two.
+ *
+ * A host's 404 branch asks both questions — is there a redirect for the path
+ * just vacated, and was the page taken down on purpose — and they are
+ * independent lookups against different tables, so `batch` sends them together.
+ * On a host whose D1 primary is a continent away that is the difference between
+ * two network round trips and one, on the exact path a crawler spends its whole
+ * budget hitting.
+ *
+ * A redirect wins when there is one. That order is `redirects.md`'s: a rename
+ * records a redirect *and* leaves the old story unpublished, so asking about the
+ * state first would answer 410 for a path that has a perfectly good new home.
+ */
+export async function pathMiss(db: FolioDb, path: string): Promise<FolioMiss> {
+  const [redirects, statuses] = await db.batch([
+    redirectAtStatement(db, path),
+    statusAtStatement(db, path),
+  ])
+  // `batch` types every result alike and these two select different shapes, so
+  // each row is read back at the type its own statement returns.
+  const redirect = redirectOf(normalisePath(path), redirects?.results[0] as RedirectRow | undefined)
+  if (redirect) return { kind: 'redirect', to: redirect.to, status: redirect.status }
+
+  return statusOf(statuses?.results[0] as StatusRow | undefined) === 'unpublished'
+    ? { kind: 'gone' }
+    : { kind: 'not-found' }
+}
+
+export async function publishedDoc(db: FolioDb, path: string): Promise<Doc | null> {
   const row = await db
     .prepare('select published_doc from stories where path = ?')
     .bind(path)
@@ -1054,7 +1103,7 @@ export async function publishedDoc(db: D1Database, path: string): Promise<Doc | 
  * published are simply absent, which the renderer treats as unresolvable.
  */
 export async function publishedDocsByIds(
-  db: D1Database,
+  db: FolioDb,
   ids: readonly string[],
 ): Promise<Record<string, Doc>> {
   if (ids.length === 0) return {}
@@ -1096,7 +1145,7 @@ const BEHIND = '(schema_id is null or schema_id < ?)'
  * OFFSET over a set that shrinks as you walk it skips documents.
  */
 export async function storiesBehind(
-  db: D1Database,
+  db: FolioDb,
   latestId: string,
   after: string | null,
   limit: number,
@@ -1121,7 +1170,7 @@ export async function storiesBehind(
  * across batches, so it is right however many calls a run took and however many
  * runs there have been.
  */
-export async function countBehind(db: D1Database, latestId: string): Promise<number> {
+export async function countBehind(db: FolioDb, latestId: string): Promise<number> {
   const row = await db
     .prepare(`select count(*) as n from stories where ${BEHIND}`)
     .bind(latestId)
@@ -1140,7 +1189,7 @@ export async function countBehind(db: D1Database, latestId: string): Promise<num
  * a document that has never been published.
  */
 export function stampSchemaStatement(
-  db: D1Database,
+  db: FolioDb,
   id: string,
   schemaId: string,
   publishedDoc?: Doc,
@@ -1173,7 +1222,7 @@ export function stampSchemaStatement(
  * into skips documents.
  */
 export async function publishedDocsAfter(
-  db: D1Database,
+  db: FolioDb,
   after: string | null,
   limit: number,
 ): Promise<PublishedDocRow[]> {
@@ -1245,7 +1294,7 @@ function inGroup(row: StoryMeta, group: SiblingGroup): boolean {
  * Kept beside `inGroup` on purpose. The two must agree, and the way they stop
  * agreeing is one of them moving to another file.
  */
-async function siblingGroupRows(db: D1Database, group: SiblingGroup): Promise<StoryMeta[]> {
+async function siblingGroupRows(db: FolioDb, group: SiblingGroup): Promise<StoryMeta[]> {
   const query = group.routed
     ? group.parentId === null
       ? db.prepare(`select ${COLS} from stories where path is not null and parent_id is null`)
@@ -1331,7 +1380,7 @@ export interface CreateStoryInput {
  * with no `under` constraint to enforce can leave it off.
  */
 export async function createStory(
-  db: D1Database,
+  db: FolioDb,
   input: CreateStoryInput,
   types: readonly DocumentType[] = [],
 ): Promise<StoryMeta> {
@@ -1424,7 +1473,7 @@ export async function createStory(
  * insert is a no-op and both then read the same row.
  */
 export async function ensureSingleton(
-  db: D1Database,
+  db: FolioDb,
   type: DocumentType,
   /** The migration watermark to stamp on a freshly created row; see
    * `CreateStoryInput.schemaId` for why a new document is born up to date. */
@@ -1476,7 +1525,7 @@ export async function ensureSingleton(
  * nothing else in this file touches.
  */
 export async function duplicateStory(
-  db: D1Database,
+  db: FolioDb,
   id: string,
   patch: { title?: string; parentId?: string | null },
   /** Required, unlike everywhere else this appears: the source's own type is
@@ -1556,7 +1605,7 @@ export interface StoryPatch {
 }
 
 export async function updateStoryStatement(
-  db: D1Database,
+  db: FolioDb,
   id: string,
   patch: StoryPatch,
   types: readonly DocumentType[] = [],
@@ -1689,7 +1738,7 @@ export async function updateStoryStatement(
 /** `updateStoryStatement`, run. What every caller wanted before this spec's
  * `pathsChanged` hook needed the `changes` list as well. */
 export async function updateStory(
-  db: D1Database,
+  db: FolioDb,
   id: string,
   patch: StoryPatch,
   types: readonly DocumentType[] = [],
@@ -1714,7 +1763,7 @@ export async function updateStory(
  * before this delete still collapses correctly rather than doubling up.
  */
 export async function deleteStoryStatement(
-  db: D1Database,
+  db: FolioDb,
   id: string,
   opts: { redirect?: boolean } = {},
   types: readonly DocumentType[] = [],
@@ -1819,7 +1868,7 @@ export async function deleteStoryStatement(
 
 /** Removes the story and everything beneath it. */
 export async function deleteStory(
-  db: D1Database,
+  db: FolioDb,
   id: string,
   types: readonly DocumentType[] = [],
 ): Promise<string[]> {
@@ -1861,7 +1910,7 @@ export async function deleteStory(
  * locales wants.
  */
 export function publishStoryStatement(
-  db: D1Database,
+  db: FolioDb,
   id: string,
   doc: Doc,
   title: string,
@@ -1891,7 +1940,7 @@ export function publishStoryStatement(
 
 /** Snapshot a draft into D1, caching the document's title for the tree. */
 export async function publishStory(
-  db: D1Database,
+  db: FolioDb,
   id: string,
   doc: Doc,
   fallbackTitle: string,
@@ -1924,7 +1973,7 @@ export async function publishStory(
  * sitemap — already treats it as "is this live".
  */
 export function unpublishStoryStatement(
-  db: D1Database,
+  db: FolioDb,
   id: string,
   actor: string | null,
 ): { unpublishedAt: number; statement: D1PreparedStatement } {

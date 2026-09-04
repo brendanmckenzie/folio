@@ -152,6 +152,35 @@ are free to go the next time that code is touched.
   `if (!socket.deserializeAttachment())` guard would be true for every socket.
   `broadcast` / `peers` / `departed` all gate on `joined`. Guarded by
   `keeps deltas away from a socket that has not said hello` in `story-do.test.ts`.
+- **Every D1 read runs on a session, and `db` is `FolioDb`, not `D1Database`.**
+  `src/server/db.ts` explains why: a query only reaches a read replica if it is
+  issued on `db.withSession(...)`, and everything else is served by the primary
+  wherever in the world it is — ~280ms per query, three per page render, on the
+  first host to run this in production. Three things follow, and each is silent
+  when broken:
+  - **A new query helper takes `FolioDb`** (`Pick<D1Database, 'prepare' | 'batch'>`),
+    never `D1Database`. Taking the wider type compiles, and then no session can
+    be threaded through it.
+  - **A new read path needs a session.** `withBindings` makes one per request
+    under `basePath`; `folio.reader(env, req)` makes one per host render; the
+    `?_folio=` branch in `index.tsx` makes its own because it lives outside the
+    Hono app. A fourth entry point that calls `config.bindings(env).db` directly
+    is back on the primary and nothing will say so.
+  - **A test that counts queries has to follow `withSession` *and* `bind`.**
+    `bind()` answers a new statement object, so a proxy that watches only
+    `prepare` records nothing at all and every count silently reads zero. Both
+    `globals.test.ts` and `read-session.test.ts` say so where the proxy is.
+
+  The Durable Objects are deliberately *not* converted. `StoryDO` reads what it
+  just wrote, and staying off sessions keeps it on the primary by construction.
+- **`resolve()`'s published branch runs its two passes concurrently, and the
+  draft branch cannot.** On the published branch the `known.has` pre-filter
+  changes nothing (`publishedDocsByIds` returns nothing for an absent id), so
+  waiting for pass one cost a whole round trip for free. In draft mode the same
+  filter is load-bearing: asking a deleted story for its draft *creates* a
+  Durable Object for it. `read-session.test.ts` pins the concurrency by
+  asserting the send/receive order, which is the only way to see it — both
+  orderings return identical rows.
 - **Build presence frames with `presenceOf()`. Never spread the attachment** — it
   carries `role`, `session` and `expiresAt`, and leaking a session id onto a broadcast
   is a security bug.

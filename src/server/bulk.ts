@@ -43,6 +43,7 @@ import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } fr
 import { FolioError, rethrow } from './errors'
 import { publish, type PublishDeps, unpublish } from './publish'
 import { countStories, storiesForChunked, storiesMatching } from './stories'
+import type { FolioDb } from './db'
 
 /** How many documents one call acts on before handing back a cursor. */
 export const DEFAULT_BULK_BATCH = 25
@@ -355,7 +356,7 @@ interface Batch {
  * on — the exclusions are already applied in SQL.
  */
 async function filterBatch(
-  db: D1Database,
+  db: FolioDb,
   selection: FilterSelection,
   after: string | null,
   limit: number,
@@ -382,7 +383,7 @@ async function filterBatch(
  * end of the list. The gap is filled with `null`, which the loop reports per action.
  */
 async function idBatch(
-  db: D1Database,
+  db: FolioDb,
   ids: readonly string[],
   seen: number,
   limit: number,

@@ -14,7 +14,7 @@ import type { StoryMeta } from '../core/story'
 import { FolioDoc, type RenderMode, renderGlobalNode } from '../preview/Render'
 import { Bootstrap, ReactRefreshPreamble, Shell } from './Document'
 import type { FolioRuntime } from './runtime'
-import type { FolioBindings, PreviewMode } from './types'
+import type { ReadBindings, PreviewMode } from './types'
 
 /*
  * `adminPage` was here — the old single-screen editor's HTML, bootstrapping
@@ -47,7 +47,7 @@ const ADMIN_STYLE = `body.folio-admin { margin: 0 }`
  * the application there; here `/edit/:id` is one route among eleven and the id is
  * in the URL where it belongs.
  */
-export function shellPage(rt: FolioRuntime, bindings?: FolioBindings): Promise<Response> {
+export function shellPage(rt: FolioRuntime, bindings?: ReadBindings): Promise<Response> {
   const { entries, stylesheets } = rt.page('admin')
   return html(
     <Shell
@@ -163,7 +163,7 @@ export function shellPage(rt: FolioRuntime, bindings?: FolioBindings): Promise<R
  */
 export async function previewPage(
   rt: FolioRuntime,
-  bindings: FolioBindings,
+  bindings: ReadBindings,
   story: StoryMeta,
   opts?: { as?: string; bare?: boolean; locale?: string; mode?: PreviewMode },
 ): Promise<Response> {

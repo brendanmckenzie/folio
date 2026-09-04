@@ -27,6 +27,7 @@ import type { AuthConfig, OpenAuth } from './auth/config'
 import type { Actor } from './auth/roles'
 import type { FolioHooks } from './hooks'
 import type { AuditOptions, AuditReport } from './audit'
+import type { FolioDb } from './db'
 import type { MigrateOptions, MigrateReport } from './migrate'
 import type { ReindexOptions, ReindexReport } from './reindex'
 import type { ResolveOptions } from './runtime'
@@ -109,6 +110,82 @@ export interface FolioBindings {
    * already a devDependency for every other binding here.
    */
   browser?: BrowserRun
+}
+
+/**
+ * `FolioBindings` with the database widened to what a query actually uses, so a
+ * `D1DatabaseSession` can stand in for the binding.
+ *
+ * Every internal function that reaches D1 takes this rather than `FolioBindings`
+ * — `FolioBindings` is still what a *host* declares, because only the real
+ * binding can open a session in the first place. `FolioBindings` is assignable
+ * to this, so a call site that has not been handed a session keeps working and
+ * keeps talking to the primary. See `db.ts`.
+ */
+export type ReadBindings = Omit<FolioBindings, 'db'> & { db: FolioDb }
+
+/**
+ * What to do about a path that has no live page, answered in one round trip
+ * (`reader.miss`).
+ *
+ * `'redirect'` when a rename or move recorded one for the path just vacated,
+ * `'gone'` when the page was taken down on purpose (410), `'not-found'` when it
+ * never existed (404). The distinction is `unpublish.md`'s and every host was
+ * reimplementing it as two sequential calls to `redirect` then `status`.
+ */
+export type FolioMiss =
+  | { kind: 'redirect'; to: string; status: number }
+  | { kind: 'gone' }
+  | { kind: 'not-found' }
+
+/**
+ * One request's worth of reads, on one D1 session.
+ *
+ * **Why this exists rather than more methods on `Folio`.** Every read method on
+ * `Folio` takes `env` and opens its own connection, which is right for a
+ * one-shot call from a cron or a deploy script and wrong for a page render: a
+ * render is three or four reads that should (a) go to the same replica, so the
+ * references a document resolves are never older than the document, and (b) pay
+ * for replica selection once. A session is the platform's name for exactly that
+ * grouping, so this object is a session with the read API hung off it.
+ *
+ * The top-level `folio.published(env, …)` and friends are one-line delegations
+ * to a throwaway reader — one implementation, two ergonomics, no second code
+ * path to keep in step.
+ *
+ * Hand it the `Request` and `draftAt` works; without one it reads published
+ * content only, which is the right default for a sitemap or a warm-up that must
+ * not accidentally leak a draft into something cacheable.
+ */
+export interface FolioReader {
+  published: (path: string, locale?: string) => Promise<Doc | null>
+  draftAt: (path: string, locale?: string) => Promise<Doc | null>
+  resolve: (doc?: Doc, opts?: HostResolveOptions) => Promise<Resolution>
+  status: (path: string) => Promise<'live' | 'unpublished' | 'unknown'>
+  storyAt: (path: string) => Promise<StoryMeta | null>
+  redirect: (path: string) => Promise<{ to: string; status: number } | null>
+  /**
+   * `redirect` and `status` for a path, batched into a single round trip.
+   *
+   * The 404 branch of a host's router runs both — a redirect wins if there is
+   * one, otherwise 410 or 404 turns on the story's state — and they are
+   * independent lookups, so sending them together costs one network round trip
+   * instead of two. On the host measured in September 2026 that halved the cost
+   * of every 404, which is the path a crawler spends its whole budget on.
+   */
+  miss: (path: string) => Promise<FolioMiss>
+  stories: (opts?: { page?: number; perPage?: number }) => Promise<StoryMeta[]>
+  tree: () => Promise<StoryNode[]>
+  query: (q: ContentQuery) => Promise<ContentPage>
+  global: (name: string) => Promise<Doc | null>
+  /**
+   * This session's bookmark, or null before its first query.
+   *
+   * A host that wants read-your-writes across two of its own requests carries
+   * this forward itself. Folio's own admin does exactly that in a cookie, inside
+   * `handle()`; a public page render has nothing to carry and ignores it.
+   */
+  bookmark: () => string | null
 }
 
 /**
@@ -318,6 +395,20 @@ export interface Folio<Env> {
    */
   handle: (req: Request, env: Env, ctx: ExecutionContext) => Promise<Response | null>
   /**
+   * One request's worth of reads on one D1 session — see `FolioReader`.
+   *
+   * This is what a page render should use. The individual read methods below
+   * each open their own session, which is the right shape for a one-shot call
+   * and the wrong one for a render that makes three or four reads that ought to
+   * agree with each other.
+   *
+   * Pass the `Request` whenever there is one: it is what makes `draftAt` and the
+   * bookmark carried by an editor's browser work. A caller with no request in
+   * hand (a sitemap build, a cron, a warm-up) omits it and reads published
+   * content only.
+   */
+  reader: (env: Env, req?: Request) => FolioReader
+  /**
    * Published document for a URL path, or null. `path` is locale-*independent*
    * (`localisation.md` checkpoint 4): `/about` and `/fr/about` are the same
    * story, so the host strips its own locale prefix before calling this.
@@ -368,6 +459,12 @@ export interface Folio<Env> {
    * host knows what it did with the rest of the URL.
    */
   redirect: (env: Env, path: string) => Promise<{ to: string; status: number } | null>
+  /**
+   * `redirect` and `status` for a path in a single round trip — the whole of a
+   * host's 404 branch, and the shape every host was assembling by hand out of
+   * the two calls above. See `FolioReader.miss`.
+   */
+  miss: (env: Env, path: string) => Promise<FolioMiss>
   /** Live draft for a story id, creating it on first touch. */
   draft: (env: Env, id: string) => Promise<Doc>
   /**
@@ -660,7 +757,7 @@ export interface Folio<Env> {
  * exists to name.
  */
 export interface FolioVars {
-  bindings: () => FolioBindings
+  bindings: () => ReadBindings
   story: StoryMeta
   /**
    * Who is making this request, resolved by `withActor` (middleware.ts) from the

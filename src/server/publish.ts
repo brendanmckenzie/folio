@@ -14,9 +14,10 @@ import { FolioError } from './errors'
 import type { HookRunner } from './hooks'
 import { publishStoryStatement, storyById, unpublishStoryStatement } from './stories'
 import { buildVersionWrite, type VersionMeta, writeVersion } from './versions'
+import type { FolioDb } from './db'
 
 export interface PublishDeps<Env = unknown> {
-  db: D1Database
+  db: FolioDb
   /**
    * The story's live draft, created from its row on first touch. Passed in rather
    * than reached for: the draft lives in a Durable Object, and which object that
@@ -90,7 +91,7 @@ export interface PublishResult {
  */
 export type StorySelector = string | StoryMeta
 
-async function requireStory(db: D1Database, ref: StorySelector): Promise<StoryMeta> {
+async function requireStory(db: FolioDb, ref: StorySelector): Promise<StoryMeta> {
   if (typeof ref !== 'string') return ref
   const meta = await storyById(db, ref)
   if (!meta) throw new FolioError('not_found', 'Unknown story')

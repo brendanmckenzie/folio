@@ -35,6 +35,7 @@ import type { ReferenceTarget } from '../core/resolve'
 import type { StoryMeta } from '../core/story'
 import { FolioError } from './errors'
 import { STORY_COLS, type StoryRow, toStoryMeta } from './stories'
+import type { FolioDb } from './db'
 
 /** A statement's text and its binds, kept together so a test can read both. */
 export interface Sql {
@@ -204,7 +205,7 @@ function unknownField(field: string, indexed: ReadonlySet<string>): FolioError {
 }
 
 export interface QueryDeps {
-  db: D1Database
+  db: FolioDb
   /** Field names marked `indexed` on some declared type's root block. */
   indexed: ReadonlySet<string>
   /** A locale code as `content_index` keys it: `''` for the source or an unknown code. */

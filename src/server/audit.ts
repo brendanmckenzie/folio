@@ -53,6 +53,7 @@ import { isTranslatable, type LocaleConfig } from '../core/locales'
 import { docBytes, MAX_DOC_BYTES, utf8Bytes } from '../core/protocol'
 import { type BlockSchema, type DocumentType, type SchemaIndex, slotsOf } from '../core/schema'
 import { publishedDocsAfter } from './stories'
+import type { FolioDb } from './db'
 
 /**
  * Config a check needs beyond the schema and the blok in front of it.
@@ -853,7 +854,7 @@ function compareContentFindings(a: ContentFinding, b: ContentFinding): number {
  * to parsing a hundred documents.
  */
 export async function audit(
-  db: D1Database,
+  db: FolioDb,
   schema: SchemaIndex,
   ctx: AuditContext = NO_CONTEXT,
   opts: AuditOptions = {},

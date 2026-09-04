@@ -20,6 +20,7 @@ import { type AssetSort, DEFAULT_ASSET_SORT, type StoryMeta } from '../core/stor
 import { assetReferences, clearInboundRefStatements } from './content-index'
 import { type Direction, type Keyset, keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
 import { storiesForChunked } from './stories'
+import type { FolioDb } from './db'
 
 /** Matches the Images binding's own input ceiling, so failures happen up front. */
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -106,7 +107,7 @@ export interface ListAssetsOptions {
  * date or name or size").
  */
 export async function listAssets(
-  db: D1Database,
+  db: FolioDb,
   opts: ListAssetsOptions = {},
 ): Promise<Page<AssetRow>> {
   const limit = clampLimit(opts.limit, 50, 200)
@@ -146,7 +147,7 @@ export async function listAssets(
   return total ? { ...page, total: total.n } : page
 }
 
-export async function assetById(db: D1Database, id: string): Promise<AssetRow | null> {
+export async function assetById(db: FolioDb, id: string): Promise<AssetRow | null> {
   return db.prepare(`select ${COLS} from assets where id = ?`).bind(id).first<AssetRow>()
 }
 
@@ -202,7 +203,7 @@ export interface AssetUsage {
   total: number
 }
 
-export async function assetUsage(db: D1Database, key: string): Promise<AssetUsage> {
+export async function assetUsage(db: FolioDb, key: string): Promise<AssetUsage> {
   const from = await assetReferences(db, key)
   if (from.length === 0) return { published: [], total: 0 }
 
@@ -282,7 +283,7 @@ export async function readCappedBody(
 }
 
 export async function uploadAsset(
-  db: D1Database,
+  db: FolioDb,
   bucket: R2Bucket,
   input: { bytes: ArrayBuffer; filename: string },
 ): Promise<AssetRow> {
@@ -361,7 +362,7 @@ export async function uploadAsset(
   return row
 }
 
-export async function updateAsset(db: D1Database, id: string, patch: { alt?: string }) {
+export async function updateAsset(db: FolioDb, id: string, patch: { alt?: string }) {
   if (patch.alt === undefined) return assetById(db, id)
   await db.prepare('update assets set alt = ? where id = ?').bind(patch.alt, id).run()
   return assetById(db, id)
@@ -385,7 +386,7 @@ export async function updateAsset(db: D1Database, id: string, patch: { alt?: str
  * why this calls it unchanged rather than writing a second delete
  * (`migrations/0002_asset_refs.sql`).
  */
-export async function deleteAsset(db: D1Database, bucket: R2Bucket, id: string): Promise<boolean> {
+export async function deleteAsset(db: FolioDb, bucket: R2Bucket, id: string): Promise<boolean> {
   const row = await assetById(db, id)
   if (!row) return false
   // D1 before R2: if the row survives (the delete throws), the asset is still
@@ -908,7 +909,7 @@ function jpegSize(bytes: Uint8Array, view: DataView): { width: number; height: n
  * page count that a cursor cannot give.
  */
 export async function listAssetsByPage(
-  db: D1Database,
+  db: FolioDb,
   opts: { page: number; perPage: number },
 ): Promise<{ assets: AssetRow[]; total: number }> {
   const perPage = clampLimit(opts.perPage, 50, 200)

@@ -21,6 +21,7 @@ import type { DocumentType, SchemaIndex } from '../core/schema'
 import { contentProjection, indexStatements } from './content-index'
 import type { HookRunner } from './hooks'
 import { publishedDocsAfter } from './stories'
+import type { FolioDb } from './db'
 
 const DEFAULT_BATCH = 50
 const MAX_BATCH = 200
@@ -51,7 +52,7 @@ export interface ReindexReport {
 }
 
 export interface ReindexDeps {
-  db: D1Database
+  db: FolioDb
   schema: SchemaIndex
   typeOf: (name: string | undefined) => DocumentType | undefined
   locales?: LocaleConfig

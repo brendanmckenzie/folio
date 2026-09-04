@@ -31,6 +31,7 @@ import { clampLimit, decodeCursor, type Page, paginate } from '../../core/pagina
 import { FolioError } from '../errors'
 import { type Keyset, keysetWhere, orderBy, whereOf } from '../keyset'
 import { hashToken, mintId, mintSecret } from './secrets'
+import type { FolioDb } from '../db'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -161,7 +162,7 @@ export function shareExpiry(days: number | undefined, now = Date.now()): number 
  * from the surface that enforces it.
  */
 export async function createShare(
-  db: D1Database,
+  db: FolioDb,
   input: {
     storyId: string
     expiresAt: number
@@ -228,7 +229,7 @@ export interface ListSharesOptions {
  * `pagination.md`'s rule is that no admin list route reads a whole table.
  */
 export async function listShares(
-  db: D1Database,
+  db: FolioDb,
   opts: ListSharesOptions = {},
 ): Promise<Page<ShareRow>> {
   const limit = clampLimit(opts.limit, 50, 200)
@@ -280,7 +281,7 @@ export async function listShares(
  * keeps the document and the date so "which link was that, and when did we turn it
  * off" stays answerable.
  */
-export async function revokeShare(db: D1Database, id: string): Promise<boolean> {
+export async function revokeShare(db: FolioDb, id: string): Promise<boolean> {
   const result = await db
     .prepare('update shares set revoked_at = ? where id = ? and revoked_at is null')
     .bind(Date.now(), id)
@@ -303,7 +304,7 @@ export async function revokeShare(db: D1Database, id: string): Promise<boolean> 
  * a given string was ever a token.
  */
 export async function readShareByToken(
-  db: D1Database,
+  db: FolioDb,
   presented: string,
   now = Date.now(),
 ): Promise<ShareGrant | null> {
@@ -338,7 +339,7 @@ export async function readShareByToken(
  * visitor merely carrying a cookie past an unrelated page has not used the link.
  */
 export async function claimShare(
-  db: D1Database,
+  db: FolioDb,
   presented: readonly string[],
   storyId: string,
   now = Date.now(),
@@ -367,7 +368,7 @@ export async function claimShare(
  * more" is.
  */
 export async function deleteLapsedShares(
-  db: D1Database,
+  db: FolioDb,
   opts: { now?: number; keepDays?: number } = {},
 ): Promise<number> {
   const now = opts.now ?? Date.now()

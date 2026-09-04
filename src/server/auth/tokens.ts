@@ -10,6 +10,7 @@ import { type Actor, type Scope, parseScopes } from './roles'
 import { hashToken, mintApiToken } from './secrets'
 import { clampLimit, decodeCursor, type Page, paginate } from '../../core/pagination'
 import { keysetWhere, NEWEST_FIRST, orderBy, whereOf } from '../keyset'
+import type { FolioDb } from '../db'
 
 export interface TokenRow {
   id: string
@@ -56,7 +57,7 @@ export interface MintedToken {
 }
 
 export async function createToken(
-  db: D1Database,
+  db: FolioDb,
   input: {
     name: string
     scopes: readonly Scope[]
@@ -93,7 +94,7 @@ export async function createToken(
  * ever deleted here, so the list only grows.
  */
 export async function listTokens(
-  db: D1Database,
+  db: FolioDb,
   opts: { limit?: number; cursor?: string; count?: boolean } = {},
 ): Promise<Page<TokenRow>> {
   const limit = clampLimit(opts.limit, 50, 200)
@@ -117,7 +118,7 @@ export async function listTokens(
  * the row keeps the hash so a token that leaked can never be resurrected by
  * chance.
  */
-export async function revokeToken(db: D1Database, id: string): Promise<boolean> {
+export async function revokeToken(db: FolioDb, id: string): Promise<boolean> {
   const result = await db
     .prepare('update api_tokens set revoked_at = ? where id = ? and revoked_at is null')
     .bind(Date.now(), id)
@@ -138,7 +139,7 @@ export async function revokeToken(db: D1Database, id: string): Promise<boolean> 
  * it is a credential that no longer exists, not a credential lacking a scope.
  */
 export async function readToken(
-  db: D1Database,
+  db: FolioDb,
   presented: string,
   now = Date.now(),
 ): Promise<Actor | null> {

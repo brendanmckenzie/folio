@@ -36,6 +36,7 @@ import {
 } from './stories'
 import type { StoryStub } from './types'
 import { deleteVersionsStatement } from './versions'
+import type { FolioDb } from './db'
 
 /**
  * What these three need, assembled from bindings alone — no Request, no Hono, no
@@ -44,7 +45,7 @@ import { deleteVersionsStatement } from './versions'
  * actions.
  */
 export interface DocumentDeps<Env = unknown> {
-  db: D1Database
+  db: FolioDb
   /** Declared types. Load-bearing rather than incidental: it is what says a
    * document is a singleton, and both duplicating and deleting one is refused. */
   types: readonly DocumentType[]

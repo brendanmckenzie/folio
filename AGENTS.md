@@ -46,7 +46,7 @@ The three rules broken most often:
 
 - `folio.handle()` runs **first** in the Worker's `fetch` and returns `null` for
   anything it does not own. Your router runs after it, not before.
-- A published page is **your** route, calling `folio.published()` in its loader.
+- A published page is **your** route, calling `folio.reader(env, req).published()` in its loader.
   Never render pages in the Worker entry — it works, and silently bypasses your
   framework's layout, meta and error boundaries.
 - Read fields with `fieldValue()` / `dataOf()` from `folio/core`, never
@@ -85,16 +85,26 @@ intercepts, so it needs no blocklist and cannot swallow one of your paths.
 Worker entry. In your framework's loader (or handler, or controller):
 
 ```tsx
-const doc = await folio.published(env, path, locale)
+const r = folio.reader(env, req)                       // one D1 session per request
+const doc = await r.published(path, locale)
 if (!doc) {
-  const hit = await folio.redirect(env, path)          // a rename left a redirect
-  if (hit) return Response.redirect(hit.to, hit.status)
-  const status = await folio.status(env, path)         // 'unpublished' vs never existed
-  return new Response('Not found', { status: status === 'unpublished' ? 410 : 404 })
+  const miss = await r.miss(path)                      // redirect + state, one round trip
+  if (miss.kind === 'redirect') return Response.redirect(miss.to, miss.status)
+  return new Response('Not found', { status: miss.kind === 'gone' ? 410 : 404 })
 }
-const resolution = await folio.resolve(env, doc, { locale })
+const resolution = await r.resolve(doc, { locale })
 return <YourLayout>{folio.render(doc, { resolution })}</YourLayout>
 ```
+
+**Always `folio.reader(env, req)` for a page, never the top-level
+`folio.published(env, …)`.** A render makes three or four reads, and a reader
+runs them on one D1 session: that is what lets a read replica near the visitor
+answer them instead of the primary (which may be on another continent — it was
+~280ms per query on the first production host), and it is what guarantees they
+all see the same version of the database. The top-level calls each open their
+own session and are for one-shot use from a cron or a deploy script. Pass the
+`Request`; it is what makes `draftAt` work and what carries an editor's
+read-your-writes bookmark.
 
 This keeps your framework's layout, `meta`/`head` exports, error boundaries and
 SEO helpers. It works because `Resolution` is plain JSON — the rich objects
@@ -106,10 +116,10 @@ see the page rendered from its draft at its own URL. Set `draftMode: true` in
 `createFolio` to go with it.
 
 ```tsx
-const draft = await folio.draftAt(env, req, path, locale)
-const doc = draft ?? (await folio.published(env, path, locale))
+const draft = await r.draftAt(path, locale)
+const doc = draft ?? (await r.published(path, locale))
 // …then, at the end:
-const resolution = await folio.resolve(env, doc, { locale, draft: draft !== null })
+const resolution = await r.resolve(doc, { locale, draft: draft !== null })
 return html(page, draft ? folio.noStore() : folio.cacheHeaders(resolution, { story: story.id }))
 ```
 
@@ -163,7 +173,8 @@ build and the asset constants. Do not hand-roll them.
 | A referenced document's asset field is empty | A block's `render` gets no `Resolution`, so it cannot resolve an asset belonging to a *referenced* document. Only the `url` arm works today. Known limitation. |
 | Typecheck reports two incompatible `Plugin` types | Folio installed by directory path. Use a SHA or a tarball. |
 | A path Folio should own returns your 404 | Your router ran before `folio.handle()`. |
-| A page taken down reads as 404 instead of 410 | You did not call `folio.status()`. It exists to tell "unpublished on purpose" from "never existed". |
+| A page taken down reads as 404 instead of 410 | You did not call `reader.miss()` (or `folio.status()`). It exists to tell "unpublished on purpose" from "never existed". |
+| Pages are fast for you and slow for everyone else | Your D1 primary is far from your readers. Turn on read replication for the database (**Settings → Enable Read Replication**) and make sure every page read goes through `folio.reader(env, req)`. Folio issues every query on a session; without replication enabled they all still go to the primary. |
 | Login appears to do nothing | The `users` table is empty. The login route answers 200 identically whether or not an address is known, so it cannot enumerate accounts — an unknown email looks exactly like a successful one. |
 | Editor loads but shows no other cursors and the tree never updates | The optional `space` binding is absent. Nothing else depends on it. |
 | After bumping the pinned SHA, imports fail or `dist/` is missing from `node_modules/folio` | npm skipped the package's `prepare` build because a `node_modules/folio` directory was already there. `rm -rf node_modules/folio` and install again. A clean install has never had this problem, which is why it survives so long unnoticed. |

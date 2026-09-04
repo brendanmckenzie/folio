@@ -8,6 +8,7 @@ import { hasDraftCookie, shareCookieTokens } from './auth/cookie'
 import { credentialOf, resolveActor } from './auth/resolve'
 import { allows, READ_DRAFT } from './auth/roles'
 import { claimShare } from './auth/shares'
+import { readBookmark, sessionFor } from './db'
 import { FolioError } from './errors'
 import { runMigrations } from './migrate'
 import { previewPage } from './pages'
@@ -17,6 +18,7 @@ import { alarmHookCtx, createRuntime } from './runtime'
 import { runSchedules } from './scheduler'
 import {
   listStories,
+  pathMiss,
   publishedDoc,
   publishedDocsByIds,
   storyByPath,
@@ -26,7 +28,7 @@ import {
 } from './stories'
 import { SpaceDO } from './space-do'
 import { createStoryDO, StoryDO } from './story-do'
-import type { Folio, FolioConfig } from './types'
+import type { Folio, FolioConfig, ReadBindings } from './types'
 import { commitAll } from './write'
 
 /**
@@ -207,7 +209,14 @@ export { ANY_TYPE_TAG, NO_STORE, SITE_TAG, globalTag, storyTag, typeTag } from '
  * what a block author needs. */
 export type { LocaleConfig, LocaleContext, LocaleDef, TranslationStatus } from '../core/locales'
 export type { AssetRow } from './assets'
-export type { Folio, FolioBindings, FolioConfig } from './types'
+export type {
+  Folio,
+  FolioBindings,
+  FolioConfig,
+  FolioMiss,
+  FolioReader,
+  ReadBindings,
+} from './types'
 
 /**
  * Wires a block registry and a set of bindings into the HTTP surface, the
@@ -241,7 +250,17 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      */
     const mode = url.searchParams.get('_folio')
     if (mode === 'preview' || mode === 'draft') {
-      const bindings = config.bindings(env)
+      // On a session, like every other read (`db.ts`). This branch lives outside
+      // `basePath` on purpose, so `withBindings` never sees it and it is the one
+      // surface that has to open its own — and it is a render, so it makes the
+      // same three or four reads a published page does. An editor's bookmark
+      // matters here more than anywhere: a preview opened straight after a save
+      // is exactly the request that must not land on a replica behind it.
+      const bound = config.bindings(env)
+      const bindings: ReadBindings = {
+        ...bound,
+        db: sessionFor(bound.db, { bookmark: readBookmark(req.headers.get('cookie')) }),
+      }
 
       // A preview renders the *draft*, so it needs the same gate the API routes
       // got in identity-and-access.md — and it is the one such surface that lives
@@ -346,8 +365,120 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     return null
   }
 
+  /**
+   * One request's worth of reads, on one D1 session (`FolioReader`, `db.ts`).
+   *
+   * Everything below this line that reads content goes through here, including
+   * the top-level `folio.published(env, …)` and friends: those are one-line
+   * delegations to a throwaway reader, so there is one implementation of each
+   * read and two ways to reach it, not two implementations.
+   *
+   * The session opens on the nearest instance, or on one at least as new as the
+   * bookmark this browser carries if it is an editor who just wrote something.
+   * Either way every read in the render agrees with every other, which is what a
+   * page needs: a document resolved against references older than itself renders
+   * a card that has since been retitled.
+   */
+  const reader: Folio<Env>['reader'] = (env, req) => {
+    const bound = config.bindings(env)
+    const db = sessionFor(bound.db, { bookmark: readBookmark(req?.headers.get('cookie')) })
+    const bindings: ReadBindings = { ...bound, db }
+
+    return {
+      published: async (path, locale) => {
+        if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null
+        return publishedDoc(db, path)
+      },
+      /**
+       * Draft mode's whole contract (`../../docs/specs/platform/draft-mode.md`).
+       *
+       * The order of the checks is the design. **The cookie presence test comes
+       * first and reads no binding**, so a visitor with no credential costs
+       * nothing — the discipline spec 21 established for shares and the reason
+       * draft mode can be a call on every page render rather than a route
+       * somebody opts into. A reader built without a `Request` has no cookie to
+       * test and answers null before anything else, which is what keeps a
+       * sitemap or a warm-up from pulling a draft into something cacheable.
+       *
+       * After that it mirrors `handle()`'s preview branch, and deliberately does
+       * not share code with it: that branch answers "may I serve Folio's own
+       * preview of this URL" and this answers "may the host serve its page from
+       * the draft". They agree today on who may see a draft and differ on
+       * everything else — the render, the response, the refusal shape — and
+       * folding them together would mean one function with a mode flag deciding
+       * four unrelated things.
+       */
+      draftAt: async (path, locale) => {
+        if (!req) return null
+        const header = req.headers.get('cookie')
+        const wants = hasDraftCookie(header)
+        const shared = shareCookieTokens(header)
+        // No credential of either kind: the overwhelmingly common case,
+        // answered before a query is sent.
+        if (!wants && shared.length === 0) return null
+        if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null
+
+        const story = await storyByPath(db, path)
+        // Unrouted documents are unreachable here by construction
+        // (`storyByPath` matches `path = ?` and one stores NULL), but a record's
+        // draft not being the host's to render at a URL is a rule, not an
+        // accident of SQL.
+        if (!story || story.path === null) return null
+
+        /**
+         * An editor first, because it is the cheaper question: `resolveActor` is
+         * one indexed read and `claimShare` is a read plus a write that stamps a
+         * view. A browser holding both cookies is an editor who was also sent a
+         * link, and charging them a share view for reading their own site would
+         * make the share's view count a lie.
+         */
+        if (wants && rt.auth.mode === 'session') {
+          const actor = await resolveActor(() => db, rt.auth, credentialOf(req))
+          if (allows(actor, READ_DRAFT)) return rt.draftFor(bindings, story)
+        }
+        // `auth: 'open'` has no actor to resolve and no role to check, so the
+        // draft cookie alone is the authority — which is the same authority
+        // `handle()`'s preview branch grants there, on a site that has declared
+        // it has no editors to distinguish.
+        if (wants && rt.auth.mode !== 'session') return rt.draftFor(bindings, story)
+
+        if (shared.length > 0 && (await claimShare(db, shared, story.id))) {
+          return rt.draftFor(bindings, story)
+        }
+        return null
+      },
+      resolve: (doc, opts) => rt.resolve(bindings, doc, opts),
+      status: (path) => storyStatus(db, path),
+      storyAt: async (path) => {
+        const story = await storyByPath(db, path)
+        return story && rt.withUrls(story)
+      },
+      redirect: (path) => lookupRedirect(db, path),
+      miss: (path) => pathMiss(db, path),
+      stories: async (opts) => {
+        const page = Math.max(Math.trunc(opts?.page ?? 1), 1)
+        const perPage =
+          opts?.perPage === undefined ? undefined : Math.max(Math.trunc(opts.perPage), 1)
+        const window =
+          perPage === undefined ? undefined : { limit: perPage, offset: (page - 1) * perPage }
+        return (await listStories(db, window)).map(rt.withUrls)
+      },
+      tree: async () => rt.decorate(await storyTree(db)),
+      query: (q) => rt.query(bindings, q),
+      global: async (name) => {
+        const type = rt.typeOf(name)
+        if (type?.kind !== 'singleton') return null
+        const id = singletonId(type)
+        const docs = await publishedDocsByIds(db, [id])
+        return docs[id] ?? null
+      },
+      bookmark: () => db.getBookmark(),
+    }
+  }
+
   return {
     handle,
+    reader,
     /**
      * The locale does not select a document — there is one per story, holding
      * every language (`localisation.md` checkpoint 3). What it does is refuse a
@@ -355,72 +486,16 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * rather than serving English under a URL that means nothing. Absent, or the
      * source locale, is the pre-localisation behaviour exactly.
      */
-    published: async (env, path, locale) => {
-      if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null
-      return publishedDoc(config.bindings(env).db, path)
-    },
-    status: (env, path) => storyStatus(config.bindings(env).db, path),
-    storyAt: async (env, path) => {
-      const story = await storyByPath(config.bindings(env).db, path)
-      return story && rt.withUrls(story)
-    },
-    redirect: (env, path) => lookupRedirect(config.bindings(env).db, path),
+    published: (env, path, locale) => reader(env).published(path, locale),
+    status: (env, path) => reader(env).status(path),
+    storyAt: (env, path) => reader(env).storyAt(path),
+    redirect: (env, path) => reader(env).redirect(path),
+    miss: (env, path) => reader(env).miss(path),
     draft: (env, id) => rt.draft(config.bindings(env), id),
     inDraftMode: (req) => hasDraftCookie(req.headers.get('cookie')),
     noStore: () => ({ 'cache-control': NO_STORE }),
-    /**
-     * Draft mode's whole contract (`../../docs/specs/platform/draft-mode.md`).
-     *
-     * The order of the checks is the design. **The cookie presence test comes
-     * first and reads no binding**, so a visitor with no credential costs nothing
-     * — the discipline spec 21 established for shares and the reason draft mode
-     * can be a call on every page render rather than a route somebody opts into.
-     *
-     * After that it mirrors `handle()`'s preview branch, and deliberately does not
-     * share code with it: that branch answers "may I serve Folio's own preview of
-     * this URL" and this answers "may the host serve its page from the draft".
-     * They agree today on who may see a draft and differ on everything else — the
-     * render, the response, the refusal shape — and folding them together would
-     * mean one function with a mode flag deciding four unrelated things.
-     */
-    draftAt: async (env, req, path, locale) => {
-      const header = req.headers.get('cookie')
-      const wants = hasDraftCookie(header)
-      const shared = shareCookieTokens(header)
-      // No credential of either kind: the overwhelmingly common case, answered
-      // before a binding is touched.
-      if (!wants && shared.length === 0) return null
-      if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null
-
-      const bindings = config.bindings(env)
-      const story = await storyByPath(bindings.db, path)
-      // Unrouted documents are unreachable here by construction (`storyByPath`
-      // matches `path = ?` and one stores NULL), but a record's draft not being
-      // the host's to render at a URL is a rule, not an accident of SQL.
-      if (!story || story.path === null) return null
-
-      /**
-       * An editor first, because it is the cheaper question: `resolveActor` is one
-       * indexed read and `claimShare` is a read plus a write that stamps a view.
-       * A browser holding both cookies is an editor who was also sent a link, and
-       * charging them a share view for reading their own site would make the
-       * share's view count a lie.
-       */
-      if (wants && rt.auth.mode === 'session') {
-        const actor = await resolveActor(() => bindings.db, rt.auth, credentialOf(req))
-        if (allows(actor, READ_DRAFT)) return rt.draftFor(bindings, story)
-      }
-      // `auth: 'open'` has no actor to resolve and no role to check, so the draft
-      // cookie alone is the authority — which is the same authority `handle()`'s
-      // preview branch grants there, on a site that has declared it has no editors
-      // to distinguish.
-      if (wants && rt.auth.mode !== 'session') return rt.draftFor(bindings, story)
-
-      if (shared.length > 0 && (await claimShare(bindings.db, shared, story.id))) {
-        return rt.draftFor(bindings, story)
-      }
-      return null
-    },
+    /** Draft mode's whole contract, implemented on `reader` — see `FolioReader.draftAt`. */
+    draftAt: (env, req, path, locale) => reader(env, req).draftAt(path, locale),
     /**
      * The in-process write (`content-api.md` decision 6), assembled from bindings
      * alone exactly as `publish` and `migrate` are — so a nightly sync job, a
@@ -453,18 +528,11 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * everything: a sitemap of 40 pages should not have to page, and one of 2,000
      * now can. `folio.query(env, …)` is what reports `pages`.
      */
-    stories: async (env, opts) => {
-      const page = Math.max(Math.trunc(opts?.page ?? 1), 1)
-      const perPage =
-        opts?.perPage === undefined ? undefined : Math.max(Math.trunc(opts.perPage), 1)
-      const window =
-        perPage === undefined ? undefined : { limit: perPage, offset: (page - 1) * perPage }
-      return (await listStories(config.bindings(env).db, window)).map(rt.withUrls)
-    },
-    tree: async (env) => rt.decorate(await storyTree(config.bindings(env).db)),
+    stories: (env, opts) => reader(env).stories(opts),
+    tree: (env) => reader(env).tree(),
     registry: rt.registry,
-    resolve: (env, doc, opts) => rt.resolve(config.bindings(env), doc, opts),
-    query: (env, q) => rt.query(config.bindings(env), q),
+    resolve: (env, doc, opts) => reader(env).resolve(doc, opts),
+    query: (env, q) => reader(env).query(q),
     /**
      * `alarmHookCtx(env)` for the hook context, here and in `migrate` below.
      * Neither method takes an `ExecutionContext` — a deploy script has none to
@@ -513,13 +581,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      */
     cacheTags,
     cacheHeaders,
-    global: async (env, name) => {
-      const type = rt.typeOf(name)
-      if (type?.kind !== 'singleton') return null
-      const id = singletonId(type)
-      const docs = await publishedDocsByIds(config.bindings(env).db, [id])
-      return docs[id] ?? null
-    },
+    global: (env, name) => reader(env).global(name),
     renderGlobal: (resolution, name, opts) => renderGlobalNode(rt.registry, resolution, name, opts),
     /**
      * Explicit, never automatic (`schema-migrations.md` checkpoint 5). Assembled

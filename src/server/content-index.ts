@@ -19,6 +19,7 @@ import { indexRowsFor, type IndexRow } from '../core/index-projection'
 import type { LocaleConfig } from '../core/locales'
 import { outboundRefs, type OutboundRef } from '../core/refs'
 import type { DocumentType, SchemaIndex } from '../core/schema'
+import type { FolioDb } from './db'
 
 /** What one document projects to. Computed by `contentProjection`, written by `indexStatements`. */
 export interface ContentProjection {
@@ -63,7 +64,7 @@ const MAX_ROWS = 400
  * value in this schema rather than a column.
  */
 export function indexStatements(
-  db: D1Database,
+  db: FolioDb,
   storyId: string,
   projection: ContentProjection,
 ): D1PreparedStatement[] {
@@ -126,10 +127,7 @@ export function indexStatements(
  * (`migrations/0002_asset_refs.sql`). "Used by N **published** documents" is the
  * claim the Assets panel makes.
  */
-export function clearIndexStatements(
-  db: D1Database,
-  ids: readonly string[],
-): D1PreparedStatement[] {
+export function clearIndexStatements(db: FolioDb, ids: readonly string[]): D1PreparedStatement[] {
   if (ids.length === 0) return []
   const placeholders = ids.map(() => '?').join(', ')
   return [
@@ -162,7 +160,7 @@ export function clearIndexStatements(
  * reason for it is invisible.
  */
 export function clearInboundRefStatements(
-  db: D1Database,
+  db: FolioDb,
   targets: readonly string[],
 ): D1PreparedStatement[] {
   if (targets.length === 0) return []
@@ -180,7 +178,7 @@ export function clearInboundRefStatements(
  * id. The two namespaces do not overlap, so this is belt over braces.
  */
 export async function countReferencesTo(
-  db: D1Database,
+  db: FolioDb,
   id: string,
 ): Promise<{ total: number; links: number; references: number }> {
   const { results } = await db
@@ -229,7 +227,7 @@ export type IndexedValues = Record<string, Record<string, IndexedValue>>
  *    document itself is where a translation is read.
  */
 export async function indexedValuesFor(
-  db: D1Database,
+  db: FolioDb,
   ids: readonly string[],
 ): Promise<IndexedValues> {
   if (ids.length === 0) return {}
@@ -252,7 +250,7 @@ export async function indexedValuesFor(
 
 /** The distinct documents pointing at `id`, for a warning that names them. */
 export async function referencesTo(
-  db: D1Database,
+  db: FolioDb,
   id: string,
 ): Promise<{ from: string; kind: string }[]> {
   const { results } = await db
@@ -282,7 +280,7 @@ export async function referencesTo(
  * `kind` is bound rather than interpolated, like every other value in this file:
  * the moment one literal goes inline, the next one is a field name off a request.
  */
-export async function assetReferences(db: D1Database, key: string): Promise<string[]> {
+export async function assetReferences(db: FolioDb, key: string): Promise<string[]> {
   const { results } = await db
     .prepare(
       `select from_story as "from" from content_refs
