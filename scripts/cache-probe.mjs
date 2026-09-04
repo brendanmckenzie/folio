@@ -68,9 +68,9 @@ const record = (step, ok, detail) => {
 }
 
 /** One plain GET of the target, as a browser navigation would make it. */
-async function probe() {
+async function probe(headers = {}) {
   const started = Date.now()
-  const res = await fetch(TARGET, { redirect: 'manual' })
+  const res = await fetch(TARGET, { redirect: 'manual', headers })
   await res.arrayBuffer() // drain, so the connection is reusable
   return {
     status: res.status,
@@ -155,13 +155,40 @@ record(
   Boolean(first.cacheControl),
   first.cacheControl ?? 'absent — the host has not applied folio.cacheHeaders()',
 )
-// The asymmetry decision 2 is built on: both headers or neither. One without the
-// other is a page cached for its full TTL with no purge path.
-record(
-  'the host sets Cache-Tag',
-  Boolean(first.cacheTag),
-  first.cacheTag ? `${tagsOf(first.cacheTag).tags.length} tags` : 'absent — nothing can be purged',
-)
+/**
+ * The asymmetry decision 2 is built on: both headers or neither. One without the
+ * other is a page cached for its full TTL with no purge path.
+ *
+ * **But `Cache-Tag` is unobservable on a cached response.** Cloudflare consumes
+ * the header and strips it before the response reaches a client, so a request
+ * that Workers Caching handled can never show it — and `cf-cache-status` being
+ * present is exactly the signal that it did. Reporting FAIL there is a false
+ * alarm, which is worse than no check: this probe exists to be believed.
+ *
+ * So the tags are read from a request that *bypassed* the cache. Folio's own
+ * draft cookie is the reliable way to arrange one — `cacheVerdictFor` answers
+ * `'bypass'` for any request carrying it, on any path — and it grants nothing on
+ * its own, so an unauthenticated probe still gets the published page.
+ */
+if (first.cacheStatus) {
+  const bypassed = await probe({ cookie: 'folio_draft=1' })
+  record(
+    'the host sets Cache-Tag',
+    Boolean(bypassed.cacheTag),
+    bypassed.cacheTag
+      ? `${tagsOf(bypassed.cacheTag).tags.length} tags (read off a bypassed request; Cloudflare strips the header from a cached one)`
+      : 'absent — nothing can be purged',
+  )
+  first.cacheTag = bypassed.cacheTag
+} else {
+  record(
+    'the host sets Cache-Tag',
+    Boolean(first.cacheTag),
+    first.cacheTag
+      ? `${tagsOf(first.cacheTag).tags.length} tags`
+      : 'absent — nothing can be purged',
+  )
+}
 if (first.cacheControl && !/max-age=0/.test(first.cacheControl)) {
   record(
     'max-age is 0',
