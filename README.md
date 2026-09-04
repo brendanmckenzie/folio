@@ -1610,14 +1610,33 @@ does with its `mutating` check. Only GET and HEAD are ever stored, so a POST
 through `CachedPages` caches nothing; it only puts the purge on the right side
 of the boundary.
 
-The corollary is a real limit: **a purge issued outside a fetch has no
-entrypoint** — a cron-triggered scheduled publish, or a Durable Object alarm —
-and cannot reach `CachedPages`. A site that wants both scheduled publishing and
-click-id normalisation cannot have them under this design; collapse to a single
-cached entrypoint and give up `cf.cacheKey`. Run `scripts/cache-probe.mjs` with
-a token against any deployment to find out which side of that you are on: it is
-the only thing that can tell you, because none of it is observable locally and
-none of it errors when wrong.
+**The same rule applies to a scheduled publish**, and it is satisfiable the same
+way. `folio.runSchedules(env)` is called by the *host*, so the host chooses the
+context it runs in — and a `scheduled()` handler that calls it directly issues
+its purges from the default entrypoint, which is the wrong namespace again.
+Route it through the cached entrypoint instead:
+
+```ts
+export default class extends WorkerEntrypoint<Env> {
+  async scheduled() {
+    // POST, not GET: only GET and HEAD are ever stored, so this cannot cache
+    // itself, and the purges land where the pages are.
+    await this.ctx.exports.CachedPages.fetch(
+      new Request('https://internal/run-schedules', { method: 'POST' }),
+    )
+  }
+}
+```
+
+The one thing genuinely out of reach is a purge from inside a Durable Object,
+which is not an entrypoint. Folio issues none: `StoryDO`'s only alarm is a
+debounced watermark write that publishes nothing.
+
+**Verify it, do not assume it.** None of this is observable locally, none of it
+errors when wrong, and the failure — a purge into an empty namespace — looks
+exactly like a purge that worked. `scripts/cache-probe.mjs <url> --token …` is
+the only thing that will tell you, and it is worth running against a deployment
+after any change to how requests reach your entrypoints.
 
 **`folio.cacheKey(url)`** strips click identifiers — `utm_*`, `gclid`, `fbclid`,
 `msclkid` and the rest — and sorts what survives. This is not cosmetic:

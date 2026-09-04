@@ -188,9 +188,12 @@ are free to go the next time that code is touched.
   entrypoint and handles writes on another purges an empty namespace and keeps
   serving the stale page for its whole TTL — silently. The fix is the host's
   (route writes through the cached entrypoint) but the trap is ours to document,
-  and the README does. A purge from a cron or a Durable Object alarm has no
-  entrypoint at all and cannot reach a non-default one; `scripts/cache-probe.mjs
-  --token` is the only thing that can detect any of this.
+  and the README does. The same applies to `runSchedules` from a `scheduled()`
+  handler — the host picks that context too, so a cron must be routed through the
+  cached entrypoint like any other write. Nothing purges from inside a Durable
+  Object (`StoryDO`'s only alarm is a debounced watermark write), so that case
+  does not arise. `scripts/cache-probe.mjs --token` is the only thing that can
+  detect any of this.
 - **A page route calls `reader.page()`, and answers with the `headers` it
   returns.** Two silent failures live in that one value: a draft answered with
   `cacheHeaders` is unpublished content on the edge under the page's real URL,
