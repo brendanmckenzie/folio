@@ -1596,6 +1596,29 @@ security-critical ones and they are Folio's because the knowledge is Folio's:
 that `{base}/asset/:key` is public while `{base}/api/assets` is the admin's
 gated list, and which three cookie names mean "this render may be a draft".
 
+**A purge is scoped to the entrypoint that issues it**, and this is the trap in
+the pattern above. Cloudflare: "a purge from `PublicAPI` does not affect cached
+responses stored by `AdminAPI`, even if they share tag names or path prefixes."
+Folio's publish hook purges from whichever entrypoint handled the request that
+triggered the publish — so if writes go to the gateway and pages are cached by
+`CachedPages`, every purge lands in an empty namespace and the real entry sits
+there until its week-long TTL expires. Nothing errors. Measured on the first
+host to run this: `story: purge lands — still HIT after 15000ms`.
+
+**So route writes through the cached entrypoint too**, as the gateway above
+does with its `mutating` check. Only GET and HEAD are ever stored, so a POST
+through `CachedPages` caches nothing; it only puts the purge on the right side
+of the boundary.
+
+The corollary is a real limit: **a purge issued outside a fetch has no
+entrypoint** — a cron-triggered scheduled publish, or a Durable Object alarm —
+and cannot reach `CachedPages`. A site that wants both scheduled publishing and
+click-id normalisation cannot have them under this design; collapse to a single
+cached entrypoint and give up `cf.cacheKey`. Run `scripts/cache-probe.mjs` with
+a token against any deployment to find out which side of that you are on: it is
+the only thing that can tell you, because none of it is observable locally and
+none of it errors when wrong.
+
 **`folio.cacheKey(url)`** strips click identifiers — `utm_*`, `gclid`, `fbclid`,
 `msclkid` and the rest — and sorts what survives. This is not cosmetic:
 `fbclid` and `gclid` are unique *per click*, so left in the key every paid and

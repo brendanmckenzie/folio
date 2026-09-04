@@ -237,14 +237,28 @@ if (!auth) {
   summarise()
 }
 
-const meta = await api(`/documents/by-path/${values.path.replace(/^\/+/, '')}`)
-  .then((d) => d.meta)
-  .catch((err) => {
-    record('find the document behind the path', false, String(err))
-    return null
-  })
+/**
+ * `GET /documents/by-path/:path` answers the document **flat** — `meta()` is
+ * spread into the top level alongside `source` and `content` — not wrapped in a
+ * `meta` key. Reading `d.meta` gave `undefined`, and because the guard below was
+ * a bare `if`, every phase-2 check was skipped and the run still reported
+ * "0 failed". A probe that quietly does nothing is the failure this script was
+ * written to catch, so the miss is now recorded rather than stepped over.
+ */
+const meta = await api(`/documents/by-path/${values.path.replace(/^\/+/, '')}`).catch((err) => {
+  record('find the document behind the path', false, String(err))
+  return null
+})
 
-if (meta) {
+if (meta && !meta.id) {
+  record(
+    'find the document behind the path',
+    false,
+    `no id in ${JSON.stringify(meta).slice(0, 120)}`,
+  )
+}
+
+if (meta?.id) {
   record('find the document behind the path', true, `${meta.id} (${meta.type})`)
 
   // --- story: --------------------------------------------------------------
@@ -256,7 +270,7 @@ if (meta) {
     const original = meta.title
     await api(`/documents/${meta.id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ title: `${original} (cache-probe)`, slug: meta.slug }),
+      body: JSON.stringify({ title: `${original} (cache-probe)` }),
     })
     const fresh = await timeToFresh()
     record(
@@ -268,7 +282,7 @@ if (meta) {
     // found it. This purges the same tag a second time, harmlessly.
     await api(`/documents/${meta.id}`, {
       method: 'PATCH',
-      body: JSON.stringify({ title: original, slug: meta.slug }),
+      body: JSON.stringify({ title: original }),
     })
   } else {
     record('story: purge lands', null, 'the response carries no story: tag')

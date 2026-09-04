@@ -181,6 +181,16 @@ are free to go the next time that code is touched.
   Durable Object for it. `read-session.test.ts` pins the concurrency by
   asserting the send/receive order, which is the only way to see it — both
   orderings return identical rows.
+- **A purge is scoped to the entrypoint that issued it.** Cloudflare: "a purge
+  from `PublicAPI` does not affect cached responses stored by `AdminAPI`, even if
+  they share tag names or path prefixes." The publish hook purges from whichever
+  entrypoint handled the triggering request, so a host that caches on one
+  entrypoint and handles writes on another purges an empty namespace and keeps
+  serving the stale page for its whole TTL — silently. The fix is the host's
+  (route writes through the cached entrypoint) but the trap is ours to document,
+  and the README does. A purge from a cron or a Durable Object alarm has no
+  entrypoint at all and cannot reach a non-default one; `scripts/cache-probe.mjs
+  --token` is the only thing that can detect any of this.
 - **A page route calls `reader.page()`, and answers with the `headers` it
   returns.** Two silent failures live in that one value: a draft answered with
   `cacheHeaders` is unpublished content on the edge under the page's real URL,
