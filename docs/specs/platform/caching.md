@@ -885,3 +885,49 @@ what covers the rest, and cannot gate CI.
   A write mutates a *draft*; a published page is unaffected until somebody
   publishes, and that fires `published`. Worth naming because it looks like a
   gap and is not.
+
+### What the first real deployment taught (2026-09-04)
+
+Three things, none of which this spec got wrong and none of which it could have
+known. All were found on `takeoffgo-website`, the first host to actually wire
+caching up; all three are silent when broken, and only the second was caught by
+a tool rather than by looking.
+
+**1. A purge is scoped to the entrypoint that issued it.** Cloudflare: *"a purge
+from `PublicAPI` does not affect cached responses stored by `AdminAPI`, even if
+they share tag names or path prefixes."* This spec assumes one entrypoint and so
+never had to say it. A host that caches on a second entrypoint — which is the
+recommended shape, see 3 — and handles writes on the default one purges an empty
+namespace on every publish and serves the stale page for the whole `s-maxage`.
+Measured: `story: purge lands — still HIT after 15000ms`, with nine correct tags
+on the response and the hook firing exactly as designed. The host's fix is to
+route writes through the cached entrypoint; the same applies to `runSchedules`
+from a `scheduled()` handler. Nothing purges from inside a Durable Object, so
+that case does not arise.
+
+**2. `Cache-Tag` is not observable on a cached response.** Cloudflare consumes
+the header and strips it before the response reaches a client. `cache-probe`'s
+"the host sets Cache-Tag" check therefore reported FAIL against a host setting
+nine of them. It now reads the tags off a request that bypassed the cache
+(Folio's draft cookie arranges one). Decision 2's whole point is that the
+half-configured state is the dangerous one — a probe that cries wolf about
+exactly that is worse than no probe.
+
+**3. Workers Caching is opt-*out*, which makes the entrypoint split a security
+requirement rather than a tuning choice.** With `cache.enabled` on a Worker, a
+200 carrying no `Cache-Control` is stored for **two hours** under RFC 9111
+heuristic freshness. Folio's admin is authenticated by a *cookie*, and a request
+cookie is not a bypass condition — only `Set-Cookie` on the response is. So a
+host that enables caching Worker-wide has put authenticated admin JSON in a
+shared cache. `server/cache-request.ts` (`cacheVerdict`, `cacheKey`) exists
+because the list of what must not be cached is a list of Folio's own route
+shapes — `{base}/asset/:key` is public, `{base}/api/assets` is the admin's gated
+list, one letter apart — and a host re-deriving it is a host one route away from
+a disclosure.
+
+**What this spec chose, and the host ignored.** Decision 1 is "Workers Cache, not
+the Cache API and not KV", on the grounds that `caches.default` is per-colo. The
+first host hand-rolled `stale-while-revalidate` over `caches.default` anyway, and
+so had a cache no publish could ever invalidate. The decision was right; nothing
+made a host follow it. `cacheVerdict`/`cacheKey` and `reader.page()`'s headers
+are the answer to that: the guidance is now an API rather than a paragraph.
