@@ -1265,3 +1265,82 @@ flagged where they are made rather than left here as questions: **decision 16** 
 bulk describe run is `ADMIN` while everything else is `ASSETS` — chosen on consequence
 rather than symmetry) and **decision 4**'s eight-tag filter cap, which is a bind budget
 and can be raised by narrowing something else in the same statement.
+
+## Implementation notes
+
+Built in phases, and this section grows one entry per phase as they land. The
+migration number stopped being a claim with phase 1: **`0008_asset_organisation.sql`
+is on disk**, so the header's "a claim, not a landing" note is history now.
+
+### Phase 1 — the migration and the core vocabulary (2026-09-05, `f1e52a3`)
+
+Landed as planned: `migrations/0008_asset_organisation.sql`, `src/core/assets.ts`
+(with `AssetSort` / `DEFAULT_ASSET_SORT` moved in from `core/story.ts`), the six
+columns on `AssetRow` and `COLS`, and the edits to `test/workers/migrations.test.ts`.
+One thing the plan did not name: `smoke.test.ts` asserts the **exact table list**, so
+three new tables broke it and had to be told about them.
+
+### Phase 2 — folders, server side (2026-09-06)
+
+`src/server/asset-folders.ts` is new; `assetFilterSql` is new in `server/assets.ts`
+and both readers go through it; four routes in `routes/assets.ts`; two body schemas
+and `folderQuery` in `validate.ts`. `test/workers/asset-folders.test.ts` is new (25)
+and `test/unit/server/pure.test.ts` gained the pure SQL emitters (9).
+
+**The two destructive failure modes were verified by breaking them**, which is the
+only way to know a test is actually holding a decision rather than agreeing with it:
+
+- Swapping the range for a prefix `like` in `subtreeWhere` turns three workers tests
+  and four unit tests red, and the failure output is the damage itself: renaming
+  `Shoots` to `Archive` rewrites the *sibling* `Shoots 2024` to `archive-2024` and
+  `Shootsx` to `archivex`. Two folders nobody touched, silently, with no undo.
+- Neutering the cycle guard turns four workers tests red, and a self-move then
+  *succeeds*, committing a row whose `parent_id` is its own `id` — a subtree detached
+  from the tree with no recursive query anywhere in this design to find it again.
+
+**Six things the plan did not settle, decided here:**
+
+- **`renameFolder` and `moveFolder` are wrappers over one `updateFolder`.** The plan
+  names five functions; a rename and a move are the *same* operation on a materialised
+  path — recompute my path, rewrite my subtree — and two copies of that statement is
+  how the two come to disagree about the range. Both names exist because the plan uses
+  them; there is one implementation of the dangerous statement.
+- **The cycle check is one comparison, not two.** `parent.path === mine ||
+  parent.path.startsWith(mine + '/')` catches a self-move for free, because a
+  self-move makes the destination's path equal to mine. A separate `parentId === id`
+  guard would be a second thing to keep in step, and the `+ '/'` in the second
+  disjunct is load-bearing on its own: without it, moving `Shoots` into the unrelated
+  sibling `Shoots 2024` would be refused as a cycle. A test pins that it is allowed.
+- **`substr(path, length(?) + 1)` takes the length from SQLite, not from JavaScript.**
+  `String.length` counts UTF-16 code units and SQLite's `length()` counts characters,
+  so a folder named with an astral character would cut one short and corrupt every
+  descendant. Costs one extra bind (five, not four) and removes the encoding question
+  entirely.
+- **Deleting a folder lifts its whole subtree in one statement**, not one move per
+  child: descendants' paths shift up a segment through the same `? || substr(path,
+  length(?) + 2)` form. It also **pre-checks the one collision it can cause** — delete
+  `a/x` where `a/x/y` and `a/y` both exist — and refuses with a message naming the
+  child, because the alternative is a raw D1 `UNIQUE constraint failed` that
+  `errors.ts` translates into a message about *stories*.
+- **`folder` and `unfiled` are refused together at the route** (400), rather than one
+  quietly winning. `assetFilterSql` composes both clauses honestly, which yields an
+  empty list — truthful, and indistinguishable on screen from an empty folder.
+- **`assetFilterSql` composes `q`, `kind`, `folder` and `unfiled` only.** `tags` and
+  `untagged` are phase 3's and `undescribed` is phase 7's; they are `AssetFilter`
+  members no route parses yet, and the composer says so where the clauses are, so the
+  next phase adds a clause *there* rather than at a call site.
+
+**Bind budget, checked rather than assumed** (`db.ts`'s `D1_BIND_CAP`): every
+statement added by this phase binds a **fixed** number of parameters — five for the
+subtree rewrite, four for the delete's lift, three for the collision pre-check and for
+a folder filter, nine for the widest possible `assetFilterSql` — and **not one of them
+binds a caller-sized list**, so `bindChunks` is not needed anywhere here. That is the
+materialised path earning its keep rather than a happy accident: the alternative
+design, resolving a folder to a list of descendant ids, is exactly the caller-sized
+bind list `db.ts` warns about. A unit test asserts the nine.
+
+**Left for a later phase, named rather than glossed:** `listAssetsByPage` now takes an
+optional `filter` and runs it through the shared composer (decision 13), but the
+**`{base}/api/v1/assets` route does not parse `folder` or `q` yet** — that route lives
+in `routes/api/index.ts`, which was outside this phase's file set. It is a two-line
+change and the reader behind it is already built and tested.

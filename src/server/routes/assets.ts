@@ -9,6 +9,7 @@
  * runtime-independent, which is what lets it be mounted on the bare path.
  */
 import { Hono } from 'hono'
+import { createFolder, deleteFolder, listFolders, updateFolder } from '../asset-folders'
 import {
   assetById,
   assetUsage,
@@ -28,17 +29,45 @@ import { requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
 import {
+  AssetFolderCreateBody,
+  AssetFolderPatchBody,
   assetKeyParam,
   AssetPatchBody,
   assetSortQuery,
   contentLengthHeader,
   filenameQuery,
+  folderQuery,
   idParam,
   limitParam,
+  parseBody,
   parseOptionalBody,
   requireCursor,
   sortDirQuery,
 } from '../validate'
+
+/**
+ * `?folder=` and `?unfiled=1`, which are **mutually exclusive**
+ * (`core/assets.ts`'s `AssetFilter`): one narrows to a folder and its
+ * descendants, the other to the rows in no folder at all.
+ *
+ * Refused rather than resolved. `assetFilterSql` composes both clauses honestly
+ * when both are set, which yields an empty list — truthful, and indistinguishable
+ * on screen from a folder that happens to be empty. A 400 naming the two
+ * parameters is the difference between "you asked for something that cannot
+ * exist" and a grid that looks broken.
+ */
+function assetFolderFilter(
+  folder: string | undefined,
+  unfiled: string | undefined,
+): { folder?: string; unfiled?: boolean } {
+  const path = folderQuery(folder)
+  const none = unfiled === '1'
+  if (path !== undefined && none) {
+    throw new FolioError('bad_request', '`folder` and `unfiled` cannot both be given')
+  }
+  if (path !== undefined) return { folder: path }
+  return none ? { unfiled: true } : {}
+}
 
 export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
@@ -55,8 +84,79 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         count: c.req.query('count') === '1',
         sort: assetSortQuery(c.req.query('sort')),
         dir: sortDirQuery(c.req.query('dir')),
+        ...assetFolderFilter(c.req.query('folder'), c.req.query('unfiled')),
       }),
     )
+  })
+
+  /* ------------------------------------------------------------ folders --- */
+
+  /**
+   * The folder tree, keyset-paged over `path` — **so the page order *is* the tree
+   * order** (`media-library.md` decision 3). A client appends rows as they arrive:
+   * every folder follows its parent and siblings are alphabetical, because that is
+   * what sorting a slugified materialised path does. It performs no sort of its
+   * own, which is the property that makes paging a tree possible at all.
+   *
+   * Registered **before** `/assets/:id`, and that ordering is load-bearing rather
+   * than cosmetic: `folders` is a legal `:id` as far as the router is concerned.
+   *
+   * `READ` (viewer+), matching the asset list it narrows: a folder name is
+   * organisation, not content, and anyone who can see the library can see how it
+   * is filed.
+   */
+  app.get('/assets/folders', requireAccess<Env>(rt, READ), async (c) => {
+    const cursor = c.req.query('cursor')
+    requireCursor(cursor)
+    return c.json(
+      await listFolders(c.var.bindings().db, {
+        limit: limitParam(c.req.query('limit'), 100, 500),
+        cursor,
+        count: c.req.query('count') === '1',
+      }),
+    )
+  })
+
+  /**
+   * A new folder. 409 when its name slugifies onto a sibling's, naming the
+   * sibling — deliberately not de-duplicated silently, because two names that
+   * slugify alike are different names and the editor should choose.
+   */
+  app.post('/assets/folders', requireAccess<Env>(rt, ASSETS), async (c) => {
+    const body = await parseBody(c.req, AssetFolderCreateBody)
+    return c.json(await createFolder(c.var.bindings().db, body), 201)
+  })
+
+  /**
+   * Rename, move, or both — one subtree path rewrite either way
+   * (`asset-folders.ts`'s `updateFolder` says why the two are one operation).
+   *
+   * 409 on a cycle, naming the path that made it one, and 409 on a collision. A
+   * missed cycle detaches a subtree from the tree permanently: there is no
+   * recursive query anywhere here to find it again.
+   */
+  app.patch('/assets/folders/:id', requireAccess<Env>(rt, ASSETS), async (c) => {
+    const id = idParam('id', c.req.param('id'))
+    const body = await parseBody(c.req, AssetFolderPatchBody)
+    const row = await updateFolder(c.var.bindings().db, id, body)
+    if (!row) throw new FolioError('not_found', 'Unknown folder')
+    return c.json(row)
+  })
+
+  /**
+   * Deletes the folder and **nothing else** (decision 14): children re-parent to
+   * its own parent, its assets land back in *Unfiled*, and no asset and no R2
+   * object is touched. The counts come back so the dialog can say what happened
+   * rather than guess.
+   *
+   * Note it does not need the `media` binding, unlike `DELETE /assets/:id` — a
+   * folder is metadata, and deleting metadata reaches no bucket.
+   */
+  app.delete('/assets/folders/:id', requireAccess<Env>(rt, ASSETS), async (c) => {
+    const id = idParam('id', c.req.param('id'))
+    const report = await deleteFolder(c.var.bindings().db, id)
+    if (!report) throw new FolioError('not_found', 'Unknown folder')
+    return c.json({ deleted: true, ...report })
   })
 
   /**

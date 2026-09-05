@@ -15,7 +15,8 @@ import type { AssetValue } from '../core/values'
 import type { AssetTransform } from '../core/resolve'
 import { FolioError } from './errors'
 import { DOWNLOAD_CONTENT_TYPE, isInlineContentType, SERVED_CONTENT_TYPES } from './validate'
-import { type AssetSort, DEFAULT_ASSET_SORT } from '../core/assets'
+import { type AssetFilter, type AssetSort, DEFAULT_ASSET_SORT } from '../core/assets'
+import { subtreeWhere } from './asset-folders'
 import { clampLimit, type CursorPart, decodeCursor, type Page, paginate } from '../core/pagination'
 import type { StoryMeta } from '../core/story'
 import { assetReferences, clearInboundRefStatements } from './content-index'
@@ -89,14 +90,74 @@ function keyOf(sort: AssetSort, row: AssetRow): [CursorPart, CursorPart] {
   }
 }
 
-export interface ListAssetsOptions {
+/**
+ * **The one `where` builder over `assets`** — `listAssets` and `listAssetsByPage`
+ * both call it, which is decision 13 of `media-library.md` and is not a tidiness
+ * preference: two builders over one table is how the admin's grid and the count
+ * beside it, or the cursor list and the versioned page list, come to mean
+ * different things by `folder`.
+ *
+ * Returns fragments rather than a finished clause because both callers have a
+ * keyset or an `offset` to concatenate; feed them straight into `whereOf`.
+ *
+ * **Every clause binds a fixed number of parameters** — five for `q`, one for
+ * `kind`, three for `folder`, nine in total — so no filter here can approach
+ * `D1_BIND_CAP` (`db.ts`) however deep the tree or however many assets are in it.
+ * The folder clause is a range over the materialised path (`asset-folders.ts`),
+ * which is what keeps it that way: the alternative, resolving a folder to a list
+ * of descendant ids and binding them, is exactly the caller-sized bind list
+ * `db.ts` warns about.
+ *
+ * **`q` is five columns** and stays a substring scan (decision 12), so a
+ * machine-written description is reachable by the one control an editor uses
+ * first. The stated trigger for reversing that: the library passing ~50,000 rows,
+ * or a settled `q` exceeding ~200ms at p50 against a real deployment.
+ *
+ * **`tags`, `untagged` and `undescribed` are deliberately not composed here yet.**
+ * They are `AssetFilter` members that phase 3 (the tag join, `having count(*) = n`,
+ * capped at eight) and phase 7 (`described_at is null`) add. Nothing can pass one
+ * today: `ListAssetsOptions` accepts them only because it extends `AssetFilter`,
+ * and no route parses them. Adding one means adding its clause *here*, not at a
+ * call site.
+ */
+export function assetFilterSql(filter: AssetFilter): { clauses: string[]; binds: unknown[] } {
+  const clauses: string[] = []
+  const binds: unknown[] = []
+
+  if (filter.q) {
+    clauses.push(
+      `(filename like ? or alt like ? or alt_auto like ?
+        or description like ? or description_auto like ?)`,
+    )
+    const like = `%${filter.q}%`
+    binds.push(like, like, like, like, like)
+  }
+  if (filter.kind) {
+    clauses.push('content_type like ?')
+    binds.push(`${filter.kind}%`)
+  }
+  if (filter.folder) {
+    // A folder filter includes the folder's descendants (checkpoint 10), which
+    // the materialised path makes a range rather than a join to a recursion.
+    // `like` here would sweep in every sibling whose name starts with this one's.
+    const range = subtreeWhere('path', filter.folder)
+    clauses.push(`folder_id in (select id from asset_folders where ${range.sql})`)
+    binds.push(...range.binds)
+  }
+  if (filter.unfiled) clauses.push('folder_id is null')
+
+  return { clauses, binds }
+}
+
+/**
+ * `AssetFilter` (`core/assets.ts`) plus the paging controls — the filter half is
+ * shared with a captured *select all* and with the query string a route parses,
+ * which is why it is one type in `core/` rather than a second list of the same
+ * names here.
+ */
+export interface ListAssetsOptions extends AssetFilter {
   limit?: number
   cursor?: string
-  /** Substring of the filename. The media library had no search at all, which is
-   * what made asset 201 unreachable once the list was capped at 200. */
-  q?: string
-  /** A `content_type` prefix — `image`, `video`, `application`. */
-  kind?: string
   /** Adds `total` for the same filter. One extra `count(*)`, only when asked
    * (`../../docs/specs/foundation/pagination.md` decision 5). */
   count?: boolean
@@ -134,29 +195,20 @@ export async function listAssets(
   const keyset: Keyset = opts.dir ? { ...ORDERS[sort], direction: opts.dir } : ORDERS[sort]
   const resume = keysetWhere(keyset, cursor)
 
-  const filters: string[] = []
-  const binds: unknown[] = []
-  if (opts.q) {
-    filters.push('filename like ?')
-    binds.push(`%${opts.q}%`)
-  }
-  if (opts.kind) {
-    filters.push('content_type like ?')
-    binds.push(`${opts.kind}%`)
-  }
-  const where = whereOf(...filters, resume.sql)
+  const filter = assetFilterSql(opts)
+  const where = whereOf(...filter.clauses, resume.sql)
 
   const [rows, total] = await Promise.all([
     db
       .prepare(`select ${COLS} from assets ${where} ${orderBy(keyset)} limit ?`)
-      .bind(...binds, ...resume.binds, limit + 1)
+      .bind(...filter.binds, ...resume.binds, limit + 1)
       .all<AssetRow>(),
     // The count ignores the cursor deliberately: it counts the whole filter, which
     // is what a header means by "of 1,284" and what a bulk guard would compare.
     opts.count
       ? db
-          .prepare(`select count(*) as n from assets ${whereOf(...filters)}`)
-          .bind(...binds)
+          .prepare(`select count(*) as n from assets ${whereOf(...filter.clauses)}`)
+          .bind(...filter.binds)
           .first<{ n: number }>()
       : null,
   ])
@@ -937,16 +989,26 @@ function jpegSize(bytes: Uint8Array, view: DataView): { width: number; height: n
  */
 export async function listAssetsByPage(
   db: FolioDb,
-  opts: { page: number; perPage: number },
+  opts: { page: number; perPage: number; filter?: AssetFilter },
 ): Promise<{ assets: AssetRow[]; total: number }> {
   const perPage = clampLimit(opts.perPage, 50, 200)
   const page = Math.max(1, Math.trunc(opts.page) || 1)
+  // The same composer `listAssets` uses (decision 13). Absent, it emits nothing
+  // and the statement is the unfiltered one this route has always answered — the
+  // filters are additive, so a caller passing none gets exactly today's rows.
+  const filter = assetFilterSql(opts.filter ?? {})
+  const where = whereOf(...filter.clauses)
   const [rows, total] = await Promise.all([
     db
-      .prepare(`select ${COLS} from assets order by created_at desc, id desc limit ? offset ?`)
-      .bind(perPage, (page - 1) * perPage)
+      .prepare(
+        `select ${COLS} from assets ${where} order by created_at desc, id desc limit ? offset ?`,
+      )
+      .bind(...filter.binds, perPage, (page - 1) * perPage)
       .all<AssetRow>(),
-    db.prepare('select count(*) as n from assets').first<{ n: number }>(),
+    db
+      .prepare(`select count(*) as n from assets ${where}`)
+      .bind(...filter.binds)
+      .first<{ n: number }>(),
   ])
   return { assets: rows.results, total: total?.n ?? 0 }
 }

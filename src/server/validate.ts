@@ -211,6 +211,32 @@ export const CheckpointBody = v.object({ label: v.optional(bounded(120)) }, OBJE
 export const AssetPatchBody = v.object({ alt: v.optional(bounded(500)) }, OBJECT)
 
 /**
+ * A media-library folder (`../content-model/media-library.md` decision 3).
+ *
+ * `name` is what was typed and is what is displayed; the identity is `path`, the
+ * slash-joined chain of *slugified* ancestor names that `asset-folders.ts`
+ * derives from it. So this bounds the typed string and nothing more: 120 is the
+ * cap on what a person types, and `slugify` truncates its own output to 64 for
+ * the segment.
+ *
+ * `parentId` is optional **and** nullable, and the two mean different things:
+ * absent is "the top level" on a create and "leave the parent alone" on a patch,
+ * while an explicit `null` is "the top level" in both. That distinction is the
+ * whole of what makes `PATCH { name }` a rename rather than a move to the root.
+ */
+export const AssetFolderCreateBody = v.object(
+  { name: required(120), parentId: v.optional(v.nullable(ID)) },
+  OBJECT,
+)
+
+/** The same fields, both optional: `{ name }` renames, `{ parentId }` moves, and
+ * both together is one subtree rewrite rather than two. */
+export const AssetFolderPatchBody = v.object(
+  { name: v.optional(required(120)), parentId: v.optional(v.nullable(ID)) },
+  OBJECT,
+)
+
+/**
  * A manual redirect (redirects.md). `to` is capped generously: it is either an
  * in-site path or an absolute URL, and the row is re-checked with `isSafeHref`
  * on every read regardless of what this schema let through.
@@ -712,6 +738,8 @@ export type StoryPatchInput = v.InferOutput<typeof StoryPatchBody>
 export type StoryDuplicateInput = v.InferOutput<typeof StoryDuplicateBody>
 export type CheckpointInput = v.InferOutput<typeof CheckpointBody>
 export type AssetPatchInput = v.InferOutput<typeof AssetPatchBody>
+export type AssetFolderCreateInput = v.InferOutput<typeof AssetFolderCreateBody>
+export type AssetFolderPatchInput = v.InferOutput<typeof AssetFolderPatchBody>
 export type RedirectCreateInput = v.InferOutput<typeof RedirectCreateBody>
 
 /* --------------------------------------------------------------- parsing --- */
@@ -1295,6 +1323,35 @@ export function assetSortQuery(raw: string | undefined): AssetSort {
     raw,
     'sort',
   )
+}
+
+/**
+ * `?folder=` on the asset list — a folder **`path`**, not an id, because the
+ * filter is a range over `asset_folders.path` and includes descendants
+ * (`../content-model/media-library.md` decision 3 and checkpoint 10). It is what
+ * a captured *select all* stores too, which is why the URL carries the path
+ * rather than an id a later delete could invalidate.
+ *
+ * Not `bounded()`, which trims: a trimmed path is a *different* path, and one
+ * with a trailing space would silently find its neighbour. No leading or trailing
+ * slash and no empty segment either — `asset-folders.ts` writes none, so asking
+ * for `/clients/` is a client bug worth surfacing rather than normalising.
+ *
+ * The segment shape is "anything but a slash or whitespace" rather than an ASCII
+ * slug charset: `slugify` keeps `\p{Letter}` and `\p{Number}`, so a folder called
+ * `Café` slugifies to `café` and an ASCII-only screen would refuse to filter by
+ * a folder Folio itself created.
+ */
+const ASSET_FOLDER_PATH = v.pipe(
+  v.string('must be a string'),
+  v.maxLength(1024, 'must be 1024 characters or fewer'),
+  v.regex(PRINTABLE, 'contains unsupported characters'),
+  v.regex(/^[^/\s]+(\/[^/\s]+)*$/u, 'is not a folder path'),
+)
+
+export function folderQuery(raw: string | undefined): string | undefined {
+  if (raw === undefined || raw === '') return undefined
+  return parseOrThrow(ASSET_FOLDER_PATH, raw, 'folder')
 }
 
 /**

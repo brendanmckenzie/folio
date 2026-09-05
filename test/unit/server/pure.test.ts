@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
+import { descendantsWhere, subtreeWhere } from '../../../src/server/asset-folders'
 import {
+  assetFilterSql,
   imageSize,
   MAX_TRANSFORM_DIMENSION,
   MAX_TRANSFORM_QUALITY,
@@ -8,6 +10,7 @@ import {
   parseTransform,
   sniffContentType,
 } from '../../../src/server/assets'
+import { BIND_BUDGET } from '../../../src/server/db'
 import { serializeJson } from '../../../src/server/Document'
 import {
   createHookRunner,
@@ -1300,5 +1303,96 @@ describe('validateAssets', () => {
    */
   it('treats an empty string as absent', () => {
     expect(() => validateAssets({ admin: '', preview: '/p.js' })).toThrow(/'assets.admin'/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// subtreeWhere / descendantsWhere / assetFilterSql
+// ---------------------------------------------------------------------------
+
+/**
+ * The three SQL emitters behind media-library folders
+ * (`docs/specs/content-model/media-library.md` decisions 3, 12 and 13). Pure, so
+ * the two properties that matter most are checkable without a database:
+ *
+ *  - the descendant filter is a **range**, never a `like` — the difference
+ *    between "everything under `shoots`" and "everything under `shoots` plus the
+ *    sibling called `Shoots 2024`";
+ *  - every clause binds a **fixed** number of parameters, so no filter can walk
+ *    into `D1_BIND_CAP` however deep the tree.
+ */
+describe('subtreeWhere / descendantsWhere', () => {
+  it('emits a half-open range whose bounds are the two adjacent ASCII bytes', () => {
+    const range = subtreeWhere('path', 'clients')
+    expect(range.sql).toBe('(path = ? or (path > ? and path < ?))')
+    expect(range.binds).toEqual(['clients', 'clients/', 'clients0'])
+    // The whole trick: '/' is 0x2F, '0' is 0x30, and nothing sits between them.
+    expect('clients/'.charCodeAt(7) + 1).toBe('clients0'.charCodeAt(7))
+  })
+
+  it('places a prefix sibling outside the range on both sides', () => {
+    const { binds } = subtreeWhere('path', 'shoots')
+    const [, low, high] = binds as [string, string, string]
+    expect('shoots/raw' > low && 'shoots/raw' < high).toBe(true)
+    // '-' (0x2D) sorts below '/', 'x' (0x78) above '0'. A `like 'shoots%'` takes
+    // both; the range takes neither.
+    expect('shoots-2024' > low).toBe(false)
+    expect('shootsx' < high).toBe(false)
+  })
+
+  it('names any column the caller gives it, and never binds it', () => {
+    expect(subtreeWhere('f.path', 'a').sql).toBe('(f.path = ? or (f.path > ? and f.path < ?))')
+  })
+
+  it('descendantsWhere is the same range with the folder itself excluded', () => {
+    const range = descendantsWhere('path', 'clients')
+    expect(range.sql).toBe('(path > ? and path < ?)')
+    expect(range.binds).toEqual(['clients/', 'clients0'])
+  })
+})
+
+describe('assetFilterSql', () => {
+  it('emits nothing for an empty filter, so an unfiltered reader is unchanged', () => {
+    expect(assetFilterSql({})).toEqual({ clauses: [], binds: [] })
+  })
+
+  it('searches five columns for one term (decision 12)', () => {
+    const { clauses, binds } = assetFilterSql({ q: 'brick' })
+    expect(clauses).toHaveLength(1)
+    for (const column of ['filename', 'alt', 'alt_auto', 'description', 'description_auto']) {
+      expect(clauses[0]).toContain(`${column} like ?`)
+    }
+    expect(binds).toEqual(['%brick%', '%brick%', '%brick%', '%brick%', '%brick%'])
+  })
+
+  it('filters a folder by range and not by LIKE', () => {
+    const { clauses, binds } = assetFilterSql({ folder: 'clients' })
+    expect(clauses[0]).toBe(
+      'folder_id in (select id from asset_folders where (path = ? or (path > ? and path < ?)))',
+    )
+    expect(clauses[0]).not.toMatch(/like/i)
+    expect(binds).toEqual(['clients', 'clients/', 'clients0'])
+  })
+
+  it('treats unfiled as a null test, and composes both rather than dropping one', () => {
+    expect(assetFilterSql({ unfiled: true })).toEqual({
+      clauses: ['folder_id is null'],
+      binds: [],
+    })
+    // The route refuses this combination; the composer stays truthful about it
+    // rather than silently choosing a winner.
+    const both = assetFilterSql({ folder: 'clients', unfiled: true })
+    expect(both.clauses).toHaveLength(2)
+  })
+
+  /**
+   * The bind budget, asserted rather than reasoned about. `D1_BIND_CAP` is 100
+   * per statement and this repo has been over it twice; a filter is the shape
+   * that grows a bind quietly, so the widest one it can express is worth pinning.
+   */
+  it('binds a fixed nine parameters at its very widest', () => {
+    const widest = assetFilterSql({ q: 'x', kind: 'image', folder: 'a/b/c', unfiled: true })
+    expect(widest.binds).toHaveLength(9)
+    expect(widest.binds.length).toBeLessThan(BIND_BUDGET)
   })
 })
