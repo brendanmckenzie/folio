@@ -74,6 +74,9 @@ describe('workers harness: D1', () => {
       'content_text',
       'd1_migrations',
       'login_challenges',
+      // 0007: one WebAuthn credential per row (foundation/passkeys.md). Its
+      // shape is asserted in migrations.test.ts; this list only says it exists.
+      'passkeys',
       'redirects',
       'schedules',
       'schema_migrations',

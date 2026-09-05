@@ -215,20 +215,29 @@ export async function updateUser(
 }
 
 /**
- * Removes an editor and every session they hold, in one batch.
+ * Removes an editor, every session they hold and every passkey they enrolled,
+ * in one batch.
  *
- * The sessions delete is explicit rather than left to the `on delete cascade`
- * in 0007: whether D1 enforces foreign keys is a property of the database, and
- * "removing someone's access takes effect immediately" is the entire point of
- * this feature — too load-bearing to rest on a pragma. Their *history* is not
- * touched: `versions.actor` stores a string, not a foreign key, so an access
- * change never rewrites the record of who changed what.
+ * Both deletes are explicit rather than left to the `on delete cascade` their
+ * columns declare: whether D1 enforces foreign keys is a property of the
+ * database, and "removing someone's access takes effect immediately" is the
+ * entire point of this feature — too load-bearing to rest on a pragma.
+ * `test/workers/auth-session.test.ts` asserts both **with foreign keys off**,
+ * which is the only way to see that the batch and not the pragma did it.
+ *
+ * Their *history* is not touched: `versions.actor` and `auth_events.user_id`
+ * store strings, not foreign keys, so an access change never rewrites the record
+ * of who changed what.
  */
 export async function deleteUser(db: FolioDb, id: string): Promise<boolean> {
   const existing = await userById(db, id)
   if (!existing) return false
   await db.batch([
     db.prepare('delete from sessions where user_id = ?').bind(id),
+    // `foundation/passkeys.md`: a credential that outlived its account would be
+    // an orphan row whose `user_id` no longer resolves, and `passkeyForAssertion`
+    // would spend a round trip on it at every sign-in attempt.
+    db.prepare('delete from passkeys where user_id = ?').bind(id),
     db.prepare('delete from users where id = ?').bind(id),
   ])
   return true

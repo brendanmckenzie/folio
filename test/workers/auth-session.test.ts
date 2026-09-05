@@ -37,6 +37,9 @@ beforeEach(async () => {
     env.DB.prepare('delete from sessions'),
     env.DB.prepare('delete from api_tokens'),
     env.DB.prepare('delete from login_challenges'),
+    // Before `users`, and explicitly rather than by cascade, for the same reason
+    // `deleteUser` batches it: this file must not depend on a pragma to be clean.
+    env.DB.prepare('delete from passkeys'),
     env.DB.prepare('delete from users'),
   ])
 })
@@ -91,6 +94,68 @@ describe('users', () => {
     expect(await readSession(env.DB, b.token)).toBeNull()
     expect((await listUsers(env.DB)).rows).toEqual([])
     expect(await deleteUser(env.DB, user.id)).toBe(false)
+  })
+
+  /**
+   * `foundation/passkeys.md`: a credential must not outlive the account it
+   * signs in to.
+   *
+   * **The spec asks for this "asserted with foreign keys off", and that is not
+   * available here.** D1 in workerd pins `PRAGMA foreign_keys` at 1: the
+   * statement is accepted, changes nothing, and a later read still answers 1 —
+   * so a test that turned it off and watched the row vanish would be watching
+   * the cascade and calling it the batch. Verified by probe, September 2026.
+   *
+   * The substitute is stronger in the direction that matters and is stated in
+   * two halves: the statement is **in the batch** (recorded off a proxy, which
+   * no pragma can influence) and the row **is gone** (against real D1, whatever
+   * removed it). Together they say what the pragma trick was meant to say.
+   */
+  it('deleting a user removes their passkeys from the batch, not from a cascade', async () => {
+    const user = await seedUser()
+    await env.DB.prepare(
+      `insert into passkeys (id, user_id, public_key, alg, name, created_at)
+       values (?, ?, 'AQIDBA', -7, 'Work laptop', 1)`,
+    )
+      .bind('cred_one', user.id)
+      .run()
+    await env.DB.prepare(
+      `insert into passkeys (id, user_id, public_key, alg, name, created_at)
+       values (?, ?, 'BAUGBw', -257, 'Security key', 2)`,
+    )
+      .bind('cred_two', user.id)
+      .run()
+
+    // Records every statement `deleteUser` prepares. `bind` answers a *new*
+    // statement object, so the proxy follows it — the trap `read-session.test.ts`
+    // and `globals.test.ts` both carry a note about, where watching only
+    // `prepare` records nothing and every count silently reads zero.
+    const prepared: string[] = []
+    const db = new Proxy(env.DB, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver)
+        if (prop !== 'prepare') return typeof value === 'function' ? value.bind(target) : value
+        return (sql: string) => {
+          prepared.push(sql)
+          return (value as D1Database['prepare']).call(target, sql)
+        }
+      },
+    })
+
+    expect(await deleteUser(db, user.id)).toBe(true)
+
+    // Half one: the delete is a statement this library issued.
+    expect(prepared.some((sql) => /delete from passkeys where user_id = \?/.test(sql))).toBe(true)
+    // And it comes before the user row's own delete, so the child never
+    // outlives the parent even for the width of one batch.
+    const passkeysAt = prepared.findIndex((sql) => sql.includes('delete from passkeys'))
+    const usersAt = prepared.findIndex((sql) => sql.includes('delete from users'))
+    expect(passkeysAt).toBeGreaterThan(-1)
+    expect(passkeysAt).toBeLessThan(usersAt)
+
+    // Half two: nothing is left behind.
+    const left = await env.DB.prepare('select count(*) as n from passkeys').first<{ n: number }>()
+    expect(left?.n).toBe(0)
   })
 })
 

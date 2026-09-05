@@ -519,6 +519,83 @@ describe('identity', () => {
     ])
     expect(await indexesOf('api_tokens')).toEqual(['api_tokens_created'])
   })
+
+  /**
+   * `passkeys` (`0007_passkeys.sql`) — one WebAuthn credential per row.
+   *
+   * Three things here are decisions rather than mechanics: the credential id
+   * being the primary key, the single index and the *absence* of the three that
+   * were considered, and the absence of a CHECK on `alg`.
+   */
+  it('creates `passkeys` keyed on the credential id, with one index and no CHECK', async () => {
+    expect((await columnsOf('passkeys')).map((c) => c.name)).toEqual([
+      'id',
+      'user_id',
+      'public_key',
+      'alg',
+      'counter',
+      'transports',
+      'aaguid',
+      'name',
+      'backed_up',
+      'created_at',
+      'last_used_at',
+    ])
+
+    // The credential id **as the authenticator returned it**, not a hash of it:
+    // it is not a secret, the browser sends it in the clear on every assertion,
+    // and sign-in is one probe by this value.
+    const id = (await columnsOf('passkeys')).find((c) => c.name === 'id')
+    expect(id?.pk).toBe(1)
+    expect(id?.type).toBe('TEXT')
+
+    // A fresh row relies on both of these: an authenticator that reports no
+    // counter and a credential that is not synced.
+    expect((await columnsOf('passkeys')).find((c) => c.name === 'counter')?.dflt_value).toBe('0')
+    expect((await columnsOf('passkeys')).find((c) => c.name === 'backed_up')?.dflt_value).toBe('0')
+    for (const name of ['user_id', 'public_key', 'alg', 'name', 'created_at']) {
+      expect((await columnsOf('passkeys')).find((c) => c.name === name)?.notnull).toBe(1)
+    }
+
+    // Exactly one, and **deliberately none on `last_used_at`, `aaguid` or
+    // `created_at` alone**: no route orders by any of them across users, so
+    // adding one is a decision with a measurement behind it, as `shares_story`'s
+    // absence is and as `stories_draft_updated`'s removal established.
+    expect(await indexesOf('passkeys')).toEqual(['passkeys_user'])
+    expect(await indexSql('passkeys_user')).toContain('user_id')
+    expect(await indexSql('passkeys_user')).toContain('created_at')
+
+    await env.DB.prepare(
+      "insert into users (id, email, name, role, created_at) values ('usr_pk', 'pk@x.com', 'PK', 'editor', 1)",
+    ).run()
+
+    // **No CHECK on `alg`, deliberately** — the reasoning `versions.kind` taught
+    // and `content_refs.kind` learned: SQLite cannot widen a CHECK without a
+    // table rebuild, and Ed25519 (-8) is in the WebAuthn registry. Adding it is
+    // a `pubKeyCredParams` entry and a `coseToJwk` branch, not a migration.
+    await env.DB.prepare(
+      `insert into passkeys (id, user_id, public_key, alg, name, created_at)
+       values ('cred_a', 'usr_pk', 'AQID', -8, 'A key from a later build', 1)`,
+    ).run()
+    const row = await env.DB.prepare('select counter, backed_up from passkeys where id = ?')
+      .bind('cred_a')
+      .first<{ counter: number; backed_up: number }>()
+    expect(row).toEqual({ counter: 0, backed_up: 0 })
+
+    // The credential id is unique by being the primary key: two rows for one
+    // credential would mean an assertion the lookup has to choose between.
+    await expect(
+      env.DB.prepare(
+        `insert into passkeys (id, user_id, public_key, alg, name, created_at)
+         values ('cred_a', 'usr_pk', 'BAUG', -7, 'Same id', 2)`,
+      ).run(),
+    ).rejects.toThrow(/UNIQUE constraint failed/i)
+
+    await env.DB.batch([
+      env.DB.prepare('delete from passkeys'),
+      env.DB.prepare('delete from users'),
+    ])
+  })
 })
 
 describe('content migrations ledger', () => {

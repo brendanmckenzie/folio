@@ -5,9 +5,10 @@
 > **Size:** M–L
 > **Status:** draft
 > **Wire version:** none
-> **Migration:** `0006_passkeys.sql` — a claim. **Takes `0007` on the decided order**
-> (30 takes `0005`, 28 takes `0006`), and every `0006` in this file restamps with it.
-> Spec 23 keeps `0008` behind all of them.
+> **Migration:** `0007_passkeys.sql` — **landed** (phase 1, 2026-09-05). The body
+> claimed `0006`; on the decided order 30 took `0005` and 28 took `0006`, so this
+> took the next free number and every mention below was restamped with it.
+> Spec 32 takes `0008` and spec 23 `0009`, behind all of them.
 > **Build sequence:** 4 of 4 — 31 → 30 → 28 → 29 (owner, 2026-09-05). The **Build order** above is this spec's identity, not its place in the queue.
 > **Last updated:** 2026-09-05
 
@@ -46,7 +47,8 @@ is written against that spec's post-phase-2 tree and does not restate its work:
   is the one path from a `VerifiedIdentity` to a session row and cookie. It applies
   enforced-domain rules, stamps `sessions.provider` and `users.provider`, and writes
   the `auth_events` row. A passkey sign-in calls it and nothing else.
-- `sessions.provider` exists (`0005_auth.sql`), which is what makes the account
+- `sessions.provider` exists (`0006_auth.sql` — spec 28 claimed `0005` and landed
+  as `0006`), which is what makes the account
   screen's sessions list able to say "signed in with a passkey".
 - `src/server/auth/jwt.ts` holds `fromBase64url` and `algorithmFor`, extracted from
   `oidc.ts` (today at `src/server/auth/oidc.ts:100-145`). The verifier here reuses
@@ -475,7 +477,7 @@ sign-in is always another door.
 
 ## Wire & schema changes
 
-### D1 migration `0006_passkeys.sql`
+### D1 migration `0007_passkeys.sql`
 
 ```sql
 -- Passkeys: a WebAuthn credential per row, enrolled by a signed-in person.
@@ -795,7 +797,7 @@ AND "Sign out other browsers" leaves that one live and revokes the other
    strings, text, arrays, maps, and refusal of indefinite-length and tags),
    `parseAuthData` (with and without AT, flag bits), `coseToJwk` (EC2 and RSA,
    refusal of other `kty`), `derToRaw` (leading-zero padding both ways).
-6. `src/server/auth/passkeys.ts`; `migrations/0006_passkeys.sql`;
+6. `src/server/auth/passkeys.ts`; `migrations/0007_passkeys.sql`;
    `test/workers/migrations.test.ts` block (columns in order, `passkeys_user` the
    only index, `id` is the pk, `alg` has no CHECK); `deleteUser` batch +
    `auth-session.test.ts` case.
@@ -804,6 +806,65 @@ Tree green: nothing mounts a route yet. If step 4's fixtures fail and cannot be
 made to pass, this is where the fallback branches: add `@simplewebauthn/server`,
 write `test/workers/webauthn-lib-smoke.test.ts`, and make `webauthn.ts` an adapter
 with the same exports. Phases 2–5 are unchanged either way.
+
+#### Phase 1 implementation notes (2026-09-05)
+
+Built as planned; five things landed differently and one acceptance criterion
+could not be met as written.
+
+- **The migration is `0007_passkeys.sql`**, per the header. `0006_auth.sql` had
+  already landed from spec 28. Every `0006` in this file was restamped.
+- **`WebAuthnError` with a `code`** is exported beside the four functions in
+  decision 3, which listed only the functions. It is not decoration: the
+  acceptance criteria require that a counter regression alone log
+  `passkey_rejected` while every other refusal is byte-identical to the person,
+  and a route cannot tell those apart from a message. The codes are
+  `malformed | type | challenge | origin | rp_id | user_presence |
+  user_verification | attested_credential | algorithm | user_handle | signature |
+  counter`. **Phase 2 switches on `'counter'` and treats every other code
+  identically.**
+- **`decodeCbor` also reads `false`, `true` and `null`** (major 7, simple values
+  20–22) beyond the six major types decision 3 lists. Same reasoning as accepting
+  `fmt: 'packed'`: some authenticator's `attStmt` may carry one, and refusing
+  would lock a person out over a field this file never reads. Indefinite lengths,
+  tags and floats are refused, and each refusal is pinned.
+- **`coseToJwk` normalises coordinate width in both directions** — left-pads a
+  short EC coordinate to 32 bytes and strips a leading zero an encoder added, and
+  trims RSA `n`. Not in the spec, and load-bearing: a P-256 coordinate whose top
+  byte is zero occurs about once in 256 credentials, and an unpadded JWK import
+  fails for exactly those.
+- **`createPasskey` answers `null` for a duplicate id** rather than throwing a D1
+  constraint error, via `on conflict(id) do nothing`. That is the `409` in the
+  route table, decided in the same round trip a pre-read would have spent asking.
+- **`completeSignIn` has no hook for extra batched statements.** Its `ctx` is
+  `{ userAgent, now }` and its `writes` array is local. `usePasskeyStatement`
+  exists and is unrun as the spec requires, but **phase 2 has to widen
+  `completeSignIn` to accept extra statements** (an `extra?: D1PreparedStatement[]`
+  on `ctx` is the obvious shape) or the passkey stamp costs a second round trip.
+
+**The acceptance criterion "asserted with foreign keys off" is not achievable
+and was replaced.** D1 in workerd pins `PRAGMA foreign_keys` at 1: the statement
+is accepted, changes nothing, and a later read still answers 1 — verified by
+probe. A test that turned it off and watched the row vanish would be watching the
+cascade and calling it the batch. `auth-session.test.ts` instead asserts it in two
+halves: the `delete from passkeys` statement **is in the batch** (recorded off a
+`prepare`-watching proxy, which no pragma can influence, and ordered before the
+user row's own delete) and the row **is gone** against real D1. The substitute is
+stronger where it counts and the test says so in place.
+
+**The real-device fixtures are not captured, and phase 1's gate is therefore half
+open.** `test/fixtures/webauthn/` holds a README with the capture procedure, the
+file format and the reasoning that these contain no secret; it holds no fixtures,
+because capturing one needs a browser and a device. `passkey-verify.test.ts`
+covers the *logic* fully — ES256 and RS256 round trips, every refusal in decision
+3 individually, the counter rule's five cases, `packed` accepted — against the
+synthetic authenticator, and that half is genuinely green. It does **not** cover
+the *parsing* of what Chrome and Safari actually send. The suite refuses to hide
+that: when the directory is empty it emits a `todo` (which the default reporter
+counts in its summary line even when piped, so the gap is visible in a plain
+`pnpm test`), a passing test whose name is the gap, and a `console.warn`. All
+three disappear on their own when a fixture lands. **Checkpoint 1's fallback to
+`@simplewebauthn/server` is neither taken nor ruled out until then.**
 
 ### Phase 2 — the provider kind and the routes
 
