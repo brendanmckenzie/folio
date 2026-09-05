@@ -18,7 +18,7 @@
  * itself.
  */
 import * as v from 'valibot'
-import { type AssetSort, DEFAULT_ASSET_SORT } from '../core/assets'
+import { type AssetSort, DEFAULT_ASSET_SORT, tagSlug } from '../core/assets'
 import { decodeCursor } from '../core/pagination'
 import type { DocumentType } from '../core/schema'
 import {
@@ -32,6 +32,7 @@ import {
   type SearchSort,
   type StoryFilter,
 } from '../core/story'
+import { MAX_ASSET_TAGS, MAX_TAG_FILTER } from './asset-tags'
 import { FolioError } from './errors'
 
 /**
@@ -208,7 +209,56 @@ export const StoryDuplicateBody = v.object(
  */
 export const CheckpointBody = v.object({ label: v.optional(bounded(120)) }, OBJECT)
 
-export const AssetPatchBody = v.object({ alt: v.optional(bounded(500)) }, OBJECT)
+/**
+ * What an editor can change about one library row
+ * (`../content-model/media-library.md` decision 4 and phase 3).
+ *
+ * Every field is `v.optional`, and absent means *leave it alone* — so `alt: ''`
+ * clears the alt text while `{}` does not, and `folderId: null` unfiles the asset
+ * while an absent `folderId` leaves it filed. `assets.ts`'s `updateAsset` builds
+ * its `set` list from exactly that distinction.
+ *
+ * `tags` is the **whole** set of tag ids, replacing whatever is stored: the chip
+ * list an editor sees is the truth, so removing a chip has to remove the tagging.
+ * Adding or removing across a *selection* is phase 5's bulk route, deliberately
+ * not this. `MAX_ASSET_TAGS` bounds the array so an unbounded list cannot be
+ * parsed and turned into statements — `setAssetTags` chunks its binds, so this is
+ * a bound on the body rather than on the SQL.
+ *
+ * `description` is capped at 2000 against `alt`'s 500, matching what phase 6's
+ * `DescribeResult` is allowed to write into the machine columns beside them: a
+ * description says what the file *is* and a sentence of alt text says what a
+ * screen reader should announce.
+ */
+export const AssetPatchBody = v.object(
+  {
+    alt: v.optional(bounded(500)),
+    description: v.optional(bounded(2000)),
+    folderId: v.optional(v.nullable(ID)),
+    tags: v.optional(
+      v.pipe(
+        v.array(ID, 'must be an array of tag ids'),
+        v.maxLength(MAX_ASSET_TAGS, `must name ${MAX_ASSET_TAGS} tags or fewer`),
+      ),
+    ),
+  },
+  OBJECT,
+)
+
+/**
+ * A tag, created or renamed (`../content-model/media-library.md` decision 4).
+ *
+ * `name` is what was typed and is what is displayed; the identity is
+ * `core/assets.ts`'s `tagSlug` of it, which is why there is no `slug` field for a
+ * client to send. 60 rather than the folder's 120: a tag renders as a chip beside
+ * others in a sidebar, and `tagSlug` truncates nothing, so the typed length *is*
+ * the stored identity's length.
+ *
+ * One schema for both the create and the patch, unlike folders — a tag has
+ * exactly one editable field, so the two bodies cannot drift apart the way
+ * `{ name?, parentId? }` can.
+ */
+export const AssetTagBody = v.object({ name: required(60) }, OBJECT)
 
 /**
  * A media-library folder (`../content-model/media-library.md` decision 3).
@@ -740,6 +790,7 @@ export type CheckpointInput = v.InferOutput<typeof CheckpointBody>
 export type AssetPatchInput = v.InferOutput<typeof AssetPatchBody>
 export type AssetFolderCreateInput = v.InferOutput<typeof AssetFolderCreateBody>
 export type AssetFolderPatchInput = v.InferOutput<typeof AssetFolderPatchBody>
+export type AssetTagInput = v.InferOutput<typeof AssetTagBody>
 export type RedirectCreateInput = v.InferOutput<typeof RedirectCreateBody>
 
 /* --------------------------------------------------------------- parsing --- */
@@ -1352,6 +1403,48 @@ const ASSET_FOLDER_PATH = v.pipe(
 export function folderQuery(raw: string | undefined): string | undefined {
   if (raw === undefined || raw === '') return undefined
   return parseOrThrow(ASSET_FOLDER_PATH, raw, 'folder')
+}
+
+/**
+ * One `?tags=` value: a tag **slug**, which is the identity
+ * (`../content-model/media-library.md` decision 4).
+ *
+ * The charset is `tagSlug`'s own output — anything printable with no whitespace
+ * in it — rather than an ASCII slug screen, for `ASSET_FOLDER_PATH`'s reason:
+ * `tagSlug` lowercases and strips whitespace but keeps letters, so a tag called
+ * `Café` is `café` and an ASCII-only screen would refuse to filter by a tag Folio
+ * itself minted.
+ */
+const ASSET_TAG_SLUG = v.pipe(
+  v.string('must be a string'),
+  v.maxLength(60, 'must be 60 characters or fewer'),
+  v.regex(PRINTABLE, 'contains unsupported characters'),
+  v.regex(/^\S+$/u, 'is not a tag'),
+)
+
+/**
+ * `?tags=` on the asset list, repeated once per tag and **ANDed** by
+ * `assetFilterSql`.
+ *
+ * Each value is put through `tagSlug` before it is screened, so `?tags=Headshots`
+ * finds the tag whose slug is `headshots`. That is not leniency for its own sake:
+ * the slug is the identity precisely so that what somebody typed and what is
+ * stored do not have to match, and a URL a person edited by hand is exactly the
+ * place that shows up.
+ *
+ * The count is capped here as well as inside `assetFilterSql`, and neither is
+ * redundant: this turns nine chips into a 400 that names the limit, while the
+ * composer is what stops a captured *select all* — which never passes through a
+ * query string — from binding past `D1_BIND_CAP`.
+ */
+export function tagsQuery(raw: string[] | undefined): string[] | undefined {
+  if (raw === undefined) return undefined
+  const slugs = [...new Set(raw.map((value) => tagSlug(value)).filter((value) => value !== ''))]
+  if (slugs.length === 0) return undefined
+  if (slugs.length > MAX_TAG_FILTER) {
+    throw new FolioError('bad_request', `tags must name ${MAX_TAG_FILTER} tags or fewer`)
+  }
+  return slugs.map((slug) => parseOrThrow(ASSET_TAG_SLUG, slug, 'tags'))
 }
 
 /**

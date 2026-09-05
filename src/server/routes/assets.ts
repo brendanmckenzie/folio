@@ -9,7 +9,9 @@
  * runtime-independent, which is what lets it be mounted on the bare path.
  */
 import { Hono } from 'hono'
+import type { AssetTag } from '../../core/assets'
 import { createFolder, deleteFolder, listFolders, updateFolder } from '../asset-folders'
+import { deleteTag, ensureTag, listTags, renameTag, tagsForAssets } from '../asset-tags'
 import {
   assetById,
   assetUsage,
@@ -24,6 +26,7 @@ import {
   uploadAsset,
 } from '../assets'
 import { ASSETS, EDIT, READ } from '../auth/roles'
+import type { FolioDb } from '../db'
 import { FolioError, rethrow } from '../errors'
 import { requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
@@ -34,6 +37,7 @@ import {
   assetKeyParam,
   AssetPatchBody,
   assetSortQuery,
+  AssetTagBody,
   contentLengthHeader,
   filenameQuery,
   folderQuery,
@@ -43,6 +47,7 @@ import {
   parseOptionalBody,
   requireCursor,
   sortDirQuery,
+  tagsQuery,
 } from '../validate'
 
 /**
@@ -69,24 +74,73 @@ function assetFolderFilter(
   return none ? { unfiled: true } : {}
 }
 
+/**
+ * `?tags=` (repeated, ANDed) and `?untagged=1`, the tag half of the same rule.
+ *
+ * Refused together for `assetFolderFilter`'s reason exactly: an asset carrying
+ * `headshots` is by definition not untagged, so the pair can only ever return
+ * nothing, and a grid that renders nothing looks like a bug rather than like an
+ * answer. The two helpers are separate rather than one four-argument screen
+ * because the pairs are independent — `?folder=clients&untagged=1` is a perfectly
+ * good question — and merging them is how that combination would come to be
+ * refused too.
+ */
+function assetTagFilter(
+  tags: string[] | undefined,
+  untagged: string | undefined,
+): { tags?: string[]; untagged?: boolean } {
+  const slugs = tagsQuery(tags)
+  const none = untagged === '1'
+  if (slugs !== undefined && none) {
+    throw new FolioError('bad_request', '`tags` and `untagged` cannot both be given')
+  }
+  if (slugs !== undefined) return { tags: slugs }
+  return none ? { untagged: true } : {}
+}
+
+/**
+ * Each row's tags, attached to what the admin's routes answer.
+ *
+ * **One read for a whole page**, through `tagsForAssets`, which chunks its binds:
+ * the alternative — a query per tile — is 200 round trips for a full page and is
+ * the shape this repo has got wrong twice. A row with no tags carries `[]` rather
+ * than being absent, so a client renders a chip list without a null check.
+ *
+ * Only the **unversioned** routes get this. `{base}/api/v1/assets` answers the
+ * envelope it always has (decision 13: a version segment is a promise), and the
+ * admin's own surface may change shape in any commit — which is exactly the
+ * freedom that lets the grid show a tile's tags without a second request.
+ */
+async function withTags<T extends { id: string }>(
+  db: FolioDb,
+  rows: readonly T[],
+): Promise<(T & { tags: AssetTag[] })[]> {
+  const byAsset = await tagsForAssets(
+    db,
+    rows.map((row) => row.id),
+  )
+  return rows.map((row) => ({ ...row, tags: byAsset.get(row.id) ?? [] }))
+}
+
 export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
 
   app.get('/assets', requireAccess<Env>(rt, READ), async (c) => {
+    const { db } = c.var.bindings()
     const cursor = c.req.query('cursor')
     requireCursor(cursor)
-    return c.json(
-      await listAssets(c.var.bindings().db, {
-        limit: limitParam(c.req.query('limit'), 50, 200),
-        cursor,
-        q: c.req.query('q'),
-        kind: c.req.query('kind'),
-        count: c.req.query('count') === '1',
-        sort: assetSortQuery(c.req.query('sort')),
-        dir: sortDirQuery(c.req.query('dir')),
-        ...assetFolderFilter(c.req.query('folder'), c.req.query('unfiled')),
-      }),
-    )
+    const page = await listAssets(db, {
+      limit: limitParam(c.req.query('limit'), 50, 200),
+      cursor,
+      q: c.req.query('q'),
+      kind: c.req.query('kind'),
+      count: c.req.query('count') === '1',
+      sort: assetSortQuery(c.req.query('sort')),
+      dir: sortDirQuery(c.req.query('dir')),
+      ...assetFolderFilter(c.req.query('folder'), c.req.query('unfiled')),
+      ...assetTagFilter(c.req.queries('tags'), c.req.query('untagged')),
+    })
+    return c.json({ ...page, rows: await withTags(db, page.rows) })
   })
 
   /* ------------------------------------------------------------ folders --- */
@@ -159,6 +213,79 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return c.json({ deleted: true, ...report })
   })
 
+  /* --------------------------------------------------------------- tags --- */
+
+  /**
+   * The tag vocabulary, keyset-paged over `slug`.
+   *
+   * `?counts=1` adds `count` — how many assets carry each tag — as one grouped
+   * query, opt-in for `?count=1`'s reason (`pagination.md` decision 5): the
+   * sidebar's chip list wants it and an autocomplete does not. **Note it is
+   * `counts`, not `count`**, and there is deliberately no `count` here: two
+   * parameters one letter apart meaning "how many tags" and "how many assets per
+   * tag" is a trap, and `asset-tags.ts`'s `ListTagsOptions` says so.
+   *
+   * Registered **before** `/assets/:id` for the reason `folders` is: `tags` is a
+   * legal `:id` as far as the router is concerned.
+   *
+   * `READ` (viewer+), matching the list it narrows — a tag is organisation, not
+   * content.
+   */
+  app.get('/assets/tags', requireAccess<Env>(rt, READ), async (c) => {
+    const cursor = c.req.query('cursor')
+    requireCursor(cursor)
+    return c.json(
+      await listTags(c.var.bindings().db, {
+        limit: limitParam(c.req.query('limit'), 100, 500),
+        cursor,
+        counts: c.req.query('counts') === '1',
+      }),
+    )
+  })
+
+  /**
+   * A tag, created **or found** (decision 4).
+   *
+   * `201` for a new slug, `200` for one that already existed — and the existing
+   * row comes back rather than a 409, which is what makes "type a name, press
+   * enter" one call from a chip input instead of a create-then-recover dance. The
+   * match is on the slug, so `Headshots` finds `headshot` and the vocabulary
+   * stays a taxonomy rather than growing a near-synonym per typist.
+   */
+  app.post('/assets/tags', requireAccess<Env>(rt, ASSETS), async (c) => {
+    const body = await parseBody(c.req, AssetTagBody)
+    const { tag, created } = await ensureTag(c.var.bindings().db, body.name)
+    return c.json(tag, created ? 201 : 200)
+  })
+
+  /**
+   * Renames a tag, re-slugging it. `409` when the new slug is another tag's,
+   * naming it: a rename onto an existing tag would otherwise be a **merge**,
+   * rewriting taggings for assets the editor is not looking at, with no undo.
+   * Changing only the display — `head shots` to `Headshots` — is always allowed,
+   * because the slug does not move.
+   */
+  app.patch('/assets/tags/:id', requireAccess<Env>(rt, ASSETS), async (c) => {
+    const id = idParam('id', c.req.param('id'))
+    const body = await parseBody(c.req, AssetTagBody)
+    const row = await renameTag(c.var.bindings().db, id, body.name)
+    if (!row) throw new FolioError('not_found', 'Unknown tag')
+    return c.json(row)
+  })
+
+  /**
+   * Deletes a tag and its taggings, and **no asset** (decision 14). `removedFrom`
+   * is how many assets stop carrying it, so the dialog can say what will happen
+   * rather than guess — and, like the folder delete beside it, this reaches no
+   * bucket and needs no `media` binding.
+   */
+  app.delete('/assets/tags/:id', requireAccess<Env>(rt, ASSETS), async (c) => {
+    const id = idParam('id', c.req.param('id'))
+    const report = await deleteTag(c.var.bindings().db, id)
+    if (!report) throw new FolioError('not_found', 'Unknown tag')
+    return c.json({ deleted: true, ...report })
+  })
+
   /**
    * Which published documents use one asset — the detail panel's "where it is
    * used", and the confirmation shown before a delete
@@ -225,9 +352,10 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * a side effect.
    */
   app.get('/assets/:id', requireAccess<Env>(rt, READ), async (c) => {
-    const row = await assetById(c.var.bindings().db, idParam('id', c.req.param('id')))
+    const { db } = c.var.bindings()
+    const row = await assetById(db, idParam('id', c.req.param('id')))
     if (!row) throw new FolioError('not_found', 'Unknown asset')
-    return c.json(row)
+    return c.json((await withTags(db, [row]))[0])
   })
 
   /**
@@ -255,12 +383,24 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     }
   })
 
+  /**
+   * Alt text, description, folder and tags — `AssetPatchBody` (`validate.ts`) has
+   * the field-by-field rules, and the one worth knowing here is that **absent is
+   * not empty**: `{ alt: '' }` clears the alt text and `{ folderId: null }`
+   * unfiles the asset, while an absent key leaves the stored value alone.
+   *
+   * Answers the row **with its tags**, so a detail panel that just replaced the
+   * chip list renders what is stored rather than what it sent. An unknown folder
+   * or an unknown tag id is a 400 naming it, not a silently dangling reference:
+   * neither column is a foreign key, so nothing downstream would catch it.
+   */
   app.patch('/assets/:id', requireAccess<Env>(rt, ASSETS), async (c) => {
+    const { db } = c.var.bindings()
     const id = idParam('id', c.req.param('id'))
     const body = await parseOptionalBody(c.req, AssetPatchBody)
-    const row = await updateAsset(c.var.bindings().db, id, body)
+    const row = await updateAsset(db, id, body)
     if (!row) throw new FolioError('not_found', 'Unknown asset')
-    return c.json(row)
+    return c.json((await withTags(db, [row]))[0])
   })
 
   app.delete('/assets/:id', requireAccess<Env>(rt, ASSETS), async (c) => {

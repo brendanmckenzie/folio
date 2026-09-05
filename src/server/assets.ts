@@ -16,7 +16,8 @@ import type { AssetTransform } from '../core/resolve'
 import { FolioError } from './errors'
 import { DOWNLOAD_CONTENT_TYPE, isInlineContentType, SERVED_CONTENT_TYPES } from './validate'
 import { type AssetFilter, type AssetSort, DEFAULT_ASSET_SORT } from '../core/assets'
-import { subtreeWhere } from './asset-folders'
+import { folderById, subtreeWhere } from './asset-folders'
+import { MAX_TAG_FILTER, setAssetTags } from './asset-tags'
 import { clampLimit, type CursorPart, decodeCursor, type Page, paginate } from '../core/pagination'
 import type { StoryMeta } from '../core/story'
 import { assetReferences, clearInboundRefStatements } from './content-index'
@@ -100,25 +101,28 @@ function keyOf(sort: AssetSort, row: AssetRow): [CursorPart, CursorPart] {
  * Returns fragments rather than a finished clause because both callers have a
  * keyset or an `offset` to concatenate; feed them straight into `whereOf`.
  *
- * **Every clause binds a fixed number of parameters** — five for `q`, one for
- * `kind`, three for `folder`, nine in total — so no filter here can approach
- * `D1_BIND_CAP` (`db.ts`) however deep the tree or however many assets are in it.
- * The folder clause is a range over the materialised path (`asset-folders.ts`),
- * which is what keeps it that way: the alternative, resolving a folder to a list
- * of descendant ids and binding them, is exactly the caller-sized bind list
- * `db.ts` warns about.
+ * **Every clause binds a bounded number of parameters** — five for `q`, one for
+ * `kind`, three for `folder`, at most nine for `tags`, eighteen in total — so no
+ * filter here can approach `D1_BIND_CAP` (`db.ts`) however deep the tree, however
+ * many assets are in it, or however many tags an editor has invented. The folder
+ * clause is a range over the materialised path (`asset-folders.ts`), which is what
+ * keeps it that way: the alternative, resolving a folder to a list of descendant
+ * ids and binding them, is exactly the caller-sized bind list `db.ts` warns about.
+ * `tags` is the one clause whose width a caller chooses, which is why
+ * `MAX_TAG_FILTER` is enforced *here* rather than only at the route: a captured
+ * *select all* (phase 5's `FilterSelection<AssetFilter>`) reaches this composer
+ * from a request body that never passed through the query-string parser.
  *
  * **`q` is five columns** and stays a substring scan (decision 12), so a
  * machine-written description is reachable by the one control an editor uses
  * first. The stated trigger for reversing that: the library passing ~50,000 rows,
  * or a settled `q` exceeding ~200ms at p50 against a real deployment.
  *
- * **`tags`, `untagged` and `undescribed` are deliberately not composed here yet.**
- * They are `AssetFilter` members that phase 3 (the tag join, `having count(*) = n`,
- * capped at eight) and phase 7 (`described_at is null`) add. Nothing can pass one
- * today: `ListAssetsOptions` accepts them only because it extends `AssetFilter`,
- * and no route parses them. Adding one means adding its clause *here*, not at a
- * call site.
+ * **`undescribed` is deliberately not composed here yet.** It is the one
+ * `AssetFilter` member phase 7 adds (`described_at is null`); nothing can pass it
+ * today, because `ListAssetsOptions` accepts it only by extending `AssetFilter`
+ * and no route parses it. Adding it means adding its clause *here*, not at a call
+ * site — which is what decision 13 is about.
  */
 export function assetFilterSql(filter: AssetFilter): { clauses: string[]; binds: unknown[] } {
   const clauses: string[] = []
@@ -145,6 +149,43 @@ export function assetFilterSql(filter: AssetFilter): { clauses: string[]; binds:
     binds.push(...range.binds)
   }
   if (filter.unfiled) clauses.push('folder_id is null')
+
+  if (filter.tags && filter.tags.length > 0) {
+    // **AND, not OR** (decision 4): two chips mean "the assets that carry both".
+    // `group by` then `having count(*) = n` is how a join answers that — the
+    // subquery keeps only the asset ids that matched *every* slug. `count(*)` is
+    // exact rather than `count(distinct …)` because `asset_taggings`'s primary key
+    // is `(asset_id, tag_id)` and `asset_tags.slug` is unique, so one slug can
+    // contribute at most one row per asset.
+    //
+    // **The cap of eight is a bind budget, not a product decision.** This clause
+    // binds one parameter per slug plus one for the `having`, and `D1_BIND_CAP`
+    // (`db.ts`) is 100 for the whole statement — shared with `q`'s five, the
+    // folder's three, the keyset's and the `limit`. Deduplicated first so
+    // `?tags=a&tags=a` cannot ask for two of one thing and then find nothing,
+    // which is what `having count(*) = 2` over one slug would do.
+    const slugs = [...new Set(filter.tags)]
+    if (slugs.length > MAX_TAG_FILTER) {
+      throw new FolioError(
+        'bad_request',
+        `tags must name ${MAX_TAG_FILTER} tags or fewer in one filter`,
+      )
+    }
+    clauses.push(
+      `id in (select g.asset_id from asset_taggings g
+                join asset_tags t on t.id = g.tag_id
+               where t.slug in (${slugs.map(() => '?').join(', ')})
+               group by g.asset_id having count(*) = ?)`,
+    )
+    binds.push(...slugs, slugs.length)
+  }
+  // `not exists` rather than `id not in (select asset_id from asset_taggings)`:
+  // the correlated form probes `asset_taggings`'s primary key per row, while the
+  // `not in` form materialises every tagging in the table. Binds nothing either
+  // way. This is the retro-organise starting point — "what have I never filed?".
+  if (filter.untagged) {
+    clauses.push('not exists (select 1 from asset_taggings g where g.asset_id = assets.id)')
+  }
 
   return { clauses, binds }
 }
@@ -441,10 +482,78 @@ export async function uploadAsset(
   return row
 }
 
-export async function updateAsset(db: FolioDb, id: string, patch: { alt?: string }) {
-  if (patch.alt === undefined) return assetById(db, id)
-  await db.prepare('update assets set alt = ? where id = ?').bind(patch.alt, id).run()
-  return assetById(db, id)
+/**
+ * What a `PATCH {base}/api/assets/:id` may change — `validate.ts`'s
+ * `AssetPatchBody` in TypeScript. Every field is optional and **absent means
+ * "leave it alone"**, which is why each is checked with `!== undefined` and never
+ * for truthiness: `''` clears the alt text and `null` unfiles the asset, and both
+ * are things an editor asks for.
+ */
+export interface AssetPatch {
+  alt?: string
+  /** Human, longer than `alt`, and searchable through `q` (decision 12). */
+  description?: string
+  /** `null` files the asset back into *Unfiled*. */
+  folderId?: string | null
+  /** The **whole** set of tag ids, replacing whatever is there. */
+  tags?: readonly string[]
+}
+
+/**
+ * The three columns an editor can type into, plus the tag set.
+ *
+ * The `set` list is built rather than written out because absent and empty are
+ * different things here — `{ alt: '' }` clears alt text, `{}` must not — and a
+ * fixed statement with `coalesce(?, alt)` cannot express the difference at all.
+ *
+ * **`folderId` is checked against a real folder**, and refused as a
+ * `bad_request` otherwise. `assets.folder_id` is deliberately not a foreign key
+ * (`0008_asset_organisation.sql`: `deleteFolder` nulls it rather than cascading),
+ * so an id nothing is behind would file the asset somewhere no folder filter
+ * reaches *and* out of `unfiled` — visible only as a file that has vanished from
+ * every list. `null` skips the check, because unfiling is always legal.
+ *
+ * The tag set goes through `setAssetTags`, which owns the replace semantics and
+ * the chunking. Returns the row **after** the write, so the caller answers with
+ * what is stored rather than with what it sent.
+ */
+export async function updateAsset(
+  db: FolioDb,
+  id: string,
+  patch: AssetPatch,
+): Promise<AssetRow | null> {
+  const row = await assetById(db, id)
+  if (!row) return null
+
+  if (patch.folderId) {
+    const folder = await folderById(db, patch.folderId)
+    if (!folder) throw new FolioError('bad_request', 'Unknown folder')
+  }
+
+  const sets: string[] = []
+  const binds: unknown[] = []
+  if (patch.alt !== undefined) {
+    sets.push('alt = ?')
+    binds.push(patch.alt)
+  }
+  if (patch.description !== undefined) {
+    sets.push('description = ?')
+    binds.push(patch.description)
+  }
+  if (patch.folderId !== undefined) {
+    sets.push('folder_id = ?')
+    binds.push(patch.folderId)
+  }
+
+  if (sets.length > 0) {
+    await db
+      .prepare(`update assets set ${sets.join(', ')} where id = ?`)
+      .bind(...binds, id)
+      .run()
+  }
+  if (patch.tags !== undefined) await setAssetTags(db, id, patch.tags)
+
+  return sets.length > 0 ? assetById(db, id) : row
 }
 
 /**
