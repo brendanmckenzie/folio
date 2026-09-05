@@ -1,0 +1,168 @@
+/*
+ * The Your account screen. Four sections and no filter, no sort and no paging —
+ * `docs/specs/foundation/passkeys.md` decision 6's whole layout — so most of what
+ * `Access.module.css` needs for two paged tables this file does not.
+ *
+ * Everything table-shaped is `Table.module.css`; the skeleton, `blank` and `stamp`
+ * rules are the same objects Access already declares, repeated rather than shared
+ * because a CSS module is per-component by design.
+ */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  max-width: 1400px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------- cells --- */
+
+.who {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.name {
+  font-weight: 550;
+}
+
+/* The vendor a passkey's `aaguid` implies ("iCloud Keychain"), or a session's
+   user agent — a fact worth showing beside the primary value, never the point
+   of the row on its own. */
+.muted {
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.stamp {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A fact that is absent rather than a value that is empty — matching
+   `Access.module.css`'s own rule for a provider nobody has signed in with yet. */
+.blank {
+  color: var(--fg-subtle);
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+/* ---------------------------------------------------------------- identity --- */
+
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+}
+
+.identityRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.identityRow dt {
+  width: 6rem;
+  flex: none;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.identityRow dd {
+  margin: 0;
+  font-size: var(--text-base);
+  color: var(--fg);
+}
+
+.roleValue {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  text-transform: capitalize;
+}
+
+/* "Set by okta" beside the role. Deliberately quiet: it is an explanation, not a
+   status, and the role is the value being read. `text-transform: none` because a
+   provider id is a literal — capitalising it would misspell somebody's config. */
+.roleFrom {
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+  text-transform: none;
+}
+
+/* ------------------------------------------------------------------ notes --- */
+
+/* Why the Add button is absent — the admin's "absent, not disabled" rule for a
+   permission the person cannot change, rendered as a sentence in the button's
+   place rather than a title nobody hovers to read. */
+.notice {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.dialogNote {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.dialogNote:first-child {
+  margin-top: 0;
+}
+
+.dialogError {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--state-danger-fg);
+}
+
+/* ----------------------------------------------------------------- layout --- */
+
+.skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.skeleton {
+  height: var(--row-h);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+}
+
+.signIn {
+  display: inline-flex;
+  align-items: center;
+  height: var(--row-h);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--fg);
+  color: var(--fg-inverse);
+  font-size: var(--text-base);
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.signIn:hover {
+  background: var(--fg-muted);
+}
+
+.signIn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}

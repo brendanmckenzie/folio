@@ -16,6 +16,19 @@ export interface MeUser {
   name: string
   colour: string
   role: Role
+  /** The caller's own address. Present for a session actor; the account screen
+   * shows it so an editor can see which address they are signed in as. */
+  email?: string
+  /**
+   * Which identity provider set this person's role, or null when Folio did.
+   *
+   * The account screen shows it as the *reason* the role is not editable here:
+   * `PATCH {base}/api/users/:id` answers 409 for a provider-set role, because
+   * letting an admin change a role the next sign-in overwrites is the "it quietly
+   * changed" failure this codebase refuses (`foundation/auth-providers.md`
+   * checkpoint 2).
+   */
+  roleFrom?: string | null
 }
 
 export interface MeToken {
@@ -71,6 +84,20 @@ export interface Me {
    * from "what may I do".
    */
   policy?: AuthPolicy
+  /**
+   * Whether this person may enrol a passkey, and why not when they may not.
+   *
+   * **Present when the deployment lists `passkeys()`, absent otherwise** —
+   * `'passkeys' in me` is a different question from `me.passkeys?.allowed`, and
+   * the account screen has to ask both: the first is "does this site have
+   * passkeys at all", the second is "may *this* person add one". `allowed: false`
+   * happens under an enforced domain (spec 28) — a passkey would be a second door
+   * around the SSO the domain is enforced to — and `reason` is the sentence the
+   * account screen renders **in place of** the Add button, per this admin's
+   * "absent, not disabled" rule for a permission the person cannot change.
+   * `../../docs/specs/foundation/passkeys.md` decision 6.
+   */
+  passkeys?: { allowed: boolean; reason?: string }
 }
 
 /**

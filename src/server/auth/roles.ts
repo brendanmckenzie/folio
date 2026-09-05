@@ -114,6 +114,19 @@ export interface UserActor {
    * it already runs, so the honest answer costs no extra query.
    */
   provider?: string | null
+  /**
+   * `users.email` and `users.role_from`, both filled from the join `readSession`
+   * already runs, so neither costs a query.
+   *
+   * **Optional for the same reason `provider` is**: a `UserActor` built to ask a
+   * permission question has no row behind it. `GET {base}/api/me` projects both so
+   * the account screen can show a person their own address and say *why* their role
+   * is not editable when an identity provider set it (`foundation/passkeys.md`
+   * decision 6). Neither is a new disclosure: it is the caller's own row, answered
+   * to the caller.
+   */
+  email?: string
+  roleFrom?: string | null
 }
 
 export interface TokenActor {

@@ -16,6 +16,7 @@ import { Palette, type PaletteAction } from './Palette'
 import { type Crumb, type CrumbContext, crumbs, documentTitle, href, type Screen } from './route'
 import { useRemembered, useRememberedString } from './remembered'
 import { Access } from './screens/Access'
+import { Account } from './screens/Account'
 // `ASSET_VIEW_KEY` and not a string literal: the picker is mounted by an asset
 // *field* and reads the remembered view itself, so the two mounts of one grid have to
 // agree on the key or they remember different views. `AssetPicker` itself is not
@@ -331,10 +332,17 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
   const actions = usePaletteActions({ groups, found: search.rows, mount: boot.base, go, label })
 
   /**
-   * The user menu. One item, because who you are is the trigger and the only thing
-   * to *do* about it is leave. The kitchen sink used to be here too; it is a dev
-   * surface and still answers at `{base}/ui`, but a link to it is not something an
-   * editor should find under their own name.
+   * The user menu. Two items again, as it was before this admin had only one
+   * thing to do about who you are: "Your account" first, "Sign out" last and
+   * `danger`, and the ordering is deliberate — the destructive one is not the
+   * first thing a click lands on. The kitchen sink used to be here too; it is a
+   * dev surface and still answers at `{base}/ui`, but a link to it is not
+   * something an editor should find under their own name.
+   *
+   * "Your account" is `{base}/account` — `docs/specs/foundation/passkeys.md`
+   * decision 6 — which is why it is reached from here and not from `nav()`:
+   * there is nobody else's account to list beside it, so a sidebar entry would
+   * be a second, redundant door to a screen with no siblings.
    *
    * Revoke first, navigate regardless: `POST /api/logout` clears both cookie names
    * even for a session that is already dead server-side, so there is no answer that
@@ -351,6 +359,11 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
    * where landing on the login page is the honest outcome.
    */
   const user: MenuItem[] = [
+    {
+      id: 'account',
+      label: 'Your account',
+      run: () => go({ name: 'account' }),
+    },
     {
       id: 'signout',
       label: 'Sign out',
@@ -708,6 +721,9 @@ function screenFor(a: ScreenArgs) {
           onQuery={(next) => a.replace({ name: 'settings' }, { ...route.query, ...next })}
         />
       )
+
+    case 'account':
+      return <Account apiBase={boot.apiBase} me={a.me} loading={a.loading} onNotice={a.notify} />
 
     case 'ui':
       return <Kitchen />

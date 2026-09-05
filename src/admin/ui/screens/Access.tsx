@@ -23,6 +23,7 @@ import {
   accessQuery,
   isSelf,
   parseAccessUrl,
+  removePasskeysRefusal,
   revokeRefusal,
   roleFromReason,
   since,
@@ -119,6 +120,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
   const [minted, setMinted] = useState<Minted | null>(null)
   const [removing, setRemoving] = useState<AccessUser | null>(null)
   const [revoking, setRevoking] = useState<TokenRow | null>(null)
+  const [removingPasskeys, setRemovingPasskeys] = useState<AccessUser | null>(null)
 
   const close = useCallback(() => onQuery(accessQuery({ open: null })), [onQuery])
 
@@ -184,6 +186,19 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
     void run(async () => {
       await send(`/users/${encodeURIComponent(user.id)}`, 'DELETE')
       return `${user.name} no longer has access. Their edit history is untouched.`
+    }, data.users.reload)
+
+  /**
+   * The one incident this covers: a lost or stolen device.
+   * `docs/specs/foundation/passkeys.md` checkpoint 4 — no per-passkey admin
+   * management, no "require passkeys" policy, just this. Magic link or SSO
+   * stays the way back in, which is the whole reason it is safe to do without
+   * asking the person first.
+   */
+  const removeAllPasskeys = (user: AccessUser) =>
+    void run(async () => {
+      await send(`/users/${encodeURIComponent(user.id)}/passkeys`, 'DELETE')
+      return `Removed every passkey for ${user.name}. Magic link or single sign-on still gets them in.`
     }, data.users.reload)
 
   const mint = async (body: { name: string; scopes: Scope[]; expiresInDays?: number }) => {
@@ -290,20 +305,42 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
       cell: (user) => <span className={css.stamp}>{since(user.lastSeenAt)}</span>,
     },
     {
+      key: 'passkeys',
+      label: 'Passkeys',
+      numeric: true,
+      cell: (user) =>
+        user.passkeys > 0 ? (
+          <Badge numeric>{user.passkeys}</Badge>
+        ) : (
+          <span className={css.blank}>—</span>
+        ),
+    },
+    {
       key: 'act',
       label: 'Actions',
       cell: (user) => {
         const self = isSelf(user.id, selfId)
+        const passkeysRefusal = removePasskeysRefusal(user)
         return (
-          <Button
-            size="sm"
-            variant="danger"
-            disabled={busy || self}
-            reason={self ? SELF_REMOVE_REASON : 'A write is in flight'}
-            onClick={() => setRemoving(user)}
-          >
-            Remove
-          </Button>
+          <span className={css.rowActions}>
+            <Button
+              size="sm"
+              disabled={busy || passkeysRefusal !== undefined}
+              reason={passkeysRefusal ?? 'A write is in flight'}
+              onClick={() => setRemovingPasskeys(user)}
+            >
+              Remove all passkeys
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={busy || self}
+              reason={self ? SELF_REMOVE_REASON : 'A write is in flight'}
+              onClick={() => setRemoving(user)}
+            >
+              Remove
+            </Button>
+          </span>
         )
       },
     },
@@ -555,6 +592,36 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
             again by chance.
           </p>
           <p className={css.dialogNote}>There is no way to un-revoke it. Mint a new one instead.</p>
+        </Dialog>
+      ) : null}
+
+      {removingPasskeys ? (
+        <Dialog
+          title={`Remove every passkey for ${removingPasskeys.name}?`}
+          description="For a lost or stolen device. They keep whatever other way they have in."
+          danger
+          onClose={() => setRemovingPasskeys(null)}
+          actions={
+            <>
+              <Button onClick={() => setRemovingPasskeys(null)}>Cancel</Button>
+              <Button
+                variant="danger"
+                onClick={() => {
+                  const user = removingPasskeys
+                  setRemovingPasskeys(null)
+                  removeAllPasskeys(user)
+                }}
+              >
+                Remove all passkeys
+              </Button>
+            </>
+          }
+        >
+          <p className={css.dialogNote}>
+            None of their passkeys will sign in after this. Magic link or single sign-on, whichever
+            this site has, still works — that is the point of doing this rather than removing their
+            account.
+          </p>
         </Dialog>
       ) : null}
     </div>

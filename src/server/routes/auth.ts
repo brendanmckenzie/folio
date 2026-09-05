@@ -739,6 +739,13 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
               name: actor.name,
               colour: actor.colour,
               role: actor.role,
+              // The caller's own address, and who decided their role. Both are
+              // answered only to the person they describe, and the account screen
+              // needs them: an editor should see which address they are signed in
+              // as, and `roleFrom` is the reason the role control is not theirs to
+              // change (`foundation/passkeys.md` decision 6).
+              email: actor.email,
+              roleFrom: actor.roleFrom ?? null,
             }
           : { kind: 'token' as const, id: actor.id, name: actor.name, scopes: actor.scopes }
     // Omitted rather than null under `auth: 'open'`, where there are no providers,

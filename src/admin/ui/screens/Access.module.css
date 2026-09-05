@@ -104,6 +104,14 @@
   gap: var(--space-1);
 }
 
+/* Two actions in one cell now that "Remove all passkeys" sits beside "Remove" —
+   `Table`'s own `actions` slot is one node, not a layout, so a row that needs
+   more than one control names its own wrapper. */
+.rowActions {
+  display: flex;
+  gap: var(--space-1);
+}
+
 /* ------------------------------------------------------------------ layout --- */
 
 .skeletons {

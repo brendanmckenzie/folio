@@ -95,3 +95,33 @@ describe('actorLabel', () => {
     expect(actorLabel(signedOut)).toBeNull()
   })
 })
+
+describe('Me.passkeys', () => {
+  /**
+   * `docs/specs/foundation/passkeys.md` decision 6: `'passkeys' in me` is a
+   * different question from `me.passkeys?.allowed`, and the account screen has
+   * to ask both. This is the type-level contract those two reads depend on —
+   * `account-model.ts`'s `passkeyAvailability` is the function that actually
+   * asks them, and is tested there.
+   */
+  it('is absent, not merely false, when the deployment never listed passkeys()', () => {
+    const withoutProvider = user('editor')
+    expect('passkeys' in withoutProvider).toBe(false)
+    expect(withoutProvider.passkeys).toBeUndefined()
+  })
+
+  it('carries allowed and an optional reason for a person who may not enrol', () => {
+    const enforced: Me = {
+      ...user('editor'),
+      passkeys: { allowed: false, reason: 'Signing in for client.com goes through oidc.' },
+    }
+    expect(enforced.passkeys?.allowed).toBe(false)
+    expect(enforced.passkeys?.reason).toContain('oidc')
+  })
+
+  it('needs no reason when enrolment is allowed', () => {
+    const open: Me = { ...user('editor'), passkeys: { allowed: true } }
+    expect(open.passkeys?.allowed).toBe(true)
+    expect(open.passkeys?.reason).toBeUndefined()
+  })
+})

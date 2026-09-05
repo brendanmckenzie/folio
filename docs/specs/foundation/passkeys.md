@@ -975,6 +975,47 @@ credentials are dead afterwards. Restored, green.
    in with the passkey, hits `GET /api/me`, and asserts the login HTML invariants.
    Then `auth-test.mjs`'s "no script at all" check flips to "one inline script".
 
+#### Phase 3 implementation notes (2026-09-05)
+
+Built as planned; one implementation choice the spec left open, and one
+surprise from the rendering pipeline that cost the first test run.
+
+- **`LOGIN_PASSKEY_SCRIPT_HASH` is a top-level `await`.** "Computed at build
+  time" reads two ways — a build-step script, or computed once when the module
+  itself loads — and the second is what landed: `scriptHash()` calls
+  `crypto.subtle.digest` and the export is `await scriptHash(LOGIN_PASSKEY_SCRIPT)`
+  at module scope. Verified against both toolchains this ships through: `tsc`
+  accepts it under `module: "ESNext"`, and `esbuild --format=esm --target=es2022`
+  compiles it unchanged (checked directly — top-level await is part of the
+  ES2022 spec the existing `--target=es2022` already names). No unit test
+  imports `server/pages.tsx` or `server/index.tsx` under the Node project
+  (`vitest.config.ts`'s `unit` tree is core/admin-only), so the await's cost is
+  paid once per isolate in workerd and never reached from Node at all.
+- **The button and script are unconditional on `rt.auth.passkey`, not on
+  `opts.signedOut`** — unlike the `trusted` buttons, which decision 4 does not
+  say to gate the same way, and which would otherwise leave the signed-out page
+  advertising a door the ordinary login page does not. This meant
+  `scripts/auth-test.mjs`'s *other* "no JavaScript" assertion — on the
+  signed-out page, near the trusted-provider checks — needed the identical
+  two-part rewrite as line 63's, not only the one the spec pointed at.
+- **`react-dom/server.edge` renders `autoComplete` verbatim, not lowercased to
+  `autocomplete`.** The first test run asserted `autocomplete="email"` and
+  failed against `autoComplete="email"` in the actual output — harmless in a
+  real browser, which parses HTML attribute names case-insensitively, but worth
+  recording because it is not what the DOM property name would suggest and
+  nothing before this phase had asserted an `autoComplete` value in rendered
+  HTML to notice. Every assertion here (`pages.tsx`'s test, and the demo
+  script's) now matches the actual casing.
+- **The e2e script hardcodes `PASSKEY_REFUSED`'s literal** (`'That passkey was
+  not accepted.'`) rather than importing `routes/passkeys.ts` under Node — that
+  module pulls in `hono` and the whole auth surface for one string, and the
+  literal is already pinned against drift by `test/workers/auth-login.test.ts`
+  and `auth-passkeys.test.ts` in workerd. `scripts/passkey-test.mjs` runs the
+  full round trip once against a live dev server instead: enrol, list, rename,
+  sign out, sign in with *only* the passkey, `GET /api/me`, the login HTML
+  invariants, remove, and the identical refusal afterwards — 24/24 checks, and
+  `scripts/auth-test.mjs` at 58/58 alongside it.
+
 ### Phase 4 — the account screen and the admin
 
 1. `src/admin/ui/route.ts` — `account` in `Screen`, `FLAT`, `TITLES`;
@@ -994,6 +1035,66 @@ credentials are dead afterwards. Restored, green.
    confirm; `test/unit/admin/access-screen.test.ts`.
 7. `src/admin/ui/screens/settings-model.ts` — `flow` text for `kind: 'passkey'`
    ("A passkey on this device"); `settings-screen.test.ts`.
+
+#### Phase 4 implementation notes (2026-09-05)
+
+Built as planned, with one false Ground-truth premise, one place the spec's
+prose ("one menu item") was read loosely, and one place already done by an
+earlier phase.
+
+- **The Identity section cannot show email or "role set by `<provider>`",
+  and that is a false premise in decision 6, not a choice made here.** `GET
+  {base}/api/me` (`routes/auth.ts`, spec 28 phase 2 — landed, and outside this
+  phase's file list) projects a user actor as exactly `{ kind, id, name,
+  colour, role }`; there is no `email` and no `roleFrom` on the wire, and
+  `admin/me.ts`'s `MeUser` never had either. The section renders what is
+  actually there — name and role — and `Account.tsx`'s own doc comment states
+  the gap in place rather than inventing a source for the other two. The fix
+  is a one-line, additive change to that route's `safe` projection (add
+  `email` and `roleFrom` beside the existing four fields) for whoever next
+  touches `routes/auth.ts`; nothing here needed to guess at a different design
+  for it.
+- **`account-model.ts` adds an `AccountGate`**, the same four-case shape
+  `access-model.ts`'s `AccessGate` uses (`open` / `anonymous` / `token` / `ok`)
+  but with no role check — anyone signed in may see their own account. Not
+  named in the spec's plan, which only asked for row labels, `since`, the
+  `aaguid` map and `canEnrol`; without it the screen had no honest thing to
+  render for `auth: 'open'`, an anonymous visit, or (unreachably in practice,
+  since a token never drives the admin) a token actor.
+- **The `aaguid → vendor` map's six entries are the community-documented
+  ones** (Google Password Manager, iCloud Keychain × 2, Windows Hello,
+  1Password, Dashlane) rather than values captured from a real device — the
+  real-device capture this build needs is phase 1's own open item (the
+  `test/fixtures/webauthn/` fixtures), not this phase's. Cosmetic only, as the
+  migration's own comment insists ("never a security input"), so an
+  imprecise or missing entry degrades to the row's own name, never to a wrong
+  security decision.
+- **Access's "one menu item" is a `Button` beside the existing `Remove`,
+  not a dropdown menu.** The spec's decision 4 prose reads as "one menu item"
+  but names no `Menu` component, and the existing Actions column is already
+  two adjacent buttons in `AccessTokenDialog`'s row; a second button
+  ("Remove all passkeys", disabled with a reason at zero via the new
+  `removePasskeysRefusal`) keeps that pattern rather than introducing a
+  kebab menu for a single action. The passkeys count column renders an em
+  dash at zero, the same rule `provider` and every other "nobody yet" cell on
+  this screen already follows.
+- **`settings-model.ts`'s passkey `flow` text already existed** — spec 28
+  phase 1 added `passkey: 'Passkey on the device'` to `FLOWS` to keep the
+  `Record<AuthPolicyProvider['kind'], string>` exhaustive, and
+  `settings-screen.test.ts` already pins it. Decision 6's own prose suggests
+  "A passkey on this device" instead; the two say the same thing and the
+  existing wording is shipped and tested, so this phase left it rather than
+  bikeshedding a string with no test currently failing over it.
+- **Rename is an inline `Dialog` built directly in `Account.tsx`**, matching
+  `Access.tsx`'s own pattern of declaring its confirm dialogs in place rather
+  than as separate files — this phase's file list has no room for a sixth new
+  component, and one `Field` for one string does not want one.
+- **No pagination in `useAccount.ts`**, unlike every other list hook in this
+  admin. Deliberate, not an oversight: `MAX_PASSKEYS_PER_USER` bounds passkeys
+  at ten, `GET {base}/api/me/events` answers a fixed last-twenty with no
+  cursor at all, and a person's own open sessions are never more than a
+  handful. `useAccess.ts`'s cursor-stack shape solves a problem this screen
+  does not have.
 
 ### Phase 5 — the prose
 

@@ -185,6 +185,15 @@ describe('nav', () => {
     expect(editor).toContain('Settings')
   })
 
+  it('never lists Your account: it is reached from the user menu, not the sidebar', () => {
+    // `docs/specs/foundation/passkeys.md` decision 6 is explicit that `account`
+    // joins `Screen`, `FLAT` and `TITLES` but not `nav()` — a sidebar entry would
+    // be a second, redundant way to a screen with no content of its own to list.
+    for (const me of [OPEN, ADMIN, EDITOR]) {
+      expect(labels(nav({ types: [PAGE], globals: [], me })).flat()).not.toContain('Your account')
+    }
+  })
+
   /**
    * The icons are names now, resolved to inline SVG by `ui/icons.tsx` — which
    * this file deliberately does not import, because it is a `.tsx` and these

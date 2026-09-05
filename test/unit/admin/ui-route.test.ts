@@ -30,6 +30,9 @@ describe('parse', () => {
     expect(parse('/folio/redirects', MOUNT).screen).toEqual({ name: 'redirects' })
     expect(parse('/folio/schedules', MOUNT).screen).toEqual({ name: 'schedules' })
     expect(parse('/folio/settings', MOUNT).screen).toEqual({ name: 'settings' })
+    // Reached from the user menu, never the sidebar (`ui-nav.test.ts`), but a URL
+    // like any other: `docs/specs/foundation/passkeys.md` decision 6.
+    expect(parse('/folio/account', MOUNT).screen).toEqual({ name: 'account' })
     // The kitchen sink, which finally has a sane URL: it read `/folio/ui/ui` while
     // the shell was itself under a `/ui` prefix.
     expect(parse('/folio/ui', MOUNT).screen).toEqual({ name: 'ui' })
@@ -114,6 +117,7 @@ describe('href', () => {
       { name: 'redirects' },
       { name: 'schedules' },
       { name: 'settings' },
+      { name: 'account' },
       { name: 'ui' },
       { name: 'documents', type: 'person' },
       { name: 'edit', id: 'sty_abc' },
@@ -170,6 +174,10 @@ describe('crumbs', () => {
   it('names a platform screen with no trail', () => {
     expect(crumbs(parse('/folio/assets', MOUNT))).toEqual([{ text: 'Assets' }])
     expect(crumbs(parse('/folio/model', MOUNT))).toEqual([{ text: 'Model' }])
+  })
+
+  it('names the account screen "Your account", though nothing links to it', () => {
+    expect(crumbs(parse('/folio/account', MOUNT))).toEqual([{ text: 'Your account' }])
   })
 
   it('names a type list by its label, falling back to the type name', () => {

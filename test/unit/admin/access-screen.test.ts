@@ -13,6 +13,7 @@ import {
   mintRefusal,
   parseAccessUrl,
   presetOf,
+  removePasskeysRefusal,
   revokeRefusal,
   roleFromReason,
   ROLE_MEANING,
@@ -366,6 +367,17 @@ describe('revokeRefusal', () => {
     // The hash is only permanently spent once `revoked_at` is set, so a lapsed token
     // is still worth revoking.
     expect(revokeRefusal({ revokedAt: null })).toBeUndefined()
+  })
+})
+
+describe('removePasskeysRefusal', () => {
+  it('refuses when there is nothing to remove', () => {
+    expect(removePasskeysRefusal({ passkeys: 0 })).toBeTruthy()
+  })
+
+  it('allows it for anybody with at least one', () => {
+    expect(removePasskeysRefusal({ passkeys: 1 })).toBeUndefined()
+    expect(removePasskeysRefusal({ passkeys: 10 })).toBeUndefined()
   })
 })
 

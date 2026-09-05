@@ -50,6 +50,16 @@ export interface AccessUser {
   roleFrom: string | null
   createdAt: number
   lastSeenAt: number | null
+  /**
+   * How many passkeys this person has enrolled.
+   *
+   * **Present on every row whether or not this deployment lists `passkeys()`** —
+   * `routes/access.ts` skips the count query entirely when there is no provider
+   * (every answer would be zero) but still puts the key on each row, so this
+   * column has one shape to render either way (`docs/specs/foundation/
+   * passkeys.md` decision 4).
+   */
+  passkeys: number
 }
 
 /* --------------------------------------------------------------- the gate --- */
@@ -147,6 +157,19 @@ export const SELF_ROLE_REASON = 'You cannot change your own role'
  */
 export function roleFromReason(user: Pick<AccessUser, 'roleFrom'>): string | null {
   return user.roleFrom ? roleSetByReason(user.roleFrom) : null
+}
+
+/**
+ * Why "Remove all passkeys" is refused, or undefined when it is not.
+ *
+ * Just the one case: nothing to remove. Disabled with a reason rather than
+ * absent — unlike `roleFromReason`'s control, this is not a permission the
+ * admin lacks, it is an action with no effect, and `## Cross-cutting`'s rule
+ * about a refusal explaining itself applies just as well to "there is nothing
+ * here" as to "you may not".
+ */
+export function removePasskeysRefusal(user: Pick<AccessUser, 'passkeys'>): string | undefined {
+  return user.passkeys === 0 ? 'This person has no passkeys' : undefined
 }
 
 /** The roles a `<select>` offers, weakest first — `ROLES`' own order, which is the

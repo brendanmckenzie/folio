@@ -184,6 +184,8 @@ export async function readSession(
     session: id,
     expiresAt,
     provider: row.session_provider,
+    email: user.email,
+    roleFrom: row.role_from,
   }
 }
 

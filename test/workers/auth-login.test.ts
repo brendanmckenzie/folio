@@ -437,6 +437,28 @@ describe('sessions over HTTP', () => {
     })
   })
 
+  /**
+   * The account screen's Identity section reads all four off `me.actor`, so a
+   * projection that drops `email` or `roleFrom` makes that section unbuildable
+   * — which is exactly what happened: the screen was written first, found only
+   * `{ kind, id, name, colour, role }` on the wire, and had to leave two rows
+   * out. Both ride the join `readSession` already runs, so this costs nothing;
+   * this test is what stops the projection quietly narrowing again.
+   *
+   * `roleFrom` is null here because Folio placed this role. The provider-set
+   * case is covered where the interaction table is, in the roles block.
+   */
+  it('GET /folio/api/me answers the caller their own email and who set their role', async () => {
+    const folio = folioWith(magicAuth)
+    const cookie = await signedIn(folio)
+
+    const res = await call(folio, '/folio/api/me', { headers: { cookie } })
+    expect(res.status).toBe(200)
+    const body = await res.json<{ actor: { email?: string; roleFrom?: string | null } }>()
+    expect(body.actor.email).toBe('ann@example.com')
+    expect(body.actor.roleFrom).toBeNull()
+  })
+
   it('GET /folio/api/me names the provider that minted this browser’s session', async () => {
     // `session.provider` is `sessions.provider`, not `users.provider`: which
     // door *this* browser came through, which is what

@@ -30,6 +30,10 @@ export type Screen =
   | { name: 'redirects' }
   | { name: 'schedules' }
   | { name: 'settings' }
+  /** Passkeys, sessions and recent sign-ins for whoever is signed in.
+   * `docs/specs/foundation/passkeys.md` decision 6: reached from the user menu,
+   * deliberately **not** in `nav()` — `ui-nav.test.ts` asserts the absence. */
+  | { name: 'account' }
   /** The kitchen sink. Dev only, at `{base}/ui` — which it now has to itself,
    * having read `{base}/ui/ui` while the shell was under its own `/ui` prefix. */
   | { name: 'ui' }
@@ -60,6 +64,7 @@ const FLAT = [
   'redirects',
   'schedules',
   'settings',
+  'account',
   'ui',
 ] as const
 
@@ -206,6 +211,7 @@ const TITLES: Record<Exclude<ScreenName, 'documents' | 'edit' | 'missing'>, stri
   redirects: 'Redirects',
   schedules: 'Schedules',
   settings: 'Settings',
+  account: 'Your account',
   ui: 'Design system',
 }
 
