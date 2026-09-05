@@ -23,6 +23,7 @@ import type { Doc } from '../core/doc'
 import type { LocaleContext } from '../core/locales'
 import {
   BUILT_IN_ORDERS,
+  type ContentItem,
   type ContentPage,
   type ContentQuery,
   type ContentWhere,
@@ -31,7 +32,8 @@ import {
   normaliseQuery,
 } from '../core/query'
 import { dataOf } from '../core/locales'
-import type { ReferenceTarget } from '../core/resolve'
+import { ftsQuery, splitSnippet } from '../core/search-projection'
+import { projectValue } from '../core/index-projection'
 import type { StoryMeta } from '../core/story'
 import { FolioError } from './errors'
 import { STORY_COLS, type StoryRow, toStoryMeta } from './stories'
@@ -41,6 +43,14 @@ import type { FolioDb } from './db'
 export interface Sql {
   text: string
   binds: unknown[]
+}
+
+/** The three columns the search statement adds to a story row. Absent from
+ * every non-search query, which is why each is optional here. */
+interface SearchRow {
+  score?: number
+  snippet?: string | null
+  fts_rowid?: number
 }
 
 /** `stories` columns the built-in sort keys name. */
@@ -104,6 +114,61 @@ const scalar = (value: string | number | readonly string[]): string | number =>
   Array.isArray(value) ? (value[0] ?? '') : (value as string | number)
 
 /**
+ * What `contentSql` needs of `ResolvedGate` (`gate.ts`) to scope a search
+ * (`../../docs/specs/content-model/full-text-search.md` decision 11). Structural
+ * rather than the resolved object itself, so this file stays a pure compiler
+ * with no opinion about how a gate is configured or validated.
+ */
+export interface SearchGate {
+  /** The root-block field holding the gate value. `indexed: true`, guaranteed. */
+  field: string
+  /** The one value that means "no gate". */
+  public: string | number | boolean
+  /**
+   * The **document type** names whose root declares the field — `stories.type`,
+   * which is the only thing SQL can see. Not the root block names: SQL cannot
+   * see those, and two types may share one root.
+   */
+  types: ReadonlySet<string>
+}
+
+/**
+ * Decision 11: on a gated deployment a search is scoped to the gate's public
+ * value, because `snippet()` hands back a marked extract of precisely the prose
+ * `redactDoc` exists to withhold.
+ *
+ * **The predicate keys off `stories.type`, and that is the load-bearing line in
+ * this file.** `projectValue` answers null for an absent value, so a document
+ * with no value for an indexed field gets *no* `content_index` row — which makes
+ * two very different documents identical to any test for a missing row: a
+ * `record` whose root never declares the gate field, which must stay searchable,
+ * and a gated `page` that declares it and holds nothing, which spec 31
+ * checkpoint 2 fails **closed**. `exists … or not exists …` would admit the
+ * second and silently reverse that checkpoint; requiring the row outright would
+ * exclude the first and make records unsearchable. The type list tells them
+ * apart: absence from it means "this type has no gate at all", and a declaring
+ * type with no value falls to the `exists` and is excluded, which is what
+ * fail-closed means here.
+ */
+function gatePredicate(gate: SearchGate, locale: string): Sql {
+  const types = [...gate.types]
+  const holes = types.map(() => '?').join(', ')
+  // The value as `content_index` stores it, through the same function publish
+  // wrote the row with: a `boolean` is 'true'/'false' there and a `number` is
+  // its digits, so comparing against the raw config value would compare a
+  // boolean bind to a text column. Null (an empty-string `public`) binds `''`,
+  // which no row holds either — the same exclusion, arrived at honestly.
+  const value = projectValue(gate.public)?.text ?? ''
+  return {
+    text: `(stories.type not in (${holes})
+      or exists (select 1 from content_index cg
+                  where cg.story_id = stories.id and cg.locale = ?
+                    and cg.field = ? and cg.text_value = ?))`,
+    binds: [...types, locale, gate.field, value],
+  }
+}
+
+/**
  * The two statements a query runs: a `count(*)` for `total`, and the page itself.
  *
  * The page selects `published_doc` alongside the story columns rather than taking a
@@ -118,6 +183,9 @@ export function contentSql(
   /** The index locale key: `''` for the source locale. */
   locale: string,
   perPageMax = MAX_PER_PAGE,
+  /** `ResolvedGate`, narrowed. Decision 11; absent on an ungated deployment,
+   * and then not one character of SQL below changes. */
+  gate?: SearchGate,
 ): { count: Sql; page: Sql; normalised: ReturnType<typeof normaliseQuery> } {
   const n = normaliseQuery(q, perPageMax)
 
@@ -126,20 +194,37 @@ export function contentSql(
   }
   const builtInOrder = n.order.field in BUILT_IN_ORDERS
   if (!builtInOrder && !indexed.has(n.order.field)) throw unknownField(n.order.field, indexed)
+  // `relevance` sorts by a column that is only in the statement when there is a
+  // `MATCH` to score. Refused rather than quietly demoted to `publishedAt`: a
+  // list silently sorted by something other than what was asked for is the
+  // failure nobody notices.
+  if (n.order.field === 'relevance' && n.search === undefined) {
+    throw new FolioError('bad_request', "order 'relevance' needs a search")
+  }
 
   // `contains` is a `like '%x%'`, which cannot use the index — it is a scan of
   // every row for the field. Allowed, and capped: only alongside something that
   // *can* narrow first, so the scan is over a type's rows rather than the site's.
-  // Full-text search is the real answer and is out of scope (D1 has FTS5; it is a
-  // separate index, a separate write path and a separate ranking question).
+  // `search` counts as narrowing, and is the strongest of the four: the join
+  // hands the scan the handful of rows FTS5 matched.
   const narrowing =
-    n.type.length > 0 || n.parent !== undefined || n.where.some((w) => w.op !== 'contains')
+    n.search !== undefined ||
+    n.type.length > 0 ||
+    n.parent !== undefined ||
+    n.where.some((w) => w.op !== 'contains')
   if (n.where.some((w) => w.op === 'contains') && !narrowing) {
     throw new FolioError(
       'bad_request',
       "A 'contains' filter is a scan; combine it with a type, a parent or another filter",
     )
   }
+
+  // Visitor input as `MATCH` syntax, or null when it held no token at all
+  // (`???`, an emoji). Null is an *answer*, not an error: the statement below
+  // gets `0 = 1` and no join, which is an honest empty page rather than a 500
+  // or — far worse — everything.
+  const match = n.search === undefined ? null : ftsQuery(n.search)
+  const searching = match !== null
 
   const clauses: string[] = ['stories.published_doc is not null']
   const binds: unknown[] = []
@@ -161,6 +246,23 @@ export function contentSql(
     binds.push(...pred.binds)
   })
 
+  // Decision 11, and its opt-out. A caller who names the gate field in a `where`
+  // has taken the scoping on itself — `where: [{ field: 'access', op: 'in',
+  // value: ['public', 'members'] }]` is how a host builds a members' search over
+  // members' content — and the same double enforcement `filterable` uses says
+  // the caller wins. Emitted last, so its binds land last among the where binds.
+  if (gate && n.search !== undefined && gate.types.size > 0) {
+    if (!n.where.some((w) => w.field === gate.field)) {
+      const pred = gatePredicate(gate, locale)
+      clauses.push(pred.text)
+      binds.push(...pred.binds)
+    }
+  }
+
+  // Decision 5's empty token set. The clause rather than an early return so
+  // every other refusal above has already had its say.
+  if (n.search !== undefined && !searching) clauses.push('0 = 1')
+
   const where = clauses.join(' and ')
   const dir = n.order.dir === 'asc' ? 'asc' : 'desc'
 
@@ -169,7 +271,11 @@ export function contentSql(
   const orderBinds: unknown[] = []
   let join = ''
   let orderBy: string
-  if (builtInOrder) {
+  if (n.order.field === 'relevance') {
+    // No join to sort by when the term held no token: the page is empty and the
+    // id tiebreak is the whole of the order.
+    orderBy = searching ? `fts.score ${dir}, stories.id asc` : 'stories.id asc'
+  } else if (builtInOrder) {
     orderBy = `${BUILT_IN_COLUMNS[n.order.field]} ${dir}, stories.id asc`
   } else {
     join = `left join content_index co
@@ -182,13 +288,60 @@ export function contentSql(
     orderBy = `co.num_value ${dir} nulls last, co.text_value ${dir} nulls last, stories.id asc`
   }
 
-  return {
-    count: { text: `select count(*) as n from stories where ${where}`, binds },
-    page: {
-      // Order binds come first: they are in the JOIN, which precedes the WHERE.
-      text: `select ${STORY_COLS}, published_doc from stories ${join} where ${where}
+  const limit = [n.perPage, (n.page - 1) * n.perPage]
+
+  if (!searching) {
+    return {
+      count: { text: `select count(*) as n from stories where ${where}`, binds },
+      page: {
+        // Order binds come first: they are in the JOIN, which precedes the WHERE.
+        text: `select ${STORY_COLS}, published_doc from stories ${join} where ${where}
              order by ${orderBy} limit ? offset ?`,
-      binds: [...orderBinds, ...binds, n.perPage, (n.page - 1) * n.perPage],
+        binds: [...orderBinds, ...binds, ...limit],
+      },
+      normalised: n,
+    }
+  }
+
+  // One row per matching (story, locale), and the locale filter is an equality
+  // *after* the match rather than a term inside it: fallback text is indexed
+  // under each locale at publish, so a French visitor's hit is a French row.
+  // `content_fts` is never aliased in here — FTS5's hidden `MATCH` column bears
+  // the table's own name, and an alias makes `content_fts match ?` unresolvable.
+  const matchJoin = (cols: string) => `join (select ${cols}
+                      from content_fts
+                      join content_text ct on ct.id = content_fts.rowid
+                     where content_fts match ? and ct.locale = ?) fts
+                 on fts.story_id = stories.id`
+
+  const inner = `select ${STORY_COLS}, published_doc, fts.score, fts.rowid as fts_rowid
+             from stories
+             ${matchJoin('ct.story_id, ct.id as rowid, -bm25(content_fts, 10.0, 1.0) as score')}
+             ${join} where ${where}
+             order by ${orderBy} limit ? offset ?`
+
+  return {
+    count: {
+      text: `select count(*) as n from stories
+             ${matchJoin('ct.story_id')}
+             where ${where}`,
+      binds: [match, locale, ...binds],
+    },
+    page: {
+      // **The snippet is a correlated subquery over the paged rows, and that is
+      // the whole reason for the nesting.** Inside the match subquery `snippet()`
+      // would run for every hit before the sort — a 2,000-hit query reading 2,000
+      // bodies to show twenty. Out here it runs `perPage` times, and
+      // `match ? and rowid = ?` is an equality probe FTS5 answers directly.
+      //
+      // The select-list `?` is textually first, so it binds first: the order is
+      // [snippet match, join match, locale, order, where, limit, offset].
+      text: `select p.*,
+                    (select snippet(content_fts, 1, char(1), char(2), '…', 32)
+                       from content_fts
+                      where content_fts match ? and content_fts.rowid = p.fts_rowid) as snippet
+             from (${inner}) p`,
+      binds: [match, match, locale, ...orderBinds, ...binds, ...limit],
     },
     normalised: n,
   }
@@ -212,6 +365,9 @@ export interface QueryDeps {
   localeKey: (code: string | undefined) => string
   /** A story's public URL, for the item's `url`. `FolioRuntime.withUrls`. */
   withUrls: <T extends StoryMeta>(story: T) => T
+  /** `FolioRuntime.gate`, narrowed — absent on a deployment with no gate.
+   * Scopes a `search` and nothing else (decision 11). */
+  gate?: SearchGate
 }
 
 /**
@@ -234,7 +390,13 @@ export async function runQuery(
   // canonical form. An HTTP caller has no resolution and names the locale in the
   // query instead.
   const localeKey = opts.locale ? opts.locale.code : deps.localeKey(q.locale)
-  const { count, page, normalised } = contentSql(q, deps.indexed, localeKey, opts.perPageMax)
+  const { count, page, normalised } = contentSql(
+    q,
+    deps.indexed,
+    localeKey,
+    opts.perPageMax,
+    deps.gate,
+  )
 
   const [totalRow, rows] = await Promise.all([
     deps.db
@@ -244,13 +406,13 @@ export async function runQuery(
     deps.db
       .prepare(page.text)
       .bind(...page.binds)
-      .all<StoryRow & { published_doc: string | null }>(),
+      .all<StoryRow & SearchRow & { published_doc: string | null }>(),
   ])
 
   const total = totalRow?.n ?? 0
-  const items: ReferenceTarget[] = []
+  const items: ContentItem[] = []
   for (const raw of rows.results) {
-    const { published_doc, ...row } = raw
+    const { published_doc, score, snippet, fts_rowid, ...row } = raw
     if (!published_doc) continue
     const doc = JSON.parse(published_doc) as Doc
     const story = deps.withUrls(toStoryMeta(row))
@@ -264,6 +426,11 @@ export async function runQuery(
       url: story.path === null ? '' : (story.url ?? `/${story.path}`),
       data: root ? dataOf(root, opts.locale) : {},
       doc,
+      // Only when the query asked, so a plain collection's items are byte for
+      // byte what they were before search existed.
+      ...(normalised.search === undefined
+        ? {}
+        : { score: score ?? 0, snippet: splitSnippet(snippet ?? null) }),
     })
   }
 

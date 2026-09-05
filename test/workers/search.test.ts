@@ -1,6 +1,14 @@
 import { createExecutionContext, env } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
-import { blocks, defineBlock, richtext, text, textarea, toSchemaIndex } from '../../src/core'
+import { beforeAll, describe, expect, it } from 'vitest'
+import {
+  blocks,
+  defineBlock,
+  richtext,
+  select,
+  text,
+  textarea,
+  toSchemaIndex,
+} from '../../src/core'
 import type { Doc, Json } from '../../src/core/doc'
 import { defineMigration, field } from '../../src/core/migrate'
 import type { DocumentType } from '../../src/core/schema'
@@ -164,15 +172,16 @@ function pageDoc(title: string, caption: string, body: string, embed = ''): Doc 
 
 async function insertRow(
   id: string,
-  opts: { path: string | null; title: string; doc: Doc; published?: boolean },
+  opts: { path: string | null; title: string; doc: Doc; published?: boolean; type?: string },
 ): Promise<void> {
   await env.DB.prepare(
     `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at,
                           published_doc, published_at)
-     values (?, 'srchPageType', ?, ?, ?, 'a0', ?, ?, ?, ?)`,
+     values (?, ?, ?, ?, ?, 'a0', ?, ?, ?, ?)`,
   )
     .bind(
       id,
+      opts.type ?? 'srchPageType',
       null,
       opts.path === null ? id : (opts.path.split('/').pop() ?? ''),
       opts.path,
@@ -521,5 +530,364 @@ describe('a document with more locale rows than one statement can bind', () => {
     // sees nothing and this answers zero while `content_text` still has all 24.
     expect(await orphanedTokens('zqxwide')).toBe(24)
     await expect(integrityCheck()).resolves.toBeTruthy()
+  })
+})
+
+/* =================================================== the query compiler === */
+
+/**
+ * Phase 4 against real D1 and real FTS5: what the nested statement in
+ * `server/query.ts` actually answers.
+ *
+ * `test/unit/server/query.test.ts` pins its text and its bind order, which is the
+ * only place either is visible. What it cannot see is whether SQLite accepts the
+ * statement at all — a correlated `snippet()` over a paged subquery, an aliased
+ * `content_text` beside an unaliased `content_fts`, and `-bm25` through a join
+ * are each the sort of thing that compiles as a string and fails as SQL.
+ */
+
+const queryDoc = (title: string, body: string, i18n?: Record<string, Json>, caption = ''): Doc => {
+  const doc = pageDoc(title, caption, body)
+  if (i18n) {
+    const prose = doc.bloks.p
+    if (prose) doc.bloks.p = { ...prose, i18n: { fr: i18n } }
+  }
+  return doc
+}
+
+const ids = (page: { items: { id: string }[] }) => page.items.map((i) => i.id)
+
+describe('a search, run', () => {
+  it('ranks a title hit above a body hit, and scores both', async () => {
+    // The root's `title` field is searchable, so a title hit is in the body
+    // column too — bm25's title weight of 10 is what separates them.
+    await seedAndPublish(
+      'srch_q_title',
+      queryDoc('Zqxrank', 'Nothing to do with it.'),
+      'zqx-rank-a',
+    )
+    await seedAndPublish(
+      'srch_q_body',
+      queryDoc('Unrelated', 'A passing mention of zqxrank in the prose.'),
+      'zqx-rank-b',
+    )
+
+    const page = await folio.query(env, { search: 'zqxrank' })
+    expect(ids(page)).toEqual(['srch_q_title', 'srch_q_body'])
+    expect(page.total).toBe(2)
+    // Negated bm25: positive, and bigger is better.
+    const [first, second] = page.items
+    expect(first?.score).toBeGreaterThan(0)
+    expect(second?.score).toBeGreaterThan(0)
+    expect(first?.score ?? 0).toBeGreaterThan(second?.score ?? 0)
+  })
+
+  it('hands back a snippet split on the markers, never a <mark> string', async () => {
+    const page = await folio.query(env, { search: 'zqxrank', type: 'srchPageType' })
+    const snippet = page.items.find((i) => i.id === 'srch_q_body')?.snippet
+    expect(snippet).toBeDefined()
+    expect(snippet?.some((p) => p.match && p.text.toLowerCase().includes('zqxrank'))).toBe(true)
+    expect(snippet?.some((p) => !p.match)).toBe(true)
+    // The markers themselves never survive into a part.
+    const open = String.fromCharCode(1)
+    const close = String.fromCharCode(2)
+    expect(snippet?.every((p) => !p.text.includes(open) && !p.text.includes(close))).toBe(true)
+  })
+
+  it('keeps the score under another order, and sorts by that order', async () => {
+    const page = await folio.query(env, { search: 'zqxrank', order: 'publishedAt' })
+    expect(page.items.every((i) => (i.score ?? 0) > 0)).toBe(true)
+    expect(ids(page).sort()).toEqual(['srch_q_body', 'srch_q_title'])
+  })
+
+  it('carries neither score nor snippet when the query had no search', async () => {
+    const page = await folio.query(env, { type: 'srchPageType', perPage: 1 })
+    expect(page.items[0]?.score).toBeUndefined()
+    expect(page.items[0]?.snippet).toBeUndefined()
+  })
+
+  it('finds a translation under its own locale and not under the source', async () => {
+    await seedAndPublish(
+      'srch_q_fr',
+      queryDoc(
+        'Coucher',
+        'The zqxenglish word.',
+        { body: richText('coucher de zqxsoleil') },
+        'A zqxuntranslated caption.',
+      ),
+      'zqx-fr',
+    )
+    expect(ids(await folio.query(env, { search: 'zqxsoleil', locale: 'fr' }))).toEqual([
+      'srch_q_fr',
+    ])
+    expect(ids(await folio.query(env, { search: 'zqxsoleil' }))).toEqual([])
+    // A translated field *replaces* its source in the `fr` row rather than
+    // joining it: the English body is not what a French visitor reads, so it is
+    // not what a French search matches.
+    expect(ids(await folio.query(env, { search: 'zqxenglish', locale: 'fr' }))).toEqual([])
+    expect(ids(await folio.query(env, { search: 'zqxenglish' }))).toEqual(['srch_q_fr'])
+    // …and the fallback is per field: a sibling nobody translated is indexed
+    // under `fr` too, so a French visitor still finds a half-translated page.
+    expect(ids(await folio.query(env, { search: 'zqxuntranslated', locale: 'fr' }))).toEqual([
+      'srch_q_fr',
+    ])
+  })
+
+  it('conjoins search with a type, and still refuses an unindexed where field', async () => {
+    const refused = await folio
+      .query(env, {
+        search: 'zqxrank',
+        type: 'srchPageType',
+        where: [{ field: 'zqxnothing', op: 'eq', value: 'x' }],
+      })
+      .catch((e: unknown) => e)
+    // Proof the field check still runs first with a search in the query.
+    expect((refused as { code?: string }).code).toBe('bad_request')
+
+    const typed = await folio.query(env, { search: 'zqxrank', type: 'srchPageType' })
+    expect(ids(typed)).toEqual(['srch_q_title', 'srch_q_body'])
+    expect(ids(await folio.query(env, { search: 'zqxrank', type: 'srchNoSuchType' }))).toEqual([])
+  })
+
+  it('answers a page past the end with the right total, not an error', async () => {
+    const page = await folio.query(env, { search: 'zqxrank', page: 99, perPage: 10 })
+    expect(page.items).toEqual([])
+    expect(page.total).toBe(2)
+    expect(page.pages).toBe(1)
+    expect(page.page).toBe(99)
+  })
+
+  it('answers every malformed term with a well-formed page rather than a 500', async () => {
+    // A `MATCH` syntax error would be a 500 with the visitor's own text in the
+    // log. Every one of these reaches FTS5 as quoted terms or not at all.
+    const fuzz = ['"', '-x', 'foo:bar', 'NOT', '(x', '*', '^', '"" ""', 'a'.repeat(10_000)]
+    for (const search of fuzz) {
+      const page = await folio.query(env, { search })
+      expect(Array.isArray(page.items)).toBe(true)
+      expect(typeof page.total).toBe('number')
+    }
+    // Nothing to search for at all: an honest empty page, never everything.
+    for (const search of ['???', '🙂🙂']) {
+      expect(await folio.query(env, { search })).toMatchObject({ items: [], total: 0 })
+    }
+  })
+
+  it('answers the same thing over HTTP, on the internal route and the versioned one', async () => {
+    const read = async (path: string) => {
+      const res = await send(path, 'GET')
+      expect(res?.status).toBe(200)
+      return (await res?.json()) as { items: { id: string; score?: number }[] }
+    }
+    const internal = await read('/folio/api/content?search=zqxrank')
+    const versioned = await read('/folio/api/v1/documents?search=zqxrank')
+    expect(internal.items.map((i) => i.id)).toEqual(['srch_q_title', 'srch_q_body'])
+    expect(versioned.items.map((i) => i.id)).toEqual(internal.items.map((i) => i.id))
+    expect(internal.items[0]?.score).toBeGreaterThan(0)
+
+    // `order=relevance` with nothing to rank is the one refusal in the family.
+    const bad = await send('/folio/api/content?order=relevance', 'GET')
+    expect(bad?.status).toBe(400)
+    expect(JSON.stringify(await bad?.json())).toContain('relevance')
+  })
+})
+
+/* ========================================================= decision 11 === */
+
+/**
+ * A search on a gated deployment is scoped to the gate's public value
+ * (`full-text-search.md` decision 11), and the predicate keys off `stories.type`
+ * rather than off the absence of a `content_index` row.
+ *
+ * The fixtures below are the whole argument, and the SQL text cannot show it —
+ * only running the query can:
+ *
+ *   - a **gated page holding 'members'** must be absent, which any predicate
+ *     gets right;
+ *   - a **gated page holding nothing at all** must be absent too, because
+ *     `projectValue` writes no row for an absent value and spec 31 checkpoint 2
+ *     fails that closed. `exists … or not exists …` admits it;
+ *   - a **record whose root never declares the field** must be present, because
+ *     it is not gated at all. A predicate that simply required a public row
+ *     excludes it and takes every record on the site out of search.
+ *
+ * The last two look identical to any row-absence test and want opposite answers.
+ */
+
+const gateRoot = defineBlock({
+  name: 'srchGateRoot',
+  label: 'Gated page',
+  summary: 'title',
+  fields: {
+    title: text({ indexed: true }),
+    access: select({
+      options: [
+        { label: 'Everyone', value: 'public' },
+        { label: 'Members', value: 'members' },
+      ],
+      indexed: true,
+    }),
+    standfirst: text(),
+  },
+  render: () => null,
+})
+
+/** A `record` root that never heard of the gate field: not gated, and it has to
+ * stay searchable. */
+const noteRoot = defineBlock({
+  name: 'srchNoteRoot',
+  label: 'Note',
+  summary: 'title',
+  fields: { title: text(), note: textarea() },
+  render: () => null,
+})
+
+const gateTypes: DocumentType[] = [
+  { name: 'srchGateType', label: 'Gated page', kind: 'page', root: 'srchGateRoot', default: true },
+  { name: 'srchNoteType', label: 'Note', kind: 'record', root: 'srchNoteRoot' },
+]
+
+const makeGated = (gated: boolean) =>
+  createFolio<Cloudflare.Env>({
+    blocks: [gateRoot, noteRoot],
+    types: gateTypes,
+    bindings,
+    basePath: '/folio',
+    auth: 'open',
+    route: (p) => (p ? `/${p}` : '/'),
+    ...(gated
+      ? { gate: { field: 'access', public: 'public', visitor: () => null, allows: () => false } }
+      : {}),
+  })
+
+const gatedFolio = makeGated(true)
+const ungatedFolio = makeGated(false)
+
+const gateDoc = (title: string, standfirst: string, access?: string): Doc => ({
+  root: 'r',
+  bloks: {
+    r: {
+      uid: 'r',
+      type: 'srchGateRoot',
+      parent: null,
+      slot: null,
+      order: 'a0',
+      data: { title, standfirst, ...(access === undefined ? {} : { access }) },
+    },
+  },
+})
+
+const noteDoc = (title: string, note: string): Doc => ({
+  root: 'r',
+  bloks: {
+    r: {
+      uid: 'r',
+      type: 'srchNoteRoot',
+      parent: null,
+      slot: null,
+      order: 'a0',
+      data: { title, note },
+    },
+  },
+})
+
+async function publishGated(
+  id: string,
+  doc: Doc,
+  opts: { path: string | null; type: string },
+): Promise<void> {
+  await insertRow(id, {
+    path: opts.path,
+    title: (doc.bloks.r?.data.title as string) ?? id,
+    doc,
+    type: opts.type,
+  })
+  await stubFor(id).getOrInit(doc)
+  const res = await gatedFolio.handle(
+    new Request(`${ORIGIN}/folio/api/story/${id}/publish`, { method: 'POST' }),
+    env,
+    createExecutionContext(),
+  )
+  expect(res?.status).toBe(200)
+}
+
+describe('a gated deployment scopes a search to the public value', () => {
+  const TERM = 'zqxgatecrash'
+
+  beforeAll(async () => {
+    await publishGated('srch_g_public', gateDoc('Public', `Everyone reads ${TERM}.`, 'public'), {
+      path: 'zqx-g-public',
+      type: 'srchGateType',
+    })
+    await publishGated('srch_g_members', gateDoc('Members', `Members read ${TERM}.`, 'members'), {
+      path: 'zqx-g-members',
+      type: 'srchGateType',
+    })
+    // Declares the field, holds nothing: no `content_index` row at all.
+    await publishGated('srch_g_empty', gateDoc('Unset', `Nobody set ${TERM}.`), {
+      path: 'zqx-g-empty',
+      type: 'srchGateType',
+    })
+    await publishGated('srch_g_note', noteDoc('Note', `A record mentioning ${TERM}.`), {
+      path: null,
+      type: 'srchNoteType',
+    })
+  })
+
+  it('leaves every one of them in the index, gated or not', async () => {
+    // The scoping is a read-side predicate, not a write-side omission: a gated
+    // document is indexed exactly like a public one and stays findable to a
+    // caller that filters for it.
+    expect(await matched(TERM)).toEqual([
+      'srch_g_empty:-',
+      'srch_g_members:-',
+      'srch_g_note:-',
+      'srch_g_public:-',
+    ])
+  })
+
+  it('answers an unfiltered search with the public page and the ungated record only', async () => {
+    const page = await gatedFolio.query(env, { search: TERM })
+    expect(ids(page).sort()).toEqual(['srch_g_note', 'srch_g_public'])
+    expect(page.total).toBe(2)
+  })
+
+  it('never excludes a record type whose root does not declare the field', async () => {
+    // The case a predicate that simply required a public row would have broken,
+    // taking every record on the site out of search with it.
+    const page = await gatedFolio.query(env, { search: TERM, type: 'srchNoteType' })
+    expect(ids(page)).toEqual(['srch_g_note'])
+  })
+
+  it('excludes a declaring type that holds no value at all, which is fail-closed', async () => {
+    // The case `exists … or not exists …` would have admitted, silently
+    // reversing spec 31 checkpoint 2. It has no `content_index` row, exactly
+    // like the record above, and has to get the opposite answer.
+    const page = await gatedFolio.query(env, { search: TERM, type: 'srchGateType' })
+    expect(ids(page)).toEqual(['srch_g_public'])
+  })
+
+  it('steps aside entirely when the caller filters the gate field itself', async () => {
+    // A members' search over members' content: the caller has taken the scoping
+    // on itself, and the auto-clause is not emitted at all.
+    const page = await gatedFolio.query(env, {
+      search: TERM,
+      where: [{ field: 'access', op: 'in', value: ['public', 'members'] }],
+    })
+    expect(ids(page).sort()).toEqual(['srch_g_members', 'srch_g_public'])
+  })
+
+  it('leaves a list with no search term alone, per spec 31 checkpoint 6', async () => {
+    const page = await gatedFolio.query(env, { type: 'srchGateType' })
+    expect(ids(page).sort()).toEqual(['srch_g_empty', 'srch_g_members', 'srch_g_public'])
+  })
+
+  it('does none of it on a deployment with no gate', async () => {
+    const page = await ungatedFolio.query(env, { search: TERM })
+    expect(ids(page).sort()).toEqual([
+      'srch_g_empty',
+      'srch_g_members',
+      'srch_g_note',
+      'srch_g_public',
+    ])
   })
 })

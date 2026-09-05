@@ -755,10 +755,18 @@ All additive. `PROTOCOL_VERSION` is unchanged: nothing here rides a socket frame
 | GET | `/api/v1/documents?search=` | `READ` (`content:read`) | same parser; the response's `items[]` may carry `snippet` and `score` |
 | MCP | `query_documents` | `content:read` | `query` gains `search`; `inputSchema.properties.search` with the description "Full-text `search` ranks by relevance and returns a `snippet` per item." |
 
-Errors: `bad_request` for `order=relevance` without `search`; `bad_request` for a
-`search` over 200 characters (the same screen as `?q=`). A malformed `search` is
+Errors: `bad_request` for `order=relevance` without `search`. A malformed `search` is
 **never** an error: `ftsQuery` cannot produce invalid syntax, and an empty token set
 answers an empty page.
+
+**This line used to also refuse a `search` over 200 characters, and contradicted the
+rest of the spec** (resolved during phase 4, 2026-09-05). Decision 4 lists the 200-cap
+alongside trim, collapse and drop — all *normalisations*; decision 5 says a malformed
+search is never an error; and the acceptance criteria explicitly require a 10 kB
+`?search=` to answer `200` with a well-formed `ContentPage`. Two of three readings and
+the only executable one say truncate, so `normaliseQuery` truncates and the route
+refuses nothing. Recorded rather than silently corrected because the route table is
+where somebody will look for the answer.
 
 Response shape for an item when `search` was set:
 
@@ -933,6 +941,17 @@ Tree green: nothing reads the table yet.
 2. `docs/api.md` Querying table; `docs/mcp.md`.
 
 ### Phase 6 — the collection field
+
+**Carried in from phase 4, and it is a visible bug until this phase lands:**
+`relevance` joined `BUILT_IN_ORDERS`, and `CollectionField.tsx:112` builds its sort
+dropdown from `Object.keys(BUILT_IN_ORDERS)` — so the admin currently offers a
+"relevance" option on *every* collection field, which does nothing. The render side is
+already defended (`collectionQuery` drops a stored `relevance` and falls back to
+`defaultOrder`, this spec's own edge case), so it is inert rather than harmful, but the
+dropdown must exclude `relevance` unless the field declares `searchable`.
+Also outstanding: **`ContentItem` is not exported from `src/core/index.ts`** — a host
+can reach it structurally through `ContentPage` but not by name. One line, here or in
+phase 7.
 
 1. `src/core/query.ts`: `collectionQuery`/`collectionQueries` `search`;
    `CollectionValue.search`.

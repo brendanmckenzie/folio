@@ -20,6 +20,7 @@ import type { Field } from './fields'
 import { fieldValue, type LocaleContext } from './locales'
 import type { ReferenceTarget } from './resolve'
 import type { SchemaIndex } from './schema'
+import type { SnippetPart } from './search-projection'
 
 /** Operators over a `content_index` row's `text_value`. */
 export type TextOp = 'eq' | 'ne' | 'in' | 'contains' | 'startsWith'
@@ -49,6 +50,13 @@ export const BUILT_IN_ORDERS: Readonly<Record<string, 'asc' | 'desc'>> = {
   publishedAt: 'desc',
   ord: 'asc',
   title: 'asc',
+  // Not a column of `stories` at all but of the full-text join
+  // (`../../docs/specs/content-model/full-text-search.md` decision 2): bm25 is
+  // negated in the SQL so a bigger score is a better match, which lets
+  // `relevance` mean `desc` like every other "best first" order. `contentSql`
+  // refuses it without a `search` term rather than sorting by a column that is
+  // not in the statement.
+  relevance: 'desc',
 }
 
 export interface ContentOrderSpec {
@@ -62,7 +70,7 @@ export interface ContentOrderSpec {
  * would have to be threaded through the canonical form, the query string and the
  * SQL for a case nothing has yet asked for.
  */
-export type ContentOrder = ContentOrderSpec | 'publishedAt' | 'ord' | 'title'
+export type ContentOrder = ContentOrderSpec | 'publishedAt' | 'ord' | 'title' | 'relevance'
 
 export interface ContentQuery {
   /** One type or several. Absent queries every type, records included. */
@@ -73,6 +81,17 @@ export interface ContentQuery {
   locale?: string
   where?: readonly ContentWhere[]
   order?: ContentOrder
+  /**
+   * Full-text term (`../../docs/specs/content-model/full-text-search.md`
+   * decision 4). Trimmed, whitespace-collapsed and capped at
+   * `MAX_SEARCH_LENGTH` by `normaliseQuery`; dropped entirely when nothing is
+   * left of it.
+   *
+   * Visitor input, and it is **never** a bad request: `ftsQuery` tokenises it
+   * before it reaches FTS5, so a stray quote or a bare `NOT` is a term rather
+   * than syntax, and a string with no token at all answers an empty page.
+   */
+  search?: string
   /** 1-based. */
   page?: number
   /** Default 20, capped at 100. */
@@ -86,8 +105,26 @@ export interface ContentQuery {
   status?: 'published'
 }
 
+/**
+ * One row of a `ContentPage`: the shape a `reference` already resolves to, plus
+ * the two things only a full-text query can answer
+ * (`../../docs/specs/content-model/full-text-search.md` decision 4).
+ *
+ * Both are present **only** when the query carried `search`, so a block that
+ * renders a plain collection sees exactly what it saw before.
+ */
+export interface ContentItem extends ReferenceTarget {
+  /**
+   * The matched extract, already split into parts (decision 6) — never a
+   * `<mark>…</mark>` string a host would have to trust as HTML or escape.
+   */
+  snippet?: SnippetPart[]
+  /** bm25, negated: bigger is a better match. */
+  score?: number
+}
+
 export interface ContentPage {
-  items: ReferenceTarget[]
+  items: ContentItem[]
   total: number
   page: number
   perPage: number
@@ -106,6 +143,8 @@ export interface ResolvedCollection extends ContentPage {
 
 export const DEFAULT_PER_PAGE = 20
 export const MAX_PER_PAGE = 100
+/** How much of a search box reaches the index. The same bound `?q=` carries. */
+export const MAX_SEARCH_LENGTH = 200
 
 /** The zero value: what a block gets for a query nothing ran. */
 export function emptyContentPage(page = 1, perPage = DEFAULT_PER_PAGE): ContentPage {
@@ -123,6 +162,22 @@ const clampPerPage = (n: unknown, max = MAX_PER_PAGE): number => {
 }
 
 /**
+ * A search box's contents, canonicalised: whitespace collapsed so two spellings
+ * of one phrase share a `queryKey`, and **truncated** at `MAX_SEARCH_LENGTH`
+ * rather than refused.
+ *
+ * Truncated, deliberately. Everything else this function meets is a developer's
+ * or an editor's mistake; this one is a visitor's paste, and a 10 kB string is
+ * far likelier to be a fat finger than an attack. `ftsQuery` keeps twelve tokens
+ * of whatever survives, so the cap decides nothing a visitor would notice.
+ */
+const clampSearch = (raw: unknown): string | undefined => {
+  if (typeof raw !== 'string') return undefined
+  const collapsed = raw.replace(/\s+/g, ' ').trim()
+  return collapsed ? collapsed.slice(0, MAX_SEARCH_LENGTH) : undefined
+}
+
+/**
  * The canonical form of a query: defaults applied, `type` a sorted array, `where`
  * sorted, `order` expanded, `page`/`perPage` clamped.
  *
@@ -137,10 +192,12 @@ export function normaliseQuery(
   type: readonly string[]
   parent?: string | null
   locale?: string
+  search?: string
   where: readonly ContentWhere[]
   order: ContentOrderSpec
 } {
   const type = q.type === undefined ? [] : typeof q.type === 'string' ? [q.type] : [...q.type]
+  const search = clampSearch(q.search)
   const where = [...(q.where ?? [])]
     .filter((w) => w && typeof w.field === 'string' && WHERE_OPS.includes(w.op))
     .map((w) => ({
@@ -162,15 +219,21 @@ export function normaliseQuery(
       ? { field: q.order, dir: BUILT_IN_ORDERS[q.order] ?? 'asc' }
       : q.order && typeof q.order.field === 'string'
         ? { field: q.order.field, dir: q.order.dir === 'asc' ? 'asc' : 'desc' }
-        : // Newest first: what a CMS list means when it says nothing. Deterministic
-          // either way — `server/query.ts` always appends `s.id` as the tiebreak,
-          // without which offset pagination could show one row on two pages.
-          { field: 'publishedAt', dir: 'desc' }
+        : search !== undefined
+          ? // Best match first, which is the only thing a search result page
+            // could mean by default (decision 4). A caller who wants a search
+            // sorted by date says so and still gets a `score` on every item.
+            { field: 'relevance', dir: 'desc' }
+          : // Newest first: what a CMS list means when it says nothing. Deterministic
+            // either way — `server/query.ts` always appends `s.id` as the tiebreak,
+            // without which offset pagination could show one row on two pages.
+            { field: 'publishedAt', dir: 'desc' }
 
   return {
     type: type.slice().sort(),
     ...(q.parent !== undefined ? { parent: q.parent } : {}),
     ...(q.locale ? { locale: q.locale } : {}),
+    ...(search !== undefined ? { search } : {}),
     where,
     order,
     page: clampPage(q.page),
@@ -192,6 +255,8 @@ export function queryKey(q: ContentQuery, perPageMax = MAX_PER_PAGE): string {
   const n = normaliseQuery(q, perPageMax)
   // Explicit key order rather than JSON.stringify over the object, so the key is
   // stable against a future field being added in the middle of the interface.
+  // `search` is the eighth element for exactly that reason: appended, never
+  // inserted, so every key written before it existed still reads the same.
   return JSON.stringify([
     n.type,
     n.parent ?? null,
@@ -200,6 +265,7 @@ export function queryKey(q: ContentQuery, perPageMax = MAX_PER_PAGE): string {
     [n.order.field, n.order.dir],
     n.page,
     n.perPage,
+    n.search ?? '',
   ])
 }
 
@@ -219,6 +285,7 @@ export function queryToParams(q: ContentQuery, perPageMax = MAX_PER_PAGE): URLSe
   // anywhere. `undefined` and `null` are different queries, so both are spellable.
   if (n.parent !== undefined) params.set('parent', n.parent ?? '')
   if (n.locale) params.set('locale', n.locale)
+  if (n.search) params.set('search', n.search)
   for (const w of n.where) {
     params.append(
       'where',
@@ -309,7 +376,15 @@ export function collectionQuery(
 ): ContentQuery {
   const stored = asCollectionValue(value)
   const filterable = new Set(field.filterable ?? [])
-  const orderable = new Set([...filterable, ...Object.keys(BUILT_IN_ORDERS)])
+  // `relevance` is not orderable here **yet**: a `collection` carries no search
+  // term until `searchable: true` exists (full-text-search.md decision 10), and
+  // `contentSql` refuses `relevance` without one. Dropping it falls back to the
+  // field's `defaultOrder`, which is what that spec's edge case asks for — and
+  // is what a stored `relevance` did before it was a built-in at all.
+  const orderable = new Set([
+    ...filterable,
+    ...Object.keys(BUILT_IN_ORDERS).filter((k) => k !== 'relevance'),
+  ])
 
   const order =
     stored.order && orderable.has(stored.order.field) ? stored.order : field.defaultOrder

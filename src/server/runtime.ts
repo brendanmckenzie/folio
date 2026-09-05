@@ -784,6 +784,13 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     // exactly what `indexRowsFor` writes for the same three cases.
     localeKey: (code) => localeOf(code)?.code ?? '',
     withUrls,
+    // `ResolvedGate` narrowed to the three things a SQL predicate can use
+    // (`../content-model/full-text-search.md` decision 11). `types`, not
+    // `roots`: SQL sees `stories.type` and cannot see a root block's name.
+    // Absent on a deployment with no gate, and then `contentSql` emits nothing.
+    ...(gate
+      ? { gate: { field: gate.config.field, public: gate.config.public, types: gate.types } }
+      : {}),
   })
 
   const query = (bindings: ReadBindings, q: ContentQuery): Promise<ContentPage> =>

@@ -55,11 +55,19 @@ function parseWhere(raw: string): ContentWhere {
 
 const clip = (s: string) => (s.length > 60 ? `${s.slice(0, 60)}…` : s)
 
-/** `published:desc`, or a bare built-in like `publishedAt`. */
+/**
+ * `published:desc`, or a bare built-in like `publishedAt`.
+ *
+ * `relevance` is a built-in like the other three and is accepted here on the
+ * same terms — bare, or with a direction. Whether it *means* anything is
+ * `contentSql`'s call, not this function's: it needs a `search` term and refuses
+ * without one, naming it, which is a check that has to sit next to the query it
+ * checks rather than next to the string it was spelled with.
+ */
 function parseOrder(raw: string): ContentQuery['order'] {
   const [field, dir] = raw.split(':')
   if (!field) throw new FolioError('bad_request', "order must be 'field' or 'field:asc|desc'")
-  if (dir === undefined) return field as 'publishedAt' | 'ord' | 'title'
+  if (dir === undefined) return field as 'publishedAt' | 'ord' | 'title' | 'relevance'
   if (dir !== 'asc' && dir !== 'desc') {
     throw new FolioError('bad_request', "order direction must be 'asc' or 'desc'")
   }
@@ -100,11 +108,18 @@ export function queryFromParams(params: URLSearchParams): ContentQuery {
   // it means "anywhere".
   const parent = params.get('parent')
   const locale = params.get('locale')
+  // Passed through as the visitor typed it. `normaliseQuery` trims it, collapses
+  // its whitespace and caps it at `MAX_SEARCH_LENGTH`, and `ftsQuery` tokenises
+  // what is left — so there is no spelling of this parameter that is a 400, and
+  // deliberately so: a stray quote in a search box is the commonest input there
+  // is, and refusing it teaches a visitor nothing they can act on.
+  const search = params.get('search')
 
   return {
     ...(type.length > 0 ? { type: type.map(typeNameQuery) } : {}),
     ...(parent !== null ? { parent: parent === '' ? null : parent } : {}),
     ...(locale ? { locale } : {}),
+    ...(search ? { search } : {}),
     ...(where.length > 0 ? { where } : {}),
     ...(order ? { order: parseOrder(order) } : {}),
     ...(positive(params.get('page') ?? undefined, 'page') !== undefined
