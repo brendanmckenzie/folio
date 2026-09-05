@@ -2093,6 +2093,68 @@ silently not being kept is worth a line: `GET /folio/api/auth-events` answers
 `oldestAt`, the age of its oldest row, so the surface that would show the
 symptom actually shows it.
 
+### Passkeys
+
+`passkeys()` is a fifth provider, opt-in per deployment — listing it in
+`auth.providers` is the whole of turning it on. It renders a hidden button and
+one inert inline script on the login page, mounts `/folio/login/passkey/*` and
+`/folio/api/me/passkeys*`, and adds a row to Settings' provider list. It cannot
+be the *only* provider: enrolling one needs a session, and the first sign-in is
+always another door, so `resolveAuth` throws at construction if nothing else is
+listed.
+
+```ts
+import { createFolio, magicLink, passkeys } from 'folio/server'
+
+const folio = createFolio<Env>({
+  // ...
+  auth: {
+    providers: [magicLink({ send }), passkeys()],
+    sessionDays: 30,
+  },
+})
+```
+
+**Enrolling one is something a signed-in person does to their own account,
+never a public form.** There is no self-registration. It happens on **Your
+account** — reached from the user menu — which also lists that person's own
+passkeys (name, added, last used, a "synced" badge) with rename and remove per
+row, their open sessions with a "this browser" badge and a
+sign-out-the-others action, and their last twenty sign-in events.
+
+**The login page still posts without JavaScript.** The passkey button ships
+`hidden` until an inline script proves the browser supports WebAuthn, and the
+email form's `action` and `method` are unchanged either way — a browser with
+scripting off, or a host that never lists `passkeys()`, sees exactly today's
+page: a mail form and a button per redirect provider, nothing else.
+`LOGIN_PASSKEY_SCRIPT_HASH`, exported from `folio/server`, is the `sha256-…` of
+that one inline script; a host applying a Content-Security-Policy to
+`/folio/login` puts it in `script-src` to allow it. It is computed from the
+literal itself, so a one-character edit to the script cannot silently break a
+host's CSP without anyone noticing at build time.
+
+**A passkey is bound to the host it was enrolled on, and that binding is not
+configurable.** `rpId` — the relying-party id a passkey is scoped to — is
+always the request host; there is no `passkeys({ rpId })`. A passkey enrolled
+on `localhost` under `wrangler dev`, or on a `workers.dev` preview, does
+**not** work on the production domain, and never will. The failure a person
+sees is the browser's own "this passkey does not work here", with nothing to
+debug on the server — WebAuthn refuses the assertion before Folio's code ever
+runs. This is the trap most likely to be hit first, and the only thing that
+hints at it is the account screen's default passkey name, `Passkey · <host>`,
+which at least says which host a given credential is good for.
+
+**User verification is `required` at both enrolment and sign-in**, so a bare
+security key with no PIN or biometric cannot enrol at all — a passkey is the
+only factor in this sign-in, and the local check is what makes it two factors
+by construction. That failure, too, is the browser's to report, not Folio's.
+
+**An admin can remove all of somebody's passkeys, never manage them one by
+one.** "Remove all passkeys" sits on the Access screen next to the ordinary
+"Remove" action, for a lost or stolen device; the way back in afterwards is
+magic link or SSO, whichever the deployment also lists — removing passkeys is
+never the only door left standing.
+
 Out of scope, deliberately: **site-visitor auth** — who may *read* a published
 page. That is a different problem, and reading a published page still needs no
 account at all. See "Visitor access" below: a host predicate `reader.page()`
@@ -2679,9 +2741,13 @@ Within auth, **spec 28 has landed**
 (`docs/specs/foundation/auth-providers.md`) — see "Auth" above: a
 trusted-identity provider kind with a Cloudflare Access helper, SSO role
 mapping through `roleFromClaim`, per-domain enforced providers and an
-`auth_events` table with a `sweepAuth` retention sweep. Passkeys are spec 29
-(`docs/specs/foundation/passkeys.md`), still unbuilt. **Site-visitor access
-control has landed**, as spec 31 (`docs/specs/platform/visitor-access.md`) —
+`auth_events` table with a `sweepAuth` retention sweep. **Passkeys have
+landed too**, as spec 29 (`docs/specs/foundation/passkeys.md`) — see
+"Passkeys" above. One thing that spec's own gate does not yet cover: the
+hand-rolled WebAuthn verifier is proven against a synthetic authenticator,
+not against real devices — `test/fixtures/webauthn/` is still empty, and a
+`todo` in `pnpm test` names the gap rather than hiding it. **Site-visitor
+access control has landed**, as spec 31 (`docs/specs/platform/visitor-access.md`) —
 see "Visitor access" above. Still deliberately out: per-story editor
 permissions, multi-tenant spaces (spec 23), passwords and TOTP. Sign-in link
 rate limiting is per address only; the IP dimension wants a Cloudflare

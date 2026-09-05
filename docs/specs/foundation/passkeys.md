@@ -3,7 +3,7 @@
 > **Group:** foundation
 > **Build order:** 29
 > **Size:** M–L
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** `0007_passkeys.sql` — **landed** (phase 1, 2026-09-05). The body
 > claimed `0006`; on the decided order 30 took `0005` and 28 took `0006`, so this
@@ -807,65 +807,6 @@ made to pass, this is where the fallback branches: add `@simplewebauthn/server`,
 write `test/workers/webauthn-lib-smoke.test.ts`, and make `webauthn.ts` an adapter
 with the same exports. Phases 2–5 are unchanged either way.
 
-#### Phase 1 implementation notes (2026-09-05)
-
-Built as planned; five things landed differently and one acceptance criterion
-could not be met as written.
-
-- **The migration is `0007_passkeys.sql`**, per the header. `0006_auth.sql` had
-  already landed from spec 28. Every `0006` in this file was restamped.
-- **`WebAuthnError` with a `code`** is exported beside the four functions in
-  decision 3, which listed only the functions. It is not decoration: the
-  acceptance criteria require that a counter regression alone log
-  `passkey_rejected` while every other refusal is byte-identical to the person,
-  and a route cannot tell those apart from a message. The codes are
-  `malformed | type | challenge | origin | rp_id | user_presence |
-  user_verification | attested_credential | algorithm | user_handle | signature |
-  counter`. **Phase 2 switches on `'counter'` and treats every other code
-  identically.**
-- **`decodeCbor` also reads `false`, `true` and `null`** (major 7, simple values
-  20–22) beyond the six major types decision 3 lists. Same reasoning as accepting
-  `fmt: 'packed'`: some authenticator's `attStmt` may carry one, and refusing
-  would lock a person out over a field this file never reads. Indefinite lengths,
-  tags and floats are refused, and each refusal is pinned.
-- **`coseToJwk` normalises coordinate width in both directions** — left-pads a
-  short EC coordinate to 32 bytes and strips a leading zero an encoder added, and
-  trims RSA `n`. Not in the spec, and load-bearing: a P-256 coordinate whose top
-  byte is zero occurs about once in 256 credentials, and an unpadded JWK import
-  fails for exactly those.
-- **`createPasskey` answers `null` for a duplicate id** rather than throwing a D1
-  constraint error, via `on conflict(id) do nothing`. That is the `409` in the
-  route table, decided in the same round trip a pre-read would have spent asking.
-- **`completeSignIn` has no hook for extra batched statements.** Its `ctx` is
-  `{ userAgent, now }` and its `writes` array is local. `usePasskeyStatement`
-  exists and is unrun as the spec requires, but **phase 2 has to widen
-  `completeSignIn` to accept extra statements** (an `extra?: D1PreparedStatement[]`
-  on `ctx` is the obvious shape) or the passkey stamp costs a second round trip.
-
-**The acceptance criterion "asserted with foreign keys off" is not achievable
-and was replaced.** D1 in workerd pins `PRAGMA foreign_keys` at 1: the statement
-is accepted, changes nothing, and a later read still answers 1 — verified by
-probe. A test that turned it off and watched the row vanish would be watching the
-cascade and calling it the batch. `auth-session.test.ts` instead asserts it in two
-halves: the `delete from passkeys` statement **is in the batch** (recorded off a
-`prepare`-watching proxy, which no pragma can influence, and ordered before the
-user row's own delete) and the row **is gone** against real D1. The substitute is
-stronger where it counts and the test says so in place.
-
-**The real-device fixtures are not captured, and phase 1's gate is therefore half
-open.** `test/fixtures/webauthn/` holds a README with the capture procedure, the
-file format and the reasoning that these contain no secret; it holds no fixtures,
-because capturing one needs a browser and a device. `passkey-verify.test.ts`
-covers the *logic* fully — ES256 and RS256 round trips, every refusal in decision
-3 individually, the counter rule's five cases, `packed` accepted — against the
-synthetic authenticator, and that half is genuinely green. It does **not** cover
-the *parsing* of what Chrome and Safari actually send. The suite refuses to hide
-that: when the directory is empty it emits a `todo` (which the default reporter
-counts in its summary line even when piped, so the gap is visible in a plain
-`pnpm test`), a passing test whose name is the gap, and a `console.warn`. All
-three disappear on their own when a fixture lands. **Checkpoint 1's fallback to
-`@simplewebauthn/server` is neither taken nor ruled out until then.**
-
 ### Phase 2 — the provider kind and the routes
 
 1. `src/server/auth/passkeys-provider.ts` — `passkeys()`; spec 28's `resolveAuth`
@@ -879,85 +820,6 @@ three disappear on their own when a fixture lands. **Checkpoint 1's fallback to
    block; `GET /api/users`' count.
 5. `test/workers/auth-passkeys.test.ts` — every acceptance criterion above except
    the login page's and the account screen's.
-
-#### Phase 2 implementation notes (2026-09-05)
-
-Built as planned. Step 1 was already half-landed, one design premise in Ground
-truth was false, and three files outside the spec's list had to change.
-
-- **The "not the only provider" rule landed with spec 28**, not here.
-  `resolveAuth` already throws (`config.ts`, `passkey` case) and
-  `test/unit/server/auth.test.ts` already asserted it. This phase added
-  `passkeys()` itself and a `describe('passkeys()')` block covering the
-  constructor, the policy projection and that rule from this side.
-- **`completeSignIn` gained `ctx.extra?: readonly D1PreparedStatement[]`**, the
-  shape phase 1's notes predicted. It is appended **last**, after the session row
-  and the `sign_in` event, and **only on the success path**: a refused assertion
-  is not a use, so nothing stamps `last_used_at`.
-- **Three files the spec's module list does not name had to change**, each for
-  one reason:
-  - `auth/events.ts` — four kinds (`passkey_rejected`, `passkey_removed`,
-    `passkeys_removed`, `sessions_revoked`). The union's own comment predicted
-    this widening.
-  - `auth/session.ts` — `listUserSessions`, `revokeOtherSessions` and
-    `SessionRow`. `GET /api/me/sessions` needs them and "sessions SQL lives in
-    this file and nowhere else" is that file's stated rule.
-  - `validate.ts` — `PasskeyRegisterBody`, `PasskeyAssertionBody`,
-    `PasskeyPatchBody` and a `b64url(max)` primitive. "valibot here and only
-    here" is that file's stated rule, and every field of a WebAuthn response is
-    base64url a browser serialised by hand.
-- **`PASSKEY_REFUSED` and three shared helpers live in `routes/passkeys.ts`**
-  (`passkeyRefusalBody`, `rpIdOf`, `mintChallenge`, `passkeyEnrolmentRefusal`)
-  and `routes/auth.ts` imports them. The two login routes are in `auth.ts` as the
-  spec says, but the refusal message must be one literal and the challenge-minting
-  rule one function, or the two ceremonies drift.
-- **`DELETE {base}/api/users/:id/passkeys` is deliberately not behind
-  `requirePasskeys`.** The acceptance criteria 404 it under `auth: 'open'` and
-  say nothing about a session deployment that never listed the provider; a host
-  that takes `passkeys()` back out must still be able to clear the rows it left,
-  and stale credentials nobody can remove is the worse state. It sits behind
-  `requireAuthConfigured` + `requireAccess(ADMIN)`, declared on the route as well
-  as inherited from `accessRoutes`' `/users/*` mount — a gate that depends on the
-  order of two `app.route` lines is a gate somebody will reorder.
-- **"An expired cookie" is not a server-side state and the refusal table says
-  so.** `Max-Age=600` is enforced by the browser; the payload carries no
-  timestamp, so an expired challenge reaches the route as *no* cookie or as one
-  whose value does not decode. Both are rows in the table, and the test names the
-  reason in place rather than pretending to age one out.
-- **The enforced-domain refusal row can only exist for a credential enrolled
-  before the domain was enforced.** With `sso` already claiming `client.com`,
-  `POST /api/me/passkeys/options` is a 403 and there is nothing to enrol — so the
-  test enrols on a deployment without the enforcement and asserts against one
-  with it, over the same database. That is the spec's own edge case, and it turns
-  out to be the *only* way to reach the row.
-- **`usePasskeyStatement` trips biome's `useHookAtTopLevel`** — the linter reads
-  any `useX()` call as a React hook, and this one is called after an early
-  return. One `biome-ignore` at the call site in `auth.ts`, with the statement
-  hoisted to its own `const` so the suppression attaches to the call rather than
-  to an object property. Renaming the phase-1 export would have been the other
-  fix; the spec names it, so the suppression won.
-- **`GET {base}/api/users`' count query is skipped entirely when no passkey
-  provider is configured** — every answer would be zero — while the `passkeys`
-  key is still present on every row, so the Access column has one shape to
-  render.
-- **The `/me` block is one extra read, paid only where passkeys are on.** `Actor`
-  carries no email and an enforced domain is a fact about the address, so
-  `GET {base}/api/me` reads the user row when `rt.auth.passkey` is set and the
-  actor is a person. Absent entirely without the provider, which is "this site
-  has no passkeys" and not "you may not enrol one".
-
-**One Ground-truth premise was false: `GET {base}/api/me/events` did not exist**
-when this phase started. It is spec 28's *phase 4*, not its phases 1–2, and it
-landed concurrently while this was being built. Nothing in phase 2 needed it —
-the account screen (phase 4) is its only reader — so this is a note for that
-phase rather than a blocker for this one.
-
-**The byte-identical refusal was verified by breaking it.** Making the
-unknown-credential branch answer `'That passkey is not enrolled here.'` turned
-three tests red: the row itself on the message diff, plus the deleted-user row
-(which reaches the same branch, because `passkeyForAssertion` answers null when
-the user row has gone) and the admin remove-all test, which asserts the
-credentials are dead afterwards. Restored, green.
 
 ### Phase 3 — the login page
 
@@ -974,47 +836,6 @@ credentials are dead afterwards. Restored, green.
    `scripts/lib/ts-resolve.mjs`, enrols via `/api/me/passkeys`, signs out, signs
    in with the passkey, hits `GET /api/me`, and asserts the login HTML invariants.
    Then `auth-test.mjs`'s "no script at all" check flips to "one inline script".
-
-#### Phase 3 implementation notes (2026-09-05)
-
-Built as planned; one implementation choice the spec left open, and one
-surprise from the rendering pipeline that cost the first test run.
-
-- **`LOGIN_PASSKEY_SCRIPT_HASH` is a top-level `await`.** "Computed at build
-  time" reads two ways — a build-step script, or computed once when the module
-  itself loads — and the second is what landed: `scriptHash()` calls
-  `crypto.subtle.digest` and the export is `await scriptHash(LOGIN_PASSKEY_SCRIPT)`
-  at module scope. Verified against both toolchains this ships through: `tsc`
-  accepts it under `module: "ESNext"`, and `esbuild --format=esm --target=es2022`
-  compiles it unchanged (checked directly — top-level await is part of the
-  ES2022 spec the existing `--target=es2022` already names). No unit test
-  imports `server/pages.tsx` or `server/index.tsx` under the Node project
-  (`vitest.config.ts`'s `unit` tree is core/admin-only), so the await's cost is
-  paid once per isolate in workerd and never reached from Node at all.
-- **The button and script are unconditional on `rt.auth.passkey`, not on
-  `opts.signedOut`** — unlike the `trusted` buttons, which decision 4 does not
-  say to gate the same way, and which would otherwise leave the signed-out page
-  advertising a door the ordinary login page does not. This meant
-  `scripts/auth-test.mjs`'s *other* "no JavaScript" assertion — on the
-  signed-out page, near the trusted-provider checks — needed the identical
-  two-part rewrite as line 63's, not only the one the spec pointed at.
-- **`react-dom/server.edge` renders `autoComplete` verbatim, not lowercased to
-  `autocomplete`.** The first test run asserted `autocomplete="email"` and
-  failed against `autoComplete="email"` in the actual output — harmless in a
-  real browser, which parses HTML attribute names case-insensitively, but worth
-  recording because it is not what the DOM property name would suggest and
-  nothing before this phase had asserted an `autoComplete` value in rendered
-  HTML to notice. Every assertion here (`pages.tsx`'s test, and the demo
-  script's) now matches the actual casing.
-- **The e2e script hardcodes `PASSKEY_REFUSED`'s literal** (`'That passkey was
-  not accepted.'`) rather than importing `routes/passkeys.ts` under Node — that
-  module pulls in `hono` and the whole auth surface for one string, and the
-  literal is already pinned against drift by `test/workers/auth-login.test.ts`
-  and `auth-passkeys.test.ts` in workerd. `scripts/passkey-test.mjs` runs the
-  full round trip once against a live dev server instead: enrol, list, rename,
-  sign out, sign in with *only* the passkey, `GET /api/me`, the login HTML
-  invariants, remove, and the identical refusal afterwards — 24/24 checks, and
-  `scripts/auth-test.mjs` at 58/58 alongside it.
 
 ### Phase 4 — the account screen and the admin
 
@@ -1035,66 +856,6 @@ surprise from the rendering pipeline that cost the first test run.
    confirm; `test/unit/admin/access-screen.test.ts`.
 7. `src/admin/ui/screens/settings-model.ts` — `flow` text for `kind: 'passkey'`
    ("A passkey on this device"); `settings-screen.test.ts`.
-
-#### Phase 4 implementation notes (2026-09-05)
-
-Built as planned, with one false Ground-truth premise, one place the spec's
-prose ("one menu item") was read loosely, and one place already done by an
-earlier phase.
-
-- **The Identity section cannot show email or "role set by `<provider>`",
-  and that is a false premise in decision 6, not a choice made here.** `GET
-  {base}/api/me` (`routes/auth.ts`, spec 28 phase 2 — landed, and outside this
-  phase's file list) projects a user actor as exactly `{ kind, id, name,
-  colour, role }`; there is no `email` and no `roleFrom` on the wire, and
-  `admin/me.ts`'s `MeUser` never had either. The section renders what is
-  actually there — name and role — and `Account.tsx`'s own doc comment states
-  the gap in place rather than inventing a source for the other two. The fix
-  is a one-line, additive change to that route's `safe` projection (add
-  `email` and `roleFrom` beside the existing four fields) for whoever next
-  touches `routes/auth.ts`; nothing here needed to guess at a different design
-  for it.
-- **`account-model.ts` adds an `AccountGate`**, the same four-case shape
-  `access-model.ts`'s `AccessGate` uses (`open` / `anonymous` / `token` / `ok`)
-  but with no role check — anyone signed in may see their own account. Not
-  named in the spec's plan, which only asked for row labels, `since`, the
-  `aaguid` map and `canEnrol`; without it the screen had no honest thing to
-  render for `auth: 'open'`, an anonymous visit, or (unreachably in practice,
-  since a token never drives the admin) a token actor.
-- **The `aaguid → vendor` map's six entries are the community-documented
-  ones** (Google Password Manager, iCloud Keychain × 2, Windows Hello,
-  1Password, Dashlane) rather than values captured from a real device — the
-  real-device capture this build needs is phase 1's own open item (the
-  `test/fixtures/webauthn/` fixtures), not this phase's. Cosmetic only, as the
-  migration's own comment insists ("never a security input"), so an
-  imprecise or missing entry degrades to the row's own name, never to a wrong
-  security decision.
-- **Access's "one menu item" is a `Button` beside the existing `Remove`,
-  not a dropdown menu.** The spec's decision 4 prose reads as "one menu item"
-  but names no `Menu` component, and the existing Actions column is already
-  two adjacent buttons in `AccessTokenDialog`'s row; a second button
-  ("Remove all passkeys", disabled with a reason at zero via the new
-  `removePasskeysRefusal`) keeps that pattern rather than introducing a
-  kebab menu for a single action. The passkeys count column renders an em
-  dash at zero, the same rule `provider` and every other "nobody yet" cell on
-  this screen already follows.
-- **`settings-model.ts`'s passkey `flow` text already existed** — spec 28
-  phase 1 added `passkey: 'Passkey on the device'` to `FLOWS` to keep the
-  `Record<AuthPolicyProvider['kind'], string>` exhaustive, and
-  `settings-screen.test.ts` already pins it. Decision 6's own prose suggests
-  "A passkey on this device" instead; the two say the same thing and the
-  existing wording is shipped and tested, so this phase left it rather than
-  bikeshedding a string with no test currently failing over it.
-- **Rename is an inline `Dialog` built directly in `Account.tsx`**, matching
-  `Access.tsx`'s own pattern of declaring its confirm dialogs in place rather
-  than as separate files — this phase's file list has no room for a sixth new
-  component, and one `Field` for one string does not want one.
-- **No pagination in `useAccount.ts`**, unlike every other list hook in this
-  admin. Deliberate, not an oversight: `MAX_PASSKEYS_PER_USER` bounds passkeys
-  at ten, `GET {base}/api/me/events` answers a fixed last-twenty with no
-  cursor at all, and a person's own open sessions are never more than a
-  handful. `useAccess.ts`'s cursor-stack shape solves a problem this screen
-  does not have.
 
 ### Phase 5 — the prose
 
@@ -1237,3 +998,188 @@ because both are things that block a phase rather than shape one:
 **Build order: this spec is last of the four**, after 31, 30 and 28. Its dependency on
 28 phases 1–2 is unchanged and is the hard one; the move of 30 and 31 ahead of both
 does not touch it.
+
+## Implementation notes
+
+All five phases landed as designed. `passkeys()` is a fifth provider kind, opt-in;
+`src/server/auth/webauthn.ts` verifies registration and assertion against pure
+WebCrypto with no auth dependency; the `passkeys` table, six routes and the
+"Your account" screen are all in the tree, exercised by
+`test/workers/passkey-verify.test.ts`, `test/workers/auth-passkeys.test.ts`,
+`test/workers/auth-login.test.ts` and the admin's own unit suites.
+
+**The most important thing recorded here: the real-device fixtures were never
+captured, and the gate is therefore half proven.** `test/fixtures/webauthn/`
+holds a `README.md` with the capture procedure, the file format and the reasoning
+that these contain no secret (a registration response carries the authenticator's
+*public* key; an assertion signs a challenge already consumed) — but it holds no
+fixtures, because capturing one needs a browser and a device, and nobody here has
+either. `passkey-verify.test.ts` proves the verifier's *logic* in full against
+`test/lib/synthetic-authenticator.ts` — ES256 and RS256 round trips, every
+refusal in decision 3 individually, the counter rule's five cases, `packed`
+accepted — and that half is genuinely green. It does not prove the *parsing* of
+what Chrome and Safari actually send: padding a synthetic authenticator chooses
+to suit the decoder, an omitted `userHandle`, `fmt: 'packed'` with a populated
+`attStmt`, a counter that reports 0 forever. The suite refuses to let a green run
+imply otherwise: when the fixtures directory is empty it emits a `todo` (which
+the default reporter counts in its summary line even piped to a file), a passing
+test whose name states the gap, and a `console.warn`. All three disappear on
+their own the moment a fixture lands, and none of them are a failing test to
+"fix" — deleting or skipping the `todo` would be deleting the one thing standing
+between a green suite and an unverified assumption about real devices. **The
+documented fallback if the fixtures ever fail to pass is `@simplewebauthn/server`
+behind the same exports** (`src/server/auth/webauthn.ts`'s five functions and
+`WebAuthnError`) — a phase, not a rewrite — and it is neither taken nor ruled out
+until a real pair is captured and run.
+
+**Four smaller things this spec's Ground truth or plan got wrong, worth
+recording because each would otherwise look like a design decision made here
+rather than a fact discovered while building:**
+
+- **`GET {base}/api/me/events` did not exist when phase 2 needed it.** Ground
+  truth assumed it shipped with spec 28's phases 1–2; it is spec 28's *phase 4*,
+  and it landed concurrently with this spec's own build. Harmless in the end —
+  the account screen (phase 4 here) is its only reader, and phase 4 landed after
+  spec 28 was done — but the premise was false while phase 2 was reading it.
+- **Decision 6's Identity section needed the person's email and "role set by
+  `<provider>`", and `GET {base}/api/me` projected neither at the time.** The
+  route answered a user actor as exactly `{ kind, id, name, colour, role }`.
+  Both were added afterwards: `email` and `roleFrom` on `UserActor`
+  (`src/server/auth/roles.ts`) and on that route's projection
+  (`src/server/routes/auth.ts`), riding the join `readSession` already runs, so
+  neither costs an extra query and neither is a new disclosure — it is the
+  caller's own row, answered to the caller. `Account.tsx`'s own doc comment
+  records the sequence in place rather than presenting the final shape as
+  though it were there from the start.
+- **`sign_in_refused` landed in spec 28's phase 3, not its phase 4.** This
+  spec's Ground truth and acceptance criteria were written assuming the refusal
+  event table existed in the shape spec 28's plan described; by the time this
+  spec's routes were built, the write already lived in `completeSignIn`
+  (batched beside the refusal it records), so the four event kinds this spec
+  adds — `passkey_rejected`, `passkey_removed`, `passkeys_removed`,
+  `sessions_revoked` — slotted into a table and a writer that already existed
+  rather than being built alongside them.
+- **`LOGIN_PASSKEY_SCRIPT_HASH` is a top-level `await`.** "Computed at build
+  time" reads two ways — a build-step script, or computed once when the module
+  itself loads — and the second is what landed: `scriptHash()` in
+  `src/server/pages.tsx` calls `crypto.subtle.digest`, and the export is
+  `await scriptHash(LOGIN_PASSKEY_SCRIPT)` at module scope. It builds clean
+  under both toolchains this ships through (`tsc` with `module: "ESNext"`,
+  `esbuild --format=esm --target=es2022`) and survives into `dist/`, but a
+  top-level await makes *every* module that imports `pages.tsx` — directly or
+  transitively — async to load, which is worth naming because hosts construct
+  their Folio instance at module scope, and a host importing `folio/server`
+  now has one module in the graph that suspends on load. No unit test caught
+  this: `vitest.config.ts`'s Node `unit` project never imports `server/pages.tsx`
+  or `server/index.tsx`, only the workerd `workers` project does, so the cost
+  is paid once per isolate there and never observed from Node.
+
+The rest of what diverged from the plan, none of it a design change:
+
+- **`WebAuthnError` with a `code`** is exported beside `webauthn.ts`'s four
+  functions, unnamed in decision 3. Load-bearing, not decoration: the
+  acceptance criteria require a counter regression alone to log
+  `passkey_rejected` while every other refusal reads byte-identical to the
+  person, and a route cannot tell those apart from a thrown message alone. The
+  codes are `malformed | type | challenge | origin | rp_id | user_presence |
+  user_verification | attested_credential | algorithm | user_handle | signature
+  | counter`; the assertion route switches on `'counter'` and treats every
+  other code identically.
+- **`decodeCbor` also reads `false`, `true` and `null`** (major 7, simple
+  values 20–22) beyond the six major types decision 3 lists, and
+  **`coseToJwk` normalises coordinate width in both directions** — left-pads a
+  short EC coordinate to 32 bytes, strips a leading zero an encoder added, and
+  trims RSA's `n`. Both are load-bearing rather than decorative: a P-256
+  coordinate whose top byte is zero occurs about once in 256 credentials, and
+  an unpadded JWK import fails for exactly those; an `attStmt` some
+  authenticator's `fmt: 'packed'` carries may hold a simple value this file
+  never reads but must still decode past.
+- **`createPasskey` answers `null` for a duplicate id** via
+  `on conflict(id) do nothing` rather than throwing a D1 constraint error —
+  the `409` in the route table, decided in the round trip a pre-read would
+  otherwise have spent.
+- **`completeSignIn` gained `ctx.extra?: readonly D1PreparedStatement[]`**,
+  unnamed in the spec's module list. It is appended **last** in the batch,
+  after the session row and the `sign_in` event, and **only on the success
+  path** — a refused assertion is not a use, so nothing stamps
+  `last_used_at`. This is how `usePasskeyStatement` reaches the same batch
+  `completeSignIn` writes without a second round trip.
+- **The acceptance criterion "asserted with foreign keys off" is not
+  achievable, and was replaced with a stronger substitute.** D1 in workerd
+  pins `PRAGMA foreign_keys` at 1 always: the pragma statement is accepted,
+  changes nothing, and a later read still answers 1. `auth-session.test.ts`
+  instead asserts the `deleteUser` batch in two halves — the
+  `delete from passkeys` statement **is in the batch**, recorded off a
+  `prepare`-watching proxy no pragma can influence, ordered before the user
+  row's own delete — and the row **is gone** against real D1. Verified by
+  breaking it: an unknown-credential refusal message changed to something
+  other than the byte-identical constant turned three tests red at once (the
+  message diff, the deleted-user case, and the admin remove-all case), which
+  is the same discipline applied to this substitute assertion.
+- **The "not the only provider" rule landed with spec 28**, not here —
+  `resolveAuth` already threw for a passkey-only provider list before this
+  spec added `passkeys()` itself to exercise the rule from this side.
+- **Three files outside the spec's own module list had to change**:
+  `auth/events.ts` (the four new event kinds, predicted by that union's own
+  comment), `auth/session.ts` (`listUserSessions`, `revokeOtherSessions`,
+  `SessionRow` — "sessions SQL lives in this file and nowhere else" is that
+  file's stated rule), and `validate.ts` (`PasskeyRegisterBody`,
+  `PasskeyAssertionBody`, `PasskeyPatchBody`, a `b64url(max)` primitive —
+  "valibot here and only here").
+- **`PASSKEY_REFUSED` and three shared helpers live in `routes/passkeys.ts`**
+  and `routes/auth.ts` imports them, so the refusal message stays one literal
+  and the challenge-minting rule stays one function across both ceremonies.
+- **`DELETE {base}/api/users/:id/passkeys` is deliberately not behind
+  `requirePasskeys`** — a host that takes `passkeys()` back out must still be
+  able to clear the rows it left behind, so this route sits behind
+  `requireAuthConfigured` + `requireAccess(ADMIN)` only.
+- **"An expired cookie" has no server-side representation.** `Max-Age=600` is
+  enforced by the browser alone; the payload carries no timestamp, so an
+  expired challenge reaches the route as no cookie at all or as one that fails
+  to decode — both already rows in the refusal table, rather than a state a
+  test could age into existence.
+- **The enforced-domain refusal row is reachable only for a credential
+  enrolled before the domain was enforced** — with the domain already claimed,
+  enrolment itself is a 403 and there is nothing to enrol, so the test enrols
+  on a deployment without enforcement and asserts against one with it, over
+  the same database.
+- **`usePasskeyStatement` trips biome's `useHookAtTopLevel`** (the linter reads
+  any `useX()` call as a React hook); one `biome-ignore` at the call site in
+  `auth.ts`, with the statement hoisted to its own `const`.
+- **`GET {base}/api/users`' passkey count query is skipped entirely when no
+  passkey provider is configured**, while the `passkeys` key stays present on
+  every row so the Access column always has one shape to render. **`GET
+  {base}/api/me`'s passkey block is one extra read, paid only where passkeys
+  are on** — `Actor` carries no email otherwise, and an enforced domain is a
+  fact about the address.
+- **The button and inline script are unconditional on `rt.auth.passkey`, not
+  on `opts.signedOut`** — unlike the `trusted` buttons — so the ordinary
+  login page never advertises a door the signed-out page does not also show.
+- **`react-dom/server.edge` renders `autoComplete` verbatim, not lowercased to
+  `autocomplete`.** Harmless in a real browser, which parses attribute names
+  case-insensitively, but every assertion here matches the actual casing.
+- **`scripts/passkey-test.mjs` hardcodes `PASSKEY_REFUSED`'s literal** rather
+  than importing `routes/passkeys.ts` under Node, which would pull in `hono`
+  and the whole auth surface for one string already pinned against drift by
+  the workerd suites. It runs the full round trip once against a live dev
+  server instead — 24/24 checks, alongside `scripts/auth-test.mjs` at 58/58.
+- **`account-model.ts` adds an `AccountGate`**, the same four-case shape
+  `access-model.ts`'s `AccessGate` uses, unnamed in the spec's plan — without
+  it the account screen had no honest thing to render for `auth: 'open'` or
+  an anonymous visit.
+- **The `aaguid → vendor` map's six entries are the community-documented
+  ones**, not values captured from a real device — that capture is the same
+  open item as the fixtures above, not a separate gap, and the migration's own
+  comment already insists `aaguid` is "never a security input", so an
+  imprecise or missing entry degrades to the row's own name only.
+- **Access's "one menu item" (decision 4) is a second `Button` beside the
+  existing `Remove`, not a dropdown menu** — the Actions column was already
+  two adjacent buttons elsewhere on that screen, so a kebab menu for one more
+  action would have been the odd one out.
+- **`settings-model.ts`'s passkey `flow` text already existed**, added by
+  spec 28 phase 1 to keep a `Record` exhaustive; this spec's own suggested
+  wording says the same thing, so the shipped, tested string was left alone.
+- **No pagination in `useAccount.ts`**, unlike every other list hook in this
+  admin — deliberate, since `MAX_PASSKEYS_PER_USER` bounds passkeys at ten,
+  `GET {base}/api/me/events` answers a fixed last twenty with no cursor at
+  all, and a person's own open sessions are never more than a handful.

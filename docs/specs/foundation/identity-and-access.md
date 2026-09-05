@@ -611,9 +611,14 @@ serve while signed out.
   different shape from the whole-route gate this spec rejected.
 - **Passkeys, TOTP, password login.** Magic link plus OIDC covers both audiences,
   and a password store is a liability nobody asked for. *Reversed for passkeys on
-  2026-09-05:* spec 29, `passkeys.md`, adds them as a second door a signed-in
-  account enrols — no password store, no self-registration. TOTP and passwords stay
-  out.
+  2026-09-05:* spec 29, `passkeys.md` — **done** — adds them as a second door a
+  signed-in account enrols — no self-registration. The reversal is not only that
+  the owner asked: the reason given here does not actually apply to a passkey.
+  "A password store is a liability nobody asked for" is true of a password, which
+  is a secret Folio would have to hash and guard; a passkey's `public_key` column
+  is, as its name says, public — a leaked table lets nobody sign in, by
+  construction rather than by hashing. There was never a password store to avoid
+  building. TOTP and passwords stay out.
 - **A separate audit log.** The activity trail plus version rows already record who
   changed content; auth events (sign-in, role change, token created) are the gap,
   and one `auth_events` table is a follow-up rather than a prerequisite.

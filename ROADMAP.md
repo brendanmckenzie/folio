@@ -338,6 +338,30 @@ of its own, and `folio.sweepAuth` gives it — and expired sessions, and stale
 challenges — a 90-day retention that a host has to wire into its own cron, with
 no signal if it forgets to.
 
+**Passkeys — one gesture to sign in, enrolled by somebody who already has an
+account. Done 2026-09-05, as spec 29** (`foundation/passkeys.md`). `passkeys()`
+is a fifth provider kind, opt-in: listing it renders a hidden button and one
+inert inline script on the login page — progressive enhancement over the same
+form that posts today without it, spec 10 decision 7 kept in spirit — and adds
+a "Your account" screen where a signed-in person enrols, names and removes
+their own passkeys and sees their open sessions and recent sign-ins. Admins get
+one action, "remove all of a person's passkeys," for the lost-device case, not
+per-passkey management. Verification is hand-rolled WebCrypto — a CBOR
+decoder, COSE-to-JWK, DER-to-raw ECDSA — rather than `@simplewebauthn/server`,
+on the same reasoning `oidc.ts` already set: the library's largest part is
+attestation-chain trust, and this spec never evaluates attestation.
+
+**The gate this shipped with is only half proven, and that is the gap most
+worth knowing about.** `test/workers/passkey-verify.test.ts` verifies the
+verifier's logic in full against a synthetic authenticator, but the real-device
+half — `test/fixtures/webauthn/`, registration and assertion responses
+actually captured from Chrome and Safari — was never populated, because
+capturing one needs a browser and a device and cannot be done by an agent. The
+suite emits a `todo` naming the gap rather than a green run quietly implying
+device parsing is covered; the documented fallback, `@simplewebauthn/server`
+behind the same exports, is neither taken nor ruled out until a real pair
+either passes or fails against the hand-rolled verifier.
+
 ## Next
 
 ### 1. Pagination, everywhere, as a rule
@@ -925,10 +949,13 @@ an unsorted flat list, which stops working somewhere around 15.
 - No way to bootstrap the first admin over HTTP, on purpose: an endpoint that
   creates an admin is an endpoint that creates an admin. The first `users` row is
   a `wrangler d1 execute` deploy step.
-- Passkeys are in after all: spec 29 (`docs/specs/foundation/passkeys.md`, draft
-  2026-09-05) adds them as a second door a signed-in account enrols, never as a way
-  to self-register. TOTP and password login stay out — a password store is a
-  liability nobody asked for.
+- Passkeys are in after all. **Done 2026-09-05, as spec 29**
+  (`docs/specs/foundation/passkeys.md`) — see *Passkeys* under *Done* above.
+  They landed as a second door a signed-in account enrols, never a way to
+  self-register; TOTP and password login stay out. The reversal is not just
+  that the owner asked but that the reason for keeping them out never applied
+  to a passkey in the first place — see `identity-and-access.md`'s own note
+  in place.
 - The library ships built JavaScript now — `dist/`, esbuild, one
   bundle per entry with source maps and no minification, and `exports` pointing at
   it (`docs/specs/foundation/package-build.md`). Two things are deliberately still

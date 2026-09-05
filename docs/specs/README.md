@@ -389,6 +389,21 @@ assumptions never checked against a live tenant, verified only against a
 stand-in endpoint injected through `fetchImpl`; both fail loudly rather than
 silently if wrong.
 
+**Spec 29 (passkeys) is done**, built 2026-09-05 across five phases; its
+`## Implementation notes` leads with the one gap that matters most: the
+hand-rolled WebAuthn verifier is proven against a synthetic authenticator in
+full, but `test/fixtures/webauthn/` — real registration and assertion
+responses captured from Chrome and Safari — was never populated, so the
+*parsing* half of the gate is unverified against an actual device. A `todo`
+in `pnpm test` names the gap rather than a green suite quietly hiding it, and
+the documented fallback (`@simplewebauthn/server` behind the same exports) is
+neither taken nor ruled out until then. The notes also record two Ground
+truth premises that turned out false — `GET {base}/api/me/events` was spec
+28's phase 4, not its phases 1–2, and `sign_in_refused` landed in 28's phase
+3 rather than 4 — and that `GET {base}/api/me` gained the person's email and
+`roleFrom` projection only afterwards, riding the join `readSession` already
+runs, because decision 6's account screen needed both and neither existed yet.
+
 **Spec 26 had no ordering constraint** and was taken first for that reason. It moved
 the package to the repository root and deleted the subtree split, so every path in the
 specs above that reads `packages/folio/src/...` is now `src/...`. Ground truth written
