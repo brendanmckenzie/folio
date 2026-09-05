@@ -17,7 +17,9 @@ import {
   shareCookieTokens,
   withShareToken,
 } from '../../../src/server/auth/cookie'
-import { resolveAuth, screenScopes } from '../../../src/server/auth/config'
+import type { AuthProvider } from '../../../src/server/auth/config'
+import { authPolicy, resolveAuth, screenScopes } from '../../../src/server/auth/config'
+import { magicLink } from '../../../src/server/auth/magic-link'
 import {
   actorString,
   ADMIN,
@@ -238,7 +240,30 @@ describe('safeNext: the login page cannot be turned into an open redirect', () =
   })
 })
 
+/**
+ * Construction refuses **by kind** (`auth-providers.md` decision 1).
+ *
+ * The bag of optionals these replaced could not tell a half-built provider from
+ * a working one: `{ redirect: true, start }` with no `callback` passed every
+ * check here and failed at the callback, in front of somebody trying to sign in.
+ * A discriminant makes each kind's requirements a closed list, checked once, and
+ * **every refusal names the provider** — the one thing a host reading a
+ * construction throw needs is which of their four entries is wrong.
+ */
 describe('resolveAuth: construction refuses ambiguity', () => {
+  const mailer = (over: Record<string, unknown> = {}) =>
+    ({ kind: 'mail', id: 'magic', label: 'Email', send: () => {}, ...over }) as AuthProvider
+
+  const redirecter = (over: Record<string, unknown> = {}) =>
+    ({
+      kind: 'redirect',
+      id: 'oidc',
+      label: 'Work account',
+      start: async () => ({ url: 'https://idp.test/authorize', state: {} }),
+      callback: async () => ({ email: 'a@b.c' }),
+      ...over,
+    }) as AuthProvider
+
   it('throws when `auth` is absent, naming the deliberate escape hatch', () => {
     expect(() => resolveAuth(undefined)).toThrow(/auth. must be configured/)
     expect(() => resolveAuth(undefined)).toThrow(/auth: 'open'/)
@@ -253,28 +278,220 @@ describe('resolveAuth: construction refuses ambiguity', () => {
   })
 
   it('refuses two providers sharing an id', () => {
-    const provider = { id: 'magic', label: 'Email', redirect: false, send: () => {} }
-    expect(() => resolveAuth({ providers: [provider, { ...provider }] })).toThrow(
-      /share the id 'magic'/,
+    expect(() => resolveAuth({ providers: [mailer(), mailer()] })).toThrow(/share the id 'magic'/)
+  })
+
+  it('refuses a provider with no `kind`, and one with a kind nobody declares', () => {
+    expect(() => resolveAuth({ providers: [mailer({ kind: undefined })] })).toThrow(
+      /unknown `kind`/,
+    )
+    expect(() => resolveAuth({ providers: [mailer({ kind: 'sms' })] })).toThrow(
+      /'magic' has an unknown `kind` 'sms'/,
     )
   })
 
-  it('refuses a non-redirect provider with no way to send anything', () => {
+  it('refuses a provider with no label', () => {
+    expect(() => resolveAuth({ providers: [mailer({ label: '' })] })).toThrow(
+      /'magic' needs a `label`/,
+    )
+  })
+
+  it('refuses a mail provider with no way to send anything', () => {
+    expect(() => resolveAuth({ providers: [mailer({ send: undefined })] })).toThrow(
+      /'magic' is a mail flow but has no `send`/,
+    )
+  })
+
+  it('refuses two mail providers, because the login page has one address field', () => {
+    // Unrepresentable rather than merely unwise: the page ships no JavaScript and
+    // has a single `<input name="email">`, so the second provider is unreachable.
     expect(() =>
-      resolveAuth({ providers: [{ id: 'magic', label: 'Email', redirect: false }] }),
-    ).toThrow(/redirect flow or supply `send`/)
+      resolveAuth({ providers: [mailer(), mailer({ id: 'other', label: 'Other mail' })] }),
+    ).toThrow(/'magic' and 'other' are both mail flows/)
+  })
+
+  it('refuses a redirect provider with no `start`, and one with no `callback`', () => {
+    expect(() => resolveAuth({ providers: [redirecter({ start: undefined })] })).toThrow(
+      /'oidc' is a redirect flow but has no `start`/,
+    )
+    // The refusal that did not exist before the kinds: `start` alone passed
+    // construction, and the failure surfaced on the callback instead.
+    expect(() => resolveAuth({ providers: [redirecter({ callback: undefined })] })).toThrow(
+      /'oidc' is a redirect flow but has no `callback`/,
+    )
+  })
+
+  it('refuses a trusted provider with no `resolve`', () => {
+    expect(() =>
+      resolveAuth({ providers: [{ kind: 'trusted', id: 't', label: 'T' } as AuthProvider] }),
+    ).toThrow(/'t' is a trusted flow but has no `resolve`/)
+  })
+
+  it('refuses `provision` and `roleFrom` on the kinds that verify no identity', () => {
+    // A link proves an address and a passkey proves a device; neither is an
+    // identity provider's assertion about a person, so neither may place a role.
+    expect(() => resolveAuth({ providers: [mailer({ provision: { create: true } })] })).toThrow(
+      /'magic' is a mail flow and cannot carry `provision`/,
+    )
+    expect(() => resolveAuth({ providers: [mailer({ roleFrom: () => 'admin' })] })).toThrow(
+      /'magic' is a mail flow and cannot carry `roleFrom`/,
+    )
+  })
+
+  it('refuses `domains` on a mail or passkey provider', () => {
+    expect(() => resolveAuth({ providers: [mailer({ domains: ['client.com'] })] })).toThrow(
+      /'magic' is a mail flow and cannot carry `domains`/,
+    )
+  })
+
+  it('refuses a provision role no build declares', () => {
+    expect(() =>
+      resolveAuth({ providers: [redirecter({ provision: { create: true, role: 'owner' } })] }),
+    ).toThrow(/'oidc' provisions with an unknown role 'owner'/)
+  })
+
+  it('refuses a `roleFrom` that is not a function', () => {
+    expect(() => resolveAuth({ providers: [redirecter({ roleFrom: 'groups' })] })).toThrow(
+      /'oidc's `roleFrom` must be a function/,
+    )
+  })
+
+  it('compiles every provider’s domains into one map, lowercased', () => {
+    const resolved = resolveAuth({
+      providers: [mailer(), redirecter({ id: 'okta', domains: ['Client.COM', 'agency.example.'] })],
+    })
+    expect(resolved.mode).toBe('session')
+    if (resolved.mode !== 'session') return
+    expect([...resolved.domains]).toEqual([
+      ['client.com', 'okta'],
+      ['agency.example', 'okta'],
+    ])
+  })
+
+  it('refuses a domain claimed by two providers, naming both and it', () => {
+    expect(() =>
+      resolveAuth({
+        providers: [
+          redirecter({ id: 'a', domains: ['client.com'] }),
+          redirecter({ id: 'b', domains: ['client.com'] }),
+        ],
+      }),
+    ).toThrow(/'a' and 'b' both claim the domain 'client.com'/)
+  })
+
+  it('refuses something that is not a domain at all', () => {
+    expect(() => resolveAuth({ providers: [redirecter({ domains: ['@client.com'] })] })).toThrow(
+      /claims '@client.com', which is not a domain/,
+    )
+    expect(() => resolveAuth({ providers: [redirecter({ domains: ['*.client.com'] })] })).toThrow(
+      /which is not a domain/,
+    )
+  })
+
+  it('refuses a passkey provider that is the only door', () => {
+    // Nobody could ever enrol a first passkey: enrolment needs a session, and a
+    // session needs a sign-in through something else (`foundation/passkeys.md`).
+    const passkey = { kind: 'passkey', id: 'passkey', label: 'Passkey' } as AuthProvider
+    expect(() => resolveAuth({ providers: [passkey] })).toThrow(/cannot be the only one/)
+    expect(() => resolveAuth({ providers: [mailer(), passkey] })).not.toThrow()
+  })
+
+  it("refuses a passkey provider whose id is not 'passkey'", () => {
+    expect(() =>
+      resolveAuth({
+        providers: [
+          mailer(),
+          { kind: 'passkey', id: 'webauthn', label: 'P' } as unknown as AuthProvider,
+        ],
+      }),
+    ).toThrow(/whose id must be 'passkey'/)
+  })
+
+  it('partitions the providers by kind, so no reader has to sniff', () => {
+    const mail = mailer()
+    const redirect = redirecter()
+    const resolved = resolveAuth({ providers: [mail, redirect] })
+    expect(resolved).toMatchObject({
+      mode: 'session',
+      mail,
+      passkey: null,
+      redirects: [redirect],
+      trusted: [],
+    })
   })
 
   it('defaults the session length and the link rate limit', () => {
-    const resolved = resolveAuth({
-      providers: [{ id: 'magic', label: 'Email', redirect: false, send: () => {} }],
+    expect(resolveAuth({ providers: [mailer()] })).toMatchObject({
+      mode: 'session',
+      sessionDays: 30,
+      linksPerHour: 5,
     })
-    expect(resolved).toMatchObject({ mode: 'session', sessionDays: 30, linksPerHour: 5 })
   })
 
   it('refuses a nonsensical session length', () => {
-    const providers = [{ id: 'magic', label: 'Email', redirect: false, send: () => {} }]
-    expect(() => resolveAuth({ providers, sessionDays: 0 })).toThrow(/positive number of days/)
+    expect(() => resolveAuth({ providers: [mailer()], sessionDays: 0 })).toThrow(
+      /positive number of days/,
+    )
+  })
+})
+
+/**
+ * The redirect-state cookie's payload is an **envelope**: `next` is Folio's and
+ * `state` is the provider's, handed back unread.
+ *
+ * `authPolicy` is beside it because both are the same rule from opposite ends —
+ * what crosses a boundary is named field by field, never spread. A provider's
+ * object is where a host's `clientSecret` lives; a cookie is attacker-supplied.
+ */
+describe('the provider projection names every field it carries', () => {
+  it('carries the eight facts and never a function', () => {
+    const policy = authPolicy(
+      resolveAuth({
+        providers: [
+          {
+            kind: 'redirect',
+            id: 'okta',
+            label: 'Okta',
+            domains: ['Client.com'],
+            signOutUrl: 'https://okta.test/logout',
+            roleFrom: () => 'admin',
+            provision: { create: true, role: 'editor' },
+            start: async () => ({ url: 'https://okta.test', state: {} }),
+            callback: async () => ({ email: 'a@b.c' }),
+            // The key a spread would carry, and the whole reason for the rule.
+            ...({ clientSecret: 'sk-live-nope' } as Record<string, unknown>),
+          } as AuthProvider,
+        ],
+      }),
+    )
+    expect(Object.keys(policy!.providers[0]!).sort()).toEqual([
+      'domains',
+      'id',
+      'kind',
+      'label',
+      'provision',
+      'provisionRole',
+      'rolesFromProvider',
+      'signOut',
+    ])
+    expect(policy!.providers[0]).toMatchObject({
+      kind: 'redirect',
+      rolesFromProvider: true,
+      signOut: true,
+      domains: ['client.com'],
+    })
+    expect(JSON.stringify(policy)).not.toContain('sk-live-nope')
+  })
+
+  it('reports the absences as absences, not as omissions', () => {
+    const policy = authPolicy(resolveAuth({ providers: [magicLink({ send: () => {} })] }))
+    expect(policy!.providers[0]).toMatchObject({
+      kind: 'mail',
+      provision: 'refuse',
+      rolesFromProvider: false,
+      signOut: false,
+      domains: [],
+    })
   })
 })
 

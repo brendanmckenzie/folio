@@ -323,13 +323,15 @@ export interface LoginPageOptions {
  * or unbuilt bundle — where someone needs to sign in and look at the CMS to find
  * out what is wrong.
  *
- * Providers are rendered from the config, so the page shows the email form only
- * when a `send`-style provider is configured and a button per redirect provider.
+ * Providers are rendered **by kind** (`../../docs/specs/foundation/auth-providers.md`
+ * decision 1), from the partition `resolveAuth` already built: the address form
+ * when a `mail` provider is configured, and one button per `redirect` provider.
+ * It used to re-derive both from `redirect: boolean` and from which functions
+ * each provider happened to carry, which is the sniffing the kinds replaced.
  */
 export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Response> {
-  const providers = rt.auth.mode === 'session' ? rt.auth.config.providers : []
-  const mail = providers.filter((p) => !p.redirect)
-  const redirects = providers.filter((p) => p.redirect)
+  const mail = rt.auth.mode === 'session' ? rt.auth.mail : null
+  const redirects = rt.auth.mode === 'session' ? rt.auth.redirects : []
   const next = opts.next
 
   return html(
@@ -350,7 +352,7 @@ export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Res
         ) : null}
         {opts.sent ? <p className="folio-login__notice">{opts.sent}</p> : null}
 
-        {mail.length > 0 ? (
+        {mail ? (
           <form method="post" action={`${rt.base}/login/email`}>
             <input type="hidden" name="next" value={next} />
             <label htmlFor="folio-login-email">Email address</label>
@@ -362,11 +364,11 @@ export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Res
               required
               placeholder="you@example.com"
             />
-            <button type="submit">{mail[0]?.label ?? 'Email me a sign-in link'}</button>
+            <button type="submit">{mail.label}</button>
           </form>
         ) : null}
 
-        {mail.length > 0 && redirects.length > 0 ? <hr className="folio-login__rule" /> : null}
+        {mail && redirects.length > 0 ? <hr className="folio-login__rule" /> : null}
 
         {redirects.map((provider) => (
           <a

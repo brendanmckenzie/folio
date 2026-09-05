@@ -40,22 +40,59 @@ export interface NewSession {
 export async function createSession(
   db: FolioDb,
   userId: string,
-  opts: { days?: number; userAgent?: string | null } = {},
+  opts: { days?: number; userAgent?: string | null; provider?: string | null } = {},
 ): Promise<NewSession> {
+  const session = await newSession(opts)
+  await db.batch(sessionStatements(db, userId, session, opts))
+  return session
+}
+
+/**
+ * The token, its hash and its expiry, with nothing written yet.
+ *
+ * Split from `createSession` for `completeSignIn`, which provisions a user,
+ * mints a session, stamps the provider and appends an event in **one** batch
+ * (`../../../docs/specs/foundation/auth-providers.md` decision 3) and therefore
+ * cannot use a function that runs its own.
+ */
+export async function newSession(opts: { days?: number; now?: number } = {}): Promise<NewSession> {
   const token = mintSecret()
   const id = await hashToken(token)
-  const now = Date.now()
-  const expiresAt = now + (opts.days ?? DEFAULT_SESSION_DAYS) * DAY_MS
-  await db.batch([
+  const now = opts.now ?? Date.now()
+  return { token, id, expiresAt: now + (opts.days ?? DEFAULT_SESSION_DAYS) * DAY_MS }
+}
+
+/**
+ * The two statements a fresh session always writes: the row itself, and the
+ * `users` touch that stamps `last_seen_at` and the provider that minted it.
+ *
+ * `provider` is threaded through both, so `sessions.provider` (which logout
+ * reads to decide where the browser goes next) and `users.provider` (which the
+ * Access screen draws) cannot disagree.
+ */
+export function sessionStatements(
+  db: FolioDb,
+  userId: string,
+  session: NewSession,
+  opts: { userAgent?: string | null; provider?: string | null; now?: number } = {},
+): D1PreparedStatement[] {
+  const now = opts.now ?? Date.now()
+  return [
     db
       .prepare(
-        `insert into sessions (id, user_id, created_at, expires_at, user_agent)
-         values (?, ?, ?, ?, ?)`,
+        `insert into sessions (id, user_id, created_at, expires_at, user_agent, provider)
+         values (?, ?, ?, ?, ?, ?)`,
       )
-      .bind(id, userId, now, expiresAt, opts.userAgent?.slice(0, 300) ?? null),
-    touchUserStatement(db, userId, now),
-  ])
-  return { token, id, expiresAt }
+      .bind(
+        session.id,
+        userId,
+        now,
+        session.expiresAt,
+        opts.userAgent?.slice(0, 300) ?? null,
+        opts.provider ?? null,
+      ),
+    touchUserStatement(db, userId, now, opts.provider ?? undefined),
+  ]
 }
 
 interface SessionJoin {
@@ -67,6 +104,8 @@ interface SessionJoin {
   name: string
   colour: string | null
   role: string
+  provider: string | null
+  role_from: string | null
 }
 
 /**
@@ -91,7 +130,7 @@ export async function readSession(
   const row = await db
     .prepare(
       `select s.id as session_id, s.expires_at, s.created_at,
-              u.id as user_id, u.email, u.name, u.colour, u.role
+              u.id as user_id, u.email, u.name, u.colour, u.role, u.provider, u.role_from
          from sessions s join users u on u.id = s.user_id
         where s.id = ?`,
     )
@@ -123,7 +162,11 @@ export async function readSession(
     name: row.name,
     colour: row.colour,
     role: isRole(row.role) ? row.role : 'viewer',
-    provider: null,
+    // From the join, not a hard-coded null. It read `null` here for as long as
+    // the column existed, which cost nothing until `completeSignIn` made the
+    // column true and `/me` had a reader for it.
+    provider: row.provider,
+    roleFrom: row.role_from,
     createdAt: row.created_at,
     lastSeenAt: null,
   }

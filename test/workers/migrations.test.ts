@@ -414,6 +414,9 @@ describe('identity', () => {
       'provider',
       'created_at',
       'last_seen_at',
+      // 0006: who decided the role — null for Folio, else the provider whose
+      // claims placed it. `PATCH /api/users/:id` refuses `role` when it is set.
+      'role_from',
     ])
     const role = (await columnsOf('users')).find((c) => c.name === 'role')
     expect(role?.dflt_value).toBe("'editor'")
@@ -446,11 +449,50 @@ describe('identity', () => {
       'created_at',
       'expires_at',
       'user_agent',
+      // 0006: which provider minted it, read by logout to decide where the
+      // browser goes next. Nothing gates on it.
+      'provider',
     ])
     // `id` is the SHA-256 of the cookie's token, so it must be the primary key:
     // the per-request lookup is by it and nothing else.
     expect((await columnsOf('sessions')).find((c) => c.name === 'id')?.pk).toBe(1)
     expect(await indexesOf('sessions')).toEqual(['sessions_expiry', 'sessions_user'])
+  })
+
+  it('creates `auth_events` with no CHECK on `kind` and exactly two indexes', async () => {
+    expect((await columnsOf('auth_events')).map((c) => c.name)).toEqual([
+      'id',
+      'at',
+      'kind',
+      'user_id',
+      'actor',
+      'provider',
+      'detail',
+    ])
+    expect((await columnsOf('auth_events')).find((c) => c.name === 'id')?.pk).toBe(1)
+
+    // **No CHECK on `kind`, deliberately** — the reasoning `content_refs.kind`
+    // and `schedules.action` record: SQLite cannot widen a CHECK without
+    // rebuilding the table, and `foundation/passkeys.md` adds kinds. Unknown
+    // kinds are screened on read, as `api_tokens.scopes` are.
+    await env.DB.prepare(
+      "insert into auth_events (id, at, kind) values ('evt_a', 1, 'a_kind_no_build_declares')",
+    ).run()
+
+    // A refused identity is recorded with no `user_id`, on purpose: it is an
+    // address an identity provider vouched for, and "this person tried and is
+    // not invited" is the admin's cue.
+    await env.DB.prepare(
+      `insert into auth_events (id, at, kind, user_id, provider, detail)
+       values ('evt_b', 2, 'sign_in_refused', null, 'oidc', '{"email":"a@x.com"}')`,
+    ).run()
+    await env.DB.prepare('delete from auth_events').run()
+
+    // Exactly two, and **deliberately none on `kind` or `provider`**: neither is
+    // a filter any route takes, and adding one later is a deliberate act with a
+    // measurement behind it — the rule `stories_draft_updated`'s removal set.
+    expect(await indexesOf('auth_events')).toEqual(['auth_events_at', 'auth_events_user'])
+    expect(await indexSql('auth_events_user')).toContain('at desc')
   })
 
   it('creates `login_challenges` with the index the rate limit counts on', async () => {

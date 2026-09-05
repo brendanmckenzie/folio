@@ -842,6 +842,19 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
       label: 'An email with no account',
       cell: (row) => <span className={css.clause}>{row.unknownEmail}</span>,
     },
+    // Where to go to change somebody's role, which is the fact an editor needs:
+    // never the mapping itself, because a `RoleMapper` is a host function
+    // (`server/auth/config.ts`, and the spec's decision 5).
+    {
+      key: 'roles',
+      label: 'Roles',
+      cell: (row) => <span className={css.clause}>{row.roles}</span>,
+    },
+    {
+      key: 'domains',
+      label: 'Enforced domains',
+      cell: (row) => <span className={css.clause}>{row.domains}</span>,
+    },
   ]
 
   return (

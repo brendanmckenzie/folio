@@ -20,7 +20,15 @@ export interface UserRow {
   /** Null in the database; `userColour` derives one deterministically. */
   colour: string | null
   role: Role
+  /** How they last signed in: a provider id, or null for an invited user who
+   * never has. Stamped inside `completeSignIn`'s batch, by every kind. */
   provider: string | null
+  /**
+   * Who decided their role: null for Folio — an admin invited or edited them —
+   * or the id of the provider whose claims placed it
+   * (`../../../docs/specs/foundation/auth-providers.md` decision 5).
+   */
+  roleFrom: string | null
   createdAt: number
   lastSeenAt: number | null
 }
@@ -32,6 +40,7 @@ interface RawUser {
   colour: string | null
   role: string
   provider: string | null
+  role_from: string | null
   created_at: number
   last_seen_at: number | null
 }
@@ -48,12 +57,13 @@ function toUser(row: RawUser): UserRow {
     colour: row.colour,
     role: isRole(row.role) ? row.role : 'viewer',
     provider: row.provider,
+    roleFrom: row.role_from,
     createdAt: row.created_at,
     lastSeenAt: row.last_seen_at,
   }
 }
 
-const COLUMNS = 'id, email, name, colour, role, provider, created_at, last_seen_at'
+const COLUMNS = 'id, email, name, colour, role, provider, role_from, created_at, last_seen_at'
 
 /**
  * The colour presence shows for a user. `fallbackColour` is the same derivation
@@ -121,6 +131,8 @@ export interface UserInput {
   role?: Role
   colour?: string | null
   provider?: string | null
+  /** The provider whose claims placed `role`, when one did. */
+  roleFrom?: string | null
 }
 
 /**
@@ -129,6 +141,25 @@ export interface UserInput {
  * overwrites it with the name the provider asserts.
  */
 export async function createUser(db: FolioDb, input: UserInput): Promise<UserRow> {
+  const { user, statement } = createUserStatement(db, input)
+  await statement.run()
+  return user
+}
+
+/**
+ * The same insert, unrun, plus the row it will produce.
+ *
+ * `completeSignIn` provisions a user and mints their session in **one** batch
+ * (`../../../docs/specs/foundation/auth-providers.md` decision 3), so it needs
+ * the id before the write happens — which it does, because the id is minted here
+ * rather than by the database. `createUser` above is the same thing for a caller
+ * with nothing to batch it with.
+ */
+export function createUserStatement(
+  db: FolioDb,
+  input: UserInput,
+  at = Date.now(),
+): { user: UserRow; statement: D1PreparedStatement } {
   const email = normaliseEmail(input.email)
   const user: UserRow = {
     id: mintId('usr'),
@@ -137,17 +168,26 @@ export async function createUser(db: FolioDb, input: UserInput): Promise<UserRow
     colour: input.colour ?? null,
     role: input.role ?? 'editor',
     provider: input.provider ?? null,
-    createdAt: Date.now(),
+    roleFrom: input.roleFrom ?? null,
+    createdAt: at,
     lastSeenAt: null,
   }
-  await db
+  const statement = db
     .prepare(
-      `insert into users (id, email, name, colour, role, provider, created_at)
-       values (?, ?, ?, ?, ?, ?, ?)`,
+      `insert into users (id, email, name, colour, role, provider, role_from, created_at)
+       values (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(user.id, user.email, user.name, user.colour, user.role, user.provider, user.createdAt)
-    .run()
-  return user
+    .bind(
+      user.id,
+      user.email,
+      user.name,
+      user.colour,
+      user.role,
+      user.provider,
+      user.roleFrom,
+      user.createdAt,
+    )
+  return { user, statement }
 }
 
 /**
@@ -194,8 +234,30 @@ export async function deleteUser(db: FolioDb, id: string): Promise<boolean> {
   return true
 }
 
-/** Stamped on sign-in, and nothing gates on it: it answers "is this account
- * still in use" for whoever is pruning the list. */
-export function touchUserStatement(db: FolioDb, id: string, at = Date.now()): D1PreparedStatement {
-  return db.prepare('update users set last_seen_at = ? where id = ?').bind(at, id)
+/**
+ * Stamped on sign-in: `last_seen_at`, which answers "is this account still in
+ * use" for whoever is pruning the list, and `provider`, which answers "how did
+ * they last get in".
+ *
+ * **The provider stamp lives here and not at a call site**, which is the point.
+ * It used to be written by `createUser` on the OIDC callback and nowhere else,
+ * so every magic-link user read "—" in the Access screen's "Signs in with"
+ * column for as long as the column existed. Folding it into the one statement
+ * every sign-in batches makes forgetting it impossible.
+ *
+ * An absent `provider` leaves the column alone rather than nulling it: a caller
+ * with no provider in hand is touching the row, not re-answering the question.
+ */
+export function touchUserStatement(
+  db: FolioDb,
+  id: string,
+  at = Date.now(),
+  provider?: string | null,
+): D1PreparedStatement {
+  if (provider === undefined) {
+    return db.prepare('update users set last_seen_at = ? where id = ?').bind(at, id)
+  }
+  return db
+    .prepare('update users set last_seen_at = ?, provider = ? where id = ?')
+    .bind(at, provider, id)
 }

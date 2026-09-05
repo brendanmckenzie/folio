@@ -18,7 +18,13 @@ import {
   createChallenge,
   recentChallengeCount,
 } from '../auth/challenges'
-import { type AuthProvider, authPolicy, type OidcState } from '../auth/config'
+import {
+  type AuthProvider,
+  authPolicy,
+  type RedirectProvider,
+  type RedirectState,
+  type ResolvedAuth,
+} from '../auth/config'
 import {
   clearOidcCookies,
   clearSessionCookies,
@@ -28,8 +34,10 @@ import {
   serialiseCookie,
 } from '../auth/cookie'
 import { credentialOf, resolveActor } from '../auth/resolve'
-import { createSession, revokeSession } from '../auth/session'
-import { createUser, userByEmail } from '../auth/users'
+import { revokeSession } from '../auth/session'
+import { completeSignIn } from '../auth/sign-in'
+import type { NewSession } from '../auth/session'
+import { userByEmail } from '../auth/users'
 import { FolioError } from '../errors'
 import { loginPage } from '../pages'
 import type { FolioRuntime } from '../runtime'
@@ -79,38 +87,37 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
   const editorUrl = `${rt.base}/edit`
 
-  /** The configured providers, or a 404 for a deployment with `auth: 'open'`:
-   * there is nothing to sign in to, so a login page would be a lie. */
-  const providers = (): readonly AuthProvider<unknown>[] => {
+  /** The resolved auth, or a 404 for a deployment with `auth: 'open'`: there is
+   * nothing to sign in to, so a login page would be a lie. */
+  const sessionAuth = (): Extract<ResolvedAuth<unknown>, { mode: 'session' }> => {
     if (rt.auth.mode !== 'session') throw new FolioError('not_found', 'Auth is not configured')
-    return rt.auth.config.providers
+    return rt.auth
   }
 
   const providerById = (id: string): AuthProvider<unknown> => {
-    const found = providers().find((p) => p.id === id)
+    const found = sessionAuth().config.providers.find((p) => p.id === id)
     if (!found) throw new FolioError('not_found', 'Unknown sign-in provider')
     return found
   }
 
-  /** One place mints the cookie for a fresh session, so the name rule and the
-   * attributes cannot differ between the magic-link and the OIDC paths. */
-  const signIn = async (
-    c: Context<FolioEnv<Env>>,
-    userId: string,
-    days: number,
-  ): Promise<string> => {
-    const session = await createSession(c.var.bindings().db, userId, {
-      days,
-      userAgent: c.req.header('user-agent') ?? null,
-    })
+  /**
+   * One place turns a minted session into a cookie, so the name rule and the
+   * attributes cannot differ between the paths that mint one.
+   *
+   * Everything *before* the cookie — finding or provisioning the user, stamping
+   * the provider, appending the audit row — is `completeSignIn`'s
+   * (`../auth/sign-in.ts`), which is why this is three lines rather than the
+   * twice-written block it replaced.
+   */
+  const signInCookie = (c: Context<FolioEnv<Env>>, minted: NewSession): string => {
     const url = new URL(c.req.url)
-    return serialiseCookie(url, cookieName(url), session.token, {
-      maxAge: Math.floor((session.expiresAt - Date.now()) / 1000),
+    return serialiseCookie(url, cookieName(url), minted.token, {
+      maxAge: Math.floor((minted.expiresAt - Date.now()) / 1000),
     })
   }
 
   app.get('/login', async (c) => {
-    providers()
+    sessionAuth()
     const next = safeNext(c.req.query('next'), editorUrl)
     // `?error=` is set by the redirects below rather than by anything a stranger
     // can craft into a message: the parameter selects one of a fixed set.
@@ -137,9 +144,11 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * is assembled before either branch runs.
    */
   app.post('/login/email', async (c) => {
-    const list = providers()
-    const provider = list.find((p) => !p.redirect && typeof p.send === 'function')
-    if (!provider?.send) {
+    const auth = sessionAuth()
+    // The mail provider by *kind*, not by which functions the object happens to
+    // carry, and there is at most one of them by construction.
+    const provider = auth.mail
+    if (!provider) {
       throw new FolioError('unsupported', 'No email sign-in provider is configured')
     }
     const body = await loginBody(c.req.raw)
@@ -148,7 +157,7 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     const user = await userByEmail(db, body.email)
     if (user) {
-      const perHour = rt.auth.mode === 'session' ? rt.auth.linksPerHour : 5
+      const perHour = auth.linksPerHour
       const recent = await recentChallengeCount(db, body.email)
       if (recent < perHour) {
         const challenge = await createChallenge(db, body.email)
@@ -185,7 +194,7 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * afterwards is a page that can be reloaded.
    */
   app.get('/login/verify', async (c) => {
-    providers()
+    const auth = sessionAuth()
     const next = safeNext(c.req.query('next'), editorUrl)
     const token = c.req.query('t')
     const db = c.var.bindings().db
@@ -193,34 +202,56 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const email = token ? await consumeChallenge(db, token) : null
     if (!email) return c.redirect(`${rt.base}/login?error=link&next=${encodeURIComponent(next)}`)
 
-    const user = await userByEmail(db, email)
-    // The challenge was valid but the account has gone since it was issued.
-    // Refused, not provisioned: a magic link is proof of an address, and access
-    // is a list someone maintains.
-    if (!user) {
+    // Unreachable in practice — only `POST /login/email` mints a challenge and
+    // it needs this provider — but a token cannot be trusted to imply a
+    // configuration, so the branch is written rather than asserted.
+    if (!auth.mail) {
       return c.redirect(`${rt.base}/login?error=refused&next=${encodeURIComponent(next)}`)
     }
 
-    const days = rt.auth.mode === 'session' ? rt.auth.sessionDays : 30
-    const cookie = await signIn(c, user.id, days)
-    return new Response(null, { status: 302, headers: { location: next, 'set-cookie': cookie } })
+    // The challenge proves the address. Everything after it — the account must
+    // exist (a link never provisions, because `mail` cannot carry `provision`),
+    // the provider stamp, the audit row — is `completeSignIn`'s.
+    const result = await completeSignIn(
+      db,
+      auth,
+      auth.mail,
+      { email },
+      { userAgent: c.req.header('user-agent') ?? null },
+    )
+    if (!result.ok) {
+      return c.redirect(`${rt.base}/login?error=${result.reason}&next=${encodeURIComponent(next)}`)
+    }
+
+    return new Response(null, {
+      status: 302,
+      headers: { location: next, 'set-cookie': signInCookie(c, result.session) },
+    })
   })
 
-  /** Starts a redirect flow. The state, nonce and PKCE verifier ride in a
-   * short-lived httpOnly cookie: they must survive a trip to the IdP and be
-   * unreadable to anything else, which is exactly a cookie's job. */
+  /**
+   * Starts a redirect flow.
+   *
+   * Whatever the provider asked to remember — for OIDC the state, nonce and PKCE
+   * verifier — rides in a short-lived httpOnly cookie beside Folio's own `next`:
+   * both must survive a trip to the IdP and be unreadable to anything else,
+   * which is exactly a cookie's job.
+   */
   app.get('/login/:provider', async (c) => {
     const provider = providerById(c.req.param('provider'))
-    if (!provider.redirect || !provider.start) {
+    if (provider.kind !== 'redirect') {
       throw new FolioError('not_found', 'That provider is not a redirect flow')
     }
     const url = new URL(c.req.url)
     const next = safeNext(c.req.query('next'), editorUrl)
     const redirectUri = `${url.origin}${rt.base}/login/${provider.id}/callback`
 
-    let started: { url: string; state: OidcState }
+    let started: { url: string; state: RedirectState }
     try {
-      started = await provider.start(c.env, { redirectUri, next })
+      // `next` is not handed to the provider: it is Folio's, it has already been
+      // screened same-origin, and a provider that never sees it cannot be talked
+      // into putting it somewhere. The cookie envelope below carries it.
+      started = await provider.start(c.env, { redirectUri })
     } catch (err) {
       console.error(`folio: ${provider.id} sign-in could not start`, err)
       return c.redirect(`${rt.base}/login?error=provider&next=${encodeURIComponent(next)}`)
@@ -230,19 +261,25 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       status: 302,
       headers: {
         location: started.url,
-        'set-cookie': serialiseCookie(url, oidcCookieName(url), encodeState(started.state), {
-          maxAge: OIDC_STATE_TTL_S,
-        }),
+        'set-cookie': serialiseCookie(
+          url,
+          oidcCookieName(url),
+          encodeState({ next, state: started.state }),
+          { maxAge: OIDC_STATE_TTL_S },
+        ),
       },
     })
   })
 
   app.get('/login/:provider/callback', async (c) => {
+    const auth = sessionAuth()
     const provider = providerById(c.req.param('provider'))
-    if (!provider.callback) throw new FolioError('not_found', 'That provider has no callback')
+    if (provider.kind !== 'redirect') {
+      throw new FolioError('not_found', 'That provider has no callback')
+    }
     const url = new URL(c.req.url)
-    const state = decodeState(readOidcCookie(c.req.header('cookie')))
-    const next = safeNext(state?.next, editorUrl)
+    const envelope = decodeState(readOidcCookie(c.req.header('cookie')))
+    const next = safeNext(envelope?.next, editorUrl)
     const bail = (reason: 'provider' | 'refused') =>
       new Response(null, {
         status: 302,
@@ -255,40 +292,33 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // No state cookie at all: a bookmarked callback, a cookie-less browser, or a
     // cross-site attempt. There is nothing to verify the response against, so
     // there is nothing to exchange.
-    if (!state) return bail('provider')
+    if (!envelope) return bail('provider')
 
-    let identity: { email: string; name?: string }
+    let identity: Awaited<ReturnType<RedirectProvider<unknown>['callback']>>
     try {
       identity = await provider.callback(c.env, {
-        url,
+        // The query only. A provider that cannot see the request's own URL
+        // cannot decide anything from it, and the callback is GET with
+        // `response_mode=query` by decision 2.
+        params: url.searchParams,
         redirectUri: `${url.origin}${rt.base}/login/${provider.id}/callback`,
-        state,
+        state: envelope.state,
       })
     } catch (err) {
       console.error(`folio: ${provider.id} sign-in failed`, err)
       return bail('provider')
     }
 
-    const db = c.var.bindings().db
-    let user = await userByEmail(db, identity.email)
-    if (!user) {
-      const provision = provider.provision ?? 'refuse'
-      if (provision === 'refuse') return bail('refused')
-      user = await createUser(db, {
-        email: identity.email,
-        name: identity.name,
-        role: provision.role ?? 'editor',
-        provider: provider.id,
-      })
-    }
+    const result = await completeSignIn(c.var.bindings().db, auth, provider, identity, {
+      userAgent: c.req.header('user-agent') ?? null,
+    })
+    if (!result.ok) return bail(result.reason)
 
-    const days = rt.auth.mode === 'session' ? rt.auth.sessionDays : 30
-    const cookie = await signIn(c, user.id, days)
     return new Response(null, {
       status: 302,
       headers: [
         ['location', next],
-        ['set-cookie', cookie],
+        ['set-cookie', signInCookie(c, result.session)],
         ...clearOidcCookies(url).map((value) => ['set-cookie', value] as [string, string]),
       ],
     })
@@ -388,40 +418,55 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 /* ------------------------------------------------------------------ state --- */
 
 /**
- * The OIDC state cookie's payload. Base64url over UTF-8 rather than raw JSON: a
- * cookie value may not contain `;` or a comma, and JSON is full of characters
- * that survive some proxies and not others.
+ * The redirect-state cookie's payload: **an envelope**, `{ next, state }`.
+ *
+ * `next` is Folio's — screened same-origin before it is written and screened
+ * again when it comes back — and `state` is whatever the provider asked to
+ * remember, handed back to it unread. It used to be one flat OIDC-shaped object
+ * with `next` as a fourth field beside `state`, `nonce` and `verifier`, which
+ * made the cookie a protocol's shape rather than a provider's.
+ *
+ * Base64url over UTF-8 rather than raw JSON: a cookie value may not contain `;`
+ * or a comma, and JSON is full of characters that survive some proxies and not
+ * others.
  */
-function encodeState(state: OidcState): string {
-  const bytes = new TextEncoder().encode(JSON.stringify(state))
+interface StateEnvelope {
+  next: string
+  state: RedirectState
+}
+
+function encodeState(envelope: StateEnvelope): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(envelope))
   let binary = ''
   for (const b of bytes) binary += String.fromCharCode(b)
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-/** Total over its input: the cookie is attacker-supplied like any other, and an
- * unreadable one means "no state", which the callback already refuses. */
-function decodeState(value: string | null): OidcState | null {
+/**
+ * Total over its input: the cookie is attacker-supplied like any other, and an
+ * unreadable one means "no state", which the callback already refuses.
+ *
+ * `state` is screened to a string-valued record — the provider is handed a
+ * `RedirectState` and must not have to defend against a nested object, an array
+ * or a number arriving where it wrote a string.
+ */
+function decodeState(value: string | null): StateEnvelope | null {
   if (!value) return null
   try {
     const padded = value.replace(/-/g, '+').replace(/_/g, '/')
     const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4))
     const bytes = new Uint8Array(binary.length)
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<OidcState>
-    if (
-      typeof parsed.state !== 'string' ||
-      typeof parsed.nonce !== 'string' ||
-      typeof parsed.verifier !== 'string'
-    ) {
-      return null
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<StateEnvelope>
+    if (typeof parsed.next !== 'string') return null
+    const state = parsed.state
+    if (typeof state !== 'object' || state === null || Array.isArray(state)) return null
+    const screened: Record<string, string> = {}
+    for (const [key, entry] of Object.entries(state)) {
+      if (typeof entry !== 'string') return null
+      screened[key] = entry
     }
-    return {
-      state: parsed.state,
-      nonce: parsed.nonce,
-      verifier: parsed.verifier,
-      next: typeof parsed.next === 'string' ? parsed.next : '',
-    }
+    return { next: parsed.next, state: screened }
   } catch {
     return null
   }

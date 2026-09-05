@@ -32,7 +32,7 @@ import {
 } from '../../../core/cache-tags'
 import type { FieldCondition } from '../../../core/conditions'
 import type { Field } from '../../../core/fields'
-import type { AuthPolicy } from '../../../server/auth/config'
+import type { AuthPolicy, AuthPolicyProvider } from '../../../server/auth/config'
 import { type LocaleConfig, localeChain } from '../../../core/locales'
 import {
   type BlockSchema,
@@ -540,10 +540,19 @@ export function globalRows(manifest: Manifest): GlobalRow[] {
 export interface ProviderRow {
   id: string
   label: string
-  /** How a person gets through it. */
+  /** How a person gets through it — one clause per kind. */
   flow: string
   /** What happens to an identity the provider verified that Folio has never seen. */
   unknownEmail: string
+  /**
+   * Who decides a role here. "Set in Folio" or "From <label>", never the mapping
+   * itself: a `RoleMapper` is a host function, and projecting one needs a DSL
+   * the spec rejected (decision 5). Which of the two it is *is* the fact an
+   * editor needs, because it says where to go to change somebody's role.
+   */
+  roles: string
+  /** Email domains enforced to this provider, or an em dash for the usual none. */
+  domains: string
 }
 
 /**
@@ -558,12 +567,26 @@ export function providerRows(policy: AuthPolicy | undefined): ProviderRow[] {
   return (policy?.providers ?? []).map((provider) => ({
     id: provider.id,
     label: provider.label,
-    flow: provider.redirect ? 'Redirect to the provider' : 'Emailed sign-in link',
+    flow: FLOWS[provider.kind],
     unknownEmail:
       provider.provision === 'create'
         ? `Creates ${article(provider.provisionRole ?? 'viewer')}`
         : 'Refused — access is a list someone maintains',
+    roles: provider.rolesFromProvider ? `From ${provider.label}` : 'Set in Folio',
+    domains: provider.domains.length > 0 ? provider.domains.join(', ') : '—',
   }))
+}
+
+/**
+ * One clause per kind. A lookup rather than a chain of ternaries because the
+ * union is closed and exhaustive: adding a fifth kind to `AuthProvider` fails to
+ * typecheck here until it has a sentence, which is the point.
+ */
+const FLOWS: Record<AuthPolicyProvider['kind'], string> = {
+  mail: 'Emailed sign-in link',
+  redirect: 'Redirect to the provider',
+  trusted: 'Identity the host has already verified',
+  passkey: 'Passkey on the device',
 }
 
 /** `an editor`, `a viewer`. Worth the three lines: the roles are `viewer`,

@@ -63,6 +63,7 @@ describe('workers harness: D1', () => {
     expect(results.map((r) => r.name)).toEqual([
       'api_tokens',
       'assets',
+      'auth_events',
       'content_fts',
       'content_fts_config',
       'content_fts_data',

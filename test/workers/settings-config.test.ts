@@ -65,15 +65,15 @@ const leaky = () =>
     auth: {
       providers: [
         {
+          kind: 'redirect' as const,
           id: 'oidc',
           label: 'Sign in with Acme',
-          redirect: true,
           start: async () => ({
             url: 'https://idp.example/authorize',
-            state: { state: 's', nonce: 'n', verifier: 'v', next: '/' },
+            state: { state: 's', nonce: 'n', verifier: 'v' },
           }),
           callback: async () => ({ email: 'a@b.c' }),
-          provision: { create: true, role: 'editor' },
+          provision: { create: true, role: 'editor' as const },
           ...({ clientSecret: SECRET } as Record<string, unknown>),
         },
       ],
@@ -158,7 +158,7 @@ describe('GET /folio/api/schema carries no auth block', () => {
 /* ------------------------------- the gated route, and no credential with it --- */
 
 describe('GET /folio/api/me: sign-in policy', () => {
-  it('carries the four facts that describe a provider and nothing else', async () => {
+  it('carries the facts that describe a provider and nothing else', async () => {
     const { status, body } = await get(leaky(), '/folio/api/me', await signIn())
     expect(status).toBe(200)
     const policy = (JSON.parse(body) as { policy?: AuthPolicy }).policy
@@ -167,19 +167,25 @@ describe('GET /folio/api/me: sign-in policy', () => {
       {
         id: 'oidc',
         label: 'Sign in with Acme',
-        redirect: true,
+        kind: 'redirect',
         provision: 'create',
         provisionRole: 'editor',
+        rolesFromProvider: false,
+        domains: [],
+        signOut: false,
       },
     ])
     // The exact key set, so an added field is a failing test rather than a quiet
     // widening of what a client is told.
     expect(Object.keys(policy!.providers[0]!).sort()).toEqual([
+      'domains',
       'id',
+      'kind',
       'label',
       'provision',
       'provisionRole',
-      'redirect',
+      'rolesFromProvider',
+      'signOut',
     ])
     // And the whole response, not just the projection: the secret must not have
     // reached the body by any route. This is the assertion `authPolicy`'s
@@ -208,8 +214,11 @@ describe('GET /folio/api/me: sign-in policy', () => {
     expect(policy?.providers[0]).toEqual({
       id: 'magic',
       label: 'Email me a sign-in link',
-      redirect: false,
+      kind: 'mail',
       provision: 'refuse',
+      rolesFromProvider: false,
+      domains: [],
+      signOut: false,
     })
   })
 

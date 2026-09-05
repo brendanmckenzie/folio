@@ -152,13 +152,24 @@ const manifest: Manifest = {
  */
 const policy: AuthPolicy = {
   providers: [
-    { id: 'link', label: 'Email me a link', redirect: false, provision: 'refuse' },
+    {
+      id: 'link',
+      label: 'Email me a link',
+      kind: 'mail',
+      provision: 'refuse',
+      rolesFromProvider: false,
+      domains: [],
+      signOut: false,
+    },
     {
       id: 'google',
       label: 'Google',
-      redirect: true,
+      kind: 'redirect',
       provision: 'create',
       provisionRole: 'editor',
+      rolesFromProvider: true,
+      domains: ['client.com'],
+      signOut: true,
     },
   ],
   sessionDays: 30,
@@ -494,13 +505,40 @@ describe('providerRows', () => {
         label: 'Email me a link',
         flow: 'Emailed sign-in link',
         unknownEmail: 'Refused — access is a list someone maintains',
+        roles: 'Set in Folio',
+        domains: '—',
       },
       {
         id: 'google',
         label: 'Google',
         flow: 'Redirect to the provider',
         unknownEmail: 'Creates an editor',
+        // Never the mapping — a `RoleMapper` is a host function, and where to
+        // change a role is the fact this column carries (decision 5).
+        roles: 'From Google',
+        domains: 'client.com',
       },
+    ])
+  })
+
+  it('has a clause for every kind, including the two no test config uses yet', () => {
+    const kinds = providerRows({
+      ...policy,
+      providers: (['mail', 'redirect', 'trusted', 'passkey'] as const).map((kind) => ({
+        id: kind,
+        label: kind,
+        kind,
+        provision: 'refuse' as const,
+        rolesFromProvider: false,
+        domains: [],
+        signOut: false,
+      })),
+    }).map((row) => row.flow)
+    expect(kinds).toEqual([
+      'Emailed sign-in link',
+      'Redirect to the provider',
+      'Identity the host has already verified',
+      'Passkey on the device',
     ])
   })
 
@@ -515,15 +553,18 @@ describe('providerRows', () => {
 
   it('never sees a field the projection did not name', () => {
     // The guard against the manifest mistake coming back through a different door:
-    // whatever a host hung off its provider object, only these five keys exist by
+    // whatever a host hung off its provider object, only these eight keys exist by
     // the time a row is built. `test/workers/settings-config.test.ts` pins the same
     // property on the wire.
     expect(Object.keys(policy.providers[1]!).sort()).toEqual([
+      'domains',
       'id',
+      'kind',
       'label',
       'provision',
       'provisionRole',
-      'redirect',
+      'rolesFromProvider',
+      'signOut',
     ])
   })
 })

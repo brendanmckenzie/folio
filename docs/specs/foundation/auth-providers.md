@@ -5,8 +5,9 @@
 > **Size:** L
 > **Status:** draft
 > **Wire version:** none
-> **Migration:** `0005_auth.sql` — a claim. **Takes `0006` on the decided order**
-> (30 goes first and takes `0005`), and every `0005` in this file restamps with it.
+> **Migration:** `0006_auth.sql` — restamped from the `0005` this was drafted with,
+> because 30 built first and took `0005_content_fts.sql`. Every mention below is
+> `0006`.
 > **Build sequence:** 3 of 4 — 31 → 30 → 28 → 29 (owner, 2026-09-05). The **Build order** above is this spec's identity, not its place in the queue.
 > **Last updated:** 2026-09-05
 
@@ -171,7 +172,7 @@ Verified 2026-09-05 against the tree at `0f0df54`. Paths are `src/…`; the olde
   under open (286); the origin check (446-490); the socket (572-830).
 - `test/workers/auth-session.test.ts` — the `users`/`sessions`/`api_tokens` helpers.
 - `test/workers/migrations.test.ts:406-418` and `437-449` assert the **exact column
-  lists** of `users` and `sessions` with `toEqual`; `0005` grows both.
+  lists** of `users` and `sessions` with `toEqual`; `0006` grows both.
 - `test/workers/wrangler.jsonc` — `nodejs_compat`, `compatibility_date` 2026-07-27.
 - `scripts/auth-test.mjs:63` asserts the login page contains no `<script`. Unchanged by
   this spec; spec 29 is the one that revisits it.
@@ -656,13 +657,13 @@ it calls.
 
 ## Wire & schema changes
 
-### D1 migration `0005_auth.sql`
+### D1 migration `0006_auth.sql`
 
 ```sql
 -- Auth providers, part 2 (docs/specs/foundation/auth-providers.md): who decided a
 -- role, which provider minted a session, and a record of sign-ins.
 --
--- Two `alter table add column`s and one `create table`, in the plain shape 0002-0004
+-- Two `alter table add column`s and one `create table`, in the plain shape 0002-0005
 -- established. Both new columns go at the end of their tables, so the exact column
 -- lists `test/workers/migrations.test.ts` asserts grow by one entry each.
 
@@ -951,7 +952,7 @@ THEN each is deleted and the report counts them; a 89-day-old event survives
    the three OIDC fields; `callback` takes `params`.
 3. `src/server/auth/jwt.ts` (new): `verifyJws`, `fromBase64url`, `algorithmFor`
    extracted from `oidc.ts`; `verifyIdToken` becomes a caller.
-4. `migrations/0005_auth.sql`; `test/workers/migrations.test.ts:406-418` and
+4. `migrations/0006_auth.sql`; `test/workers/migrations.test.ts:406-418` and
    `437-449` gain one column each; a new `it` asserts `auth_events`' columns and
    exactly its two indexes.
 5. `src/server/auth/sign-in.ts` (new): `completeSignIn`. `session.ts`:

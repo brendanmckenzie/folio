@@ -97,6 +97,7 @@ beforeEach(async () => {
   await env.DB.batch([
     env.DB.prepare('delete from sessions'),
     env.DB.prepare('delete from login_challenges'),
+    env.DB.prepare('delete from auth_events'),
     env.DB.prepare('delete from users'),
   ])
 })
@@ -302,6 +303,42 @@ describe('GET /folio/login/verify', () => {
     expect(res.headers.get('location')).toContain('error=refused')
   })
 
+  it('stamps `users.provider` with the provider that signed them in', async () => {
+    // **The bug `completeSignIn` exists to make unrepeatable.** `users.provider`
+    // was written by the OIDC callback's inline `createUser` and by nothing
+    // else, so every magic-link user read "—" in the Access screen's "Signs in
+    // with" column — a visible wrong answer, three files from the omission.
+    const user = await seedEditor()
+    const folio = folioWith(magicAuth)
+    await requestLink(folio, 'ann@example.com')
+    expect(user.provider).toBeNull()
+
+    await call(folio, `/folio/login/verify?t=${tokenOf(outbox[0]!)}`)
+
+    expect((await userByEmail(env.DB, 'ann@example.com'))?.provider).toBe('magic')
+    // And the session records the provider that minted it, which is what logout
+    // reads to decide where the browser goes next.
+    const row = await env.DB.prepare('select provider from sessions').first<{
+      provider: string | null
+    }>()
+    expect(row?.provider).toBe('magic')
+  })
+
+  it('records the sign-in as one auth_events row, in the session’s own batch', async () => {
+    const user = await seedEditor()
+    const folio = folioWith(magicAuth)
+    await requestLink(folio, 'ann@example.com')
+    await call(folio, `/folio/login/verify?t=${tokenOf(outbox[0]!)}`)
+
+    const { results } = await env.DB.prepare(
+      'select kind, user_id, actor, provider from auth_events',
+    ).all<{ kind: string; user_id: string; actor: string; provider: string }>()
+    // A sign-in is the one event whose actor is its own subject.
+    expect(results).toEqual([
+      { kind: 'sign_in', user_id: user.id, actor: user.id, provider: 'magic' },
+    ])
+  })
+
   it('will not be talked into redirecting off-site', async () => {
     await seedEditor()
     const folio = folioWith(magicAuth)
@@ -454,9 +491,18 @@ function idpFetch(idToken: () => Promise<string> | string, opts: { tokenStatus?:
   }
 }
 
-/** The state cookie's payload, which the test needs so it can sign a token with
- * the right nonce — exactly what an attacker cannot do. */
-function decodeStateCookie(res: Response): { state: string; nonce: string; next: string } {
+/**
+ * The state cookie's payload, which the test needs so it can sign a token with
+ * the right nonce — exactly what an attacker cannot do.
+ *
+ * An **envelope**: `next` is Folio's and `state` is whatever the provider asked
+ * to remember, handed back to it unread. It used to be one flat OIDC-shaped
+ * object with `next` as a fourth field beside the three the protocol needs.
+ */
+function decodeStateCookie(res: Response): {
+  next: string
+  state: { state: string; nonce: string; verifier: string }
+} {
   const raw = cookieFrom(res, '__Host-folio_oidc')
   if (!raw) throw new Error('no oidc state cookie was set')
   const padded = raw.replace(/-/g, '+').replace(/_/g, '/')
@@ -513,9 +559,12 @@ describe('GET /folio/login/oidc', () => {
     expect(target.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/)
     expect(target.searchParams.get('nonce')).toBeTruthy()
 
-    const state = decodeStateCookie(res)
-    expect(state.state).toBe(target.searchParams.get('state'))
-    expect(state.next).toBe('/folio/edit/sty_a')
+    const envelope = decodeStateCookie(res)
+    expect(envelope.state.state).toBe(target.searchParams.get('state'))
+    // `next` rides in Folio's half of the envelope, and the provider never sees
+    // it: `start` is handed a `redirectUri` and nothing else.
+    expect(envelope.next).toBe('/folio/edit/sty_a')
+    expect(Object.keys(envelope.state).sort()).toEqual(['nonce', 'state', 'verifier'])
   })
 
   it('404s for a provider that is not configured', async () => {
@@ -527,7 +576,7 @@ describe('GET /folio/login/oidc/callback', () => {
   async function start(folio: Folio) {
     const res = await call(folio, '/folio/login/oidc')
     const cookie = `__Host-folio_oidc=${cookieFrom(res, '__Host-folio_oidc')}`
-    return { cookie, state: decodeStateCookie(res) }
+    return { cookie, state: decodeStateCookie(res).state }
   }
 
   it('signs in a known user and clears the state cookie', async () => {

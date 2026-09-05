@@ -20,13 +20,16 @@
  *     authentication bypass.
  */
 import { CLOCK_LEEWAY_MS } from './challenges'
-import type { AuthProvider, OidcState, Provisioning, VerifiedIdentity } from './config'
+import type { Provisioning, RedirectProvider, RoleMapper, VerifiedIdentity } from './config'
+import { base64url, verifyJws } from './jwt'
 import { mintSecret } from './secrets'
 
 /** What Folio asks for. `openid` is mandatory; the other two are what the user
  * row needs. */
 const DEFAULT_SCOPES = 'openid email profile'
 
+/** The default id. Overridable with `oidc({ id })`, so two tenants — a staff
+ * directory and a client's — can be configured side by side. */
 export const OIDC_ID = 'oidc'
 
 /** A value read straight from the config, or from the env at request time — a
@@ -40,6 +43,12 @@ function resolveFromEnv<Env, T>(value: FromEnv<Env, T>, env: Env): T {
 export interface OidcOptions<Env> {
   /** Discovery base, e.g. `https://login.microsoftonline.com/<tenant>/v2.0`. */
   issuer: string
+  /**
+   * Provider id, defaulting to `'oidc'`. It is the URL segment
+   * (`{base}/login/<id>`), the `users.provider` stamp and what `domains` names,
+   * so two tenants need two ids.
+   */
+  id?: string
   clientId: FromEnv<Env, string>
   clientSecret: FromEnv<Env, string>
   /** Default `'openid email profile'`. */
@@ -50,6 +59,14 @@ export interface OidcOptions<Env> {
    * of holding an account at the identity provider.
    */
   provision?: Provisioning
+  /** Maps the id token's claims to a role. `null` refuses a user this provider
+   * previously placed (the spec's decision 5). */
+  roleFrom?: RoleMapper
+  /** Email domains this provider is the only door for. */
+  domains?: readonly string[]
+  /** Where "sign out" sends the browser. RP-initiated logout is the host's URL
+   * to supply: it is not derivable from the discovery document. */
+  signOutUrl?: string
   label?: string
   /** Injected in tests. Defaults to the global `fetch`. */
   fetchImpl?: typeof fetch
@@ -87,23 +104,7 @@ async function discover(issuer: string, doFetch: typeof fetch): Promise<Discover
   return full
 }
 
-/* -------------------------------------------------------------- jwt / pkce --- */
-
-function base64url(bytes: Uint8Array): string {
-  let binary = ''
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
-}
-
-/** Backed by a plain `ArrayBuffer` explicitly, so the result is a `BufferSource`
- * `crypto.subtle.verify` accepts without a cast. */
-function fromBase64url(value: string): Uint8Array<ArrayBuffer> {
-  const padded = value.replace(/-/g, '+').replace(/_/g, '/')
-  const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4))
-  const out = new Uint8Array(new ArrayBuffer(binary.length))
-  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i)
-  return out
-}
+/* -------------------------------------------------------------------- pkce --- */
 
 /** S256 code challenge for a verifier. */
 async function codeChallenge(verifier: string): Promise<string> {
@@ -111,12 +112,10 @@ async function codeChallenge(verifier: string): Promise<string> {
   return base64url(new Uint8Array(digest))
 }
 
-interface JwtHeader {
-  alg?: string
-  kid?: string
-}
-
 interface IdTokenClaims {
+  /** Everything else the tenant asserts — `groups`, `roles`, whatever a
+   * `roleFrom` reads. */
+  [claim: string]: unknown
   iss?: string
   aud?: string | string[]
   nonce?: string
@@ -127,29 +126,14 @@ interface IdTokenClaims {
   preferred_username?: string
 }
 
-/** Which `crypto.subtle` algorithm a JOSE `alg` names, or null if unsupported. */
-function algorithmFor(
-  alg: string,
-): { importAlg: EcKeyImportParams | RsaHashedImportParams } | null {
-  switch (alg) {
-    case 'RS256':
-      return { importAlg: { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' } }
-    case 'ES256':
-      return { importAlg: { name: 'ECDSA', namedCurve: 'P-256' } }
-    default:
-      // `none` and every HMAC alg included. An id token is signed with the
-      // provider's *private* key; anything symmetric here means the "key" is a
-      // value the client also holds, which is not a signature.
-      return null
-  }
-}
-
-function verifyParams(alg: string): AlgorithmIdentifier | EcdsaParams {
-  return alg === 'ES256' ? { name: 'ECDSA', hash: 'SHA-256' } : { name: 'RSASSA-PKCS1-v1_5' }
-}
-
 /**
  * The claims of a verified id token, or a throw.
+ *
+ * A caller of `verifyJws` (`./jwt.ts`) rather than a verifier of its own: the
+ * signature check is protocol-agnostic and is shared with anything else that
+ * receives a JWT. What is *here* is everything OIDC adds on top — the issuer,
+ * the audience, the nonce that ties the token to this browser's attempt, and the
+ * expiry.
  *
  * Exported for its own tests: the failure modes here (a wrong issuer, a replayed
  * nonce, an expired token, a token signed by a key that is not in the JWKS) are
@@ -161,41 +145,11 @@ export async function verifyIdToken(
   expect: { issuer: string; clientId: string; nonce: string; jwks: { keys: JsonWebKey[] } },
   now = Date.now(),
 ): Promise<IdTokenClaims> {
-  const parts = token.split('.')
-  if (parts.length !== 3) throw new Error('oidc: id token is not a JWS')
-  const [headerPart, payloadPart, signaturePart] = parts as [string, string, string]
-
-  const decoder = new TextDecoder()
-  const header = JSON.parse(decoder.decode(fromBase64url(headerPart))) as JwtHeader
-  const alg = header.alg ?? ''
-  const chosen = algorithmFor(alg)
-  if (!chosen) throw new Error(`oidc: unsupported id token algorithm '${alg || 'none'}'`)
-
-  // `kid` narrows to one key when the provider sends one, which is what makes a
-  // rotation window work; without it every candidate of the right type is tried.
-  const candidates = expect.jwks.keys.filter(
-    (k) => header.kid === undefined || (k as { kid?: string }).kid === header.kid,
-  )
-  if (candidates.length === 0) throw new Error('oidc: id token names a key the JWKS does not have')
-
-  const signed = new TextEncoder().encode(`${headerPart}.${payloadPart}`)
-  const signature = fromBase64url(signaturePart)
-  let ok = false
-  for (const jwk of candidates) {
-    let key: CryptoKey
-    try {
-      key = await crypto.subtle.importKey('jwk', jwk, chosen.importAlg, false, ['verify'])
-    } catch {
-      continue
-    }
-    if (await crypto.subtle.verify(verifyParams(alg), key, signature, signed)) {
-      ok = true
-      break
-    }
-  }
-  if (!ok) throw new Error('oidc: id token signature does not verify')
-
-  const claims = JSON.parse(decoder.decode(fromBase64url(payloadPart))) as IdTokenClaims
+  const { payload: claims } = await verifyJws<IdTokenClaims>(token, {
+    jwks: expect.jwks,
+    source: 'oidc',
+    noun: 'id token',
+  })
 
   // The issuer, not the email domain: see this module's own comment.
   if (claims.iss !== expect.issuer) {
@@ -216,25 +170,43 @@ export async function verifyIdToken(
 
 /* ---------------------------------------------------------------- provider --- */
 
-export function oidc<Env>(options: OidcOptions<Env>): AuthProvider<Env> {
+/**
+ * The three values OIDC needs to survive the trip to the IdP, as a
+ * `RedirectState` with names. Folio stores whatever a provider hands it and
+ * hands the same thing back; typing it here is what keeps `start` and `callback`
+ * from reading an index signature that is `string | undefined` everywhere.
+ */
+interface OidcRoundTrip extends Record<string, string> {
+  state: string
+  nonce: string
+  verifier: string
+}
+
+export function oidc<Env>(options: OidcOptions<Env>): RedirectProvider<Env> {
   if (!options?.issuer) throw new Error('folio: oidc({ issuer }) is required')
 
+  const id = options.id ?? OIDC_ID
   const doFetch: typeof fetch = (input, init) =>
     (options.fetchImpl ?? fetch)(input as RequestInfo, init)
 
   return {
-    id: OIDC_ID,
+    kind: 'redirect',
+    id,
     label: options.label ?? 'Sign in with your work account',
-    redirect: true,
     provision: options.provision ?? 'refuse',
+    ...(options.roleFrom ? { roleFrom: options.roleFrom } : {}),
+    ...(options.domains ? { domains: options.domains } : {}),
+    ...(options.signOutUrl ? { signOutUrl: options.signOutUrl } : {}),
 
-    async start(env, { redirectUri, next }) {
+    // `next` is not here and never was OIDC's: Folio wraps whatever a provider
+    // asks it to remember in a `{ next, state }` cookie envelope and hands back
+    // only the inner half. What survives is the three things the protocol needs.
+    async start(env, { redirectUri }) {
       const doc = await discover(options.issuer, doFetch)
-      const state: OidcState = {
+      const state: OidcRoundTrip = {
         state: mintSecret(),
         nonce: mintSecret(),
         verifier: mintSecret(),
-        next,
       }
       const url = new URL(doc.authorization_endpoint)
       url.searchParams.set('response_type', 'code')
@@ -251,17 +223,20 @@ export function oidc<Env>(options: OidcOptions<Env>): AuthProvider<Env> {
       return { url: url.toString(), state }
     },
 
-    async callback(env, { url, redirectUri, state }): Promise<VerifiedIdentity> {
-      const error = url.searchParams.get('error')
+    // `params` and not the whole URL: the callback reads the query and nothing
+    // else, and a provider that cannot see the request's own origin cannot
+    // accidentally decide anything from it.
+    async callback(env, { params, redirectUri, state }): Promise<VerifiedIdentity> {
+      const error = params.get('error')
       if (error) throw new Error(`oidc: the provider refused the sign-in (${error})`)
 
       // Checked before anything is fetched: a mismatched state is a CSRF attempt
       // or a stale tab, and either way there is nothing to exchange.
-      const returned = url.searchParams.get('state')
+      const returned = params.get('state')
       if (!returned || returned !== state.state) {
         throw new Error('oidc: the sign-in state did not match')
       }
-      const code = url.searchParams.get('code')
+      const code = params.get('code')
       if (!code) throw new Error('oidc: the provider returned no authorization code')
 
       const doc = await discover(options.issuer, doFetch)
@@ -272,7 +247,7 @@ export function oidc<Env>(options: OidcOptions<Env>): AuthProvider<Env> {
         redirect_uri: redirectUri,
         client_id: clientId,
         client_secret: resolveFromEnv(options.clientSecret, env),
-        code_verifier: state.verifier,
+        code_verifier: state.verifier ?? '',
       })
       const tokenRes = await doFetch(doc.token_endpoint, {
         method: 'POST',
@@ -290,7 +265,7 @@ export function oidc<Env>(options: OidcOptions<Env>): AuthProvider<Env> {
       const claims = await verifyIdToken(tokens.id_token, {
         issuer: doc.issuer,
         clientId,
-        nonce: state.nonce,
+        nonce: state.nonce ?? '',
         jwks,
       })
 
@@ -302,7 +277,9 @@ export function oidc<Env>(options: OidcOptions<Env>): AuthProvider<Env> {
       if (claims.email_verified === false) {
         throw new Error('oidc: the provider has not verified that email address')
       }
-      return { email, name: claims.name ?? claims.preferred_username }
+      // Every claim travels, not just the two the user row needs: `roleFrom` is
+      // the reader, and what a tenant maps a role from is its own business.
+      return { email, name: claims.name ?? claims.preferred_username, claims }
     },
   }
 }

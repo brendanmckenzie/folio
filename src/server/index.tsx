@@ -169,7 +169,13 @@ export type {
   AuthConfig,
   AuthProvider,
   MagicLinkMail,
+  MailProvider,
+  PasskeyProvider,
   Provisioning,
+  RedirectProvider,
+  RedirectState,
+  RoleMapper,
+  TrustedProvider,
   VerifiedIdentity,
 } from './auth/config'
 export type { UserRow } from './auth/users'
