@@ -60,7 +60,30 @@ check('the manifest stays public', schema.status === 200, `status=${schema.statu
 const loginPage = await fetch(`${BASE}/login`)
 const loginHtml = await loginPage.text()
 check('the login page renders', loginPage.status === 200 && loginHtml.includes('name="email"'))
-check('and ships no JavaScript at all', !loginHtml.includes('<script'))
+
+/**
+ * `foundation/passkeys.md` decision 4 changed the shape of this assertion
+ * rather than removing it. It used to be "no `<script` at all" — true of every
+ * deployment before this spec. The demo now lists `passkeys()` (below and in
+ * `examples/demo/src/index.tsx`), so the honest property left to assert is
+ * "never a *bundled* script" — `<script src>` — plus, for this deployment
+ * specifically, "exactly the one inline script the passkey button needs". A
+ * deployment that never lists `passkeys()` still gets the stronger claim
+ * (`test/workers/auth-login.test.ts` pins that half in workerd, where a
+ * config with no passkey provider is cheap to build); this script only ever
+ * runs against the demo, which does.
+ */
+const loginScriptTags = [...loginHtml.matchAll(/<script\b[^>]*>/g)].map((m) => m[0])
+check(
+  'and ships no external script',
+  loginScriptTags.every((tag) => !tag.includes(' src=')),
+  loginScriptTags.join(' | '),
+)
+check(
+  'and ships exactly one inline script, now that the demo lists passkeys()',
+  loginScriptTags.length === 1,
+  `count=${loginScriptTags.length}`,
+)
 
 /* --- an unauthenticated socket is refused terminally -------------------- */
 
@@ -433,7 +456,20 @@ check(
   'and offers one button per trusted provider',
   signedOutHtml.includes('href="/folio/login/dev-header?next='),
 )
-check('while still shipping no JavaScript', !signedOutHtml.includes('<script'))
+// Same page, same passkey provider (decision 4 does not gate the button on
+// `signedOut`, unlike the trusted buttons above), so the same two-part claim
+// as the ordinary login page holds here too.
+const signedOutScriptTags = [...signedOutHtml.matchAll(/<script\b[^>]*>/g)].map((m) => m[0])
+check(
+  'and still ships no external script',
+  signedOutScriptTags.every((tag) => !tag.includes(' src=')),
+  signedOutScriptTags.join(' | '),
+)
+check(
+  'and still ships exactly one inline script',
+  signedOutScriptTags.length === 1,
+  `count=${signedOutScriptTags.length}`,
+)
 
 const explicit = await fetch(`${BASE}/login/dev-header?next=%2Ffolio%2Fedit`, {
   headers: DEV_ID,

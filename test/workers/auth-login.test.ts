@@ -2,7 +2,14 @@ import { createExecutionContext, env } from 'cloudflare:test'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { defineBlock, text } from '../../src/core'
 import type { AuthConfig, MagicLinkMail, Role, RoleMapper } from '../../src/server'
-import { createFolio, magicLink, oidc, roleFromClaim } from '../../src/server'
+import {
+  createFolio,
+  LOGIN_PASSKEY_SCRIPT_HASH,
+  magicLink,
+  oidc,
+  passkeys,
+  roleFromClaim,
+} from '../../src/server'
 import { CHALLENGE_TTL_MS, createChallenge } from '../../src/server/auth/challenges'
 import { PLAIN_COOKIE, SECURE_COOKIE } from '../../src/server/auth/cookie'
 import { resetDiscoveryCache, verifyIdToken } from '../../src/server/auth/oidc'
@@ -117,7 +124,13 @@ describe('GET /folio/login', () => {
     expect(html).toContain('name="email"')
     // Architecture decision 7: a login page that needs a bundle to work is a
     // worse failure than an ugly one. No module script, no bootstrap global.
+    // `foundation/passkeys.md` decision 4: this holds because `magicAuth` lists
+    // no `passkeys()` — the acceptance criterion "GIVEN passkeys() is not
+    // configured, THEN the HTML contains no <script> at all and no
+    // button#folio-passkey".
     expect(html).not.toContain('<script')
+    expect(html).not.toContain('folio-passkey')
+    expect(html).toContain('autoComplete="email"')
     expect(html).toContain('Email me a sign-in link')
   })
 
@@ -155,6 +168,54 @@ describe('GET /folio/login', () => {
     // page is the most useful kind there is.
     expect(html).not.toContain('evil.example')
     expect(html).toContain('value="/folio/edit"')
+  })
+})
+
+/* --------------------------------------------- the passkey login script --- */
+
+/** `sha256-<base64 digest>` of `text`, computed the same way `pages.tsx`'s own
+ * `scriptHash` does — independently, so the test is not just asserting the
+ * function equals itself. */
+async function sha256Hash(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  let binary = ''
+  for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte)
+  return `sha256-${btoa(binary)}`
+}
+
+describe('GET /folio/login with passkeys() configured (foundation/passkeys.md decision 4)', () => {
+  const withPasskeys: AuthConfig<Cloudflare.Env> = {
+    providers: [capturingMagicLink, passkeys()],
+  }
+
+  it('ships exactly one inline script, a hidden button, and the webauthn autocomplete token', async () => {
+    const res = await call(folioWith(withPasskeys), '/folio/login')
+    const html = await res.text()
+
+    expect(res.status).toBe(200)
+    const scripts = [...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/g)]
+    expect(scripts).toHaveLength(1)
+    // No `src` attribute — it never bundles, whatever else it does.
+    expect(scripts[0]![1]).not.toContain('src')
+
+    expect(html).toMatch(/<button[^>]*id="folio-passkey"[^>]*hidden/)
+    expect(html).toContain('autoComplete="username webauthn"')
+    // The email form posts exactly as it does today.
+    expect(html).toContain('action="/folio/login/email"')
+    expect(html).toContain('method="post"')
+
+    // The hash a host puts in a CSP's `script-src` matches the literal that
+    // actually shipped, computed independently rather than by re-reading the
+    // exported constant — a one-character edit to the script must fail this.
+    expect(await sha256Hash(scripts[0]![2]!)).toBe(LOGIN_PASSKEY_SCRIPT_HASH)
+  })
+
+  it('ships nothing passkey-shaped for a deployment that never listed the provider', async () => {
+    const res = await call(folioWith(magicAuth), '/folio/login')
+    const html = await res.text()
+    expect(html).not.toContain('<script')
+    expect(html).not.toContain('folio-passkey')
+    expect(html).toContain('autoComplete="email"')
   })
 })
 

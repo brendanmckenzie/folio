@@ -184,6 +184,14 @@ export type { RoleFromClaimOptions } from './auth/roles-from'
  */
 export { passkeys } from './auth/passkeys-provider'
 export type { PasskeyOptions } from './auth/passkeys-provider'
+/**
+ * The `sha256-…` of the login page's one inline script
+ * (`../../docs/specs/foundation/passkeys.md` decision 4): what a host applying
+ * a Content-Security-Policy to `{base}/login` puts in `script-src` to allow it.
+ * Computed once in `pages.tsx` from the literal itself, so a one-character edit
+ * to the script cannot silently break every such host's CSP.
+ */
+export { LOGIN_PASSKEY_SCRIPT_HASH } from './pages'
 export {
   ADMIN,
   ASSETS,

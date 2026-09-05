@@ -302,6 +302,172 @@ const LOGIN_STYLE = `
   .folio-login__rule { margin: 18px 0 0; border: 0; border-top: 1px solid #eee; }
 `
 
+/**
+ * The whole of the passkey login flow's client side
+ * (`../../docs/specs/foundation/passkeys.md` decision 4).
+ *
+ * **A static literal with no interpolation** — the same property `LOGIN_STYLE`
+ * has, and for the same reason: `base` and `next` travel as `data-base` /
+ * `data-next` attributes on `#folio-passkey` instead, so a literal script can
+ * carry no injection even though `next` is user-controlled (screened by
+ * `safeNext`, but still).
+ *
+ * Five things, in order:
+ *
+ * 1. Bail out entirely when the browser has no `PublicKeyCredential` — nothing
+ *    changes for it, and the button stays `hidden`.
+ * 2. Un-hide the button.
+ * 3. `arm(mediation)`: request a challenge, run `navigator.credentials.get()`,
+ *    serialise the assertion **by hand** — not `PublicKeyCredential.toJSON()`,
+ *    too new to rely on — and post it. `ok` navigates to `next`; a failure
+ *    writes the server's message into a notice, unless the request was
+ *    aborted, which leaves the page exactly as it was.
+ * 4. On load, arm conditional UI when the browser offers it. Every route here
+ *    answers the byte-identical refusal body, so the script cannot read
+ *    *why* a conditional assertion was refused — only that it was — which is
+ *    why the rule is simply: on a conditional failure, re-arm **once** with a
+ *    fresh challenge, then stop. An idle tab must not hammer `/options`.
+ * 5. The button's click handler aborts the pending conditional `get()` first —
+ *    two concurrent `get()` calls reject each other, so the abort is
+ *    required, not defensive — then arms an explicit ceremony.
+ */
+const LOGIN_PASSKEY_SCRIPT = `(function () {
+  if (!('PublicKeyCredential' in window)) return
+  var btn = document.getElementById('folio-passkey')
+  if (!btn) return
+  btn.hidden = false
+  var base = btn.getAttribute('data-base')
+  var next = btn.getAttribute('data-next')
+  var controller = null
+  var rearmed = false
+
+  function b64uToBuf(value) {
+    var pad = value.length % 4 === 0 ? '' : new Array(5 - (value.length % 4)).join('=')
+    var bin = atob((value + pad).replace(/-/g, '+').replace(/_/g, '/'))
+    var out = new Uint8Array(bin.length)
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+    return out.buffer
+  }
+
+  function bufToB64u(buf) {
+    var bytes = new Uint8Array(buf)
+    var bin = ''
+    for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+    return btoa(bin).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '')
+  }
+
+  function notify(message) {
+    var card = document.querySelector('.folio-login__card')
+    if (!card) return
+    var p = document.createElement('p')
+    p.className = 'folio-login__notice folio-login__notice--bad'
+    p.textContent = message
+    var form = card.querySelector('form')
+    card.insertBefore(p, form || card.firstChild)
+  }
+
+  function serialise(credential) {
+    return {
+      id: credential.id,
+      rawId: bufToB64u(credential.rawId),
+      type: credential.type,
+      response: {
+        clientDataJSON: bufToB64u(credential.response.clientDataJSON),
+        authenticatorData: bufToB64u(credential.response.authenticatorData),
+        signature: bufToB64u(credential.response.signature),
+        userHandle: credential.response.userHandle ? bufToB64u(credential.response.userHandle) : null
+      }
+    }
+  }
+
+  function arm(mediation) {
+    var ctl = new AbortController()
+    controller = ctl
+    fetch(base + '/login/passkey/options', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}'
+    })
+      .then(function (res) { return res.json() })
+      .then(function (body) {
+        var publicKey = body.publicKey
+        publicKey.challenge = b64uToBuf(publicKey.challenge)
+        publicKey.allowCredentials = (publicKey.allowCredentials || []).map(function (c) {
+          return { type: c.type, id: b64uToBuf(c.id), transports: c.transports }
+        })
+        return navigator.credentials.get({ publicKey: publicKey, mediation: mediation, signal: ctl.signal })
+      })
+      .then(function (credential) {
+        if (!credential) return null
+        return fetch(base + '/login/passkey', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ credential: serialise(credential), next: next })
+        }).then(function (res) {
+          return res.json().then(function (out) {
+            return { ok: res.ok, out: out }
+          })
+        })
+      })
+      .then(function (result) {
+        if (!result) return
+        if (result.ok) {
+          location.assign(result.out.next)
+          return
+        }
+        if (mediation === 'conditional' && !rearmed) {
+          rearmed = true
+          arm('conditional')
+          return
+        }
+        var message = result.out && result.out.error && result.out.error.message
+        notify(message || 'That passkey was not accepted.')
+      })
+      .catch(function (err) {
+        if (err && err.name === 'AbortError') return
+        if (mediation !== 'conditional') notify('That passkey was not accepted.')
+      })
+  }
+
+  if (window.PublicKeyCredential.isConditionalMediationAvailable) {
+    window.PublicKeyCredential.isConditionalMediationAvailable().then(function (ok) {
+      if (ok) arm('conditional')
+    })
+  }
+
+  btn.addEventListener('click', function () {
+    if (controller) controller.abort()
+    arm('optional')
+  })
+})()`
+
+/**
+ * `sha256-<base64 digest>` of a piece of inline script text, for a host's own
+ * Content-Security-Policy (`../../docs/specs/foundation/passkeys.md`
+ * decision 4). Folio sets no CSP itself; this is what a host that sets one on
+ * `{base}/login` puts in `script-src` to allow `LOGIN_PASSKEY_SCRIPT`.
+ */
+async function scriptHash(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
+  let binary = ''
+  for (const byte of new Uint8Array(digest)) binary += String.fromCharCode(byte)
+  return `sha256-${btoa(binary)}`
+}
+
+/**
+ * The hash of `LOGIN_PASSKEY_SCRIPT`, computed once at module load rather than
+ * hand-maintained, so a one-character edit to the script cannot silently break
+ * every host's CSP. `test/workers/auth-login.test.ts` pins that this equals the
+ * literal's own digest, computed the same way, as a second check against the
+ * same drift.
+ *
+ * A top-level `await`: this module's whole export surface — everything
+ * `folio/server` re-exports — resolves once, at instantiation, on whichever
+ * runtime loads it (workerd in every place this ships; `crypto.subtle` needs
+ * no `nodejs_compat`). Nothing here is per-request.
+ */
+export const LOGIN_PASSKEY_SCRIPT_HASH = await scriptHash(LOGIN_PASSKEY_SCRIPT)
+
 export interface LoginPageOptions {
   /** Where to send the browser once signed in. Already screened same-origin. */
   next: string
@@ -352,6 +518,11 @@ export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Res
   const mail = rt.auth.mode === 'session' ? rt.auth.mail : null
   const redirects = rt.auth.mode === 'session' ? rt.auth.redirects : []
   const trusted = opts.signedOut && rt.auth.mode === 'session' ? rt.auth.trusted : []
+  // Decision 1: opt-in per deployment. `null` here is what makes the whole of
+  // the button, the `autocomplete` change and the script disappear together —
+  // a host that never listed `passkeys()` ships exactly today's page, byte for
+  // byte, and no script at all.
+  const passkey = rt.auth.mode === 'session' ? rt.auth.passkey : null
   const next = opts.next
 
   return html(
@@ -381,7 +552,11 @@ export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Res
               id="folio-login-email"
               name="email"
               type="email"
-              autoComplete="email"
+              // `webauthn` is what lets the browser offer a passkey from this
+              // field's own autofill, before anybody has typed anything
+              // (decision 4). Inert without the script that arms conditional
+              // UI, which is exactly the browser's job to ignore.
+              autoComplete={passkey ? 'username webauthn' : 'email'}
               required
               placeholder="you@example.com"
             />
@@ -414,9 +589,36 @@ export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Res
             {provider.label}
           </a>
         ))}
+
+        {passkey && (mail || redirects.length > 0 || trusted.length > 0) ? (
+          <hr className="folio-login__rule" />
+        ) : null}
+
+        {passkey ? (
+          // `hidden` until the script proves `PublicKeyCredential` exists —
+          // with JavaScript disabled this never un-hides, and nothing else on
+          // the page depends on it. `base` and `next` travel as attributes
+          // rather than through interpolation, which is what lets
+          // `LOGIN_PASSKEY_SCRIPT` be a static literal (decision 4).
+          <button
+            type="button"
+            id="folio-passkey"
+            className="folio-login__provider"
+            hidden
+            data-base={rt.base}
+            data-next={next}
+          >
+            {passkey.label}
+          </button>
+        ) : null}
       </div>
+      {passkey ? (
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: a static literal script, no interpolation
+        <script dangerouslySetInnerHTML={{ __html: LOGIN_PASSKEY_SCRIPT }} />
+      ) : null}
     </Shell>,
-    // No client entry: that is the point.
+    // No client entry: that is the point. The inline script above is not one —
+    // it ships only when a host lists `passkeys()`, and it never bundles.
     [],
   )
 }

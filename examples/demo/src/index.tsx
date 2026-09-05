@@ -1,4 +1,4 @@
-import { createFolio, type FolioGate, magicLink, Shell, trusted } from 'folio/server'
+import { createFolio, type FolioGate, magicLink, passkeys, Shell, trusted } from 'folio/server'
 import { dataOf, resolveAsset, toSchemaIndex, type Doc, type Resolution } from 'folio/core'
 // `folio/engine` is the entry point for host-side tooling that manipulates
 // documents — a sync job is exactly the case its doc comment names. Ordinary
@@ -180,6 +180,12 @@ const folio = createFolio<Env>({
         },
       }),
       devIdentity,
+      // `foundation/passkeys.md` decision 1: listing this is the whole of the
+      // opt-in. `scripts/passkey-test.mjs` is what exercises it end to end —
+      // enrolling, signing in, and the login page's one inline script — and
+      // `scripts/auth-test.mjs` is what keeps asserting the page ships none of
+      // that for a deployment that never lists it.
+      passkeys(),
     ],
   },
   // See `gate` above (`platform/visitor-access.md`).
