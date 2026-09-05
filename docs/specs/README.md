@@ -265,6 +265,12 @@ Both restamped once when `0005` landed: the drafts claimed `0005` and `0006`, wr
 before the build order put 30 first. A claim is a stamp, not a landing — whichever of
 the remaining two builds first takes the next free number and the other restamps.
 
+**So the next free number is `0009`**, and a spec being drafted now should claim that
+rather than counting the landed rows above and reaching for `0006`. Landed: `0001`–`0005`.
+Claimed: `0006` (28), `0007` (29), `0008` (23). A media-management spec is in draft
+elsewhere as of 2026-09-05 and is the likely next claimant; when it lands a number here,
+this paragraph is where it goes.
+
 The table is kept as a **record of what each spec added**, since each spec's own
 *Wire & schema changes* section still names its migration and those sections are
 history rather than instructions:
