@@ -594,16 +594,27 @@ serve while signed out.
   `access_level`, roles, OTP login). It attaches in two places when wanted: a field
   on the root block, which `document-types.md` already makes per-type, and a host
   check before `folio.published()`. Deliberately not smuggled into a CMS-auth spec.
+  *2026-09-05:* drafted as spec 31, `../platform/visitor-access.md`, in exactly
+  that shape — the check moved inside `reader.page()` so the cache headers cannot
+  be got wrong.
 - **Per-story and per-branch permissions.** Needs a way to name a set of stories;
   revisit after `collections.md`.
 - **Multi-tenant spaces.** Roles are global (checkpoint 3).
 - **SSO group → role mapping.** `provision` sets a default role; mapping groups
-  needs claims configuration per tenant and is a follow-up.
+  needs claims configuration per tenant and is a follow-up. *2026-09-05:* spec 28,
+  `auth-providers.md`, takes it as a `roleFrom` mapper, and reworks decision 2's
+  provider bag into a union of four kinds — including a *trusted* kind for a host
+  that already authenticates, which is the shape this spec's Cloudflare Access
+  rejection left no room for.
 - **Passkeys, TOTP, password login.** Magic link plus OIDC covers both audiences,
-  and a password store is a liability nobody asked for.
+  and a password store is a liability nobody asked for. *Reversed for passkeys on
+  2026-09-05:* spec 29, `passkeys.md`, adds them as a second door a signed-in
+  account enrols — no password store, no self-registration. TOTP and passwords stay
+  out.
 - **A separate audit log.** The activity trail plus version rows already record who
   changed content; auth events (sign-in, role change, token created) are the gap,
   and one `auth_events` table is a follow-up rather than a prerequisite.
+  *2026-09-05:* in spec 28.
 
 ## Open questions
 

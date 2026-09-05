@@ -77,9 +77,9 @@ render, so any publish that flushes it flushes every site's pages.
 `route`, `auth`, `basePath` and `bindings` are all singular
 (`server/types.ts`). A host mounts one instance.
 
-**`content_index`, `content_refs`, `versions`, `schedules`, `shares` and
-`login_challenges`** all hang off a story id and inherit whatever the story
-belongs to. They need a `site_id` only where a query starts from them rather than
+**`content_index`, `content_refs`, `versions`, `schedules`, `shares`,
+`login_challenges`** — and `content_text` once spec 30 lands — all hang off a
+story id and inherit whatever the story belongs to. They need a `site_id` only where a query starts from them rather than
 from a story — the audit and the schedule sweep both do.
 
 ## Owner decision checkpoints

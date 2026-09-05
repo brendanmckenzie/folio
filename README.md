@@ -355,6 +355,57 @@ served: an unknown root block, a duplicate name, two defaults, a `titleField`
 the root block lacks, an `under` chain that never reaches the top level, or both
 `types` and `root` at once.
 
+## Prose pages
+
+Not every page is a stack of blocks. A news article, an FAQ entry, a privacy policy
+is a heading and a body, and Folio already expresses that: a document's root is
+just a block, and nothing requires it to have a `blocks()` slot. Put the body on
+the root as a `richtext` field and the type is a prose page.
+
+```ts
+{ name: 'article', label: 'Article', kind: 'page', root: 'articleRoot', under: ['page'] }
+
+export const articleRoot = defineBlock({
+  name: 'articleRoot',
+  label: 'Article',
+  summary: 'title',
+  fields: {
+    title: text({ label: 'Title', required: true, translatable: true, indexed: true }),
+    published: text({ label: 'Publish date', placeholder: '2026-03-14', indexed: true }),
+    standfirst: textarea({ label: 'Standfirst', rows: 2, translatable: true }),
+    body: richtext({ label: 'Body', headingLevels: [2, 3], translatable: true }),
+    description: textarea({ label: 'Meta description', rows: 3, translatable: true }),
+  },
+  render: ({ title, standfirst, body }) => (
+    <article>
+      <h1>{title}</h1>
+      {standfirst ? <p>{standfirst}</p> : null}
+      {body}
+    </article>
+  ),
+})
+```
+
+Routing, publishing, versions, draft mode, collections and cache tags all work
+unchanged, because nothing about a document knows whether its root has children.
+`insightPage` in the demo is the hybrid: prose fields on the root with a `blocks()`
+tail for the occasional pull quote or image. An FAQ is the same pattern with
+`references({ types: ['question'] })` on the root, or a `blocks(['faqItem'])` slot if
+editors should reorder answers inline.
+
+**The editor is the honest caveat.** A routed type opens with the stage and the
+inspector, so a long body is written in the side panel — 340px to start, resizable
+to 640, which is a readable measure but not a writing desk. Records already get the
+centred form because they have nothing to preview; letting a routed type opt into
+that layout (`DocumentType.editor: 'form'`, with a toggle back to the stage) is a
+small follow-up on the roadmap, and draft mode is how you read the page in its real
+layout meanwhile.
+
+**Search.** `richtext` cannot be `indexed`, so the body is not filterable through
+`content_index` — `title` and `published` are, and that is what an archive page
+sorts and filters by. Full-text search over bodies is FTS5's job and spec 30's
+(`docs/specs/content-model/full-text-search.md`).
+
 ## Globals
 
 A header, a footer, a bag of site-wide settings: content that is on every
@@ -1138,7 +1189,8 @@ numeric bound compares the numeric column; a string bound compares the text one,
 and an ISO date is stored in both, so either spelling of "since March" works. `ne`
 is a `NOT EXISTS`, so "topic is not ai" is true of a document with no topic —
 which is what it means in English. `contains` is a scan and is refused unless
-something else can narrow first; full-text search is FTS5's job and its own spec.
+something else can narrow first; full-text search is FTS5's job and spec 30's
+(`docs/specs/content-model/full-text-search.md`, draft).
 
 **A `where` or `order` on a field nobody marked `indexed` is a 400 naming the
 field**, and listing the ones that work. Never a silent empty result: that is the
@@ -1888,8 +1940,9 @@ editor. Adding an editor sends no mail: the row *is* the invitation, and they
 sign in through whichever provider the site configured.
 
 Out of scope, deliberately: **site-visitor auth** — who may *read* a published
-page. That is a different problem (`ROADMAP.md` has it), and reading a published
-page still needs no account at all.
+page. That is a different problem, and reading a published page still needs no
+account at all. Spec 31 (`docs/specs/platform/visitor-access.md`, draft) plans it
+as a host predicate that `reader.page()` consults, never as Folio accounts.
 
 ## Content migrations
 
@@ -2379,14 +2432,20 @@ Within localisation: translated slugs (a French URL contains English words), and
 per-locale publishing. Both are deliberate and both are additive later — see the
 section above.
 
-Within auth: site-visitor access control (who may *read* a published page — see
-`ROADMAP.md`), per-story editor permissions, multi-tenant spaces, SSO group → role
-mapping, passwords/passkeys/TOTP, and a separate `auth_events` audit log. Sign-in
-link rate limiting is per address only; the IP dimension wants a Cloudflare
-rate-limiting rule at the zone.
+Within auth, three items are now specified and unbuilt, all drafted 2026-09-05:
+site-visitor access control is spec 31 (`docs/specs/platform/visitor-access.md`); a
+trusted-identity provider kind (Cloudflare Access, a host's own session), SSO group →
+role mapping, per-domain enforced providers and an `auth_events` table are spec 28
+(`docs/specs/foundation/auth-providers.md`); passkeys are spec 29
+(`docs/specs/foundation/passkeys.md`). Still deliberately out: per-story editor
+permissions, multi-tenant spaces (spec 23), passwords and TOTP. Sign-in link rate
+limiting is per address only; the IP dimension wants a Cloudflare rate-limiting rule
+at the zone.
 
-Within collections: **full-text search** (D1 has FTS5; it is a separate index, a
-separate write path and a separate ranking question, so it is its own spec), a
+Within collections: **full-text search** is spec 30
+(`docs/specs/content-model/full-text-search.md`, draft 2026-09-05): FTS5 rows written
+by the same publish batch as `content_index`, exposed as a `search` term on
+`folio.query` with ranked results and snippets. Also unbuilt: a
 `collection` on a nested block's field (only a root block is projected, so the index
 stays a fixed projection of a document), **faceted counts** ("Policy (12), AI (8)" —
 one `group by` over the same predicate, genuinely easy and deliberately unbuilt

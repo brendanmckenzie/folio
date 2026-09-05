@@ -343,16 +343,20 @@ section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
 
-**Specs 1–22 and 24 are done. Three are `draft` and unstarted: 23
-(`foundation/multi-site.md`, XL), 25 (`platform/draft-mode.md`, M) and 26
-(`foundation/documentation.md`, M).** 26 is the one with no ordering constraint —
-Markdown, `files` and one `release.mjs` assertion — so it neither waits on the other
-two nor conflicts with them. 23 does have one: it scopes every list route, so it and
-anything else reshaping a list route must not land out of order.
+**Specs 1–22 and 24–27 are done. Five are `draft`: 23 (`foundation/multi-site.md`,
+XL, unstarted since 2026-08-01) and the four drafted together on 2026-09-05 — 28
+(`foundation/auth-providers.md`, L), 29 (`foundation/passkeys.md`, M–L, needs 28's
+provider union and `completeSignIn`), 30 (`content-model/full-text-search.md`, M)
+and 31 (`platform/visitor-access.md`, M).** 30 and 31 have no ordering constraint.
+23 does: it scopes every list route, so it and anything else reshaping a list route
+must not land out of order. The migration numbers in the four drafts are claims
+(`0005`–`0007`, with 23 moved to `0008`): whichever builds first takes the next
+free number and the others restamp.
 
 This paragraph said "18 (`foundation/pagination.md`) is the current one and is
 `draft`" until 2026-08-29, long after pagination and its API-prefix move had landed
-in full. A `draft` stamp in this file is a claim about a moving target; check the
+in full, and it listed 25 and 26 as drafts until 2026-09-05, a week after both had
+shipped. A `draft` stamp in this file is a claim about a moving target; check the
 spec's own stamp before believing it.
 
 One rule from it is worth knowing before adding any route: **a version segment is a

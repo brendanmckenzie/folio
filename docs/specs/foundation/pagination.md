@@ -432,6 +432,13 @@ columns is enough for a picker over a site's own content, and an FTS table is a
 second write path to keep in step with the first for a feature nobody has asked
 to be fuzzy yet. Named so it is a decision rather than an oversight.
 
+*2026-09-05:* asked for. Spec 30 (`../content-model/full-text-search.md`) takes
+FTS5 for *published* content, and its answer to the objection above is that there
+is no second write path: the FTS rows come out of the same `indexStatements` in
+the same publish batch as `content_index`. This route, the palette and both
+pickers stay on `like`, because they have to reach drafts and the FTS index is
+written at publish.
+
 ### 9. A filter is one flat serialisable object, and three things read it
 
 ```ts
@@ -786,7 +793,8 @@ paged.
 - **Infinite scroll.** Next/previous first; a scroll container that fetches is a
   UI decision the screen ports can make once the route is honest.
 - **FTS5 search.** Decision 8 — `like` plus `content_index` is enough for a
-  picker, and an FTS table is a second write path.
+  picker, and an FTS table is a second write path. Taken by spec 30 on 2026-09-05,
+  for published content only; see the note under decision 8.
 - **`content_index` coverage for non-`indexed` fields.** Search reaches what is
   indexed plus title, slug and path. Widening it is `collections.md`'s business.
 - **Restyling `DataTable` or `StoryTree`.** Phase 6 keeps them correct; the UI

@@ -58,11 +58,15 @@ sequence because the dependency graph is the same one.
 | 20 | [Bulk write endpoints](platform/bulk-writes.md) | platform | M | — | — | completion plan: gap 2 |
 | 21 | [Draft preview sharing](platform/draft-sharing.md) | platform | M | — | `0004` | completion plan: gap 4 |
 | 22 | [Build artifacts and `.d.ts`](foundation/package-build.md) | foundation | S | — | — | completion plan: gap 5 |
-| 23 | [Many sites in one deployment](foundation/multi-site.md) | foundation | XL | 5 | `0005` | owner, 2026-08-01 |
+| 23 | [Many sites in one deployment](foundation/multi-site.md) | foundation | XL | 5 | `0008` | owner, 2026-08-01 |
 | 24 | [An MCP server](platform/mcp-server.md) | platform | M–L | — | — | feedback: ai-friendliness |
 | 25 | [Draft mode](platform/draft-mode.md) | platform | M | — | — | roadmap, twice: host-layout draft + cookie draft mode |
 | 26 | [Documentation that ships](foundation/documentation.md) | foundation | M | — | — | owner, 2026-08-29 |
 | 27 | [A draft seeds from what is published](foundation/draft-seeding.md) | foundation | M | — | — | staging incident, 2026-08-30 |
+| 28 | [Auth providers, part 2](foundation/auth-providers.md) | foundation | L | — | `0005` | owner, 2026-09-05 |
+| 29 | [Passkeys](foundation/passkeys.md) | foundation | M–L | — | `0006` | owner, 2026-09-05 |
+| 30 | [Full-text search](content-model/full-text-search.md) | content model | M | — | `0007` | owner, 2026-09-05 |
+| 31 | [Visitor access](platform/visitor-access.md) | platform | M | — | — | owner, 2026-09-05 |
 
 Spec 26 is **done**, and its own `## Implementation notes` records that it shipped a
 different answer from the one it planned: the package moved to the repository root and
@@ -173,6 +177,25 @@ or two. Relative weight, not a quote.
   photograph the editor's DOM rather than the page's. That is also why **24 changes 21's
   behaviour**: a share link points at the editing render today, so a client reviewing a
   draft gets hover outlines and dead links, and the chrome-free mode 24 adds is the fix.
+- **28 before 29**, and the dependency is exact: 29 is a fifth sign-in path, and 28 is
+  what makes a fifth path cheap. It collapses the identity → user → session logic that
+  `verify` and `callback` each carry their own copy of into one `completeSignIn`, so
+  a passkey assertion, a trusted header and an SSO callback all mint a session the
+  same way and none of them can forget the provider stamp, the domain rule or the
+  audit row. It also reworks 10's provider bag into a union of kinds, and `passkey`
+  is one of the kinds. Neither needs 23, and 23 needs neither — 23 moves the role off
+  `users`, and 28's `role_from` moves with it.
+- **30 stands alone**, and its central claim is about 18: decision 8 rejected FTS5 as
+  "a second write path", and 30's answer is that there is none — the FTS rows are
+  emitted by the same `indexStatements` in the same publish batch as `content_index`,
+  and `search` becomes a term of 13's `ContentQuery` so every surface that runs a
+  query gets it from one compiler. Joins through `stories`, so 23's `site_id` needs
+  no FTS change.
+- **31 stands alone too**, and reuses 25's shape rather than 10's: Folio decides
+  whether *this request* may see *this page* and the host renders the answer, exactly
+  as `draftAt` does. It needs 13 (`indexed`, `in`) so a host can filter lists
+  itself, and 17 (`cacheHeaders`, `NO_STORE`) because the whole risk is a gated page
+  under a public cache key.
 
 ## Wire version ledger
 
@@ -217,6 +240,13 @@ they recorded had no audience. Two have landed since:
 
 `0002` was a plain rename and `0003` and `0004` plain `create table`s, which is what
 every one after them is expected to be.
+
+Three more are **claimed by drafts** and not landed: `0005_auth.sql` (28: two
+`alter table add column`s and an `auth_events` table), `0006_passkeys.sql` (29: a
+`passkeys` table) and `0007_content_fts.sql` (30: `content_text` and an FTS5 virtual
+table over it). Spec 23's `0005_sites.sql` therefore reads `0008` in the index. A
+claim is a stamp, not a landing: whichever of these builds first takes the next free
+number and the others restamp.
 
 The table is kept as a **record of what each spec added**, since each spec's own
 *Wire & schema changes* section still names its migration and those sections are
@@ -298,6 +328,13 @@ across the ~265 literal paths pagination already touches.
 rather than a patch: it moves when a draft's seed is built so it can be built from
 something other than blank. Found by a real environment where every document was
 unrecoverable. No ordering constraint — it touches the seed path and nothing else.
+
+**Specs 28–31 were drafted together on 2026-09-05** from an owner list — passkeys,
+bring-your-own auth, SSO, full-text search, member-gated content — and each is
+`draft`. Two of them reverse earlier decisions in place and say so where the
+decision was made: 29 reverses 10's "passkeys are out", and 30 takes the FTS5 that
+18's decision 8 rejected, because the trigger 18 named for reversal fired. 28 must
+precede 29; 30 and 31 are independent of everything, including each other.
 
 **Spec 26 had no ordering constraint** and was taken first for that reason. It moved
 the package to the repository root and deleted the subtree split, so every path in the

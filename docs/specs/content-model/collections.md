@@ -570,6 +570,8 @@ an insight and assert it leaves the list.
 - **Full-text search.** D1 supports FTS5 and it is the right answer for a search
   page; it is a separate index, a separate write path and a separate ranking
   question. `PARITY.md` sizes it at **M** and it should stay its own spec.
+  *2026-09-05:* it is spec 30, `full-text-search.md`, and it makes `search` a
+  term of `ContentQuery` so this engine is the one that runs it.
 - **Draft-status queries** in the public route. The admin needs them for its list
   views (an unpublished insight must appear in the editor's list), and the honest
   answer is a second source — the `stories` table plus `draft_updated_at` from

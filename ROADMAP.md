@@ -583,13 +583,23 @@ page still needs no account. It attaches in two places when wanted — a field o
 the root block, which document types already make per-type, and a host check
 before `folio.published()`. Per-story *editor* permissions are the other half,
 and want a way to name a set of stories: revisit after
-`docs/specs/content-model/collections.md`.
+`docs/specs/content-model/collections.md`. **Specified 2026-09-05 as spec 31**
+(`docs/specs/platform/visitor-access.md`, draft): a `gate` config key names a
+root-block field and two host predicates, `reader.page()` consults them and answers
+`access: 'public' | 'granted' | 'denied'` with a redacted document on deny, and a
+gated page is never edge-cached. Lists and queries are untouched by decision; the
+field is `indexed` so a host filters them itself.
 
 **SSO group → role mapping.** `oidc({ provision })` sets a default role for a
 staff account on first sign-in; mapping IdP groups onto Folio roles needs claims
 configuration per tenant and is a follow-up. So is an `auth_events` table: the
 activity trail and version rows already record who changed content, but sign-ins,
-role changes and token creation are not recorded anywhere.
+role changes and token creation are not recorded anywhere. **Both are spec 28**
+(`docs/specs/foundation/auth-providers.md`, draft 2026-09-05), together with a
+provider union of four kinds, a trusted-identity kind for hosts that already
+authenticate (with a Cloudflare Access helper) and per-domain enforced providers.
+SAML stays out of Folio by decision: it arrives through a broker as OIDC or as a
+trusted identity.
 
 **SEO metadata.** Mostly done: `title`, `description`, `socialImage`, `noindex`
 are fields on the root block and the demo renders them into `<head>`. Still
@@ -850,8 +860,10 @@ an unsorted flat list, which stops working somewhere around 15.
 - No way to bootstrap the first admin over HTTP, on purpose: an endpoint that
   creates an admin is an endpoint that creates an admin. The first `users` row is
   a `wrangler d1 execute` deploy step.
-- Passkeys, TOTP and password login are all out. Magic link plus OIDC covers both
-  audiences, and a password store is a liability nobody asked for.
+- Passkeys are in after all: spec 29 (`docs/specs/foundation/passkeys.md`, draft
+  2026-09-05) adds them as a second door a signed-in account enrols, never as a way
+  to self-register. TOTP and password login stay out — a password store is a
+  liability nobody asked for.
 - The library ships built JavaScript now — `dist/`, esbuild, one
   bundle per entry with source maps and no minification, and `exports` pointing at
   it (`docs/specs/foundation/package-build.md`). Two things are deliberately still
