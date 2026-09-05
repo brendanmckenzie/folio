@@ -14,7 +14,8 @@ import type {
   CacheTagOptions,
   CacheTags,
 } from '../core/cache-tags'
-import type { Doc } from '../core/doc'
+import type { Doc, Json } from '../core/doc'
+import type { PageAccess } from '../core/gate'
 import type { LocaleConfig } from '../core/locales'
 import type { Migration } from '../core/migrate'
 import type { Mutation } from '../core/mutations'
@@ -158,6 +159,71 @@ export type FolioMiss =
  * content only, which is the right default for a sitemap or a warm-up that must
  * not accidentally leak a draft into something cacheable.
  */
+/** What `allows` is told about the document it is being asked to admit somebody
+ * to, beyond the field value itself: enough to gate on the type, the path or the
+ * language without re-reading anything. */
+export interface FolioGateContext {
+  story: StoryMeta
+  doc: Doc
+  locale?: string
+}
+
+/**
+ * Visitor access (`../../docs/specs/platform/visitor-access.md`): who is asking,
+ * and what may they read.
+ *
+ * Folio never learns who a visitor is and must not start to. The host answers
+ * both halves; Folio owns only the cheap part — reading one named field off the
+ * root block and comparing it, strictly, to `public`. That comparison happens
+ * **before** `visitor` is touched, which is the property the whole design turns
+ * on: a public page stays cacheable and costs no host call, and code that may
+ * verify a token or call an IdP runs only when a document has asked for it.
+ *
+ * **`visitor` and `allows` are declared as methods, deliberately, not as
+ * property-typed arrows** (decision 1). A host writes
+ * `const gate: FolioGate<Env, Member> = {…}` and hands it to a config that holds
+ * `FolioGate<Env>` — i.e. `FolioGate<Env, unknown>` — and under
+ * `strictFunctionTypes` only *method* parameters are bivariant. Written as
+ * properties, that assignment fails, and every host would have to type its
+ * member as `unknown` and cast it back on the first line of `allows`.
+ *
+ * `FolioConfig<Env, V>` was rejected for the same ergonomics: every host writes
+ * `createFolio<Env>(…)` with an explicit type argument, and an explicit argument
+ * turns off inference for the rest, so `V` would always land on `unknown`.
+ */
+export interface FolioGate<Env, V = unknown> {
+  /**
+   * The root-block field holding the gate value. Must be one of the five scalar
+   * kinds, `indexed: true`, and never `translatable` — `validateGate` throws at
+   * construction otherwise, each for a reason the spec argues.
+   */
+  field: string
+  /**
+   * The one stored value that means "no gate". Anything else — including no
+   * value at all — reaches `allows`, so a document created before the field
+   * existed fails closed rather than open.
+   */
+  public: string | number | boolean
+  /**
+   * Who is asking. Runs at most once per reader, and never for an ungated page
+   * or for an editor holding a draft or share credential.
+   */
+  visitor(req: Request, env: Env): V | null | Promise<V | null>
+  /**
+   * May this visitor read a document whose gate field holds `value`.
+   *
+   * `value` is `undefined` when the document has no such key, and `visitor` is
+   * `null` both for a visitor the host did not recognise and for a reader built
+   * without a `Request` — a sitemap build or a warm-up, where "no request" is
+   * "nobody".
+   */
+  allows(
+    visitor: V | null,
+    value: Json | undefined,
+    ctx: FolioGateContext,
+  ): boolean | Promise<boolean>
+}
+
 /**
  * Everything a host needs to answer one page request: `reader.page()`.
  *
@@ -185,6 +251,24 @@ export interface FolioPage {
    * care of the second half.
    */
   draft: boolean
+  /**
+   * What the `gate` decided about this visitor
+   * (`../../docs/specs/platform/visitor-access.md`). **Always present**, and
+   * `'public'` for every page on a host that configured no gate, so a host that
+   * branches on it reads a meaningful value rather than `undefined`.
+   *
+   * `'denied'` is not an error and not a miss: `doc` is the *redacted*
+   * document — the root block with its prose removed — so the host renders its
+   * teaser and paywall from the same `<Page doc={page.doc}>` it always did, and
+   * chooses the status itself.
+   *
+   * Here for the same reason `headers` is: it is the half of the decision that
+   * is silent when wrong. `'granted'` and `'denied'` both mean this URL answered
+   * differently to different visitors, which is the one thing a shared cache
+   * cannot represent — so `headers` is `no-store` for both, including the teaser
+   * that looks visitor-independent and is not.
+   */
+  access: PageAccess
   /**
    * The cache headers this response must carry, correct for whichever of the two
    * cases this is: `no-store` for a draft, `Cache-Control` **and** `Cache-Tag`
@@ -384,6 +468,18 @@ export interface FolioConfig<Env> {
    * to veto or rewrite a publish. Validated for unknown keys at construction.
    */
   hooks?: FolioHooks<Env>
+  /**
+   * Members-only pages, for a site whose membership lives outside Folio
+   * (`../platform/visitor-access.md`). Names a root-block field and two host
+   * predicates; `reader.page()` consults them and answers `FolioPage.access`.
+   *
+   * Absent is the whole of "this site is public": no field is read, no host code
+   * runs, and every page answers `access: 'public'` with the cache headers it
+   * always had. Validated at construction (`validateGate`) — a gate whose field
+   * is translatable, unindexed, the wrong kind, or declared on no `page` root is
+   * a gate the editor believes in and nothing enforces.
+   */
+  gate?: FolioGate<Env>
   /**
    * The `singleton` types loaded into every page's `Resolution` — a header, a
    * footer, site settings (`../../docs/specs/content-model/globals.md`). An

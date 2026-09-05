@@ -45,6 +45,7 @@ import { ancestorPaths, type StoryMeta, type StoryNode } from '../core/story'
 import { type ResolvedAuth, resolveAuth } from './auth/config'
 import { cachePurgeHooks } from './cache-purge'
 import { type ContentProjection, contentProjection } from './content-index'
+import { type ResolvedGate, validateGate } from './gate'
 import {
   createHookRunner,
   type FolioHooks,
@@ -159,6 +160,19 @@ export interface FolioRuntime {
    * saves threading a type parameter through every route module.
    */
   auth: ResolvedAuth<unknown>
+  /**
+   * `FolioConfig.gate`, validated, or **null for a site with no gate at all** —
+   * which is the case that must stay free (`../platform/visitor-access.md`): no
+   * field is read, no host code runs, and every page keeps the cache headers it
+   * always had.
+   *
+   * Widened to `unknown` for the same reason `auth` is. Carries the two
+   * precomputed sets `validateGate` builds in one walk: `roots` for
+   * `reader.page()`, which holds a document and can only see its root block's
+   * name, and `types` for the search predicate, which sees `stories.type` and
+   * cannot see a root block's name at all.
+   */
+  gate: ResolvedGate | null
   /** A declared type by name, or undefined — a row whose type was removed from
    * the code still reads, it just has no schema to render ("Unknown type"). */
   typeOf: (name: string | undefined) => DocumentType | undefined
@@ -358,6 +372,11 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // Same timing, same reason: a typo in `hooks` (or in `await`) should fail
   // loudly once, not silently never fire (`../platform/publish-hooks.md`).
   validateHooks(config.hooks)
+  // Same timing, same reason, and after `validateTypes` because it needs both
+  // `types` and `schema`: a `gate` whose field is translatable, unindexed, the
+  // wrong kind, or declared on no `page` root is a gate the editor believes in
+  // and nothing enforces (`../platform/visitor-access.md` decision 8).
+  const gate = validateGate(config.gate, types, schema)
   // Same timing, same reason: `globals` naming an unknown type or a non-
   // singleton one is a config mistake, not a runtime surprise the first page
   // render discovers (`../../docs/specs/content-model/globals.md`).
@@ -852,6 +871,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     migrations,
     schemaId,
     auth,
+    gate,
     typeOf,
     defaultType: fallbackType,
     titleFor,

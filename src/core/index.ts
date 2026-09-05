@@ -173,6 +173,13 @@ export type {
   TranslationStatus,
 } from './locales'
 
+// Visitor access (`../../docs/specs/platform/visitor-access.md`) is core, not
+// server, for the same reason caching is: the whole of it is a pure function of
+// a document. The host supplies who a visitor is; these three decide whether a
+// document is gated at all and what a denied one is allowed to say.
+export { gateValue, isUngated, redactDoc } from './gate'
+export type { PageAccess } from './gate'
+
 export {
   ancestorPaths,
   buildTree,

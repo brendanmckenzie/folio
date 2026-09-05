@@ -1,5 +1,6 @@
 import { cacheHeaders, cacheTags, NO_STORE } from '../core/cache-tags'
 import type { Doc } from '../core/doc'
+import { gateValue, isUngated, type PageAccess, redactDoc } from '../core/gate'
 import { isKnownLocale } from '../core/locales'
 import type { StoryMeta } from '../core/story'
 import { singletonId } from '../core/schema'
@@ -13,6 +14,7 @@ import { allows, READ_DRAFT } from './auth/roles'
 import { claimShare } from './auth/shares'
 import { readBookmark, sessionFor } from './db'
 import { FolioError } from './errors'
+import type { ResolvedGate } from './gate'
 import { runMigrations } from './migrate'
 import { previewPage } from './pages'
 import { lookupRedirect } from './redirects'
@@ -32,7 +34,7 @@ import {
 } from './stories'
 import { SpaceDO } from './space-do'
 import { createStoryDO, StoryDO } from './story-do'
-import type { Folio, FolioConfig, ReadBindings } from './types'
+import type { Folio, FolioConfig, FolioGateContext, ReadBindings } from './types'
 import { commitAll } from './write'
 
 /**
@@ -214,6 +216,14 @@ export { ANY_TYPE_TAG, NO_STORE, SITE_TAG, globalTag, storyTag, typeTag } from '
 export type { LocaleConfig, LocaleContext, LocaleDef, TranslationStatus } from '../core/locales'
 export type { AssetRow } from './assets'
 export type { CacheVerdict } from './cache-request'
+/**
+ * Visitor access (`../../docs/specs/platform/visitor-access.md`): the two
+ * predicates a host declares, what the second is told, and the outcome it reads
+ * back off `FolioPage.access`. `PageAccess` also ships from `folio/core`, with
+ * the pure half — `redactDoc` and friends — a host never needs to call itself.
+ */
+export type { FolioGate, FolioGateContext } from './types'
+export type { PageAccess } from '../core/gate'
 export type {
   Folio,
   FolioBindings,
@@ -441,6 +451,89 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       return null
     }
 
+    /**
+     * Who is asking, as the host's `gate.visitor` answers it — **once per
+     * reader**, not once per call (`visitor-access.md` decision 1).
+     *
+     * A reader is one request's worth of reads, and `visitor` may verify a JWT
+     * or call a membership API; a page that resolves a `collection` of gated
+     * cards, or a host that renders two documents off one reader, must not pay
+     * for that twice. The **promise** is memoised rather than its value, because
+     * two `page()` calls started together would otherwise both find the slot
+     * empty and both call the host.
+     *
+     * The body is `async`, so a `visitor` that throws synchronously rejects this
+     * promise instead of escaping `page()` — decision 7 is that a gate which
+     * cannot decide denies, and `page()` never rejects. A rejection is memoised
+     * like any other answer: the host is asked once, whatever it does.
+     *
+     * **A reader built without a `Request` never calls it at all** — a sitemap
+     * build or a warm-up has nobody to be — and `allows` is handed `null`,
+     * because "no request" is "nobody".
+     */
+    let asked: Promise<unknown> | null = null
+    const visitorOnce = (gate: ResolvedGate): Promise<unknown> => {
+      asked ??= (async () => (req ? await gate.config.visitor(req, env) : null))()
+      return asked
+    }
+
+    /**
+     * What this visitor may see of `doc` (`visitor-access.md` decisions 1, 6, 7).
+     *
+     * The order of the three questions is the design, and each answer is cheaper
+     * than the one below it:
+     *
+     * 1. **Is this document gated at all** — one `Set` lookup and one strict
+     *    comparison, on values Folio already holds. A page whose root does not
+     *    declare the field is public (checkpoint 3), and so is one whose value is
+     *    `gate.public`. Neither costs a host call, which is the property that
+     *    lets a mostly-public site keep its edge cache.
+     * 2. **Is this a Folio credential** — an editor in draft mode, or a reviewer
+     *    holding this story's share grant (decision 6). They are not members of
+     *    the host's site and have no host credential; gating them would make the
+     *    draft unreadable to the person about to publish it.
+     * 3. **Ask the host.** Only now, and only ever once per reader.
+     */
+    const accessFor = async (
+      story: StoryMeta,
+      doc: Doc,
+      drafted: boolean,
+      locale: string | undefined,
+    ): Promise<PageAccess> => {
+      const gate = rt.gate
+      if (!gate) return 'public'
+
+      const root = doc.bloks[doc.root]
+      // Read from `data`, never `fieldValue` — `gateValue`'s header argues why,
+      // and it is the one deliberate exception to this repo's rule.
+      const value = gateValue(doc, gate.config.field)
+      if (!root || !gate.roots.has(root.type) || isUngated(value, gate.config.public)) {
+        return 'public'
+      }
+      if (drafted) return 'granted'
+
+      const ctx: FolioGateContext = {
+        story,
+        doc,
+        ...(locale !== undefined ? { locale } : {}),
+      }
+      let who: unknown
+      try {
+        who = await visitorOnce(gate)
+      } catch (err) {
+        // The IdP is down, or a token is malformed. The host's route answers a
+        // paywall rather than a 500, and this line is where the outage shows.
+        console.error('folio: gate.visitor threw; denying', err)
+        return 'denied'
+      }
+      try {
+        return (await gate.config.allows(who, value, ctx)) ? 'granted' : 'denied'
+      } catch (err) {
+        console.error('folio: gate.allows threw; denying', err)
+        return 'denied'
+      }
+    }
+
     return {
       published: async (path, locale) => {
         if (locale !== undefined && !isKnownLocale(rt.locales, locale)) return null
@@ -492,7 +585,14 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         const doc = drafted ?? found.doc
         if (!doc) return null
 
-        const resolution = await rt.resolve(bindings, doc, {
+        // Decided here, before the resolve, because a denied visitor's
+        // resolution must be built from the *redacted* document: resolving the
+        // full one and swapping the doc afterwards would hand back the titles
+        // and URLs of everything the withheld body points at.
+        const access = await accessFor(found.story, doc, drafted !== null, locale)
+        const shown = access === 'denied' ? redactDoc(doc, rt.schema) : doc
+
+        const resolution = await rt.resolve(bindings, shown, {
           ...(locale !== undefined ? { locale } : {}),
           ...(opts?.page !== undefined ? { page: opts.page } : {}),
           story: found.story,
@@ -503,10 +603,11 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         })
 
         return {
-          doc,
+          doc: shown,
           story: found.story,
           resolution,
           draft: drafted !== null,
+          access,
           /**
            * **The reason this method returns headers at all.** `cacheHeaders`
            * and `noStore` look interchangeable and only one of them keeps
@@ -514,10 +615,22 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
            * `Cache-Tag` is a page cached for a week with no purge path — the
            * half-configured state `caching.md` decision 2 calls worse than no
            * caching. Both are now impossible to get wrong from here.
+           *
+           * **`access !== 'public'` is the whole of visitor access's security
+           * property** (`visitor-access.md` decision 5). `cacheVerdictFor`
+           * answers `null` for a host's own path — Folio has no opinion there —
+           * so this value is the only thing keeping a members-only page out of a
+           * shared cache under its real URL. `'denied'` is `no-store` too, and
+           * that is the half that looks wrong: a teaser is visitor-independent
+           * and therefore *looks* cacheable, but Workers Caching has no way to
+           * answer it to a stranger and not to the member who signed in a second
+           * later. The cost is stated in the spec: a gated page is uncacheable
+           * at the edge, for everyone, forever.
            */
-          headers: drafted
-            ? { 'cache-control': NO_STORE }
-            : cacheHeaders(resolution, { story: found.story.id }),
+          headers:
+            drafted || access !== 'public'
+              ? { 'cache-control': NO_STORE }
+              : cacheHeaders(resolution, { story: found.story.id }),
         }
       },
       resolve: (doc, opts) => rt.resolve(bindings, doc, opts),
