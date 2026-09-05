@@ -120,14 +120,21 @@ Verified 2026-09-05 against the tree. Line numbers are load-bearing where given.
   same offset for every size above 100. The workerd test runtime and production D1
   therefore hold the *same* number, so a statement that passes locally passes live.
   Two consequences:
-  - **`BIND_CHUNK = 100`'s comment is wrong.** 100 is not "deliberately
-    conservative" against a higher ceiling; it is exactly the ceiling, with no
-    margin. `storiesForChunked` chunks ids and paths into separate `storiesFor`
-    calls of ≤ 100 each and is safe by luck rather than design, but **`storiesFor`
-    called directly is not chunked** — `resolve()`'s narrowed read binds
-    `ids + paths` in one statement, so a document with more than 100 links,
-    references and ancestors combined fails the render. Out of scope for this spec;
-    worth a line in `ROADMAP.md`.
+  - **Both consequences were live bugs, and both are now fixed** (commit
+    `c7313c4`, ahead of this spec's phase 3 rather than inside it). `BIND_CHUNK`'s
+    comment claimed 100 was "deliberately conservative" against a higher ceiling;
+    it was exactly the ceiling. `indexStatements` therefore threw above 20
+    `content_index` rows and 33 `content_refs` rows — a page with 34 links or 34
+    images failed its whole publish batch — and `resolve()` called `storiesFor`
+    unchunked, so a document with more than 100 links, references, globals and
+    ancestors combined failed the render.
+    **What this changes for the phases below:** the rule lives in `src/server/db.ts`
+    as `D1_BIND_CAP`, `BIND_BUDGET`, `rowsPerStatement(bindsPerRow)` and
+    `bindChunks(rows, bindsPerRow)` — use them rather than sizing anything by hand.
+    `indexStatements` already chunks all its inserts, so phase 3 adds the search
+    statements to a function that is already correct instead of also fixing it.
+    **`storiesForChunked` no longer exists**: `storiesFor` chunks internally, and
+    every former call site moved to it.
   - **`content_index` is already broken today, and `content_refs` more easily.**
     `indexStatements` (`content-index.ts:76-86`) binds `rows × 5` for
     `content_index` and `rows × 3` for `content_refs`, both capped at
