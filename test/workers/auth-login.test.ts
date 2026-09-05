@@ -376,6 +376,22 @@ describe('sessions over HTTP', () => {
     })
   })
 
+  it('GET /folio/api/me names the provider that minted this browser’s session', async () => {
+    // `session.provider` is `sessions.provider`, not `users.provider`: which
+    // door *this* browser came through, which is what
+    // `foundation/passkeys.md`'s account screen lists beside each one.
+    const folio = folioWith(magicAuth)
+    const cookie = await signedIn(folio)
+
+    const res = await call(folio, '/folio/api/me', { headers: { cookie } })
+    expect(await res.json()).toMatchObject({ session: { provider: 'magic' } })
+  })
+
+  it('GET /folio/api/me carries no session block under auth: open', async () => {
+    const res = await call(folioWith('open'), '/folio/api/me')
+    expect(await res.json()).not.toHaveProperty('session')
+  })
+
   it('GET /folio/api/me is 401 with no cookie', async () => {
     const res = await call(folioWith(magicAuth), '/folio/api/me')
     expect(res.status).toBe(401)
@@ -398,6 +414,9 @@ describe('sessions over HTTP', () => {
 
     const res = await call(folio, '/folio/api/logout', { method: 'POST', headers: { cookie } })
     expect(res.status).toBe(200)
+    // A mail provider has no sign-out URL of its own, so `next` is the page that
+    // deliberately does not resolve trusted identity. The admin follows it.
+    expect(await res.clone().json()).toEqual({ ok: true, next: '/folio/login?signedout=1' })
     expect(await readSession(env.DB, token)).toBeNull()
     const cleared = setCookies(res)
     expect(cleared.some((c) => c.startsWith(`${SECURE_COOKIE}=;`))).toBe(true)

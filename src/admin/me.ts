@@ -40,6 +40,21 @@ export interface Me {
    */
   loginUrl: string
   /**
+   * This browser's session, as opposed to this person.
+   *
+   * `provider` is which provider minted *this* session — not which one the user
+   * last signed in with anywhere, which is `users.provider` and a different fact
+   * the moment somebody signs in on a second machine by another door. Absent
+   * under `auth: 'open'`, for a token actor, and before `/folio/me` answers.
+   *
+   * Nothing in phase 2 reads it: sign-out follows the `next` the logout route
+   * returns, which is computed server-side from the same column and needs no
+   * help from here. It is on the response for
+   * `../../docs/specs/foundation/passkeys.md`'s account screen, which lists a
+   * person's browsers and says how each of them got in.
+   */
+  session?: { provider: string }
+  /**
    * The sign-in providers and session policy, for the Settings screen
    * (`../../docs/ui-architecture.md` decision 6). Absent under `auth: 'open'`,
    * and absent from `OPEN` below because that is a guess made before any response.

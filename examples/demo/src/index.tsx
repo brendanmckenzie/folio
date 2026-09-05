@@ -1,4 +1,4 @@
-import { createFolio, type FolioGate, magicLink, Shell } from 'folio/server'
+import { createFolio, type FolioGate, magicLink, Shell, trusted } from 'folio/server'
 import { dataOf, resolveAsset, toSchemaIndex, type Doc, type Resolution } from 'folio/core'
 // `folio/engine` is the entry point for host-side tooling that manipulates
 // documents — a sync job is exactly the case its doc comment names. Ordinary
@@ -51,6 +51,48 @@ const gate: FolioGate<Env> = {
   },
   allows: (visitor) => visitor !== null,
 }
+
+/**
+ * A trusted-identity provider that believes a request header.
+ *
+ * **Read this before copying it. It is a footgun with the safety taped down,
+ * and the tape is the four lines checking the hostname.**
+ * `foundation/auth-providers.md` checkpoint 5 put it here on purpose, because it
+ * is the only way `scripts/auth-test.mjs` can drive the trusted kind against a
+ * real server with no identity provider to stand up — and because the shape a
+ * careless host would copy is precisely this one with the guard deleted.
+ *
+ * What a trusted provider promises is that `resolve` has **verified** the
+ * identity it returns. This one verifies nothing at all: it reads
+ * `x-folio-dev-identity` and hands back whatever address is in it, so on a
+ * public hostname it would be "type a header, become the admin". The hostname
+ * check is what makes that unreachable, and it is the same guard
+ * `/dev/last-signin` uses two hundred lines down for the same reason: a
+ * localhost-only credential is a dev convenience, and the identical code on a
+ * deployed origin is an authentication bypass with no error message.
+ *
+ * The real shape is `cloudflareAccess()`, in the library, which verifies a JWT
+ * signature against the team's published keys before it believes a header — see
+ * `src/server/auth/cloudflare-access.ts` for why that step is the whole of the
+ * security rather than a formality.
+ */
+const devIdentity = trusted<Env>({
+  id: 'dev-header',
+  label: 'Continue as the dev identity',
+  // No provisioning: the address still has to be one of the seeded accounts, so
+  // the header cannot conjure a user row either.
+  provision: 'refuse',
+  // No `signOutUrl`, deliberately — Folio cannot un-set a request header, so
+  // this is exactly the deployment whose sign-out lands on
+  // `/folio/login?signedout=1` rather than looping straight back in. That page
+  // is what `scripts/auth-test.mjs` asserts.
+  resolve: (_env, req) => {
+    const url = new URL(req.url)
+    if (url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') return null
+    const email = req.headers.get('x-folio-dev-identity')
+    return email ? { email } : null
+  },
+})
 
 const folio = createFolio<Env>({
   blocks,
@@ -137,6 +179,7 @@ const folio = createFolio<Env>({
           lastSignInUrl = url
         },
       }),
+      devIdentity,
     ],
   },
   // See `gate` above (`platform/visitor-access.md`).

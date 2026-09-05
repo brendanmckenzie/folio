@@ -536,6 +536,21 @@ issuer, audience, nonce and expiry on top. Spec 29 reuses `fromBase64url` and
 deployment during phase 2** rather than assert here: the certs JSON carries a `keys`
 array of JWKs (beside `public_certs`), and `iss` is the bare team URL with no path.
 
+> **Both are still assumptions** (phase 2, 2026-09-05). There is no Access tenant
+> to point at from this tree — no remote, nothing deployed — so neither could be
+> confirmed, and the helper was built against them with a stand-in certs endpoint
+> injected through `fetchImpl`, exactly as `auth-login.test.ts` injects a stand-in
+> IdP. What makes that safe to ship is that **each assumption fails loudly**: a
+> certs document with no `keys` throws (`the certs document carried no keys`) and
+> an `iss` that is not the bare team URL throws (`the assertion names a different
+> team`). Either way the outcome is `?error=provider`, a log line and no session —
+> a refused sign-in, never a verification that quietly stops happening. The first
+> host to put this behind a real Access application is the one that finds out; if
+> `iss` turns out to carry a path or an application segment, the fix is one
+> comparison in `auth/cloudflare-access.ts` and the failure that reports it is
+> unmistakable. `resetAccessCertsCache()` is the test seam, matching
+> `resetDiscoveryCache()`.
+
 ### 5. `roleFrom` is a function; `roleFromClaim` is a helper that returns one
 
 ```ts
@@ -1174,3 +1189,64 @@ than shaped around it. `role_from`, the `PATCH` refusal and the Access screen's
 disabled state all move with `role` when 23 puts it on `site_members`; that rework is
 accepted, and the note this spec asks for in 23's decision 5 is what makes it a
 migration rather than a rediscovery.
+
+## Implementation notes
+
+Written as each phase lands, rather than at the end: what actually shipped, where
+the plan above was wrong, and what a later phase still owes.
+
+### Phase 2 — trusted identity (2026-09-05)
+
+Landed as written. `src/server/auth/trusted.ts` and
+`src/server/auth/cloudflare-access.ts` are new; `routes/auth.ts` gained implicit
+resolution behind the three-query guard, the "already signed in → 302" branch, the
+trusted arm of `GET {base}/login/:id`, and a `next` on the logout response;
+`pages.tsx` gained the signed-out page; the demo gained the localhost-gated dev
+provider (checkpoint 5) and `scripts/auth-test.mjs` a block that drives it. Six
+divergences and two deferrals, none of them design changes:
+
+- **`UserActor.provider` is optional, not required**, and it is filled from
+  `sessions.provider` rather than `users.provider`. The plan said "`UserActor` gains
+  `provider: string`" and "`readSession` fills `provider` from the join", which are
+  two different columns: `users.provider` is the door this person last came through
+  anywhere, `sessions.provider` is the door *this browser* came through, and `/me`'s
+  `session: { provider }` means the second. Optional because a `UserActor` is not
+  always a session read — a permission test builds one — and requiring it would have
+  made an unrelated fixture the reason for the field.
+- **`session.ts` gained `sessionProvider(db, token)`**, which the plan did not name.
+  Logout has to read the provider *before* it revokes the row, and `sessions` SQL
+  lives in that file and nowhere else: no route in this server runs its own
+  `db.prepare`, and this was not the place to be first.
+- **Trusted buttons render only on the `?signedout=1` page.** On every other
+  rendering of `/login` the resolver has already been consulted a moment earlier, so
+  a button is either redundant or a dead end. `loginPage` takes `signedOut?: boolean`.
+- **`GET {base}/login/:id` for a trusted provider that resolves `null`** redirects to
+  `?error=refused`, which the plan left unstated. It is the button on the signed-out
+  page leading nowhere; the landing page carries `error`, so it does not resolve, so
+  it cannot loop.
+- **`trusted({ resolve })` may answer synchronously.** A header read needs no
+  `await`, and the factory's `async` wrapper turns a synchronous throw into the
+  rejected promise every other failure on this path already is.
+- **`cloudflareAccess` throws at construction for a missing `aud`.** The plan typed
+  it required; a host reading it out of an unset binding gets `undefined`, and a
+  provider that verifies a signature and then checks the audience against
+  `undefined` is a provider with no audience check.
+
+Deferred, and both are acceptance criteria above that are **not yet true**:
+
+- **The `sign_in_refused` event.** `completeSignIn` writes `sign_in` (phase 1) and
+  nothing on the refusal path; phase 4 step 2 owns that write, so "one
+  `sign_in_refused` event carries her email and no `user_id`" has no test yet.
+  `test/workers/auth-trusted.test.ts` pins the refusal itself — the notice in place,
+  no session, no user row created.
+- **Domain enforcement and `roleFrom`.** Both are phase 3, so "a trusted provider
+  resolves ann@client.com → the refused notice" and "claims are handed to `roleFrom`"
+  are not yet exercised end to end. Phase 2 pins the half it owns: the Access helper
+  puts the whole payload on `VerifiedIdentity.claims`, asserted against the provider
+  directly.
+
+`test/unit/server/jwt.test.ts` is also new. The Testing requirements above ask for
+it and phase 1's step list omitted it, so `verifyJws` had no direct test at all —
+only whatever `verifyIdToken` happened to reach. It pins the four failures the
+extraction had to preserve and the `source`/`noun` wording that keeps
+`verifyIdToken`'s messages byte-identical.

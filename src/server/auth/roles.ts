@@ -103,6 +103,17 @@ export interface UserActor {
   session: string
   /** Session expiry, epoch ms. Rides in the socket attachment (checkpoint 5). */
   expiresAt: number
+  /**
+   * `sessions.provider`: which provider minted *this* session, for `/me` to
+   * answer and for `foundation/passkeys.md`'s account screen to draw beside each
+   * browser. Nothing gates on it.
+   *
+   * **Optional, unlike `session` and `expiresAt`**, because a `UserActor` is not
+   * always a session read: a test builds one to ask a permission question, and
+   * "which provider" has no answer there. `readSession` fills it from the join
+   * it already runs, so the honest answer costs no extra query.
+   */
+  provider?: string | null
 }
 
 export interface TokenActor {

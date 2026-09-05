@@ -105,6 +105,11 @@ interface SessionJoin {
   colour: string | null
   role: string
   provider: string | null
+  /** `sessions.provider`, which is not `users.provider`: the first is which
+   * provider minted *this* browser's session, the second is the one that signed
+   * this person in most recently anywhere. They differ the moment somebody signs
+   * in on a second machine by another door. */
+  session_provider: string | null
   role_from: string | null
 }
 
@@ -129,7 +134,7 @@ export async function readSession(
   const id = await hashToken(token)
   const row = await db
     .prepare(
-      `select s.id as session_id, s.expires_at, s.created_at,
+      `select s.id as session_id, s.expires_at, s.created_at, s.provider as session_provider,
               u.id as user_id, u.email, u.name, u.colour, u.role, u.provider, u.role_from
          from sessions s join users u on u.id = s.user_id
         where s.id = ?`,
@@ -178,6 +183,7 @@ export async function readSession(
     role: user.role as Role,
     session: id,
     expiresAt,
+    provider: row.session_provider,
   }
 }
 
@@ -189,6 +195,25 @@ export async function sessionExpiry(db: FolioDb, sessionId: string): Promise<num
     .bind(sessionId)
     .first<{ expires_at: number }>()
   return row?.expires_at ?? null
+}
+
+/**
+ * Which provider minted the session behind a raw cookie token, or null.
+ *
+ * What `POST {base}/api/logout` asks before it revokes the row, so it can answer
+ * `next` (`../../../docs/specs/foundation/auth-providers.md` decision 4): a
+ * redirect or trusted provider may have a sign-out URL of its own, and the
+ * browser has to be sent there *after* Folio's own session is gone. Read
+ * separately rather than as a `delete … returning` so the revocation stays one
+ * unconditional statement, and read here rather than in the route because
+ * `sessions` SQL lives in this file and nowhere else.
+ */
+export async function sessionProvider(db: FolioDb, token: string): Promise<string | null> {
+  const row = await db
+    .prepare('select provider from sessions where id = ?')
+    .bind(await hashToken(token))
+    .first<{ provider: string | null }>()
+  return row?.provider ?? null
 }
 
 /** Signs out one browser. Takes the raw cookie token, since that is what the

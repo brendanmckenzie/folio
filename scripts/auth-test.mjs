@@ -353,6 +353,105 @@ if (firstAsset?.key) {
   check('an asset serves with no credential (skipped: no assets seeded)', true)
 }
 
+/* --- the provider stamp ------------------------------------------------- */
+
+// `users.provider` used to read null for every magic-link user, because the only
+// write to it was in the OIDC callback. `completeSignIn` stamps it on every path
+// now (`foundation/auth-providers.md` decision 7), which is what makes the Access
+// screen's "Signs in with" column true rather than decorative. Asserted on the
+// editor, who signed in by link above and is not touched by the trusted block
+// below.
+const stamped = (await (await fetch(`${API}/users`, { headers: { cookie } })).json()).users ?? []
+const editorRow = stamped.find((u) => u.email === DEMO_EDITOR)
+check(
+  'a magic-link sign-in stamps users.provider',
+  editorRow?.provider === 'magic',
+  JSON.stringify(editorRow?.provider),
+)
+
+/* --- trusted identity --------------------------------------------------- */
+
+// The demo lists a localhost-gated `trusted()` provider that believes an
+// `x-folio-dev-identity` header (checkpoint 5). It is the only way to drive this
+// kind against a real server with no identity provider to stand up — and it is a
+// footgun with the safety taped down; see the comment on it in the demo.
+const DEV_ID = { 'x-folio-dev-identity': DEMO_ADMIN }
+
+const implicit = await fetch(`${BASE}/login?next=%2Ffolio%2Fedit`, {
+  headers: DEV_ID,
+  redirect: 'manual',
+})
+const trustedCookie = sessionCookieFrom(implicit)
+check(
+  'a trusted header signs in on GET /login',
+  implicit.status === 302 && Boolean(trustedCookie),
+  `status=${implicit.status}`,
+)
+check('and lands where it was going', implicit.headers.get('location') === '/folio/edit')
+
+const trustedMe = await (await fetch(`${API}/me`, { headers: { cookie: trustedCookie } })).json()
+check(
+  'the session records the provider that minted it',
+  trustedMe?.session?.provider === 'dev-header',
+  JSON.stringify(trustedMe?.session),
+)
+
+const plainLogin = await fetch(`${BASE}/login`, { redirect: 'manual' })
+check(
+  'the same page with no header is still the ordinary login page',
+  plainLogin.status === 200 && (await plainLogin.text()).includes('name="email"'),
+  `status=${plainLogin.status}`,
+)
+
+const trustedOut = await fetch(`${API}/logout`, {
+  method: 'POST',
+  headers: { cookie: trustedCookie },
+})
+const trustedOutBody = await trustedOut.json()
+check(
+  'signing out of a trusted session points at the signed-out page',
+  trustedOutBody?.next === '/folio/login?signedout=1',
+  JSON.stringify(trustedOutBody),
+)
+
+// The whole reason that page exists: this deployment's "upstream session" is a
+// request header Folio cannot un-set, so the next request still carries the
+// identity. Resolving on it would sign the person straight back in and make
+// signing out look broken.
+const signedOutPage = await fetch(`${HTTP}${trustedOutBody.next}`, {
+  headers: DEV_ID,
+  redirect: 'manual',
+})
+const signedOutHtml = await signedOutPage.text()
+check(
+  'which sets no cookie even with the identity still present',
+  signedOutPage.status === 200 && (signedOutPage.headers.getSetCookie?.() ?? []).length === 0,
+  `status=${signedOutPage.status}`,
+)
+check('and says so', signedOutHtml.includes('You have signed out'))
+check(
+  'and offers one button per trusted provider',
+  signedOutHtml.includes('href="/folio/login/dev-header?next='),
+)
+check('while still shipping no JavaScript', !signedOutHtml.includes('<script'))
+
+const explicit = await fetch(`${BASE}/login/dev-header?next=%2Ffolio%2Fedit`, {
+  headers: DEV_ID,
+  redirect: 'manual',
+})
+check(
+  'following that button signs in again',
+  explicit.status === 302 && Boolean(sessionCookieFrom(explicit)),
+  `status=${explicit.status}`,
+)
+
+const noIdentity = await fetch(`${BASE}/login/dev-header`, { redirect: 'manual' })
+check(
+  'and the same button with no identity lands somewhere that will not loop',
+  (noIdentity.headers.get('location') ?? '').includes('error=refused'),
+  noIdentity.headers.get('location') ?? '',
+)
+
 /* --- signing out ------------------------------------------------------- */
 
 const loggedOut = await fetch(`${API}/logout`, { method: 'POST', headers: { cookie } })

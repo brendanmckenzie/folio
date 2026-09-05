@@ -150,6 +150,20 @@ export { FolioError } from './errors'
 export type { ErrorEnvelope, FolioErrorCode } from './errors'
 export { magicLink } from './auth/magic-link'
 export { oidc } from './auth/oidc'
+/**
+ * Trusted identity (`../../docs/specs/foundation/auth-providers.md` decision 4):
+ * a host that already authenticates people hands Folio the verified email, and
+ * Folio still owns the role, the session and revocation.
+ *
+ * `cloudflareAccess()` is the one Folio ships, because Access is the case a
+ * Cloudflare-native CMS meets first and because doing it correctly means
+ * verifying a JWT signature — the step a host writing its own would most likely
+ * skip, and the step that is the whole of the security.
+ */
+export { trusted } from './auth/trusted'
+export type { TrustedOptions } from './auth/trusted'
+export { cloudflareAccess } from './auth/cloudflare-access'
+export type { CloudflareAccessOptions } from './auth/cloudflare-access'
 export {
   ADMIN,
   ASSETS,

@@ -340,6 +340,15 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
    * even for a session that is already dead server-side, so there is no answer that
    * should leave the browser in the admin. No `auth: 'open'` guard: `TopBar` draws
    * "Not signed in" instead of this menu when there is no actor.
+   *
+   * **Where it navigates is the server's call, not this component's**
+   * (`../../../docs/specs/foundation/auth-providers.md` decision 4): the logout
+   * response carries `next`, which is the sign-out URL of whichever provider
+   * minted this session — Cloudflare Access's own logout, an IdP's RP-initiated
+   * endpoint — or `{base}/login?signedout=1` when there is none. Only the server
+   * knows which of those it was, because only the server can read the session
+   * row. `me.loginUrl` stays the fallback for a request that never answered,
+   * where landing on the login page is the honest outcome.
    */
   const user: MenuItem[] = [
     {
@@ -347,9 +356,18 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
       label: 'Sign out',
       danger: true,
       run: () => {
-        void send(`${boot.apiBase}/logout`, 'POST').finally(() => {
-          window.location.assign(me.loginUrl)
-        })
+        void (async () => {
+          let next = me.loginUrl
+          try {
+            const res = await send(`${boot.apiBase}/logout`, 'POST')
+            const body = (await res.json()) as { next?: unknown }
+            if (typeof body.next === 'string' && body.next !== '') next = body.next
+          } catch {
+            // Navigate anyway: the cookie may already be gone, and staying in a
+            // dead admin is the one outcome with nothing to recommend it.
+          }
+          window.location.assign(next)
+        })()
       },
     },
   ]

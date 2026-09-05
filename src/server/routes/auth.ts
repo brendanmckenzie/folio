@@ -24,6 +24,8 @@ import {
   type RedirectProvider,
   type RedirectState,
   type ResolvedAuth,
+  type TrustedProvider,
+  type VerifiedIdentity,
 } from '../auth/config'
 import {
   clearOidcCookies,
@@ -34,7 +36,7 @@ import {
   serialiseCookie,
 } from '../auth/cookie'
 import { credentialOf, resolveActor } from '../auth/resolve'
-import { revokeSession } from '../auth/session'
+import { revokeSession, sessionProvider } from '../auth/session'
 import { completeSignIn } from '../auth/sign-in'
 import type { NewSession } from '../auth/session'
 import { userByEmail } from '../auth/users'
@@ -60,6 +62,29 @@ const OIDC_STATE_TTL_S = 600
  * thing for a legitimate user to be told.
  */
 const SENT = 'If that address has access, a sign-in link is on its way. It expires in 15 minutes.'
+
+/**
+ * The fixed error vocabulary of the login page, as prose.
+ *
+ * A closed set, and the reason is the same one `SENT` records: the parameter
+ * *selects* a message rather than carrying one, so nothing a stranger puts in
+ * the query string can be rendered, and nothing a refusal knows — which account,
+ * which domain, which claim — reaches the page. `?error=` gains no new values
+ * for trusted identity: a refused identity is `refused`, a resolver that threw
+ * is `provider`.
+ */
+function loginNotice(code: string | null | undefined): string | null {
+  switch (code) {
+    case 'link':
+      return 'That sign-in link has already been used or has expired. Ask for a new one.'
+    case 'refused':
+      return 'That account does not have access to this site.'
+    case 'provider':
+      return 'Signing in with that provider did not work. Try again.'
+    default:
+      return null
+  }
+}
 
 /** Reads either a JSON body or an HTML form post, since the login page ships no
  * JavaScript and therefore posts a form. */
@@ -116,23 +141,94 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     })
   }
 
+  /**
+   * Signs a trusted identity in, on whichever route asked.
+   *
+   * Each `trusted` provider is consulted in declaration order until one answers
+   * an identity, and **the first identity is terminal whatever happens to it**.
+   * A host moving from one proxy to another may list two, and "the second one
+   * might like this person better" is not a rule anybody could reason about. A
+   * throw is terminal for the same reason and a stronger one: it means a
+   * credential arrived and did not verify, which is a fact to show rather than a
+   * reason to keep asking around.
+   *
+   * Answers a signed-in `Response`, a refusal word, or `null` for "nobody here".
+   */
+  const signInTrusted = async (
+    c: Context<FolioEnv<Env>>,
+    auth: Extract<ResolvedAuth<unknown>, { mode: 'session' }>,
+    providers: readonly TrustedProvider<unknown>[],
+    next: string,
+  ): Promise<Response | 'refused' | 'provider' | null> => {
+    for (const provider of providers) {
+      let identity: VerifiedIdentity | null
+      try {
+        identity = await provider.resolve(c.env, c.req.raw)
+      } catch (err) {
+        // Logged and shown, never swallowed: a gate that has stopped verifying
+        // looks exactly like a gate nobody is standing at.
+        console.error(`folio: ${provider.id} could not resolve an identity`, err)
+        return 'provider'
+      }
+      if (!identity) continue
+      const result = await completeSignIn(c.var.bindings().db, auth, provider, identity, {
+        userAgent: c.req.header('user-agent') ?? null,
+      })
+      if (!result.ok) return result.reason
+      return new Response(null, {
+        status: 302,
+        headers: { location: next, 'set-cookie': signInCookie(c, result.session) },
+      })
+    }
+    return null
+  }
+
+  /**
+   * The login page — and, for a deployment with a `trusted` provider, the whole
+   * of signing in (`../../../docs/specs/foundation/auth-providers.md`
+   * decision 4).
+   *
+   * Three branches, in order, and the order is the design:
+   *
+   *   1. **A credential that resolves answers `302 next`.** It used to render
+   *      the form to a signed-in person, which was merely pointless; with
+   *      implicit resolution it would be a form that signs you in again.
+   *   2. **Implicit resolution**, unless the query carries `error`, `sent` or
+   *      `signedout`. Each of those three marks a page that is here to be
+   *      *read* — a refusal to explain, a "check your mail", a sign-out — and
+   *      resolving on one of them either loops (a refusal redirecting here
+   *      would resolve, refuse and redirect again, forever) or undoes the thing
+   *      the page is announcing.
+   *   3. **The page**, carrying whatever notice the attempt produced. A failure
+   *      renders **in place** and never redirects to `/login`, for the same
+   *      loop reason.
+   */
   app.get('/login', async (c) => {
-    sessionAuth()
+    const auth = sessionAuth()
     const next = safeNext(c.req.query('next'), editorUrl)
     // `?error=` is set by the redirects below rather than by anything a stranger
     // can craft into a message: the parameter selects one of a fixed set.
     const error = c.req.query('error')
+    const sent = c.req.query('sent') !== undefined
+    const signedOut = c.req.query('signedout') !== undefined
+
+    // Costs nothing for an anonymous browser: `resolveActor` reads no D1 for a
+    // request carrying neither cookie nor bearer.
+    const actor = await resolveActor(() => c.var.bindings().db, rt.auth, credentialOf(c.req.raw))
+    if (actor) return c.redirect(next)
+
+    let refused: 'refused' | 'provider' | null = null
+    if (error === undefined && !sent && !signedOut && auth.trusted.length > 0) {
+      const outcome = await signInTrusted(c, auth, auth.trusted, next)
+      if (outcome instanceof Response) return outcome
+      refused = outcome
+    }
+
     return loginPage(rt, {
       next,
-      sent: c.req.query('sent') !== undefined ? SENT : null,
-      error:
-        error === 'link'
-          ? 'That sign-in link has already been used or has expired. Ask for a new one.'
-          : error === 'refused'
-            ? 'That account does not have access to this site.'
-            : error === 'provider'
-              ? 'Signing in with that provider did not work. Try again.'
-              : null,
+      sent: sent ? SENT : null,
+      error: loginNotice(error ?? refused),
+      signedOut,
     })
   })
 
@@ -238,12 +334,32 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * which is exactly a cookie's job.
    */
   app.get('/login/:provider', async (c) => {
+    const auth = sessionAuth()
     const provider = providerById(c.req.param('provider'))
+    const url = new URL(c.req.url)
+    const next = safeNext(c.req.query('next'), editorUrl)
+
+    /**
+     * The explicit half of trusted identity, and the only other place it
+     * resolves: the button on the signed-out page.
+     *
+     * A failure redirects to `/login?error=…` rather than rendering in place,
+     * which is the opposite of what `GET /login` does and is right for the
+     * opposite reason: the page it lands on carries `error`, so implicit
+     * resolution is skipped there and the loop the in-place rule guards against
+     * cannot start. `null` — no identity on this request — is `refused`,
+     * because the person clicked a button that turned out to lead nowhere.
+     */
+    if (provider.kind === 'trusted') {
+      const outcome = await signInTrusted(c, auth, [provider], next)
+      if (outcome instanceof Response) return outcome
+      const reason = outcome ?? 'refused'
+      return c.redirect(`${rt.base}/login?error=${reason}&next=${encodeURIComponent(next)}`)
+    }
+
     if (provider.kind !== 'redirect') {
       throw new FolioError('not_found', 'That provider is not a redirect flow')
     }
-    const url = new URL(c.req.url)
-    const next = safeNext(c.req.query('next'), editorUrl)
     const redirectUri = `${url.origin}${rt.base}/login/${provider.id}/callback`
 
     let started: { url: string; state: RedirectState }
@@ -344,14 +460,35 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * Signs out. Reads the cookie itself rather than `c.var.actor`, so a browser
    * holding a session that has already been revoked server-side still gets its
    * cookie cleared instead of a 401 it can do nothing about.
+   *
+   * **Answers `next`, and the admin follows it**
+   * (`../../../docs/specs/foundation/auth-providers.md` decision 4). The session
+   * row records which provider minted it, so a redirect or trusted provider with
+   * a `signOutUrl` — Cloudflare Access's `/cdn-cgi/access/logout`, an IdP's
+   * RP-initiated endpoint — gets the browser sent on to end the *upstream*
+   * session too. With no such URL the answer is `{base}/login?signedout=1`, a
+   * page that deliberately does not resolve trusted identity: on a deployment
+   * whose upstream session Folio cannot end, the very next request still carries
+   * the identity, and signing the person back in would make sign-out look broken
+   * rather than refused.
+   *
+   * The provider is read *before* the revocation, because after it there is no
+   * row to read it from.
    */
   app.post('/logout', async (c) => {
     const url = new URL(c.req.url)
     const token = credentialOf(c.req.raw).cookie
+    let next = `${rt.base}/login?signedout=1`
     if (token && rt.auth.mode === 'session') {
-      await revokeSession(c.var.bindings().db, token)
+      const db = c.var.bindings().db
+      const minted = await sessionProvider(db, token)
+      await revokeSession(db, token)
+      const provider = minted ? rt.auth.config.providers.find((p) => p.id === minted) : undefined
+      if (provider && 'signOutUrl' in provider && provider.signOutUrl) {
+        next = provider.signOutUrl
+      }
     }
-    return new Response(JSON.stringify({ ok: true }), {
+    return new Response(JSON.stringify({ ok: true, next }), {
       status: 200,
       headers: [
         ['content-type', 'application/json'],
@@ -404,10 +541,16 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // no session length and no throttle: absence is the honest answer, and a block
     // of zeroes would be a policy the screen would then have to explain away.
     const policy = authPolicy(rt.auth)
+    // Which provider minted *this* browser's session, from the join `readSession`
+    // already runs. Present only when there is one to name, so the key's absence
+    // means "not a session" rather than "a session by an unknown door".
+    const session =
+      actor?.kind === 'user' && actor.provider ? { session: { provider: actor.provider } } : {}
     return c.json({
       mode: rt.auth.mode,
       actor: safe,
       loginUrl: `${rt.base}/login`,
+      ...session,
       ...(policy ? { policy } : {}),
     })
   })

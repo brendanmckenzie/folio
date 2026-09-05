@@ -309,6 +309,19 @@ export interface LoginPageOptions {
   sent?: string | null
   /** Shown in a red banner: a refused or expired link. */
   error?: string | null
+  /**
+   * `?signedout=1`: the page a sign-out lands on.
+   *
+   * It exists for the deployment whose upstream session Folio cannot end — a
+   * proxy header, a trusted resolver with no `signOutUrl`. There, the request
+   * *after* a sign-out still carries the identity, so an ordinary `/login`
+   * would resolve it and sign the person straight back in, and sign-out would
+   * read as broken rather than as refused. This page says what happened and
+   * offers a button per trusted provider instead: the click is the consent, and
+   * the route behind it is the only other place trusted identity resolves
+   * (`../../docs/specs/foundation/auth-providers.md` decision 4).
+   */
+  signedOut?: boolean
 }
 
 /**
@@ -328,10 +341,17 @@ export interface LoginPageOptions {
  * when a `mail` provider is configured, and one button per `redirect` provider.
  * It used to re-derive both from `redirect: boolean` and from which functions
  * each provider happened to carry, which is the sniffing the kinds replaced.
+ *
+ * The `trusted` kind is the one that draws **only** on the signed-out page. On
+ * every other rendering of this page the resolver has already been consulted a
+ * moment earlier (decision 4's implicit resolution), so a button would either be
+ * redundant — the identity was there and you would not be reading this — or a
+ * dead end that resolves to nothing and bounces back with a refusal.
  */
 export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Response> {
   const mail = rt.auth.mode === 'session' ? rt.auth.mail : null
   const redirects = rt.auth.mode === 'session' ? rt.auth.redirects : []
+  const trusted = opts.signedOut && rt.auth.mode === 'session' ? rt.auth.trusted : []
   const next = opts.next
 
   return html(
@@ -351,6 +371,7 @@ export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Res
           <p className="folio-login__notice folio-login__notice--bad">{opts.error}</p>
         ) : null}
         {opts.sent ? <p className="folio-login__notice">{opts.sent}</p> : null}
+        {opts.signedOut ? <p className="folio-login__notice">You have signed out.</p> : null}
 
         {mail ? (
           <form method="post" action={`${rt.base}/login/email`}>
@@ -371,6 +392,20 @@ export function loginPage(rt: FolioRuntime, opts: LoginPageOptions): Promise<Res
         {mail && redirects.length > 0 ? <hr className="folio-login__rule" /> : null}
 
         {redirects.map((provider) => (
+          <a
+            key={provider.id}
+            className="folio-login__provider"
+            href={`${rt.base}/login/${provider.id}?next=${encodeURIComponent(next)}`}
+          >
+            {provider.label}
+          </a>
+        ))}
+
+        {trusted.length > 0 && (mail || redirects.length > 0) ? (
+          <hr className="folio-login__rule" />
+        ) : null}
+
+        {trusted.map((provider) => (
           <a
             key={provider.id}
             className="folio-login__provider"
