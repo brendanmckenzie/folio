@@ -679,6 +679,95 @@ describe('content index', () => {
 })
 
 /**
+ * `content_text` + `content_fts` (`0005_content_fts.sql`) — the full-text index.
+ *
+ * Shape only; that FTS5 *behaves* the way the design leans on it behaving is
+ * fts-smoke.test.ts's job. Three of the four assertions here are decisions rather
+ * than mechanics: `autoincrement` (so a rowid is never reused under an index keyed
+ * by rowid), one index and only one, and the **absence** of `content_fts_content`,
+ * which is the only observable proof that `content='content_text'` took and the
+ * prose is stored once rather than twice.
+ */
+describe('content search index', () => {
+  it('creates `content_text` with id, story_id, locale, title, body in that order', async () => {
+    expect((await columnsOf('content_text')).map((c) => c.name)).toEqual([
+      'id',
+      'story_id',
+      'locale',
+      'title',
+      'body',
+    ])
+    // '' is the source locale, as `content_index` — one row per locale a document
+    // renders in, and no null handling anywhere.
+    const cols = await columnsOf('content_text')
+    expect(cols.find((c) => c.name === 'locale')?.dflt_value).toBe("''")
+    expect(cols.find((c) => c.name === 'title')?.dflt_value).toBe("''")
+    expect(cols.find((c) => c.name === 'body')?.dflt_value).toBe("''")
+  })
+
+  it('makes `id` an autoincrement rowid, so a deleted id is never handed out again', async () => {
+    // FTS5 keys its index by rowid and has no other handle on a row. SQLite's
+    // default allocation reuses the largest deleted id, so without `autoincrement`
+    // a stale token entry could land on a different document's recycled rowid and
+    // make one page findable by another page's words.
+    //
+    // Asserted through `sqlite_sequence`, which SQLite creates only for a table
+    // declared `autoincrement`, rather than by reading the DDL text: the table
+    // existing *is* the behaviour.
+    const table = await env.DB.prepare(
+      "select sql from sqlite_master where name = 'content_text'",
+    ).first<{ sql: string }>()
+    expect(table?.sql).toMatch(/integer\s+primary\s+key\s+autoincrement/i)
+
+    const seq = await env.DB.prepare(
+      "select count(*) as n from sqlite_master where name = 'sqlite_sequence'",
+    ).first<{ n: number }>()
+    expect(seq?.n).toBe(1)
+  })
+
+  it('has `content_text_story` unique on (story_id, locale), and no other index', async () => {
+    expect(await indexesOf('content_text')).toEqual(['content_text_story'])
+    const sql = await indexSql('content_text_story')
+    expect(sql).toMatch(/create\s+unique\s+index/i)
+    expect(sql).toMatch(/\(\s*story_id\s*,\s*locale\s*\)/i)
+  })
+
+  it('does NOT have `content_text_locale`, for a query nothing starts from', async () => {
+    // The standing refusal: an index nothing reads is asserted absent rather than
+    // created on spec. `stories_draft_updated` is the example that cost ten
+    // migrations of write amplification for a query nobody ever wrote, and
+    // `schedules_story`, `shares_story` and `assets.filename`/`size` are the same
+    // measurement made since.
+    expect(await indexesOf('content_text')).not.toContain('content_text_locale')
+  })
+
+  it('creates `content_fts` external to `content_text`, so the prose is stored once', async () => {
+    const names = async (like: string) => {
+      const { results } = await env.DB.prepare(
+        'select name from sqlite_master where name like ? order by name',
+      )
+        .bind(like)
+        .all<{ name: string }>()
+      return results.map((r) => r.name)
+    }
+
+    expect(await names('content_fts%')).toEqual([
+      'content_fts',
+      'content_fts_config',
+      'content_fts_data',
+      'content_fts_docsize',
+      'content_fts_idx',
+    ])
+
+    // The one that carries the decision: a *non*-external FTS5 table has a
+    // `%_content` shadow table holding a second copy of every body. Its absence is
+    // the only observable proof that `content='content_text'` took, and it would
+    // come back silently if a future migration recreated this table without it.
+    expect(await names('content_fts_content')).toEqual([])
+  })
+})
+
+/**
  * `shares` (`0004_shares.sql`) — draft preview links.
  *
  * Four things here are decisions rather than mechanics: the **absence** of any role

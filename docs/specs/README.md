@@ -63,9 +63,9 @@ sequence because the dependency graph is the same one.
 | 25 | [Draft mode](platform/draft-mode.md) | platform | M | — | — | roadmap, twice: host-layout draft + cookie draft mode |
 | 26 | [Documentation that ships](foundation/documentation.md) | foundation | M | — | — | owner, 2026-08-29 |
 | 27 | [A draft seeds from what is published](foundation/draft-seeding.md) | foundation | M | — | — | staging incident, 2026-08-30 |
-| 28 | [Auth providers, part 2](foundation/auth-providers.md) | foundation | L | — | `0005` | owner, 2026-09-05 |
-| 29 | [Passkeys](foundation/passkeys.md) | foundation | M–L | — | `0006` | owner, 2026-09-05 |
-| 30 | [Full-text search](content-model/full-text-search.md) | content model | M | — | `0007` | owner, 2026-09-05 |
+| 28 | [Auth providers, part 2](foundation/auth-providers.md) | foundation | L | — | `0006` | owner, 2026-09-05 |
+| 29 | [Passkeys](foundation/passkeys.md) | foundation | M–L | — | `0007` | owner, 2026-09-05 |
+| 30 | [Full-text search](content-model/full-text-search.md) | content model | M | — | `0005` | owner, 2026-09-05 |
 | 31 | [Visitor access](platform/visitor-access.md) | platform | M | — | — | owner, 2026-09-05 |
 
 **28–31 build in the order 31 → 30 → 28 → 29** (owner, 2026-09-05), which is not the
@@ -78,7 +78,8 @@ and **30 wants 31 landed first**, because 30 decision 11 compiles a predicate ou
 first would mean writing the search path twice and shipping a window in which a search
 page renders paywalled prose. The claimed migration numbers move with the build order,
 per the rule below: on this order 31 carries none, 30 takes `0005`, 28 takes `0006`,
-29 takes `0007`, and 23 stays behind all of them.
+29 takes `0007`, and 23 stays behind all of them. **`0005` has landed** — the column
+above now reads the decided number rather than the drafted one for all three.
 
 Spec 26 is **done**, and its own `## Implementation notes` records that it shipped a
 different answer from the one it planned: the package moved to the repository root and
@@ -236,29 +237,33 @@ source-locale write, forever).
 
 ## D1 migration ledger
 
-`packages/folio/migrations/` is shared by every consuming project (the demo points
-`migrations_dir` at it).
+`migrations/` sits at the repo root beside `src/` and is shared by every consuming
+project (the demo points `migrations_dir` at it). It used to live under
+`packages/folio/`; the subdirectory went away with the subtree split in August 2026.
 
 **`0001_init.sql` holds the whole schema**, and it replaced the ten below as spec 18's
 phase 1 (`foundation/pagination.md` decision 10). They were sequenced only because they
 were written in sequence; nothing is deployed and there is no remote, so the history
-they recorded had no audience. Two have landed since:
+they recorded had no audience. Four have landed since:
 
 | # | Spec | Contents |
 | --- | --- | --- |
 | `0002_asset_refs.sql` | (asset usage, port phase 4) | `content_refs.to_story` → `to_id`, plus a third `kind` value |
 | `0003_schedules.sql` | scheduled publishing | `schedules` table, two partial indexes |
 | `0004_shares.sql` | draft preview sharing | `shares` table, one unique index and one ordinary one |
+| `0005_content_fts.sql` | full-text search (30) | `content_text` table, one unique index, and the `content_fts` FTS5 virtual table external to it |
 
-`0002` was a plain rename and `0003` and `0004` plain `create table`s, which is what
-every one after them is expected to be.
+`0002` was a plain rename and `0003`, `0004` and `0005` plain `create table`s, which is
+what every one after them is expected to be. `0005` is the first to create a *virtual*
+table; `test/workers/sql-split.ts` needed no change for it, because the DDL uses no
+triggers (spec 30 decision 1) and therefore no `BEGIN … END`.
 
-Three more are **claimed by drafts** and not landed: `0005_auth.sql` (28: two
-`alter table add column`s and an `auth_events` table), `0006_passkeys.sql` (29: a
-`passkeys` table) and `0007_content_fts.sql` (30: `content_text` and an FTS5 virtual
-table over it). Spec 23's `0005_sites.sql` therefore reads `0008` in the index. A
-claim is a stamp, not a landing: whichever of these builds first takes the next free
-number and the others restamp.
+Two more are **claimed by drafts** and not landed: `0006_auth.sql` (28: two
+`alter table add column`s and an `auth_events` table) and `0007_passkeys.sql` (29: a
+`passkeys` table). Spec 23's `sites` migration therefore reads `0008` in the index.
+Both restamped once when `0005` landed: the drafts claimed `0005` and `0006`, written
+before the build order put 30 first. A claim is a stamp, not a landing — whichever of
+the remaining two builds first takes the next free number and the other restamps.
 
 The table is kept as a **record of what each spec added**, since each spec's own
 *Wire & schema changes* section still names its migration and those sections are

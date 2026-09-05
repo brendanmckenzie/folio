@@ -45,6 +45,15 @@ describe('workers harness: D1', () => {
     // `d1_migrations` is `applyD1Migrations`'s own bookkeeping table (see
     // apply-schema.ts), the same one a real `wrangler d1 migrations apply` run
     // creates in production.
+    //
+    // The four `content_fts_*` rows are FTS5's shadow tables, which it creates
+    // for itself from the one `create virtual table` in `0005_content_fts.sql`.
+    // They are listed rather than filtered out: this assertion is "what did the
+    // migrations directory actually produce", and an FTS5 table quietly losing or
+    // gaining a shadow table is exactly the kind of thing it should report. Note
+    // which one is *not* here — `content_fts_content`, whose absence is the proof
+    // that `content='content_text'` took and the prose is stored once
+    // (migrations.test.ts asserts that directly).
     const { results } = await env.DB.prepare(
       `select name from sqlite_master
        where type = 'table' and name not like 'sqlite_%' and name not like '_cf_%'
@@ -54,8 +63,14 @@ describe('workers harness: D1', () => {
     expect(results.map((r) => r.name)).toEqual([
       'api_tokens',
       'assets',
+      'content_fts',
+      'content_fts_config',
+      'content_fts_data',
+      'content_fts_docsize',
+      'content_fts_idx',
       'content_index',
       'content_refs',
+      'content_text',
       'd1_migrations',
       'login_challenges',
       'redirects',

@@ -5,8 +5,9 @@
 > **Size:** M
 > **Status:** draft
 > **Wire version:** none
-> **Migration:** `0007_content_fts.sql` — a claim. **Takes `0005` on the decided
-> order** (31 carries none), and every `0007` in this file restamps with it.
+> **Migration:** `0005_content_fts.sql`. Written and applied; the draft's `0007`
+> was a claim made before the build order was decided, and every mention of it in
+> this file has been restamped to `0005`. 28 takes `0006`, 29 `0007`, 23 `0008`.
 > **Build sequence:** 2 of 4 — 31 → 30 → 28 → 29 (owner, 2026-09-05). The **Build order** above is this spec's identity, not its place in the queue.
 > **Last updated:** 2026-09-05
 
@@ -108,19 +109,37 @@ Verified 2026-09-05 against the tree. Line numbers are load-bearing where given.
   `indexStatements`. A content migration that changes an indexed value leaves
   `content_index` stale until a manual reindex. A migration that rewrites prose
   would leave the FTS index stale the same way (decision 8).
-- **A pre-existing hazard, out of scope but bounded here:** `indexStatements`
-  (`content-index.ts:76-86`) binds `rows × 5` in one statement, capped at
-  `MAX_ROWS = 400` — up to 2,000 parameters. D1 documents a per-query bound-parameter
-  cap; this spec's guess was 100, and `stories.ts:203-209` says of `BIND_CHUNK = 100`
-  that "D1's own ceiling is higher" without naming it. **Those two cannot both be
-  right, and a doc search on 2026-09-05 did not settle it.** Settle it empirically in
-  phase 1, in the same workers test as the `'delete'` gate: bind 150, 500 and 2,000
-  parameters to one statement and see which fails. If the cap is 100, `content_index`
-  is *already* broken for any document producing more than twenty (locale × indexed
-  field) rows — five indexed fields across five locales — and phase 3 chunks both
-  tables' inserts rather than only sizing the new one around the cap. The new
-  statements stay under 100 by construction either way (decision 3's
-  `MAX_SEARCH_ROWS = 24` × 4 binds = 96).
+- **The D1 bound-parameter cap is 100 per statement. Measured, phase 1.** The draft
+  left this open — this spec guessed 100, `stories.ts:203-209` said of
+  `BIND_CHUNK = 100` that "D1's own ceiling is higher", a doc search on 2026-09-05
+  did not settle it, and the two could not both be right. They are settled now, and
+  they agree from both directions: `d1/platform/limits` states "Maximum bound
+  parameters per query: 100", and `test/workers/fts-smoke.test.ts` binds 1, 99 and
+  100 successfully and gets `D1_ERROR: too many SQL variables … SQLITE_ERROR` at 101,
+  150, 500 and 2,000. No degradation, no truncation, no soft limit: one error at the
+  same offset for every size above 100. The workerd test runtime and production D1
+  therefore hold the *same* number, so a statement that passes locally passes live.
+  Two consequences:
+  - **`BIND_CHUNK = 100`'s comment is wrong.** 100 is not "deliberately
+    conservative" against a higher ceiling; it is exactly the ceiling, with no
+    margin. `storiesForChunked` chunks ids and paths into separate `storiesFor`
+    calls of ≤ 100 each and is safe by luck rather than design, but **`storiesFor`
+    called directly is not chunked** — `resolve()`'s narrowed read binds
+    `ids + paths` in one statement, so a document with more than 100 links,
+    references and ancestors combined fails the render. Out of scope for this spec;
+    worth a line in `ROADMAP.md`.
+  - **`content_index` is already broken today, and `content_refs` more easily.**
+    `indexStatements` (`content-index.ts:76-86`) binds `rows × 5` for
+    `content_index` and `rows × 3` for `content_refs`, both capped at
+    `MAX_ROWS = 400` — up to 2,000 and 1,200 parameters against a ceiling of 100.
+    The real thresholds, both pinned in `fts-smoke.test.ts`: **21 index rows** (five
+    indexed fields across five locales) and **34 outbound refs** (a page with
+    thirty-four internal links, which `pagination.md`'s edge cases call legitimate)
+    each fail the *whole publish batch*. The refs threshold is the reachable one.
+    `MAX_ROWS = 400` was sized against a ceiling that does not exist. **Phase 3
+    therefore chunks all three tables' inserts** rather than only sizing the new one
+    around the cap; the new statements stay under 100 by construction either way
+    (decision 3's `MAX_SEARCH_ROWS = 24` × 4 binds = 96).
 
 **admin (`src/admin/`):**
 - `ui/screens/fields/CollectionField.tsx` renders filters, count and sort from a
@@ -288,9 +307,14 @@ Three properties of the DDL, each deliberate:
 - **The `'delete'` command via `insert … select`.** FTS5's special delete needs the
   old column values; they are in `content_text`, so the batch supplies them with
   nothing read into JS. The FTS5 `xUpdate` path is per row, so a multi-row `select`
-  is fine in principle — **phase 1's workers test must prove it in workerd** before
-  anything is built on it. This is the one place the design leans on behaviour not
-  yet observed in this repo.
+  is fine in principle. This was the one place the design leaned on behaviour not
+  yet observed in this repo, and **phase 1 observed it**: `test/workers/fts-smoke.test.ts`
+  de-indexes a two-locale story with one `insert into content_fts(content_fts,
+  rowid, title, body) select 'delete', id, title, body from content_text where
+  story_id = ?`, inside a `batch()`, and afterwards neither locale's tokens answer a
+  `match` while a second story's still do — and FTS5's own `'integrity-check'`
+  passes, which is the only assertion that could see a *partial* de-index. The gate
+  is green; the rest of this spec is buildable as written.
 
 This is also the direct answer to spec 18 decision 8. It rejected FTS5 as "a second
 write path to keep in step with the first". **There is no second write path.**
@@ -628,10 +652,13 @@ can simply answer correctly.
 
 ## Wire & schema changes
 
-### D1 migration `0007_content_fts.sql`
+### D1 migration `0005_content_fts.sql`
 
-The number is a claim in build order (spec 28 takes `0005`, 29 `0006`); whichever
-lands first takes the next free number and the others restamp.
+Written in phase 1 and applying cleanly. The draft said `0007`; on the decided
+build order (31 → 30 → 28 → 29) this is the first migration of the four, so it took
+the next free number and 28, 29 and 23 restamp to `0006`, `0007` and `0008`. The
+file as written carries longer comments than the sketch below — the DDL itself is
+unchanged from it.
 
 ```sql
 -- Full-text index over published prose (docs/specs/content-model/full-text-search.md).
@@ -836,16 +863,21 @@ AND there is NO content_fts_content table (external content proven)
 
 ## Implementation plan
 
-### Phase 1 — the migration, and the one thing to prove
+### Phase 1 — the migration, and the one thing to prove — **DONE**
 
-1. `migrations/0007_content_fts.sql` as above.
+1. `migrations/0005_content_fts.sql` as above. **Done.**
 2. `test/workers/migrations.test.ts`: the shape block from the last acceptance
    group, including the index absence and the `content_fts_content` absence.
-3. **The gate**, in the same file or `test/workers/fts-smoke.test.ts`: insert two
-   `content_text` rows, index them, `match`, read `bm25` and `snippet`, then run the
-   `'delete'`-via-`insert … select` statement for one story and prove the index no
-   longer finds it while the other row still matches. Nothing after this phase is
-   built until this passes in workerd.
+   **Done**, as `describe('content search index')`; `autoincrement` is asserted
+   through `sqlite_sequence` existing rather than by reading the DDL text, since the
+   table existing *is* the behaviour.
+3. **The gate**, `test/workers/fts-smoke.test.ts`. **Done and green**: `match`,
+   diacritic folding, a `prefix` seek, `-bm25(content_fts, 10.0, 1.0)` ranking a
+   title hit above a body hit, `snippet()` with `char(1)`/`char(2)` markers read out
+   of the external content table, a 64 kB body through one bind, and the multi-row
+   `'delete'`-via-`insert … select` for a two-locale story followed by FTS5's own
+   `'integrity-check'`. The same file measures the D1 bound-parameter cap (Ground
+   truth) and pins where `content_index` and `content_refs` cross it today.
 
 Tree green: nothing reads the table yet.
 
