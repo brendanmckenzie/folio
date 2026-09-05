@@ -83,6 +83,14 @@ export interface ResolveOptions {
   /** 1-based page for every `collection` field in the document. */
   page?: number
   /**
+   * A full-text term for every `searchable` `collection` field in the document
+   * (`../content-model/full-text-search.md` architecture decision 10), threaded
+   * through to `collectionQueries` beside `page`. A `collection` that does not
+   * declare `searchable: true` ignores it, the same double enforcement
+   * `filterable` already has.
+   */
+  search?: string
+  /**
    * The story being rendered. Two things need it: its ancestors join the
    * resolution (a breadcrumb has to resolve), and in `draft` mode its draft values
    * are patched over its published row in any collection that lists it.
@@ -620,6 +628,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     // read in `RenderBlok` goes through this one value.
     const localeField = active ? { locale: active } : {}
     const pageField = opts?.page !== undefined ? { page: opts.page } : {}
+    const searchField = opts?.search !== undefined ? { search: opts.search } : {}
     const globalIds = globals.map((name) => singletonId(typeOf(name)!))
 
     // A caller with no document at all wants the map and nothing else, so it gets
@@ -723,6 +732,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       ...buildResolution([...known.values()].map(withUrls), assetBase),
       ...localeField,
       ...pageField,
+      ...searchField,
       // Absent rather than `{}` when there is nothing to pull in, so a document
       // with no references bootstraps the byte-identical payload it always did.
       ...(Object.keys(docs).length > 0 ? { docs } : {}),
@@ -731,7 +741,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
 
     /** Pass four: the collection queries this document contains, run once each. */
     const queries = doc
-      ? collectionQueries(doc, schema, opts?.page, active)
+      ? collectionQueries(doc, schema, opts?.page, active, opts?.search)
       : new Map<string, ContentQuery>()
     if (queries.size === 0) return resolution
 

@@ -9,6 +9,7 @@ import { gallery, image } from './media'
 import { page } from './page'
 import { leadership, officeCard, officeRecord, personCard, personRecord } from './person'
 import { prose, pullquote } from './prose'
+import { searchResults } from './search'
 import { settingsRoot } from './settings'
 
 /**
@@ -47,4 +48,8 @@ export const blocks = [
   // (data-documents.md decision 3).
   leadership,
   insightList,
+  // Not a document root (src/index.tsx never lists it under `types`): the
+  // `/search` route builds its own in-memory `Doc` around this one block
+  // (`content-model/full-text-search.md` decision 10).
+  searchResults,
 ]

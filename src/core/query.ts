@@ -313,6 +313,13 @@ export interface CollectionValue {
   order?: ContentOrderSpec
   perPage?: number
   page?: number
+  /**
+   * An editor-typed full-text term (`../../docs/specs/content-model/
+   * full-text-search.md` architecture decision 10). Only ever reaches a query
+   * when the field itself declares `searchable: true` — `collectionQuery` drops
+   * it otherwise, the same double enforcement `filterable` already has.
+   */
+  search?: string
 }
 
 export function asCollectionValue(value: Json | undefined): CollectionValue {
@@ -351,6 +358,7 @@ export function asCollectionValue(value: Json | undefined): CollectionValue {
   }
   if (typeof v.perPage === 'number') out.perPage = v.perPage
   if (typeof v.page === 'number') out.page = v.page
+  if (typeof v.search === 'string') out.search = v.search
   return out
 }
 
@@ -367,32 +375,51 @@ export function asCollectionValue(value: Json | undefined): CollectionValue {
  * `page` is the render's page, which is how a host paginates a published index:
  * it reads `?page=` and passes it to `folio.resolve`, offsetting every collection
  * in the document. A page on the stored value is the editor's own starting point
- * and loses to it.
+ * and loses to it. `search` is the same trade
+ * (`../../docs/specs/content-model/full-text-search.md` architecture decision
+ * 10): a render-time term — a host's `?q=` passed to `folio.resolve` — wins over
+ * whatever an editor typed into the field's own Search input.
  */
 export function collectionQuery(
   field: CollectionField,
   value: Json | undefined,
   page?: number,
+  search?: string,
 ): ContentQuery {
   const stored = asCollectionValue(value)
   const filterable = new Set(field.filterable ?? [])
-  // `relevance` is not orderable here **yet**: a `collection` carries no search
-  // term until `searchable: true` exists (full-text-search.md decision 10), and
-  // `contentSql` refuses `relevance` without one. Dropping it falls back to the
-  // field's `defaultOrder`, which is what that spec's edge case asks for — and
-  // is what a stored `relevance` did before it was a built-in at all.
+  // `relevance` is orderable only when the field itself accepts a search term
+  // (full-text-search.md decision 10): `contentSql` refuses `relevance` without
+  // one, so offering (or keeping) it on a field that can never carry `search`
+  // would be a sort that silently falls back to `defaultOrder` — the same trap
+  // `CollectionField.tsx`'s dropdown used to fall into by building itself from
+  // every key of `BUILT_IN_ORDERS`.
   const orderable = new Set([
     ...filterable,
-    ...Object.keys(BUILT_IN_ORDERS).filter((k) => k !== 'relevance'),
+    ...Object.keys(BUILT_IN_ORDERS).filter((k) => k !== 'relevance' || field.searchable),
   ])
 
-  const order =
+  const preOrder =
     stored.order && orderable.has(stored.order.field) ? stored.order : field.defaultOrder
+
+  // Without `searchable: true`, both the stored and the render-time term are
+  // dropped here — the same double enforcement `filterable` has, because a
+  // value can also arrive from an importer or over the content API.
+  const term = field.searchable ? (search ?? stored.search) : undefined
+
+  // `relevance` ranks by a term that can be gone the moment a visitor or an
+  // editor clears the search box while the sort is still stored as `relevance`
+  // — `contentSql` refuses `order: 'relevance'` with no `search` outright
+  // (decision 4's `bad_request`), so a resolve must never hand it that
+  // combination. Dropped exactly as an order naming an unfilterable field
+  // already is, so `normaliseQuery` picks the ordinary default instead.
+  const order = preOrder?.field === 'relevance' && !term ? undefined : preOrder
 
   return {
     ...(field.type !== undefined ? { type: field.type } : {}),
     where: (stored.where ?? []).filter((w) => filterable.has(w.field)),
     ...(order ? { order } : {}),
+    ...(term ? { search: term } : {}),
     page: page ?? stored.page ?? 1,
     perPage: Math.min(stored.perPage ?? field.maxPerPage ?? DEFAULT_PER_PAGE, maxPerPageOf(field)),
     status: 'published',
@@ -422,6 +449,11 @@ export function collectionQueries(
    * matters for a value an importer put in `i18n`. Threaded anyway so this and
    * `resolveCollection` cannot read different values and compute different keys. */
   locale?: LocaleContext,
+  /** The render's full-text term, from `Resolution.search`
+   * (`../../docs/specs/content-model/full-text-search.md` architecture decision
+   * 10) — passed to every `collection` field in the document, exactly as `page`
+   * is, and dropped by `collectionQuery` for a field that is not `searchable`. */
+  search?: string,
 ): Map<string, ContentQuery> {
   const out = new Map<string, ContentQuery>()
   for (const blok of Object.values(doc.bloks)) {
@@ -429,7 +461,7 @@ export function collectionQueries(
     if (!fields) continue
     for (const [name, field] of Object.entries(fields)) {
       if (field.kind !== 'collection') continue
-      const q = collectionQuery(field, fieldValue(blok, name, locale), page)
+      const q = collectionQuery(field, fieldValue(blok, name, locale), page, search)
       const key = queryKey(q, maxPerPageOf(field))
       if (!out.has(key)) out.set(key, q)
     }

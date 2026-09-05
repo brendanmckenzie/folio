@@ -71,6 +71,7 @@ export function sortLabel(schema: SchemaIndex, name: string): string {
   if (name === 'publishedAt') return 'Publish date'
   if (name === 'title') return 'Title'
   if (name === 'ord') return 'Manual order'
+  if (name === 'relevance') return 'Best match'
   return filterField(schema, name)?.label ?? name
 }
 
@@ -109,7 +110,16 @@ export function CollectionField({
   const unknown = wanted.filter((name) => !types.some((t) => t.name === name))
 
   const patch = (next: CollectionValue) => onChange(next as unknown as Json)
-  const orderable = [...new Set([...Object.keys(BUILT_IN_ORDERS), ...filterable])]
+  // `relevance` only ever belongs in this list when the field itself declares
+  // `searchable: true` (`full-text-search.md` decision 10) — otherwise a
+  // collection with no way to carry a search term offered a sort that could
+  // never do anything, silently falling back to `defaultOrder` at render.
+  const orderable = [
+    ...new Set([
+      ...Object.keys(BUILT_IN_ORDERS).filter((name) => name !== 'relevance' || field.searchable),
+      ...filterable,
+    ]),
+  ]
   const labelOf = (name: string) => types.find((t) => t.name === name)?.label ?? name
   /*
    * One id per control inside this field, derived from the one the row's `Field`
@@ -119,9 +129,10 @@ export function CollectionField({
    * row's label is a `<label htmlFor={id}>`, a `<fieldset>` is not a labelable
    * element, and a `for` pointing at one is a label associated with nothing. Handing
    * it to the first control means clicking the field's name focuses the first thing
-   * you would type into, which is what a label is for.
+   * you would type into, which is what a label is for. A searchable field puts
+   * Search there: it is the control a visitor-facing search page is actually for.
    */
-  const first = filterable[0] ?? 'perPage'
+  const first = field.searchable ? 'search' : (filterable[0] ?? 'perPage')
   const idFor = (suffix: string) => (suffix === first ? id : `${id}-${suffix}`)
 
   return (
@@ -138,6 +149,23 @@ export function CollectionField({
           <span className={css.unknown}> — unknown type “{unknown.join(', ')}”</span>
         ) : null}
       </p>
+
+      {/* Only when the field declares it (`full-text-search.md` decision 10):
+          a `collection` with no `searchable: true` never sees this control at
+          all, because a render-time term would have nowhere to go — dropped by
+          `collectionQuery` exactly as an unfilterable `where` already is. */}
+      {field.searchable ? (
+        <label className={css.filter} htmlFor={idFor('search')}>
+          <span>Search</span>
+          <Input
+            id={idFor('search')}
+            type="search"
+            value={stored.search ?? ''}
+            placeholder="Any"
+            onChange={(e) => patch({ ...stored, search: e.target.value })}
+          />
+        </label>
+      ) : null}
 
       {filterable.map((name) => {
         const def = filterField(schema, name)

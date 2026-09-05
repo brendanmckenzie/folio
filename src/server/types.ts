@@ -48,6 +48,11 @@ import type { WriteResult } from './write'
  * did not cover: a host rendering a draft at the page's real URL must resolve the
  * *targets* from their drafts too, or a drafted page links to and pulls in
  * published copies of everything else and is internally inconsistent.
+ *
+ * `ResolveOptions.search` (`../content-model/full-text-search.md` architecture
+ * decision 10) is the same shape a host reads its own `?q=` into and hands
+ * straight to `resolve`, alongside `page` — this type carries it with no
+ * change of its own, being a plain alias.
  */
 export type HostResolveOptions = ResolveOptions
 

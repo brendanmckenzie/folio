@@ -123,6 +123,18 @@ export interface Resolution {
    * is out of scope — `?page` is one number.
    */
   page?: number
+  /**
+   * The full-text term every `searchable` `collection` field in this document
+   * runs against (`../../docs/specs/content-model/full-text-search.md`
+   * architecture decision 10). Rides here for the same reason `page` does: a
+   * host reads its own `?q=` and passes it to `folio.resolve`, and it wins over
+   * whatever an editor stored on the field's own Search input.
+   *
+   * A `collection` that does not declare `searchable: true` ignores this
+   * entirely — `collectionQuery` drops it on the way out, the same double
+   * enforcement `filterable` already has.
+   */
+  search?: string
 }
 
 export const DEFAULT_ASSET_BASE = '/folio/asset'
@@ -409,7 +421,7 @@ export function resolveCollection(
   value: Json | undefined,
   resolution: Resolution,
 ): ResolvedCollection {
-  const q = collectionQuery(field, value, resolution.page)
+  const q = collectionQuery(field, value, resolution.page, resolution.search)
   const key = queryKey(q, maxPerPageOf(field))
   return resolution.collections?.[key] ?? emptyContentPage(q.page, q.perPage)
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { ContentItem } from '../../../src/core'
 import type { Blok, Doc, Json } from '../../../src/core/doc'
 import { collection, text } from '../../../src/core/fields'
 import {
@@ -23,10 +24,44 @@ const list = collection({
   defaultOrder: { field: 'published', dir: 'desc' },
 }) as CollectionField
 
+/** A `searchable` collection (`full-text-search.md` decision 10) — everything
+ * `list` has, plus the flag that lets a `search` term reach `collectionQuery`. */
+const searchableList = collection({
+  type: 'insight',
+  searchable: true,
+  filterable: ['topic'],
+  maxPerPage: 12,
+  defaultOrder: { field: 'published', dir: 'desc' },
+}) as CollectionField
+
 const schema: SchemaIndex = {
   indexPage: { name: 'indexPage', label: 'Index', fields: { title: text(), list } },
   dualIndex: { name: 'dualIndex', label: 'Two lists', fields: { list, other: list } },
+  searchPage: {
+    name: 'searchPage',
+    label: 'Search',
+    fields: { title: text(), list: searchableList },
+  },
 }
+
+/** `ContentItem` (`full-text-search.md` decision 4) has to be reachable by name off
+ * the public barrel, not only structurally through `ContentPage` — a host cannot
+ * write `items: ContentItem[]` of its own otherwise. */
+describe('ContentItem is exported from the public core barrel', () => {
+  it('is assignable from an item carrying a snippet and a score', () => {
+    const item: ContentItem = {
+      id: 'sty_1',
+      title: 'Sunset',
+      path: 'p',
+      url: '/p',
+      data: {},
+      doc: { root: 'r', bloks: {} },
+      score: 4.2,
+      snippet: [{ text: 'sun', match: true }],
+    }
+    expect(item.score).toBe(4.2)
+  })
+})
 
 function docOf(...bloks: Blok[]): Doc {
   return { root: bloks[0]!.uid, bloks: Object.fromEntries(bloks.map((b) => [b.uid, b])) }
@@ -157,6 +192,62 @@ describe('collectionQuery', () => {
   })
 })
 
+/**
+ * `search` on a `collection` field (`full-text-search.md` architecture decision
+ * 10): opt-in via `searchable: true`, the render-time term beats the stored one
+ * exactly as `page` already does, and `relevance` is only ever orderable when a
+ * term can actually reach it.
+ */
+describe('collectionQuery: search (decision 10)', () => {
+  it('drops both the stored and the render-time term without `searchable: true`', () => {
+    expect(collectionQuery(list, { search: 'sunset' } as unknown as Json).search).toBeUndefined()
+    expect(collectionQuery(list, {}, undefined, 'sunset').search).toBeUndefined()
+  })
+
+  it('carries the stored term for a searchable field', () => {
+    const q = collectionQuery(searchableList, { search: 'sunset' } as unknown as Json)
+    expect(q.search).toBe('sunset')
+  })
+
+  it('lets the render’s term win over the editor’s stored one, like page', () => {
+    const q = collectionQuery(
+      searchableList,
+      { search: 'stored' } as unknown as Json,
+      undefined,
+      'render-time',
+    )
+    expect(q.search).toBe('render-time')
+  })
+
+  it('offers `relevance` as an order only when the field is searchable', () => {
+    // Not searchable: `relevance` is not orderable, so a stored choice of it
+    // falls back to `defaultOrder` — the pre-existing edge case this spec closes.
+    expect(
+      collectionQuery(list, { order: { field: 'relevance', dir: 'desc' } } as unknown as Json)
+        .order,
+    ).toEqual({ field: 'published', dir: 'desc' })
+
+    // Searchable, and a term is present: `relevance` is accepted.
+    expect(
+      collectionQuery(searchableList, {
+        order: { field: 'relevance', dir: 'desc' },
+        search: 'sunset',
+      } as unknown as Json).order,
+    ).toEqual({ field: 'relevance', dir: 'desc' })
+  })
+
+  it('drops a stored `relevance` order when no term survives to rank by', () => {
+    // Searchable, `relevance` stored, but the search box was since cleared: this
+    // must never reach `contentSql` as `order: 'relevance'` with no `search`,
+    // which is refused outright (decision 4's `bad_request`).
+    const q = collectionQuery(searchableList, {
+      order: { field: 'relevance', dir: 'desc' },
+    } as unknown as Json)
+    expect(q.order).not.toEqual({ field: 'relevance', dir: 'desc' })
+    expect(q.search).toBeUndefined()
+  })
+})
+
 describe('asCollectionValue', () => {
   it('keeps a well-formed where and drops the rest', () => {
     const parsed = asCollectionValue({
@@ -174,6 +265,11 @@ describe('asCollectionValue', () => {
       { field: 'x', op: 'gte', value: 4 },
       { field: 'y', op: 'in', value: ['a', 'b'] },
     ])
+  })
+
+  it('reads a stored search term, and ignores one that is not a string', () => {
+    expect(asCollectionValue({ search: 'harbour' } as unknown as Json).search).toBe('harbour')
+    expect(asCollectionValue({ search: 4 } as unknown as Json).search).toBeUndefined()
   })
 })
 
@@ -215,6 +311,21 @@ describe('collectionQueries', () => {
     const doc = docOf(blok('r0', { list: { page: 1 } }), blok('k1', { list: { page: 2 } }))
     expect(collectionQueries(doc, schema).size).toBe(2)
   })
+
+  it('threads the render’s search term into a searchable field, and ignores it for one that is not', () => {
+    // `dualIndex` carries two non-searchable `list`/`other` fields — same schema
+    // this describe block already uses — so the render-time term collapsing them
+    // to a shared, search-less key proves it never reached either.
+    const plain = docOf(blok('r0', { list: {} }, 'indexPage'))
+    const [q] = [...collectionQueries(plain, schema, undefined, undefined, 'sunset').values()]
+    expect(q?.search).toBeUndefined()
+
+    const searchable = docOf(blok('r0', { list: {} }, 'searchPage'))
+    const [searchQ] = [
+      ...collectionQueries(searchable, schema, undefined, undefined, 'sunset').values(),
+    ]
+    expect(searchQ?.search).toBe('sunset')
+  })
 })
 
 describe('resolveCollection', () => {
@@ -246,5 +357,43 @@ describe('resolveCollection', () => {
       },
     )
     expect(answer.page).toBe(4)
+  })
+
+  it('reads the resolution’s search term for a searchable field, exactly as page works', () => {
+    const key = queryKey(collectionQuery(searchableList, {}, undefined, 'harbour'), 12)
+    const page = {
+      items: [{ id: 'sty_1', title: 'Harbour', path: 'p', url: '/p', data: {}, doc: {} as Doc }],
+      total: 1,
+      page: 1,
+      perPage: 12,
+      pages: 1,
+    }
+    const answer = resolveCollection(
+      searchableList,
+      {},
+      {
+        ...EMPTY_RESOLUTION,
+        search: 'harbour',
+        collections: { [key]: page },
+      },
+    )
+    expect(answer.items).toEqual(page.items)
+  })
+
+  it('ignores the resolution’s search term for a field that is not searchable', () => {
+    // `list` has no `searchable: true`, so `resolution.search` must not change
+    // which key it looks up — the answer keyed with no search term at all.
+    const key = queryKey(collectionQuery(list, {}), 12)
+    const page = { items: [], total: 9, page: 1, perPage: 12, pages: 1 }
+    const answer = resolveCollection(
+      list,
+      {},
+      {
+        ...EMPTY_RESOLUTION,
+        search: 'harbour',
+        collections: { [key]: page },
+      },
+    )
+    expect(answer.total).toBe(9)
   })
 })

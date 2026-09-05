@@ -12,6 +12,7 @@ import {
 import {
   filterField,
   filterValue,
+  sortLabel,
   withFilter,
 } from '../../../src/admin/ui/screens/fields/CollectionField'
 
@@ -56,6 +57,15 @@ describe('filterField', () => {
     expect(filterField(schema, 'topic')?.label).toBe('Topic')
     expect(filterField(schema, 'subtitle')).toBeUndefined()
     expect(filterField(schema, 'nothing')).toBeUndefined()
+  })
+})
+
+describe('sortLabel', () => {
+  it('names `relevance` (full-text-search.md decision 10), not the raw key', () => {
+    // Reachable in the dropdown only when the field declares `searchable: true`
+    // (`CollectionField.tsx`'s `orderable`) — the label just has to read well
+    // once it is there.
+    expect(sortLabel(schema, 'relevance')).toBe('Best match')
   })
 })
 

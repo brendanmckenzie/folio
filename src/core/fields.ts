@@ -202,6 +202,21 @@ export type Field =
       /** Ceiling on the editor's count, itself capped at 100. */
       maxPerPage?: number
       defaultOrder?: { field: string; dir: 'asc' | 'desc' }
+      /**
+       * Accepts a full-text `search` term — from the editor's own Search input,
+       * or from a render-time `Resolution.search`, which wins over the stored
+       * one exactly as a render-time `page` already does
+       * (`../../docs/specs/content-model/full-text-search.md` architecture
+       * decision 10).
+       *
+       * A *different* flag from `Searchable` above, and deliberately not that
+       * interface: this says whether the *list* accepts a term, not whether one
+       * of this field's own values is prose to index — a `collection` has no
+       * prose of its own to index. Without it, both the stored and the
+       * render-time term are dropped on the way out, the same double
+       * enforcement `filterable` already has.
+       */
+      searchable?: boolean
     } & Omit<Common, 'translatable'>)
 
 type Opts<K extends Field['kind']> = Omit<Extract<Field, { kind: K }>, 'kind'>

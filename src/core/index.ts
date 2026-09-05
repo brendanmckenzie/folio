@@ -75,6 +75,7 @@ export {
 export type {
   CollectionField,
   CollectionValue,
+  ContentItem,
   ContentOrder,
   ContentOrderSpec,
   ContentPage,

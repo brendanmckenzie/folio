@@ -293,6 +293,13 @@ export default {
     if (url.pathname === '/archive') {
       return archive(env, url)
     }
+    // A search results page (`content-model/full-text-search.md` decision 10):
+    // "a search page is a page holding a collection block", so `/search?q=`
+    // is `folio.resolve`, not `folio.query` — the block declares `searchable`
+    // and reads its own `list.items`, exactly like `insightList` already does.
+    if (url.pathname === '/search') {
+      return searchPage(env, url)
+    }
     // The in-process write (`platform/content-api.md` decision 6): a host's own
     // Worker already holds the bindings, so a nightly ERP sync should not have to
     // make an HTTP request to itself. Behind `/dev/` and localhost-only here only
@@ -654,6 +661,53 @@ async function archive(env: Env, url: URL) {
       published: i.data.published ?? null,
     })),
   })
+}
+
+/**
+ * A search results page (`content-model/full-text-search.md` architecture
+ * decision 10): "a search page is a page holding a collection block", so this
+ * is `folio.resolve` rather than `folio.query` — the block declares
+ * `searchable: true` and reads back `list.items`, `list.snippet`s included,
+ * exactly like `insightList` above reads a plain one.
+ *
+ * There is no story to seed: `searchResults` is not a document type
+ * (`blocks/search.tsx`), so the `Doc` below is built in memory, the same way a
+ * host importer or a one-off script builds one to write — except this one is
+ * never published, only resolved and rendered.
+ *
+ * No `where: access eq public` to write by hand, unlike `archive()` above:
+ * this demo declares a `gate`, and decision 11 scopes a query carrying
+ * `search` to the gate's public value automatically, inside `contentSql`
+ * itself. `folio.query` (what `archive` calls) never gates at all — the two
+ * user stories are answered differently on purpose.
+ */
+async function searchPage(env: Env, url: URL) {
+  const q = url.searchParams.get('q') ?? ''
+  const doc: Doc = {
+    root: 'r0',
+    bloks: {
+      r0: {
+        uid: 'r0',
+        type: 'searchResults',
+        parent: null,
+        slot: null,
+        order: 'a0',
+        data: { heading: q ? `Results for “${q}”` : 'Search', list: {} },
+      },
+    },
+  }
+  const resolution = await folio.resolve(env, doc, { search: q })
+
+  return html(
+    <Shell title="Search" stylesheets={['/site.css']}>
+      <form method="get" action="/search">
+        <label htmlFor="q">Search</label>{' '}
+        <input id="q" type="search" name="q" defaultValue={q} placeholder="Search the site…" />{' '}
+        <button type="submit">Search</button>
+      </form>
+      <div id="folio-root">{folio.render(doc, { resolution })}</div>
+    </Shell>,
+  )
 }
 
 /**
