@@ -347,11 +347,30 @@ when written and stale by the time it was built.
 XL, unstarted since 2026-08-01) and the four drafted together on 2026-09-05 — 28
 (`foundation/auth-providers.md`, L), 29 (`foundation/passkeys.md`, M–L, needs 28's
 provider union and `completeSignIn`), 30 (`content-model/full-text-search.md`, M)
-and 31 (`platform/visitor-access.md`, M).** 30 and 31 have no ordering constraint.
-23 does: it scopes every list route, so it and anything else reshaping a list route
-must not land out of order. The migration numbers in the four drafts are claims
-(`0005`–`0007`, with 23 moved to `0008`): whichever builds first takes the next
-free number and the others restamp.
+and 31 (`platform/visitor-access.md`, M).**
+
+**The four build in the order 31 → 30 → 28 → 29** (owner, 2026-09-05), which is not
+the order they are numbered in — the numbers were assigned when they were drafted
+together and are identities, not a queue. Each spec's header carries its place. Two
+of the three gaps between them are hard constraints and one is sequencing:
+
+- **29 after 28**, phases 1–2: the provider union, `completeSignIn`,
+  `sessions.provider`, `auth/jwt.ts`.
+- **30 after 31.** This paragraph used to say "30 and 31 have no ordering
+  constraint" and that stopped being true on 2026-09-05, when 30 gained decision 11:
+  a search on a gated deployment is scoped to `gate.public` unless the caller filters
+  the field, compiled from 31's `ResolvedGate`. Without it, 30 and 31 are each
+  internally consistent and the pair leaks — `snippet()` returns a marked extract of
+  exactly the prose `redactDoc` withholds, so an unfiltered search page renders the
+  paywalled half of a gated document with the matched words highlighted. Build 30
+  first and you write the search path twice.
+- **23 after all four**, and it is the older constraint: it scopes every list route,
+  so it and anything else reshaping a list route must not land out of order.
+
+Migration numbers in the drafts are claims. **On the decided order: 31 carries none,
+30 takes `0005`, 28 takes `0006`, 29 takes `0007`, 23 keeps `0008`.** The old rule
+still governs if the order moves again — whichever builds first takes the next free
+number and the others restamp.
 
 This paragraph said "18 (`foundation/pagination.md`) is the current one and is
 `draft`" until 2026-08-29, long after pagination and its API-prefix move had landed

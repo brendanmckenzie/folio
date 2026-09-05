@@ -6,6 +6,7 @@
 > **Status:** draft
 > **Wire version:** none
 > **Migration:** none
+> **Build sequence:** 1 of 4 — 31 → 30 → 28 → 29 (owner, 2026-09-05). The **Build order** above is this spec's identity, not its place in the queue.
 > **Last updated:** 2026-09-05
 
 ## Summary
@@ -136,7 +137,9 @@ Verified 2026-09-05 against `main` at `0f0df54`.
 4. **The field must be `indexed: true`**, or construction throws. Lists are untouched
    by decision, so the host's ability to filter them is the whole remedy; forgetting
    `indexed` would leave gated titles in every public list with no fix short of a
-   schema change plus a reindex. Recommended.
+   schema change plus a reindex. Recommended. **A second reason, from 2026-09-05:**
+   spec 30 decision 11 compiles the gate into a `content_index` predicate to keep
+   gated rows out of a search, and it can only do that because the field is indexed.
 5. **Deny answers a redacted document**, not `null`: root blok kept, every child blok
    dropped, every `richtext` on the root nulled in `data` and `i18n`. Recommended over
    a per-type `teaser: [...]` list (decision 4).
@@ -146,6 +149,13 @@ Verified 2026-09-05 against `main` at `0f0df54`.
    `item.doc` or `item.data` wholesale. Flipping this — applying `redactDoc` to gated
    items inside `runQuery` — is visitor-independent and S-sized; offered as a
    follow-up, not built here. Recommended: untouched, per the owner's decision.
+   **One exception, decided 2026-09-05: full-text search.** Spec 30's `snippet()`
+   returns a marked extract of exactly the prose `redactDoc` withholds, so an
+   unfiltered search page does not merely list a gated document, it renders the
+   withheld half of it with the matched words highlighted. Spec 30 decision 11 scopes
+   any query carrying a `search` term to `gate.public` unless the caller filters the
+   field itself. Nothing in *this* spec changes; the clause is compiled in
+   `contentSql`, which is why 31 lands before 30 (Dependencies).
 7. **No request-side knowledge of the visitor credential**: `cacheVerdict` is
    unchanged, no `gate.cookies`. The response header carries the property (decision 5).
    Recommended.
@@ -364,6 +374,17 @@ response header already guarantees, teaches Folio the shape of the host's creden
 and is wrong for a header credential. `cacheVerdict` is about Folio's own paths; the
 host's page is the host's.
 
+**The cost, stated so nobody discovers it in production.** `cacheVerdictFor` answers
+`null` for a host path (`cache-request.ts:151`), which means Folio has no opinion and
+the response header is the whole of the control. So this decision is exactly as
+strong as it reads: **every gated page is uncacheable at the edge, forever, for
+everyone** — `denied` as well as `granted`. On a mostly-members site that is the whole
+of the cache hit rate, and every view becomes an origin render plus one `visitor`
+call. The teaser is visitor-independent and therefore *looks* cacheable, which is
+precisely why it must not be: Workers Cache has no way to answer it to a stranger and
+not to the member who signed in a second later. A host that wants a cached teaser
+serves it from a URL of its own, where it owns both halves of the decision.
+
 ### 6. A Folio credential skips the gate
 
 In `page()`, `drafted !== null` means an editor in draft mode or a reviewer holding a
@@ -417,6 +438,12 @@ never reach `page()`. `ResolvedGate` carries the config plus a precomputed
 `roots: Set<string>` of declaring root block names, so `page()`'s ungated check is
 `roots.has(root.type) && root.data[field] === public` and nothing else.
 
+It carries a second set, `types: ReadonlySet<string>` — the **document type** names
+whose root is one of those roots. `page()` never needs it; spec 30 decision 11 does,
+because a SQL predicate can see `stories.type` and cannot see a root block's name. The
+two sets are built in the same walk. Note they are not interchangeable: two types may
+share a root, and a root block name is not a type name.
+
 **Rejected: tolerate every misconfiguration and treat it as public.** That is
 `validateTypes`' `under`-on-a-record case (`schema.ts:325`): a key that reads as a
 constraint and enforces nothing. Here the silent failure is a page everyone can read
@@ -438,7 +465,8 @@ the decision is per request, and the inputs are the document and the host.
 - `FolioPage.access: PageAccess` — additive and always present, so a host that reads
   it on a gate-less deployment gets `'public'` rather than `undefined`.
 - `FolioConfig.gate?: FolioGate<Env>`, `FolioGate`, `FolioGateContext` (new,
-  `src/server/types.ts`, exported from `folio/server`).
+  `src/server/types.ts`, exported from `folio/server`). `ResolvedGate` (internal,
+  `src/server/gate.ts`) carries `roots` and `types` (decision 8).
 - No `Doc`, `Blok`, `Field` or `Mutation` change. `PROTOCOL_VERSION` unchanged.
 
 ### New or changed routes
@@ -549,7 +577,11 @@ Nothing consumes it yet; the tree stays green.
 1. `src/server/types.ts`: `FolioGate`, `FolioGateContext`, `FolioConfig.gate`,
    `FolioPage.access` (typed now, filled in phase 3 as `'public'` unconditionally so
    the tree compiles).
-2. `src/server/gate.ts`: `validateGate` and `ResolvedGate`.
+2. `src/server/gate.ts`: `validateGate` and `ResolvedGate`, including the
+   `types: ReadonlySet<string>` set spec 30 decision 11 compiles its predicate from
+   (decision 8). Built here even though nothing in this spec reads it, because it
+   falls out of a walk `validateGate` already does and the alternative is 30 walking
+   `types` a second time.
 3. `src/server/runtime.ts`: call it in `createRuntime` after `validateTypes`; add
    `FolioRuntime.gate: ResolvedGate | null`.
 4. Re-export the types from `src/server/index.tsx`.
@@ -637,6 +669,10 @@ Nothing consumes it yet; the tree stays green.
   missing `indexed`; for a `select` `public` not in `options`; for a boolean field
   with a string `public`; ignores a record root declaring the field. Each message
   names type, field and rule (the `validateHooks` shape at `pure.test.ts:1226-1266`).
+- `ResolvedGate.types` holds the document type names, not the root block names, and
+  holds both of two types sharing one declaring root. This is what spec 30 decision
+  11's predicate binds, so getting it backwards would scope a search by a name
+  `stories.type` never holds and silently exclude nothing.
 
 **Workers (`test/workers/gate.test.ts`, real workerd, own `createFolio` like
 `draft-mode.test.ts`):**
@@ -672,13 +708,23 @@ phase 4's demo):**
   page the moment it becomes gated.
 - Spec 25 (draft mode): `wantsDraft`/`draftFor`, and the "Folio decides, the host
   renders" shape this spec extends to a second kind of restricted read.
+- **Spec 30 (full-text search): this spec lands first.** 30's decision 11 reads
+  `ResolvedGate` to keep gated documents out of an unfiltered search, so the gate has
+  to exist before that compiler is written. `validateGate` therefore answers
+  `types: ReadonlySet<string>` — the document type names whose root declares the field —
+  beside the `roots` set `page()` uses, because `stories.type` is what the SQL predicate
+  can see. Building the set here costs nothing: `validateGate` already walks `types`.
 - No Cloudflare resources, bindings or host config beyond the `gate` key.
 
 ## Out of scope
 
-- **Gating lists, `folio.query`, collections and search** — owner decision. The
-  exposure is stated (`item.doc` is the whole document) and the host filter is the
-  remedy; checkpoint 6 offers the S-sized `redactDoc`-in-`runQuery` follow-up.
+- **Gating lists, `folio.query` and collections** — owner decision. The exposure is
+  stated (`item.doc` is the whole document) and the host filter is the remedy;
+  checkpoint 6 offers the S-sized `redactDoc`-in-`runQuery` follow-up.
+  **Search is no longer part of this exclusion** (checkpoint 6, revised 2026-09-05):
+  spec 30 decision 11 scopes a search to `gate.public` unless the caller filters the
+  field. The row is kept out of the result; the `item.doc` half of the exposure is
+  unchanged for anything a caller does surface, which is what stays out of scope.
 - **Any knowledge of who a visitor is** — no visitor table, no cookie, no session.
   `visitor` is the host's, and `identity-and-access.md`'s `users` stay editors.
 - **Gating `published()` and `draftAt()`** — raw reads stay raw (decision 3).
@@ -693,4 +739,20 @@ phase 4's demo):**
 
 ## Open questions
 
-None. Every judgement above is a checkpoint with a recommendation.
+None. **All nine checkpoints answered by the owner on 2026-09-05**, each to its
+recommendation, with two amendments recorded in place: checkpoint 6 now carves out
+full-text search (spec 30 decision 11) and checkpoint 4 gains the second reason that
+follows from it.
+
+Checkpoint 3 was put to the owner again in that sitting, because it is the one place
+this design fails **open** — a `page`-kind root that does not declare the field is
+public and `visitor` is never called for it, so a page type added later and not
+thought about publishes ungated with no signal, which sits oddly beside checkpoint 2's
+fail-closed rule for a missing *value* and beside decision 8's "a key that reads as a
+constraint and enforces nothing throws". **Confirmed as specced**, with the two
+alternatives on the table and rejected: requiring every page root to declare the field
+(a dead field on every genuinely public type), and a per-type `gate: false` opt-out
+(a second config key to say what silence already says). Recorded here so it is a
+decision taken twice rather than an oversight.
+
+**Build order: this spec is first of the four**, ahead of 30, then 28, then 29.

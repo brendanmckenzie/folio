@@ -5,7 +5,9 @@
 > **Size:** M
 > **Status:** draft
 > **Wire version:** none
-> **Migration:** `0007_content_fts.sql`
+> **Migration:** `0007_content_fts.sql` — a claim. **Takes `0005` on the decided
+> order** (31 carries none), and every `0007` in this file restamps with it.
+> **Build sequence:** 2 of 4 — 31 → 30 → 28 → 29 (owner, 2026-09-05). The **Build order** above is this spec's identity, not its place in the queue.
 > **Last updated:** 2026-09-05
 
 ## Summary
@@ -106,10 +108,19 @@ Verified 2026-09-05 against the tree. Line numbers are load-bearing where given.
   `indexStatements`. A content migration that changes an indexed value leaves
   `content_index` stale until a manual reindex. A migration that rewrites prose
   would leave the FTS index stale the same way (decision 8).
-- **A pre-existing hazard, out of scope but bounded here:** `indexStatements` can
-  bind up to 400 × 5 = 2,000 parameters in one statement. D1 documents a per-query
-  bound-parameter cap (100 at last reading — **verify** before phase 3). The new
-  statements stay under it by construction (decision 3's `MAX_SEARCH_ROWS`).
+- **A pre-existing hazard, out of scope but bounded here:** `indexStatements`
+  (`content-index.ts:76-86`) binds `rows × 5` in one statement, capped at
+  `MAX_ROWS = 400` — up to 2,000 parameters. D1 documents a per-query bound-parameter
+  cap; this spec's guess was 100, and `stories.ts:203-209` says of `BIND_CHUNK = 100`
+  that "D1's own ceiling is higher" without naming it. **Those two cannot both be
+  right, and a doc search on 2026-09-05 did not settle it.** Settle it empirically in
+  phase 1, in the same workers test as the `'delete'` gate: bind 150, 500 and 2,000
+  parameters to one statement and see which fails. If the cap is 100, `content_index`
+  is *already* broken for any document producing more than twenty (locale × indexed
+  field) rows — five indexed fields across five locales — and phase 3 chunks both
+  tables' inserts rather than only sizing the new one around the cap. The new
+  statements stay under 100 by construction either way (decision 3's
+  `MAX_SEARCH_ROWS = 24` × 4 binds = 96).
 
 **admin (`src/admin/`):**
 - `ui/screens/fields/CollectionField.tsx` renders filters, count and sort from a
@@ -167,6 +178,18 @@ Verified 2026-09-05 against the tree. Line numbers are load-bearing where given.
    page is a page holding a collection block — **in scope as the last code phase**.
    It is the one phase that can be deferred without unpicking anything.
    **Recommended: in.**
+8. **A search on a gated deployment is scoped to the gate's public value** unless the
+   caller filters that field itself. Decision 11, added 2026-09-05 after the owner
+   read specs 30 and 31 together. Search is the one place a list becomes a leak the
+   host cannot reasonably be asked to remember: a snippet is a marked extract of
+   precisely the prose `redactDoc` exists to withhold. **Owner decision: in, search
+   only — collections and `folio.query` without a `search` term stay untouched, per
+   spec 31 checkpoint 6.**
+
+**Owner decisions, 2026-09-05.** Checkpoints 1–7 confirmed as recommended.
+Checkpoint 8 added and confirmed in the same sitting. Build order: **spec 31 lands
+before this spec**, so `ResolvedGate` exists when the compiler is written rather than
+being retrofitted into it (Dependencies).
 
 ## User stories
 
@@ -543,6 +566,66 @@ page holding a collection block plus `resolve(doc, { search: url.searchParams.ge
 term renamed, a second surface for the MCP tool and the API to mirror, and no way for
 a collection block to use it.
 
+### 11. A search on a gated deployment is scoped to the gate's public value, and the predicate keys off the declaring *types*
+
+When `config.gate` is set (spec 31) **and** the normalised query carries `search`
+**and** no `where` clause names `gate.field`, `contentSql` appends one more clause:
+
+```sql
+(stories.type not in (?, ?, …)                    -- the types whose root declares the field
+ or exists (select 1 from content_index cg
+             where cg.story_id = stories.id and cg.locale = ?
+               and cg.field = ? and cg.text_value = ?))
+```
+
+`contentSql` gains an optional `gate` parameter — `{ field, public, types }` off
+`ResolvedGate` — and stays pure; `runtime.ts`'s `queryDeps` passes `rt.gate`. The
+binds join the existing where binds in clause order. A caller who names the field
+itself opts out entirely: `where: [{ field: 'access', op: 'in', value: ['public',
+'members'] }]` is how a host builds a members' search over members' content, and it
+is the same double enforcement `filterable` and `searchable` already use.
+
+**Why it is search and not every query.** Spec 31 checkpoint 6 leaves lists alone,
+and that decision holds: a `collection` of cards is something a host laid out and can
+see, and `item.data` is the metadata a card is built from. A search result is
+different in kind. `snippet()` returns a marked extract of the body — the exact prose
+`redactDoc` nulls — so an unfiltered search page does not merely expose a gated
+document, it renders the withheld half of it, ranked, with the matched words
+highlighted. "The host filters with `where`" is a fair remedy for a listing the host
+wrote deliberately; it is a thin one for the surface whose whole purpose is to query
+everything at once.
+
+**The predicate keys off `stories.type`, not off the absence of a row, and that is
+load-bearing.** `projectValue` returns null for an absent value, so *a document with
+no value for an indexed field gets no `content_index` row*
+(`core/index-projection.ts:120-124`). Two very different documents therefore look
+identical to a row-absence test: a `record` type whose root never declares the gate
+field, which must stay searchable, and a `page` whose root *does* declare it and
+holds no value, which spec 31 checkpoint 2 fails **closed**. An
+`exists … or not exists …` predicate would open the second case and quietly reverse
+that checkpoint. `ResolvedGate` already precomputes the declaring root block names
+for `page()`; `validateGate` additionally answers `types: ReadonlySet<string>`, the
+document type names those roots belong to, which is what `stories.type` holds.
+Absence then means "this type has no gate", and a declaring type with no value falls
+to the `exists` and is excluded — which is what fail-closed means here.
+
+This is also the second reason spec 31 checkpoint 4 requires `indexed: true` on the
+gate field. The first was that a host could filter its own lists; this is that Folio
+can compile the predicate at all.
+
+**Rejected: scope every query, not just search.** It is the safer default and it
+contradicts a decision the owner has taken twice. It would also change what a
+`collection` returns on a deployment that added a gate afterwards, silently.
+**Rejected: `redactDoc` on gated items inside `runQuery`.** Spec 31 checkpoint 6's
+S-sized follow-up, still available and still not built here: it removes the body but
+leaves the row in the result set, so a search page would list a paywalled document
+with an empty snippet, which is worse than not listing it. The two are complementary
+rather than alternatives — if it is ever built, this clause is what keeps the row out
+of a *search* and that one is what keeps the body out of a *list*.
+**Rejected: refusing `search` outright when a gate is configured and no filter is
+given.** An error the host has to learn about by hitting it, for a case the compiler
+can simply answer correctly.
+
 ## Wire & schema changes
 
 ### D1 migration `0007_content_fts.sql`
@@ -622,6 +705,13 @@ All additive. `PROTOCOL_VERSION` is unchanged: nothing here rides a socket frame
 - `migrate.ts`: `MigrateDeps.projection?`.
 - `runtime.ts`: `resolve` threads `opts.search` into `collectionQueries` beside
   `opts.page`; `FolioResolveOptions.search?` on `types.ts`.
+- `query.ts`: `contentSql` gains a fourth optional parameter,
+  `gate?: { field: string; public: string | number | boolean; types: ReadonlySet<string> }`,
+  applied only when `n.search` is set and no `where` clause names `gate.field`
+  (decision 11). Pure; `queryDeps` in `runtime.ts` passes `rt.gate` through.
+- `gate.ts` (spec 31): `ResolvedGate` gains `types: ReadonlySet<string>` beside its
+  `roots` set — the document type names whose root declares the field, which is what
+  `stories.type` holds. Computed in `validateGate`, which already walks `types`.
 
 ### New or changed routes
 
@@ -787,7 +877,10 @@ Tree green: nothing reads the table yet.
 1. `src/core/query.ts`: `search`, `relevance`, `ContentItem`, `queryKey`'s eighth
    element, `normaliseQuery`.
 2. `src/server/query.ts`: the match join, the score, the correlated snippet, the
-   `relevance` refusal, `search` as narrowing.
+   `relevance` refusal, `search` as narrowing, and decision 11's gate clause —
+   `contentSql`'s `gate` parameter, `queryDeps` passing `rt.gate`, and the caller
+   opt-out when a `where` clause names the field. `validateGate` (spec 31) answers
+   the `types` set this reads.
 3. `src/server/routes/content.ts`: `search` in `queryFromParams`; `parseOrder`
    accepts `relevance`.
 4. `test/unit/server/query.test.ts`: SQL text and bind order pinned; refusals.
@@ -855,6 +948,22 @@ Tree green: nothing reads the table yet.
   any collection (decision 7).
 - **`order: 'relevance'` on a `collection` without `searchable`** → dropped with the
   search term; the field's `defaultOrder` applies.
+- **A search on a deployment with no `gate`** → decision 11's clause is not emitted
+  at all; the SQL is byte-identical to the ungated form, which is what the unit test
+  pins.
+- **A search over a `record` type on a gated deployment** → records' roots do not
+  declare the gate field, so their type is not in the `not in (…)` list's complement
+  and every row survives. This is the case a row-absence predicate would have broken.
+- **A gated page whose gate field holds no value at all** → no `content_index` row,
+  its type *is* a declaring one, so the `exists` fails and it is excluded from search.
+  The same fail-closed answer `reader.page()` gives it (spec 31 checkpoint 2).
+- **A caller filtering the gate field itself** → the auto-clause is not emitted; the
+  caller's `where` is the whole of the scoping. A members' search page is
+  `where: [{ field: 'access', op: 'in', value: ['public', 'members'] }]` plus the
+  host's own check that the visitor is a member before it runs the query.
+- **A `collection` with `searchable: true` on a gated deployment** → it carries a
+  `search` term, so it is scoped like any other search. A collection with no search
+  term is untouched, per spec 31 checkpoint 6.
 
 ## Testing requirements
 
@@ -870,7 +979,10 @@ Tree green: nothing reads the table yet.
 - `server/query.test.ts`: the search page statement's text and bind order; `count`
   shares the join; `relevance` without `search` refused; `search` counts as narrowing;
   `queryKey` gains the eighth element and two queries differing only in `search`
-  differ.
+  differ. Decision 11: with no `gate`, the SQL is byte-identical to today's; with a
+  `gate`, the clause and its three binds appear in both `count` and `page` in clause
+  order; a `where` on the gate field suppresses it; a query with no `search` never
+  emits it.
 - `mcp/tools.test.ts`: `query_documents` query list and `inputSchema` stay in parity.
 
 **Workers (`test/workers/`, real workerd):**
@@ -882,7 +994,9 @@ Tree green: nothing reads the table yet.
   `deleteDocument` clears; reindex rebuilds after a `searchable: false` edit; migrate
   re-projects; title-over-body ranking; `order: 'publishedAt'` keeps scores;
   multi-locale including fallback; every malformed input answers 200; a 64 kB body
-  round-trips through one bind; `GET {base}/api/content?search=` and
+  round-trips through one bind; decision 11 end to end — a gated page is absent from
+  an unfiltered `search`, present when the caller filters the gate field, and a
+  `record` type with no gate field is never excluded; `GET {base}/api/content?search=` and
   `GET /api/v1/documents?search=` answer identically; MCP `query_documents` with
   `search`; a `searchable` collection resolves with `search` and a plain one ignores
   it.
@@ -903,15 +1017,28 @@ Tree green: nothing reads the table yet.
 - **Spec 18 (pagination):** decision 8 is the rejection this spec reverses, on the
   trigger `docs/design-system.md` named; `queryFromParams` and the `/api/v1` partition
   rule are what the new parameter rides on.
+- **Spec 31 (visitor access): an ordering constraint, added 2026-09-05. 31 lands
+  first.** Decision 11 compiles a predicate out of `ResolvedGate`, so the gate has to
+  exist before the query compiler is written. Building this spec first would mean
+  writing `contentSql`'s search path twice, and shipping a window in which a search
+  page leaks gated bodies. If 31 is ever dropped, decision 11 goes with it and
+  nothing else here moves.
 - **Spec 23 (multi-site, draft):** no ordering constraint. `content_text` joins the
   list of tables that hang off a story id; the search join inherits the implicit
-  `site_id` scope through `stories`.
+  `site_id` scope through `stories`. Note that decision 11's clause is a second
+  predicate on `stories` and picks up 23's implicit `site_id` scope the same way
+  every other clause does.
 - No new Cloudflare resources, bindings or host config.
 
 ## Out of scope
 
 - **Draft search.** A second index per keystroke from every Durable Object, or
   opening every candidate object per query (decision 7).
+- **Redacting gated documents' bodies out of `item.doc` in a search result.** Decision
+  11 keeps a gated *row* out of an unfiltered search; the body still rides on
+  `item.doc` for anything the caller does surface with an explicit filter, exactly as
+  spec 31 checkpoint 6 leaves it for every other list. The `redactDoc`-in-`runQuery`
+  follow-up that spec offers is still the fix for that half and is still not built.
 - **The palette and pickers on FTS.** They need drafts and unpublished documents;
   `searchStories` stays (decision 7).
 - **Faceted counts** ("12 in Insights, 3 in People"). A second query per facet; wait
@@ -925,10 +1052,17 @@ Tree green: nothing reads the table yet.
   write path cannot see.
 - **An FTS `'rebuild'` route.** One statement over the whole table; `reindex` is the
   bounded repair.
-- **Fixing `indexStatements`' bind count.** Pre-existing; noted in Ground truth.
+- **Fixing `indexStatements`' bind count** — *conditionally*. Pre-existing and out of
+  scope **unless phase 1's measurement shows the cap is below 2,000**, in which case it
+  is a live bug in the neighbour this spec is extending and comes into phase 3. Noted
+  in Ground truth.
 
 ## Open questions
 
-None. Every judgement is a checkpoint with a recommendation, and the one behavioural
-unknown — the `'delete'` command via `insert … select` in workerd — is phase 1's gate
-rather than a question.
+None. **All eight checkpoints answered by the owner on 2026-09-05**, each to its
+recommendation, with checkpoint 8 and decision 11 added in that sitting.
+
+Two things are deliberately measurements rather than questions, both gated in phase 1:
+the `'delete'` command via `insert … select` in workerd, and D1's per-query
+bound-parameter cap (Ground truth). Neither blocks the design; the second decides
+whether phase 3 also chunks `content_index`'s existing insert.

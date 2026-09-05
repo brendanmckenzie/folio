@@ -5,7 +5,9 @@
 > **Size:** L
 > **Status:** draft
 > **Wire version:** none
-> **Migration:** `0005_auth.sql`
+> **Migration:** `0005_auth.sql` — a claim. **Takes `0006` on the decided order**
+> (30 goes first and takes `0005`), and every `0005` in this file restamps with it.
+> **Build sequence:** 3 of 4 — 31 → 30 → 28 → 29 (owner, 2026-09-05). The **Build order** above is this spec's identity, not its place in the queue.
 > **Last updated:** 2026-09-05
 
 ## Summary
@@ -629,6 +631,29 @@ challenges and events older than `AUTH_EVENT_RETENTION_MS` (90 days), answering
 `runSchedules`. This gives `deleteExpiredSessions` and `deleteStaleChallenges` their
 first caller.
 
+**And it is a new host obligation with no signal when it is forgotten**, which is the
+same shape as the cross-entrypoint purge trap the README documents: a host that never
+wires `sweepAuth` into a cron accumulates `auth_events` forever, never reaps an
+expired session row and never clears a stale challenge, and nothing anywhere says so.
+Nothing *breaks* — an expired session already fails `sessionExpiry` on read, so this
+is unbounded growth rather than a security hole — but unbounded growth on a table
+with a documented 90-day retention is a promise the deployment is quietly not
+keeping. Two things follow, both cheap and both required:
+
+- The README's Auth section states it in the same voice it states the purge trap, and
+  the `sweepAuth` doc comment says "nothing calls this for you".
+- `GET {base}/api/auth-events` reports the age of its oldest row, so an admin looking
+  at the surface that would show the symptom can see it. A route that answers "the
+  oldest event here is 400 days old" on a table with 90-day retention has said the
+  thing no log line was going to say.
+
+**Rejected: sweeping opportunistically** — a probabilistic delete on some fraction of
+sign-ins. It puts an unbounded write on the latency path of the one request a person
+is waiting on, and it makes the retention window a function of traffic. **Rejected:
+Folio owning a cron.** Folio is a library mounted by a host Worker; `runSchedules`
+already establishes that the host owns the `scheduled()` handler and Folio owns what
+it calls.
+
 ## Wire & schema changes
 
 ### D1 migration `0005_auth.sql`
@@ -744,7 +769,7 @@ create index auth_events_at on auth_events (at desc);
 | POST | `{base}/api/logout` | cookie, none required | answers `{ ok: true, next: string }` and clears both cookie names, as today |
 | GET | `{base}/api/me` | session | `+ session: { provider }`; `policy.providers[].kind`, `rolesFromProvider`, `domains`, `signOut` |
 | PATCH | `{base}/api/users/:id` | admin | `409 conflict` when `role` is given and `role_from` is set: "Their role is set by <provider>. Change it there." |
-| GET | `{base}/api/auth-events` | admin | new: `?user=&cursor=&limit=` → `{ events, cursor }`, newest first |
+| GET | `{base}/api/auth-events` | admin | new: `?user=&cursor=&limit=` → `{ events, cursor, oldestAt }`, newest first. `oldestAt` is the epoch of the oldest row in the table (null when empty) — the one place a deployment that never wired `sweepAuth` can see that it never wired `sweepAuth` (decision 8) |
 | GET | `{base}/api/me/events` | session, user actor | new: the caller's own last twenty |
 
 `?error=` gains no new values. An enforced-domain refusal and a group-vanished refusal
@@ -1064,8 +1089,11 @@ THEN each is deleted and the report counts them; a 89-day-old event survives
   `users.provider`", roles from an id token with `groups` (the whole interaction
   table), two `oidc({ id })` providers, the enforced-domain `302` and the byte-identical
   `SENT` otherwise, `/login` while signed in.
-- `auth-http.test.ts`: the `409` and its wording; `GET /api/auth-events` paging and
-  `?user=`; `GET /api/me/events` for a user and `403` for a token; `sweepAuth`.
+- `auth-http.test.ts`: the `409` and its wording; `GET /api/auth-events` paging,
+  `?user=`, and `oldestAt` (null on an empty table, the oldest row's `at` otherwise,
+  and unchanged by a `?user=` filter — it is a fact about the table, not the page);
+  `GET /api/me/events` for a user and `403` for a token; `sweepAuth` deleting across
+  all three tables and answering its three counts.
 - `migrations.test.ts`: the grown column lists; `auth_events` columns and exactly
   `auth_events_at` and `auth_events_user`.
 
@@ -1121,4 +1149,27 @@ THEN each is deleted and the report counts them; a 89-day-old event survives
 
 ## Open questions
 
-None; every judgement above is a checkpoint with a recommendation.
+None. **All five checkpoints answered by the owner on 2026-09-05**, each to its
+recommendation. Two were put back with their real alternatives spelled out, and both
+were confirmed rather than waved through:
+
+- **Checkpoint 1** — an enforced-domain `POST /login/email` answers `302` to the
+  domain's provider. The rule `SENT` protects is non-enumeration *with respect to
+  accounts*, and the `302` holds it: it is identical for every address at that domain
+  whether or not a user row exists. What it discloses is a configuration fact the SSO
+  button on the same page already discloses.
+- **Checkpoint 4** — `auth_events` is in, table and both routes, after two previous
+  deferrals. The "table now, routes later" middle option was offered and declined:
+  spec 29's account screen reads `GET /api/me/events`, so the routes have a consumer
+  in the next spec rather than in a hypothetical one.
+
+**Build order: this spec is third of the four**, after 31 and 30 and before 29. That
+is a change from the 28 → 29 → 30 → 31 order recorded when the four were drafted: 31
+and 30 are M-sized, independent of auth, and interact with each other in a way that is
+cheaper to settle first.
+
+**Spec 23 is still live** (owner, 2026-09-05), and this spec is built as written rather
+than shaped around it. `role_from`, the `PATCH` refusal and the Access screen's
+disabled state all move with `role` when 23 puts it on `site_members`; that rework is
+accepted, and the note this spec asks for in 23's decision 5 is what makes it a
+migration rather than a rediscovery.

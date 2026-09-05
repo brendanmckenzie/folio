@@ -68,6 +68,18 @@ sequence because the dependency graph is the same one.
 | 30 | [Full-text search](content-model/full-text-search.md) | content model | M | — | `0007` | owner, 2026-09-05 |
 | 31 | [Visitor access](platform/visitor-access.md) | platform | M | — | — | owner, 2026-09-05 |
 
+**28–31 build in the order 31 → 30 → 28 → 29** (owner, 2026-09-05), which is not the
+order they are numbered in. The numbers are identities, assigned when the four were
+drafted together; the build order was decided after reading them side by side. Two
+constraints in it are real and the rest is sequencing: **29 cannot start before 28's
+phases 1–2** (the provider union, `completeSignIn`, `sessions.provider`, `auth/jwt.ts`),
+and **30 wants 31 landed first**, because 30 decision 11 compiles a predicate out of
+31's `ResolvedGate` to keep gated documents out of an unfiltered search. Building 30
+first would mean writing the search path twice and shipping a window in which a search
+page renders paywalled prose. The claimed migration numbers move with the build order,
+per the rule below: on this order 31 carries none, 30 takes `0005`, 28 takes `0006`,
+29 takes `0007`, and 23 stays behind all of them.
+
 Spec 26 is **done**, and its own `## Implementation notes` records that it shipped a
 different answer from the one it planned: the package moved to the repository root and
 the subtree split was deleted, rather than the docs moving inside the split prefix.

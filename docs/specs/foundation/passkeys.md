@@ -5,7 +5,10 @@
 > **Size:** M–L
 > **Status:** draft
 > **Wire version:** none
-> **Migration:** `0006_passkeys.sql`
+> **Migration:** `0006_passkeys.sql` — a claim. **Takes `0007` on the decided order**
+> (30 takes `0005`, 28 takes `0006`), and every `0006` in this file restamps with it.
+> Spec 23 keeps `0008` behind all of them.
+> **Build sequence:** 4 of 4 — 31 → 30 → 28 → 29 (owner, 2026-09-05). The **Build order** above is this spec's identity, not its place in the queue.
 > **Last updated:** 2026-09-05
 
 ## Summary
@@ -970,4 +973,26 @@ with the same exports. Phases 2–5 are unchanged either way.
 
 ## Open questions
 
-None. Every judgement above is a checkpoint with a recommendation.
+None. **All five checkpoints answered by the owner on 2026-09-05**, each to its
+recommendation. Two carry commitments worth restating outside the checkpoint list,
+because both are things that block a phase rather than shape one:
+
+- **Checkpoint 1 — hand-rolled WebCrypto verification, with the library as the
+  documented fallback.** The library-first inversion was offered and declined. This
+  means `test/fixtures/webauthn/*.json` is on the critical path: **real registration
+  and assertion responses have to be captured by hand, once, from Chrome (platform
+  authenticator and a security key) and Safari (iCloud Keychain)**, with the matching
+  `rpId`, `origin` and challenge recorded beside them. Nobody but the owner can do
+  that, it needs the login script working locally to produce the `console.log` it is
+  captured from, and phase 1's gate does not pass without it. Plan the phase so the
+  synthetic authenticator lands first and the fixtures are a second, owner-blocked
+  step — not so the whole phase stalls waiting on a device.
+- **Checkpoint 2 — user verification `required` at both ceremonies.** `preferred` was
+  offered and declined. The consequence to state in the README: **a bare security key
+  with no PIN cannot enrol at all**, and the error the person sees comes from their
+  browser, not from Folio, so there is no server-side symptom to debug. That is the
+  price of a passkey being the only factor in this sign-in.
+
+**Build order: this spec is last of the four**, after 31, 30 and 28. Its dependency on
+28 phases 1–2 is unchanged and is the hard one; the move of 30 and 31 ahead of both
+does not touch it.
