@@ -39,7 +39,9 @@ import {
   type Actor,
   type Role,
 } from '../../../src/server/auth/roles'
+import { roleFromClaim, roleSetByReason } from '../../../src/server/auth/roles-from'
 import { DEFAULT_SHARE_DAYS, MAX_SHARE_DAYS, shareExpiry } from '../../../src/server/auth/shares'
+import { domainOf } from '../../../src/server/auth/sign-in'
 import { bearerToken } from '../../../src/server/auth/tokens'
 import { safeNext } from '../../../src/server/validate'
 
@@ -432,6 +434,111 @@ describe('resolveAuth: construction refuses ambiguity', () => {
     expect(() => resolveAuth({ providers: [mailer()], sessionDays: 0 })).toThrow(
       /positive number of days/,
     )
+  })
+})
+
+/**
+ * Roles that come from the directory rather than from a person clicking
+ * (`../../../docs/specs/foundation/auth-providers.md` decision 5).
+ *
+ * `RoleMapper` is a function a host writes; `roleFromClaim` is the one shape
+ * common enough to ship. The interaction table it feeds is exercised over HTTP
+ * in `test/workers/auth-login.test.ts` — what is pinned here is the mapping
+ * itself, which is pure and has the awkward cases: a claim that is a string
+ * rather than an array, a nested path, and a value that is not a group name at
+ * all.
+ */
+describe('roleFromClaim', () => {
+  const groups = (values: unknown) => ({ email: 'ann@example.com', claims: { groups: values } })
+  const mapper = roleFromClaim({
+    claim: 'groups',
+    map: { 'cms-admins': 'admin', 'cms-editors': 'editor', 'cms-readers': 'viewer' },
+  })
+
+  it('reads a flat list of group names', () => {
+    expect(mapper(groups(['cms-editors']))).toBe('editor')
+  })
+
+  it('lets the highest-ranking match win, whatever order the directory sent', () => {
+    // The alternative is that somebody's access depends on how their IdP
+    // happened to serialise two groups, which is not a rule anybody could act on.
+    expect(mapper(groups(['cms-editors', 'cms-admins']))).toBe('admin')
+    expect(mapper(groups(['cms-admins', 'cms-editors']))).toBe('admin')
+  })
+
+  it('reads a claim that is one string rather than a list', () => {
+    // An app-`roles` claim is often a bare string; a mapper that only understood
+    // arrays would silently place no role for half the identity providers there are.
+    expect(mapper(groups('cms-admins'))).toBe('admin')
+  })
+
+  it('walks a dotted path into a nested claim', () => {
+    const nested = roleFromClaim({ claim: 'custom.groups', map: { staff: 'editor' } })
+    expect(nested({ email: 'a@b.c', claims: { custom: { groups: ['staff'] } } })).toBe('editor')
+    // A path that runs into something that is not an object stops there, which
+    // is the same answer as absent rather than a throw.
+    expect(nested({ email: 'a@b.c', claims: { custom: 'staff' } })).toBeNull()
+  })
+
+  it('answers null for an absent claim, absent claims, and an unmapped value', () => {
+    expect(mapper(groups(undefined))).toBeNull()
+    expect(mapper({ email: 'ann@example.com' })).toBeNull()
+    expect(mapper(groups(['some-other-group']))).toBeNull()
+  })
+
+  it('ignores a claim value that is not a string, rather than throwing on it', () => {
+    // A directory may put anything in a claim. A number beside a group name is
+    // not an error, it is just not a group name.
+    expect(mapper(groups([42, null, { nested: true }, 'cms-editors']))).toBe('editor')
+  })
+
+  it('falls back to the default when nothing matched, and only then', () => {
+    const withDefault = roleFromClaim({
+      claim: 'groups',
+      map: { 'cms-admins': 'admin' },
+      default: 'viewer',
+    })
+    expect(withDefault(groups(['nobody-mapped']))).toBe('viewer')
+    expect(withDefault(groups(undefined))).toBe('viewer')
+    expect(withDefault(groups(['cms-admins']))).toBe('admin')
+  })
+
+  it('refuses a map naming a role no build declares, at construction', () => {
+    // The same discipline `resolveAuth` keeps. The alternative is a mapper that
+    // answers a non-role at sign-in time, which `completeSignIn` refuses as
+    // `error=provider` — months later, to whoever was in that group first.
+    expect(() => roleFromClaim({ claim: 'groups', map: { staff: 'owner' as Role } })).toThrow(
+      /maps 'staff' to 'owner', which is not a role/,
+    )
+    expect(() => roleFromClaim({ claim: '', map: {} })).toThrow(/must name a claim/)
+  })
+})
+
+/**
+ * The enforced-domain map's key, and the sentence the refusal to edit a
+ * provider-placed role is said in.
+ *
+ * `domainOf` is exact-match only by decision 6: a wildcard is a policy language,
+ * and the agency case the feature exists for names its domains.
+ */
+describe('one domain, one door', () => {
+  it('takes the domain of an address, lowercased and trimmed', () => {
+    expect(domainOf('  Ann@Client.COM ')).toBe('client.com')
+    // The last `@` wins: a local part may legally contain one, and the domain is
+    // what follows the final separator.
+    expect(domainOf('"a@b"@client.com')).toBe('client.com')
+  })
+
+  it('answers the empty string for something that is not an address', () => {
+    // Which matches no key in the map, so an unparseable address enforces
+    // nothing rather than enforcing everything.
+    expect(domainOf('not-an-address')).toBe('')
+  })
+
+  it('says why a role cannot be edited here, naming the provider', () => {
+    // One sentence in one place: `PATCH /users/:id` answers it as a 409 and the
+    // Access screen puts it on the disabled control, and they cannot drift.
+    expect(roleSetByReason('okta')).toBe('Their role is set by okta. Change it there.')
   })
 })
 

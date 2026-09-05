@@ -1,13 +1,13 @@
 import { createExecutionContext, env } from 'cloudflare:test'
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { defineBlock, text } from '../../src/core'
-import type { AuthConfig, MagicLinkMail } from '../../src/server'
-import { createFolio, magicLink, oidc } from '../../src/server'
-import { CHALLENGE_TTL_MS } from '../../src/server/auth/challenges'
+import type { AuthConfig, MagicLinkMail, Role, RoleMapper } from '../../src/server'
+import { createFolio, magicLink, oidc, roleFromClaim } from '../../src/server'
+import { CHALLENGE_TTL_MS, createChallenge } from '../../src/server/auth/challenges'
 import { PLAIN_COOKIE, SECURE_COOKIE } from '../../src/server/auth/cookie'
 import { resetDiscoveryCache, verifyIdToken } from '../../src/server/auth/oidc'
 import type { UserActor } from '../../src/server/auth/roles'
-import { readSession } from '../../src/server/auth/session'
+import { createSession, readSession } from '../../src/server/auth/session'
 import { createUser, userByEmail } from '../../src/server/auth/users'
 
 /**
@@ -732,6 +732,430 @@ describe('GET /folio/login/oidc/callback', () => {
       { headers: { cookie } },
     )
     expect(res.headers.get('location')).toContain('error=provider')
+  })
+})
+
+/* ------------------------------------------------------ roles from claims --- */
+
+/**
+ * A tenant that has delegated roles to its directory
+ * (`docs/specs/foundation/auth-providers.md` decision 5).
+ *
+ * The whole of what makes this feature safe is the **interaction table** — seven
+ * rows over (a user row exists) × (the mapper answered nothing, a role, or
+ * `null`) — and the two rows the owner put a checkpoint on are the ones with
+ * teeth: a changed role revokes every other browser, and a mapper answering
+ * `null` for a user *this provider* placed refuses the sign-in outright, because
+ * their group was removed and the stored role is now stale privilege.
+ */
+function oidcWith(
+  fetchImpl: typeof fetch,
+  over: {
+    id?: string
+    roleFrom?: RoleMapper
+    provision?: 'refuse' | { create: true; role?: Role }
+    domains?: readonly string[]
+  } = {},
+) {
+  return oidc<Cloudflare.Env>({
+    issuer: IDP,
+    clientId: 'folio-client',
+    clientSecret: () => 'shh',
+    provision: over.provision ?? 'refuse',
+    fetchImpl,
+    ...(over.id ? { id: over.id } : {}),
+    ...(over.roleFrom ? { roleFrom: over.roleFrom } : {}),
+    ...(over.domains ? { domains: over.domains } : {}),
+  })
+}
+
+/** Starts a redirect flow and hands back what the callback needs: the state
+ * cookie to send, and the nonce to sign a token with. */
+async function startFlow(folio: Folio, id = 'oidc') {
+  const res = await call(folio, `/folio/login/${id}`)
+  return {
+    cookie: `__Host-folio_oidc=${cookieFrom(res, '__Host-folio_oidc')}`,
+    state: decodeStateCookie(res).state,
+  }
+}
+
+const CMS_GROUPS = roleFromClaim({
+  claim: 'groups',
+  map: { 'cms-admins': 'admin', 'cms-editors': 'editor' },
+})
+
+/**
+ * Every `auth_events` row, with `detail` parsed.
+ *
+ * Ordered by `kind`, **not** by `(at, id)`. Every event a sign-in writes is
+ * batched with the same `at`, so the id is the only tiebreak — and an id is
+ * `evt_<random hex>`, which makes `order by at, id` a coin toss that passes
+ * until it does not. What the tests below actually assert is the *set*, and the
+ * batch order is pinned where it matters (the revocation before the insert) by
+ * the session that survives it rather than by a row order here.
+ */
+async function events(): Promise<
+  { kind: string; user_id: string | null; actor: string | null; detail: unknown }[]
+> {
+  const { results } = await env.DB.prepare(
+    'select kind, user_id, actor, detail from auth_events order by kind',
+  ).all<{ kind: string; user_id: string | null; actor: string | null; detail: string | null }>()
+  return results.map((row) => ({ ...row, detail: row.detail ? JSON.parse(row.detail) : null }))
+}
+
+describe('roles come from the directory', () => {
+  /**
+   * One SSO tenant, and a whole round trip per call.
+   *
+   * The stand-in IdP signs whatever `claims` currently holds, so the closure is
+   * over the variable rather than the value: `start` has to run before the test
+   * knows the nonce it must sign.
+   */
+  function tenant(over: Parameters<typeof oidcWith>[1] = {}) {
+    let claims: Record<string, unknown> = {}
+    const folio = folioWith({
+      providers: [
+        oidcWith(
+          idpFetch(() => signIdToken(claims)),
+          over,
+        ),
+      ],
+    })
+    return {
+      folio,
+      async signIn(overrides: Record<string, unknown>): Promise<Response> {
+        const { cookie, state } = await startFlow(folio)
+        claims = claimsFor(state, overrides)
+        return call(folio, `/folio/login/oidc/callback?code=abc&state=${state.state}`, {
+          headers: { cookie },
+        })
+      },
+    }
+  }
+
+  it('takes the role from the claim, revokes every other browser, and records who did it', async () => {
+    const bob = await createUser(env.DB, { email: 'bob@example.com', role: 'editor' })
+    // A browser he already had open somewhere else.
+    const stale = await createSession(env.DB, bob.id)
+    const { signIn } = tenant({ roleFrom: CMS_GROUPS })
+
+    const res = await signIn({ email: 'bob@example.com', groups: ['cms-admins'] })
+
+    expect(res.status).toBe(302)
+    const row = await userByEmail(env.DB, 'bob@example.com')
+    expect(row).toMatchObject({ role: 'admin', roleFrom: 'oidc' })
+    // The old browser is gone in the same batch that minted the new one — a
+    // claim-driven downgrade must not sit in an open socket's attachment for the
+    // window an ordinary revocation may.
+    expect(await readSession(env.DB, stale.token)).toBeNull()
+    // …and the browser that just signed in is not, which is what the statement
+    // order inside the batch is for.
+    expect(await readSession(env.DB, cookieFrom(res, SECURE_COOKIE)!)).toMatchObject({
+      role: 'admin',
+    })
+
+    // The event this table was argued for: a role change with nobody clicking.
+    expect(await events()).toEqual([
+      {
+        kind: 'role_changed',
+        user_id: bob.id,
+        actor: 'provider:oidc',
+        detail: { from: 'editor', to: 'admin' },
+      },
+      { kind: 'sign_in', user_id: bob.id, actor: bob.id, detail: null },
+    ])
+  })
+
+  it('writes nothing at all when the claim agrees with the stored role', async () => {
+    const bob = await createUser(env.DB, {
+      email: 'bob@example.com',
+      role: 'admin',
+      roleFrom: 'oidc',
+    })
+    const other = await createSession(env.DB, bob.id)
+    const { signIn } = tenant({ roleFrom: CMS_GROUPS })
+
+    await signIn({ email: 'bob@example.com', groups: ['cms-admins'] })
+
+    // No update, no revocation, no event: a no-op is not a change, and a
+    // `role_changed` row per sign-in would bury the ones that mean something.
+    expect(await readSession(env.DB, other.token)).not.toBeNull()
+    expect((await events()).map((e) => e.kind)).toEqual(['sign_in'])
+  })
+
+  it('refuses a user this provider placed whose groups have gone', async () => {
+    // Checkpoint 3. The alternative was falling back to `provision.role`, which
+    // would make "in no group" silently mean "editor" on a tenant that delegated
+    // roles to its directory precisely so that it would not.
+    const bob = await createUser(env.DB, {
+      email: 'bob@example.com',
+      role: 'admin',
+      roleFrom: 'oidc',
+    })
+    const { signIn } = tenant({ roleFrom: CMS_GROUPS })
+
+    const res = await signIn({ email: 'bob@example.com', groups: [] })
+
+    expect(res.headers.get('location')).toContain('error=refused')
+    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull()
+    expect(
+      await env.DB.prepare('select count(*) as n from sessions').first<{ n: number }>(),
+    ).toEqual({ n: 0 })
+    // The role is left standing: refusing the sign-in is the remedy, and
+    // rewriting the row would lose the record of what the directory once said.
+    expect((await userByEmail(env.DB, 'bob@example.com'))?.role).toBe('admin')
+    expect(await events()).toEqual([
+      {
+        kind: 'sign_in_refused',
+        user_id: bob.id,
+        actor: bob.id,
+        detail: { email: 'bob@example.com', reason: 'role_removed' },
+      },
+    ])
+  })
+
+  it('leaves a Folio-placed role alone when the mapper has no opinion', async () => {
+    // Carol was invited by an admin, so `role_from` is null and this provider was
+    // never the authority on her role. "No group" is not a demotion.
+    await createUser(env.DB, { email: 'carol@example.com', role: 'publisher' })
+    const { signIn } = tenant({ roleFrom: CMS_GROUPS })
+
+    const res = await signIn({ email: 'carol@example.com', groups: [] })
+
+    expect(res.status).toBe(302)
+    expect(await userByEmail(env.DB, 'carol@example.com')).toMatchObject({
+      role: 'publisher',
+      roleFrom: null,
+    })
+  })
+
+  it('provisions at the mapped role, stamping the provider as its author', async () => {
+    const { signIn } = tenant({ roleFrom: CMS_GROUPS, provision: { create: true, role: 'viewer' } })
+
+    await signIn({ email: 'new@example.com', groups: ['cms-editors'] })
+
+    // The claim wins over `provision.role`: the mapper is a statement about this
+    // person, and `provision.role` is the default for somebody it says nothing
+    // about.
+    expect(await userByEmail(env.DB, 'new@example.com')).toMatchObject({
+      role: 'editor',
+      roleFrom: 'oidc',
+    })
+  })
+
+  it('refuses to invent a role for an unmapped stranger', async () => {
+    // A provider that maps roles and a `provision` with no role named: creating
+    // them at the implicit `editor` default would be the same silent promotion
+    // checkpoint 3 refuses one row up.
+    const { signIn } = tenant({ roleFrom: CMS_GROUPS, provision: { create: true } })
+
+    const res = await signIn({ email: 'new@example.com', groups: ['nothing-mapped'] })
+
+    expect(res.headers.get('location')).toContain('error=refused')
+    expect(await userByEmail(env.DB, 'new@example.com')).toBeNull()
+    expect(await events()).toEqual([
+      {
+        kind: 'sign_in_refused',
+        user_id: null,
+        actor: null,
+        detail: { email: 'new@example.com', reason: 'not_invited' },
+      },
+    ])
+  })
+
+  it('creates an unmapped stranger at the role the host named, owned by Folio', async () => {
+    const { signIn } = tenant({ roleFrom: CMS_GROUPS, provision: { create: true, role: 'viewer' } })
+
+    await signIn({ email: 'new@example.com', groups: ['nothing-mapped'] })
+
+    // `role_from` stays null: the host decided this, not the directory, so an
+    // admin may edit it and the next sign-in will not take it back.
+    expect(await userByEmail(env.DB, 'new@example.com')).toMatchObject({
+      role: 'viewer',
+      roleFrom: null,
+    })
+  })
+
+  it('treats a mapper answering a non-role as a configuration bug, not a default', async () => {
+    await createUser(env.DB, { email: 'bob@example.com', role: 'editor' })
+    const { signIn } = tenant({ roleFrom: () => 'owner' as Role })
+
+    const res = await signIn({ email: 'bob@example.com' })
+
+    expect(res.headers.get('location')).toContain('error=provider')
+    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull()
+    expect((await userByEmail(env.DB, 'bob@example.com'))?.role).toBe('editor')
+  })
+
+  it('treats a mapper that throws the same way', async () => {
+    await createUser(env.DB, { email: 'bob@example.com', role: 'editor' })
+    const { signIn } = tenant({
+      roleFrom: () => {
+        throw new Error('the directory API is down')
+      },
+    })
+
+    const res = await signIn({ email: 'bob@example.com' })
+
+    expect(res.headers.get('location')).toContain('error=provider')
+    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull()
+  })
+
+  it('hands the whole id token to the mapper, not only the two fields a user row needs', async () => {
+    await createUser(env.DB, { email: 'bob@example.com', role: 'editor' })
+    const seen: unknown[] = []
+    const { signIn } = tenant({
+      roleFrom: (identity) => {
+        seen.push(identity.claims)
+        return null
+      },
+    })
+
+    await signIn({ email: 'bob@example.com', groups: ['cms-admins'], sub: 'idp-subject' })
+
+    expect(seen[0]).toMatchObject({ groups: ['cms-admins'], sub: 'idp-subject', iss: IDP })
+  })
+})
+
+/* ---------------------------------------------------- one domain, one door --- */
+
+describe('an enforced domain is exactly one door', () => {
+  /** Magic link plus an SSO tenant that owns `client.com`. */
+  function agency(fetchImpl: typeof fetch = idpFetch(() => '')) {
+    return folioWith({
+      providers: [capturingMagicLink, oidcWith(fetchImpl, { id: 'okta', domains: ['client.com'] })],
+    })
+  }
+
+  it('sends an enforced address to its provider before any D1 read, known or not', async () => {
+    await createUser(env.DB, { email: 'ann@client.com', role: 'editor' })
+    const folio = agency()
+
+    for (const email of ['ann@client.com', 'nobody@client.com']) {
+      const res = await requestLink(folio, email)
+      expect(res.status).toBe(302)
+      // Identical for both, which is what keeps it non-enumerating *with respect
+      // to accounts* — the property `SENT` protects. What it does disclose is a
+      // configuration fact about the domain, which the SSO button on the same
+      // page already discloses.
+      expect(res.headers.get('location')).toBe('/folio/login/okta?next=%2Ffolio%2Fedit')
+    }
+
+    expect(outbox).toHaveLength(0)
+    // No challenge, and no read that could have told the two addresses apart.
+    const rows = await env.DB.prepare('select email from login_challenges').all()
+    expect(rows.results).toEqual([])
+  })
+
+  it('answers a form post and a JSON caller the same way', async () => {
+    // A script follows redirects and the admin never posts here, so there is no
+    // caller for whom a 200-with-a-message would be better than the 302.
+    const folio = agency()
+    const form = await call(folio, '/folio/login/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'text/html' },
+      body: 'email=ann%40client.com',
+    })
+    expect(form.status).toBe(302)
+    expect(form.headers.get('location')).toBe('/folio/login/okta?next=%2Ffolio%2Fedit')
+  })
+
+  it('leaves every other address on the byte-identical answer', async () => {
+    await createUser(env.DB, { email: 'dan@agency.example', role: 'editor' })
+    const folio = agency()
+
+    const known = await requestLink(folio, 'dan@agency.example')
+    const unknown = await requestLink(folio, 'nobody@agency.example')
+
+    expect(known.status).toBe(200)
+    expect(await unknown.text()).toBe(await known.text())
+    expect(outbox.map((m) => m.email)).toEqual(['dan@agency.example'])
+  })
+
+  it('refuses a link that was somehow minted for an enforced address', async () => {
+    // Unreachable through the route above, which is exactly why it is written:
+    // `completeSignIn` re-checks the map for every kind, so a challenge that
+    // predates the configuration cannot become a session.
+    await createUser(env.DB, { email: 'ann@client.com', role: 'editor' })
+    const challenge = await createChallenge(env.DB, 'ann@client.com')
+
+    const res = await call(agency(), `/folio/login/verify?t=${challenge.token}`)
+
+    expect(res.headers.get('location')).toContain('error=refused')
+    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull()
+    expect(await env.DB.prepare('select count(*) as n from sessions').first()).toEqual({ n: 0 })
+    expect(await events()).toEqual([
+      {
+        kind: 'sign_in_refused',
+        // No `user_id`: enforcement happens before the row is read, because the
+        // answer does not depend on there being one.
+        user_id: null,
+        actor: null,
+        detail: { email: 'ann@client.com', reason: 'domain' },
+      },
+    ])
+  })
+
+  it('refuses a second SSO tenant for a domain another one owns', async () => {
+    // Two `oidc({ id })` providers side by side, which is the other half of what
+    // the configurable id bought: a staff directory and a client's, at once.
+    await createUser(env.DB, { email: 'ann@client.com', role: 'editor' })
+    let claims: Record<string, unknown> = {}
+    const fetchImpl = idpFetch(() => signIdToken(claims))
+    const folio = folioWith({
+      providers: [
+        oidcWith(fetchImpl, { id: 'okta', domains: ['client.com'] }),
+        oidcWith(fetchImpl, { id: 'entra' }),
+      ],
+    })
+
+    const { cookie, state } = await startFlow(folio, 'entra')
+    claims = claimsFor(state, { email: 'ann@client.com' })
+    const res = await call(folio, `/folio/login/entra/callback?code=abc&state=${state.state}`, {
+      headers: { cookie },
+    })
+
+    expect(res.headers.get('location')).toContain('error=refused')
+    expect(cookieFrom(res, SECURE_COOKIE)).toBeNull()
+    // The point of the rule: the client's directory controls revocation, and a
+    // second door around it is not a door the deployment agreed to.
+    expect((await events())[0]).toMatchObject({
+      kind: 'sign_in_refused',
+      detail: { reason: 'domain' },
+    })
+  })
+
+  it('lets the domain’s own provider through', async () => {
+    await createUser(env.DB, { email: 'ann@client.com', role: 'editor' })
+    let claims: Record<string, unknown> = {}
+    const fetchImpl = idpFetch(() => signIdToken(claims))
+    const folio = folioWith({
+      providers: [capturingMagicLink, oidcWith(fetchImpl, { id: 'okta', domains: ['client.com'] })],
+    })
+
+    const { cookie, state } = await startFlow(folio, 'okta')
+    claims = claimsFor(state, { email: 'ann@client.com' })
+    const res = await call(folio, `/folio/login/okta/callback?code=abc&state=${state.state}`, {
+      headers: { cookie },
+    })
+
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('/folio/edit')
+    expect((await userByEmail(env.DB, 'ann@client.com'))?.provider).toBe('okta')
+  })
+})
+
+describe('GET /folio/login for a browser that is already signed in', () => {
+  it('redirects to next rather than rendering a form that would sign them in again', async () => {
+    const user = await seedEditor()
+    const session = await createSession(env.DB, user.id)
+
+    const res = await call(folioWith(magicAuth), '/folio/login?next=%2Ffolio%2Fedit%2Fsty_a', {
+      headers: { cookie: `${SECURE_COOKIE}=${session.token}` },
+    })
+
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('/folio/edit/sty_a')
   })
 })
 

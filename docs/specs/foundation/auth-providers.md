@@ -1250,3 +1250,69 @@ it and phase 1's step list omitted it, so `verifyJws` had no direct test at all 
 only whatever `verifyIdToken` happened to reach. It pins the four failures the
 extraction had to preserve and the `source`/`noun` wording that keeps
 `verifyIdToken`'s messages byte-identical.
+
+### Phase 3 — SSO finishing (2026-09-05)
+
+The interaction table, `roleFromClaim`, `users.role_from` written, the `409`, the
+Access screen's disabled `Select`, and domain enforcement. Landed as written.
+`src/server/auth/roles-from.ts` is new; `sign-in.ts` gained steps 1 and 3 of
+decision 3's order (domain, then role) and the whole of decision 5's table;
+`routes/auth.ts` gained the enforced-domain fast path on `POST /login/email`;
+`routes/access.ts` gained the `409` and `roleFrom` on `toJson`;
+`access-model.ts` and `Access.tsx` gained the disabled control and its reason.
+`config.ts` needed **nothing**: phase 1 already compiled and validated the
+`domains` map, so phase 3's step 4 was half done before it started.
+
+Five things worth knowing, and one of them is a divergence:
+
+- **A refusal records `user_id` when Folio has a row, not always `null`.** The
+  plan's acceptance criterion says "one `sign_in_refused` event carries her email
+  and no `user_id`", which is true of the case it describes — a *stranger* the IdP
+  vouched for. It is not true of the two refusals that only happen to somebody who
+  already has a row: a group that vanished (checkpoint 3) and a mapper that
+  answered a non-role. Recording those with `user_id` null would make them
+  invisible to `GET {base}/api/auth-events?user=`, which is the query
+  `auth_events_user` exists for and the one an admin runs when somebody says "I
+  cannot get in". `0006_auth.sql`'s own column comment is the authority followed
+  here: "Null for a refused identity Folio has no row for." The email is in
+  `detail` either way.
+- **The `sign_in_refused` write is phase 3's, not phase 4's.** Phase 2's notes
+  flagged it as owed and phase 4 step 2 claims it; it is done, batched inside
+  `completeSignIn` beside the refusal it records, because a refusal and the row
+  explaining it are one decision and splitting them across two phases is how one
+  of them ends up missing. **Phase 4 must not add it a second time** — what phase
+  4 still owns on this path is the *routes* that read the table.
+- **`detail.reason` is a machine word, and there are four**: `domain`,
+  `not_invited`, `role_removed`, `mapper`. The login page's `?error=` vocabulary
+  is deliberately two values wide and says nothing about which account; this is
+  the other half of the same refusal, on a surface only an admin can read. The
+  spec's schema comment shapes `sign_in_refused`'s detail as `{ email, reason }`
+  and does not say what `reason` ranges over, so this fixes it.
+- **`domainOf` lives in `sign-in.ts`**, exported, rather than beside
+  `normaliseEmail` in `users.ts`. The module that enforces the map is the module
+  that owns its key, and `POST /login/email` imports it from there.
+  `roleSetByReason` lives in `roles-from.ts` for the same reason and is imported
+  by **both** `routes/access.ts` (the `409`) and `admin/ui/screens/access-model.ts`
+  (the disabled control's title), so the pre-emptive explanation and the refusal
+  that would follow the click cannot drift apart.
+- **`roleFromClaim` validates at construction**, throwing for a `map` value that
+  is not a role and for an empty `claim`. The alternative is a mapper that answers
+  a non-role at sign-in time, which `completeSignIn` correctly refuses as
+  `error=provider` — months later, to whichever person happened to be in that
+  group first. `roleFromClaim` and `RoleFromClaimOptions` are exported from
+  `src/server/index.tsx` beside `magicLink`, `oidc`, `trusted` and
+  `cloudflareAccess`; decision 1 asks for that and phase 3's step list omitted it.
+
+Two smaller notes for whoever is next:
+
+- `PATCH {base}/api/users/:id` costs **one extra read when `role` is in the body**
+  and nothing otherwise. `updateUser` reads the row to build the patch, but it
+  reads it to write it, and `role_from` has to be known *before* the write rather
+  than after. A rename pays nothing.
+- `Access.module.css`'s `.roleCell` became a flex column so the provider badge can
+  sit under the `<select>` with a gap. That is the only file this phase touched
+  that its plan does not name.
+
+Not done here, and still phase 4's: `GET {base}/api/auth-events`,
+`GET {base}/api/me/events`, `folio.sweepAuth`, and the `sign_out`,
+`user_invited`, `user_removed` and admin-actor `role_changed` writes.

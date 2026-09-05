@@ -24,6 +24,7 @@ import {
   isSelf,
   parseAccessUrl,
   revokeRefusal,
+  roleFromReason,
   since,
   tokenStatus,
   tokenStatusTone,
@@ -240,12 +241,18 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
       label: 'Role',
       cell: (user) => {
         const self = isSelf(user.id, selfId)
+        // A role the identity provider's claims placed. Disabled rather than
+        // absent, which is the one place this admin departs from "a control you
+        // cannot use is not drawn": the reason *is* the message, and the badge
+        // beside it names where the role actually comes from. `PATCH` answers
+        // the same sentence as a 409, so the click would fail anyway.
+        const fromProvider = roleFromReason(user)
         return (
           <span className={css.roleCell}>
             <Select
               value={user.role}
-              disabled={busy || self}
-              title={self ? SELF_ROLE_REASON : ROLE_MEANING[user.role]}
+              disabled={busy || self || fromProvider !== null}
+              title={self ? SELF_ROLE_REASON : (fromProvider ?? ROLE_MEANING[user.role])}
               aria-label={`Role for ${user.name}`}
               onChange={(e) => changeRole(user, e.target.value as Role)}
             >
@@ -255,6 +262,11 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
                 </option>
               ))}
             </Select>
+            {user.roleFrom ? (
+              <Badge mono title={fromProvider ?? undefined}>
+                {user.roleFrom}
+              </Badge>
+            ) : null}
           </span>
         )
       },

@@ -14,6 +14,7 @@
 import { Hono } from 'hono'
 import type { Scope } from '../auth/roles'
 import { ADMIN } from '../auth/roles'
+import { roleSetByReason } from '../auth/roles-from'
 import { createToken, listTokens, revokeToken } from '../auth/tokens'
 import {
   createUser,
@@ -21,6 +22,7 @@ import {
   listUsers,
   updateUser,
   userByEmail,
+  userById,
   type UserRow,
 } from '../auth/users'
 import { revokeUserSessions } from '../auth/session'
@@ -44,6 +46,10 @@ function toJson(user: UserRow) {
     role: user.role,
     colour: user.colour,
     provider: user.provider,
+    /** Which provider's claims placed `role`, or null for a role Folio owns.
+     * The Access screen disables its `<select>` on this and says why, which is
+     * the client half of the `409` below. */
+    roleFrom: user.roleFrom,
     createdAt: user.createdAt,
     lastSeenAt: user.lastSeenAt,
   }
@@ -132,6 +138,33 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         'conflict',
         'You cannot change your own role. Ask another admin to change it for you.',
       )
+    }
+
+    /**
+     * **A role an identity provider placed is not Folio's to edit**
+     * (`../../../docs/specs/foundation/auth-providers.md` decision 5,
+     * checkpoint 2). `users.role_from` records who decided it, and when a
+     * provider did, the remedy for a group change is in the directory — which is
+     * where a tenant that delegated roles to it expects to find it.
+     *
+     * The alternative was to allow the edit and let the next sign-in overwrite
+     * it, which is the "it quietly changed" failure this codebase refuses
+     * everywhere else: an admin would set `viewer`, watch the row say `viewer`,
+     * and find `admin` again after the person's next sign-in with no event
+     * between the two that anybody was looking at.
+     *
+     * One extra read, and only when `role` is in the body: `updateUser` reads
+     * the row itself, but it reads it to build the patch, and the answer has to
+     * be known before the write rather than after it. A rename pays nothing.
+     *
+     * `DELETE` below is deliberately not guarded this way. Removing someone is
+     * not a role, and a provider that decides what somebody may do has no
+     * opinion on whether they have access at all.
+     */
+    if (body.role !== undefined) {
+      const target = await userById(db, id)
+      if (!target) throw new FolioError('not_found', 'Unknown user')
+      if (target.roleFrom) throw new FolioError('conflict', roleSetByReason(target.roleFrom))
     }
 
     const updated = await updateUser(db, id, body)

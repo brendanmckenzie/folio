@@ -14,6 +14,7 @@ import {
   parseAccessUrl,
   presetOf,
   revokeRefusal,
+  roleFromReason,
   ROLE_MEANING,
   ROLE_OPTIONS,
   SCOPE_MEANING,
@@ -26,6 +27,7 @@ import {
   tokenStatusTone,
 } from '../../../src/admin/ui/screens/access-model'
 import { ROLES, SCOPES, hasScope } from '../../../src/server/auth/roles'
+import { roleSetByReason } from '../../../src/server/auth/roles-from'
 
 /**
  * The Access screen's arithmetic — `docs/ui-architecture.md`'s port phase 5.
@@ -96,6 +98,29 @@ describe('isSelf', () => {
   it('is what stops somebody removing their own admin', () => {
     expect(isSelf('usr_a', 'usr_a')).toBe(true)
     expect(isSelf('usr_b', 'usr_a')).toBe(false)
+  })
+})
+
+/**
+ * A role an identity provider's claims placed
+ * (`../../../docs/specs/foundation/auth-providers.md` decision 5, checkpoint 2).
+ *
+ * The `<select>` is disabled rather than removed, which is the one place this
+ * admin departs from "a control you cannot use is not drawn": the reason is the
+ * whole message — the role is set in the directory and that is where it changes
+ * — and a row with no role control would leave "why not this one?" unanswered.
+ */
+describe('roleFromReason', () => {
+  it('is null for a role Folio owns, so the control stays live', () => {
+    expect(roleFromReason({ roleFrom: null })).toBeNull()
+  })
+
+  it('names the provider, in the server’s own words', () => {
+    // The exact sentence `PATCH /users/:id` answers as a 409. Asserted against
+    // `roleSetByReason` rather than a literal, so the pre-emptive explanation
+    // and the refusal that would follow the click cannot drift apart.
+    expect(roleFromReason({ roleFrom: 'okta' })).toBe(roleSetByReason('okta'))
+    expect(roleFromReason({ roleFrom: 'okta' })).toContain('okta')
   })
 })
 

@@ -164,6 +164,14 @@ export { trusted } from './auth/trusted'
 export type { TrustedOptions } from './auth/trusted'
 export { cloudflareAccess } from './auth/cloudflare-access'
 export type { CloudflareAccessOptions } from './auth/cloudflare-access'
+/**
+ * Roles from an identity provider's claims
+ * (`../../docs/specs/foundation/auth-providers.md` decision 5). `RoleMapper` is
+ * a function a host writes; `roleFromClaim` is the one shape common enough to
+ * ship — a flat claim of group names, looked up in a table, highest role wins.
+ */
+export { roleFromClaim } from './auth/roles-from'
+export type { RoleFromClaimOptions } from './auth/roles-from'
 export {
   ADMIN,
   ASSETS,

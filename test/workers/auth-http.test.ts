@@ -351,6 +351,83 @@ describe('role gates', () => {
     expect(res.status).toBe(200)
   })
 
+  /**
+   * A role an identity provider's claims placed is not Folio's to edit
+   * (`docs/specs/foundation/auth-providers.md` decision 5, checkpoint 2).
+   *
+   * The rejected alternative was to allow the edit and let the next sign-in
+   * overwrite it, which is the "it quietly changed" failure this codebase
+   * refuses everywhere else: the row would read `viewer` until the person next
+   * signed in, and then read `admin` again with nobody watching.
+   */
+  it('refuses a role an identity provider placed, naming the provider', async () => {
+    const admin = await signIn('admin')
+    const target = await createUser(env.DB, {
+      email: 'bob@example.com',
+      role: 'editor',
+      provider: 'okta',
+      roleFrom: 'okta',
+    })
+
+    const res = await call(`/folio/api/users/${target.id}`, {
+      method: 'PATCH',
+      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ role: 'viewer' }),
+    })
+    expect(res.status).toBe(409)
+    const body = (await res.json()) as ErrorEnvelope
+    // Naming it is the whole message: the remedy is in the directory, and a
+    // refusal that did not say which one would send an admin looking.
+    expect(body.error.message).toBe('Their role is set by okta. Change it there.')
+
+    // And the row really did not change — a refusal that had already written it
+    // would be the worst of both.
+    const row = await env.DB.prepare('select role from users where id = ?')
+      .bind(target.id)
+      .first<{ role: string }>()
+    expect(row?.role).toBe('editor')
+  })
+
+  it('still lets an admin rename somebody whose role a provider placed', async () => {
+    // The guard is on the *role*, not on the row. A name is Folio's whoever set
+    // the role, and `roleFrom` travels back out so the screen can say why the
+    // one control it does disable is disabled.
+    const admin = await signIn('admin')
+    const target = await createUser(env.DB, {
+      email: 'bob@example.com',
+      role: 'editor',
+      roleFrom: 'okta',
+    })
+    const res = await call(`/folio/api/users/${target.id}`, {
+      method: 'PATCH',
+      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Robert' }),
+    })
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ user: { name: 'Robert', roleFrom: 'okta' } })
+  })
+
+  it('removes them anyway: removing somebody is not a role', async () => {
+    // `DELETE` is always Folio's. A provider that decides what somebody may do
+    // has no opinion on whether they have access at all — and an admin locked
+    // out of revoking access because the directory owns the role would be a
+    // worse failure than the one the 409 above prevents.
+    const admin = await signIn('admin')
+    const target = await createUser(env.DB, {
+      email: 'bob@example.com',
+      role: 'admin',
+      roleFrom: 'okta',
+    })
+    const res = await call(`/folio/api/users/${target.id}`, {
+      method: 'DELETE',
+      headers: { cookie: admin.cookie },
+    })
+    expect(res.status).toBe(200)
+    expect(await env.DB.prepare('select id from users where id = ?').bind(target.id).first()).toBe(
+      null,
+    )
+  })
+
   it('signs a user out of every browser when their role changes', async () => {
     const admin = await signIn('admin')
     const target = await signIn('editor')

@@ -21,6 +21,7 @@
  */
 import type { Role, Scope } from '../../../server/auth/roles'
 import { ROLES, SCOPES, hasScope } from '../../../server/auth/roles'
+import { roleSetByReason } from '../../../server/auth/roles-from'
 import type { TokenRow } from '../../../server/auth/tokens'
 import type { Me, MeUser } from '../../me'
 import type { BadgeTone } from '../Badge'
@@ -44,6 +45,9 @@ export interface AccessUser {
   colour: string | null
   /** How they last signed in, or null for somebody who never has. */
   provider: string | null
+  /** Which provider's claims placed `role`, or null for a role Folio owns —
+   * an admin invited them, or edited it here. */
+  roleFrom: string | null
   createdAt: number
   lastSeenAt: number | null
 }
@@ -124,6 +128,26 @@ export const SELF_REMOVE_REASON = 'You cannot remove your own account'
  * radius than this screen.
  */
 export const SELF_ROLE_REASON = 'You cannot change your own role'
+
+/**
+ * Why the screen refuses to change a role an identity provider placed, or null
+ * when it does not.
+ *
+ * **This one the server does refuse**, unlike `SELF_ROLE_REASON` above:
+ * `PATCH /users/:id` answers `409` with this exact sentence
+ * (`../../../../docs/specs/foundation/auth-providers.md` decision 5,
+ * checkpoint 2), which is why the wording comes from the server's own
+ * `roleSetByReason` rather than being restated here. The two cannot drift.
+ *
+ * The admin's usual rule is that a control a person cannot use is **absent**
+ * rather than disabled. This is the case that rule does not fit: the reason is
+ * the whole message — the role comes from somewhere else and that is where it is
+ * changed — and a row with no role control at all would leave "why can I not
+ * edit this one?" as the reader's problem.
+ */
+export function roleFromReason(user: Pick<AccessUser, 'roleFrom'>): string | null {
+  return user.roleFrom ? roleSetByReason(user.roleFrom) : null
+}
 
 /** The roles a `<select>` offers, weakest first — `ROLES`' own order, which is the
  * order the permission table in `identity-and-access.md` reads in. */

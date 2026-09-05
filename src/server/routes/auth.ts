@@ -37,7 +37,7 @@ import {
 } from '../auth/cookie'
 import { credentialOf, resolveActor } from '../auth/resolve'
 import { revokeSession, sessionProvider } from '../auth/session'
-import { completeSignIn } from '../auth/sign-in'
+import { completeSignIn, domainOf } from '../auth/sign-in'
 import type { NewSession } from '../auth/session'
 import { userByEmail } from '../auth/users'
 import { FolioError } from '../errors'
@@ -238,6 +238,14 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * Note what is *not* awaited differently between the branches: an unknown
    * address does exactly the same amount of work minus the send, and the answer
    * is assembled before either branch runs.
+   *
+   * The one exception is an **enforced domain**, and it is not an exception to
+   * the rule `SENT` protects (checkpoint 1). `SENT` is non-enumerating *with
+   * respect to accounts*; the `302` below is identical for every address at that
+   * domain whether or not a user row exists, so it discloses a configuration
+   * fact about the domain and nothing about anybody's account — and the SSO
+   * button on the same page already discloses that fact. What the alternative
+   * bought was a legitimate user waiting for a mail nobody was going to send.
    */
   app.post('/login/email', async (c) => {
     const auth = sessionAuth()
@@ -249,6 +257,19 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     }
     const body = await loginBody(c.req.raw)
     const next = safeNext(body.next, editorUrl)
+
+    // **Before any D1 read**, so there is no timing difference and no challenge
+    // row to be consumed later — `completeSignIn` would refuse the link anyway,
+    // but a mail per refusal is a round trip to say what this form could say.
+    // A `mail` provider cannot itself claim a domain (`resolveAuth` refuses it),
+    // so the comparison is defensive rather than reachable.
+    const enforced = auth.domains.get(domainOf(body.email))
+    if (enforced !== undefined && enforced !== provider.id) {
+      // The same answer for a JSON caller: a script follows redirects, and the
+      // admin never posts to this route.
+      return c.redirect(`${rt.base}/login/${enforced}?next=${encodeURIComponent(next)}`)
+    }
+
     const db = c.var.bindings().db
 
     const user = await userByEmail(db, body.email)
