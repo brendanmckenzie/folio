@@ -962,3 +962,242 @@
   font-size: var(--text-lg);
   font-weight: 600;
 }
+
+/* ------------------------------------------------------------- selection --- */
+
+/*
+ * The bulk bar (`AssetBrowser.tsx`'s selection layer, media-library.md phase 5).
+ *
+ * Above the grid rather than below it, unlike Content's footer bar: this list
+ * has a detail panel beside it and a footer that already carries the pager, and
+ * a bar under a twelve-tile grid moves every time a filter changes.
+ *
+ * Always rendered on the screen mount, whether or not anything is ticked — a bar
+ * that appears when the first checkbox is ticked pushes the whole grid down by
+ * its own height on the click that ticked it, which moves the tile the pointer
+ * is over out from under the pointer.
+ */
+.bulkBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+  font-size: var(--text-xs);
+}
+
+.bulkText {
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.bulkActions {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* A link-weight control, matching Content's own select-all: it is a *change of
+   selection*, not one of the four actions, and giving it a button's weight would
+   put five equal-looking controls in a row where only four write anything. */
+.selectAll {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-accent);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.selectAll:disabled {
+  color: var(--fg-subtle);
+  cursor: default;
+  text-decoration: none;
+}
+
+.selectAll:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* The table's leading checkbox. `Table.tsx`'s `select` slot puts it outside the
+   first column's open button, which is the only place it can be. */
+.tick {
+  margin: 0;
+  cursor: pointer;
+}
+
+/*
+ * The tile's checkbox, over the thumbnail's top-left corner.
+ *
+ * `position: absolute` so it never holds layout: a checkbox in the tile's flow
+ * would reflow every tile in the grid on the mount where the selection layer is
+ * offered and nowhere else, which is exactly the "one implementation, two
+ * mounts" property drifting apart by 16 pixels.
+ *
+ * Visible at all times rather than on hover, unlike a row's actions: this is
+ * how you read a selection back, and a tick you can only see with the pointer
+ * on it is not a selection anybody can audit before pressing Delete.
+ */
+.tile {
+  position: relative;
+}
+
+.tileTick {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  z-index: 1;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* A ticked tile, which is **not** the same state as the open one (`.tileOn`):
+   one is "in the set the bar will act on", the other is "the file the panel is
+   describing", and the same tile is often both. A left edge for the tick, a
+   fill and border for the subject. */
+.tile[data-ticked] {
+  background: var(--bg-selected);
+}
+
+/* ------------------------------------------------------- manage / pick lists --- */
+
+/* The bulk tag dialog's checkbox list. A real list of labels rather than chips:
+   this is a form control, and a chip that is also a checkbox has no state a
+   screen reader can announce. */
+.pickList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 320px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow-y: auto;
+}
+
+.pickRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-1);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.pickRow:hover {
+  background: var(--bg-hover);
+}
+
+/* The tag manager's rows. Each is name-then-controls, and a row in its rename or
+   its confirm state is the same row with different children — so the height does
+   not change as one is opened. */
+.manageList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 360px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+}
+
+.manageRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+}
+
+.manageName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+}
+
+/* A sentence that is a warning rather than an aside — the bulk delete's "12 of
+   these are used on published pages", and an inline error. Uses the danger
+   tokens, so both themes are covered by construction. */
+.warn {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--state-danger-fg);
+}
+
+/* --------------------------------------------------------- folder editing --- */
+
+/*
+ * A folder row is two controls now: the filter button, and the edit affordance
+ * over its right edge. The wrapper is what carries hover, because the button can
+ * no longer be the row — a button inside a button is not markup.
+ */
+.folderRowWrap {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.folderRowWrap .folderRow {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Room for the edit affordance, always — reserved rather than added on hover,
+     so a folder name does not reflow as the pointer crosses the tree. */
+  padding-right: 24px;
+}
+
+/*
+ * Revealed on hover or keyboard focus, and **absolutely positioned so it holds
+ * no layout** (`CLAUDE.md`: a hover-only control must not hold layout).
+ *
+ * `visibility` rather than `display`, and `:focus-within` on the wrapper: the
+ * row's own filter button is focusable, so tabbing to it reveals this one and
+ * makes it reachable — which is the trap `Table.tsx`'s `actions` documents, a
+ * hover-only control in a row with nothing else focusable being mouse-only.
+ */
+.rowEdit {
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  translate: 0 -50%;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-subtle);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.folderRowWrap:hover .rowEdit,
+.folderRowWrap:focus-within .rowEdit {
+  visibility: visible;
+}
+
+.rowEdit:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.rowEdit:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+  visibility: visible;
+}

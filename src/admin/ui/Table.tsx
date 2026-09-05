@@ -47,6 +47,22 @@ interface Props<T> {
    * designing around.
    */
   actions?: (row: T) => ReactNode
+  /**
+   * A leading selection cell, **outside** the first column and therefore outside
+   * the `onOpen` button that wraps it.
+   *
+   * That placement is the whole reason this is a slot rather than "just another
+   * column": a checkbox rendered as `columns[0]` would land inside that button —
+   * a control inside a control, which no browser lets you tick and no screen
+   * reader can describe. It cannot ride in `actions` either, because that cell is
+   * hidden until the row is hovered or focused, and a *checked* checkbox that
+   * disappears is not a selection anybody can see.
+   *
+   * `head` is the header cell's content — the "select every row shown" control
+   * where a caller has one. Give it an accessible name; the cell has no visible
+   * label to inherit.
+   */
+  select?: { head?: ReactNode; cell: (row: T) => ReactNode }
   empty?: ReactNode
 }
 
@@ -69,6 +85,7 @@ export function Table<T>({
   onSort,
   onOpen,
   actions,
+  select,
   empty,
 }: Props<T>) {
   if (rows.length === 0 && empty) return <>{empty}</>
@@ -78,6 +95,7 @@ export function Table<T>({
       <table className={css.table} aria-label={label}>
         <thead>
           <tr>
+            {select ? <th className={css.select}>{select.head}</th> : null}
             {columns.map((column) => (
               <th
                 key={column.key}
@@ -130,6 +148,7 @@ export function Table<T>({
             const key = rowKey(row)
             return (
               <tr key={key} className={key === currentKey ? css.current : undefined}>
+                {select ? <td className={css.select}>{select.cell(row)}</td> : null}
                 {columns.map((column, i) => (
                   <td key={column.key} className={column.numeric ? css.numeric : undefined}>
                     {i === 0 && onOpen ? (

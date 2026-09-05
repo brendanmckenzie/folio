@@ -34,6 +34,18 @@ export interface TagsData {
    * message on failure. Reloads on success.
    */
   ensure: (name: string) => Promise<AssetTag>
+  /**
+   * Renames a tag, re-slugging it. Throws the server's 409 when the new slug is
+   * another tag's — a rename onto an existing tag would be a **merge**, rewriting
+   * taggings for files the editor is not looking at, with no undo.
+   */
+  rename: (id: string, name: string) => Promise<AssetTag>
+  /**
+   * Deletes the tag and its taggings, and **no file** (decision 14). Answers
+   * `removedFrom`, so the caller reports how many files stopped carrying it
+   * rather than guessing.
+   */
+  remove: (id: string) => Promise<{ removedFrom: number }>
 }
 
 export function useTags(apiBase: string): TagsData {
@@ -75,5 +87,33 @@ export function useTags(apiBase: string): TagsData {
     [apiBase, reload],
   )
 
-  return { tags, loading, error, reload, ensure }
+  const rename = useCallback(
+    async (id: string, name: string) => {
+      const res = await fetch(`${apiBase}/assets/tags/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      if (!res.ok) throw new Error(await messageOf(res))
+      const tag = (await res.json()) as AssetTag
+      await reload()
+      return tag
+    },
+    [apiBase, reload],
+  )
+
+  const remove = useCallback(
+    async (id: string) => {
+      const res = await fetch(`${apiBase}/assets/tags/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) throw new Error(await messageOf(res))
+      const report = (await res.json()) as { removedFrom: number }
+      await reload()
+      return report
+    },
+    [apiBase, reload],
+  )
+
+  return { tags, loading, error, reload, ensure, rename, remove }
 }

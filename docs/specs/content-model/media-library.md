@@ -1427,3 +1427,141 @@ rather than a literal character, so the assertion does not depend on an invisibl
 non-breaking space surviving a copy-paste. `MAX_TAG_FILTER` here is asserted equal
 to `server/asset-tags.ts`'s own, the same insurance `assetValue`'s test buys against
 `toAssetValue`.
+
+### Phase 5 — bulk (2026-09-06)
+
+`src/core/bulk.ts` is new and holds `IdSelection`, `FilterSelection<F>`,
+`BulkSelection<F>`, `BulkFailure`, `BulkReport<A>`, `BulkRefusal`,
+`BulkOutcome<A>` and `wasRefused`; `src/server/asset-bulk.ts` is new;
+`countAssets`, `assetsFor` and `assetsMatching` are new in `server/assets.ts`;
+four routes in `routes/assets.ts` and five schemas in `validate.ts`;
+`AssetBrowser.tsx` gained the selection layer, the four bulk dialogs and the
+folder/tag editors phase 4 deferred. `test/workers/asset-bulk.test.ts` is new
+(25) and `test/unit/core/bulk.test.ts` is new (7).
+
+**The report shapes are generic over the *action* too**, which the plan did not
+say. Decision 6 said they move "unchanged", and they could not: `BulkReport`'s
+`action` was `BulkAction`, the story runner's five, so an asset report would have
+been typed as publishing something. `BulkReport<A extends string>` with no
+default is the same argument decision 6 already makes for the filter, applied to
+the other field that differs — `StoryBulkReport` and `StoryBulkOutcome` are
+aliases in `server/bulk.ts` so the story call sites read as they did.
+`BulkAction` is `StoryBulkAction` now, per the spec.
+
+**The cursor codec moved to `core/bulk.ts` as well** (`writeBulkCursor` /
+`readBulkCursor`). Decision 6 says the asset runner shares the `(lastId, seen)`
+cursor rule and duplicates none of it; the rule is not shareable while the codec
+lives in `server/bulk.ts`, and two encoders for one opaque string is how a
+media-library cursor comes to be readable by the document runner and mean
+something else. It answers `null` rather than throwing, because `core/` has no
+error type — each runner turns that into its own `bad_request`.
+
+**`exclude` is applied in JavaScript, not in the `where`, and that is the one
+real departure from `runBulk`.** `storiesMatching` binds the excluded ids into an
+`id not in (…)`; a selection's `exclude` is capped at `MAX_SELECTION_IDS`, which
+is **500**, and `D1_BIND_CAP` is 100 — so that statement can bind five times the
+cap, and no chunking rescues it, because the cap is per *statement* and splitting
+one `not in` into three clauses still binds all three. `filterBatch` drops
+excluded rows from the batch it read instead. **That is a latent bug in the story
+runner**, not a hypothetical one: it needs a select-all with more than ~90 rows
+ticked off to fire, which is a real gesture on a 200-row page. Named here rather
+than fixed, because `server/bulk.ts`'s reader was not this phase's to change.
+
+The price of dropping exclusions after the read is that `consumed` and the number
+of rows *read* come apart, and two things follow that a copy of `runBulk` would
+get wrong:
+
+- **The walk ends on a short read, never on a short act.** `Batch.exhausted` is
+  reported by each batch rather than inferred from `consumed < limit`; ending the
+  job on the acted count would silently skip everything after the first excluded
+  row. A test drives 120 assets with 117 ticked off and asserts the three that
+  survive are the three that were tagged.
+- **The two branches ask for different limits.** An id list is clamped to the
+  remaining allowance; a filter batch is not, because clamping the *read* to the
+  allowance turns "select all 120, tick off 117" into a walk that reads three
+  rows per request and needs forty of them. Found by the test above failing at
+  twenty requests, which is worth saying plainly: the first implementation was
+  correct and unusable.
+
+**`usedOnPublished` is on the delete report's *first call only*.** The plan says
+the confirmation posts `dryRun: true` and reads it; it does not say what a resumed
+call answers, and the honest answer is nothing — by then the job has deleted some
+of the rows it would be counting. Absent rather than stale, and absent rather than
+zero, because zero is a claim. A `FilterSelection`'s `exclude` is **not**
+subtracted from it, for the bind-cap reason above; the error is in the safe
+direction, since a warning that overstates what is in use is a warning.
+
+**Verified by breaking it**, which is the only way to know the guard is held by a
+test rather than agreed with: making the delete not consult `countUsedOnPublished`
+turns four tests red, including the route-level one — the confirmation would have
+gone on rendering "none of these files is used on a published page" over a
+selection that included twelve that were.
+
+**One `AssetBulkDeps`, and no runtime in it.** `runBulk` takes `PublishDeps &
+DocumentDeps`; none of these four actions resolves a document, fires a hook or
+purges a cache, because none of them changes what a published page renders —
+filing is metadata (decision 1) and a delete leaves the documents alone
+(`deleteAsset`'s own rule). So the runner takes `{ db, media }`, and `media` is
+optional because three of the four never reach a bucket.
+
+**Two things the plan did not name, decided here:**
+
+- **`tagsByIds` is exported from `asset-tags.ts`** so the bulk runner resolves a
+  tag list through the same chunked reader `setAssetTags` uses. Every argument —
+  the tag ids, the destination folder, the bucket — is checked **once before the
+  walk**, and refused as a request error rather than as N identical per-row
+  failures: an unknown tag id is a client bug, not twenty-five separate accidents.
+- **`Table.tsx` gained a `select` slot**, a leading cell outside the columns. A
+  checkbox rendered as `columns[0]` lands *inside* the `onOpen` button that wraps
+  the first cell — a control inside a control — and it cannot ride in `actions`,
+  which is hidden until the row is hovered, because a checked checkbox that
+  disappears is not a selection anybody can read back.
+
+**The picker does not get the selection layer**, and the reason is stronger than
+"it has no use for it": every one of the four actions opens a `Dialog`, and the
+picker's `AssetBrowser` already sits inside `AssetPicker.tsx`'s own — the exact
+two-focus-trap collision phase 4 hit with *New folder*. `bulk` is a prop the
+screen passes and the picker does not, like `kinds`, and `onNotice` rides with it
+(`AssetPicker.tsx` takes none by its own design).
+
+**`useFolders`/`useTags` moved up one level, into `AssetBrowser`.** Phase 4 gave
+the sidebar its own pair and named the cost; this phase added a third and fourth
+consumer — the bulk *Tag* and *Move* dialogs pick from the same two lists — and
+four copies of one fetch is where lifting it is cheaper than explaining it again.
+`AssetDetail`'s copies are still its own: that component is mounted by
+`Assets.tsx`, and threading a hook's value through a screen to a sibling is a
+bigger change than this phase owes.
+
+**Folder rename/move/delete and tag rename/delete now have an admin surface**,
+closing what phase 4 deferred. Two shapes, deliberately different:
+
+- A folder row carries its own `⋯`, revealed on hover or `:focus-within` and
+  **absolutely positioned so it holds no layout** — a hover control in flow makes
+  every folder name reflow as the pointer crosses the tree. The row is a wrapper
+  now, because the filter control can no longer *be* the row: a button inside a
+  button is not markup any browser accepts.
+- Tags get one *Manage tags* button, not an affordance per chip. Chips wrap, and
+  a hover control inside a two-word chip is four pixels wide; a vocabulary is
+  hundreds of chips by design (decision 4), so the list in a dialog is also the
+  only place it reads as a vocabulary.
+
+Both delete confirmations say what decision 14 promises, in the panel rather than
+in a tooltip: *no file is deleted*, where the files go (Unfiled), and where the
+subfolders go (up one level). The tag row names the count from `?counts=1`.
+
+**The folder delete dialog states the rule and reports the numbers afterwards**,
+which is a small divergence from decision 14's "both dialogs say … how many rows
+it affects". Nothing can answer "how many files are directly in this folder"
+before the fact: the only count route is the asset list's, and its `folder`
+filter **includes descendants** by design, so it would overstate — a delete
+re-parents the children, and their files stay filed. `deleteFolder` returns
+`{ unfiled, reparented }`, so the toast says exactly what happened. A route
+answering "files directly in this folder" is the alternative if the number is
+wanted before the click.
+
+**One dialog mounted at a time is held by the state shape, not by discipline.**
+The bulk layer's open dialog is a single `AssetBulkAction | null`, the sidebar's
+is one `AssetFolder | null` plus two booleans that the render tree makes
+exclusive, and `FolderEditDialog` and `TagManagerDialog` confirm a delete *inside*
+their own panel rather than opening a second one — the same collision, one level
+down.

@@ -1447,6 +1447,140 @@ export function tagsQuery(raw: string[] | undefined): string[] | undefined {
   return slugs.map((slug) => parseOrThrow(ASSET_TAG_SLUG, slug, 'tags'))
 }
 
+/* ------------------------------------------------------ bulk asset writes --- */
+
+/**
+ * The `AssetFilter` a media-library select-all **captured**
+ * (`../content-model/media-library.md` decision 6), as a body field rather than a
+ * query string.
+ *
+ * Every member of `core/assets.ts`'s `AssetFilter` that a list route parses, and
+ * **nothing more**: `undescribed` is deliberately absent because phase 7 adds the
+ * clause that would answer it, and a filter key the composer ignores is a
+ * selection that means something other than what it says. The two mutual
+ * exclusions the list route refuses with a 400 (`folder`/`unfiled`,
+ * `tags`/`untagged`) are *not* re-checked here — `assetFilterSql` composes both
+ * honestly and yields an empty set, which for a bulk write is the safest possible
+ * reading of a contradictory request: it acts on nothing.
+ *
+ * `q` and `kind` are bounded here rather than trusted, because this shape reaches
+ * `assetFilterSql` from a request body that never passed through the query-string
+ * parser — the same reason `MAX_TAG_FILTER` is enforced inside the composer.
+ */
+const CAPTURED_ASSET_FILTER = v.object(
+  {
+    q: v.optional(bounded(200)),
+    kind: v.optional(bounded(100)),
+    folder: v.optional(ASSET_FOLDER_PATH),
+    tags: v.optional(
+      v.pipe(
+        v.array(ASSET_TAG_SLUG, 'must be an array of tag slugs'),
+        v.maxLength(MAX_TAG_FILTER, `must name ${MAX_TAG_FILTER} tags or fewer`),
+      ),
+    ),
+    unfiled: v.optional(v.boolean('must be true or false')),
+    untagged: v.optional(v.boolean('must be true or false')),
+  },
+  OBJECT,
+)
+
+/**
+ * A selection of library rows, in the same two shapes `SELECTION` describes for
+ * documents — and `v.strictObject` for the identical reason: a stripped key here
+ * changes *which files get written to*, and one of the four actions deletes them.
+ */
+const ASSET_SELECTION = v.union(
+  [
+    v.strictObject(
+      {
+        all: v.literal(true, 'must be true'),
+        filter: CAPTURED_ASSET_FILTER,
+        expected: v.pipe(
+          v.number('must be a number'),
+          v.integer('must be a whole number'),
+          v.minValue(0, 'must be 0 or greater'),
+        ),
+        exclude: v.optional(
+          v.pipe(
+            v.array(ID, 'must be an array of asset ids'),
+            v.maxLength(MAX_SELECTION_IDS, `must name ${MAX_SELECTION_IDS} files or fewer`),
+          ),
+        ),
+      },
+      OBJECT,
+    ),
+    v.strictObject(
+      {
+        ids: v.pipe(
+          v.array(ID, 'must be an array of asset ids'),
+          v.minLength(1, 'must name at least one file'),
+          v.maxLength(MAX_SELECTION_IDS, `must name ${MAX_SELECTION_IDS} files or fewer`),
+        ),
+      },
+      OBJECT,
+    ),
+  ],
+  'must be either { ids } or { all: true, filter, expected }',
+)
+
+/** The job-control half of every asset bulk body — `BULK_CONTROL` with the other
+ * selection. Same fields, same bounds, same cursor rule. */
+const ASSET_BULK_CONTROL = {
+  selection: ASSET_SELECTION,
+  dryRun: v.optional(v.boolean('must be true or false')),
+  continueFrom: v.nullish(
+    v.pipe(v.string('must be a string'), v.maxLength(500, 'is not a pagination cursor')),
+  ),
+  batch: v.optional(
+    v.pipe(
+      v.number('must be a number'),
+      v.integer('must be a whole number'),
+      v.minValue(1, 'must be at least 1'),
+      v.maxValue(200, 'must be 200 or fewer'),
+    ),
+  ),
+}
+
+/**
+ * `POST {base}/api/assets/bulk/tag` and `/untag`.
+ *
+ * `tagIds` is required and non-empty: "tag these forty files with nothing" is not
+ * an operation, and defaulting it to the empty list would answer a placid report
+ * of forty successes that changed nothing. Bounded by `MAX_ASSET_TAGS`, the same
+ * ceiling `AssetPatchBody.tags` carries — `runAssetBulk` chunks its binds, so this
+ * is a bound on the body rather than on the SQL.
+ */
+export const AssetBulkTagBody = v.object(
+  {
+    ...ASSET_BULK_CONTROL,
+    tagIds: v.pipe(
+      v.array(ID, 'must be an array of tag ids'),
+      v.minLength(1, 'must name at least one tag'),
+      v.maxLength(MAX_ASSET_TAGS, `must name ${MAX_ASSET_TAGS} tags or fewer`),
+    ),
+  },
+  OBJECT,
+)
+
+/**
+ * `POST {base}/api/assets/bulk/move`. `folderId` is **required and nullable**:
+ * `null` is *Unfiled*, a real destination, and leaving it out would make "move"
+ * mean "move to wherever you already are" — which is not an operation anybody
+ * asked for. Exactly `BulkMoveBody.parentId`'s rule, one level over.
+ */
+export const AssetBulkMoveBody = v.object(
+  { ...ASSET_BULK_CONTROL, folderId: v.nullable(ID) },
+  OBJECT,
+)
+
+/** `POST {base}/api/assets/bulk/delete`. Nothing beyond the selection: there is
+ * no redirect switch to offer, because an asset has no path to redirect from. */
+export const AssetBulkBody = v.object(ASSET_BULK_CONTROL, OBJECT)
+
+export type AssetBulkTagInput = v.InferOutput<typeof AssetBulkTagBody>
+export type AssetBulkMoveInput = v.InferOutput<typeof AssetBulkMoveBody>
+export type AssetBulkInput = v.InferOutput<typeof AssetBulkBody>
+
 /**
  * `?dir=` — reverses a sort. Absent means the ordering's own natural direction,
  * which is what a column header shows on its first click, so this is only ever

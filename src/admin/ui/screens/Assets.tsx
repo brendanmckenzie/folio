@@ -201,6 +201,10 @@ export function Assets(props: Props) {
           onSelect={(id) => go({ ...url, asset: id })}
           label="Media library"
           kinds
+          // The selection layer, screen-only — `AssetBrowser`'s own `bulk` prop
+          // says why the picker must not have it.
+          bulk
+          onNotice={onNotice}
         />
 
         {/*

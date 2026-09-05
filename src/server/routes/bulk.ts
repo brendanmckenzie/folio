@@ -23,9 +23,10 @@
  */
 import type { Context } from 'hono'
 import { Hono } from 'hono'
-import type { BulkAction } from '../../core/story'
+import { type BulkOutcome, wasRefused } from '../../core/bulk'
+import type { StoryBulkAction } from '../../core/story'
 import { type Access, actorString, CREATE, MANAGE, PUBLISH } from '../auth/roles'
-import { type BulkDeps, type BulkOptions, type BulkOutcome, runBulk, wasRefused } from '../bulk'
+import { type BulkDeps, type BulkOptions, runBulk } from '../bulk'
 import { hookCtx, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
@@ -63,7 +64,7 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * refusal answered as a value (`runBulk` returns it rather than throwing, the way
    * `StoryDO.commit` answers a rejection).
    */
-  const answer = (c: Context<FolioEnv<Env>>, outcome: BulkOutcome): Response => {
+  const answer = (c: Context<FolioEnv<Env>>, outcome: BulkOutcome<StoryBulkAction>): Response => {
     if (!wasRefused(outcome)) return c.json(outcome)
     return c.json(
       {
@@ -101,7 +102,7 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * be character-identical apart from the action name and the access, and three
    * copies is where the fourth one forgets `requireCursor`.
    */
-  const PLAIN: [BulkAction, Access][] = [
+  const PLAIN: [StoryBulkAction, Access][] = [
     ['publish', PUBLISH],
     ['unpublish', PUBLISH],
     // `CREATE` (editor+), matching `POST {base}/api/stories/:id/duplicate`: a copy is

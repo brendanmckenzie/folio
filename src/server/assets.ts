@@ -23,7 +23,7 @@ import type { StoryMeta } from '../core/story'
 import { assetReferences, clearInboundRefStatements } from './content-index'
 import { type Direction, type Keyset, keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
 import { storiesFor } from './stories'
-import type { FolioDb } from './db'
+import { bindChunks, type FolioDb } from './db'
 
 /** Matches the Images binding's own input ceiling, so failures happen up front. */
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -258,8 +258,100 @@ export async function listAssets(
   return total ? { ...page, total: total.n } : page
 }
 
+/**
+ * How many library rows match a filter, and nothing else — `countStories`'s twin
+ * for the media library, and for the same one reason: **it is the bulk guard**
+ * (`../content-model/media-library.md` decision 6, `bulk-writes.md` decision 3).
+ *
+ * The same `count(*)` over the same `assetFilterSql` the list route runs, so the
+ * number in `Showing n of N` and the number the server re-checks before a bulk
+ * write cannot disagree. That is what `pagination.md` decision 5 asks for when it
+ * says one count implementation serves the header and the guard, and it is why
+ * this is here rather than a second `select count(*)` inside `asset-bulk.ts`:
+ * a guard that counts a different set from the one the person read is not a
+ * guard.
+ *
+ * Binds nothing a caller sizes — `assetFilterSql`'s own header carries the
+ * arithmetic (eighteen at the widest).
+ */
+export async function countAssets(db: FolioDb, filter: AssetFilter = {}): Promise<number> {
+  const { clauses, binds } = assetFilterSql(filter)
+  const row = await db
+    .prepare(`select count(*) as n from assets ${whereOf(...clauses)}`)
+    .bind(...binds)
+    .first<{ n: number }>()
+  return row?.n ?? 0
+}
+
 export async function assetById(db: FolioDb, id: string): Promise<AssetRow | null> {
   return db.prepare(`select ${COLS} from assets where id = ?`).bind(id).first<AssetRow>()
+}
+
+/**
+ * The library rows for a set of ids, deduplicated and in no particular order —
+ * `storiesFor`'s twin, and chunked for the identical reason.
+ *
+ * **The list is caller-sized by definition.** An explicit bulk selection is up to
+ * `MAX_SELECTION_IDS` ids off a request body, which is five times `D1_BIND_CAP`
+ * (`db.ts`), so a single `id in (…)` would fail on exactly the selections a bulk
+ * route exists for. `bindChunks` sizes the statements; a caller cannot forget,
+ * because there is no unchunked version to reach for.
+ *
+ * An id with no row behind it is simply absent, which is what lets `runAssetBulk`
+ * tell "already gone" apart from "failed" per action.
+ *
+ * Empty in, empty out: `in ()` is not valid SQL.
+ */
+export async function assetsFor(db: FolioDb, ids: readonly string[]): Promise<AssetRow[]> {
+  if (ids.length === 0) return []
+  const pages = await Promise.all(
+    bindChunks([...new Set(ids)], 1).map(async (chunk) => {
+      const { results } = await db
+        .prepare(`select ${COLS} from assets where id in (${chunk.map(() => '?').join(', ')})`)
+        .bind(...chunk)
+        .all<AssetRow>()
+      return results
+    }),
+  )
+  return pages.flat()
+}
+
+/**
+ * One batch of the assets a filter matches, walked by `id`, for a bulk write.
+ *
+ * **By `id` rather than by any of the orderings the screen offers**, exactly as
+ * `storiesMatching` walks stories: the set is *changing as it is walked* — a bulk
+ * move empties a folder filter, a bulk delete empties everything — and `id` is the
+ * one key that is stable, unique and never rewritten by any of the four actions.
+ * The keyset is therefore two lines rather than a `Keyset`: `id > ?` and
+ * `order by id`.
+ *
+ * **`exclude` is deliberately not a parameter**, and that is the one place this
+ * departs from `storiesMatching`, which binds the excluded ids straight into its
+ * `id not in (…)`. A selection's `exclude` is caller-sized — up to 500 ids — so
+ * that statement can bind well past `D1_BIND_CAP` on a large tick-off, and no
+ * chunking helps: the cap is per *statement*, and splitting one `not in` into
+ * three clauses still binds all three. `runAssetBulk` drops excluded rows from the
+ * batch it read instead, which costs one `Set.has` per row and cannot overrun
+ * anything. See its `filterBatch` for why the cursor still terminates correctly
+ * when a batch acts on fewer rows than it read.
+ */
+export async function assetsMatching(
+  db: FolioDb,
+  filter: AssetFilter,
+  opts: { limit: number; after?: string | null },
+): Promise<AssetRow[]> {
+  const { clauses, binds } = assetFilterSql(filter)
+  const sql = [...clauses]
+  if (opts.after) {
+    sql.push('id > ?')
+    binds.push(opts.after)
+  }
+  const { results } = await db
+    .prepare(`select ${COLS} from assets ${whereOf(...sql)} order by id limit ?`)
+    .bind(...binds, opts.limit)
+    .all<AssetRow>()
+  return results
 }
 
 /* ------------------------------------------------------------------ usage --- */

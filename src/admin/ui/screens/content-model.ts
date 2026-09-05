@@ -24,8 +24,14 @@
  * `StoryNode` tree with children in hand, which is precisely what a paged tree
  * does not have.
  */
-import type { BulkAction, FlatSort, StoryFilter, StoryMeta, StoryState } from '../../../core/story'
-import type { BulkFailure, BulkRefusal, BulkReport } from '../../../server/bulk'
+import type {
+  StoryBulkAction,
+  FlatSort,
+  StoryFilter,
+  StoryMeta,
+  StoryState,
+} from '../../../core/story'
+import type { BulkFailure, BulkRefusal, BulkReport } from '../../../core/bulk'
 
 /* ------------------------------------------------------------------- modes --- */
 
@@ -593,11 +599,11 @@ export function selectAllLabel(total: number): string {
  * encodes every rule that applies, so a page that cannot go where it was asked is
  * one named line in the report.
  *
- * `BulkAction` itself is `core/story.ts`'s: the value is in a URL — one route per
+ * `StoryBulkAction` itself is `core/story.ts`'s: the value is in a URL — one route per
  * action — so the screen that posts it and the runner that performs it share one
  * vocabulary rather than two lists that agree today.
  */
-export const BULK_ACTIONS: readonly BulkAction[] = [
+export const BULK_ACTIONS: readonly StoryBulkAction[] = [
   'publish',
   'unpublish',
   'duplicate',
@@ -615,7 +621,7 @@ export const BULK_ACTIONS: readonly BulkAction[] = [
  * id list this shape exists to avoid. So the refusal is structural rather than
  * situational, and `## Cross-cutting` says an impossible control is absent.
  */
-export function actionsFor(selection: Selection): readonly BulkAction[] {
+export function actionsFor(selection: Selection): readonly StoryBulkAction[] {
   return isAll(selection) ? BULK_ACTIONS.filter((action) => action !== 'duplicate') : BULK_ACTIONS
 }
 
@@ -645,7 +651,7 @@ export interface Confirmation {
 }
 
 export function confirmOf(
-  action: BulkAction,
+  action: StoryBulkAction,
   summary: SelectionSummary,
   filter?: StoryFilter,
   labels: Readonly<Record<string, string>> = {},
@@ -687,7 +693,7 @@ const DELETE_NOTE =
  * routine — and is the point. The alternative it beat is running anyway, which is
  * a bulk publish quietly including nine pages nobody looked at.
  */
-export function refusalOf(action: BulkAction, refusal: BulkRefusal): Confirmation {
+export function refusalOf(action: StoryBulkAction, refusal: BulkRefusal): Confirmation {
   const verb = refusal.actual === 1 ? 'matches' : 'match'
   return {
     title: `${pages(refusal.actual)} ${verb} now, not ${num(refusal.expected)}`,
@@ -697,7 +703,7 @@ export function refusalOf(action: BulkAction, refusal: BulkRefusal): Confirmatio
 }
 
 /** The affirmative button beside `refusalOf`'s question. */
-export function retryLabel(action: BulkAction, refusal: BulkRefusal): string {
+export function retryLabel(action: StoryBulkAction, refusal: BulkRefusal): string {
   return `${VERB[action]} ${pages(refusal.actual)}`
 }
 
@@ -715,7 +721,7 @@ export function retryLabel(action: BulkAction, refusal: BulkRefusal): string {
  * precisely because the server cannot know what an earlier call did.
  */
 export function reportOf(
-  action: BulkAction,
+  action: StoryBulkAction,
   done: number,
   failures: readonly { title: string; message: string }[],
 ): string {
@@ -738,7 +744,7 @@ export function progressOf(seen: number, total: number): string {
   return `Working… ${num(seen)} of ${num(total)}`
 }
 
-const PAST_TENSE: Record<BulkAction, string> = {
+const PAST_TENSE: Record<StoryBulkAction, string> = {
   publish: 'Published',
   unpublish: 'Unpublished',
   duplicate: 'Duplicated',
@@ -746,7 +752,7 @@ const PAST_TENSE: Record<BulkAction, string> = {
   delete: 'Deleted',
 }
 
-const VERB: Record<BulkAction, string> = {
+const VERB: Record<StoryBulkAction, string> = {
   publish: 'Publish',
   unpublish: 'Unpublish',
   duplicate: 'Duplicate',
@@ -756,7 +762,7 @@ const VERB: Record<BulkAction, string> = {
 
 /** The imperative, for a confirmation's affirmative button. One table for the
  * question and the button, so "Publish 12 pages?" cannot be answered by *Apply*. */
-export function verbOf(action: BulkAction): string {
+export function verbOf(action: StoryBulkAction): string {
   return VERB[action]
 }
 
@@ -847,7 +853,7 @@ export function bulkBody(
 }
 
 /** What a bulk route answers: the report, or the 409's refusal. */
-export type BulkAnswer = BulkReport | BulkRefusal
+export type BulkAnswer = BulkReport<StoryBulkAction> | BulkRefusal
 
 export function wasRefused(answer: BulkAnswer): answer is BulkRefusal {
   return 'refused' in answer

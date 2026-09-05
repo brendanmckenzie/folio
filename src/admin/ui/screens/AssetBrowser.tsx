@@ -1,6 +1,13 @@
 import type { KeyboardEvent, ReactNode } from 'react'
 import { useRef, useState } from 'react'
-import type { AssetFolder, AssetSort } from '../../../core/assets'
+import type {
+  AssetBulkAction,
+  AssetFilter,
+  AssetFolder,
+  AssetSort,
+  AssetTag,
+} from '../../../core/assets'
+import type { BulkFailure, BulkRefusal, BulkReport } from '../../../core/bulk'
 import { Button } from '../Button'
 import { Dialog } from '../Dialog'
 import { EmptyState } from '../EmptyState'
@@ -34,8 +41,9 @@ import {
 } from './assets-model'
 import css from './Assets.module.css'
 import type { AssetsData, Uploads } from './useAssets'
-import { useFolders } from './useFolders'
-import { useTags } from './useTags'
+import { messageOf } from './useContent'
+import { type FoldersData, useFolders } from './useFolders'
+import { type TagsData, useTags } from './useTags'
 
 /**
  * The width asked of the transform route, per surface. Three values and no more:
@@ -90,6 +98,26 @@ export interface AssetBrowserProps {
   accept?: string
   /** Tighter tiles and one column fewer, for the dialog mount. */
   compact?: boolean
+  /**
+   * Whether the **selection layer** is offered: a checkbox per tile and per row,
+   * a bar over the grid, *select all matching*, and the four bulk actions.
+   *
+   * A prop the screen passes and the picker does not, exactly as `kinds` works —
+   * and for a stronger reason than "the picker has no use for it". Every one of
+   * the four actions opens a `Dialog`, and the picker's own `AssetBrowser`
+   * already sits inside `AssetPicker.tsx`'s `Dialog`; two mounted `useFocusTrap`
+   * instances fight over every Tab press, which is the bug phase 4 hit with the
+   * *New folder* dialog and fixed with `compact`. Filing forty files is a
+   * library-management gesture and belongs on the screen; picking one is what the
+   * picker is for.
+   */
+  bulk?: boolean
+  /**
+   * How a completed bulk run reports itself. Screen-only, like `bulk` — and
+   * absent for the picker deliberately, which is `AssetPicker.tsx`'s own rule
+   * (it takes no `onNotice`, because a dialog has nowhere to put a toast).
+   */
+  onNotice?: (message: string) => void
 }
 
 /**
@@ -122,8 +150,48 @@ export interface AssetBrowserProps {
 export function AssetBrowser(props: AssetBrowserProps) {
   const { apiBase, mount, url, onUrl, data, upload, selected, label, kinds, accept, compact } =
     props
+  const { bulk, onNotice } = props
   const grid = useRef<HTMLDivElement>(null)
   const file = useRef<HTMLInputElement>(null)
+
+  /**
+   * **One instance of each per mount**, held here rather than in `Sidebar`.
+   *
+   * Phase 4 gave the sidebar its own `useFolders`/`useTags` and named the cost:
+   * two independent copies whenever the detail panel is open beside it. This
+   * phase adds a third and fourth consumer — the bulk *Tag* and *Move* dialogs
+   * pick from exactly the same two lists — and four copies of one fetch is the
+   * point at which lifting it one level is cheaper than explaining it again. The
+   * detail panel's own copies are still its own: that component is mounted by
+   * `Assets.tsx`, not by this one, and threading a hook's value through a
+   * screen to a sibling is a bigger change than this phase owes.
+   */
+  const folders = useFolders(apiBase)
+  const tags = useTags(apiBase)
+
+  /**
+   * The bulk selection. `NOTHING` unless `bulk` is set, in which case the
+   * checkbox layer writes to it — a captured *select all* included, which is
+   * why this is a discriminated union rather than a `Set`.
+   */
+  const [ticked, setTicked] = useState<Ticked>(NOTHING)
+  /** Which bulk dialog is open, or null. One at a time by construction: the
+   * state is a single value, not four booleans. */
+  const [job, setJob] = useState<AssetBulkAction | null>(null)
+  const [running, setRunning] = useState(false)
+  /**
+   * What the delete confirmation's dry run found — `usedOnPublished`, or the
+   * reason it could not be asked.
+   *
+   * Held **here**, and fired by the button that opens the dialog rather than by
+   * the dialog itself: a probe started while the dialog renders is a side effect
+   * in render, and one started in its `useEffect` needs a dependency list over a
+   * `selection` object that is rebuilt every render. The gesture is what asks.
+   */
+  const [probe, setProbe] = useState<{ used: number | null; error: string | null }>({
+    used: null,
+    error: null,
+  })
 
   const rows = data.page.rows
   const firstLoad = data.page.loading && rows.length === 0
@@ -163,6 +231,76 @@ export function AssetBrowser(props: AssetBrowserProps) {
     e.preventDefault()
     tiles[next]?.focus()
   }
+
+  /**
+   * A finished run: say what happened, drop the selection, and re-read.
+   *
+   * The selection is cleared rather than kept, and that is the safe direction:
+   * a captured *select all* that survived a delete would still claim its
+   * `expected`, and the very next action over it would be refused by the count
+   * guard — a correct refusal that reads as a bug. Ticked ids that no longer
+   * exist have the same problem one row at a time.
+   */
+  const finished = (
+    action: AssetBulkAction,
+    outcome: { done: number; failed: BulkFailure[] } | { refused: BulkRefusal },
+  ) => {
+    setJob(null)
+    if ('refused' in outcome) {
+      // A door, not a wall: the refusal carries the *new* count, so the
+      // selection is re-captured at it and pressing the same button again is
+      // the whole recovery.
+      setTicked((prev) => (prev.all ? { ...prev, expected: outcome.refused.actual } : prev))
+      onNotice?.(
+        `The library changed while you were choosing: ${outcome.refused.actual} files match now, not ${outcome.refused.expected}. Check the number and try again.`,
+      )
+      return
+    }
+    setTicked(NOTHING)
+    data.reload()
+    // The vocabulary's counts moved, and a tag can have been left carrying
+    // nothing at all.
+    if (action === 'tag' || action === 'untag') tags.reload()
+    onNotice?.(runSummary(action, outcome.done, outcome.failed))
+  }
+
+  const run = async (action: AssetBulkAction, extra: Record<string, unknown> = {}) => {
+    setRunning(true)
+    try {
+      finished(action, await runAssetJob(apiBase, action, { selection: bodyOf(ticked), ...extra }))
+    } catch (e) {
+      setJob(null)
+      onNotice?.((e as Error).message)
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  /** Opens the delete confirmation and asks, in that order: the dialog paints
+   * immediately and fills its warning in, rather than the button hanging for a
+   * round trip with nothing on screen. */
+  const askDelete = async () => {
+    setProbe({ used: null, error: null })
+    setJob('delete')
+    try {
+      const outcome = await runAssetJob(apiBase, 'delete', {
+        selection: bodyOf(ticked),
+        dryRun: true,
+      })
+      if ('refused' in outcome) {
+        setProbe({
+          used: null,
+          error: `${outcome.refused.actual} files match now, not ${outcome.refused.expected}. Close this and choose again.`,
+        })
+      } else setProbe({ used: outcome.usedOnPublished ?? 0, error: null })
+    } catch (e) {
+      setProbe({ used: null, error: (e as Error).message })
+    }
+  }
+
+  const count = tickCount(ticked)
+  const allShown = rows.length > 0 && rows.every((row) => isTicked(ticked, row.id))
+  const tick = (id: string) => setTicked((prev) => toggleTick(prev, id))
 
   const report = uploadSummary(upload.entries)
 
@@ -207,7 +345,14 @@ export function AssetBrowser(props: AssetBrowserProps) {
           everything else `AssetBrowser` holds: the screen and the picker each get
           their own sidebar over the same routes.
         */}
-        <Sidebar apiBase={apiBase} url={url} onUrl={onUrl} compact={compact} />
+        <Sidebar
+          folders={folders}
+          tags={tags}
+          url={url}
+          onUrl={onUrl}
+          compact={compact}
+          {...(onNotice ? { onNotice } : {})}
+        />
 
         <div className={css.main}>
           <div className={css.controls}>
@@ -302,6 +447,97 @@ export function AssetBrowser(props: AssetBrowserProps) {
           </div>
 
           {/*
+            The selection bar. Above the grid rather than below it, unlike
+            Content's: this list has a second column beside it and a footer that
+            already carries the pager, and a bar that appears under a
+            twelve-tile grid is a control that moves every time a filter changes.
+          */}
+          {bulk ? (
+            <div className={css.bulkBar}>
+              <button
+                type="button"
+                className={css.selectAll}
+                disabled={rows.length === 0}
+                onClick={() => setTicked((prev) => tickAllShown(prev, rows))}
+              >
+                {allShown ? 'Deselect all shown' : 'Select all shown'}
+              </button>
+              {/*
+                Select-all-matching, offered only when the list has been asked
+                for a count. `expected` has to be the number the person read, or
+                the guard is comparing against something nobody agreed to —
+                which is why this reads `data.page.total` rather than counting
+                the rows on screen.
+              */}
+              {data.page.total !== undefined && !ticked.all ? (
+                <button
+                  type="button"
+                  className={css.selectAll}
+                  onClick={() =>
+                    setTicked({
+                      all: true,
+                      filter: capturedFilter(url),
+                      expected: data.page.total ?? 0,
+                      exclude: new Set(),
+                    })
+                  }
+                >
+                  {`Select all ${data.page.total.toLocaleString('en-US')} matching`}
+                </button>
+              ) : null}
+              {/* Announced: the count changes without the focus moving, so a
+                  screen reader user is otherwise never told what they have. */}
+              <span className={css.bulkText} role="status">
+                {summarise(ticked, rows)}
+              </span>
+              <span className={css.bulkActions}>
+                <Button
+                  size="sm"
+                  disabled={count === 0 || running}
+                  reason={running ? 'Working…' : 'Select some files first'}
+                  onClick={() => setJob('tag')}
+                >
+                  Tag
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={count === 0 || running}
+                  reason={running ? 'Working…' : 'Select some files first'}
+                  onClick={() => setJob('untag')}
+                >
+                  Untag
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={count === 0 || running}
+                  reason={running ? 'Working…' : 'Select some files first'}
+                  onClick={() => setJob('move')}
+                >
+                  Move
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={count === 0 || running}
+                  reason={running ? 'Working…' : 'Select some files first'}
+                  onClick={() => void askDelete()}
+                >
+                  Delete
+                </Button>
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  disabled={count === 0 || running}
+                  reason="Nothing is selected"
+                  onClick={() => setTicked(NOTHING)}
+                >
+                  Clear
+                </Button>
+              </span>
+            </div>
+          ) : null}
+
+          {/*
         The per-file upload report. `role="status"` so the outcome is announced: a
         batch can partly succeed, and a sighted user reads the failed rows while a
         screen reader user would otherwise never be told.
@@ -381,6 +617,9 @@ export function AssetBrowser(props: AssetBrowserProps) {
                   selected={row.id === selected}
                   focusable={row.id === focusable}
                   onSelect={() => props.onSelect(row.id)}
+                  {...(bulk
+                    ? { ticked: isTicked(ticked, row.id), onTick: () => tick(row.id) }
+                    : {})}
                 />
               ))}
             </div>
@@ -390,6 +629,31 @@ export function AssetBrowser(props: AssetBrowserProps) {
               columns={columns.map((column) => tableColumn(column, mount))}
               rows={rows}
               rowKey={(row) => row.id}
+              {...(bulk
+                ? {
+                    select: {
+                      head: (
+                        <input
+                          type="checkbox"
+                          className={css.tick}
+                          checked={allShown}
+                          disabled={rows.length === 0}
+                          aria-label="Select every file shown"
+                          onChange={() => setTicked((prev) => tickAllShown(prev, rows))}
+                        />
+                      ),
+                      cell: (row: AssetRow) => (
+                        <input
+                          type="checkbox"
+                          className={css.tick}
+                          checked={isTicked(ticked, row.id)}
+                          aria-label={`Select ${row.filename}`}
+                          onChange={() => tick(row.id)}
+                        />
+                      ),
+                    },
+                  }
+                : {})}
               currentKey={selected ?? null}
               sort={{ key: sortColumnKey(url), dir: dirOf(url) }}
               onSort={(key) => {
@@ -432,8 +696,222 @@ export function AssetBrowser(props: AssetBrowserProps) {
           </div>
         </div>
       </div>
+
+      {/*
+        The bulk dialogs. **Screen-only by construction**, because they are
+        rendered under `bulk`, which the picker does not pass: a `Dialog` opened
+        from inside `AssetPicker.tsx`'s own would mount a second `useFocusTrap`
+        and take every Tab press away from itself.
+      */}
+      {job === 'tag' || job === 'untag' ? (
+        <BulkTagDialog
+          action={job}
+          count={count}
+          tags={tags.tags}
+          busy={running}
+          onClose={() => setJob(null)}
+          onRun={(tagIds) => void run(job, { tagIds })}
+        />
+      ) : job === 'move' ? (
+        <BulkMoveDialog
+          count={count}
+          folders={folders.folders}
+          busy={running}
+          onClose={() => setJob(null)}
+          onRun={(folderId) => void run('move', { folderId })}
+        />
+      ) : job === 'delete' ? (
+        <BulkDeleteDialog
+          count={count}
+          used={probe.used}
+          error={probe.error}
+          busy={running}
+          onClose={() => setJob(null)}
+          onRun={() => void run('delete')}
+        />
+      ) : null}
     </div>
   )
+}
+
+/* --------------------------------------------------------------- selection --- */
+
+/**
+ * What the bulk layer holds, in the two shapes a selection comes in
+ * (`core/bulk.ts`'s `BulkSelection<AssetFilter>`, as component state).
+ *
+ * `Set`s rather than arrays because every read here is a membership test — one
+ * per tile, per render — and the wire shape is built once, at post time, by
+ * `bodyOf`. The captured half stores the *filter*, not the URL: a select-all
+ * captures conditions at the moment it is clicked and must survive the person
+ * changing a chip afterwards, which is the property the server's `expected`
+ * guard is checking against.
+ */
+type Ticked =
+  | { all: false; ids: ReadonlySet<string> }
+  | { all: true; filter: AssetFilter; expected: number; exclude: ReadonlySet<string> }
+
+const NOTHING: Ticked = { all: false, ids: new Set() }
+
+function isTicked(ticked: Ticked, id: string): boolean {
+  return ticked.all ? !ticked.exclude.has(id) : ticked.ids.has(id)
+}
+
+/** How many files the selection means. Never below zero: `exclude` can outgrow
+ * `expected` if the set shrank under a person who kept ticking. */
+function tickCount(ticked: Ticked): number {
+  return ticked.all ? Math.max(ticked.expected - ticked.exclude.size, 0) : ticked.ids.size
+}
+
+/** Ticking a row off a select-all **adds to `exclude`** rather than collapsing
+ * the selection into ids — which is what keeps "all 4,812 except these two" four
+ * small JSON fields instead of 4,810 of them. */
+function toggleTick(ticked: Ticked, id: string): Ticked {
+  if (ticked.all) {
+    const exclude = new Set(ticked.exclude)
+    if (!exclude.delete(id)) exclude.add(id)
+    return { ...ticked, exclude }
+  }
+  const ids = new Set(ticked.ids)
+  if (!ids.delete(id)) ids.add(id)
+  return { all: false, ids }
+}
+
+function tickAllShown(ticked: Ticked, rows: readonly AssetRow[]): Ticked {
+  const on = rows.length > 0 && rows.every((row) => isTicked(ticked, row.id))
+  if (ticked.all) {
+    const exclude = new Set(ticked.exclude)
+    for (const row of rows) {
+      if (on) exclude.add(row.id)
+      else exclude.delete(row.id)
+    }
+    return { ...ticked, exclude }
+  }
+  const ids = new Set(ticked.ids)
+  for (const row of rows) {
+    if (on) ids.delete(row.id)
+    else ids.add(row.id)
+  }
+  return { all: false, ids }
+}
+
+/**
+ * The screen's filter as a captured `AssetFilter` — the same conditions
+ * `assetsParams` puts on the list request, so the count the person read and the
+ * count the guard re-runs are over one set of clauses.
+ *
+ * `kind: 'all'` and an empty `q` are omitted rather than sent, because
+ * `assetFilterSql` reads both for truthiness and a captured `q: ''` would be a
+ * filter key that means nothing and looks like it means something.
+ */
+function capturedFilter(url: AssetsUrl): AssetFilter {
+  const q = url.q.trim()
+  return {
+    ...(q ? { q } : {}),
+    ...(url.kind === 'all' ? {} : { kind: url.kind }),
+    ...(url.folder === undefined ? {} : { folder: url.folder }),
+    ...(url.unfiled ? { unfiled: true } : {}),
+    ...(url.tags.length === 0 ? {} : { tags: [...url.tags] }),
+    ...(url.untagged ? { untagged: true } : {}),
+  }
+}
+
+/** The `selection` field of a bulk body. `exclude` is omitted when empty rather
+ * than sent as `[]`: the route's two options are `v.strictObject`, so every key
+ * in the body is one it reads. */
+function bodyOf(ticked: Ticked): Record<string, unknown> {
+  if (!ticked.all) return { ids: [...ticked.ids] }
+  return {
+    all: true,
+    filter: ticked.filter,
+    expected: ticked.expected,
+    ...(ticked.exclude.size === 0 ? {} : { exclude: [...ticked.exclude] }),
+  }
+}
+
+/**
+ * What the bar says.
+ *
+ * **The invisible part of a selection is named rather than implied**, because
+ * acting on more than you can see is the hazard: a bar reading "12 selected"
+ * over a grid with nothing ticked reads as broken software.
+ */
+function summarise(ticked: Ticked, rows: readonly AssetRow[]): string {
+  const count = tickCount(ticked)
+  if (count === 0) return 'Nothing selected'
+  const shown = rows.filter((row) => isTicked(ticked, row.id)).length
+  const hidden = Math.max(count - shown, 0)
+  const split = hidden === 0 ? '' : shown === 0 ? ', none shown here' : ` · ${shown} shown here`
+  const files = `${count.toLocaleString('en-US')} ${count === 1 ? 'file' : 'files'}`
+  if (!ticked.all) return `${files} selected${split}`
+  const off = ticked.exclude.size === 0 ? '' : `, except the ${ticked.exclude.size} you ticked off`
+  return `All ${ticked.expected.toLocaleString('en-US')} matching${off}${split}`
+}
+
+/** What a bulk answer looks like on the wire: the report, plus the delete's one
+ * extra field (decision 15). */
+type AssetBulkAnswer = BulkReport<AssetBulkAction> & { usedOnPublished?: number }
+
+/**
+ * A whole bulk job: post, read the report, post again with its cursor.
+ *
+ * **Loop on `continueFrom`, never on `seen < total`** — a batch whose files were
+ * all refused still advances the cursor, and a comparison of counts would spin.
+ * A cursor that has not *moved* ends the loop too, which is the case
+ * `content-model.ts`'s own runner had to name: decision 11 is right about the
+ * condition and silent about a server that answers the same cursor forever.
+ */
+async function runAssetJob(
+  apiBase: string,
+  action: AssetBulkAction,
+  body: Record<string, unknown>,
+): Promise<
+  { done: number; failed: BulkFailure[]; usedOnPublished?: number } | { refused: BulkRefusal }
+> {
+  let continueFrom: string | null = null
+  let done = 0
+  let usedOnPublished: number | undefined
+  const failed: BulkFailure[] = []
+  for (;;) {
+    const res = await fetch(`${apiBase}/assets/bulk/${action}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, ...(continueFrom === null ? {} : { continueFrom }) }),
+    })
+    // The guard runs once, at the start of a job, so a refusal can only arrive
+    // on the first call — and it arrives before anything is written.
+    if (res.status === 409) return { refused: (await res.json()) as BulkRefusal }
+    if (!res.ok) throw new Error(await messageOf(res))
+    const report = (await res.json()) as AssetBulkAnswer
+    done += report.done
+    failed.push(...report.failed)
+    if (usedOnPublished === undefined) usedOnPublished = report.usedOnPublished
+    if (report.continueFrom === null || report.continueFrom === continueFrom) {
+      return { done, failed, ...(usedOnPublished === undefined ? {} : { usedOnPublished }) }
+    }
+    continueFrom = report.continueFrom
+  }
+}
+
+const PAST_TENSE: Record<AssetBulkAction, string> = {
+  tag: 'Tagged',
+  untag: 'Untagged',
+  move: 'Filed',
+  delete: 'Deleted',
+}
+
+/** One sentence for a finished run. **Never atomic and never implied to be**:
+ * each file is its own write, so the successes are counted and the failures are
+ * named. */
+function runSummary(action: AssetBulkAction, done: number, failed: readonly BulkFailure[]): string {
+  const files = `${done.toLocaleString('en-US')} ${done === 1 ? 'file' : 'files'}`
+  if (failed.length === 0) return `${PAST_TENSE[action]} ${files}`
+  const named = failed
+    .slice(0, 2)
+    .map((one) => one.title || one.id)
+    .join(', ')
+  const rest = failed.length > 2 ? ` and ${failed.length - 2} more` : ''
+  return `${PAST_TENSE[action]} ${files}. Could not: ${named}${rest}`
 }
 
 /* ----------------------------------------------------------------- sidebar --- */
@@ -456,22 +934,31 @@ export function AssetBrowser(props: AssetBrowserProps) {
  * without either `Assets.tsx` or `AssetPicker.tsx` having to wire it up.
  */
 function Sidebar({
-  apiBase,
+  folders,
+  tags,
   url,
   onUrl,
   compact,
+  onNotice,
 }: {
-  apiBase: string
+  /** Held by `AssetBrowser` and passed down, so the sidebar, the bulk *Tag*
+   * dialog and the bulk *Move* dialog read one fetch rather than three. */
+  folders: FoldersData
+  tags: TagsData
   url: AssetsUrl
   onUrl: (next: AssetsUrl) => void
   /** Whether this mount is already inside a `Dialog` — the picker's, at `wide`.
-   * Suppresses the *New folder* affordance: see `NewFolderDialog`'s own header
-   * for why a second `Dialog` cannot be opened from on top of one. */
+   * Suppresses every affordance that opens a second one: creating a folder,
+   * editing a folder, and managing the tag vocabulary. See `NewFolderDialog`'s
+   * own header for why a `Dialog` cannot be opened from on top of one. */
   compact: boolean | undefined
+  onNotice?: (message: string) => void
 }) {
-  const folders = useFolders(apiBase)
-  const tags = useTags(apiBase)
   const [creating, setCreating] = useState(false)
+  /** The folder being edited, or null. One at a time, and the same single-value
+   * rule the bulk dialogs follow rather than a boolean per dialog. */
+  const [editing, setEditing] = useState<AssetFolder | null>(null)
+  const [managingTags, setManagingTags] = useState(false)
 
   const atRoot = url.folder === undefined && !url.unfiled
 
@@ -490,16 +977,38 @@ function Sidebar({
             All files
           </button>
           {folders.folders.map((folder) => (
-            <button
-              key={folder.id}
-              type="button"
-              className={`${css.folderRow} ${url.folder === folder.path ? css.folderRowOn : ''}`}
-              style={{ paddingLeft: `calc(var(--space-2) + ${folderDepth(folder) * 14}px)` }}
-              aria-pressed={url.folder === folder.path}
-              onClick={() => onUrl(withFilter(url, { folder: folder.path }))}
-            >
-              {folder.name}
-            </button>
+            /*
+             * A row is now **two** controls, so the filter button can no longer
+             * be the row: a button inside a button is not markup any browser
+             * accepts. The wrapper carries the hover state and positions the
+             * edit affordance over the row's right edge — `position: absolute`
+             * rather than a flex sibling, because a hover-revealed control that
+             * holds layout makes every folder name reflow as the pointer
+             * crosses the tree.
+             */
+            <div key={folder.id} className={css.folderRowWrap}>
+              <button
+                type="button"
+                className={`${css.folderRow} ${url.folder === folder.path ? css.folderRowOn : ''}`}
+                style={{ paddingLeft: `calc(var(--space-2) + ${folderDepth(folder) * 14}px)` }}
+                aria-pressed={url.folder === folder.path}
+                onClick={() => onUrl(withFilter(url, { folder: folder.path }))}
+              >
+                {folder.name}
+              </button>
+              {compact ? null : (
+                <button
+                  type="button"
+                  className={css.rowEdit}
+                  // Named per row rather than "Edit": a tree of twenty folders
+                  // otherwise announces twenty identical buttons.
+                  aria-label={`Edit folder ${folder.name}`}
+                  onClick={() => setEditing(folder)}
+                >
+                  <span aria-hidden="true">⋯</span>
+                </button>
+              )}
+            </div>
           ))}
           <button
             type="button"
@@ -547,6 +1056,20 @@ function Sidebar({
             ))}
           </fieldset>
         )}
+        {/*
+          Renaming and deleting a tag live behind **one** control rather than an
+          affordance per chip, and that is the one place this differs from the
+          folder tree above. A chip list wraps: a hover-revealed edit button
+          inside each chip would be four pixels wide at the end of a two-word
+          label, and a vocabulary is hundreds of chips by design (decision 4).
+          A folder row is a full-width line in a spine you point at, so it can
+          carry its own.
+        */}
+        {compact || tags.tags.length === 0 ? null : (
+          <Button size="sm" variant="subtle" onClick={() => setManagingTags(true)}>
+            Manage tags
+          </Button>
+        )}
       </section>
 
       {creating ? (
@@ -559,9 +1082,72 @@ function Sidebar({
             onUrl(withFilter(url, { folder: folder.path }))
           }}
         />
+      ) : editing ? (
+        <FolderEditDialog
+          folder={editing}
+          folders={folders.folders}
+          onClose={() => setEditing(null)}
+          onSave={async (patch) => {
+            const folder = await folders.update(editing.id, patch)
+            setEditing(null)
+            // The path moved, so a filter pointing at the old one now matches
+            // nothing. Following it is what makes a rename feel like a rename
+            // rather than like the folder disappearing.
+            if (url.folder !== undefined) onUrl(withFilter(url, { folder: folder.path }))
+            onNotice?.(`Renamed to ${folder.name}`)
+          }}
+          onDelete={async () => {
+            const report = await folders.remove(editing.id)
+            setEditing(null)
+            if (url.folder !== undefined) onUrl(withFilter(url, { folder: undefined }))
+            onNotice?.(deletedFolderSummary(editing.name, report))
+          }}
+        />
+      ) : managingTags ? (
+        <TagManagerDialog
+          tags={tags.tags}
+          onClose={() => setManagingTags(false)}
+          onRename={async (id, name) => {
+            const tag = await tags.rename(id, name)
+            onNotice?.(`Renamed to ${tag.name}`)
+          }}
+          onDelete={async (tag) => {
+            const report = await tags.remove(tag.id)
+            // The chip may be in the filter, and a filter naming a slug nothing
+            // has is a grid that renders nothing for no visible reason.
+            if (url.tags.includes(tag.slug)) {
+              onUrl(withFilter(url, { tags: url.tags.filter((slug) => slug !== tag.slug) }))
+            }
+            onNotice?.(
+              `Deleted the tag ${tag.name}. ${report.removedFrom === 1 ? '1 file' : `${report.removedFrom.toLocaleString('en-US')} files`} no longer carry it. No file was deleted.`,
+            )
+          }}
+        />
       ) : null}
     </div>
   )
+}
+
+/** What a folder delete actually did, in one sentence — the counts come back
+ * from the route because nothing before the delete can know them: the folder
+ * filter includes descendants, and only the folder's *own* files are unfiled. */
+function deletedFolderSummary(
+  name: string,
+  report: { unfiled: number; reparented: number },
+): string {
+  const files =
+    report.unfiled === 0
+      ? 'No files were in it'
+      : report.unfiled === 1
+        ? '1 file is now unfiled'
+        : `${report.unfiled.toLocaleString('en-US')} files are now unfiled`
+  const kids =
+    report.reparented === 0
+      ? ''
+      : report.reparented === 1
+        ? ', and 1 subfolder moved up a level'
+        : `, and ${report.reparented} subfolders moved up a level`
+  return `Deleted ${name}. ${files}${kids}. No file was deleted.`
 }
 
 /**
@@ -678,6 +1264,502 @@ function NewFolderDialog({
   )
 }
 
+/**
+ * Renaming, moving and deleting one folder — the surface phase 4 named as
+ * missing, since `updateFolder` and `deleteFolder` were reachable only through
+ * the raw API.
+ *
+ * **One dialog for all three**, because on a materialised path a rename and a
+ * move are the same operation (`server/asset-folders.ts`'s `updateFolder`), and
+ * splitting them here would be two dialogs over one `PATCH`. Delete sits in the
+ * same panel behind its own confirmation step rather than a second dialog: two
+ * mounted `Dialog`s fight over the focus trap, which is the bug phase 4 found.
+ *
+ * **The delete copy is the load-bearing part** (decision 14). Filing is meant to
+ * be cheap to undo, and an editor who miscategorised forty photographs must not
+ * be able to delete them by tidying up — so the confirmation says, in the panel
+ * rather than in a tooltip, that no file is deleted and where the files and the
+ * subfolders go. An editor who believes otherwise will not press the button.
+ */
+function FolderEditDialog({
+  folder,
+  folders,
+  onClose,
+  onSave,
+  onDelete,
+}: {
+  folder: AssetFolder
+  folders: readonly AssetFolder[]
+  onClose: () => void
+  onSave: (patch: { name?: string; parentId?: string | null }) => Promise<void>
+  onDelete: () => Promise<void>
+}) {
+  const [name, setName] = useState(folder.name)
+  const [parentId, setParentId] = useState(folder.parentId ?? '')
+  const [confirming, setConfirming] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const attempt = async (what: () => Promise<void>) => {
+    setPending(true)
+    setError(null)
+    try {
+      await what()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  const changed = name.trim() !== folder.name || (parentId || null) !== folder.parentId
+
+  return (
+    <Dialog
+      danger={confirming}
+      title={confirming ? `Delete ${folder.name}?` : `Edit ${folder.name}`}
+      description={
+        confirming
+          ? 'No file is deleted. This only removes the folder.'
+          : 'Renaming or moving a folder rewrites the paths beneath it.'
+      }
+      onClose={onClose}
+      actions={
+        confirming ? (
+          <>
+            <Button onClick={() => setConfirming(false)}>Cancel</Button>
+            <Button
+              variant="danger"
+              disabled={pending}
+              reason="Deleting…"
+              onClick={() => void attempt(onDelete)}
+            >
+              Delete folder
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button onClick={onClose}>Cancel</Button>
+            <Button
+              variant="primary"
+              disabled={pending || !changed || name.trim() === ''}
+              reason={pending ? 'Saving…' : 'Change something first'}
+              onClick={() =>
+                void attempt(() =>
+                  onSave({
+                    ...(name.trim() === folder.name ? {} : { name: name.trim() }),
+                    ...((parentId || null) === folder.parentId
+                      ? {}
+                      : { parentId: parentId || null }),
+                  }),
+                )
+              }
+            >
+              Save
+            </Button>
+          </>
+        )
+      }
+    >
+      {confirming ? (
+        <div className={css.folderForm}>
+          <p className={css.note}>
+            Files in this folder go back to <strong>Unfiled</strong>, where you can find them again.
+            Any subfolders move up one level, keeping their own files.
+          </p>
+          {error ? <p className={css.warn}>{error}</p> : null}
+        </div>
+      ) : (
+        <form
+          className={css.folderForm}
+          onSubmit={(e) => {
+            e.preventDefault()
+          }}
+        >
+          <Field label="Name" required error={error}>
+            {(id) => (
+              <Input
+                id={id}
+                value={name}
+                disabled={pending}
+                onChange={(e) => setName(e.target.value)}
+              />
+            )}
+          </Field>
+          <Field label="Parent folder" help="Top level if none is chosen.">
+            {(id) => (
+              <Select
+                id={id}
+                value={parentId}
+                disabled={pending}
+                onChange={(e) => setParentId(e.target.value)}
+              >
+                <option value="">Top level</option>
+                {folders
+                  // A folder cannot be moved into itself or into its own
+                  // subtree. The route refuses both with a 409; offering them
+                  // and then reporting a cycle is a control that exists to fail.
+                  .filter(
+                    (one) => one.path !== folder.path && !one.path.startsWith(`${folder.path}/`),
+                  )
+                  .map((one) => (
+                    <option key={one.id} value={one.id}>
+                      {indentedFolderName(one)}
+                    </option>
+                  ))}
+              </Select>
+            )}
+          </Field>
+          <div>
+            <Button variant="danger" size="sm" onClick={() => setConfirming(true)}>
+              Delete folder
+            </Button>
+          </div>
+        </form>
+      )}
+    </Dialog>
+  )
+}
+
+/**
+ * The tag vocabulary, editable — rename and delete, one row each.
+ *
+ * A list in **one** dialog rather than an edit affordance per chip, for the
+ * reason `Sidebar` states where the button is: chips wrap, and a hover control
+ * inside one is unhittable. It also makes the vocabulary legible as a
+ * vocabulary, which is what somebody who came here to tidy up is looking at.
+ *
+ * Delete confirms **inline, in the row**, not in a second dialog — same rule as
+ * `FolderEditDialog`'s, and it keeps the sentence that matters (decision 14: no
+ * file is deleted) attached to the row it is about, with the count of files that
+ * lose the tag right there in the label.
+ */
+function TagManagerDialog({
+  tags,
+  onClose,
+  onRename,
+  onDelete,
+}: {
+  tags: readonly AssetTag[]
+  onClose: () => void
+  onRename: (id: string, name: string) => Promise<void>
+  onDelete: (tag: AssetTag) => Promise<void>
+}) {
+  const [renaming, setRenaming] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const [draft, setDraft] = useState('')
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const attempt = async (what: () => Promise<void>) => {
+    setPending(true)
+    setError(null)
+    try {
+      await what()
+      setRenaming(null)
+      setConfirming(null)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Dialog
+      title="Manage tags"
+      description="Deleting a tag never deletes a file."
+      onClose={onClose}
+      actions={<Button onClick={onClose}>Done</Button>}
+    >
+      {error ? <p className={css.warn}>{error}</p> : null}
+      <ul className={css.manageList}>
+        {tags.map((tag) => (
+          <li key={tag.id} className={css.manageRow}>
+            {renaming === tag.id ? (
+              <>
+                <Input
+                  value={draft}
+                  aria-label={`New name for ${tag.name}`}
+                  disabled={pending}
+                  onChange={(e) => setDraft(e.target.value)}
+                />
+                <Button size="sm" onClick={() => setRenaming(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabled={pending || draft.trim() === ''}
+                  reason={pending ? 'Saving…' : 'Name it first'}
+                  onClick={() => void attempt(() => onRename(tag.id, draft.trim()))}
+                >
+                  Save
+                </Button>
+              </>
+            ) : confirming === tag.id ? (
+              <>
+                <span className={css.manageName}>
+                  {tag.count === undefined
+                    ? `Delete ${tag.name}? No file is deleted.`
+                    : `Delete ${tag.name}? It comes off ${tag.count === 1 ? '1 file' : `${tag.count.toLocaleString('en-US')} files`}. No file is deleted.`}
+                </span>
+                <Button size="sm" onClick={() => setConfirming(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  variant="danger"
+                  disabled={pending}
+                  reason="Deleting…"
+                  onClick={() => void attempt(() => onDelete(tag))}
+                >
+                  Delete
+                </Button>
+              </>
+            ) : (
+              <>
+                <span className={css.manageName}>{tagChipLabel(tag)}</span>
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  onClick={() => {
+                    setDraft(tag.name)
+                    setRenaming(tag.id)
+                  }}
+                >
+                  Rename
+                </Button>
+                <Button size="sm" variant="danger" onClick={() => setConfirming(tag.id)}>
+                  Delete
+                </Button>
+              </>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Dialog>
+  )
+}
+
+/* --------------------------------------------------------- bulk dialogs --- */
+
+/**
+ * Which tags to add to, or remove from, a selection.
+ *
+ * **Add and remove, never replace** — the difference between this and the detail
+ * panel's chip editor, and the reason there are two routes rather than a bulk
+ * `PATCH`. A bulk replace would wipe every per-file tag somebody had applied by
+ * hand, which is not what "add `2024` to these forty" means.
+ *
+ * A checkbox list rather than the detail panel's type-to-create input: this
+ * dialog may only *choose* from the vocabulary, because minting a tag while
+ * applying it to four hundred files is two decisions wearing one button.
+ */
+function BulkTagDialog({
+  action,
+  count,
+  tags,
+  busy,
+  onClose,
+  onRun,
+}: {
+  action: 'tag' | 'untag'
+  count: number
+  tags: readonly AssetTag[]
+  busy: boolean
+  onClose: () => void
+  onRun: (tagIds: string[]) => void
+}) {
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set())
+  const files = `${count.toLocaleString('en-US')} ${count === 1 ? 'file' : 'files'}`
+
+  return (
+    <Dialog
+      title={action === 'tag' ? `Tag ${files}` : `Untag ${files}`}
+      description={
+        action === 'tag'
+          ? 'Adds these tags. Tags already on a file stay.'
+          : 'Removes these tags. Other tags on a file stay.'
+      }
+      onClose={onClose}
+      actions={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            disabled={busy || chosen.size === 0}
+            reason={busy ? 'Working…' : 'Choose a tag first'}
+            onClick={() => onRun([...chosen])}
+          >
+            {action === 'tag' ? 'Add tags' : 'Remove tags'}
+          </Button>
+        </>
+      }
+    >
+      {tags.length === 0 ? (
+        <p className={css.note}>
+          There are no tags yet. Tag a single file from its detail panel to make one.
+        </p>
+      ) : (
+        <fieldset className={css.pickList}>
+          <legend className={css.srOnly}>Tags</legend>
+          {tags.map((tag) => (
+            <label key={tag.id} className={css.pickRow}>
+              <input
+                type="checkbox"
+                checked={chosen.has(tag.id)}
+                onChange={() =>
+                  setChosen((prev) => {
+                    const next = new Set(prev)
+                    if (!next.delete(tag.id)) next.add(tag.id)
+                    return next
+                  })
+                }
+              />
+              {tagChipLabel(tag)}
+            </label>
+          ))}
+        </fieldset>
+      )}
+    </Dialog>
+  )
+}
+
+/** Where a selection is filed. *Unfiled* is a real destination rather than a
+ * cancel, which is why it is an option in the list and not an absence. */
+function BulkMoveDialog({
+  count,
+  folders,
+  busy,
+  onClose,
+  onRun,
+}: {
+  count: number
+  folders: readonly AssetFolder[]
+  busy: boolean
+  onClose: () => void
+  onRun: (folderId: string | null) => void
+}) {
+  const [folderId, setFolderId] = useState('')
+  const files = `${count.toLocaleString('en-US')} ${count === 1 ? 'file' : 'files'}`
+
+  return (
+    <Dialog
+      title={`Move ${files}`}
+      description="Filing changes nothing about the file itself: its link keeps working and published pages are untouched."
+      onClose={onClose}
+      actions={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            disabled={busy}
+            reason="Working…"
+            onClick={() => onRun(folderId || null)}
+          >
+            Move
+          </Button>
+        </>
+      }
+    >
+      <Field label="Folder" help="Unfiled if none is chosen.">
+        {(id) => (
+          <Select
+            id={id}
+            value={folderId}
+            disabled={busy}
+            onChange={(e) => setFolderId(e.target.value)}
+          >
+            <option value="">Unfiled</option>
+            {folders.map((folder) => (
+              <option key={folder.id} value={folder.id}>
+                {indentedFolderName(folder)}
+              </option>
+            ))}
+          </Select>
+        )}
+      </Field>
+    </Dialog>
+  )
+}
+
+/**
+ * The one irreversible action in this screen, and the one dialog that has to say
+ * what it is about to break.
+ *
+ * It opens by posting the delete with **`dryRun: true`** and reading
+ * `usedOnPublished` (decision 15) — one aggregate for the whole selection, not
+ * `assetUsage` per file, which for four hundred files would be four hundred
+ * round trips and a list nobody can read. The number **warns and proceeds**: it
+ * does not disable the button, for the reason `assetUsage`'s own header gives —
+ * a broken image reference degrades visibly and fixably, while a delete that
+ * refuses leaves an editor unable to remove a file at all.
+ *
+ * The button stays disabled until the probe answers, which is not a spinner for
+ * politeness: pressing *Delete* before the warning has arrived is exactly the
+ * click this dialog exists to prevent.
+ */
+function BulkDeleteDialog({
+  count,
+  used,
+  error,
+  busy,
+  onClose,
+  onRun,
+}: {
+  count: number
+  /** How many of the selected files a published page points at, or null while
+   * the dry run is still in flight. */
+  used: number | null
+  error: string | null
+  busy: boolean
+  onClose: () => void
+  onRun: () => void
+}) {
+  const files = `${count.toLocaleString('en-US')} ${count === 1 ? 'file' : 'files'}`
+
+  return (
+    <Dialog
+      danger
+      title={`Delete ${files}?`}
+      description="This cannot be undone."
+      onClose={onClose}
+      actions={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant="danger"
+            disabled={busy || used === null}
+            reason={busy ? 'Deleting…' : (error ?? 'Checking what uses these files…')}
+            onClick={onRun}
+          >
+            Delete
+          </Button>
+        </>
+      }
+    >
+      {error ? (
+        <p className={css.warn}>{error}</p>
+      ) : used === null ? (
+        <p className={css.note}>Checking what uses these files…</p>
+      ) : used === 0 ? (
+        <p className={css.note}>
+          None of these files is used on a published page. The files themselves are removed; nothing
+          else is.
+        </p>
+      ) : (
+        <p className={css.warn}>
+          {used === 1
+            ? '1 of these files is used on a published page and will stop loading there.'
+            : `${used.toLocaleString('en-US')} of these files are used on published pages and will stop loading there.`}{' '}
+          Deleting does not edit those pages.
+        </p>
+      )}
+    </Dialog>
+  )
+}
+
 /* -------------------------------------------------------------------- tile --- */
 
 function Tile({
@@ -686,12 +1768,17 @@ function Tile({
   selected,
   focusable,
   onSelect,
+  ticked,
+  onTick,
 }: {
   row: AssetRow
   mount: string
   selected: boolean
   focusable: boolean
   onSelect: () => void
+  /** Absent on a mount with no selection layer — the picker's. */
+  ticked?: boolean
+  onTick?: () => void
 }) {
   return (
     // A real `option` inside the grid's `listbox`, focusable and named by its own
@@ -704,13 +1791,33 @@ function Tile({
       aria-selected={selected}
       tabIndex={focusable ? 0 : -1}
       className={`${css.tile} ${selected ? css.tileOn : ''}`}
+      data-ticked={ticked ? '' : undefined}
       onClick={onSelect}
       onKeyDown={(e) => {
         if (e.key !== 'Enter' && e.key !== ' ') return
         e.preventDefault()
-        onSelect()
+        // **Space ticks and Enter opens**, the Finder and Gmail convention, and
+        // the same split `List.tsx`'s `Row` makes — it is the only way a keyboard
+        // reaches a checkbox inside a roving-tabindex grid without the checkbox
+        // becoming its own tab stop and costing the grid its "one stop in the tab
+        // order" property. With no selection layer, both keys select.
+        if (e.key === ' ' && onTick) onTick()
+        else onSelect()
       }}
     >
+      {onTick ? (
+        <input
+          type="checkbox"
+          className={css.tileTick}
+          checked={ticked === true}
+          // Held out of the tab order for the reason above. `stopPropagation` so
+          // ticking a tile does not also open it in the detail panel.
+          tabIndex={-1}
+          aria-label={`Select ${row.filename}`}
+          onClick={(e) => e.stopPropagation()}
+          onChange={onTick}
+        />
+      ) : null}
       <span className={css.tileFrame}>
         {isRenderableImage(row) ? (
           <img

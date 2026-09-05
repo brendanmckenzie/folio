@@ -3,13 +3,15 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { blocks, defineBlock, text } from '../../src/core'
 import type { Doc } from '../../src/core/doc'
 import { encodeCursor } from '../../src/core/pagination'
-import type { BulkSelection, StoryMeta } from '../../src/core/story'
+import type { BulkSelection } from '../../src/core/bulk'
+import { wasRefused } from '../../src/core/bulk'
+import type { StoryFilter, StoryMeta } from '../../src/core/story'
 import type { AuthConfig, Role } from '../../src/server'
 import { createFolio, magicLink } from '../../src/server'
 import { SECURE_COOKIE } from '../../src/server/auth/cookie'
 import { createSession } from '../../src/server/auth/session'
 import { createUser } from '../../src/server/auth/users'
-import { type BulkDeps, type BulkReport, runBulk, wasRefused } from '../../src/server/bulk'
+import { type BulkDeps, runBulk, type StoryBulkReport } from '../../src/server/bulk'
 import { countStories, createStory, listStories, storyById } from '../../src/server/stories'
 import { applySeedFixture } from './seed-fixture'
 
@@ -87,12 +89,12 @@ function deps(): BulkDeps & { seeded: string[]; purged: string[] } {
 }
 
 /** A report, refusing to typecheck as one if the run was refused instead. */
-function reported(outcome: Awaited<ReturnType<typeof runBulk>>): BulkReport {
+function reported(outcome: Awaited<ReturnType<typeof runBulk>>): StoryBulkReport {
   if (wasRefused(outcome)) throw new Error(`refused: expected ${outcome.expected}`)
   return outcome
 }
 
-const everyPage: BulkSelection = { all: true, filter: { routed: true }, expected: 3 }
+const everyPage: BulkSelection<StoryFilter> = { all: true, filter: { routed: true }, expected: 3 }
 
 const titles = async (): Promise<string[]> =>
   (await listStories(env.DB)).map((row) => row.title).sort()
@@ -460,7 +462,7 @@ describe('the routes', () => {
     for (const [path, body] of cases) {
       const res = await post(path, body)
       expect([path, res.status]).toEqual([path, 200])
-      const report = await res.json<BulkReport>()
+      const report = await res.json<StoryBulkReport>()
       expect([path, report.done, report.failed]).toEqual([path, 1, []])
     }
   })

@@ -37,8 +37,15 @@
  * Each document is its own write, individually refusable by a tree rule, and the
  * report counts the successes and *names* the failures.
  */
-import { type CursorPart, decodeCursor, encodeCursor } from '../core/pagination'
-import type { BulkAction, BulkSelection, FilterSelection, StoryMeta } from '../core/story'
+import {
+  type BulkOutcome,
+  type BulkReport,
+  type BulkSelection,
+  type FilterSelection,
+  readBulkCursor,
+  writeBulkCursor,
+} from '../core/bulk'
+import type { StoryBulkAction, StoryFilter, StoryMeta } from '../core/story'
 import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from './documents'
 import { FolioError, rethrow } from './errors'
 import { publish, type PublishDeps, unpublish } from './publish'
@@ -61,73 +68,13 @@ export const DEFAULT_BULK_BATCH = 25
 export const MAX_BULK_BATCH = 200
 
 /**
- * A document the job could not act on, and why.
- *
- * `message` rather than the `reason` `MigrateFailure` and `ScheduleFailure` carry,
- * and the difference is the audience: those two are diagnostics for whoever reads a
- * report, and this is prose that goes straight into a toast — the admin's
- * `reportOf(action, done, failures)` takes `{ title, message }[]`, so this shape
- * feeds it with no mapping step in between. `id` rides along for a screen that wants
- * to leave the refused rows selected.
+ * The report, the refusal and the failure shapes live in `core/bulk.ts` — the
+ * value travels in a URL and in a body, so the screen that reads it and the
+ * runner that writes it share one vocabulary. Instantiated here at
+ * `StoryBulkAction`, which is the only thing about them that is story-shaped.
  */
-export interface BulkFailure {
-  id: string
-  title: string
-  message: string
-}
-
-export interface BulkReport {
-  action: BulkAction
-  /**
-   * Documents this **call** acted on successfully. Per call, not cumulative: the
-   * server cannot know what earlier calls did, so a client that batches sums these
-   * itself and calls `reportOf` once at the end.
-   */
-  done: number
-  /** The same, refused — one entry each, named. Per call, like `done`. */
-  failed: BulkFailure[]
-  /**
-   * How many documents this selection agreed to act on: `ids.length`, or
-   * `expected - exclude.length`. About the **job**, not this call, and it is what a
-   * progress display divides by.
-   */
-  total: number
-  /**
-   * How many the job has consumed, this call included — the cursor's own counter,
-   * so it is cumulative even though `done` is not. `seen === total` and
-   * `continueFrom === null` are the same fact from either end.
-   */
-  seen: number
-  /**
-   * Pass back as `continueFrom` to do the next batch. Null when the job is
-   * finished. **Loop on this**, not on `seen < total`: a batch whose documents were
-   * all refused still advances the cursor, and a comparison of counts would spin.
-   */
-  continueFrom: string | null
-  /** Reports what it would do and writes nothing. */
-  dryRun: boolean
-}
-
-/**
- * The set moved between the number a person read and the button they pressed.
- *
- * **A door, not a wall**: it carries the *new* count, so re-confirming is one click
- * rather than a mystery. `refused` is a literal so a client can tell this apart from
- * a report without duck-typing, and there is deliberately only one value for it — the
- * count is the only thing this can refuse over.
- */
-export interface BulkRefusal {
-  refused: 'count'
-  expected: number
-  actual: number
-}
-
-/** A run either happened or was refused before it started. */
-export type BulkOutcome = BulkReport | BulkRefusal
-
-export function wasRefused(outcome: BulkOutcome): outcome is BulkRefusal {
-  return 'refused' in outcome
-}
+export type StoryBulkReport = BulkReport<StoryBulkAction>
+export type StoryBulkOutcome = BulkOutcome<StoryBulkAction>
 
 export interface BulkOptions {
   batch?: number
@@ -181,10 +128,10 @@ export interface BulkDeps<Env = unknown> extends PublishDeps<Env>, DocumentDeps<
  */
 export async function runBulk<Env>(
   deps: BulkDeps<Env>,
-  action: BulkAction,
-  selection: BulkSelection,
+  action: StoryBulkAction,
+  selection: BulkSelection<StoryFilter>,
   opts: BulkOptions = {},
-): Promise<BulkOutcome> {
+): Promise<StoryBulkOutcome> {
   const dryRun = opts.dryRun === true
   const actor = opts.actor ?? null
   const batch = Math.min(Math.max(Math.trunc(opts.batch ?? DEFAULT_BULK_BATCH), 1), MAX_BULK_BATCH)
@@ -230,7 +177,7 @@ export async function runBulk<Env>(
     }
   }
 
-  const report: BulkReport = {
+  const report: StoryBulkReport = {
     action,
     done: 0,
     failed: [],
@@ -285,7 +232,7 @@ export async function runBulk<Env>(
   report.continueFrom =
     consumed < limit || report.seen >= total || last === null
       ? null
-      : writeCursor(last, report.seen)
+      : writeBulkCursor(last, report.seen)
   return report
 }
 
@@ -293,7 +240,7 @@ export async function runBulk<Env>(
  * route makes, which is the point of `documents.ts` and `publish.ts` existing. */
 async function one<Env>(
   deps: BulkDeps<Env>,
-  action: BulkAction,
+  action: StoryBulkAction,
   story: StoryMeta,
   opts: BulkOptions & { actor: string | null; index: number },
 ): Promise<void> {
@@ -357,7 +304,7 @@ interface Batch {
  */
 async function filterBatch(
   db: FolioDb,
-  selection: FilterSelection,
+  selection: FilterSelection<StoryFilter>,
   after: string | null,
   limit: number,
 ): Promise<Batch> {
@@ -398,34 +345,16 @@ async function idBatch(
 }
 
 /** The id at a job position, for a failure that has no row to name itself with. */
-function idAt(selection: BulkSelection, position: number): string {
+function idAt(selection: BulkSelection<StoryFilter>, position: number): string {
   return selection.all ? '' : (selection.ids[position] ?? '')
 }
 
-/**
- * The job's cursor: the id it stopped on, and how many documents it has consumed.
- *
- * Two components, and only the first is a sort key — which is why this is
- * `encodeCursor` directly rather than a `Page<T>`. The counter is what enforces the
- * ceiling across calls, and putting it in the opaque cursor rather than in the body
- * means the caller cannot advance the job's allowance by editing a number.
- *
- * A client *can* still fabricate a whole cursor and skip the count guard with it,
- * which is worth naming: it buys nothing. The guard confirms intent; the role check
- * is the security boundary, and a caller authorised to post this could equally post
- * the ids.
- */
-function writeCursor(after: string, seen: number): string {
-  return encodeCursor([after, seen])
-}
-
+/** `core/bulk.ts`'s codec, with this module's refusal for a cursor that is not
+ * one of ours. */
 function readCursor(raw: string): { after: string; seen: number } {
-  const parts: CursorPart[] | null = decodeCursor(raw)
-  const [after, seen] = parts ?? []
-  if (typeof after !== 'string' || typeof seen !== 'number' || seen < 0) {
-    throw new FolioError('bad_request', 'Malformed pagination cursor')
-  }
-  return { after, seen: Math.trunc(seen) }
+  const at = readBulkCursor(raw)
+  if (!at) throw new FolioError('bad_request', 'Malformed pagination cursor')
+  return at
 }
 
 /**

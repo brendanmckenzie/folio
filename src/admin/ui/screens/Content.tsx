@@ -1,8 +1,8 @@
 import type { CSSProperties, KeyboardEvent } from 'react'
 import { useCallback, useMemo, useState } from 'react'
 import type { DocumentType, SchemaIndex } from '../../../core/schema'
-import type { BulkAction, FlatSort } from '../../../core/story'
-import type { BulkRefusal } from '../../../server/bulk'
+import type { StoryBulkAction, FlatSort } from '../../../core/story'
+import type { BulkRefusal } from '../../../core/bulk'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { EmptyState } from '../EmptyState'
@@ -376,12 +376,12 @@ export function Content(props: Props) {
   /** What a confirmation would say, or null when the action can be taken as read.
    * The rule is `confirmOf`'s; the captured filter is only passed in select-all
    * mode, because that is the only mode with conditions to restate. */
-  const confirmation = (action: BulkAction) =>
+  const confirmation = (action: StoryBulkAction) =>
     confirmOf(action, bar, isAll(selection) ? selection.filter : undefined, labels)
 
   /** A bar button. Move opens its destination picker, which is its confirmation;
    * everything else asks first when there is something to say. */
-  const start = (action: BulkAction) => {
+  const start = (action: StoryBulkAction) => {
     if (action === 'move') {
       setMoving(true)
       return
@@ -716,7 +716,7 @@ export function Content(props: Props) {
 /** One bulk job in flight or awaiting confirmation: what to do, and for a move,
  * where. */
 interface Job {
-  action: BulkAction
+  action: StoryBulkAction
   destination?: Destination
 }
 
@@ -874,9 +874,9 @@ function SelectionBar({
   /** Which of the five this selection may be given — `duplicate` is absent for a
    * select-all, because the server refuses it there and an impossible control is
    * absent rather than disabled. */
-  actions: readonly BulkAction[]
+  actions: readonly StoryBulkAction[]
   onClear: () => void
-  onRun: (action: BulkAction) => void
+  onRun: (action: StoryBulkAction) => void
   /** Absent for an explicit selection: twelve ids are not a filter, so there is no
    * URL that shows them. */
   onShowSelected?: () => void
@@ -918,7 +918,7 @@ function SelectionBar({
 
 /** The bar's buttons. `Move…` keeps its ellipsis because it opens a dialog rather
  * than acting, which is the same convention the palette follows. */
-const ACTION_LABELS: Record<BulkAction, string> = {
+const ACTION_LABELS: Record<StoryBulkAction, string> = {
   publish: 'Publish',
   unpublish: 'Unpublish',
   duplicate: 'Duplicate',
@@ -1046,7 +1046,7 @@ function NewPageButton({
  */
 async function postBulk(
   apiBase: string,
-  action: BulkAction,
+  action: StoryBulkAction,
   body: BulkRequest,
 ): Promise<BulkAnswer> {
   const res = await fetch(`${apiBase}/bulk/${action}`, {

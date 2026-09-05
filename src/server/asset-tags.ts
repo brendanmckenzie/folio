@@ -251,7 +251,7 @@ export async function deleteTag(db: FolioDb, id: string): Promise<TagDeletion | 
  * statement, which is what makes the per-asset `order by t.slug` a real ordering
  * rather than one that holds until the page crosses a chunk boundary.
  */
-async function tagsByIds(db: FolioDb, ids: readonly string[]): Promise<AssetTag[]> {
+export async function tagsByIds(db: FolioDb, ids: readonly string[]): Promise<AssetTag[]> {
   const pages = await Promise.all(
     bindChunks([...new Set(ids)], 1).map(async (chunk) => {
       const { results } = await db

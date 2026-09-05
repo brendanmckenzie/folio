@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { BulkReport } from '../../../src/server/bulk'
+import type { StoryBulkReport } from '../../../src/server/bulk'
 import {
   actionsFor,
   allShownSelected,
@@ -621,7 +621,7 @@ describe('the request body', () => {
 })
 
 describe('runBulkJob', () => {
-  const report = (over: Partial<BulkReport> = {}): BulkReport => ({
+  const report = (over: Partial<StoryBulkReport> = {}): StoryBulkReport => ({
     action: 'publish',
     done: 0,
     failed: [],

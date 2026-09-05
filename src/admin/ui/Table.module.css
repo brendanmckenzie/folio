@@ -168,3 +168,14 @@
   white-space: nowrap;
   border: 0;
 }
+
+/*
+ * The leading selection cell (`Table.tsx`'s `select` slot). Narrow, and always
+ * visible — unlike `.actions`, which is revealed on hover: a checkbox that
+ * vanishes when the pointer leaves is a selection nobody can read back.
+ */
+.select {
+  width: 1%;
+  padding-right: 0;
+  white-space: nowrap;
+}

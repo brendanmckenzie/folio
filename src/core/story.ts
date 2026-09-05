@@ -273,57 +273,14 @@ export interface StoryFilter {
  * Here rather than in `server/bulk.ts` for the same reason `ScheduleAction` and
  * `StoryFilter` are here: the value appears in a URL — one route per action — so the
  * screen that posts it and the runner that performs it share one vocabulary.
- */
-export type BulkAction = 'publish' | 'unpublish' | 'duplicate' | 'move' | 'delete'
-
-/**
- * The documents somebody ticked. Small by construction: you can only tick what you
- * can see, a page at a time.
- */
-export interface IdSelection {
-  ids: string[]
-  all?: never
-}
-
-/**
- * Every document matching a filter, as it stood when somebody clicked *select all* —
- * a flag, the conditions **captured** at that moment, the count they were shown, and
- * whatever they ticked off afterwards (`ui-architecture.md` decision 7a).
  *
- * **No ids are materialised at all**, which is the whole point: "select all 51,420
- * matching" is the same amount of data as "select all 12 matching", so the question
- * of a ceiling never arises. And it *captures* rather than tracks, which is what
- * makes a selection survive a filter change — the filter here is a snapshot, not a
- * live read of whatever the screen's chips currently say.
+ * **`Story`-prefixed**, unlike the selection and report shapes it travels with:
+ * those moved to `core/bulk.ts` because none of them is about documents, and this
+ * one stayed because all of it is. `core/assets.ts`'s `AssetBulkAction` is the
+ * media library's four, and a bare `BulkAction` exported beside it would be a
+ * name that reads as "either" and means "one of them".
  */
-export interface FilterSelection {
-  all: true
-  filter: StoryFilter
-  /**
-   * The count the person was shown — `total` from `?count=1` on the list they were
-   * looking at (`pagination.md` decision 5, which insists one `count(*)` serves the
-   * header and this guard so the two cannot drift).
-   *
-   * **The safety mechanism, and the job's ceiling.** The server re-runs the filter
-   * once at the start and refuses on a mismatch, so an operation is never quietly
-   * applied to a different set than the one that was agreed to; and no run ever
-   * touches more documents than this number, so a set that grows underneath a long
-   * job cannot make it act on more than was agreed.
-   */
-  expected: number
-  /** Rows ticked *off* after the select-all. Bounded by what a person can see. */
-  exclude?: string[]
-  ids?: never
-}
-
-/**
- * One selection, in the two shapes a selection comes in.
- *
- * One type rather than two endpoints: the action half of a bulk request is
- * identical either way, and a client that had to choose a *URL* by selection mode
- * would be encoding the mode twice.
- */
-export type BulkSelection = IdSelection | FilterSelection
+export type StoryBulkAction = 'publish' | 'unpublish' | 'duplicate' | 'move' | 'delete'
 
 /**
  * Flat mode's ordering (`pagination.md` decision 2a) — the other half of the

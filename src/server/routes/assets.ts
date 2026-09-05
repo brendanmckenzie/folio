@@ -8,8 +8,11 @@
  * document usage route does. `assetFileRoutes` below stays entirely
  * runtime-independent, which is what lets it be mounted on the bare path.
  */
+import type { Context } from 'hono'
 import { Hono } from 'hono'
 import type { AssetTag } from '../../core/assets'
+import { wasRefused } from '../../core/bulk'
+import { type AssetBulkOptions, type AssetBulkOutcome, runAssetBulk } from '../asset-bulk'
 import { createFolder, deleteFolder, listFolders, updateFolder } from '../asset-folders'
 import { deleteTag, ensureTag, listTags, renameTag, tagsForAssets } from '../asset-tags'
 import {
@@ -32,6 +35,9 @@ import { requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
 import {
+  AssetBulkBody,
+  AssetBulkMoveBody,
+  AssetBulkTagBody,
   AssetFolderCreateBody,
   AssetFolderPatchBody,
   assetKeyParam,
@@ -284,6 +290,109 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const report = await deleteTag(c.var.bindings().db, id)
     if (!report) throw new FolioError('not_found', 'Unknown tag')
     return c.json({ deleted: true, ...report })
+  })
+
+  /* --------------------------------------------------------------- bulk --- */
+
+  /**
+   * One run, and the two shapes it can answer with — `routes/bulk.ts`'s `answer`
+   * for the media library, and the same 409 body: the error envelope a generic
+   * fetch wrapper already reads, plus the machine-readable counts beside it.
+   *
+   * A refusal has to be a **door rather than a wall**, which is what the `actual`
+   * count buys: "somebody uploaded three files while you were reading the number"
+   * is re-confirmed in one click instead of investigated.
+   */
+  const answer = (c: Context<FolioEnv<Env>>, outcome: AssetBulkOutcome): Response => {
+    if (!wasRefused(outcome)) return c.json(outcome)
+    return c.json(
+      {
+        error: {
+          code: 'conflict',
+          message: `${outcome.expected} files matched when you chose them and ${outcome.actual} match now. Check the number and try again.`,
+        },
+        refused: outcome.refused,
+        expected: outcome.expected,
+        actual: outcome.actual,
+      },
+      409,
+    )
+  }
+
+  /** The job-control fields, off any of the three bodies. No `actor`: none of
+   * these four actions writes a version row or fires a hook, because none of them
+   * changes a document. */
+  const control = (body: {
+    dryRun?: boolean
+    continueFrom?: string | null
+    batch?: number
+  }): AssetBulkOptions => {
+    requireCursor(body.continueFrom ?? undefined)
+    return {
+      ...(body.dryRun === undefined ? {} : { dryRun: body.dryRun }),
+      ...(body.continueFrom === undefined ? {} : { continueFrom: body.continueFrom }),
+      ...(body.batch === undefined ? {} : { batch: body.batch }),
+    }
+  }
+
+  /**
+   * Tagging and untagging a selection — **add and remove, never replace**, which
+   * is the whole difference between these and `PATCH /assets/:id`'s `tags`. A
+   * bulk replace would wipe every per-file tag an editor had applied by hand,
+   * which is not something a person asking to "add `2024` to these forty" means.
+   *
+   * Registered **before** `/assets/:id`: `bulk` is a legal `:id` as far as the
+   * router is concerned, the same trap `folders` and `tags` sit in above.
+   *
+   * `ASSETS` (editor+), matching the single-asset patch these are forty of
+   * (decision 16). The one route in this feature that is `ADMIN` is phase 7's
+   * describe run, because that one spends the host's money.
+   */
+  for (const action of ['tag', 'untag'] as const) {
+    app.post(`/assets/bulk/${action}`, requireAccess<Env>(rt, ASSETS), async (c) => {
+      const body = await parseBody(c.req, AssetBulkTagBody)
+      return answer(
+        c,
+        await runAssetBulk({ db: c.var.bindings().db }, action, body.selection, {
+          ...control(body),
+          tagIds: body.tagIds,
+        }),
+      )
+    })
+  }
+
+  /** Filing a selection. `folderId: null` is *Unfiled*, a real destination, which
+   * is why the field is required and nullable rather than optional. Touches one
+   * column per row and no R2 object at all (decision 1). */
+  app.post('/assets/bulk/move', requireAccess<Env>(rt, ASSETS), async (c) => {
+    const body = await parseBody(c.req, AssetBulkMoveBody)
+    return answer(
+      c,
+      await runAssetBulk({ db: c.var.bindings().db }, 'move', body.selection, {
+        ...control(body),
+        folderId: body.folderId,
+      }),
+    )
+  })
+
+  /**
+   * Deleting a selection — the one irreversible action in this feature.
+   *
+   * The report carries `usedOnPublished` on the first call (decision 15), which
+   * is what a confirmation reads by posting this with `dryRun: true` first. It
+   * **warns and proceeds**: gating would leave an editor unable to remove a file
+   * that a published page happens to point at, and a broken image reference
+   * degrades visibly and fixably.
+   *
+   * Needs the bucket, like `DELETE /assets/:id` — `runAssetBulk` refuses a delete
+   * without one, but the check is here too so the failure is a request-shaped
+   * `unsupported` before a count guard runs rather than after it.
+   */
+  app.post('/assets/bulk/delete', requireAccess<Env>(rt, ASSETS), async (c) => {
+    const { db, media } = c.var.bindings()
+    if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
+    const body = await parseBody(c.req, AssetBulkBody)
+    return answer(c, await runAssetBulk({ db, media }, 'delete', body.selection, control(body)))
   })
 
   /**

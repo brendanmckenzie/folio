@@ -34,6 +34,20 @@ export interface FoldersData {
    * caller does not also have to remember to.
    */
   create: (input: { name: string; parentId?: string | null }) => Promise<AssetFolder>
+  /**
+   * Rename, move, or both — one `PATCH`, because on a materialised path they are
+   * the same operation (`server/asset-folders.ts`'s `updateFolder`). Throws the
+   * server's own message: a 409 naming the sibling it would collide with, or the
+   * path that would make the move a cycle.
+   */
+  update: (id: string, patch: { name?: string; parentId?: string | null }) => Promise<AssetFolder>
+  /**
+   * Deletes the folder and **nothing else** (decision 14): children re-parent to
+   * its own parent and its files land back in *Unfiled*. Answers the two counts
+   * the route reports, so the caller can say what actually happened rather than
+   * guess — which is the whole reason this returns anything at all.
+   */
+  remove: (id: string) => Promise<{ unfiled: number; reparented: number }>
 }
 
 export function useFolders(apiBase: string): FoldersData {
@@ -75,5 +89,33 @@ export function useFolders(apiBase: string): FoldersData {
     [apiBase, reload],
   )
 
-  return { folders, loading, error, reload, create }
+  const update = useCallback(
+    async (id: string, patch: { name?: string; parentId?: string | null }) => {
+      const res = await fetch(`${apiBase}/assets/folders/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(patch),
+      })
+      if (!res.ok) throw new Error(await messageOf(res))
+      const folder = (await res.json()) as AssetFolder
+      await reload()
+      return folder
+    },
+    [apiBase, reload],
+  )
+
+  const remove = useCallback(
+    async (id: string) => {
+      const res = await fetch(`${apiBase}/assets/folders/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) throw new Error(await messageOf(res))
+      const report = (await res.json()) as { unfiled: number; reparented: number }
+      await reload()
+      return report
+    },
+    [apiBase, reload],
+  )
+
+  return { folders, loading, error, reload, create, update, remove }
 }
