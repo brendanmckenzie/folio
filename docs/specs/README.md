@@ -58,7 +58,7 @@ sequence because the dependency graph is the same one.
 | 20 | [Bulk write endpoints](platform/bulk-writes.md) | platform | M | — | — | completion plan: gap 2 |
 | 21 | [Draft preview sharing](platform/draft-sharing.md) | platform | M | — | `0004` | completion plan: gap 4 |
 | 22 | [Build artifacts and `.d.ts`](foundation/package-build.md) | foundation | S | — | — | completion plan: gap 5 |
-| 23 | [Many sites in one deployment](foundation/multi-site.md) | foundation | XL | 5 | `0008` | owner, 2026-08-01 |
+| 23 | [Many sites in one deployment](foundation/multi-site.md) | foundation | XL | 5 | `0009` | owner, 2026-08-01 |
 | 24 | [An MCP server](platform/mcp-server.md) | platform | M–L | — | — | feedback: ai-friendliness |
 | 25 | [Draft mode](platform/draft-mode.md) | platform | M | — | — | roadmap, twice: host-layout draft + cookie draft mode |
 | 26 | [Documentation that ships](foundation/documentation.md) | foundation | M | — | — | owner, 2026-08-29 |
@@ -67,6 +67,7 @@ sequence because the dependency graph is the same one.
 | 29 | [Passkeys](foundation/passkeys.md) | foundation | M–L | — | `0007` | owner, 2026-09-05 |
 | 30 | [Full-text search](content-model/full-text-search.md) | content model | M | — | `0005` | owner, 2026-09-05 |
 | 31 | [Visitor access](platform/visitor-access.md) | platform | M | — | — | owner, 2026-09-05 |
+| 32 | [Media library organisation](content-model/media-library.md) | content model | L | — | `0008` | owner, 2026-09-05 |
 
 **28–31 build in the order 31 → 30 → 28 → 29** (owner, 2026-09-05), which is not the
 order they are numbered in. The numbers are identities, assigned when the four were
@@ -78,7 +79,11 @@ and **30 wants 31 landed first**, because 30 decision 11 compiles a predicate ou
 first would mean writing the search path twice and shipping a window in which a search
 page renders paywalled prose. The claimed migration numbers move with the build order,
 per the rule below: on this order 31 carries none, 30 takes `0005`, 28 takes `0006`,
-29 takes `0007`, and 23 stays behind all of them. **`0005` has landed** — the column
+29 takes `0007`, and 23 stays behind all of them. **Spec 32 (media library) joined
+after this paragraph was written** and its own header sequences it **after 29 and
+before 23**, so it takes `0008` and 23 restamps to `0009` — before multi-site scopes
+every list route, so 23 scopes the new asset tables in the same pass rather than
+retrofitting them. **`0005` has landed** — the column
 above now reads the decided number rather than the drafted one for all three.
 
 Spec 26 is **done**, and its own `## Implementation notes` records that it shipped a
@@ -258,18 +263,25 @@ what every one after them is expected to be. `0005` is the first to create a *vi
 table; `test/workers/sql-split.ts` needed no change for it, because the DDL uses no
 triggers (spec 30 decision 1) and therefore no `BEGIN … END`.
 
-Two more are **claimed by drafts** and not landed: `0006_auth.sql` (28: two
-`alter table add column`s and an `auth_events` table) and `0007_passkeys.sql` (29: a
-`passkeys` table). Spec 23's `sites` migration therefore reads `0008` in the index.
+Three more are **claimed by drafts** and not landed: `0006_auth.sql` (28: two
+`alter table add column`s and an `auth_events` table), `0007_passkeys.sql` (29: a
+`passkeys` table) and `0008_asset_organisation.sql` (32: `asset_folders`,
+`asset_tags`, `asset_tag_links`, plus six columns and four indexes on `assets`,
+reversing `0002`'s refusal to index `filename` on a premise that has since changed).
+Spec 23's `sites` migration therefore reads `0009` in the index.
 Both restamped once when `0005` landed: the drafts claimed `0005` and `0006`, written
 before the build order put 30 first. A claim is a stamp, not a landing — whichever of
 the remaining two builds first takes the next free number and the other restamps.
 
-**So the next free number is `0009`**, and a spec being drafted now should claim that
-rather than counting the landed rows above and reaching for `0006`. Landed: `0001`–`0005`.
-Claimed: `0006` (28), `0007` (29), `0008` (23). A media-management spec is in draft
-elsewhere as of 2026-09-05 and is the likely next claimant; when it lands a number here,
-this paragraph is where it goes.
+**Landed: `0001`–`0005`. Claimed: `0006` (28), `0007` (29), `0008` (32, media
+library), `0009` (23). The next free number is `0010`.** Do not
+derive a number by counting the landed rows above; take the one your spec's header
+names, and if it is already on disk, stop rather than picking the next one yourself.
+
+Spec 23 restamped `0008` → `0009` to make room for 32, which its own header sequences
+after 29 and before 23. That is the standing rule working as intended rather than an
+exception to it: a claim is a stamp, not a landing, and the spec that builds first
+takes the number.
 
 The table is kept as a **record of what each spec added**, since each spec's own
 *Wire & schema changes* section still names its migration and those sections are

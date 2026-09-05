@@ -343,16 +343,18 @@ section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
 
-**Specs 1–22 and 24–27 are done. Five are `draft`: 23 (`foundation/multi-site.md`,
-XL, unstarted since 2026-08-01) and the four drafted together on 2026-09-05 — 28
-(`foundation/auth-providers.md`, L), 29 (`foundation/passkeys.md`, M–L, needs 28's
-provider union and `completeSignIn`), 30 (`content-model/full-text-search.md`, M)
-and 31 (`platform/visitor-access.md`, M).**
+**Specs 1–22, 24–27 and 31 are done. Five are `draft`: 23 (`foundation/multi-site.md`,
+XL, unstarted since 2026-08-01), the three still building of the four drafted together
+on 2026-09-05 — 28 (`foundation/auth-providers.md`, L), 29 (`foundation/passkeys.md`,
+M–L, needs 28's provider union and `completeSignIn`), 30
+(`content-model/full-text-search.md`, M) — and 32 (`content-model/media-library.md`,
+L, drafted the same day, after the other four).**
 
-**The four build in the order 31 → 30 → 28 → 29** (owner, 2026-09-05), which is not
-the order they are numbered in — the numbers were assigned when they were drafted
-together and are identities, not a queue. Each spec's header carries its place. Two
-of the three gaps between them are hard constraints and one is sequencing:
+**They build in the order 31 → 30 → 28 → 29 → 32** (owner, 2026-09-05), which is not
+the order they are numbered in — the numbers were assigned when they were drafted and
+are identities, not a queue. Each spec's header carries its place. **31 is done**
+(`ebd45e6`, `41cd2e2`) and 30 is part-built. Three of the four gaps between them are
+hard constraints and one is sequencing:
 
 - **29 after 28**, phases 1–2: the provider union, `completeSignIn`,
   `sessions.provider`, `auth/jwt.ts`.
@@ -364,13 +366,17 @@ of the three gaps between them are hard constraints and one is sequencing:
   exactly the prose `redactDoc` withholds, so an unfiltered search page renders the
   paywalled half of a gated document with the matched words highlighted. Build 30
   first and you write the search path twice.
-- **23 after all four**, and it is the older constraint: it scopes every list route,
-  so it and anything else reshaping a list route must not land out of order.
+- **32 after 29, before 23.** Its own checkpoint 8: landing the asset tables before
+  multi-site scopes every list route means 23 scopes them in the same pass instead of
+  retrofitting them.
+- **23 after all of them**, and it is the older constraint: it scopes every list
+  route, so it and anything else reshaping a list route must not land out of order.
 
 Migration numbers in the drafts are claims. **On the decided order: 31 carries none,
-30 takes `0005`, 28 takes `0006`, 29 takes `0007`, 23 keeps `0008`.** The old rule
-still governs if the order moves again — whichever builds first takes the next free
-number and the others restamp.
+30 takes `0005` (landed), 28 takes `0006`, 29 takes `0007`, 32 takes `0008`, and 23
+restamped to `0009` to make room for it.** The old rule still governs if the order
+moves again — whichever builds first takes the next free number and the others
+restamp, which is exactly what 23 just did.
 
 This paragraph said "18 (`foundation/pagination.md`) is the current one and is
 `draft`" until 2026-08-29, long after pagination and its API-prefix move had landed
