@@ -640,6 +640,13 @@ an unsorted flat list, which stops working somewhere around 15.
     `D1PreparedStatement` on that function's five-part return and every one of the
     five would want chunking together — a half-fix would move the failure to a
     different statement in the same batch and read as fixed.
+
+    **`clearIndexStatements` is now four of those statements rather than two**
+    (spec 30 phase 3): full-text search added `content_text` and the FTS5
+    `'delete'` command that de-indexes it, and both bind the same `in (…)` list
+    the other two do. They were written that way on purpose, to match the
+    function around them rather than to half-fix it. Whoever chunks this fixes
+    four statements in that one function, not two.
   - **The admin's Data list at a page size above a hundred.** `indexedValuesFor`
     (`content-index.ts`) binds one parameter per row on the page, and
     `limitParam(…, 50, 200)` lets a caller ask for 200.

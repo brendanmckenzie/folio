@@ -1,6 +1,11 @@
 /**
  * Writing and clearing `content_index` / `content_refs`
- * (`../../docs/specs/content-model/collections.md` architecture decision 3).
+ * (`../../docs/specs/content-model/collections.md` architecture decision 3) and
+ * the full-text pair `content_text` / `content_fts`
+ * (`../../docs/specs/content-model/full-text-search.md` architecture decision 1) —
+ * a third table written by the same functions into the same batch, which is the
+ * whole answer to spec 18's objection that FTS5 would be "a second write path to
+ * keep in step with the first".
  *
  * Every function here returns **unrun** statements, for one reason: they join the
  * batch that publishes, unpublishes or deletes the story they describe. `publish()`
@@ -19,19 +24,22 @@ import { indexRowsFor, type IndexRow } from '../core/index-projection'
 import type { LocaleConfig } from '../core/locales'
 import { outboundRefs, type OutboundRef } from '../core/refs'
 import type { DocumentType, SchemaIndex } from '../core/schema'
+import { type SearchRow, searchRowsFor } from '../core/search-projection'
 import { bindChunks, type FolioDb } from './db'
 
 /** What one document projects to. Computed by `contentProjection`, written by `indexStatements`. */
 export interface ContentProjection {
   index: IndexRow[]
   refs: OutboundRef[]
+  /** One `content_text` row per locale that has any prose (`full-text-search.md` decision 3). */
+  search: SearchRow[]
 }
 
-export const EMPTY_PROJECTION: ContentProjection = { index: [], refs: [] }
+export const EMPTY_PROJECTION: ContentProjection = { index: [], refs: [], search: [] }
 
 /**
  * The projection for one document, from the pure core walks. The one place the
- * two halves are computed together, so publish and reindex cannot drift.
+ * three halves are computed together, so publish and reindex cannot drift.
  */
 export function contentProjection(
   storyId: string,
@@ -43,6 +51,7 @@ export function contentProjection(
   return {
     index: indexRowsFor(doc, type, schema, locales),
     refs: outboundRefs(doc, schema, storyId),
+    search: searchRowsFor(doc, type, schema, locales),
   }
 }
 
@@ -76,9 +85,10 @@ const MAX_ROWS = 400
 /** Bound parameters per row of each multi-row insert below, for `bindChunks`. */
 const INDEX_BINDS = 5
 const REFS_BINDS = 3
+const SEARCH_BINDS = 4
 
 /**
- * The index and ref rows for one story, replacing whatever is there.
+ * The index, ref and full-text rows for one story, replacing whatever is there.
  *
  * Multi-row inserts rather than one statement per row: a D1 batch is a real
  * transaction but each statement is a round trip inside it, and a document with
@@ -139,17 +149,80 @@ export function indexStatements(
     )
   }
 
+  // The full-text pair, appended after the two tables above (decision 1). Four
+  // statements, and **the order of the first two is load-bearing and silent when
+  // it is wrong**: FTS5's special `'delete'` command de-indexes a row by being
+  // handed that row's *old* column values, and the only place they exist is
+  // `content_text` itself. Read them first and the tokens go; drop the rows first
+  // and the command reads an empty `select`, raises nothing, and leaves the old
+  // tokens in the index for ever — matching documents that no longer contain the
+  // words. Every ordinary reader joins `content_fts` back to `content_text` and
+  // so sees an empty result either way; only asking the index on its own terms
+  // (`test/workers/search.test.ts`'s `orphanedTokens`) or running FTS5's
+  // `'integrity-check'` can tell the two apart, and a *partial* de-index is
+  // visible to nothing but the latter.
+  //
+  // The `select` is deliberately multi-row: a document is multi-locale, so the
+  // de-index is inherently more than one row and the command column is fed once
+  // per row by SQLite's per-row `xUpdate`. That was the one behaviour this design
+  // leaned on and had not observed; `fts-smoke.test.ts` observes it.
+  out.push(
+    db
+      .prepare(
+        `insert into content_fts(content_fts, rowid, title, body)
+         select 'delete', id, title, body from content_text where story_id = ?`,
+      )
+      .bind(storyId),
+    db.prepare('delete from content_text where story_id = ?').bind(storyId),
+  )
+
+  // Four binds a row against `db.ts`'s ninety-parameter budget is twenty-two rows
+  // a statement, and `MAX_SEARCH_ROWS` is twenty-four — so a site with enough
+  // declared locales chunks here exactly as the two tables above do, into
+  // statements that join this same array and therefore the same transaction.
+  for (const chunk of bindChunks(projection.search, SEARCH_BINDS)) {
+    const values = chunk.map(() => '(?, ?, ?, ?)').join(', ')
+    out.push(
+      db
+        .prepare(`insert into content_text (story_id, locale, title, body) values ${values}`)
+        .bind(...chunk.flatMap((r) => [storyId, r.locale, r.title, r.body])),
+    )
+  }
+
+  // Last, and after **every** insert chunk: this is the statement that indexes
+  // the new rows, and it finds them by reading `content_text` back by story id.
+  // Emitted anywhere before the inserts it sees an empty table and indexes
+  // nothing at all, which is a document that exists, reads correctly and cannot
+  // be found. Inside the loop it would re-index each earlier chunk once more per
+  // chunk — harmless but wasteful, and not the shape the batch is meant to have.
+  //
+  // Omitted entirely for a document with no prose, which leaves the two deletes
+  // above and nothing else — the shrink case, exactly as `content_index`'s bare
+  // deletes handle a field losing `indexed`.
+  if (projection.search.length > 0) {
+    out.push(
+      db
+        .prepare(
+          `insert into content_fts(rowid, title, body)
+           select id, title, body from content_text where story_id = ?`,
+        )
+        .bind(storyId),
+    )
+  }
+
   return out
 }
 
 /**
- * Drops every index row and every *outbound* ref row for a set of stories — what
- * an unpublish and a delete both need.
+ * Drops every index row, every *outbound* ref row and every full-text row for a
+ * set of stories — what an unpublish and a delete both need.
  *
  * Outbound only, because this is the half an unpublish means: the story still
  * exists, so a row pointing *at* it is still another document's true fact and
  * still what `data-documents.md`'s "used by N" warning reads. Unpublishing a
- * referenced record must keep warning that four pages point at it.
+ * referenced record must keep warning that four pages point at it. The full-text
+ * rows carry no such distinction — they describe the story's own prose, so they
+ * go with the index rows.
  *
  * A delete is the case where the target stops existing, and it pairs this with
  * `clearInboundRefStatements` in the same batch.
@@ -159,6 +232,15 @@ export function indexStatements(
  * the reason asset usage was widened into this table rather than given its own
  * (`migrations/0002_asset_refs.sql`). "Used by N **published** documents" is the
  * claim the Assets panel makes.
+ *
+ * **The `in (…)` list is not chunked, and that is deliberate.** Every statement
+ * here binds the whole set in one go, so a subtree wider than about ninety
+ * documents fails — recorded in `ROADMAP.md` under "Known smaller issues" and
+ * left there on purpose: `deleteStoryStatement` returns five things that all bind
+ * the same list into the same batch, and fixing one of them moves the failure to
+ * the next while reading as fixed. Adding the full-text pair here takes this
+ * function from two of those statements to four; it does not change the shape of
+ * the problem, and whoever fixes it now has four to fix rather than two.
  */
 export function clearIndexStatements(db: FolioDb, ids: readonly string[]): D1PreparedStatement[] {
   if (ids.length === 0) return []
@@ -166,6 +248,16 @@ export function clearIndexStatements(db: FolioDb, ids: readonly string[]): D1Pre
   return [
     db.prepare(`delete from content_index where story_id in (${placeholders})`).bind(...ids),
     db.prepare(`delete from content_refs where from_story in (${placeholders})`).bind(...ids),
+    // De-index before the rows go, for the reason `indexStatements` spells out:
+    // FTS5's `'delete'` reads the old values out of `content_text`, so after the
+    // delete it reads nothing, raises nothing, and orphans the tokens.
+    db
+      .prepare(
+        `insert into content_fts(content_fts, rowid, title, body)
+         select 'delete', id, title, body from content_text where story_id in (${placeholders})`,
+      )
+      .bind(...ids),
+    db.prepare(`delete from content_text where story_id in (${placeholders})`).bind(...ids),
   ]
 }
 

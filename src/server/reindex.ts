@@ -1,10 +1,13 @@
 /**
- * Rebuilding `content_index` and `content_refs` from `published_doc`
- * (`../../docs/specs/content-model/collections.md` architecture decision 3).
+ * Rebuilding `content_index`, `content_refs` and the full-text pair
+ * `content_text` / `content_fts` from `published_doc`
+ * (`../../docs/specs/content-model/collections.md` architecture decision 3,
+ * `../../docs/specs/content-model/full-text-search.md` architecture decision 1).
  *
  * Publish-time writing covers every ordinary case, and this exists for the one it
  * cannot: a schema change that adds `indexed: true` to a field that already has
- * content. Nothing republishes, so nothing would ever write the new rows.
+ * content, or takes `searchable: false` away from one. Nothing republishes, so
+ * nothing would ever write the new rows.
  *
  * Shaped like `runMigrations` on purpose — batched, resumable by an `id` cursor,
  * explicit rather than automatic — because it has the same two problems: it walks
@@ -44,7 +47,13 @@ export interface ReindexReport {
   indexRows: number
   /** `content_refs` rows written across them. */
   refRows: number
-  /** Documents that projected to no rows at all — no indexed field has a value. */
+  /** `content_text` rows written across them — one per locale that has prose. */
+  searchRows: number
+  /**
+   * Documents that projected to no rows at all: no indexed field has a value, no
+   * outbound edge, and no searchable prose. Counts the full-text half too, so a
+   * page whose only content is body text is no longer reported empty.
+   */
   empty: number
   /** Pass back as `continueFrom` to sweep the next batch. Null when done. */
   continueFrom: string | null
@@ -76,6 +85,7 @@ export async function reindex(
 
   let indexRows = 0
   let refRows = 0
+  let searchRows = 0
   let empty = 0
   const statements: D1PreparedStatement[] = []
 
@@ -89,10 +99,19 @@ export async function reindex(
     )
     indexRows += projection.index.length
     refRows += projection.refs.length
-    if (projection.index.length === 0 && projection.refs.length === 0) empty++
+    searchRows += projection.search.length
+    if (
+      projection.index.length === 0 &&
+      projection.refs.length === 0 &&
+      projection.search.length === 0
+    ) {
+      empty++
+    }
     // The deletes are emitted even for a document that projects to nothing: that
-    // is the case a *removed* `indexed` flag produces, and leaving the old rows
-    // behind would keep a field queryable that the schema no longer declares.
+    // is the case a *removed* `indexed` flag produces — or a `searchable: false`
+    // added to a field that already had content — and leaving the old rows behind
+    // would keep a field queryable, or findable, that the schema no longer
+    // declares.
     statements.push(...indexStatements(deps.db, row.id, projection))
   }
 
@@ -112,6 +131,7 @@ export async function reindex(
     documents: docs.length,
     indexRows,
     refRows,
+    searchRows,
     empty,
     // A short batch means the walk reached the end. A full one might have, and
     // costs one more empty call to find out — the same trade `runMigrations` makes.

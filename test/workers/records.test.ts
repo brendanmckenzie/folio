@@ -158,6 +158,20 @@ async function insertRow(
     .run()
 }
 
+/**
+ * How many `content_text` rows a story has — the third table `indexStatements`
+ * and `clearIndexStatements` write (`full-text-search.md` decision 1). Asserted
+ * beside every `content_index` count below, because the whole argument for
+ * putting full-text in these functions rather than in a publish hook is that
+ * the three tables cannot fall out of step.
+ */
+const searchRows = async (id: string): Promise<number> => {
+  const row = await env.DB.prepare('select count(*) as n from content_text where story_id = ?')
+    .bind(id)
+    .first<{ n: number }>()
+  return row?.n ?? 0
+}
+
 const ADA = 'rec_ada'
 const GRACE = 'rec_grace'
 const SYDNEY = 'rec_syd'
@@ -465,6 +479,11 @@ describe('deleting a referenced record proceeds', () => {
       .first<{ n: number }>()
     expect(rows?.n).toBe(0)
 
+    // And the full-text rows with them: `clearIndexStatements` writes all three
+    // tables, so a delete cannot leave the office findable by name
+    // (`full-text-search.md` decision 1).
+    expect(await searchRows(created.id)).toBe(0)
+
     // The referring page is still live and still published; it renders its
     // block's empty state, which is what makes a broken reference safe.
     expect(await folio.published(env, 'recreferrer')).not.toBeNull()
@@ -512,6 +531,10 @@ describe('deleting a referenced record proceeds', () => {
       .bind('rec_pointer', 'rec_hub', 'link')
       .run()
 
+    // The reindex above wrote the hub's prose too, so the delete below has
+    // something to clear rather than trivially finding nothing.
+    expect(await searchRows('rec_hub')).toBeGreaterThan(0)
+
     const res = (await send('/folio/api/stories/rec_hub?redirect=false', 'DELETE'))!
     expect(res.status).toBe(200)
 
@@ -530,6 +553,11 @@ describe('deleting a referenced record proceeds', () => {
       .bind('rec_pointer')
       .all<{ target: string }>()
     expect(survivors.results.map((r) => r.target)).toEqual([ADA, SYDNEY])
+
+    // The full-text rows went with it, and only its own: `rec_pointer` is still
+    // published and still findable.
+    expect(await searchRows('rec_hub')).toBe(0)
+    expect(await searchRows('rec_pointer')).toBeGreaterThan(0)
 
     await env.DB.prepare('delete from stories where id = ?').bind('rec_pointer').run()
   })
@@ -551,10 +579,13 @@ describe('deleting a referenced record proceeds', () => {
       doc: one('nm', 'recPage', { title: 'Naming', office: 'rec_paused' }),
     })
     await folio.reindex(env, { batch: 200 })
+    expect(await searchRows('rec_paused')).toBeGreaterThan(0)
 
     expect((await send('/folio/api/story/rec_paused/unpublish', 'POST'))!.status).toBe(200)
 
-    // Its own projection is gone: an unpublished document leaves every collection.
+    // Its own projection is gone: an unpublished document leaves every collection
+    // and, in the same batch, every search result.
+    expect(await searchRows('rec_paused')).toBe(0)
     const own = await env.DB.prepare('select count(*) as n from content_index where story_id = ?')
       .bind('rec_paused')
       .first<{ n: number }>()

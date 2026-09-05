@@ -6,8 +6,8 @@
  *
  *   - a story's live **draft** through `StoryDO.commit`, the real log path, so it
  *     syncs to open editors, lands in the activity trail and is undoable;
- *   - the **published snapshot** through `applyAll` and one D1 write, batched with
- *     the watermark;
+ *   - the **published snapshot** through `applyAll`, batched with the watermark
+ *     that claims it and with the index rows that describe it;
  *   - **version rows** are not touched at all — they are migrated on read (see
  *     `versions.ts`), so history stays byte-true.
  *
@@ -27,6 +27,7 @@ import { applyAll, type Mutation } from '../core/mutations'
 import { MAX_TX_MUTATIONS } from '../core/protocol'
 import type { SchemaIndex } from '../core/schema'
 import type { StoryMeta } from '../core/story'
+import { type ContentProjection, indexStatements } from './content-index'
 import type { HookRunner } from './hooks'
 import type { FolioRuntime } from './runtime'
 import { countBehind, stampSchemaStatement, storiesBehind } from './stories'
@@ -172,6 +173,27 @@ export interface MigrateDeps {
   /** The story's Durable Object, for `commit`. */
   stub: (id: string) => StoryStub
   /**
+   * The document's `content_index` / `content_refs` / `content_text` rows, the
+   * same function `PublishDeps.projection` is — and here for the same reason: a
+   * projection needs the block schema, the document type and the locale config,
+   * and only `createRuntime` has all three.
+   *
+   * **This closes a gap that predates full-text search**
+   * (`../content-model/full-text-search.md` architecture decision 8). A run
+   * rewrites `published_doc` for every document a migration touches, and used to
+   * write nothing else: a migration that renamed an indexed field, or changed its
+   * value, left `content_index` describing the document as it used to be until
+   * somebody ran a reindex by hand. Search makes that worse rather than
+   * different — a body-text rewrite is precisely the case where a stale index is
+   * invisible until a visitor reports a snippet quoting prose the page no longer
+   * has.
+   *
+   * Optional, exactly as on `PublishDeps`: a caller without one leaves the index
+   * as it was, which is what every caller did before, and the index is
+   * rebuildable from `published_doc` at any time.
+   */
+  projection?: (story: StoryMeta, doc: Doc) => ContentProjection
+  /**
    * Fires `migrated` once per batch (`../platform/caching.md`). Optional, like
    * `PublishDeps.hooks`, and absent is the behaviour every caller had before
    * the event existed: a run rewrites `published_doc` per story through
@@ -305,17 +327,26 @@ export async function runMigrations(
       continue
     }
 
-    // One statement, so the migrated snapshot and the watermark that claims it
-    // can never land separately.
-    await stampSchemaStatement(
-      db,
-      story.id,
-      latestId,
+    // The migrated snapshot and the watermark that claims it are one statement,
+    // so they can never land separately — and when the snapshot changed, the
+    // index rows describing it join the same batch, for the same reason
+    // `publish()` batches them: an index that describes a document nobody
+    // rewrote is the failure, and here the document *was* rewritten.
+    const migratedDoc =
       publishedResult.mutations.length > 0
         ? applyAll(publishedDoc!, publishedResult.mutations)
-        : undefined,
-    ).run()
-    if (publishedResult.mutations.length > 0) republished.push(story.id)
+        : undefined
+    const stamp = stampSchemaStatement(db, story.id, latestId, migratedDoc)
+    const projection = migratedDoc ? deps.projection?.(story, migratedDoc) : undefined
+    if (projection) {
+      await db.batch([stamp, ...indexStatements(db, story.id, projection)])
+    } else {
+      // Nothing to re-project: either the snapshot is unchanged (a draft-only
+      // migration), or the caller supplied no projection and gets what every
+      // caller got before this existed — a stale index until the next reindex.
+      await stamp.run()
+    }
+    if (migratedDoc) republished.push(story.id)
   }
 
   // A short batch means the sweep reached the end of the table.
