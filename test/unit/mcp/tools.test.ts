@@ -190,6 +190,51 @@ describe('the tool table', () => {
   })
 
   /**
+   * **The other direction, which the check above cannot see.** That one walks
+   * `query`/`flags` and asks whether the schema mentions each — so a property
+   * added to `inputSchema` and never wired into `query` (or the reverse: wired
+   * into `query` and typed on the schema for a *different* argument) passes it
+   * silently. `query_documents`'s `search`
+   * (`../../../docs/specs/content-model/full-text-search.md` decision 4) is
+   * exactly the shape that drifts, because nothing stops one side of the pair
+   * from being edited without the other.
+   *
+   * Scoped to a routed tool with no request body, where every argument *has* to
+   * surface as a path segment, a query key or a flag — a body-carrying tool
+   * (`create_document`, `write_content`, …) sends the rest of its properties in
+   * the JSON body instead, so this cannot be asked of it there.
+   * `preview_document` has no route at all and is excluded the same way
+   * `routed` excludes it everywhere else in this file.
+   */
+  it('keeps a body-less tool’s schema in parity with its path, query and flag arguments', () => {
+    for (const tool of MCP_TOOLS) {
+      if (!routed(tool) || tool.body) continue
+      const declared = Object.keys(tool.inputSchema.properties ?? {})
+      const pathParams = [...tool.path.matchAll(/:([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1]!)
+      const accounted = new Set([...pathParams, ...(tool.query ?? []), ...(tool.flags ?? [])])
+      for (const key of declared) {
+        expect([tool.name, key, accounted.has(key)]).toEqual([tool.name, key, true])
+      }
+    }
+  })
+
+  /**
+   * `search` pinned as the literal words the spec's route table gives it
+   * (`../../../docs/specs/content-model/full-text-search.md`, "New or changed
+   * routes"), the same way `state`'s enum and the viewport bounds are pinned
+   * below — so a rewording here is a deliberate edit to the spec's own text,
+   * not a drift nobody notices.
+   */
+  it('advertises query_documents’ search exactly as the spec words it', () => {
+    const search = toolByName('query_documents')?.inputSchema.properties?.search
+    expect(search?.type).toBe('string')
+    expect(search?.description).toBe(
+      'Full-text `search` ranks by relevance and returns a `snippet` per item.',
+    )
+    expect(toolByName('query_documents')?.query).toContain('search')
+  })
+
+  /**
    * **An `enum` in an input schema is a second copy of the route's validation**,
    * which is the fork decision 2 exists to prevent — one layer in from the place
    * that decision is usually argued. It shipped wrong once: the advertised list

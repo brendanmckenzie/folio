@@ -48,6 +48,15 @@ Two of those are worth knowing rather than discovering:
   can undo. A script that means to delete asks for `admin`; an assistant helping with copy
   does not.
 
+**`query_documents` takes a full-text `search` argument**
+(`docs/specs/content-model/full-text-search.md`): the same query `GET
+/api/v1/documents?search=` runs, ranked by relevance, with a `snippet` per item rather than
+a single indexed field it filters on — so an agent can find the document about a topic
+rather than guessing its title. A malformed value is never refused; see `docs/api.md`'s
+Querying section for the parameter and the response shape. On a deployment with a `gate`
+configured, a `search` is scoped to the gate's public value unless the call's own `where`
+already names that field.
+
 ## 2. Connect a client
 
 ### Claude Code

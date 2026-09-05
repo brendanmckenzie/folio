@@ -356,7 +356,8 @@ notice. Use a new key for a new write.
 | `parent` | `parent=sty_x`, or `parent=` | Present-and-empty means the top level |
 | `locale` | `locale=fr` | Filters and sorts against that locale's index rows |
 | `where` | `where=topic:eq:policy` | `field:op:value`. Repeatable, at most 8 |
-| `order` | `order=published:desc` | One field. Or a bare `publishedAt`, `ord`, `title` |
+| `order` | `order=published:desc` | One field. Or a bare `publishedAt`, `ord`, `title`, `relevance` |
+| `search` | `search=harbour sunset` | Full-text, ranked. Trimmed and capped at 200 characters |
 | `page` | `page=2` | 1-based |
 | `perPage` | `perPage=10` | Default 20, maximum 100 |
 
@@ -365,12 +366,49 @@ Operators: `eq`, `ne`, `in` (comma-separated), `contains`, `startsWith`, `gt`,
 declares `indexed: true`; anything else is a `400` naming the field, never a silent
 empty result.
 
+**`search` full-text-matches a document's title and its `searchable` `text`,
+`textarea` and `richtext` fields** (`docs/specs/content-model/full-text-search.md`),
+ranked with the best match first. `order` defaults to `relevance` the moment
+`search` is present; naming any other order still returns a `score` on every item.
+**`order=relevance` with no `search` is the one `400` this parameter adds**, naming
+`relevance`. Past that, a malformed `search` is never an error: a stray quote, a
+bare `NOT`, an unbalanced paren, an emoji-only string — every one is tokenised
+before it reaches the index, and a value with no token left in it answers a
+well-formed, empty page. A `search` over 200 characters is **truncated**, not
+refused.
+
 Answers:
 
 ```json
 { "items": [ { "id": "…", "title": "…", "url": "…", "data": { … }, "doc": { … } } ],
   "total": 25, "page": 2, "perPage": 10, "pages": 3 }
 ```
+
+**An item answers a `search` query with two extra fields:**
+
+```json
+{ "id": "…", "title": "…", "url": "…", "data": { … }, "doc": { … },
+  "score": 4.21,
+  "snippet": [
+    { "text": "the harbour at ", "match": false },
+    { "text": "sunset", "match": true },
+    { "text": " was…", "match": false }
+  ] }
+```
+
+`snippet` is **`{ text, match }[]`, never an HTML string** with the match wrapped
+in a tag. A host would otherwise have to either trust it as HTML — an injection the
+moment a paragraph *about* HTML contains a `<script>` tag literally — or escape it,
+which destroys the marks that made it a snippet. Render the matched parts yourself
+from the `match` flag.
+
+**On a deployment with a `gate` configured**
+(`docs/specs/platform/visitor-access.md`), a `search` query is scoped to the gate's
+public value unless the query's own `where` already names that field. A members'
+search over members' content is `where=access:in:public,members` plus the host's
+own check that the visitor is a member before it runs the query — the same opt-out
+`filterable` already gives a plain `where`. A query with no `search` is untouched;
+the scoping applies to search alone.
 
 **`?status=draft` is refused with `501`.** A draft lives in its own Durable Object,
 so a query over drafts means opening one object per candidate row. Read drafts one
