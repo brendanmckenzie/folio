@@ -636,7 +636,7 @@ describe('storiesMatching', () => {
     expect(second.map((row: StoryMeta) => row.id)).toEqual(['sty_team'])
   })
 
-  it('applies exclusions in SQL, so a batch does a batch of work', async () => {
+  it('still does a batch of work when exclusions are dropped, not a batch of reads', async () => {
     const { storiesMatching } = await import('../../src/server/stories')
     const rows = await storiesMatching(
       env.DB,
@@ -644,6 +644,29 @@ describe('storiesMatching', () => {
       { limit: 2, exclude: ['sty_about', 'sty_home'] },
     )
     expect(rows.map((row: StoryMeta) => row.id)).toEqual(['sty_team'])
+  })
+
+  /**
+   * The exclusion list used to be `id not in (…)`, one bound parameter each,
+   * justified as "bounded by what a person can tick off". That bound is
+   * `MAX_SELECTION_IDS` — 500 — and D1 binds at most 100 parameters per
+   * statement, so select-all with ninety-odd rows unticked failed the whole
+   * batch with `too many SQL variables`. Reachable by ordinary use of the
+   * Content screen, and the third instance of that same false premise in this
+   * repo after `indexStatements` and `resolve()`.
+   *
+   * 120 exclusions is past the cap and inside the selection limit, which is
+   * exactly the gap that was broken.
+   */
+  it('takes more exclusions than D1 will bind parameters for', async () => {
+    const { storiesMatching } = await import('../../src/server/stories')
+    const absent = Array.from({ length: 120 }, (_, i) => `sty_ghost_${i}`)
+    const rows = await storiesMatching(
+      env.DB,
+      { routed: true },
+      { limit: 10, exclude: [...absent, 'sty_home'] },
+    )
+    expect(rows.map((row: StoryMeta) => row.id)).toEqual(['sty_about', 'sty_team'])
   })
 
   it('honours the filter keys no list route sends', async () => {

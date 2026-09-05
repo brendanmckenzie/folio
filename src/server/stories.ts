@@ -797,10 +797,27 @@ export async function countStories(db: FolioDb, filter?: StoryFilter): Promise<n
  * `coalesce(draft_updated_at, updated_at)` would resume after a value the job had
  * just changed.
  *
- * `exclude` is applied in **SQL** rather than by filtering the rows afterwards, so a
- * batch does `limit` documents of *work* rather than reading `limit` rows and
- * skipping most of them. It is bounded by what a person can tick off, which is what
- * makes `id not in (…)` an acceptable shape here and not in general.
+ * `exclude` is applied by **over-reading and filtering**, not by `id not in (…)`,
+ * and the difference is a live bug rather than a preference. That clause bound one
+ * parameter per exclusion and was justified as "bounded by what a person can tick
+ * off" — but that bound is `MAX_SELECTION_IDS`, 500, and D1 binds at most 100
+ * parameters per statement. Select-all with about ninety rows unticked overran the
+ * cap and failed the whole batch with `too many SQL variables`. It is the same false
+ * premise that broke `indexStatements` and `resolve()`: a limit assumed to have
+ * headroom it does not have (`src/server/db.ts`).
+ *
+ * Reading `limit + exclude.length` rows and dropping the excluded ones is exact
+ * rather than approximate: rows come back in `id` order, so any `limit` matching
+ * non-excluded rows must lie within the first `limit + exclude.length` of them. The
+ * batch still does `limit` documents of *work*; it reads at most 500 rows more to
+ * do it, which is bounded by the same constant that bounds the selection.
+ *
+ * **Rejected: chunking the `not in`.** A negative match cannot be split across
+ * statements — every exclusion has to be present in the one that filters, or a row
+ * somebody unticked comes back. **Rejected: filtering in the caller.** Then a short
+ * read means "some were excluded" as well as "the table ran out", and the walk's
+ * termination condition has to learn the difference — which is exactly the trap
+ * `asset-bulk.ts` had to design around.
  *
  * No `Page<T>`: a bulk job's cursor carries a second component that has nothing to
  * do with sorting (how many documents the job has consumed against its ceiling), so
@@ -818,15 +835,19 @@ export async function storiesMatching(
     sql.push('id > ?')
     binds.push(opts.after)
   }
-  if (opts.exclude && opts.exclude.length > 0) {
-    sql.push(`id not in (${opts.exclude.map(() => '?').join(', ')})`)
-    binds.push(...opts.exclude)
-  }
+  const excluded = new Set(opts.exclude ?? [])
   const { results } = await db
     .prepare(`select ${COLS} from stories ${whereOf(...sql)} order by id limit ?`)
-    .bind(...binds, opts.limit)
+    .bind(...binds, opts.limit + excluded.size)
     .all<StoryRow>()
-  return results.map(withState)
+
+  const out: StoryMeta[] = []
+  for (const row of results) {
+    if (excluded.has(row.id)) continue
+    out.push(withState(row))
+    if (out.length === opts.limit) break
+  }
+  return out
 }
 
 /* ------------------------------------------------------------------ search --- */

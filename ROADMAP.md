@@ -692,8 +692,16 @@ an unsorted flat list, which stops working somewhere around 15.
     binds one per value inside a larger `where`, so this one cannot be chunked into
     separate statements the way the others can — the fix is a cap on the filter,
     with a `bad_request` naming it, not a chunker.
-  - **`storiesMatching`'s `exclude`** and **`claimShare`'s presented hashes** are
-    the same shape, and both are small in every path that exists today.
+  - ~~**`storiesMatching`'s `exclude`**~~ — **fixed 2026-09-06.** It was not small
+    in every path that exists today, which is what spec 32's asset bulk runner
+    found: `MAX_SELECTION_IDS` is 500, so select-all on the Content screen with
+    ninety-odd rows unticked overran the cap and failed the batch. It now
+    over-reads by the exclusion count and filters in JavaScript, which is exact
+    because rows come back in `id` order. Chunking was not an option: a negative
+    match cannot be split across statements without letting through a row
+    somebody unticked.
+  - **`claimShare`'s presented hashes** are the same shape and genuinely small in
+    every path that exists today.
 
   None of these is speculative: each is one statement binding a list whose length
   comes from outside the function, and `test/workers/fts-smoke.test.ts` pins that
