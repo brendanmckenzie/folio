@@ -19,7 +19,7 @@ import { clampLimit, type CursorPart, decodeCursor, type Page, paginate } from '
 import { type AssetSort, DEFAULT_ASSET_SORT, type StoryMeta } from '../core/story'
 import { assetReferences, clearInboundRefStatements } from './content-index'
 import { type Direction, type Keyset, keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
-import { storiesForChunked } from './stories'
+import { storiesFor } from './stories'
 import type { FolioDb } from './db'
 
 /** Matches the Images binding's own input ceiling, so failures happen up front. */
@@ -184,13 +184,14 @@ export async function assetById(db: FolioDb, id: string): Promise<AssetRow | nul
  *
  * In `assets.ts` rather than beside `documentUsage`: this is the reader for an
  * asset, and `stories.ts` would otherwise have to import the media library to turn
- * an id into a key. It reaches the other way instead — one import of
- * `storiesForChunked`, and `stories.ts` learns nothing about assets.
+ * an id into a key. It reaches the other way instead — one import of `storiesFor`,
+ * and `stories.ts` learns nothing about assets.
  *
- * `storiesForChunked`, not `storiesFor`: outbound edges are capped at 400 rows per
- * document, but *inbound* ones are not, and a logo used on every page of a
+ * The id list is genuinely unbounded here: outbound edges are capped at 400 rows
+ * per document, but *inbound* ones are not, and a logo used on every page of a
  * 500-page site is the normal case for an asset rather than the pathological one.
- * `storiesFor` binds every id in one statement.
+ * `storiesFor` chunks, so that is its problem rather than this one's — it did not
+ * always, and the call site used to have to know.
  */
 export interface AssetUsage {
   /** Published documents using this asset. Routed first, by path; then unrouted
@@ -212,7 +213,7 @@ export async function assetUsage(db: FolioDb, key: string): Promise<AssetUsage> 
   // edges in both directions, so this should not happen on a live site — but an
   // import that wrote edges directly would otherwise put a usage with no title and
   // no URL in front of somebody about to delete a file.
-  const published = await storiesForChunked(db, from)
+  const published = await storiesFor(db, from)
   published.sort(
     (a, b) =>
       (a.path === null ? 1 : 0) - (b.path === null ? 1 : 0) ||

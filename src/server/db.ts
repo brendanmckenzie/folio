@@ -116,3 +116,71 @@ export function sessionFor(
   if (opts.write) return db.withSession(PRIMARY_FIRST)
   return db.withSession(opts.bookmark ?? REPLICA_FIRST)
 }
+
+/* ------------------------------------------------------ bound parameters --- */
+
+/**
+ * **D1 binds at most 100 parameters per statement, and 100 is the ceiling
+ * itself, not a soft limit with headroom above it.**
+ *
+ * Measured rather than taken on trust, because this repo assumed otherwise twice
+ * and both assumptions were live bugs. `d1/platform/limits` states "Maximum
+ * bound parameters per query: 100"; `test/workers/fts-smoke.test.ts` binds 1, 99
+ * and 100 successfully and gets `D1_ERROR: too many SQL variables` at 101, and
+ * again at 150, 500 and 2,000 — one error at the same offset for every size
+ * above the cap, with no degradation and no truncation. The workerd test runtime
+ * and production D1 hold the *same* number, so a statement that passes locally
+ * passes live.
+ *
+ * The cap applies **per statement, not per batch**: four statements of a hundred
+ * binds each in one `batch()` is fine. That is what makes "split it into chunks
+ * and batch them" a fix rather than a trade, and why chunking an insert does not
+ * cost a publish its transaction.
+ *
+ * **Any query binding a caller-sized list must chunk**, and the list is
+ * caller-sized more often than it looks: a document's links, a page's ancestors,
+ * a record's inbound edges, an id list off a query string. `storiesFor` and
+ * `publishedDocsByIds` chunk internally so a call site cannot forget; anything
+ * new binding `n` values should do the same rather than document a limit.
+ */
+export const D1_BIND_CAP = 100
+
+/**
+ * What a statement in this library is *planned* against — the cap less a margin.
+ *
+ * The margin is not superstition. A chunked statement is sized from its rows, and
+ * the same statement usually grows a bind or two later (a `where locale = ?`, a
+ * `limit ?`, a new column). Planning at exactly 100 means the first such addition
+ * fails at 100 rows and passes at 99, which is a bug that only appears on large
+ * documents. Ten spare parameters buy that headroom for nothing: the chunk count
+ * changes by at most one.
+ *
+ * Derived from the cap rather than written as `90`, so the two cannot drift if
+ * Cloudflare ever raises the ceiling.
+ */
+export const BIND_BUDGET = D1_BIND_CAP - 10
+
+/**
+ * How many rows of `bindsPerRow` parameters fit in one statement.
+ *
+ * Derived from `bindsPerRow` rather than hardcoded per table, so adding a column
+ * to a multi-row insert re-sizes its chunks instead of silently pushing it back
+ * over the cap. Never zero: a row wider than the whole budget still has to be
+ * written, one row per statement, and a chunk size of 0 would loop forever.
+ */
+export function rowsPerStatement(bindsPerRow: number): number {
+  return Math.max(1, Math.floor(BIND_BUDGET / Math.max(1, bindsPerRow)))
+}
+
+/**
+ * `rows` split into slices that each fit inside one statement.
+ *
+ * Empty in, empty out, so a caller can `for (const chunk of bindChunks(...))`
+ * without a length check first.
+ */
+export function bindChunks<T>(rows: readonly T[], bindsPerRow: number): T[][] {
+  const size = rowsPerStatement(bindsPerRow)
+  const out: T[][] = []
+  for (let at = 0; at < rows.length; at += size) out.push(rows.slice(at, at + size))
+  return out
+}

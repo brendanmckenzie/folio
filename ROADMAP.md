@@ -610,6 +610,39 @@ an unsorted flat list, which stops working somewhere around 15.
 
 ## Known smaller issues
 
+- **Six more queries still bind a caller-sized list in one statement, and D1's cap
+  is exactly 100.** The two that were failing in the field are fixed — `publish`
+  (`content-index.ts`'s `indexStatements`, which threw at 21 index rows or 34
+  outbound refs and took the whole publish batch with it) and `resolve()`'s
+  narrowed read (`storiesFor`, `publishedDocsByIds`, which failed a *page render*
+  past a hundred links). `server/db.ts` now carries the measured cap, a budget
+  with margin, and `bindChunks`, so the remaining ones are a mechanical fix
+  rather than a discovery. In rough order of how reachable each is:
+
+  - **A delete of a subtree wider than a hundred documents.**
+    `deleteStoryStatement` (`stories.ts`) binds the whole subtree in one
+    `delete from stories where id in (…)`, and `clearIndexStatements`,
+    `clearInboundRefStatements`, `clearSchedulesStatements` and
+    `deleteVersionsStatement` each bind it again. Deleting a section of a large
+    site is an ordinary act, so this is the one most likely to be hit next. It is
+    listed here rather than fixed because `statement` is a single
+    `D1PreparedStatement` on that function's five-part return and every one of the
+    five would want chunking together — a half-fix would move the failure to a
+    different statement in the same batch and read as fixed.
+  - **The admin's Data list at a page size above a hundred.** `indexedValuesFor`
+    (`content-index.ts`) binds one parameter per row on the page, and
+    `limitParam(…, 50, 200)` lets a caller ask for 200.
+  - **A collection filter with more than ~90 values.** `query.ts`'s `in` operator
+    binds one per value inside a larger `where`, so this one cannot be chunked into
+    separate statements the way the others can — the fix is a cap on the filter,
+    with a `bad_request` naming it, not a chunker.
+  - **`storiesMatching`'s `exclude`** and **`claimShare`'s presented hashes** are
+    the same shape, and both are small in every path that exists today.
+
+  None of these is speculative: each is one statement binding a list whose length
+  comes from outside the function, and `test/workers/fts-smoke.test.ts` pins that
+  the 101st parameter is refused with no degradation and no truncation.
+
 - **`{base}/mcp` speaks MCP revision `2026-07-28`. Done 2026-08-04, Modern-only**, and
   the spec's amendment (`platform/mcp-server.md`) carries the six non-obvious parts. Two
   are worth having on this list.

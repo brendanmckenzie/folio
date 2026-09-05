@@ -2,6 +2,7 @@ import { createExecutionContext, env } from 'cloudflare:test'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { defineBlock, defineRecord, reference, references, richtext, text } from '../../src/core'
 import type { Doc, Json } from '../../src/core/doc'
+import type { Field } from '../../src/core/fields'
 import type { DocumentType } from '../../src/core/schema'
 import { createFolio } from '../../src/server'
 import type { FolioBindings } from '../../src/server'
@@ -41,6 +42,37 @@ const officeRecord = defineRecord({
   fields: { city: text({ indexed: true }), phone: text() },
 })
 
+/**
+ * How many `indexed` fields the wide record declares, and how many link marks the
+ * linky document carries — both chosen to sit past D1's hundred-bound-parameter
+ * statement cap, which is what `indexStatements` used to fail on.
+ *
+ * `content_index` binds five parameters a row, so twenty-one rows is 105 and the
+ * publish batch used to throw `too many SQL variables` whole. `content_refs` binds
+ * three, so its threshold is thirty-four — a page with thirty-four internal links,
+ * which `pagination.md`'s edge cases call ordinary input. Both are set a little
+ * above their threshold rather than far above it: the point is that the first size
+ * that used to fail now works, not that some enormous number does.
+ */
+const WIDE_FIELDS = 24
+const MANY_LINKS = 34
+
+/**
+ * A record declaring more `indexed` fields than one D1 statement can bind values
+ * for. Generated rather than written out, because the only thing that matters
+ * about the twenty-four is that there are twenty-four of them.
+ */
+const wideFields: Record<string, Field> = Object.fromEntries(
+  Array.from({ length: WIDE_FIELDS }, (_, i) => [`f${i}`, text({ indexed: true })]),
+)
+
+const wideRecord = defineRecord({
+  name: 'recWide',
+  label: 'Wide',
+  summary: 'f0',
+  fields: wideFields,
+})
+
 const pageRoot = defineBlock({
   name: 'recPage',
   label: 'Page',
@@ -64,6 +96,7 @@ const types: DocumentType[] = [
     titleField: 'fullName',
   },
   { name: 'recOfficeType', label: 'Office', kind: 'record', root: 'recOffice', titleField: 'city' },
+  { name: 'recWideType', label: 'Wide', kind: 'record', root: 'recWide', titleField: 'f0' },
 ]
 
 const bindings = (e: Cloudflare.Env): FolioBindings => ({
@@ -74,7 +107,7 @@ const bindings = (e: Cloudflare.Env): FolioBindings => ({
 })
 
 const folio = createFolio<Cloudflare.Env>({
-  blocks: [personRecord, officeRecord, pageRoot],
+  blocks: [personRecord, officeRecord, wideRecord, pageRoot],
   types,
   bindings,
   basePath: '/folio',
@@ -609,5 +642,136 @@ describe('GET /api/search', () => {
       `/folio/api/search?limit=1&cursor=${encodeURIComponent(first.cursor ?? '')}`,
     ))!.json()) as Found
     expect(second.rows[0]?.id).not.toBe(first.rows[0]?.id)
+  })
+})
+
+/* ------------------------------------------------ D1's bound-parameter cap --- */
+
+/**
+ * **A publish must not fail because the document is large.**
+ *
+ * `indexStatements` built one multi-row insert per table, and D1 binds at most a
+ * hundred parameters per statement — exactly a hundred, with no headroom above it
+ * (`server/db.ts`'s `D1_BIND_CAP`, measured in `fts-smoke.test.ts`). At five binds
+ * per `content_index` row and three per `content_refs` row that is a whole publish
+ * batch throwing `too many SQL variables` at **21 index rows** and at **34
+ * outbound refs**, and `MAX_ROWS = 400` — the constant that was supposed to stop a
+ * statement getting big enough to fail the batch — was sized against a ceiling
+ * that does not exist.
+ *
+ * Both cases go through the real publish workflow rather than calling
+ * `indexStatements` directly: the failure was never in building the statements,
+ * it was in running them, and the thing that has to keep working is a publish.
+ */
+describe("a document past D1's hundred-parameter statement cap still publishes", () => {
+  /** Seeds the Durable Object so `publish` has a draft to read, then publishes it. */
+  const publishDoc = async (id: string, type: string, title: string, doc: Doc) => {
+    await insertRow(id, { type, path: null, title, doc })
+    const stub = env.STORY.get(env.STORY.idFromName(id)) as unknown as {
+      getOrInit: (d: Doc) => Promise<Doc>
+    }
+    await stub.getOrInit(doc)
+    return (await send(`/folio/api/story/${id}/publish`, 'POST'))!
+  }
+
+  const countRows = async (table: 'content_index' | 'content_refs', id: string) => {
+    const column = table === 'content_index' ? 'story_id' : 'from_story'
+    const row = await env.DB.prepare(`select count(*) as n from ${table} where ${column} = ?`)
+      .bind(id)
+      .first<{ n: number }>()
+    return row?.n ?? 0
+  }
+
+  it(`writes ${WIDE_FIELDS} content_index rows, where 21 used to fail the whole batch`, async () => {
+    const id = 'rec_wide_idx'
+    const doc = one(
+      'w',
+      'recWide',
+      Object.fromEntries(Array.from({ length: WIDE_FIELDS }, (_, i) => [`f${i}`, `value ${i}`])),
+    )
+
+    const res = await publishDoc(id, 'recWideType', 'Wide', doc)
+    expect(res.status).toBe(200)
+
+    // Every row, not merely "it did not throw": a chunker that dropped its last
+    // slice would also publish cleanly.
+    expect(await countRows('content_index', id)).toBe(WIDE_FIELDS)
+    const values = await env.DB.prepare(
+      'select field, text_value as text from content_index where story_id = ? order by field',
+    )
+      .bind(id)
+      .all<{ field: string; text: string }>()
+    expect(values.results).toHaveLength(WIDE_FIELDS)
+    expect(values.results.find((r) => r.field === `f${WIDE_FIELDS - 1}`)?.text).toBe(
+      `value ${WIDE_FIELDS - 1}`,
+    )
+
+    await send(`/folio/api/stories/${id}`, 'DELETE')
+  })
+
+  it(`writes ${MANY_LINKS} content_refs rows, where 34 used to fail the whole batch`, async () => {
+    const id = 'rec_many_links'
+    // Link marks inside richtext, which is what "a page with thirty-four internal
+    // links" actually is: a Folio-native mark carries a structured `attrs.link`
+    // and no href at all (`core/refs.ts`).
+    const doc = one('lk', 'recPerson', {
+      fullName: 'Linky Person',
+      bio: {
+        type: 'doc',
+        content: Array.from({ length: MANY_LINKS }, (_, i) => ({
+          type: 'paragraph',
+          content: [
+            {
+              type: 'text',
+              text: `see ${i}`,
+              marks: [{ type: 'link', attrs: { link: { kind: 'story', id: `rec_target_${i}` } } }],
+            },
+          ],
+        })),
+      },
+    })
+
+    const res = await publishDoc(id, 'recPersonType', 'Linky Person', doc)
+    expect(res.status).toBe(200)
+
+    expect(await countRows('content_refs', id)).toBe(MANY_LINKS)
+    // The targets, so a chunk boundary cannot silently swallow one: the last id is
+    // in the final slice and the 31st is the first row of the second.
+    const rows = await env.DB.prepare(
+      'select to_id as target, kind from content_refs where from_story = ?',
+    )
+      .bind(id)
+      .all<{ target: string; kind: string }>()
+    const targets = new Set(rows.results.map((r) => r.target))
+    for (let i = 0; i < MANY_LINKS; i++) expect(targets.has(`rec_target_${i}`)).toBe(true)
+    expect(rows.results.every((r) => r.kind === 'link')).toBe(true)
+
+    await send(`/folio/api/stories/${id}`, 'DELETE')
+  })
+
+  /**
+   * The same two tables through `POST /folio/reindex`, which is the other caller of
+   * `indexStatements` and batches **every document in the sweep together**. One
+   * oversized document used to take the whole sweep down with it, so a site could
+   * not reindex its way out of the problem either.
+   */
+  it('reindexes a document that projects past the cap, without failing the sweep', async () => {
+    const id = 'rec_wide_reindex'
+    await insertRow(id, {
+      type: 'recWideType',
+      path: null,
+      title: 'Wide Reindex',
+      doc: one(
+        'w2',
+        'recWide',
+        Object.fromEntries(Array.from({ length: WIDE_FIELDS }, (_, i) => [`f${i}`, `swept ${i}`])),
+      ),
+    })
+
+    const report = await folio.reindex(env, { batch: 200 })
+    expect(report.documents).toBeGreaterThan(0)
+    expect(await countRows('content_index', id)).toBe(WIDE_FIELDS)
+
+    await send(`/folio/api/stories/${id}`, 'DELETE')
   })
 })

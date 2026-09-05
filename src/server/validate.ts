@@ -838,7 +838,7 @@ export function requireCursor(raw: string | undefined): void {
 /**
  * How many ids or paths one batch request may name.
  *
- * `storiesForChunked` will chunk any number of them, so this is not a technical
+ * `storiesFor` will chunk any number of them, so this is not a technical
  * bound — it is the bound on how much work one request may ask for. A document
  * with three hundred links is legitimate; three thousand ids in a query string is
  * a client with a bug or a URL somebody built by accident, and answering it would

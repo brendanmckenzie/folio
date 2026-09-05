@@ -26,7 +26,7 @@ import {
   listStoriesFlat,
   listStoryLevel,
   searchStories,
-  storiesForChunked,
+  storiesFor,
 } from '../stories'
 import type { FolioEnv } from '../types'
 import {
@@ -135,18 +135,14 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const ids = idListQuery(c.req.query('ids'))
     const paths = pathListQuery(c.req.query('paths'))
     if (ids.length > 0 || paths.length > 0) {
-      const rows = await storiesForChunked(db, ids, paths)
+      const rows = await storiesFor(db, ids, paths)
       // `?ancestors=1` pulls each row's breadcrumb chain in the same request.
       // Two queries rather than one, and worth it: the caller cannot compute
       // `ancestorPaths` before it knows the row's `path`, so the alternative is
       // a second round trip for something the server already has in hand.
       const chain =
         c.req.query('ancestors') === '1'
-          ? await storiesForChunked(
-              db,
-              [],
-              [...new Set(rows.flatMap((row) => ancestorPaths(row.path)))],
-            )
+          ? await storiesFor(db, [], [...new Set(rows.flatMap((row) => ancestorPaths(row.path)))])
           : []
       const merged = new Map(rows.map((row) => [row.id, row]))
       for (const row of chain) merged.set(row.id, row)

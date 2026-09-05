@@ -46,7 +46,7 @@ import {
 } from './redirects'
 import type { FolioMiss } from './types'
 import { clearSchedulesStatements } from './schedules'
-import type { FolioDb } from './db'
+import { bindChunks, type FolioDb } from './db'
 
 const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18n,
               published_at as publishedAt, unpublished_at as unpublishedAt,
@@ -176,9 +176,35 @@ export async function listStories(
 /**
  * The story rows a narrowed resolution needs: some by id (a link's or a
  * reference's target), some by path (the rendered story's ancestors, for
- * breadcrumbs) — in **one** query, which is the whole reason ancestors are
- * addressed by path rather than walked up `parent_id`
+ * breadcrumbs) — in one query where they fit in one, which is the whole reason
+ * ancestors are addressed by path rather than walked up `parent_id`
  * (`../content-model/collections.md` decision 6, and `ancestorPaths`).
+ *
+ * **Chunked internally, and there is no unchunked version to reach for.** Every
+ * input this takes is caller-sized: a document with three hundred internal links
+ * is legitimate (`pagination.md`'s edge cases), an id list off `?ids=` is
+ * whatever a client sent, and the inbound edges of a record referenced by every
+ * page on the site are as many as there are pages. D1 refuses the 101st bound
+ * parameter on a statement (`db.ts`'s `D1_BIND_CAP`), so binding a caller-sized
+ * list in one statement is a render that fails on exactly the documents that
+ * matter most.
+ *
+ * This used to be two functions — this one, and a `storiesForChunked` wrapping
+ * it — with four call sites carrying a comment explaining which to pick. Three
+ * others did not, and two of those were the narrowed `resolve()` read: the page
+ * render itself. A footgun with a warning label on four of seven call sites is
+ * still a footgun, so the label is gone and so is the gun. One function, safe for
+ * any size of input.
+ *
+ * **Ids and paths are packed together, not chunked separately.** The ordinary
+ * call is a handful of links plus a breadcrumb, and splitting by kind would make
+ * that two round trips where one does — `read-session.test.ts` pins the single
+ * `prepare` that pass one of `resolve()` costs.
+ *
+ * Rows come back deduplicated and in no particular order: an id and a path can
+ * name the same row (a breadcrumb's leaf is its own ancestor chain's last entry),
+ * a batch by id is not a page, and every consumer looks rows up by id rather than
+ * reading them in sequence.
  *
  * Empty in, empty out: `in ()` is not valid SQL, and a document with no links,
  * no references and no ancestors should cost no read at all.
@@ -189,56 +215,38 @@ export async function storiesFor(
   paths: readonly string[] = [],
 ): Promise<StoryMeta[]> {
   if (ids.length === 0 && paths.length === 0) return []
-  const clauses: string[] = []
-  if (ids.length > 0) clauses.push(`id in (${ids.map(() => '?').join(', ')})`)
-  if (paths.length > 0) clauses.push(`path in (${paths.map(() => '?').join(', ')})`)
-  const { results } = await db
-    .prepare(`select ${COLS} from stories where ${clauses.join(' or ')}`)
-    .bind(...ids, ...paths)
-    .all<StoryRow>()
-  return results.map(withState)
-}
 
-/**
- * How many bound parameters one `storiesFor` call may carry.
- *
- * D1's own ceiling is higher; this is deliberately conservative because the
- * caller's input is not — a document with three hundred internal links is
- * legitimate (`pagination.md`'s edge cases), and so is a breadcrumb over a deep
- * path. The chunk size is the constraint's, not the caller's.
- */
-const BIND_CHUNK = 100
+  // One bind per term whichever column it constrains, so the two lists share a
+  // single budget rather than each getting one of their own.
+  const terms: Term[] = [
+    ...ids.map((id) => ['id', id] as const),
+    ...paths.map((path) => ['path', path] as const),
+  ]
 
-/**
- * `storiesFor`, chunked, deduplicated by id, and safe for any size of input.
- *
- * This is what `GET {base}/api/stories?ids=` answers with, and the reason it is
- * not just `storiesFor`: the route's input arrives off a query string, so its
- * length is whatever a client sent. Rows come back in no particular order — a
- * batch by id is not a page, and its consumer looks rows up by id rather than
- * reading them in sequence.
- */
-export async function storiesForChunked(
-  db: FolioDb,
-  ids: readonly string[],
-  paths: readonly string[] = [],
-): Promise<StoryMeta[]> {
-  const batches: Promise<StoryMeta[]>[] = []
-  for (let at = 0; at < ids.length; at += BIND_CHUNK) {
-    batches.push(storiesFor(db, ids.slice(at, at + BIND_CHUNK)))
-  }
-  for (let at = 0; at < paths.length; at += BIND_CHUNK) {
-    batches.push(storiesFor(db, [], paths.slice(at, at + BIND_CHUNK)))
-  }
+  const pages = await Promise.all(
+    bindChunks(terms, 1).map(async (chunk) => {
+      const chunkIds = chunk.filter(([column]) => column === 'id').map(([, value]) => value)
+      const chunkPaths = chunk.filter(([column]) => column === 'path').map(([, value]) => value)
+      const clauses: string[] = []
+      if (chunkIds.length > 0) clauses.push(`id in (${chunkIds.map(() => '?').join(', ')})`)
+      if (chunkPaths.length > 0) clauses.push(`path in (${chunkPaths.map(() => '?').join(', ')})`)
+      const { results } = await db
+        .prepare(`select ${COLS} from stories where ${clauses.join(' or ')}`)
+        .bind(...chunkIds, ...chunkPaths)
+        .all<StoryRow>()
+      return results
+    }),
+  )
+
   const seen = new Map<string, StoryMeta>()
-  for (const rows of await Promise.all(batches)) {
-    // An id and a path can name the same row — a breadcrumb's leaf is its own
-    // ancestor chain's last entry — so the dedupe is not defensive, it is the
-    // normal case.
-    for (const row of rows) seen.set(row.id, row)
+  for (const rows of pages) {
+    for (const row of rows) seen.set(row.id, withState(row))
   }
   return [...seen.values()]
 }
+
+/** One `where` term of `storiesFor`: the column it constrains, and its one bind. */
+type Term = readonly ['id' | 'path', string]
 
 /**
  * `id` plus every descendant, read from the database instead of filtered out of
@@ -963,22 +971,19 @@ export async function documentUsage(db: FolioDb, id: string): Promise<DocumentUs
   if (rows.length === 0) return { published: [], total: 0, links: 0, references: 0 }
 
   /**
-   * `storiesForChunked`, not `storiesFor` — and the difference is a real bug rather
-   * than a tidy-up.
+   * The id list here is unbounded, and that is worth naming even though
+   * `storiesFor` now chunks by itself.
    *
-   * `storiesFor` binds every id in one statement. Outbound edges are capped at
-   * `MAX_ROWS` (400) per document by `indexStatements`, so the *from* side of this
-   * table is bounded; **inbound edges are not capped by anything.** A record every
-   * page on the site references — an office in a footer, a person in a byline — has
-   * as many inbound edges as there are pages, and this is the reader behind a delete
-   * confirmation, which is exactly when somebody is looking at a heavily referenced
-   * document. Past D1's bind limit the query fails, so the dialog reports an error
-   * on the one document where the warning matters most.
-   *
-   * Found by the agent building asset usage, which hit the same shape and reached for
-   * the chunked reader from the start.
+   * Outbound edges are capped at `MAX_ROWS` (400) per document by
+   * `indexStatements`, so the *from* side of this table is bounded; **inbound
+   * edges are not capped by anything.** A record every page on the site
+   * references — an office in a footer, a person in a byline — has as many
+   * inbound edges as there are pages, and this is the reader behind a delete
+   * confirmation, which is exactly when somebody is looking at a heavily
+   * referenced document. This read used to have to opt in to chunking, and the
+   * one that would have failed loudest was the one that mattered most.
    */
-  const sources = await storiesForChunked(db, [...new Set(rows.map((r) => r.from))])
+  const sources = await storiesFor(db, [...new Set(rows.map((r) => r.from))])
   const byId = new Map(sources.map((s) => [s.id, s]))
 
   const published: UsageRef[] = []
@@ -1128,23 +1133,37 @@ export async function publishedDoc(db: FolioDb, path: string): Promise<Doc | nul
 
 /**
  * Published documents for a set of story ids, for resolving `reference` fields on
- * a live page. One query, and never touches a Durable Object. Ids with nothing
- * published are simply absent, which the renderer treats as unresolvable.
+ * a live page. Never touches a Durable Object. Ids with nothing published are
+ * simply absent, which the renderer treats as unresolvable.
+ *
+ * **Chunked, for the same reason `storiesFor` is**: this is the other half of
+ * pass two of a published `resolve()`, and its input is the document's own
+ * `reference` targets across every locale plus one id per global — caller-sized,
+ * and past a hundred it was one statement over D1's bind cap and a page that
+ * fails to render. One query for the ordinary document, which is what the
+ * concurrency assertion in `read-session.test.ts` counts.
  */
 export async function publishedDocsByIds(
   db: FolioDb,
   ids: readonly string[],
 ): Promise<Record<string, Doc>> {
   if (ids.length === 0) return {}
-  const placeholders = ids.map(() => '?').join(', ')
-  const { results } = await db
-    .prepare(`select id, published_doc from stories where id in (${placeholders})`)
-    .bind(...ids)
-    .all<{ id: string; published_doc: string | null }>()
+  const pages = await Promise.all(
+    bindChunks(ids, 1).map(async (chunk) => {
+      const placeholders = chunk.map(() => '?').join(', ')
+      const { results } = await db
+        .prepare(`select id, published_doc from stories where id in (${placeholders})`)
+        .bind(...chunk)
+        .all<{ id: string; published_doc: string | null }>()
+      return results
+    }),
+  )
 
   const out: Record<string, Doc> = {}
-  for (const row of results) {
-    if (row.published_doc) out[row.id] = JSON.parse(row.published_doc) as Doc
+  for (const rows of pages) {
+    for (const row of rows) {
+      if (row.published_doc) out[row.id] = JSON.parse(row.published_doc) as Doc
+    }
   }
   return out
 }

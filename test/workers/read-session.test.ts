@@ -1,6 +1,6 @@
 import { createExecutionContext, env } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
-import { defineBlock, reference, text } from '../../src/core'
+import { defineBlock, reference, richtext, text } from '../../src/core'
 import type { Doc } from '../../src/core/doc'
 import { createFolio } from '../../src/server'
 import type { FolioBindings } from '../../src/server'
@@ -30,6 +30,8 @@ const page = defineBlock({
     title: text({ label: 'Title', required: true }),
     // Something for `resolve` to pull in, so its second pass has work to do.
     related: reference({ label: 'Related', types: ['page'] }),
+    // Somewhere to put more internal links than one D1 statement can bind.
+    body: richtext({ label: 'Body' }),
   },
   render: () => null,
 })
@@ -445,5 +447,98 @@ describe('reader.page()', () => {
   it('refuses a locale the site never declared, exactly as published does', async () => {
     await insertPage('sty_rs_p5', 'rs-p5', 'Page Five', pageDoc('Five'))
     await expect(makeFolio().reader(env).page('rs-p5', { locale: 'xx' })).resolves.toBeNull()
+  })
+})
+
+/* ------------------------------------------------ D1's bound-parameter cap --- */
+
+/**
+ * **A page render must not fail because the document links to a lot of pages.**
+ *
+ * Pass one of `resolve()` binds the document's link targets, its reference
+ * targets, one id per global and its own ancestor paths — all of it in one
+ * statement, and all of it caller-sized. D1 binds at most a hundred parameters
+ * per statement (`server/db.ts`'s `D1_BIND_CAP`), so a document with more than a
+ * hundred of them used to throw `too many SQL variables` and the *page* failed,
+ * not the query. `pagination.md`'s edge cases name a document with three hundred
+ * internal links as legitimate input.
+ *
+ * `storiesFor` chunks internally now, which is why there is no longer a
+ * `storiesForChunked` beside it for a call site to forget to reach for. This
+ * pins both halves: that every link resolves, and that the fan-out really did
+ * happen rather than the input having quietly been truncated to fit.
+ */
+describe('resolve(): a document with more links than one statement can bind', () => {
+  const LINKS = 120
+
+  /** A page whose prose links at every id, as Folio-native marks with no href. */
+  function linkingDoc(ids: readonly string[]): Doc {
+    return {
+      root: 'root0000',
+      bloks: {
+        root0000: {
+          uid: 'root0000',
+          type: 'page',
+          parent: null,
+          slot: null,
+          order: 'a0',
+          data: {
+            title: 'Index',
+            body: {
+              type: 'doc',
+              content: ids.map((id, i) => ({
+                type: 'paragraph',
+                content: [
+                  {
+                    type: 'text',
+                    text: `see ${i}`,
+                    marks: [{ type: 'link', attrs: { link: { kind: 'story', id } } }],
+                  },
+                ],
+              })),
+            },
+          },
+        },
+      },
+    }
+  }
+
+  it('resolves every one of them, over as many statements as it takes', async () => {
+    const ids = Array.from({ length: LINKS }, (_, i) => `sty_rs_many_${i}`)
+    // One statement per row rather than a multi-row insert: the seed would other-
+    // wise hit the very cap this test is about.
+    await env.DB.batch(
+      ids.map((id, i) =>
+        env.DB.prepare(
+          `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at,
+                                published_doc, published_at)
+           values (?, 'page', null, ?, ?, 'a0', ?, ?, ?, ?)`,
+        ).bind(
+          id,
+          `rs-many-${i}`,
+          `rs-many-${i}`,
+          `Many ${i}`,
+          Date.now(),
+          JSON.stringify(pageDoc(`Many ${i}`)),
+          Date.now(),
+        ),
+      ),
+    )
+
+    const spy = spyOn(env.DB)
+    const folio = makeFolio(spy.db)
+    const resolution = await folio.resolve(env, linkingDoc(ids))
+
+    // Not one missing, and none of them broken: a link mark whose target is absent
+    // from the story map renders as unstyled text (`core/refs.ts`).
+    ids.forEach((id, n) => {
+      expect(resolution.stories[id]?.url).toBe(`/rs-many-${n}`)
+    })
+    expect(Object.keys(resolution.stories)).toHaveLength(LINKS)
+
+    // Two statements, not one and not a hundred and twenty: the chunker packs a
+    // budget's worth into each. A single `prepare` here would mean the id list had
+    // been truncated rather than chunked.
+    expect(spy.prepares).toBe(2)
   })
 })

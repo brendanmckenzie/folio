@@ -19,7 +19,7 @@ import { indexRowsFor, type IndexRow } from '../core/index-projection'
 import type { LocaleConfig } from '../core/locales'
 import { outboundRefs, type OutboundRef } from '../core/refs'
 import type { DocumentType, SchemaIndex } from '../core/schema'
-import type { FolioDb } from './db'
+import { bindChunks, type FolioDb } from './db'
 
 /** What one document projects to. Computed by `contentProjection`, written by `indexStatements`. */
 export interface ContentProjection {
@@ -47,12 +47,35 @@ export function contentProjection(
 }
 
 /**
- * A cap on how many rows one document may contribute, so a hand-written schema
- * marking forty fields indexed across six locales cannot produce a single SQL
- * statement large enough to fail the whole publish batch. Generously above any
- * real projection: five indexed fields across four locales is twenty rows.
+ * A cap on how many rows one document may contribute.
+ *
+ * **What this used to guard against, it never guarded against.** The comment here
+ * said 400 rows kept one document from producing "a single SQL statement large
+ * enough to fail the whole publish batch", and it was sized against a D1
+ * bound-parameter ceiling that does not exist: the real cap is exactly 100 per
+ * statement (`db.ts`'s `D1_BIND_CAP`), so at five binds per index row and three
+ * per ref row this failed the whole publish batch at **21 index rows** and at
+ * **34 outbound refs** — a page with thirty-four internal links, which
+ * `pagination.md`'s edge cases call legitimate input. `MAX_ROWS = 400` was not a
+ * generous margin above the danger; it was four hundred rows *past* it.
+ *
+ * The statement size is now the chunker's problem, not this constant's, so what
+ * is left for `MAX_ROWS` to mean is the honest thing it always described: a bound
+ * on how much one document may contribute to the publish batch **at all**. A
+ * hand-written schema marking forty fields indexed across six locales is 240 rows
+ * and a dozen statements; ten thousand would be a batch nobody meant to write.
+ * Rows past it are dropped, exactly as before, and dropping them is now the only
+ * effect it has rather than a second line of defence behind a broken first.
+ *
+ * Unchanged at 400 because the number was never the problem, and two other
+ * comments quote it as the bound on a document's outbound edges
+ * (`assets.ts`, `documentUsage`).
  */
 const MAX_ROWS = 400
+
+/** Bound parameters per row of each multi-row insert below, for `bindChunks`. */
+const INDEX_BINDS = 5
+const REFS_BINDS = 3
 
 /**
  * The index and ref rows for one story, replacing whatever is there.
@@ -62,6 +85,16 @@ const MAX_ROWS = 400
  * three indexed fields across two locales is six rows. Bound parameters
  * throughout — nothing here is interpolated, including the field name, which is a
  * value in this schema rather than a column.
+ *
+ * **Several inserts per table rather than one, sized by `bindChunks` from the
+ * binds each row costs.** D1 refuses the 101st bound parameter on a statement,
+ * and both of these bind a caller-sized list. Chunking is what this file's header
+ * rule demands rather than a departure from it: the extra statements join the
+ * *same* returned array and therefore the same batch, so a publish is still one
+ * transaction and the index still cannot describe a document that is not
+ * published. The chunk size comes off `INDEX_BINDS` / `REFS_BINDS` rather than a
+ * number written here, so adding a column to either insert re-sizes its chunks
+ * instead of quietly putting it back over the cap.
  */
 export function indexStatements(
   db: FolioDb,
@@ -73,36 +106,36 @@ export function indexStatements(
     db.prepare('delete from content_refs where from_story = ?').bind(storyId),
   ]
 
-  const index = projection.index.slice(0, MAX_ROWS)
-  if (index.length > 0) {
-    const values = index.map(() => '(?, ?, ?, ?, ?)').join(', ')
+  for (const chunk of bindChunks(projection.index.slice(0, MAX_ROWS), INDEX_BINDS)) {
+    const values = chunk.map(() => '(?, ?, ?, ?, ?)').join(', ')
     out.push(
       db
         .prepare(
           `insert into content_index (story_id, locale, field, text_value, num_value)
            values ${values}`,
         )
-        .bind(...index.flatMap((r) => [storyId, r.locale, r.field, r.text, r.num])),
+        .bind(...chunk.flatMap((r) => [storyId, r.locale, r.field, r.text, r.num])),
     )
   }
 
-  const refs = projection.refs.slice(0, MAX_ROWS)
-  if (refs.length > 0) {
-    // `or ignore`, not a plain insert: the same target can legitimately appear
-    // twice in one document (two links to the same page), and the primary key
-    // makes the second row a duplicate rather than a second fact.
-    //
-    // `to_id` holds whatever `kind` says: a story id for `link` and `reference`,
-    // an R2 object key for `asset` (`migrations/0002_asset_refs.sql`). Asset rows
-    // land in the same batch as everything else here, which is the property this
-    // file's header is about — the index can never describe a document that is not
-    // published, and that has to be as true of "which pages use this photograph"
-    // as it is of "which pages reference this record".
-    const values = refs.map(() => '(?, ?, ?)').join(', ')
+  // `or ignore`, not a plain insert: the same target can legitimately appear
+  // twice in one document (two links to the same page), and the primary key
+  // makes the second row a duplicate rather than a second fact. It also makes
+  // chunking free of a new hazard — a duplicate split across two chunks is
+  // ignored by the second statement exactly as it would have been by the first.
+  //
+  // `to_id` holds whatever `kind` says: a story id for `link` and `reference`,
+  // an R2 object key for `asset` (`migrations/0002_asset_refs.sql`). Asset rows
+  // land in the same batch as everything else here, which is the property this
+  // file's header is about — the index can never describe a document that is not
+  // published, and that has to be as true of "which pages use this photograph"
+  // as it is of "which pages reference this record".
+  for (const chunk of bindChunks(projection.refs.slice(0, MAX_ROWS), REFS_BINDS)) {
+    const values = chunk.map(() => '(?, ?, ?)').join(', ')
     out.push(
       db
         .prepare(`insert or ignore into content_refs (from_story, to_id, kind) values ${values}`)
-        .bind(...refs.flatMap((r) => [storyId, r.to, r.kind])),
+        .bind(...chunk.flatMap((r) => [storyId, r.to, r.kind])),
     )
   }
 

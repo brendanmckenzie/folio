@@ -42,7 +42,7 @@ import type { BulkAction, BulkSelection, FilterSelection, StoryMeta } from '../c
 import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from './documents'
 import { FolioError, rethrow } from './errors'
 import { publish, type PublishDeps, unpublish } from './publish'
-import { countStories, storiesForChunked, storiesMatching } from './stories'
+import { countStories, storiesFor, storiesMatching } from './stories'
 import type { FolioDb } from './db'
 
 /** How many documents one call acts on before handing back a cursor. */
@@ -378,7 +378,7 @@ async function filterBatch(
  * documents and doing some of them twice, and one of the five actions is not
  * idempotent.
  *
- * `consumed` is the *slice* length rather than the row count: `storiesForChunked`
+ * `consumed` is the *slice* length rather than the row count: `storiesFor`
  * omits an id with no row behind it, so counting rows would read a stale id as the
  * end of the list. The gap is filled with `null`, which the loop reports per action.
  */
@@ -389,7 +389,7 @@ async function idBatch(
   limit: number,
 ): Promise<Batch> {
   const slice = ids.slice(seen, seen + limit)
-  const found = new Map((await storiesForChunked(db, slice)).map((row) => [row.id, row]))
+  const found = new Map((await storiesFor(db, slice)).map((row) => [row.id, row]))
   return {
     rows: slice.map((id) => found.get(id) ?? null),
     consumed: slice.length,
