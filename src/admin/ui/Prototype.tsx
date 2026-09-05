@@ -7,6 +7,7 @@ import {
   type SchemaIndex,
 } from '../../core/schema'
 import { DEFAULT_FLAT_SORT, type FlatSort, type StoryMeta } from '../../core/story'
+import { onUnauthorized, send, signInUrl } from '../api'
 import { actorLabel, fetchMe, type Me, OPEN } from '../me'
 import { Kitchen } from './Kitchen'
 import type { MenuItem } from './Menu'
@@ -154,6 +155,25 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
       live = false
     }
   }, [boot.apiBase, boot.base])
+
+  /**
+   * A 401 is a navigation, not a toast (`admin/api.ts`). Registered here rather than
+   * in `main.tsx` because only `/me`'s answer says whether this deployment has
+   * sessions at all: under `auth: 'open'` a 401 cannot happen and the handler stays
+   * null. `next` is the page the person was on, so the login page brings them back
+   * to it rather than to the root of the CMS.
+   */
+  useEffect(() => {
+    onUnauthorized(
+      me.mode === 'session'
+        ? () => {
+            const here = window.location.pathname + window.location.search
+            window.location.assign(signInUrl(me.loginUrl, here))
+          }
+        : null,
+    )
+    return () => onUnauthorized(null)
+  }, [me])
 
   const types = manifest?.types ?? []
   const schema = useMemo(() => (manifest ? indexManifest(manifest) : {}), [manifest])
@@ -310,18 +330,27 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
   const search = useSearch(boot.apiBase, palette)
   const actions = usePaletteActions({ groups, found: search.rows, mount: boot.base, go, label })
 
+  /**
+   * The user menu. One item, because who you are is the trigger and the only thing
+   * to *do* about it is leave. The kitchen sink used to be here too; it is a dev
+   * surface and still answers at `{base}/ui`, but a link to it is not something an
+   * editor should find under their own name.
+   *
+   * Revoke first, navigate regardless: `POST /api/logout` clears both cookie names
+   * even for a session that is already dead server-side, so there is no answer that
+   * should leave the browser in the admin. No `auth: 'open'` guard: `TopBar` draws
+   * "Not signed in" instead of this menu when there is no actor.
+   */
   const user: MenuItem[] = [
-    { id: 'ui', label: 'Design system', run: () => go({ name: 'ui' }) },
     {
       id: 'signout',
       label: 'Sign out',
       danger: true,
-      disabled: me.mode === 'open',
-      reason: 'This deployment has no accounts',
-      // Deliberately a navigation rather than a POST: the prototype does not
-      // write, and a sign-out that half-worked would be a confusing way to find
-      // that out.
-      run: () => setNotice('Sign out is wired up with the Access port'),
+      run: () => {
+        void send(`${boot.apiBase}/logout`, 'POST').finally(() => {
+          window.location.assign(me.loginUrl)
+        })
+      },
     },
   ]
 
