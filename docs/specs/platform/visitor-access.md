@@ -3,7 +3,7 @@
 > **Group:** platform
 > **Build order:** 31
 > **Size:** M
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** none
 > **Build sequence:** 1 of 4 — 31 → 30 → 28 → 29 (owner, 2026-09-05). The **Build order** above is this spec's identity, not its place in the queue.
@@ -756,3 +756,64 @@ alternatives on the table and rejected: requiring every page root to declare the
 decision taken twice rather than an oversight.
 
 **Build order: this spec is first of the four**, ahead of 30, then 28, then 29.
+
+## Implementation notes
+
+Built 2026-09-05, all four phases, and the plan held throughout: `gate` splits
+*who* from *may*, Folio decides "ungated" itself before calling anything, a
+denial redacts rather than nulls, and both non-public outcomes are
+`private, no-store`. Nothing in the architecture decisions was overturned.
+
+**Four divergences from the plan, all narrower than a design change:**
+
+- **`ResolvedGate` nests the host's config under a `config` key** rather than
+  spreading it — `{ config: FolioGate<unknown>, roots, types }` — mirroring
+  `ResolvedAuth` exactly as decision 8 said it would, so there is one place the
+  gate's own keys live and no chance of `roots`/`types` shadowing one of them.
+  Both sets are `ReadonlySet<string>`, not the plain `Set` the architecture
+  decision sketched, for the same reason every other precomputed set in
+  `FolioRuntime` is read-only after construction.
+- **`validateGate` reuses `isIndexableKind` from `core/index-projection`**
+  rather than re-deriving "the five scalar kinds" as its own check. One
+  definition of the set, so a future sixth indexable kind cannot update the
+  index projection and leave the gate's own validator refusing it.
+- **Decision 7's catch is two `try`/`catch` blocks, not one.** `visitor` and
+  `allows` are awaited in separate `try`s, each logging its own
+  `'folio: gate.visitor threw; denying'` / `'folio: gate.allows threw;
+  denying'`, so an outage log names which half of the contract broke rather
+  than leaving an operator to guess between "the IdP is down" and "the
+  membership check itself has a bug".
+- **Several Ground truth line numbers were stale by the time phase 3
+  landed**, exactly as this run's briefing warned they might be — `visitorOnce`
+  and `accessFor` are new functions inserted ahead of the header rule, so
+  `index.tsx:518-520` (the header rule Ground truth pointed at) is
+  `index.tsx:630-633` now. Worked from what is actually there rather than the
+  cited numbers; nothing here changes the design those citations were
+  supporting.
+
+**Phase 4's one real find: the `/archive` list-filter example needed
+`insightPage` to declare the gate field too, not only `page`.** The plan named
+`where: [{ field: 'access', op: 'eq', value: 'public' }]` as the example filter
+on the demo's `/archive` route, which lists `insight` documents. `insightPage`
+is not one of the roots this spec's checkpoint 3 requires to declare the
+field — a root without it is public by design — but `eq` compiles to an
+`exists` subquery against `content_index` (`server/query.ts`'s `wherePredicate`),
+and a type that never writes a `content_index` row for `access` fails that
+`exists` for every document, forever. Adding the filter without also giving
+`insightPage` the field would have made `/archive` return zero results
+permanently, silently, including in `scripts/collections-test.mjs`'s own
+`archive.total > 0` assertion — caught by reading `wherePredicate` and then
+confirming empirically against a live dev server, not by inspection alone. The
+fix declares `access` on `insightPage` exactly as it is on `page` (`Everyone`
+first, so `defaultValue(select)` keeps every existing and future insight
+public by default), which is outside this phase's originally assigned file
+list (`examples/demo/src/blocks/insight.tsx`) but was the only way to make the
+assigned instruction true rather than cosmetic. `scripts/gate-test.mjs` now
+exercises the distinction directly: a gated insight is excluded from
+`/archive` and a public one is not, alongside the paywall/body assertions the
+spec's own end-to-end list named.
+
+Deferred: nothing. The demo wires it end to end
+(`scripts/gate-test.mjs`, 12/12 passing against a live dev server), so the
+contract has a consumer, per `draft-mode.md` phase 4's reasoning for why that
+matters.

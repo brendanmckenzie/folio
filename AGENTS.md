@@ -86,17 +86,30 @@ Worker entry. In your framework's loader (or handler, or controller):
 
 ```tsx
 const r = folio.reader(env, req)                  // one D1 session per request
-const page = await r.page(path, { locale })       // doc + story + resolution + headers
+const page = await r.page(path, { locale })       // doc + story + resolution + access + headers
 if (!page) {
   const miss = await r.miss(path)                 // redirect + state, one round trip
   if (miss.kind === 'redirect') return Response.redirect(miss.to, miss.status)
   return new Response('Not found', { status: miss.kind === 'gone' ? 410 : 404 })
 }
 return html(
-  <YourLayout>{folio.render(page.doc, { resolution: page.resolution })}</YourLayout>,
-  page.headers,                                   // no-store on a draft, tags on a page
+  <YourLayout>
+    {folio.render(page.doc, { resolution: page.resolution })}
+    {/* Only reachable at all if `createFolio` declared `gate` — otherwise
+        `page.access` is always 'public'. On 'denied', `page.doc` is already
+        the redacted document (root kept, body dropped), so this render is
+        unchanged; add your own paywall where the body was. */}
+    {page.access === 'denied' ? <YourPaywall /> : null}
+  </YourLayout>,
+  page.headers,                                   // no-store on a draft or a gated page, tags on a public one
 )
 ```
+
+**A gated page is `private, no-store` whether it answers `granted` or
+`denied`** — see "Visitor access" in `README.md`. `page.access` is the whole
+security property: `cacheVerdictFor` has no opinion on your own route, so this
+value is the only thing keeping members-only content out of a shared cache
+under its real URL.
 
 **Always `folio.reader(env, req)` for a page, never the top-level
 `folio.published(env, …)`.** A render makes three or four reads, and a reader

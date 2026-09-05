@@ -594,9 +594,10 @@ serve while signed out.
   `access_level`, roles, OTP login). It attaches in two places when wanted: a field
   on the root block, which `document-types.md` already makes per-type, and a host
   check before `folio.published()`. Deliberately not smuggled into a CMS-auth spec.
-  *2026-09-05:* drafted as spec 31, `../platform/visitor-access.md`, in exactly
-  that shape — the check moved inside `reader.page()` so the cache headers cannot
-  be got wrong.
+  *2026-09-05:* spec 31, `../platform/visitor-access.md` — **done**, in exactly
+  that shape: a `gate` config key names the field and two host predicates,
+  `visitor` and `allows`, consulted inside `reader.page()` so the cache headers
+  cannot be got wrong.
 - **Per-story and per-branch permissions.** Needs a way to name a set of stories;
   revisit after `collections.md`.
 - **Multi-tenant spaces.** Roles are global (checkpoint 3).

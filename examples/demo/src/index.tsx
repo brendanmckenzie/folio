@@ -1,4 +1,4 @@
-import { createFolio, magicLink, Shell } from 'folio/server'
+import { createFolio, type FolioGate, magicLink, Shell } from 'folio/server'
 import { dataOf, resolveAsset, toSchemaIndex, type Doc, type Resolution } from 'folio/core'
 // `folio/engine` is the entry point for host-side tooling that manipulates
 // documents — a sync job is exactly the case its doc comment names. Ordinary
@@ -22,6 +22,34 @@ declare const __FOLIO_ASSETS__: {
   devClient?: string
   adminCss?: string[]
   previewCss?: string[]
+}
+
+/**
+ * `platform/visitor-access.md`: `gate` names a root-block field — `access`,
+ * declared on both `blocks/page.tsx` and `blocks/insight.tsx` — and the one
+ * stored value, `public`, that means "no gate". Folio decides "ungated"
+ * itself, strictly, before calling anything below, so a public page (the
+ * overwhelming majority of one) costs no host call at all.
+ *
+ * **`visitor` below is a fake, and says so bluntly on purpose.** A real
+ * host's `visitor` checks its own membership system — a session lookup, an
+ * Auth0 token, a call to Memberstack's API — and answers whatever shape that
+ * system hands back; `allows` then decides what that answer is worth. This
+ * one reads a single unsigned cookie, `demo_member=1`, that anyone can set
+ * from devtools and that proves nothing whatsoever. It exists so the `gate`
+ * contract can be exercised end to end (`scripts/gate-test.mjs`) with no
+ * external provider to stand up. **It is exactly the shape a careless host
+ * would copy, and exactly the one not to**: shipping this cookie check as a
+ * real membership gate is a paywall with no lock on it.
+ */
+const gate: FolioGate<Env> = {
+  field: 'access',
+  public: 'public',
+  visitor: (req) => {
+    const cookie = req.headers.get('cookie') ?? ''
+    return /(?:^|;\s*)demo_member=1(?:;|$)/.test(cookie) ? { id: 'demo-member' } : null
+  },
+  allows: (visitor) => visitor !== null,
 }
 
 const folio = createFolio<Env>({
@@ -111,6 +139,8 @@ const folio = createFolio<Env>({
       }),
     ],
   },
+  // See `gate` above (`platform/visitor-access.md`).
+  gate,
   basePath: '/folio',
   // content-model/localisation.md: two languages, one document per story.
   // `default` is the *source* locale — the one `Blok.data` holds — and everything
@@ -334,6 +364,11 @@ export default {
         doc={page.doc}
         resolution={page.resolution}
         locale={locale}
+        // `page.doc` is already the redacted document on a denial
+        // (`visitor-access.md` decision 4) — root kept, body nulled — so this
+        // render is otherwise unchanged. `paywall` is the one thing the host
+        // adds: somewhere to put a way to join, in the body's place.
+        paywall={page.access === 'denied'}
         {...(page.draft ? { draft: true } : {})}
       />,
       page.headers,
@@ -415,11 +450,20 @@ function Page({
   resolution,
   locale,
   draft = false,
+  paywall = false,
 }: {
   doc: Doc
   resolution: Resolution
   locale: string
   draft?: boolean
+  /**
+   * `page.access === 'denied'` (`platform/visitor-access.md` decision 3). The
+   * `doc` this render was handed is already redacted — every child dropped,
+   * every richtext nulled — so `folio.render` below draws an empty body by
+   * construction; this is only the flag that says a paywall belongs where
+   * that body was.
+   */
+  paywall?: boolean
 }) {
   const root = doc.bloks[doc.root]
   // `dataOf` rather than `.data`: metadata is read straight off the root block
@@ -488,6 +532,35 @@ function Page({
           default — on a published page, which ships zero JavaScript. */}
       <div id="folio-root">
         {folio.render(doc, { resolution, ...(draft ? { mode: 'mark' as const } : {}) })}
+        {/*
+          The paywall, where the body was (`visitor-access.md` decision 4). `doc`'s
+          root still renders its own metadata — title, standfirst, hero — above
+          this; only the prose and the child blocks are gone, redacted before this
+          render ever saw them. A real host answers with its own sign-in/upgrade
+          flow here; this one names the fake cookie so the e2e script (and a
+          curious reader) can grant themselves membership.
+        */}
+        {paywall ? (
+          <div
+            data-testid="paywall"
+            style={{
+              background: '#f4ede2',
+              border: '1px solid #d8c9ae',
+              borderRadius: '.5rem',
+              padding: '1.5rem',
+              margin: '1.5rem 0',
+              font: '400 16px/1.5 system-ui, sans-serif',
+            }}
+          >
+            <h2 style={{ margin: '0 0 .5rem', font: '600 20px system-ui, sans-serif' }}>
+              Members only
+            </h2>
+            <p style={{ margin: 0 }}>
+              This page is for members. (Demo: this site's real login is a cookie — set{' '}
+              <code>demo_member=1</code> to see the rest.)
+            </p>
+          </div>
+        ) : null}
       </div>
       {folio.renderGlobal(resolution, 'settings')}
     </Shell>
@@ -509,7 +582,16 @@ async function archive(env: Env, url: URL) {
   const page = Number(url.searchParams.get('page') ?? '1')
   const result = await folio.query(env, {
     type: 'insight',
-    ...(topic ? { where: [{ field: 'topic', op: 'eq' as const, value: topic }] } : {}),
+    // `folio.query` never gates (`platform/visitor-access.md` checkpoint 6):
+    // an item here is the whole published document, so a members-only insight
+    // would otherwise hand its full title and standfirst to every stranger
+    // who loads this archive. This `where` clause is the host's whole remedy
+    // — the same `access` field the gate itself reads — not something Folio
+    // applies for it.
+    where: [
+      { field: 'access', op: 'eq' as const, value: 'public' },
+      ...(topic ? [{ field: 'topic', op: 'eq' as const, value: topic }] : []),
+    ],
     order: { field: 'published', dir: 'desc' },
     perPage: 5,
     page: Number.isFinite(page) && page >= 1 ? Math.trunc(page) : 1,

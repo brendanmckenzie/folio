@@ -304,6 +304,23 @@ Cache — so every computation is a pure function with unit tests behind it and
 `scripts/cache-probe.mjs` covers the rest against a deployment. Spec:
 `docs/specs/platform/caching.md`.
 
+**Visitor access, for a site whose membership lives outside Folio. Done
+2026-09-05, as spec 31** (`platform/visitor-access.md`). A `gate` config key
+names a root-block field and splits *who* is asking from *may they read this
+value*: `visitor(req, env)` and `allows(visitor, value, ctx)`. Folio decides
+"ungated" itself — one strict equality against the field's stored value —
+before calling either, so a public page (the overwhelming majority of one)
+costs no host call and stays in the edge cache; a gated one costs one
+`visitor` call per reader and is `private, no-store` whether it answers
+`granted` or `denied`, because the same URL cannot mean two different things
+to a shared cache. A denial hands back a redacted document — root kept, every
+child dropped, every richtext nulled — rather than `null`, so the host's
+existing `<Page doc={page.doc}>` renders unchanged and a paywall goes where
+the body was. Lists and `folio.query` are untouched by decision: an item is
+the whole published document, so a host filters a list on the same field the
+gate reads (`where: [{ field: 'access', op: 'eq', value: 'public' }]`) rather
+than Folio redacting on its behalf.
+
 ## Next
 
 ### 1. Pagination, everywhere, as a rule
@@ -575,20 +592,14 @@ gives a permanent no-op that never purges, never errors and passes every unit
 test. Neither is discoverable from the types. Spec:
 `docs/specs/platform/caching.md`.
 
-**Per-story access control, for site visitors.** The reference has an
-`access_level` field on story content and gates *rendering* on the visitor's
-roles. CMS auth is now built, and this is deliberately not the same problem:
-identity-and-access.md scoped itself to who may edit, and reading a published
-page still needs no account. It attaches in two places when wanted — a field on
-the root block, which document types already make per-type, and a host check
-before `folio.published()`. Per-story *editor* permissions are the other half,
-and want a way to name a set of stories: revisit after
-`docs/specs/content-model/collections.md`. **Specified 2026-09-05 as spec 31**
-(`docs/specs/platform/visitor-access.md`, draft): a `gate` config key names a
-root-block field and two host predicates, `reader.page()` consults them and answers
-`access: 'public' | 'granted' | 'denied'` with a redacted document on deny, and a
-gated page is never edge-cached. Lists and queries are untouched by decision; the
-field is `indexed` so a host filters them itself.
+**Per-story access control, for site visitors. Done 2026-09-05, as spec 31** —
+see *Visitor access* under *Done* above. Kept here because the shape of the
+gap is the useful part: the reference has an `access_level` field on story
+content and gates *rendering* on the visitor's roles, which is close to what
+shipped, except Folio never learns who a visitor is — the host's own
+predicate decides, and Folio only decides whether to call it. Per-story
+*editor* permissions are the other half of "access control" and remain
+unbuilt: revisit after `docs/specs/content-model/collections.md`.
 
 **SSO group → role mapping.** `oidc({ provision })` sets a default role for a
 staff account on first sign-in; mapping IdP groups onto Folio roles needs claims

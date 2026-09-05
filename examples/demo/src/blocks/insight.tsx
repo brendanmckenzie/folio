@@ -65,6 +65,22 @@ export const insightPage = defineBlock({
       indexed: true,
       help: 'YYYY-MM-DD. What an index page sorts by.',
     }),
+    // The same `gate` field `blocks/page.tsx` declares
+    // (`docs/specs/platform/visitor-access.md` phase 4): an insight can be
+    // members-only too, and `/archive`'s own `where: access eq public` filter
+    // (src/index.tsx) is only a real filter, rather than a clause that matches
+    // nothing, because this root also carries the field. `Everyone` first, for
+    // the same reason as `page.tsx`: `defaultValue(select)` seeds the first
+    // option, so every insight publishes public unless an editor changes it.
+    access: select({
+      label: 'Access',
+      options: [
+        { label: 'Everyone', value: 'public' },
+        { label: 'Members', value: 'members' },
+      ],
+      indexed: true,
+      help: 'Members-only insights show a paywall to anyone not signed in to membership.',
+    }),
     standfirst: textarea({
       label: 'Standfirst',
       rows: 2,

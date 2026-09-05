@@ -406,6 +406,10 @@ layout meanwhile.
 sorts and filters by. Full-text search over bodies is FTS5's job and spec 30's
 (`docs/specs/content-model/full-text-search.md`).
 
+**Gating.** If this type carries a `gate` field, a denial nulls `body` itself —
+the root-level `richtext` — in `data` and every `i18n` locale, exactly as it
+drops a stack of children on a block-based page.
+
 ## Globals
 
 A header, a footer, a bag of site-wide settings: content that is on every
@@ -1147,6 +1151,15 @@ author who can render a reference can render a collection item with no new
 knowledge. An empty result is an empty page, never null, so `list.items.map(…)`
 needs no guard.
 
+**`item.doc` and `item.data` are the whole published document, on every item,
+always.** A `collection` field and `folio.query` never redact and never gate
+(see "Visitor access"): if a members-only insight is in the result set, its full
+title, standfirst and body are right there in `item.doc`. Filter one out with
+`where` on the field your gate reads — `where: [{ field: 'access', op: 'eq',
+value: 'public' }]` — and render a lock icon from `item.data.<field>` for
+anything you narrow by hand instead. Never serialise `item.doc` or `item.data`
+wholesale to a client that has not earned the document itself.
+
 `list.total`, `list.page` and `list.pages` are there because a design will ask for
 "page 4 of 9". Pagination is the **host's**: read `?page=` and pass it in, and it
 offsets every collection in the document.
@@ -1548,8 +1561,8 @@ construction rather than by argument.
 ### One page, one call
 
 `reader.page(path)` answers a `FolioPage`: `{ doc, story, resolution, draft,
-headers }`. It replaces `published` + `storyAt` + `resolve`, and it exists for
-two reasons beyond brevity.
+access, headers }`. It replaces `published` + `storyAt` + `resolve`, and it
+exists for two reasons beyond brevity.
 
 **It reads the row once.** `published(path)` and `storyAt(path)` select from the
 same row by the same indexed column. A host that sets cache tags needs both,
@@ -1568,6 +1581,10 @@ Spread it and you are done:
 ```tsx
 return html(<Page doc={page.doc} resolution={page.resolution} />, page.headers)
 ```
+
+`access` is `'public'` on every page of a host with no `gate` configured, so
+that line is genuinely all there is unless "Visitor access" applies to you —
+add `paywall={page.access === 'denied'}` and nothing else changes.
 
 The individual reads are still there for anything that is not a page — a
 sitemap wants `stories()`, a search result page has no document of its own and
@@ -1754,6 +1771,14 @@ overridable, because a host that wants a short edge TTL wants a different design
 
 ### Traps
 
+- **A gated page is uncacheable at the edge, forever** — `granted` and `denied`
+  alike, not only the drafted case above. "Visitor access" is the only feature
+  that makes `reader.page()` answer something other than `public`, and once it
+  does, `page.headers` is `private, no-store` for both outcomes, on purpose: the
+  same URL cannot mean two different things to a shared cache, and a cached
+  teaser would be served to a member who signed in a second after it was
+  stored. On a mostly-members site that is the whole of the cache hit rate —
+  stated here so nobody discovers it in production.
 - **`Set-Cookie` means no caching at all.** Workers Cache never stores a response
   carrying one, silently and with no error. If your published path rolls a session
   cookie, you get zero cache hits and nothing tells you. Folio's own published path
@@ -1941,8 +1966,97 @@ sign in through whichever provider the site configured.
 
 Out of scope, deliberately: **site-visitor auth** — who may *read* a published
 page. That is a different problem, and reading a published page still needs no
-account at all. Spec 31 (`docs/specs/platform/visitor-access.md`, draft) plans it
-as a host predicate that `reader.page()` consults, never as Folio accounts.
+account at all. See "Visitor access" below: a host predicate `reader.page()`
+consults, never Folio accounts.
+
+## Visitor access
+
+A site whose membership lives outside Folio — the host's own accounts, Auth0,
+Memberstack — has pages only members may read, or only members with a certain
+privilege. Folio never learns who a visitor is: the host answers that, through
+one config key.
+
+```ts
+import { createFolio } from 'folio/server'
+
+const folio = createFolio<Env>({
+  blocks, types, bindings, auth,
+  gate: {
+    field: 'access',                          // a root-block field, indexed, never translatable
+    public: 'public',                          // the one stored value that means "no gate"
+    visitor: (req, env) => getMember(req, env), // who is asking — runs at most once per reader
+    allows: (visitor, value, ctx) => visitor?.plan === value, // may they read this value
+  },
+})
+```
+
+`field` names an `indexed`, untranslatable `text`/`textarea`/`number`/`boolean`/
+`select` field on a `page`-kind root; `public` is the one stored value that means
+"ungated". Construction throws, naming the type and the field, if no `page` root
+declares it, if it is `translatable`, if it lacks `indexed: true`, or if `public`
+is the wrong primitive or not one of a `select`'s options.
+
+**Folio decides "ungated" itself, before calling anything.** One strict
+comparison — `root.data[field] === gate.public` — against a value Folio already
+has in hand. That is the whole design: a public page (the overwhelming majority
+of one) costs no host call and stays in the edge cache. `visitor` runs at most
+once per reader, memoised, so a page resolving several gated `collection` items
+does not ask twice; a reader built with no `Request` (a sitemap build, a
+warm-up) never calls it and hands `allows` a `null` visitor.
+
+`reader.page()` answers one more field, `access: 'public' | 'granted' |
+'denied'`, and never `null` for a gated page:
+
+```tsx
+const page = await reader.page(path, { locale })
+if (!page) { /* miss, as always */ }
+return html(
+  <Page doc={page.doc} resolution={page.resolution}
+        paywall={page.access === 'denied'} />,
+  page.headers,        // already right: no-store for granted and denied
+)
+```
+
+**A denial hands back a redacted document, not `null`.** The root blok survives
+— every scalar, asset, link and reference on it, which is page metadata by the
+sanctioned model below and the same set a `collection` card renders from — every
+child blok is dropped, and every `richtext` the root itself declares is nulled in
+`data` and in every `i18n` locale. `<Page doc={page.doc}>` renders unchanged: an
+empty `blocks` slot draws nothing, so the host's only job is to put a paywall
+where the body was. Answering `null` would turn the host's ordinary miss branch
+into a 404 for a page that exists, and would lose the title, standfirst and hero
+a teaser needs.
+
+An editor in draft mode, or a reviewer holding this story's share grant, is never
+gated — they are not a member of the host's site, and gating them would make the
+draft they are about to publish unreadable to the person publishing it. A
+`visitor` or `allows` that throws is caught, logged, and treated as `denied`:
+the host's route answers a paywall rather than a 500.
+
+**Two traps this design leaves open, because a host cannot infer either:**
+
+- **Every gated page is uncacheable at the edge, forever** — `granted` and
+  `denied` alike. `cacheVerdictFor` has no opinion on a host's own route, so
+  `page.headers` (`private, no-store` whenever `access !== 'public'`) is the
+  *only* thing keeping members-only content out of a shared cache under its
+  real URL. A cached teaser looks safe and is not: Workers Caching cannot
+  answer it to a stranger and not to the member who signed in a second later.
+  On a mostly-members site that is the whole of the cache hit rate, and every
+  view costs one `visitor` call. A host that wants a cached teaser serves it
+  from a URL of its own, where it owns both halves of the decision.
+- **Lists hand back the whole published document, ungated.** `item.doc` and
+  `item.data` on every `collection` and `folio.query` item are the full thing
+  (see Collections) — a `folio.query` never redacts and never filters on the
+  gate field for you. Filter with `where: [{ field: 'access', op: 'eq', value:
+  'public' }]`, render a lock from `item.data.<field>` for anything you narrow
+  by hand instead, and never serialise an item wholesale. Full-text search
+  (spec 30) is the one exception: it scopes an unfiltered search to the public
+  value itself, because a snippet would otherwise render the exact prose a
+  denial withholds.
+
+No admin change: there is no lock glyph in the content tree, and the inspector
+already edits any root-block field under "Page settings" — the same place an
+editor already goes to change `title` or `noindex`.
 
 ## Content migrations
 
@@ -2432,15 +2546,15 @@ Within localisation: translated slugs (a French URL contains English words), and
 per-locale publishing. Both are deliberate and both are additive later — see the
 section above.
 
-Within auth, three items are now specified and unbuilt, all drafted 2026-09-05:
-site-visitor access control is spec 31 (`docs/specs/platform/visitor-access.md`); a
+Within auth, two items are now specified and unbuilt, both drafted 2026-09-05: a
 trusted-identity provider kind (Cloudflare Access, a host's own session), SSO group →
 role mapping, per-domain enforced providers and an `auth_events` table are spec 28
 (`docs/specs/foundation/auth-providers.md`); passkeys are spec 29
-(`docs/specs/foundation/passkeys.md`). Still deliberately out: per-story editor
-permissions, multi-tenant spaces (spec 23), passwords and TOTP. Sign-in link rate
-limiting is per address only; the IP dimension wants a Cloudflare rate-limiting rule
-at the zone.
+(`docs/specs/foundation/passkeys.md`). **Site-visitor access control has landed**,
+as spec 31 (`docs/specs/platform/visitor-access.md`) — see "Visitor access" above.
+Still deliberately out: per-story editor permissions, multi-tenant spaces (spec 23),
+passwords and TOTP. Sign-in link rate limiting is per address only; the IP dimension
+wants a Cloudflare rate-limiting rule at the zone.
 
 Within collections: **full-text search** is spec 30
 (`docs/specs/content-model/full-text-search.md`, draft 2026-09-05): FTS5 rows written

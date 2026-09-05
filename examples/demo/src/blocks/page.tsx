@@ -1,4 +1,4 @@
-import { asset, blocks, boolean, defineBlock, text, textarea } from 'folio/core'
+import { asset, blocks, boolean, defineBlock, select, text, textarea } from 'folio/core'
 
 /**
  * Root block. Every document has exactly one.
@@ -7,6 +7,12 @@ import { asset, blocks, boolean, defineBlock, text, textarea } from 'folio/core'
  * through the same sync engine as everything else: multiplayer, undoable,
  * versioned, and published atomically with the content. Only routing structure
  * (slug, parent, order) lives in D1.
+ *
+ * `access` is the `gate` field this demo declares
+ * (`docs/specs/platform/visitor-access.md` phase 4). `Everyone` has to be
+ * first: `defaultValue(select)` is `options[0]?.value` (`fields.ts`), so a
+ * seeded document carries whichever option is listed first, and if that were
+ * `Members` every new page would publish gated with nobody having chosen it.
  */
 export const page = defineBlock({
   name: 'page',
@@ -22,6 +28,21 @@ export const page = defineBlock({
     }),
     socialImage: asset({ label: 'Social share image', accept: 'image/*' }),
     noindex: boolean({ label: 'Hide from search engines' }),
+    // The gate field named in `createFolio`'s `gate: { field: 'access', ... }`
+    // below (src/index.tsx). `indexed: true` is required by `validateGate` —
+    // lists are not gated (checkpoint 6), so a host filters on this field
+    // instead — and it must not be `translatable` (decision 2): a gate that
+    // varies by language is a hole a stranger asking in French could walk
+    // through.
+    access: select({
+      label: 'Access',
+      options: [
+        { label: 'Everyone', value: 'public' },
+        { label: 'Members', value: 'members' },
+      ],
+      indexed: true,
+      help: 'Members-only pages show a paywall to anyone not signed in to membership.',
+    }),
     body: blocks({
       label: 'Body',
       allow: [
