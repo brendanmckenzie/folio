@@ -93,6 +93,21 @@ export type { IndexRow } from './index-projection'
 export { linkedIds, outboundRefs, referencedIdsAllLocales } from './refs'
 export type { OutboundRef } from './refs'
 
+// Full-text search (`../../docs/specs/content-model/full-text-search.md`). The
+// same rationale as `indexRowsFor` above: a host importer that writes
+// `published_doc` directly and already calls `indexRowsFor` has to be able to
+// write the same `content_text` rows a publish would.
+export {
+  ftsQuery,
+  isSearchable,
+  MAX_SEARCH_BODY,
+  MAX_SEARCH_ROWS,
+  MAX_SEARCH_TITLE,
+  searchRowsFor,
+  splitSnippet,
+} from './search-projection'
+export type { SearchRow, SnippetPart } from './search-projection'
+
 export {
   asAsset,
   asAssets,

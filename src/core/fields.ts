@@ -73,14 +73,38 @@ interface Indexable {
   indexed?: boolean
 }
 
+/**
+ * Projected into `content_text` on publish, so `folio.query({ search })` (and
+ * every surface built on it) can find this field's prose
+ * (`../../docs/specs/content-model/full-text-search.md` architecture
+ * decision 3).
+ *
+ * **Opt-out, not opt-in** — the opposite of `Indexable`, and deliberately: an
+ * `indexed` field costs a row per locale and makes a filter promise, so it
+ * defaults off; a searchable field costs one row per locale however many
+ * fields contribute, so "full-text search finds my prose" is what a host
+ * expects with no schema edit at all. `searchable: false` is the one flag
+ * that opts a field back out — a raw-HTML `embed` textarea is the case that
+ * needs it.
+ *
+ * **Deliberately not on `Common`, and a *different* membership from
+ * `Indexable`.** `text` and `textarea` carry both; `richtext` carries this one
+ * and not `Indexable` (a prose document has no scalar to sort by, which is
+ * `Indexable`'s own comment); `number`, `boolean` and `select` carry neither —
+ * their values are never prose.
+ */
+interface Searchable {
+  searchable?: boolean
+}
+
 export interface SelectOption {
   label: string
   value: string
 }
 
 export type Field =
-  | ({ kind: 'text'; placeholder?: string } & Common & Indexable)
-  | ({ kind: 'textarea'; rows?: number; placeholder?: string } & Common & Indexable)
+  | ({ kind: 'text'; placeholder?: string } & Common & Indexable & Searchable)
+  | ({ kind: 'textarea'; rows?: number; placeholder?: string } & Common & Indexable & Searchable)
   | ({ kind: 'number'; min?: number; max?: number } & Common & Indexable)
   | ({ kind: 'boolean' } & Common & Indexable)
   | ({ kind: 'select'; options: readonly SelectOption[] } & Common & Indexable)
@@ -105,7 +129,8 @@ export type Field =
       marks?: readonly RichtextMarkName[]
       nodes?: readonly RichtextNodeName[]
       headingLevels?: readonly number[]
-    } & Common)
+    } & Common &
+      Searchable)
   /**
    * Points at another document and resolves its content at render time.
    * `types` narrows the candidates to particular document types, so a
