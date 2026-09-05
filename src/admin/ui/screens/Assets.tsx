@@ -191,6 +191,7 @@ export function Assets(props: Props) {
       */}
       <div className={css.body} data-open={url.asset ? '' : undefined}>
         <AssetBrowser
+          apiBase={apiBase}
           mount={mount}
           url={url}
           onUrl={go}

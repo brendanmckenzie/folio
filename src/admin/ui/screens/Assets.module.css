@@ -68,6 +68,192 @@
   min-width: 0;
 }
 
+/* ----------------------------------------------------------------- sidebar --- */
+
+/*
+ * The folder tree and the tag chips, beside the grid rather than over it — the
+ * same "keep the subject in view" argument `.body[data-open]` makes for the detail
+ * panel, one column further in. Stacks above the grid below `.main`'s own
+ * breakpoint, because there is no width left to spend on a third column at a
+ * dialog's size.
+ */
+.layout {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.sidebar {
+  display: flex;
+  flex: 0 0 180px;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    flex: 1 1 auto;
+  }
+}
+
+.sidebarSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.sidebarTitle {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--fg-subtle);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.folderTree {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/*
+ * A row, not a chip: the tree reads top to bottom and a folder's depth is a
+ * left offset (`AssetBrowser.tsx`'s inline `paddingLeft`, measured from
+ * `folderDepth` — a real property of a real element, unlike the `<option>`
+ * indent `indentedFolderName` builds out of non-breaking spaces for the select
+ * that cannot take one).
+ *
+ * A background fill for the selected row, matching `.tileOn`/`.chipOn`/
+ * `.segmentOn` beside it — not a left-edge `::before` accent. `List.module.css`'s
+ * `.ticked` is the one place an edge is right, and it is right there because a
+ * ticked row and an open row can be the same row and need two marks; a folder
+ * filter has only one state to show, so the fill this file already uses
+ * elsewhere is enough.
+ */
+.folderRow {
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.folderRow:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.folderRow:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.folderRowOn {
+  background: var(--bg-active);
+  color: var(--fg);
+  font-weight: 550;
+}
+
+.folderForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* --------------------------------------------------------------- tag editor --- */
+
+.tagEditor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tagPill {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 24px;
+  padding: 0 var(--space-1) 0 var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--bg-inset);
+  color: var(--fg);
+  font-size: var(--text-xs);
+}
+
+.tagRemove {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--fg-subtle);
+  font-size: var(--text-sm);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tagRemove:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.tagRemove:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.tagInput {
+  height: 26px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.tagInput:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
+  border-color: var(--fg-accent);
+}
+
 /* ---------------------------------------------------------------- controls --- */
 
 /*

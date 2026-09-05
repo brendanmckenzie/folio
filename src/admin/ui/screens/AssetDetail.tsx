@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type { StoryMeta } from '../../../core/story'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
-import { Field, Input } from '../Field'
+import { Field, Input, Select, Textarea } from '../Field'
 import { href } from '../route'
 import {
   addedAgo,
@@ -11,6 +11,7 @@ import {
   type AssetRow,
   dimensionsOf,
   humanSize,
+  indentedFolderName,
   isRenderableImage,
   originalUrl,
   thumbUrl,
@@ -18,6 +19,8 @@ import {
 } from './assets-model'
 import css from './Assets.module.css'
 import { messageOf } from './useContent'
+import { useFolders } from './useFolders'
+import { useTags } from './useTags'
 
 /** The transform width the preview asks for. See `AssetBrowser`'s note on why the
  * set of widths is deliberately tiny. */
@@ -138,18 +141,21 @@ export function AssetDetail({
       </dl>
 
       <AltText apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
+      <DescriptionEditor apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
+      <FolderEditor apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
+      <TagsEditor apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
 
       {/*
         The focal point, and the honest answer about it.
 
         `ui-architecture.md` lists it among the panel's contents, and it cannot be
         here: there is no column for it on `assets`, `toAssetValue` does not carry
-        one, and `PATCH /assets/:id` accepts `alt` and nothing else. That is not an
-        omission — a focal point answers "what must stay in frame when *this block*
-        crops it", which is a different answer for a wide hero and a square avatar of
-        the same file. It belongs to the field value, which is where the editor's
-        asset field sets it. Said out loud rather than left as a missing control,
-        because somebody will come looking for it.
+        one, and none of `AssetPatchBody`'s fields is it. That is not an omission —
+        a focal point answers "what must stay in frame when *this block* crops it",
+        which is a different answer for a wide hero and a square avatar of the same
+        file. It belongs to the field value, which is where the editor's asset field
+        sets it. Said out loud rather than left as a missing control, because
+        somebody will come looking for it.
       */}
       <p className={css.note}>
         A focal point belongs to a <em>use</em> of this file, not to the file: it is set on the
@@ -285,6 +291,273 @@ function AltText({
             if (e.key === 'Enter') void commit()
           }}
         />
+      )}
+    </Field>
+  )
+}
+
+/* ---------------------------------------------------------------- description --- */
+
+/**
+ * Human, longer than alt text and searchable through `q` (decision 12 —
+ * `assetFilterSql` scans this column too). Otherwise the same blur-commits shape
+ * as `AltText`, for the same reason: a `PATCH` per keystroke to a D1 row is the
+ * wrong write for a value nobody else is co-editing.
+ *
+ * A `Textarea` rather than `Input`: `description` is bounded to 2000 characters
+ * against `alt`'s 500 (`validate.ts`'s `AssetPatchBody`), which is a paragraph
+ * rather than a sentence, and a single-line box would scroll it out of view while
+ * somebody is still typing.
+ */
+function DescriptionEditor({
+  apiBase,
+  row,
+  onChanged,
+  onNotice,
+}: {
+  apiBase: string
+  row: AssetRow
+  onChanged: (row: AssetRow) => void
+  onNotice: (message: string) => void
+}) {
+  const [draft, setDraft] = useState(row.description)
+  const [saving, setSaving] = useState(false)
+  const [savedValue, setSavedValue] = useState<string | null>(null)
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `row.id` is the trigger and `row.description` is deliberately excluded — see `AltText`'s identical note, which this mirrors field for field
+  useEffect(() => {
+    setDraft(row.description)
+    setSavedValue(null)
+  }, [row.id])
+
+  const commit = async () => {
+    if (draft === row.description) return
+    setSaving(true)
+    try {
+      const res = await fetch(`${apiBase}/assets/${encodeURIComponent(row.id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ description: draft }),
+      })
+      if (!res.ok) throw new Error(await messageOf(res))
+      const next = (await res.json()) as AssetRow
+      onChanged(next)
+      setSavedValue(next.description)
+    } catch (e) {
+      onNotice((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Field
+      label="Description"
+      note={saving ? 'Saving…' : savedValue !== null && savedValue === draft ? 'Saved' : undefined}
+      help="What the file is, longer than alt text and part of what the search box scans."
+    >
+      {(id) => (
+        <Textarea
+          id={id}
+          value={draft}
+          placeholder="Describe the file"
+          rows={3}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => void commit()}
+        />
+      )}
+    </Field>
+  )
+}
+
+/* ---------------------------------------------------------------------- folder --- */
+
+/**
+ * Where this file is filed — a `<select>` over the whole tree (`useFolders`,
+ * capped at 500, "the whole tree" at the scale a sidebar wants). Committing on
+ * `change` rather than blur, because a `<select>` has no intermediate keystrokes
+ * to debounce: every change is already one deliberate choice.
+ *
+ * **Folder creation is not offered here.** The sidebar's *New folder* is the one
+ * place a folder is planted (`AssetBrowser.tsx`'s `NewFolderDialog`); this panel
+ * only assigns an asset to one that already exists. A newly created folder shows
+ * up here once this component's own `useFolders` next reloads.
+ */
+function FolderEditor({
+  apiBase,
+  row,
+  onChanged,
+  onNotice,
+}: {
+  apiBase: string
+  row: AssetRow
+  onChanged: (row: AssetRow) => void
+  onNotice: (message: string) => void
+}) {
+  const folders = useFolders(apiBase)
+  const [saving, setSaving] = useState(false)
+
+  const commit = async (folderId: string | null) => {
+    if (folderId === row.folderId) return
+    setSaving(true)
+    try {
+      const res = await fetch(`${apiBase}/assets/${encodeURIComponent(row.id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ folderId }),
+      })
+      if (!res.ok) throw new Error(await messageOf(res))
+      onChanged((await res.json()) as AssetRow)
+    } catch (e) {
+      onNotice((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Field
+      label="Folder"
+      help="Metadata only (decision 1) — filing this never changes its URL or moves the object."
+    >
+      {(id) => (
+        <Select
+          id={id}
+          value={row.folderId ?? ''}
+          disabled={saving || folders.loading}
+          onChange={(e) => void commit(e.target.value || null)}
+        >
+          <option value="">Unfiled</option>
+          {folders.folders.map((folder) => (
+            <option key={folder.id} value={folder.id}>
+              {indentedFolderName(folder)}
+            </option>
+          ))}
+        </Select>
+      )}
+    </Field>
+  )
+}
+
+/* ------------------------------------------------------------------------ tags --- */
+
+/**
+ * The asset's tags — a chip per tag, a remove button on each, and a text box that
+ * creates-or-finds one on Enter (`useTags`'s `ensure`, decision 4). Every write is
+ * a `PATCH { tags: […] }` carrying the **whole** set (`setAssetTags` replaces
+ * rather than merges), so adding and removing both go through the one `patch`
+ * below.
+ *
+ * **Only Enter commits a new tag, not blur.** `AltText` and `DescriptionEditor`
+ * both commit on blur, which is right for one value somebody is done typing —
+ * but a chip input is different: losing focus mid-word (Tab, a click on the
+ * remove button of another chip) must not silently mint a tag out of whatever was
+ * left in the box. Nothing here is lost by requiring Enter; the draft just stays
+ * in the box.
+ *
+ * The `<datalist>` offers the existing vocabulary as a native autocomplete —
+ * cheap, keyboard-operable without a second focus trap, and exactly what "free
+ * text with suggestions" (decision 4's argument for rejecting a closed
+ * vocabulary) needs.
+ */
+function TagsEditor({
+  apiBase,
+  row,
+  onChanged,
+  onNotice,
+}: {
+  apiBase: string
+  row: AssetRow
+  onChanged: (row: AssetRow) => void
+  onNotice: (message: string) => void
+}) {
+  const vocabulary = useTags(apiBase)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const listId = useId()
+
+  const patch = async (tagIds: readonly string[]) => {
+    setSaving(true)
+    try {
+      const res = await fetch(`${apiBase}/assets/${encodeURIComponent(row.id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tags: tagIds }),
+      })
+      if (!res.ok) throw new Error(await messageOf(res))
+      onChanged((await res.json()) as AssetRow)
+    } catch (e) {
+      onNotice((e as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const add = async (name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    try {
+      const tag = await vocabulary.ensure(trimmed)
+      setDraft('')
+      if (row.tags.some((t) => t.id === tag.id)) return
+      await patch([...row.tags.map((t) => t.id), tag.id])
+    } catch (e) {
+      onNotice((e as Error).message)
+    }
+  }
+
+  const remove = (id: string) => {
+    void patch(row.tags.filter((t) => t.id !== id).map((t) => t.id))
+  }
+
+  return (
+    <Field
+      label="Tags"
+      help="Free-form and shared across the library. Type a name and press Enter — an existing tag is reused rather than duplicated."
+    >
+      {(id) => (
+        <div className={css.tagEditor}>
+          {row.tags.length > 0 ? (
+            <ul className={css.tagList}>
+              {row.tags.map((tag) => (
+                <li key={tag.id} className={css.tagPill}>
+                  {tag.name}
+                  <button
+                    type="button"
+                    className={css.tagRemove}
+                    aria-label={`Remove tag ${tag.name}`}
+                    disabled={saving}
+                    onClick={() => remove(tag.id)}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <input
+            id={id}
+            className={css.tagInput}
+            type="text"
+            list={listId}
+            value={draft}
+            placeholder="Add a tag"
+            disabled={saving}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return
+              e.preventDefault()
+              void add(draft)
+            }}
+          />
+          <datalist id={listId}>
+            {vocabulary.tags
+              .filter((tag) => !row.tags.some((t) => t.id === tag.id))
+              .map((tag) => (
+                <option key={tag.id} value={tag.name} />
+              ))}
+          </datalist>
+        </div>
       )}
     </Field>
   )

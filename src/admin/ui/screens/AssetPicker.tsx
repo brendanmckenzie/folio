@@ -96,6 +96,10 @@ export function AssetPicker({ apiBase, mount, accept, onPick, onClose }: AssetPi
     dir: undefined,
     kind: imposed ?? 'all',
     q: '',
+    folder: undefined,
+    unfiled: false,
+    tags: [],
+    untagged: false,
     asset: undefined,
   }))
   const [selected, setSelected] = useState<string | undefined>(undefined)
@@ -159,6 +163,7 @@ export function AssetPicker({ apiBase, mount, accept, onPick, onClose }: AssetPi
       */}
       <div className={css.dropZone} {...drop.handlers}>
         <AssetBrowser
+          apiBase={apiBase}
           mount={mount}
           url={url}
           onUrl={(next) => {

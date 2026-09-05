@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { toAssetValue } from '../../../src/server/assets'
 import type { AssetSort } from '../../../src/core/assets'
+import { MAX_TAG_FILTER as SERVER_MAX_TAG_FILTER } from '../../../src/server/asset-tags'
+import { toAssetValue } from '../../../src/server/assets'
 import {
   addedAgo,
   ASSET_COLUMNS,
@@ -13,18 +14,23 @@ import {
   dimensionsOf,
   dirOf,
   extensionOf,
+  folderDepth,
   gridStep,
   humanSize,
+  indentedFolderName,
   isAssetView,
   isNarrowed,
   isRenderableImage,
   kindForAccept,
+  MAX_TAG_FILTER,
   naturalDir,
   originalUrl,
   panelSubject,
   parseAssetsUrl,
   sortColumnKey,
+  tagChipLabel,
   thumbUrl,
+  toggleTagFilter,
   typeLabel,
   uploadSummary,
   withFilter,
@@ -76,6 +82,7 @@ const row = (extra: Partial<AssetRow> = {}): AssetRow => ({
   descriptionAuto: '',
   describedAt: null,
   describeError: null,
+  tags: [],
   ...extra,
 })
 
@@ -85,6 +92,10 @@ const url = (extra: Partial<AssetsUrl> = {}): AssetsUrl => ({
   dir: undefined,
   kind: 'all',
   q: '',
+  folder: undefined,
+  unfiled: false,
+  tags: [],
+  untagged: false,
   asset: undefined,
   ...extra,
 })
@@ -120,20 +131,43 @@ describe('the URL model', () => {
       dir: undefined,
       kind: undefined,
       q: undefined,
+      folder: undefined,
+      unfiled: undefined,
+      tags: undefined,
+      untagged: undefined,
       asset: undefined,
     })
   })
 
   it('writes what is not a default', () => {
-    expect(assetsQuery(url({ view: 'table', sort: 'size', kind: 'image', q: 'logo' }))).toEqual({
+    expect(
+      assetsQuery(
+        url({
+          view: 'table',
+          sort: 'size',
+          kind: 'image',
+          q: 'logo',
+          folder: 'clients/acme',
+          tags: ['headshot', 'archive'],
+        }),
+      ),
+    ).toEqual({
       view: 'table',
       sort: 'size',
       // `size`'s own direction is descending, so it stays out even here.
       dir: undefined,
       kind: 'image',
       q: 'logo',
+      folder: 'clients/acme',
+      unfiled: undefined,
+      // Comma-joined — the screen's own address bar cannot carry a repeated key
+      // (`route.ts`'s `parseQuery`), unlike the request `assetsParams` builds.
+      tags: 'headshot,archive',
+      untagged: undefined,
       asset: undefined,
     })
+    expect(assetsQuery(url({ unfiled: true }))).toMatchObject({ folder: undefined, unfiled: '1' })
+    expect(assetsQuery(url({ untagged: true }))).toMatchObject({ tags: undefined, untagged: '1' })
   })
 
   it('round trips every screen state', () => {
@@ -145,6 +179,10 @@ describe('the URL model', () => {
       url({ sort: 'size', dir: 'asc' }),
       url({ kind: 'application', q: 'invoice' }),
       url({ asset: 'ast_x' }),
+      url({ folder: 'clients/acme' }),
+      url({ unfiled: true }),
+      url({ tags: ['headshot', 'archive'] }),
+      url({ untagged: true }),
     ]
     for (const state of states) {
       const written = assetsQuery(state)
@@ -217,11 +255,32 @@ describe('the view toggle and the filters', () => {
     expect(withFilter(open, { kind: 'image' })).toEqual({ ...open, kind: 'image' })
   })
 
+  it('lets a folder win over unfiled, and unfiled win over a folder', () => {
+    // The pair the route refuses together (`assetFolderFilter`) — this screen must
+    // never be able to write both, or the request the pager builds is the one that
+    // 400s.
+    const filed = withFilter(url({ unfiled: true }), { folder: 'clients/acme' })
+    expect(filed).toMatchObject({ folder: 'clients/acme', unfiled: false })
+    const unfiled = withFilter(url({ folder: 'clients/acme' }), { unfiled: true })
+    expect(unfiled).toMatchObject({ folder: undefined, unfiled: true })
+  })
+
+  it('lets tags win over untagged, and untagged win over tags', () => {
+    const tagged = withFilter(url({ untagged: true }), { tags: ['headshot'] })
+    expect(tagged).toMatchObject({ tags: ['headshot'], untagged: false })
+    const untagged = withFilter(url({ tags: ['headshot'] }), { untagged: true })
+    expect(untagged).toMatchObject({ tags: [], untagged: true })
+  })
+
   it('tells an empty library from a filter that matches nothing', () => {
     expect(isNarrowed(url())).toBe(false)
     expect(isNarrowed(url({ q: '  ' }))).toBe(false)
     expect(isNarrowed(url({ q: 'logo' }))).toBe(true)
     expect(isNarrowed(url({ kind: 'image' }))).toBe(true)
+    expect(isNarrowed(url({ folder: 'clients/acme' }))).toBe(true)
+    expect(isNarrowed(url({ unfiled: true }))).toBe(true)
+    expect(isNarrowed(url({ tags: ['headshot'] }))).toBe(true)
+    expect(isNarrowed(url({ untagged: true }))).toBe(true)
   })
 })
 
@@ -257,6 +316,19 @@ describe('the request', () => {
     expect(assetsParams(url({ asset: 'ast_x' }), { limit: 48 }).get('asset')).toBeNull()
   })
 
+  it('sends a folder or unfiled, never both', () => {
+    expect(assetsParams(url({ folder: 'clients/acme' }), { limit: 48 }).get('folder')).toBe(
+      'clients/acme',
+    )
+    expect(assetsParams(url({ unfiled: true }), { limit: 48 }).get('unfiled')).toBe('1')
+  })
+
+  it("sends every tag repeated, not comma-joined — the route parses `queries('tags')`", () => {
+    const params = assetsParams(url({ tags: ['headshot', 'archive'] }), { limit: 48 })
+    expect(params.getAll('tags')).toEqual(['headshot', 'archive'])
+    expect(assetsParams(url({ untagged: true }), { limit: 48 }).get('untagged')).toBe('1')
+  })
+
   it('is identical with and without a cursor apart from the cursor', () => {
     // The property `useAssets` leans on: the request minus the cursor is the identity
     // that resets paging, so anything else changing has to change that string too.
@@ -284,6 +356,53 @@ describe('the kind a field imposes', () => {
     // `video` is a real prefix and no stored row can ever have it: `uploadAsset`
     // stores an allowlisted image type or `application/octet-stream`.
     expect(kindForAccept('video/mp4')).toBeUndefined()
+  })
+})
+
+describe('the organisation filters', () => {
+  it('agrees with the server bind budget it mirrors', () => {
+    // Duplicated rather than imported (`assetValue`'s reason: that module's
+    // neighbour is a Worker module), so the agreement is asserted instead of
+    // assumed — the same insurance `assetValue`'s own test buys.
+    expect(MAX_TAG_FILTER).toBe(SERVER_MAX_TAG_FILTER)
+  })
+
+  it('toggles a tag slug on and off', () => {
+    expect(toggleTagFilter([], 'headshot')).toEqual(['headshot'])
+    expect(toggleTagFilter(['headshot'], 'headshot')).toEqual([])
+    expect(toggleTagFilter(['headshot'], 'archive')).toEqual(['headshot', 'archive'])
+  })
+
+  it('refuses a ninth tag rather than building a request the route would 400', () => {
+    const eight = Array.from({ length: MAX_TAG_FILTER }, (_, i) => `tag-${i}`)
+    expect(toggleTagFilter(eight, 'one-too-many')).toEqual(eight)
+    // Removing still works at the cap — the cap bounds growth, not the set itself.
+    expect(toggleTagFilter(eight, 'tag-0')).toEqual(eight.slice(1))
+  })
+
+  it('labels a tag with its count only when the list carries one', () => {
+    expect(tagChipLabel({ name: 'Headshot' })).toBe('Headshot')
+    expect(tagChipLabel({ name: 'Headshot', count: 0 })).toBe('Headshot (0)')
+    expect(tagChipLabel({ name: 'Headshot', count: 12 })).toBe('Headshot (12)')
+  })
+
+  it("reads a folder's depth off its path, root at zero", () => {
+    expect(folderDepth({ path: 'clients' })).toBe(0)
+    expect(folderDepth({ path: 'clients/acme' })).toBe(1)
+    expect(folderDepth({ path: 'clients/acme/2026' })).toBe(2)
+  })
+
+  it('indents a folder name for an <option>, two non-breaking spaces per level', () => {
+    // A regular space collapses in option text, which is the whole reason
+    // `indentedFolderName` uses `\u00A0` rather than `' '` -- written as an
+    // explicit escape here so this assertion does not depend on an invisible
+    // character surviving a copy-paste.
+    const nbsp = '\u00A0'
+    expect(indentedFolderName({ path: 'clients', name: 'Clients' })).toBe('Clients')
+    expect(indentedFolderName({ path: 'clients/acme', name: 'Acme' })).toBe(`${nbsp}${nbsp}Acme`)
+    expect(indentedFolderName({ path: 'clients/acme/2026', name: '2026' })).toBe(
+      `${nbsp}${nbsp}${nbsp}${nbsp}2026`,
+    )
   })
 })
 

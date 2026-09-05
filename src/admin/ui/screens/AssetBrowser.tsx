@@ -1,8 +1,10 @@
 import type { KeyboardEvent, ReactNode } from 'react'
-import { useRef } from 'react'
-import type { AssetSort } from '../../../core/assets'
+import { useRef, useState } from 'react'
+import type { AssetFolder, AssetSort } from '../../../core/assets'
 import { Button } from '../Button'
+import { Dialog } from '../Dialog'
 import { EmptyState } from '../EmptyState'
+import { Field, Input, Select } from '../Field'
 import { type Column, Table } from '../Table'
 import {
   addedAgo,
@@ -13,13 +15,17 @@ import {
   type AssetView,
   dimensionsOf,
   dirOf,
+  folderDepth,
   gridStep,
   humanSize,
+  indentedFolderName,
   isNarrowed,
   isRenderableImage,
   KINDS,
   sortColumnKey,
+  tagChipLabel,
   thumbUrl,
+  toggleTagFilter,
   typeLabel,
   uploadSummary,
   withFilter,
@@ -28,6 +34,8 @@ import {
 } from './assets-model'
 import css from './Assets.module.css'
 import type { AssetsData, Uploads } from './useAssets'
+import { useFolders } from './useFolders'
+import { useTags } from './useTags'
 
 /**
  * The width asked of the transform route, per surface. Three values and no more:
@@ -50,6 +58,10 @@ const SORTS: readonly { value: AssetSort; label: string }[] = [
 ]
 
 export interface AssetBrowserProps {
+  /** The admin's internal JSON base — `{base}/api`. The sidebar's own reads and
+   * writes (`useFolders`, `useTags`, and the *New folder* dialog) go through it,
+   * same as everything else in this admin. */
+  apiBase: string
   /**
    * Where Folio is mounted — **not** `apiBase`. `/asset/:key` serves bytes into an
    * `<img>` and stays on the bare mount, because its URL is baked into published
@@ -108,7 +120,8 @@ export interface AssetBrowserProps {
  *    single commit, over the selection this reports.
  */
 export function AssetBrowser(props: AssetBrowserProps) {
-  const { mount, url, onUrl, data, upload, selected, label, kinds, accept, compact } = props
+  const { apiBase, mount, url, onUrl, data, upload, selected, label, kinds, accept, compact } =
+    props
   const grid = useRef<HTMLDivElement>(null)
   const file = useRef<HTMLInputElement>(null)
 
@@ -187,210 +200,481 @@ export function AssetBrowser(props: AssetBrowserProps) {
         }}
       />
 
-      <div className={css.controls}>
-        <input
-          className={css.search}
-          type="search"
-          value={url.q}
-          placeholder="Search filenames"
-          aria-label="Search filenames"
-          onChange={(e) => onUrl(withFilter(url, { q: e.target.value }))}
-        />
-
+      <div className={css.layout}>
         {/*
+          The folder tree and the tag chips — filters, never a place to navigate
+          into (decision 2, checkpoint 10). One instance per mount, same as
+          everything else `AssetBrowser` holds: the screen and the picker each get
+          their own sidebar over the same routes.
+        */}
+        <Sidebar apiBase={apiBase} url={url} onUrl={onUrl} compact={compact} />
+
+        <div className={css.main}>
+          <div className={css.controls}>
+            <input
+              className={css.search}
+              type="search"
+              value={url.q}
+              placeholder="Search filenames"
+              aria-label="Search filenames"
+              onChange={(e) => onUrl(withFilter(url, { q: e.target.value }))}
+            />
+
+            {/*
           The `[ Grid | Table ]` toggle. `ui-architecture.md` gives Assets exactly the
           rule Content's `[ Tree | Flat ]` has — the mode is in the URL and the last
           choice is remembered as the default when arriving without one, linkable
           first and convenient second. Unlike Content's, it keeps the filters: see
           `withView`.
         */}
-        <fieldset className={css.toggle}>
-          <legend className={css.srOnly}>View</legend>
-          {(['grid', 'table'] as AssetView[]).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              className={`${css.segment} ${url.view === mode ? css.segmentOn : ''}`}
-              aria-pressed={url.view === mode}
-              onClick={() => onUrl(withView(url, mode))}
-            >
-              {mode === 'grid' ? 'Grid' : 'Table'}
-            </button>
-          ))}
-        </fieldset>
+            <fieldset className={css.toggle}>
+              <legend className={css.srOnly}>View</legend>
+              {(['grid', 'table'] as AssetView[]).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={`${css.segment} ${url.view === mode ? css.segmentOn : ''}`}
+                  aria-pressed={url.view === mode}
+                  onClick={() => onUrl(withView(url, mode))}
+                >
+                  {mode === 'grid' ? 'Grid' : 'Table'}
+                </button>
+              ))}
+            </fieldset>
 
-        {kinds ? (
-          <fieldset className={css.chips}>
-            <legend className={css.srOnly}>Filter by type</legend>
-            {KINDS.map((kind) => (
-              <button
-                key={kind.value}
-                type="button"
-                className={`${css.chip} ${url.kind === kind.value ? css.chipOn : ''}`}
-                aria-pressed={url.kind === kind.value}
-                onClick={() => onUrl(withFilter(url, { kind: kind.value }))}
-              >
-                {kind.label}
-              </button>
-            ))}
-          </fieldset>
-        ) : null}
+            {kinds ? (
+              <fieldset className={css.chips}>
+                <legend className={css.srOnly}>Filter by type</legend>
+                {KINDS.map((kind) => (
+                  <button
+                    key={kind.value}
+                    type="button"
+                    className={`${css.chip} ${url.kind === kind.value ? css.chipOn : ''}`}
+                    aria-pressed={url.kind === kind.value}
+                    onClick={() => onUrl(withFilter(url, { kind: kind.value }))}
+                  >
+                    {kind.label}
+                  </button>
+                ))}
+              </fieldset>
+            ) : null}
 
-        {/*
+            {/*
           The sort, in grid mode only. The table's own headers carry the same two
           facts — which column and which direction — and offering both at once is how
           two controls over one piece of state start disagreeing about it.
         */}
-        {url.view === 'grid' ? (
-          <fieldset className={css.sortGroup}>
-            <legend className={css.srOnly}>Sort</legend>
-            <label className={css.sortLabel}>
-              Sort
-              <select
-                className={css.sortSelect}
-                value={url.sort}
-                onChange={(e) => onUrl(withSort(url, e.target.value as AssetSort))}
-              >
-                {SORTS.map((sort) => (
-                  <option key={sort.value} value={sort.value}>
-                    {sort.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className={css.dirButton}
-              // Names the state and the effect together, because a bare ↑ is the
-              // unlabelled glyph `docs/ui-review.md` found twice in the old top bar.
-              aria-label={
-                dirOf(url) === 'asc'
-                  ? 'Ascending. Reverse to descending'
-                  : 'Descending. Reverse to ascending'
-              }
-              onClick={() => onUrl(withSort(url, url.sort))}
-            >
-              <span aria-hidden="true">{dirOf(url) === 'asc' ? '↑' : '↓'}</span>
-            </button>
-          </fieldset>
-        ) : null}
+            {url.view === 'grid' ? (
+              <fieldset className={css.sortGroup}>
+                <legend className={css.srOnly}>Sort</legend>
+                <label className={css.sortLabel}>
+                  Sort
+                  <select
+                    className={css.sortSelect}
+                    value={url.sort}
+                    onChange={(e) => onUrl(withSort(url, e.target.value as AssetSort))}
+                  >
+                    {SORTS.map((sort) => (
+                      <option key={sort.value} value={sort.value}>
+                        {sort.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className={css.dirButton}
+                  // Names the state and the effect together, because a bare ↑ is the
+                  // unlabelled glyph `docs/ui-review.md` found twice in the old top bar.
+                  aria-label={
+                    dirOf(url) === 'asc'
+                      ? 'Ascending. Reverse to descending'
+                      : 'Descending. Reverse to ascending'
+                  }
+                  onClick={() => onUrl(withSort(url, url.sort))}
+                >
+                  <span aria-hidden="true">{dirOf(url) === 'asc' ? '↑' : '↓'}</span>
+                </button>
+              </fieldset>
+            ) : null}
 
-        <span className={css.controlsEnd}>{uploadButton}</span>
-      </div>
+            <span className={css.controlsEnd}>{uploadButton}</span>
+          </div>
 
-      {/*
+          {/*
         The per-file upload report. `role="status"` so the outcome is announced: a
         batch can partly succeed, and a sighted user reads the failed rows while a
         screen reader user would otherwise never be told.
       */}
-      {upload.entries.length > 0 ? (
-        <div className={css.uploads} role="status">
-          <div className={css.uploadsHead}>
-            <span className={css.uploadsText}>{report.text}</span>
-            {report.busy ? null : (
-              <Button size="sm" variant="subtle" onClick={upload.dismiss}>
-                Dismiss
-              </Button>
-            )}
-          </div>
-          <ul className={css.uploadList}>
-            {upload.entries.map((entry) => (
-              <li key={entry.id} className={css.uploadRow} data-status={entry.status}>
-                <span className={css.uploadName}>{entry.filename}</span>
-                <span className={css.uploadState}>
-                  {entry.status === 'uploading'
-                    ? 'Uploading…'
-                    : entry.status === 'done'
-                      ? 'Uploaded'
-                      : (entry.error ?? 'Failed')}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
+          {upload.entries.length > 0 ? (
+            <div className={css.uploads} role="status">
+              <div className={css.uploadsHead}>
+                <span className={css.uploadsText}>{report.text}</span>
+                {report.busy ? null : (
+                  <Button size="sm" variant="subtle" onClick={upload.dismiss}>
+                    Dismiss
+                  </Button>
+                )}
+              </div>
+              <ul className={css.uploadList}>
+                {upload.entries.map((entry) => (
+                  <li key={entry.id} className={css.uploadRow} data-status={entry.status}>
+                    <span className={css.uploadName}>{entry.filename}</span>
+                    <span className={css.uploadState}>
+                      {entry.status === 'uploading'
+                        ? 'Uploading…'
+                        : entry.status === 'done'
+                          ? 'Uploaded'
+                          : (entry.error ?? 'Failed')}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
-      {firstLoad ? (
-        // Skeleton tiles and rows, not a spinner: both have a known shape, so the
-        // screen does not jump when the answer lands.
-        <div
-          className={url.view === 'grid' ? css.skeletonGrid : css.skeletonRows}
-          aria-hidden="true"
-        >
-          {SKELETONS.slice(0, url.view === 'grid' ? 12 : 6).map((key) => (
-            <div className={url.view === 'grid' ? css.skeletonTile : css.skeletonRow} key={key} />
-          ))}
-        </div>
-      ) : rows.length === 0 ? (
-        <Empty narrowed={narrowed} onClear={() => onUrl(withFilter(url, { kind: 'all', q: '' }))}>
-          {uploadButton}
-        </Empty>
-      ) : url.view === 'grid' ? (
-        <div
-          ref={grid}
-          className={`${css.grid} ${compact ? css.gridCompact : ''}`}
-          role="listbox"
-          aria-label={label}
-          onKeyDown={onGridKey}
-        >
-          {rows.map((row) => (
-            <Tile
-              key={row.id}
-              row={row}
-              mount={mount}
-              selected={row.id === selected}
-              focusable={row.id === focusable}
-              onSelect={() => props.onSelect(row.id)}
+          {firstLoad ? (
+            // Skeleton tiles and rows, not a spinner: both have a known shape, so the
+            // screen does not jump when the answer lands.
+            <div
+              className={url.view === 'grid' ? css.skeletonGrid : css.skeletonRows}
+              aria-hidden="true"
+            >
+              {SKELETONS.slice(0, url.view === 'grid' ? 12 : 6).map((key) => (
+                <div
+                  className={url.view === 'grid' ? css.skeletonTile : css.skeletonRow}
+                  key={key}
+                />
+              ))}
+            </div>
+          ) : rows.length === 0 ? (
+            <Empty
+              narrowed={narrowed}
+              onClear={() =>
+                onUrl(
+                  withFilter(url, {
+                    kind: 'all',
+                    q: '',
+                    folder: undefined,
+                    unfiled: false,
+                    tags: [],
+                    untagged: false,
+                  }),
+                )
+              }
+            >
+              {uploadButton}
+            </Empty>
+          ) : url.view === 'grid' ? (
+            <div
+              ref={grid}
+              className={`${css.grid} ${compact ? css.gridCompact : ''}`}
+              role="listbox"
+              aria-label={label}
+              onKeyDown={onGridKey}
+            >
+              {rows.map((row) => (
+                <Tile
+                  key={row.id}
+                  row={row}
+                  mount={mount}
+                  selected={row.id === selected}
+                  focusable={row.id === focusable}
+                  onSelect={() => props.onSelect(row.id)}
+                />
+              ))}
+            </div>
+          ) : (
+            <Table
+              label={label}
+              columns={columns.map((column) => tableColumn(column, mount))}
+              rows={rows}
+              rowKey={(row) => row.id}
+              currentKey={selected ?? null}
+              sort={{ key: sortColumnKey(url), dir: dirOf(url) }}
+              onSort={(key) => {
+                const sort = ASSET_COLUMNS.find((column) => column.key === key)?.sort
+                if (sort) onUrl(withSort(url, sort))
+              }}
+              onOpen={(row) => props.onSelect(row.id)}
             />
-          ))}
-        </div>
-      ) : (
-        <Table
-          label={label}
-          columns={columns.map((column) => tableColumn(column, mount))}
-          rows={rows}
-          rowKey={(row) => row.id}
-          currentKey={selected ?? null}
-          sort={{ key: sortColumnKey(url), dir: dirOf(url) }}
-          onSort={(key) => {
-            const sort = ASSET_COLUMNS.find((column) => column.key === key)?.sort
-            if (sort) onUrl(withSort(url, sort))
-          }}
-          onOpen={(row) => props.onSelect(row.id)}
-        />
-      )}
+          )}
 
-      <div className={css.footer}>
-        {/*
+          <div className={css.footer}>
+            {/*
           `Showing n of N` — next / previous plus an exact count, never page numbers
           (`ui-architecture.md` Resolved 5). The old library showed neither, which is
           how asset 201 became unreachable.
         */}
-        <span className={css.count}>
-          {data.page.total === undefined
-            ? `${rows.length} shown`
-            : `${rows.length} of ${data.page.total} ${data.page.total === 1 ? 'file' : 'files'}`}
-        </span>
-        <span className={css.pager}>
-          <Button
-            size="sm"
-            disabled={!data.canGoBack}
-            reason="This is the first page"
-            onClick={data.prevPage}
-          >
-            Previous
-          </Button>
-          <Button
-            size="sm"
-            disabled={data.page.cursor === null}
-            reason="This is the last page"
-            onClick={data.nextPage}
-          >
-            Next
-          </Button>
-        </span>
+            <span className={css.count}>
+              {data.page.total === undefined
+                ? `${rows.length} shown`
+                : `${rows.length} of ${data.page.total} ${data.page.total === 1 ? 'file' : 'files'}`}
+            </span>
+            <span className={css.pager}>
+              <Button
+                size="sm"
+                disabled={!data.canGoBack}
+                reason="This is the first page"
+                onClick={data.prevPage}
+              >
+                Previous
+              </Button>
+              <Button
+                size="sm"
+                disabled={data.page.cursor === null}
+                reason="This is the last page"
+                onClick={data.nextPage}
+              >
+                Next
+              </Button>
+            </span>
+          </div>
+        </div>
       </div>
     </div>
+  )
+}
+
+/* ----------------------------------------------------------------- sidebar --- */
+
+/**
+ * The folder tree and the tag chips — the two filters decision 2 adds beside
+ * `kind` and `q`. **A filter list, not a place to navigate into**: clicking a
+ * folder narrows the one grid this component already draws, and does not open it
+ * as a second view.
+ *
+ * `listFolders` and `listTags` already answer their lists in the order a tree and
+ * a vocabulary should render in — depth-first and alphabetical for folders
+ * (decision 3), alphabetical by slug for tags — so this renders both flat and
+ * lets the server's ordering do the work, rather than reconstructing a nested
+ * structure in JavaScript.
+ *
+ * **One instance per mount.** `AssetBrowser` is the "one implementation, two
+ * mounts" component, and this lives inside it rather than being lifted to a
+ * caller, which is what makes the picker's sidebar the same code as the screen's
+ * without either `Assets.tsx` or `AssetPicker.tsx` having to wire it up.
+ */
+function Sidebar({
+  apiBase,
+  url,
+  onUrl,
+  compact,
+}: {
+  apiBase: string
+  url: AssetsUrl
+  onUrl: (next: AssetsUrl) => void
+  /** Whether this mount is already inside a `Dialog` — the picker's, at `wide`.
+   * Suppresses the *New folder* affordance: see `NewFolderDialog`'s own header
+   * for why a second `Dialog` cannot be opened from on top of one. */
+  compact: boolean | undefined
+}) {
+  const folders = useFolders(apiBase)
+  const tags = useTags(apiBase)
+  const [creating, setCreating] = useState(false)
+
+  const atRoot = url.folder === undefined && !url.unfiled
+
+  return (
+    <div className={css.sidebar}>
+      <section className={css.sidebarSection}>
+        <h3 className={css.sidebarTitle}>Folders</h3>
+        <fieldset className={css.folderTree}>
+          <legend className={css.srOnly}>Filter by folder</legend>
+          <button
+            type="button"
+            className={`${css.folderRow} ${atRoot ? css.folderRowOn : ''}`}
+            aria-pressed={atRoot}
+            onClick={() => onUrl(withFilter(url, { folder: undefined, unfiled: false }))}
+          >
+            All files
+          </button>
+          {folders.folders.map((folder) => (
+            <button
+              key={folder.id}
+              type="button"
+              className={`${css.folderRow} ${url.folder === folder.path ? css.folderRowOn : ''}`}
+              style={{ paddingLeft: `calc(var(--space-2) + ${folderDepth(folder) * 14}px)` }}
+              aria-pressed={url.folder === folder.path}
+              onClick={() => onUrl(withFilter(url, { folder: folder.path }))}
+            >
+              {folder.name}
+            </button>
+          ))}
+          <button
+            type="button"
+            className={`${css.folderRow} ${url.unfiled ? css.folderRowOn : ''}`}
+            aria-pressed={url.unfiled}
+            onClick={() => onUrl(withFilter(url, { unfiled: true }))}
+          >
+            Unfiled
+          </button>
+        </fieldset>
+        {compact ? null : (
+          <Button size="sm" variant="subtle" onClick={() => setCreating(true)}>
+            New folder
+          </Button>
+        )}
+      </section>
+
+      <section className={css.sidebarSection}>
+        <h3 className={css.sidebarTitle}>Tags</h3>
+        {tags.tags.length === 0 && !tags.loading ? (
+          <p className={css.note}>No tags yet.</p>
+        ) : (
+          <fieldset className={css.chips}>
+            <legend className={css.srOnly}>Filter by tag</legend>
+            <button
+              type="button"
+              className={`${css.chip} ${url.untagged ? css.chipOn : ''}`}
+              aria-pressed={url.untagged}
+              onClick={() => onUrl(withFilter(url, { untagged: !url.untagged }))}
+            >
+              Untagged
+            </button>
+            {tags.tags.map((tag) => (
+              <button
+                key={tag.id}
+                type="button"
+                className={`${css.chip} ${url.tags.includes(tag.slug) ? css.chipOn : ''}`}
+                aria-pressed={url.tags.includes(tag.slug)}
+                onClick={() =>
+                  onUrl(withFilter(url, { tags: toggleTagFilter(url.tags, tag.slug) }))
+                }
+              >
+                {tagChipLabel(tag)}
+              </button>
+            ))}
+          </fieldset>
+        )}
+      </section>
+
+      {creating ? (
+        <NewFolderDialog
+          folders={folders.folders}
+          onClose={() => setCreating(false)}
+          onCreate={async (input) => {
+            const folder = await folders.create(input)
+            setCreating(false)
+            onUrl(withFilter(url, { folder: folder.path }))
+          }}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * The one place a folder is created (decision 3's tree is the browse spine, and
+ * this is what plants it). A name and, optionally, a parent — nothing else,
+ * matching `CreateDialog.tsx`'s rule that a create dialog asks for the one field
+ * that would otherwise leave a row unrepresentable and nothing more.
+ *
+ * **Screen-only, never offered when `Sidebar`'s `compact` is set** — the picker
+ * mount, whose own `AssetBrowser` already sits inside `AssetPicker.tsx`'s
+ * `Dialog`. `useFocusTrap` attaches one `keydown` listener per mounted `Dialog`
+ * and each cycles Tab within *its own* `panel`; a portal detaches DOM
+ * containment, so the outer trap's "is focus inside my panel?" check reads
+ * false for anything focused inside this one and yanks focus back into the
+ * outer dialog on every Tab press — not a hypothetical, verified by opening
+ * this from inside the picker before the `compact` guard was added. **One
+ * focus trap** (`CLAUDE.md`) turns out to mean one *mounted* `Dialog` at a
+ * time, not merely one implementation shared by every caller, and this is the
+ * mount where that distinction bites: creating a folder from the picker is
+ * left to the screen, where nothing else is layered on top.
+ *
+ * **The error is shown inline**, not through a toast: `AssetPicker.tsx`
+ * deliberately takes no `onNotice` (see its own header), and now that this
+ * dialog is screen-only that constraint is not load-bearing for the reason
+ * above — but a self-contained error still costs nothing and needs no channel
+ * threaded down from either mount.
+ */
+function NewFolderDialog({
+  folders,
+  onClose,
+  onCreate,
+}: {
+  folders: readonly AssetFolder[]
+  onClose: () => void
+  onCreate: (input: { name: string; parentId: string | null }) => Promise<void>
+}) {
+  const [name, setName] = useState('')
+  const [parentId, setParentId] = useState('')
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async () => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setPending(true)
+    setError(null)
+    try {
+      await onCreate({ name: trimmed, parentId: parentId || null })
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Dialog
+      title="New folder"
+      description="Nothing is created until you press Create."
+      onClose={onClose}
+      actions={
+        <>
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
+            disabled={pending || name.trim() === ''}
+            reason={pending ? 'Creating…' : 'Name a folder first'}
+            onClick={() => void submit()}
+          >
+            Create
+          </Button>
+        </>
+      }
+    >
+      {/* A real `<form>`, so Enter submits — `Dialog` owns the footer, so the
+          buttons that act on this form live outside the element itself. */}
+      <form
+        className={css.folderForm}
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (!pending) void submit()
+        }}
+      >
+        <Field label="Name" required error={error}>
+          {(id) => (
+            <Input
+              id={id}
+              value={name}
+              placeholder="Folder name"
+              disabled={pending}
+              onChange={(e) => setName(e.target.value)}
+            />
+          )}
+        </Field>
+        <Field label="Parent folder" help="Top level if none is chosen.">
+          {(id) => (
+            <Select
+              id={id}
+              value={parentId}
+              disabled={pending}
+              onChange={(e) => setParentId(e.target.value)}
+            >
+              <option value="">Top level</option>
+              {folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>
+                  {indentedFolderName(folder)}
+                </option>
+              ))}
+            </Select>
+          )}
+        </Field>
+      </form>
+    </Dialog>
   )
 }
 

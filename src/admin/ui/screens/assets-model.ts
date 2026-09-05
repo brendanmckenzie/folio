@@ -16,13 +16,21 @@
  * (`humanSize`, the thumbnail URL shape, and `keyAssets` at the foot of the file —
  * the last of which is a *field's* concern rather than this screen's, and says so).
  */
-import type { AssetSort } from '../../../core/assets'
+import type { AssetFolder, AssetSort, AssetTag } from '../../../core/assets'
 import type { AssetValue } from '../../../core/values'
-import type { AssetRow } from '../../../server/assets'
+import type { AssetRow as ServerAssetRow } from '../../../server/assets'
 
-/** Re-exported so a screen file imports its row type from the model beside it
- * rather than reaching into `server/` for a shape it only ever reads. */
-export type { AssetRow }
+/**
+ * A library row, as every unversioned asset route answers it: `server/assets.ts`'s
+ * own `AssetRow` plus the `tags` array `withTags` (`routes/assets.ts`) attaches to
+ * every read. Not the bare server type re-exported, because every fetch this screen
+ * makes goes through that wrapper — `GET /assets`, `GET /assets/:id` and the
+ * `PATCH` response all carry it — and a client type that omitted it would leave
+ * every caller re-declaring the extension for itself.
+ */
+export interface AssetRow extends ServerAssetRow {
+  tags: AssetTag[]
+}
 
 /* ------------------------------------------------------------------- kinds --- */
 
@@ -106,6 +114,23 @@ export interface AssetsUrl {
   kind: KindFilter
   q: string
   /**
+   * A folder's `path`, including its descendants (decision 3, checkpoint 10).
+   * **Mutually exclusive with `unfiled`** — both narrow the same axis, and
+   * `assetFilterSql` composing both honestly would yield an empty list the route
+   * refuses instead (`routes/assets.ts`'s `assetFolderFilter`). `withFilter` is
+   * what keeps this screen from ever writing both at once.
+   */
+  folder: string | undefined
+  /** `folder_id is null` — every file nothing has filed yet. Mutually exclusive
+   * with `folder`, for the reason above. */
+  unfiled: boolean
+  /** Tag slugs, ANDed (decision 4), capped at `MAX_TAG_FILTER`. Mutually
+   * exclusive with `untagged`. */
+  tags: readonly string[]
+  /** No tagging rows — the retro-organise starting point (decision 4's user
+   * story). Mutually exclusive with `tags`. */
+  untagged: boolean
+  /**
    * The asset whose detail panel is open.
    *
    * In the URL because **an asset is a thing somebody sends a colleague**: "have a
@@ -122,12 +147,26 @@ export function parseAssetsUrl(
   /** What to use when the URL says nothing — the last choice, remembered. */
   defaults: { view: AssetView },
 ): AssetsUrl {
+  const folder = query.folder || undefined
+  // Deduplicated and capped defensively, the way `tagsQuery` (`server/validate.ts`)
+  // is on the route's side of the same string — a hand-edited URL is the one place
+  // this screen's own `withFilter` cannot have kept it inside `MAX_TAG_FILTER`.
+  const tags = query.tags
+    ? [...new Set(query.tags.split(',').filter(Boolean))].slice(0, MAX_TAG_FILTER)
+    : []
   return {
     view: query.view !== undefined && isAssetView(query.view) ? query.view : defaults.view,
     sort: isAssetSort(query.sort) ? query.sort : 'created',
     dir: query.dir === 'asc' || query.dir === 'desc' ? query.dir : undefined,
     kind: isKindFilter(query.kind) ? query.kind : 'all',
     q: query.q ?? '',
+    folder,
+    // A folder wins over `unfiled` when a hand-edited URL names both, rather than
+    // sending the route the pair it refuses with a 400 — the one case `withFilter`
+    // cannot prevent, because nothing here wrote this particular URL.
+    unfiled: folder === undefined && query.unfiled === '1',
+    tags,
+    untagged: tags.length === 0 && query.untagged === '1',
     asset: query.asset || undefined,
   }
 }
@@ -151,6 +190,15 @@ export function assetsQuery(url: AssetsUrl): Record<string, string | undefined> 
     dir: url.dir === naturalDir(url.sort) ? undefined : url.dir,
     kind: url.kind === 'all' ? undefined : url.kind,
     q: url.q || undefined,
+    folder: url.folder,
+    unfiled: url.unfiled ? '1' : undefined,
+    // Comma-joined, matching `useEditor.ts`'s `wanted`: this screen's own address
+    // bar is a `Record<string, string>` (`route.ts`'s `parseQuery` keeps only the
+    // last of two repeated keys), so a multi-valued filter has to ride in one
+    // parameter here even though `assetsParams` sends it to the route repeated —
+    // see that function's own note.
+    tags: url.tags.length > 0 ? url.tags.join(',') : undefined,
+    untagged: url.untagged ? '1' : undefined,
     asset: url.asset,
   }
 }
@@ -213,9 +261,20 @@ export function withView(url: AssetsUrl, view: AssetView): AssetsUrl {
  */
 export function withFilter(
   url: AssetsUrl,
-  patch: Partial<Pick<AssetsUrl, 'kind' | 'q'>>,
+  patch: Partial<Pick<AssetsUrl, 'kind' | 'q' | 'folder' | 'unfiled' | 'tags' | 'untagged'>>,
 ): AssetsUrl {
-  return { ...url, ...patch }
+  const next = { ...url, ...patch }
+  // The two pairs the route refuses together (`assetFolderFilter`, `assetTagFilter`
+  // in `routes/assets.ts`): whichever side of a pair this patch is *turning on*
+  // wins outright, rather than composing into a filter that can only ever answer
+  // nothing. `folder` is checked against `undefined` rather than truthiness — an
+  // empty string is not a legal path — and the two booleans against truthiness,
+  // because turning one *off* has nothing to clear on the other side.
+  if (patch.folder !== undefined) next.unfiled = false
+  if (patch.unfiled) next.folder = undefined
+  if (patch.tags !== undefined) next.untagged = false
+  if (patch.untagged) next.tags = []
+  return next
 }
 
 /**
@@ -223,7 +282,14 @@ export function withFilter(
  * states — offering *clear filters* under the first is offering to clear nothing.
  */
 export function isNarrowed(url: AssetsUrl): boolean {
-  return url.kind !== 'all' || url.q.trim() !== ''
+  return (
+    url.kind !== 'all' ||
+    url.q.trim() !== '' ||
+    url.folder !== undefined ||
+    url.unfiled ||
+    url.tags.length > 0 ||
+    url.untagged
+  )
 }
 
 /**
@@ -249,6 +315,13 @@ export function assetsParams(
   if (url.kind !== 'all') params.set('kind', url.kind)
   const q = url.q.trim()
   if (q) params.set('q', q)
+  if (url.folder !== undefined) params.set('folder', url.folder)
+  if (url.unfiled) params.set('unfiled', '1')
+  // Repeated, not comma-joined: this is the fetch query the route parses with
+  // `c.req.queries('tags')` (`validate.ts`'s `tagsQuery`), not the screen's own
+  // address bar — see `assetsQuery`'s note on why those two differ.
+  for (const tag of url.tags) params.append('tags', tag)
+  if (url.untagged) params.set('untagged', '1')
   if (opts.count) params.set('count', '1')
   if (opts.cursor) params.set('cursor', opts.cursor)
   return params
@@ -260,6 +333,61 @@ function isAssetSort(raw: string | undefined): raw is AssetSort {
 
 function isKindFilter(raw: string | undefined): raw is KindFilter {
   return raw === 'all' || raw === 'image' || raw === 'application'
+}
+
+/* -------------------------------------------------------------- organisation --- */
+
+/**
+ * How many tag filters this screen offers at once — mirrors
+ * `server/asset-tags.ts`'s `MAX_TAG_FILTER`, decision 4's bind budget rather than a
+ * product decision (`assetFilterSql`'s tag clause binds one parameter per slug plus
+ * one for its `having`, against `D1_BIND_CAP`). Duplicated rather than imported for
+ * `assetValue`'s reason below: that module's neighbour is a Worker module, and
+ * importing it here to reuse one number is the wrong trade. The unit test asserts
+ * the two agree.
+ */
+export const MAX_TAG_FILTER = 8
+
+/**
+ * Adds or removes one tag slug from the filter, capped at `MAX_TAG_FILTER`. A click
+ * past the cap is a no-op rather than a ninth chip the route would refuse with a
+ * 400 naming a limit the click gave no reason for.
+ */
+export function toggleTagFilter(tags: readonly string[], slug: string): readonly string[] {
+  if (tags.includes(slug)) return tags.filter((value) => value !== slug)
+  if (tags.length >= MAX_TAG_FILTER) return tags
+  return [...tags, slug]
+}
+
+/**
+ * A tag chip's label — the name, plus its count in parentheses when the list
+ * carries one. `listTags`'s `?counts=1` is opt-in (`asset-tags.ts`'s
+ * `ListTagsOptions`), so a sidebar chip gets a count and a bare autocomplete option
+ * does not; this reads either without needing to know which it was given.
+ */
+export function tagChipLabel(tag: Pick<AssetTag, 'name' | 'count'>): string {
+  return tag.count === undefined ? tag.name : `${tag.name} (${tag.count})`
+}
+
+/**
+ * How deeply nested a folder is — the number of `/` in its `path`, so a root
+ * folder is depth 0. `listFolders` already answers the tree in depth-first,
+ * alphabetical order (decision 3): this is what turns that flat, already-ordered
+ * list into something that reads as a tree, without reconstructing the nesting in
+ * JavaScript.
+ */
+export function folderDepth(folder: Pick<AssetFolder, 'path'>): number {
+  return folder.path.split('/').length - 1
+}
+
+/**
+ * A folder's name, indented for a plain-text context — a `<select>`'s `<option>`,
+ * which cannot reliably take CSS padding across browsers the way a real element in
+ * the sidebar tree can. Two non-breaking spaces per level of depth: a regular space
+ * collapses in option text the same way it does everywhere else in HTML.
+ */
+export function indentedFolderName(folder: Pick<AssetFolder, 'path' | 'name'>): string {
+  return `${'  '.repeat(folderDepth(folder))}${folder.name}`
 }
 
 /* ----------------------------------------------------------------- columns --- */

@@ -1344,3 +1344,86 @@ optional `filter` and runs it through the shared composer (decision 13), but the
 **`{base}/api/v1/assets` route does not parse `folder` or `q` yet** — that route lives
 in `routes/api/index.ts`, which was outside this phase's file set. It is a two-line
 change and the reader behind it is already built and tested.
+
+### Phase 4 — the admin, single-asset (2026-09-06)
+
+Landed as planned: `assets-model.ts` gained `folder`, `unfiled`, `tags` and
+`untagged` on `AssetsUrl`, with `parseAssetsUrl`, `assetsQuery`, `assetsParams`,
+`withFilter` and `isNarrowed` following; `useFolders.ts` and `useTags.ts` are new;
+`AssetBrowser.tsx` grew a sidebar (a folder tree, a *New folder* dialog, and tag
+chips) that both mounts get for free; `AssetDetail.tsx` gained a description, a
+folder and a tags editor beside the alt editor.
+
+**The one-parameter-per-key address bar is why the two URLs disagree about tags.**
+`route.ts`'s `parseQuery` keeps only the last of two repeated `?tags=` — a fact the
+plan did not name — so `AssetsUrl.tags` rides the screen's own address bar
+comma-joined (`assetsQuery`), the way `useEditor.ts`'s `wanted` already does, and is
+sent to the route **repeated** (`assetsParams`, one `params.append('tags', …)` per
+slug), which is what `c.req.queries('tags')` on the other end actually parses. Two
+representations of one array, on either side of one function boundary, and
+`assetsParams`'s own doc comment says why they may not be unified.
+
+**`withFilter` enforces the two mutual exclusions the route refuses with a 400**,
+so this screen can never build the request that triggers one: turning `folder` or
+`tags` on clears `unfiled`/`untagged` and vice versa. `parseAssetsUrl` carries the
+same defensive rule for a hand-edited URL naming both — folder wins over `unfiled`,
+tags win over `untagged` — which is the one case `withFilter` cannot reach because
+nothing in this screen wrote that URL.
+
+**`AssetRow` (this file's own, not `server/assets.ts`'s) now carries `tags`.** Every
+unversioned route this admin calls attaches it (`routes/assets.ts`'s `withTags`),
+so the type says so rather than leaving every caller to declare the extension for
+itself. The one response that does not carry it — `POST /assets`'s upload
+response — is never read for its `tags`, only its `id`, so this is sound in
+practice; a comment on the interface says why rather than leaving it to be
+rediscovered.
+
+**Two independent `useFolders`/`useTags` instances exist whenever the detail panel
+is open beside the sidebar** — `AssetBrowser`'s sidebar and `AssetDetail`'s editors
+each call the hook rather than sharing a fetch. A folder or tag created from one
+does not appear in the other until it next mounts or reloads. Decided rather than
+discovered late: a shared cache across two components is a bigger investment than
+a single-asset phase owes, and named here so phase 5 (bulk, which will want its own
+folder/tag data for the same reasons) does not have to rediscover the trade-off.
+
+**Folder creation lives only in the sidebar; tag creation lives only in the detail
+panel.** The plan named neither, and both were decided for the same reason: one
+creation surface per kind of thing, rather than two places that can disagree about
+what just got created. `FolderEditor`'s select therefore offers only folders that
+already exist — a folder created while the panel is open does not appear there
+until its own `useFolders` reloads, which is the same gap the paragraph above
+already names.
+
+**Deferred, and worth naming rather than gone quiet about:** folder rename, move
+and delete have no admin surface yet — `asset-folders.ts`'s `updateFolder` and
+`deleteFolder` are only reachable through the raw API today. Tag rename and delete
+are the same. Nothing in phases 1–3 needed either for the tree and the vocabulary
+to be usable, and phase 5's bulk actions are a more natural home for "move/delete a
+folder" than a single-asset phase, so this is left rather than built twice.
+
+**One mounted `Dialog` at a time, not just one implementation — verified by
+breaking it.** The plan did not anticipate this: `NewFolderDialog` opened from the
+sidebar while `AssetBrowser` sits inside `AssetPicker.tsx`'s own `wide` `Dialog`
+mounts two `useFocusTrap` instances at once, and the outer one's "is focus inside
+my panel?" check reads false for anything focused in the inner one — a portal
+detaches DOM containment, so `outerPanel.contains(activeElement)` is false the
+whole time the inner dialog has focus. Every Tab press was yanked back into the
+picker's own Cancel/Use buttons instead of cycling the New Folder form, which is
+not a corner case, it is what happened on the very first Tab. `CLAUDE.md`'s "one
+focus trap" turns out to bind harder than "one implementation, do not hand-roll a
+second": nesting two mounted instances of the *same* one has the identical
+failure mode. The fix is `Sidebar`'s new `compact` prop, threaded from
+`AssetBrowser`'s own — folder creation is offered only on the screen, where
+nothing else is layered on top; the picker keeps the read-only tree and chips.
+`AssetDetail`'s editors never had this risk, because that panel is screen-only by
+`AssetPicker.tsx`'s own design ("drops the detail panel").
+
+Ten new tests in `test/unit/admin/assets-screen.test.ts`, beyond extending the
+existing URL round-trip and `isNarrowed` cases with the four new fields:
+`withFilter`'s two mutual exclusions, `assetsParams`'s folder/unfiled and
+repeated-`tags` shapes, `toggleTagFilter`'s cap, `tagChipLabel`, `folderDepth` and
+`indentedFolderName` — the last two pinned with an explicit `\u00A0` escape
+rather than a literal character, so the assertion does not depend on an invisible
+non-breaking space surviving a copy-paste. `MAX_TAG_FILTER` here is asserted equal
+to `server/asset-tags.ts`'s own, the same insurance `assetValue`'s test buys against
+`toAssetValue`.
