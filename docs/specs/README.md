@@ -68,6 +68,7 @@ sequence because the dependency graph is the same one.
 | 30 | [Full-text search](content-model/full-text-search.md) | content model | M | — | `0005` | owner, 2026-09-05 |
 | 31 | [Visitor access](platform/visitor-access.md) | platform | M | — | — | owner, 2026-09-05 |
 | 32 | [Media library organisation](content-model/media-library.md) | content model | L | — | `0008` | owner, 2026-09-05 |
+| 33 | [Forms and responses](content-model/forms.md) | content model | L | — | `0010` | owner, 2026-09-05 |
 
 **28–31 build in the order 31 → 30 → 28 → 29** (owner, 2026-09-05), which is not the
 order they are numbered in. The numbers are identities, assigned when the four were
@@ -273,13 +274,15 @@ Both restamped once when `0005` landed: the drafts claimed `0005` and `0006`, wr
 before the build order put 30 first. A claim is a stamp, not a landing — whichever of
 the remaining two builds first takes the next free number and the other restamps.
 
-**Landed: `0001`–`0005`. Claimed: `0006` (28), `0007` (29), `0008` (32, media
-library), `0009` (23). The next free number is `0010`.** Do not
+**Landed on `main`: `0001`–`0005`. Landed on the build branch: `0006` (28). Claimed:
+`0007` (29), `0008` (32, media library), `0009` (23), `0010` (33, forms). The next
+free number is `0011`.** Do not
 derive a number by counting the landed rows above; take the one your spec's header
 names, and if it is already on disk, stop rather than picking the next one yourself.
 
 Spec 23 restamped `0008` → `0009` to make room for 32, which its own header sequences
-after 29 and before 23. That is the standing rule working as intended rather than an
+after 29 and before 23; spec 33 (forms) then took `0010`, sequencing itself after 32
+and before 23 in turn, so 23 stays last and did not move again. That is the standing rule working as intended rather than an
 exception to it: a claim is a stamp, not a landing, and the spec that builds first
 takes the number.
 

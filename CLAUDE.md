@@ -350,7 +350,7 @@ M–L, needs 28's provider union and `completeSignIn`), 30
 (`content-model/full-text-search.md`, M) — and 32 (`content-model/media-library.md`,
 L, drafted the same day, after the other four).**
 
-**They build in the order 31 → 30 → 28 → 29 → 32** (owner, 2026-09-05), which is not
+**They build in the order 31 → 30 → 28 → 29 → 32 → 33** (owner, 2026-09-05), which is not
 the order they are numbered in — the numbers were assigned when they were drafted and
 are identities, not a queue. Each spec's header carries its place. **31 is done**
 (`ebd45e6`, `41cd2e2`) and 30 is part-built. Three of the four gaps between them are
@@ -369,12 +369,14 @@ hard constraints and one is sequencing:
 - **32 after 29, before 23.** Its own checkpoint 8: landing the asset tables before
   multi-site scopes every list route means 23 scopes them in the same pass instead of
   retrofitting them.
+- **33 (`content-model/forms.md`, L) after 32, before 23**, its own header's sequence,
+  for the same reason: it adds tables and a list route, and 23 scopes every list route.
 - **23 after all of them**, and it is the older constraint: it scopes every list
   route, so it and anything else reshaping a list route must not land out of order.
 
 Migration numbers in the drafts are claims. **On the decided order: 31 carries none,
-30 takes `0005` (landed), 28 takes `0006`, 29 takes `0007`, 32 takes `0008`, and 23
-restamped to `0009` to make room for it.** The old rule still governs if the order
+30 takes `0005` (landed), 28 takes `0006` (landed), 29 takes `0007`, 32 takes `0008`,
+33 takes `0010`, and 23 restamped to `0009` to make room.** The old rule still governs if the order
 moves again — whichever builds first takes the next free number and the others
 restamp, which is exactly what 23 just did.
 
