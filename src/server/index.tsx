@@ -792,6 +792,9 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
           typeOf: rt.typeOf,
           draft: (story) => rt.draftFor(bindings, story),
           stub: (id) => rt.stub(bindings, id),
+          // Without this a migration that rewrites an indexed value or any prose
+          // leaves content_index and content_text describing the old document.
+          projection: rt.projection,
           hooks: rt.hookRunner(alarmHookCtx(env)),
         },
         opts,

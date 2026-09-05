@@ -65,6 +65,9 @@ export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           typeOf: rt.typeOf,
           draft: (story) => rt.draftFor(bindings, story),
           stub: (id) => rt.stub(bindings, id),
+          // As in `folio.migrate`: re-project, or the index describes the
+          // document as it was before the migration rewrote it.
+          projection: rt.projection,
           hooks: rt.hookRunner(hookCtx(c)),
         },
         {

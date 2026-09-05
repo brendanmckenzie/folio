@@ -187,6 +187,18 @@ export interface FolioRuntime {
    * leave the column alone rather than clear it.
    */
   titlesFor: (story: StoryMeta, doc: Doc) => Record<string, string> | undefined
+  /**
+   * The `content_index` / `content_refs` / `content_text` rows for one published
+   * document, as `publishDeps` already receives.
+   *
+   * Exposed on the runtime for the sake of `runMigrations`, which rewrites
+   * `published_doc` and must re-project the index in the same batch
+   * (`content-model/full-text-search.md` decision 8). Both of its call sites build
+   * `MigrateDeps` from a `FolioRuntime` rather than from inside `createRuntime`,
+   * and a migration that rewrites prose without this leaves the index describing
+   * text no document contains any more — silently, until somebody reindexes.
+   */
+  projection: (story: StoryMeta, doc: Doc) => ContentProjection
   /** Where the routes are mounted, with no trailing slash. */
   base: string
   /** True when a Vite dev client is configured, so the pages ship the preamble. */
@@ -876,6 +888,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     defaultType: fallbackType,
     titleFor,
     titlesFor,
+    projection,
     base,
     dev: Boolean(config.assets?.devClient),
     draftMode: config.draftMode === true,

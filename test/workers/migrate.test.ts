@@ -724,6 +724,46 @@ describe('POST /folio/api/migrate', () => {
     })
     expect(res?.status).toBe(400)
   })
+
+  /**
+   * The route has to hand `runMigrations` a `projection`, or a migration that
+   * rewrites a published document leaves `content_index` and `content_text`
+   * describing the document as it was before
+   * (`content-model/full-text-search.md` decision 8).
+   *
+   * This asserts the **wiring**, which `migrate.ts`'s own tests cannot: they call
+   * `runMigrations` directly and pass a projection themselves, so both branches
+   * pass whether or not either call site supplies one. Dropping
+   * `projection: rt.projection` from `routes/migrations.ts` is a one-line edit
+   * that nothing else here would notice.
+   *
+   * `seedStory` writes `published_doc` straight to the row rather than going
+   * through the publish batch, so no search row exists beforehand — which makes
+   * "a row appeared, holding the migrated text" the whole assertion.
+   */
+  it('re-projects the search index for the documents it rewrites', async () => {
+    const folio = makeFolio([RENAME])
+    await seedStory(folio, 'mig_proj', [blok('h1', 'hero', { heading: 'wibblewords' })], {
+      publish: true,
+    })
+
+    const before = await env.DB.prepare('select body from content_text where story_id = ?')
+      .bind('mig_proj')
+      .first<{ body: string }>()
+    expect(before).toBeNull()
+
+    const res = await req(folio, '/folio/api/migrate', { method: 'POST' })
+    expect(res?.status).toBe(200)
+    expect(await res?.json<MigrateReport>()).toMatchObject({ changed: 1 })
+
+    // `heading` is not a field of `hero`, so it was never searchable; `title` is.
+    // The text is only reachable because the migration moved it *and* the route
+    // re-projected afterwards.
+    const after = await env.DB.prepare('select body from content_text where story_id = ?')
+      .bind('mig_proj')
+      .first<{ body: string }>()
+    expect(after?.body).toContain('wibblewords')
+  })
 })
 
 describe('GET /folio/api/audit', () => {
