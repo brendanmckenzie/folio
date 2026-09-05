@@ -16,7 +16,7 @@
  * (`humanSize`, the thumbnail URL shape, and `keyAssets` at the foot of the file —
  * the last of which is a *field's* concern rather than this screen's, and says so).
  */
-import type { AssetSort } from '../../../core/story'
+import type { AssetSort } from '../../../core/assets'
 import type { AssetValue } from '../../../core/values'
 import type { AssetRow } from '../../../server/assets'
 
@@ -159,7 +159,7 @@ export function assetsQuery(url: AssetsUrl): Record<string, string | undefined> 
  * Each sort's own direction — the one it shows before anybody reverses it.
  *
  * Stated here and in `server/assets.ts`'s `ORDERS` on purpose, and the two have to
- * agree: the URL is written here and read there. `core/story.ts`'s `AssetSort`
+ * agree: the URL is written here and read there. `core/assets.ts`'s `AssetSort`
  * carries the argument for each, and the interesting one is `size` **descending** —
  * nobody sorts a media library looking for the smallest file; they sort it because
  * the bucket is bigger than expected and they are hunting the 8MB PNG.
@@ -286,7 +286,7 @@ export interface AssetColumn {
  * facts, and nothing on this screen sorts by something you cannot see.
  *
  * `type` and `dimensions` are the two that do not sort, and neither wants to:
- * `core/story.ts`'s `AssetSort` argues `contentType` out (it would order by the
+ * `core/assets.ts`'s `AssetSort` argues `contentType` out (it would order by the
  * spelling of a MIME string, when `?kind=` is what somebody grouping by type
  * actually wants), and a sort by pixel area has no index, no cursor pair and no
  * question behind it.

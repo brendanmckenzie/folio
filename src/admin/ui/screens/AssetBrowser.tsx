@@ -1,6 +1,6 @@
 import type { KeyboardEvent, ReactNode } from 'react'
 import { useRef } from 'react'
-import type { AssetSort } from '../../../core/story'
+import type { AssetSort } from '../../../core/assets'
 import { Button } from '../Button'
 import { EmptyState } from '../EmptyState'
 import { type Column, Table } from '../Table'

@@ -330,21 +330,39 @@ describe('versions', () => {
 })
 
 describe('assets', () => {
-  it('has exactly one index, and the two new sorts deliberately have none', async () => {
-    // The Assets screen sorts by filename and by size as well as by date
-    // (`core/story.ts`'s `AssetSort`), and neither got an index. An asset table is
-    // bounded by what somebody uploaded by hand, so the scan-and-sort is over
-    // hundreds of rows while an index is a write cost on every upload forever.
+  it('gained four indexes when 0002 refused to add them, and the measurement that reverses it', async () => {
+    // `0002_asset_refs.sql` refused `filename` and `size` on the premise that an
+    // asset table is bounded by what somebody uploaded by hand — adequate at a
+    // few hundred rows. `docs/specs/content-model/media-library.md` decision 5 is
+    // the measurement that reverses it: the library is expected to hold
+    // thousands, and a scan-and-sort behind a debounced search box that also
+    // drags a `count(*)` is exactly the cost `0002` said would need revisiting.
     //
-    // Asserted as an absence for the same reason `stories_draft_updated` is: that
-    // index was created for a query nobody had written and cost every story write
-    // for ten migrations. Adding one here should be a deliberate act with a
-    // measurement behind it, not a reflex — which means this assertion failing is
-    // the conversation, not an obstacle to it.
-    expect(await indexesOf('assets')).toEqual(['assets_created'])
+    // This is an exact-equality assertion on purpose, the same way the one it
+    // replaces was: widening `assets` again should fail this test until it is a
+    // deliberate edit, not a reflex.
+    expect(await indexesOf('assets')).toEqual([
+      'assets_created',
+      'assets_filename',
+      'assets_folder',
+      'assets_size',
+      'assets_undescribed',
+    ])
   })
 
-  it('has every column and a unique R2 key', async () => {
+  it('does NOT index tags or `description` on `assets`', async () => {
+    // The tag filter is served by `asset_taggings_tag`, on the join table where
+    // it belongs — indexing `assets` itself for a tag would duplicate the join
+    // table's job. And `description` search is a scan by decision 12: a leading
+    // wildcard `LIKE` cannot use an index anyway. Asserted here, in addition to
+    // the exact-equality list above, so a future column added to `assets` cannot
+    // smuggle one of these two past just the count.
+    const names = await indexesOf('assets')
+    expect(names.some((n) => n.includes('tag'))).toBe(false)
+    expect(names.some((n) => n.includes('description'))).toBe(false)
+  })
+
+  it('has every column, six of them new for filing, description and enrichment', async () => {
     expect((await columnsOf('assets')).map((c) => c.name)).toEqual([
       'id',
       'key',
@@ -355,6 +373,12 @@ describe('assets', () => {
       'height',
       'alt',
       'created_at',
+      'folder_id',
+      'description',
+      'alt_auto',
+      'description_auto',
+      'described_at',
+      'describe_error',
     ])
     expect(await indexesOf('assets')).toContain('assets_created')
 
@@ -369,6 +393,79 @@ describe('assets', () => {
       ).run(),
     ).rejects.toThrow(/UNIQUE constraint failed/i)
     await env.DB.prepare('delete from assets').run()
+  })
+})
+
+describe('asset_folders', () => {
+  it('has every column, and no `ord`', async () => {
+    expect((await columnsOf('asset_folders')).map((c) => c.name)).toEqual([
+      'id',
+      'parent_id',
+      'name',
+      'path',
+      'created_at',
+    ])
+    // Manual sibling ordering would break `path`'s depth-first-and-alphabetical
+    // property (decision 3) and nobody orders folders by hand. Asserted as an
+    // absence the way `stories_draft_updated` is.
+    expect((await columnsOf('asset_folders')).map((c) => c.name)).not.toContain('ord')
+  })
+
+  it('indexes only the tree render', async () => {
+    expect(await indexesOf('asset_folders')).toEqual(['asset_folders_parent'])
+  })
+
+  it('refuses two siblings whose names slugify onto the same path', async () => {
+    await env.DB.prepare(
+      `insert into asset_folders (id, parent_id, name, path, created_at)
+       values ('fld_a', null, 'Clients', 'clients', 1)`,
+    ).run()
+    await expect(
+      env.DB.prepare(
+        `insert into asset_folders (id, parent_id, name, path, created_at)
+         values ('fld_b', null, 'CLIENTS', 'clients', 1)`,
+      ).run(),
+    ).rejects.toThrow(/UNIQUE constraint failed/i)
+    await env.DB.prepare('delete from asset_folders').run()
+  })
+})
+
+describe('asset_tags', () => {
+  it('has every column, and no index on `name`', async () => {
+    expect((await columnsOf('asset_tags')).map((c) => c.name)).toEqual([
+      'id',
+      'name',
+      'slug',
+      'created_at',
+    ])
+    // The vocabulary is hundreds of rows and the unique index the `unique`
+    // constraint on `slug` already creates serves lookup — decision 5's absence
+    // list.
+    expect(await indexesOf('asset_tags')).toEqual([])
+  })
+
+  it('is unique on `slug`, the tag identity, not on `name`', async () => {
+    await env.DB.prepare(
+      `insert into asset_tags (id, name, slug, created_at)
+       values ('tag_a', 'Headshot', 'headshot', 1)`,
+    ).run()
+    await expect(
+      env.DB.prepare(
+        `insert into asset_tags (id, name, slug, created_at)
+         values ('tag_b', 'headshot', 'headshot', 1)`,
+      ).run(),
+    ).rejects.toThrow(/UNIQUE constraint failed/i)
+    await env.DB.prepare('delete from asset_tags').run()
+  })
+})
+
+describe('asset_taggings', () => {
+  it('has every column, and indexes the direction the screen filters in', async () => {
+    expect((await columnsOf('asset_taggings')).map((c) => c.name)).toEqual(['asset_id', 'tag_id'])
+    // The primary key (asset_id, tag_id) already serves "this asset's tags";
+    // `asset_taggings_tag` serves "this tag's assets", the direction a tag
+    // filter and the sidebar's per-tag counts actually read in.
+    expect(await indexesOf('asset_taggings')).toEqual(['asset_taggings_tag'])
   })
 })
 

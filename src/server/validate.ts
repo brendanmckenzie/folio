@@ -18,11 +18,10 @@
  * itself.
  */
 import * as v from 'valibot'
+import { type AssetSort, DEFAULT_ASSET_SORT } from '../core/assets'
 import { decodeCursor } from '../core/pagination'
 import type { DocumentType } from '../core/schema'
 import {
-  type AssetSort,
-  DEFAULT_ASSET_SORT,
   DEFAULT_DOCUMENT_SORT,
   DEFAULT_FLAT_SORT,
   DEFAULT_SEARCH_SORT,
@@ -1286,7 +1285,7 @@ export function documentSortQuery(raw: string | undefined): DocumentSort {
  * because a URL that silently means something else than it says is worse than a
  * refusal somebody can read.
  *
- * `core/story.ts`'s `AssetSort` carries which direction each one runs in and why
+ * `core/assets.ts`'s `AssetSort` carries which direction each one runs in and why
  * `size` is the one that descends.
  */
 export function assetSortQuery(raw: string | undefined): AssetSort {

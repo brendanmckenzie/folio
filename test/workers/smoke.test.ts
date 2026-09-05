@@ -62,6 +62,14 @@ describe('workers harness: D1', () => {
 
     expect(results.map((r) => r.name)).toEqual([
       'api_tokens',
+      // 0008: the media library's organisation (content-model/media-library.md).
+      // A folder is metadata and never part of an R2 key, so these three tables
+      // are the whole of it — filing a file writes one column and touches no
+      // object. Shapes are asserted in migrations.test.ts; this list only says
+      // they exist.
+      'asset_folders',
+      'asset_taggings',
+      'asset_tags',
       'assets',
       'auth_events',
       'content_fts',

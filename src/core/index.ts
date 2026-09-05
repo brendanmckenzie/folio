@@ -196,6 +196,13 @@ export type {
 export { gateValue, isUngated, redactDoc } from './gate'
 export type { PageAccess } from './gate'
 
+// The media library's organisation vocabulary
+// (`../../docs/specs/content-model/media-library.md`). `AssetSort` travels in a
+// URL the same way `FlatSort`/`DocumentSort`/`SearchSort` below do, which is why
+// it ships from `core/` rather than `server/`.
+export { DEFAULT_ASSET_SORT, tagSlug } from './assets'
+export type { AssetBulkAction, AssetFilter, AssetFolder, AssetSort, AssetTag } from './assets'
+
 export {
   ancestorPaths,
   buildTree,

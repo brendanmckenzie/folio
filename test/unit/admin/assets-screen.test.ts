@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { toAssetValue } from '../../../src/server/assets'
-import type { AssetSort } from '../../../src/core/story'
+import type { AssetSort } from '../../../src/core/assets'
 import {
   addedAgo,
   ASSET_COLUMNS,
@@ -70,6 +70,12 @@ const row = (extra: Partial<AssetRow> = {}): AssetRow => ({
   height: 800,
   alt: 'A photo',
   createdAt: 1_700_000_000_000,
+  folderId: null,
+  description: '',
+  altAuto: '',
+  descriptionAuto: '',
+  describedAt: null,
+  describeError: null,
   ...extra,
 })
 

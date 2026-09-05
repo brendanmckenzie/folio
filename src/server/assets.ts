@@ -15,8 +15,9 @@ import type { AssetValue } from '../core/values'
 import type { AssetTransform } from '../core/resolve'
 import { FolioError } from './errors'
 import { DOWNLOAD_CONTENT_TYPE, isInlineContentType, SERVED_CONTENT_TYPES } from './validate'
+import { type AssetSort, DEFAULT_ASSET_SORT } from '../core/assets'
 import { clampLimit, type CursorPart, decodeCursor, type Page, paginate } from '../core/pagination'
-import { type AssetSort, DEFAULT_ASSET_SORT, type StoryMeta } from '../core/story'
+import type { StoryMeta } from '../core/story'
 import { assetReferences, clearInboundRefStatements } from './content-index'
 import { type Direction, type Keyset, keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
 import { storiesFor } from './stories'
@@ -35,14 +36,31 @@ export interface AssetRow {
   height: number | null
   alt: string
   createdAt: number
+  /** Null is *unfiled*, a real state and the one every existing row starts in
+   * (`migrations/0008_asset_organisation.sql`). */
+  folderId: string | null
+  /** Human, longer than `alt` and searchable — what the file *is*, as against
+   * what a screen reader should say. */
+  description: string
+  /** Machine-written alt text. Separate from `alt` so a human edit is never
+   * clobbered and a re-run is idempotent — `toAssetValue` reads `alt || altAuto`. */
+  altAuto: string
+  /** The same, for `description`. */
+  descriptionAuto: string
+  /** Null means never attempted; set with `describeError` non-null means tried
+   * and failed. */
+  describedAt: number | null
+  describeError: string | null
 }
 
 const COLS = `id, key, filename, content_type as contentType, size, width, height,
-              alt, created_at as createdAt`
+              alt, created_at as createdAt, folder_id as folderId,
+              description, alt_auto as altAuto, description_auto as descriptionAuto,
+              described_at as describedAt, describe_error as describeError`
 
 /**
  * The three orderings the Assets screen offers, and their natural directions.
- * `core/story.ts`'s `AssetSort` carries the argument for each direction — the
+ * `core/assets.ts`'s `AssetSort` carries the argument for each direction — the
  * interesting one is `size` descending, because nobody sorts a media library
  * looking for the smallest file.
  *
@@ -82,7 +100,7 @@ export interface ListAssetsOptions {
   /** Adds `total` for the same filter. One extra `count(*)`, only when asked
    * (`../../docs/specs/foundation/pagination.md` decision 5). */
   count?: boolean
-  /** One of `core/story.ts`'s `AssetSort` values. Absent is `created`. */
+  /** One of `core/assets.ts`'s `AssetSort` values. Absent is `created`. */
   sort?: AssetSort
   /**
    * Reverses the ordering. Absent means the sort's own natural direction, which is
@@ -327,6 +345,14 @@ export async function uploadAsset(
     height: dims?.height ?? null,
     alt: '',
     createdAt: Date.now(),
+    // Every new upload starts unfiled, untagged and undescribed — the defaults
+    // the insert below leaves unspecified columns to (`migrations/0008_asset_organisation.sql`).
+    folderId: null,
+    description: '',
+    altAuto: '',
+    descriptionAuto: '',
+    describedAt: null,
+    describeError: null,
   }
 
   try {
