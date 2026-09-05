@@ -603,10 +603,12 @@ serve while signed out.
 - **Multi-tenant spaces.** Roles are global (checkpoint 3).
 - **SSO group → role mapping.** `provision` sets a default role; mapping groups
   needs claims configuration per tenant and is a follow-up. *2026-09-05:* spec 28,
-  `auth-providers.md`, takes it as a `roleFrom` mapper, and reworks decision 2's
-  provider bag into a union of four kinds — including a *trusted* kind for a host
-  that already authenticates, which is the shape this spec's Cloudflare Access
-  rejection left no room for.
+  `auth-providers.md` — **done**. `roleFromClaim` is the mapper, and decision 2's
+  provider bag became a union of four kinds — including a *trusted* kind for a
+  host that already authenticates, which is the shape this spec's Cloudflare
+  Access rejection left no room for. `cloudflareAccess()` is that kind's
+  Access helper: listed as a provider, roles come out of it, which is a
+  different shape from the whole-route gate this spec rejected.
 - **Passkeys, TOTP, password login.** Magic link plus OIDC covers both audiences,
   and a password store is a liability nobody asked for. *Reversed for passkeys on
   2026-09-05:* spec 29, `passkeys.md`, adds them as a second door a signed-in
@@ -615,7 +617,10 @@ serve while signed out.
 - **A separate audit log.** The activity trail plus version rows already record who
   changed content; auth events (sign-in, role change, token created) are the gap,
   and one `auth_events` table is a follow-up rather than a prerequisite.
-  *2026-09-05:* in spec 28.
+  *2026-09-05:* spec 28, `auth-providers.md` — **done**, as one `auth_events`
+  table, two routes (`GET {base}/api/auth-events`, `GET {base}/api/me/events`)
+  and no admin screen, plus `folio.sweepAuth` for the 90-day retention this
+  paragraph never specified because the table did not exist yet to retain.
 
 ## Open questions
 

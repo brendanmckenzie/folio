@@ -321,6 +321,23 @@ the whole published document, so a host filters a list on the same field the
 gate reads (`where: [{ field: 'access', op: 'eq', value: 'public' }]`) rather
 than Folio redacting on its behalf.
 
+**Auth providers, part 2 — trusted identity, SSO roles, an audit trail. Done
+2026-09-05, as spec 28** (`foundation/auth-providers.md`). A provider is now
+one of four kinds — `mail`, `redirect`, `trusted`, `passkey` — validated by
+kind rather than by which optional functions a bag happens to carry, and every
+sign-in path funnels through one function, `completeSignIn`, so the provider
+stamp, domain enforcement and the audit row cannot be skipped by any of them.
+`trusted()` and its `cloudflareAccess()` helper let a host that already
+authenticates elsewhere hand Folio a verified identity instead of a second
+login page — a different shape from putting Access in front of the whole
+route, which carries no per-user role. `roleFromClaim` maps IdP groups onto
+Folio roles, and a role an IdP set cannot be edited in the admin, only in the
+IdP; `domains` lets a provider claim an email domain as its only door.
+`auth_events` records sign-ins, refusals and role changes with no admin screen
+of its own, and `folio.sweepAuth` gives it — and expired sessions, and stale
+challenges — a 90-day retention that a host has to wire into its own cron, with
+no signal if it forgets to.
+
 ## Next
 
 ### 1. Pagination, everywhere, as a rule
@@ -601,16 +618,13 @@ predicate decides, and Folio only decides whether to call it. Per-story
 *editor* permissions are the other half of "access control" and remain
 unbuilt: revisit after `docs/specs/content-model/collections.md`.
 
-**SSO group → role mapping.** `oidc({ provision })` sets a default role for a
-staff account on first sign-in; mapping IdP groups onto Folio roles needs claims
-configuration per tenant and is a follow-up. So is an `auth_events` table: the
-activity trail and version rows already record who changed content, but sign-ins,
-role changes and token creation are not recorded anywhere. **Both are spec 28**
-(`docs/specs/foundation/auth-providers.md`, draft 2026-09-05), together with a
-provider union of four kinds, a trusted-identity kind for hosts that already
-authenticate (with a Cloudflare Access helper) and per-domain enforced providers.
-SAML stays out of Folio by decision: it arrives through a broker as OIDC or as a
-trusted identity.
+**SSO group → role mapping, and an audit trail. Done 2026-09-05, as spec 28**
+(`foundation/auth-providers.md`) — see *Auth providers, part 2* under *Done*
+above. `oidc({ provision })` still only sets a default role on first sign-in;
+`roleFromClaim` is what turns IdP groups into Folio roles, and `auth_events` is
+the sign-in/refusal/role-change record the activity trail and version rows
+never covered. SAML stays out of Folio by decision: it arrives through a
+broker as OIDC or as a trusted identity.
 
 **SEO metadata.** Mostly done: `title`, `description`, `socialImage`, `noindex`
 are fields on the root block and the demo renders them into `<head>`. Still

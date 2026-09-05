@@ -2031,6 +2031,68 @@ After that, an `admin` manages editors and tokens from the **Access** rail in th
 editor. Adding an editor sends no mail: the row *is* the invitation, and they
 sign in through whichever provider the site configured.
 
+**A provider is one of four kinds** — `mail`, `redirect`, `trusted`, `passkey` —
+and `resolveAuth` validates each against exactly the functions its kind
+carries, rather than sniffing which optional functions a bag happens to have.
+`magicLink()` is `mail`, `oidc()` is `redirect`, and `trusted()` /
+`cloudflareAccess()` are `trusted`.
+
+**Trusted identity is for a host that already knows who this is** — behind
+Cloudflare Access, behind a proxy that sets a header, behind its own membership
+system. `trusted({ resolve })` hands Folio one function: given a request,
+answer a verified identity, `null` for "nobody here", or throw for a
+credential that is present but does not verify. Folio calls it on
+`GET /folio/login` when no session cookie resolves to an actor, mints an
+ordinary session through the same `completeSignIn` every other kind goes
+through, and redirects onward — so a host sitting entirely behind Access sees
+two redirects and never Folio's own login form. `resolve` is the whole trust
+boundary: whatever it returns is signed in, with no second check anywhere,
+which is why `cloudflareAccess()` verifies a signature over the assertion
+rather than trusting the header on its face.
+
+**`cloudflareAccess({ teamDomain, aud })` is a trusted provider, and that is a
+different shape from putting Access in front of an `auth: 'open'` deployment.**
+The first carries a per-user role into the editor, because `completeSignIn`
+runs for it like any other sign-in; the second is a whole-route gate with no
+per-user role at all — everyone who gets through is the same anonymous editor.
+Access in front of Folio always authenticates the *route*; listing
+`cloudflareAccess()` as a provider is what turns that into a *role*.
+
+**`roleFromClaim({ claim, map, default? })`** covers the common shape of
+`roleFrom` — read one claim (`'groups'`, or a dotted path like
+`custom.groups`), look each value up in `map`, and let the highest-ranking
+match win when someone sits in several mapped groups. `roleFrom` itself stays a
+plain function, `(identity) => Role | null`, because Entra's `roles` claim, a
+group-overage claim that points at a directory API, and an Access JWT's flat
+`custom` claims are not one shape a declarative option could cover.
+
+**A role set by an identity provider cannot be edited in the admin.**
+`PATCH /folio/api/users/:id { role }` answers `409`, naming the provider, once
+that user's role came from `roleFrom` — the fix is a group change at the IdP,
+not a click on the Access screen. Allowing the edit and letting the next
+sign-in silently overwrite it is exactly the "it quietly changed" failure this
+codebase refuses everywhere else.
+
+**`domains` on a provider claims an email domain as that provider's only
+door.** `oidc({ domains: ['client.com'] })` means every `@client.com` address —
+a fresh magic-link request, a second SSO provider, a trusted header, a passkey
+— refuses unless it arrives through that provider. The point is that the
+client's own IdP controls revocation, and any other door would go around it.
+`POST /folio/login/email` consults the compiled domain map before any D1 read,
+so an address at an enforced domain gets the same redirect to its provider
+whether or not a user row exists — non-enumerating, the same property `SENT`
+already protects.
+
+**`folio.sweepAuth(env)` is a host obligation with no signal when it is
+forgotten.** Nothing calls it for you: a deployment that never wires it into
+`scheduled()` accumulates `auth_events` rows forever, never reaps an expired
+session, and never clears a stale sign-in challenge. Nothing breaks — an
+expired session already fails on read — so this is unbounded growth rather
+than a security hole, but a table with a documented 90-day retention that is
+silently not being kept is worth a line: `GET /folio/api/auth-events` answers
+`oldestAt`, the age of its oldest row, so the surface that would show the
+symptom actually shows it.
+
 Out of scope, deliberately: **site-visitor auth** — who may *read* a published
 page. That is a different problem, and reading a published page still needs no
 account at all. See "Visitor access" below: a host predicate `reader.page()`
@@ -2613,15 +2675,17 @@ Within localisation: translated slugs (a French URL contains English words), and
 per-locale publishing. Both are deliberate and both are additive later — see the
 section above.
 
-Within auth, two items are now specified and unbuilt, both drafted 2026-09-05: a
-trusted-identity provider kind (Cloudflare Access, a host's own session), SSO group →
-role mapping, per-domain enforced providers and an `auth_events` table are spec 28
-(`docs/specs/foundation/auth-providers.md`); passkeys are spec 29
-(`docs/specs/foundation/passkeys.md`). **Site-visitor access control has landed**,
-as spec 31 (`docs/specs/platform/visitor-access.md`) — see "Visitor access" above.
-Still deliberately out: per-story editor permissions, multi-tenant spaces (spec 23),
-passwords and TOTP. Sign-in link rate limiting is per address only; the IP dimension
-wants a Cloudflare rate-limiting rule at the zone.
+Within auth, **spec 28 has landed**
+(`docs/specs/foundation/auth-providers.md`) — see "Auth" above: a
+trusted-identity provider kind with a Cloudflare Access helper, SSO role
+mapping through `roleFromClaim`, per-domain enforced providers and an
+`auth_events` table with a `sweepAuth` retention sweep. Passkeys are spec 29
+(`docs/specs/foundation/passkeys.md`), still unbuilt. **Site-visitor access
+control has landed**, as spec 31 (`docs/specs/platform/visitor-access.md`) —
+see "Visitor access" above. Still deliberately out: per-story editor
+permissions, multi-tenant spaces (spec 23), passwords and TOTP. Sign-in link
+rate limiting is per address only; the IP dimension wants a Cloudflare
+rate-limiting rule at the zone.
 
 Within collections: **full-text search has landed**, as spec 30
 (`docs/specs/content-model/full-text-search.md`) — see "Search" above. Still unbuilt: a

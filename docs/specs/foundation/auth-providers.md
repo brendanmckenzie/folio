@@ -3,7 +3,7 @@
 > **Group:** foundation
 > **Build order:** 28
 > **Size:** L
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** `0006_auth.sql` — restamped from the `0005` this was drafted with,
 > because 30 built first and took `0005_content_fts.sql`. Every mention below is
@@ -1192,183 +1192,135 @@ migration rather than a rediscovery.
 
 ## Implementation notes
 
-Written as each phase lands, rather than at the end: what actually shipped, where
-the plan above was wrong, and what a later phase still owes.
+All five phases landed as designed. `AuthProvider` is a union of four kinds
+instead of a bag switched on `redirect`, validated by kind rather than by which
+optional functions a bag happens to carry, and every sign-in path — verify,
+OIDC callback, trusted implicit, trusted explicit, and spec 29's passkey —
+funnels through one function, `completeSignIn`, so the provider stamp, domain
+enforcement and the audit row cannot be skipped by any of them, including a
+trusted provider a host writes itself. `trusted()`, `cloudflareAccess()`,
+`roleFromClaim` and `auth_events` are all in the tree, exercised by the new
+`test/workers/auth-trusted.test.ts` and `test/unit/server/jwt.test.ts` and by
+the grown assertions in `auth-login.test.ts`, `auth-http.test.ts` and
+`auth-session.test.ts`. The bug the Summary opened with — `users.provider`
+reading "—" for every magic-link user — is fixed: `completeSignIn`'s batch
+stamps it on every sign-in, not only an OIDC one.
 
-### Phase 2 — trusted identity (2026-09-05)
+**The most important thing recorded here: two Cloudflare Access facts remain
+unverified against a real tenant.** The helper was built against two
+assumptions phase 2 wrote into the spec rather than confirmed as Ground
+truth, because there is no Access tenant in this tree to point at — no
+remote, nothing deployed — only a stand-in certs endpoint injected through
+`fetchImpl`, exactly as `auth-login.test.ts` already does for OIDC's JWKS:
+that `/cdn-cgi/access/certs` answers a `keys` array of JWKs beside
+`public_certs`, and that a verified assertion's `iss` is the bare team URL
+with no path. Both fail loudly rather than silently if wrong — a certs
+document with no `keys` throws (`the certs document carried no keys`), an
+`iss` that is not the bare team URL throws naming the team — and either way
+the outcome is a refused sign-in, `?error=provider` and a log line, never a
+verification that quietly stops happening. The first real deployment behind
+Access is the one that finds out; if `iss` turns out to carry a path or an
+application segment, the fix is one comparison in `cloudflare-access.ts` and
+the failure that reports it is unmistakable. `resetAccessCertsCache()` is the
+test seam, matching `resetDiscoveryCache()`.
 
-Landed as written. `src/server/auth/trusted.ts` and
-`src/server/auth/cloudflare-access.ts` are new; `routes/auth.ts` gained implicit
-resolution behind the three-query guard, the "already signed in → 302" branch, the
-trusted arm of `GET {base}/login/:id`, and a `next` on the logout response;
-`pages.tsx` gained the signed-out page; the demo gained the localhost-gated dev
-provider (checkpoint 5) and `scripts/auth-test.mjs` a block that drives it. Six
-divergences and two deferrals, none of them design changes:
+**`sign_in_refused` landed in phase 3, not phase 4 as the plan had it.** The
+plan's phase 4 step 2 claimed that write; it was built in phase 3 instead,
+batched inside `completeSignIn` beside the refusal it records, because a
+refusal and the row explaining it are one decision and splitting them across
+two phases is how one of them ends up missing. Phase 4 was explicitly told
+not to add it a second time, and didn't — what phase 4 owns on that path is
+only the routes that read the table (`GET {base}/api/auth-events`,
+`GET {base}/api/me/events`). A refusal records `user_id` when Folio already
+has a row for that person, not always `null` as the acceptance criteria's one
+worked example implied: `0006_auth.sql`'s own column comment is the authority
+— null is for an identity Folio has no row for — and a group that vanished or
+a mapper answering a non-role happens to somebody who already has a row, so
+recording those with `user_id` null would make them invisible to `?user=`,
+the query `auth_events_user` exists for. `detail.reason` is one of four
+machine words — `domain`, `not_invited`, `role_removed`, `mapper` — fixing a
+shape the schema comment left open.
 
-- **`UserActor.provider` is optional, not required**, and it is filled from
-  `sessions.provider` rather than `users.provider`. The plan said "`UserActor` gains
-  `provider: string`" and "`readSession` fills `provider` from the join", which are
-  two different columns: `users.provider` is the door this person last came through
-  anywhere, `sessions.provider` is the door *this browser* came through, and `/me`'s
-  `session: { provider }` means the second. Optional because a `UserActor` is not
-  always a session read — a permission test builds one — and requiring it would have
-  made an unrelated fixture the reason for the field.
-- **`session.ts` gained `sessionProvider(db, token)`**, which the plan did not name.
-  Logout has to read the provider *before* it revokes the row, and `sessions` SQL
-  lives in that file and nowhere else: no route in this server runs its own
-  `db.prepare`, and this was not the place to be first.
-- **Trusted buttons render only on the `?signedout=1` page.** On every other
-  rendering of `/login` the resolver has already been consulted a moment earlier, so
-  a button is either redundant or a dead end. `loginPage` takes `signedOut?: boolean`.
-- **`GET {base}/login/:id` for a trusted provider that resolves `null`** redirects to
-  `?error=refused`, which the plan left unstated. It is the button on the signed-out
-  page leading nowhere; the landing page carries `error`, so it does not resolve, so
-  it cannot loop.
+The rest of what diverged from the plan, none of it a design change:
+
+- **`UserActor.provider` is optional, and it is filled from
+  `sessions.provider`, not `users.provider`.** The plan conflated two columns:
+  `users.provider` is the door this person last came through *anywhere*;
+  `sessions.provider` is the door *this browser* came through, which is what
+  `/me`'s `session: { provider }` means. Optional because a `UserActor` is not
+  always a session read — a permission test builds one — and requiring the
+  field would have made an unrelated fixture the reason for it.
+- **`session.ts` gained `sessionProvider(db, token)`**, unnamed in the plan.
+  Logout reads the provider before revoking the row, and `sessions` SQL lives
+  in that file and nowhere else.
 - **`trusted({ resolve })` may answer synchronously.** A header read needs no
-  `await`, and the factory's `async` wrapper turns a synchronous throw into the
+  `await`; the factory's `async` wrapper turns a synchronous throw into the
   rejected promise every other failure on this path already is.
-- **`cloudflareAccess` throws at construction for a missing `aud`.** The plan typed
-  it required; a host reading it out of an unset binding gets `undefined`, and a
-  provider that verifies a signature and then checks the audience against
-  `undefined` is a provider with no audience check.
-
-Deferred, and both are acceptance criteria above that are **not yet true**:
-
-- **The `sign_in_refused` event.** `completeSignIn` writes `sign_in` (phase 1) and
-  nothing on the refusal path; phase 4 step 2 owns that write, so "one
-  `sign_in_refused` event carries her email and no `user_id`" has no test yet.
-  `test/workers/auth-trusted.test.ts` pins the refusal itself — the notice in place,
-  no session, no user row created.
-- **Domain enforcement and `roleFrom`.** Both are phase 3, so "a trusted provider
-  resolves ann@client.com → the refused notice" and "claims are handed to `roleFrom`"
-  are not yet exercised end to end. Phase 2 pins the half it owns: the Access helper
-  puts the whole payload on `VerifiedIdentity.claims`, asserted against the provider
-  directly.
-
-`test/unit/server/jwt.test.ts` is also new. The Testing requirements above ask for
-it and phase 1's step list omitted it, so `verifyJws` had no direct test at all —
-only whatever `verifyIdToken` happened to reach. It pins the four failures the
-extraction had to preserve and the `source`/`noun` wording that keeps
-`verifyIdToken`'s messages byte-identical.
-
-### Phase 3 — SSO finishing (2026-09-05)
-
-The interaction table, `roleFromClaim`, `users.role_from` written, the `409`, the
-Access screen's disabled `Select`, and domain enforcement. Landed as written.
-`src/server/auth/roles-from.ts` is new; `sign-in.ts` gained steps 1 and 3 of
-decision 3's order (domain, then role) and the whole of decision 5's table;
-`routes/auth.ts` gained the enforced-domain fast path on `POST /login/email`;
-`routes/access.ts` gained the `409` and `roleFrom` on `toJson`;
-`access-model.ts` and `Access.tsx` gained the disabled control and its reason.
-`config.ts` needed **nothing**: phase 1 already compiled and validated the
-`domains` map, so phase 3's step 4 was half done before it started.
-
-Five things worth knowing, and one of them is a divergence:
-
-- **A refusal records `user_id` when Folio has a row, not always `null`.** The
-  plan's acceptance criterion says "one `sign_in_refused` event carries her email
-  and no `user_id`", which is true of the case it describes — a *stranger* the IdP
-  vouched for. It is not true of the two refusals that only happen to somebody who
-  already has a row: a group that vanished (checkpoint 3) and a mapper that
-  answered a non-role. Recording those with `user_id` null would make them
-  invisible to `GET {base}/api/auth-events?user=`, which is the query
-  `auth_events_user` exists for and the one an admin runs when somebody says "I
-  cannot get in". `0006_auth.sql`'s own column comment is the authority followed
-  here: "Null for a refused identity Folio has no row for." The email is in
-  `detail` either way.
-- **The `sign_in_refused` write is phase 3's, not phase 4's.** Phase 2's notes
-  flagged it as owed and phase 4 step 2 claims it; it is done, batched inside
-  `completeSignIn` beside the refusal it records, because a refusal and the row
-  explaining it are one decision and splitting them across two phases is how one
-  of them ends up missing. **Phase 4 must not add it a second time** — what phase
-  4 still owns on this path is the *routes* that read the table.
-- **`detail.reason` is a machine word, and there are four**: `domain`,
-  `not_invited`, `role_removed`, `mapper`. The login page's `?error=` vocabulary
-  is deliberately two values wide and says nothing about which account; this is
-  the other half of the same refusal, on a surface only an admin can read. The
-  spec's schema comment shapes `sign_in_refused`'s detail as `{ email, reason }`
-  and does not say what `reason` ranges over, so this fixes it.
-- **`domainOf` lives in `sign-in.ts`**, exported, rather than beside
-  `normaliseEmail` in `users.ts`. The module that enforces the map is the module
-  that owns its key, and `POST /login/email` imports it from there.
-  `roleSetByReason` lives in `roles-from.ts` for the same reason and is imported
-  by **both** `routes/access.ts` (the `409`) and `admin/ui/screens/access-model.ts`
-  (the disabled control's title), so the pre-emptive explanation and the refusal
-  that would follow the click cannot drift apart.
-- **`roleFromClaim` validates at construction**, throwing for a `map` value that
-  is not a role and for an empty `claim`. The alternative is a mapper that answers
-  a non-role at sign-in time, which `completeSignIn` correctly refuses as
-  `error=provider` — months later, to whichever person happened to be in that
-  group first. `roleFromClaim` and `RoleFromClaimOptions` are exported from
-  `src/server/index.tsx` beside `magicLink`, `oidc`, `trusted` and
-  `cloudflareAccess`; decision 1 asks for that and phase 3's step list omitted it.
-
-Two smaller notes for whoever is next:
-
-- `PATCH {base}/api/users/:id` costs **one extra read when `role` is in the body**
-  and nothing otherwise. `updateUser` reads the row to build the patch, but it
-  reads it to write it, and `role_from` has to be known *before* the write rather
-  than after. A rename pays nothing.
-- `Access.module.css`'s `.roleCell` became a flex column so the provider badge can
-  sit under the `<select>` with a gap. That is the only file this phase touched
-  that its plan does not name.
-
-Not done here, and still phase 4's: `GET {base}/api/auth-events`,
-`GET {base}/api/me/events`, `folio.sweepAuth`, and the `sign_out`,
-`user_invited`, `user_removed` and admin-actor `role_changed` writes.
-
-### Phase 4 — `auth_events`, the read side and the sweep (2026-09-05)
-
-`listEvents`, `oldestEventAt` and `sweepEvents` in `src/server/auth/events.ts`;
-the four remaining writes (`sign_out`, `user_invited`, `user_removed`, the
-admin-actor `role_changed`); both routes; `folio.sweepAuth` on `types.ts` and
-`index.tsx`; the demo's `scheduled()` calling it beside `runSchedules`. Landed
-as written, confirmed against phase 3's own note that nothing here re-writes
-`sign_in` or `sign_in_refused` — both stayed exactly where phase 1 and phase 3
-left them. Four things worth knowing:
-
-- **Not every write below is in the same `db.batch` as the change it
+- **`cloudflareAccess` throws at construction for a missing `aud`**, where the
+  plan typed it required. A host reading an unset binding gets `undefined`,
+  and a provider that verifies a signature and then checks the audience
+  against `undefined` is a provider with no audience check.
+- **Trusted sign-out buttons render only on the `?signedout=1` page.** On
+  every other rendering of `/login` the resolver has already been consulted a
+  moment earlier, so a button there is either redundant or a dead end.
+- **`GET {base}/login/:id` for a trusted provider that resolves `null`**
+  redirects to `?error=refused`, unstated in the plan: it is where the
+  signed-out page's button leads, and the landing page carries `error` so it
+  does not resolve again and cannot loop.
+- **`domainOf` lives in `sign-in.ts`**, not beside `normaliseEmail` in
+  `users.ts`, and **`roleSetByReason` lives in `roles-from.ts`** rather than
+  being inlined at each call site — both exported and imported by both the
+  route that enforces the rule and the admin screen that explains it
+  pre-emptively, so the explanation and the refusal it predicts cannot drift
+  apart.
+- **`roleFromClaim` validates its `map` and `default` at construction**,
+  throwing for a value that is not a role. The alternative was a mapper that
+  only fails at sign-in time, refused by `completeSignIn` as `error=provider`
+  months later, to whichever person happened to be in that group first.
+- **Not every `auth_events` write shares a batch with the change it
   describes, and that is a scope boundary, not a change of mind about the
-  rule.** `user_invited` is atomic — it goes through `createUserStatement`
-  (already exported for `completeSignIn`'s own use) rather than `createUser`,
-  so the insert and the event batch together, exactly as decision 8 asks.
-  `role_changed` (admin actor) and `user_removed` do not: `updateUser` and
-  `deleteUser` each run their own statement or batch inside `users.ts`, which
-  this phase's file list does not include, and reaching in to change either
-  would have meant duplicating `deleteUser`'s three-statement batch (sessions,
-  passkeys, the row) at the one call site the repo already treats as
-  consolidated. The event is written as a second round trip immediately after,
-  which is the same shape `passkeys.ts` already uses for `passkey_removed`,
-  `passkeys_removed` and `sessions_revoked` — a precedent phase 2's passkeys
-  work set for exactly this reason, not one invented here. `sign_out` is the
-  same shape again, after `revokeSession`. A crash between the two writes
-  leaves the state change real and its event missing, never the reverse.
-- **`listEvents`'s `kind` is typed `string`, not `AuthEventKind`.** The union
+  rule.** `user_invited` does, through `createUserStatement` (already exported
+  for `completeSignIn`'s own use). `role_changed` (admin actor), `user_removed`
+  and `sign_out` are a second round trip after `updateUser`/`deleteUser`/
+  `revokeSession`, because reaching into those functions to add the event
+  would have duplicated batches this repo already treats as consolidated at
+  one call site — the same shape `passkeys.ts` already uses for its own
+  events. A crash between the two writes leaves the state change real and its
+  event missing, never the reverse.
+- **`listEvents`'s `kind` is typed `string`, not the closed union.** The union
   is this build's vocabulary for *writing*; a row a later migration's code
   wrote with a kind this build has never heard of must still read back as
-  data. `toEvent` also treats undecodable or non-object `detail` JSON as
-  `null` rather than throwing — belt and braces alongside the `string` typing,
-  since a row this route reads was written by this same library and should
-  never actually be malformed.
+  data, so `toEvent` also treats undecodable `detail` JSON as `null` rather
+  than throwing.
 - **`GET {base}/api/me/events` composes `requireAccess(READ)` with an explicit
-  `actor.kind === 'user'` check**, per the plan. The middleware alone is not
-  enough: a read-scoped token passes `requireAccess(READ)` cleanly, so the
-  kind check after it is load-bearing, not defensive.
+  `actor.kind === 'user'` check.** The middleware alone is not enough: a
+  read-scoped token passes `requireAccess(READ)` cleanly, so the kind check
+  after it is load-bearing, not defensive.
 - **`folio.sweepAuth` reads `config.bindings(env).db` directly, on the
   primary**, matching `reindex` and `migrate` rather than a per-request
-  reader: it is a background delete with no request to serve, and the
-  session-routing rule in `db.ts` is about reads that want a replica, not
-  about every D1 access in the tree.
+  reader — a background delete with no request to serve, which the
+  session-routing rule in `db.ts` was never about.
+- `test/unit/server/jwt.test.ts` is new; phase 1's step list omitted a direct
+  test for the extracted `verifyJws`, which previously had none of its own —
+  only whatever `verifyIdToken` happened to reach.
+- `PATCH {base}/api/users/:id` costs one extra read only when `role` is in
+  the body — `role_from` has to be known before the write, not after — and
+  nothing otherwise.
+- `Access.module.css`'s `.roleCell` became a flex column so the provider
+  badge sits under the role `<select>`, the one file phase 3 touched that its
+  own plan did not name.
 
-Both test files needed one addition the phase 3 baseline did not: `delete from
-auth_events` in `beforeEach`, since `POST /users`, `PATCH /users/:id`,
-`DELETE /users/:id` and `POST /logout` all write rows now, where they wrote
-none before. `test/workers/auth-session.test.ts`'s new `listEvents` tests
-insert rows directly through `recordEventStatement` with **distinct `at`
-values** rather than through a real sign-in, for the reason phase 3's own note
-records: every event in one sign-in batch shares a timestamp, so a `(at, id)`
-keyset cannot be exercised honestly from one batch.
+Both `auth-http.test.ts` and `auth-session.test.ts` needed one addition none
+of the earlier baselines did: `delete from auth_events` in `beforeEach`, since
+`POST /users`, `PATCH /users/:id`, `DELETE /users/:id` and `POST /logout` all
+write rows now, where they wrote none before. `auth-session.test.ts`'s
+`listEvents` tests insert rows directly through `recordEventStatement` with
+distinct `at` values rather than through a real sign-in, because every event
+in one sign-in batch shares a timestamp and a `(at, id)` keyset cannot be
+exercised honestly from one batch.
 
-Not done here, and out of this spec's scope entirely: an admin screen for
-`auth_events` (explicitly out of scope, decision 8) and the README / roadmap /
-`docs/specs/README.md` updates, which are phase 5's.
+Nothing from the plan was deferred past this spec — every acceptance
+criterion an earlier phase's notes called "not yet true" is exercised by the
+phase that follows it. What remains open is the one thing no phase could
+have closed, the Cloudflare Access assumptions above; everything this spec
+deliberately left out is recorded under *Out of scope*.

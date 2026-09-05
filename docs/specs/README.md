@@ -380,6 +380,15 @@ measurement found in code this spec merely extended — `indexStatements` and th
 unchunked `storiesFor` — and that decision 11 (gate-scoped search) was added after
 drafting, when the owner read 30 and 31 together.
 
+**Spec 28 (auth providers, part 2) is done**, built 2026-09-05 across five
+phases; its `## Implementation notes` records that `sign_in_refused` landed in
+phase 3, not phase 4 as the plan had it — a refusal and the row explaining it
+are one decision, and phase 4 was told not to add the write a second time — and
+that the Cloudflare Access certs shape and its bare-team-URL `iss` remain
+assumptions never checked against a live tenant, verified only against a
+stand-in endpoint injected through `fetchImpl`; both fail loudly rather than
+silently if wrong.
+
 **Spec 26 had no ordering constraint** and was taken first for that reason. It moved
 the package to the repository root and deleted the subtree split, so every path in the
 specs above that reads `packages/folio/src/...` is now `src/...`. Ground truth written
