@@ -404,7 +404,7 @@ layout meanwhile.
 **Search.** `richtext` cannot be `indexed`, so the body is not filterable through
 `content_index` — `title` and `published` are, and that is what an archive page
 sorts and filters by. Full-text search over bodies is FTS5's job and spec 30's
-(`docs/specs/content-model/full-text-search.md`).
+(`docs/specs/content-model/full-text-search.md`) — see "Search" below.
 
 **Gating.** If this type carries a `gate` field, a denial nulls `body` itself —
 the root-level `richtext` — in `data` and every `i18n` locale, exactly as it
@@ -1203,7 +1203,7 @@ and an ISO date is stored in both, so either spelling of "since March" works. `n
 is a `NOT EXISTS`, so "topic is not ai" is true of a document with no topic —
 which is what it means in English. `contains` is a scan and is refused unless
 something else can narrow first; full-text search is FTS5's job and spec 30's
-(`docs/specs/content-model/full-text-search.md`, draft).
+(`docs/specs/content-model/full-text-search.md`) — see "Search" below.
 
 **A `where` or `order` on a field nobody marked `indexed` is a 400 naming the
 field**, and listing the ones that work. Never a silent empty result: that is the
@@ -1246,6 +1246,73 @@ instead.
 `content_refs` is written in the same publish batch and records the outbound edges
 of every published document, which is what "used by N documents" will read before
 letting you delete something.
+
+## Search
+
+`content_index` filters the scalars you marked `indexed`; it cannot reach prose,
+because `richtext` cannot be `indexed`. Full-text search is the other half, over
+every `text`, `textarea` and `richtext` value in a document's whole blok graph — not
+just the root — written by FTS5 rows inside the **same publish batch** as
+`content_index` (`docs/specs/content-model/full-text-search.md`). One write path, one
+query compiler: `search` is a term of `ContentQuery`, so `folio.query`,
+`GET {base}/api/content`, `GET /api/v1/documents` and MCP's `query_documents` all
+rank and snippet the same way.
+
+```ts
+const { items } = await folio.query(env, { search: 'harbour sunset', type: 'insight' })
+
+items[0].score    // bm25, negated so a higher number is always the better match
+items[0].snippet  // [{ text: '…the ', match: false }, { text: 'harbour', match: true }, …]
+```
+
+`order` defaults to `relevance` whenever `search` is set (`publishedAt` otherwise),
+and every item on a searched page carries `score` and `snippet: SnippetPart[]` —
+`{ text, match }` pairs, never a `<mark>…</mark>` string to trust as HTML:
+
+```tsx
+{item.snippet?.map((part, i) =>
+  part.match ? <mark key={i}>{part.text}</mark> : <span key={i}>{part.text}</span>,
+)}
+```
+
+Asking for `order: 'relevance'` with no `search` term is a 400 naming `relevance`; a
+stray character in a search box — a bare `"`, a dangling `(`, an emoji — is never an
+error, just an honest empty page.
+
+**`searchable` is opt-out, default `true`** — the opposite of `indexed`, because "full-text
+search finds my prose" is what a host expects with no schema edit:
+
+```tsx
+embed: textarea({ label: 'Embed code', searchable: false })   // raw iframe HTML, not prose
+```
+
+Only the three prose kinds accept it; `select({ searchable: true })` does not
+compile, any more than `richtext({ indexed: true })` does. Labels, numbers, booleans,
+asset filenames and referenced titles are out of the index — each is additive later,
+and a referenced title carries a staleness the write path cannot see.
+
+A search page is a page holding a `collection` block, nothing more:
+
+```tsx
+list: collection({ type: 'insight', searchable: true, maxPerPage: 10 })
+```
+
+```ts
+await folio.resolve(env, doc, { search: url.searchParams.get('q') })
+```
+
+The render-time term wins over whatever an editor typed into the field's own Search
+input — the same trade `page` already makes — and without `searchable: true` on the
+field both are dropped silently, the same double enforcement `filterable` has.
+
+Published only, like every collection: a draft is invisible to `search` until it goes
+live, and the palette and the pickers stay on the existing substring
+`GET {base}/api/search` — they have to reach drafts, and the FTS index is written at
+publish. On a [gated](#visitor-access) deployment, an unfiltered `search` is scoped to
+the gate's public value automatically — a snippet is a marked extract of exactly the
+prose a denial withholds, so search is the one list Folio narrows for you without
+being asked. Filter the gate field yourself (`where: [{ field: 'access', op: 'eq',
+value: 'public' }]`) to build a members' search over members' content instead.
 
 ## Layout
 
@@ -1468,11 +1535,11 @@ const folio = createFolio<Env>({
   // live tree updates and nothing else. See "Live collaboration" below.
   bindings: (env) => ({ db: env.DB, story: env.STORY, space: env.SPACE }),
   hooks: {
-    published({ story, doc, env, waitUntil }) {
-      waitUntil(indexForSearch(env, story, doc))
+    published({ story, env, waitUntil }) {
+      waitUntil(notifySlack(env, `Published: ${story.path || '/'}`))
     },
     async unpublished({ story, env }) {
-      await removeFromIndex(env, story.id)
+      await notifySlack(env, `Unpublished: ${story.path || '/'}`)
     },
   },
 })
@@ -2556,10 +2623,8 @@ Still deliberately out: per-story editor permissions, multi-tenant spaces (spec 
 passwords and TOTP. Sign-in link rate limiting is per address only; the IP dimension
 wants a Cloudflare rate-limiting rule at the zone.
 
-Within collections: **full-text search** is spec 30
-(`docs/specs/content-model/full-text-search.md`, draft 2026-09-05): FTS5 rows written
-by the same publish batch as `content_index`, exposed as a `search` term on
-`folio.query` with ranked results and snippets. Also unbuilt: a
+Within collections: **full-text search has landed**, as spec 30
+(`docs/specs/content-model/full-text-search.md`) — see "Search" above. Still unbuilt: a
 `collection` on a nested block's field (only a root block is projected, so the index
 stays a fixed projection of a document), **faceted counts** ("Policy (12), AI (8)" —
 one `group by` over the same predicate, genuinely easy and deliberately unbuilt

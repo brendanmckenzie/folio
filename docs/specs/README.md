@@ -368,11 +368,17 @@ something other than blank. Found by a real environment where every document was
 unrecoverable. No ordering constraint — it touches the seed path and nothing else.
 
 **Specs 28–31 were drafted together on 2026-09-05** from an owner list — passkeys,
-bring-your-own auth, SSO, full-text search, member-gated content — and each is
+bring-your-own auth, SSO, full-text search, member-gated content — and each was
 `draft`. Two of them reverse earlier decisions in place and say so where the
 decision was made: 29 reverses 10's "passkeys are out", and 30 takes the FTS5 that
 18's decision 8 rejected, because the trigger 18 named for reversal fired. 28 must
 precede 29; 30 and 31 are independent of everything, including each other.
+
+**Spec 30 (full-text search) is done**, built 2026-09-05 across seven phases; its
+`## Implementation notes` records the two live bugs phase 1's D1 bound-parameter
+measurement found in code this spec merely extended — `indexStatements` and the
+unchunked `storiesFor` — and that decision 11 (gate-scoped search) was added after
+drafting, when the owner read 30 and 31 together.
 
 **Spec 26 had no ordering constraint** and was taken first for that reason. It moved
 the package to the repository root and deleted the subtree split, so every path in the

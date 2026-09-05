@@ -3,7 +3,7 @@
 > **Group:** content model
 > **Build order:** 30
 > **Size:** M
-> **Status:** draft
+> **Status:** done
 > **Wire version:** none
 > **Migration:** `0005_content_fts.sql`. Written and applied; the draft's `0007`
 > was a claim made before the build order was decided, and every mention of it in
@@ -1124,3 +1124,92 @@ Two things are deliberately measurements rather than questions, both gated in ph
 the `'delete'` command via `insert … select` in workerd, and D1's per-query
 bound-parameter cap (Ground truth). Neither blocks the design; the second decides
 whether phase 3 also chunks `content_index`'s existing insert.
+
+## Implementation notes
+
+Built 2026-09-05, phases 1–7, in the order written. Every architecture decision
+held to the acceptance criteria as drafted, including decision 11, which did not
+exist when the other ten were written.
+
+**Spec 18 decision 8 is amended by this spec, and it is worth reading as a
+trigger that fired, not a mistake corrected.** It rejected FTS5 by name as "a
+second write path to keep in step with the first for a feature nobody has asked
+to be fuzzy yet", and named its own reversal condition:
+`docs/design-system.md`'s "the trigger for taking it is body-text search being
+asked for". The owner asked for it on 2026-09-05, and this spec's answer is that
+the stated objection is *met*, not sidestepped: `contentProjection` returns
+`{ index, refs, search }` and `indexStatements` emits all three tables'
+statements inside the one batch every publish, unpublish, delete and reindex
+already runs. There is no second write path to drift out of step with the
+first, because there is one write path. `foundation/pagination.md` decision 8,
+its "Out of scope" entry, and `docs/design-system.md`'s named trigger each carry
+a dated note saying so, and `content-model/collections.md`'s "Out of scope"
+entry does the same.
+
+**The route table's 200-character `bad_request` for `search` contradicted
+decisions 4 and 5 and the acceptance criteria.** Already resolved and recorded
+in place, under "New or changed routes" above: two of three readings and the
+only executable one meant truncation, not refusal, so `normaliseQuery` truncates
+at `MAX_SEARCH_LENGTH` and the route refuses nothing. Not repeated here beyond
+the pointer, since the correction already lives beside the line it corrects.
+
+**Phase 1's D1 bound-parameter measurement found two live bugs in code this
+spec only meant to extend.** `indexStatements` failed above 20 `content_index`
+rows (five indexed fields across five locales) and 33 `content_refs` rows (a
+page with 34 links or 34 images could not publish at all), and `resolve()`
+called `storiesFor` unchunked, so a document pulling in more than 100 links,
+references, globals and ancestors combined failed to render. Both fixed ahead
+of phase 3, in commit `c7313c4` rather than inside it: `content-index.ts`'s
+existing insert now chunks all three tables via `src/server/db.ts`'s
+`D1_BIND_CAP`, `BIND_BUDGET`, `rowsPerStatement` and `bindChunks`, so phase 3
+added the search statements to a function that was already correct rather than
+also fixing it. **`storiesForChunked` no longer exists**: `storiesFor` chunks
+internally and every former call site moved to it.
+
+**Decision 11 (gate-scoped search) did not exist at drafting time.** Added
+2026-09-05, after the owner read this spec and spec 31 together, once
+`ResolvedGate` existed for a predicate to compile out of. Its predicate keys off
+`stories.type`, never off `content_index` row absence: `projectValue` gives an
+absent value no row, so a `record` type that never declares the gate field and
+a `page` type that declares it and holds no value look identical to a
+row-absence test, and the spec wants opposite answers for the two. Both wrong
+forms — `exists … or not exists …`, and no predicate at all — were built and
+verified red before the `stories.type` form replaced them; `query.test.ts`'s
+`contentSql: the gate clause` (`test/unit/server/`) and `test/workers/search.test.ts`
+pin both directions, including the `record`-type case a row-absence predicate
+would have silently admitted.
+
+**Phase 3b's fix was correct and unreachable at the same time.** `migrate.ts`'s
+re-projection landed as written, but nothing called it with a real
+`projection` until both call sites — `routes/migrations.ts` and `index.tsx`'s
+inline migration route — were wired, because `FolioRuntime` did not expose
+`projection` at all. It does now, as a top-level field beside `titleFor` and
+`titlesFor`. A unit test against `migrate.ts` in isolation cannot see that
+nothing calls it with a real projection, so the test that catches a regression
+here had to be written at the route.
+
+**Phase 6 found a live render failure, not only a dead admin option.**
+`CollectionField.tsx`'s sort dropdown built itself from every key of
+`BUILT_IN_ORDERS`, so every collection field — searchable or not — offered a
+"relevance" option that did nothing on a plain field. The render side was not
+merely inert, though: a searchable collection with `relevance` stored and its
+search term since cleared reached `contentSql`'s `order 'relevance' needs a
+search` refusal on every render and threw mid-render. Fixed in
+`collectionQuery` (`core/query.ts`): an order of `relevance` with no live
+`search` term is dropped the same way an order naming an unfilterable field
+already is, falling back to the field's `defaultOrder`; the dropdown itself now
+excludes `relevance` unless the field declares `searchable`.
+
+**Deferred, matching Out of scope exactly:** draft search; faceted counts; the
+palette and both pickers staying on substring search (decision 7, `searchStories`
+unchanged); indexing `select` labels, numbers, booleans, asset filenames and
+referenced titles (checkpoint 1); an FTS5 `'rebuild'` route; highlighting the
+whole body rather than a snippet.
+
+Prose closed out alongside this restamp: `README.md` gained a `## Search`
+section, both `"its own spec"` references and the hooks example's
+`indexForSearch` sketch are gone, and `docs/specs/README.md`,
+`foundation/pagination.md`, `content-model/collections.md`,
+`docs/design-system.md` and `foundation/multi-site.md` each carry a dated note
+closing the forward reference they made to this spec while it was still a
+draft.

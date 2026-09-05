@@ -459,8 +459,8 @@ Shape, for `url-and-shell.md` to specify:
   write. The trigger for taking it is body-text search being asked for, or a site
   passing a few thousand documents — named here so it is a decision later rather
   than a surprise. *It fired on 2026-09-05*: spec 30
-  (`specs/content-model/full-text-search.md`) takes FTS5 for published content,
-  and this route stays on `like` because it has to reach drafts.
+  (`specs/content-model/full-text-search.md`) took FTS5 for published content, built
+  the same day, and this route stays on `like` because it has to reach drafts.
 - `content_index` is the second source, and it carries a caveat worth stating
   once: it is written at **publish** time, so searching an indexed field finds
   published values only. A draft-only person is findable by title and not by
