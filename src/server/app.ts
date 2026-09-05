@@ -15,6 +15,7 @@ import { editorPageRoutes, editorRoutes } from './routes/editor'
 import { historyRoutes } from './routes/history'
 import { mcpRoutes } from './routes/mcp'
 import { migrationRoutes } from './routes/migrations'
+import { passkeyRoutes } from './routes/passkeys'
 import { draftRoutes } from './routes/draft'
 import { shareRoutes, sharePageRoutes } from './routes/preview'
 import { redirectRoutes } from './routes/redirects'
@@ -121,6 +122,23 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // makes it safe ahead of any gate.
   app.route('/api', sessionRoutes<Env>(rt))
   app.route('/api', accessRoutes<Env>(rt))
+  /**
+   * `{base}/api/me/passkeys*`, `{base}/api/me/sessions*` and the admin's
+   * `{base}/api/users/:id/passkeys` (`../../docs/specs/foundation/passkeys.md`).
+   *
+   * **After `accessRoutes`, and that is load-bearing.** That mount declares
+   * `app.use('/users/*', requireAuthConfigured, requireAccess(ADMIN))`, and Hono
+   * assembles a request's handler chain in registration order — so the admin gate
+   * is already in front of `/users/:id/passkeys` by the time this file's own
+   * handler runs. The route declares both guards itself as well, because a gate
+   * that depends on the order of two `app.route` lines is a gate somebody will
+   * reorder.
+   *
+   * Unversioned, under `/api` and not `/api/v1`: this is the admin talking to its
+   * own server, and a version segment is a promise to somebody's script
+   * (`../../docs/specs/foundation/pagination.md` decision 3).
+   */
+  app.route('/api', passkeyRoutes<Env>(rt))
   app.route('/api', storyRoutes<Env>(rt))
   // After `storyRoutes`, which owns `/story/:id/publish` and `/unpublish`. Order is
   // not load-bearing here — `/story/:id/schedule` is a distinct literal segment,

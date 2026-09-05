@@ -467,6 +467,23 @@ export default {
         }
       }
     } while (cursor !== null && ++batches < 20)
+
+    /**
+     * Auth housekeeping (`docs/specs/foundation/auth-providers.md` decision 8):
+     * sessions past expiry, sign-in challenges past their fifteen minutes or
+     * already consumed, and `auth_events` rows past their 90-day retention.
+     *
+     * Beside `runSchedules` rather than folded into it — a different table, a
+     * different retention rule — and this is the only wiring it needs: nothing
+     * calls `folio.sweepAuth` for a host that forgets to, which is why it says
+     * so, and `GET {base}/api/auth-events`'s `oldestAt` is where that would show.
+     */
+    const swept = await folio.sweepAuth(env)
+    if (swept.sessions || swept.challenges || swept.events) {
+      console.log(
+        `folio: swept ${swept.sessions} session(s), ${swept.challenges} challenge(s), ${swept.events} event(s)`,
+      )
+    }
   },
 } satisfies ExportedHandler<Env>
 

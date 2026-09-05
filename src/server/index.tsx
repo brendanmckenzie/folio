@@ -8,9 +8,12 @@ import { FolioDoc, renderGlobalNode } from '../preview/Render'
 import { createApp } from './app'
 import { audit } from './audit'
 import { cacheKeyFor, cacheVerdictFor } from './cache-request'
+import { deleteStaleChallenges } from './auth/challenges'
 import { hasDraftCookie, shareCookieTokens } from './auth/cookie'
+import { sweepEvents } from './auth/events'
 import { credentialOf, resolveActor } from './auth/resolve'
 import { allows, READ_DRAFT } from './auth/roles'
+import { deleteExpiredSessions } from './auth/session'
 import { claimShare } from './auth/shares'
 import { readBookmark, sessionFor } from './db'
 import { FolioError } from './errors'
@@ -172,6 +175,15 @@ export type { CloudflareAccessOptions } from './auth/cloudflare-access'
  */
 export { roleFromClaim } from './auth/roles-from'
 export type { RoleFromClaimOptions } from './auth/roles-from'
+/**
+ * Passkeys (`../../docs/specs/foundation/passkeys.md` decision 1): opt-in per
+ * deployment, and listing `passkeys()` in `auth.providers` is the whole of the
+ * opt-in. It cannot be the only provider — enrolment needs a session, and the
+ * first sign-in is always another door — and `resolveAuth` says so at
+ * construction.
+ */
+export { passkeys } from './auth/passkeys-provider'
+export type { PasskeyOptions } from './auth/passkeys-provider'
 export {
   ADMIN,
   ASSETS,
@@ -784,6 +796,23 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      */
     runSchedules: (env, opts) =>
       runSchedules(rt.publishDeps(config.bindings(env), alarmHookCtx(env)), opts),
+    /**
+     * The auth housekeeping sweep (`../../docs/specs/foundation/
+     * auth-providers.md` decision 8). Assembled from bindings alone, exactly as
+     * `reindex` and `migrate` above, so a cron tick and a deploy script reach the
+     * identical sweep — and, like both of those, on the primary rather than a
+     * read session: this is a background delete, never a request's own read.
+     */
+    sweepAuth: async (env, opts) => {
+      const db = config.bindings(env).db
+      const now = opts?.now ?? Date.now()
+      const [sessions, challenges, events] = await Promise.all([
+        deleteExpiredSessions(db, now),
+        deleteStaleChallenges(db, now),
+        sweepEvents(db, now),
+      ])
+      return { sessions, challenges, events }
+    },
     render: (doc, opts) => (
       <FolioDoc doc={doc} registry={rt.registry} mode={opts?.mode} resolution={opts?.resolution} />
     ),

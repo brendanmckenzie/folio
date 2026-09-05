@@ -225,6 +225,76 @@ export async function revokeSession(db: FolioDb, token: string): Promise<void> {
     .run()
 }
 
+/**
+ * Every live session a person holds, newest first — the account screen's
+ * "signed in on" list (`../../../docs/specs/foundation/passkeys.md` decision 6).
+ *
+ * `id` is the SHA-256 of a cookie token, so it is handed out **truncated** by
+ * the route rather than whole: the hash is not a credential and cannot be
+ * presented as one, but the smallest value that still lets a person tell two
+ * rows apart is the one that cannot leak later.
+ *
+ * Expired rows are filtered rather than deleted: `readSession` prunes the row a
+ * browser actually presents, and a list route is a read.
+ */
+export async function listUserSessions(
+  db: FolioDb,
+  userId: string,
+  now = Date.now(),
+): Promise<SessionRow[]> {
+  const { results } = await db
+    .prepare(
+      `select id, created_at, expires_at, user_agent, provider
+         from sessions where user_id = ? and expires_at > ?
+        order by created_at desc, id`,
+    )
+    .bind(userId, now)
+    .all<{
+      id: string
+      created_at: number
+      expires_at: number
+      user_agent: string | null
+      provider: string | null
+    }>()
+  return results.map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    userAgent: row.user_agent,
+    provider: row.provider,
+  }))
+}
+
+export interface SessionRow {
+  /** `sessions.id`: the SHA-256 of the cookie token. Truncated before it ships. */
+  id: string
+  createdAt: number
+  expiresAt: number
+  userAgent: string | null
+  provider: string | null
+}
+
+/**
+ * "Sign out other browsers": every session this person holds except the one
+ * presenting the cookie, by its hash.
+ *
+ * Takes the session **id** rather than the raw token, because the caller is a
+ * route that already resolved an actor and holds the hash — hashing it a second
+ * time to compare would be hashing a hash. Answers how many went, which is what
+ * the screen reports.
+ */
+export async function revokeOtherSessions(
+  db: FolioDb,
+  userId: string,
+  keepId: string,
+): Promise<number> {
+  const result = await db
+    .prepare('delete from sessions where user_id = ? and id != ?')
+    .bind(userId, keepId)
+    .run()
+  return result.meta.changes ?? 0
+}
+
 /** Signs out every browser a user holds — what a role downgrade or a "sign out
  * everywhere" acts on. */
 export async function revokeUserSessions(db: FolioDb, userId: string): Promise<void> {

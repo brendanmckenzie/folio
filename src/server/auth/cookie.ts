@@ -5,7 +5,12 @@
  * the name-selection rule below is testable on its own, which matters because
  * getting it wrong is the difference between "works deployed, never works
  * locally" and the reverse.
+ *
+ * The one import is `jwt.ts`'s base64url pair, which the challenge codec at the
+ * bottom needs: a third copy of "decode base64url" in this tree is a third place
+ * for the padding rule to be got wrong.
  */
+import { base64url, fromBase64url } from './jwt'
 
 /** The name on HTTPS. `__Host-` binds the cookie to this exact host, forbids a
  * `Domain` attribute and requires `Secure` + `Path=/`, so a sibling subdomain
@@ -243,4 +248,114 @@ export function hasDraftCookie(header: string | null | undefined): boolean {
     readCookie(header, SECURE_DRAFT_COOKIE) !== null ||
     readCookie(header, PLAIN_DRAFT_COOKIE) !== null
   )
+}
+
+/* ------------------------------------------------- webauthn challenges --- */
+
+/**
+ * The WebAuthn challenge (`../../../docs/specs/foundation/passkeys.md`
+ * decision 2).
+ *
+ * **A fifth name, and a cookie rather than a table.** `POST {base}/login/passkey/options`
+ * is unauthenticated and conditional UI calls it on every login-page load, so a
+ * row per challenge would be an anonymous D1 write per page view — a storage-DoS
+ * vector that would then need its own rate limit and its own sweep. A cookie
+ * costs nothing server-side and expires itself.
+ *
+ * The security property is the one the OIDC state cookie above already relies
+ * on: a value only this host set, unreadable to script, single-use because the
+ * response that consumes it also clears it. `SameSite=Lax` is what makes a
+ * cross-site POST to the verify route carry no challenge at all, which is why
+ * that route can refuse before it reads D1.
+ */
+export const SECURE_WEBAUTHN_COOKIE = '__Host-folio_webauthn'
+export const PLAIN_WEBAUTHN_COOKIE = 'folio_webauthn'
+
+/**
+ * Ten minutes, deliberately longer than the 300s `timeout` the options hand the
+ * browser (`webauthn.ts`'s `PASSKEY_TIMEOUT_MS`): the *server* must never be the
+ * half that expires first, or an assertion the browser was still willing to
+ * produce fails on a race with our own clock.
+ */
+export const WEBAUTHN_COOKIE_TTL_S = 600
+
+export function webauthnCookieName(url: URL | string): string {
+  return isSecure(url) ? SECURE_WEBAUTHN_COOKIE : PLAIN_WEBAUTHN_COOKIE
+}
+
+export function readWebauthnCookie(header: string | null | undefined): string | null {
+  return readCookie(header, SECURE_WEBAUTHN_COOKIE) ?? readCookie(header, PLAIN_WEBAUTHN_COOKIE)
+}
+
+export function clearWebauthnCookies(url: URL | string): string[] {
+  return clearCookies(url, SECURE_WEBAUTHN_COOKIE, PLAIN_WEBAUTHN_COOKIE)
+}
+
+/**
+ * What the cookie carries.
+ *
+ * `u` is on the **registration** challenge only, and it is the whole of a real
+ * defence rather than bookkeeping: without it, a challenge minted while one
+ * person was signed in could be replayed by a second browser to hang a
+ * credential off *that* account instead. The verify route refuses when `u` is
+ * not who is signed in now.
+ */
+export interface ChallengeCookie {
+  /** The challenge itself: `mintSecret()`'s 64 lowercase hex characters, which
+   * is the same 32 bytes of entropy every other credential here is minted from. */
+  c: string
+  /** Which ceremony minted it. A `create` cookie presented to the assertion
+   * route (or the reverse) is refused: the two are different gates. */
+  k: 'create' | 'get'
+  /** `users.id`, on a `create` challenge. */
+  u?: string
+}
+
+/** 64 lowercase hex characters and nothing else — `mintSecret()`'s exact shape. */
+const CHALLENGE_HEX = /^[0-9a-f]{64}$/
+
+/**
+ * Base64url over UTF-8, for the reason `routes/auth.ts`'s state envelope gives:
+ * a cookie value may not contain `;` or a comma, and JSON is full of characters
+ * that survive some proxies and not others.
+ */
+export function encodeChallenge(payload: ChallengeCookie): string {
+  return base64url(new TextEncoder().encode(JSON.stringify(payload)))
+}
+
+/**
+ * Total over its input. The cookie is attacker-supplied like any other, so
+ * anything that does not decode to exactly the shape above is `null` — which
+ * every caller turns into the same refusal an absent cookie gets.
+ */
+export function decodeChallenge(value: string | null | undefined): ChallengeCookie | null {
+  if (!value) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(fromBase64url(value)))
+  } catch {
+    return null
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
+  const bag = parsed as Partial<ChallengeCookie>
+  if (typeof bag.c !== 'string' || !CHALLENGE_HEX.test(bag.c)) return null
+  if (bag.k !== 'create' && bag.k !== 'get') return null
+  if (bag.u !== undefined && (typeof bag.u !== 'string' || bag.u === '')) return null
+  return bag.u === undefined ? { c: bag.c, k: bag.k } : { c: bag.c, k: bag.k, u: bag.u }
+}
+
+/**
+ * The challenge as bytes, for `creationOptions` / `requestOptions` — which
+ * base64url them into what the browser signs over, and therefore into what
+ * `clientDataJSON.challenge` has to equal at verify time.
+ *
+ * Hex in the cookie and bytes in the options rather than base64url in both: the
+ * cookie's value is screened by `CHALLENGE_HEX` above, and a screen that admits
+ * exactly `mintSecret()`'s alphabet is stronger than one that admits any
+ * base64url string of the right length.
+ */
+export function challengeBytes(hex: string): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(new ArrayBuffer(hex.length / 2))
+  for (let i = 0; i < out.length; i++) out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+  return out
 }

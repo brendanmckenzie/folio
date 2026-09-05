@@ -1316,3 +1316,59 @@ Two smaller notes for whoever is next:
 Not done here, and still phase 4's: `GET {base}/api/auth-events`,
 `GET {base}/api/me/events`, `folio.sweepAuth`, and the `sign_out`,
 `user_invited`, `user_removed` and admin-actor `role_changed` writes.
+
+### Phase 4 — `auth_events`, the read side and the sweep (2026-09-05)
+
+`listEvents`, `oldestEventAt` and `sweepEvents` in `src/server/auth/events.ts`;
+the four remaining writes (`sign_out`, `user_invited`, `user_removed`, the
+admin-actor `role_changed`); both routes; `folio.sweepAuth` on `types.ts` and
+`index.tsx`; the demo's `scheduled()` calling it beside `runSchedules`. Landed
+as written, confirmed against phase 3's own note that nothing here re-writes
+`sign_in` or `sign_in_refused` — both stayed exactly where phase 1 and phase 3
+left them. Four things worth knowing:
+
+- **Not every write below is in the same `db.batch` as the change it
+  describes, and that is a scope boundary, not a change of mind about the
+  rule.** `user_invited` is atomic — it goes through `createUserStatement`
+  (already exported for `completeSignIn`'s own use) rather than `createUser`,
+  so the insert and the event batch together, exactly as decision 8 asks.
+  `role_changed` (admin actor) and `user_removed` do not: `updateUser` and
+  `deleteUser` each run their own statement or batch inside `users.ts`, which
+  this phase's file list does not include, and reaching in to change either
+  would have meant duplicating `deleteUser`'s three-statement batch (sessions,
+  passkeys, the row) at the one call site the repo already treats as
+  consolidated. The event is written as a second round trip immediately after,
+  which is the same shape `passkeys.ts` already uses for `passkey_removed`,
+  `passkeys_removed` and `sessions_revoked` — a precedent phase 2's passkeys
+  work set for exactly this reason, not one invented here. `sign_out` is the
+  same shape again, after `revokeSession`. A crash between the two writes
+  leaves the state change real and its event missing, never the reverse.
+- **`listEvents`'s `kind` is typed `string`, not `AuthEventKind`.** The union
+  is this build's vocabulary for *writing*; a row a later migration's code
+  wrote with a kind this build has never heard of must still read back as
+  data. `toEvent` also treats undecodable or non-object `detail` JSON as
+  `null` rather than throwing — belt and braces alongside the `string` typing,
+  since a row this route reads was written by this same library and should
+  never actually be malformed.
+- **`GET {base}/api/me/events` composes `requireAccess(READ)` with an explicit
+  `actor.kind === 'user'` check**, per the plan. The middleware alone is not
+  enough: a read-scoped token passes `requireAccess(READ)` cleanly, so the
+  kind check after it is load-bearing, not defensive.
+- **`folio.sweepAuth` reads `config.bindings(env).db` directly, on the
+  primary**, matching `reindex` and `migrate` rather than a per-request
+  reader: it is a background delete with no request to serve, and the
+  session-routing rule in `db.ts` is about reads that want a replica, not
+  about every D1 access in the tree.
+
+Both test files needed one addition the phase 3 baseline did not: `delete from
+auth_events` in `beforeEach`, since `POST /users`, `PATCH /users/:id`,
+`DELETE /users/:id` and `POST /logout` all write rows now, where they wrote
+none before. `test/workers/auth-session.test.ts`'s new `listEvents` tests
+insert rows directly through `recordEventStatement` with **distinct `at`
+values** rather than through a real sign-in, for the reason phase 3's own note
+records: every event in one sign-in batch shares a timestamp, so a `(at, id)`
+keyset cannot be exercised honestly from one batch.
+
+Not done here, and out of this spec's scope entirely: an admin screen for
+`auth_events` (explicitly out of scope, decision 8) and the README / roadmap /
+`docs/specs/README.md` updates, which are phase 5's.

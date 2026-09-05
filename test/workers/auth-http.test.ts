@@ -6,6 +6,8 @@ import { PROTOCOL_VERSION } from '../../src/core/protocol'
 import type { AuthConfig, MagicLinkMail, Role } from '../../src/server'
 import { createFolio, magicLink } from '../../src/server'
 import { SECURE_COOKIE } from '../../src/server/auth/cookie'
+import { createChallenge } from '../../src/server/auth/challenges'
+import { recordEventStatement } from '../../src/server/auth/events'
 import { createSession } from '../../src/server/auth/session'
 import { createToken } from '../../src/server/auth/tokens'
 import { createUser } from '../../src/server/auth/users'
@@ -114,6 +116,8 @@ beforeEach(async () => {
   await env.DB.batch([
     env.DB.prepare('delete from sessions'),
     env.DB.prepare('delete from api_tokens'),
+    env.DB.prepare('delete from login_challenges'),
+    env.DB.prepare('delete from auth_events'),
     env.DB.prepare('delete from users'),
     env.DB.prepare('delete from versions'),
     env.DB.prepare('delete from stories'),
@@ -442,6 +446,173 @@ describe('role gates', () => {
     // socket's attachment for the bounded window a revocation may.
     expect((await call('/folio/api/stories', { headers: { cookie: target.cookie } })).status).toBe(
       401,
+    )
+  })
+})
+
+/* ------------------------------------------------------------------ events --- */
+
+describe('auth_events', () => {
+  it('records who invited, re-roled and removed someone, and writes no event for a no-op role', async () => {
+    const admin = await signIn('admin')
+
+    const invited = await call('/folio/api/users', {
+      method: 'POST',
+      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'invitee@example.com' }),
+    })
+    expect(invited.status).toBe(201)
+    const { user: created } = (await invited.json()) as { user: { id: string } }
+
+    const patch = (role: string) =>
+      call(`/folio/api/users/${created.id}`, {
+        method: 'PATCH',
+        headers: { cookie: admin.cookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ role }),
+      })
+    expect((await patch('publisher')).status).toBe(200)
+    // Re-selecting the role already stored: no-op, so no second `role_changed`.
+    expect((await patch('publisher')).status).toBe(200)
+
+    expect(
+      (
+        await call(`/folio/api/users/${created.id}`, {
+          method: 'DELETE',
+          headers: { cookie: admin.cookie },
+        })
+      ).status,
+    ).toBe(200)
+
+    const invitedEvt = await env.DB.prepare(
+      "select user_id, actor from auth_events where kind = 'user_invited'",
+    ).first<{ user_id: string; actor: string }>()
+    expect(invitedEvt).toEqual({ user_id: created.id, actor: admin.user.id })
+
+    const roleEvts = await env.DB.prepare(
+      "select user_id, actor, detail from auth_events where kind = 'role_changed'",
+    ).all<{ user_id: string; actor: string; detail: string }>()
+    expect(roleEvts.results).toHaveLength(1)
+    expect(roleEvts.results[0]).toMatchObject({ user_id: created.id, actor: admin.user.id })
+    expect(JSON.parse(roleEvts.results[0]!.detail)).toEqual({ from: 'editor', to: 'publisher' })
+
+    const removedEvt = await env.DB.prepare(
+      "select user_id, actor from auth_events where kind = 'user_removed'",
+    ).first<{ user_id: string; actor: string }>()
+    expect(removedEvt).toEqual({ user_id: created.id, actor: admin.user.id })
+  })
+
+  it('records a sign-out naming the browser that signed out', async () => {
+    const admin = await signIn('admin')
+    const res = await call('/folio/api/logout', {
+      method: 'POST',
+      headers: { cookie: admin.cookie },
+    })
+    expect(res.status).toBe(200)
+
+    const row = await env.DB.prepare(
+      "select user_id, actor from auth_events where kind = 'sign_out'",
+    ).first<{ user_id: string; actor: string }>()
+    expect(row).toEqual({ user_id: admin.user.id, actor: admin.user.id })
+  })
+
+  it('never writes an event for a logout with no session to revoke', async () => {
+    expect((await call('/folio/api/logout', { method: 'POST' })).status).toBe(200)
+    const count = await env.DB.prepare('select count(*) as n from auth_events').first<{
+      n: number
+    }>()
+    expect(count?.n).toBe(0)
+  })
+
+  it('reserves GET /auth-events for an admin, 404s under open, and reports oldestAt unaffected by ?user=', async () => {
+    const admin = await signIn('admin')
+    const editor = await signIn('editor')
+
+    expect(
+      (await call('/folio/api/auth-events', { headers: { cookie: editor.cookie } })).status,
+    ).toBe(403)
+
+    const empty = (await (
+      await call('/folio/api/auth-events', { headers: { cookie: admin.cookie } })
+    ).json()) as { events: unknown[]; cursor: string | null; oldestAt: number | null }
+    expect(empty).toEqual({ events: [], cursor: null, oldestAt: null })
+
+    await call('/folio/api/users', {
+      method: 'POST',
+      headers: { cookie: admin.cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'invitee@example.com' }),
+    })
+
+    const page = (await (
+      await call('/folio/api/auth-events', { headers: { cookie: admin.cookie } })
+    ).json()) as { events: { kind: string }[]; oldestAt: number | null }
+    expect(page.events.some((e) => e.kind === 'user_invited')).toBe(true)
+    expect(page.oldestAt).toBeTypeOf('number')
+
+    // `?user=` narrows `events` but must not change the table-wide `oldestAt`:
+    // it is a fact about the table, not the page (decision 8).
+    const filtered = (await (
+      await call(`/folio/api/auth-events?user=${editor.user.id}`, {
+        headers: { cookie: admin.cookie },
+      })
+    ).json()) as { events: unknown[]; oldestAt: number | null }
+    expect(filtered.events).toEqual([])
+    expect(filtered.oldestAt).toBe(page.oldestAt)
+
+    const open = await build('open').handle(
+      new Request(`${API}/auth-events`),
+      env,
+      createExecutionContext(),
+    )
+    expect(open?.status).toBe(404)
+  })
+
+  it("lists the caller's own last events over a real sign-in, and 403s a token", async () => {
+    const email = 'ann@example.com'
+    await createUser(env.DB, { email, name: 'Ann', role: 'editor' })
+
+    await call('/folio/login/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email }),
+    })
+    const mail = outbox.at(-1)
+    expect(mail).toBeDefined()
+    const link = new URL(mail!.url)
+    const verify = await call(`${link.pathname}${link.search}`)
+    expect(verify.status).toBe(302)
+    const cookie = verify.headers.get('set-cookie')?.split(';')[0]
+    expect(cookie).toBeTruthy()
+
+    const mine = await call('/folio/api/me/events', { headers: { cookie: cookie! } })
+    expect(mine.status).toBe(200)
+    const body = (await mine.json()) as { events: { kind: string }[] }
+    expect(body.events.map((e) => e.kind)).toEqual(['sign_in'])
+
+    const { token } = await createToken(env.DB, { name: 'script', scopes: ['content:read'] })
+    expect(
+      (await call('/folio/api/me/events', { headers: { authorization: `Bearer ${token}` } }))
+        .status,
+    ).toBe(403)
+  })
+
+  it('folio.sweepAuth deletes expired sessions, stale challenges and retired events, and reports each count', async () => {
+    const viewer = await signIn('viewer')
+    await createSession(env.DB, viewer.user.id, { days: -1 })
+    await createChallenge(env.DB, 'ghost@example.com', Date.now() - 20 * 60 * 1000)
+    await recordEventStatement(env.DB, {
+      kind: 'sign_in',
+      at: Date.now() - 91 * 24 * 60 * 60 * 1000,
+      userId: null,
+    }).run()
+
+    const report = await folio.sweepAuth(env)
+    expect(report.sessions).toBe(1)
+    expect(report.challenges).toBe(1)
+    expect(report.events).toBe(1)
+
+    // The still-live session survives the sweep.
+    expect((await call('/folio/api/stories', { headers: { cookie: viewer.cookie } })).status).toBe(
+      200,
     )
   })
 })

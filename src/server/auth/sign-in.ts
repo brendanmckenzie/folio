@@ -80,7 +80,26 @@ export async function completeSignIn(
   auth: SessionAuth,
   provider: AuthProvider<unknown>,
   identity: VerifiedIdentity,
-  ctx: { userAgent: string | null; now?: number } = { userAgent: null },
+  ctx: {
+    userAgent: string | null
+    now?: number
+    /**
+     * Statements the *caller* wants in the same batch, run only when the
+     * sign-in actually happens.
+     *
+     * One caller today and one reason: `POST {base}/login/passkey` stamps
+     * `passkeys.counter`, `backed_up` and `last_used_at` with what the
+     * authenticator just reported (`usePasskeyStatement`), and a second round
+     * trip for three columns on the hot path of a sign-in is a round trip the
+     * batch was already making. The alternative — a `passkey` branch inside this
+     * function — would put a credential table's SQL in the one place that is
+     * deliberately provider-agnostic.
+     *
+     * **Not run on a refusal.** A refused assertion is not a use, so nothing
+     * stamps `last_used_at`; the refusal's own event is the only write.
+     */
+    extra?: readonly D1PreparedStatement[]
+  } = { userAgent: null },
 ): Promise<SignInResult> {
   const now = ctx.now ?? Date.now()
   const email = normaliseEmail(identity.email)
@@ -240,6 +259,10 @@ export async function completeSignIn(
       provider: provider.id,
       at: now,
     }),
+    // Last, after the session row exists: the caller's statements are about the
+    // credential that was just used, and an event ordered before the thing it
+    // describes is the ordering `events.ts` refuses everywhere else.
+    ...(ctx.extra ?? []),
   )
 
   await db.batch(writes)

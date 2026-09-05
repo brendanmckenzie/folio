@@ -192,6 +192,31 @@ export function requireAuthConfigured<Env>(rt: FolioRuntime): MiddlewareHandler<
 }
 
 /**
+ * The same for the passkey surface, which is opt-in per deployment
+ * (`../../docs/specs/foundation/passkeys.md` decision 1): a host that did not
+ * list `passkeys()` has no enrolment screen, no login button and no script, so
+ * the routes behind them do not exist either.
+ *
+ * 404 rather than 403, and it subsumes `requireAuthConfigured`'s check: "there
+ * is no such thing here" is the honest answer for a surface the configuration
+ * never created, and it is the same answer `auth: 'open'` gets, so a probe
+ * cannot tell a deployment without passkeys from a deployment without accounts.
+ *
+ * Deliberately **not** on `DELETE {base}/api/users/:id/passkeys`. Removing a
+ * lost device's credentials is the one passkey act that must keep working after
+ * a host takes the provider back out, and stale rows nobody can clear is a
+ * worse state than an admin route that answers on a deployment with none.
+ */
+export function requirePasskeys<Env>(rt: FolioRuntime): MiddlewareHandler<FolioEnv<Env>> {
+  return async (_c, next) => {
+    if (rt.auth.mode !== 'session' || !rt.auth.passkey) {
+      throw new FolioError('not_found', 'Passkeys are not configured')
+    }
+    await next()
+  }
+}
+
+/**
  * Screens the `:id` in the path and loads the story row behind it, or 404s.
  *
  * Mounted on the routes that need the row itself — its `title` seeds the draft on

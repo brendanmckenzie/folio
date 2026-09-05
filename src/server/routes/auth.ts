@@ -28,23 +28,41 @@ import {
   type VerifiedIdentity,
 } from '../auth/config'
 import {
+  challengeBytes,
   clearOidcCookies,
   clearSessionCookies,
+  clearWebauthnCookies,
   cookieName,
+  decodeChallenge,
   oidcCookieName,
   readOidcCookie,
+  readWebauthnCookie,
   serialiseCookie,
 } from '../auth/cookie'
+import { listEvents, recordEventStatement } from '../auth/events'
+import { base64url } from '../auth/jwt'
+import { passkeyForAssertion, usePasskeyStatement } from '../auth/passkeys'
 import { credentialOf, resolveActor } from '../auth/resolve'
+import { READ } from '../auth/roles'
 import { revokeSession, sessionProvider } from '../auth/session'
 import { completeSignIn, domainOf } from '../auth/sign-in'
 import type { NewSession } from '../auth/session'
-import { userByEmail } from '../auth/users'
+import { userByEmail, userById } from '../auth/users'
+import { requestOptions, verifyAssertion, WebAuthnError } from '../auth/webauthn'
 import { FolioError } from '../errors'
+import { requireAccess, requireAuthConfigured } from '../middleware'
 import { loginPage } from '../pages'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
-import { LoginEmailBody, parseOrThrow, safeNext } from '../validate'
+import {
+  LoginEmailBody,
+  PasskeyAssertionBody,
+  type PasskeyAssertionInput,
+  parseBody,
+  parseOrThrow,
+  safeNext,
+} from '../validate'
+import { mintChallenge, passkeyEnrolmentRefusal, passkeyRefusalBody, rpIdOf } from './passkeys'
 
 /** How long the OIDC state cookie lives: one round trip to an IdP, not a
  * session. Ten minutes is generous for a login form and short enough that a
@@ -347,6 +365,156 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   })
 
   /**
+   * The request options and a `k: 'get'` challenge cookie.
+   *
+   * **Unauthenticated, and called on every login-page load** — conditional UI
+   * arms itself from this before anybody has typed anything (decision 4) — which
+   * is the whole reason the challenge is a cookie and not a row (decision 2): a
+   * table would be an anonymous D1 write per page view. This handler touches no
+   * binding at all.
+   *
+   * `allowCredentials` is empty and stays empty. The route does not know whose
+   * passkeys to list, and listing them would be an enumeration oracle; a
+   * discoverable credential needs no list.
+   *
+   * Registered before `/login/:provider` for the reason `/login/verify` is,
+   * although here it is belt and braces: these two are POSTs and that one is a
+   * GET, so nothing could swallow them today. The next person to add
+   * `POST /login/:provider` would find out the hard way.
+   */
+  app.post('/login/passkey/options', (c) => {
+    const auth = sessionAuth()
+    if (!auth.passkey) throw new FolioError('not_found', 'Passkeys are not configured')
+    const url = new URL(c.req.url)
+    const minted = mintChallenge(url, 'get')
+    return new Response(
+      JSON.stringify({
+        publicKey: requestOptions({ rpId: rpIdOf(url), challenge: minted.challenge }),
+      }),
+      {
+        status: 200,
+        headers: [
+          ['content-type', 'application/json'],
+          ['set-cookie', minted.cookie],
+        ],
+      },
+    )
+  })
+
+  /**
+   * Signs in with a passkey. **Every failure answers the byte-identical 401.**
+   *
+   * That is `SENT`'s discipline one route along: an attacker holding a
+   * credential id must learn nothing about whether it exists, whose it is, or
+   * why it was refused — an unknown id, a wrong challenge, a foreign origin, a
+   * foreign `rpIdHash`, a clear UV flag, a counter regression, a deleted user,
+   * an enforced domain and a missing cookie all read the same. The one asymmetry
+   * is invisible to the caller and visible to the host: a counter regression
+   * means two authenticators hold one private key, so it alone writes a
+   * `passkey_rejected` row.
+   *
+   * The cookie is the gate, and it runs **before any D1 read**. A cross-site
+   * POST carries no `SameSite=Lax` cookie and a scanner carries none either, so
+   * neither costs a query — and the challenge cookie is cleared on the way out
+   * whatever happened, because a challenge is single-use whether or not it
+   * verified.
+   */
+  app.post('/login/passkey', async (c) => {
+    const auth = sessionAuth()
+    if (!auth.passkey) throw new FolioError('not_found', 'Passkeys are not configured')
+    const provider = auth.passkey
+    const url = new URL(c.req.url)
+
+    /** The one answer every refusal gives. Built once per call rather than held
+     * as a module constant so the cleared-cookie headers travel with it. */
+    const refuse = (): Response =>
+      new Response(JSON.stringify(passkeyRefusalBody()), {
+        status: 401,
+        headers: [
+          ['content-type', 'application/json'],
+          ...clearWebauthnCookies(url).map((value) => ['set-cookie', value] as [string, string]),
+        ],
+      })
+
+    const challenge = decodeChallenge(readWebauthnCookie(c.req.header('cookie')))
+    // A `create` cookie here is the enrolment ceremony's, and the two are
+    // different gates: one proves a device to an account that is already
+    // signed in, the other decides who is signing in.
+    if (challenge?.k !== 'get') return refuse()
+
+    let body: PasskeyAssertionInput
+    try {
+      body = await parseBody(c.req, PasskeyAssertionBody)
+    } catch {
+      // A 400 naming the field that failed would be a difference an attacker
+      // could measure. This is the one route where a malformed body is a 401.
+      return refuse()
+    }
+
+    const db = c.var.bindings().db
+    const found = await passkeyForAssertion(db, body.credential.id)
+    if (!found) return refuse()
+
+    let asserted: { counter: number; backedUp: boolean }
+    try {
+      asserted = await verifyAssertion({
+        credential: body.credential,
+        stored: {
+          publicKey: found.passkey.publicKey,
+          alg: found.passkey.alg,
+          counter: found.passkey.counter,
+          userId: found.user.id,
+        },
+        expected: {
+          challenge: base64url(challengeBytes(challenge.c)),
+          origin: url.origin,
+          rpId: rpIdOf(url),
+        },
+      })
+    } catch (err) {
+      if (err instanceof WebAuthnError && err.code === 'counter') {
+        // The only refusal anybody can ever see. A clone is the person's to
+        // resolve by removing the credential, so this records and refuses
+        // rather than deleting the row out from under them.
+        await db.batch([
+          recordEventStatement(db, {
+            kind: 'passkey_rejected',
+            userId: found.user.id,
+            actor: found.user.id,
+            provider: provider.id,
+            detail: { passkey: found.passkey.id, reason: 'counter' },
+          }),
+        ])
+      }
+      return refuse()
+    }
+
+    // The assertion proves the credential; everything after it — the enforced
+    // domain, the provider stamp, the audit row — is `completeSignIn`'s, with
+    // the passkey's own stamp riding in the same batch rather than a second
+    // round trip.
+    // biome-ignore lint/correctness/useHookAtTopLevel: `usePasskeyStatement` is a D1 statement builder, not a React hook — `use` is the verb ("use this passkey"), and nothing in this file renders.
+    const stamp = usePasskeyStatement(db, found.passkey.id, asserted.counter, asserted.backedUp)
+    const result = await completeSignIn(
+      db,
+      auth,
+      provider,
+      { email: found.user.email },
+      { userAgent: c.req.header('user-agent') ?? null, extra: [stamp] },
+    )
+    if (!result.ok) return refuse()
+
+    return new Response(JSON.stringify({ ok: true, next: safeNext(body.next, editorUrl) }), {
+      status: 200,
+      headers: [
+        ['content-type', 'application/json'],
+        ['set-cookie', signInCookie(c, result.session)],
+        ...clearWebauthnCookies(url).map((value) => ['set-cookie', value] as [string, string]),
+      ],
+    })
+  })
+
+  /**
    * Starts a redirect flow.
    *
    * Whatever the provider asked to remember — for OIDC the state, nonce and PKCE
@@ -508,6 +676,21 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       if (provider && 'signOutUrl' in provider && provider.signOutUrl) {
         next = provider.signOutUrl
       }
+      // After the revoke, not before: the row this describes has just stopped
+      // existing. `c.var.actor` is who `withActor` resolved from this same
+      // cookie at the top of the request, before the revoke — a token never
+      // reaches this branch, since `credentialOf(...).cookie` is empty for one.
+      const actor = c.var.actor
+      if (actor?.kind === 'user') {
+        await db.batch([
+          recordEventStatement(db, {
+            kind: 'sign_out',
+            userId: actor.id,
+            actor: actor.id,
+            provider: minted,
+          }),
+        ])
+      }
     }
     return new Response(JSON.stringify({ ok: true, next }), {
       status: 200,
@@ -567,13 +750,55 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // means "not a session" rather than "a session by an unknown door".
     const session =
       actor?.kind === 'user' && actor.provider ? { session: { provider: actor.provider } } : {}
+    /**
+     * The passkey block (`../../../docs/specs/foundation/passkeys.md`
+     * decision 6). Present only when the deployment listed `passkeys()`, so its
+     * absence is the account screen's "this site has no passkeys" and not "you
+     * may not".
+     *
+     * `allowed: false` carries the reason, and the account screen renders it as
+     * a sentence *in place of* the Add button — the admin's "absent, not
+     * disabled" rule for a permission the person cannot change. One extra read
+     * to get there, because `Actor` carries no email and an enforced domain is a
+     * fact about the address; it is paid only by a deployment that asked for
+     * passkeys, and `/me` is already reading D1 for the session.
+     */
+    let passkeys: { passkeys?: { allowed: boolean; reason?: string } } = {}
+    if (rt.auth.mode === 'session' && rt.auth.passkey) {
+      let reason: string | null = null
+      if (actor?.kind === 'user') {
+        const row = await userById(c.var.bindings().db, actor.id)
+        reason = row ? passkeyEnrolmentRefusal(rt.auth, row.email) : null
+      }
+      passkeys = { passkeys: reason ? { allowed: false, reason } : { allowed: true } }
+    }
     return c.json({
       mode: rt.auth.mode,
       actor: safe,
       loginUrl: `${rt.base}/login`,
       ...session,
+      ...passkeys,
       ...(policy ? { policy } : {}),
     })
+  })
+
+  /**
+   * The caller's own last twenty rows of `../../../docs/specs/foundation/
+   * auth-providers.md`'s audit table — spec 29's account screen reads this.
+   *
+   * **A user actor only.** `requireAccess(READ)` passes a read-scoped token
+   * straight through — a script may hold `content:read` — so the kind check
+   * after it is load-bearing, not defensive: a token's own record of its use is
+   * `api_tokens.last_used_at`, not a person's sign-in history, and there is no
+   * account for `?user=` to mean here in the first place.
+   */
+  app.get('/me/events', requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, READ), async (c) => {
+    const actor = c.var.actor
+    if (actor?.kind !== 'user') {
+      throw new FolioError('forbidden', 'A token has no sign-in history of its own.')
+    }
+    const page = await listEvents(c.var.bindings().db, { user: actor.id, limit: 20 })
+    return c.json({ events: page.rows })
   })
 
   return app

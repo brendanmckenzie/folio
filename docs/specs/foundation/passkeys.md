@@ -880,6 +880,85 @@ three disappear on their own when a fixture lands. **Checkpoint 1's fallback to
 5. `test/workers/auth-passkeys.test.ts` — every acceptance criterion above except
    the login page's and the account screen's.
 
+#### Phase 2 implementation notes (2026-09-05)
+
+Built as planned. Step 1 was already half-landed, one design premise in Ground
+truth was false, and three files outside the spec's list had to change.
+
+- **The "not the only provider" rule landed with spec 28**, not here.
+  `resolveAuth` already throws (`config.ts`, `passkey` case) and
+  `test/unit/server/auth.test.ts` already asserted it. This phase added
+  `passkeys()` itself and a `describe('passkeys()')` block covering the
+  constructor, the policy projection and that rule from this side.
+- **`completeSignIn` gained `ctx.extra?: readonly D1PreparedStatement[]`**, the
+  shape phase 1's notes predicted. It is appended **last**, after the session row
+  and the `sign_in` event, and **only on the success path**: a refused assertion
+  is not a use, so nothing stamps `last_used_at`.
+- **Three files the spec's module list does not name had to change**, each for
+  one reason:
+  - `auth/events.ts` — four kinds (`passkey_rejected`, `passkey_removed`,
+    `passkeys_removed`, `sessions_revoked`). The union's own comment predicted
+    this widening.
+  - `auth/session.ts` — `listUserSessions`, `revokeOtherSessions` and
+    `SessionRow`. `GET /api/me/sessions` needs them and "sessions SQL lives in
+    this file and nowhere else" is that file's stated rule.
+  - `validate.ts` — `PasskeyRegisterBody`, `PasskeyAssertionBody`,
+    `PasskeyPatchBody` and a `b64url(max)` primitive. "valibot here and only
+    here" is that file's stated rule, and every field of a WebAuthn response is
+    base64url a browser serialised by hand.
+- **`PASSKEY_REFUSED` and three shared helpers live in `routes/passkeys.ts`**
+  (`passkeyRefusalBody`, `rpIdOf`, `mintChallenge`, `passkeyEnrolmentRefusal`)
+  and `routes/auth.ts` imports them. The two login routes are in `auth.ts` as the
+  spec says, but the refusal message must be one literal and the challenge-minting
+  rule one function, or the two ceremonies drift.
+- **`DELETE {base}/api/users/:id/passkeys` is deliberately not behind
+  `requirePasskeys`.** The acceptance criteria 404 it under `auth: 'open'` and
+  say nothing about a session deployment that never listed the provider; a host
+  that takes `passkeys()` back out must still be able to clear the rows it left,
+  and stale credentials nobody can remove is the worse state. It sits behind
+  `requireAuthConfigured` + `requireAccess(ADMIN)`, declared on the route as well
+  as inherited from `accessRoutes`' `/users/*` mount — a gate that depends on the
+  order of two `app.route` lines is a gate somebody will reorder.
+- **"An expired cookie" is not a server-side state and the refusal table says
+  so.** `Max-Age=600` is enforced by the browser; the payload carries no
+  timestamp, so an expired challenge reaches the route as *no* cookie or as one
+  whose value does not decode. Both are rows in the table, and the test names the
+  reason in place rather than pretending to age one out.
+- **The enforced-domain refusal row can only exist for a credential enrolled
+  before the domain was enforced.** With `sso` already claiming `client.com`,
+  `POST /api/me/passkeys/options` is a 403 and there is nothing to enrol — so the
+  test enrols on a deployment without the enforcement and asserts against one
+  with it, over the same database. That is the spec's own edge case, and it turns
+  out to be the *only* way to reach the row.
+- **`usePasskeyStatement` trips biome's `useHookAtTopLevel`** — the linter reads
+  any `useX()` call as a React hook, and this one is called after an early
+  return. One `biome-ignore` at the call site in `auth.ts`, with the statement
+  hoisted to its own `const` so the suppression attaches to the call rather than
+  to an object property. Renaming the phase-1 export would have been the other
+  fix; the spec names it, so the suppression won.
+- **`GET {base}/api/users`' count query is skipped entirely when no passkey
+  provider is configured** — every answer would be zero — while the `passkeys`
+  key is still present on every row, so the Access column has one shape to
+  render.
+- **The `/me` block is one extra read, paid only where passkeys are on.** `Actor`
+  carries no email and an enforced domain is a fact about the address, so
+  `GET {base}/api/me` reads the user row when `rt.auth.passkey` is set and the
+  actor is a person. Absent entirely without the provider, which is "this site
+  has no passkeys" and not "you may not enrol one".
+
+**One Ground-truth premise was false: `GET {base}/api/me/events` did not exist**
+when this phase started. It is spec 28's *phase 4*, not its phases 1–2, and it
+landed concurrently while this was being built. Nothing in phase 2 needed it —
+the account screen (phase 4) is its only reader — so this is a note for that
+phase rather than a blocker for this one.
+
+**The byte-identical refusal was verified by breaking it.** Making the
+unknown-credential branch answer `'That passkey is not enrolled here.'` turned
+three tests red: the row itself on the message diff, plus the deleted-user row
+(which reaches the same branch, because `passkeyForAssertion` answers null when
+the user row has gone) and the admin remove-all test, which asserts the
+credentials are dead afterwards. Restored, green.
+
 ### Phase 3 — the login page
 
 1. `src/server/pages.tsx` — button, `autocomplete`, `LOGIN_PASSKEY_SCRIPT`,

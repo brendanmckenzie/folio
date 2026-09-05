@@ -542,6 +542,109 @@ export const TokenCreateBody = v.object(
   OBJECT,
 )
 
+/* ------------------------------------------------------------ passkeys --- */
+
+/**
+ * base64url, bounded. **The one screen that keeps a browser's own JSON off a
+ * decoder that has to be total** (`../../docs/specs/foundation/passkeys.md`):
+ * every field of a WebAuthn response arrives base64url-encoded from a page that
+ * serialised it by hand, and `webauthn.ts` is fed the decoded bytes.
+ *
+ * Anchored to the alphabet rather than merely bounded, so a value with `+`, `/`
+ * or `=` in it is a 400 here instead of a surprise inside `atob`. The caps are
+ * generous by design — an RSA attestation object is a couple of kilobytes and
+ * some authenticators pad — but they are caps: an unbounded body would be a
+ * megabyte reaching a CBOR decoder before anything had decided it was a
+ * credential at all.
+ */
+const b64url = (max: number) =>
+  v.pipe(
+    v.string('must be a string'),
+    v.minLength(1, 'is required'),
+    v.maxLength(max, `must be ${max} characters or fewer`),
+    v.regex(/^[A-Za-z0-9_-]+$/, 'must be base64url'),
+  )
+
+/** A credential id as the authenticator minted it. 1023 bytes is the WebAuthn
+ * ceiling; base64url of that is 1364. */
+const CREDENTIAL_ID = b64url(1400)
+
+const CREDENTIAL_TYPE = v.literal('public-key', "must be 'public-key'")
+
+/**
+ * `POST {base}/api/me/passkeys`. The enrolment half.
+ *
+ * `name` is optional because the route defaults it to `Passkey · <host>`, which
+ * is the name that tells somebody later *where* the credential was enrolled —
+ * the only hint they get when a passkey made on `localhost` silently fails on
+ * the deployed host.
+ */
+export const PasskeyRegisterBody = v.object(
+  {
+    credential: v.object(
+      {
+        id: CREDENTIAL_ID,
+        rawId: CREDENTIAL_ID,
+        type: CREDENTIAL_TYPE,
+        response: v.object(
+          {
+            clientDataJSON: b64url(4096),
+            attestationObject: b64url(16384),
+            /** `getTransports()`, advisory. Screened again in `webauthn.ts`,
+             * which drops anything that is not a short string. */
+            transports: v.optional(v.array(bounded(32))),
+          },
+          OBJECT,
+        ),
+      },
+      OBJECT,
+    ),
+    name: v.optional(bounded(60)),
+  },
+  OBJECT,
+)
+
+/**
+ * `POST {base}/login/passkey`. The assertion half.
+ *
+ * A failure here is a **401 with the route's one generic body**, not the 400
+ * this schema would otherwise produce: the route catches it, because a
+ * validation message is exactly the kind of difference that turns a uniform
+ * refusal into an oracle.
+ */
+export const PasskeyAssertionBody = v.object(
+  {
+    credential: v.object(
+      {
+        id: CREDENTIAL_ID,
+        rawId: CREDENTIAL_ID,
+        type: CREDENTIAL_TYPE,
+        response: v.object(
+          {
+            clientDataJSON: b64url(4096),
+            authenticatorData: b64url(4096),
+            signature: b64url(4096),
+            /** Absent from some security keys' non-discoverable assertions, and
+             * `null` from browsers that send the key regardless. */
+            userHandle: v.nullish(b64url(1400)),
+          },
+          OBJECT,
+        ),
+      },
+      OBJECT,
+    ),
+    next: v.optional(bounded(500)),
+  },
+  OBJECT,
+)
+
+/** `PATCH {base}/api/me/passkeys/:id`. 1–60 characters, matching the column's
+ * own bound in `auth/passkeys.ts`. */
+export const PasskeyPatchBody = v.object({ name: required(60) }, OBJECT)
+
+export type PasskeyRegisterInput = v.InferOutput<typeof PasskeyRegisterBody>
+export type PasskeyAssertionInput = v.InferOutput<typeof PasskeyAssertionBody>
+
 /**
  * `POST {base}/api/story/:id/share` (`../../docs/specs/platform/draft-sharing.md`).
  *

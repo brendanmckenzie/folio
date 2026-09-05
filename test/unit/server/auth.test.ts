@@ -1,25 +1,35 @@
 import { describe, expect, it } from 'vitest'
 import {
+  challengeBytes,
   clearSessionCookies,
+  clearWebauthnCookies,
   cookieName,
+  decodeChallenge,
+  encodeChallenge,
   hasDraftCookie,
   PLAIN_COOKIE,
   PLAIN_DRAFT_COOKIE,
+  PLAIN_WEBAUTHN_COOKIE,
   SECURE_DRAFT_COOKIE,
+  SECURE_WEBAUTHN_COOKIE,
   readCookie,
   MAX_SHARE_COOKIE_TOKENS,
   PLAIN_SHARE_COOKIE,
   readSessionCookie,
+  readWebauthnCookie,
   SECURE_COOKIE,
   SECURE_SHARE_COOKIE,
   serialiseCookie,
   shareCookieName,
   shareCookieTokens,
+  webauthnCookieName,
+  WEBAUTHN_COOKIE_TTL_S,
   withShareToken,
 } from '../../../src/server/auth/cookie'
 import type { AuthProvider } from '../../../src/server/auth/config'
 import { authPolicy, resolveAuth, screenScopes } from '../../../src/server/auth/config'
 import { magicLink } from '../../../src/server/auth/magic-link'
+import { passkeys } from '../../../src/server/auth/passkeys-provider'
 import {
   actorString,
   ADMIN,
@@ -728,5 +738,199 @@ describe('how long a preview link may last', () => {
     // value of the argument that produces null — and the column says so too
     // (`expires_at not null`, pinned in migrations.test.ts).
     expect(Number.isFinite(shareExpiry(undefined, NOW))).toBe(true)
+  })
+})
+
+/**
+ * The WebAuthn challenge cookie (`docs/specs/foundation/passkeys.md`
+ * decision 2): a fifth name, a payload that has to survive a round trip through
+ * a browser, and a decoder that is total over whatever comes back.
+ *
+ * Worth testing here rather than through a route for the reason the session
+ * cookie's own rule is: getting the *name* wrong is "works deployed, never
+ * works locally", and getting the *decoder* wrong is a value an attacker
+ * chooses reaching a comparison that was written assuming this host wrote it.
+ */
+describe('the webauthn challenge cookie', () => {
+  const CHALLENGE = 'a'.repeat(64)
+
+  it('is a fifth name, prefixed on https and plain everywhere else', () => {
+    expect(webauthnCookieName('https://example.com')).toBe(SECURE_WEBAUTHN_COOKIE)
+    expect(webauthnCookieName('http://localhost:5199')).toBe(PLAIN_WEBAUTHN_COOKIE)
+    // Neither name is the session's, the share's or the draft's: a browser
+    // holding only this one resolves to no actor at all.
+    expect(readSessionCookie(`${SECURE_WEBAUTHN_COOKIE}=x`)).toBeNull()
+    expect(hasDraftCookie(`${PLAIN_WEBAUTHN_COOKIE}=x`)).toBe(false)
+  })
+
+  it('reads either name, preferring the prefixed one', () => {
+    expect(readWebauthnCookie(`${PLAIN_WEBAUTHN_COOKIE}=plain`)).toBe('plain')
+    expect(
+      readWebauthnCookie(`${PLAIN_WEBAUTHN_COOKIE}=plain; ${SECURE_WEBAUTHN_COOKIE}=host`),
+    ).toBe('host')
+    expect(readWebauthnCookie(null)).toBeNull()
+    expect(readWebauthnCookie(`${SECURE_COOKIE}=session`)).toBeNull()
+  })
+
+  it('clears both names, the way a sign-out does', () => {
+    const https = clearWebauthnCookies('https://example.com')
+    expect(https).toHaveLength(2)
+    expect(https[0]).toContain(SECURE_WEBAUTHN_COOKIE)
+    expect(https[0]).toContain('Secure')
+    expect(https[1]).toContain(PLAIN_WEBAUTHN_COOKIE)
+    expect(https.every((c) => c.includes('Max-Age=0'))).toBe(true)
+    expect(clearWebauthnCookies('http://localhost:5199')).toHaveLength(1)
+  })
+
+  /**
+   * 600 seconds, and the number matters in one direction only: it has to be
+   * *longer* than the 300s `timeout` the options hand the browser, so the server
+   * is never the half that expires first. An assertion a browser was still
+   * willing to produce must not fail on a race with our own clock.
+   */
+  it('lives ten minutes, deliberately outliving the ceremony timeout', () => {
+    expect(WEBAUTHN_COOKIE_TTL_S).toBe(600)
+    const cookie = serialiseCookie('https://example.com', SECURE_WEBAUTHN_COOKIE, 'v', {
+      maxAge: WEBAUTHN_COOKIE_TTL_S,
+    })
+    expect(cookie).toContain('Max-Age=600')
+    // `SameSite=Lax` is the whole of the cross-site defence: a POST from
+    // another site carries no challenge, so the verify route refuses before it
+    // reads D1.
+    expect(cookie).toContain('SameSite=Lax')
+    expect(cookie).toContain('HttpOnly')
+  })
+
+  it('round-trips the ceremony and the user it was minted for', () => {
+    expect(decodeChallenge(encodeChallenge({ c: CHALLENGE, k: 'get' }))).toEqual({
+      c: CHALLENGE,
+      k: 'get',
+    })
+    expect(decodeChallenge(encodeChallenge({ c: CHALLENGE, k: 'create', u: 'usr_1' }))).toEqual({
+      c: CHALLENGE,
+      k: 'create',
+      u: 'usr_1',
+    })
+  })
+
+  /**
+   * The payload is base64url, so it can carry neither a `;` nor a comma — the
+   * two characters a `Set-Cookie` value may not contain, and the reason the
+   * codec exists at all rather than `JSON.stringify` straight into the header.
+   */
+  it('encodes to something a cookie value may actually hold', () => {
+    const value = encodeChallenge({ c: CHALLENGE, k: 'create', u: 'usr_1' })
+    expect(value).toMatch(/^[A-Za-z0-9_-]+$/)
+  })
+
+  it('answers null for anything that is not exactly the payload', () => {
+    const cases: Record<string, string | null | undefined> = {
+      absent: null,
+      empty: '',
+      'not base64url at all': '!!!!',
+      'valid base64url, not JSON': 'bm90LWpzb24',
+      'JSON that is an array': encodeAsCookie('[]'),
+      'JSON that is a string': encodeAsCookie('"nope"'),
+      'no challenge': encodeAsCookie(JSON.stringify({ k: 'get' })),
+      // Not 64 hex: the screen is `mintSecret()`'s exact alphabet, which is a
+      // narrower thing to admit than "some base64url of the right length".
+      'a short challenge': encodeAsCookie(JSON.stringify({ c: 'abc', k: 'get' })),
+      'an uppercase challenge': encodeAsCookie(JSON.stringify({ c: 'A'.repeat(64), k: 'get' })),
+      'a challenge with a non-hex character': encodeAsCookie(
+        JSON.stringify({ c: `${'a'.repeat(63)}z`, k: 'get' }),
+      ),
+      'an unknown ceremony': encodeAsCookie(JSON.stringify({ c: CHALLENGE, k: 'sign' })),
+      'no ceremony': encodeAsCookie(JSON.stringify({ c: CHALLENGE })),
+      'a non-string user': encodeAsCookie(JSON.stringify({ c: CHALLENGE, k: 'create', u: 7 })),
+      'an empty user': encodeAsCookie(JSON.stringify({ c: CHALLENGE, k: 'create', u: '' })),
+    }
+    for (const [name, value] of Object.entries(cases)) {
+      expect(decodeChallenge(value), name).toBeNull()
+    }
+  })
+
+  /**
+   * Nothing else survives the decode. A cookie carrying extra keys is one an
+   * older deploy or an attacker wrote, and the caller must not be able to read
+   * anything out of it that this build did not put there.
+   */
+  it('drops keys it does not know about', () => {
+    const value = encodeAsCookie(
+      JSON.stringify({ c: CHALLENGE, k: 'get', u: 'usr_1', role: 'admin' }),
+    )
+    expect(decodeChallenge(value)).toEqual({ c: CHALLENGE, k: 'get', u: 'usr_1' })
+  })
+
+  /** The hex in the cookie and the bytes the options are built from are the same
+   * 32 bytes, which is what makes `clientDataJSON.challenge` a string compare. */
+  it('turns the stored hex back into the 32 bytes the browser signs over', () => {
+    const bytes = challengeBytes('00ff10'.padEnd(64, '0'))
+    expect(bytes).toHaveLength(32)
+    expect([...bytes.slice(0, 3)]).toEqual([0, 255, 16])
+  })
+})
+
+/** base64url of a UTF-8 string, the way `encodeChallenge` writes one — so the
+ * malformed cases above are malformed in their *payload* rather than in their
+ * encoding. */
+function encodeAsCookie(json: string): string {
+  const bytes = new TextEncoder().encode(json)
+  let binary = ''
+  for (const b of bytes) binary += String.fromCharCode(b)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+/**
+ * `passkeys()` (decision 1). Four lines of constructor, and every one of them is
+ * a decision: the kind is what `resolveAuth` switches on, the id is fixed
+ * because `sessions.provider` stores it, and `rpName` is absent unless a host
+ * named one so the route's `?? host` default is reachable.
+ */
+describe('passkeys()', () => {
+  it('is a provider of kind passkey with a fixed id', () => {
+    expect(passkeys()).toEqual({
+      kind: 'passkey',
+      id: 'passkey',
+      label: 'Sign in with a passkey',
+    })
+  })
+
+  it('takes a label and an rpName, and omits rpName when it was not given', () => {
+    expect(passkeys({ label: 'Use Touch ID', rpName: 'Acme CMS' })).toEqual({
+      kind: 'passkey',
+      id: 'passkey',
+      label: 'Use Touch ID',
+      rpName: 'Acme CMS',
+    })
+    expect('rpName' in passkeys()).toBe(false)
+  })
+
+  /**
+   * The rule that makes the opt-in safe to offer: enrolment needs a session and
+   * a session needs a first sign-in, so a deployment whose only provider is this
+   * one is a deployment nobody could ever enrol on. Refused at construction
+   * rather than discovered at the login page.
+   */
+  it('cannot be the only door', () => {
+    expect(() => resolveAuth({ providers: [passkeys()] })).toThrow(/cannot be the only one/)
+    const resolved = resolveAuth({ providers: [magicLink({ send: () => {} }), passkeys()] })
+    expect(resolved).toMatchObject({ mode: 'session', passkey: { id: 'passkey' } })
+  })
+
+  /** It has no secret and no provisioning to describe, so the projection carries
+   * the same fields every other kind's does and nothing extra. */
+  it('projects onto the policy as a kind, with nothing to hide', () => {
+    const policy = authPolicy(
+      resolveAuth({ providers: [magicLink({ send: () => {} }), passkeys()] }),
+    )
+    expect(policy?.providers.find((p) => p.id === 'passkey')).toEqual({
+      id: 'passkey',
+      label: 'Sign in with a passkey',
+      kind: 'passkey',
+      provision: 'refuse',
+      rolesFromProvider: false,
+      domains: [],
+      signOut: false,
+    })
   })
 })

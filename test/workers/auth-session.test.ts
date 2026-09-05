@@ -9,6 +9,13 @@ import {
   revokeUserSessions,
   sessionExpiry,
 } from '../../src/server/auth/session'
+import {
+  type AuthEventInput,
+  listEvents,
+  oldestEventAt,
+  recordEventStatement,
+  sweepEvents,
+} from '../../src/server/auth/events'
 import { hashToken } from '../../src/server/auth/secrets'
 import { createToken, listTokens, readToken, revokeToken } from '../../src/server/auth/tokens'
 import type { UserActor } from '../../src/server/auth/roles'
@@ -37,6 +44,7 @@ beforeEach(async () => {
     env.DB.prepare('delete from sessions'),
     env.DB.prepare('delete from api_tokens'),
     env.DB.prepare('delete from login_challenges'),
+    env.DB.prepare('delete from auth_events'),
     // Before `users`, and explicitly rather than by cascade, for the same reason
     // `deleteUser` batches it: this file must not depend on a pragma to be clean.
     env.DB.prepare('delete from passkeys'),
@@ -325,5 +333,99 @@ describe('api tokens', () => {
 
   it('answers null for a token nobody minted', async () => {
     expect(await readToken(env.DB, 'folio_deadbeef')).toBeNull()
+  })
+})
+
+describe('auth_events', () => {
+  /**
+   * Every event a real sign-in batches shares one `at` (phase 3's own note on
+   * this file), so a `(at, id)` keyset cannot be exercised honestly from a
+   * single batch. These rows are inserted directly, with **distinct** `at`
+   * values, for exactly that reason.
+   */
+  const insert = (input: AuthEventInput) => recordEventStatement(env.DB, input).run()
+
+  it("pages newest first over (at, id), not within one row's tie", async () => {
+    const user = await seedUser()
+    await insert({ kind: 'sign_in', at: 1000, userId: user.id, actor: user.id })
+    await insert({ kind: 'sign_in', at: 2000, userId: user.id, actor: user.id })
+    await insert({ kind: 'sign_out', at: 3000, userId: user.id, actor: user.id })
+
+    const first = await listEvents(env.DB, { limit: 2 })
+    expect(first.rows.map((r) => r.at)).toEqual([3000, 2000])
+    expect(first.cursor).not.toBeNull()
+
+    const second = await listEvents(env.DB, { cursor: first.cursor ?? undefined, limit: 2 })
+    expect(second.rows.map((r) => r.at)).toEqual([1000])
+    expect(second.cursor).toBeNull()
+  })
+
+  it('narrows to one user without paging over rows that are not theirs', async () => {
+    const ann = await seedUser()
+    const bo = await createUser(env.DB, { email: 'bo@example.com' })
+    await insert({ kind: 'sign_in', at: 1000, userId: ann.id, actor: ann.id })
+    await insert({ kind: 'sign_in', at: 2000, userId: bo.id, actor: bo.id })
+    await insert({ kind: 'sign_out', at: 3000, userId: ann.id, actor: ann.id })
+
+    const mine = await listEvents(env.DB, { user: ann.id })
+    expect(mine.rows.map((r) => r.at)).toEqual([3000, 1000])
+  })
+
+  it('round-trips detail as an object, and answers null when there is none', async () => {
+    await insert({
+      kind: 'role_changed',
+      at: 1000,
+      userId: null,
+      detail: { from: 'editor', to: 'admin' },
+    })
+    await insert({ kind: 'sign_in', at: 2000, userId: null })
+
+    const rows = await listEvents(env.DB)
+    expect(rows.rows.find((r) => r.kind === 'role_changed')?.detail).toEqual({
+      from: 'editor',
+      to: 'admin',
+    })
+    expect(rows.rows.find((r) => r.kind === 'sign_in')?.detail).toBeNull()
+  })
+
+  /**
+   * `kind` carries no CHECK constraint, deliberately (`docs/specs/foundation/
+   * auth-providers.md` decision 8): a kind a later migration adds and this
+   * build has not been taught yet must read back as data, not fail the
+   * request. Inserted with raw SQL, since `AuthEventKind` would refuse it at
+   * the type level — exactly the point.
+   */
+  it('reads an unrecognised kind back as a plain string rather than refusing it', async () => {
+    await env.DB.prepare(
+      "insert into auth_events (id, at, kind) values ('evt_future', 1000, 'a_kind_this_build_never_declared')",
+    ).run()
+    const rows = await listEvents(env.DB)
+    expect(rows.rows[0]?.kind).toBe('a_kind_this_build_never_declared')
+  })
+
+  it('answers null for the oldest row of an empty table, and the epoch otherwise — unaffected by ?user=', async () => {
+    expect(await oldestEventAt(env.DB)).toBeNull()
+
+    const ann = await seedUser()
+    const bo = await createUser(env.DB, { email: 'bo@example.com' })
+    await insert({ kind: 'sign_in', at: 5000, userId: bo.id, actor: bo.id })
+    await insert({ kind: 'sign_in', at: 1000, userId: ann.id, actor: ann.id })
+
+    // A fact about the table, not the page: filtering to `bo` (whose own
+    // earliest row is 5000) must not make the table look younger than it is.
+    expect(await oldestEventAt(env.DB)).toBe(1000)
+    expect((await listEvents(env.DB, { user: bo.id })).rows.map((r) => r.at)).toEqual([5000])
+  })
+
+  it('sweeps events past the retention window and leaves newer ones', async () => {
+    const now = Date.now()
+    const DAY = 24 * 60 * 60 * 1000
+    await insert({ kind: 'sign_in', at: now - 91 * DAY, userId: null })
+    await insert({ kind: 'sign_in', at: now - 89 * DAY, userId: null })
+
+    expect(await sweepEvents(env.DB, now)).toBe(1)
+    const remaining = await listEvents(env.DB)
+    expect(remaining.rows).toHaveLength(1)
+    expect(remaining.rows[0]?.at).toBe(now - 89 * DAY)
   })
 })

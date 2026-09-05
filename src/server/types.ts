@@ -721,6 +721,27 @@ export interface Folio<Env> {
    * scheduled costs one indexed read over an empty partial index.
    */
   runSchedules: (env: Env, opts?: ScheduleRunOptions) => Promise<ScheduleRunReport>
+  /**
+   * Housekeeping for the auth tables nothing else prunes
+   * (`../../docs/specs/foundation/auth-providers.md` decision 8): sessions past
+   * expiry, sign-in challenges past their fifteen minutes or already consumed,
+   * and `auth_events` rows older than its 90-day retention window.
+   *
+   * **A host obligation with no signal when it is forgotten.** Nothing breaks
+   * when a deployment never wires this into a cron — an expired session already
+   * fails `sessionExpiry` on read — so the failure mode is unbounded growth, not
+   * an outage, and nothing anywhere else says so. `GET {base}/api/auth-events`'s
+   * `oldestAt` is the one surface that shows it: an admin looking there can see
+   * an oldest row far past 90 days and know the cron was never wired up.
+   *
+   * Not folded into `runSchedules`: that sweep is Folio's own publish/unpublish
+   * workflow over a different table with a different retention rule. The
+   * demo's `scheduled()` calls both, one after the other.
+   */
+  sweepAuth: (
+    env: Env,
+    opts?: { now?: number },
+  ) => Promise<{ sessions: number; challenges: number; events: number }>
   registry: Registry
   /**
    * Context the document deliberately does not contain: story ids to their
