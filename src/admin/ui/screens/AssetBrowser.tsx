@@ -98,15 +98,13 @@ export interface AssetBrowserProps {
    * `?kind=`; see `kindForAccept`. */
   accept?: string
   /**
-   * The dialog mount: tighter tiles, one column fewer, no *New folder* dialog (a
-   * second `useFocusTrap` inside the picker's own is the bug that guard exists for)
-   * — and the **fixed-height layout**, where the sidebar, the controls and the pager
-   * hold still and only `.results` scrolls.
+   * The dialog mount: tighter tiles, one column fewer, and no *New folder* dialog —
+   * a second `useFocusTrap` inside the picker's own is the bug that guard exists for.
    *
-   * The screen keeps the opposite arrangement on purpose: it scrolls as a page and
-   * pins its detail panel instead. The mount owns its bounds, which is the same rule
-   * that gives the two mounts different drop targets — the dialog's body here, the
-   * whole screen there.
+   * **Not the scrolling.** Both mounts frame the browser and scroll `.results`
+   * inside it; they differ only in where the height comes from, which is the mount's
+   * business and is settled in CSS (`Dialog`'s `.fill` body, or `.screen`'s own
+   * height above 1100px). See the chain's note in `Assets.module.css`.
    */
   compact?: boolean
   /**
@@ -463,7 +461,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
   )
 
   return (
-    <div className={`${css.browser} ${compact ? css.browserFill : ''}`}>
+    <div className={css.browser}>
       {/*
         The real file input, always present. Dropping is the fast path and it is a
         pointer gesture, so it can never be the only one — `ui-architecture.md`'s
@@ -779,13 +777,12 @@ export function AssetBrowser(props: AssetBrowserProps) {
           ) : null}
 
           {/*
-            The results region, and the only part of the browser that scrolls in the
-            dialog mount. On the screen it is an ordinary block and the page scrolls
-            past it; under `.browserFill` it is the flex chain's terminus, which is
-            what keeps the search box and the pager on screen while two hundred tiles
-            go by. It wraps all four states rather than the grid alone — a skeleton
-            and an empty state that sat outside the scroller would size the dialog
-            differently from the thing that replaces them.
+            The results region: the flex chain's terminus, and the only part of the
+            browser that scrolls in either mount. It is what keeps the search box, the
+            folder list and the pager on screen while two hundred tiles go by. It
+            wraps all four result states rather than the grid alone — a skeleton or an
+            empty state sitting outside the scroller would size the frame differently
+            from the thing that replaces it.
           */}
           <div className={css.results}>
             {firstLoad ? (

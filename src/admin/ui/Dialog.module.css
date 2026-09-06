@@ -86,8 +86,8 @@
  *
  * So `fill` says: I will scroll my own regions. The body stops being a scrollport
  * and becomes a flex column that hands its height down — `Assets.module.css`'s
- * `.browserFill` chain is the one consumer, and it ends at a `.results` that
- * scrolls while the sidebar, the controls and the pager stay put.
+ * `Assets.module.css`'s chain is the one consumer, and it ends at a `.results`
+ * that scrolls while the sidebar, the controls and the pager stay put.
  *
  * `overflow: hidden` and not `auto`: with the chain in place nothing here should
  * ever overflow, and `auto` would answer a broken chain with a second scrollbar

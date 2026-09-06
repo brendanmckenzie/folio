@@ -17,7 +17,8 @@ import { describe, expect, it } from 'vitest'
  *  3. **The Assets detail panel.** `position: sticky` on a box 1071px tall against an
  *     822px scrollport pins the head and hangs the rest below the fold, and a sticky
  *     element does not unstick until its containing block runs out: the bottom of the
- *     panel was unreachable until the whole library had been scrolled past.
+ *     panel was unreachable until the whole library had been scrolled past. Capping
+ *     it was tried first and was itself wrong — see the frame's tests below.
  *
  * Source-text assertions because the admin's suite mounts nothing (`vitest.config.ts`)
  * — there is no layout here to measure, and each fix was checked in a browser once.
@@ -62,7 +63,7 @@ describe('the dialog fits the viewport', () => {
   })
 })
 
-describe("the picker's furniture holds still", () => {
+describe('the browser is a frame in both mounts', () => {
   it('frames the body instead of scrolling it, when a dialog asks to fill', () => {
     const fill = rule(dialogCss, '.fill')
     expect(fill).toContain('flex-direction: column')
@@ -80,47 +81,62 @@ describe("the picker's furniture holds still", () => {
   })
 
   /**
-   * The chain, link by link. `Dialog`'s `.fill` hands its height to `.dropZone`, which
-   * hands it to `.browserFill`, `.layout`, `.main` and finally `.results` — and
-   * `min-height: 0` at each link is what lets the shrink through, because a flex
-   * item's automatic minimum size is its content. One omission anywhere and the grid
-   * is back at its natural height inside a body that clips.
+   * The chain, link by link. A height enters at `.dropZone` (the dialog) or at
+   * `.body` (the wide screen) and is handed down through `.browser`, `.layout`,
+   * `.main` and finally `.results` — and `min-height: 0` at each link is what lets
+   * the shrink through, because a flex item's automatic minimum size is its content.
+   * One omission anywhere and the grid is back at its natural height inside a frame
+   * that clips.
    */
   it('carries min-height: 0 down every link, or the shrink stops there', () => {
-    for (const selector of [
-      '.dropZone',
-      '.browserFill',
-      '.browserFill .layout',
-      '.browserFill .main',
-      '.browserFill .results',
-    ]) {
+    for (const selector of ['.dropZone', '.browser', '.layout', '.main', '.results']) {
       expect(rule(assetsCss, selector), `${selector} breaks the chain`).toContain('min-height: 0')
     }
   })
 
   it('ends at the results region, which is the only part that scrolls', () => {
-    expect(rule(assetsCss, '.browserFill .results')).toContain('overflow-y: auto')
+    expect(rule(assetsCss, '.results')).toContain('overflow-y: auto')
     // The sidebar is its own scroller beside it, not part of the same one.
-    expect(rule(assetsCss, '.browserFill .sidebar')).toContain('overflow-y: auto')
+    expect(rule(assetsCss, '.sidebar')).toContain('overflow-y: auto')
+  })
+
+  it('stretches the sidebar to the full height it has to scroll in', () => {
+    expect(rule(assetsCss, '.layout')).toContain('align-items: stretch')
   })
 
   it('pins the controls and the pager against the default shrink', () => {
-    expect(assetsCss).toContain('.browserFill .controls,\n.browserFill .footer {\n  flex: none;')
+    expect(assetsCss).toContain('.controls,\n.footer {\n  flex: none;')
   })
 })
 
-describe('the Assets detail panel', () => {
-  it('is capped to the scrollport and scrolls itself', () => {
-    // A sticky box taller than the scrollport is worse than a static one.
-    expect(assetsCss).toContain('max-height: calc(100dvh - 40px - var(--space-4) * 2)')
-    expect(assetsCss).toContain('overflow-y: auto')
+describe('the wide Assets screen is a frame, not a page', () => {
+  /**
+   * The predecessor of this was a `max-height: calc(100dvh - ...)` on a sticky panel,
+   * and it was the wrong shape twice over: the arithmetic had to know both the top
+   * bar's height and the heading's, and a sticky box's cap and its offset are
+   * measured from different origins, so it was only ever right at one scroll
+   * position. At the top of the page the panel still ran 24px off the bottom.
+   */
+  it('hands the shell nothing to scroll, so neither column can leave the window', () => {
+    expect(assetsCss).toContain('@media (min-width: 1101px)')
+    const frame = assetsCss.slice(assetsCss.indexOf('@media (min-width: 1101px)'))
+    expect(frame).toContain('height: 100%')
+    expect(frame).toContain('overflow: hidden')
+    expect(frame).toContain('align-items: stretch')
   })
 
-  it('leaves the stacked layout alone, where the panel is below the grid', () => {
-    // Scoped to the wide layout, the complement of `.body[data-open]`'s own
-    // breakpoint. Capping a stacked panel would put a nested scroller in a page that
-    // already scrolls.
-    expect(assetsCss).toContain('@media (min-width: 1101px)')
+  it('leaves the stacked layout as a page, where the panel is below the grid', () => {
+    // A stacked panel inside `overflow: hidden` is unreachable, which is worse than
+    // the bug being fixed. The breakpoint is the complement of `.body[data-open]`'s.
     expect(assetsCss).toContain('@media (max-width: 1100px)')
+  })
+
+  it('is a scroller itself, rather than a sticky box that outgrows the scrollport', () => {
+    const panel = rule(assetsCss, '.panel')
+    expect(panel).toContain('overflow-y: auto')
+    expect(panel).toContain('min-height: 0')
+    // The whole class of bug goes with it.
+    expect(panel).not.toContain('position: sticky')
+    expect(assetsCss).not.toContain('max-height: calc(100dvh')
   })
 })
