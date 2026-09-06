@@ -501,6 +501,32 @@ describe('query', () => {
     expect(typeof items[0]!.data.title).toBe('string')
   })
 
+  /**
+   * **The projection and the parse must agree, or the saving is a bug.**
+   *
+   * Without `withDoc` the root block is extracted by SQLite
+   * (`json_extract(published_doc, '$.bloks."' || … || '"')`) instead of being
+   * read out of a parsed document in JS. Those are two different pieces of code
+   * answering the same question, so this asks both and compares — which is the
+   * only assertion that would catch a JSON-path spelling that quietly returns
+   * null for some uid shape and leaves every card blank.
+   */
+  it('projects the same data SQLite-side as parsing the document gives', async () => {
+    const q = { type: 'colInsight', perPage: 10, order: 'title' } as const
+    const [projected, parsed] = await Promise.all([
+      folio.query(env, q),
+      folio.query(env, { ...q, withDoc: true }),
+    ])
+
+    expect(projected.items.length).toBe(parsed.items.length)
+    expect(projected.items.length).toBeGreaterThan(1)
+    expect(projected.items.map((i) => i.id)).toEqual(parsed.items.map((i) => i.id))
+    for (const [i, item] of projected.items.entries()) {
+      expect(item.data).toEqual(parsed.items[i]!.data)
+      expect(item.title).toBe(parsed.items[i]!.title)
+    }
+  })
+
   it('carries the document when withDoc is set', async () => {
     const { items } = await folio.query(env, {
       type: 'colInsight',

@@ -264,6 +264,13 @@ change shape for the same reason, both additively reversible with `doc=1`:
 `queryKey` is unchanged for a field that does not declare `withDoc`, so
 `Resolution.collections` keys are byte for byte what they were.
 
+**The read shrank too, not just the response.** A query without `withDoc` no
+longer selects `published_doc` at all: SQLite projects the root block out of it
+(`json_extract(published_doc, '$.bloks."' || … || '"')`) and ships that instead.
+On one production database that is 27 kB against 542 kB across 32 published
+pages. Nothing to do on your side — `item.data` is identical either way, and a
+test asserts exactly that by running the same query both ways and comparing.
+
 ### Durable Object migration tags
 
 If you are upgrading from a pin old enough to predate `SpaceDO`, you need both

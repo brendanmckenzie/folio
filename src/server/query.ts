@@ -19,7 +19,7 @@
  * and offset is what lets a page render "page 4 of 9" — which keyset cannot without
  * a count anyway. Revisit past ~10k rows in one collection.
  */
-import type { Doc } from '../core/doc'
+import type { Blok, Doc } from '../core/doc'
 import type { LocaleContext } from '../core/locales'
 import {
   BUILT_IN_ORDERS,
@@ -171,11 +171,17 @@ function gatePredicate(gate: SearchGate, locale: string): Sql {
 /**
  * The two statements a query runs: a `count(*)` for `total`, and the page itself.
  *
- * The page selects `published_doc` alongside the story columns rather than taking a
- * third round trip through `publishedDocsByIds`: the bytes are identical either
- * way, and the id list it would bind is the id list this statement just produced.
- * The spec costed the read at three statements; two is the same work with one fewer
- * hop.
+ * The page reads the document alongside the story columns rather than taking a
+ * third round trip through `publishedDocsByIds`: the id list it would bind is the
+ * id list this statement just produced. The spec costed the read at three
+ * statements; two is the same work with one fewer hop.
+ *
+ * **"The bytes are identical either way" is no longer true, and that is the
+ * point.** It said so until 2026-09-06, when the whole `published_doc` was the
+ * only shape a row came back in. A list needs the root block, not the document,
+ * so `projection` below has SQLite pull just that out unless the query asked for
+ * the rest — twenty times less to ship, on the uncached render of every page
+ * carrying a list.
  */
 export function contentSql(
   q: ContentQuery,
@@ -290,12 +296,39 @@ export function contentSql(
 
   const limit = [n.perPage, (n.page - 1) * n.perPage]
 
+  /**
+   * **What a row has to carry back, and why it is usually not the document.**
+   *
+   * An item needs `data` — the root block's fields, which is what a card
+   * renders from — and `data` lives inside `published_doc`. Selecting the whole
+   * blob to read one object out of it means D1 ships every paragraph of every
+   * listed page on every cache miss: measured on All About Africa's production
+   * database, 542 kB of documents against 27 kB of root blocks across 32
+   * published pages, and an eleven-item guides rail is a fifth of that on every
+   * uncached render of every page that shows the rail.
+   *
+   * So SQLite does the projection. The path is built from the document's own
+   * `root` and the key is quoted, because a uid is `[A-Za-z0-9_-]{1,64}`
+   * (`core/nested.ts`'s `UID_RE`) and an unquoted `-` in a JSON path is not
+   * something to rely on. Verified against every published row in both of that
+   * host's databases: zero extractions returned null.
+   *
+   * `has_doc` rides along rather than being inferred from the projection: an
+   * unpublished row must be skipped (it always was), and a projection that
+   * somehow answered null must *not* silently drop a published page from a
+   * list. The two cases are indistinguishable without it.
+   */
+  const projection = n.withDoc
+    ? 'published_doc'
+    : `(published_doc is not null) as has_doc,
+       json_extract(published_doc, '$.bloks."' || json_extract(published_doc, '$.root') || '"') as root_blok`
+
   if (!searching) {
     return {
       count: { text: `select count(*) as n from stories where ${where}`, binds },
       page: {
         // Order binds come first: they are in the JOIN, which precedes the WHERE.
-        text: `select ${STORY_COLS}, published_doc from stories ${join} where ${where}
+        text: `select ${STORY_COLS}, ${projection} from stories ${join} where ${where}
              order by ${orderBy} limit ? offset ?`,
         binds: [...orderBinds, ...binds, ...limit],
       },
@@ -314,7 +347,7 @@ export function contentSql(
                      where content_fts match ? and ct.locale = ?) fts
                  on fts.story_id = stories.id`
 
-  const inner = `select ${STORY_COLS}, published_doc, fts.score, fts.rowid as fts_rowid
+  const inner = `select ${STORY_COLS}, ${projection}, fts.score, fts.rowid as fts_rowid
              from stories
              ${matchJoin('ct.story_id, ct.id as rowid, -bm25(content_fts, 10.0, 1.0) as score')}
              ${join} where ${where}
@@ -406,17 +439,32 @@ export async function runQuery(
     deps.db
       .prepare(page.text)
       .bind(...page.binds)
-      .all<StoryRow & SearchRow & { published_doc: string | null }>(),
+      .all<
+        StoryRow &
+          SearchRow & {
+            published_doc?: string | null
+            has_doc?: number | null
+            root_blok?: string | null
+          }
+      >(),
   ])
 
   const total = totalRow?.n ?? 0
   const items: ContentItem[] = []
   for (const raw of rows.results) {
-    const { published_doc, score, snippet, fts_rowid, ...row } = raw
-    if (!published_doc) continue
-    const doc = JSON.parse(published_doc) as Doc
+    const { published_doc, has_doc, root_blok, score, snippet, fts_rowid, ...row } = raw
+    // `contentSql` selects one shape or the other, never both: the whole
+    // document when the query asked for it, otherwise `has_doc` plus the root
+    // block SQLite projected out of it. The published-or-not test is the same
+    // test in both cases and has to come first either way.
+    if (!(normalised.withDoc ? published_doc : has_doc)) continue
+    const doc = published_doc ? (JSON.parse(published_doc) as Doc) : undefined
     const story = deps.withUrls(toStoryMeta(row))
-    const root = doc.bloks[doc.root]
+    const root: Blok | undefined = doc
+      ? doc.bloks[doc.root]
+      : root_blok
+        ? (JSON.parse(root_blok) as Blok)
+        : undefined
     items.push({
       id: story.id,
       title: story.title,
@@ -431,7 +479,7 @@ export async function runQuery(
       // bytes from the *response*, which is where they hurt: a card rail is one
       // D1 read either way, and a quarter of a megabyte of unread prose in the
       // SSR payload otherwise.
-      ...(normalised.withDoc ? { doc } : {}),
+      ...(normalised.withDoc && doc ? { doc } : {}),
       // Only when the query asked, so a plain collection's items are byte for
       // byte what they were before search existed.
       ...(normalised.search === undefined
