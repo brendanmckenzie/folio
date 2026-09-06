@@ -190,9 +190,10 @@ export const contactForm = defineBlock({
   summary: 'heading',
   fields: {
     heading: text({ label: 'Heading', translatable: true }),
-    // The form's id (`frm_…`), copied from the Forms screen. There is no picker
-    // control for a `form` field yet, so the inspector draws a text box.
-    form: form({ label: 'Form', help: 'The form id from the Forms screen, e.g. frm_0a1b2c3d4e5f' }),
+    // The stored value is the form's id; the inspector draws a picker over the
+    // Forms screen's own rows for it, so nothing here has to explain where to
+    // find one.
+    form: form({ label: 'Form' }),
   },
   render: ({ heading, form: descriptor }) => {
     // Deleted since the page was published: the same posture a `reference` to a

@@ -1613,9 +1613,36 @@ their models and hooks; and the demo, `scripts/forms-test.mjs` and this prose.
 
 Two things the plan named and this build did **not** ship, both recorded where
 they belong: **no picker control for the `form` field kind** — the inspector's
-`CONTROLS` map falls back to a text box, so embedding a form means pasting its
+`CONTROLS` map fell back to a text box, so embedding a form meant pasting its
 `frm_…` id from the Forms screen — and **no seeded form in the demo's database**
 (below).
+
+**The picker landed the next day, 2026-09-06**, and building it found the bug it
+had been hiding: the editor's preview could not resolve a form at all.
+`useEditor` assembles a `Resolution` of its own and `usePreviewBridge` posts it
+into the iframe, overwriting the server-rendered one — so `forms`, a key the
+admin never assembled, was gone from the first frame onwards and every form
+rendered as `null` in the one pane an editor looks at while building the page.
+Published pages and `?_folio=preview` were correct throughout, which is why it
+survived the phase that shipped it. Three parts, all additive:
+
+- `GET {base}/api/forms/resolved?ids=…&locale=…&page=…` (`routes/forms.ts`),
+  `READ`, answering `Resolution['forms']` — `formsByIds` plus the same
+  `compileForm` a page render uses, because a browser bundle has no business
+  deriving `open` from the clock or clamping `maxBytes` against R2's ceiling.
+  A workers test asserts the route's answer `toEqual` what `resolve()` puts on
+  the page for the same form, which is the only assertion that keeps one
+  compiler from becoming two.
+- `admin/hooks/useResolvedForms.ts`, keyed on the *set* of form ids plus the
+  locale and the page URL — `useCollections`' rule, so nothing fetches per
+  keystroke — and `useEditor` puts both `forms` **and `locale`** on its
+  resolution. `locale` was missing for the same reason and with the same shape
+  of consequence: a translated preview fell back to source strings on the first
+  frame.
+- `admin/ui/screens/fields/FormField.tsx`, `ReferenceField`'s shape over a
+  fetched list rather than a searched route (`GET {base}/api/forms` takes no
+  `q`), showing the label, the slug, the question count and whether the form is
+  open — and naming a deleted one rather than rendering a blank box.
 
 ### Where the spec was wrong, and where a real deployment bites
 

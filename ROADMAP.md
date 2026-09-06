@@ -444,9 +444,13 @@ weaker than the document editor's story and is the direct cost.
 
 Deferred or uncovered, each named rather than glossed:
 
-- **No picker control for the `form` field kind.** The inspector falls back to a
-  text box, so embedding a form means pasting its `frm_…` id from the Forms
-  screen. One control, and the phase that built the admin was not scoped for it.
+- ~~**No picker control for the `form` field kind.**~~ **Done 2026-09-06**, with
+  the preview bug it was hiding: the inspector draws a picker over the Forms
+  screen's rows (`admin/ui/screens/fields/FormField.tsx`), and the editor's
+  preview resolves a form at all — `useEditor`'s `Resolution` carried no `forms`
+  key, so the first bridge frame overwrote the server-rendered one and every form
+  rendered as `null` in the pane it was being edited in. `GET
+  {base}/api/forms/resolved` is what the admin fetches descriptors from.
 - **A form embedded in a *global* or in a referenced document resolves to
   `null`.** Form ids come off the rendered document's own walk, and a global's are
   not known until the pass that loads it. The fix is cheap (a third-pass read for

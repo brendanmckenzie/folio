@@ -100,6 +100,18 @@ describe('controlFor', () => {
     expect(controlFor('references')).toBe('references')
   })
 
+  /**
+   * `form` was `'text'` for one day, which is what a kind with no control of its
+   * own falls back to: spec 33 shipped the field kind and left `Control.tsx`'s
+   * `default` branch drawing a box that wanted a `frm_…` id pasted into it. The
+   * assertion is that it names its own control now, because the fallback is
+   * indistinguishable from a working field until an editor is asked to copy an
+   * id out of another screen.
+   */
+  it('sends a form field to its own picker, not to the text fallback', () => {
+    expect(controlFor('form')).toBe('form')
+  })
+
   /** A checkbox is 16px and leaves the rest of the row empty; every other control
    * fills the column, so anything beside it would be squeezed. One kind, and the
    * assertion is that it stays one kind. */

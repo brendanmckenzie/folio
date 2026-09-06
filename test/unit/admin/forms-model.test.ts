@@ -6,6 +6,7 @@ import {
   formDraftRefusal,
   formStatus,
   type FormRow,
+  matchesForm,
   questionsLabel,
   responsesLabel,
   statusHint,
@@ -98,6 +99,33 @@ describe('statusHint', () => {
 
   it('says plainly that it is accepting submissions with no closing date at all', () => {
     expect(statusHint(row({ open: true, closesAt: null }))).toBe('Accepting submissions.')
+  })
+})
+
+/**
+ * The form picker's filter box (`fields/FormField.tsx`). Client-side because
+ * `GET {base}/api/forms` takes no `q` at all — there is nothing to send a query
+ * to, which is the one case in this admin where filtering in the browser is the
+ * honest answer rather than the lazy one.
+ */
+describe('matchesForm', () => {
+  it('matches the label and the slug, because an editor may know either', () => {
+    const contact = row({ label: 'Contact us', name: 'contact-us' })
+    expect(matchesForm(contact, 'contact')).toBe(true)
+    expect(matchesForm(contact, 'us')).toBe(true)
+    expect(matchesForm(contact, 'contact-us')).toBe(true)
+    expect(matchesForm(contact, 'careers')).toBe(false)
+  })
+
+  it('ignores case and surrounding space, which is what a typed filter carries', () => {
+    const row_ = row({ label: 'Newsletter', name: 'newsletter' })
+    expect(matchesForm(row_, 'NEWS')).toBe(true)
+    expect(matchesForm(row_, '  news  ')).toBe(true)
+  })
+
+  it('offers everything for an empty filter, including one that is all space', () => {
+    expect(matchesForm(row(), '')).toBe(true)
+    expect(matchesForm(row(), '   ')).toBe(true)
   })
 })
 

@@ -1649,8 +1649,8 @@ job; only the host knows what it did with the rest of the URL.
 ## Forms
 
 A page can ask a question and Folio has somewhere to put the answer. An editor
-builds a form in the admin, drops it on a page by id, and the host renders it from
-a typed descriptor; a visitor submits it with an ordinary browser and no
+builds a form in the admin, picks it into a block on a page, and the host renders
+it from a typed descriptor; a visitor submits it with an ordinary browser and no
 JavaScript at all. Responses land in a table with a streamed CSV export, and one
 hook forwards each of them wherever the host already sends things.
 
@@ -1692,12 +1692,21 @@ export const contactForm = defineBlock({
 })
 ```
 
-The stored value is the form's **id**. `resolve()` reads the form, compiles the
-descriptor in the render's locale and puts it on the resolution, so a block
-receives a `ResolvedForm` rather than an id — or `null` if the form has since been
-deleted, in which case the page renders nothing where it was, the same posture a
-`reference` to a deleted document takes. The read joins the same `Promise.all` as
-everything else a page needs, so embedding a form costs no extra round trip.
+The stored value is the form's **id**, and the inspector draws a picker over the
+Forms screen's own rows for it — a label, its slug, how many questions it asks and
+whether it is open — so nobody copies a `frm_…` between screens. `resolve()` reads
+the form, compiles the descriptor in the render's locale and puts it on the
+resolution, so a block receives a `ResolvedForm` rather than an id — or `null` if
+the form has since been deleted, in which case the page renders nothing where it
+was, the same posture a `reference` to a deleted document takes. The read joins the
+same `Promise.all` as everything else a page needs, so embedding a form costs no
+extra round trip.
+
+The editor's preview resolves a form exactly as a published page does. It gets
+there differently: the admin assembles its own `Resolution` for the frames it
+pushes into the iframe, and fetches the descriptors it needs from `GET
+{base}/api/forms/resolved?ids=…` — one request, and only when the *set* of forms
+a document embeds changes.
 
 Every string on the descriptor is already resolved through the locale chain, so a
 host writes no locale code: `label`, `help`, `placeholder` and option labels come

@@ -54,6 +54,26 @@ export function statusHint(
   return 'Accepting submissions.'
 }
 
+/**
+ * Whether a row survives the form picker's filter box
+ * (`fields/FormField.tsx`).
+ *
+ * Client-side, and it is the one place in the admin where that is the right
+ * answer rather than a shortcut: `GET {base}/api/forms` takes no `q` at all, so
+ * there is nothing to send a query to — this file's header says why, and the
+ * picker holds the whole page it is filtering.
+ *
+ * Both identifiers, because both are on the row and an editor may know either:
+ * the label is what they named it and the slug is what a host's own code says.
+ * Case-insensitive and a plain substring — a form list is tens of rows, not a
+ * corpus, so ranking it would be inventing precision nobody asked for.
+ */
+export function matchesForm(row: Pick<FormRow, 'label' | 'name'>, q: string): boolean {
+  const needle = q.trim().toLowerCase()
+  if (needle === '') return true
+  return row.label.toLowerCase().includes(needle) || row.name.toLowerCase().includes(needle)
+}
+
 export function questionsLabel(row: Pick<FormRow, 'questions'>): string {
   return `${row.questions} ${row.questions === 1 ? 'question' : 'questions'}`
 }

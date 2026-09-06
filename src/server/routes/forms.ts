@@ -51,11 +51,13 @@ import {
   validateSubmission,
 } from '../form-responses'
 import {
+  compileForm,
   createForm,
   deleteForm,
   type Form,
   formById,
   formMeta,
+  formsByIds,
   deleteUploads,
   formUsage,
   hasFileQuestion,
@@ -73,7 +75,9 @@ import {
   fieldNameParam,
   FormCreateBody,
   FormPatchBody,
+  formIdListQuery,
   formIdParam,
+  formPageQuery,
   limitParam,
   parseBody,
   requireCursor,
@@ -134,6 +138,48 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const body = await parseBody(c.req, FormCreateBody)
     const form = await createForm(c.var.bindings().db, body)
     return c.json(form, 201)
+  })
+
+  /**
+   * The **compiled descriptors** for a set of form ids: `Resolution['forms']`,
+   * exactly as `resolve()` builds it, for a client that renders a document
+   * without going through a page render.
+   *
+   * That client is the editor's preview, and it is the reason this exists.
+   * `useEditor` assembles a `Resolution` of its own and posts it over the
+   * bridge on every keystroke; before this route there was no `forms` key in
+   * it, so the first frame overwrote the server-rendered resolution and every
+   * form in the preview pane resolved to `null` — a working page that could not
+   * be seen while it was edited. The admin cannot compile a descriptor itself:
+   * `compileForm` clamps `maxBytes` against the media library's own ceiling and
+   * derives `open` from the clock, neither of which belongs in a browser bundle.
+   *
+   * `READ`, matching `GET {base}/api/forms` — a descriptor is what a published
+   * page already carries in its markup, so this is the *least* privileged thing
+   * about a form.
+   *
+   * Registered before `/forms/:id` because it reads as a sibling of it, not
+   * because it has to be: Hono prefers a static segment over a parameter, which
+   * is what already keeps `/assets/describe` out of `/assets/:id`.
+   *
+   * Absent ids are absent from the answer rather than an error — deleting a form
+   * a page still embeds is allowed (the delete dialog warns and then cascades),
+   * and the render's answer for one is `null`, so the map simply does not carry
+   * it. Missing and never-existed are the same fact to a caller here.
+   */
+  app.get('/forms/resolved', requireAccess<Env>(rt, READ), async (c) => {
+    const ids = formIdListQuery(c.req.query('ids'))
+    if (ids.length === 0) return c.json({})
+
+    const forms = await formsByIds(c.var.bindings().db, ids)
+    const locale = rt.localeOf(c.req.query('locale'))
+    const page = c.req.query('page')
+    const ctx = {
+      base: rt.base,
+      ...(locale ? { locale } : {}),
+      ...(page ? { page: formPageQuery(page) } : {}),
+    }
+    return c.json(Object.fromEntries(forms.map((form) => [form.id, compileForm(form, ctx)])))
   })
 
   app.get('/forms/:id', requireAccess<Env>(rt, READ), async (c) => {

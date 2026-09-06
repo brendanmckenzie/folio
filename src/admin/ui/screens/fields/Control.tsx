@@ -12,6 +12,7 @@ import { Input, Select, Textarea } from '../../Field'
 import { AssetField, MultiAssetField } from './AssetField'
 import { CollectionField } from './CollectionField'
 import css from './fields.module.css'
+import { FormField } from './FormField'
 import { LinkField } from './LinkField'
 import { ReferenceField, ReferencesField } from './ReferenceField'
 import { type FieldChrome, RichTextField } from './RichTextField'
@@ -229,6 +230,18 @@ export function Control(props: ControlProps) {
           {...(field.accept ? { accept: field.accept } : {})}
           apiBase={env.apiBase}
           mount={env.mount}
+          editable={editable}
+          onChange={onChange}
+        />
+      )
+
+    case 'form':
+      return (
+        <FormField
+          id={id}
+          label={field.label ?? props.name}
+          value={value}
+          apiBase={env.apiBase}
           editable={editable}
           onChange={onChange}
         />

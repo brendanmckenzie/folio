@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { defineBlock, outboundRefs, text, toRegistry, toSchemaIndex } from '../../src/core'
 import type { Doc } from '../../src/core/doc'
 import type { Page } from '../../src/core/pagination'
+import type { ResolvedForm } from '../../src/core/forms'
 import { createFolio } from '../../src/server'
 import {
   countResponsesByForm,
@@ -536,8 +537,9 @@ const formPage = defineBlock({
   summary: 'title',
   fields: {
     title: text({ label: 'Title', required: true }),
-    // No `form()` builder exists yet — phase 1 added the union member and the
-    // resolution, and a block author writes the literal until one does.
+    // The literal rather than `form({ label: 'Enquiry' })`: the builder exists
+    // now, and writing the union member by hand keeps this file's fixture
+    // independent of it.
     enquiry: { kind: 'form' as const, label: 'Enquiry' },
   },
   render: () => null,
@@ -655,5 +657,124 @@ describe('resolve(): the descriptor a page renders from', () => {
     )
     expect(json.total).toBe(1)
     expect(json.published[0]?.path).toBe('fx-e')
+  })
+})
+
+/* -------------------------------------------------- the descriptor route --- */
+
+/**
+ * `GET {base}/api/forms/resolved` — the same descriptors, for a client that has
+ * a document but no page render: the editor's preview.
+ *
+ * It exists because `useEditor` assembles a `Resolution` of its own and posts it
+ * to the preview iframe over the bridge, overwriting the server-rendered one. A
+ * key the admin cannot assemble is a key the preview loses, so `forms` was
+ * `undefined` there and every form in the editor pane rendered as `null` while
+ * the published page rendered correctly — which is the shape of bug that gets
+ * reported as "the preview is broken" months later.
+ *
+ * What is asserted here is that the two paths agree: what this route answers for
+ * an id is what `resolve()` puts on a page for the same id.
+ */
+describe('GET /forms/resolved', () => {
+  it('answers a map of compiled descriptors, keyed by id', async () => {
+    const form = await makeForm('Preview me')
+    await patch<Form>(`/forms/${form.id}`, {
+      expectedUpdatedAt: form.updatedAt,
+      fields: [NAME_FIELD, EMAIL_FIELD],
+      submitLabel: 'Send it',
+    })
+
+    const { status, json } = await get<Record<string, ResolvedForm>>(
+      `/forms/resolved?ids=${form.id}`,
+    )
+    expect(status).toBe(200)
+
+    // The static segment reaches its own handler rather than `/forms/:id`,
+    // which would answer 400 for an id that is not `frm_<12 hex>`.
+    const descriptor = json[form.id]
+    expect(descriptor?.action).toBe(`/folio/f/${form.id}`)
+    expect(descriptor?.name).toBe('preview-me')
+    expect(descriptor?.open).toBe(true)
+    expect(descriptor?.version).toBe(2)
+    expect(descriptor?.submitLabel).toBe('Send it')
+    expect(descriptor?.fields.map((f) => f.name)).toEqual(['full_name', 'email'])
+    // A projection, not the row: the authoring `i18n` maps, `updatedAt` and
+    // `closesAt` are not a visitor's and are not the preview's either.
+    expect(Object.keys(descriptor ?? {}).sort()).toEqual(
+      [
+        'action',
+        'closedMessage',
+        'enctype',
+        'fields',
+        'hidden',
+        'honeypot',
+        'id',
+        'method',
+        'name',
+        'open',
+        'redirectTo',
+        'submitLabel',
+        'successMessage',
+        'version',
+      ].sort(),
+    )
+  })
+
+  it('carries `_folio_page` when the caller knows the page, and nothing when it does not', async () => {
+    const form = await makeForm('Hidden inputs')
+
+    const bare = await get<Record<string, ResolvedForm>>(`/forms/resolved?ids=${form.id}`)
+    expect(bare.json[form.id]?.hidden).toEqual([])
+
+    // The admin sends the story's own URL, so the preview's markup matches the
+    // published page's down to the hidden inputs.
+    const onPage = await get<Record<string, ResolvedForm>>(
+      `/forms/resolved?ids=${form.id}&page=${encodeURIComponent('/contact')}`,
+    )
+    expect(onPage.json[form.id]?.hidden).toEqual([{ name: '_folio_page', value: '/contact' }])
+  })
+
+  it('leaves out an id nothing answers to, and asks nothing for an empty list', async () => {
+    const form = await makeForm('Alive')
+    const dead = 'frm_000000000000'
+
+    const { json } = await get<Record<string, ResolvedForm>>(
+      `/forms/resolved?ids=${form.id},${dead}`,
+    )
+    // Absent rather than an error: a page may embed a form somebody has since
+    // deleted, and `resolveValue` answers `null` for it — the same posture a
+    // `reference` to a deleted document takes.
+    expect(Object.keys(json)).toEqual([form.id])
+
+    expect((await get<Record<string, ResolvedForm>>('/forms/resolved?ids=')).json).toEqual({})
+    expect((await get<Record<string, ResolvedForm>>('/forms/resolved')).json).toEqual({})
+  })
+
+  it('refuses an id that is not a form id, rather than binding it', async () => {
+    const { status, json } = await get<ErrorBody>('/forms/resolved?ids=sty_0123456789ab')
+    expect(status).toBe(400)
+    expect(json.error.code).toBe('bad_request')
+    // Named by position, so a client sending five ids is told which one.
+    expect(json.error.message).toContain('ids[0]')
+  })
+
+  it('answers what `resolve()` would put on the page for the same form', async () => {
+    const form = await makeForm('Both paths')
+    await patch<Form>(`/forms/${form.id}`, {
+      expectedUpdatedAt: form.updatedAt,
+      fields: [EMAIL_FIELD],
+    })
+    await insertFormPage('sty_fx_g', 'fx-g', form.id)
+
+    const page = await folioWithForm().reader(env).page('fx-g')
+    const rendered = page?.resolution.forms?.[form.id]
+    const { json } = await get<Record<string, ResolvedForm>>(
+      `/forms/resolved?ids=${form.id}&page=${encodeURIComponent('/fx-g')}`,
+    )
+
+    // The whole point of the route: one compiler, two callers. A second
+    // implementation in the admin is what this refuses to be.
+    expect(json[form.id]).toEqual(rendered)
   })
 })

@@ -19,6 +19,7 @@ import { usePreviewBridge } from '../../hooks/usePreviewBridge'
 import { usePublish } from '../../hooks/usePublish'
 import { usePublishedDoc } from '../../hooks/usePublishedDoc'
 import { useReferencedDocs } from '../../hooks/useReferencedDocs'
+import { useResolvedForms } from '../../hooks/useResolvedForms'
 import { useUndoShortcut } from '../../hooks/useUndoShortcut'
 import { useVersions, useVersionsList } from '../../hooks/useVersions'
 import { canEdit, type Me } from '../../me'
@@ -205,6 +206,22 @@ export function useEditor(opts: EditorOptions): EditorApi {
   // iframe renders every global server-side, fresh, on its own.
   const globalDocs = useGlobalDocs(apiBase, types, globals)
   const collections = useCollections(apiBase, state.doc, schema, localeCtx)
+  // The page's own URL, for the `_folio_page` hidden input a form descriptor
+  // carries — the same value the server render passes, picked the way
+  // `previewFrame` picks the iframe's src, so the preview's markup and the
+  // published page's agree down to the hidden inputs.
+  const formPage = story
+    ? isSourceLocale
+      ? story.url
+      : (story.urls?.[locale] ?? story.url)
+    : undefined
+  const forms = useResolvedForms(
+    apiBase,
+    state.doc,
+    schema,
+    isSourceLocale ? undefined : locale,
+    formPage,
+  )
   const resolution = useMemo<Resolution>(
     () => ({
       // The open story is always in the map, whether or not anything links to it:
@@ -214,8 +231,15 @@ export function useEditor(opts: EditorOptions): EditorApi {
       docs,
       globals: globalDocs.docs,
       collections,
+      // Every key the admin does not assemble is a key the preview loses the
+      // moment this resolution is posted over the server-rendered one. `forms`
+      // was missing until 2026-09-06 and every form in the editor pane rendered
+      // as nothing at all; `locale` is here for the same reason, and without it
+      // a translated preview falls back to source strings on the first keystroke.
+      ...(localeCtx ? { locale: localeCtx } : {}),
+      forms,
     }),
-    [story, refStories, base, docs, globalDocs.docs, collections],
+    [story, refStories, base, docs, globalDocs.docs, collections, forms, localeCtx],
   )
 
   /* ---------------------------------------------------------------- bridge --- */

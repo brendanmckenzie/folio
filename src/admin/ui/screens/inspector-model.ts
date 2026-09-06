@@ -187,6 +187,7 @@ export type ControlKind =
   | 'reference'
   | 'references'
   | 'collection'
+  | 'form'
   | 'none'
 
 /** A record keyed by every declared kind rather than a switch, so a new kind in
@@ -205,12 +206,12 @@ const CONTROLS: { readonly [K in Field['kind']]: ControlKind } = {
   references: 'references',
   collection: 'collection',
   blocks: 'none',
-  // No form picker exists yet (`../../../../docs/specs/content-model/forms.md`
-  // phase 1 leaves the field kind resolving to `null` with nothing to build
-  // one from). `Control.tsx`'s own `default` branch is what actually draws a
-  // plain text box for this today, the same fallback a brand new kind gets
-  // while its own control is being written — this just has to agree with it.
-  form: 'text',
+  // A picker over the Forms screen's own rows (`fields/FormField.tsx`). It was
+  // `'text'` for a day — spec 33 shipped the field kind with no control, so the
+  // `default` branch in `Control.tsx` drew a box wanting a `frm_…` id pasted
+  // into it — and the composite it is now is why this line has to agree with
+  // that switch rather than merely compile.
+  form: 'form',
 }
 
 export function controlFor(kind: Field['kind']): ControlKind {

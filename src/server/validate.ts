@@ -1707,6 +1707,34 @@ export function formIdParam(raw: string | undefined): string {
   return parseOrThrow(FORM_ID, raw, 'id')
 }
 
+/**
+ * `?ids=` on `GET {base}/api/forms/resolved` — `idListQuery`'s screen with
+ * `FORM_ID` in place of `ID`, and it exists rather than reusing that one for the
+ * reason `FORM_ID` exists at all: an id list that reaches a statement binding it
+ * should be screened by mint format, not by charset.
+ */
+export function formIdListQuery(raw: string | undefined): string[] {
+  return listQuery(raw, 'ids', (value, label) => parseOrThrow(FORM_ID, value, label))
+}
+
+/**
+ * `?page=` on the same route: the URL of the page the descriptor is being
+ * compiled for, which becomes its `_folio_page` hidden input.
+ *
+ * A host's `route()` answers this, so it is whatever that function returns — a
+ * path today, an absolute URL for a host that emits one — and neither shape is
+ * ours to insist on. Bounded and screened for control characters, no more.
+ */
+const FORM_PAGE = v.pipe(
+  v.string('must be a string'),
+  v.maxLength(2048, 'must be 2048 characters or fewer'),
+  v.regex(PRINTABLE, 'contains unsupported characters'),
+)
+
+export function formPageQuery(raw: string): string {
+  return parseOrThrow(FORM_PAGE, raw, 'page')
+}
+
 /** A response id from a path param. `res_<12 hex>`, anchored the way `FORM_ID`
  *  is — these routes are behind `FORMS`, but a screened-by-charset id parameter
  *  on a route that reads rows keyed by it is the same primitive either way. */
