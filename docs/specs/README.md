@@ -270,7 +270,7 @@ table; `test/workers/sql-split.ts` needed no change for it, because the DDL uses
 triggers (spec 30 decision 1) and therefore no `BEGIN … END`.
 
 **Nothing is a claim any more.** `0005`–`0008` and `0010` all landed on the branch
-`specs-31-30-28-29` over 2026-09-05/06 — `0005_content_fts.sql` (30),
+`specs-31-30-28-29` over 2026-09-05/06, merged to `main` — `0005_content_fts.sql` (30),
 `0006_auth.sql` (28: two `alter table add column`s and an `auth_events` table),
 `0007_passkeys.sql` (29), `0008_asset_organisation.sql` (32), `0010_forms.sql` (33).
 Spec 32's drafted contents named an `asset_tag_links` table that was built as
@@ -287,11 +287,20 @@ claim is a stamp, not a landing, and every one of these restamped at least once 
 the build order settled — 28 and 29 both moved when 30 went first, and 23 moved to
 make room for 32.
 
-**Landed on `main`: `0001`–`0005`. Landed on the build branch: `0006` (28),
-`0007` (29), `0008` (32, media library) and `0010` (33, forms). Claimed: `0009`
-(23). The next free number is `0011`.** Do not
-derive a number by counting the landed rows above; take the one your spec's header
-names, and if it is already on disk, stop rather than picking the next one yourself.
+**Landed on `main`: `0001`–`0008` and `0010`, and applied to All About Africa's
+staging and production databases on 2026-09-06. Claimed and not landed: `0009`
+(23). The next free number is `0011`.** Do not derive a number by counting the
+landed rows above; take the one your spec's header names, and if it is already on
+disk, stop rather than picking the next one yourself.
+
+**These are applied to a real database now, which changes what a mistake costs.**
+Everything before 2026-09-06 was greenfield in the literal sense — nothing was
+deployed, so a migration could be rewritten or renumbered freely. That is no longer
+true of `0001`–`0010`: two live D1 databases have them in `d1_migrations`, so
+editing one in place changes what a fresh database gets without changing either of
+those, and the two diverge silently. Add a new migration instead. The greenfield
+licence in `CLAUDE.md` still applies to the *schema* — rebuilding a table is fair
+game — but it now has to be spelled as a migration rather than an edit.
 
 Spec 23 restamped `0008` → `0009` to make room for 32, which its own header sequences
 after 29 and before 23; spec 33 (forms) then took `0010`, sequencing itself after 32

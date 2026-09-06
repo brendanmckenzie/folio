@@ -65,7 +65,10 @@ When writing a new one, follow two conventions that already exist:
 
 `scripts/cache-probe.mjs` is **not** one of these and `e2e.sh` does not glob it: it
 takes a deployment URL, because Workers Cache does not exist locally. A tool, not a
-test, and it cannot gate a release.
+test, and it cannot gate a release. **There are deployments to point it at now** —
+`https://staging.allaboutafrica.au` and `https://allaboutafrica.au` — so the one
+thing no test in this repository can observe, a real cache hit and a real purge, is
+finally checkable. Use staging.
 
 ## Local login
 
@@ -86,19 +89,35 @@ not a Folio route and should not be copied into a real host.
 
 ## This is greenfield, and that is a licence
 
-**Zero users. No remote. Nothing deployed.** The owner's standing position, and it
-overrides every instinct toward compatibility you will find in this repo's history:
+**This section used to open "Zero users. No remote. Nothing deployed." Two of those
+three stopped being true on 2026-09-06**, and the licence is narrower than it was
+without being revoked. What is true now: **one consumer, one remote, two live
+deployments.** All About Africa (`takeoffgo/allaboutafrica-website`) runs Folio on
+`staging.allaboutafrica.au` and `allaboutafrica.au`, pinned to a full SHA, with
+real content in D1 and R2 and real editors signing in.
 
-- **Backwards compatibility is not a constraint.** Not for the wire, not for the
-  schema, not for stored documents or logs. There is no old data to be kind to.
-- **The migrations were rolled into one, and that was fine.** Ten became
-  `0001_init.sql` in July 2026. They were not a ledger anybody depended on, and the
-  next one to be in the way can go the same way.
-- **A thing existing is not an argument for keeping it.** If a design is wrong,
-  replace it; do not extend it to avoid a rewrite.
-- **Pivots are allowed.** Nothing here is set in stone.
+The owner's position still overrides the instinct toward compatibility you will
+find in this repo's history, because one known consumer is not the same as users:
 
-Documents written before this was stated argue at length for additive change and
+- **Backwards compatibility is still not a constraint** — for the wire, for stored
+  documents, for logs. There is exactly one consumer, it pins a SHA, and it upgrades
+  deliberately. Break what you need to; the host moves with you, and a breaking
+  change is a line in its upgrade commit rather than a deprecation cycle.
+- **A thing existing is still not an argument for keeping it.** If a design is
+  wrong, replace it.
+- **Pivots are still allowed.**
+
+**What changed is the schema, and only the schema.** `0001`–`0010` are applied to
+two live databases, so *editing a landed migration in place no longer does what it
+used to*: a fresh database gets your edit and those two do not, and they diverge
+with nothing to say so. The July 2026 collapse of ten migrations into `0001_init.sql`
+was correct then and would be wrong now. **Rebuilding a table is still fair game —
+spell it as a new migration.** That is the whole of the difference.
+
+Also gone: "nothing deployed" was the reason `scripts/cache-probe.mjs` could not be
+run. It can be, against either environment.
+
+Documents written before any of this argue at length for additive change and
 byte-identical serialisation — `docs/sync-design.md` invariant 10 is the clearest
 case, and it says so in place. Read those arguments as *history*, not as rules.
 The engineering in them is often still good; the reason given for it is not.
@@ -109,11 +128,18 @@ than a scatter.
 
 ## The two ledgers
 
-**D1 migrations** (`migrations/`). **There is one:
-`0001_init.sql`**, holding the whole schema — the ten that preceded it were
-collapsed into it (`docs/specs/README.md` keeps the record of what each added). A
-new one is the next number and normally a plain `alter table`, but rebuilding a
-table — `stories` included — is fair game when the shape is wrong. A rebuild has to
+**D1 migrations** (`migrations/`). **There are nine: `0001`–`0008` and `0010`.**
+`0001_init.sql` holds the base schema — the ten that preceded it were collapsed into
+it (`docs/specs/README.md` keeps the record of what each added) — and `0002`–`0010`
+landed on top, five of them on 2026-09-06 with specs 28–33. **`0009` is a gap on
+purpose**: it is spec 23's claim, still a draft, and 33 took `0010` rather than
+close it, because renumbering a claim somebody is working against is how two
+migrations end up sharing a number. Next free is `0011`.
+
+A new one is the next number and normally a plain `alter table`, but rebuilding a
+table — `stories` included — is fair game when the shape is wrong. **Editing a
+landed one is not**, now that two live databases have them applied: a fresh database
+would get the edit and those two would not. A rebuild has to
 carry every column and recreate every index, which is a correctness chore, not a
 reason to avoid it.
 
@@ -346,9 +372,9 @@ when written and stale by the time it was built.
 **Specs 1–22 and 24–32 are done. Two are `draft`: 23 (`foundation/multi-site.md`,
 XL, unstarted since 2026-08-01) and 33 (`content-model/forms.md`, L, drafted
 2026-09-05, sequenced after 32 and before 23).** 28, 29, 30, 31 and 32 were all
-built on the branch `specs-31-30-28-29` on 2026-09-05/06; each carries an
-`## Implementation notes` section recording where its plan was wrong, which is the
-half worth reading.
+built on the branch `specs-31-30-28-29` on 2026-09-05/06 and merged to `main`; each
+carries an `## Implementation notes` section recording where its plan was wrong,
+which is the half worth reading.
 
 **They built in the order 31 → 30 → 28 → 29 → 32, and 33 follows** (owner,
 2026-09-05), which is not the order they are numbered in — the numbers were assigned when they were drafted and
