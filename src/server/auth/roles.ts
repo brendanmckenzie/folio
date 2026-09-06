@@ -46,6 +46,7 @@ export const SCOPES = [
   'content:write',
   'publish',
   'assets:write',
+  'forms:read',
   'admin',
 ] as const
 
@@ -68,6 +69,11 @@ const IMPLIES: Record<Scope, readonly Scope[]> = {
   'content:read:draft': ['content:read', 'content:read:draft'],
   'content:read': ['content:read'],
   'assets:write': ['assets:write'],
+  // Reading what strangers typed about themselves is implied by nothing but
+  // `admin` (`../../../docs/specs/content-model/forms.md` decision 8): a token
+  // that may write content has no business reading a form's responses, and a
+  // token minted to push responses into a CRM has no business writing pages.
+  'forms:read': ['forms:read'],
 }
 
 /** True when any granted scope implies `need`. Total: an unknown grant is ignored. */
@@ -202,6 +208,17 @@ export const PUBLISH: Access = { role: 'publisher', scope: 'publish' }
 
 /** Uploading, renaming or deleting an asset. */
 export const ASSETS: Access = { role: 'editor', scope: 'assets:write' }
+
+/**
+ * Reading submitted form responses, and downloading the files that came with
+ * them (`../../../docs/specs/content-model/forms.md` decision 8).
+ *
+ * **`publisher`, not `viewer`**, and the gap from `READ` is the point: every
+ * other reader in this file is about the site's own content, and these rows are
+ * what strangers typed about themselves — a name, an address, a CV. An editor
+ * who may write a page is not thereby somebody who may read the enquiries.
+ */
+export const FORMS: Access = { role: 'publisher', scope: 'forms:read' }
 
 /** Managing editors and tokens. */
 export const ADMIN: Access = { role: 'admin', scope: 'admin' }

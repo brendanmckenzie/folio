@@ -623,6 +623,7 @@ export const TokenCreateBody = v.object(
             'content:write',
             'publish',
             'assets:write',
+            'forms:read',
             'admin',
           ],
           'is not a scope',
@@ -1702,6 +1703,38 @@ const FORM_ID = v.pipe(
 
 export function formIdParam(raw: string | undefined): string {
   return parseOrThrow(FORM_ID, raw, 'id')
+}
+
+/** A response id from a path param. `res_<12 hex>`, anchored the way `FORM_ID`
+ *  is — these routes are behind `FORMS`, but a screened-by-charset id parameter
+ *  on a route that reads rows keyed by it is the same primitive either way. */
+const RESPONSE_ID = v.pipe(
+  v.string('must be a string'),
+  v.regex(/^res_[0-9a-f]{12}$/, 'must be a Folio response id'),
+)
+
+export function responseIdParam(raw: string | undefined): string {
+  return parseOrThrow(RESPONSE_ID, raw, 'rid')
+}
+
+/**
+ * A form field's slug from a path param — the `:name` in the gated download
+ * route, which names the *question* rather than the object, because one question
+ * holds one file (`../../docs/specs/content-model/forms.md` decision 15).
+ *
+ * **The R2 key is deliberately not what the URL carries.** A route taking a key
+ * would be a route whose parameter is a bucket path, and the thing it reads back
+ * would be whatever that path names; a field slug can only be looked up inside a
+ * response the caller already named, so the object served is one this response
+ * actually holds. Same shape as `core/forms.ts`'s own `NAME`.
+ */
+const FIELD_NAME = v.pipe(
+  v.string('must be a string'),
+  v.regex(/^[a-z][a-z0-9_]{0,63}$/, 'must be a field name'),
+)
+
+export function fieldNameParam(raw: string | undefined): string {
+  return parseOrThrow(FIELD_NAME, raw, 'name')
 }
 
 /**

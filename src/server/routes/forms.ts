@@ -17,8 +17,9 @@
  * form's delete takes every response with it.
  */
 import { Hono } from 'hono'
+import { NO_STORE } from '../../core/cache-tags'
 import { honeypotName } from '../../core/forms'
-import { actorString, ADMIN, EDIT, READ } from '../auth/roles'
+import { actorString, ADMIN, EDIT, FORMS, READ } from '../auth/roles'
 import { FolioError } from '../errors'
 import {
   type AnswerRefusal,
@@ -26,12 +27,19 @@ import {
   capFor,
   clientIp,
   DEFAULT_RATE_PER_HOUR,
+  filePartsOf,
   insertResponse,
   ipHash,
+  isDuplicateSubmission,
   newResponseId,
+  type PreparedUpload,
+  prepareUploads,
+  putUploads,
   rawBodyOf,
   readSubmission,
   recentSubmissionCount,
+  responseFileOf,
+  storedFilesOf,
   type SubmissionBody,
   throttleHashes,
   validateSubmission,
@@ -42,7 +50,9 @@ import {
   type Form,
   formById,
   formMeta,
+  deleteUploads,
   formUsage,
+  hasFileQuestion,
   isOpen,
   listForms,
   LOCALE_INPUT,
@@ -53,15 +63,32 @@ import { hookCtx, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
 import {
+  DOWNLOAD_CONTENT_TYPE,
+  fieldNameParam,
   FormCreateBody,
   FormPatchBody,
   formIdParam,
   limitParam,
   parseBody,
   requireCursor,
+  responseIdParam,
   safeNext,
   wantsJson,
 } from '../validate'
+
+/**
+ * The refusal a host with no `media` binding gets for anything file-shaped
+ * (`../../../docs/specs/content-model/forms.md` decision 15).
+ *
+ * **Legible, and it names the binding** — the shape `FolioBindings` already sets
+ * for `media`, `images` and `browser`, and the reason `unsupported` exists as a
+ * code at all: "this deployment is not configured for that" is a different fact
+ * from "you may not" and from "there is no such thing", and a host debugging a
+ * form that refuses every CV needs to be told which of the three it is.
+ */
+function noMedia(): FolioError {
+  return new FolioError('unsupported', 'No media bucket is configured, so a form cannot take files')
+}
 
 export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
@@ -122,7 +149,15 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.patch('/forms/:id', requireAccess<Env>(rt, EDIT), async (c) => {
     const id = formIdParam(c.req.param('id'))
     const body = await parseBody(c.req, FormPatchBody)
-    const result = await updateForm(c.var.bindings().db, id, body)
+    const { db, media } = c.var.bindings()
+
+    // The builder half of decision 15's refusal. Checked on the *incoming*
+    // fields rather than the stored ones, so this refuses adding the question
+    // rather than refusing to save a form that already has one — and it is the
+    // reason `deleteForm` can treat "files with no bucket" as unreachable.
+    if (!media && body.fields?.some((field) => field.kind === 'file')) throw noMedia()
+
+    const result = await updateForm(db, id, body)
     if (!result) throw new FolioError('not_found', 'Unknown form')
 
     if (result.structural) {
@@ -147,7 +182,11 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.delete('/forms/:id', requireAccess<Env>(rt, ADMIN), async (c) => {
     const id = formIdParam(c.req.param('id'))
-    const result = await deleteForm(c.var.bindings().db, id)
+    const { db, media } = c.var.bindings()
+    // The bucket, so the objects go with the rows. `deleteForm` throws rather
+    // than silently orphaning them if it is absent and there is anything to
+    // delete, which is why this is passed unconditionally instead of guarded.
+    const result = await deleteForm(db, id, media)
     if (!result.deleted) throw new FolioError('not_found', 'Unknown form')
     return c.json(result)
   })
@@ -184,6 +223,65 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       total: usage.total,
       responses: usage.responses,
       files: usage.files,
+    })
+  })
+
+  /**
+   * One response's uploaded file, streamed from R2
+   * (`../../../docs/specs/content-model/forms.md` decision 15).
+   *
+   * **`FORMS`, which is `publisher` plus `forms:read`.** These are a stranger's
+   * bytes about themselves — a CV, an invoice, a photograph — and reading them
+   * is a different permission from reading the site's own content, which is why
+   * the scope is implied by `admin` and by nothing else.
+   *
+   * Three things separate this from `{base}/asset/:key`, and each is the reason
+   * a form's uploads are not assets:
+   *
+   *  - **The public route physically cannot serve one.** Keys are minted `sub_…`
+   *    and `ASSET_KEY` is anchored to `^ast_…`, so that route answers 400 from
+   *    the parameter validator before a handler runs. No new guard, so no new
+   *    guard to forget.
+   *  - **The type is always `application/octet-stream` and the disposition is
+   *    always `attachment`, however the bytes sniffed.** `serveAsset` renders an
+   *    allowlisted type inline because a Folio asset is the site's own image in
+   *    the site's own markup; there is no case at all for rendering a stranger's
+   *    upload in a tab on this origin, so the branch does not exist rather than
+   *    being narrow.
+   *  - **`no-store`.** Nothing about this belongs in a shared cache, and
+   *    `cacheVerdictFor` bypasses it anyway for carrying a session cookie — this
+   *    is the half that also covers a browser and a corporate proxy.
+   *
+   * The URL names the **question**, not the key: one file per question, and a
+   * route whose parameter is a bucket path is a route that reads whatever that
+   * path names. `responseFileOf` binds the form id as well, so a response id
+   * cannot be walked in through a different form's URL.
+   */
+  app.get('/forms/:id/responses/:rid/file/:name', requireAccess<Env>(rt, FORMS), async (c) => {
+    const { db, media } = c.var.bindings()
+    if (!media) throw noMedia()
+
+    const file = await responseFileOf(
+      db,
+      formIdParam(c.req.param('id')),
+      responseIdParam(c.req.param('rid')),
+      fieldNameParam(c.req.param('name')),
+    )
+    if (!file) throw new FolioError('not_found', 'No such file')
+
+    const object = await media.get(file.key)
+    if (!object) throw new FolioError('not_found', 'No such file')
+
+    return new Response(object.body, {
+      headers: {
+        'content-type': DOWNLOAD_CONTENT_TYPE,
+        // `filename` is `safeFilename`'s output, so it holds no quote, no
+        // newline and no path separator — the header cannot be split by it.
+        'content-disposition': `attachment; filename="${file.filename}"`,
+        'cache-control': NO_STORE,
+        'x-content-type-options': 'nosniff',
+        'content-security-policy': "default-src 'none'; sandbox",
+      },
     })
   })
 
@@ -324,7 +422,16 @@ function refererPath(req: Request): string {
  *     to the host's widget (decision 13), and which fails closed on a throw.
  *  7. **The rate limit**, after `verify` so a verified submission is never
  *     refused for an unverified one's traffic.
- *  8. **Validation**, then the insert, then the hook.
+ *  8. **The uploads**, bounded per question, typed from their own bytes and
+ *     hashed — with nothing written to R2. Behind every abuse control above,
+ *     because buffering an attachment for a bot is the cost the honeypot exists
+ *     to avoid, and ahead of validation because a `file` question's `required`
+ *     is the question "did an acceptable file arrive".
+ *  9. **Validation**, then the duplicate check, then the put, then the insert,
+ *     then the hook. The put is between the last two reads and the write for
+ *     `uploadAsset`'s reason: a row naming an object that never landed is worse
+ *     than an object with no row, and the second is closed by a compensating
+ *     delete on either failure.
  *
  * Nothing about the answer distinguishes a stored row from a collapsed duplicate
  * or from a caught honeypot: all three answer `ok` with a minted id. That is
@@ -341,7 +448,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const now = Date.now()
 
     const id = formIdParam(c.req.param('id'))
-    const db = c.var.bindings().db
+    const { db, media } = c.var.bindings()
     const form = await formById(db, id)
     if (!form) {
       return replyTo({
@@ -355,7 +462,24 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       })
     }
 
-    const body = await readSubmission(req, capFor(form))
+    // Before the body is read, not after: a form that has nowhere to put a CV
+    // must not spend a Worker's memory buffering one first. Unreachable through
+    // the builder, which refuses the question — this is the route's own half of
+    // the same refusal, for a host that lost the binding after the form existed.
+    if (!media && hasFileQuestion(form.fields)) {
+      return replyTo({
+        json,
+        status: 'error',
+        target: refererPath(req),
+        from,
+        form,
+        code: 'unsupported',
+        message: noMedia().message,
+        httpStatus: 501,
+      })
+    }
+
+    const { body, files: parts } = await readSubmission(req, capFor(form))
 
     // The host's own hidden input, through `safeNext` — which already exists to
     // stop a redirect parameter becoming an open redirect, and which bounds this
@@ -417,40 +541,82 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       hash = await ipHash(ip, form.id, now)
     }
 
-    const { values, errors } = validateSubmission(form.fields, body)
-    const invalid = Object.keys(errors)
+    // The uploads: bounded per question, sniffed, hashed and keyed — and
+    // **nothing written to R2 yet**. Ahead of the text validator because its
+    // `required` check for a `file` question is the answer to "did a file
+    // arrive", and behind every abuse control because buffering an attachment
+    // for a bot is the one cost the honeypot exists to avoid.
+    const uploads = await prepareUploads(form.fields, parts)
+    const { values, errors } = validateSubmission(
+      form.fields,
+      body,
+      new Set(uploads.files.map((file) => file.field)),
+    )
+    // The file's own refusal wins: a required question whose CV was too large
+    // should say `too_long`, not `required`.
+    const refusals = { ...errors, ...uploads.errors }
+    const invalid = Object.keys(refusals)
     if (invalid.length > 0) {
       return replyTo({
         ...reply,
         status: 'invalid',
         invalid,
-        fields: errors,
+        fields: refusals,
         code: 'invalid',
         message: 'Some answers need another look.',
         httpStatus: 422,
       })
     }
 
-    const inserted = await insertResponse(db, {
-      form,
-      data: values,
-      // Whatever the descriptor's hidden input said, run back through the
-      // runtime's own locale resolution: an undeclared code — or one a submitter
-      // invented — is stored as `''`, the source-locale convention `content_index`
-      // already uses.
-      locale: rt.localeOf(body.get(LOCALE_INPUT)?.[0])?.code ?? '',
-      page,
-      ipHash: hash,
-      bodyHash: await bodyHash(values),
-      files: [],
-      now,
-    })
+    // Over the answers **and** each file's bytes, which is what lets the
+    // duplicate check below run before the put (decision 14).
+    const hashed = await bodyHash(values, filePartsOf(uploads.files))
+
+    // A double-click on a 5MB application: knowably a duplicate, so nothing is
+    // written. The single-statement collapse inside `insertResponse` is still the
+    // arbiter — this only saves the megabytes, and only when there are megabytes.
+    if (uploads.files.length > 0 && (await isDuplicateSubmission(db, form.id, hashed, now))) {
+      return replyTo({ ...reply, responseId: newResponseId(), ...successTarget(form, target) })
+    }
+
+    // R2 first, then the row: a row naming an object that never landed is a
+    // download button that 404s for a publisher with no way to explain it, while
+    // an object with no row is closed by the compensating delete below.
+    // `uploadAsset`'s order, and its reasoning.
+    if (media && uploads.files.length > 0) await putUploads(media, uploads.files)
+
+    let inserted: Awaited<ReturnType<typeof insertResponse>>
+    try {
+      inserted = await insertResponse(db, {
+        form,
+        data: values,
+        // Whatever the descriptor's hidden input said, run back through the
+        // runtime's own locale resolution: an undeclared code — or one a submitter
+        // invented — is stored as `''`, the source-locale convention `content_index`
+        // already uses.
+        locale: rt.localeOf(body.get(LOCALE_INPUT)?.[0])?.code ?? '',
+        page,
+        ipHash: hash,
+        bodyHash: hashed,
+        files: storedFilesOf(uploads.files),
+        now,
+      })
+    } catch (err) {
+      await compensate(media, uploads.files)
+      throw err
+    }
+
+    // The narrow race the pre-check cannot close: two clicks that both got past
+    // it, one of which lost the `not exists`. Its objects have no row and never
+    // will, so they go now (decision 15: *"a compensating `bucket.delete` if the
+    // insert throws **or the duplicate guard fires**"*).
+    if (!inserted.stored) await compensate(media, uploads.files)
 
     if (inserted.stored) {
       await rt.hookRunner(hookCtx(c)).run('submitted', {
         form: formMeta(form),
         response: inserted.response,
-        files: [],
+        files: storedFilesOf(uploads.files),
         // The route is unauthenticated and the row is a stranger's. Attributing it
         // to whichever editor happened to be signed in in this browser would be a
         // lie about who filled the form in.
@@ -466,6 +632,32 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   })
 
   return app
+}
+
+/**
+ * The objects, when the row they were supposed to belong to did not happen.
+ *
+ * **Swallowed, exactly as `uploadAsset`'s own compensating delete is.** The
+ * failure worth reporting is the one being compensated for — a D1 insert that
+ * threw is what the caller needs to see and debug — and a cleanup that also
+ * failed is a secondary, orphaned object rather than the reportable error. This
+ * is the opposite call from `deleteForm`, and the difference is what a retry can
+ * reach: there the rows survive and name the keys, so throwing leaves something
+ * repeatable; here nothing will ever name these keys again either way.
+ */
+async function compensate(
+  bucket: R2Bucket | undefined,
+  files: readonly PreparedUpload[],
+): Promise<void> {
+  if (!bucket || files.length === 0) return
+  try {
+    await deleteUploads(
+      bucket,
+      files.map((file) => file.key),
+    )
+  } catch (err) {
+    console.error('folio: form upload cleanup failed', err)
+  }
 }
 
 /** Where a *successful* submission lands: the form's own `redirectTo` when it

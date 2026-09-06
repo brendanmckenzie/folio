@@ -76,6 +76,22 @@
 > "Implementation notes — phase 3" at the end of this file, along with the
 > `form()` field builder that still does not exist. Phases 4–8 are outstanding.
 
+> **Phase 5 landed 2026-09-06** (the upload half of `src/server/form-responses.ts`,
+> `fileCap`/`hasFileQuestion`/`deleteUploads` and the delete walk in
+> `src/server/forms.ts`, the gated download route and the submit route's file
+> pipeline in `src/server/routes/forms.ts`, `FORMS` and `forms:read` in
+> `src/server/auth/roles.ts`, `test/workers/form-files.test.ts` and
+> `test/unit/server/form-files.test.ts`). A stranger can now put bytes in the
+> host's bucket, and every limit in decision 15 is enforced. Five divergences,
+> under "Implementation notes — phase 5" at the end of this file; the load-bearing
+> ones are that **`sniffContentType` could not answer the `documents` half** (it
+> only knows the types the media library serves inline, so a document sniffer was
+> written beside it and the gate is on a *family* rather than an exact type),
+> that **`FORMS` and `forms:read` arrived here** because the download route is the
+> first reader, and that **a failed R2 delete on the form cascade throws rather
+> than being swallowed** — the inverse of `deleteAsset`'s rule, because the rows
+> still exist to retry from. Phases 6–8 are outstanding.
+
 ## Summary
 
 Folio can publish a page that asks a question and has nowhere to put the answer. There
@@ -2020,3 +2036,217 @@ to join both, sanctioned by the spec's "Server types" section adding the event t
 `FORMS`, `forms:read` and every response reader are unwritten, deliberately (see
 divergence 3). `ResponseFilter` and `responseFilterQuery` are still the only
 response-shaped things that exist, both from phase 2.
+
+## Implementation notes — phase 5 (landed 2026-09-06)
+
+Files. `sub_` keys are minted into the `media` bucket, the gated download route
+is live, and deleting a form takes its objects with it. Phases 6–8 are the two
+admin screens and the demo.
+
+### Divergences from the plan
+
+1. **`sniffContentType` could not answer the `documents` half, so the gate is on
+   a *family*.** Decision 15 says "`sniffContentType` decides what the file *is*
+   from its bytes", and it does — for images. It knows exactly the types
+   `validate.ts` is willing to serve inline (`SERVED_CONTENT_TYPES` plus SVG),
+   which is the right set for the media library and answers `undefined` for every
+   member of `FILE_ACCEPT.documents`. Enforcing `accept: 'documents'` against it
+   directly would have refused every PDF.
+
+   So `sniffUpload` (`form-responses.ts`) wraps it: images delegate unchanged, and
+   PDF (`%PDF-`), an Office Open XML package (a ZIP whose first entry is
+   `[Content_Types].xml` at the fixed 30-byte offset), an OLE2 compound file and
+   "reads as text" are added beside it. It answers a **family** — `images` or
+   `documents` — plus an exact content type *when the bytes name one*, and the
+   `accept` check is on the family. A `.docx` and an `.xlsx` are the same
+   container and no cheap signature separates them; a gate that needed to would
+   have had to trust the header, which is the thing being defended against.
+
+   The exact label is then decided by `labelFor`, under one rule: **a claim may
+   label a file, it may never admit one.** Where the bytes settle only the family,
+   the submitter's own `Content-Type` may choose between the members of *that
+   family* in the menu, and anything else is `application/octet-stream`. The
+   stakes are low by construction — the download route sends
+   `application/octet-stream` whatever the column says — so a wrong label is a
+   wrong word in a drawer rather than a served content type.
+
+   Two consequences worth stating because they are narrower than a reader might
+   assume: **`sniffUpload` refuses AVIF and SVG** at an `images` question, since
+   neither is in `FILE_ACCEPT.images` and the menu is the contract (SVG is
+   attacker-supplied XML and there is no case for accepting it here at all); and
+   **an unrecognised binary is refused rather than stored as a download**, which
+   is the opposite of `uploadAsset`'s posture and deliberately so — an editor
+   uploading to their own library gets the benefit of the doubt and an anonymous
+   stranger does not.
+
+2. **`FORMS` and `forms:read` arrived in this phase**, which is what phase 4's
+   divergence 3 asked for: *"the first reader still adds both"*, and the gated
+   download route is the first reader. `roles.ts` gains the scope (implied by
+   `admin` and by itself, nothing else), the `FORMS` access constant exactly as
+   the spec's "Server types" section writes it, and two files outside phase 5's
+   own list had to follow the type: `admin/ui/screens/access-model.ts`'s
+   `SCOPE_MEANING` is a `Record<Scope, …>` and would not compile without an entry,
+   and `validate.ts`'s `TokenCreateBody` picklist would otherwise refuse to mint a
+   token holding it. Neither is behavioural for phase 7.
+
+3. **A failed R2 delete on the form cascade throws; the submit route's
+   compensating delete swallows.** `deleteAsset`'s rule is "D1 before R2, the R2
+   failure swallowed", and it cannot apply to `deleteForm`: the keys are only
+   knowable from the rows the batch is about to destroy, so R2 has to go *first*,
+   and swallowing a failure there would commit the batch over objects that are now
+   unreachable by anything. Throwing leaves the rows in place, so a retry is
+   exactly a retry. The submit route's compensation keeps the swallow, because
+   there the failure worth reporting is the one being compensated for and nothing
+   will ever name those keys again either way.
+
+   `deleteForm` also **throws `unsupported` if it is handed no bucket and the form
+   holds files**. Unreachable through the routes — the PATCH refuses to add a
+   `file` question without `media` — but a delete that silently orphaned twelve
+   people's CVs because a caller passed two arguments instead of three is exactly
+   the class of bug `documents.ts` exists to prevent elsewhere.
+
+4. **`readSubmission` now answers `{ body, files }`, and JSON carries no files.**
+   The two channels are separate types (`SubmissionBody`, `SubmissionFiles`)
+   rather than a union inside one map, so the `[object File]` failure is
+   unrepresentable from the parsing end as well as from the rendering end.
+   `validateSubmission` gained an optional third argument — the set of field names
+   an acceptable file arrived for — which defaults to empty, so every existing
+   text-only caller and all 22 of phase 4's unit tests read unchanged.
+
+   A JSON submission has no files at all. Decision 5 negotiates the *answer*, not
+   the upload: base64 inside an answer would inflate a body by a third against a
+   cap the form derived, and the native POST is the transport a form is designed
+   around. A script that needs to attach a file posts multipart, like a browser.
+
+5. **The duplicate check runs twice, and only the second is the arbiter.**
+   Decision 14 wants the check *before* the R2 put and decision 15 wants a
+   compensating delete *if the duplicate guard fires* — which is two statements
+   about the same thing only if the pre-check is not authoritative. So
+   `isDuplicateSubmission` runs before the put **and only when there is a file to
+   save** (for a text-only submission it would be a second query to avoid
+   nothing), and `insertResponse`'s single `insert … where not exists` remains the
+   decider. The narrow race two clicks can still fit through puts an object and
+   then deletes it; the ordinary double-click puts nothing.
+
+### Decisions taken where the plan was silent
+
+- **An empty part is no part.** A browser sends `filename=""` with zero bytes for
+  a file input nobody touched. Storing it would put an empty object in the bucket
+  for every visitor who left the question alone; treating it as an error would
+  make every optional file question effectively required. It is simply absent, and
+  `required` then says `required`.
+- **The per-question cap is checked twice, on `File.size` and on the buffered
+  `byteLength`.** The first is what the parser measured and the second is what it
+  handed over. Removing only the first left the tests green, which is the
+  redundancy doing its job.
+- **A `too_long` file beats a `required` question.** `prepareUploads`' errors are
+  spread over `validateSubmission`'s, so a required question whose CV was
+  oversized answers `too_long`. "You did not attach one" is both untrue and the
+  one answer a visitor cannot act on.
+- **The loop walks the form's questions, not the request's parts**, so a part
+  under an undeclared name is never even read into memory — decision 13 applied to
+  bytes rather than to strings.
+- **The stored object's own metadata says `octet-stream` and `attachment`**, not
+  just the route's headers. An object outlives the route that wrote it, and one
+  whose stored `contentType` is `text/html` is one signed URL away from being a
+  page on somebody's origin. `serveAsset` re-checks its allowlist on read for the
+  same reason from the other end.
+- **The download URL names the *question*, never the key.** One file per question,
+  so the field slug identifies the object — and a route whose parameter is a
+  bucket path reads back whatever that path names. `responseFileOf` binds
+  `form_id` as well as the response id, so a response id cannot be walked in
+  through a different form's URL.
+- **`responseFileOf` returns `application/octet-stream` whatever the column
+  says.** Handing the caller the stored label and trusting it to ignore it is how
+  a later edit ends up echoing a stranger's `text/html` at a publisher's browser.
+- **`safeFilename` was exported from `assets.ts`** rather than reimplemented. It
+  is the codebase's one filename sanitiser and a second copy is a second chance to
+  leave a `/` or a `..` in a key.
+- **`compileField` emits the *clamped* `maxBytes`.** A descriptor promising 50MB
+  against a server that takes 20 is a visitor watching an upload fail after it
+  finished.
+
+### Bind budget
+
+Nothing on either path binds a caller-sized list. The delete walk is four binds a
+page — `form_id`, the resume id and the page size — with the *keys* accumulating
+in a JavaScript array and going to R2, which caps a `delete` at 1,000 keys and has
+no bind ceiling at all. `isDuplicateSubmission` is three; `responseFileOf` is two.
+A form with fifty thousand responses is 250 pages of 200 and never one statement.
+
+### Verified by breaking
+
+Four, each edited in place and reverted in place:
+
+- **`purgeFormUploads` removed from `deleteForm`** — two red (`removes every
+  object across every response, then the rows`, `walks past the first page…`).
+  The one this phase exists to prevent: everything still works, the counts are
+  still honest, and every file ever submitted stays in the bucket forever.
+- **The `accept` gate widened to pass a file whose *declared* type is in the
+  menu** — two red (`refuses a document sent at an images question, however it is
+  labelled`, `refuses bytes nothing recognises…`). The plausible mistake, and
+  silent: every legitimate upload still works and the gate is now on a string the
+  submitter chose.
+- **Both per-file size checks removed** — three red (`refuses a file over the
+  question's own maxBytes`, `says too_long rather than required…`, `enforces a
+  per-question cap that the body cap alone would let through`). Removing only the
+  first of the two left the suite green, which is the second check earning its
+  place rather than a gap in the tests.
+- **`newUploadKey` given the raw filename** — three red across both files
+  (`drops every path segment…`, `survives a filename that is nothing but
+  punctuation…`, `stores the object, the metadata and nothing the submitter
+  named`).
+
+### What is not covered, named rather than glossed
+
+- **The insert-throws compensation has no direct test.** Its sibling — the
+  duplicate-guard branch — is covered by `a double-click stores one row and one
+  object`, and `deleteUploads` is exercised by the cascade, but making a D1 insert
+  fail mid-route inside workerd needs a fault-injection seam this file does not
+  have. The two call sites are one function (`compensate`), so the untested half
+  is the `try`/`catch` around `insertResponse` rather than the cleanup itself.
+- **The gate itself is unit-tested, not route-tested.** `test/workers`' fixture is
+  `auth: 'open'`, so a `FORMS` refusal cannot be observed through `SELF.fetch`
+  there. `test/unit/server/form-files.test.ts` pins `allows()` for every role and
+  every scope instead, which is where the decision actually lives.
+
+### Test counts
+
+135 files / 3969 passing + 1 todo, from 133 / 3932 + 1. Thirty-seven added: 22
+workers (`test/workers/form-files.test.ts`, new) and 15 unit
+(`test/unit/server/form-files.test.ts`, new). **No existing test changed**, which
+is the third argument's default doing its work: `validateSubmission(fields, body)`
+still means what it meant.
+
+### What phase 6 inherits
+
+- **The builder must refuse a `file` question when `media` is absent**, which is
+  the admin half of decision 15's refusal. The server half is done: `PATCH
+  {base}/api/forms/:id` answers 501 `unsupported` naming the binding, so the
+  builder's job is to not offer the question rather than to invent a rule. There
+  is no manifest flag saying whether `media` is bound; the screen either asks and
+  handles the 501, or `GET {base}/api/schema` grows one.
+- `fileCap` is exported and is the number to show beside a `maxBytes` control:
+  the editor's value clamped to `MAX_UPLOAD_BYTES`.
+- `FILE_ACCEPT` is the menu, and `sniffUpload`'s narrowness is real — an `images`
+  question does **not** take AVIF or SVG, whatever the `accept` attribute the
+  descriptor renders implies.
+
+### What phase 7 inherits
+
+- **`FORMS` and `forms:read` now exist**, so every response route can be gated
+  without touching `roles.ts` again. `responseIdParam` and `fieldNameParam` are in
+  `validate.ts`.
+- **`deleteResponses` is still unwritten, and its R2 half is a two-line call.**
+  `uploadKeysOf(row.files)` turns a `files` column into keys and
+  `deleteUploads(bucket, keys)` removes them a thousand at a time. The order for a
+  *single* response and for a bulk selection is the route table's — D1 before R2,
+  the R2 failure swallowed — which is the opposite of `deleteForm`'s and correct
+  for the same reason `deleteAsset`'s is: the row goes first, so there is nothing
+  left to retry from.
+- **A bulk delete over a selection must not bind the keys.** The keys come off the
+  rows the batch already read, so they never reach a statement; the `(lastId,
+  seen)` cursor rule is unaffected by them.
+- `responseFileOf` is deliberately narrow (one column, two binds). A full
+  `responseById` is still phase 7's to write, and should not be built by widening
+  this one — serving a file has no business reading a stranger's answers.

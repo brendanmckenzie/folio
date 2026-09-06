@@ -192,8 +192,9 @@ export interface FormChangedHookPayload<Env> extends HookBase<Env> {
 export interface SubmittedHookPayload<Env> extends HookBase<Env> {
   form: FormMeta
   response: FormResponse
-  /** The files that came with it. Empty until phase 5 of the spec mints a
-   *  `sub_` key; declared now so the payload does not change shape when it does. */
+  /** The files that came with it. Metadata only — a host that wants the bytes
+   *  reads them back through `GET {base}/api/forms/:id/responses/:rid/file/:name`
+   *  or holds the `media` binding. */
   files: readonly SubmittedFile[]
 }
 

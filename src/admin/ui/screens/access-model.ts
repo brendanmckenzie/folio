@@ -225,6 +225,10 @@ export const SCOPE_MEANING: Record<Scope, { label: string; description: string }
     label: 'Manage media',
     description: 'Upload, rename and delete files in the media library.',
   },
+  'forms:read': {
+    label: 'Read form responses',
+    description: 'Everything strangers submitted through a form, and their uploads.',
+  },
   admin: {
     label: 'Manage access',
     description: 'Invite editors, change roles, and mint or revoke tokens.',

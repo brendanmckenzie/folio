@@ -976,7 +976,19 @@ export async function serveAsset(
   return response
 }
 
-function safeFilename(name: string): string {
+/**
+ * A submitted filename reduced to something that may safely be part of an R2
+ * key: the basename only, lowercased, everything outside `[a-z0-9.]` collapsed
+ * to a hyphen, and truncated.
+ *
+ * **Exported because `form-responses.ts` mints `sub_` keys from filenames a
+ * stranger chose** (`../../docs/specs/content-model/forms.md` decision 15), and
+ * a second implementation of this is a second chance to leave `..` or a `/` in a
+ * key. Dropping the path segments is the whole of it: a key is a flat string, so
+ * `../../etc/passwd` reaching the bucket verbatim is a collision or a traversal
+ * depending on what else is co-tenanted there.
+ */
+export function safeFilename(name: string): string {
   const base = name.split(/[\\/]/).pop() ?? 'file'
   return (
     base

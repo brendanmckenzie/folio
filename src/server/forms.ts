@@ -41,6 +41,7 @@ import {
 import type { LocaleContext } from '../core/locales'
 import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
 import type { StoryMeta } from '../core/story'
+import { MAX_UPLOAD_BYTES } from './assets'
 import { bindChunks, type FolioDb } from './db'
 import { FolioError } from './errors'
 import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
@@ -102,6 +103,31 @@ export interface FormMeta {
 
 export function formMeta(form: Form | FormSummary): FormMeta {
   return { id: form.id, name: form.name, label: form.label, version: form.version }
+}
+
+/**
+ * How many bytes one `file` question will actually accept
+ * (`../../docs/specs/content-model/forms.md` decision 15: *"a `maxBytes`
+ * clamped to `MAX_UPLOAD_BYTES`"*).
+ *
+ * **The clamp is here rather than in `validateFormFields`** because
+ * `MAX_UPLOAD_BYTES` is the media library's ceiling and `core/forms.ts` knows
+ * nothing about R2. Storing the editor's number unclamped and clamping on every
+ * read is the same posture `parseScopes` takes: lowering the platform ceiling
+ * narrows every stored form at once instead of leaving rows that claim more than
+ * the server will take.
+ *
+ * Three readers and they must not disagree: `capFor` sums it into the body cap,
+ * `prepareUploads` enforces it per file, and `compileField` puts it on the
+ * descriptor so a host's own `maxBytes` attribute says what the server will do.
+ */
+export function fileCap(field: FormField): number {
+  return Math.min(field.maxBytes ?? MAX_UPLOAD_BYTES, MAX_UPLOAD_BYTES)
+}
+
+/** Whether this form needs the `media` binding at all (decision 15). */
+export function hasFileQuestion(fields: readonly FormField[]): boolean {
+  return fields.some((f) => f.kind === 'file')
 }
 
 /**
@@ -328,7 +354,10 @@ function compileField(field: FormField, locale: LocaleContext | undefined): Reso
   // straight on the input's `accept`, and the menu it came from is an editor's
   // vocabulary rather than a visitor's.
   if (field.accept !== undefined) out.accept = FILE_ACCEPT[field.accept]
-  if (field.maxBytes !== undefined) out.maxBytes = field.maxBytes
+  // The **clamped** cap, not the stored number: a host renders this as the
+  // input's own limit, and a descriptor promising 50MB against a server that
+  // takes 20 is a visitor watching an upload fail after it finished.
+  if (field.maxBytes !== undefined) out.maxBytes = fileCap(field)
   if (field.value !== undefined) out.value = field.value
   if (field.text !== undefined) out.text = field.text
   return out
@@ -543,7 +572,7 @@ export async function formUsage(db: FolioDb, id: string): Promise<FormUsage> {
  * keys: the count is what a dialog shows, and a form with fifty thousand
  * responses must not become fifty thousand rows in a Worker's memory to answer
  * "how many files". Deleting the objects is a different question and reads them
- * in pages (`docs/specs/content-model/forms.md` phase 5).
+ * in pages, which is what `deleteForm`'s walk does before its batch.
  */
 async function responseCounts(
   db: FolioDb,
@@ -715,6 +744,92 @@ export async function updateForm(
   return { form: next, structural }
 }
 
+/* ------------------------------------------------------- the R2 half --- */
+
+/**
+ * Responses read per page of the delete walk. A page holds ids and one JSON
+ * column each, not the answers, so this is a memory bound rather than a bind
+ * one — the statement binds four parameters whatever the page size is.
+ */
+const UPLOAD_WALK_PAGE = 200
+
+/** R2 refuses a `delete` naming more than a thousand keys. */
+const R2_DELETE_KEYS = 1000
+
+/**
+ * The R2 keys one page of responses holds, and the id to resume from.
+ *
+ * **Walked by `id`, not by `created_at`**, for `assetsMatching`'s reason: the set
+ * is about to be destroyed as it is walked, and `id` is the one key that is
+ * stable, unique and rewritten by nothing. `files <> '[]'` keeps the walk to the
+ * rows that have anything in them, so a form whose questions are all text
+ * terminates on the first page.
+ *
+ * Screened on read: a `files` entry whose `key` is not a string is dropped
+ * rather than thrown on, the posture `parseScopes` sets for every JSON column in
+ * this schema. A malformed row must not be the reason a form cannot be deleted.
+ */
+async function uploadKeysPage(
+  db: FolioDb,
+  formId: string,
+  after: string,
+): Promise<{ keys: string[]; last: string | null }> {
+  const { results } = await db
+    .prepare(
+      `select id, files from form_responses
+       where form_id = ? and files <> '[]' and id > ?
+       order by id limit ?`,
+    )
+    .bind(formId, after, UPLOAD_WALK_PAGE)
+    .all<{ id: string; files: string }>()
+
+  const keys: string[] = []
+  for (const row of results) keys.push(...uploadKeysOf(row.files))
+  return { keys, last: results.at(-1)?.id ?? null }
+}
+
+/** The R2 keys inside one `form_responses.files` value. Total: anything that is
+ *  not an object with a string `key` is simply not a key. */
+export function uploadKeysOf(raw: string): string[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  return parsed
+    .map((entry) =>
+      entry && typeof entry === 'object' ? (entry as { key?: unknown }).key : undefined,
+    )
+    .filter((key): key is string => typeof key === 'string' && key !== '')
+}
+
+/**
+ * Objects out of the bucket, a thousand keys at a time.
+ *
+ * **This throws**, deliberately, and every caller decides what that means: the
+ * delete paths let it abort so the rows stay behind to retry from, and the
+ * submit route's compensating cleanup swallows it because the failure it is
+ * compensating for is the one worth reporting (`uploadAsset`'s rule).
+ */
+export async function deleteUploads(bucket: R2Bucket, keys: readonly string[]): Promise<void> {
+  for (let i = 0; i < keys.length; i += R2_DELETE_KEYS) {
+    await bucket.delete(keys.slice(i, i + R2_DELETE_KEYS))
+  }
+}
+
+/** Every object every response to this form holds, in keyset pages. */
+async function purgeFormUploads(db: FolioDb, bucket: R2Bucket, formId: string): Promise<void> {
+  let after = ''
+  for (;;) {
+    const { keys, last } = await uploadKeysPage(db, formId, after)
+    if (keys.length > 0) await deleteUploads(bucket, keys)
+    if (last === null) return
+    after = last
+  }
+}
+
 export interface DeleteFormResult {
   deleted: boolean
   /** Responses destroyed with it. */
@@ -737,17 +852,44 @@ export interface DeleteFormResult {
  * mean "this published page renders this form", and nothing renders a form that
  * no longer exists.
  *
- * **The R2 objects behind `files` are not deleted here yet** — the count is
- * honest about how many there are, and phase 5 of the spec owns the R2 half of
- * every delete path, walking the `files` column in keyset pages before this
- * batch runs. Until a `file` question can be built there is nothing for it to
- * find, which is why the order is safe rather than merely convenient.
+ * **The R2 objects go first, walked in keyset pages** (decision 15). They have
+ * to: the keys are only knowable from the rows this batch is about to destroy,
+ * so a batch that ran first would leave every file ever submitted to this form
+ * in the bucket with nothing left pointing at it — invisible, permanent, and
+ * paid for monthly. The walk is paged rather than one `select`, because a form
+ * with fifty thousand responses is the case `responseCounts` was already written
+ * around.
+ *
+ * **A failed object delete aborts the whole thing, and that is the recoverable
+ * side to be wrong on.** This is the one place `deleteAsset`'s "swallow the R2
+ * failure" rule is inverted, and the reason is the order: `deleteAsset` deletes
+ * the row first, so by the time R2 is reached there is nothing left to retry
+ * *from*. Here the rows are still there, so throwing leaves a delete that can
+ * simply be repeated; swallowing would commit the batch and orphan the objects
+ * the walk had just failed to remove.
  *
  * Nothing here binds a caller-sized list: three statements, one or two binds
- * each, whatever the form holds.
+ * each, and the walk is four binds a page whatever the form holds.
  */
-export async function deleteForm(db: FolioDb, id: string): Promise<DeleteFormResult> {
+export async function deleteForm(
+  db: FolioDb,
+  id: string,
+  bucket?: R2Bucket,
+): Promise<DeleteFormResult> {
   const counts = await responseCounts(db, id)
+  if (counts.files > 0) {
+    if (!bucket) {
+      // Unreachable through the routes — a form cannot gain a `file` question
+      // on a host with no `media` binding — but a delete that silently orphaned
+      // twelve people's CVs because a caller passed two arguments instead of
+      // three is exactly the failure `documents.ts` exists to stop elsewhere.
+      throw new FolioError(
+        'unsupported',
+        'No media bucket is configured, and this form holds uploaded files.',
+      )
+    }
+    await purgeFormUploads(db, bucket, id)
+  }
   const [, , removed] = await db.batch([
     db.prepare('delete from form_responses where form_id = ?').bind(id),
     db.prepare('delete from content_refs where to_id = ? and kind = ?').bind(id, 'form'),
