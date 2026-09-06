@@ -269,15 +269,23 @@ what every one after them is expected to be. `0005` is the first to create a *vi
 table; `test/workers/sql-split.ts` needed no change for it, because the DDL uses no
 triggers (spec 30 decision 1) and therefore no `BEGIN … END`.
 
-Two more are **claimed by drafts** and not landed: `0006_auth.sql` (28: two
-`alter table add column`s and an `auth_events` table) and `0007_passkeys.sql` (29: a
-`passkeys` table). **`0008_asset_organisation.sql` stopped being a claim with spec
-32's phase 1** and is on disk; the drafted contents named an `asset_tag_links` table
-that was built as `asset_taggings`. Spec 23's `sites` migration therefore reads
-`0009` in the index.
-Both restamped once when `0005` landed: the drafts claimed `0005` and `0006`, written
-before the build order put 30 first. A claim is a stamp, not a landing — whichever of
-the remaining two builds first takes the next free number and the other restamps.
+**Nothing is a claim any more.** `0005`–`0008` and `0010` all landed on the branch
+`specs-31-30-28-29` over 2026-09-05/06 — `0005_content_fts.sql` (30),
+`0006_auth.sql` (28: two `alter table add column`s and an `auth_events` table),
+`0007_passkeys.sql` (29), `0008_asset_organisation.sql` (32), `0010_forms.sql` (33).
+Spec 32's drafted contents named an `asset_tag_links` table that was built as
+`asset_taggings`.
+
+**`0009` is a hole, deliberately.** It is spec 23's `sites` migration, which is still
+a draft, and 33 took `0010` rather than closing the gap because renumbering a claim
+somebody else is working against is how two migrations end up sharing a number. The
+next free number is `0011`; a spec that wants `0009` should take it only if 23 is
+abandoned.
+
+That is the standing rule having run its course rather than an exception to it: a
+claim is a stamp, not a landing, and every one of these restamped at least once as
+the build order settled — 28 and 29 both moved when 30 went first, and 23 moved to
+make room for 32.
 
 **Landed on `main`: `0001`–`0005`. Landed on the build branch: `0006` (28),
 `0007` (29), `0008` (32, media library) and `0010` (33, forms). Claimed: `0009`
