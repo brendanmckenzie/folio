@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { defineBlock, reference, richtext, text } from '../../src/core'
 import type { Doc } from '../../src/core/doc'
 import { createFolio } from '../../src/server'
+import { createForm } from '../../src/server/forms'
 import type { FolioBindings } from '../../src/server'
 
 /**
@@ -32,6 +33,10 @@ const page = defineBlock({
     related: reference({ label: 'Related', types: ['page'] }),
     // Somewhere to put more internal links than one D1 statement can bind.
     body: richtext({ label: 'Body' }),
+    // A form to embed, so `resolve`'s forms read has something to fetch. Left
+    // unset by `pageDoc`, which is what makes "a page with no form issues no
+    // forms query" measurable against the same block.
+    enquiry: { kind: 'form' as const, label: 'Enquiry' },
   },
   render: () => null,
 })
@@ -258,7 +263,7 @@ describe('resolve(): the published branch sends both passes at once', () => {
 })
 
 /** A page that references `id`, so `resolve`'s second pass has a document to fetch. */
-function referencingDoc(id: string): Doc {
+function referencingDoc(id: string, formId?: string): Doc {
   return {
     root: 'root0000',
     bloks: {
@@ -268,11 +273,51 @@ function referencingDoc(id: string): Doc {
         parent: null,
         slot: null,
         order: 'a0',
-        data: { title: 'Linking', related: id },
+        data: { title: 'Linking', related: id, ...(formId ? { enquiry: formId } : {}) },
       },
     },
   }
 }
+
+/**
+ * The forms a document embeds are read *alongside* the story map
+ * (`../../docs/specs/content-model/forms.md` architecture decision 4), for the
+ * identical reason the two passes above overlap: the ids come straight off the
+ * document walk and depend on nothing pass one returns, so awaiting it would buy
+ * a filter that changes nothing at the price of a whole round trip per render.
+ *
+ * Neither half is visible in the answer — the same descriptors come back either
+ * way, and a page with no form resolves identically whether the query ran or
+ * not — so the send order and the query count are the only evidence there is.
+ */
+describe('resolve(): the forms a document embeds', () => {
+  it('goes out with the story map, not after it', async () => {
+    const target = 'sty_rs_fref'
+    await insertPage(target, 'rs-fref', 'Referenced', pageDoc('Referenced'))
+    const form = await createForm(env.DB, { label: 'Enquiry' })
+
+    const spy = spyOn(env.DB)
+    await makeFolio(spy.db).resolve(env, referencingDoc(target, form.id))
+
+    // Three independent reads: the story map, the referenced documents, the
+    // forms. All three are sent before any of them is waited on.
+    expect(spy.prepares).toBe(3)
+    expect(spy.order.slice(0, 3)).toEqual(['send', 'send', 'send'])
+  })
+
+  it('issues no query at all for a document that embeds none', async () => {
+    const target = 'sty_rs_fnone'
+    await insertPage(target, 'rs-fnone', 'Referenced', pageDoc('Referenced'))
+
+    const spy = spyOn(env.DB)
+    await makeFolio(spy.db).resolve(env, referencingDoc(target))
+
+    // The same document minus the form field: the forms read is the *ids*, and
+    // an empty list never reaches D1. A page that carries no form must cost
+    // exactly what it did before forms existed.
+    expect(spy.prepares).toBe(2)
+  })
+})
 
 describe('folio.miss(): one round trip for a path with no live page', () => {
   it('asks about the redirect and the state together, in one batch', async () => {

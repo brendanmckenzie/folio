@@ -1,6 +1,7 @@
 import { createExecutionContext, env, SELF, waitOnExecutionContext } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { defineBlock, text } from '../../src/core'
+import { defineBlock, outboundRefs, text, toRegistry, toSchemaIndex } from '../../src/core'
+import type { Doc } from '../../src/core/doc'
 import type { Page } from '../../src/core/pagination'
 import { createFolio } from '../../src/server'
 import {
@@ -507,5 +508,152 @@ describe('deleteForm as a method', () => {
       responses: 0,
       files: 0,
     })
+  })
+})
+
+/* ---------------------------------------------------------- the descriptor --- */
+
+/**
+ * A `form` field is a lookup on `resolution.forms` (decision 4), which means
+ * three things have to line up and each is silent when it does not:
+ *
+ *  - **The ids come off the document walk.** `resolve()` loads the forms a page
+ *    embeds, not every form on the site, and a page embedding none must issue no
+ *    forms query at all (`read-session.test.ts` pins that half, where the query
+ *    count is observable).
+ *  - **A rendered page carries `form:<id>`.** The purge is already wired —
+ *    `formChanged` → `purge('form change', [formTag(id)])` — and it reaches
+ *    nothing at all unless the tag is on the page in the first place. This is the
+ *    half that makes a structural save honest about a week-long TTL.
+ *  - **The action and `_folio_page` are computed at render**, from the base path
+ *    and the host's own `route`, so remounting Folio or renaming a form
+ *    invalidates nothing.
+ */
+
+const formPage = defineBlock({
+  name: 'page',
+  label: 'Page',
+  summary: 'title',
+  fields: {
+    title: text({ label: 'Title', required: true }),
+    // No `form()` builder exists yet — phase 1 added the union member and the
+    // resolution, and a block author writes the literal until one does.
+    enquiry: { kind: 'form' as const, label: 'Enquiry' },
+  },
+  render: () => null,
+})
+
+function folioWithForm() {
+  return createFolio<Cloudflare.Env>({
+    blocks: [formPage],
+    types: [{ name: 'page', label: 'Page', kind: 'page', root: 'page' }],
+    bindings: (e) => ({ db: e.DB, story: e.STORY, media: e.MEDIA, images: e.IMAGES }),
+    basePath: '/folio',
+    auth: 'open',
+    route: (p) => (p ? `/${p}` : '/'),
+  })
+}
+
+/** A published page whose root block embeds `formId` (or nothing). */
+async function insertFormPage(id: string, path: string, formId?: string): Promise<Doc> {
+  const doc = {
+    root: 'root0000',
+    bloks: {
+      root0000: {
+        uid: 'root0000',
+        type: 'page',
+        parent: null,
+        slot: null,
+        order: 'a0',
+        data: { title: 'Contact', ...(formId ? { enquiry: formId } : {}) },
+      },
+    },
+  }
+  await env.DB.prepare(
+    `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at,
+                          published_doc, published_at)
+     values (?, 'page', null, ?, ?, 'a0', 'Contact', ?, ?, ?)`,
+  )
+    .bind(id, path, path, Date.now(), JSON.stringify(doc), Date.now())
+    .run()
+  return doc
+}
+
+describe('resolve(): the descriptor a page renders from', () => {
+  it('compiles one per embedded form, with the action and the page it was rendered on', async () => {
+    const form = await makeForm('Enquiry')
+    await patch<Form>(`/forms/${form.id}`, {
+      expectedUpdatedAt: form.updatedAt,
+      fields: [NAME_FIELD, EMAIL_FIELD],
+      submitLabel: 'Send it',
+    })
+    await insertFormPage('sty_fx_a', 'fx-a', form.id)
+
+    const page = await folioWithForm().reader(env).page('fx-a')
+    const descriptor = page?.resolution.forms?.[form.id]
+
+    expect(descriptor?.action).toBe(`/folio/f/${form.id}`)
+    expect(descriptor?.method).toBe('post')
+    expect(descriptor?.enctype).toBe('application/x-www-form-urlencoded')
+    expect(descriptor?.open).toBe(true)
+    expect(descriptor?.version).toBe(2)
+    expect(descriptor?.submitLabel).toBe('Send it')
+    expect(descriptor?.fields.map((f) => f.name)).toEqual(['full_name', 'email'])
+    // The page it came from, through the host's own `route` — which is what the
+    // submit route sends the browser back to.
+    expect(descriptor?.hidden).toEqual([{ name: '_folio_page', value: '/fx-a' }])
+  })
+
+  it('puts the form on the page cache tags, which is what a structural save purges', async () => {
+    const form = await makeForm('Tagged')
+    await insertFormPage('sty_fx_b', 'fx-b', form.id)
+
+    const page = await folioWithForm().reader(env).page('fx-b')
+    // `formChanged` purges exactly this string. Without it on the page, a
+    // required field added to the form leaves a week of cached markup that the
+    // live route refuses, and nothing anywhere says so.
+    expect(page?.headers['cache-tag']).toContain(`form:${form.id}`)
+    expect(page?.headers['cache-tag']).toContain('story:sty_fx_b')
+  })
+
+  it('leaves the map absent for a page that embeds none, and for a form since deleted', async () => {
+    await insertFormPage('sty_fx_c', 'fx-c')
+    const bare = await folioWithForm().reader(env).page('fx-c')
+    // Absent rather than `{}`, the rule `docs` and `globals` follow.
+    expect(bare?.resolution.forms).toBeUndefined()
+    expect(bare?.headers['cache-tag']).not.toContain('form:')
+
+    const form = await makeForm('Doomed')
+    await insertFormPage('sty_fx_d', 'fx-d', form.id)
+    await deleteForm(env.DB, form.id)
+
+    const orphaned = await folioWithForm().reader(env).page('fx-d')
+    // The same posture a `reference` to a deleted document takes: no entry, and
+    // `resolveValue` answers `null` so the host's block renders nothing.
+    expect(orphaned?.resolution.forms).toBeUndefined()
+  })
+
+  it('walks the same edge the usage count reads, so a page renders and is counted', async () => {
+    const form = await makeForm('Used')
+    const doc = await insertFormPage('sty_fx_e', 'fx-e', form.id)
+
+    // The publish projection's edges, from the identical walk `resolve()` uses
+    // to decide which forms to load (`core/refs.ts`'s `formIds`). Written here
+    // the way `contentProjection` writes them, so the two strings that have to
+    // agree — the kind the walk emits and the kind the counter binds — are both
+    // under test rather than both hard-coded.
+    const edges = outboundRefs(doc, toSchemaIndex(toRegistry([formPage])), 'sty_fx_e')
+    expect(edges).toContainEqual({ to: form.id, kind: 'form' })
+    for (const edge of edges) {
+      await env.DB.prepare('insert into content_refs (from_story, to_id, kind) values (?, ?, ?)')
+        .bind('sty_fx_e', edge.to, edge.kind)
+        .run()
+    }
+
+    const { json } = await get<{ published: { path: string }[]; total: number }>(
+      `/forms/${form.id}/usage`,
+    )
+    expect(json.total).toBe(1)
+    expect(json.published[0]?.path).toBe('fx-e')
   })
 })

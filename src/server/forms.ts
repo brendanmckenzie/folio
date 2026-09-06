@@ -27,7 +27,18 @@
  * per statement, which is the ceiling and not a soft limit, so `bindChunks`
  * sizes both rather than a comment promising nobody will pass more than ninety.
  */
-import { validateFormFields, type FormField, formSlug, shapeOf } from '../core/forms'
+import {
+  FILE_ACCEPT,
+  type FormField,
+  type FormFieldOption,
+  formSlug,
+  honeypotName,
+  type ResolvedForm,
+  type ResolvedFormField,
+  shapeOf,
+  validateFormFields,
+} from '../core/forms'
+import type { LocaleContext } from '../core/locales'
 import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
 import type { StoryMeta } from '../core/story'
 import { bindChunks, type FolioDb } from './db'
@@ -216,6 +227,161 @@ export async function formsByIds(db: FolioDb, ids: readonly string[]): Promise<F
     }),
   )
   return pages.flat().map(toForm)
+}
+
+/* -------------------------------------------------------------- descriptor --- */
+
+/**
+ * What `compileForm` needs beyond the row itself. All three come from the
+ * render, none of them from storage.
+ */
+export interface FormRenderContext {
+  /**
+   * Where Folio is mounted (`FolioConfig.basePath`). The action is
+   * `${base}/f/<id>`, **computed here and never stored**, the rule `assetBase`
+   * already follows: remounting Folio under a different base path must not
+   * invalidate every page that carries a form.
+   */
+  base: string
+  /**
+   * The render's locale, or undefined for the source locale. Every string a
+   * visitor reads is resolved through this chain here, so a host writes no
+   * locale code at all (decision 12).
+   */
+  locale?: LocaleContext
+  /**
+   * The URL of the page being rendered, for the `_folio_page` hidden input.
+   * Absent when the render does not know its page — `folio.resolve(env, doc)`
+   * with no `story`, or a document that has no path. Then `hidden` is empty and
+   * the submit route falls back to `Referer` and then to `/`.
+   */
+  page?: string
+  /** The clock half of `isOpen`. Injected so a test can move it. */
+  now?: number
+}
+
+/** The i18n keys a `FormField` can translate one string under. */
+type TranslatableKey = 'label' | 'help' | 'placeholder'
+
+/**
+ * One string through the locale chain: the active locale, then each fallback,
+ * then the source. `fieldValue`'s rule (`core/locales.ts`) applied to a form's
+ * own i18n map — **the first *defined* candidate wins**, so a translation of
+ * `''` is a deliberate emptiness that survives and a missing one falls back
+ * rather than leaving a hole.
+ */
+function translate(
+  field: FormField,
+  key: TranslatableKey,
+  locale: LocaleContext | undefined,
+): string | undefined {
+  if (locale) {
+    for (const code of [locale.code, ...locale.fallbacks]) {
+      const candidate = field.i18n?.[code]?.[key]
+      if (candidate !== undefined) return candidate
+    }
+  }
+  return field[key]
+}
+
+/** An option's label through the same chain, keyed by the option's value. */
+function translateOption(
+  field: FormField,
+  option: FormFieldOption,
+  locale: LocaleContext | undefined,
+): FormFieldOption {
+  if (locale) {
+    for (const code of [locale.code, ...locale.fallbacks]) {
+      const candidate = field.i18n?.[code]?.options?.[option.value]
+      if (candidate !== undefined) return { value: option.value, label: candidate }
+    }
+  }
+  return option
+}
+
+/**
+ * One question as a host renders it.
+ *
+ * **Written key by key on purpose, never `{ ...field }`.** A spread would carry
+ * the whole `i18n` map — every locale's strings, on every page, for a visitor
+ * reading one — and would carry whatever a later column adds to `FormField`
+ * without anybody deciding it should be public. The projection is the decision.
+ */
+function compileField(field: FormField, locale: LocaleContext | undefined): ResolvedFormField {
+  const out: ResolvedFormField = {
+    name: field.name,
+    kind: field.kind,
+    label: translate(field, 'label', locale) ?? field.label,
+    // Always a boolean: a host writes `required={f.required}` and an absent key
+    // would render `required` as present-and-false in some frameworks.
+    required: field.required === true,
+  }
+  const help = translate(field, 'help', locale)
+  if (help !== undefined) out.help = help
+  const placeholder = translate(field, 'placeholder', locale)
+  if (placeholder !== undefined) out.placeholder = placeholder
+  if (field.max !== undefined) out.max = field.max
+  if (field.min !== undefined) out.min = field.min
+  if (field.pattern !== undefined) out.pattern = field.pattern
+  if (field.options) out.options = field.options.map((o) => translateOption(field, o, locale))
+  // The expanded content-type list, not the stored token: a host puts it
+  // straight on the input's `accept`, and the menu it came from is an editor's
+  // vocabulary rather than a visitor's.
+  if (field.accept !== undefined) out.accept = FILE_ACCEPT[field.accept]
+  if (field.maxBytes !== undefined) out.maxBytes = field.maxBytes
+  if (field.value !== undefined) out.value = field.value
+  if (field.text !== undefined) out.text = field.text
+  return out
+}
+
+/** The name Folio's own hidden input carries. `_`-prefixed, and the builder
+ *  refuses a field slug in that namespace (decision 13). */
+export const PAGE_INPUT = '_folio_page'
+
+/**
+ * A stored form as a `render` receives it (decision 4): everything a host needs
+ * to render a working form and nothing it has to derive — the action, the
+ * encoding, the honeypot's name, and every question already localised.
+ *
+ * Three things here are the whole reason this is compiled server-side rather
+ * than left to a host:
+ *
+ * - **`open` comes from `isOpen`, never from `form.open`.** The switch alone is
+ *   half the answer; a form whose `closesAt` has passed is closed and the route
+ *   will say so whatever the markup said (decision 14). Deriving it twice is how
+ *   the page and the endpoint come to disagree.
+ * - **`enctype` is on the descriptor.** A form with a file question submitted as
+ *   `application/x-www-form-urlencoded` sends the string `[object File]` and
+ *   raises no error anywhere.
+ * - **This is a projection, not a view of the row.** Nothing a visitor should not
+ *   see may ride along: not `updatedAt` (the concurrency token), not `closesAt`,
+ *   not the authoring `i18n` maps, and not whatever a later column adds. The
+ *   descriptor is assembled key by key and `test/workers/forms.test.ts` pins its
+ *   exact shape, the same posture `presenceOf` takes toward a socket attachment.
+ */
+export function compileForm(form: Form, ctx: FormRenderContext): ResolvedForm {
+  const fields = form.fields.map((field) => compileField(field, ctx.locale))
+  return {
+    id: form.id,
+    name: form.name,
+    action: `${ctx.base}/f/${form.id}`,
+    method: 'post',
+    enctype: form.fields.some((f) => f.kind === 'file')
+      ? 'multipart/form-data'
+      : 'application/x-www-form-urlencoded',
+    version: form.version,
+    open: isOpen(form, ctx.now ?? Date.now()),
+    fields,
+    hidden: ctx.page ? [{ name: PAGE_INPUT, value: ctx.page }] : [],
+    honeypot: honeypotName(
+      form.id,
+      form.fields.map((f) => f.name),
+    ),
+    submitLabel: form.submitLabel,
+    successMessage: form.successMessage,
+    closedMessage: form.closedMessage,
+    redirectTo: form.redirectTo,
+  }
 }
 
 /**

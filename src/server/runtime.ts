@@ -24,7 +24,7 @@ import {
   type ContentQuery,
   type ResolvedCollection,
 } from '../core/query'
-import { linkedIds, referencedIdsAllLocales } from '../core/refs'
+import { formIds, linkedIds, referencedIdsAllLocales } from '../core/refs'
 import type { PreviewWrap } from '../core/render-wrap'
 import { buildResolution, type Resolution } from '../core/resolve'
 import {
@@ -46,6 +46,7 @@ import { type ResolvedAuth, resolveAuth } from './auth/config'
 import { cachePurgeHooks } from './cache-purge'
 import { type ContentProjection, contentProjection } from './content-index'
 import { type ResolvedDescribe, validateDescribe } from './describe'
+import { compileForm, formsByIds } from './forms'
 import { type ResolvedGate, validateGate } from './gate'
 import {
   createHookRunner,
@@ -669,6 +670,19 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
           ancestorPaths(opts?.story?.path ?? null),
         )
 
+    /**
+     * The forms this document embeds (`../content-model/forms.md` decision 4),
+     * **issued here rather than awaited later**: the ids come straight off the
+     * document walk and depend on nothing pass one returns, so the read goes out
+     * alongside it and both branches below wait once instead of twice. Serialising
+     * it would cost a whole round trip per page render for nothing — the mistake
+     * the published branch's comment below records having already made once.
+     *
+     * A document with no `form` field issues no query at all: `formIds` answers
+     * an empty array and this never touches D1.
+     */
+    const formRows = formsByIds(db, doc ? formIds(doc, schema) : [])
+
     /** Pass two: the documents this one pulls in — references, and every global. */
     let docs: Record<string, Doc> = {}
     let globalDocs: Record<string, Doc> | undefined
@@ -743,6 +757,28 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       if (nested.size > 0) remember(await storiesFor(db, [...nested]))
     }
 
+    /**
+     * The descriptors, compiled from the rows the read above fetched. The action URL
+     * is built from this runtime's `base` and the `_folio_page` hidden input from
+     * the story's own URL through the host's `route` — so a submission comes back
+     * to the page it was made on, in the locale it was rendered in.
+     *
+     * A form the document points at that has since been deleted is simply absent
+     * from the map, and `resolveValue` answers `null` for it: the same posture a
+     * `reference` to a deleted document takes.
+     */
+    const formPage = opts?.story?.path != null ? route(opts.story.path, active?.code) : undefined
+    const forms = Object.fromEntries(
+      (await formRows).map((form) => [
+        form.id,
+        compileForm(form, {
+          base,
+          ...(active ? { locale: active } : {}),
+          ...(formPage !== undefined ? { page: formPage } : {}),
+        }),
+      ]),
+    )
+
     const resolution: Resolution = {
       ...buildResolution([...known.values()].map(withUrls), assetBase),
       ...localeField,
@@ -752,6 +788,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       // with no references bootstraps the byte-identical payload it always did.
       ...(Object.keys(docs).length > 0 ? { docs } : {}),
       ...(globalDocs ? { globals: globalDocs } : {}),
+      ...(Object.keys(forms).length > 0 ? { forms } : {}),
     }
 
     /** Pass four: the collection queries this document contains, run once each. */

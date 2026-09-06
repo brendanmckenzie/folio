@@ -51,6 +51,17 @@
 > of the asset usage shape, and that `validateFormFields`' refusals had to be
 > translated into `bad_request` or every one of them was a 500.
 
+> **Phase 3 landed 2026-09-06** (`compileForm` and `FormRenderContext` in
+> `src/server/forms.ts`, the forms read and the descriptor map in `resolve()`,
+> `test/unit/server/forms.test.ts`, and extensions to `test/workers/forms.test.ts`
+> and `test/workers/read-session.test.ts`). The plan's step 3 turned out to need no
+> code — `contentProjection` already emits `kind: 'form'` edges through
+> `outboundRefs`, since phase 1 — and one limitation the spec does not cover came
+> out of it: a form embedded in a **global** or in a referenced document resolves
+> to `null`, because its id is not known until pass two. Both are under
+> "Implementation notes — phase 3" at the end of this file, along with the
+> `form()` field builder that still does not exist. Phases 4–8 are outstanding.
+
 ## Summary
 
 Folio can publish a page that asks a question and has nowhere to put the answer. There
@@ -1735,3 +1746,86 @@ are not removed. Phase 5 owns the R2 half of every delete path and has to walk
 the `files` column in keyset pages **before** the batch runs. Until a `file`
 question can be built there is nothing for it to find, which is why the order is
 safe rather than merely convenient.
+
+## Implementation notes — phase 3 (landed 2026-09-06)
+
+Resolution and the descriptor. `resolution.forms` is populated, a rendered page
+carries `form:<id>`, and the purge phase 2 wired now reaches something.
+
+### Divergences from the plan
+
+1. **Step 3 needed no code.** The plan has `content-index.ts` gaining a
+   `kind: 'form'` edge in the publish projection; `contentProjection` delegates
+   to `core/refs.ts`'s `outboundRefs`, which phase 1 already taught the fourth
+   kind, so the projection has emitted form edges since phase 1. What was missing
+   was a test that the kind the walk emits is the kind `formUsage` binds — two
+   string literals in different files that have to agree — and that is now
+   `walks the same edge the usage count reads` in `test/workers/forms.test.ts`.
+
+2. **`compileForm` takes a context, not a runtime.** The plan says "the action
+   from `rt.base`"; the function takes `FormRenderContext { base, locale?, page?,
+   now? }` and knows nothing about the runtime, which keeps it pure over a row
+   and therefore unit-testable in Node (`test/unit/server/forms.test.ts`) rather
+   than only against workerd. `now` exists so the clock half of `isOpen` can be
+   moved by a test; every caller omits it.
+
+3. **`_folio_page` carries the page's URL, not its path.** `opts.story.path` is
+   Folio's path (`about/contact`); what the browser is at is the host's own
+   `route(path, locale)` (`/about/contact`), and that is what `safeNext` accepts
+   and what the 303 has to be able to send a visitor back to. `resolve()` runs
+   the story's path through `route` for the render's locale, so a French page's
+   submission returns to the French page. `PAGE_INPUT` is exported from
+   `server/forms.ts` so phase 4 reads the key from one place.
+
+4. **The descriptor's key set is asserted, not just its contents.** Decision 4
+   describes what is on it; nothing described what must *not* be. `updatedAt` is
+   the concurrency token, `closesAt` is scheduling metadata and a field's `i18n`
+   is every locale's strings at once — none of them belong on a page a stranger
+   loads, and a later `{ ...form }` "tidy-up" would ship all three silently.
+   `carries nothing a visitor should not see` pins the exact key set of both the
+   form and a compiled field, the posture `presenceOf` takes toward a socket
+   attachment.
+
+### Known gap: a form inside a global or a referenced document
+
+`resolve()` collects form ids from **the document being rendered only**
+(`formIds(doc, schema)`). A `form` field inside a *global* — a newsletter signup
+in a site footer is the obvious case — or inside a document pulled in by a
+`reference` resolves to `null`, because its id is not known until pass two has
+come back, and reading it then would cost exactly the round trip decision 4 exists
+to avoid.
+
+This is a real limitation rather than an oversight, and the spec does not cover
+it. The cheap fix, when something needs it, is a second forms read in pass three
+beside the nested story lookup — that pass already exists, already costs a round
+trip when it runs at all, and is skipped in the ordinary case. Whoever builds
+phase 8's demo should know a footer form will not work until then.
+
+### Also missing, and not this phase's to add
+
+There is **no `form()` field builder** in `core/fields.ts`. Phase 1 added the
+union member, `ValueOf`, `defaultValue` and the exhaustive-switch cases, but no
+constructor beside `collection()` and `reference()`, so a block author writes
+`{ kind: 'form' as const, label: 'Enquiry' }` — which is what both new tests do.
+Phase 6 or phase 8 should add it; it is one line and one export.
+
+### Verified by breaking
+
+Three, each restored in place:
+
+- **`open: form.open` instead of `isOpen(form, now)`** — one test red,
+  `answers open from the switch and the clock together`. Only the clock case
+  moves: a switched-off form is closed either way, and a form whose `closesAt`
+  has passed is the state where the page and the submit route come to disagree.
+- **`formRows = pass1.then(() => formsByIds(…))`** — the sequential version,
+  which returns byte-identical descriptors. `goes out with the story map, not
+  after it` in `read-session.test.ts` reads `['send', 'send', 'recv']` where it
+  wants three sends, which is the only evidence a round trip was spent.
+- **A `...form` spread at the top of the descriptor** — `carries nothing a
+  visitor should not see` red, naming `createdAt`, `updatedAt` and `closesAt`.
+
+### Test counts
+
+131 files / 3889 passing + 1 todo, from 130 / 3875 + 1. Fourteen added: eight
+unit (`test/unit/server/forms.test.ts`, new), four in `test/workers/forms.test.ts`
+and two in `test/workers/read-session.test.ts`. Nothing was changed or removed.
