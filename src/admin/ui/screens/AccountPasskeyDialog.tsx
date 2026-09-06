@@ -47,11 +47,10 @@ export function AccountPasskeyDialog({ apiBase, onClose, onEnrolled }: Props) {
     setBusy(true)
     setError(null)
     try {
-      const optionsRes = await fetch(`${apiBase}/me/passkeys/options`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: '{}',
-      })
+      // No body: the route derives everything from the session. See the login
+      // script's own call for what an unread body costs across an entrypoint
+      // boundary.
+      const optionsRes = await fetch(`${apiBase}/me/passkeys/options`, { method: 'POST' })
       if (!optionsRes.ok) throw new Error(await messageOf(optionsRes))
       const { publicKey } = (await optionsRes.json()) as {
         publicKey: PublicKeyCredentialCreationOptionsJSON

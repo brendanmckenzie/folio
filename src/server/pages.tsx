@@ -383,11 +383,13 @@ const LOGIN_PASSKEY_SCRIPT = `(function () {
   function arm(mediation) {
     var ctl = new AbortController()
     controller = ctl
-    fetch(base + '/login/passkey/options', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}'
-    })
+    // No body, deliberately: the route mints a challenge from the URL and takes
+    // no input at all (its own enumeration-oracle comment says why). A body
+    // nothing reads is not free - a host that forwards writes across an
+    // entrypoint boundary (ctx.exports.X.fetch(request)) throws "Can't read
+    // from request stream after response has been sent" on the forwarding
+    // invocation, on every sign-in, for an empty object no handler wanted.
+    fetch(base + '/login/passkey/options', { method: 'POST' })
       .then(function (res) { return res.json() })
       .then(function (body) {
         var publicKey = body.publicKey
