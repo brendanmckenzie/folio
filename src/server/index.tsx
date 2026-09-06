@@ -272,6 +272,14 @@ export type { CacheVerdict } from './cache-request'
  */
 export type { FolioGate, FolioGateContext } from './types'
 export type { PageAccess } from '../core/gate'
+/**
+ * The describe seam (`../../docs/specs/content-model/media-library.md`
+ * decision 8): the one function a host declares to give its media library
+ * machine-written alt text, what it is handed, and what it may answer. Folio
+ * holds no API key and makes no model call of its own, so these three types are
+ * the entire contract.
+ */
+export type { DescribeInput, DescribeResult, FolioDescribe } from './types'
 export type {
   Folio,
   FolioBindings,

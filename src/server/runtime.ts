@@ -45,6 +45,7 @@ import { ancestorPaths, type StoryMeta, type StoryNode } from '../core/story'
 import { type ResolvedAuth, resolveAuth } from './auth/config'
 import { cachePurgeHooks } from './cache-purge'
 import { type ContentProjection, contentProjection } from './content-index'
+import { type ResolvedDescribe, validateDescribe } from './describe'
 import { type ResolvedGate, validateGate } from './gate'
 import {
   createHookRunner,
@@ -181,6 +182,14 @@ export interface FolioRuntime {
    * cannot see a root block's name at all.
    */
   gate: ResolvedGate | null
+  /**
+   * `FolioConfig.describe`, validated and defaulted, or **null for a host that
+   * configured none** — which is the whole of "this site does not do this": the
+   * describe routes answer `unsupported`, no machine column is ever written, and
+   * an upload behaves exactly as it did before the feature existed
+   * (`../content-model/media-library.md` decision 8).
+   */
+  describe: ResolvedDescribe | null
   /** A declared type by name, or undefined — a row whose type was removed from
    * the code still reads, it just has no schema to render ("Unknown type"). */
   typeOf: (name: string | undefined) => DocumentType | undefined
@@ -397,6 +406,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // wrong kind, or declared on no `page` root is a gate the editor believes in
   // and nothing enforces (`../platform/visitor-access.md` decision 8).
   const gate = validateGate(config.gate, types, schema)
+  // Same timing, same reason: `describe.fn` that is not a function, an unknown
+  // key, or a `concurrency` outside 1–8 is a config mistake, and the request
+  // that would otherwise discover it is a background `waitUntil` after an
+  // upload — where nobody is looking and the only symptom is alt text that
+  // never appears (`../content-model/media-library.md` decision 8).
+  const describe = validateDescribe(config.describe)
   // Same timing, same reason: `globals` naming an unknown type or a non-
   // singleton one is a config mistake, not a runtime surprise the first page
   // render discovers (`../../docs/specs/content-model/globals.md`).
@@ -901,6 +916,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     schemaId,
     auth,
     gate,
+    describe,
     typeOf,
     defaultType: fallbackType,
     titleFor,

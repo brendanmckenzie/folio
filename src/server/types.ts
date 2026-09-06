@@ -230,6 +230,93 @@ export interface FolioGate<Env, V = unknown> {
 }
 
 /**
+ * Machine-written alt text and descriptions
+ * (`../../docs/specs/content-model/media-library.md` decision 8): **a host
+ * function, not a provider name and an API key**.
+ *
+ * Folio holds no key, picks no model, writes no prompt and makes no outbound
+ * call of its own. That is `gate`'s shape rather than a binding's, and it is the
+ * whole design: the moment Folio owns the request it owns the retry policy, the
+ * timeout nobody agrees on, and a vendor list to keep current. It owns none of
+ * them, so `describe` needs no allowlist and no adapter to be useful — an
+ * adapter (`anthropicDescriber`) is a convenience over this seam, never a second
+ * one.
+ *
+ * Absent is the whole of "this site does not do this": no column is written, no
+ * host code runs, the admin renders no *Describe* control, and the routes answer
+ * `unsupported` — exactly as `media` and `browser` already do.
+ */
+export interface FolioDescribe<Env> {
+  /**
+   * The host's own model call. Whatever it returns is clamped and bounded
+   * (`server/describe.ts`) before a byte of it is stored: it is arbitrary text
+   * from a model, and a model is a caller.
+   *
+   * **Declared as a method rather than a property-typed arrow**, for
+   * `FolioGate`'s reason above: only method parameters are bivariant under
+   * `strictFunctionTypes`, and without that a host's
+   * `FolioDescribe<Env>` would not be assignable to the `FolioDescribe<unknown>`
+   * the runtime widens it to.
+   */
+  fn(input: DescribeInput, env: Env): Promise<DescribeResult>
+  /** Describe a new upload in the background (`ctx.waitUntil`). Default true. */
+  onUpload?: boolean
+  /** In-flight model calls per batch. Default 4; 1–8, refused at construction
+   * outside that. */
+  concurrency?: number
+}
+
+/**
+ * What a host's `fn` is handed. Two ways to reach the same pixels, because
+ * neither works everywhere:
+ *
+ *  - `url` is public and cheap — a model API fetches it directly, and it is a
+ *    512px WebP wherever `images` is bound, which is an order of magnitude fewer
+ *    tokens than a 20MB original.
+ *  - `bytes()` is for a deployment a model API cannot reach: a local
+ *    `wrangler dev`, a preview behind Access. **Lazy**, because at
+ *    `concurrency: 4` and a 20MB ceiling, eagerly reading every one would put
+ *    80MB of `ArrayBuffer` live in one isolate per batch.
+ */
+export interface DescribeInput {
+  id: string
+  filename: string
+  contentType: string
+  width: number | null
+  height: number | null
+  /** `{base}/asset/<key>?w=512&f=webp` when `images` is bound, the original
+   * otherwise. Absolute, so a model API can fetch it without knowing the host. */
+  url: string
+  /** The same bytes, read from R2 on demand. Not read unless called. */
+  bytes(): Promise<ArrayBuffer>
+  /**
+   * Every tag that exists, for the prompt — and the *only* tags a result may
+   * name (decision 11). A model handed an open vocabulary invents a near-synonym
+   * per image, which is what would destroy the slug identity the whole taxonomy
+   * rests on.
+   */
+  tags: readonly { id: string; name: string }[]
+}
+
+/**
+ * What a host's `fn` answers, before Folio has looked at it.
+ *
+ * Every field is optional and every field is checked: a string that is not a
+ * string is ignored, an over-long one is truncated, and a tag matching no
+ * existing slug is dropped and **counted** rather than silently discarded
+ * (decision 11) — a host whose prompt keeps proposing `product-shot` should find
+ * out and create the tag.
+ */
+export interface DescribeResult {
+  /** Alt text. Truncated to 500, matching `AssetPatchBody.alt`. */
+  alt?: string
+  /** What the file *is*. Truncated to 2000, matching `AssetPatchBody.description`. */
+  description?: string
+  /** Tag names or slugs. Matched against existing tag slugs; unmatched dropped. */
+  tags?: readonly string[]
+}
+
+/**
  * Everything a host needs to answer one page request: `reader.page()`.
  *
  * Assembled from **one** read of the story row plus one resolve. The three-call
@@ -485,6 +572,19 @@ export interface FolioConfig<Env> {
    * a gate the editor believes in and nothing enforces.
    */
   gate?: FolioGate<Env>
+  /**
+   * Machine-written alt text, descriptions and tags for the media library
+   * (`../content-model/media-library.md` decision 8). One host function; Folio
+   * holds no API key and chooses no model.
+   *
+   * Absent is the whole of "this site does not do this": the describe routes
+   * answer `unsupported`, no machine column is ever written, and an upload
+   * behaves exactly as it does today. Validated at construction
+   * (`validateDescribe`) — a `fn` that is not a function, or a `concurrency`
+   * outside 1–8, is a config mistake and should not become a 500 on whichever
+   * request reaches it first.
+   */
+  describe?: FolioDescribe<Env>
   /**
    * The `singleton` types loaded into every page's `Resolution` — a header, a
    * footer, site settings (`../../docs/specs/content-model/globals.md`). An

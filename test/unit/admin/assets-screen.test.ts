@@ -488,6 +488,12 @@ describe('the field value', () => {
       row(),
       row({ width: null, height: null }),
       row({ alt: '' }),
+      // Machine alt text, and a human's beating it: `toAssetValue` reads
+      // `alt || altAuto` (media-library.md decision 9), and a copy that kept
+      // only `alt` would drop every described asset's text at pick time — which
+      // is invisible until somebody wonders why the run did nothing.
+      row({ alt: '', altAuto: 'A cyclist by a red brick wall' }),
+      row({ alt: 'Typed by hand', altAuto: 'Written by a model' }),
       row({
         filename: 'terms.pdf',
         contentType: 'application/octet-stream',

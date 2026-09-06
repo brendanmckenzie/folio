@@ -29,6 +29,7 @@ import {
   uploadAsset,
 } from '../assets'
 import { ASSETS, EDIT, READ } from '../auth/roles'
+import { describeAsset } from '../describe'
 import type { FolioDb } from '../db'
 import { FolioError, rethrow } from '../errors'
 import { requireAccess } from '../middleware'
@@ -437,6 +438,60 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         url: rt.withUrls(story).url ?? '',
       })),
       total: usage.total,
+    })
+  })
+
+  /* ----------------------------------------------------------- describe --- */
+
+  /**
+   * Alt text, a description and tags for one asset, from the host's own model
+   * call (`media-library.md` decision 8). Synchronous: one asset, one call, and
+   * the row that results — the *Describe* button on the detail panel. The batched
+   * run over a selection is phase 7's `POST {base}/api/assets/describe`, and it
+   * is the one route in this feature that is `ADMIN`, because it spends money by
+   * the hundred rather than by the one.
+   *
+   * **Two refusals, and the order matters.** No bucket comes first: there is
+   * nothing to look at, so "no media" is the truer answer than "no describe".
+   * Then the config key itself, named in the message — absence is a legible
+   * refusal here exactly as it is for `media` and `browser`, and the admin reads
+   * it off the manifest and renders no control at all.
+   *
+   * **`ASSETS` (editor+)**, matching `PATCH /assets/:id`: this writes the same
+   * kind of metadata onto one row, and it cannot touch a document. Nothing it
+   * writes reaches `alt` or `description` — the human columns — so the worst a
+   * misfired call can do is put a sentence in `alt_auto` that the next editor
+   * overtypes.
+   *
+   * **A failed model call is a 200 carrying `error`, not a 500.** `fn` is
+   * somebody else's HTTP call and it will time out, rate-limit and answer junk;
+   * every one of those is recorded in `describe_error` and *is* the outcome the
+   * caller asked for. A 500 would say Folio broke.
+   */
+  app.post('/assets/:id/describe', requireAccess<Env>(rt, ASSETS), async (c) => {
+    const { db, media, images } = c.var.bindings()
+    if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
+    if (!rt.describe) {
+      throw new FolioError('unsupported', 'No `describe` function is configured')
+    }
+
+    const row = await assetById(db, idParam('id', c.req.param('id')))
+    if (!row) throw new FolioError('not_found', 'Unknown asset')
+
+    // Absolute, from this request's own origin: `DescribeInput.url` is handed to
+    // somebody else's API to fetch, and `rt.base` alone is a path rather than a
+    // URL. The origin is only knowable here.
+    const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
+    const outcome = await describeAsset(
+      { db, media, images, assetBase, describe: rt.describe, env: c.env },
+      row,
+    )
+    return c.json({
+      asset: (await withTags(db, [outcome.row]))[0],
+      skipped: outcome.skipped,
+      tagged: outcome.tagged,
+      tagsIgnored: outcome.tagsIgnored,
+      error: outcome.error,
     })
   })
 

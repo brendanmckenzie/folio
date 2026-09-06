@@ -1565,3 +1565,84 @@ is one `AssetFolder | null` plus two booleans that the render tree makes
 exclusive, and `FolderEditDialog` and `TagManagerDialog` confirm a delete *inside*
 their own panel rather than opening a second one — the same collision, one level
 down.
+
+### Phase 6 — the describe seam (2026-09-06)
+
+`src/server/describe.ts` is new and holds `validateDescribe`, `ResolvedDescribe`,
+`describeAsset`, `describeVocabulary`, `describeUrl`, `matchTags` and the seven
+constants (`DEFAULT_DESCRIBE_CONCURRENCY`, its `MIN`/`MAX`, `MAX_DESCRIBE_ALT`,
+`MAX_DESCRIBE_DESCRIPTION`, `MAX_DESCRIBE_TAGS`, `MAX_PROMPT_TAGS`,
+`MAX_DESCRIBE_ERROR`). `FolioDescribe`, `DescribeInput` and `DescribeResult` are
+in `server/types.ts` beside `FolioGate` and exported from `folio/server`;
+`runtime.ts` validates at construction and carries `describe: ResolvedDescribe |
+null`; `toAssetValue` returns `alt || altAuto`; `POST {base}/api/assets/:id/describe`
+is in `routes/assets.ts`. `test/workers/describe.test.ts` is new (26) and
+`test/unit/server/describe.test.ts` is new (6).
+
+**`fn` is declared as a method, not a property-typed arrow**, which the spec's
+type sketch did not say and which decision 1 of `visitor-access.md` explains: only
+method parameters are bivariant under `strictFunctionTypes`, so a host's
+`FolioDescribe<Env>` is not assignable to the `FolioDescribe<unknown>` the runtime
+widens it to unless it is written as a method. `FolioGate` carries the same note
+for the same reason.
+
+**`concurrency` is refused rather than clamped.** Decision 8's code comment says
+"clamped to 1–8" and the Server types section says "validated at construction:
+`concurrency` an integer in range"; those are different behaviours and the second
+one won. Clamping a config value silently gives a host a run four times narrower
+than they asked for with nothing said; every other construction-time check in this
+library throws. Nothing outside the config is clamped — a *model's* answer is,
+which is the opposite direction and the point below.
+
+**A model's text is clamped, not refused, and the clamp is `clampText` in
+`validate.ts`.** The edge case says a 4,000-character description is "bounded to
+2,000 by the same `bounded()` validator a human's input goes through" — but
+`bounded()` *refuses*, and refusing here throws away a paid-for call, including
+the alt text that came back perfect, over ten characters. `clampText` is
+`bounded()`'s twin with the opposite failure: same `PRINTABLE` screen, same caps,
+but a non-string is `undefined`, unsupported characters are stripped rather than
+fatal, and the text is truncated **by code point** — a `.slice` at a fixed index
+lands between the halves of a surrogate pair and stores the lone `\p{Cs}` the
+screen exists to keep out.
+
+**Absent is not empty, applied to a model.** `describeAsset` writes only the
+machine columns the result actually named, so a re-run answering only a
+description does not wipe the `alt_auto` a previous run produced.
+`described_at` and `describe_error` are written every time, including the skip and
+both failure paths — "tried and there was nothing to do" has to be
+distinguishable from "never tried" or phase 7's backlog walk offers the same
+asset forever.
+
+**Tags are added, never replaced** — `insert or ignore`, the statement
+`runAssetBulk`'s `tag` action issues, not `setAssetTags`. Replacing would let a
+model delete tags an editor applied by hand, which is decision 9's rule about
+`alt` applied to the one other thing a run touches.
+
+**`matchTags` counts *distinct* drops.** `['Headshot', 'headshot']` against an
+existing `headshot` is one match and no drop; `['product-shot', 'product-shot']`
+is one ignored, not two. A non-string entry, or one that slugifies to nothing,
+counts as a drop — the model answered and it was not usable. Verified by breaking
+it: returning an unmatched slug as though it had matched turns three tests red
+across the pure function, the D1 write and the route (`tagsIgnored` falls to 0 and
+the asset carries a tag nothing created).
+
+**Decision 9's premise holds, and is now pinned.** `assets.alt` is read only by
+`toAssetValue` at pick time and by nothing else; no describe path resolves a
+document, writes a mutation log, fires a hook or purges a cache. `cannot clobber a
+human, and cannot touch a published page` publishes a document that uses the asset
+and asserts `published_doc` is byte-identical after a run.
+
+**`toAssetValue` has a copy in the admin and it had to move too.**
+`assets-model.ts`'s `assetValue` is a deliberate duplicate (bundling: the server
+module reaches for R2, D1 and the Images binding), and `assets-screen.test.ts`
+asserts the two agree — but only over rows whose `altAuto` was `''`, so the
+divergence would not have been caught. Both are `alt || altAuto` now, and the
+agreement test gained two fixtures that fail if either half drops the fallback.
+Without it the picker stores an empty `alt` for every described asset and the
+feature does nothing from the one screen anybody uses it on.
+
+**Deferred to phase 7, as planned:** `runDescribe`, `POST {base}/api/assets/describe`,
+`undescribed` in `assetFilterSql`, the `ctx.waitUntil` call after an upload, and
+every admin control. `describeVocabulary` is exported so a batch reads the tag list
+once per run rather than once per asset, and `describeAsset` takes it as an
+optional third argument for exactly that.

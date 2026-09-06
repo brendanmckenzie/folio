@@ -429,6 +429,20 @@ export async function assetUsage(db: FolioDb, key: string): Promise<AssetUsage> 
  * The field value for a library row. Copies `alt` in as a starting point; from
  * then on the two are independent, because alt text depends on what the image is
  * being used to say.
+ *
+ * **That independence is what makes an enrichment run structurally safe**
+ * (`../../docs/specs/content-model/media-library.md` decision 9). The stored
+ * `alt` is only ever a *default*, read here at pick time and never again, so a
+ * describe run over three thousand images changes not one byte of any published
+ * document, any draft, or any rendered page — there is nothing to purge and
+ * nothing to republish.
+ *
+ * **`alt || altAuto`, in that order, and the order is the whole rule.** `alt` is
+ * the column an editor types into and `altAuto` is the column a model writes
+ * (`describe.ts`), so a human value always wins and a machine one fills the gap.
+ * An editor clearing their alt text back to empty therefore makes the machine
+ * text effective again, which is the right answer: clearing means "I have
+ * nothing better", not "announce nothing".
  */
 export function toAssetValue(row: AssetRow): AssetValue {
   return {
@@ -438,7 +452,7 @@ export function toAssetValue(row: AssetRow): AssetValue {
     size: row.size,
     ...(row.width ? { width: row.width } : {}),
     ...(row.height ? { height: row.height } : {}),
-    alt: row.alt,
+    alt: row.alt || row.altAuto,
   }
 }
 

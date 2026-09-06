@@ -542,6 +542,12 @@ export function originalUrl(mount: string, row: Pick<AssetRow, 'key'>): string {
  *
  * Note what is **not** carried: `focal`. A focal point is a property of a *use*, not
  * of a file (see `AssetDetail`), so there is nothing on an `AssetRow` to copy.
+ *
+ * **`alt || altAuto`, and the order is the rule** (`media-library.md` decision 9):
+ * `alt` is the column an editor types into and `altAuto` is the one a describe run
+ * writes, so a human value always wins and a machine one fills the gap. Drop the
+ * fallback here and the server keeps it, and the feature silently stops working
+ * from the one place anybody picks an asset.
  */
 export function assetValue(row: AssetRow): AssetValue {
   return {
@@ -551,7 +557,7 @@ export function assetValue(row: AssetRow): AssetValue {
     size: row.size,
     ...(row.width ? { width: row.width } : {}),
     ...(row.height ? { height: row.height } : {}),
-    alt: row.alt,
+    alt: row.alt || row.altAuto,
   }
 }
 

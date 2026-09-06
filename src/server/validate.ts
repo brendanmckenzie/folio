@@ -123,6 +123,30 @@ const bounded = (max: number) =>
 /** Required, non-empty once trimmed. */
 const required = (max: number) => v.pipe(bounded(max), v.minLength(1, 'is required'))
 
+/**
+ * `bounded()`'s screen for text that **nobody typed** — what a model answered
+ * (`../content-model/media-library.md` decision 8's `DescribeResult`).
+ *
+ * Same characters, same caps, opposite failure. `bounded` refuses, because a
+ * person is holding the form and can be told which field is wrong; there is
+ * nobody to tell here, and refusing a 2,010-character description would throw
+ * away the whole model call — including the alt text that came back perfect —
+ * over ten characters. So this **clamps**: a non-string is `undefined` (the
+ * model said nothing about that field), the characters `PRINTABLE` excludes are
+ * stripped rather than fatal, and the rest is trimmed and truncated.
+ *
+ * Truncation is by code point, not by `.slice`: cutting a UTF-16 string at a
+ * fixed index can land between the halves of a surrogate pair and store a lone
+ * `\uD83D` — exactly the `\p{Cs}` that `PRINTABLE` exists to keep out, put back
+ * by the thing enforcing the cap.
+ */
+export function clampText(raw: unknown, max: number): string | undefined {
+  if (typeof raw !== 'string') return undefined
+  const clean = raw.replace(/[\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]/gu, '').trim()
+  const points = [...clean]
+  return points.length > max ? points.slice(0, max).join('').trim() : clean
+}
+
 /* --------------------------------------------------------------- bodies --- */
 
 /**
