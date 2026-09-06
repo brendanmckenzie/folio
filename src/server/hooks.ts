@@ -14,6 +14,7 @@
  */
 import type { Doc } from '../core/doc'
 import type { StoryMeta } from '../core/story'
+import type { FormMeta } from './forms'
 import type { VersionMeta } from './versions'
 
 export type HookEvent =
@@ -27,6 +28,7 @@ export type HookEvent =
   | 'migrated'
   | 'reindexed'
   | 'redirectsChanged'
+  | 'formChanged'
 
 /**
  * The same list at runtime, for `validateHooks`. A name must appear in both or
@@ -46,6 +48,7 @@ const HOOK_EVENTS: readonly HookEvent[] = [
   'migrated',
   'reindexed',
   'redirectsChanged',
+  'formChanged',
 ]
 
 /** Every hook payload's common shape. Nothing else is injected: a hook that
@@ -141,6 +144,26 @@ export interface RedirectsChangedHookPayload<Env> extends HookBase<Env> {
   from: string[]
 }
 
+/**
+ * A **structural** save on a form: a question added, removed, renamed, retyped,
+ * made required, or its option values changed
+ * (`../../docs/specs/content-model/forms.md` architecture decision 7). A label,
+ * help, placeholder or translation edit fires nothing at all — `shapeOf` is what
+ * decides, and `updateForm` is what asks it.
+ *
+ * `redirectsChanged`'s shape: an event for a write that changes published bytes
+ * without publishing anything. Folio's own internal hook purges `form:<id>` off
+ * it, which is the whole reason it is not enough to stamp a version — a page
+ * cached for a week is still handing visitors markup for the old shape, and
+ * every one of them would submit something the live form now refuses.
+ */
+export interface FormChangedHookPayload<Env> extends HookBase<Env> {
+  form: FormMeta
+  /** The version this save bumped to. Always present: the event does not fire
+   *  for a save that did not bump one. */
+  version: number
+}
+
 /** Every event's full payload, keyed by name — what `FolioHooks` hands a
  * handler and what `HookRunner.run` builds before calling one. */
 export interface HookPayloadMap<Env> {
@@ -154,6 +177,7 @@ export interface HookPayloadMap<Env> {
   migrated: MigratedHookPayload<Env>
   reindexed: ReindexedHookPayload<Env>
   redirectsChanged: RedirectsChangedHookPayload<Env>
+  formChanged: FormChangedHookPayload<Env>
 }
 
 /**
@@ -183,6 +207,13 @@ export interface FolioHooks<Env> {
   migrated?: (e: MigratedHookPayload<Env>) => unknown
   reindexed?: (e: ReindexedHookPayload<Env>) => unknown
   redirectsChanged?: (e: RedirectsChangedHookPayload<Env>) => unknown
+  /**
+   * A form's *shape* changed (`../../docs/specs/content-model/forms.md`). Folio's
+   * own internal hook already purges `form:<id>`; this is for a host with its own
+   * work to hang off one — regenerating a static form, telling a CRM the columns
+   * moved.
+   */
+  formChanged?: (e: FormChangedHookPayload<Env>) => unknown
   /** Events to await before responding. Everything else rides `waitUntil`. */
   await?: readonly HookEvent[]
 }

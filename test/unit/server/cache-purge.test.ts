@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { ANY_TYPE_TAG, globalTag, storyTag, typeTag } from '../../../src/core/cache-tags'
+import { ANY_TYPE_TAG, formTag, globalTag, storyTag, typeTag } from '../../../src/core/cache-tags'
 import type { Doc } from '../../../src/core/doc'
 import type { StoryMeta } from '../../../src/core/story'
 import {
@@ -277,6 +277,23 @@ describe('cachePurgeHooks', () => {
     expect(calls).toEqual([{ purgeEverything: true }])
     expect(warned.mock.calls[0]?.[0]).toContain('not recorded anywhere')
     warned.mockRestore()
+  })
+
+  it('formChanged purges exactly one tag, with no lookup of the pages holding it', async () => {
+    const { calls, capability } = recorder()
+    const hooks = cachePurgeHooks<Env>([], capability)
+
+    await fire(hooks, 'formChanged', {
+      ...BASE,
+      form: { id: 'frm_abc123abc123', name: 'contact', label: 'Contact', version: 2 },
+      version: 2,
+    })
+
+    // `form:<id>` is emitted at render from `resolution.forms`, so the pages
+    // that hold the form already carry it and nothing has to enumerate them —
+    // which is what makes `content_refs`' 400-row truncation irrelevant here
+    // (forms.md architecture decision 8).
+    expect(calls).toEqual([{ tags: [formTag('frm_abc123abc123')] }])
   })
 
   it('registers nothing for created, checkpointed or redirectsChanged', () => {

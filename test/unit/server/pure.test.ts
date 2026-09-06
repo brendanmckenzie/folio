@@ -19,6 +19,7 @@ import {
   validateHooks,
 } from '../../../src/server/hooks'
 import { normalisePath, redirectStatements } from '../../../src/server/redirects'
+import { formIdParam, responseFilterQuery } from '../../../src/server/validate'
 import { alarmHookCtx, validateAssets } from '../../../src/server/runtime'
 
 // ---------------------------------------------------------------------------
@@ -1250,6 +1251,7 @@ describe('validateHooks', () => {
       migrated: () => {},
       reindexed: () => {},
       redirectsChanged: () => {},
+      formChanged: () => {},
       await: ['published'],
     }
     expect(() => validateHooks(hooks)).not.toThrow()
@@ -1257,7 +1259,7 @@ describe('validateHooks', () => {
 
   it('names every valid key in the message it throws, so the list is discoverable', () => {
     expect(() => validateHooks({ reindex: () => {} } as unknown as FolioHooks<Env>)).toThrow(
-      /valid: await, checkpointed, created, deleted, migrated, pathsChanged, published, redirectsChanged, reindexed, unpublished, updated/,
+      /valid: await, checkpointed, created, deleted, formChanged, migrated, pathsChanged, published, redirectsChanged, reindexed, unpublished, updated/,
     )
   })
 
@@ -1394,5 +1396,56 @@ describe('assetFilterSql', () => {
     const widest = assetFilterSql({ q: 'x', kind: 'image', folder: 'a/b/c', unfiled: true })
     expect(widest.binds).toHaveLength(9)
     expect(widest.binds.length).toBeLessThan(BIND_BUDGET)
+  })
+})
+
+/* ----------------------------------------------------------------- forms --- */
+
+/**
+ * The two parsers phase 2 adds to `validate.ts`
+ * (`docs/specs/content-model/forms.md`). Both are pure and both are the only
+ * screen between a query string and a store, so they are tested here rather
+ * than only through the routes that will call them.
+ */
+describe('formIdParam', () => {
+  it('accepts the mint format and nothing that merely looks like it', () => {
+    expect(formIdParam('frm_0123456789ab')).toBe('frm_0123456789ab')
+    // Anchored to the shape, not screened by charset — `{base}/f/:id` is public
+    // and unauthenticated, so a charset screen would be a read primitive
+    // (architecture decision 3, and `ASSET_KEY`'s own header).
+    for (const bad of [
+      'sty_0123456789ab',
+      'frm_0123456789ab-extra',
+      'frm_0123456789AB',
+      'frm_0123456789a',
+      'frm_',
+      undefined,
+    ]) {
+      expect(() => formIdParam(bad)).toThrow()
+    }
+  })
+})
+
+describe('responseFilterQuery', () => {
+  const q = (params: Record<string, string>) => ({ query: (key: string) => params[key] })
+
+  it('is empty for a request that asked for nothing', () => {
+    expect(responseFilterQuery(q({}))).toEqual({})
+    // An empty parameter is the same request as an absent one, which is what
+    // lets a client build the URL without a conditional.
+    expect(responseFilterQuery(q({ from: '', to: '', q: '' }))).toEqual({})
+  })
+
+  it('parses the two bounds and the term', () => {
+    expect(
+      responseFilterQuery(q({ from: '1700000000000', to: '1800000000000', q: ' hi ' })),
+    ).toEqual({ from: 1_700_000_000_000, to: 1_800_000_000_000, q: 'hi' })
+  })
+
+  it('refuses a bound that is not a number, and truncates a pasted term', () => {
+    expect(() => responseFilterQuery(q({ from: 'yesterday' }))).toThrow()
+    // The `limit` side of this file's asymmetry: a 300-character term is a paste
+    // accident with an obvious right answer and no state to leave a client in.
+    expect(responseFilterQuery(q({ q: 'x'.repeat(300) })).q).toHaveLength(200)
   })
 })

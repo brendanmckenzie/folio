@@ -19,6 +19,7 @@
  */
 import * as v from 'valibot'
 import { type AssetSort, DEFAULT_ASSET_SORT, tagSlug } from '../core/assets'
+import { MAX_FORM_FIELDS } from '../core/forms'
 import { decodeCursor } from '../core/pagination'
 import type { DocumentType } from '../core/schema'
 import {
@@ -34,6 +35,7 @@ import {
 } from '../core/story'
 import { MAX_ASSET_TAGS, MAX_TAG_FILTER } from './asset-tags'
 import { FolioError } from './errors'
+import type { ResponseFilter } from './forms'
 
 /**
  * Ceiling on a validation message. A backstop rather than the defence: a schema
@@ -1680,4 +1682,163 @@ export function searchKindQuery(raw: string | undefined): DocumentType['kind'] |
     raw,
     'kind',
   )
+}
+
+/* ---------------------------------------------------------------- forms --- */
+
+/**
+ * A form id from a path param, on the admin routes **and on the public submit
+ * route** (`../../docs/specs/content-model/forms.md` architecture decision 3).
+ *
+ * Anchored to the mint format the way `ASSET_KEY` is, and for the same reason
+ * its header gives: `{base}/f/:id` is public and unauthenticated, and a
+ * parameter screened by charset rather than by shape is a primitive somebody
+ * finds a use for. Ids are minted `frm_<12 hex>` and nothing else is a form.
+ */
+const FORM_ID = v.pipe(
+  v.string('must be a string'),
+  v.regex(/^frm_[0-9a-f]{12}$/, 'must be a Folio form id'),
+)
+
+export function formIdParam(raw: string | undefined): string {
+  return parseOrThrow(FORM_ID, raw, 'id')
+}
+
+/**
+ * How many choices one `select`, `radio` or `checkboxes` question may offer.
+ *
+ * A request-size bound rather than a model one, which is why it lives here and
+ * not beside `MAX_FORM_FIELDS` in `core/forms.ts`: `validateFormFields` decides
+ * what a *form* may be, and this decides how much JSON one PATCH may carry into
+ * a D1 column. A hundred options is a country list; more is a mistake or a
+ * script.
+ */
+const MAX_FORM_OPTIONS = 100
+
+/**
+ * One question, bounded. Every string cap here exists for the reason this file
+ * exists: they bound what reaches `forms.fields` before the write.
+ *
+ * **`kind` is `bounded`, not a picklist, and that is deliberate.** Screening the
+ * kinds is `validateFormFields`' job and its rule is to *drop* one this build
+ * does not know rather than refuse the save (`parseScopes`' posture). A picklist
+ * here would turn that narrowing into a 400 and put the same list in two places
+ * for the two to drift.
+ */
+const FORM_FIELD = v.object(
+  {
+    name: required(64),
+    kind: required(32),
+    label: required(200),
+    help: v.optional(bounded(500)),
+    placeholder: v.optional(bounded(200)),
+    required: v.optional(v.boolean()),
+    max: v.optional(v.pipe(v.number(), v.finite())),
+    min: v.optional(v.pipe(v.number(), v.finite())),
+    pattern: v.optional(bounded(200)),
+    options: v.optional(
+      v.pipe(
+        v.array(v.object({ value: required(120), label: v.optional(bounded(200)) }, OBJECT)),
+        v.maxLength(MAX_FORM_OPTIONS, `must be ${MAX_FORM_OPTIONS} options or fewer`),
+      ),
+    ),
+    accept: v.optional(bounded(32)),
+    maxBytes: v.optional(v.pipe(v.number(), v.finite())),
+    value: v.optional(bounded(2000)),
+    text: v.optional(bounded(2000)),
+    i18n: v.optional(
+      v.record(
+        LOCALE_CODE,
+        v.object(
+          {
+            label: v.optional(bounded(200)),
+            help: v.optional(bounded(500)),
+            placeholder: v.optional(bounded(200)),
+            options: v.optional(v.record(bounded(120), bounded(200))),
+          },
+          OBJECT,
+        ),
+      ),
+    ),
+  },
+  OBJECT,
+)
+
+/**
+ * The whole field array. Bounded at `MAX_FORM_FIELDS` here as well as in
+ * `validateFormFields`, which is not a duplicated rule so much as the same one
+ * asked at two different times: this refuses the *request* before it is parsed
+ * into anything, and the core function refuses the *form*.
+ */
+const FORM_FIELDS = v.pipe(
+  v.array(FORM_FIELD, 'must be an array of fields'),
+  v.maxLength(MAX_FORM_FIELDS, `must be ${MAX_FORM_FIELDS} fields or fewer`),
+)
+
+/**
+ * `{ label, name? }`. `name` is capped before `formSlug`, which truncates its
+ * own output to 64 — the cap is so an unbounded string is never slugified, not a
+ * description of the stored value.
+ */
+export const FormCreateBody = v.object(
+  { label: required(200), name: v.optional(bounded(200)) },
+  OBJECT,
+)
+
+/**
+ * A builder save. `expectedUpdatedAt` is **required and never optional**: it is
+ * the whole of this table's concurrency story (decision 18), and a client that
+ * may omit it is a client that omits it.
+ *
+ * `closesAt` and `redirectTo` are nullable *and* optional, and the two mean
+ * different things — absent is "leave it alone", an explicit `null` is "clear
+ * it". Without the distinction there is no way to remove a closing date at all.
+ */
+export const FormPatchBody = v.object(
+  {
+    expectedUpdatedAt: v.pipe(v.number('must be a number'), v.finite()),
+    label: v.optional(required(200)),
+    name: v.optional(bounded(200)),
+    fields: v.optional(FORM_FIELDS),
+    open: v.optional(v.boolean()),
+    closesAt: v.optional(v.nullable(v.pipe(v.number(), v.finite()))),
+    successMessage: v.optional(bounded(500)),
+    closedMessage: v.optional(bounded(500)),
+    submitLabel: v.optional(bounded(60)),
+    /** A path on this site or an absolute URL, the same latitude
+     *  `RedirectCreateBody.to` takes. */
+    redirectTo: v.optional(v.nullable(bounded(2000))),
+  },
+  OBJECT,
+)
+
+export type FormCreateInput = v.InferOutput<typeof FormCreateBody>
+export type FormPatchInput = v.InferOutput<typeof FormPatchBody>
+
+/** An epoch-millisecond bound off a query string. */
+const TIMESTAMP = v.pipe(v.string(), v.transform(Number), v.number(), v.finite())
+
+/**
+ * `?from=`, `?to=` and `?q=` on the responses table and on the CSV export, which
+ * honours the same filter the table is showing (decision 16). One parser, so the
+ * two cannot narrow to different sets.
+ *
+ * Structurally typed on `query` for the reason `parseBody` is: this file stays
+ * free of Hono.
+ */
+export function responseFilterQuery(req: {
+  query: (key: string) => string | undefined
+}): ResponseFilter {
+  const filter: ResponseFilter = {}
+  const from = req.query('from')
+  const to = req.query('to')
+  const q = req.query('q')
+  if (from !== undefined && from !== '') filter.from = parseOrThrow(TIMESTAMP, from, 'from')
+  if (to !== undefined && to !== '') filter.to = parseOrThrow(TIMESTAMP, to, 'to')
+  // Trimmed and bounded rather than refused, the `limit` side of this file's
+  // asymmetry: a 300-character search term is a paste accident with an obvious
+  // right answer, and truncating one leaves a client in no state at all.
+  const term = q?.trim().slice(0, 200)
+  if (term) filter.q = term
+  return filter
 }

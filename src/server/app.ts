@@ -12,6 +12,7 @@ import { authRoutes, sessionRoutes } from './routes/auth'
 import { bulkRoutes } from './routes/bulk'
 import { contentRoutes } from './routes/content'
 import { editorPageRoutes, editorRoutes } from './routes/editor'
+import { formRoutes } from './routes/forms'
 import { historyRoutes } from './routes/history'
 import { mcpRoutes } from './routes/mcp'
 import { migrationRoutes } from './routes/migrations'
@@ -157,6 +158,12 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   app.route('/api', assetRoutes<Env>(rt))
   app.route('/api', editorRoutes<Env>(rt))
   app.route('/api', redirectRoutes<Env>(rt))
+  // `/forms` and `/forms/:id/...`, sharing no prefix with anything on this mount,
+  // so the order is for reading rather than for correctness. The *public* submit
+  // route is not here: it is on the bare mount, because a browser navigates to it
+  // and its URL is baked into published HTML
+  // (`../../docs/specs/content-model/forms.md` architecture decision 3).
+  app.route('/api', formRoutes<Env>(rt))
   app.route('/api', migrationRoutes<Env>(rt))
   app.route('/api', contentRoutes<Env>(rt))
   app.route('/api', spaceRoutes<Env>(rt))

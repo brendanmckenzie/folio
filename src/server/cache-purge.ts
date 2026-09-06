@@ -37,7 +37,7 @@
  * — so everything computable lives in `purgePlan` and `core/cache-tags.ts`, and
  * `scripts/cache-probe.mjs` is what exercises the rest against a deployment.
  */
-import { ANY_TYPE_TAG, globalTag, storyTag, typeTag } from '../core/cache-tags'
+import { ANY_TYPE_TAG, formTag, globalTag, storyTag, typeTag } from '../core/cache-tags'
 import type { FolioHooks } from './hooks'
 
 /** Workers Cache's own cap on one `purge()` call. */
@@ -266,6 +266,26 @@ export function cachePurgeHooks<Env>(
         console.error('folio: reindex failed to purge', err)
       }
     },
+
+    /**
+     * A form's shape moved, so every cached page rendering it is serving markup
+     * the live form no longer accepts
+     * (`../../docs/specs/content-model/forms.md` architecture decision 7).
+     *
+     * **One tag, and no lookup at all.** `form:<id>` is emitted at render from
+     * `resolution.forms`, exactly as `global:<name>` is emitted from
+     * `resolution.globals`, so the pages that hold the form are already tagged
+     * with it and nothing has to enumerate them. Computing the set from
+     * `content_refs` instead is what `caching.md` decision 2 refused for the
+     * general case, and the refusal holds here for the specific one: that table
+     * truncates at 400 rows per document, so a form on 500 pages would leave a
+     * hundred of them stale and silent.
+     *
+     * A label-only save never reaches here — `updateForm` fires nothing for a
+     * save that did not bump the version, which is what keeps a typo fix from
+     * flushing a week of cache.
+     */
+    formChanged: ({ form }) => purge('form change', [formTag(form.id)]),
 
     // `created` and `checkpointed` are deliberately absent: neither publishes
     // anything, so no cached page can be describing either of them yet.

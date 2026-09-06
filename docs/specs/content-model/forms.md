@@ -41,7 +41,15 @@
 > `admin/ui/screens/inspector-model.ts`'s `CONTROLS` map (`Field['kind'] →
 > ControlKind`, mapped to `'text'` — there is no form picker yet, so this only has
 > to agree with `Control.tsx`'s existing default-to-a-text-box fallback for an
-> unbuilt control). Phases 2–8 are still outstanding.
+> unbuilt control). Phases 3–8 are still outstanding.
+
+> **Phase 2 landed 2026-09-06** (`src/server/forms.ts`, `src/server/routes/forms.ts`,
+> the forms half of `validate.ts`, `formChanged` in `hooks.ts` and `cache-purge.ts`,
+> the mount in `app.ts`, `test/workers/forms.test.ts`). Six divergences from the
+> plan, each recorded under "Implementation notes — phase 2" at the end of this
+> file; the load-bearing two are that `GET /forms/:id/usage` answers a **superset**
+> of the asset usage shape, and that `validateFormFields`' refusals had to be
+> translated into `bad_request` or every one of them was a 500.
 
 ## Summary
 
@@ -1605,3 +1613,125 @@ where they are made rather than left here as questions: **checkpoint 1** (a besp
 table rather than a document — decision 1 lists the four things it costs and their
 replacements) and **checkpoint 9** (manual retention — decision 17 states the
 liability, and reversing it is one column, one statement and one host call).
+
+## Implementation notes — phase 2 (landed 2026-09-06)
+
+What actually landed for "the store, server side", where the plan was wrong, and
+what phases 3–5 inherit.
+
+### Divergences from the plan
+
+1. **`GET {base}/api/forms/:id/usage` answers a superset of the asset usage
+   shape.** The route table says "`/assets/:id/usage`'s shape and its access". It
+   keeps the access (`EDIT`) and the `{ published, total }` half verbatim, and it
+   adds `responses` and `files`. The acceptance criterion "Deleting a form says
+   what it will destroy" asks for **three** numbers in one dialog, and a dialog
+   that has to make three calls to assemble them is a dialog that ships with one
+   of them missing — which is checkpoint 17's whole failure mode. `formUsage`
+   answers all three from two concurrent statements.
+
+2. **`GET {base}/api/forms` answers a `FormSummary`, not a `Form`.** A list page
+   is up to 200 rows and `forms.fields` is the widest column in the schema, so
+   the list projects `json_array_length(fields) as questions` instead of the
+   array. `?counts=1` adds `responses` per row. The builder reads one form and
+   gets the array; nothing needed the two hundred it was not going to render.
+
+3. **`validateFormFields`' refusals are translated into `bad_request`.** It
+   throws a plain `Error` — correctly, since it is also called by the admin
+   builder and by the submit route's compiler and knows nothing about HTTP — and
+   an untranslated throw is a **500 for the client's own mistake**. `updateForm`
+   funnels the write-side call through `fieldsFromInput`, which re-raises as a
+   `FolioError`. The core messages already name the field and what is wrong with
+   it, so they travel verbatim. Found by a test: `{ name: '_folio_page' }` was a
+   500, not the 400 decision 13 describes.
+
+4. **Per-field length caps live in `validate.ts`, not in `core/forms.ts`.** The
+   plan has `validateFormFields` as the one validator, and it is — of the *form*:
+   sixty fields, unique names, no reserved prefix, kinds screened, a `pattern`
+   that compiles. It bounds no **bytes**: nothing in core caps a label, a help
+   string or an option list, so a ten-megabyte label would have reached the D1
+   column. `FORM_FIELD` and `FORM_FIELDS` in `validate.ts` are that bound, which
+   is that file's stated charter, and `MAX_FORM_OPTIONS` (100) lives there for
+   the same reason — it says how much JSON one PATCH may carry, not what a form
+   may be. `kind` is `bounded`, deliberately **not** a picklist: screening kinds
+   is core's job and its rule is to *drop* an unknown one, which a picklist would
+   turn into a 400 and put the same list in two places.
+
+   One consequence worth knowing before phase 6: `bounded()` screens `\p{Cc}`,
+   so a newline is refused. A `statement`'s `text` and a field's `help` are
+   single-line, the same latitude every other prose field in this codebase has.
+
+5. **`updated_at` is forced forward: `max(Date.now(), current + 1)`.** Two saves
+   inside one millisecond would otherwise share a concurrency token, and the
+   second editor's stale value would validate against the first's write — the
+   guard reading as passed on exactly the race it exists for.
+
+6. **The guard is in the `update`'s own `where`, not in a read before it.** The
+   pre-read computes the next row; `where id = ? and updated_at = ?` plus
+   `changes === 0` is what refuses. A read-then-write pair has a window two
+   editors clicking Save at once fit through.
+
+### Decisions taken where the plan was silent
+
+- **`FormMeta` is `{ id, name, label, version }`**, exported from
+  `server/forms.ts`; `hooks.ts` imports the type from there the way it already
+  imports `VersionMeta` from `server/versions.ts`.
+- **`ResponseFilter` is declared in `server/forms.ts`**, because `validate.ts`
+  parses it (`responseFilterQuery`) and `server/form-responses.ts` is phase 4's
+  file. A filter is a shape and the shape belongs with the feature.
+- **`deleteForm` clears inbound `content_refs` too**, the way `deleteAsset`
+  clears its own: the rows mean "this published page renders this form", and
+  nothing renders a form that no longer exists.
+- **`isOpen(form, now)` is the one place the switch and the clock combine.**
+  Phase 3's descriptor must compile `open` from it and not from `form.open`.
+- **No `FORMS` access and no `forms:read` scope yet.** Nothing in this phase
+  reads a response; adding an unused member of `SCOPES` is a security surface
+  with no consumer to justify it. Phase 4 or 7 adds it with its first reader.
+
+### Bind budget
+
+Two readers take a caller-sized id list and **both chunk through `bindChunks`**:
+`formsByIds` (one id per form a document embeds — phase 3's read) and
+`countResponsesByForm` (one id per row of a list page, up to 200, against a
+100-parameter ceiling). Verified by breaking: replacing `formsByIds`' chunking
+with a single `in (…)` and reading 150 ids answers
+`D1_ERROR: too many SQL variables at offset 573`. Nothing else here binds a list
+somebody else sized — `formUsage`, `deleteForm` and `updateForm` bind two, three
+and thirteen parameters respectively, whatever the form holds.
+
+### Verified by breaking
+
+Dropping `and updated_at = ?` from `updateForm`'s statement turns two tests red —
+`refuses a save whose expectedUpdatedAt has moved` and `does not fire for a save
+that was refused`. That is the invariant in this phase that is silent when wrong:
+without it a form is last-write-wins, and the editor whose questions were
+overwritten is told nothing. Restored in place.
+
+### Tests changed rather than added
+
+- `test/unit/server/pure.test.ts` — the `validateHooks` message test pins the
+  **exact** sorted list of valid hook names, so `formChanged` had to be added to
+  it and to the "accepts every real event" literal. Sanctioned by the spec's
+  "Server types" section, which adds the event to both `HookEvent` and
+  `HOOK_EVENTS`.
+- `test/unit/server/cache-purge.test.ts` — one test added, not changed:
+  `formChanged` purges exactly `form:<id>` and nothing else.
+
+### What phase 3 inherits
+
+`formsByIds` is the resolve read and is already chunked, so `compileForm` sits
+beside it and pass one's `Promise.all` gains a call rather than a query. The
+purge is fully wired: `formChanged` fires from the PATCH route and
+`cachePurgeHooks` turns it into `purge('form change', [formTag(form.id)])` — all
+phase 3 has to do is make `resolution.forms` non-empty so a rendered page carries
+the tag in the first place.
+
+### What phase 5 inherits
+
+`deleteForm` deletes D1 only. The `files` count it answers is honest (a
+`sum(json_array_length(files))`, so a form with fifty thousand responses does not
+become fifty thousand rows in a Worker's memory), but the R2 objects behind it
+are not removed. Phase 5 owns the R2 half of every delete path and has to walk
+the `files` column in keyset pages **before** the batch runs. Until a `file`
+question can be built there is nothing for it to find, which is why the order is
+safe rather than merely convenient.
