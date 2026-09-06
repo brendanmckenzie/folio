@@ -3,6 +3,25 @@
   inset: 0;
   z-index: 40;
   display: grid;
+  /*
+   * One row, sized to the wrapper rather than to the panel.
+   *
+   * `place-items: center` on its own leaves the implicit row `auto`, and an auto
+   * track grows to its content — so `.panel`'s `max-height: 100%` resolved against a
+   * track the panel had just finished sizing, which is no constraint at all. The
+   * asset picker with a real library behind it rendered its natural 2300px, ran off
+   * the bottom of the viewport and took the footer's *Use this file* with it. The
+   * body never scrolled because the panel was never asked to fit; the only way to
+   * reach the button was to zoom the browser out. Reported from
+   * `allaboutafrica.au` on 2026-09-07.
+   *
+   * `minmax(0, 1fr)` makes the track definite — exactly the wrapper's content box —
+   * so the percentage has something real to resolve against and the flex column
+   * hands the overflow down to `.body`. **The `0` is load-bearing:** a bare `1fr` is
+   * `minmax(auto, 1fr)`, whose automatic minimum floors the track at the panel's
+   * content, which is the same bug spelled differently.
+   */
+  grid-template-rows: minmax(0, 1fr);
   place-items: center;
   padding: var(--space-4);
 }
@@ -20,6 +39,7 @@
   display: flex;
   flex-direction: column;
   width: min(420px, 100%);
+  /* Against `.wrap`'s definite row, and only against that — see the note there. */
   max-height: 100%;
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -53,6 +73,32 @@
   min-height: 0;
   padding: var(--space-3) var(--space-4) 0;
   overflow: auto;
+}
+
+/*
+ * The body as a frame rather than a scroller — `Dialog`'s `fill` prop.
+ *
+ * A one-question dialog scrolls as one block and that is right: there is one thing
+ * in it. A dialog that holds a *browser* is not one thing, and scrolling it as a
+ * block takes the search box, the folder list and the pager off the top and bottom
+ * of the screen along with the tiles. The asset picker's own report of this was
+ * having to scroll back up past two hundred files to change a filter.
+ *
+ * So `fill` says: I will scroll my own regions. The body stops being a scrollport
+ * and becomes a flex column that hands its height down — `Assets.module.css`'s
+ * `.browserFill` chain is the one consumer, and it ends at a `.results` that
+ * scrolls while the sidebar, the controls and the pager stay put.
+ *
+ * `overflow: hidden` and not `auto`: with the chain in place nothing here should
+ * ever overflow, and `auto` would answer a broken chain with a second scrollbar
+ * inside the first instead of looking wrong. The body is still `flex: 0 1 auto`, so
+ * a picker over an empty library is a short dialog rather than a full-height one
+ * with a hole in it.
+ */
+.fill {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .foot {

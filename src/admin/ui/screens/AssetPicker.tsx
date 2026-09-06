@@ -141,6 +141,9 @@ export function AssetPicker({ apiBase, mount, accept, onPick, onClose }: AssetPi
     <Dialog
       title="Choose a file"
       size="wide"
+      // The browser scrolls its own grid, so the dialog must not scroll the browser.
+      // `AssetBrowser`'s `compact` is the other half; `.browserFill` is the chain.
+      fill
       onClose={onClose}
       actions={
         <>

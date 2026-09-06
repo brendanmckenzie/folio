@@ -68,6 +68,79 @@
   min-width: 0;
 }
 
+/*
+ * The results region. A block on the screen; the scroller in the dialog.
+ *
+ * A wrapper rather than `overflow` on `.grid` because the browser has four result
+ * states — skeletons, empty, grid, table — and only one of them is `.grid`. Putting
+ * the scroll on each of the four is three chances to forget one, and the table's
+ * would have to fight the sticky header it already has.
+ */
+.results {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------ the dialog's bounds --- */
+
+/*
+ * **The picker's fixed-height layout**, set by `AssetBrowser`'s `compact`.
+ *
+ * The two mounts scroll differently on purpose. The screen is a page: it scrolls as
+ * one and pins its detail panel. The dialog is a box with a footer in it, and
+ * scrolling *that* as one block is what put the search box, the folder list and the
+ * pager off the top and bottom of a library of two hundred files — you scrolled back
+ * up past all of them to change a filter, and the *Use this file* button went with
+ * them. So inside a dialog the browser holds still and its results scroll.
+ *
+ * It is a chain and every link is load-bearing, which is the price of doing this in
+ * flex rather than with a magic height: `Dialog`'s `.fill` body hands its height to
+ * `.dropZone`, which hands it to this, which hands it to `.layout`, `.main` and
+ * finally `.results`. `min-height: 0` at each link is what lets the shrink through —
+ * a flex item's automatic minimum size is its content, so one omission anywhere puts
+ * the whole grid back at its natural height and the dialog clips instead of
+ * scrolling. `flex-basis` stays `auto` throughout, so a short library is still a
+ * short dialog.
+ */
+.browserFill {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.browserFill .layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* `stretch`, overriding `.layout`'s `flex-start`: the sidebar is a column of the
+     dialog's full height now, and it needs that height to be able to scroll in it. */
+  align-items: stretch;
+}
+
+/* Long enough to overflow on its own once a library has folders and tags in it, and
+   it is beside the grid rather than above it, so it scrolls separately. */
+.browserFill .sidebar {
+  overflow-y: auto;
+}
+
+.browserFill .main {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The furniture holds its size. Without this the default `flex-shrink: 1` lets the
+   controls and the pager give up a few pixels each before the results give up any,
+   which is how a search box ends up one line shorter than the one on the screen. */
+.browserFill .controls,
+.browserFill .footer {
+  flex: none;
+}
+
+.browserFill .results {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* ----------------------------------------------------------------- sidebar --- */
 
 /*
@@ -756,6 +829,35 @@
   top: 0;
 }
 
+/*
+ * The panel is its own scroller, capped to the scrollport.
+ *
+ * **A sticky box taller than the scrollport is worse than a static one**, and this
+ * one is: a described image with a usage list runs past 1000px against an 822px
+ * scrollport. `top` pins the panel's *head* and the rest hangs below the fold, and
+ * because a sticky element only unsticks when its containing block runs out, the
+ * bottom of the panel — alt text, usage, Delete — could not be reached until the
+ * whole media library had been scrolled past. Reported from `allaboutafrica.au` on
+ * 2026-09-07 as "you can't scroll the details panel until you scroll to the bottom
+ * of the full list".
+ *
+ * The arithmetic is the scroll container's *content* box, which is what `top: 0`
+ * actually sticks to — a sticky inset is measured from the scrollport inset by the
+ * scroller's own padding, so the stuck panel lands on `Shell.module.css`'s
+ * `--space-4` gutter rather than flush under the top bar, and the same gutter is
+ * left at the foot. `100dvh`, less `TopBar.module.css`'s 40px, less that gutter
+ * twice; measured against a real library at 862px it comes out at 790px, top 56px
+ * to bottom 846px. `HistoryPanel.module.css` spells the same 40px the same way and
+ * for the same reason — it is a constant of the frame, stated once in `TopBar` and
+ * cited where it is needed.
+ */
+@media (min-width: 1101px) {
+  .panel {
+    max-height: calc(100dvh - 40px - var(--space-4) * 2);
+    overflow-y: auto;
+  }
+}
+
 .panelHead {
   display: flex;
   align-items: flex-start;
@@ -935,8 +1037,14 @@
 
 /* The picker's drop bounds. `relative` so the veil covers the browser inside the
    dialog body rather than the viewport. */
+/* `relative` for the veil, and a flex column because it sits between `Dialog`'s
+   `.fill` body and `.browserFill` — see that block for the whole chain. */
 .dropZone {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 /*

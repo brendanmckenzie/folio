@@ -35,6 +35,15 @@ interface Props {
    * `--state-danger-*` tokens, so both themes are covered by construction.
    */
   danger?: boolean
+  /**
+   * The body frames its content instead of scrolling it.
+   *
+   * For a dialog whose child is a browsing surface with its own furniture — the
+   * asset picker is the only one today. See `.fill` in the stylesheet for what it
+   * costs the caller: the child must carry a flex chain down to whatever scrolls,
+   * because the body will clip rather than scroll.
+   */
+  fill?: boolean
 }
 
 /**
@@ -66,6 +75,7 @@ export function Dialog({
   actions,
   children,
   danger,
+  fill,
 }: Props) {
   const panel = useRef<HTMLDivElement>(null)
   const titleId = useId()
@@ -109,7 +119,11 @@ export function Dialog({
             </p>
           ) : null}
         </div>
-        {children ? <div className={css.body}>{children}</div> : null}
+        {children ? (
+          <div className={[css.body, fill ? css.fill : ''].filter(Boolean).join(' ')}>
+            {children}
+          </div>
+        ) : null}
         {actions ? <div className={css.foot}>{actions}</div> : null}
       </div>
     </div>,

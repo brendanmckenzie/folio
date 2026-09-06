@@ -97,7 +97,17 @@ export interface AssetBrowserProps {
   /** Passed to the file input only. The *listing* is narrowed server-side through
    * `?kind=`; see `kindForAccept`. */
   accept?: string
-  /** Tighter tiles and one column fewer, for the dialog mount. */
+  /**
+   * The dialog mount: tighter tiles, one column fewer, no *New folder* dialog (a
+   * second `useFocusTrap` inside the picker's own is the bug that guard exists for)
+   * — and the **fixed-height layout**, where the sidebar, the controls and the pager
+   * hold still and only `.results` scrolls.
+   *
+   * The screen keeps the opposite arrangement on purpose: it scrolls as a page and
+   * pins its detail panel instead. The mount owns its bounds, which is the same rule
+   * that gives the two mounts different drop targets — the dialog's body here, the
+   * whole screen there.
+   */
   compact?: boolean
   /**
    * Whether the **selection layer** is offered: a checkbox per tile and per row,
@@ -453,7 +463,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
   )
 
   return (
-    <div className={css.browser}>
+    <div className={`${css.browser} ${compact ? css.browserFill : ''}`}>
       {/*
         The real file input, always present. Dropping is the fast path and it is a
         pointer gesture, so it can never be the only one — `ui-architecture.md`'s
@@ -768,101 +778,112 @@ export function AssetBrowser(props: AssetBrowserProps) {
             </div>
           ) : null}
 
-          {firstLoad ? (
-            // Skeleton tiles and rows, not a spinner: both have a known shape, so the
-            // screen does not jump when the answer lands.
-            <div
-              className={url.view === 'grid' ? css.skeletonGrid : css.skeletonRows}
-              aria-hidden="true"
-            >
-              {SKELETONS.slice(0, url.view === 'grid' ? 12 : 6).map((key) => (
-                <div
-                  className={url.view === 'grid' ? css.skeletonTile : css.skeletonRow}
-                  key={key}
-                />
-              ))}
-            </div>
-          ) : rows.length === 0 ? (
-            <Empty
-              narrowed={narrowed}
-              onClear={() =>
-                onUrl(
-                  withFilter(url, {
-                    kind: 'all',
-                    q: '',
-                    folder: undefined,
-                    unfiled: false,
-                    tags: [],
-                    untagged: false,
-                    undescribed: false,
-                  }),
-                )
-              }
-            >
-              {uploadButton}
-            </Empty>
-          ) : url.view === 'grid' ? (
-            <div
-              ref={grid}
-              className={`${css.grid} ${compact ? css.gridCompact : ''}`}
-              role="listbox"
-              aria-label={label}
-              onKeyDown={onGridKey}
-            >
-              {rows.map((row) => (
-                <Tile
-                  key={row.id}
-                  row={row}
-                  mount={mount}
-                  selected={row.id === selected}
-                  focusable={row.id === focusable}
-                  onSelect={() => props.onSelect(row.id)}
-                  {...(bulk
-                    ? { ticked: isTicked(ticked, row.id), onTick: () => tick(row.id) }
-                    : {})}
-                />
-              ))}
-            </div>
-          ) : (
-            <Table
-              label={label}
-              columns={columns.map((column) => tableColumn(column, mount))}
-              rows={rows}
-              rowKey={(row) => row.id}
-              {...(bulk
-                ? {
-                    select: {
-                      head: (
-                        <input
-                          type="checkbox"
-                          className={css.tick}
-                          checked={allShown}
-                          disabled={rows.length === 0}
-                          aria-label="Select every file shown"
-                          onChange={() => setTicked((prev) => tickAllShown(prev, rows))}
-                        />
-                      ),
-                      cell: (row: AssetRow) => (
-                        <input
-                          type="checkbox"
-                          className={css.tick}
-                          checked={isTicked(ticked, row.id)}
-                          aria-label={`Select ${row.filename}`}
-                          onChange={() => tick(row.id)}
-                        />
-                      ),
-                    },
-                  }
-                : {})}
-              currentKey={selected ?? null}
-              sort={{ key: sortColumnKey(url), dir: dirOf(url) }}
-              onSort={(key) => {
-                const sort = ASSET_COLUMNS.find((column) => column.key === key)?.sort
-                if (sort) onUrl(withSort(url, sort))
-              }}
-              onOpen={(row) => props.onSelect(row.id)}
-            />
-          )}
+          {/*
+            The results region, and the only part of the browser that scrolls in the
+            dialog mount. On the screen it is an ordinary block and the page scrolls
+            past it; under `.browserFill` it is the flex chain's terminus, which is
+            what keeps the search box and the pager on screen while two hundred tiles
+            go by. It wraps all four states rather than the grid alone — a skeleton
+            and an empty state that sat outside the scroller would size the dialog
+            differently from the thing that replaces them.
+          */}
+          <div className={css.results}>
+            {firstLoad ? (
+              // Skeleton tiles and rows, not a spinner: both have a known shape, so the
+              // screen does not jump when the answer lands.
+              <div
+                className={url.view === 'grid' ? css.skeletonGrid : css.skeletonRows}
+                aria-hidden="true"
+              >
+                {SKELETONS.slice(0, url.view === 'grid' ? 12 : 6).map((key) => (
+                  <div
+                    className={url.view === 'grid' ? css.skeletonTile : css.skeletonRow}
+                    key={key}
+                  />
+                ))}
+              </div>
+            ) : rows.length === 0 ? (
+              <Empty
+                narrowed={narrowed}
+                onClear={() =>
+                  onUrl(
+                    withFilter(url, {
+                      kind: 'all',
+                      q: '',
+                      folder: undefined,
+                      unfiled: false,
+                      tags: [],
+                      untagged: false,
+                      undescribed: false,
+                    }),
+                  )
+                }
+              >
+                {uploadButton}
+              </Empty>
+            ) : url.view === 'grid' ? (
+              <div
+                ref={grid}
+                className={`${css.grid} ${compact ? css.gridCompact : ''}`}
+                role="listbox"
+                aria-label={label}
+                onKeyDown={onGridKey}
+              >
+                {rows.map((row) => (
+                  <Tile
+                    key={row.id}
+                    row={row}
+                    mount={mount}
+                    selected={row.id === selected}
+                    focusable={row.id === focusable}
+                    onSelect={() => props.onSelect(row.id)}
+                    {...(bulk
+                      ? { ticked: isTicked(ticked, row.id), onTick: () => tick(row.id) }
+                      : {})}
+                  />
+                ))}
+              </div>
+            ) : (
+              <Table
+                label={label}
+                columns={columns.map((column) => tableColumn(column, mount))}
+                rows={rows}
+                rowKey={(row) => row.id}
+                {...(bulk
+                  ? {
+                      select: {
+                        head: (
+                          <input
+                            type="checkbox"
+                            className={css.tick}
+                            checked={allShown}
+                            disabled={rows.length === 0}
+                            aria-label="Select every file shown"
+                            onChange={() => setTicked((prev) => tickAllShown(prev, rows))}
+                          />
+                        ),
+                        cell: (row: AssetRow) => (
+                          <input
+                            type="checkbox"
+                            className={css.tick}
+                            checked={isTicked(ticked, row.id)}
+                            aria-label={`Select ${row.filename}`}
+                            onChange={() => tick(row.id)}
+                          />
+                        ),
+                      },
+                    }
+                  : {})}
+                currentKey={selected ?? null}
+                sort={{ key: sortColumnKey(url), dir: dirOf(url) }}
+                onSort={(key) => {
+                  const sort = ASSET_COLUMNS.find((column) => column.key === key)?.sort
+                  if (sort) onUrl(withSort(url, sort))
+                }}
+                onOpen={(row) => props.onSelect(row.id)}
+              />
+            )}
+          </div>
 
           <div className={css.footer}>
             {/*
