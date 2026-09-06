@@ -118,11 +118,15 @@ function keyOf(sort: AssetSort, row: AssetRow): [CursorPart, CursorPart] {
  * first. The stated trigger for reversing that: the library passing ~50,000 rows,
  * or a settled `q` exceeding ~200ms at p50 against a real deployment.
  *
- * **`undescribed` is deliberately not composed here yet.** It is the one
- * `AssetFilter` member phase 7 adds (`described_at is null`); nothing can pass it
- * today, because `ListAssetsOptions` accepts it only by extending `AssetFilter`
- * and no route parses it. Adding it means adding its clause *here*, not at a call
- * site — which is what decision 13 is about.
+ * **`undescribed` is the enrichment backlog, and its clause belongs *here***
+ * rather than at the run's call site (decision 13). It is served by
+ * `assets_undescribed`, the partial index over `described_at` the migration
+ * declares `where described_at is null`, so the backlog walk reads the backlog
+ * rather than the table. Two things have to move together for it to mean
+ * anything: this clause, and `CAPTURED_ASSET_FILTER`'s key in `validate.ts`. A
+ * captured *select all* whose `undescribed` the validator strips composes as an
+ * unfiltered run, which is the whole library described again at the host's
+ * expense — the failure is silent, and it is silent in the expensive direction.
  */
 export function assetFilterSql(filter: AssetFilter): { clauses: string[]; binds: unknown[] } {
   const clauses: string[] = []
@@ -186,6 +190,12 @@ export function assetFilterSql(filter: AssetFilter): { clauses: string[]; binds:
   if (filter.untagged) {
     clauses.push('not exists (select 1 from asset_taggings g where g.asset_id = assets.id)')
   }
+  // Never attempted, as against attempted and failed: `described_at` is stamped
+  // on the failure path too (`describe.ts`), which is what keeps a permanently
+  // failing asset out of this set and therefore out of every sweep after the
+  // first. Retrying those is an explicit run, not the default one. Binds
+  // nothing.
+  if (filter.undescribed) clauses.push('described_at is null')
 
   return { clauses, binds }
 }

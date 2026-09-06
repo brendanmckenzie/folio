@@ -1646,3 +1646,130 @@ feature does nothing from the one screen anybody uses it on.
 every admin control. `describeVocabulary` is exported so a batch reads the tag list
 once per run rather than once per asset, and `describeAsset` takes it as an
 optional third argument for exactly that.
+
+### Phase 7 — the run, and on-upload (2026-09-06)
+
+`runDescribe`, `describeOnUpload`, `DEFAULT_DESCRIBE_BATCH` (10) and
+`MAX_DESCRIBE_BATCH` (25) are new in `server/describe.ts`; `undescribed` is
+composed in `assetFilterSql` and declared in `CAPTURED_ASSET_FILTER`;
+`AssetDescribeBody` is new in `validate.ts`; `POST {base}/api/assets/describe`
+(`ADMIN`) and `GET {base}/api/assets/describe` are new in `routes/assets.ts`, the
+upload route fires `describeOnUpload` under `ctx.waitUntil`, and `GET /assets`
+parses `?undescribed=1`. In the admin, `useDescribe.ts` is new, `AssetDetail`
+gained a *Describe* action and the machine-text display decision 9 asks for, and
+`AssetBrowser` gained a *Describe* bulk control and the run panel. 24 new tests in
+`test/workers/describe.test.ts` (50 in the file).
+
+**The admin cannot read this off the manifest, and the spec says twice that it
+does.** Decision 8 and phase 6's route comment both say "the admin reads it off
+the manifest and renders no control at all"; `Manifest` (`core/schema.ts`) has no
+such field and by `server/app.ts`'s standing rule should not grow one — that is
+the same rule under which sign-in providers are answered by `GET {base}/api/me`
+rather than by the manifest. So `describe` got its own one-field read, `GET
+{base}/api/assets/describe` at `READ`, answering `{ configured }` alone when
+nothing is configured and `{ onUpload, concurrency, batch, images }` beside it
+when something is. It carries `images` because that changes what a run *costs*
+rather than what it does, which is the edge case's "the admin says so once in the
+run panel", and there was otherwise nowhere for the admin to learn it.
+
+**A recorded model failure is in `failed`, not `done`.** `describeAsset` returns
+an outcome carrying `error` rather than throwing, so a batch of ten timeouts
+would otherwise report ten successes. The row still leaves the backlog either way
+— `described_at` is stamped on the failure path, which is what stops a
+permanently failing asset being swept forever — so retrying those is an explicit
+run over `describe_error is not null` and never the default one.
+
+**`DescribeRunReport` is `BulkReport<'describe'>` plus `skipped` and
+`tagsIgnored`.** `skipped` is counted inside `done` as well: the run did account
+for a non-image, it simply did not pay for it, and a dry run reporting "3 files,
+1 of them free" is the closest thing to a cost estimate that can be had without
+spending anything.
+
+**The batch walk is duplicated from `asset-bulk.ts`, deliberately and with a
+cost.** `filterBatch`, `idBatch`, the cursor read and `reasonOf` are the same
+sixty lines in both files. Decision 6's argument for a second runner covers a
+third — no action to switch on, a concurrency pool instead of a sequential loop,
+a batch ceiling an order of magnitude lower, a report with two fields no bulk
+write has — but the *walk* is genuinely common now that there are two copies of
+it, and a fourth caller should extract it into `server/bulk-walk.ts` rather than
+copy it again. Not done here because `asset-bulk.ts` was not this phase's file
+and a shared helper cannot be introduced from one side.
+
+**Concurrency is a worker pool, and the report is assembled by position.**
+`runAssetBulk` gets a deterministic failure list by being sequential, which is
+not available here; results land in a slot per row and the report is built from
+the slots after the batch, or the same batch names its failures in whichever
+order the network answered. `inFlight(count, limit, job)` is a fixed pool pulling
+the next index rather than `Promise.all` with a semaphore, so "four at once" is a
+property of the code rather than of a counter that has to be decremented on every
+path out.
+
+**Verified by breaking it, twice, because both are silent and expensive:**
+
+- Making the dry run call `fn` and discard the answer turns **two** tests red on
+  the *call count* alone — `expected "vi.fn()" to be called +0 times, but got 3`
+  — while every "nothing was written" assertion stays green. That is the point of
+  asserting the count: a dry run that spent the money and threw away the result
+  is indistinguishable from a correct one by its effects.
+- Dropping the vocabulary argument so `describeAsset` reads the tag list for
+  itself takes the read count from 1 to 6 over a five-asset batch. Over a run of
+  forty thousand that is forty thousand reads of a table that cannot change while
+  a batch is in flight.
+
+**`undescribed` needed both halves, and the admin needed a third.** The clause in
+`assetFilterSql` and the key in `CAPTURED_ASSET_FILTER` are two halves of one
+thing — the schema is a `v.object`, so an undeclared key is *stripped in silence*,
+and a backlog run whose narrowing was stripped is the whole library described
+again at the host's expense. The third half is that the run panel must re-read
+`?count=1` **for the narrowed filter**: `expected` is what the count guard
+re-checks, so a selection captured at the unnarrowed count and posted with
+`undescribed` added would be refused every single time. `countMatching` in
+`AssetBrowser.tsx` does that read, and it is deliberately not `assetsParams` —
+that builder takes the screen's `AssetsUrl`, which does not carry `undescribed`
+and should not, because the backlog is a property of a run rather than a state of
+the screen.
+
+**A run panel, not a fifth bulk dialog.** The other four actions are seconds of
+D1 writes; this is N calls to somebody else's API at ten per batch, and a dialog
+saying *Working…* over four thousand files is a spinner nobody can tell from a
+wedge. So the batches are reported as they land and there is a *Stop*, which
+costs nothing to offer precisely because decision 10 put the cursor in the
+caller's hand: stopping is declining to ask for the next batch, and there is no
+job record left behind. The panel opens on a dry run, so the first thing anybody
+sees is the number of model calls they are about to pay for.
+
+**Two things about a backlog run over a select-all are worth knowing.** Its
+`exclude` is kept rather than dropped — a file somebody ticked off must stay
+untouched — which makes the job's ceiling an under-count when an excluded file is
+not in the narrowed set, so the walk stops early. That is the safe direction and
+the only one available without materialising ids. And a *Stop* is a stop: the
+cursor is local to the loop and is not resumable from the panel, so continuing
+means starting again, which for a backlog run is cheap (the described half is no
+longer in the set) and for an unnarrowed one is not.
+
+**The describe run is drawn for everyone and enforced by the route.** Decision 16
+makes it `ADMIN` while everything else here is `ASSETS`; the admin does not know
+the viewer's role at this screen, so the button is rendered whenever `describe` is
+configured and an editor pressing it gets the 403 as a message. Hiding a control
+by a role the client would have to guess at is a worse way to learn about a
+permission than a sentence saying so. The gate itself is pinned three ways in
+`describe.test.ts` — an editor gets 200 on one asset and 403 on the run, an admin
+gets both, a viewer gets neither.
+
+**Not done, and each is a real gap rather than a tidy-up:**
+
+- **`POST {base}/api/v1/assets` does not describe on upload.** It is a second
+  upload route, in `routes/api/index.ts`, which was outside this phase's files —
+  and it is the route **MCP's `upload_asset` proxies to** (`mcp/tools.ts`'s paths
+  are under `{base}/api/v1`). So a file uploaded by an agent or by a script lands
+  in the backlog rather than being described, where the same file dropped on the
+  admin's grid is described immediately. The fix is the six lines the admin route
+  now carries, and it is additive to the versioned contract because the response
+  does not change.
+- **There is no backlog *view*, only a backlog run.** `?undescribed=1` is parsed
+  by the list route, but `AssetsUrl` (`assets-model.ts`, not this phase's file)
+  has no term for it, so the screen cannot filter to "never described" the way it
+  filters by folder or tag. The run panel's checkbox is the only way to reach the
+  set from the admin.
+- **Phase 8** as planned: `anthropicDescriber`, the README's config key and
+  prerequisites, and `ROADMAP.md`.

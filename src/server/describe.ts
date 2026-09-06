@@ -32,11 +32,28 @@
  *    message and `described_at` is set either way, which is what stops a
  *    permanently failing asset being retried forever by a backlog walk.
  */
-import { type AssetTag, tagSlug } from '../core/assets'
+import { type AssetFilter, type AssetTag, tagSlug } from '../core/assets'
+import {
+  type BulkFailure,
+  type BulkRefusal,
+  type BulkReport,
+  type BulkSelection,
+  type FilterSelection,
+  readBulkCursor,
+  writeBulkCursor,
+} from '../core/bulk'
 import { isImageAsset } from '../core/values'
-import { type AssetRow, assetById, toAssetValue } from './assets'
+import {
+  type AssetRow,
+  assetById,
+  assetsFor,
+  assetsMatching,
+  countAssets,
+  toAssetValue,
+} from './assets'
 import { listTags } from './asset-tags'
 import { bindChunks, type FolioDb } from './db'
+import { FolioError, rethrow } from './errors'
 import { clampText } from './validate'
 import type { DescribeInput, DescribeResult, FolioDescribe } from './types'
 
@@ -404,4 +421,393 @@ async function addAssetTags(
  * caller asked what happened, and what happened is recorded. */
 async function reread(db: FolioDb, row: AssetRow): Promise<AssetRow> {
   return (await assetById(db, row.id)) ?? row
+}
+
+/* -------------------------------------------------------------------- run --- */
+
+/**
+ * How many assets one call of a run acts on before handing back a cursor.
+ *
+ * **Deliberately far below `DEFAULT_ASSET_BULK_BATCH`'s 25 and
+ * `MAX_BULK_BATCH`'s 200** (decision 10): a batch here is *N calls to somebody
+ * else's model API*, not N D1 writes. Ten at `concurrency: 4` is three waves of
+ * a call that takes seconds, which is comfortably inside a Worker's wall-clock
+ * budget; two hundred is not, and a batch that runs out of time reports nothing
+ * at all — the caller cannot even tell how far it got, because the cursor rides
+ * on the response.
+ */
+export const DEFAULT_DESCRIBE_BATCH = 10
+export const MAX_DESCRIBE_BATCH = 25
+
+/**
+ * What one call of a run did.
+ *
+ * `BulkReport<'describe'>` plus the two numbers this run has and a bulk write
+ * does not. `action` is a literal rather than one of `AssetBulkAction`'s four
+ * because this is a fifth thing done to a selection, run by a different runner
+ * (see `runDescribe`), and a client reading `report.action` should be able to
+ * tell them apart.
+ *
+ * **`done` counts assets the host's function answered for, and a recorded model
+ * failure is in `failed` instead** — `describeAsset` never throws for one, so
+ * without this split a batch of ten timeouts would report ten successes. The row
+ * still leaves the backlog either way: `described_at` is stamped on the failure
+ * path too, which is what stops a permanently failing asset being offered
+ * forever.
+ */
+export interface DescribeRunReport extends BulkReport<'describe'> {
+  /** Rows that **cost nothing**: a non-image is skipped before `fn` is reached.
+   * Counted in `done` as well, because the run did account for them. */
+  skipped: number
+  /** Tag answers that matched no existing slug, summed over this call
+   * (decision 11). A host whose prompt keeps proposing `product-shot` finds out
+   * here rather than by wondering why the filter never has it. */
+  tagsIgnored: number
+}
+
+export type DescribeRunOutcome = DescribeRunReport | BulkRefusal
+
+export interface DescribeRunOptions {
+  /** Rows per call. Defaulted and clamped to `MAX_DESCRIBE_BATCH`, which is
+   * much lower than a bulk write's for the reason above. */
+  batch?: number
+  /** The previous call's `continueFrom`. An opaque `(id, seen)` pair, not an id. */
+  continueFrom?: string | null
+  /**
+   * Answers what the run *would* do and **calls `fn` exactly zero times**.
+   *
+   * The whole question a dry run is asked here is "how many, and what will it
+   * cost" (decision 10), so a dry run that reached the host's model API to find
+   * out would be answering it by spending it. It reads rows, counts the
+   * non-images that would be free, and writes nothing.
+   */
+  dryRun?: boolean
+}
+
+/**
+ * One batch of an enrichment run over a selection of library rows
+ * (`../../docs/specs/content-model/media-library.md` decision 10).
+ *
+ * **A third runner beside `runBulk` and `runAssetBulk`, and the same argument
+ * covers it** (decision 6): the walk is shared vocabulary rather than shared
+ * code, because the three differ in everything that surrounds it — this one has
+ * no action to switch on, no per-action arguments, a concurrency pool instead of
+ * a sequential loop, a batch ceiling an order of magnitude lower, and a report
+ * with two fields no bulk write has. What it does share it *imports*:
+ * `core/bulk.ts`'s selection shapes, report shapes and cursor codec, and
+ * `assetsMatching` / `assetsFor` / `countAssets` for the reads. The batch walk
+ * below is duplicated from `asset-bulk.ts` and is the one place the two overlap;
+ * extracting it would mean reshaping that file, which this phase did not own.
+ *
+ * Four properties are load-bearing, and the first two are the expensive ones:
+ *
+ * **The vocabulary is read once per call, never once per asset.** Ten assets in
+ * a batch is ten identical reads of a table that cannot change during the batch;
+ * over a run of forty thousand it is forty thousand.
+ *
+ * **`concurrency` in flight, and one failure never abandons the batch.** Every
+ * asset is its own `try`, exactly as `runAssetBulk` does it — a run that died on
+ * the file whose provider rate-limited it and skipped the other nine would be
+ * paying for nine calls to report one error.
+ *
+ * **The report is assembled in position order**, though the work is not done in
+ * it. `runAssetBulk` gets a deterministic failure list by being sequential;
+ * that is not available here, so the results land in a slot per row and the
+ * report is built from the slots afterwards. Without it the same batch reports
+ * its failures in whichever order the network answered.
+ *
+ * **The count guard runs once, at the start of the job.** It bounds the *set* —
+ * it cannot bound the bill, which is why the route above it is `ADMIN`
+ * (decision 16).
+ */
+export async function runDescribe(
+  deps: DescribeDeps,
+  selection: BulkSelection<AssetFilter>,
+  opts: DescribeRunOptions = {},
+): Promise<DescribeRunOutcome> {
+  const { db } = deps
+  const dryRun = opts.dryRun === true
+  const batch = Math.min(
+    Math.max(Math.trunc(opts.batch ?? DEFAULT_DESCRIBE_BATCH), 1),
+    MAX_DESCRIBE_BATCH,
+  )
+  const resume = opts.continueFrom ? readCursor(opts.continueFrom) : null
+
+  // Before the ceiling check, matching `runAssetBulk`: a cursor that disagrees
+  // with the list it was issued against is a client bug whatever the arithmetic
+  // says, and an exhausted allowance would otherwise report a placid "nothing
+  // left to do" for it.
+  if (!selection.all && resume !== null && selection.ids[resume.seen - 1] !== resume.after) {
+    throw new FolioError(
+      'bad_request',
+      'The selection changed between batches. Start the run again.',
+    )
+  }
+
+  const total = selection.all
+    ? Math.max(selection.expected - (selection.exclude?.length ?? 0), 0)
+    : selection.ids.length
+  const seen = resume?.seen ?? 0
+
+  // Once, at the start of the job — never on a resumed call (`bulk-writes.md`
+  // decision 3). It confirms *intent* over a set somebody read a number for; a
+  // run whose set moved by three files while an admin was reading it is refused
+  // as a value, with the new count, rather than thrown.
+  if (selection.all && resume === null) {
+    const actual = await countAssets(db, selection.filter)
+    if (actual !== selection.expected) {
+      return { refused: 'count', expected: selection.expected, actual }
+    }
+  }
+
+  const report: DescribeRunReport = {
+    action: 'describe',
+    done: 0,
+    failed: [],
+    total,
+    seen,
+    continueFrom: null,
+    dryRun,
+    skipped: 0,
+    tagsIgnored: 0,
+  }
+
+  // The ceiling. A job that has consumed everything it agreed to is finished
+  // even if the filter still matches rows: those are files nobody agreed to
+  // spend money on.
+  const allowance = total - seen
+  if (allowance <= 0) return report
+
+  const { rows, consumed, exhausted, last } = selection.all
+    ? await filterBatch(db, selection, resume?.after ?? null, batch, allowance)
+    : await idBatch(db, selection.ids, seen, Math.min(batch, allowance))
+
+  /**
+   * **Once per call, and passed into every `describeAsset`.** `describeAsset`
+   * reads it for itself when it is not given one, which is right for the
+   * single-asset route and wrong here by a factor of the batch size.
+   *
+   * Not read at all on a dry run: nothing consumes it, and a dry run is the
+   * call that is meant to be free.
+   */
+  const vocabulary = dryRun ? [] : await describeVocabulary(db)
+
+  const slots: (Slot | null)[] = new Array(rows.length).fill(null)
+  await inFlight(rows.length, deps.describe.concurrency, async (at) => {
+    const row = rows[at] ?? null
+    if (row === null) {
+      // An id an explicit selection named and D1 no longer has. Unlike a bulk
+      // delete, there is no reading of this under which the job got what it
+      // asked for.
+      slots[at] = {
+        kind: 'failed',
+        failure: { id: idAt(selection, seen + at), title: '', message: 'No such file' },
+      }
+      return
+    }
+    if (dryRun) {
+      // `fn` is not reached, and the only question asked of the row is the free
+      // one: would this have cost anything?
+      slots[at] = { kind: 'dry', skipped: !isImageAsset(toAssetValue(row)) }
+      return
+    }
+    try {
+      slots[at] = { kind: 'done', outcome: await describeAsset(deps, row, vocabulary) }
+    } catch (err) {
+      // `describeAsset` records a model failure rather than throwing, so what
+      // reaches here is D1 or R2 itself — and even that must not take the other
+      // nine calls of the batch down with it.
+      slots[at] = {
+        kind: 'failed',
+        failure: { id: row.id, title: row.filename, message: reasonOf(err) },
+      }
+    }
+  })
+
+  for (const slot of slots) {
+    if (slot === null) continue
+    if (slot.kind === 'failed') {
+      report.failed.push(slot.failure)
+      continue
+    }
+    if (slot.kind === 'dry') {
+      report.done++
+      if (slot.skipped) report.skipped++
+      continue
+    }
+    const { outcome } = slot
+    report.tagsIgnored += outcome.tagsIgnored
+    if (outcome.error !== null) {
+      // Recorded on the row *and* named in the report. The asset has left the
+      // backlog either way — `described_at` is stamped — so a retry is an
+      // explicit run over `describe_error is not null`, not the next sweep.
+      report.failed.push({
+        id: outcome.row.id,
+        title: outcome.row.filename,
+        message: outcome.error,
+      })
+      continue
+    }
+    report.done++
+    if (outcome.skipped) report.skipped++
+  }
+
+  report.seen = seen + consumed
+  // `exhausted`, not `consumed < batch`: a filter batch drops the rows a
+  // select-all ticked off *after* the read, so it can act on fewer rows than it
+  // read and still have the whole rest of the table in front of it.
+  report.continueFrom =
+    exhausted || report.seen >= total || last === null ? null : writeBulkCursor(last, report.seen)
+  return report
+}
+
+/** One row's result, held by position so the report can be assembled in list
+ * order however the concurrent calls actually finished. */
+type Slot =
+  | { kind: 'done'; outcome: DescribeOutcome }
+  | { kind: 'dry'; skipped: boolean }
+  | { kind: 'failed'; failure: BulkFailure }
+
+/**
+ * `count` positions, at most `limit` of them in flight.
+ *
+ * A fixed pool of workers pulling the next index rather than
+ * `Promise.all(rows.map(…))` with a semaphore: the pool is the shape where
+ * "four at once" is a property of the code rather than of a counter that has to
+ * be decremented on every path out, including the throwing one. `next++` between
+ * `await`s is safe for the reason it always is in this runtime — the increment
+ * cannot interleave, because nothing else runs until the loop yields.
+ *
+ * `job` is expected to record its own failures; a throw out of it would abandon
+ * one worker and take `Promise.all` with it, which is why every call site wraps
+ * its body in a `try`.
+ */
+async function inFlight(
+  count: number,
+  limit: number,
+  job: (at: number) => Promise<void>,
+): Promise<void> {
+  let next = 0
+  const workers = Array.from({ length: Math.max(Math.min(limit, count), 0) }, async () => {
+    for (;;) {
+      const at = next++
+      if (at >= count) return
+      await job(at)
+    }
+  })
+  await Promise.all(workers)
+}
+
+/**
+ * Describes an upload in the background, and **cannot fail the upload**
+ * (decision 10).
+ *
+ * This runs under `ctx.waitUntil`, after the response has gone: the object is
+ * in R2 and the row is in D1, and there is nobody left to tell. So every failure
+ * — including a D1 or R2 one, which `describeAsset` does propagate — is a log
+ * line, and the asset is left in the backlog exactly where a never-attempted one
+ * is. A rejected promise handed to `waitUntil` is an unhandled rejection in the
+ * host's Worker for an upload that succeeded.
+ */
+export async function describeOnUpload(deps: DescribeDeps, row: AssetRow): Promise<void> {
+  try {
+    await describeAsset(deps, row)
+  } catch (e) {
+    console.error('folio: describing an upload failed', e)
+  }
+}
+
+/* ------------------------------------------------------------- the walk --- */
+
+/**
+ * One batch's worth of rows, and the three numbers the cursor needs —
+ * `asset-bulk.ts`'s `Batch`, and it means the same thing here.
+ */
+interface Batch {
+  rows: (AssetRow | null)[]
+  /** How much of the ceiling this batch used. Not the number of rows read, for
+   * a filter batch that dropped exclusions. */
+  consumed: number
+  /** Whether the walk has reached the end of what it can read. Reported by the
+   * batch rather than inferred, because the two branches are asked for
+   * different limits and only they know what they asked for. */
+  exhausted: boolean
+  /** The id to resume after, or null when there is nothing left. */
+  last: string | null
+}
+
+/**
+ * One batch of a captured filter.
+ *
+ * **The exclusions are applied here, in JavaScript, and not in the `where`** —
+ * `asset-bulk.ts`'s `filterBatch` argues it in full: a selection's `exclude` is
+ * up to 500 ids, five times `D1_BIND_CAP`, and no chunking rescues a single
+ * statement.
+ */
+async function filterBatch(
+  db: FolioDb,
+  selection: FilterSelection<AssetFilter>,
+  after: string | null,
+  limit: number,
+  allowance: number,
+): Promise<Batch> {
+  const rows = await assetsMatching(db, selection.filter, { limit, after })
+  const excluded = new Set(selection.exclude ?? [])
+  const kept = excluded.size === 0 ? rows : rows.filter((row) => !excluded.has(row.id))
+  const acting = kept.length > allowance ? kept.slice(0, allowance) : kept
+  return {
+    rows: acting,
+    consumed: acting.length,
+    exhausted: rows.length < limit,
+    last: rows.at(-1)?.id ?? null,
+  }
+}
+
+/**
+ * One batch of an explicit id list. `consumed` is the *slice* length rather than
+ * the row count, because `assetsFor` omits an id with no row behind it and
+ * counting rows would read a stale id as the end of the list.
+ */
+async function idBatch(
+  db: FolioDb,
+  ids: readonly string[],
+  seen: number,
+  limit: number,
+): Promise<Batch> {
+  const slice = ids.slice(seen, seen + limit)
+  const found = new Map((await assetsFor(db, slice)).map((row) => [row.id, row]))
+  return {
+    rows: slice.map((id) => found.get(id) ?? null),
+    consumed: slice.length,
+    exhausted: slice.length < limit,
+    last: slice.at(-1) ?? null,
+  }
+}
+
+/** The id at a job position, for a failure that has no row to name itself with. */
+function idAt(selection: BulkSelection<AssetFilter>, position: number): string {
+  return selection.all ? '' : (selection.ids[position] ?? '')
+}
+
+/** `core/bulk.ts`'s codec, with this module's refusal for a cursor that is not
+ * one of ours. */
+function readCursor(raw: string): { after: string; seen: number } {
+  const at = readBulkCursor(raw)
+  if (!at) throw new FolioError('bad_request', 'Malformed pagination cursor')
+  return at
+}
+
+/** Why one file could not be described, as text that may travel — `runBulk`'s
+ * `reasonOf` and `runAssetBulk`'s, for their reason: a run report is prose
+ * rendered straight into a panel, and anything `rethrow` declines to translate
+ * is a bug or a platform failure that gets the generic message here and the real
+ * one in the log. */
+function reasonOf(err: unknown): string {
+  try {
+    rethrow(err)
+  } catch (translated) {
+    if (translated instanceof FolioError) return translated.message
+  }
+  console.error('folio: unreportable failure during a describe run', err)
+  return 'Something went wrong.'
 }

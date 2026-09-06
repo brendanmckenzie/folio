@@ -28,8 +28,14 @@ import {
   updateAsset,
   uploadAsset,
 } from '../assets'
-import { ASSETS, EDIT, READ } from '../auth/roles'
-import { describeAsset } from '../describe'
+import { ADMIN, ASSETS, EDIT, READ } from '../auth/roles'
+import {
+  DEFAULT_DESCRIBE_BATCH,
+  describeAsset,
+  describeOnUpload,
+  type DescribeRunOutcome,
+  runDescribe,
+} from '../describe'
 import type { FolioDb } from '../db'
 import { FolioError, rethrow } from '../errors'
 import { requireAccess } from '../middleware'
@@ -39,6 +45,7 @@ import {
   AssetBulkBody,
   AssetBulkMoveBody,
   AssetBulkTagBody,
+  AssetDescribeBody,
   AssetFolderCreateBody,
   AssetFolderPatchBody,
   assetKeyParam,
@@ -146,6 +153,12 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       dir: sortDirQuery(c.req.query('dir')),
       ...assetFolderFilter(c.req.query('folder'), c.req.query('unfiled')),
       ...assetTagFilter(c.req.queries('tags'), c.req.query('untagged')),
+      // The enrichment backlog. Answered here as well as composed into a run's
+      // captured filter, because the run panel has to be able to read *how many
+      // have never been described* before it offers to describe them — with
+      // `?count=1`, that number is also the `expected` its count guard checks
+      // against, so the two have to come off one set of clauses.
+      undescribed: c.req.query('undescribed') === '1',
     })
     return c.json({ ...page, rows: await withTags(db, page.rows) })
   })
@@ -304,7 +317,10 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * count buys: "somebody uploaded three files while you were reading the number"
    * is re-confirmed in one click instead of investigated.
    */
-  const answer = (c: Context<FolioEnv<Env>>, outcome: AssetBulkOutcome): Response => {
+  const answer = (
+    c: Context<FolioEnv<Env>>,
+    outcome: AssetBulkOutcome | DescribeRunOutcome,
+  ): Response => {
     if (!wasRefused(outcome)) return c.json(outcome)
     return c.json(
       {
@@ -444,6 +460,92 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   /* ----------------------------------------------------------- describe --- */
 
   /**
+   * Whether this deployment describes anything, and how.
+   *
+   * **The admin cannot ask the manifest.** `Manifest` (`core/schema.ts`) carries
+   * the content model and, by `server/app.ts`'s own rule, deliberately not the
+   * configuration a screen needs to know about — sign-in providers are answered
+   * by `GET {base}/api/me` for the same reason. So this is the describe
+   * feature's equivalent: one read, answered before any control is drawn, so
+   * that a host with no `describe` in config renders no *Describe* button rather
+   * than one that 501s when it is pressed. An impossible control is absent, not
+   * disabled.
+   *
+   * `images` rides along because it changes what a run *costs* rather than what
+   * it does: without the binding the original bytes are described instead of a
+   * 512px WebP, and the run panel says so once rather than leaving a host to
+   * find it on an invoice.
+   *
+   * `READ` (viewer+), matching the list this describes rows of: it answers a
+   * boolean about the deployment's own configuration and reveals nothing about
+   * content. The two controls it gates carry their own gates — `ASSETS` for one
+   * asset, `ADMIN` for the run.
+   *
+   * Registered **before** `/assets/:id` for the reason `folders` and `tags` are:
+   * `describe` is a legal `:id` as far as the router is concerned.
+   */
+  app.get('/assets/describe', requireAccess<Env>(rt, READ), (c) => {
+    const { images } = c.var.bindings()
+    if (!rt.describe) return c.json({ configured: false })
+    return c.json({
+      configured: true,
+      onUpload: rt.describe.onUpload,
+      concurrency: rt.describe.concurrency,
+      batch: DEFAULT_DESCRIBE_BATCH,
+      images: images !== undefined,
+    })
+  })
+
+  /**
+   * The batched enrichment run over a selection (decision 10) — the run panel's
+   * whole loop, one call per batch, the cursor in the caller's hand.
+   *
+   * **`ADMIN`, while every other route in this feature is `ASSETS`, and that is
+   * chosen on consequence rather than on symmetry** (decision 16). It is the one
+   * route in Folio that spends the host's money against a third party, at a rate
+   * the caller chooses, over a set that can be *all forty thousand*. The count
+   * guard below bounds the **set**, not the bill: it confirms that the number an
+   * admin read is the number that will be acted on, and says nothing whatever
+   * about what those calls cost. An editor should not be able to start that, and
+   * an admin — the role that can already mint API tokens — is the right bar for
+   * who can. The asymmetry with `POST /assets/:id/describe` beside it is
+   * deliberate and is exactly the difference between spending by the one and
+   * spending by the hundred.
+   *
+   * **Rejected: `ASSETS` for both**, which is consistent and puts the one
+   * genuinely expensive button in this admin in front of the most numerous role.
+   * **Rejected: a configured spend ceiling**, which is Folio guessing at a
+   * host's pricing for a provider it has never heard of.
+   *
+   * The two refusals are `POST /assets/:id/describe`'s, in its order and for its
+   * reasons. A refused count answers 409 with the new number, like every other
+   * bulk route: a door, not a wall.
+   */
+  app.post('/assets/describe', requireAccess<Env>(rt, ADMIN), async (c) => {
+    const { db, media, images } = c.var.bindings()
+    if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
+    if (!rt.describe) {
+      throw new FolioError('unsupported', 'No `describe` function is configured')
+    }
+
+    const body = await parseBody(c.req, AssetDescribeBody)
+    requireCursor(body.continueFrom ?? undefined)
+    const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
+    return answer(
+      c,
+      await runDescribe(
+        { db, media, images, assetBase, describe: rt.describe, env: c.env },
+        body.selection,
+        {
+          ...(body.dryRun === undefined ? {} : { dryRun: body.dryRun }),
+          ...(body.continueFrom === undefined ? {} : { continueFrom: body.continueFrom }),
+          ...(body.batch === undefined ? {} : { batch: body.batch }),
+        },
+      ),
+    )
+  })
+
+  /**
    * Alt text, a description and tags for one asset, from the host's own model
    * call (`media-library.md` decision 8). Synchronous: one asset, one call, and
    * the row that results — the *Describe* button on the detail panel. The batched
@@ -454,8 +556,8 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * **Two refusals, and the order matters.** No bucket comes first: there is
    * nothing to look at, so "no media" is the truer answer than "no describe".
    * Then the config key itself, named in the message — absence is a legible
-   * refusal here exactly as it is for `media` and `browser`, and the admin reads
-   * it off the manifest and renders no control at all.
+   * refusal here exactly as it is for `media` and `browser`, and the admin asks
+   * `GET /assets/describe` first so it renders no control at all.
    *
    * **`ASSETS` (editor+)**, matching `PATCH /assets/:id`: this writes the same
    * kind of metadata onto one row, and it cannot touch a document. Nothing it
@@ -526,9 +628,19 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * Raw body upload with the filename in a query parameter, rather than
    * multipart: it keeps the Worker out of the business of parsing form data, and
    * the browser sets Content-Type and Content-Length from the File for free.
+   *
+   * **A new upload is described in the background** when the host configured a
+   * `describe` and did not turn `onUpload` off (decision 10), so the file an
+   * editor drops on the grid has alt text by the time they open it, with no
+   * button to press. `ctx.waitUntil`, not `await`: the describe is a call to
+   * somebody else's model API and it must not add its seconds to an upload, or
+   * its failures to one. `describeOnUpload` swallows everything for that second
+   * reason — the response has already gone, the object is in R2 and the row is
+   * in D1, so a failure here is a log line and an asset left in the backlog,
+   * which is exactly where a never-attempted one is.
    */
   app.post('/assets', requireAccess<Env>(rt, ASSETS), async (c) => {
-    const { db, media } = c.var.bindings()
+    const { db, media, images } = c.var.bindings()
     if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
 
     const filename = filenameQuery(c.req.query('filename'))
@@ -539,6 +651,15 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     try {
       const bytes = await readCappedBody(c.req.raw.body, MAX_UPLOAD_BYTES)
       const row = await uploadAsset(db, media, { bytes, filename })
+      if (rt.describe?.onUpload) {
+        const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
+        c.executionCtx.waitUntil(
+          describeOnUpload(
+            { db, media, images, assetBase, describe: rt.describe, env: c.env },
+            row,
+          ),
+        )
+      }
       return c.json({ asset: row, value: toAssetValue(row) }, 201)
     } catch (e) {
       // An empty upload is a bad request; one over either size ceiling is

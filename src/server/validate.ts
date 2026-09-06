@@ -1479,9 +1479,12 @@ export function tagsQuery(raw: string[] | undefined): string[] | undefined {
  * query string.
  *
  * Every member of `core/assets.ts`'s `AssetFilter` that a list route parses, and
- * **nothing more**: `undescribed` is deliberately absent because phase 7 adds the
- * clause that would answer it, and a filter key the composer ignores is a
- * selection that means something other than what it says. The two mutual
+ * **nothing more** — a filter key the composer ignores is a selection that means
+ * something other than what it says. **`undescribed` is here and its clause is
+ * in `assetFilterSql`, and the two arrived together on purpose**: this object is
+ * a `v.object`, so a key it does not declare is *stripped in silence*, and a
+ * describe run whose "only the ones never described" was stripped is the whole
+ * library described again, every time, at the host's expense. The two mutual
  * exclusions the list route refuses with a 400 (`folder`/`unfiled`,
  * `tags`/`untagged`) are *not* re-checked here — `assetFilterSql` composes both
  * honestly and yields an empty set, which for a bulk write is the safest possible
@@ -1504,6 +1507,7 @@ const CAPTURED_ASSET_FILTER = v.object(
     ),
     unfiled: v.optional(v.boolean('must be true or false')),
     untagged: v.optional(v.boolean('must be true or false')),
+    undescribed: v.optional(v.boolean('must be true or false')),
   },
   OBJECT,
 )
@@ -1601,9 +1605,47 @@ export const AssetBulkMoveBody = v.object(
  * no redirect switch to offer, because an asset has no path to redirect from. */
 export const AssetBulkBody = v.object(ASSET_BULK_CONTROL, OBJECT)
 
+/**
+ * `POST {base}/api/assets/describe` — the batched enrichment run
+ * (`../content-model/media-library.md` decision 10).
+ *
+ * The same selection and the same job control as a bulk write, with **one
+ * deliberate difference: `batch` is capped at 25, not 200.** A batch here is N
+ * calls to somebody else's model API rather than N D1 writes, and 200 of those
+ * do not fit in a Worker's wall-clock budget — see `MAX_DESCRIBE_BATCH`
+ * (`describe.ts`), whose value this is. Written as a literal rather than
+ * imported, exactly as `ASSET_BULK_CONTROL` writes 200: `describe.ts` imports
+ * `clampText` from this file, and importing a `const` back the other way is a
+ * cycle whose failure mode is a module-evaluation `ReferenceError` that depends
+ * on which file the bundler reaches first.
+ *
+ * No `concurrency` and no per-run overrides of anything else in `describe`: the
+ * rate at which a host's money is spent is a **configuration** decision made
+ * once at construction, not something a request body may raise.
+ */
+export const AssetDescribeBody = v.object(
+  {
+    selection: ASSET_SELECTION,
+    dryRun: v.optional(v.boolean('must be true or false')),
+    continueFrom: v.nullish(
+      v.pipe(v.string('must be a string'), v.maxLength(500, 'is not a pagination cursor')),
+    ),
+    batch: v.optional(
+      v.pipe(
+        v.number('must be a number'),
+        v.integer('must be a whole number'),
+        v.minValue(1, 'must be at least 1'),
+        v.maxValue(25, 'must be 25 or fewer'),
+      ),
+    ),
+  },
+  OBJECT,
+)
+
 export type AssetBulkTagInput = v.InferOutput<typeof AssetBulkTagBody>
 export type AssetBulkMoveInput = v.InferOutput<typeof AssetBulkMoveBody>
 export type AssetBulkInput = v.InferOutput<typeof AssetBulkBody>
+export type AssetDescribeInput = v.InferOutput<typeof AssetDescribeBody>
 
 /**
  * `?dir=` — reverses a sort. Absent means the ordering's own natural direction,

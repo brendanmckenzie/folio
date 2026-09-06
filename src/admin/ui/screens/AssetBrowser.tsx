@@ -42,6 +42,7 @@ import {
 import css from './Assets.module.css'
 import type { AssetsData, Uploads } from './useAssets'
 import { messageOf } from './useContent'
+import { useDescribe } from './useDescribe'
 import { type FoldersData, useFolders } from './useFolders'
 import { type TagsData, useTags } from './useTags'
 
@@ -168,6 +169,9 @@ export function AssetBrowser(props: AssetBrowserProps) {
    */
   const folders = useFolders(apiBase)
   const tags = useTags(apiBase)
+  /** Whether this deployment describes anything. Absent config draws no control
+   * at all rather than one that answers `unsupported` when it is pressed. */
+  const describe = useDescribe(apiBase)
 
   /**
    * The bulk selection. `NOTHING` unless `bulk` is set, in which case the
@@ -192,6 +196,24 @@ export function AssetBrowser(props: AssetBrowserProps) {
     used: null,
     error: null,
   })
+
+  /**
+   * The describe run, or null when its panel is closed.
+   *
+   * **A panel rather than a fifth bulk dialog**, because this is the one action
+   * here that takes minutes rather than seconds: it is N calls to somebody
+   * else's model API, ten per batch, and a dialog that said *Working…* over four
+   * thousand files would be a spinner somebody watches for an hour with no way
+   * to tell whether it is progressing or wedged. So the batches are reported as
+   * they land and there is a *Stop*, which costs nothing to offer precisely
+   * because decision 10 put the cursor in the caller's hand: stopping is not
+   * cancelling a job, it is declining to ask for the next batch.
+   */
+  const [describeRun, setDescribeRun] = useState<DescribeRunState | null>(null)
+  /** Read between batches. A ref rather than state because the loop below reads
+   * it after an `await` and would otherwise close over the value it started
+   * with — the classic version of this bug is a *Stop* that does nothing. */
+  const stopping = useRef(false)
 
   const rows = data.page.rows
   const firstLoad = data.page.loading && rows.length === 0
@@ -295,6 +317,120 @@ export function AssetBrowser(props: AssetBrowserProps) {
       } else setProbe({ used: outcome.usedOnPublished ?? 0, error: null })
     } catch (e) {
       setProbe({ used: null, error: (e as Error).message })
+    }
+  }
+
+  /**
+   * The body a describe run posts, built **once** and posted by both the dry run
+   * and the real one — so the number somebody read is the number the count guard
+   * re-checks, and a *select all* cannot be previewed as one set and run over
+   * another.
+   *
+   * `backlogOnly` is the only thing that reshapes it, and it is offered for a
+   * captured *select all* alone: it adds `undescribed` to the filter and reads
+   * the count **for that narrowed filter**, because `expected` has to be the
+   * count of the set actually being run over or the guard refuses every time.
+   * For a ticked list of ids there is nothing to narrow — those files were
+   * chosen one at a time.
+   */
+  const describeBody = async (backlogOnly: boolean): Promise<Record<string, unknown>> => {
+    if (!ticked.all || !backlogOnly) return bodyOf(ticked)
+    const filter: AssetFilter = { ...ticked.filter, undescribed: true }
+    return {
+      all: true,
+      filter,
+      expected: await countMatching(apiBase, filter),
+      // Kept, not dropped: a file somebody ticked off must stay untouched. It
+      // may not be in the narrowed set at all, which makes the job's ceiling an
+      // under-count and stops the walk early — the safe direction, and the only
+      // one available without materialising ids.
+      ...(ticked.exclude.size === 0 ? {} : { exclude: [...ticked.exclude] }),
+    }
+  }
+
+  /** Opens the panel and asks what the run would do — `dryRun`, which calls the
+   * host's function zero times and answers the job's total. */
+  const previewDescribe = async (backlogOnly: boolean) => {
+    setDescribeRun({
+      backlogOnly,
+      body: null,
+      total: null,
+      error: null,
+      running: false,
+      progress: null,
+      finished: false,
+    })
+    try {
+      const body = await describeBody(backlogOnly)
+      const outcome = await postDescribe(apiBase, { ...body, dryRun: true })
+      setDescribeRun((prev) =>
+        prev === null
+          ? prev
+          : 'refused' in outcome
+            ? { ...prev, error: refusedText(outcome.refused) }
+            : { ...prev, body, total: outcome.total },
+      )
+    } catch (e) {
+      setDescribeRun((prev) => (prev === null ? prev : { ...prev, error: (e as Error).message }))
+    }
+  }
+
+  /**
+   * The run itself: post, read the report, post again with its cursor.
+   *
+   * **Loop on `continueFrom`, never on `seen < total`**, and stop on a cursor
+   * that did not move — `runAssetJob`'s rule, and it matters more here, because
+   * a spin costs a model call per iteration rather than a D1 read.
+   */
+  const startDescribe = async () => {
+    const body = describeRun?.body
+    if (!body) return
+    stopping.current = false
+    setDescribeRun((prev) =>
+      prev === null ? prev : { ...prev, running: true, progress: emptyRun() },
+    )
+
+    let continueFrom: string | null = null
+    const totals = emptyRun()
+    try {
+      for (;;) {
+        const outcome = await postDescribe(apiBase, {
+          ...body,
+          ...(continueFrom === null ? {} : { continueFrom }),
+        })
+        if ('refused' in outcome) {
+          setDescribeRun((prev) =>
+            prev === null ? prev : { ...prev, error: refusedText(outcome.refused) },
+          )
+          break
+        }
+        totals.seen = outcome.seen
+        totals.done += outcome.done
+        totals.skipped += outcome.skipped
+        totals.tagsIgnored += outcome.tagsIgnored
+        totals.failed = [...totals.failed, ...outcome.failed]
+        setDescribeRun((prev) => (prev === null ? prev : { ...prev, progress: { ...totals } }))
+        if (outcome.continueFrom === null || outcome.continueFrom === continueFrom) break
+        continueFrom = outcome.continueFrom
+        // Between batches, never mid-batch: the ten calls already in flight are
+        // paid for either way, and abandoning their answers would waste them.
+        if (stopping.current) break
+      }
+    } catch (e) {
+      setDescribeRun((prev) => (prev === null ? prev : { ...prev, error: (e as Error).message }))
+    } finally {
+      setDescribeRun((prev) => (prev === null ? prev : { ...prev, running: false, finished: true }))
+      // Only when a batch actually ran. A refusal on the first call — the count
+      // guard, before a single model call — is reported in the panel, and a
+      // toast reading "Described 0 files" beside it would be the same event told
+      // twice and wrongly.
+      if (totals.seen > 0) {
+        // The rows carry machine text now, and the vocabulary's counts moved
+        // with whatever the model chose from it.
+        data.reload()
+        tags.reload()
+        onNotice?.(describeRunSummary(totals))
+      }
     }
   }
 
@@ -515,6 +651,26 @@ export function AssetBrowser(props: AssetBrowserProps) {
                 >
                   Move
                 </Button>
+                {/*
+                  Absent, not disabled, with no `describe` configured — and the
+                  only bulk control here that is `ADMIN` rather than `ASSETS`
+                  (decision 16). The role is enforced by the route; this button
+                  is drawn for an editor too, and an editor pressing it gets the
+                  403 as a message. Hiding it by role would need the admin to
+                  know the viewer's role here, which it does not, and a control
+                  that appears for some people and not others is a worse way to
+                  learn about a permission than a sentence saying so.
+                */}
+                {describe.configured ? (
+                  <Button
+                    size="sm"
+                    disabled={count === 0 || running}
+                    reason={running ? 'Working…' : 'Select some files first'}
+                    onClick={() => void previewDescribe(false)}
+                  >
+                    Describe
+                  </Button>
+                ) : null}
                 <Button
                   size="sm"
                   variant="danger"
@@ -730,6 +886,28 @@ export function AssetBrowser(props: AssetBrowserProps) {
           onRun={() => void run('delete')}
         />
       ) : null}
+
+      {describeRun === null ? null : (
+        <DescribeRunDialog
+          state={describeRun}
+          count={count}
+          images={describe.images}
+          onUpload={describe.onUpload}
+          {...(ticked.all ? { onBacklogOnly: (only: boolean) => void previewDescribe(only) } : {})}
+          onRun={() => void startDescribe()}
+          onStop={() => {
+            stopping.current = true
+          }}
+          onClose={() => {
+            stopping.current = true
+            setDescribeRun(null)
+            // A finished run leaves the selection where a bulk write does not:
+            // the files are still there, still selected, and running again over
+            // the ones that failed is a reasonable next gesture.
+            if (describeRun.finished) setTicked(NOTHING)
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -912,6 +1090,268 @@ function runSummary(action: AssetBulkAction, done: number, failed: readonly Bulk
     .join(', ')
   const rest = failed.length > 2 ? ` and ${failed.length - 2} more` : ''
   return `${PAST_TENSE[action]} ${files}. Could not: ${named}${rest}`
+}
+
+/* ---------------------------------------------------------------- describe --- */
+
+/**
+ * What the describe run panel holds. One object rather than six `useState`s,
+ * for `Ticked`'s reason: several of these are only meaningful together — a
+ * `total` with no `body` is a preview of a job nobody can start — and a single
+ * value makes the impossible combinations unwritable.
+ */
+interface DescribeRunState {
+  /** Narrowed to files that have never been described. Offered for a captured
+   * *select all* only; a ticked list of ids has nothing to narrow. */
+  backlogOnly: boolean
+  /** The body the dry run built, reposted verbatim by the real run. Null while
+   * the preview is in flight. */
+  body: Record<string, unknown> | null
+  /** The job's ceiling, as the dry run reported it. */
+  total: number | null
+  error: string | null
+  running: boolean
+  /** Cumulative across the batches so far, or null before the first lands. */
+  progress: DescribeTotals | null
+  /** Whether the loop has ended — by finishing, by stopping, or by failing. */
+  finished: boolean
+}
+
+interface DescribeTotals {
+  seen: number
+  done: number
+  skipped: number
+  tagsIgnored: number
+  failed: BulkFailure[]
+}
+
+/** A fresh zero, as a factory rather than a shared constant: `failed` is an
+ * array, and one module-level object handed to both the run's accumulator and
+ * React state is two owners of one list. */
+const emptyRun = (): DescribeTotals => ({
+  seen: 0,
+  done: 0,
+  skipped: 0,
+  tagsIgnored: 0,
+  failed: [],
+})
+
+/** What a describe batch answers: `BulkReport` plus the two numbers only this
+ * run has (`server/describe.ts`'s `DescribeRunReport`). */
+type DescribeAnswer = BulkReport<'describe'> & { skipped: number; tagsIgnored: number }
+
+async function postDescribe(
+  apiBase: string,
+  body: Record<string, unknown>,
+): Promise<DescribeAnswer | { refused: BulkRefusal }> {
+  const res = await fetch(`${apiBase}/assets/describe`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  // The guard runs once at the start of a job, so a refusal can only arrive on
+  // the first call — and it arrives before a single model call is made.
+  if (res.status === 409) return { refused: (await res.json()) as BulkRefusal }
+  if (!res.ok) throw new Error(await messageOf(res))
+  return (await res.json()) as DescribeAnswer
+}
+
+/**
+ * How many files a filter matches, straight from the list route's `?count=1`.
+ *
+ * **Not `assetsParams`**, which builds a query from the screen's `AssetsUrl`:
+ * what is needed here is the *captured* filter, plus `undescribed`, which the
+ * URL shape does not carry and should not — the backlog is a property of a run,
+ * not a state of the screen. The one number this reads is the `expected` the
+ * server's count guard will re-check, so it has to come off exactly the clauses
+ * the run will walk.
+ */
+async function countMatching(apiBase: string, filter: AssetFilter): Promise<number> {
+  const params = new URLSearchParams({ limit: '1', count: '1' })
+  if (filter.q) params.set('q', filter.q)
+  if (filter.kind) params.set('kind', filter.kind)
+  if (filter.folder) params.set('folder', filter.folder)
+  if (filter.unfiled) params.set('unfiled', '1')
+  // Repeated, not comma-joined: `c.req.queries('tags')` is what the route
+  // parses, exactly as `assetsParams` does it.
+  for (const slug of filter.tags ?? []) params.append('tags', slug)
+  if (filter.untagged) params.set('untagged', '1')
+  if (filter.undescribed) params.set('undescribed', '1')
+  const res = await fetch(`${apiBase}/assets?${params.toString()}`)
+  if (!res.ok) throw new Error(await messageOf(res))
+  const page = (await res.json()) as { total?: number }
+  return page.total ?? 0
+}
+
+function refusedText(refusal: BulkRefusal): string {
+  return `${refusal.actual.toLocaleString('en-US')} files match now, not ${refusal.expected.toLocaleString('en-US')}. Close this and choose again.`
+}
+
+/** One sentence for a finished run — the successes counted, the failures named,
+ * and the drops reported rather than swallowed, so a prompt that keeps proposing
+ * a tag nobody created is visible. */
+function describeRunSummary(totals: DescribeTotals): string {
+  const files = `${totals.done.toLocaleString('en-US')} ${totals.done === 1 ? 'file' : 'files'}`
+  const parts = [`Described ${files}`]
+  if (totals.skipped > 0) parts.push(`${totals.skipped} skipped as not images`)
+  if (totals.tagsIgnored > 0) {
+    parts.push(
+      `${totals.tagsIgnored} suggested ${totals.tagsIgnored === 1 ? 'tag' : 'tags'} ignored`,
+    )
+  }
+  if (totals.failed.length > 0) {
+    const named = totals.failed
+      .slice(0, 2)
+      .map((one) => one.title || one.id)
+      .join(', ')
+    const rest = totals.failed.length > 2 ? ` and ${totals.failed.length - 2} more` : ''
+    parts.push(`could not: ${named}${rest}`)
+  }
+  return `${parts.join('. ')}.`
+}
+
+/**
+ * The run panel: what it will cost, then what it is doing, then what it did.
+ *
+ * **The dry run is what opens it**, and it is free by construction — `runDescribe`
+ * calls the host's function zero times under `dryRun` (decision 10). So the
+ * first thing anybody sees is the number of model calls they are about to pay
+ * for, before a button that starts them.
+ *
+ * **The batches are reported as they land, and there is a *Stop*.** Both fall
+ * out of the cursor living in the caller's hand: this loop is N requests, so
+ * declining to send the next one is all stopping means, and there is no job
+ * record left behind to reconcile. It is the one screen in this admin where
+ * that design is visible rather than merely cheap.
+ */
+function DescribeRunDialog({
+  state,
+  count,
+  images,
+  onUpload,
+  onBacklogOnly,
+  onRun,
+  onStop,
+  onClose,
+}: {
+  state: DescribeRunState
+  count: number
+  /** Whether the Images binding is bound. It changes what a run *costs*, not
+   * what it does, which is why it is said once here rather than as a warning. */
+  images: boolean
+  onUpload: boolean
+  /** Absent for a ticked list of ids: there is no backlog to narrow to. */
+  onBacklogOnly?: (only: boolean) => void
+  onRun: () => void
+  onStop: () => void
+  onClose: () => void
+}) {
+  const { total, progress, running, finished, error } = state
+  const files = `${count.toLocaleString('en-US')} ${count === 1 ? 'file' : 'files'}`
+
+  return (
+    <Dialog
+      title={`Describe ${files}`}
+      description="Each image is sent to this site's own describe function — one model call per file, and it is your account that pays for them."
+      onClose={onClose}
+      actions={
+        <>
+          <Button onClick={onClose}>{finished ? 'Close' : 'Cancel'}</Button>
+          {running ? (
+            <Button variant="primary" onClick={onStop}>
+              Stop
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              disabled={total === null || finished || error !== null}
+              reason={error ?? (finished ? 'This run has finished' : 'Working out how many…')}
+              onClick={onRun}
+            >
+              {total === null ? 'Describe' : `Describe ${total.toLocaleString('en-US')}`}
+            </Button>
+          )}
+        </>
+      }
+    >
+      {onBacklogOnly ? (
+        <label className={css.pickRow}>
+          <input
+            type="checkbox"
+            checked={state.backlogOnly}
+            disabled={running || finished}
+            onChange={(e) => onBacklogOnly(e.target.checked)}
+          />
+          Only files that have never been described
+        </label>
+      ) : null}
+
+      {error ? <p className={css.warn}>{error}</p> : null}
+
+      {progress === null ? (
+        total === null ? (
+          <p className={css.note}>Working out how many files this would be…</p>
+        ) : (
+          <p className={css.note}>
+            {total === 0
+              ? 'Nothing to do: no file in this selection needs describing.'
+              : `${total.toLocaleString('en-US')} ${total === 1 ? 'file' : 'files'} will be sent, one model call each. Files that are not images are skipped and cost nothing.`}
+            {onUpload ? ' New uploads are described on their own as they arrive.' : ''}
+          </p>
+        )
+      ) : (
+        <>
+          {/* Announced: the numbers change without focus moving, so a screen
+              reader user is otherwise never told the run is progressing. */}
+          <p className={css.note} role="status">
+            {running
+              ? `Working… ${progress.seen.toLocaleString('en-US')} of ${(total ?? progress.seen).toLocaleString('en-US')}`
+              : `Finished ${progress.seen.toLocaleString('en-US')} of ${(total ?? progress.seen).toLocaleString('en-US')}`}
+          </p>
+          <dl className={css.runStats}>
+            <RunStat label="Described" value={progress.done} />
+            <RunStat label="Not images" value={progress.skipped} />
+            <RunStat label="Failed" value={progress.failed.length} />
+            <RunStat label="Tags ignored" value={progress.tagsIgnored} />
+          </dl>
+          {progress.failed.length > 0 ? (
+            <ul className={css.runFailures}>
+              {progress.failed.slice(0, 5).map((one) => (
+                <li key={one.id || one.title}>
+                  <b>{one.title || one.id}</b> — {one.message}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      )}
+
+      {/* Said once, where the cost is being decided, rather than as a warning:
+          without the Images binding the original bytes are described instead of
+          a 512px WebP, which works and costs more per call. */}
+      {images ? null : (
+        <p className={css.note}>
+          No Images binding is configured, so the original file is sent rather than a small preview.
+          It works, and each call costs more.
+        </p>
+      )}
+      {progress !== null && progress.tagsIgnored > 0 ? (
+        <p className={css.note}>
+          A model may only choose tags that already exist. Create the ones it keeps proposing and
+          run it again to pick them up.
+        </p>
+      ) : null}
+    </Dialog>
+  )
+}
+
+function RunStat({ label, value }: { label: string; value: number }) {
+  return (
+    <>
+      <dt className={css.runStatLabel}>{label}</dt>
+      <dd className={css.runStatValue}>{value.toLocaleString('en-US')}</dd>
+    </>
+  )
 }
 
 /* ----------------------------------------------------------------- sidebar --- */

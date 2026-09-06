@@ -19,6 +19,7 @@ import {
 } from './assets-model'
 import css from './Assets.module.css'
 import { messageOf } from './useContent'
+import { useDescribe } from './useDescribe'
 import { useFolders } from './useFolders'
 import { useTags } from './useTags'
 
@@ -142,6 +143,7 @@ export function AssetDetail({
 
       <AltText apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
       <DescriptionEditor apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
+      <DescribeAction apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
       <FolderEditor apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
       <TagsEditor apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
 
@@ -277,23 +279,153 @@ function AltText({
       help="The file's default. A block copies it in when the image is placed and can then say something else, because alt text depends on what the image is being used to say."
     >
       {(id) => (
-        <Input
-          id={id}
-          type="text"
-          value={draft}
-          placeholder="Describe the image"
-          // No `setSavedValue(null)` here: the note is a comparison against what was
-          // written, so typing and then typing the same thing back leaves it correct
-          // rather than needing a second write to say so again.
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => void commit()}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') void commit()
-          }}
-        />
+        <>
+          <Input
+            id={id}
+            type="text"
+            value={draft}
+            placeholder="Describe the image"
+            // No `setSavedValue(null)` here: the note is a comparison against what was
+            // written, so typing and then typing the same thing back leaves it correct
+            // rather than needing a second write to say so again.
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => void commit()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void commit()
+            }}
+          />
+          <MachineText value={row.altAuto} human={row.alt} />
+        </>
       )}
     </Field>
   )
+}
+
+/**
+ * What a model wrote, **marked as such and never in the box** (decision 9).
+ *
+ * `alt_auto` and `alt` are separate columns precisely so a run can never clobber
+ * a caption an editor checked, and this is the visible half of that: the machine
+ * text is shown *beside* the empty human field rather than pre-filled into it,
+ * because a value in an input is indistinguishable from one somebody typed and
+ * would be re-saved as human text by the next blur.
+ *
+ * It says which one is in force, because `toAssetValue` reads `alt || alt_auto`
+ * and the answer is otherwise invisible: with the human field empty this text
+ * *is* what a block copies in, and the moment somebody types, it stops being.
+ */
+function MachineText({ value, human }: { value: string; human: string }) {
+  if (!value) return null
+  return (
+    <p className={css.machine}>
+      <span className={css.machineTag}>Written by the describe function</span>
+      <span className={css.machineValue}>{value}</span>
+      <span className={css.machineNote}>
+        {human ? 'Your text above is used instead.' : 'Used until you type something above.'}
+      </span>
+    </p>
+  )
+}
+
+/* ---------------------------------------------------------------- describe --- */
+
+/**
+ * *Describe*: one asset, one model call, through the host's own `describe.fn`
+ * (`media-library.md` decision 8).
+ *
+ * **Absent, not disabled, when no `describe` is configured** — `useDescribe` is
+ * asked first and this renders nothing at all. A button whose only possible
+ * outcome is "this deployment does not do that" is furniture.
+ *
+ * **A failed model call is reported and is not an error state to recover from.**
+ * The route answers 200 carrying the recorded failure, because `fn` is somebody
+ * else's HTTP call and timing out is a thing it does; the row records what
+ * happened and the file leaves the backlog either way, which is why the button
+ * says *Describe again* rather than *Retry*.
+ *
+ * The **run** over a selection is the browser's, and it is `ADMIN` where this is
+ * `ASSETS` (decision 16): describing one file is editing the library, and
+ * describing forty thousand is spending money.
+ */
+function DescribeAction({
+  apiBase,
+  row,
+  onChanged,
+  onNotice,
+}: {
+  apiBase: string
+  row: AssetRow
+  onChanged: (row: AssetRow) => void
+  onNotice: (message: string) => void
+}) {
+  const describe = useDescribe(apiBase)
+  const [busy, setBusy] = useState(false)
+
+  if (!describe.configured) return null
+
+  const run = async () => {
+    setBusy(true)
+    try {
+      const res = await fetch(`${apiBase}/assets/${encodeURIComponent(row.id)}/describe`, {
+        method: 'POST',
+      })
+      if (!res.ok) throw new Error(await messageOf(res))
+      const body = (await res.json()) as {
+        asset: AssetRow
+        skipped: boolean
+        tagged: string[]
+        tagsIgnored: number
+        error: string | null
+      }
+      onChanged(body.asset)
+      onNotice(describeSummary(body))
+    } catch (e) {
+      onNotice((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className={css.describe}>
+      <h3 className={css.usesTitle}>Describe</h3>
+      <p className={css.note}>
+        Asks this site's own describe function for alt text, a description and tags. It writes
+        beside your text, never over it, and can only choose tags that already exist.
+      </p>
+      <div className={css.describeRow}>
+        <Button size="sm" disabled={busy} reason="Working…" onClick={() => void run()}>
+          {row.describedAt === null ? 'Describe' : 'Describe again'}
+        </Button>
+        {row.describeError ? (
+          <span className={css.warn}>Last attempt failed: {row.describeError}</span>
+        ) : row.describedAt === null ? (
+          <span className={css.note}>Not described yet.</span>
+        ) : (
+          <span className={css.note}>Described {addedAgo(row.describedAt)}.</span>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/** One sentence for a finished single describe — the same shape the run panel's
+ * summary takes, one file wide. A drop is named rather than swallowed: a host
+ * whose prompt keeps proposing a tag nobody created finds out here first. */
+function describeSummary(outcome: {
+  skipped: boolean
+  tagged: string[]
+  tagsIgnored: number
+  error: string | null
+}): string {
+  if (outcome.error) return `Could not describe this file: ${outcome.error}`
+  if (outcome.skipped) return 'Nothing to describe: this file is not an image.'
+  const tagged = outcome.tagged.length === 0 ? '' : ` Tagged ${outcome.tagged.join(', ')}.`
+  const ignored =
+    outcome.tagsIgnored === 0
+      ? ''
+      : ` ${outcome.tagsIgnored} suggested ${outcome.tagsIgnored === 1 ? 'tag' : 'tags'} did not exist and ${outcome.tagsIgnored === 1 ? 'was' : 'were'} ignored.`
+  return `Described.${tagged}${ignored}`
 }
 
 /* ---------------------------------------------------------------- description --- */
@@ -357,14 +489,17 @@ function DescriptionEditor({
       help="What the file is, longer than alt text and part of what the search box scans."
     >
       {(id) => (
-        <Textarea
-          id={id}
-          value={draft}
-          placeholder="Describe the file"
-          rows={3}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => void commit()}
-        />
+        <>
+          <Textarea
+            id={id}
+            value={draft}
+            placeholder="Describe the file"
+            rows={3}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={() => void commit()}
+          />
+          <MachineText value={row.descriptionAuto} human={row.description} />
+        </>
       )}
     </Field>
   )

@@ -1201,3 +1201,91 @@
   outline-offset: -2px;
   visibility: visible;
 }
+
+/* --------------------------------------------------------------- describe --- */
+
+/* What a model wrote, shown *beside* the empty human field rather than in it
+   (media-library.md decision 9): a value sitting in an input is indistinguishable
+   from one somebody typed, and the next blur would save it as human text. The
+   left rule is what makes it read as a quotation of something else rather than as
+   this field's own help. */
+.machine {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: var(--space-1) var(--space-2);
+  border-left: 2px solid var(--border);
+  background: var(--bg-inset);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+
+.machineTag {
+  color: var(--fg-subtle);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.machineValue {
+  color: var(--fg);
+  overflow-wrap: anywhere;
+}
+
+.machineNote {
+  color: var(--fg-muted);
+  font-size: var(--text-xs);
+}
+
+.describe {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+/* The button and its last-run state on one line, wrapping rather than clipping:
+   `describeError` is a provider's own message and can be a sentence. */
+.describeRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/* The run panel's counters. A definition list, matching Model.tsx's run report:
+   these are four labelled numbers, not a table. */
+.runStats {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--space-2);
+  margin: 0;
+}
+
+.runStatLabel {
+  color: var(--fg-subtle);
+  font-size: var(--text-sm);
+}
+
+.runStatValue {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Named, never summarised: a run is N separate writes and the ones that failed
+   are the only part of the report anybody acts on. */
+.runFailures {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 200px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}

@@ -1,19 +1,37 @@
-import { createExecutionContext, env } from 'cloudflare:test'
+import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineBlock, asset, text } from '../../src/core'
+import type { AssetFilter } from '../../src/core/assets'
+import type { BulkSelection } from '../../src/core/bulk'
+import { wasRefused } from '../../src/core/bulk'
 import type { Doc } from '../../src/core/doc'
 import type { DocumentType } from '../../src/core/schema'
-import { createFolio } from '../../src/server'
-import type { DescribeInput, DescribeResult, FolioBindings, FolioDescribe } from '../../src/server'
+import { createFolio, magicLink } from '../../src/server'
+import type {
+  AuthConfig,
+  DescribeInput,
+  DescribeResult,
+  FolioBindings,
+  FolioDescribe,
+  Role,
+} from '../../src/server'
 import { ensureTag, tagsForAssets } from '../../src/server/asset-tags'
-import { assetById, toAssetValue } from '../../src/server/assets'
+import { assetById, countAssets, toAssetValue } from '../../src/server/assets'
+import { SECURE_COOKIE } from '../../src/server/auth/cookie'
+import { createSession } from '../../src/server/auth/session'
+import { createUser } from '../../src/server/auth/users'
+import type { FolioDb } from '../../src/server/db'
 import {
   DEFAULT_DESCRIBE_CONCURRENCY,
   type DescribeDeps,
+  type DescribeRunOutcome,
+  type DescribeRunReport,
   describeAsset,
+  describeOnUpload,
   describeUrl,
   MAX_DESCRIBE_DESCRIPTION,
   matchTags,
+  runDescribe,
   validateDescribe,
 } from '../../src/server/describe'
 
@@ -603,5 +621,597 @@ describe('POST {base}/api/assets/:id/describe', () => {
     const folio = makeFolio({ fn: async () => ({}) })
     const res = await post(folio, '/folio/api/assets/ast_ds99999999/describe')
     expect(res?.status).toBe(404)
+  })
+})
+
+/* ------------------------------------------------------------------- run --- */
+
+/**
+ * The batched run (phase 7, decision 10): a bounded batch per call, the cursor
+ * in the caller's hand between them, **no job record and nothing to reconcile**
+ * if the tab closes.
+ *
+ * Three of these tests are about money rather than correctness, which is what
+ * makes them worth more than the arithmetic ones:
+ *
+ *  - **`dryRun` calls `fn` zero times.** The question a dry run is asked here is
+ *    "how many, and what will this cost"; a dry run that found out by calling
+ *    the model would be answering it by spending it. The assertion is the *call
+ *    count*, not the absence of writes — a run that called `fn` and then threw
+ *    the answer away would pass the second and fail the first.
+ *  - **The vocabulary is read once per call.** Once per asset is one query per
+ *    tag list per image, which over a run of forty thousand is forty thousand
+ *    reads of a table that cannot change while the batch is in flight.
+ *  - **`undescribed` reaches the composer.** The clause and
+ *    `CAPTURED_ASSET_FILTER`'s key are two halves of one thing: with the key
+ *    stripped, a backlog run is a run over the whole library, silently, every
+ *    time it is pressed.
+ */
+
+/** Deps against a stub, over a db a test may have wrapped. */
+function runDeps(
+  fn: (input: DescribeInput, env: unknown) => Promise<DescribeResult>,
+  over: { db?: FolioDb; concurrency?: number } = {},
+): DescribeDeps {
+  const describe = validateDescribe<unknown>({
+    fn,
+    ...(over.concurrency === undefined ? {} : { concurrency: over.concurrency }),
+  })
+  if (!describe) throw new Error('unreachable: a config was passed')
+  return {
+    db: over.db ?? env.DB,
+    media: env.MEDIA,
+    assetBase: `${ORIGIN}/folio/asset`,
+    describe,
+    env: {},
+  }
+}
+
+/** A report, or a thrown assertion — the refusal branch is tested where it is
+ * expected rather than absorbed everywhere. */
+function reported(outcome: DescribeRunOutcome): DescribeRunReport {
+  if (wasRefused(outcome)) throw new Error(`refused: expected ${outcome.expected}`)
+  return outcome
+}
+
+/**
+ * Drives a run to completion the way the run panel does — **loop on
+ * `continueFrom`, never on `seen < total`** — and sums what the batches said.
+ */
+async function drive(
+  deps: DescribeDeps,
+  selection: BulkSelection<AssetFilter>,
+  opts: { batch?: number; dryRun?: boolean } = {},
+): Promise<{
+  calls: number
+  done: number
+  skipped: number
+  tagsIgnored: number
+  failed: string[]
+}> {
+  let continueFrom: string | null = null
+  const totals = { calls: 0, done: 0, skipped: 0, tagsIgnored: 0, failed: [] as string[] }
+  for (;;) {
+    const report = reported(
+      await runDescribe(deps, selection, { ...opts, ...(continueFrom ? { continueFrom } : {}) }),
+    )
+    totals.calls++
+    totals.done += report.done
+    totals.skipped += report.skipped
+    totals.tagsIgnored += report.tagsIgnored
+    totals.failed.push(...report.failed.map((one) => one.message))
+    if (report.continueFrom === null || report.continueFrom === continueFrom) {
+      expect(report.seen).toBe(report.total)
+      return totals
+    }
+    continueFrom = report.continueFrom
+    // A wedged cursor is a hang, not a failure, so the loop is bounded.
+    expect(totals.calls).toBeLessThan(50)
+  }
+}
+
+describe('runDescribe', () => {
+  it('walks a selection in batches and stops on a null cursor', async () => {
+    const ids: string[] = []
+    for (let i = 0; i < 7; i++) ids.push(await seedAsset({ filename: `shot-${i}.png` }))
+    const fn = vi.fn(async () => ({ alt: 'A photograph' }))
+
+    const totals = await drive(runDeps(fn), { ids }, { batch: 3 })
+
+    // Seven files, three at a time: 3 + 3 + 1, and the fourth call is the one
+    // that answers a null cursor rather than a fourth batch of nothing.
+    expect(totals.calls).toBe(3)
+    expect(totals.done).toBe(7)
+    expect(fn).toHaveBeenCalledTimes(7)
+    for (const id of ids) expect((await stored(id)).altAuto).toBe('A photograph')
+  })
+
+  it('walks a captured filter, and the count guard refuses a set that moved', async () => {
+    for (let i = 0; i < 4; i++) await seedAsset({ filename: `filtered-${i}.png` })
+    const filter: AssetFilter = { q: 'filtered' }
+    const expected = await countAssets(env.DB, filter)
+    expect(expected).toBe(4)
+
+    // The number somebody read, then three more files arrive underneath them.
+    await seedAsset({ filename: 'filtered-late.png' })
+    const refusal = await runDescribe(
+      runDeps(async () => ({})),
+      {
+        all: true,
+        filter,
+        expected,
+      },
+    )
+    expect(wasRefused(refusal) && refusal).toMatchObject({
+      refused: 'count',
+      expected: 4,
+      actual: 5,
+    })
+
+    // A door, not a wall: re-confirming at the new count runs.
+    const fn = vi.fn(async () => ({ alt: 'Described' }))
+    const totals = await drive(runDeps(fn), { all: true, filter, expected: 5 }, { batch: 2 })
+    expect(totals.done).toBe(5)
+    expect(fn).toHaveBeenCalledTimes(5)
+  })
+
+  it('honours the ticked-off half of a select-all', async () => {
+    const ids: string[] = []
+    for (let i = 0; i < 4; i++) ids.push(await seedAsset({ filename: `excl-${i}.png` }))
+    const filter: AssetFilter = { q: 'excl-' }
+    const fn = vi.fn(async () => ({ alt: 'Described' }))
+
+    const totals = await drive(
+      runDeps(fn),
+      { all: true, filter, expected: 4, exclude: [ids[0] as string, ids[3] as string] },
+      { batch: 4 },
+    )
+
+    expect(totals.done).toBe(2)
+    expect(fn).toHaveBeenCalledTimes(2)
+    expect((await stored(ids[0] as string)).describedAt).toBeNull()
+    expect((await stored(ids[1] as string)).altAuto).toBe('Described')
+  })
+
+  /**
+   * The expensive assertion, and it is on the **call count**: a dry run that
+   * asked the model and discarded the answer would leave the columns exactly as
+   * clean as this one does.
+   */
+  it('costs nothing on a dry run and still says how many and how many are free', async () => {
+    const ids = [
+      await seedAsset({ filename: 'a.png' }),
+      await seedAsset({ filename: 'b.png' }),
+      await seedAsset({ filename: 'deck.pdf', contentType: 'application/pdf' }),
+    ]
+    const fn = vi.fn(async () => ({ alt: 'Never written' }))
+
+    const report = reported(await runDescribe(runDeps(fn), { ids }, { dryRun: true }))
+
+    expect(fn).toHaveBeenCalledTimes(0)
+    expect(report.dryRun).toBe(true)
+    expect(report.total).toBe(3)
+    expect(report.done).toBe(3)
+    // The PDF is the one that would cost nothing, and saying so is the whole
+    // point of counting it separately from `done`.
+    expect(report.skipped).toBe(1)
+    for (const id of ids) {
+      const row = await stored(id)
+      expect([row.altAuto, row.describedAt]).toEqual(['', null])
+    }
+  })
+
+  it('runs at most `concurrency` model calls at once', async () => {
+    const ids: string[] = []
+    for (let i = 0; i < 6; i++) ids.push(await seedAsset({ filename: `c-${i}.png` }))
+
+    const peakAt = async (concurrency: number) => {
+      let live = 0
+      let peak = 0
+      const deps = runDeps(
+        async () => {
+          live++
+          peak = Math.max(peak, live)
+          await new Promise((resolve) => setTimeout(resolve, 2))
+          live--
+          return {}
+        },
+        { concurrency },
+      )
+      await drive(deps, { ids }, { batch: 6 })
+      return peak
+    }
+
+    // Exactly, not "at most": a pool that never fills is a run four times
+    // slower than the host asked for, and a ceiling that leaks is a bill.
+    expect(await peakAt(2)).toBe(2)
+    expect(await peakAt(1)).toBe(1)
+  })
+
+  it('reads the tag vocabulary once per call, not once per asset', async () => {
+    await ensureTag(env.DB, 'headshot')
+    const ids: string[] = []
+    for (let i = 0; i < 5; i++) ids.push(await seedAsset({ filename: `v-${i}.png` }))
+
+    let reads = 0
+    const db = new Proxy(env.DB, {
+      get(t, prop, receiver) {
+        const value = Reflect.get(t, prop, receiver)
+        if (prop !== 'prepare') return value
+        return (...args: unknown[]) => {
+          // The vocabulary read, and nothing else: `asset_taggings` is a
+          // different table and the insert below must not be counted as one.
+          if (typeof args[0] === 'string' && /from asset_tags\b/.test(args[0])) reads++
+          return (value as (...a: unknown[]) => D1PreparedStatement).apply(t, args)
+        }
+      },
+    }) as unknown as FolioDb
+
+    const report = reported(
+      await runDescribe(
+        runDeps(async () => ({ tags: ['headshot'] }), { db }),
+        { ids },
+        { batch: 5 },
+      ),
+    )
+
+    expect(report.done).toBe(5)
+    expect(reads).toBe(1)
+  })
+
+  it('finishes the batch when one file fails, and names it', async () => {
+    const ids: string[] = []
+    for (let i = 0; i < 4; i++) ids.push(await seedAsset({ filename: `f-${i}.png` }))
+    const fn = vi.fn(async (input: DescribeInput) => {
+      if (input.filename === 'f-1.png') throw new Error('429 rate limited by the provider')
+      return { alt: 'Described' }
+    })
+
+    const totals = await drive(runDeps(fn), { ids }, { batch: 4 })
+
+    expect(fn).toHaveBeenCalledTimes(4)
+    // Three described, one named — not three described and one silently
+    // counted as a success, which is what `done` would say if a recorded model
+    // failure were not lifted into `failed`.
+    expect(totals.done).toBe(3)
+    expect(totals.failed).toEqual(['429 rate limited by the provider'])
+    expect((await stored(ids[3] as string)).altAuto).toBe('Described')
+    const failed = await stored(ids[1] as string)
+    expect(failed.describeError).toBe('429 rate limited by the provider')
+    // Stamped anyway, so the backlog does not offer it forever.
+    expect(failed.describedAt).toBeGreaterThan(0)
+  })
+
+  it('reports an id with no row behind it rather than stopping', async () => {
+    const id = await seedAsset()
+    const totals = await drive(
+      runDeps(async () => ({ alt: 'Described' })),
+      {
+        ids: ['ast_ds77777777', id],
+      },
+    )
+    expect(totals.done).toBe(1)
+    expect(totals.failed).toEqual(['No such file'])
+  })
+
+  it('sums tagsIgnored across a batch, so a prompt proposing a missing tag is visible', async () => {
+    await ensureTag(env.DB, 'headshot')
+    const ids = [await seedAsset({ filename: 't-0.png' }), await seedAsset({ filename: 't-1.png' })]
+
+    const totals = await drive(
+      runDeps(async () => ({ tags: ['headshot', 'product-shot', 'lifestyle'] })),
+      { ids },
+      { batch: 1 },
+    )
+
+    expect(totals.done).toBe(2)
+    // Two files, two drops each, and the count survives being summed across two
+    // separate calls of the run.
+    expect(totals.calls).toBe(2)
+    expect(totals.tagsIgnored).toBe(4)
+  })
+
+  it('walks only the backlog when the captured filter says undescribed', async () => {
+    const done = await seedAsset({ filename: 'u-done.png' })
+    const waiting = await seedAsset({ filename: 'u-waiting.png' })
+    await env.DB.prepare('update assets set described_at = ? where id = ?')
+      .bind(Date.now(), done)
+      .run()
+
+    const filter: AssetFilter = { undescribed: true }
+    const expected = await countAssets(env.DB, filter)
+    expect(expected).toBe(1)
+
+    const fn = vi.fn(async () => ({ alt: 'From the backlog' }))
+    const totals = await drive(runDeps(fn), { all: true, filter, expected })
+
+    expect(totals.done).toBe(1)
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect((await stored(waiting)).altAuto).toBe('From the backlog')
+    // A failed attempt is *not* in the backlog — `described_at` is stamped on
+    // that path too — so it is not swept again by the default run.
+    expect((await stored(done)).altAuto).toBe('')
+  })
+})
+
+/* ------------------------------------------------- POST /assets/describe --- */
+
+describe('POST {base}/api/assets/describe', () => {
+  const run = (folio: ReturnType<typeof makeFolio>, body: unknown) =>
+    folio.handle(
+      new Request(`${ORIGIN}/folio/api/assets/describe`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+      env,
+      createExecutionContext(),
+    )
+
+  it('is a legible refusal with nothing configured', async () => {
+    const res = await run(makeFolio(), { selection: { ids: [await seedAsset()] } })
+    expect(res?.status).toBe(501)
+    const body = (await res!.json()) as { error: { code: string; message: string } }
+    expect(body.error.code).toBe('unsupported')
+    expect(body.error.message).toMatch(/describe/)
+  })
+
+  it('answers a report, and a dry run that spent nothing', async () => {
+    const ids = [await seedAsset({ filename: 'r-0.png' }), await seedAsset({ filename: 'r-1.png' })]
+    const fn = vi.fn(async () => ({ alt: 'A photograph' }))
+    const folio = makeFolio({ fn })
+
+    const dry = await run(folio, { selection: { ids }, dryRun: true })
+    expect(dry?.status).toBe(200)
+    expect((await dry!.json()) as DescribeRunReport).toMatchObject({
+      action: 'describe',
+      dryRun: true,
+      total: 2,
+      done: 2,
+      continueFrom: null,
+    })
+    expect(fn).toHaveBeenCalledTimes(0)
+
+    const real = await run(folio, { selection: { ids } })
+    expect(((await real!.json()) as DescribeRunReport).done).toBe(2)
+    expect(fn).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps `undescribed` through the validator rather than stripping it', async () => {
+    const described = await seedAsset({ filename: 'v-done.png' })
+    await seedAsset({ filename: 'v-waiting.png' })
+    await env.DB.prepare('update assets set described_at = ? where id = ?')
+      .bind(Date.now(), described)
+      .run()
+
+    const fn = vi.fn(async () => ({ alt: 'Backlog only' }))
+    const res = await run(makeFolio({ fn }), {
+      selection: { all: true, filter: { undescribed: true }, expected: 1 },
+    })
+
+    // A stripped key would make this a run over both files: the count guard
+    // would refuse it (2 !== 1), and if the number happened to agree it would
+    // describe the one an editor already paid for.
+    expect(res?.status).toBe(200)
+    expect(((await res!.json()) as DescribeRunReport).done).toBe(1)
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect((await stored(described)).altAuto).toBe('')
+  })
+
+  it('answers 409 with the new count when the set moved', async () => {
+    await seedAsset({ filename: 'moved-0.png' })
+    await seedAsset({ filename: 'moved-1.png' })
+    const res = await run(makeFolio({ fn: async () => ({}) }), {
+      selection: { all: true, filter: { q: 'moved-' }, expected: 1 },
+    })
+    expect(res?.status).toBe(409)
+    expect((await res!.json()) as { refused: string; actual: number }).toMatchObject({
+      refused: 'count',
+      expected: 1,
+      actual: 2,
+    })
+  })
+
+  it('refuses a batch larger than a run may ask for', async () => {
+    const res = await run(makeFolio({ fn: async () => ({}) }), {
+      selection: { ids: [await seedAsset()] },
+      batch: 200,
+    })
+    expect(res?.status).toBe(400)
+  })
+
+  it('reports whether it is configured, and whether images will keep it cheap', async () => {
+    const get = (folio: ReturnType<typeof makeFolio>) =>
+      folio.handle(
+        new Request(`${ORIGIN}/folio/api/assets/describe`),
+        env,
+        createExecutionContext(),
+      )
+
+    // No config: the admin draws no control at all, rather than one that 501s
+    // when it is pressed.
+    expect(await (await get(makeFolio()))!.json()).toEqual({ configured: false })
+
+    const body = (await (await get(
+      makeFolio({ fn: async () => ({}), onUpload: false }),
+    ))!.json()) as {
+      configured: boolean
+      onUpload: boolean
+      images: boolean
+    }
+    expect(body.configured).toBe(true)
+    expect(body.onUpload).toBe(false)
+    // This test environment binds no Images, which is the bare `wrangler dev`
+    // shape: originals are described and the run panel says it costs more.
+    expect(body.images).toBe(false)
+  })
+})
+
+/* -------------------------------------------------------------- role gate --- */
+
+/**
+ * **Decision 16, which is the one gate in this feature chosen on consequence
+ * rather than on symmetry**: describing one asset is `ASSETS`, like the patch it
+ * sits beside, and the *run* is `ADMIN` because it is the only route in Folio
+ * that spends the host's money against a third party over a set that can be all
+ * forty thousand. The count guard bounds the set; it does not bound the bill.
+ *
+ * Its own `createFolio` with a provider configured, for `bulk.test.ts`'s reason:
+ * the folio built above runs `auth: 'open'`, where there is nothing to refuse.
+ */
+describe('the run is ADMIN and the single asset is ASSETS', () => {
+  const auth: AuthConfig<Cloudflare.Env> = {
+    providers: [magicLink<Cloudflare.Env>({ send: () => {} })],
+  }
+
+  const gated = createFolio<Cloudflare.Env>({
+    blocks: [pageRoot],
+    types,
+    bindings,
+    basePath: '/folio',
+    assets: { admin: '/folio-admin.js', preview: '/folio-preview.js' },
+    auth,
+    route: (p) => (p ? `/${p}` : '/'),
+    describe: { fn: async () => ({ alt: 'A photograph' }) },
+  })
+
+  let people = 0
+  async function cookieFor(role: Role): Promise<string> {
+    people += 1
+    const user = await createUser(env.DB, {
+      email: `${role}-${people}@describe.test`,
+      name: role,
+      role,
+    })
+    const session = await createSession(env.DB, user.id)
+    return `${SECURE_COOKIE}=${session.token}`
+  }
+
+  const call = (path: string, cookie: string, body?: unknown) =>
+    gated.handle(
+      new Request(`${ORIGIN}/folio/api${path}`, {
+        method: 'POST',
+        headers: { cookie, 'content-type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }),
+      env,
+      createExecutionContext(),
+    )
+
+  it('lets an editor describe one file and refuses them the run', async () => {
+    const cookie = await cookieFor('editor')
+    const id = await seedAsset()
+    expect((await call(`/assets/${id}/describe`, cookie))?.status).toBe(200)
+    expect((await call('/assets/describe', cookie, { selection: { ids: [id] } }))?.status).toBe(403)
+  })
+
+  it('lets an admin do both', async () => {
+    const cookie = await cookieFor('admin')
+    const id = await seedAsset()
+    expect((await call('/assets/describe', cookie, { selection: { ids: [id] } }))?.status).toBe(200)
+    expect((await stored(id)).altAuto).toBe('A photograph')
+  })
+
+  it('refuses a viewer both', async () => {
+    const cookie = await cookieFor('viewer')
+    const id = await seedAsset()
+    expect((await call(`/assets/${id}/describe`, cookie))?.status).toBe(403)
+    expect((await call('/assets/describe', cookie, { selection: { ids: [id] } }))?.status).toBe(403)
+  })
+})
+
+/* -------------------------------------------------------------- on upload --- */
+
+/** 1×1 transparent PNG — the fixture `assets.test.ts` and `http.test.ts` use.
+ * It has to be a real image: `uploadAsset` stores what the bytes say, and a
+ * describe skips anything that is not an image before `fn` is reached. */
+const PNG_1X1 = Uint8Array.from(
+  atob(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  ),
+  (ch) => ch.charCodeAt(0),
+)
+
+describe('describing a new upload', () => {
+  const upload = async (folio: ReturnType<typeof makeFolio>) => {
+    const ctx = createExecutionContext()
+    const res = await folio.handle(
+      new Request(`${ORIGIN}/folio/api/assets?filename=uploaded.png`, {
+        method: 'POST',
+        headers: { 'content-type': 'image/png' },
+        body: PNG_1X1,
+      }),
+      env,
+      ctx,
+    )
+    // The background work is what `waitUntil` holds, so a test that did not
+    // wait on the context would assert against a describe still in flight.
+    await waitOnExecutionContext(ctx)
+    return res
+  }
+
+  it('describes it in the background without slowing or failing the upload', async () => {
+    const fn = vi.fn(async () => ({ alt: 'A tiny transparent square' }))
+    const res = await upload(makeFolio({ fn }))
+
+    expect(res?.status).toBe(201)
+    const { asset } = (await res!.json()) as { asset: { id: string; altAuto: string } }
+    // The response is the row as it was written, *before* the describe: the
+    // upload does not wait for a model call and its body cannot claim to.
+    expect(asset.altAuto).toBe('')
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect((await stored(asset.id)).altAuto).toBe('A tiny transparent square')
+  })
+
+  it('does not describe it when the host turned onUpload off', async () => {
+    const fn = vi.fn(async () => ({ alt: 'Never asked for' }))
+    const res = await upload(makeFolio({ fn, onUpload: false }))
+
+    expect(res?.status).toBe(201)
+    expect(fn).toHaveBeenCalledTimes(0)
+    const { asset } = (await res!.json()) as { asset: { id: string } }
+    expect((await stored(asset.id)).describedAt).toBeNull()
+  })
+
+  it('does not describe anything at all with no describe configured', async () => {
+    const res = await upload(makeFolio())
+    expect(res?.status).toBe(201)
+    const { asset } = (await res!.json()) as { asset: { id: string } }
+    expect((await stored(asset.id)).describedAt).toBeNull()
+  })
+
+  it('is a 201 even when the model call fails, and records why', async () => {
+    const res = await upload(
+      makeFolio({
+        async fn() {
+          throw new Error('the provider timed out')
+        },
+      }),
+    )
+
+    expect(res?.status).toBe(201)
+    const { asset } = (await res!.json()) as { asset: { id: string } }
+    expect((await stored(asset.id)).describeError).toBe('the provider timed out')
+  })
+
+  /**
+   * The half a route test cannot reach: `describeAsset` records a *model*
+   * failure, but a D1 or R2 failure it propagates — and by the time this runs
+   * the response has gone, the object is in R2 and the row is in D1. A rejected
+   * promise handed to `waitUntil` is an unhandled rejection in the host's Worker
+   * for an upload that succeeded, so the wrapper has to swallow it.
+   */
+  it('swallows a platform failure rather than rejecting inside waitUntil', async () => {
+    const broken = {
+      prepare() {
+        throw new Error('D1 is having a day')
+      },
+      batch: async () => [],
+    } as unknown as FolioDb
+    const row = await stored(await seedAsset())
+
+    await expect(
+      describeOnUpload({ ...runDeps(async () => ({ alt: 'x' })), db: broken }, row),
+    ).resolves.toBeUndefined()
   })
 })
