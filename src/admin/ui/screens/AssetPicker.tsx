@@ -100,6 +100,7 @@ export function AssetPicker({ apiBase, mount, accept, onPick, onClose }: AssetPi
     unfiled: false,
     tags: [],
     untagged: false,
+    undescribed: false,
     asset: undefined,
   }))
   const [selected, setSelected] = useState<string | undefined>(undefined)

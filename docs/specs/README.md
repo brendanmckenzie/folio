@@ -250,7 +250,10 @@ project (the demo points `migrations_dir` at it). It used to live under
 **`0001_init.sql` holds the whole schema**, and it replaced the ten below as spec 18's
 phase 1 (`foundation/pagination.md` decision 10). They were sequenced only because they
 were written in sequence; nothing is deployed and there is no remote, so the history
-they recorded had no audience. Four have landed since:
+they recorded had no audience. Each row below is added by the spec that landed the
+migration, so the table trails `migrations/` whenever one has landed and its spec has
+not been restamped yet — read the directory for what exists, this for what each was
+for:
 
 | # | Spec | Contents |
 | --- | --- | --- |
@@ -258,25 +261,26 @@ they recorded had no audience. Four have landed since:
 | `0003_schedules.sql` | scheduled publishing | `schedules` table, two partial indexes |
 | `0004_shares.sql` | draft preview sharing | `shares` table, one unique index and one ordinary one |
 | `0005_content_fts.sql` | full-text search (30) | `content_text` table, one unique index, and the `content_fts` FTS5 virtual table external to it |
+| `0008_asset_organisation.sql` | media library organisation (32) | `asset_folders`, `asset_tags`, `asset_taggings`, plus six columns and four indexes on `assets` — reversing `0002`'s refusal to index `filename` and `size`, on the measurement `0002` itself named |
 
 `0002` was a plain rename and `0003`, `0004` and `0005` plain `create table`s, which is
 what every one after them is expected to be. `0005` is the first to create a *virtual*
 table; `test/workers/sql-split.ts` needed no change for it, because the DDL uses no
 triggers (spec 30 decision 1) and therefore no `BEGIN … END`.
 
-Three more are **claimed by drafts** and not landed: `0006_auth.sql` (28: two
-`alter table add column`s and an `auth_events` table), `0007_passkeys.sql` (29: a
-`passkeys` table) and `0008_asset_organisation.sql` (32: `asset_folders`,
-`asset_tags`, `asset_tag_links`, plus six columns and four indexes on `assets`,
-reversing `0002`'s refusal to index `filename` on a premise that has since changed).
-Spec 23's `sites` migration therefore reads `0009` in the index.
+Two more are **claimed by drafts** and not landed: `0006_auth.sql` (28: two
+`alter table add column`s and an `auth_events` table) and `0007_passkeys.sql` (29: a
+`passkeys` table). **`0008_asset_organisation.sql` stopped being a claim with spec
+32's phase 1** and is on disk; the drafted contents named an `asset_tag_links` table
+that was built as `asset_taggings`. Spec 23's `sites` migration therefore reads
+`0009` in the index.
 Both restamped once when `0005` landed: the drafts claimed `0005` and `0006`, written
 before the build order put 30 first. A claim is a stamp, not a landing — whichever of
 the remaining two builds first takes the next free number and the other restamps.
 
-**Landed on `main`: `0001`–`0005`. Landed on the build branch: `0006` (28). Claimed:
-`0007` (29), `0008` (32, media library), `0009` (23), `0010` (33, forms). The next
-free number is `0011`.** Do not
+**Landed on `main`: `0001`–`0005`. Landed on the build branch: `0006` (28) and
+`0008` (32, media library). Claimed: `0007` (29), `0009` (23), `0010` (33, forms).
+The next free number is `0011`.** Do not
 derive a number by counting the landed rows above; take the one your spec's header
 names, and if it is already on disk, stop rather than picking the next one yourself.
 
@@ -403,6 +407,20 @@ truth premises that turned out false — `GET {base}/api/me/events` was spec
 3 rather than 4 — and that `GET {base}/api/me` gained the person's email and
 `roleFrom` projection only afterwards, riding the join `readSession` already
 runs, because decision 6's account screen needed both and neither existed yet.
+
+**Spec 32 (media library organisation) is done**, built 2026-09-05 to 2026-09-06
+across eight phases. Its `## Implementation notes` lead with the premise that turned
+out false — decision 8 says twice that the admin reads the describe configuration off
+`Manifest`, which carries the content model and deliberately not a screen's
+configuration, so it got its own one-field read at `GET {base}/api/assets/describe`
+instead — and with the duplicate that nearly shipped wrong: `toAssetValue` has a
+deliberate copy in the admin (`assets-model.ts`'s `assetValue`) whose agreement test
+passed over fixtures that all had an empty `alt_auto`, so decision 9's `alt || altAuto`
+rule landed on one side only and the picker would have written an empty `alt` for every
+described asset. **Folio names a vendor for the first time here**, in
+`anthropicDescriber` — an adapter that *returns* a `describe.fn` rather than a second
+seam — and it has never made a live call: every test of it stubs `fetch`, because no
+key exists in this repository, and the README says so where a host will read it.
 
 **Spec 26 had no ordering constraint** and was taken first for that reason. It moved
 the package to the repository root and deleted the subtree split, so every path in the

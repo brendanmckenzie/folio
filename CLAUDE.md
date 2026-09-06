@@ -343,15 +343,15 @@ section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
 
-**Specs 1–22, 24–27 and 31 are done. Five are `draft`: 23 (`foundation/multi-site.md`,
-XL, unstarted since 2026-08-01), the three still building of the four drafted together
-on 2026-09-05 — 28 (`foundation/auth-providers.md`, L), 29 (`foundation/passkeys.md`,
-M–L, needs 28's provider union and `completeSignIn`), 30
-(`content-model/full-text-search.md`, M) — and 32 (`content-model/media-library.md`,
-L, drafted the same day, after the other four).**
+**Specs 1–22 and 24–32 are done. Two are `draft`: 23 (`foundation/multi-site.md`,
+XL, unstarted since 2026-08-01) and 33 (`content-model/forms.md`, L, drafted
+2026-09-05, sequenced after 32 and before 23).** 28, 29, 30, 31 and 32 were all
+built on the branch `specs-31-30-28-29` on 2026-09-05/06; each carries an
+`## Implementation notes` section recording where its plan was wrong, which is the
+half worth reading.
 
-**They build in the order 31 → 30 → 28 → 29 → 32 → 33** (owner, 2026-09-05), which is not
-the order they are numbered in — the numbers were assigned when they were drafted and
+**They built in the order 31 → 30 → 28 → 29 → 32, and 33 follows** (owner,
+2026-09-05), which is not the order they are numbered in — the numbers were assigned when they were drafted and
 are identities, not a queue. Each spec's header carries its place. **31 is done**
 (`ebd45e6`, `41cd2e2`) and 30 is part-built. Three of the four gaps between them are
 hard constraints and one is sequencing:

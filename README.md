@@ -882,6 +882,112 @@ With no `images` binding, assets serve at their original size. A transform that
 fails, or that returns an empty body, also falls back to the original — a broken
 image is a worse outcome than an unoptimised one.
 
+### Folders, tags and bulk edits
+
+The library is a flat grid of everything, newest first, narrowed by a **folder**
+tree in the sidebar, by **tag** chips, by type and by a search box. Folders nest
+without limit; tags are free-form, created by editors, and several of them
+compose as AND. Filtering by a folder includes its descendants.
+
+**Filing a file never moves an object.** A folder is a nullable column on the
+library row and nothing else — not a key prefix, not a path, not a URL. This is
+the load-bearing decision of the whole feature, because `/folio/asset/:key` is
+public and **its URL is baked into every published page's HTML**: an asset's key
+is minted once at upload, and moving the object would mean rewriting every
+document and every draft that names the old one, purging every page that
+rendered it, and widening the one regex that keeps the public read narrow. So
+moving four hundred photographs into `Clients › Acme › 2026` writes four hundred
+integers and touches R2 not at all, and nothing anybody has published changes by
+a byte.
+
+Renaming or moving a *folder* rewrites its subtree's paths in one statement and
+leaves every asset's `folder_id` alone. Deleting one is deliberately not
+destructive: its children re-parent to its own parent and its files land back in
+*Unfiled*. Deleting a tag drops the taggings and no file. Filing has to be cheap
+to undo, or nobody files.
+
+Everything on the screen can be done to a selection — tag, untag, move, delete —
+including a *select all* that never materialises a list of ids: it captures the
+filter and the count you were shown, and the server refuses if the count has
+moved. A bulk delete's confirmation says how many of the selected files are used
+on published pages before it acts, and then it proceeds anyway if you say so: a
+broken image is visible and fixable, and a delete that refuses leaves an editor
+unable to remove a file at all.
+
+### Machine-written alt text
+
+Folio can fill in alt text, a description and tags for uploaded images by calling
+a model. **It holds no API key, chooses no provider and makes no request of its
+own** — you supply one function, and Folio decides only when to call it and what
+it is allowed to store:
+
+```ts
+import { anthropicDescriber, createFolio } from 'folio/server'
+
+export default createFolio<Env>({
+  // …
+  describe: {
+    fn: anthropicDescriber({ apiKey: env.ANTHROPIC_API_KEY }),
+    onUpload: true, // the default: describe a new upload in the background
+    concurrency: 4, // in-flight model calls per batch; 1–8
+  },
+})
+```
+
+`fn` is the whole seam. It is handed the image two ways — a public, transformed
+URL and a lazy `bytes()` — plus every tag that exists, and it answers `{ alt?,
+description?, tags? }`. Write your own with any provider; `anthropicDescriber` is
+a convenience over that seam and not a second one, so deleting it costs you
+twenty lines and no capability. It takes `model` and `prompt` if you want either.
+
+**`anthropicDescriber` has never made a live call.** Every test of it stubs
+`fetch`, because there is no API key in this repository and a test suite that
+spent money would be a test suite nobody runs. The request it builds is written
+from the documented Messages API and read back defensively, but it is unproven
+against the real endpoint: treat your first run as the test, and start it on one
+asset from the detail panel rather than on forty thousand.
+
+Three things to know before you turn it on:
+
+- **It needs `media` (R2), and it wants `images`.** With the Images binding the
+  model is sent a 512px WebP, which is an order of magnitude fewer tokens than a
+  20MB original; without it the original goes, and it works and costs more. The
+  admin's run panel says which of the two you are paying for.
+- **A model API fetches that URL from the public internet.** On `wrangler dev`
+  it cannot, so `anthropicDescriber` sends the bytes inline instead when the
+  asset URL is a loopback or private address. A deployment that is routable but
+  gated — a preview behind Access, a WAF rule over `/folio/asset` — fails at the
+  provider and is recorded; that host wants its own `fn` around `input.bytes()`.
+- **The model may only choose tags that already exist.** Anything it invents is
+  dropped and counted, so a prompt that keeps proposing `product-shot` shows up
+  as a number rather than as a taxonomy full of near-synonyms.
+
+**A human edit is never clobbered, and a run cannot touch a published page.**
+Machine text is written to its own columns, `alt` and `description` stay the
+editor's, and readers take the human one when it is non-empty. Since the library
+row is only ever a *default* — copied into a field value when somebody picks the
+file, independent from then on — describing three thousand images changes not one
+byte of any published document, any draft or any rendered page. Nothing is
+purged and nothing is republished.
+
+Uploads are described in the background, so nothing about an upload gets slower
+or newly able to fail. Everything else is a run you start: one asset from its
+detail panel, or a batch from the grid, reported batch by batch with a *Stop*
+that costs nothing because there is no job record to reconcile. That run is the
+one route in Folio that spends your money against somebody else's API, so it is
+**admin-only** while every other library action is editor-level.
+
+*Not described* is a filter on the grid, so the backlog is somewhere you can
+look rather than only a checkbox on a run. A failure is recorded rather than
+retried: the reason goes in a column, the asset is stamped as attempted, and it
+therefore **leaves** that backlog — which is what stops one permanently failing
+file being paid for on every pass forever. The cost is that there is no *failed*
+filter to run over yet, so re-describing one today is its detail panel's
+*Describe* button, or a bulk run over a hand-ticked selection.
+
+With no `describe` in config none of this exists: no column is written, no
+control is drawn, and the routes answer `unsupported`.
+
 ## Richtext
 
 `richtext` stores a TipTap (ProseMirror) document as the field's JSON value, and

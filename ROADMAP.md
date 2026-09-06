@@ -362,6 +362,62 @@ device parsing is covered; the documented fallback, `@simplewebauthn/server`
 behind the same exports, is neither taken nor ruled out until a real pair
 either passes or fails against the hand-rolled verifier.
 
+**The media library stops being flat. Done 2026-09-06, as spec 32**
+(`content-model/media-library.md`). It was nine columns, one index and a
+filename substring: no way to group files, no way to say what one is about, no
+way to act on more than one at a time, and an `alt` string that was empty on
+every row until somebody typed into it. It now has folders (nesting without
+limit, a materialised path, filtering that includes descendants), free-form
+editor-created tags (ANDed, capped at eight per filter by a bind budget), bulk
+tag / untag / move / delete over the same captured-selection contract stories
+already had, and search across five text columns.
+
+**A folder is metadata and never an R2 key prefix**, which is the decision the
+rest hangs from: `/folio/asset/:key` is public and its URL is in every published
+page's HTML, so filing four hundred files writes four hundred integers and
+issues no R2 operation at all. `0002_asset_refs.sql` refused to index `filename`
+and `size` on the premise that an asset table is bounded by what somebody
+uploaded by hand; `0008_asset_organisation.sql` reverses that on the measurement
+`0002` itself named, and says so where it does it.
+
+**The enrichment half is a host function, and Folio ships one adapter.**
+`describe.fn` gets an image and the tag vocabulary and answers alt text, a
+description and tags — machine text into its own columns, so an editor's is
+never clobbered and a re-run is idempotent, and the model may only pick tags an
+editor already created. `anthropicDescriber` is the first and only place this
+library names a vendor. **It has never made a live call**: there is no API key
+in this repository, every test of it stubs `fetch`, and the README tells a host
+to treat their first run as the test rather than assuming it is proven.
+
+Deferred, each named rather than glossed:
+
+- **No `failed` filter.** A recorded failure stamps `described_at` and so leaves
+  the backlog, which is what stops a permanently failing file being paid for
+  forever — but `AssetFilter` has `undescribed` and no `describe_error is not
+  null`, so there is no way to run over the failures. Spec 32's phase 7 notes
+  claimed the run panel offered one; it does not. One clause and one key.
+- **The batch walk is written twice**, in `server/asset-bulk.ts` and
+  `server/describe.ts` — `filterBatch`, `idBatch`, the cursor read and
+  `reasonOf`, some sixty lines. Two runners was decision 6 and is still right;
+  two copies of the *walk* is not, and a fourth caller should extract
+  `server/bulk-walk.ts` rather than copy it a third time.
+- **No `scripts/media-library-test.mjs`.** The spec's own *Testing requirements*
+  name one — upload, a folder tree, filing, tagging, filtering, a bulk tag over a
+  select-all, a bulk move, a folder delete — and no phase owned it. Every
+  behaviour in it is covered by the workers suite against real D1 and real R2;
+  what is missing is the live-dev-server pass the other twenty `scripts/*-test.mjs`
+  exist for.
+- **No versioned routes for folders or tags**, and no MCP tools for either
+  (decision 13). `GET {base}/api/v1/assets` gained `q`, `folder` and `tags` and
+  nothing else changed, because a version segment is a promise — and the admin's
+  `unfiled` / `untagged` / `undescribed` stayed off it for the same reason:
+  adding one later is additive, unadding one is not.
+- **Duplicate detection, a trash for a bulk delete, replacing an asset's bytes
+  in place, per-folder permissions, and a model choosing a *folder*** are all
+  out of scope with reasons in the spec. The last is the one worth repeating: a
+  tag is additive and reversible, and a model moving forty thousand files is the
+  one enrichment outcome that is expensive to undo.
+
 ## Next
 
 ### 1. Pagination, everywhere, as a rule

@@ -11,6 +11,7 @@ import {
   renameFolder,
   updateFolder,
 } from '../../src/server/asset-folders'
+import { ensureTag } from '../../src/server/asset-tags'
 import { type AssetRow, listAssets, listAssetsByPage } from '../../src/server/assets'
 
 /**
@@ -262,6 +263,41 @@ describe('filtering by a folder returns its descendants too', () => {
     // Absent, it is the unfiltered route it has always been.
     const all = await listAssetsByPage(env.DB, { page: 1, perPage: 50 })
     expect(all.total).toBe(3)
+  })
+
+  it('is reachable on the versioned route, additively (decision 13)', async () => {
+    // The reader has taken a filter since phase 2 and the *route* did not parse
+    // one until phase 8, so `assetFilterSql` was shared and unreachable from
+    // `{base}/api/v1`. Additive is the whole licence for touching a `v1`: the
+    // envelope, the ordering and the row shape are what they were, and a caller
+    // passing nothing gets exactly the page it got before.
+    const clients = await createFolder(env.DB, { name: 'Clients' })
+    const acme = await createFolder(env.DB, { name: 'Acme', parentId: clients.id })
+    const tagged = await seedAsset(acme.id, { filename: 'brick-wall.jpg' })
+    await seedAsset(clients.id, { filename: 'other.png' })
+    await seedAsset(null, { filename: 'loose.png' })
+    const { tag } = await ensureTag(env.DB, 'Headshot')
+    await env.DB.prepare('insert into asset_taggings (asset_id, tag_id) values (?, ?)')
+      .bind(tagged, tag.id)
+      .run()
+
+    const page = async (query: string) =>
+      (await SELF.fetch(`${ORIGIN}/folio/api/v1/assets${query}`)).json<{
+        assets: { id: string }[]
+        page: number
+        perPage: number
+        total: number
+      }>()
+
+    expect(await page('')).toMatchObject({ page: 1, perPage: 50, total: 3 })
+    expect((await page('?folder=clients')).total).toBe(2)
+    expect((await page('?folder=clients/acme')).assets.map((a) => a.id)).toEqual([tagged])
+    // Five columns, the same widening the admin's list got (decision 12).
+    expect((await page('?q=brick')).assets.map((a) => a.id)).toEqual([tagged])
+    expect((await page('?tags=headshot')).assets.map((a) => a.id)).toEqual([tagged])
+    expect((await page('?tags=headshot&folder=clients')).total).toBe(1)
+    // A filter naming nothing is an answer, not an error.
+    expect((await page('?folder=nope')).total).toBe(0)
   })
 
   it('returns nothing for a folder path nothing occupies', async () => {

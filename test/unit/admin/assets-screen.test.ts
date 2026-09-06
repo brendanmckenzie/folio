@@ -96,6 +96,7 @@ const url = (extra: Partial<AssetsUrl> = {}): AssetsUrl => ({
   unfiled: false,
   tags: [],
   untagged: false,
+  undescribed: false,
   asset: undefined,
   ...extra,
 })
@@ -135,6 +136,7 @@ describe('the URL model', () => {
       unfiled: undefined,
       tags: undefined,
       untagged: undefined,
+      undescribed: undefined,
       asset: undefined,
     })
   })
@@ -164,10 +166,12 @@ describe('the URL model', () => {
       // (`route.ts`'s `parseQuery`), unlike the request `assetsParams` builds.
       tags: 'headshot,archive',
       untagged: undefined,
+      undescribed: undefined,
       asset: undefined,
     })
     expect(assetsQuery(url({ unfiled: true }))).toMatchObject({ folder: undefined, unfiled: '1' })
     expect(assetsQuery(url({ untagged: true }))).toMatchObject({ tags: undefined, untagged: '1' })
+    expect(assetsQuery(url({ undescribed: true }))).toMatchObject({ undescribed: '1' })
   })
 
   it('round trips every screen state', () => {
@@ -183,6 +187,12 @@ describe('the URL model', () => {
       url({ unfiled: true }),
       url({ tags: ['headshot', 'archive'] }),
       url({ untagged: true }),
+      url({ undescribed: true }),
+      // The backlog is exclusive with nothing, so every combination has to
+      // survive the round trip — a folder's backlog and a tag's backlog are
+      // both questions somebody asks.
+      url({ undescribed: true, folder: 'clients/acme', kind: 'image', q: 'logo' }),
+      url({ undescribed: true, tags: ['headshot'] }),
     ]
     for (const state of states) {
       const written = assetsQuery(state)
@@ -272,6 +282,30 @@ describe('the view toggle and the filters', () => {
     expect(untagged).toMatchObject({ tags: [], untagged: true })
   })
 
+  it('clears nothing when the backlog is turned on, and is cleared by nothing', () => {
+    // The two exclusive pairs are exclusive because the route refuses them
+    // together. `undescribed` is a clause the route composes with every other
+    // one, so "the undescribed files in this folder carrying this tag" has to
+    // survive being asked for — and turning a folder on must not silently drop
+    // the backlog somebody was already looking at.
+    const narrowed = withFilter(url({ folder: 'clients/acme', tags: ['headshot'] }), {
+      undescribed: true,
+    })
+    expect(narrowed).toMatchObject({
+      folder: 'clients/acme',
+      tags: ['headshot'],
+      undescribed: true,
+    })
+    expect(withFilter(url({ undescribed: true }), { folder: 'clients/acme' })).toMatchObject({
+      folder: 'clients/acme',
+      undescribed: true,
+    })
+    expect(withFilter(url({ undescribed: true }), { untagged: true })).toMatchObject({
+      untagged: true,
+      undescribed: true,
+    })
+  })
+
   it('tells an empty library from a filter that matches nothing', () => {
     expect(isNarrowed(url())).toBe(false)
     expect(isNarrowed(url({ q: '  ' }))).toBe(false)
@@ -281,6 +315,7 @@ describe('the view toggle and the filters', () => {
     expect(isNarrowed(url({ unfiled: true }))).toBe(true)
     expect(isNarrowed(url({ tags: ['headshot'] }))).toBe(true)
     expect(isNarrowed(url({ untagged: true }))).toBe(true)
+    expect(isNarrowed(url({ undescribed: true }))).toBe(true)
   })
 })
 
@@ -327,6 +362,14 @@ describe('the request', () => {
     const params = assetsParams(url({ tags: ['headshot', 'archive'] }), { limit: 48 })
     expect(params.getAll('tags')).toEqual(['headshot', 'archive'])
     expect(assetsParams(url({ untagged: true }), { limit: 48 }).get('untagged')).toBe('1')
+  })
+
+  it('sends the backlog narrowing the list route parses', () => {
+    // `?undescribed=1` has been parsed by `GET {base}/api/assets` since phase 7
+    // and nothing on this screen could ask for it. The request and the address
+    // bar are written by two functions, so both are asserted.
+    expect(assetsParams(url(), { limit: 48 }).get('undescribed')).toBeNull()
+    expect(assetsParams(url({ undescribed: true }), { limit: 48 }).get('undescribed')).toBe('1')
   })
 
   it('is identical with and without a cursor apart from the cursor', () => {

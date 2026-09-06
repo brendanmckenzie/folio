@@ -1,5 +1,5 @@
 import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineBlock, asset, text } from '../../src/core'
 import type { AssetFilter } from '../../src/core/assets'
 import type { BulkSelection } from '../../src/core/bulk'
@@ -17,6 +17,7 @@ import type {
 } from '../../src/server'
 import { ensureTag, tagsForAssets } from '../../src/server/asset-tags'
 import { assetById, countAssets, toAssetValue } from '../../src/server/assets'
+import { anthropicDescriber } from '../../src/server/describe-anthropic'
 import { SECURE_COOKIE } from '../../src/server/auth/cookie'
 import { createSession } from '../../src/server/auth/session'
 import { createUser } from '../../src/server/auth/users'
@@ -1132,11 +1133,26 @@ const PNG_1X1 = Uint8Array.from(
   (ch) => ch.charCodeAt(0),
 )
 
-describe('describing a new upload', () => {
+/**
+ * **Both upload routes, and the same four assertions over each.**
+ *
+ * `{base}/api/assets` is the admin's and `{base}/api/v1/assets` is the
+ * versioned one — a different envelope, different middleware, and no shared
+ * code between them — and the second is what **MCP's `upload_asset` proxies
+ * to**. Phase 7 wired only the first, which made "described on arrival" a
+ * property of *how the file got here*: dragged onto the grid, described;
+ * pushed by an agent or a script, left in the backlog. Nothing about that is
+ * visible from either route's response, which is why it is asserted as a pair
+ * rather than tested once and assumed.
+ */
+describe.each([
+  ['the admin route', '/folio/api/assets'],
+  ['the versioned route', '/folio/api/v1/assets'],
+])('describing a new upload through %s', (_label, path) => {
   const upload = async (folio: ReturnType<typeof makeFolio>) => {
     const ctx = createExecutionContext()
     const res = await folio.handle(
-      new Request(`${ORIGIN}/folio/api/assets?filename=uploaded.png`, {
+      new Request(`${ORIGIN}${path}?filename=uploaded.png`, {
         method: 'POST',
         headers: { 'content-type': 'image/png' },
         body: PNG_1X1,
@@ -1193,7 +1209,98 @@ describe('describing a new upload', () => {
     const { asset } = (await res!.json()) as { asset: { id: string } }
     expect((await stored(asset.id)).describeError).toBe('the provider timed out')
   })
+})
 
+/**
+ * The adapter, once, through the real seam — because everything else about it
+ * is a unit test against a stubbed `fetch`
+ * (`test/unit/server/describe-anthropic.test.ts`) and none of that says whether
+ * `describeAsset` will accept what it answers.
+ *
+ * The `fetch` is still a stub: **`anthropicDescriber` has never made a live
+ * call**, here or anywhere, and no test in this repository can make one. What
+ * this pins is the chain either side of it — a host's one line of config
+ * reaching the model, and the model's answer reaching four columns and a
+ * tagging row through the same clamping and vocabulary matching every other
+ * `fn` goes through.
+ */
+describe('anthropicDescriber, through the seam', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('is a `describe.fn`, and what it answers is clamped and matched like any other', async () => {
+    const { tag: headshot } = await ensureTag(env.DB, 'Headshot')
+    const id = await seedAsset({ filename: 'portrait.png' })
+
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              stop_reason: 'end_turn',
+              content: [
+                {
+                  type: 'text',
+                  text: `Here you are:\n\`\`\`json\n${JSON.stringify({
+                    alt: 'A man in a grey coat',
+                    // Over the 2,000-character cap: clamped, not refused, by
+                    // the same `clampText` a hand-written `fn` meets.
+                    description: 'x'.repeat(2_400),
+                    // One that exists, spelled as a name, and one that does not.
+                    tags: ['headshot', 'product-shot'],
+                  })}\n\`\`\``,
+                },
+              ],
+            }),
+            { status: 200 },
+          ),
+      ),
+    )
+
+    const outcome = await describeAsset(
+      depsFor(anthropicDescriber({ apiKey: 'sk-ant-test' })),
+      await stored(id),
+    )
+
+    expect(outcome.error).toBeNull()
+    expect(outcome.tagsIgnored).toBe(1)
+    const row = await stored(id)
+    expect(row.altAuto).toBe('A man in a grey coat')
+    expect(row.descriptionAuto).toHaveLength(MAX_DESCRIBE_DESCRIPTION)
+    // The human columns are untouched, which is the property the whole feature
+    // rests on and is no different for an adapter than for anything else.
+    expect(row.alt).toBe('')
+    expect(row.description).toBe('')
+    expect(await tagsForAssets(env.DB, [id])).toEqual(
+      new Map([[id, [expect.objectContaining({ id: headshot.id })]]]),
+    )
+  })
+
+  it('records a provider failure in the column rather than throwing out of the run', async () => {
+    const id = await seedAsset({ filename: 'portrait.png' })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{"error":{"message":"overloaded"}}', { status: 529 })),
+    )
+
+    const outcome = await describeAsset(
+      depsFor(anthropicDescriber({ apiKey: 'sk-ant-test' })),
+      await stored(id),
+    )
+
+    expect(outcome.error).toMatch(/^anthropic: 529/)
+    const row = await stored(id)
+    // Tried and failed, which is a different row from never tried: it leaves
+    // the backlog, and an explicit run over `describe_error is not null` is
+    // what brings it back.
+    expect(row.describedAt).not.toBeNull()
+    expect(row.describeError).toMatch(/overloaded/)
+  })
+})
+
+describe('describing a new upload', () => {
   /**
    * The half a route test cannot reach: `describeAsset` records a *model*
    * failure, but a D1 or R2 failure it propagates — and by the time this runs

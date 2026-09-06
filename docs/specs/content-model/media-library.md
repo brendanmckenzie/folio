@@ -3,25 +3,28 @@
 > **Group:** content model
 > **Build order:** 32
 > **Size:** L
-> **Status:** draft
+> **Status:** done — every phase landed, 2026-09-05 to 2026-09-06
 > **Wire version:** none — nothing here crosses the socket or the admin↔preview bridge
-> **Migration:** `0008_asset_organisation.sql` (a claim, not a landing — see below)
+> **Migration:** `0008_asset_organisation.sql` — **landed** with phase 1
 > **Build sequence:** after 29, before 23 (owner, 2026-09-05)
-> **Last updated:** 2026-09-05
+> **Last updated:** 2026-09-06
 
-> **Migration number is a claim.** On the decided order 28 takes `0006`, 29 takes
-> `0007`, so this takes `0008` and spec 23 (`foundation/multi-site.md`) restamps to
-> `0009`. Whichever builds first takes the next free number and the others restamp
-> — the standing rule in `docs/specs/README.md`.
+> **The migration number stopped being a claim with phase 1.** It read `0008` on the
+> decided order — 28 took `0006`, 29 took `0007` — and `0008_asset_organisation.sql`
+> is on disk under that name, so spec 23 (`foundation/multi-site.md`) keeps the
+> `0009` it restamped to. The paragraph this replaces explained the standing rule in
+> `docs/specs/README.md`, which is still the rule and no longer applies to this spec.
 
-> **Written while specs 31 and 30 were in flight.** Ground truth below was read at
-> commit `c318967` with spec 31's work uncommitted. Four files were being edited at
-> the time — `src/core/index.ts`, `src/server/index.tsx`, `src/server/runtime.ts`,
-> `src/server/types.ts` — so **line numbers cited in those four have moved**, and
-> `src/core/gate.ts` / `src/server/gate.ts` did not exist yet. Everything cited in
-> `src/server/assets.ts`, `src/admin/ui/screens/*`, `migrations/` and `test/` was
-> untouched and is exact. This spec deliberately touches no file that was in
-> flight; the implementation will, once 31 → 30 → 28 → 29 have landed.
+> **Written while specs 31 and 30 were in flight**, and the note here understated
+> the damage. Ground truth below was read at commit `c318967` with spec 31's work
+> uncommitted; it named four files as moving — `src/core/index.ts`,
+> `src/server/index.tsx`, `src/server/runtime.ts`, `src/server/types.ts` — and
+> called everything cited in `src/server/assets.ts` "untouched and exact". **It was
+> five.** `src/server/assets.ts` had also moved, in `c7313c4`, so every line number
+> this spec cites in the file it touches most is off. Nothing was built on a wrong
+> line — the phases worked from what was there, which is the standing instruction —
+> but a Ground truth section that names its own exceptions is trusted, and this one
+> was wrong about which they were. Read every `file:line` here as history.
 
 ## Summary
 
@@ -1268,9 +1271,60 @@ and can be raised by narrowing something else in the same statement.
 
 ## Implementation notes
 
-Built in phases, and this section grows one entry per phase as they land. The
+Built in eight phases between 2026-09-05 and 2026-09-06, one entry each below. The
 migration number stopped being a claim with phase 1: **`0008_asset_organisation.sql`
 is on disk**, so the header's "a claim, not a landing" note is history now.
+
+Four things are worth reading before the phase entries, because each is either a
+place this spec was wrong or a place a real deployment will bite. Three of them are
+already argued at length in the phase that found them; they are collected here so
+that reading the *plan* cannot leave somebody believing the plan.
+
+**1. The manifest premise was false, twice over.** Decision 8 and phase 6's route
+comment both say the admin reads the describe configuration off `Manifest` and draws
+no control when it is absent. `Manifest` (`core/schema.ts`) has no such field and by
+`server/app.ts`'s standing rule should not grow one — it carries the content model,
+and a screen's configuration is not the content model. That is the same rule under
+which sign-in providers are answered by `GET {base}/api/me` rather than by the
+manifest. So `describe` got its own one-field read, **`GET {base}/api/assets/describe`
+at `READ`**, answering `{ configured }` alone when nothing is configured and
+`{ onUpload, concurrency, batch, images }` beside it when something is. It carries
+`images` because that changes what a run *costs* rather than what it does, and there
+was otherwise nowhere for the admin to learn it.
+
+**2. `toAssetValue` has a duplicate in the admin, and phase 6 made them diverge while
+the test asserting their agreement stayed green.** `assets-model.ts`'s `assetValue` is
+a deliberate copy — the server module reaches for R2, D1 and the Images binding, and
+the admin bundle may import none of them — and `assets-screen.test.ts` asserts the two
+answer the same thing. It asserted it over fixtures whose `alt_auto` was `''` in every
+case, so decision 9's `alt || alt_auto` rule could land on the server half alone and
+the suite would still pass. The consequence was not subtle: the picker would have
+stored an empty `alt` for every described asset, which is the feature doing nothing
+from the one screen anybody uses it on. Both are `alt || altAuto` now and the agreement
+test gained fixtures that fail if either half drops the fallback. **The lesson
+generalises past this pair**: an agreement test is only worth its fixtures, and a
+fixture set that is uniform in the field under test asserts nothing about it.
+
+**3. The batch walk is now written twice and a fourth caller should extract it.**
+`filterBatch`, `idBatch`, the cursor read and `reasonOf` are the same sixty lines in
+`server/asset-bulk.ts` and `server/describe.ts`. Decision 6's argument for a second
+*runner* is still right and covers a third — no action to switch on, a concurrency
+pool rather than a sequential loop, a batch ceiling an order of magnitude lower, a
+report with two fields no bulk write has — but the *walk* is common now that there
+are two copies of it. **The next caller extracts `server/bulk-walk.ts`** rather than
+copying it a third time. It was not done in phase 7 because `asset-bulk.ts` was not
+that phase's file and a shared helper cannot be introduced from one side.
+
+**4. `anthropicDescriber` has never made a live call, and nothing in this repository
+can make one.** Every test of the adapter stubs `fetch`. There is no API key here and
+there should not be one: a suite that spent money on every `pnpm test` would be a
+suite that gets skipped, and the seam exists precisely so Folio's own tests never
+need a provider. What is proven is Folio's half of the wire — which request is built,
+which of the two image paths is taken, what is done with an answer, and that what it
+answers survives `describeAsset` into four columns and a tagging row. What is *not*
+proven is that the Messages API accepts the request. The README says so where a host
+will read it, and says to start on one asset from the detail panel rather than on
+forty thousand.
 
 ### Phase 1 — the migration and the core vocabulary (2026-09-05, `f1e52a3`)
 
@@ -1756,7 +1810,9 @@ permission than a sentence saying so. The gate itself is pinned three ways in
 `describe.test.ts` — an editor gets 200 on one asset and 403 on the run, an admin
 gets both, a viewer gets neither.
 
-**Not done, and each is a real gap rather than a tidy-up:**
+**Not done, and each is a real gap rather than a tidy-up.** *(All three were
+closed by phase 8; the list is kept as the record of what phase 7 could not reach
+and why.)*
 
 - **`POST {base}/api/v1/assets` does not describe on upload.** It is a second
   upload route, in `routes/api/index.ts`, which was outside this phase's files —
@@ -1773,3 +1829,122 @@ gets both, a viewer gets neither.
   set from the admin.
 - **Phase 8** as planned: `anthropicDescriber`, the README's config key and
   prerequisites, and `ROADMAP.md`.
+
+### Phase 8 — the adapter, the prose, and phase 7's two gaps (2026-09-06)
+
+`src/server/describe-anthropic.ts` is new and holds `anthropicDescriber`,
+`DEFAULT_DESCRIBE_MODEL`, `DEFAULT_DESCRIBE_PROMPT` and `parseDescribeJson`, all
+four exported from `folio/server`. `test/unit/server/describe-anthropic.test.ts`
+is new (25) and `test/workers/describe.test.ts` gained two that put the adapter
+through the real `describeAsset` (58 in the file). Both of phase 7's gaps are
+closed, and a third that phase 2 left and no later phase picked up. `README.md`,
+`ROADMAP.md` and `docs/specs/README.md` carry the prose.
+
+**Phase 7's first gap: both upload routes describe now, and they are tested as a
+pair.** `POST {base}/api/v1/assets` carries the same six lines under
+`ctx.waitUntil` — deliberately the same six lines rather than a shared helper,
+because the two routes share nothing else and the whole point of the partition is
+that one may be reshaped and the other may not. What they must not have is
+different *behaviour*, and nothing about that difference was visible from either
+response, so the four upload tests are now a `describe.each` over both paths.
+Verified by breaking it: neutering the versioned branch turns exactly two of them
+red and leaves the admin's four green.
+
+**Phase 7's second gap: `undescribed` is a term on `AssetsUrl`.** It joins
+`unfiled` and `untagged` through `parseAssetsUrl`, `assetsQuery`, `assetsParams`,
+`withFilter` and `isNarrowed`, and the chip sits with the `kind` chips rather than
+in the sidebar — it narrows the grid the way a type does. **It is exclusive with
+nothing**, which is the one way it differs from the other two: those pairs are
+refused together by the route because they can only ever answer nothing, while
+"the undescribed files in this folder carrying this tag" is a question with an
+answer. The chip is drawn only where `describe` is configured, because "never
+described" is not a distinction on a site that describes nothing — but a
+hand-written URL still filters, because the column exists either way. It is a
+different control from the run panel's *backlog only* checkbox and deliberately
+so: that one narrows the **job**, this one narrows the **screen**.
+
+**Decision 13's versioned filters had never been wired, and this closed that
+too.** Phase 2 moved the composition into `assetFilterSql`, gave
+`listAssetsByPage` an optional `filter`, tested the reader, and recorded that the
+*route* did not parse one yet because `routes/api/index.ts` was outside its files.
+No later phase owned that file either, so `GET {base}/api/v1/assets` was still the
+unfiltered list it has always been while the spec's route table said otherwise. It
+now parses `q`, `folder` and `tags`. Additive is the whole licence for touching a
+`v1`: a caller passing none of the three composes an empty filter, `assetFilterSql`
+emits no clause, and the statement is the one that route has always run.
+
+**`tags` repeated, not `tag`.** The spec's route table writes it singular; the
+admin's has always been `?tags=a&tags=b`, parsed by `tagsQuery` with its eight-slug
+cap and its refusal message. One spelling and one parser beat a spec table, because
+a second name would be a second implementation of the cap — and a version segment is
+a promise, so the name that ships is the name forever. `unfiled`, `untagged` and
+`undescribed` are deliberately **not** on the versioned route: they are the admin's
+retro-organising and enrichment affordances rather than questions a script asks of a
+media library, and adding one later is additive where unadding one is not.
+
+**The adapter is raw `fetch`, and `@anthropic-ai/sdk` is the rejected alternative.**
+The SDK is the right choice in an application and the wrong one here: `folio/server`
+is imported by every host Worker and built with `--packages=external`, so a
+dependency in this file is a dependency in every deployment — including the majority
+that configure no `describe` at all — and it is megabytes against a Worker size limit
+for one POST to one endpoint. A host who wants the SDK writes `fn` with it in four
+lines, which is the whole argument for decision 8's seam.
+
+**The request is deliberately minimal, and that is a compatibility decision rather
+than laziness.** No `thinking`, no `output_config.effort`, no beta header, no
+structured outputs. `model` is the host's, and every one of those is refused by
+*some* model somebody might reasonably name — effort errors on Haiku, thinking
+configuration is model-specific, structured outputs wants a beta flag that will
+move. An adapter that 400s on the cheap model chosen to afford a 40,000-image run
+is worse than one that leaves a knob unturned. The prompt asks for a JSON object and
+the reader finds it between the first `{` and the last `}`, forgiving about a code
+fence and strict about the absence: a model that answered no object has failed, and
+that has to be a `describe_error` rather than an empty result, because an empty
+result stamps `described_at` and retires the row from the backlog with nothing left
+to find it by.
+
+**`claude-opus-5` is the default and it is not the cheapest.** Picking a smaller
+model on a host's behalf would be Folio deciding what their alt text is worth, which
+is the overreach decision 8 refuses everywhere else. `model` is the first option for
+exactly that reason, and the README says a library of thousands is a real bill.
+
+**Two ways to hand over one image, chosen from the URL rather than from a failed
+attempt.** `DescribeInput` offers a public URL and a lazy `bytes()`, and the adapter
+sends the URL unless the URL is one a model API could not fetch — loopback, a private
+range, `.local`, a bare hostname, a non-HTTP scheme. That is the `wrangler dev` case
+the spec named, and it is deterministic and explainable rather than a retry after a
+paid failure. What it does not cover is a deployment that is routable but not
+readable — a preview behind Access, a WAF rule over `/folio/asset` — which fails at
+the provider, is recorded like any other failure, and is the point at which that host
+writes their own `fn` around `bytes()`. The inline path is narrower than what
+`uploadAsset` stores: AVIF and SVG are not base64 image sources, so a local host
+describing one gets a message naming the reason rather than somebody else's 400.
+
+**Nothing in the adapter clamps.** Whatever comes back is handed on raw and
+`server/describe.ts` truncates, type-checks and matches it. That file's "a model is a
+caller" rule holds for *every* `fn`, and an adapter that pre-cleaned its own output
+would be the one path where the screen runs twice and could drift from the one a
+hand-written `fn` meets.
+
+**Found while writing the prose, and left as a gap rather than papered over: there
+is no `failed` filter.** Phase 7's notes say retrying a recorded failure is "an
+explicit run over `describe_error is not null`, which the run panel offers". It does
+not, and neither does anything else: `AssetFilter` has `undescribed`
+(`described_at is null`) and no term for the errored set, and a failure stamps
+`described_at`, so a failed asset is in neither the backlog nor any filter. Today,
+re-describing one is its detail panel's *Describe* button or a bulk run over a
+hand-ticked selection. The fix is one clause in `assetFilterSql`, one key in
+`CAPTURED_ASSET_FILTER`, one term on `AssetsUrl` and one chip — the same four halves
+`undescribed` needed — and it is recorded in `ROADMAP.md` rather than done here,
+because it is a new filter rather than a phase that was planned.
+
+**Not done, and it is the one thing this spec asked for that nobody built.**
+*Testing requirements* names `scripts/media-library-test.mjs` — upload, a folder
+tree, filing, tagging, filtering by folder and by two tags, a bulk tag over a
+select-all, a bulk move, and a folder delete that leaves its assets unfiled. No
+phase owned it and none wrote it. Every one of those behaviours is covered by the
+workers suite against real D1 and real R2, so this is not an untested feature; what
+is missing is the one check that exercises them through a live dev server the way a
+browser would, which is what the other twenty `scripts/*-test.mjs` exist for. It is
+a script and a single `./scripts/e2e.sh` run, and it is named here rather than
+quietly dropped.

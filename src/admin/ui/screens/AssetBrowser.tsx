@@ -541,6 +541,33 @@ export function AssetBrowser(props: AssetBrowserProps) {
             ) : null}
 
             {/*
+              The backlog, as a filter rather than as a mode — one chip, drawn
+              only where the host configured a `describe`, because "never
+              described" is not a distinction on a site that describes nothing.
+
+              It sits with `kind` rather than in the sidebar because it narrows
+              the *grid* the way a type does, and it deliberately clears
+              nothing: a backlog is a question asked inside a folder, a tag or a
+              search, and every one of those combinations means something. The
+              run panel's own *backlog only* checkbox is a different control
+              over a different thing — that one narrows the job, this one
+              narrows the screen.
+            */}
+            {describe.configured ? (
+              <fieldset className={css.chips}>
+                <legend className={css.srOnly}>Filter by description</legend>
+                <button
+                  type="button"
+                  className={`${css.chip} ${url.undescribed ? css.chipOn : ''}`}
+                  aria-pressed={url.undescribed}
+                  onClick={() => onUrl(withFilter(url, { undescribed: !url.undescribed }))}
+                >
+                  Not described
+                </button>
+              </fieldset>
+            ) : null}
+
+            {/*
           The sort, in grid mode only. The table's own headers carry the same two
           facts — which column and which direction — and offering both at once is how
           two controls over one piece of state start disagreeing about it.
@@ -751,6 +778,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
                     unfiled: false,
                     tags: [],
                     untagged: false,
+                    undescribed: false,
                   }),
                 )
               }
@@ -991,6 +1019,7 @@ function capturedFilter(url: AssetsUrl): AssetFilter {
     ...(url.unfiled ? { unfiled: true } : {}),
     ...(url.tags.length === 0 ? {} : { tags: [...url.tags] }),
     ...(url.untagged ? { untagged: true } : {}),
+    ...(url.undescribed ? { undescribed: true } : {}),
   }
 }
 

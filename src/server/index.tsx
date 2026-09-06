@@ -280,6 +280,19 @@ export type { PageAccess } from '../core/gate'
  * the entire contract.
  */
 export type { DescribeInput, DescribeResult, FolioDescribe } from './types'
+/**
+ * …and the one adapter over it, so the common case is a line of config rather
+ * than a research project. `anthropicDescriber` is the only place in this
+ * library that names a vendor, and it is deliberately on this side of the seam:
+ * it *returns* a `describe.fn` and holds no privileged access to anything, so
+ * deleting it would cost a host twenty lines and no capability.
+ */
+export type { AnthropicDescriberOptions } from './describe-anthropic'
+export {
+  anthropicDescriber,
+  DEFAULT_DESCRIBE_MODEL,
+  DEFAULT_DESCRIBE_PROMPT,
+} from './describe-anthropic'
 export type {
   Folio,
   FolioBindings,

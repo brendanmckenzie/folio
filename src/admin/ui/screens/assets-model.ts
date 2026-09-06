@@ -131,6 +131,19 @@ export interface AssetsUrl {
    * story). Mutually exclusive with `tags`. */
   untagged: boolean
   /**
+   * `described_at is null` — every file the enrichment has never been asked
+   * about (decision 9). The **backlog view**, and the one filter here that is
+   * exclusive with nothing: a backlog is a question you ask *within* a folder,
+   * a tag, a type or a search, and every combination of those means something.
+   *
+   * It is a filter like any other and not a mode, which is why it lives here
+   * rather than in the run panel's state — the panel's own *backlog only*
+   * checkbox narrows the **job**, and this narrows the **screen**. A host with
+   * no `describe` configured never sees the control, but a hand-written URL
+   * still filters, because the column exists either way.
+   */
+  undescribed: boolean
+  /**
    * The asset whose detail panel is open.
    *
    * In the URL because **an asset is a thing somebody sends a colleague**: "have a
@@ -167,6 +180,7 @@ export function parseAssetsUrl(
     unfiled: folder === undefined && query.unfiled === '1',
     tags,
     untagged: tags.length === 0 && query.untagged === '1',
+    undescribed: query.undescribed === '1',
     asset: query.asset || undefined,
   }
 }
@@ -199,6 +213,7 @@ export function assetsQuery(url: AssetsUrl): Record<string, string | undefined> 
     // see that function's own note.
     tags: url.tags.length > 0 ? url.tags.join(',') : undefined,
     untagged: url.untagged ? '1' : undefined,
+    undescribed: url.undescribed ? '1' : undefined,
     asset: url.asset,
   }
 }
@@ -261,7 +276,9 @@ export function withView(url: AssetsUrl, view: AssetView): AssetsUrl {
  */
 export function withFilter(
   url: AssetsUrl,
-  patch: Partial<Pick<AssetsUrl, 'kind' | 'q' | 'folder' | 'unfiled' | 'tags' | 'untagged'>>,
+  patch: Partial<
+    Pick<AssetsUrl, 'kind' | 'q' | 'folder' | 'unfiled' | 'tags' | 'untagged' | 'undescribed'>
+  >,
 ): AssetsUrl {
   const next = { ...url, ...patch }
   // The two pairs the route refuses together (`assetFolderFilter`, `assetTagFilter`
@@ -288,7 +305,8 @@ export function isNarrowed(url: AssetsUrl): boolean {
     url.folder !== undefined ||
     url.unfiled ||
     url.tags.length > 0 ||
-    url.untagged
+    url.untagged ||
+    url.undescribed
   )
 }
 
@@ -322,6 +340,7 @@ export function assetsParams(
   // address bar — see `assetsQuery`'s note on why those two differ.
   for (const tag of url.tags) params.append('tags', tag)
   if (url.untagged) params.set('untagged', '1')
+  if (url.undescribed) params.set('undescribed', '1')
   if (opts.count) params.set('count', '1')
   if (opts.cursor) params.set('cursor', opts.cursor)
   return params
