@@ -103,6 +103,28 @@ export interface ContentQuery {
    * list views read `stories` directly — a document, not a query over content.
    */
   status?: 'published'
+  /**
+   * Ask for each item's whole document, not just its root block's `data`.
+   *
+   * **Off by default, and that is the fix rather than the option.** A
+   * `ContentItem` carried a full `Doc` unconditionally until 2026-09-06, so an
+   * eleven-item guides rail put a quarter of a megabyte of prose — every
+   * paragraph of every guide, none of it rendered — into the SSR payload of
+   * every page that showed the rail. Measured on the first host to run one:
+   * 250 kB of a 367 kB response, 68% of the bytes, and 92% of the payload once
+   * gzipped.
+   *
+   * The card case is what a collection is *for*, and a card renders from
+   * `item.data` — the root block's fields, which is where `title`,
+   * `description` and `cardImage` live. So the list pays for the body only
+   * where a block genuinely inlines one, and says so.
+   *
+   * Note the renderer does **not** build `content` for a collection item the
+   * way it does for a `reference` (`preview/Render.tsx`), so a block that opts
+   * in renders `item.doc` itself. That asymmetry is why this is opt-in rather
+   * than a second resolved field: nothing in the library consumes it.
+   */
+  withDoc?: boolean
 }
 
 /**
@@ -113,7 +135,18 @@ export interface ContentQuery {
  * Both are present **only** when the query carried `search`, so a block that
  * renders a plain collection sees exactly what it saw before.
  */
-export interface ContentItem extends ReferenceTarget {
+export interface ContentItem extends Omit<ReferenceTarget, 'doc'> {
+  /**
+   * Present only for a query that asked (`ContentQuery.withDoc`), which is what
+   * a `reference` differs on: a reference resolves *one* document a block named,
+   * so carrying its body is the point; a collection resolves a page of them, so
+   * carrying every body is a quarter-megabyte nobody reads.
+   *
+   * `Omit` rather than a narrower base interface because that is the whole of
+   * the difference — an item is a reference target whose document is optional,
+   * and spelling that as two interfaces would invite them to drift.
+   */
+  doc?: Doc
   /**
    * The matched extract, already split into parts (decision 6) — never a
    * `<mark>…</mark>` string a host would have to trust as HTML or escape.
@@ -195,6 +228,7 @@ export function normaliseQuery(
   search?: string
   where: readonly ContentWhere[]
   order: ContentOrderSpec
+  withDoc: boolean
 } {
   const type = q.type === undefined ? [] : typeof q.type === 'string' ? [q.type] : [...q.type]
   const search = clampSearch(q.search)
@@ -238,6 +272,7 @@ export function normaliseQuery(
     order,
     page: clampPage(q.page),
     perPage: clampPerPage(q.perPage, perPageMax),
+    withDoc: q.withDoc === true,
   }
 }
 
@@ -266,6 +301,13 @@ export function queryKey(q: ContentQuery, perPageMax = MAX_PER_PAGE): string {
     n.page,
     n.perPage,
     n.search ?? '',
+    // Appended **only when true**, so every key a document already computes is
+    // byte for byte what it was: the flag is off for every collection field that
+    // does not name it, and a ninth element on the ordinary key would change all
+    // of them for nothing. Present in the key at all because two fields can share
+    // a query and differ here — without it one answer serves both and whichever
+    // asked for documents silently renders without them.
+    ...(n.withDoc ? [1] : []),
   ])
 }
 
@@ -295,6 +337,11 @@ export function queryToParams(q: ContentQuery, perPageMax = MAX_PER_PAGE): URLSe
   params.set('order', `${n.order.field}:${n.order.dir}`)
   params.set('page', String(n.page))
   params.set('perPage', String(n.perPage))
+  // Only when asked, so the admin's ordinary collection fetch is the URL it
+  // always was. This is what keeps a preview render honest: a field that opts in
+  // must pull the bodies over HTTP too, or the editor's preview and the live
+  // page render from different data.
+  if (n.withDoc) params.set('doc', '1')
   return params
 }
 
@@ -420,6 +467,10 @@ export function collectionQuery(
     where: (stored.where ?? []).filter((w) => filterable.has(w.field)),
     ...(order ? { order } : {}),
     ...(term ? { search: term } : {}),
+    // The field's declaration, never the stored value: whether a block renders
+    // whole documents is the block author's decision, and an editor narrowing a
+    // list must not be able to turn a card rail into a quarter-megabyte one.
+    ...(field.withDoc ? { withDoc: true } : {}),
     page: page ?? stored.page ?? 1,
     perPage: Math.min(stored.perPage ?? field.maxPerPage ?? DEFAULT_PER_PAGE, maxPerPageOf(field)),
     status: 'published',

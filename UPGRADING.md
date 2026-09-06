@@ -196,6 +196,39 @@ against a version skew you have to manage. The user-visible symptom of a bump is
 that an editor who left a tab open across your deploy has to reload. Bumps are
 cheap and are made freely.
 
+### Collection items no longer carry each document (2026-09-06)
+
+`item.doc` on a `collection` field and on a `folio.query` result is now
+**absent unless the query asks for it**. `item.data` — the root block's fields,
+which is what a card renders from — is unchanged and still on every item.
+
+Ask for the body where a block genuinely inlines one:
+
+```ts
+list: collection({ type: 'guide', withDoc: true })
+// or, over the API and in a host's own query:
+await folio.query(env, { type: 'guide', withDoc: true })
+// GET {base}/content?type=guide&doc=1
+```
+
+**Why, and what it is worth.** An item carried a full `Doc` on every query, so a
+list paid for every body whether or not anything rendered one. Measured on a live
+site: an eleven-item guides rail put **250 kB** of unrendered prose into the SSR
+payload of the home page and of all thirteen guide pages — 68% of a 367 kB
+response, and 92% of the hydration payload once gzipped. The D1 read is unchanged
+(`published_doc` is still read, because `item.data` comes out of it); the bytes
+come off the response.
+
+**What to check when you bump.** `tsc` finds the render sites for you — `doc` is
+now `Doc | undefined`. Anything that reads `item.doc` without declaring
+`withDoc` is a page that was rendering an inlined document and will now render
+nothing, so it fails to compile rather than silently emptying. Two other surfaces
+change shape for the same reason, both additively reversible with `doc=1`:
+`GET {base}/content` and `GET {base}/api/v1/documents`.
+
+`queryKey` is unchanged for a field that does not declare `withDoc`, so
+`Resolution.collections` keys are byte for byte what they were.
+
 ### Durable Object migration tags
 
 If you are upgrading from a pin old enough to predate `SpaceDO`, you need both

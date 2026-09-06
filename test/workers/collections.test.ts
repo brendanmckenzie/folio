@@ -485,7 +485,32 @@ describe('query', () => {
     expect(item.url).toMatch(/^\/colinsights\//)
     expect(item.path).toMatch(/^colinsights\//)
     expect(typeof item.data.title).toBe('string')
-    expect(item.doc.bloks[item.doc.root]?.type).toBe('colInsight')
+  })
+
+  /**
+   * The bytes this pair is really about: an item carried a whole `Doc` on every
+   * query until 2026-09-06, so an eleven-item rail shipped a quarter of a
+   * megabyte of prose no card rendered. `data` is what a card needs and it is
+   * still here; the body is now something a block asks for.
+   */
+  it('omits each item’s document unless the query asks', async () => {
+    const { items } = await folio.query(env, { type: 'colInsight', perPage: 3, order: 'title' })
+    expect(items.length).toBeGreaterThan(0)
+    for (const item of items) expect(item.doc).toBeUndefined()
+    // The root block's fields survive the omission — that is the half a card reads.
+    expect(typeof items[0]!.data.title).toBe('string')
+  })
+
+  it('carries the document when withDoc is set', async () => {
+    const { items } = await folio.query(env, {
+      type: 'colInsight',
+      perPage: 1,
+      order: 'title',
+      withDoc: true,
+    })
+    const item = items[0]!
+    expect(item.doc).toBeDefined()
+    expect(item.doc!.bloks[item.doc!.root]?.type).toBe('colInsight')
   })
 
   it('answers an empty page past the end, with the right total', async () => {

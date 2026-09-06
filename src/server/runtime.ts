@@ -838,7 +838,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
                   item.id === open.id
                     ? {
                         ...item,
-                        doc,
+                        // Patched only where the answer carries documents at all
+                        // (`core/query.ts`'s `ContentQuery.withDoc`). Adding one
+                        // unconditionally would put the open draft's whole body
+                        // into a card rail that asked for none — and give the
+                        // editor an item shaped unlike its ten neighbours.
+                        ...(item.doc ? { doc } : {}),
                         data: dataOf(root, active),
                         title: titleOf(doc, typeOf(open.type), schema, item.title, active),
                       }

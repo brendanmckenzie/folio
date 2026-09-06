@@ -218,6 +218,21 @@ export type Field =
        * enforcement `filterable` already has.
        */
       searchable?: boolean
+      /**
+       * Carry each item's whole document, not just its root block's `data`
+       * (`./query.ts`'s `ContentQuery.withDoc`).
+       *
+       * **Off unless you say otherwise, and a card never needs it.** `item.data`
+       * is the root block's fields — `title`, `description`, the card image — so
+       * the list a `collection` is normally for renders from what it already
+       * has. Naming this ships every item's full body to the browser: eleven
+       * guides cost 250 kB of prose that no card renders.
+       *
+       * Say it when a block inlines the documents it lists — a "latest post,
+       * in full" rail — and render `item.doc` yourself, because the renderer
+       * builds `content` for a `reference` and not for a collection item.
+       */
+      withDoc?: boolean
     } & Omit<Common, 'translatable'>)
   /**
    * Points at a form, built and stored entirely outside the document

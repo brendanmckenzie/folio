@@ -1262,19 +1262,36 @@ value is only the editor's choices within it, and both are enforced on the way i
 *and* on the way out — the same double enforcement `richtext`'s `marks` has,
 because a value can also arrive from an importer or over the API.
 
-Items are `ReferenceTarget`s, the shape `reference` already resolves to, so a block
-author who can render a reference can render a collection item with no new
-knowledge. An empty result is an empty page, never null, so `list.items.map(…)`
-needs no guard.
+Items are `ReferenceTarget`s minus the document, the shape `reference` already
+resolves to, so a block author who can render a reference can render a collection
+item with no new knowledge. An empty result is an empty page, never null, so
+`list.items.map(…)` needs no guard.
 
-**`item.doc` and `item.data` are the whole published document, on every item,
-always.** A `collection` field and `folio.query` never redact and never gate
-(see "Visitor access"): if a members-only insight is in the result set, its full
-title, standfirst and body are right there in `item.doc`. Filter one out with
-`where` on the field your gate reads — `where: [{ field: 'access', op: 'eq',
-value: 'public' }]` — and render a lock icon from `item.data.<field>` for
-anything you narrow by hand instead. Never serialise `item.doc` or `item.data`
-wholesale to a client that has not earned the document itself.
+**`item.data` is the root block's fields — `title`, `description`, the card
+image — and it is what a card renders from.** It is on every item, always.
+
+**`item.doc` is the whole published document and you have to ask for it**, with
+`collection({ withDoc: true })` (or `withDoc: true` on a `folio.query`). It was
+unconditional until 2026-09-06, and the reason it is not is measured rather than
+theoretical: an eleven-item guides rail on the first host to run one put 250 kB
+of prose — every paragraph of every guide, none of it rendered — into the SSR
+payload of every page that showed the rail. That was 68% of the response and 92%
+of the payload once gzipped. A card does not need a body, so it no longer pays
+for one.
+
+Ask for it when a block genuinely inlines the documents it lists, and render it
+yourself: the renderer builds `content` for a `reference` and **not** for a
+collection item, so `<FolioDoc doc={item.doc} …>` is the call. If the field does
+not declare `withDoc`, `item.doc` is `undefined` — the type says so.
+
+**Neither half is gated.** A `collection` field and `folio.query` never redact
+and never gate (see "Visitor access"): if a members-only insight is in the
+result set, its indexed fields are in `item.data`, and its full body is in
+`item.doc` on a field that asked. Filter one out with `where` on the field your
+gate reads — `where: [{ field: 'access', op: 'eq', value: 'public' }]` — and
+render a lock icon from `item.data.<field>` for anything you narrow by hand
+instead. Never serialise an item wholesale to a client that has not earned the
+document itself.
 
 `list.total`, `list.page` and `list.pages` are there because a design will ask for
 "page 4 of 9". Pagination is the **host's**: read `?page=` and pass it in, and it
@@ -2653,15 +2670,18 @@ the host's route answers a paywall rather than a 500.
   On a mostly-members site that is the whole of the cache hit rate, and every
   view costs one `visitor` call. A host that wants a cached teaser serves it
   from a URL of its own, where it owns both halves of the decision.
-- **Lists hand back the whole published document, ungated.** `item.doc` and
-  `item.data` on every `collection` and `folio.query` item are the full thing
-  (see Collections) — a `folio.query` never redacts and never filters on the
-  gate field for you. Filter with `where: [{ field: 'access', op: 'eq', value:
+- **Lists hand back published content ungated.** `item.data` on every
+  `collection` and `folio.query` item is the gated document's root fields, and
+  `item.doc` is its entire body on a field that declares `withDoc` (see
+  Collections) — a `folio.query` never redacts and never filters on the gate
+  field for you. Filter with `where: [{ field: 'access', op: 'eq', value:
   'public' }]`, render a lock from `item.data.<field>` for anything you narrow
-  by hand instead, and never serialise an item wholesale. Full-text search
-  (spec 30) is the one exception: it scopes an unfiltered search to the public
-  value itself, because a snippet would otherwise render the exact prose a
-  denial withholds.
+  by hand instead, and never serialise an item wholesale. Leaving `withDoc` off
+  narrows this to the root block's fields and is the reason to leave it off on a
+  gated deployment, but it is not the fix: `item.data` still carries whatever a
+  root block holds. Full-text search (spec 30) is the one exception: it scopes an
+  unfiltered search to the public value itself, because a snippet would otherwise
+  render the exact prose a denial withholds.
 
 No admin change: there is no lock glyph in the content tree, and the inspector
 already edits any root-block field under "Page settings" — the same place an

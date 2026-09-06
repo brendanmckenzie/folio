@@ -425,7 +425,13 @@ export async function runQuery(
       path: story.path ?? '',
       url: story.path === null ? '' : (story.url ?? `/${story.path}`),
       data: root ? dataOf(root, opts.locale) : {},
-      doc,
+      // **Only when the query asked** (`core/query.ts`'s `ContentQuery.withDoc`).
+      // `published_doc` is still read and still parsed — `data` is the root
+      // block's fields and there is nowhere else to get them — so this drops
+      // bytes from the *response*, which is where they hurt: a card rail is one
+      // D1 read either way, and a quarter of a megabyte of unread prose in the
+      // SSR payload otherwise.
+      ...(normalised.withDoc ? { doc } : {}),
       // Only when the query asked, so a plain collection's items are byte for
       // byte what they were before search existed.
       ...(normalised.search === undefined

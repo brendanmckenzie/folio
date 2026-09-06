@@ -115,6 +115,18 @@ export function queryFromParams(params: URLSearchParams): ContentQuery {
   // is, and refusing it teaches a visitor nothing they can act on.
   const search = params.get('search')
 
+  /**
+   * `doc=1` asks for each item's whole document (`core/query.ts`'s
+   * `ContentQuery.withDoc`). Off by default, which is a shape change for this
+   * route and for `/api/v1/documents`: items carried a full `Doc` each until
+   * 2026-09-06 and now carry one only when asked.
+   *
+   * Here rather than inferred, because the admin's preview has to be able to ask
+   * — `queryToParams` sets it for a field declaring `withDoc` — and a preview
+   * that could not would render from different data than the live page.
+   */
+  const withDoc = params.get('doc') === '1'
+
   return {
     ...(type.length > 0 ? { type: type.map(typeNameQuery) } : {}),
     ...(parent !== null ? { parent: parent === '' ? null : parent } : {}),
@@ -128,6 +140,7 @@ export function queryFromParams(params: URLSearchParams): ContentQuery {
     ...(positive(params.get('perPage') ?? undefined, 'perPage') !== undefined
       ? { perPage: positive(params.get('perPage') ?? undefined, 'perPage') }
       : {}),
+    ...(withDoc ? { withDoc: true } : {}),
     status: 'published',
   }
 }

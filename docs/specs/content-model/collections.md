@@ -748,3 +748,36 @@ and `referencesTo(db, id)` → the rows, both in `server/content-index.ts` and b
 exported from `folio/server`. Published references only, which is what the table
 holds — a draft pointing somewhere is not yet a usage. Self-edges are dropped, so a
 page linking to itself never warns about itself.
+
+### Correction, 2026-09-06: an item's document is opt-in
+
+Decision 4 gave a collection item the `ReferenceTarget` shape "so a block author
+who can render a reference can render a collection item with no new knowledge",
+and `runQuery` therefore attached the parsed `published_doc` to every row. That
+was wrong in a way nothing here could see, because the whole spec was written
+against lists of a dozen short documents and the cost is invisible until the
+documents are long.
+
+Measured on All About Africa, the first host to ship a real one: an eleven-item
+guides rail carried **250,450 bytes** of document bodies, on the home page and on
+all thirteen guide pages. 68% of a 367 kB response; 92% of the hydration payload
+once gzipped. Of 460 prose strings across the ten sibling guides on one page,
+**ten rendered** — the card descriptions. The page's own document was serialised
+twice, once as the route's `doc` and again inside the collection.
+
+The symmetry with `reference` was also never real: `preview/Render.tsx` builds
+`content: ReactNode` for a `reference` and a `references`, and **not** for a
+collection item. So the `Doc` a list carried could not be rendered by the path
+decision 4 was appealing to; a block had to call the renderer itself. It was
+inert data on every item, which is the strongest form of the argument against it.
+
+`ContentQuery.withDoc` and `collection({ withDoc: true })` are the opt-in, and
+the flag is on the *field*, never on the stored `CollectionValue` — whether a
+block renders whole documents is the block author's decision, and an editor
+narrowing a list must not be able to turn a card rail into a quarter-megabyte
+one. `queryKey` appends the flag only when it is true, so every key a document
+already computed is unchanged.
+
+`published_doc` is still selected and still parsed: `item.data` is the root
+block's fields and there is nowhere else to get them. The saving is in the
+response, which is where it hurt.
