@@ -1,4 +1,5 @@
 import { button } from './button'
+import { contactForm } from './contact'
 import { cta } from './cta'
 import { embed, section } from './embed'
 import { feature, features } from './features'
@@ -48,6 +49,10 @@ export const blocks = [
   // (data-documents.md decision 3).
   leadership,
   insightList,
+  // A form on a page (`content-model/forms.md`): the block holds a form's *id*
+  // and renders the descriptor `resolve()` put on the resolution. Folio ships no
+  // markup for it, so every element in that render is this project's.
+  contactForm,
   // Not a document root (src/index.tsx never lists it under `types`): the
   // `/search` route builds its own in-memory `Doc` around this one block
   // (`content-model/full-text-search.md` decision 10).

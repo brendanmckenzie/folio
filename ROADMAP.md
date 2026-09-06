@@ -418,6 +418,52 @@ Deferred, each named rather than glossed:
   tag is additive and reversible, and a model moving forty thousand files is the
   one enrichment outcome that is expensive to undo.
 
+**Forms and responses — a page that asks a question, and somewhere to put the
+answer. Done 2026-09-06, as spec 33** (`content-model/forms.md`). An editor builds
+a form in the admin; a `form` field kind holds its **id**, and `resolve()` compiles
+a `ResolvedForm` — the action URL, the encoding, every question already localised,
+the hidden inputs and a honeypot's name — onto the resolution, so the host renders
+it with its own markup and Folio ships none. `POST {base}/f/frm_<12 hex>` is the one
+route in this library an anonymous stranger may write to: a native form post
+answered with a 303 whose three parameters name nothing personal (which is what
+keeps the thank-you page cacheable), JSON when a caller asks for it, three abuse
+controls, a sixty-second duplicate collapse in one statement, gated `sub_` uploads
+that the public asset route physically cannot serve, a responses table, a streamed
+CSV whose every cell is de-fanged, and one `submitted` hook that is the entire
+programmatic surface for a response.
+
+A form is **a row, not a document** — the expensive decision, taken deliberately
+(checkpoint 1, an owner override). It buys no draft/live split and no merge: two
+editors saving one form get an `expectedUpdatedAt` guard and a 409, which is
+weaker than the document editor's story and is the direct cost.
+
+Deferred or uncovered, each named rather than glossed:
+
+- **No picker control for the `form` field kind.** The inspector falls back to a
+  text box, so embedding a form means pasting its `frm_…` id from the Forms
+  screen. One control, and the phase that built the admin was not scoped for it.
+- **A form embedded in a *global* or in a referenced document resolves to
+  `null`.** Form ids come off the rendered document's own walk, and a global's are
+  not known until the pass that loads it. The fix is cheap (a third-pass read for
+  ids discovered in pass two) and nothing has needed it yet.
+- **Retention is manual, and nothing will remind anyone** (checkpoint 9, chosen
+  against a swept `retentionDays`). Personal data accumulates in `form_responses`
+  until somebody deletes it. What Folio adds itself expires anyway — the IP hash
+  carries the hour it was made in — and the responses screen shows the age of the
+  oldest row, which is the symptom on the surface that would display it.
+- **The `FORMS` and `ADMIN` gates are unit-tested, not route-tested.** The workers
+  fixture is `auth: 'open'`, so a refusal cannot be observed through `SELF.fetch`;
+  `allows()` is pinned for every role and scope instead, and
+  `scripts/forms-test.mjs` is what actually watches an anonymous request be turned
+  away by a live server.
+- **The swallowed R2 failure has no fault-injection seam**, so what is asserted is
+  that the objects go when the delete succeeds. And **nothing asserts the CSV
+  arrives incrementally** — the keyset walk is proven to continue past a page
+  boundary, which is the bug worth catching, but a test cannot watch bytes arrive.
+- **No `retentionDays`, no per-response comments, no spam score, no vendor
+  integration.** `verify` is a host function precisely so Folio never names a
+  captcha vendor, holds a key or has a timeout policy.
+
 ## Next
 
 ### 1. Pagination, everywhere, as a rule

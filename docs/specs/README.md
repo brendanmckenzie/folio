@@ -262,6 +262,7 @@ for:
 | `0004_shares.sql` | draft preview sharing | `shares` table, one unique index and one ordinary one |
 | `0005_content_fts.sql` | full-text search (30) | `content_text` table, one unique index, and the `content_fts` FTS5 virtual table external to it |
 | `0008_asset_organisation.sql` | media library organisation (32) | `asset_folders`, `asset_tags`, `asset_taggings`, plus six columns and four indexes on `assets` — reversing `0002`'s refusal to index `filename` and `size`, on the measurement `0002` itself named |
+| `0010_forms.sql` | forms and responses (33) | `forms` and `form_responses`, five indexes (one of them partial), and a fourth `content_refs.kind` — `'form'` — with no DDL at all, which is `0002`'s no-CHECK rule paying for itself a second time |
 
 `0002` was a plain rename and `0003`, `0004` and `0005` plain `create table`s, which is
 what every one after them is expected to be. `0005` is the first to create a *virtual*
@@ -278,9 +279,9 @@ Both restamped once when `0005` landed: the drafts claimed `0005` and `0006`, wr
 before the build order put 30 first. A claim is a stamp, not a landing — whichever of
 the remaining two builds first takes the next free number and the other restamps.
 
-**Landed on `main`: `0001`–`0005`. Landed on the build branch: `0006` (28) and
-`0008` (32, media library). Claimed: `0007` (29), `0009` (23), `0010` (33, forms).
-The next free number is `0011`.** Do not
+**Landed on `main`: `0001`–`0005`. Landed on the build branch: `0006` (28),
+`0007` (29), `0008` (32, media library) and `0010` (33, forms). Claimed: `0009`
+(23). The next free number is `0011`.** Do not
 derive a number by counting the landed rows above; take the one your spec's header
 names, and if it is already on disk, stop rather than picking the next one yourself.
 
@@ -421,6 +422,19 @@ described asset. **Folio names a vendor for the first time here**, in
 `anthropicDescriber` — an adapter that *returns* a `describe.fn` rather than a second
 seam — and it has never made a live call: every test of it stubs `fetch`, because no
 key exists in this repository, and the README says so where a host will read it.
+
+**Spec 33 (forms and responses) is done**, built 2026-09-06 across eight phases,
+and it is the first feature in this library with a route an anonymous stranger may
+write to. Its `## Implementation notes` lead with the two things that were wrong
+rather than merely missing: `validateFormFields` throws a plain `Error`, so the
+first unwrapped route answered **500 for a client's own mistake** until phase 2
+re-raised at the edge; and `deleteForm` deleted D1 rows only until phase 5, which
+would have orphaned every file anybody ever attached. The notes also record a
+limitation the spec does not cover — a form embedded in a **global** or in a
+referenced document resolves to `null`, because its id is not known until the pass
+that loads the global — and that `sniffContentType` could not answer the
+`documents` half of a `file` question at all, so every PDF would have been refused
+until a sniffer was written beside it.
 
 **Spec 26 had no ordering constraint** and was taken first for that reason. It moved
 the package to the repository root and deleted the subtree split, so every path in the

@@ -294,3 +294,46 @@ p { text-wrap: pretty; }
 .site-header__logo { font-weight: 700; letter-spacing: -0.01em; }
 .site-header__nav { display: flex; gap: 1.25rem; }
 .site-header__nav .btn { padding: 0; border: 0; background: none; color: inherit; font-size: 0.9375rem; }
+
+/* A form on a page (content-model/forms.md). Folio ships no markup and no CSS
+   for one, deliberately — a form is the place a design system has the strongest
+   opinions — so every class here is this project's own, drawn against the
+   descriptor `resolve()` put on the resolution (src/blocks/contact.tsx). */
+.form { max-width: 46rem; padding: 2rem 1.5rem; margin-inline: auto; }
+.form__heading { margin: 0 0 1.25rem; font-size: 1.5rem; }
+.form__field { display: grid; gap: 0.35rem; margin-bottom: 1.1rem; }
+.form__label { font-size: 0.875rem; font-weight: 600; }
+.form__label abbr { color: #b4351e; text-decoration: none; }
+.form__input {
+  width: 100%;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 0.375rem;
+  font: inherit;
+  background: #fff;
+}
+.form__input[aria-invalid='true'] { border-color: #b4351e; }
+.form__help { margin: 0; color: var(--muted); font-size: 0.8125rem; }
+.form__statement { margin: 0 0 1.1rem; color: var(--muted); font-size: 0.9375rem; }
+.form__group { display: grid; gap: 0.35rem; margin: 0; padding: 0; border: 0; }
+.form__choice { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9375rem; }
+.form__closed { color: var(--muted); font-size: 0.9375rem; }
+.form__notice {
+  margin: 0 0 1.25rem;
+  padding: 0.75rem 1rem;
+  border-radius: 0.375rem;
+  background: #f4f1ea;
+  font-size: 0.9375rem;
+}
+.form__notice--ok { background: #e7f2e9; }
+.form__notice--bad { background: #f8e9e5; }
+/* The honeypot (decision 9): off-screen rather than `display: none`, because a
+   bot that reads the stylesheet skips a hidden input and fills this one. Not
+   `hidden` and not `tabindex`-able either — the block sets both of those too. */
+.form__decoy {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}

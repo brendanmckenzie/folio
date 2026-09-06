@@ -7,6 +7,7 @@ import { diff, fromNested } from 'folio/engine'
 import type { ReactElement } from 'react'
 import { renderToReadableStream } from 'react-dom/server.edge'
 import { blocks } from './blocks'
+import { SubmissionStatus, type SubmissionState } from './blocks/contact'
 import { migrations } from './migrations'
 
 // Two Durable Object classes now. SpaceDO is the space channel
@@ -190,6 +191,28 @@ const folio = createFolio<Env>({
   },
   // See `gate` above (`platform/visitor-access.md`).
   gate,
+  /**
+   * content-model/forms.md. Everything about a form is built in the admin; the
+   * two things only a host can answer live here.
+   *
+   * **`verify` is deliberately absent, and absent is the whole of "this site
+   * does not verify anybody"** (decision 9). Turnstile and hCaptcha both mint
+   * their token client-side at submit time, which is what makes them the one
+   * abuse control a page cached for a week cannot invalidate — so Folio holds
+   * no key, names no vendor and has no timeout policy, and a host that wants
+   * one writes the call here. It **fails closed, including on a throw**
+   * (decision 11), which is the opposite posture to the hooks below: a hook
+   * runs after a write and must never undo one, while `verify` runs before and
+   * its whole job is to refuse traffic nobody can vouch for. This project
+   * exercises the absent path rather than stubbing one that always says yes.
+   */
+  forms: {
+    // Submissions per IP-hash per hour (default 10, 0 disables it). Partial by
+    // construction and it says so: it bounds a script, not a botnet — and the
+    // hash it counts carries the hour it was made in, so it stops being
+    // computable from an address once that hour passes (decision 10).
+    ratePerHour: 20,
+  },
   basePath: '/folio',
   // content-model/localisation.md: two languages, one document per story.
   // `default` is the *source* locale — the one `Blok.data` holds — and everything
@@ -259,6 +282,29 @@ const folio = createFolio<Env>({
     },
     unpublished: ({ story }) => {
       console.log(`folio: unpublished ${story.path || '/'}`)
+    },
+    /**
+     * Somebody filled in a form (`content-model/forms.md` checkpoint 4).
+     *
+     * **This is the entire programmatic surface for responses**: there is no
+     * `/api/v1` route, no MCP tool and no in-process reader, deliberately, so
+     * forwarding a lead to a CRM or posting it to Slack is this one function
+     * with the host's own key and the host's own retries. A real one would
+     * `waitUntil(fetch(...))`; this logs.
+     *
+     * It fires only for a row that was actually written — a submission that
+     * filled the honeypot stores nothing and fires nothing, and a double-click
+     * that collapsed into the previous minute's identical answer fires once —
+     * which is exactly what stops a CRM seeing the same lead twice. `actor` is
+     * always null here, unlike every other hook: the route is unauthenticated
+     * and the response is a stranger's.
+     */
+    submitted: ({ form, response, files }) => {
+      console.log(
+        `folio: ${form.name} answered (${response.id}, v${response.version}${
+          files.length ? `, ${files.length} file(s)` : ''
+        }) from ${response.page || 'an unknown page'}`,
+      )
     },
   },
 })
@@ -415,11 +461,19 @@ export default {
     // elements and nothing else — no marker divs, no bridge, no editing chrome.
     // It costs nothing to a reader and is what lets a screenshot be clipped to
     // one block.
+    // What a form's 303 said, read off this host's own URL
+    // (`content-model/forms.md` decision 6). Folio puts nothing personal in it —
+    // a status, the form's slug and the names of the fields it refused — which
+    // is exactly what keeps `?folio_status=ok` an ordinary cacheable page rather
+    // than one nobody may store.
+    const submitted = submission(url)
+
     return html(
       <Page
         doc={page.doc}
         resolution={page.resolution}
         locale={locale}
+        {...(submitted ? { submitted } : {})}
         // `page.doc` is already the redacted document on a denial
         // (`visitor-access.md` decision 4) — root kept, body nulled — so this
         // render is otherwise unchanged. `paywall` is the one thing the host
@@ -518,17 +572,40 @@ function parseLocale(pathname: string): { locale: string; path: string } {
 }
 
 /** Page metadata comes off the document's root block. */
+/**
+ * The three query parameters a form's 303 carries, and nothing else exists to
+ * read (`content-model/forms.md` decision 6). Null when this page was not
+ * arrived at from a submission, which is every other request.
+ *
+ * Reading them is the host's job by design: Folio ships no markup, so nothing in
+ * the library is in a position to render "thanks" — and because none of these
+ * three names anybody, the resulting URL is still an ordinary cacheable page.
+ */
+function submission(url: URL): SubmissionState | null {
+  const status = url.searchParams.get('folio_status')
+  if (!status) return null
+  return {
+    status,
+    form: url.searchParams.get('folio_form') ?? '',
+    invalid: (url.searchParams.get('folio_invalid') ?? '').split(',').filter(Boolean),
+  }
+}
+
 function Page({
   doc,
   resolution,
   locale,
   draft = false,
   paywall = false,
+  submitted = null,
 }: {
   doc: Doc
   resolution: Resolution
   locale: string
   draft?: boolean
+  /** What `submission()` read off the URL, for the form block to render the
+   *  descriptor's own `successMessage` against. */
+  submitted?: SubmissionState | null
   /**
    * `page.access === 'denied'` (`platform/visitor-access.md` decision 3). The
    * `doc` this render was handed is already redacted — every child dropped,
@@ -604,7 +681,17 @@ function Page({
       {/* `mark` in draft so a block is addressable for a screenshot; `off` — the
           default — on a published page, which ships zero JavaScript. */}
       <div id="folio-root">
-        {folio.render(doc, { resolution, ...(draft ? { mode: 'mark' as const } : {}) })}
+        {/*
+          A form block reads this to decide whether it is drawing a form or a
+          thank-you (`blocks/contact.tsx`). A context rather than a prop because
+          a block's `render` is handed the document's field values and nothing
+          else — there is no seam for "and also, what does the query string
+          say", and inventing one would put a host's page state into Folio's
+          render signature.
+        */}
+        <SubmissionStatus value={submitted}>
+          {folio.render(doc, { resolution, ...(draft ? { mode: 'mark' as const } : {}) })}
+        </SubmissionStatus>
         {/*
           The paywall, where the body was (`visitor-access.md` decision 4). `doc`'s
           root still renders its own metadata — title, standfirst, hero — above

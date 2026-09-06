@@ -1634,6 +1634,287 @@ of the two on its own.
 to hand straight to a `Location` header. Reattaching `url.search` is the host's
 job; only the host knows what it did with the rest of the URL.
 
+## Forms
+
+A page can ask a question and Folio has somewhere to put the answer. An editor
+builds a form in the admin, drops it on a page by id, and the host renders it from
+a typed descriptor; a visitor submits it with an ordinary browser and no
+JavaScript at all. Responses land in a table with a streamed CSV export, and one
+hook forwards each of them wherever the host already sends things.
+
+**A form is a row, not a document.** It has no URL, no draft, no version history,
+no place in the page tree and no entry in the content or search index — it is
+closer to a redirect than to a page, and saving the builder changes the live form
+at once. What it does carry is a `version`, bumped whenever the *shape* changes (a
+question added, removed, renamed, retyped, made required, or its option values
+changed) and deliberately not when a label, a help text or a translation is
+edited. Every response stores the version it was validated against, which is what
+makes a two-year-old response readable after the form has moved on.
+
+### Embedding one
+
+```tsx
+import { defineBlock, form, text } from 'folio/core'
+
+export const contactForm = defineBlock({
+  name: 'contactForm',
+  label: 'Form',
+  fields: {
+    heading: text({ label: 'Heading', translatable: true }),
+    form: form({ label: 'Form' }),
+  },
+  render: ({ heading, form }) => {
+    if (!form) return null
+    if (!form.open) return <p>{form.closedMessage}</p>
+    return (
+      <form method={form.method} action={form.action} encType={form.enctype}>
+        {form.hidden.map((h) => (
+          <input key={h.name} type="hidden" name={h.name} value={h.value} />
+        ))}
+        <input type="text" name={form.honeypot} tabIndex={-1} autoComplete="off" aria-hidden className="offscreen" />
+        {form.fields.map((f) => <Question key={f.name} {...f} />)}
+        <button>{form.submitLabel}</button>
+      </form>
+    )
+  },
+})
+```
+
+The stored value is the form's **id**. `resolve()` reads the form, compiles the
+descriptor in the render's locale and puts it on the resolution, so a block
+receives a `ResolvedForm` rather than an id — or `null` if the form has since been
+deleted, in which case the page renders nothing where it was, the same posture a
+`reference` to a deleted document takes. The read joins the same `Promise.all` as
+everything else a page needs, so embedding a form costs no extra round trip.
+
+Every string on the descriptor is already resolved through the locale chain, so a
+host writes no locale code: `label`, `help`, `placeholder` and option labels come
+back in the language the page is being rendered in, falling back to the source
+rather than leaving a hole. `enctype` is on the descriptor rather than left to the
+host to work out, because getting it wrong for a form with a file question
+produces a submission whose file is the string `[object File]` and no error
+anywhere.
+
+**Folio ships no markup for a form**: no `<FolioForm>`, no CSS, no component to
+override. A form is the one place a design system has strong opinions, and the
+descriptor exists so a host can satisfy them without reimplementing the action
+URL, the locale fallback, the hidden inputs or the honeypot.
+
+### The two hidden inputs, which nothing else will tell you about
+
+`form.hidden` is a list of `{ name, value }` and **a host emits it verbatim**. Two
+names appear in it, both in Folio's reserved `_` namespace:
+
+| Input | What it carries | When it is there |
+| --- | --- | --- |
+| `_folio_page` | The path this render was served at, through the host's own `route`. It is what the 303 comes back to and what is stored as the response's `page` — host-supplied rather than sniffed from `Referer`, which is stripped and forged often enough to be a lie. | Whenever the render knows its page. |
+| `_folio_locale` | The locale this page was rendered in, recorded on the response. | Only on a localised render — a source-locale submission stores `''`, the convention `content_index` already uses. |
+
+Neither is ever stored as an answer. **`_` is Folio's namespace**: the builder
+refuses a question whose slug starts with it, so a submitted key can never collide
+with one of these. Everything else a real browser sends that the form did not
+declare — the submit button's `name`, whatever a password manager injected, a
+captcha widget's own input — is **dropped silently**: not stored, not counted, not
+an error. A host that wants to pass its own value (a campaign id, a source)
+declares a `hidden` question for it, and it is then validated, stored and exported
+like any other answer.
+
+### The honeypot
+
+`form.honeypot` names one decoy input. Render it, and keep it off-screen with
+`position: absolute; left: -9999px` rather than `display: none` — a bot that reads
+the stylesheet skips a hidden input and fills a visible one. `tabindex="-1"`,
+`autocomplete="off"` and `aria-hidden` keep it away from people.
+
+The name is minted deterministically from the form's id out of a fixed pool of
+plausible-looking names (`company_website`, `fax`, `middle_name`, …), never
+something like `_hp` that a competent bot would skip. It is stable per form, so a
+page cached for a week and the live route always agree on which input is the
+decoy, and the builder refuses a question whose slug collides with it. A
+submission that fills it is answered **exactly like a successful one** — a minted
+id and a `folio_status=ok` — and stored nowhere.
+
+### Submitting
+
+```
+POST {base}/f/frm_<12 hex>
+```
+
+The action names the form's **id**, never its slug: it is baked into HTML that is
+cached for a week, so renaming a form must not break it. The route is on the bare
+mount beside `{base}/asset/:key`, not under `{base}/api`, because a browser
+navigates to it.
+
+| Request | Success | Refusal |
+| --- | --- | --- |
+| `content-type: application/json`, or an `accept` that prefers it | `200 { ok: true, id }` | `422` (or `409`/`429`/`403`) `{ error: { code, message }, fields: { email: 'required' } }` |
+| anything else — a real `<form>` | `303` to the target below | `303` with `folio_status=` |
+
+The 303 goes to the form's `redirectTo` when it sets one and the submission
+succeeded, otherwise back to the page it came from (`_folio_page`, then
+`Referer`, both through the same same-origin check that stops a redirect
+parameter becoming an open redirect). It is a **303** rather than a 302 so the
+follow-up is a GET whatever the browser would otherwise have done, and a refresh
+on the thank-you page does not re-post.
+
+It carries at most three parameters: `folio_status` (`ok` | `invalid` | `closed` |
+`rate` | `verify` | `error`), `folio_form` (the form's slug, so a page carrying two
+forms can tell which one answered) and `folio_invalid` (a comma-separated list of
+field names, never their values). **No submitted value, no response id and no
+visitor identifier ever reaches a URL** — a URL is a cache key, a `Referer`, a
+history entry and a log line at once. The good half of that rule is that
+`?folio_status=ok` names nothing personal and is therefore an ordinary cacheable
+page: the host renders `successMessage` from the descriptor, the edge caches it,
+and the next person to submit gets a hit.
+
+### Abuse controls
+
+```ts
+const folio = createFolio<Env>({
+  // …
+  forms: {
+    // Receives the raw body, before undeclared keys are dropped, because the
+    // token's name belongs to your widget and Folio does not know it.
+    async verify({ req, body, form }, env) {
+      return await turnstile(env, body['cf-turnstile-response'] ?? '')
+    },
+    // Per IP-hash per hour. Default 10, valid 1–100, and 0 disables it.
+    ratePerHour: 10,
+  },
+})
+```
+
+Three controls, and each is chosen for surviving a page that has been cached for a
+week. The **honeypot** above. **`verify`**, a host function: Folio holds no key,
+calls no third party, keeps no vendor list and has no timeout policy for anybody to
+disagree with. It **fails closed, including when it throws** — the opposite posture
+to a hook, because a hook runs after a write and must never undo one, while
+`verify` runs before and its whole job is to refuse traffic nobody can vouch for. A
+captcha that opens on error is decorative. Omitting the key entirely is the whole
+of "this site does not verify anybody".
+
+A signed nonce with a minimum fill time is the standard answer and cannot work
+here: a cached page hands every visitor the same token issued at the same moment,
+so "was this filled in under two seconds" is a question about when the page was
+*rendered*, and any TTL on the token rejects genuine submissions from the cache's
+own lifetime. An idempotency key in the descriptor fails identically.
+
+The **rate limit** counts `sha256(ip : form_id : hour)` over a rolling window. The
+raw address is never stored; including the form id makes the same visitor
+unlinkable across two forms on one site, and including the hour bucket means the
+value stops being computable from an address as soon as that hour passes — it
+expires by construction rather than by a sweep. Like the sign-in limiter it is a
+partial answer and says so: it bounds a script, not a botnet.
+
+### Files
+
+A `file` question needs the `media` binding. Without it the builder refuses to add
+one and the submit route answers `unsupported` naming the binding, the same legible
+refusal `media`, `images` and `browser` already give elsewhere.
+
+Uploads go into that same bucket under a **`sub_` prefix** and no `assets` row is
+written, so a stranger's attachment never appears in the media library — and
+`{base}/asset/:key` *physically cannot* serve one, because its parameter is
+anchored to `^ast_[0-9a-f]{12}-…` and a `sub_` key is refused by the validator
+before a handler runs. Reading one back is
+`GET {base}/api/forms/:id/responses/:rid/file/:name`, behind the responses gate,
+always `application/octet-stream` and always an attachment however the bytes
+sniffed: these came from a stranger, and there is no case for rendering them in a
+browser tab.
+
+Two narrowings worth knowing before you promise a client something. An `images`
+question accepts JPEG, PNG, WebP and GIF and **refuses AVIF and SVG**. And a file
+whose bytes match nothing recognised is **refused rather than stored** — the check
+is on the leading bytes, never on what the part claimed, so a PDF renamed `.txt` is
+accepted and a bespoke binary with a `.pdf` name is not. Per question you get an
+`accept` from a fixed menu (`documents` | `images` | `both`) and a `maxBytes`
+clamped to 20MB; the whole form's cap is the sum of its questions' caps plus a
+fixed text allowance, and that is what the request body is read against.
+
+### Reading them back
+
+Building a form is `editor`. Reading responses is `publisher` (plus a `forms:read`
+scope for a token). Exporting and deleting are `admin`: a table on a screen is one
+publisher reading enquiries, a file is a copy of every stranger's answers leaving
+the building.
+
+```
+GET {base}/api/forms/:id/responses.csv
+```
+
+Streamed, honouring the same filter the table is showing, and **five metadata
+columns come before the answers**. They are Folio's names, not the form's:
+
+| Column | What it is |
+| --- | --- |
+| `_submitted_at` | When it arrived, ISO 8601 in UTC |
+| `_response_id` | `res_<12 hex>` |
+| `_version` | The form version this response was validated against |
+| `_locale` | The locale it was submitted in; `''` on a single-locale site |
+| `_page` | The path `_folio_page` carried |
+
+They are in the reserved namespace for the same reason the hidden inputs are: a
+friendlier header (`Submitted at`) would have relied on nobody ever naming a
+question that, and `_` makes the collision unrepresentable.
+
+After them comes the exact union of every key ever submitted — the form's current
+questions first, in the form's order, then retired keys, sorted. A current question
+a given response never answered renders `—` rather than an empty cell, because
+"this did not exist yet" and "they left it blank" are different facts. **Every cell
+beginning `=`, `+`, `-` or `@` is prefixed with an apostrophe** — and so is one
+beginning with a tab or a carriage return, which Excel skips over before it looks
+for a formula — because CSV formula injection is not hypothetical for a surface
+whose entire input is strangers, and the file leads with a byte order mark so Excel on Windows reads it
+as UTF-8 rather than as the machine's code page.
+
+**Retention is manual, and nothing will remind anyone.** There is no
+`retentionDays`, no sweep and no host obligation: a response goes when somebody
+deletes it — singly, in bulk over a selection, or with the form. What Folio adds
+itself expires anyway (the IP hash stops being computable after an hour), so what
+accumulates is what the visitor typed, which is what they meant to send. The
+responses screen shows the age of the oldest row so the surface that would display
+the symptom does. Adding a retention window later is one column, one statement and
+one call.
+
+### Forwarding a response
+
+```ts
+hooks: {
+  submitted({ form, response, files, env, waitUntil }) {
+    waitUntil(sendToCrm(env, form.name, response.data))
+  },
+}
+```
+
+**This is the entire programmatic surface for responses**: there is no `/api/v1`
+route, no MCP tool and no in-process reader, deliberately. It fires after the row
+has committed and only for a row that was actually written — a submission that
+filled the honeypot fires nothing, and a double-click that collapsed into the
+identical submission from thirty seconds ago fires once, which is what stops a CRM
+seeing the same lead twice. `actor` is always `null`, unlike every other hook: the
+route is unauthenticated and the answer is a stranger's, so attributing it to
+whichever editor happened to be signed in in that browser would be a lie.
+
+### Two things about the cache
+
+A structural save fires `formChanged`, and Folio's own internal hook purges
+`form:<id>` — every cached page that rendered this form. That is what makes the
+live-edit model fair: without it, a page cached for a week would go on handing
+visitors markup for the old shape, and if the form gained a required field every
+one of them would submit something the live form refuses and see an error they
+could not possibly fix. With it, the window is the purge latency rather than the
+TTL.
+
+**It inherits the cross-entrypoint trap** described under [Caching](#caching): a
+purge issued from one `WorkerEntrypoint` does not touch what another one cached. A
+host that serves pages from one entrypoint and takes its admin writes on another
+purges an empty namespace and goes on serving stale markup for the form's whole
+TTL, silently. Route the writes through the entrypoint that does the caching.
+
+The submission itself is never a cache concern: the first rule of the cache
+verdict is that anything other than `GET` or `HEAD` bypasses, so a form POST is
+never stored and never served from a cache.
+
 ## Hooks
 
 Folio needs no webhooks. Payload, Strapi, Contentful and Storyblok all give a host
@@ -1666,11 +1947,14 @@ keyed on `story.path`: that delete is per-colo, so the hook's own data centre st
 serving the old page and every other one carries on until its TTL. It reads as
 invalidation without being it.
 
-Ten events, each after its write has already committed: `published`, `unpublished`,
-`pathsChanged` (a rename or move — the only one that knows both the old and the new
-path), `created`, `deleted`, `checkpointed`, `updated` (a row's title, slug, parent
-or position — a **title-only** patch changes every page that links to this one and
-fires no `pathsChanged`, by design), `migrated`, `reindexed` and `redirectsChanged`.
+Twelve events, each after its write has already committed: `published`,
+`unpublished`, `pathsChanged` (a rename or move — the only one that knows both the
+old and the new path), `created`, `deleted`, `checkpointed`, `updated` (a row's
+title, slug, parent or position — a **title-only** patch changes every page that
+links to this one and fires no `pathsChanged`, by design), `migrated`, `reindexed`,
+`redirectsChanged`, and the two a form adds: `formChanged` (a structural save,
+which is also what purges the pages rendering it) and `submitted` (see
+[Forms](#forms)).
 There is no `before` hook and no way to
 veto or rewrite a publish: a hook that could reject one would have to run inside the
 atomic batch, which is exactly the failure that batch exists to prevent. A throwing

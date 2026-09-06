@@ -64,6 +64,10 @@ export const page = defineBlock({
         // The one block that lists other documents rather than holding content
         // (`content-model/collections.md`), so a page can be an index page.
         'insightList',
+        // The one block that *collects* rather than shows
+        // (`content-model/forms.md`): a form built in the admin, embedded here
+        // by id and rendered from the descriptor.
+        'contactForm',
       ],
     }),
   },

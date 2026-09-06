@@ -3,16 +3,20 @@
 > **Group:** content model
 > **Build order:** 33
 > **Size:** L
-> **Status:** draft
+> **Status:** done — every phase landed (2026-09-06)
 > **Wire version:** none — nothing here crosses the socket or the admin↔preview bridge
-> **Migration:** `0010_forms.sql` (a claim, not a landing — see below)
+> **Migration:** `0010_forms.sql` (landed 2026-09-06)
 > **Build sequence:** after 32, before 23 (owner, 2026-09-05)
-> **Last updated:** 2026-09-05
+> **Last updated:** 2026-09-06
 
-> **Migration number is a claim.** `0006_auth.sql` (28) has landed on this branch;
-> `0007` (29), `0008` (32) and `0009` (23) are claimed and not landed. This takes
-> `0010`, the next free number. Whichever builds first takes the next free number
-> and the others restamp — the standing rule in `docs/specs/README.md`.
+> **Built 2026-09-06, in eight phases, all of them landed.** The migration claimed
+> `0010` while `0007` (29), `0008` (32) and `0009` (23) were still claims; `0007`
+> and `0008` have since landed, `0009` has not, and `0010_forms.sql` is on disk
+> under the number it claimed. **`## Implementation notes` at the end of this file
+> is the consolidated record** — what shipped, where this document was wrong, and
+> what is not covered — followed by the phase-by-phase notes each phase wrote as it
+> landed. Everything above that section is the plan as it stood before the build;
+> where the two disagree, the notes are what is true.
 
 > **Written while other work was in flight** on `specs-31-30-28-29`. Ground truth below
 > was read at `8122473`, with seven files dirty in the tree at the time:
@@ -26,101 +30,6 @@
 > work in flight. Everything cited in `src/server/assets.ts`, `src/server/hooks.ts`,
 > `src/server/app.ts`, `src/server/cache-request.ts`, `src/server/auth/`,
 > `src/admin/ui/route.ts`, `migrations/` and `test/` was clean and is exact.
-
-> **Phase 1 landed 2026-09-06** (`migrations/0010_forms.sql`, `src/core/forms.ts`,
-> the `form` field kind). Confirms the structural facts above held: the exhaustive
-> `resolveValue` switch, `Resolution` as a bag of per-key maps, and `reference`'s
-> string-id-and-lookup shape were all unchanged. One line in "Changes to existing
-> core files" was stale rather than the structure: `defaultValue` does **not**
-> answer `''` "as `reference` does" — the tree's actual `reference` case already
-> answered `null`, so `form` was aligned with what `reference` does today (`null`),
-> not with the sentence. Two more exhaustive switches outside this spec's own
-> Ground truth also demand a `form` case the instant the union gains the member,
-> and phase 1 had to touch both to stay green: `core/nested.ts`'s `fieldShapeError`
-> (a write-time validator over every field kind, same shape as `reference`'s) and
-> `admin/ui/screens/inspector-model.ts`'s `CONTROLS` map (`Field['kind'] →
-> ControlKind`, mapped to `'text'` — there is no form picker yet, so this only has
-> to agree with `Control.tsx`'s existing default-to-a-text-box fallback for an
-> unbuilt control). Phases 3–8 are still outstanding.
-
-> **Phase 2 landed 2026-09-06** (`src/server/forms.ts`, `src/server/routes/forms.ts`,
-> the forms half of `validate.ts`, `formChanged` in `hooks.ts` and `cache-purge.ts`,
-> the mount in `app.ts`, `test/workers/forms.test.ts`). Six divergences from the
-> plan, each recorded under "Implementation notes — phase 2" at the end of this
-> file; the load-bearing two are that `GET /forms/:id/usage` answers a **superset**
-> of the asset usage shape, and that `validateFormFields`' refusals had to be
-> translated into `bad_request` or every one of them was a 500.
-
-> **Phase 4 landed 2026-09-06** (`src/server/form-responses.ts`, `formSubmitRoutes`
-> in `src/server/routes/forms.ts` and its mount on the bare tree in `app.ts`, the
-> `FolioForms` config key and `validateForms`, the `submitted` hook,
-> `test/unit/server/form-validate.test.ts` and `test/workers/form-submit.test.ts`).
-> `POST {base}/f/:id` is live: both transports, all three abuse controls, the
-> duplicate collapse and the hook. Six divergences, under "Implementation notes —
-> phase 4" at the end of this file; the load-bearing ones are that a closed form
-> answers **409, not the 410 the Edge cases claim** (there is no `gone` code and
-> this spec's own Ground truth says `errors.ts` needs nothing new), that the route
-> assembles its own JSON answers because `FolioErrorStatus` has neither 422 nor
-> 429, and that **the three response readers listed in phase 4's step 1 were not
-> written** — nothing in this phase reads a response, so `FORMS` and `forms:read`
-> still wait for their first reader. Phases 5–8 are outstanding.
-
-> **Phase 3 landed 2026-09-06** (`compileForm` and `FormRenderContext` in
-> `src/server/forms.ts`, the forms read and the descriptor map in `resolve()`,
-> `test/unit/server/forms.test.ts`, and extensions to `test/workers/forms.test.ts`
-> and `test/workers/read-session.test.ts`). The plan's step 3 turned out to need no
-> code — `contentProjection` already emits `kind: 'form'` edges through
-> `outboundRefs`, since phase 1 — and one limitation the spec does not cover came
-> out of it: a form embedded in a **global** or in a referenced document resolves
-> to `null`, because its id is not known until pass two. Both are under
-> "Implementation notes — phase 3" at the end of this file, along with the
-> `form()` field builder that still does not exist. Phases 4–8 are outstanding.
-
-> **Phase 5 landed 2026-09-06** (the upload half of `src/server/form-responses.ts`,
-> `fileCap`/`hasFileQuestion`/`deleteUploads` and the delete walk in
-> `src/server/forms.ts`, the gated download route and the submit route's file
-> pipeline in `src/server/routes/forms.ts`, `FORMS` and `forms:read` in
-> `src/server/auth/roles.ts`, `test/workers/form-files.test.ts` and
-> `test/unit/server/form-files.test.ts`). A stranger can now put bytes in the
-> host's bucket, and every limit in decision 15 is enforced. Five divergences,
-> under "Implementation notes — phase 5" at the end of this file; the load-bearing
-> ones are that **`sniffContentType` could not answer the `documents` half** (it
-> only knows the types the media library serves inline, so a document sniffer was
-> written beside it and the gate is on a *family* rather than an exact type),
-> that **`FORMS` and `forms:read` arrived here** because the download route is the
-> first reader, and that **a failed R2 delete on the form cascade throws rather
-> than being swallowed** — the inverse of `deleteAsset`'s rule, because the rows
-> still exist to retry from. Phases 6–8 are outstanding.
-
-> **Phase 6 landed 2026-09-06** (`src/admin/ui/screens/Forms.tsx`,
-> `forms-model.ts`, `useForms.ts` — the list; `FormBuilder.tsx`, `form-model.ts`,
-> `useForm.ts` — the builder; `FormDeleteDialog.tsx`, shared by both; three new
-> `Screen` variants and their crumbs in `route.ts`, a `Forms` item in `nav.ts`,
-> and the wiring in `Prototype.tsx` — plus the `form()` field builder phase 1 left
-> out of `core/fields.ts`). Four divergences, under "Implementation notes —
-> phase 6" at the end of this file; the load-bearing ones are that **no picker
-> for the `form` field kind was built** — the phase's own plan names four steps
-> and a document-editor control for embedding a specific form is not one of
-> them, so `inspector-model.ts`'s `form: 'text'` fallback still stands — and that
-> **the builder never pre-checks a `file` question against whether `media` is
-> bound**: it offers the kind unconditionally and lets a failed Save surface the
-> route's own 501 verbatim, the first of the two options phase 5's notes left
-> open. Phase 7 (the responses table) is outstanding; its `Screen` variant and a
-> `Stub` placeholder in `Prototype.tsx` are already in place for it to replace.
-
-> **Phase 7 landed 2026-09-06** (the reading, deleting and export halves of
-> `src/server/form-responses.ts`; the five response routes in
-> `src/server/routes/forms.ts`; `ResponseBulkBody` in `validate.ts`;
-> `src/admin/ui/screens/Responses.tsx`, `responses-model.ts`, `useResponses.ts`
-> and `Responses.module.css`, replacing `Prototype.tsx`'s `Stub`;
-> `test/workers/form-responses.test.ts`, `test/unit/server/form-csv.test.ts` and
-> `test/unit/admin/responses-model.test.ts`). Six divergences, under
-> "Implementation notes — phase 7" at the end of this file; the load-bearing ones
-> are that **the export carries five metadata columns before the answers**, named
-> in Folio's own `_` namespace so they cannot collide with a submitted key; that
-> **the list route does not check the form exists** and says why; and that the
-> spec's two workers files (`form-export.test.ts` and a responses test) landed as
-> **one**. Phase 8 (the demo and the prose) is outstanding.
 
 ## Summary
 
@@ -1684,6 +1593,189 @@ where they are made rather than left here as questions: **checkpoint 1** (a besp
 table rather than a document — decision 1 lists the four things it costs and their
 replacements) and **checkpoint 9** (manual retention — decision 17 states the
 liability, and reversing it is one column, one statement and one host call).
+
+## Implementation notes
+
+**Done. Eight phases, all landed 2026-09-06.** This section is the consolidated
+record; the per-phase sections that follow it are what each phase wrote as it
+landed and are kept for their detail. Where this document's plan and these notes
+disagree, the notes are what is true.
+
+### What shipped
+
+The whole of it, in the shape the plan describes: `migrations/0010_forms.sql` (two
+tables, five indexes, a fourth `content_refs.kind` with no DDL); `src/core/forms.ts`
+and a `form` field kind; `src/server/forms.ts` and `src/server/form-responses.ts`
+with `src/server/routes/forms.ts` holding both the admin routes and the public
+`POST {base}/f/:id`; `FolioForms` in the config; `formChanged` and `submitted` in
+the hook list; three admin screens (`Forms`, `FormBuilder`, `Responses`) with
+their models and hooks; and the demo, `scripts/forms-test.mjs` and this prose.
+
+Two things the plan named and this build did **not** ship, both recorded where
+they belong: **no picker control for the `form` field kind** — the inspector's
+`CONTROLS` map falls back to a text box, so embedding a form means pasting its
+`frm_…` id from the Forms screen — and **no seeded form in the demo's database**
+(below).
+
+### Where the spec was wrong, and where a real deployment bites
+
+Five, in the order somebody would meet them.
+
+1. **`validateFormFields` throws a plain `Error`, and an unwrapped route answers
+   500 for a client's own mistake.** Decision 2 makes the core validator the one
+   place a stored array becomes a typed one, and it throws for every genuine
+   refusal — a field named `_folio_page`, a duplicate slug, a `select` with no
+   options. `Error` is not `FolioError`, so the first route to call it turned an
+   editor's typo into an internal server error with no `code` and nothing in the
+   body to act on. Phase 2 re-raises at the edge: `fieldsFromInput`
+   (`server/forms.ts`) wraps the one call on the way *in* and answers
+   `FolioError('bad_request', …)`, with the validator's message travelling
+   verbatim because it already names the field and what is wrong with it. The
+   same file takes the **opposite** decision on the way out — `readFields` logs
+   one line and answers no questions for a column it cannot parse, because a
+   throw there would take out the list of every form and the screen an editor
+   would fix the broken one from. **The rule this leaves behind is general**: a
+   `core/` validator that throws is a 500 in waiting for whatever route calls it
+   next, and the translation belongs at the edge rather than in `core/`, which
+   has no business importing `errors.ts`.
+
+2. **A form embedded in a *global*, or in a referenced document, resolves to
+   `null`.** `resolve()` collects form ids from the document being rendered, and a
+   global's own bloks are not loaded until the pass after that — so a form on the
+   site header compiles no descriptor and the block renders nothing, silently and
+   without an error anywhere. Named by phase 3, and the fix is cheap and unbuilt:
+   a third-pass read for ids discovered in pass two, costing one round trip only
+   for the documents that actually have one. Nothing has needed it yet, and a form
+   in a global is a plausible thing to want (a newsletter sign-up in a footer), so
+   this is the first thing to build if anybody reports "my form does not appear".
+
+3. **`deleteForm` deleted D1 rows only.** Until phase 5 the cascade removed the
+   form and its responses and left **every file anybody had ever attached** in the
+   bucket: invisible, unreferenced, unreachable and billed monthly. Phase 5 added
+   the R2 half to both delete paths and — deliberately the inverse of
+   `deleteAsset`'s rule — makes a failed bucket delete on the form cascade
+   **throw** rather than be swallowed, because the rows still exist to retry from.
+   Verified by breaking: removing the sweep from both paths turns two tests red and
+   nothing else changes.
+
+4. **The reserved-prefix branch in `fieldNameRefusal` and `validateOneField` is
+   unreachable.** Both check the charset pattern first, and `NAME` /
+   `NAME_PATTERN` (`/^[a-z][a-z0-9_]{0,63}$/`) already require the first character
+   to be a letter, so a name starting `_` has failed the previous test. Both
+   branches are kept as defence in depth — they are one line each and they are what
+   a reader looks for when asking whether the namespace is actually reserved — and
+   both are noted as such where they sit. **The reserved-namespace rule itself is
+   live in two other places** and neither is dead: at submit time only *declared*
+   field names are stored, so `_folio_page` and `_folio_locale` can never become
+   answers; and `form-responses.ts` screens `_`-prefixed keys out of `data` on
+   read, which is what would catch a row written by something other than
+   `insertResponse`.
+
+5. **`sniffContentType` could not answer the `documents` half, so every PDF would
+   have been refused.** Decision 15 says the upload path mirrors `uploadAsset`
+   "point for point", including *"`sniffContentType` decides what the file is from
+   its bytes"* — but that function only knows the types the media library serves
+   inline, which are images. A `documents` question sniffing a PDF would have got
+   `null` and refused it, which is the entire "Recruiter collects CVs" user story.
+   Phase 5 wrapped it: `sniffUpload` answers a **family** (`images` | `documents`)
+   rather than an exact type, delegating the image half to `sniffContentType` and
+   recognising PDF, OLE2, OOXML-shaped zips and plain text itself. Two narrowings a
+   host should know, because neither is derivable from the `accept` menu's names:
+   **an `images` question refuses AVIF and SVG** (`FILE_ACCEPT.images` is JPEG,
+   PNG, WebP and GIF), and **an unrecognised binary is refused rather than
+   stored** — the check is on the leading bytes and never on what the part
+   claimed, so a PDF renamed `.txt` is accepted and a bespoke binary named `.pdf`
+   is not.
+
+### Phase 8: the demo, the script and the prose
+
+`examples/demo/src/blocks/contact.tsx` is a `contactForm` block — a `form()` field
+holding an id, a `<form>` drawn from the descriptor, a per-kind `Question`
+renderer, the honeypot and the two hidden inputs — registered in `blocks/index.ts`
+and allowed in `page.tsx`'s body slot. `examples/demo/src/index.tsx` gains the
+`forms` config key, the `submitted` hook and the three query parameters read off
+its own URL. `examples/demo/public/site.css` carries the form's styles, including
+the off-screen honeypot. `scripts/forms-test.mjs` is the end-to-end script, and
+`README.md` gains a **Forms** section.
+
+Four things worth recording:
+
+- **No seeded form.** The plan says "a seeded contact form", and the demo does not
+  have one. `examples/demo/seed.sql` doubles as the workers-test fixture
+  (`test/workers/seed-fixture.ts` inlines it), so a seeded `forms` row would become
+  a row every workers test silently carries; and `scripts/seed-demo.mjs`, which
+  seeds the demo's real content through the API, was outside this phase's files.
+  The e2e script builds its own form, which is what it needed anyway. The cost is
+  that opening the demo by hand shows an empty Forms screen until you build one.
+- **The demo needed a React context, and it is the first one in this repository.**
+  A block's `render` is handed the document's field values and nothing else, and
+  decision 6 has the *host* rendering `successMessage` after `folio_status=ok` —
+  there is no seam for "and also, what does the query string say", and inventing
+  one would put a host's page state into Folio's render signature. So `Page`
+  provides a `SubmissionStatus` around `folio.render` and the block reads it.
+  **Rejected: a banner at page level with the host's own copy of the text**, which
+  is simpler and would have left `successMessage` unused by the one project in
+  this repository that renders a form. Note that `def.render(props)` is called as a
+  plain function (`preview/Render.tsx`), so the hooks live in components the
+  render *creates* — `Notice` and `FormBody` — and never in `render` itself.
+- **`_folio_locale` is absent on a source-locale render**, which is correct
+  (`compileForm` stamps it only when the render carries a locale, and a
+  source-locale response stores `''`) and is not what the first version of the
+  script assumed. It asserts `_folio_page` on the ordinary page and both inputs on
+  `/fr/…`, which is also the only check that the locale survives the round trip.
+- **`Response#text()` strips the BOM**, exactly as phase 7's notes warned it
+  would. The script's first CSV check read the string and failed against a file
+  that does carry one; it reads `arrayBuffer()` and asserts `ef bb bf` now. A
+  warning in a notes file turning out to be true within a day is the argument for
+  writing them.
+
+`./scripts/e2e.sh scripts/forms-test.mjs`: **48/48 checks passing.** It builds a
+form through the admin API, embeds it on a page over the sync socket, publishes,
+and then does the whole visitor half through the **unwrapped** `fetch`
+`signInGlobally` hands back — so "anonymous" is a property of the requests rather
+than a comment on them. It covers the 303 and its parameters, the honeypot's silent
+success, an invalid submission, the duplicate collapse, the JSON transport, a
+closed form refusing at the route as well as in the markup, a multipart upload with
+a real PDF, a `documents` question refusing a PNG, `{base}/asset/sub_…` being
+refused by the parameter validator, the gated download, the CSV (its BOM, its exact
+header, and a de-fanged formula cell), `usage`, a bulk delete taking its object with
+it, and finally the form's own delete — after which the still-published page renders
+nothing where the form was. The demo's `submitted` hook logs two lines for five
+contact submissions, which is the honeypot and the duplicate not firing it.
+
+### What is not covered, named rather than glossed
+
+- **The `FORMS` and `ADMIN` gates are unit-tested, not route-tested.**
+  `test/workers`' fixture is `auth: 'open'`, so a refusal cannot be observed
+  through `SELF.fetch` at all; `test/unit/server/form-files.test.ts` pins
+  `allows()` for every role and every scope instead. `scripts/forms-test.mjs` is
+  the only thing that watches a live server turn an anonymous request away, and it
+  does that for the responses list, the CSV and the file download.
+- **The swallowed R2 failure has no fault-injection seam.** Making an R2 delete
+  fail inside workerd needs a seam this code does not have; what is asserted is
+  that the objects go when it succeeds. The swallow is three lines and one
+  `console.error`.
+- **Nothing asserts the CSV export arrives *incrementally*.** `streams every page
+  rather than the first` proves the keyset walk continues past a page boundary,
+  which is the bug worth catching, but no test here can watch bytes arrive.
+- **Phase 8 added no vitest tests**, and there is nothing it could sensibly have
+  added: `examples/demo` has no unit suite, prose has no assertions, and an e2e
+  script is not part of `pnpm test` by design. The counts below are therefore
+  phase 7's, unchanged.
+- **`verify` has never been called against a real vendor.** It is a host function
+  by design — Folio holds no key and names no vendor — so what is proven is that
+  false refuses, that a throw refuses, and that an absent key is not a refusal.
+  Wiring it to Turnstile is the host's first run and its own test.
+
+### Test counts
+
+**139 files / 4137 passing + 1 todo** (spec 29's real-device WebAuthn fixture gap,
+untouched), unchanged by phase 8. Phases 1–7 added eleven files: four workers
+(`forms`, `form-submit`, `form-files`, `form-responses`) and seven unit
+(`core/forms`, `server/forms`, `server/form-validate`, `server/form-csv`,
+`server/form-files`, `admin/forms-model`, `admin/responses-model`), plus
+extensions to `migrations`, `read-session`, `resolve`, `refs`, `cache-tags`,
+`cache-purge`, `cache-request`, `pure`, `ui-route`, `ui-nav`, `me` and `fields`.
 
 ## Implementation notes — phase 2 (landed 2026-09-06)
 
