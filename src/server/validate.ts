@@ -1876,6 +1876,95 @@ export function responseFilterQuery(req: {
   return filter
 }
 
+/* -------------------------------------------------- bulk response writes --- */
+
+/**
+ * The `ResponseFilter` a select-all **captured**, as a body field rather than a
+ * query string.
+ *
+ * Every member `responseFilterQuery` produces and **nothing more** — a filter key
+ * the composer ignores is a selection that means something other than what it
+ * says. `q` is bounded here rather than trusted, because this shape reaches
+ * `responseFilterSql` from a request body that never passed through the
+ * query-string parser; the two bounds are the same 200 characters, which is what
+ * lets a captured filter count the same set the header counted.
+ */
+const CAPTURED_RESPONSE_FILTER = v.object(
+  {
+    from: v.optional(v.pipe(v.number('must be a number'), v.finite())),
+    to: v.optional(v.pipe(v.number('must be a number'), v.finite())),
+    q: v.optional(bounded(200)),
+  },
+  OBJECT,
+)
+
+/**
+ * A selection of responses, in the same two shapes `SELECTION` and
+ * `ASSET_SELECTION` describe — and `v.strictObject` for their reason, which is
+ * sharper here than in either: a stripped key changes *which rows get deleted*,
+ * and the only action this selection has is a delete.
+ *
+ * The ids are `res_<12 hex>`, screened by their mint format rather than by the
+ * generic `ID` the other two use: this body reaches a statement that binds them,
+ * and `RESPONSE_ID`'s anchoring is the same property `formIdParam`'s header
+ * argues for one route up.
+ */
+const SELECTION_RESPONSE_IDS = v.pipe(
+  v.array(RESPONSE_ID, 'must be an array of response ids'),
+  v.maxLength(MAX_SELECTION_IDS, `must name ${MAX_SELECTION_IDS} responses or fewer`),
+)
+
+const RESPONSE_SELECTION = v.union(
+  [
+    v.strictObject(
+      {
+        all: v.literal(true, 'must be true'),
+        filter: CAPTURED_RESPONSE_FILTER,
+        expected: v.pipe(
+          v.number('must be a number'),
+          v.integer('must be a whole number'),
+          v.minValue(0, 'must be 0 or greater'),
+        ),
+        exclude: v.optional(SELECTION_RESPONSE_IDS),
+      },
+      OBJECT,
+    ),
+    v.strictObject(
+      {
+        ids: v.pipe(SELECTION_RESPONSE_IDS, v.minLength(1, 'must name at least one response')),
+      },
+      OBJECT,
+    ),
+  ],
+  'must be either { ids } or { all: true, filter, expected }',
+)
+
+/**
+ * `POST {base}/api/forms/:id/responses/delete`. Nothing beyond the selection and
+ * the job control: there is one action, and a response has no path to redirect
+ * from and no folder to move to.
+ */
+export const ResponseBulkBody = v.object(
+  {
+    selection: RESPONSE_SELECTION,
+    dryRun: v.optional(v.boolean('must be true or false')),
+    continueFrom: v.nullish(
+      v.pipe(v.string('must be a string'), v.maxLength(500, 'is not a pagination cursor')),
+    ),
+    batch: v.optional(
+      v.pipe(
+        v.number('must be a number'),
+        v.integer('must be a whole number'),
+        v.minValue(1, 'must be at least 1'),
+        v.maxValue(200, 'must be 200 or fewer'),
+      ),
+    ),
+  },
+  OBJECT,
+)
+
+export type ResponseBulkInput = v.InferOutput<typeof ResponseBulkBody>
+
 /* ------------------------------------------------------ form submissions --- */
 
 /**

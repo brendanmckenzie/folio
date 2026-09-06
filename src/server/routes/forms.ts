@@ -17,6 +17,7 @@
  * form's delete takes every response with it.
  */
 import { Hono } from 'hono'
+import { wasRefused } from '../../core/bulk'
 import { NO_STORE } from '../../core/cache-tags'
 import { honeypotName } from '../../core/forms'
 import { actorString, ADMIN, EDIT, FORMS, READ } from '../auth/roles'
@@ -27,10 +28,13 @@ import {
   capFor,
   clientIp,
   DEFAULT_RATE_PER_HOUR,
+  deleteResponse,
+  deleteResponses,
   filePartsOf,
   insertResponse,
   ipHash,
   isDuplicateSubmission,
+  listResponses,
   newResponseId,
   type PreparedUpload,
   prepareUploads,
@@ -38,6 +42,8 @@ import {
   rawBodyOf,
   readSubmission,
   recentSubmissionCount,
+  responseById,
+  responseCsv,
   responseFileOf,
   storedFilesOf,
   type SubmissionBody,
@@ -71,6 +77,8 @@ import {
   limitParam,
   parseBody,
   requireCursor,
+  ResponseBulkBody,
+  responseFilterQuery,
   responseIdParam,
   safeNext,
   wantsJson,
@@ -224,6 +232,158 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       responses: usage.responses,
       files: usage.files,
     })
+  })
+
+  /* ---------------------------------------------------------- responses --- */
+
+  /**
+   * One page of a form's responses, newest first
+   * (`../../../docs/specs/content-model/forms.md` phase 7).
+   *
+   * **`FORMS`, which is `publisher` plus `forms:read`** — checkpoint 8's ladder:
+   * an editor who may build the form is not thereby somebody who may read what
+   * strangers typed into it. Exporting and deleting are `ADMIN`, one rung further.
+   *
+   * **No existence check on the form**, deliberately, and it is the one place in
+   * this file that departs from `/forms/:id/usage`'s "404 a stale link" rule. The
+   * screen fetches `GET /forms/:id` for the questions it draws columns from, so
+   * an unknown id is already a 404 somebody sees; adding a second read here would
+   * put a `select` on every keystroke of the search box, which is the budget
+   * `pagination.md` decision 5 spends its whole argument protecting. Every reader
+   * binds `form_id`, so a bogus id answers an empty page rather than somebody
+   * else's rows.
+   *
+   * `?count=1` answers **two** numbers: `total` for the header and for a
+   * select-all's guard, and `oldest` — the age of this form's oldest surviving
+   * response, which is what makes manual retention visible on the surface that
+   * would show the symptom (decision 17). `oldest` ignores the filter on purpose.
+   */
+  app.get('/forms/:id/responses', requireAccess<Env>(rt, FORMS), async (c) => {
+    const db = c.var.bindings().db
+    const cursor = c.req.query('cursor')
+    requireCursor(cursor)
+    return c.json(
+      await listResponses(db, formIdParam(c.req.param('id')), {
+        limit: limitParam(c.req.query('limit'), 50, 200),
+        cursor,
+        filter: responseFilterQuery({ query: (key) => c.req.query(key) }),
+        count: c.req.query('count') === '1',
+      }),
+    )
+  })
+
+  /**
+   * The CSV, streamed and filtered exactly as the table is
+   * (`../../../docs/specs/content-model/forms.md` decision 16).
+   *
+   * **`ADMIN`.** A table on a screen is one publisher reading enquiries; a file is
+   * a copy of every stranger's answers leaving the building, and checkpoint 8 puts
+   * that a rung higher.
+   *
+   * **Not JSON, and it says so in three headers.** `content-disposition:
+   * attachment` because the point of it is a file; `no-store` because a copy of a
+   * form's whole response table has no business in any cache; `nosniff` because a
+   * `text/csv` a browser felt free to reinterpret is the one way a de-fanged cell
+   * gets a second chance.
+   *
+   * The form is read first because the header needs its questions — so this route
+   * *does* 404 a stale link, without spending a query to do it.
+   */
+  app.get('/forms/:id/responses.csv', requireAccess<Env>(rt, ADMIN), async (c) => {
+    const db = c.var.bindings().db
+    const form = await formById(db, formIdParam(c.req.param('id')))
+    if (!form) throw new FolioError('not_found', 'Unknown form')
+
+    const { filename, body } = await responseCsv(
+      db,
+      form,
+      responseFilterQuery({ query: (key) => c.req.query(key) }),
+    )
+    return new Response(body, {
+      headers: {
+        'content-type': 'text/csv; charset=utf-8',
+        // `filename` is `safeFilename`'s output — lowercase ASCII, no quote, no
+        // newline, no path separator — so the header cannot be split by it.
+        'content-disposition': `attachment; filename="${filename}"`,
+        'cache-control': NO_STORE,
+        'x-content-type-options': 'nosniff',
+      },
+    })
+  })
+
+  /**
+   * One response, every key it holds.
+   *
+   * The drawer marks the keys the form no longer declares, and it does that from
+   * the *form* rather than from a flag on the row — which is why this answers the
+   * response and nothing else. `responseById` binds `form_id` as well as the id,
+   * so a response cannot be read through another form's URL.
+   */
+  app.get('/forms/:id/responses/:rid', requireAccess<Env>(rt, FORMS), async (c) => {
+    const response = await responseById(
+      c.var.bindings().db,
+      formIdParam(c.req.param('id')),
+      responseIdParam(c.req.param('rid')),
+    )
+    if (!response) throw new FolioError('not_found', 'Unknown response')
+    return c.json(response)
+  })
+
+  /**
+   * One response and its uploads. **`ADMIN`** (checkpoint 8).
+   *
+   * `media` is passed unconditionally rather than guarded: a host with no bucket
+   * has a form with no file question, so there is nothing to remove, and
+   * `deleteResponse` swallows the R2 half either way — the row is already gone by
+   * the time it is reached (`deleteAsset`'s rule, and the inverse of
+   * `deleteForm`'s, which is argued where each of them lives).
+   */
+  app.delete('/forms/:id/responses/:rid', requireAccess<Env>(rt, ADMIN), async (c) => {
+    const { db, media } = c.var.bindings()
+    const result = await deleteResponse(
+      db,
+      formIdParam(c.req.param('id')),
+      responseIdParam(c.req.param('rid')),
+      media,
+    )
+    if (!result.deleted) throw new FolioError('not_found', 'Unknown response')
+    return c.json(result)
+  })
+
+  /**
+   * A bulk delete over a selection — the ids somebody ticked, or a captured
+   * filter plus the count they were shown (`core/bulk.ts`).
+   *
+   * The 409 body is `routes/assets.ts`' `answer` verbatim: the error envelope a
+   * generic fetch wrapper already reads, plus the machine-readable counts beside
+   * it, so a refusal is **a door rather than a wall** — "somebody submitted three
+   * more while you were reading the number" is re-confirmed in one click instead
+   * of investigated.
+   */
+  app.post('/forms/:id/responses/delete', requireAccess<Env>(rt, ADMIN), async (c) => {
+    const { db, media } = c.var.bindings()
+    const id = formIdParam(c.req.param('id'))
+    const body = await parseBody(c.req, ResponseBulkBody)
+    requireCursor(body.continueFrom ?? undefined)
+
+    const outcome = await deleteResponses({ db, media }, id, body.selection, {
+      ...(body.dryRun === undefined ? {} : { dryRun: body.dryRun }),
+      ...(body.continueFrom === undefined ? {} : { continueFrom: body.continueFrom }),
+      ...(body.batch === undefined ? {} : { batch: body.batch }),
+    })
+    if (!wasRefused(outcome)) return c.json(outcome)
+    return c.json(
+      {
+        error: {
+          code: 'conflict',
+          message: `${outcome.expected} responses matched when you chose them and ${outcome.actual} match now. Check the number and try again.`,
+        },
+        refused: outcome.refused,
+        expected: outcome.expected,
+        actual: outcome.actual,
+      },
+      409,
+    )
   })
 
   /**

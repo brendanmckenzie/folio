@@ -29,6 +29,7 @@ import { FormBuilder } from './screens/FormBuilder'
 import { Forms } from './screens/Forms'
 import { Model } from './screens/Model'
 import { Redirects } from './screens/Redirects'
+import { Responses } from './screens/Responses'
 import { Schedules } from './screens/Schedules'
 import { Settings } from './screens/Settings'
 import type { ViewMode } from './screens/content-model'
@@ -722,13 +723,30 @@ function screenFor(a: ScreenArgs) {
       )
     }
 
-    case 'responses':
+    case 'responses': {
+      // Extracted before any closure touches it, for `case 'form'`'s reason:
+      // narrowing a discriminated union through a property access does not
+      // survive into a nested function body.
+      const formId = route.screen.id
       return (
-        <Stub title="Responses">
-          The table of submissions, its filters and the CSV export are phase 7 of{' '}
-          <code>docs/specs/content-model/forms.md</code> and are not built yet.
-        </Stub>
+        // Keyed by id, like the builder: navigating from one form's responses
+        // straight to another's must not carry over a selection or an open
+        // drawer belonging to the first.
+        <Responses
+          key={formId}
+          apiBase={boot.apiBase}
+          id={formId}
+          me={a.me}
+          query={route.query}
+          onQuery={(next) =>
+            a.replace({ name: 'responses', id: formId }, { ...route.query, ...next })
+          }
+          onNotice={a.notify}
+          onLabel={(formLabel) => a.onFormLabel(formId, formLabel)}
+          onOpenBuilder={() => a.go({ name: 'form', id: formId })}
+        />
       )
+    }
 
     case 'access':
       return (

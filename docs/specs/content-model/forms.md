@@ -108,6 +108,20 @@
 > open. Phase 7 (the responses table) is outstanding; its `Screen` variant and a
 > `Stub` placeholder in `Prototype.tsx` are already in place for it to replace.
 
+> **Phase 7 landed 2026-09-06** (the reading, deleting and export halves of
+> `src/server/form-responses.ts`; the five response routes in
+> `src/server/routes/forms.ts`; `ResponseBulkBody` in `validate.ts`;
+> `src/admin/ui/screens/Responses.tsx`, `responses-model.ts`, `useResponses.ts`
+> and `Responses.module.css`, replacing `Prototype.tsx`'s `Stub`;
+> `test/workers/form-responses.test.ts`, `test/unit/server/form-csv.test.ts` and
+> `test/unit/admin/responses-model.test.ts`). Six divergences, under
+> "Implementation notes — phase 7" at the end of this file; the load-bearing ones
+> are that **the export carries five metadata columns before the answers**, named
+> in Folio's own `_` namespace so they cannot collide with a submitted key; that
+> **the list route does not check the form exists** and says why; and that the
+> spec's two workers files (`form-export.test.ts` and a responses test) landed as
+> **one**. Phase 8 (the demo and the prose) is outstanding.
+
 ## Summary
 
 Folio can publish a page that asks a question and has nowhere to put the answer. There
@@ -2428,3 +2442,186 @@ comment predicted the moment a builder existed for it.
 - **`onFormLabel` on `Prototype.tsx`'s `ScreenArgs` is generic over both
   screens that carry a form id.** Phase 7's screen calls it exactly the way
   `FormBuilder` does, once its own fetch of the form answers.
+
+## Implementation notes — phase 7 (landed 2026-09-06)
+
+The responses table, the detail drawer, the deletes and the CSV export. Phase 8
+(the demo and the prose) is outstanding.
+
+### Divergences from the plan
+
+1. **The export carries five metadata columns before the answers, and they are
+   named in Folio's `_` namespace.** Decision 16 describes the header as "the
+   exact union of keys ever submitted", which is true of the *answer* half and
+   silent about everything else — and a CSV of answers with no timestamp is not a
+   file anybody can act on ("Marketer sees where leads come from" asks for `page`
+   by name). So `_submitted_at`, `_response_id`, `_version`, `_locale` and
+   `_page` come first.
+
+   The naming is the part worth defending. A friendlier header (`Submitted at`)
+   would have relied on nobody ever declaring a question with that name; `_`
+   makes the collision **unrepresentable**, because `validateFormFields` refuses
+   a field slug in that namespace and `NAME` requires the first character to be
+   `[a-z]`. Decision 13's reserved prefix, read from the export end.
+
+2. **The header union reads `files` as well as `data`.** The spec's query is one
+   `json_each` over `data`. A `file` question stores **no answer in `data` at
+   all** (phase 5's `validateAnswer`), so a *retired* file question would have
+   vanished from the export entirely, taking the filenames of everything anybody
+   ever attached with it. `submittedKeys` unions the two scans in one statement,
+   two binds. The same asymmetry bit `csvValue`, and the fix there is the same
+   shape: the files column is consulted for **every** answer column, not only for
+   a current `file` question.
+
+3. **`GET {base}/api/forms/:id/responses` does not check the form exists**, which
+   is the one place this file departs from `/forms/:id/usage`'s "404 a stale
+   link" rule. The screen fetches `GET /forms/:id` for the questions it draws
+   columns from, so an unknown id is already a 404 somebody sees; a second read
+   here would put a `select` on every keystroke of the search box, which is the
+   budget `pagination.md` decision 5 spends its whole argument protecting. Every
+   reader binds `form_id`, so a bogus id answers an empty page rather than
+   somebody else's rows. The CSV route *does* 404, without spending a query to do
+   it: it has to read the form for the header anyway.
+
+4. **`?count=1` answers two numbers, and only one of them honours the filter.**
+   `total` is the header's count and the select-all guard's (one `count(*)`
+   serving both, `pagination.md` decision 5); `oldest` is decision 17's retention
+   symptom and **ignores the filter deliberately** — a number that moved every
+   time somebody typed in the search box would say nothing about retention at
+   all. One opt-in for both rather than two, because the screen asks for both on
+   every load and a second flag would only be a second thing to forget.
+
+5. **Two workers test files became one.** The Testing requirements name
+   `form-export.test.ts` and a responses test. They share every fixture — a form,
+   seeded rows, `sub_` objects in the bucket — and the export is a route over the
+   same reader, so `test/workers/form-responses.test.ts` holds both. The unit
+   split is the spec's: `form-csv.test.ts` for the pure escaping and header
+   assembly, `admin/responses-model.test.ts` for the screen's model.
+
+6. **No new capability in `admin/me.ts`.** The screen gates on `canDeleteForms`
+   (admin) for the export, the bulk bar and the two delete buttons, and on
+   nothing at all for reading — `FORMS` is `publisher`, and the route is the
+   authority. Adding `canReadResponses` would have been a third helper meaning
+   exactly what `canPublish` already means, for a screen that is only reachable
+   from a nav item nothing gates.
+
+### Decisions taken where the plan was silent
+
+- **A `Dialog`, not a bespoke slide-over, and never two at once.** There is one
+  focus trap in this admin and a seventh hand-rolled one is what `CLAUDE.md`
+  names by name; a `Dialog` inside a `Dialog` steals the outer trap and never
+  gives it back (spec 32 phase 4). So the drawer renders only while no
+  confirmation is open, and its own Delete button *closes* the drawer before
+  opening the confirmation.
+- **The table's columns are every current non-`statement` question, uncapped.**
+  Decision 16 says "the form's current fields" and a cap would have been an
+  invented rule; `Table` already scrolls horizontally, and the answer cells are
+  clamped to 24ch with the whole value in `title` and in the drawer. A
+  sixty-question form gives a sixty-column table that scrolls, which is the
+  editor's own form rather than a pathological case.
+- **The reader is one column narrower than the row.** `ip_hash` and `body_hash`
+  are absent from the `select`, not filtered afterwards — `presenceOf`'s posture
+  toward a socket attachment, applied to a projection that reaches a screen. A
+  narrower read is the one that cannot leak, and `never answers the ip hash or
+  the body hash` asserts the exact key list.
+- **`data` and `files` are screened on read**, `parseScopes`' rule: a value that
+  is not a string, number, boolean or list of strings is not an answer, a key in
+  the `_` namespace is dropped (the second of decision 13's two locks, read from
+  the other end), and a malformed column answers "nothing" rather than throwing
+  on a page somebody is waiting for.
+- **A bulk delete is a third runner, not a generic one.** `runAssetBulk`'s own
+  argument, one table further: what the three share is `core/bulk.ts`, and a
+  runner generic over three dependency bags for the sake of a `for` loop is worse
+  than three loops. This one is the smallest — one action, two dependencies, no
+  per-row usage question.
+- **The bulk walk orders by `id`, not by `created_at`.** `uploadKeysPage`'s
+  reason: the set is being destroyed as it is walked, and `id` is the one key
+  that is stable, unique and rewritten by nothing. The list is newest-first; the
+  walk is not the list, and nothing about a delete depends on the order it
+  happens in.
+- **The date filter's `to` is the day *after* the one typed.** The route's bound
+  is exclusive, so "to 3 September" has to mean "before 4 September 00:00" or the
+  last day a person names is silently missing from their own filter — which reads
+  as a bug in the form rather than in the date picker. UTC on both ends, because
+  the column is epoch milliseconds.
+- **A BOM leads the CSV.** It is the one thing that makes Excel on Windows read a
+  UTF-8 CSV as UTF-8 rather than as the machine's local code page. Named in the
+  code and in the test, because `Response#text()` *strips* it during decoding —
+  so a test asserting "the header is exact" passes either way and only a check on
+  the bytes can see it.
+- **The export is an `<a href>`, not a `fetch`.** The answer is a file, the route
+  sets `content-disposition`, and a same-origin navigation carries the session
+  cookie exactly as every other admin request does. Building a blob and
+  triggering a download would buffer the thing the route went to trouble to
+  stream.
+
+### Bind budget
+
+Nothing on a read path binds a caller-sized list: `listResponses` is four binds
+at the widest, `countResponses` four, `responseById` two, `submittedKeys` two.
+The bulk runner has the only caller-sized list there is — an explicit `ids`
+selection, up to 500 — and `responseIdBatch` chunks it at one bind a row plus the
+form id. **The R2 keys never reach a statement at all**: they come off rows the
+batch has already read and go straight to `deleteUploads`, which caps a delete at
+a thousand keys and has no bind ceiling.
+
+### Verified by breaking
+
+Three, each edited in place and reverted in place:
+
+- **`sweepUploads` removed from both delete paths** — two red (`removes the row
+  and the object behind it`, `takes every object the batch read, once per batch
+  rather than once per row`). The failure this phase exists to prevent and the
+  one phase 5 had just fixed one level up: everything still works, the counts are
+  still honest, and every file anybody ever attached stays in the bucket forever,
+  invisible and paid for monthly.
+- **The apostrophe prefix removed from `csvCell`** — six red across both files
+  (four in `form-csv.test.ts`, plus `de-fangs a formula a visitor typed, end to
+  end` and `quotes a comma, a quote and a newline, and de-fangs on top of the
+  quoting`). Entirely silent: the file still parses, every legitimate cell is
+  unchanged, and `=cmd|'/c calc'!A1` in a name field executes on open.
+- **`bindChunks` replaced with a single `in (…)`** in `responseIdBatch` — one red
+  (`chunks an id list past D1's 100-parameter ceiling`), with the real message:
+  `D1_ERROR: too many SQL variables at offset 399`. A selection is caller-sized
+  by definition and a 90-id delete would have passed every smaller test.
+
+### What is not covered, named rather than glossed
+
+- **The gate is unit-tested elsewhere, not route-tested here.** `test/workers`'
+  fixture is `auth: 'open'`, so a `FORMS` or `ADMIN` refusal cannot be observed
+  through `SELF.fetch` — phase 5's notes make the same point about the download
+  route. `test/unit/server/form-files.test.ts` pins `allows()` for every role and
+  every scope, which is where the decision actually lives.
+- **The swallowed R2 failure has no direct test.** Making an R2 delete fail
+  inside workerd needs a fault-injection seam this file does not have; what is
+  asserted is that the objects go when it succeeds. The swallow itself is three
+  lines and one `console.error`.
+- **Nothing asserts the export is *streamed* rather than buffered.** `streams
+  every page rather than the first` proves the keyset walk continues past a page
+  boundary — which is the bug worth catching — but a test cannot see whether the
+  bytes arrived incrementally.
+- **No end-to-end script.** `scripts/forms-test.mjs` is phase 8's, and its list
+  includes the export and the delete; this phase's routes are exercised through
+  workerd instead.
+
+### Test counts
+
+139 files / 4137 passing + 1 todo (spec 29's fixture gap, unchanged), from 136 /
+4046 + 1. Ninety-one added across three new files: 35 workers
+(`test/workers/form-responses.test.ts`), 16 unit
+(`test/unit/server/form-csv.test.ts`) and 40 unit
+(`test/unit/admin/responses-model.test.ts`). **No existing test changed.**
+
+### What phase 8 inherits
+
+- **Every route in the spec's Responses table exists**, at the accesses it names.
+  `scripts/forms-test.mjs` can build a form, submit to it, read the table, fetch
+  the CSV and delete a selection without anything further being written.
+- **`responseCsv(db, form, filter)` answers `{ filename, body }`**, the body a
+  `ReadableStream`. A host-side caller — if one is ever wanted, and checkpoint 20
+  says one is not — would use it exactly as the route does.
+- **The demo's `Form` block needs nothing from this phase.** Nothing here touches
+  the descriptor, the submit route or `Resolution.forms`.
+- **The README's forms section still has to name the two `_`-prefixed hidden
+  inputs and the CSV's five metadata columns**, because both are Folio names a
+  host will see and neither is derivable from the descriptor.
