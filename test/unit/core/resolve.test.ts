@@ -583,6 +583,32 @@ describe('resolveValue', () => {
     expect(typeof resolvedBoolean).toBe('boolean')
     expect(resolvedBoolean).toBe(false)
   })
+
+  // `docs/specs/content-model/forms.md` architecture decision 4: a `form` field
+  // is a lookup on `resolution.forms`, exactly like `collection` is a lookup on
+  // `resolution.collections` — nothing here derives a descriptor from the value.
+  describe('form', () => {
+    const descriptor = { id: 'frm_contact000ab' } as never
+
+    it('looks the stored id up on resolution.forms', () => {
+      const resolution: Resolution = {
+        stories: {},
+        assetBase: '/a',
+        forms: { frm_contact000ab: descriptor },
+      }
+      expect(resolveValue({ kind: 'form' }, 'frm_contact000ab', resolution)).toBe(descriptor)
+    })
+
+    it('resolves null for an id the resolution never loaded', () => {
+      const resolution: Resolution = { stories: {}, assetBase: '/a', forms: {} }
+      expect(resolveValue({ kind: 'form' }, 'frm_missing00000', resolution)).toBeNull()
+    })
+
+    it('is total over a non-string stored value', () => {
+      expect(resolveValue({ kind: 'form' }, undefined, EMPTY_RESOLUTION)).toBeNull()
+      expect(resolveValue({ kind: 'form' }, 42, EMPTY_RESOLUTION)).toBeNull()
+    })
+  })
 })
 
 describe('known bugs', () => {

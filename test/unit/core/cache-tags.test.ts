@@ -5,6 +5,7 @@ import {
   cacheHeaders,
   cacheTags,
   DEFAULT_S_MAXAGE,
+  formTag,
   globalTag,
   MAX_CACHE_TAGS,
   SITE_TAG,
@@ -137,6 +138,26 @@ describe('cacheTags', () => {
     it('emits none for a site with no globals configured', () => {
       const { tags } = cacheTags({ stories: {}, assetBase: '/a' }, { story: 'sty_page' })
       expect(tags.some((t) => t.startsWith('global:'))).toBe(false)
+    })
+  })
+
+  describe('forms', () => {
+    // `docs/specs/content-model/forms.md` architecture decision 8: a structural
+    // form save purges `form:<id>` with no lookup at all, which is only true if
+    // every rendered form's id lands in the tag set exactly like a global's name.
+    it('names every embedded form, with no reverse index consulted', () => {
+      const resolution: Resolution = {
+        stories: {},
+        assetBase: '/a',
+        forms: { frm_contact000ab: { id: 'frm_contact000ab' } as never },
+      }
+      const { tags } = cacheTags(resolution, { story: 'sty_page' })
+      expect(tags).toContain(formTag('frm_contact000ab'))
+    })
+
+    it('emits none for a page embedding no form', () => {
+      const { tags } = cacheTags({ stories: {}, assetBase: '/a' }, { story: 'sty_page' })
+      expect(tags.some((t) => t.startsWith('form:'))).toBe(false)
     })
   })
 
@@ -296,6 +317,7 @@ describe('cacheTags', () => {
       expect(storyTag('sty_abc')).toBe('story:sty_abc')
       expect(globalTag('header')).toBe('global:header')
       expect(typeTag('insight')).toBe('type:insight')
+      expect(formTag('frm_abc123abc123')).toBe('form:frm_abc123abc123')
     })
   })
 })

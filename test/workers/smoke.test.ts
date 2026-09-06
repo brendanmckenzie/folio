@@ -81,6 +81,11 @@ describe('workers harness: D1', () => {
       'content_refs',
       'content_text',
       'd1_migrations',
+      // 0010: forms and their responses (content-model/forms.md). Two tables,
+      // no foreign keys. Shapes are asserted in migrations.test.ts; this list
+      // only says they exist.
+      'form_responses',
+      'forms',
       'login_challenges',
       // 0007: one WebAuthn credential per row (foundation/passkeys.md). Its
       // shape is asserted in migrations.test.ts; this list only says it exists.

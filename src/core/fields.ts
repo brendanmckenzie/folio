@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import type { FieldCondition } from './conditions'
 import type { Json } from './doc'
+import type { ResolvedForm } from './forms'
 import type { ResolvedCollection } from './query'
 import type { ResolvedAsset, ResolvedLink, ResolvedReference } from './resolve'
 import type { RichtextMarkName, RichtextNodeName } from './richtext'
@@ -218,6 +219,18 @@ export type Field =
        */
       searchable?: boolean
     } & Omit<Common, 'translatable'>)
+  /**
+   * Points at a form, built and stored entirely outside the document
+   * (`../../docs/specs/content-model/forms.md` architecture decisions 1 and 4):
+   * the stored value is the form's id, and `resolveValue` looks its compiled
+   * descriptor up on `Resolution.forms` rather than deriving anything from the
+   * value itself — the same indirection `collection` uses.
+   *
+   * **Neither `Indexable` nor `Searchable`**: a form has no scalar to sort by
+   * and no prose of its own to index — both live on the *responses*, which
+   * never enter `content_index` or `content_text` at all.
+   */
+  | ({ kind: 'form' } & Common)
 
 type Opts<K extends Field['kind']> = Omit<Extract<Field, { kind: K }>, 'kind'>
 
@@ -287,11 +300,13 @@ export type ValueOf<F extends Field> = F extends { kind: 'blocks' | 'richtext' }
                   // renders its own empty state rather than crashing.
                   F extends { kind: 'collection' }
                   ? ResolvedCollection
-                  : F extends { kind: 'select'; options: readonly (infer O)[] }
-                    ? O extends SelectOption
-                      ? O['value']
+                  : F extends { kind: 'form' }
+                    ? ResolvedForm | null
+                    : F extends { kind: 'select'; options: readonly (infer O)[] }
+                      ? O extends SelectOption
+                        ? O['value']
+                        : string
                       : string
-                    : string
 
 export type PropsOf<F extends Record<string, Field>> = { [K in keyof F]: ValueOf<F[K]> }
 
@@ -314,6 +329,7 @@ export function defaultValue(f: Field): Json {
     case 'asset':
     case 'richtext':
     case 'reference':
+    case 'form':
       return null
     // Both plural, both empty rather than null, so a fresh block's stored value
     // already has the shape its input and its renderer expect.

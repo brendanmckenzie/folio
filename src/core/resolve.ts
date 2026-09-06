@@ -15,6 +15,7 @@
 import type { ReactNode } from 'react'
 import type { Doc, Json } from './doc'
 import { defaultValue, type Field } from './fields'
+import type { ResolvedForm } from './forms'
 import { dataOf, type LocaleContext } from './locales'
 import {
   type CollectionField,
@@ -135,6 +136,17 @@ export interface Resolution {
    * enforcement `filterable` already has.
    */
   search?: string
+  /**
+   * Compiled descriptors for the `form` fields this document contains, keyed by
+   * form id (`../../docs/specs/content-model/forms.md` architecture decision 4).
+   *
+   * The same treatment `collections` gets, one map over: form ids are collected
+   * from the document walk, compiled once each, and pushed alongside it — so a
+   * page embedding no form issues no forms query at all. Absent rather than
+   * `{}` when the document embeds none, the same bootstrap-identical rule
+   * `docs` and `globals` follow.
+   */
+  forms?: Record<string, ResolvedForm>
 }
 
 export const DEFAULT_ASSET_BASE = '/folio/asset'
@@ -454,6 +466,12 @@ export function resolveValue(
       return resolveReferences(value, resolution, field.types)
     case 'collection':
       return resolveCollection(field, value, resolution)
+    case 'form':
+      // A lookup on the resolution, like `collection` above: compiling a form
+      // needs the schema, the database and the base path, none of which this
+      // function has, so the work happens in `resolve()` and lands here
+      // pre-computed (`forms.md` architecture decision 4).
+      return typeof value === 'string' ? (resolution.forms?.[value] ?? null) : null
     case 'number':
       // Deliberately `defaultValue(field)`, never `field.default`: this runs on
       // every render, and a schema edit must not retroactively change what an

@@ -24,6 +24,12 @@
  * `resolve()` has to load — an asset needs no lookup, its value is stored inline —
  * so it exists purely for `content_refs`, which is what lets the Assets screen say
  * where a file is used before somebody deletes it.
+ *
+ * `formIds` is the fourth walk (`../../docs/specs/content-model/forms.md`
+ * architecture decision 8): a `form` field's stored value is a form id, and it
+ * is both an id `resolve()` must load — to compile the form's descriptor — and
+ * an edge `content_refs` must record, because a cache tag cannot answer "which
+ * published documents render this form" and a reverse index over that table can.
  */
 import type { Blok, Doc, Json } from './doc'
 import type { Field } from './fields'
@@ -34,15 +40,17 @@ import { asAsset, asAssets, asLink, asStoryIds, type LinkValue } from './values'
 /**
  * An outbound edge of a document, as `content_refs` stores it.
  *
- * **`to` is a story id for `link` and `reference`, and an R2 object key for
- * `asset`** — the column is `to_id` and holds whatever `kind` says it holds
+ * **`to` is a story id for `link`, `reference` and `form`, and an R2 object key
+ * for `asset`** — the column is `to_id` and holds whatever `kind` says it holds
  * (`migrations/0002_asset_refs.sql`). A stored `AssetValue` carries no asset id,
  * only its key, and this walk is pure so it cannot look one up; the key is
  * `not null unique` on `assets`, so it is as total an identity as the id.
+ * `form` holds a `forms.id`, not a story id, but the column carries whatever
+ * `kind` says it holds either way — no DDL was needed to add it.
  */
 export interface OutboundRef {
   to: string
-  kind: 'link' | 'reference' | 'asset'
+  kind: 'link' | 'reference' | 'asset' | 'form'
 }
 
 /**
@@ -221,6 +229,29 @@ export function assetKeys(doc: Doc, schema: SchemaIndex): string[] {
 }
 
 /**
+ * Form ids a document embeds: every `form` field's stored value, across every
+ * locale (`../../docs/specs/content-model/forms.md` architecture decision 4).
+ *
+ * `resolve()` loads exactly these — the ids `form` fields actually contain —
+ * concurrently with the story map, the same treatment `referencedIds` gets one
+ * level up.
+ */
+export function formIds(doc: Doc, schema: SchemaIndex): string[] {
+  const out = new Set<string>()
+  for (const blok of Object.values(doc.bloks)) {
+    const fields: Record<string, Field> | undefined = schema[blok.type]?.fields
+    if (!fields) continue
+    for (const [name, field] of Object.entries(fields)) {
+      if (field.kind !== 'form') continue
+      for (const value of storedValues(blok, name)) {
+        if (typeof value === 'string' && value) out.add(value)
+      }
+    }
+  }
+  return [...out]
+}
+
+/**
  * The whole outbound edge set of a document, for `content_refs`.
  *
  * Publish is the only moment this is in hand — the document, its schema and the
@@ -240,6 +271,10 @@ export function assetKeys(doc: Doc, schema: SchemaIndex): string[] {
  * how many *documents* are affected. **Rejected: an `asset-link` kind** beside
  * `asset` — nothing would read the difference, and "used by 4 pages" is the
  * sentence being written.
+ *
+ * Form edges come last of all and get no self-edge check either, for the
+ * identical reason: a `forms.id` (`frm_…`) and a story id (`sty_…`) are values
+ * from different namespaces.
  */
 export function outboundRefs(doc: Doc, schema: SchemaIndex, from: string): OutboundRef[] {
   const out: OutboundRef[] = []
@@ -250,5 +285,6 @@ export function outboundRefs(doc: Doc, schema: SchemaIndex, from: string): Outbo
     if (to !== from) out.push({ to, kind: 'reference' })
   }
   for (const to of assetKeys(doc, schema)) out.push({ to, kind: 'asset' })
+  for (const to of formIds(doc, schema)) out.push({ to, kind: 'form' })
   return out
 }

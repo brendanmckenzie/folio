@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { Blok, Doc, Json } from '../../../src/core/doc'
 import { asset, multiasset, multilink, reference, richtext, text } from '../../../src/core/fields'
-import { assetKeys, linkedIds, outboundRefs, referencedIdsAllLocales } from '../../../src/core/refs'
+import {
+  assetKeys,
+  formIds,
+  linkedIds,
+  outboundRefs,
+  referencedIdsAllLocales,
+} from '../../../src/core/refs'
 import type { SchemaIndex } from '../../../src/core/schema'
 
 /**
@@ -37,6 +43,15 @@ const schema: SchemaIndex = {
     name: 'hero',
     label: 'Hero',
     fields: { image: asset({ translatable: true }), gallery: multiasset() },
+  },
+  // No `form()` constructor exists yet (`docs/specs/content-model/forms.md`
+  // phase 1 adds only the union member, `ValueOf` and `defaultValue`), so the
+  // schema fixture writes the literal the way an early adopter of the kind
+  // would have to.
+  landing: {
+    name: 'landing',
+    label: 'Landing page',
+    fields: { contact: { kind: 'form' } },
   },
 }
 
@@ -270,6 +285,41 @@ describe('assetKeys', () => {
   })
 })
 
+describe('formIds', () => {
+  it("collects a form field's stored id", () => {
+    expect(formIds(docOf(blok('r0', 'landing', { contact: 'frm_abc123abc123' })), schema)).toEqual([
+      'frm_abc123abc123',
+    ])
+  })
+
+  it('walks every locale, the same treatment referencedIds gets one level up', () => {
+    const doc = docOf(
+      blok(
+        'r0',
+        'landing',
+        { contact: 'frm_en000000en00' },
+        { fr: { contact: 'frm_fr000000fr00' } },
+      ),
+    )
+    expect(formIds(doc, schema).sort()).toEqual(['frm_en000000en00', 'frm_fr000000fr00'].sort())
+  })
+
+  it('de-duplicates and is total over junk and an absent value', () => {
+    const doc = docOf(
+      blok('r0', 'landing', { contact: 'frm_dup0000dup00' }),
+      blok('k1', 'landing', { contact: 'frm_dup0000dup00' }),
+      blok('k2', 'landing', { contact: 42 }),
+      blok('k3', 'landing', {}),
+    )
+    expect(formIds(doc, schema)).toEqual(['frm_dup0000dup00'])
+  })
+
+  it('ignores fields of every other kind', () => {
+    const doc = docOf(blok('r0', 'card', { who: 'sty_ada' }))
+    expect(formIds(doc, schema)).toEqual([])
+  })
+})
+
 describe('outboundRefs', () => {
   it('labels each edge and keeps both kinds for the same target', () => {
     const doc = docOf(
@@ -279,6 +329,17 @@ describe('outboundRefs', () => {
     expect(outboundRefs(doc, schema, 'sty_from')).toEqual([
       { to: 'sty_x', kind: 'link' },
       { to: 'sty_x', kind: 'reference' },
+    ])
+  })
+
+  it('appends form edges last of all, one row per embedded form', () => {
+    const doc = docOf(
+      blok('r0', 'card', { who: 'sty_ada' }),
+      blok('k1', 'landing', { contact: 'frm_contact000ab' }),
+    )
+    expect(outboundRefs(doc, schema, 'sty_from')).toEqual([
+      { to: 'sty_ada', kind: 'reference' },
+      { to: 'frm_contact000ab', kind: 'form' },
     ])
   })
 

@@ -205,6 +205,12 @@ const CONTROLS: { readonly [K in Field['kind']]: ControlKind } = {
   references: 'references',
   collection: 'collection',
   blocks: 'none',
+  // No form picker exists yet (`../../../../docs/specs/content-model/forms.md`
+  // phase 1 leaves the field kind resolving to `null` with nothing to build
+  // one from). `Control.tsx`'s own `default` branch is what actually draws a
+  // plain text box for this today, the same fallback a brand new kind gets
+  // while its own control is being written — this just has to agree with it.
+  form: 'text',
 }
 
 export function controlFor(kind: Field['kind']): ControlKind {

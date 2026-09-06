@@ -22,6 +22,7 @@ export {
   cacheHeaders,
   cacheTags,
   DEFAULT_S_MAXAGE,
+  formTag,
   globalTag,
   MAX_CACHE_TAGS,
   MAX_CACHE_TAG_BYTES,
@@ -91,8 +92,31 @@ export type {
 // to write the same index rows a publish would.
 export { indexedFieldNames, indexedFields, indexRowsFor, isIndexed } from './index-projection'
 export type { IndexRow } from './index-projection'
-export { linkedIds, outboundRefs, referencedIdsAllLocales } from './refs'
+export { formIds, linkedIds, outboundRefs, referencedIdsAllLocales } from './refs'
 export type { OutboundRef } from './refs'
+
+// Forms (`../../docs/specs/content-model/forms.md`). Core rather than server:
+// the vocabulary and its one validator are shared by the PATCH route, the admin
+// builder and the submit route, none of which should each carry their own
+// reading of what a valid `FormField` is.
+export {
+  FILE_ACCEPT,
+  formSlug,
+  honeypotName,
+  MAX_FORM_FIELDS,
+  RESERVED_PREFIX,
+  shapeOf,
+  validateFormFields,
+} from './forms'
+export type {
+  FileAccept,
+  FormField,
+  FormFieldI18n,
+  FormFieldKind,
+  FormFieldOption,
+  ResolvedForm,
+  ResolvedFormField,
+} from './forms'
 
 // Full-text search (`../../docs/specs/content-model/full-text-search.md`). The
 // same rationale as `indexRowsFor` above: a host importer that writes

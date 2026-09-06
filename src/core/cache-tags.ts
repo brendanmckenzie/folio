@@ -62,6 +62,10 @@ const encode = (value: string) => encodeURIComponent(value)
 export const storyTag = (id: string) => `story:${encode(id)}`
 export const globalTag = (name: string) => `global:${encode(name)}`
 export const typeTag = (name: string) => `type:${encode(name)}`
+/** `resolution.forms`'s key is a `forms.id`, not a story id — a structural form
+ * save purges this one tag with no lookup at all
+ * (`../../docs/specs/content-model/forms.md` architecture decision 8). */
+export const formTag = (id: string) => `form:${encode(id)}`
 
 /** The cache-tag set for a rendered page, and whether it had to be coarsened. */
 export interface CacheTags {
@@ -147,6 +151,7 @@ function collectionTypes(keys: readonly string[]): { types: string[]; any: boole
  * ```
  * story:<id>      every id in resolution.stories, plus opts.story
  * global:<name>   every key in resolution.globals
+ * form:<id>       every key in resolution.forms
  * type:<name>     the document type of every distinct collection query
  * type:*          a collection query that filters no type at all
  * site            always
@@ -166,6 +171,7 @@ export function cacheTags(resolution: Resolution, opts: CacheTagOptions): CacheT
   // section and every page under it is purged, with no edge ever recorded.
   for (const id of Object.keys(resolution.stories)) tags.add(storyTag(id))
   for (const name of Object.keys(resolution.globals ?? {})) tags.add(globalTag(name))
+  for (const id of Object.keys(resolution.forms ?? {})) tags.add(formTag(id))
 
   const collections = collectionTypes(Object.keys(resolution.collections ?? {}))
   for (const type of collections.types) tags.add(typeTag(type))

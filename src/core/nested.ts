@@ -870,6 +870,11 @@ export function fieldShapeError(field: Field, value: unknown): string | null {
       return Array.isArray(value) ? null : 'must be an array'
     case 'reference':
       return typeof value === 'string' ? null : 'must be a story id or null'
+    case 'form':
+      // Stored value is a `forms.id`, looked up on `Resolution.forms` at render
+      // (`forms.md` architecture decision 4) — the same shape `reference` is,
+      // one kind up.
+      return typeof value === 'string' ? null : 'must be a form id or null'
     case 'references':
       // The stored shape is a plain array of story-id strings
       // (`data-documents.md`); `asStoryIds` is what reads it back.

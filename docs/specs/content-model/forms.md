@@ -27,6 +27,22 @@
 > `src/server/app.ts`, `src/server/cache-request.ts`, `src/server/auth/`,
 > `src/admin/ui/route.ts`, `migrations/` and `test/` was clean and is exact.
 
+> **Phase 1 landed 2026-09-06** (`migrations/0010_forms.sql`, `src/core/forms.ts`,
+> the `form` field kind). Confirms the structural facts above held: the exhaustive
+> `resolveValue` switch, `Resolution` as a bag of per-key maps, and `reference`'s
+> string-id-and-lookup shape were all unchanged. One line in "Changes to existing
+> core files" was stale rather than the structure: `defaultValue` does **not**
+> answer `''` "as `reference` does" — the tree's actual `reference` case already
+> answered `null`, so `form` was aligned with what `reference` does today (`null`),
+> not with the sentence. Two more exhaustive switches outside this spec's own
+> Ground truth also demand a `form` case the instant the union gains the member,
+> and phase 1 had to touch both to stay green: `core/nested.ts`'s `fieldShapeError`
+> (a write-time validator over every field kind, same shape as `reference`'s) and
+> `admin/ui/screens/inspector-model.ts`'s `CONTROLS` map (`Field['kind'] →
+> ControlKind`, mapped to `'text'` — there is no form picker yet, so this only has
+> to agree with `Control.tsx`'s existing default-to-a-text-box fallback for an
+> unbuilt control). Phases 2–8 are still outstanding.
+
 ## Summary
 
 Folio can publish a page that asks a question and has nowhere to put the answer. There

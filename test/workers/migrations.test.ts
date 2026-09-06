@@ -892,6 +892,22 @@ describe('content index', () => {
     expect(row).toEqual({ f: 'sty_page', t: 'ast_abc123abc123-logo.svg' })
     await env.DB.prepare('delete from content_refs').run()
   })
+
+  it('takes a fourth kind of edge, a form id, with the same no-DDL widening', async () => {
+    // `content_refs` answers "which published documents render this form" --
+    // a question a cache tag cannot answer, because a tag is a string nothing
+    // joins on (docs/specs/content-model/forms.md architecture decision 8).
+    // `kind` still carries no CHECK, so this is a rename-era rename's whole
+    // point paid off a second time: no DDL for the fourth kind either.
+    await env.DB.prepare('insert into content_refs (from_story, to_id, kind) values (?, ?, ?)')
+      .bind('sty_page', 'frm_abc123abc123', 'form')
+      .run()
+    const row = await env.DB.prepare(
+      "select from_story as f, to_id as t from content_refs where kind = 'form'",
+    ).first<{ f: string; t: string }>()
+    expect(row).toEqual({ f: 'sty_page', t: 'frm_abc123abc123' })
+    await env.DB.prepare('delete from content_refs').run()
+  })
 })
 
 /**
@@ -1129,4 +1145,205 @@ describe('shares', () => {
   // That 0004 leaves `stories` alone needs no test of its own: every assertion in
   // this file runs against the schema the whole directory produced, so `stories`'
   // own "has exactly these seven indexes" above is already the check.
+})
+
+/**
+ * `forms` + `form_responses` (`0010_forms.sql`,
+ * `docs/specs/content-model/forms.md`). A form is a row, not a document
+ * (architecture decision 1): no foreign key to `stories` and no draft, so the
+ * only lifecycle here is `open`/`closes_at` against the clock, the same
+ * live/lapsed rule `shares` already established.
+ */
+describe('forms', () => {
+  const insert = (id: string, name: string, label: string, createdAt = 1, updatedAt = 1) =>
+    env.DB.prepare(
+      `insert into forms (id, name, label, created_at, updated_at) values (?, ?, ?, ?, ?)`,
+    )
+      .bind(id, name, label, createdAt, updatedAt)
+      .run()
+
+  beforeEach(async () => {
+    await env.DB.prepare('delete from forms').run()
+  })
+
+  it('has every column, in order, with the defaults a fresh row relies on', async () => {
+    expect((await columnsOf('forms')).map((c) => c.name)).toEqual([
+      'id',
+      'name',
+      'label',
+      'fields',
+      'version',
+      'open',
+      'closes_at',
+      'closed_message',
+      'success_message',
+      'submit_label',
+      'redirect_to',
+      'created_at',
+      'updated_at',
+    ])
+
+    const byName = new Map((await columnsOf('forms')).map((c) => [c.name, c]))
+    expect(byName.get('id')?.pk).toBe(1)
+    expect(byName.get('fields')?.dflt_value).toBe("'[]'")
+    expect(byName.get('version')?.dflt_value).toBe('1')
+    expect(byName.get('open')?.dflt_value).toBe('1')
+    expect(byName.get('closed_message')?.dflt_value).toBe("''")
+    expect(byName.get('success_message')?.dflt_value).toBe("''")
+    expect(byName.get('submit_label')?.dflt_value).toBe("'Submit'")
+    expect(byName.get('closes_at')?.notnull).toBe(0)
+    expect(byName.get('redirect_to')?.notnull).toBe(0)
+
+    await insert('frm_defaults', 'contact', 'Contact us')
+    const row = await env.DB.prepare(
+      `select fields, version, open, closes_at, closed_message, success_message,
+              submit_label, redirect_to
+       from forms where id = ?`,
+    )
+      .bind('frm_defaults')
+      .first<Record<string, unknown>>()
+    expect(row).toEqual({
+      fields: '[]',
+      version: 1,
+      open: 1,
+      closes_at: null,
+      closed_message: '',
+      success_message: '',
+      submit_label: 'Submit',
+      redirect_to: null,
+    })
+  })
+
+  it('has exactly two indexes: the slug lookup and the list screen ordering', async () => {
+    expect(await indexesOf('forms')).toEqual(['forms_name', 'forms_updated'])
+    expect(await indexSql('forms_name')).toMatch(/unique/i)
+    expect(await indexSql('forms_name')).toMatch(/\(\s*name\s*\)/i)
+    expect(await indexSql('forms_updated')).toMatch(/\(\s*updated_at\s+desc\s*,\s*id\s*\)/i)
+  })
+
+  it('refuses two forms sharing a name, so the slug is a real lookup key', async () => {
+    await insert('frm_a', 'contact', 'Contact')
+    await expect(insert('frm_b', 'contact', 'Contact again')).rejects.toThrow(
+      /UNIQUE constraint failed/i,
+    )
+  })
+
+  it('lets two forms share a label, because the label is prose and the name is the key', async () => {
+    await insert('frm_a', 'contact', 'Contact us')
+    await insert('frm_b', 'contact-2', 'Contact us')
+    const row = await env.DB.prepare('select count(*) as n from forms').first<{ n: number }>()
+    expect(row?.n).toBe(2)
+  })
+
+  it('has no "closed" or "status" column, because the effective state is computed against the clock', async () => {
+    // `open = 1 and (closes_at is null or closes_at > now)` is the whole state
+    // machine -- the same rule 0004_shares.sql's live/lapsed established -- so
+    // there is nothing stored here that could disagree with the clock.
+    const names = (await columnsOf('forms')).map((c) => c.name)
+    expect(names).not.toContain('closed')
+    expect(names).not.toContain('status')
+  })
+
+  it('does NOT have a `form_fields` table, because fields are one JSON column', async () => {
+    // `pragma_table_info` on a table that does not exist answers no rows at all,
+    // which is what makes this an assertion of absence rather than a no-op.
+    // Asserted because a projection table would be a second write path into one
+    // fact (forms.md architecture decision 2), and adding one should be a
+    // deliberate act with a measurement behind it, not a drift.
+    expect(await columnsOf('form_fields')).toEqual([])
+  })
+})
+
+describe('form_responses', () => {
+  const insert = (
+    id: string,
+    formId: string,
+    bodyHash: string,
+    createdAt = 1,
+    ipHash: string | null = null,
+  ) =>
+    env.DB.prepare(
+      `insert into form_responses (id, form_id, version, created_at, body_hash, ip_hash)
+       values (?, ?, 1, ?, ?, ?)`,
+    )
+      .bind(id, formId, createdAt, bodyHash, ipHash)
+      .run()
+
+  beforeEach(async () => {
+    await env.DB.prepare('delete from form_responses').run()
+  })
+
+  it('has every column, in order, with the defaults a fresh row relies on', async () => {
+    expect((await columnsOf('form_responses')).map((c) => c.name)).toEqual([
+      'id',
+      'form_id',
+      'version',
+      'created_at',
+      'data',
+      'locale',
+      'page',
+      'ip_hash',
+      'body_hash',
+      'files',
+    ])
+
+    const byName = new Map((await columnsOf('form_responses')).map((c) => [c.name, c]))
+    expect(byName.get('id')?.pk).toBe(1)
+    expect(byName.get('data')?.dflt_value).toBe("'{}'")
+    expect(byName.get('locale')?.dflt_value).toBe("''")
+    expect(byName.get('page')?.dflt_value).toBe("''")
+    expect(byName.get('files')?.dflt_value).toBe("'[]'")
+    // Nullable: a local dev run carries no client IP at all (decision 10's own
+    // note), and the row is still worth keeping.
+    expect(byName.get('ip_hash')?.notnull).toBe(0)
+    expect(byName.get('body_hash')?.notnull).toBe(1)
+
+    await insert('res_defaults', 'frm_x', 'hash_defaults')
+    const row = await env.DB.prepare(
+      'select data, locale, page, files, ip_hash from form_responses where id = ?',
+    )
+      .bind('res_defaults')
+      .first<Record<string, unknown>>()
+    expect(row).toEqual({ data: '{}', locale: '', page: '', files: '[]', ip_hash: null })
+  })
+
+  it('has exactly three indexes: the keyset, the duplicate reader and the partial throttle', async () => {
+    expect(await indexesOf('form_responses')).toEqual([
+      'form_responses_dupe',
+      'form_responses_form',
+      'form_responses_throttle',
+    ])
+    expect(await indexSql('form_responses_form')).toMatch(
+      /\(\s*form_id\s*,\s*created_at\s+desc\s*,\s*id\s*\)/i,
+    )
+    expect(await indexSql('form_responses_dupe')).toMatch(
+      /\(\s*form_id\s*,\s*body_hash\s*,\s*created_at\s+desc\s*\)/i,
+    )
+  })
+
+  it('scopes the throttle index to rows with a client IP, the partial shape 0003_schedules.sql established', async () => {
+    expect(await indexSql('form_responses_throttle')).toMatch(
+      /\(\s*ip_hash\s*,\s*created_at\s+desc\s*\)/i,
+    )
+    expect(await indexSql('form_responses_throttle')).toMatch(/where\s+ip_hash\s+is\s+not\s+null/i)
+  })
+
+  it('lets one form collect many responses, and orders them newest first per form', async () => {
+    await insert('res_1', 'frm_x', 'hash_1', 100)
+    await insert('res_2', 'frm_x', 'hash_2', 300)
+    await insert('res_3', 'frm_y', 'hash_3', 200)
+    const { results } = await env.DB.prepare(
+      'select id from form_responses where form_id = ? order by created_at desc, id',
+    )
+      .bind('frm_x')
+      .all<{ id: string }>()
+    expect(results.map((r) => r.id)).toEqual(['res_2', 'res_1'])
+  })
+
+  it('does NOT index `data`, because the responses search is a substring scan', async () => {
+    // No index serves a leading wildcard LIKE anyway (decision 16's sibling
+    // reasoning to the export's own) -- asserted as an absence so adding one is
+    // a deliberate act with a measurement behind it.
+    expect(await indexesOf('form_responses')).not.toContain('form_responses_data')
+  })
 })
