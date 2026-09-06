@@ -11,15 +11,17 @@ collaboration has no publishing workflow, and the one with the workflow renders
 your pages on somebody else's boxes, in somebody else's region, behind somebody
 else's cache.
 
-Folio is what came of refusing to pick. Take the best idea out of each of them,
-then keep going until they agree with one another:
+Folio is what came of refusing to pick:
 
-| From | What |
-| --- | --- |
-| Storyblok | Nested blocks, click-a-block-in-the-page-to-edit-it, draft/published split |
-| Payload | Schema as code, colocated with the component |
-| Linear | Local-first mutation log: optimistic apply, delta sync, undo, multiplayer |
-| EmDash | Cloudflare-only target: Workers, D1, Durable Objects, R2 |
+- **Nested blocks, edited in the page** — click a block in the rendered page and
+  change it there, with a real draft/published split behind it.
+- **Schema as code**, colocated with the component, so the admin form, the prop
+  types and the HTML cannot drift apart.
+- **A local-first mutation log** — optimistic apply, delta sync, per-user undo
+  and multiplayer, the way a modern issue tracker works rather than the way a
+  CMS usually does.
+- **One platform, fully committed to** — Workers, D1, Durable Objects and R2.
+  No adapter layer, no lowest common denominator.
 
 It is a **library, not an application**. Your project owns its Worker, its
 routing and its public pages. Folio owns the editor, the sync engine and the
