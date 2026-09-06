@@ -61,6 +61,7 @@ import {
   parseBody,
   parseOrThrow,
   safeNext,
+  wantsJson,
 } from '../validate'
 import { mintChallenge, passkeyEnrolmentRefusal, passkeyRefusalBody, rpIdOf } from './passkeys'
 
@@ -116,14 +117,6 @@ async function loginBody(req: Request): Promise<{ email: string; next?: string }
     raw = Object.fromEntries([...form.entries()].map(([k, v]) => [k, String(v)]))
   }
   return parseOrThrow(LoginEmailBody, raw, 'body')
-}
-
-/** True when the caller wants JSON back — a script or the admin — rather than
- * the login page re-rendered. */
-function wantsJson(req: Request): boolean {
-  const accept = req.headers.get('accept') ?? ''
-  if (accept.includes('application/json')) return true
-  return !accept.includes('text/html') && (req.headers.get('content-type') ?? '').includes('json')
 }
 
 export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {

@@ -46,6 +46,7 @@ import { type ResolvedAuth, resolveAuth } from './auth/config'
 import { cachePurgeHooks } from './cache-purge'
 import { type ContentProjection, contentProjection } from './content-index'
 import { type ResolvedDescribe, validateDescribe } from './describe'
+import { type ResolvedForms, validateForms } from './form-responses'
 import { compileForm, formsByIds } from './forms'
 import { type ResolvedGate, validateGate } from './gate'
 import {
@@ -191,6 +192,13 @@ export interface FolioRuntime {
    * (`../content-model/media-library.md` decision 8).
    */
   describe: ResolvedDescribe | null
+  /**
+   * `FolioConfig.forms`, validated and defaulted, or **null for a host that
+   * configured none** — which is not "forms are off": the honeypot still runs and
+   * the default rate limit still applies. What is null is the half only a host can
+   * supply, `verify` (`../content-model/forms.md` decision 9).
+   */
+  forms: ResolvedForms | null
   /** A declared type by name, or undefined — a row whose type was removed from
    * the code still reads, it just has no schema to render ("Unknown type"). */
   typeOf: (name: string | undefined) => DocumentType | undefined
@@ -413,6 +421,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // upload — where nobody is looking and the only symptom is alt text that
   // never appears (`../content-model/media-library.md` decision 8).
   const describe = validateDescribe(config.describe)
+  // Same timing, same reason, one rung more insistent than `describe`: the
+  // request that would otherwise discover a `verify` that is not a function is an
+  // anonymous POST from the public internet, and `verify` fails closed — so the
+  // symptom is a contact form that silently collects nothing, on the one route in
+  // this library a stranger can reach (`../content-model/forms.md` decision 11).
+  const forms = validateForms(config.forms)
   // Same timing, same reason: `globals` naming an unknown type or a non-
   // singleton one is a config mistake, not a runtime surprise the first page
   // render discovers (`../../docs/specs/content-model/globals.md`).
@@ -954,6 +968,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     auth,
     gate,
     describe,
+    forms,
     typeOf,
     defaultType: fallbackType,
     titleFor,

@@ -14,6 +14,7 @@
  */
 import type { Doc } from '../core/doc'
 import type { StoryMeta } from '../core/story'
+import type { FormResponse, SubmittedFile } from './form-responses'
 import type { FormMeta } from './forms'
 import type { VersionMeta } from './versions'
 
@@ -29,6 +30,7 @@ export type HookEvent =
   | 'reindexed'
   | 'redirectsChanged'
   | 'formChanged'
+  | 'submitted'
 
 /**
  * The same list at runtime, for `validateHooks`. A name must appear in both or
@@ -49,6 +51,7 @@ const HOOK_EVENTS: readonly HookEvent[] = [
   'reindexed',
   'redirectsChanged',
   'formChanged',
+  'submitted',
 ]
 
 /** Every hook payload's common shape. Nothing else is injected: a hook that
@@ -164,6 +167,36 @@ export interface FormChangedHookPayload<Env> extends HookBase<Env> {
   version: number
 }
 
+/**
+ * Somebody filled in a form (`../../docs/specs/content-model/forms.md`
+ * checkpoint 4). **The entire programmatic surface for responses**: there is no
+ * `/api/v1` route and no MCP tool, deliberately (checkpoint 20), so this is how a
+ * host forwards a lead to a CRM, posts it to Slack or emails it.
+ *
+ * Fires **after the row has committed**, and only for a row that was actually
+ * written: a submission that filled the honeypot stores nothing and fires
+ * nothing, and one that collapsed into an identical submission from thirty
+ * seconds ago fires nothing either — a double-click that reached a CRM twice is
+ * exactly what the collapse exists to prevent (decision 14).
+ *
+ * `actor` is **always null**, unlike every other event here. The route is
+ * unauthenticated and the response is a stranger's; attributing it to whichever
+ * editor happened to be signed in in that browser would be a lie about who filled
+ * the form in.
+ *
+ * `runOne` swallows a throw with one `console.error`, as it does for every hook:
+ * the row is already committed and a Slack outage must not turn a submission into
+ * a 500 for the person who made it. `verify` is the opposite posture and runs
+ * before the write, which is where a refusal belongs (decision 11).
+ */
+export interface SubmittedHookPayload<Env> extends HookBase<Env> {
+  form: FormMeta
+  response: FormResponse
+  /** The files that came with it. Empty until phase 5 of the spec mints a
+   *  `sub_` key; declared now so the payload does not change shape when it does. */
+  files: readonly SubmittedFile[]
+}
+
 /** Every event's full payload, keyed by name — what `FolioHooks` hands a
  * handler and what `HookRunner.run` builds before calling one. */
 export interface HookPayloadMap<Env> {
@@ -178,6 +211,7 @@ export interface HookPayloadMap<Env> {
   reindexed: ReindexedHookPayload<Env>
   redirectsChanged: RedirectsChangedHookPayload<Env>
   formChanged: FormChangedHookPayload<Env>
+  submitted: SubmittedHookPayload<Env>
 }
 
 /**
@@ -214,6 +248,16 @@ export interface FolioHooks<Env> {
    * moved.
    */
   formChanged?: (e: FormChangedHookPayload<Env>) => unknown
+  /**
+   * A response arrived (`../../docs/specs/content-model/forms.md` checkpoint 4).
+   * Folio always stores it; this is the sink a host forwards it to — a CRM, a
+   * Slack channel, an email through whatever it already uses.
+   *
+   * There is no retry queue, no delivery log and no dead-letter queue behind it,
+   * for this file's stated reason: the row has already committed, and a host that
+   * needs durable delivery has a Queue binding and a row in D1 to read from.
+   */
+  submitted?: (e: SubmittedHookPayload<Env>) => unknown
   /** Events to await before responding. Everything else rides `waitUntil`. */
   await?: readonly HookEvent[]
 }

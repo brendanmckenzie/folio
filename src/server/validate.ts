@@ -1842,3 +1842,71 @@ export function responseFilterQuery(req: {
   if (term) filter.q = term
   return filter
 }
+
+/* ------------------------------------------------------ form submissions --- */
+
+/**
+ * How many keys one submission body may carry.
+ *
+ * A request-size bound, like `MAX_FORM_OPTIONS` above and for the same reason: a
+ * form has at most `MAX_FORM_FIELDS` questions, and a real browser adds the
+ * honeypot, `_folio_page`, the submit button's name and whatever a password
+ * manager injected — a couple of dozen in the worst honest case. Two hundred is
+ * generous for that and a hard stop for a body of three thousand one-character
+ * keys, which the byte cap alone would allow.
+ *
+ * **This is the one input on a public, unauthenticated write path**
+ * (`{base}/f/:id`), so the bound is on the *count* as well as on the bytes: the
+ * map built from it is sized by whoever posted.
+ */
+export const MAX_SUBMISSION_KEYS = 200
+
+/**
+ * The ceiling on one answer's characters, whatever `max` the builder set on the
+ * question.
+ *
+ * Two caps rather than one, deliberately: the question's own `max` is what an
+ * editor promised a visitor, and this is what the column will take from a
+ * stranger. A question with no `max` is bounded by this; a question whose `max`
+ * is larger does not raise it.
+ */
+export const MAX_ANSWER_CHARS = 10_000
+
+/**
+ * `PRINTABLE`'s screen with the three whitespace controls a `textarea` carries
+ * legitimately allowed back in.
+ *
+ * Written as an alternation rather than by subtracting from the negated class,
+ * because there is no subtraction to write: `[^\p{Cc}\n]` still excludes every
+ * control including the newline, so the three have to be admitted by a second
+ * branch rather than carved out of the first.
+ */
+const PRINTABLE_MULTILINE = /^(?:[^\p{Cc}\p{Cs}\u202a-\u202e\u2066-\u2069]|[\n\r\t])*$/u
+
+/**
+ * Whether one submitted answer holds only characters a stored string may hold.
+ *
+ * The same screen every other typed value in this file gets, with one difference
+ * that has to be made per question rather than per file: a `textarea` answer with
+ * newlines in it is a paragraph, and the identical string under a `text` question
+ * is somebody trying to make one stored value look like two.
+ */
+export function isPrintableAnswer(raw: string, multiline: boolean): boolean {
+  return (multiline ? PRINTABLE_MULTILINE : PRINTABLE).test(raw)
+}
+
+/**
+ * Whether this request wants JSON rather than a browser's redirect.
+ *
+ * Two conditions because there are two callers with different clients: a script
+ * that sets `accept: application/json`, and one that sets no `accept` worth
+ * reading but posts a JSON body. A browser navigating a `<form>` sends
+ * `accept: text/html,…` and matches neither, which is the case that must never
+ * be answered with JSON — a visitor with scripting off would be looking at a
+ * page of it (`../../docs/specs/content-model/forms.md` decision 5).
+ */
+export function wantsJson(req: { headers: Headers }): boolean {
+  const accept = req.headers.get('accept') ?? ''
+  if (accept.includes('application/json')) return true
+  return !accept.includes('text/html') && (req.headers.get('content-type') ?? '').includes('json')
+}

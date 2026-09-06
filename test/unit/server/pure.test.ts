@@ -1252,6 +1252,7 @@ describe('validateHooks', () => {
       reindexed: () => {},
       redirectsChanged: () => {},
       formChanged: () => {},
+      submitted: () => {},
       await: ['published'],
     }
     expect(() => validateHooks(hooks)).not.toThrow()
@@ -1259,7 +1260,7 @@ describe('validateHooks', () => {
 
   it('names every valid key in the message it throws, so the list is discoverable', () => {
     expect(() => validateHooks({ reindex: () => {} } as unknown as FolioHooks<Env>)).toThrow(
-      /valid: await, checkpointed, created, deleted, formChanged, migrated, pathsChanged, published, redirectsChanged, reindexed, unpublished, updated/,
+      /valid: await, checkpointed, created, deleted, formChanged, migrated, pathsChanged, published, redirectsChanged, reindexed, submitted, unpublished, updated/,
     )
   })
 

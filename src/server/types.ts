@@ -29,6 +29,7 @@ import type { Actor } from './auth/roles'
 import type { FolioHooks } from './hooks'
 import type { AuditOptions, AuditReport } from './audit'
 import type { CacheVerdict } from './cache-request'
+import type { FolioForms } from './form-responses'
 import type { FolioDb } from './db'
 import type { MigrateOptions, MigrateReport } from './migrate'
 import type { ReindexOptions, ReindexReport } from './reindex'
@@ -585,6 +586,20 @@ export interface FolioConfig<Env> {
    * request reaches it first.
    */
   describe?: FolioDescribe<Env>
+  /**
+   * What a host decides about form submissions
+   * (`../../docs/specs/content-model/forms.md` decision 9): a `verify` function
+   * for human verification, and the per-IP-hash rate limit.
+   *
+   * Absent is a complete answer rather than a gap — the honeypot always runs and
+   * the default limit of ten an hour still applies; what is missing is only the
+   * verification Folio cannot do on a host's behalf. Validated at construction
+   * (`validateForms`), a rung more insistently than `gate` or `describe`: the
+   * request that would otherwise discover a broken `verify` is an anonymous POST
+   * from the public internet, and `verify` fails closed, so the symptom would be
+   * a contact form that silently collects nothing.
+   */
+  forms?: FolioForms<Env>
   /**
    * The `singleton` types loaded into every page's `Resolution` — a header, a
    * footer, site settings (`../../docs/specs/content-model/globals.md`). An

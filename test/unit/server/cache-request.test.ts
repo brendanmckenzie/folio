@@ -43,6 +43,23 @@ describe('cacheVerdictFor', () => {
     }
   })
 
+  /**
+   * The public form submit is the one Folio route an anonymous stranger writes
+   * through (`../../../docs/specs/content-model/forms.md` decision 3), and it
+   * sits on the bare mount beside `{base}/asset/:key` — the one Folio surface
+   * that *is* cached. Two rules keep them apart, and a cached 200 for a submit
+   * would be a genuine hole rather than a stale page, so both are pinned here.
+   */
+  it('refuses the public form submit, by method and by path', () => {
+    // Rule 1: never a GET, so never cacheable.
+    expect(cacheVerdictFor(req('/folio/f/frm_0123456789ab', { method: 'POST' }), BASE)).toBe(
+      'bypass',
+    )
+    // Rule 6, which is what holds if the route ever grew a GET: `{base}/f/…` is
+    // under `{base}` and is not `{base}/asset/…`.
+    expect(cacheVerdictFor(req('/folio/f/frm_0123456789ab'), BASE)).toBe('bypass')
+  })
+
   it('refuses anything but GET and HEAD', () => {
     expect(cacheVerdictFor(req('/folio/asset/a', { method: 'HEAD' }), BASE)).toBe('cache')
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {

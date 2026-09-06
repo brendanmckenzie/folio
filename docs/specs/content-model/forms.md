@@ -51,6 +51,20 @@
 > of the asset usage shape, and that `validateFormFields`' refusals had to be
 > translated into `bad_request` or every one of them was a 500.
 
+> **Phase 4 landed 2026-09-06** (`src/server/form-responses.ts`, `formSubmitRoutes`
+> in `src/server/routes/forms.ts` and its mount on the bare tree in `app.ts`, the
+> `FolioForms` config key and `validateForms`, the `submitted` hook,
+> `test/unit/server/form-validate.test.ts` and `test/workers/form-submit.test.ts`).
+> `POST {base}/f/:id` is live: both transports, all three abuse controls, the
+> duplicate collapse and the hook. Six divergences, under "Implementation notes —
+> phase 4" at the end of this file; the load-bearing ones are that a closed form
+> answers **409, not the 410 the Edge cases claim** (there is no `gone` code and
+> this spec's own Ground truth says `errors.ts` needs nothing new), that the route
+> assembles its own JSON answers because `FolioErrorStatus` has neither 422 nor
+> 429, and that **the three response readers listed in phase 4's step 1 were not
+> written** — nothing in this phase reads a response, so `FORMS` and `forms:read`
+> still wait for their first reader. Phases 5–8 are outstanding.
+
 > **Phase 3 landed 2026-09-06** (`compileForm` and `FormRenderContext` in
 > `src/server/forms.ts`, the forms read and the descriptor map in `resolve()`,
 > `test/unit/server/forms.test.ts`, and extensions to `test/workers/forms.test.ts`
@@ -1829,3 +1843,180 @@ Three, each restored in place:
 131 files / 3889 passing + 1 todo, from 130 / 3875 + 1. Fourteen added: eight
 unit (`test/unit/server/forms.test.ts`, new), four in `test/workers/forms.test.ts`
 and two in `test/workers/read-session.test.ts`. Nothing was changed or removed.
+
+## Implementation notes — phase 4 (landed 2026-09-06)
+
+The public submit route. `POST {base}/f/:id` is live on the bare mount, both
+transports answer, all three abuse controls run, and `submitted` fires. Files
+are still phase 5's and nothing reads a response back yet.
+
+### Divergences from the plan
+
+1. **A closed form is `conflict` (409), not 410.** The Edge cases section says
+   "410 / `folio_status=closed`", and there is no 410 available: `FolioErrorCode`
+   has no `gone`, and this spec's own Ground truth says of `errors.ts` that
+   *"nothing new is needed"*. Rather than add a code for one route, the JSON
+   answer is 409 with `status: 'closed'`; the native answer is unchanged
+   (`folio_status=closed`), which is the half the acceptance criterion names.
+
+2. **The route builds its own JSON answers rather than throwing `FolioError`.**
+   It has to: the plan's own table specifies `422` for a validation failure and
+   `FolioErrorStatus` is a closed union of eight statuses that does not include
+   it — or 429, which the rate limit wants. So the six outcomes are assembled by
+   `replyTo`, a pure function over a `Reply`, and only the three refusals that
+   are *not* submissions (a malformed id, an oversized body, an unreadable body)
+   still throw and get `app.onError`'s envelope. Every JSON refusal carries
+   `status` as well as `error.code`, so a script reads the same six-token
+   vocabulary the redirect does.
+
+3. **`listResponses`, `responseById` and `deleteResponses` were not written**,
+   and neither were `FORMS` or `forms:read`. The plan lists the three readers in
+   phase 4's step 1, but nothing in this phase reads a response: the routes that
+   would are phase 7's, `deleteResponses` needs the R2 half phase 5 owns, and the
+   bulk delete needs `BulkSelection<ResponseFilter>` from a `core/bulk.ts` spec 32
+   has not built. Phase 2's own note is the rule being followed here — *"adding an
+   unused member of `SCOPES` is a security surface with no consumer to justify
+   it"* — so the first reader still adds both.
+
+4. **`_folio_locale` is a second hidden input, added here rather than in phase 3.**
+   `form_responses.locale` exists and decision 12 says *"the response records
+   which locale it was submitted in"*, and after phase 3 there was no way for it
+   to be anything but `''`: the descriptor carried only `_folio_page`, and a
+   submit request has no other signal of the render's language. `compileForm` now
+   emits `LOCALE_INPUT` **only when `ctx.locale` is set**, so a single-locale
+   site's descriptor is byte-identical to the one phase 3 shipped and the pinned
+   key-set test is untouched. The route runs whatever comes back through
+   `rt.localeOf`, so an undeclared code — or one a submitter invented — stores as
+   `''`.
+
+5. **`FolioForms`, `validateForms` and the submission store all live in
+   `src/server/form-responses.ts`.** The plan puts the config type in "Server
+   types" without saying where; `types.ts` was the obvious home and would have
+   made a cycle, because `verify` names `FormMeta`, which lives in `forms.ts`.
+   `FolioHooks` already sets the precedent of a config sub-interface declared in
+   its feature file, so `types.ts` imports `FolioForms` the same way it imports
+   that.
+
+6. **`wantsJson` moved from `routes/auth.ts` into `validate.ts`.** The negotiation
+   this route needs is the same three lines `POST {base}/login/email` already had,
+   and this file is the second caller. Moved rather than copied — one
+   implementation, and `validate.ts` is where the request-header readers already
+   live (`contentLengthHeader`). `routes/auth.ts` gained an import and lost a
+   private function; nothing about its behaviour changed.
+
+### Decisions taken where the plan was silent
+
+- **The body cap is `capFor(form)`, and it exists in this phase.** Decision 15
+  describes it as part of the files work, but a text-only route still needs a
+  cap, and `readCappedBody`'s alternative default is the media library's 20MB. It
+  sums each question's own budget (`max` for the text kinds, the option list's
+  size for the pickers, a scalar allowance for the rest) plus 16KB of fixed
+  allowance, and it already adds a `file` question's `maxBytes` so phase 5 does
+  not have to widen it. A three-question contact form is about 40KB.
+- **`MAX_SUBMISSION_KEYS` (200) and `MAX_ANSWER_CHARS` (10,000) live in
+  `validate.ts`**, phase 2's divergence 4 applied to the other direction: the
+  core validator decides what a *form* may be, and these decide how much one
+  request may carry. The byte cap alone would let a body of three thousand
+  one-character keys through, and the map built from a submission is sized by
+  whoever posted it.
+- **`validateSubmission`'s switch over field kinds is exhaustive**, with the
+  `never` assignment `resolveValue` uses. On a public endpoint, a kind handled by
+  falling through is a question nothing validates rather than a missing feature.
+- **A non-string `FormData` entry is dropped, never stringified.** `String(File)`
+  is the text `[object File]` — the same failure `enctype` on the descriptor
+  exists to prevent, arriving from the other end.
+- **A `url` answer must be `http:` or `https:`.** A host renders it in its own
+  markup, and a stored `javascript:` answer is a link somebody clicks.
+- **A `textarea` may hold newlines and nothing else may.** `isPrintableAnswer`
+  is `PRINTABLE` with `\n`, `\r` and `\t` admitted by a second branch (a negated
+  class cannot re-admit a member of `Cc`).
+- **The 303's target on a *refusal* is never `redirectTo`.** Sending somebody to a
+  thank-you page for a message that was not accepted is worse than saying nothing.
+- **`FormResponse` (the hook payload) omits `ip_hash` and `body_hash`.** The one
+  quasi-identifier in the table and a fingerprint of the answers have no use in a
+  CRM push, and a host that needs them holds the `db` binding. `presenceOf`'s
+  posture toward a socket attachment.
+- **`actor` on `submitted` is a literal `null`, not `actorString(c.var.actor)`.**
+  An editor testing their own form in a signed-in browser must not be recorded as
+  the person who filled it in.
+- **The rate limit is on by default at 10/hour even with no `forms` config.** A
+  public write endpoint whose default is "no limit" is the wrong default; `verify`
+  is the half that is absent without configuration.
+- **`clientIp` reads `CF-Connecting-IP` and nothing else.** `X-Forwarded-For` is a
+  header the limited party writes.
+
+### Caching, verified rather than assumed
+
+`cacheVerdictFor` needed **no change**, and both halves are now pinned in
+`test/unit/server/cache-request.test.ts`:
+
+- `POST {base}/f/:id` → `'bypass'` by rule 1 (not a GET or HEAD).
+- `GET {base}/f/:id` → `'bypass'` by rule 6 (under `{base}`, and not
+  `{base}/asset/…` — note the neighbouring surface that *is* cached).
+
+So a cached 200 for a submit is refused twice over, and the route is on the same
+bare mount as the one Folio surface that is deliberately cacheable, one path
+segment away.
+
+### Bind budget
+
+Nothing on this path binds a caller-sized list. `insertResponse` is thirteen
+binds, fixed; `recentSubmissionCount` is three; `formById` is one. A submitted
+response's field count *is* caller-influenced, which is why `data` is one bound
+JSON string rather than a column or a statement per answer — the 100-parameter
+ceiling is never in play, and cannot be brought into play by a submission.
+
+### Verified by breaking
+
+Three, each restored in place:
+
+- **`if (field.name.startsWith('_')) continue` removed from
+  `validateSubmission`** — `never stores an answer under a Folio-reserved name`
+  red. This is the screen that stops a response forging its own metadata, and it
+  is the second of two locks on that door (`validateFormFields` refuses a `_`
+  field slug), so it fails silently: everything still works and one namespace is
+  writable.
+- **The honeypot branch answering `invalid` instead of success** — `looks exactly
+  like success and stores nothing` red on the URL comparison. The plausible
+  mistake, and the one that quietly tells whoever wrote the bot which input to
+  leave alone next time.
+- **`throttleHashes` returning the current bucket twice** — two red, `counts the
+  previous hour's bucket too` (workers) and `answers the current bucket and the
+  previous one, in that order` (unit). The silent one: the limit still limits, it
+  just resets at the top of every hour, so ten submissions at 10:58 and eleven
+  more at 11:01 all pass.
+
+### Test counts
+
+133 files / 3932 passing + 1 todo, from 131 / 3889 + 1. Forty-three added: 22
+unit (`test/unit/server/form-validate.test.ts`, new), 19 workers
+(`test/workers/form-submit.test.ts`, new), one in
+`test/unit/server/cache-request.test.ts` and one in
+`test/unit/server/forms.test.ts`. One test **changed**:
+`test/unit/server/pure.test.ts`'s `validateHooks` pair, which pins the exact
+sorted list of hook names and the literal of every real event — `submitted` had
+to join both, sanctioned by the spec's "Server types" section adding the event to
+`HookEvent` and `HOOK_EVENTS`.
+
+### What phase 5 inherits
+
+- `capFor` already budgets a `file` question its `maxBytes`, so the body cap is
+  right the moment files are stored.
+- `validateAnswer`'s `case 'file'` returns `{}` — no value, no `required` check.
+  That is the line to fill in, and the `required` half has to arrive with it or a
+  required file question is unenforced.
+- `bodyHash(values, files)` already takes `FilePart[]` (`field`, `size`,
+  `contentHash`) and the route passes `[]`. Hashing the bytes is what lets the
+  duplicate check run before the R2 put, so phase 5 computes the content hash
+  *before* it puts.
+- `SubmittedFile` is declared and the hook already carries `files: []`, so the
+  payload does not change shape when files land.
+- `readSubmission` passes the **whole** `content-type` header to the parser, not
+  the bare media type — `multipart/form-data` carries its boundary there, and a
+  stripped header parses as an empty body rather than as an error.
+
+### What phase 7 inherits
+
+`FORMS`, `forms:read` and every response reader are unwritten, deliberately (see
+divergence 3). `ResponseFilter` and `responseFilterQuery` are still the only
+response-shaped things that exist, both from phase 2.

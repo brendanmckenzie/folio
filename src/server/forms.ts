@@ -339,6 +339,18 @@ function compileField(field: FormField, locale: LocaleContext | undefined): Reso
 export const PAGE_INPUT = '_folio_page'
 
 /**
+ * The render's locale, carried back on the submission (decision 12: *"the
+ * response records which locale it was submitted in"*).
+ *
+ * Emitted **only for a non-source render**, so a single-locale site's descriptor
+ * is byte-identical to the one it had before this existed — `localeContext`'s own
+ * rule, and the same absence `Resolution.locale` follows. The submit route runs
+ * whatever comes back through `localeOf`, so a value a submitter invented is
+ * stored as `''` rather than as itself.
+ */
+export const LOCALE_INPUT = '_folio_locale'
+
+/**
  * A stored form as a `render` receives it (decision 4): everything a host needs
  * to render a working form and nothing it has to derive — the action, the
  * encoding, the honeypot's name, and every question already localised.
@@ -372,7 +384,10 @@ export function compileForm(form: Form, ctx: FormRenderContext): ResolvedForm {
     version: form.version,
     open: isOpen(form, ctx.now ?? Date.now()),
     fields,
-    hidden: ctx.page ? [{ name: PAGE_INPUT, value: ctx.page }] : [],
+    hidden: [
+      ...(ctx.page ? [{ name: PAGE_INPUT, value: ctx.page }] : []),
+      ...(ctx.locale ? [{ name: LOCALE_INPUT, value: ctx.locale.code }] : []),
+    ],
     honeypot: honeypotName(
       form.id,
       form.fields.map((f) => f.name),

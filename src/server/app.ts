@@ -12,7 +12,7 @@ import { authRoutes, sessionRoutes } from './routes/auth'
 import { bulkRoutes } from './routes/bulk'
 import { contentRoutes } from './routes/content'
 import { editorPageRoutes, editorRoutes } from './routes/editor'
-import { formRoutes } from './routes/forms'
+import { formRoutes, formSubmitRoutes } from './routes/forms'
 import { historyRoutes } from './routes/history'
 import { mcpRoutes } from './routes/mcp'
 import { migrationRoutes } from './routes/migrations'
@@ -219,6 +219,21 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // must not be read as `/login/:provider`.
   app.route('/', authRoutes<Env>(rt))
   app.route('/', assetFileRoutes<Env>())
+  /**
+   * `{base}/f/:id` — the public form submit
+   * (`../../docs/specs/content-model/forms.md` architecture decision 3).
+   *
+   * Here rather than under `/api` for `assetFileRoutes`' exact reason: its URL is
+   * baked into published HTML that is cached for a week, and a browser navigates
+   * to it with a native `<form method="post">`. It is **the one route in this
+   * server an anonymous stranger may write through**, which is why the id in its
+   * path is anchored to the mint format rather than screened by charset.
+   *
+   * Never cached, and not by anything this file does: `cacheVerdictFor`'s rule 1
+   * bypasses every non-GET, and its rule 6 bypasses a GET to the same path for
+   * being under `{base}` and not `{base}/asset/`.
+   */
+  app.route('/', formSubmitRoutes<Env>(rt))
   /**
    * `{base}/share?t=…` — the one route in the server a stranger holding a credential
    * may reach (`../../docs/specs/platform/draft-sharing.md`). It has to be here,

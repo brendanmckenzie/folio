@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FILE_ACCEPT, type FormField } from '../../../src/core/forms'
 import type { LocaleContext } from '../../../src/core/locales'
-import { compileForm, type Form, PAGE_INPUT } from '../../../src/server/forms'
+import { compileForm, type Form, LOCALE_INPUT, PAGE_INPUT } from '../../../src/server/forms'
 
 /**
  * `compileForm` — the descriptor a host's `render` is handed
@@ -100,6 +100,23 @@ describe('compileForm', () => {
     expect(compileForm(makeForm(), { base: BASE }).hidden).toEqual([])
     expect(compileForm(makeForm(), { base: BASE, page: '/about/contact' }).hidden).toEqual([
       { name: PAGE_INPUT, value: '/about/contact' },
+    ])
+  })
+
+  it('carries `_folio_locale` only for a non-source render', () => {
+    // A single-locale site's descriptor is byte-identical to the one it had
+    // before this input existed — `localeContext` answers undefined for the
+    // source locale, so there is nothing to emit and nothing to submit.
+    expect(compileForm(makeForm(), { base: BASE, page: '/contact' }).hidden).toEqual([
+      { name: PAGE_INPUT, value: '/contact' },
+    ])
+
+    // Without it `form_responses.locale` could only ever be `''`, and decision 12
+    // says a response records which language it was submitted in.
+    const locale: LocaleContext = { code: 'fr-CA', fallbacks: ['fr'] }
+    expect(compileForm(makeForm(), { base: BASE, page: '/contact', locale }).hidden).toEqual([
+      { name: PAGE_INPUT, value: '/contact' },
+      { name: LOCALE_INPUT, value: 'fr-CA' },
     ])
   })
 
