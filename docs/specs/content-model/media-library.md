@@ -1315,16 +1315,31 @@ are two copies of it. **The next caller extracts `server/bulk-walk.ts`** rather 
 copying it a third time. It was not done in phase 7 because `asset-bulk.ts` was not
 that phase's file and a shared helper cannot be introduced from one side.
 
-**4. `anthropicDescriber` has never made a live call, and nothing in this repository
-can make one.** Every test of the adapter stubs `fetch`. There is no API key here and
-there should not be one: a suite that spent money on every `pnpm test` would be a
-suite that gets skipped, and the seam exists precisely so Folio's own tests never
-need a provider. What is proven is Folio's half of the wire — which request is built,
-which of the two image paths is taken, what is done with an answer, and that what it
-answers survives `describeAsset` into four columns and a tagging row. What is *not*
-proven is that the Messages API accepts the request. The README says so where a host
-will read it, and says to start on one asset from the detail panel rather than on
-forty thousand.
+**4. `anthropicDescriber`'s automated tests all stub `fetch`, and the wire was
+checked by hand instead.** There is no API key in this repository and there should not
+be one: a suite that spent money on every `pnpm test` would be a suite that gets
+skipped, and the seam exists precisely so Folio's own tests never need a provider. So
+the suite proves Folio's half — which request is built, which of the two image paths
+is taken, what is done with an answer, and that an answer survives `describeAsset`
+into four columns and a tagging row.
+
+The other half was checked **once, manually, on 2026-09-06**, with a throwaway key the
+owner issued and then revoked, from a script outside the repository. Two calls, both
+on a generated 160×160 PNG through the inline-base64 path:
+
+- The request was accepted with the default model, and the answer parsed into `alt`,
+  `description` and `tags`.
+- **Decision 11's constraint held against a real model, in both directions.** Offered
+  `Shapes`, `Headshots`, `Landscapes` it answered `["Shapes"]`. Offered only
+  `Headshots`, `Landscapes`, `Interiors` — nothing that fits a red circle — it
+  answered `[]` rather than inventing "circle" or "red". That is the failure the
+  constrained vocabulary exists to prevent, and it is the one thing no stub could have
+  told us.
+
+Still unproven, and worth naming rather than rounding off: the **public-URL** image
+path (a `localhost` URL is not publicly fetchable, so only the base64 branch ran),
+rate limits, and behaviour at any scale past a single image. The README says to start
+a run on one asset from the detail panel.
 
 ### Phase 1 — the migration and the core vocabulary (2026-09-05, `f1e52a3`)
 

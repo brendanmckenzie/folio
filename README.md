@@ -940,12 +940,19 @@ description?, tags? }`. Write your own with any provider; `anthropicDescriber` i
 a convenience over that seam and not a second one, so deleting it costs you
 twenty lines and no capability. It takes `model` and `prompt` if you want either.
 
-**`anthropicDescriber` has never made a live call.** Every test of it stubs
-`fetch`, because there is no API key in this repository and a test suite that
-spent money would be a test suite nobody runs. The request it builds is written
-from the documented Messages API and read back defensively, but it is unproven
-against the real endpoint: treat your first run as the test, and start it on one
-asset from the detail panel rather than on forty thousand.
+**Its tests stub `fetch`, but the request has been checked against the real
+endpoint once.** No test here spends money — a suite that did would be a suite
+nobody runs — so every automated test of the adapter stubs the wire. Separately,
+on 2026-09-06, two calls were made by hand against the Messages API with a
+throwaway key: the request `anthropicDescriber` builds was accepted with the
+default model, the inline-base64 image path worked, and the answer parsed. The
+vocabulary constraint held in both directions — offered a fitting tag it chose
+that one and nothing else, and offered only unfitting ones it answered an empty
+list rather than inventing a near-synonym.
+
+What that does **not** cover: the public-URL image path, rate limits, or
+behaviour at any scale beyond one image. Still start on one asset from the detail
+panel rather than on forty thousand.
 
 Three things to know before you turn it on:
 
