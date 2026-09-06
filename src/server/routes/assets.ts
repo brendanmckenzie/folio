@@ -159,6 +159,12 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       // `?count=1`, that number is also the `expected` its count guard checks
       // against, so the two have to come off one set of clauses.
       undescribed: c.req.query('undescribed') === '1',
+      // The other half: attempted and recorded a failure. Exclusive with
+      // nothing, `undescribed` included — "never attempted" and "attempted and
+      // failed" cannot both be true of one row, so the pair can only ever
+      // narrow to nothing, which is a legitimate (empty) answer rather than one
+      // the route needs to refuse the way `folder`/`unfiled` is.
+      failed: c.req.query('failed') === '1',
     })
     return c.json({ ...page, rows: await withTags(db, page.rows) })
   })

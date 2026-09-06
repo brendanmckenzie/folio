@@ -391,11 +391,16 @@ to treat their first run as the test rather than assuming it is proven.
 
 Deferred, each named rather than glossed:
 
-- **No `failed` filter.** A recorded failure stamps `described_at` and so leaves
-  the backlog, which is what stops a permanently failing file being paid for
-  forever — but `AssetFilter` has `undescribed` and no `describe_error is not
-  null`, so there is no way to run over the failures. Spec 32's phase 7 notes
-  claimed the run panel offered one; it does not. One clause and one key.
+- **No `failed` filter. Fixed 2026-09-06**, as the same four halves
+  `undescribed` needed: `describe_error is not null` in `assetFilterSql`, the
+  key in `CAPTURED_ASSET_FILTER` so a captured *select all* survives the
+  validator, the term on `AssetsUrl` (the same six functions `undescribed`
+  runs through), and the chip beside *Not described* in `AssetBrowser`, drawn
+  only where `describe` is configured. Retrying is the ordinary bulk
+  *Describe* action over a selection captured with the chip on — no new run
+  path — and `describe.ts`'s `stamp` already clears `describe_error` on a
+  successful re-describe, so a fixed file leaves the set on its own rather
+  than needing to be unticked.
 - **The batch walk is written twice**, in `server/asset-bulk.ts` and
   `server/describe.ts` — `filterBatch`, `idBatch`, the cursor read and
   `reasonOf`, some sixty lines. Two runners was decision 6 and is still right;

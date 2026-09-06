@@ -97,6 +97,7 @@ const url = (extra: Partial<AssetsUrl> = {}): AssetsUrl => ({
   tags: [],
   untagged: false,
   undescribed: false,
+  failed: false,
   asset: undefined,
   ...extra,
 })
@@ -137,6 +138,7 @@ describe('the URL model', () => {
       tags: undefined,
       untagged: undefined,
       undescribed: undefined,
+      failed: undefined,
       asset: undefined,
     })
   })
@@ -167,11 +169,13 @@ describe('the URL model', () => {
       tags: 'headshot,archive',
       untagged: undefined,
       undescribed: undefined,
+      failed: undefined,
       asset: undefined,
     })
     expect(assetsQuery(url({ unfiled: true }))).toMatchObject({ folder: undefined, unfiled: '1' })
     expect(assetsQuery(url({ untagged: true }))).toMatchObject({ tags: undefined, untagged: '1' })
     expect(assetsQuery(url({ undescribed: true }))).toMatchObject({ undescribed: '1' })
+    expect(assetsQuery(url({ failed: true }))).toMatchObject({ failed: '1' })
   })
 
   it('round trips every screen state', () => {
@@ -188,11 +192,15 @@ describe('the URL model', () => {
       url({ tags: ['headshot', 'archive'] }),
       url({ untagged: true }),
       url({ undescribed: true }),
-      // The backlog is exclusive with nothing, so every combination has to
-      // survive the round trip — a folder's backlog and a tag's backlog are
-      // both questions somebody asks.
+      url({ failed: true }),
+      // Both halves of the backlog split are exclusive with nothing, so every
+      // combination has to survive the round trip — a folder's backlog, a
+      // tag's failures, and the two halves together (an honest empty grid).
       url({ undescribed: true, folder: 'clients/acme', kind: 'image', q: 'logo' }),
       url({ undescribed: true, tags: ['headshot'] }),
+      url({ failed: true, folder: 'clients/acme', kind: 'image', q: 'logo' }),
+      url({ failed: true, tags: ['headshot'] }),
+      url({ undescribed: true, failed: true }),
     ]
     for (const state of states) {
       const written = assetsQuery(state)
@@ -306,6 +314,27 @@ describe('the view toggle and the filters', () => {
     })
   })
 
+  it('clears nothing when `failed` is turned on, including `undescribed` — the two never contradict a route refusal, only each other', () => {
+    // `failed` is `undescribed`'s other half and gets the identical treatment:
+    // exclusive with nothing the route refuses, so a folder, a tag or the
+    // backlog chip all survive turning it on. It composes with `undescribed`
+    // too — the pair can only ever match nothing (a row cannot be both never
+    // attempted and attempted-and-failed), which is an honest empty answer
+    // rather than one `withFilter` needs to prevent.
+    const narrowed = withFilter(url({ folder: 'clients/acme', tags: ['headshot'] }), {
+      failed: true,
+    })
+    expect(narrowed).toMatchObject({ folder: 'clients/acme', tags: ['headshot'], failed: true })
+    expect(withFilter(url({ failed: true }), { folder: 'clients/acme' })).toMatchObject({
+      folder: 'clients/acme',
+      failed: true,
+    })
+    expect(withFilter(url({ failed: true }), { undescribed: true })).toMatchObject({
+      undescribed: true,
+      failed: true,
+    })
+  })
+
   it('tells an empty library from a filter that matches nothing', () => {
     expect(isNarrowed(url())).toBe(false)
     expect(isNarrowed(url({ q: '  ' }))).toBe(false)
@@ -316,6 +345,7 @@ describe('the view toggle and the filters', () => {
     expect(isNarrowed(url({ tags: ['headshot'] }))).toBe(true)
     expect(isNarrowed(url({ untagged: true }))).toBe(true)
     expect(isNarrowed(url({ undescribed: true }))).toBe(true)
+    expect(isNarrowed(url({ failed: true }))).toBe(true)
   })
 })
 
@@ -370,6 +400,12 @@ describe('the request', () => {
     // bar are written by two functions, so both are asserted.
     expect(assetsParams(url(), { limit: 48 }).get('undescribed')).toBeNull()
     expect(assetsParams(url({ undescribed: true }), { limit: 48 }).get('undescribed')).toBe('1')
+  })
+
+  it('sends the failed narrowing the list route parses', () => {
+    // The other half of the same split, wired identically.
+    expect(assetsParams(url(), { limit: 48 }).get('failed')).toBeNull()
+    expect(assetsParams(url({ failed: true }), { limit: 48 }).get('failed')).toBe('1')
   })
 
   it('is identical with and without a cursor apart from the cursor', () => {

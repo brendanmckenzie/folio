@@ -144,6 +144,16 @@ export interface AssetsUrl {
    */
   undescribed: boolean
   /**
+   * `describe_error is not null` — every file the enrichment attempted and
+   * could not describe. The other half of the backlog split, and exclusive
+   * with nothing for the same reason `undescribed` is: "never attempted" and
+   * "attempted and failed" narrow different rows, so every combination with a
+   * folder, a tag, a type or a search means something. A host with no
+   * `describe` configured never sees the control, but a hand-written URL
+   * still filters, because the column exists either way.
+   */
+  failed: boolean
+  /**
    * The asset whose detail panel is open.
    *
    * In the URL because **an asset is a thing somebody sends a colleague**: "have a
@@ -181,6 +191,7 @@ export function parseAssetsUrl(
     tags,
     untagged: tags.length === 0 && query.untagged === '1',
     undescribed: query.undescribed === '1',
+    failed: query.failed === '1',
     asset: query.asset || undefined,
   }
 }
@@ -214,6 +225,7 @@ export function assetsQuery(url: AssetsUrl): Record<string, string | undefined> 
     tags: url.tags.length > 0 ? url.tags.join(',') : undefined,
     untagged: url.untagged ? '1' : undefined,
     undescribed: url.undescribed ? '1' : undefined,
+    failed: url.failed ? '1' : undefined,
     asset: url.asset,
   }
 }
@@ -277,7 +289,10 @@ export function withView(url: AssetsUrl, view: AssetView): AssetsUrl {
 export function withFilter(
   url: AssetsUrl,
   patch: Partial<
-    Pick<AssetsUrl, 'kind' | 'q' | 'folder' | 'unfiled' | 'tags' | 'untagged' | 'undescribed'>
+    Pick<
+      AssetsUrl,
+      'kind' | 'q' | 'folder' | 'unfiled' | 'tags' | 'untagged' | 'undescribed' | 'failed'
+    >
   >,
 ): AssetsUrl {
   const next = { ...url, ...patch }
@@ -306,7 +321,8 @@ export function isNarrowed(url: AssetsUrl): boolean {
     url.unfiled ||
     url.tags.length > 0 ||
     url.untagged ||
-    url.undescribed
+    url.undescribed ||
+    url.failed
   )
 }
 
@@ -341,6 +357,7 @@ export function assetsParams(
   for (const tag of url.tags) params.append('tags', tag)
   if (url.untagged) params.set('untagged', '1')
   if (url.undescribed) params.set('undescribed', '1')
+  if (url.failed) params.set('failed', '1')
   if (opts.count) params.set('count', '1')
   if (opts.cursor) params.set('cursor', opts.cursor)
   return params

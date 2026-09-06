@@ -1483,10 +1483,11 @@ export function tagsQuery(raw: string[] | undefined): string[] | undefined {
  *
  * Every member of `core/assets.ts`'s `AssetFilter` that a list route parses, and
  * **nothing more** — a filter key the composer ignores is a selection that means
- * something other than what it says. **`undescribed` is here and its clause is
- * in `assetFilterSql`, and the two arrived together on purpose**: this object is
- * a `v.object`, so a key it does not declare is *stripped in silence*, and a
- * describe run whose "only the ones never described" was stripped is the whole
+ * something other than what it says. **`undescribed` and `failed` are here and
+ * their clauses are in `assetFilterSql`, and each pair arrived together on
+ * purpose**: this object is a `v.object`, so a key it does not declare is
+ * *stripped in silence*, and a describe run whose "only the ones never
+ * described" — or "only the ones that failed" — was stripped is the whole
  * library described again, every time, at the host's expense. The two mutual
  * exclusions the list route refuses with a 400 (`folder`/`unfiled`,
  * `tags`/`untagged`) are *not* re-checked here — `assetFilterSql` composes both
@@ -1511,6 +1512,7 @@ const CAPTURED_ASSET_FILTER = v.object(
     unfiled: v.optional(v.boolean('must be true or false')),
     untagged: v.optional(v.boolean('must be true or false')),
     undescribed: v.optional(v.boolean('must be true or false')),
+    failed: v.optional(v.boolean('must be true or false')),
   },
   OBJECT,
 )

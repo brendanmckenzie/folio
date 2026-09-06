@@ -1953,6 +1953,27 @@ hand-ticked selection. The fix is one clause in `assetFilterSql`, one key in
 `undescribed` needed — and it is recorded in `ROADMAP.md` rather than done here,
 because it is a new filter rather than a phase that was planned.
 
+**Closed 2026-09-06, outside any phase.** `assetFilterSql` gained
+`describe_error is not null`; `CAPTURED_ASSET_FILTER` gained the key so a
+captured *select all* survives the validator; `AssetsUrl` gained `failed`,
+through the same six functions `undescribed` runs through
+(`parseAssetsUrl` / `assetsQuery` / `assetsParams` / `withFilter` /
+`isNarrowed` / `capturedFilter`); and `AssetBrowser` gained a *Failed* chip
+beside *Not described*, drawn only where `describe` is configured.
+`countMatching` — the run panel's own count re-check — needed the same
+parameter `undescribed` gets, and had silently fallen out of step with
+`AssetFilter` the moment `failed` was added to it; that is now a fourth field
+it mirrors rather than a third. **Verified by breaking it**: removing only the
+`assetFilterSql` clause, leaving the URL term, the validator key and the chip
+in place, turned two `describe.test.ts` tests red — a captured `{ failed:
+true }` matched every asset rather than the one carrying a recorded error, and
+the route's own count guard caught the mismatch as a 409 before a single model
+call was made. Retrying is the ordinary bulk *Describe* action over a
+selection captured with the chip on, not a new run path: `describe.ts`'s
+`stamp` writes `describe_error` on every path, clearing it on a successful
+re-describe, so a file this chip shows leaves the set on its own once it is
+fixed, without anybody unticking it.
+
 **Not done, and it is the one thing this spec asked for that nobody built.**
 *Testing requirements* names `scripts/media-library-test.mjs` — upload, a folder
 tree, filing, tagging, filtering by folder and by two tags, a bulk tag over a

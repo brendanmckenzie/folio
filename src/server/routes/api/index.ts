@@ -159,10 +159,10 @@ export function apiRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
  * its eight-slug cap and its refusal message. One spelling and one parser beat
  * a spec table, because a second name is a second implementation of the cap.
  *
- * `unfiled`, `untagged` and `undescribed` are deliberately not here. They are
- * the admin's retro-organising and enrichment affordances, not questions a
- * script asks of a media library, and a version segment is a promise: adding
- * one later is additive, and unadding one is not.
+ * `unfiled`, `untagged`, `undescribed` and `failed` are deliberately not here.
+ * They are the admin's retro-organising and enrichment affordances, not
+ * questions a script asks of a media library, and a version segment is a
+ * promise: adding one later is additive, and unadding one is not.
  */
 function assetFilterQuery(req: {
   query(name: string): string | undefined

@@ -933,6 +933,32 @@ describe('runDescribe', () => {
     // that path too — so it is not swept again by the default run.
     expect((await stored(done)).altAuto).toBe('')
   })
+
+  it('walks only the failed set when the captured filter says failed, and a successful retry clears the error', async () => {
+    const failed = await seedAsset({ filename: 'f-failed.png' })
+    const waiting = await seedAsset({ filename: 'f-waiting.png' })
+    await env.DB.prepare('update assets set described_at = ?, describe_error = ? where id = ?')
+      .bind(Date.now(), 'The describe function failed', failed)
+      .run()
+
+    const filter: AssetFilter = { failed: true }
+    const expected = await countAssets(env.DB, filter)
+    expect(expected).toBe(1)
+
+    const fn = vi.fn(async () => ({ alt: 'Fixed on retry' }))
+    const totals = await drive(runDeps(fn), { all: true, filter, expected })
+
+    expect(totals.done).toBe(1)
+    expect(fn).toHaveBeenCalledTimes(1)
+    // The retry succeeded, so `describe_error` is cleared (`stamp` writes it on
+    // every path, error or not) — the row this filter named leaves the failed
+    // set on its own, with nobody having to untick it.
+    const row = await stored(failed)
+    expect(row.altAuto).toBe('Fixed on retry')
+    expect(row.describeError).toBeNull()
+    // A file that was never attempted is untouched by a run scoped to `failed`.
+    expect((await stored(waiting)).altAuto).toBe('')
+  })
 })
 
 /* ------------------------------------------------- POST /assets/describe --- */
@@ -997,6 +1023,28 @@ describe('POST {base}/api/assets/describe', () => {
     expect(((await res!.json()) as DescribeRunReport).done).toBe(1)
     expect(fn).toHaveBeenCalledTimes(1)
     expect((await stored(described)).altAuto).toBe('')
+  })
+
+  it('keeps `failed` through the validator rather than stripping it', async () => {
+    const broken = await seedAsset({ filename: 'v-broken.png' })
+    await seedAsset({ filename: 'v-fine.png' })
+    await env.DB.prepare('update assets set described_at = ?, describe_error = ? where id = ?')
+      .bind(Date.now(), 'a previous run failed', broken)
+      .run()
+
+    const fn = vi.fn(async () => ({ alt: 'Retried' }))
+    const res = await run(makeFolio({ fn }), {
+      selection: { all: true, filter: { failed: true }, expected: 1 },
+    })
+
+    // A stripped key would make this a run over both files: the count guard
+    // would refuse it (2 !== 1), and if the number happened to agree it would
+    // spend a call on the file that was already fine.
+    expect(res?.status).toBe(200)
+    expect(((await res!.json()) as DescribeRunReport).done).toBe(1)
+    expect(fn).toHaveBeenCalledTimes(1)
+    expect((await stored(broken)).altAuto).toBe('Retried')
+    expect((await stored(broken)).describeError).toBeNull()
   })
 
   it('answers 409 with the new count when the set moved', async () => {

@@ -70,6 +70,9 @@ export interface AssetFilter {
   untagged?: boolean
   /** `described_at is null`. Drives the enrichment backlog view. */
   undescribed?: boolean
+  /** `describe_error is not null`. A recorded failure, retried on purpose
+   * rather than swept up again by the default backlog run. */
+  failed?: boolean
 }
 
 /** The four operations a selection of assets can be run through (phase 5's

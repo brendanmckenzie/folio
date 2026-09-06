@@ -541,17 +541,25 @@ export function AssetBrowser(props: AssetBrowserProps) {
             ) : null}
 
             {/*
-              The backlog, as a filter rather than as a mode — one chip, drawn
+              The backlog split, as two filters rather than as a mode — drawn
               only where the host configured a `describe`, because "never
-              described" is not a distinction on a site that describes nothing.
+              described" and "failed to describe" are not distinctions on a
+              site that describes nothing.
 
-              It sits with `kind` rather than in the sidebar because it narrows
-              the *grid* the way a type does, and it deliberately clears
-              nothing: a backlog is a question asked inside a folder, a tag or a
-              search, and every one of those combinations means something. The
-              run panel's own *backlog only* checkbox is a different control
-              over a different thing — that one narrows the job, this one
-              narrows the screen.
+              Both sit with `kind` rather than in the sidebar because they
+              narrow the *grid* the way a type does, and both deliberately
+              clear nothing: a backlog or a failure is a question asked inside
+              a folder, a tag or a search, and every one of those combinations
+              means something — including each other, since "never attempted"
+              and "attempted and failed" cannot both be true of one row and so
+              can only ever narrow to an (honest) empty grid. The run panel's
+              own *backlog only* checkbox is a different control over a
+              different thing — that one narrows the job, this one narrows the
+              screen. Retrying a failure is the ordinary bulk *Describe*
+              action over a selection captured with `failed` on: a successful
+              re-describe clears `describe_error` (`describe.ts`'s `stamp`),
+              so a file this chip shows leaves the set on its own once it is
+              fixed.
             */}
             {describe.configured ? (
               <fieldset className={css.chips}>
@@ -563,6 +571,14 @@ export function AssetBrowser(props: AssetBrowserProps) {
                   onClick={() => onUrl(withFilter(url, { undescribed: !url.undescribed }))}
                 >
                   Not described
+                </button>
+                <button
+                  type="button"
+                  className={`${css.chip} ${url.failed ? css.chipOn : ''}`}
+                  aria-pressed={url.failed}
+                  onClick={() => onUrl(withFilter(url, { failed: !url.failed }))}
+                >
+                  Failed
                 </button>
               </fieldset>
             ) : null}
@@ -1020,6 +1036,7 @@ function capturedFilter(url: AssetsUrl): AssetFilter {
     ...(url.tags.length === 0 ? {} : { tags: [...url.tags] }),
     ...(url.untagged ? { untagged: true } : {}),
     ...(url.undescribed ? { undescribed: true } : {}),
+    ...(url.failed ? { failed: true } : {}),
   }
 }
 
@@ -1206,6 +1223,7 @@ async function countMatching(apiBase: string, filter: AssetFilter): Promise<numb
   for (const slug of filter.tags ?? []) params.append('tags', slug)
   if (filter.untagged) params.set('untagged', '1')
   if (filter.undescribed) params.set('undescribed', '1')
+  if (filter.failed) params.set('failed', '1')
   const res = await fetch(`${apiBase}/assets?${params.toString()}`)
   if (!res.ok) throw new Error(await messageOf(res))
   const page = (await res.json()) as { total?: number }

@@ -127,6 +127,12 @@ function keyOf(sort: AssetSort, row: AssetRow): [CursorPart, CursorPart] {
  * captured *select all* whose `undescribed` the validator strips composes as an
  * unfiltered run, which is the whole library described again at the host's
  * expense — the failure is silent, and it is silent in the expensive direction.
+ *
+ * **`failed` is the same shape, one column over.** `describe_error is not null`
+ * has no partial index — a recorded failure is expected to be the rarer half of
+ * the backlog, not the whole table — but it needs the same two-halves move as
+ * `undescribed`: this clause and `CAPTURED_ASSET_FILTER`'s key, or a captured
+ * *retry the failures* run silently becomes a run over everything again.
  */
 export function assetFilterSql(filter: AssetFilter): { clauses: string[]; binds: unknown[] } {
   const clauses: string[] = []
@@ -196,6 +202,11 @@ export function assetFilterSql(filter: AssetFilter): { clauses: string[]; binds:
   // first. Retrying those is an explicit run, not the default one. Binds
   // nothing.
   if (filter.undescribed) clauses.push('described_at is null')
+  // The other half of that same split: attempted *and* failed. `describe_error`
+  // is cleared (`describe.ts`'s `stamp`) on a successful re-describe, so an
+  // asset a retry fixes leaves this set on its own — nobody has to untick it.
+  // Binds nothing.
+  if (filter.failed) clauses.push('describe_error is not null')
 
   return { clauses, binds }
 }
