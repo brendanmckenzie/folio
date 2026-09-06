@@ -6,7 +6,7 @@
 > **Status:** done — but not as planned; see `## Implementation notes`
 > **Wire version:** none
 > **Migration:** none
-> **Last updated:** 2026-08-29
+> **Last updated:** 2026-09-06
 
 ## Summary
 
@@ -513,9 +513,49 @@ are recorded against their checkpoints above. `LICENSE` is at the root and
 `package.json` carries `"license": "MIT"`; npm includes a licence file in the pack
 regardless of `files`, the same as a README.
 
-`npx folio init` remains unbuilt and is now cheaper than it was: the paste block
-ships with the markers it would rewrite, so the follow-up is a `bin` that
-substitutes between two delimiters rather than a format migration.
+`npx folio init` remained unbuilt until 2026-09-06, and was as cheap as this
+predicted: the paste block already shipped with the markers it rewrites, so the
+`bin` substitutes between two delimiters rather than migrating a format.
+
+**A second pass landed 2026-09-06** and changed the shape of the answer again.
+The spec's checkpoint 1 offered a choice between moving the product documentation
+and copying it, and chose *move* — but under the split, where the question was
+which of two repositories held it. With one repository, the question became which
+of two *audiences* the front page serves, and the answer is neither one document:
+
+- **`README.md` is now a landing page** — what Folio is, who it is for, the
+  feature list, a quick start, and a map. Roughly 300 lines.
+- **`docs/handbook.md` is the old README**, moved wholesale. It is still the
+  feature-by-feature reference and still the longest document here. **Most of
+  the repository's ~168 `README.md` cross-references now mean this file**, source
+  comments included; they were not rewritten, because they read as prose rather
+  than as links and rewriting them all would touch more files than the move did.
+- **`docs/configuration.md` is new**, and is the thing this spec's Ground truth
+  did not notice was missing. The README explained every *feature* and nothing
+  enumerated `createFolio`'s keys, so "what does this setting do, and what
+  happens if I leave it out" had no address. Each optional key's absence is a
+  defined behaviour, and writing them down as a table is what made that visible
+  as a design property rather than an accident.
+- **`UPGRADING.md` is new**, and covers what nothing did: bumping the pin,
+  applying D1 migrations in the right order relative to the deploy, and the
+  per-migration ledger of what each one needs beyond being applied. Two need a
+  reindex. That was recoverable from each spec's *Wire & schema changes* section
+  and from nowhere a consumer would look.
+
+Three things worth recording because they were not obvious:
+
+- **The scaffolder is a copy of a real workspace package, not a template
+  directory.** `examples/starter` is in `pnpm-workspace.yaml` and gated by
+  `pnpm typecheck`, and `bin/folio.mjs init` copies it with four substitutions.
+  A template that is not compiled is a template that rots, and the failure lands
+  on somebody's first five minutes with the library.
+- **`biome.json`'s `files.includes` is an allowlist**, so `bin/` and
+  `examples/starter/` were unchecked by the lint gate until they were added to
+  it. Two files were unformatted and `biome ci` was green over both.
+- **The release smoke test now asserts the starter and every shipped document
+  are in the installed package.** `folio init` fails outright without
+  `examples/starter`, and `files` is the only thing carrying it — a combination
+  nothing but a real install can see.
 
 One consequence to watch: the first push after this is **not a fast-forward** of
 the old split history and never can be, because the two histories are unrelated by

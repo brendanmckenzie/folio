@@ -1,0 +1,183 @@
+/*
+ * Your site's stylesheet. Nothing here comes from Folio — every class name is
+ * one your own blocks emit, so rename them freely.
+ *
+ * It is named in two places: `stylesheets={['/site.css']}` on the page's Shell,
+ * and `previewCss: ['/site.css']` in createFolio, which is what makes the
+ * editor's preview look like the site rather than like unstyled markup.
+ */
+
+:root {
+  --ink: #14161c;
+  --muted: #5b6172;
+  --line: #e3e6ee;
+  --accent: #2f5fe0;
+  --measure: 34rem;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #eceef4;
+    --muted: #99a0b3;
+    --line: #2a2e3a;
+    --accent: #8fb0ff;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: Canvas;
+  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+.draft-banner {
+  padding: 0.6rem 1rem;
+  background: #8a5a00;
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* --- hero ------------------------------------------------------------- */
+
+.hero {
+  padding: clamp(3rem, 10vw, 7rem) 1.5rem;
+  background-size: cover;
+  background-position: center;
+}
+
+.hero[data-has-image="true"] {
+  color: #fff;
+}
+
+.hero__inner {
+  max-width: 60rem;
+  margin: 0 auto;
+}
+
+.hero--center .hero__inner {
+  text-align: center;
+}
+
+.hero__heading {
+  margin: 0;
+  font-size: clamp(2rem, 6vw, 3.5rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+}
+
+.hero__body {
+  margin: 1rem 0 0;
+  max-width: var(--measure);
+  font-size: 1.125rem;
+  color: inherit;
+  opacity: 0.85;
+}
+
+.hero--center .hero__body {
+  margin-inline: auto;
+}
+
+.hero__actions {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 2rem;
+}
+
+.hero--center .hero__actions {
+  justify-content: center;
+}
+
+.hero__actions:empty {
+  display: none;
+}
+
+/* --- button ----------------------------------------------------------- */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.7rem 1.4rem;
+  border-radius: 999px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+
+.button:hover {
+  opacity: 0.85;
+}
+
+.button--primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.button--ghost {
+  border: 1px solid currentColor;
+  color: inherit;
+}
+
+/* A link whose target document was deleted. Worth showing rather than hiding. */
+.button[data-broken] {
+  outline: 2px dashed #c0392b;
+  outline-offset: 3px;
+}
+
+/* --- prose ------------------------------------------------------------ */
+
+.prose {
+  padding: 3rem 1.5rem;
+}
+
+.prose__heading {
+  margin: 0 0 1rem;
+  font-size: 1.75rem;
+  letter-spacing: -0.01em;
+}
+
+.prose__body,
+.prose__heading {
+  max-width: var(--measure);
+  margin-inline: auto;
+}
+
+.prose--wide .prose__body,
+.prose--wide .prose__heading {
+  max-width: 56rem;
+}
+
+.prose__body > * + * {
+  margin-top: 1em;
+}
+
+.prose__body a {
+  color: var(--accent);
+}
+
+.prose__body h2,
+.prose__body h3 {
+  margin-top: 2em;
+  letter-spacing: -0.01em;
+}
+
+.prose__body blockquote {
+  margin: 2em 0;
+  padding-left: 1.25rem;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+  font-style: italic;
+}

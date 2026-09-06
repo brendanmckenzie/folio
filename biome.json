@@ -7,6 +7,9 @@
       "*.ts",
       "examples/demo/src/**",
       "examples/demo/vite.config.ts",
+      "examples/starter/src/**",
+      "examples/starter/vite.config.ts",
+      "bin/**",
       "scripts/**"
     ]
   },

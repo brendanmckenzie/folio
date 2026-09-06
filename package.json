@@ -14,13 +14,29 @@
     "clean": "rm -rf dist",
     "prepack": "pnpm run clean && pnpm run build",
     "prepare": "npm run build:js && npm run build:types",
-    "typecheck": "tsc --noEmit -p . && pnpm --filter demo typecheck",
+    "typecheck": "tsc --noEmit -p . && pnpm --filter demo typecheck && pnpm --filter folio-starter typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "biome check .",
     "lint:fix": "biome check --write ."
   },
-  "files": ["dist", "src", "migrations", "README.md", "AGENTS.md", "docs/api.md", "docs/mcp.md"],
+  "bin": { "folio": "./bin/folio.mjs" },
+  "files": [
+    "dist",
+    "src",
+    "migrations",
+    "bin",
+    "examples/starter",
+    "!examples/starter/node_modules",
+    "!examples/starter/.wrangler",
+    "README.md",
+    "AGENTS.md",
+    "UPGRADING.md",
+    "docs/api.md",
+    "docs/mcp.md",
+    "docs/configuration.md",
+    "docs/handbook.md"
+  ],
   "exports": {
     "./core": {
       "development": "./src/core/index.ts",

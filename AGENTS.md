@@ -1,9 +1,10 @@
 # Building a host on Folio
 
-Instructions for a coding agent adding Folio to a project. `README.md` explains
-what each feature *is*; this file says what to do, in what order, and what you
-will get wrong. Where they disagree, this file is about integration and the
-README is about features — neither overrides the other.
+Instructions for a coding agent adding Folio to a project. `docs/handbook.md`
+explains what each feature *is* and `docs/configuration.md` is every config key;
+this file says what to do, in what order, and what you will get wrong. Where
+they disagree, this file is about integration and those are about features and
+settings — neither overrides the other.
 
 Folio is a library, not an application. **The host owns its Worker, its routing
 and its public pages.** Folio owns the editor, the sync engine and the block
@@ -15,6 +16,13 @@ render. Everything below follows from that.
 npm install github:brendanmckenzie/folio#<full-sha>
 ```
 
+**Starting a project from nothing?** Scaffold it instead — you get a working
+Worker, a `wrangler.jsonc` with every binding, and a pinned SHA:
+
+```
+npx github:brendanmckenzie/folio init my-site
+```
+
 Pin a **full 40-character SHA**, never a branch. There is no npm package and no
 tag; a SHA is the version. `npm install` runs the package's `prepare`, which
 builds `dist/` on your machine — expect the install to take a few seconds and to
@@ -24,6 +32,10 @@ Peer dependencies: React 19, React DOM 19, Vite 7 or 8.
 
 **When you bump the pin, delete `node_modules/folio` first.** npm skips the
 package's build if the directory is already there, leaving no `dist/`.
+
+An upgrade is more than the pin when Folio has landed a D1 migration since
+yours. `UPGRADING.md` is the procedure and the per-migration ledger — two of
+them need a reindex, and one needs a cron you may not have.
 
 ## Point your own agent at this file
 
@@ -106,7 +118,7 @@ return html(
 ```
 
 **A gated page is `private, no-store` whether it answers `granted` or
-`denied`** — see "Visitor access" in `README.md`. `page.access` is the whole
+`denied`** — see "Visitor access" in `docs/handbook.md`. `page.access` is the whole
 security property: `cacheVerdictFor` has no opinion on your own route, so this
 value is the only thing keeping members-only content out of a shared cache
 under its real URL.
@@ -216,8 +228,17 @@ build and the asset constants. Do not hand-roll them.
 
 ## Where to look next
 
-- `README.md` — every feature, with worked examples.
+- `docs/configuration.md` — every `createFolio()` key, every binding, every
+  Vite option, each with its default and its failure mode. Start here for
+  "what does this setting do".
+- `docs/handbook.md` — every feature, with worked examples and the reasoning.
+- `UPGRADING.md` — bumping the pinned SHA, and which D1 migrations need more
+  than applying.
 - `docs/api.md` — the `{base}/api/v1` contract.
 - `docs/mcp.md` — pointing an assistant at a running site.
-- `examples/demo` — a working host. Read it for block definitions and config;
-  see the "Do not" note above about its page rendering.
+- `examples/starter` — the smallest correct host, and what `folio init`
+  scaffolds. **This is the template**; it renders its page through a function
+  the comments name as the one a router would call.
+- `examples/demo` — a working host with nearly every feature switched on. Read
+  it for block definitions and config; see the "Do not" note above about its
+  page rendering.

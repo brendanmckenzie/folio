@@ -143,15 +143,35 @@ function smokeTest(sha) {
     console.log(`ok (${Object.keys(map ?? {}).length} subpaths)`)
 
     process.stdout.write('· docs ship … ')
-    const docs = ['README.md', 'AGENTS.md'].filter((f) => !existsSync(join(root, f)))
+    /**
+     * Every document `files` claims to carry, plus the starter `folio init`
+     * copies. A consumer reading `node_modules` is the only reader some of
+     * these get, and `bin/folio.mjs init` fails outright without the template —
+     * both are silent failures that only a real install can see.
+     */
+    const shipped = [
+      'README.md',
+      'AGENTS.md',
+      'UPGRADING.md',
+      'docs/configuration.md',
+      'docs/handbook.md',
+      'docs/api.md',
+      'docs/mcp.md',
+      'bin/folio.mjs',
+      'examples/starter/package.json',
+      'examples/starter/src/index.tsx',
+    ]
+    const docs = shipped.filter((f) => !existsSync(join(root, f)))
     if (docs.length) {
       console.log('FAILED')
+      for (const d of docs) console.error(`    missing: ${d}`)
       die(
-        `${docs.join(' and ')} absent from the installed package. ` +
-          'A consumer reading node_modules is the only reader some docs get.',
+        `${docs.length} file(s) absent from the installed package. ` +
+          'A consumer reading node_modules is the only reader some docs get, ' +
+          'and `folio init` cannot run without examples/starter.',
       )
     }
-    console.log('ok')
+    console.log(`ok (${shipped.length} files)`)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

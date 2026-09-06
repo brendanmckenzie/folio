@@ -1,0 +1,97 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "folio-starter",
+  "main": "./src/index.tsx",
+  "compatibility_date": "2026-07-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "binding": "ASSETS"
+  },
+  "observability": {
+    "enabled": true
+  },
+
+  // Workers Caching. The whole of the opt-in: no binding, no API token, no
+  // zone, no paid plan. With it, a response carrying the Cache-Control/Cache-Tag
+  // pair `page.headers` returns is stored at the edge, and publishing purges it
+  // globally by tag. Without it those headers are inert and every purge is a
+  // no-op — which is what makes it safe to adopt the headers first and this
+  // flag second.
+  //
+  // **Read this before you scale up.** Caching is per-*entrypoint*, and turning
+  // it on Worker-wide is a security bug rather than a tuning mistake: Workers
+  // Caching is opt-out, so a 200 with no Cache-Control is stored for two hours
+  // under heuristic freshness — and a request cookie is not a bypass condition,
+  // only Set-Cookie on the response is. On a single-entrypoint project like this
+  // one, `folio.cacheVerdict(req)` is what keeps the admin's authenticated JSON
+  // out of a shared cache. See docs/configuration.md.
+  //
+  // Nothing here is observable locally: miniflare simulates no part of Workers
+  // Caching, so `wrangler dev` never reports a HIT.
+  "cache": {
+    "enabled": true
+  },
+
+  // Scheduled publish and unpublish, plus the auth retention sweep. This key
+  // plus the `scheduled()` handler in src/index.tsx is the whole integration —
+  // no queue, no polling loop, no external cron service.
+  //
+  // Every minute, which is the finest granularity Cloudflare cron offers. A
+  // schedule fires on the first sweep at or after its due time, so it is never
+  // early and is late by at most one tick. Widen it to "*/5 * * * *" if that is
+  // close enough; nothing in Folio assumes the period.
+  //
+  // `wrangler dev` does not run crons on a timer. POST /folio/api/schedules/run
+  // is the manual trigger.
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "folio",
+      // Replace with the id from `wrangler d1 create folio` before deploying.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      // Points at the folio package's copy, so this project shares one
+      // migration history with the library. `wrangler d1 migrations apply` runs
+      // them in order and records what it applied, so it never re-runs one and
+      // never drops a table. Seed rows live in ./seed.sql and are applied
+      // separately.
+      "migrations_dir": "./node_modules/folio/migrations"
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      { "name": "STORY", "class_name": "StoryDO" },
+      // The space channel: cross-story presence and structural events. Optional
+      // — Folio degrades to per-story presence and a tree you refresh yourself
+      // without it — but there is no reason for a real deployment not to have it.
+      { "name": "SPACE", "class_name": "SpaceDO" }
+    ]
+  },
+
+  // A SQLite-backed Durable Object must be declared as such at creation, and
+  // this cannot be changed for an already-deployed class. Hence two tags rather
+  // than one: `SpaceDO` uses `new_classes`, not `new_sqlite_classes`, because it
+  // holds no storage at all — presence lives in socket attachments and nothing
+  // it knows outlives them.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["StoryDO"] },
+    { "tag": "v2", "new_classes": ["SpaceDO"] }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "folio-media"
+    }
+  ],
+
+  // Without this, assets serve at their original size. `wrangler dev` supports
+  // it locally and does not bill transformations there.
+  "images": {
+    "binding": "IMAGES"
+  }
+}

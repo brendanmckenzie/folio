@@ -1,15 +1,24 @@
 # Working in this repo
 
 Folio is a Cloudflare-native block CMS with a live visual editor: a library, mounted by
-a host Worker that owns its own routes. `README.md` describes what it does and why;
-this file is how to work on it without rediscovering things the hard way.
+a host Worker that owns its own routes. This file is how to work **on** it without
+rediscovering things the hard way. The consumer-facing docs are elsewhere and are
+where a change to behaviour has to land too: `README.md` is the landing page and
+the tour, `docs/handbook.md` is the feature-by-feature deep dive (it *was* the
+README until 2026-09-06 and still reads as one long document — most of the repo's
+`README.md` cross-references, source comments included, now mean that file),
+`docs/configuration.md` is every `createFolio()` key, `UPGRADING.md` is the
+consumer's upgrade procedure and the per-migration ledger, and `AGENTS.md` is the
+integration guide. `examples/starter` is a real workspace package that
+`pnpm typecheck` gates and that `bin/folio.mjs init` copies — **change it and you
+change what every new project starts from.**
 
 ## Commands, and how to tell whether they passed
 
 From the repo root:
 
 ```
-pnpm typecheck          # tsc across the library and examples/demo
+pnpm typecheck          # tsc across the library, examples/demo and examples/starter
 pnpm exec biome ci .    # lint + format, one of the release gates
 pnpm test               # vitest: unit (Node) + workers (real workerd)
 pnpm build              # the library build (esbuild + .d.ts)
@@ -214,7 +223,7 @@ are free to go the next time that code is touched.
   entrypoint and handles writes on another purges an empty namespace and keeps
   serving the stale page for its whole TTL — silently. The fix is the host's
   (route writes through the cached entrypoint) but the trap is ours to document,
-  and the README does. The same applies to `runSchedules` from a `scheduled()`
+  and `docs/handbook.md` does. The same applies to `runSchedules` from a `scheduled()`
   handler — the host picks that context too, so a cron must be routed through the
   cached entrypoint like any other write. Nothing purges from inside a Durable
   Object (`StoryDO`'s only alarm is a debounced watermark write), so that case
@@ -337,7 +346,7 @@ node scripts/release.mjs --push    # …and push
 It refuses a dirty tree or a branch other than `main`, runs the three gates by
 exit code, then **installs this repo the way a consumer does** — `git+file:`
 against itself, so it runs before the push — and checks that every `exports`
-subpath resolves and that `README.md` and `AGENTS.md` are in the installed
+subpath resolves and that the consumer-facing documents are in the installed
 package. That is the only check that exercises the package's own `prepare`
 build: the three gates run against the workspace, and nobody installs the
 workspace.
