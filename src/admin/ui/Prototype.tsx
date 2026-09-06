@@ -25,6 +25,8 @@ import { ASSET_VIEW_KEY } from './screens/AssetPicker'
 import { Assets } from './screens/Assets'
 import { Content } from './screens/Content'
 import { Documents } from './screens/Documents'
+import { FormBuilder } from './screens/FormBuilder'
+import { Forms } from './screens/Forms'
 import { Model } from './screens/Model'
 import { Redirects } from './screens/Redirects'
 import { Schedules } from './screens/Schedules'
@@ -109,6 +111,17 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
    * it inside the component that owns the router is asking for the wrong one.
    */
   const [historyOpen, setHistoryOpen] = useState(false)
+  /**
+   * The open form's own label, for the breadcrumb and the tab title on the
+   * builder and (once phase 7 lands) the responses screen — `route.ts`'s
+   * `crumbs()` falls back to a generic "Form" without it, the same "not known
+   * yet" posture a global's crumb takes before the manifest lands.
+   *
+   * Keyed by id rather than reset on navigation: a lookup that only matches the
+   * screen currently open is simpler than clearing this on every route change,
+   * and it is what `formLabel` below relies on.
+   */
+  const [formTitle, setFormTitle] = useState<{ id: string; label: string } | null>(null)
 
   useEffect(() => {
     let live = true
@@ -224,6 +237,10 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
   const crumbContext = useMemo(
     (): CrumbContext => ({
       label: (name) => types.find((t) => t.name === name)?.label,
+      // Matches only the form currently open, so there is nothing to reset on
+      // navigation: leaving the builder for a different form simply stops
+      // matching, and the crumb falls back to "Form" until the new one loads.
+      formLabel: (id) => (formTitle?.id === id ? formTitle.label : undefined),
       ...(open
         ? {
             chain: local
@@ -237,7 +254,7 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
           }
         : {}),
     }),
-    [types, open, local, fetched.chain],
+    [types, open, local, fetched.chain, formTitle],
   )
   const trail = crumbs(route, crumbContext)
 
@@ -432,6 +449,7 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
           historyOpen,
           setHistoryOpen,
           preview: previewFor(open, previewType, previewHost, boot.base),
+          onFormLabel: (id, formLabel) => setFormTitle({ id, label: formLabel }),
         })}
       </Shell>
       {palette ? (
@@ -497,6 +515,10 @@ interface ScreenArgs {
   setHistoryOpen: (open: boolean) => void
   /** The open document's iframe src. See `EditorShell`'s `preview`. */
   preview: string | undefined
+  /** Reports the open form's own label, for `crumbContext.formLabel` — the
+   * builder's job is to call this once its fetch answers, not to hold the
+   * breadcrumb itself. */
+  onFormLabel: (id: string, label: string) => void
 }
 
 /**
@@ -668,6 +690,44 @@ function screenFor(a: ScreenArgs) {
           remembered={{ view: a.assetView.value }}
           onRemember={(next) => a.assetView.set(next.view)}
         />
+      )
+
+    case 'forms':
+      return <Forms apiBase={boot.apiBase} me={a.me} onOpen={a.go} onNotice={a.notify} />
+
+    case 'form': {
+      // Extracted before any closure touches it: narrowing a discriminated
+      // union through a property access (`route.screen.id`) does not survive
+      // into a nested function body the way it does in straight-line code —
+      // `case 'documents'` above hits the same rule and takes the same way
+      // out (`const wanted = route.screen.type`).
+      const formId = route.screen.id
+      return (
+        // Keyed by id so navigating from one form's builder straight to
+        // another's (the palette, or an edited URL) remounts rather than
+        // carrying over which field was selected — `useForm`'s own effect
+        // would refetch either way, but the selection state is the builder's,
+        // not the hook's.
+        <FormBuilder
+          key={formId}
+          apiBase={boot.apiBase}
+          id={formId}
+          me={a.me}
+          {...(a.manifest?.locales ? { locales: a.manifest.locales } : {})}
+          onNotice={a.notify}
+          onLabel={(label) => a.onFormLabel(formId, label)}
+          onOpenResponses={(id) => a.go({ name: 'responses', id })}
+          onDeleted={() => a.go({ name: 'forms' })}
+        />
+      )
+    }
+
+    case 'responses':
+      return (
+        <Stub title="Responses">
+          The table of submissions, its filters and the CSV export are phase 7 of{' '}
+          <code>docs/specs/content-model/forms.md</code> and are not built yet.
+        </Stub>
       )
 
     case 'access':

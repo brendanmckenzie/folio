@@ -268,6 +268,8 @@ export const blocks = <const T extends readonly string[]>(
 
 export const collection = (o: Opts<'collection'> = {}) => ({ kind: 'collection' as const, ...o })
 
+export const form = (o: Opts<'form'> = {}) => ({ kind: 'form' as const, ...o })
+
 /**
  * What a field hands to `render`. A `blocks` field arrives already rendered, so
  * a block author just drops `{body}` into their JSX; a `multilink` arrives

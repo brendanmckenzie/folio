@@ -155,6 +155,21 @@ export function canManageAccess(me: Me): boolean {
   return me.mode === 'session' && user !== null && user.role === 'admin'
 }
 
+/**
+ * May they delete a form? `admin`, matching `DELETE {base}/api/forms/:id`'s
+ * `ADMIN` access (`docs/specs/content-model/forms.md` checkpoint 8: "Responses
+ * read at publisher; export and delete at admin. Building a form stays at
+ * editor.") — deliberately `atLeast(…, 'admin')` like `canEdit`/`canPublish`
+ * rather than `canManageAccess`'s exact-role, mode-gated check: a form's delete
+ * is an ordinary content permission that also holds under `auth: 'open'`, not a
+ * surface that stops existing without accounts.
+ */
+export function canDeleteForms(me: Me): boolean {
+  if (me.mode === 'open') return true
+  const user = asUser(me)
+  return user !== null && atLeast(user.role, 'admin')
+}
+
 /** The label for the user menu, or null when there is nobody to name. */
 export function actorLabel(me: Me): string | null {
   if (me.actor?.kind === 'user') return me.actor.name

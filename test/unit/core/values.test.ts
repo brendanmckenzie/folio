@@ -4,6 +4,7 @@ import {
   blocks,
   boolean,
   defaultValue,
+  form,
   multiasset,
   multilink,
   number,
@@ -494,11 +495,23 @@ describe('defaultValue', () => {
     expect(defaultValue(blocks({ allow: ['x'] }))).toBeNull()
   })
 
-  it('is null for multilink, asset, richtext, and reference', () => {
+  it('is null for multilink, asset, richtext, reference, and form', () => {
     expect(defaultValue(multilink())).toBeNull()
     expect(defaultValue(asset())).toBeNull()
     expect(defaultValue(richtextField())).toBeNull()
     expect(defaultValue(reference())).toBeNull()
+    // A `form` field's stored value is the picked form's id, the same
+    // indirection `reference` uses — so a fresh block has picked none yet.
+    expect(defaultValue(form())).toBeNull()
+  })
+
+  it('form() takes no options today, matching collection() before it grew any', () => {
+    // `Opts<'form'>` is `Common` alone (`fields.ts`'s `Field` union) — no
+    // `Indexable`, no `Searchable`. The builder still takes an options object
+    // for every other common key (`label`, `help`, `required`, `showIf`,
+    // `hidden`, `default`, `translatable`), matching `collection()`'s shape.
+    expect(form()).toEqual({ kind: 'form' })
+    expect(form({ label: 'Contact form' })).toEqual({ kind: 'form', label: 'Contact form' })
   })
 
   it('is an empty array for multiasset', () => {

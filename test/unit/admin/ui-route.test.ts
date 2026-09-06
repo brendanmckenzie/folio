@@ -30,6 +30,7 @@ describe('parse', () => {
     expect(parse('/folio/redirects', MOUNT).screen).toEqual({ name: 'redirects' })
     expect(parse('/folio/schedules', MOUNT).screen).toEqual({ name: 'schedules' })
     expect(parse('/folio/settings', MOUNT).screen).toEqual({ name: 'settings' })
+    expect(parse('/folio/forms', MOUNT).screen).toEqual({ name: 'forms' })
     // Reached from the user menu, never the sidebar (`ui-nav.test.ts`), but a URL
     // like any other: `docs/specs/foundation/passkeys.md` decision 6.
     expect(parse('/folio/account', MOUNT).screen).toEqual({ name: 'account' })
@@ -38,12 +39,17 @@ describe('parse', () => {
     expect(parse('/folio/ui', MOUNT).screen).toEqual({ name: 'ui' })
   })
 
-  it('reads the two parameterised screens', () => {
+  it('reads the four parameterised screens', () => {
     expect(parse('/folio/documents/person', MOUNT).screen).toEqual({
       name: 'documents',
       type: 'person',
     })
     expect(parse('/folio/edit/sty_abc', MOUNT).screen).toEqual({ name: 'edit', id: 'sty_abc' })
+    expect(parse('/folio/form/frm_abc', MOUNT).screen).toEqual({ name: 'form', id: 'frm_abc' })
+    expect(parse('/folio/responses/frm_abc', MOUNT).screen).toEqual({
+      name: 'responses',
+      id: 'frm_abc',
+    })
   })
 
   it('decodes a parameter, so a type name with a space is one segment not two', () => {
@@ -61,6 +67,14 @@ describe('parse', () => {
     expect(parse('/folio/edit/', MOUNT).screen).toEqual({
       name: 'missing',
       path: '/folio/edit/',
+    })
+    expect(parse('/folio/form/', MOUNT).screen).toEqual({
+      name: 'missing',
+      path: '/folio/form/',
+    })
+    expect(parse('/folio/responses/', MOUNT).screen).toEqual({
+      name: 'missing',
+      path: '/folio/responses/',
     })
   })
 
@@ -117,10 +131,13 @@ describe('href', () => {
       { name: 'redirects' },
       { name: 'schedules' },
       { name: 'settings' },
+      { name: 'forms' },
       { name: 'account' },
       { name: 'ui' },
       { name: 'documents', type: 'person' },
       { name: 'edit', id: 'sty_abc' },
+      { name: 'form', id: 'frm_abc' },
+      { name: 'responses', id: 'frm_abc' },
     ] as const
     for (const screen of screens) {
       expect(parse(href(screen, MOUNT), MOUNT).screen).toEqual(screen)
@@ -178,6 +195,34 @@ describe('crumbs', () => {
 
   it('names the account screen "Your account", though nothing links to it', () => {
     expect(crumbs(parse('/folio/account', MOUNT))).toEqual([{ text: 'Your account' }])
+  })
+
+  it('names the forms list with no trail, like any other platform screen', () => {
+    expect(crumbs(parse('/folio/forms', MOUNT))).toEqual([{ text: 'Forms' }])
+  })
+
+  it('roots the builder at Forms, naming the form once its label is known', () => {
+    const formLabel = () => 'Contact us'
+    expect(crumbs(parse('/folio/form/frm_1', MOUNT), { formLabel })).toEqual([
+      { text: 'Forms', screen: { name: 'forms' } },
+      { text: 'Contact us' },
+    ])
+  })
+
+  it('falls back to a generic name for the builder while the form has not loaded', () => {
+    expect(crumbs(parse('/folio/form/frm_1', MOUNT))).toEqual([
+      { text: 'Forms', screen: { name: 'forms' } },
+      { text: 'Form' },
+    ])
+  })
+
+  it('roots responses at Forms, then the form itself, then the screen', () => {
+    const formLabel = () => 'Contact us'
+    expect(crumbs(parse('/folio/responses/frm_1', MOUNT), { formLabel })).toEqual([
+      { text: 'Forms', screen: { name: 'forms' } },
+      { text: 'Contact us', screen: { name: 'form', id: 'frm_1' } },
+      { text: 'Responses' },
+    ])
   })
 
   it('names a type list by its label, falling back to the type name', () => {

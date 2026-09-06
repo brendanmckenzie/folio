@@ -92,6 +92,22 @@
 > than being swallowed** — the inverse of `deleteAsset`'s rule, because the rows
 > still exist to retry from. Phases 6–8 are outstanding.
 
+> **Phase 6 landed 2026-09-06** (`src/admin/ui/screens/Forms.tsx`,
+> `forms-model.ts`, `useForms.ts` — the list; `FormBuilder.tsx`, `form-model.ts`,
+> `useForm.ts` — the builder; `FormDeleteDialog.tsx`, shared by both; three new
+> `Screen` variants and their crumbs in `route.ts`, a `Forms` item in `nav.ts`,
+> and the wiring in `Prototype.tsx` — plus the `form()` field builder phase 1 left
+> out of `core/fields.ts`). Four divergences, under "Implementation notes —
+> phase 6" at the end of this file; the load-bearing ones are that **no picker
+> for the `form` field kind was built** — the phase's own plan names four steps
+> and a document-editor control for embedding a specific form is not one of
+> them, so `inspector-model.ts`'s `form: 'text'` fallback still stands — and that
+> **the builder never pre-checks a `file` question against whether `media` is
+> bound**: it offers the kind unconditionally and lets a failed Save surface the
+> route's own 501 verbatim, the first of the two options phase 5's notes left
+> open. Phase 7 (the responses table) is outstanding; its `Screen` variant and a
+> `Stub` placeholder in `Prototype.tsx` are already in place for it to replace.
+
 ## Summary
 
 Folio can publish a page that asks a question and has nowhere to put the answer. There
@@ -2250,3 +2266,165 @@ still means what it meant.
 - `responseFileOf` is deliberately narrow (one column, two binds). A full
   `responseById` is still phase 7's to write, and should not be built by widening
   this one — serving a file has no business reading a stranger's answers.
+
+## Implementation notes — phase 6 (landed 2026-09-06)
+
+The two admin screens named in decision 12: the forms list and the builder.
+Phases 7 (responses) and 8 (the demo and the prose) are outstanding.
+
+### Divergences from the plan
+
+1. **No control for the `form` field kind was built.** The plan's four steps are
+   `route.ts`, `nav.ts`, the list trio and the builder trio — a picker that lets a
+   block author choose *which* form a `form()` field points at is not one of
+   them, and it is a different surface (the document editor's inspector, not the
+   forms admin). `inspector-model.ts`'s `CONTROLS` map still reads `form: 'text'`,
+   phase 1's stopgap: an editor wiring a form into a page types its `frm_…` id
+   into a plain text box today. Left named rather than silently absent, because
+   the alternative — inventing a `FormPicker.tsx` alongside `ReferenceField.tsx`
+   under a scope this phase's own plan does not claim — is exactly the kind of
+   drift `docs/specs/README.md`'s phase boundaries exist to prevent.
+2. **The builder does not pre-check a `file` question against `media`.** Phase
+   5's notes left two options open — "the screen either asks and handles the
+   501, or `GET {base}/api/schema` grows one" — and this took the first: the
+   file kind is offered unconditionally, and a host with no `media` binding
+   finds out on Save, when `PATCH {base}/api/forms/:id` answers 501 and
+   `useForm`'s `save()` surfaces the route's own message verbatim through a
+   toast. The alternative needed a manifest flag threaded from `FolioBindings`
+   through `GET {base}/api/schema` into `Manifest`, which is a server-side
+   change well outside this phase's file list.
+3. **`fileCap`'s clamped hint is not shown beside `maxBytes`.** The spec's "what
+   phase 6 inherits" note says to show it; showing it means importing a value
+   (not a type) from `server/forms.ts`, which imports `MAX_UPLOAD_BYTES` from
+   `server/assets.ts` — bundling live server code, D1 and R2 types included,
+   into the browser build for one number. `useAssets.ts`'s own upload queue
+   rejected this exact trade for the same constant ("duplicating
+   `MAX_UPLOAD_BYTES` in the admin bundle or importing a Worker module to read
+   it… buys nothing"), and the builder's help text just says the cap is
+   Folio's own rather than naming a number that could drift from it silently.
+4. **A dead branch, found rather than added.** `fieldNameRefusal`'s
+   reserved-prefix check can never fire on its own: `NAME_PATTERN` already
+   requires the first character to be `[a-z]`, and `RESERVED_PREFIX` is `_`, so
+   nothing can satisfy both. The same is true of the equivalent check in
+   `validateOneField` (`core/forms.ts`) — the charset regex there also demands
+   `[a-z]` first. Neither was touched (this phase does not own `core/forms.ts`
+   beyond the `form()` builder), and the client-side copy was kept rather than
+   removed, for symmetry with the server's own shape; `forms-model.test.ts`
+   pins what actually happens (the charset message fires) rather than what the
+   comment before this note briefly assumed.
+
+### Decisions taken where the plan was silent
+
+- **A local draft, not autosave.** Every other authored surface in Folio writes
+  through the mutation log, where a keystroke is a change with nowhere to be
+  lost. A form has no log — decision 18's whole point — so the builder holds
+  its own edit in component state and one explicit Save commits the lot, with
+  `expectedUpdatedAt` supplied by `useForm.save()` from whatever it last loaded
+  rather than left for a caller to forget.
+- **A 409 discards the in-progress edit rather than offering to merge it.**
+  `useForm.save()` reloads the form on conflict and answers `{ conflict: true,
+  message }`; the builder's own effect that seeds `draft` from the reloaded
+  `data.form` picks it up immediately, and the toast says plainly that the
+  local change was thrown away. The spec's edge case ("the second gets 409 and
+  the builder reloads") does not say what happens to the loser's edit, and
+  silently keeping it would mean the next Save re-fights the same conflict with
+  a stale `expectedUpdatedAt` baked into a screen that no longer shows what it
+  is about to overwrite.
+- **A field rename is refused outright on a collision, never silently
+  disambiguated.** `commitName` previews what a typed name would normalise to
+  and refuses to commit it over a duplicate or the form's own honeypot
+  (decision 9); it does not fall back to appending `_2`, because a rename that
+  silently becomes a different rename is worse than one that visibly did
+  nothing. Disambiguation on *add* is different and kept: a brand-new field has
+  no name yet for the editor to have typed, so `blankField` minting `text_2`
+  is the ordinary case, not a surprise.
+- **The rename-split warning is shown from the moment a name changes, not only
+  after it commits.** `renameWarning(hasResponses)` is a pure yes/no; the
+  builder shows it under the "Field name" field as soon as the *previewed*
+  name differs from the stored one, so an editor sees the cost before
+  tabbing away commits it — the same "say it before the click" posture
+  `AssetDeleteDialog.tsx` and `DeleteDialog.tsx` take for a delete.
+- **A statement's prose has no translated editor**, and says so. `FormFieldI18n`
+  has no `text` key, and `compileField` writes `field.text` verbatim with no
+  locale lookup at all — so a translated textarea here would edit a value nothing
+  server-side ever reads. The builder shows a plain note instead of inventing an
+  editor for a key that would silently do nothing, which is the honest half of
+  a limitation this phase did not introduce and is not in scope to fix
+  (`core/forms.ts`'s `FormFieldI18n` is phase 1's).
+- **`showLocaleSwitcher` is `> 1` available locale, not "locales configured at
+  all"**, matching `EditorShell.tsx`'s own check for the identical reason: a
+  config naming only the source locale has nothing to switch to.
+- **The structural-change note is informational, not a confirmation.** Decision
+  7's purge is real but not destructive the way a delete is, so `shapeOf(draft)
+  !== shapeOf(saved)` draws a plain sentence above the field list rather than a
+  dialog somebody has to dismiss to keep working.
+
+### Verified by breaking
+
+Two, each edited in place and reverted in place:
+
+- **The honeypot check removed from `fieldNameRefusal`** — one red
+  (`refuses a collision with this form's own honeypot`). Silent and plausible:
+  every other refusal still fires, and a field named after the decoy would pass
+  the builder and be invisible on every submission that filled it in
+  legitimately.
+- **The required-label branch in `withFieldText` changed to delete on
+  empty**, matching `help`'s branch — one red
+  (`never deletes a required label even when cleared to empty`). The failure
+  this guards is `'label' in field` becoming `false`, which `validateFormFields`
+  throws on at save time with a message that names no field at all until the
+  builder is reopened and the blank one is found by inspection.
+
+### What is not covered, named rather than glossed
+
+- **No drag-and-drop reordering.** Up/down buttons only, `ReferencesField.tsx`'s
+  own pattern — a form's questions are reordered occasionally, not constantly,
+  and a keyboard-reachable pair of buttons is strictly more accessible than a
+  pointer-only drag handle would have been on its own.
+- **An option's own `value` can be retyped with no rename warning of its
+  own.** `updateOption` changes a `select`/`radio`/`checkboxes` option's stored
+  value exactly as freely as its label, and an existing response holding the
+  old value reads exactly like a retired field would in the CSV — but nothing
+  in this phase surfaces that the way `renameWarning` surfaces a field rename.
+  The two are the same shape of problem; only one got a message.
+- **No confirmation on removing a question or an option.** Both are reversible
+  by re-adding under the model but not in the data — an emptied `select`
+  reduced to one option, or a removed question, does not warn the way deleting
+  the whole form does. Decision 17's warn-and-cascade posture is about the form
+  and its responses; a single question was not named in the checkpoints.
+
+### Test counts
+
+136 files / 4046 tests passing + 1 todo (spec 29's fixture gap, unchanged), from
+135 / 3969 + 1. Seventy-seven added: 69 in `test/unit/admin/forms-model.test.ts`
+(new — the list model and the builder model together, per this file's own
+Testing requirements), 4 in `test/unit/admin/ui-route.test.ts` (the three new
+screens' parse/format/crumbs), 2 in `test/unit/admin/ui-nav.test.ts` (the `Forms`
+item and `activeItem`'s new mapping), 1 in `test/unit/admin/me.test.ts`
+(`canDeleteForms`) and 1 in `test/unit/core/values.test.ts` (`form()`'s shape;
+its `defaultValue` case extends an existing test rather than adding one). Two
+existing tests changed rather than added: that `defaultValue` case, and
+`test/unit/admin/fields.test.ts`'s `EVERY_KIND` and `built` arrays, which gained
+`'form'` / `fields.form()` — the fourteenth-kind assertion the file's own
+comment predicted the moment a builder existed for it.
+
+### What phase 7 inherits
+
+- **`Screen`'s `{ name: 'responses'; id }` variant, its crumb (`Forms` → the
+  form's own label, once `onFormLabel` reports it → `Responses`), and
+  `nav.ts`'s `activeItem` mapping it to the `Forms` sidebar item all exist
+  already.** `Prototype.tsx`'s `case 'responses'` is a `Stub` naming this file
+  and phase 7 by name; replacing the `Stub` with the real screen is the whole
+  of the wiring left.
+- **`onOpenResponses(id)` is already wired from both the list row and the
+  builder's header**, navigating to `{ name: 'responses', id }` — phase 7's
+  screen receives the id as its own `route.screen.id`, the same way the
+  builder does.
+- **`FormDeleteDialog.tsx` is shared and already fetches its own usage.** A
+  bulk-delete confirmation over a *selection* of responses is a different
+  question (`BulkRefusal`, the count guard) and needs its own dialog —
+  `ConfirmBulkDialog.tsx` is the existing primitive for that shape, not this
+  one.
+- **`onFormLabel` on `Prototype.tsx`'s `ScreenArgs` is generic over both
+  screens that carry a form id.** Phase 7's screen calls it exactly the way
+  `FormBuilder` does, once its own fetch of the form answers.

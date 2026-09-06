@@ -34,10 +34,10 @@ const PAGE = type('page', 'page')
 const labels = (groups: ReturnType<typeof nav>) => groups.map((g) => g.items.map((i) => i.label))
 
 describe('nav', () => {
-  it('leads with Home, Content and Assets and needs no heading over them', () => {
+  it('leads with Home, Content, Assets and Forms and needs no heading over them', () => {
     const groups = nav({ types: [PAGE], globals: [], me: OPEN })
     expect(groups[0]?.label).toBeUndefined()
-    expect(groups[0]?.items.map((i) => i.label)).toEqual(['Home', 'Content', 'Assets'])
+    expect(groups[0]?.items.map((i) => i.label)).toEqual(['Home', 'Content', 'Assets', 'Forms'])
   })
 
   it('names each record type in the primary group, between Content and Assets', () => {
@@ -52,7 +52,14 @@ describe('nav', () => {
       'Person',
       'Office',
       'Assets',
+      'Forms',
     ])
+  })
+
+  it('lists Forms right after Assets, and links it to the list screen', () => {
+    const groups = nav({ types: [PAGE], globals: [], me: OPEN })
+    const items = groups[0]?.items ?? []
+    expect(items.at(-1)).toEqual({ label: 'Forms', icon: 'forms', screen: { name: 'forms' } })
   })
 
   it('links a record type at its own list screen', () => {
@@ -68,16 +75,16 @@ describe('nav', () => {
   it(`stays flat at ${GROUP_AT} record types and groups past it`, () => {
     const records = Array.from({ length: GROUP_AT }, (_, i) => type(`r${i}`, 'record'))
     const flat = nav({ types: [PAGE, ...records], globals: [], me: OPEN })
-    expect(flat[0]?.items).toHaveLength(GROUP_AT + 3)
+    expect(flat[0]?.items).toHaveLength(GROUP_AT + 4)
 
     const grouped = nav({
       types: [PAGE, ...records, type('r8', 'record')],
       globals: [],
       me: OPEN,
     })
-    // The primary group is back to three, and the overflow is a headed,
+    // The primary group is back to four, and the overflow is a headed,
     // collapsible group rather than a longer list.
-    expect(grouped[0]?.items.map((i) => i.label)).toEqual(['Home', 'Content', 'Assets'])
+    expect(grouped[0]?.items.map((i) => i.label)).toEqual(['Home', 'Content', 'Assets', 'Forms'])
     const documents = grouped.find((g) => g.label === 'Documents')
     expect(documents?.items).toHaveLength(GROUP_AT + 1)
     expect(documents?.collapsible).toBe(true)
@@ -93,7 +100,7 @@ describe('nav', () => {
       globals: [],
       me: OPEN,
     })
-    expect(groups[0]?.items.map((i) => i.label)).toEqual(['Home', 'Content', 'Assets'])
+    expect(groups[0]?.items.map((i) => i.label)).toEqual(['Home', 'Content', 'Assets', 'Forms'])
     expect(groups.find((g) => g.label === 'Directory')?.items.map((i) => i.label)).toEqual([
       'Person',
       'Office',
@@ -212,6 +219,7 @@ describe('nav', () => {
       ['Content', 'content'],
       ['Person', 'records'],
       ['Assets', 'assets'],
+      ['Forms', 'forms'],
       ['Header', 'global'],
       ['Model', 'model'],
       ['Redirects', 'redirects'],
@@ -247,6 +255,11 @@ describe('activeItem', () => {
 
   it('is the screen itself for anything but the editor', () => {
     expect(activeItem(groups, { name: 'assets' })).toEqual({ name: 'assets' })
+  })
+
+  it('lights up Forms for the builder and the responses table, which have no nav item of their own', () => {
+    expect(activeItem(groups, { name: 'form', id: 'frm_1' })).toEqual({ name: 'forms' })
+    expect(activeItem(groups, { name: 'responses', id: 'frm_1' })).toEqual({ name: 'forms' })
   })
 
   it('lights up Content for an open page, so the sidebar never highlights nothing', () => {

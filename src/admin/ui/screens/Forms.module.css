@@ -1,0 +1,124 @@
+/*
+ * The Forms list screen. Thin, like Redirects' and Documents': the table is
+ * `Table.module.css`, the dialogs are `Dialog.module.css`, and the footer and
+ * skeletons are the same objects every other list screen already has.
+ */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 1400px;
+}
+
+/* ------------------------------------------------------------------- cells --- */
+
+.label {
+  font-weight: 550;
+  color: var(--fg);
+}
+
+.slug {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.stamp {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-1);
+  justify-content: flex-end;
+}
+
+/* ------------------------------------------------------------------ layout --- */
+
+.skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.skeleton {
+  height: var(--row-h);
+  border-radius: var(--radius-md);
+  background: var(--bg-inset);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+}
+
+.pager {
+  display: flex;
+  gap: var(--space-1);
+  margin-left: auto;
+}
+
+/* ----------------------------------------------------------------- dialogs --- */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.dialogNote {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  color: var(--fg-muted);
+}
+
+.usage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 30vh;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.usage li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.usageTitle {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  font-weight: 550;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usagePath {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--fg-subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

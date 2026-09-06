@@ -43,6 +43,7 @@ export {
   blocks,
   boolean,
   collection,
+  form,
   multiasset,
   multilink,
   number,

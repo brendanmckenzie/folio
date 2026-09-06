@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Role } from '../../../src/server/auth/roles'
 import {
   actorLabel,
+  canDeleteForms,
   canEdit,
   canManageAccess,
   canManageContent,
@@ -41,6 +42,9 @@ describe('auth: open', () => {
     // The routes 404 there — there is no admin and no way to become one — so
     // offering the rail would be offering a broken screen.
     expect(canManageAccess(OPEN)).toBe(false)
+    // Deleting a form is an ordinary content permission, unlike the access
+    // surface: it holds under `auth: 'open'` rather than 404ing there.
+    expect(canDeleteForms(OPEN)).toBe(true)
     expect(whyNot(OPEN, 'edit')).toBeUndefined()
     expect(actorLabel(OPEN)).toBeNull()
   })
@@ -64,6 +68,14 @@ describe('roles', () => {
     expect(canManageAccess(user('publisher'))).toBe(false)
     expect(canManageAccess(user('admin'))).toBe(true)
   })
+
+  it('reserves deleting a form for an admin, unlike building one', () => {
+    // Checkpoint 8: "Responses read at publisher; export and delete at admin.
+    // Building a form stays at editor."
+    expect(canDeleteForms(user('editor'))).toBe(false)
+    expect(canDeleteForms(user('publisher'))).toBe(false)
+    expect(canDeleteForms(user('admin'))).toBe(true)
+  })
 })
 
 describe('a token in the admin', () => {
@@ -74,6 +86,7 @@ describe('a token in the admin', () => {
     expect(canEdit(token)).toBe(false)
     expect(canPublish(token)).toBe(false)
     expect(canManageAccess(token)).toBe(false)
+    expect(canDeleteForms(token)).toBe(false)
     expect(actorLabel(token)).toBe('token:import-script')
   })
 })

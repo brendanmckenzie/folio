@@ -91,6 +91,15 @@ function primary(types: readonly DocumentType[]): NavItem[] {
     { label: 'Content', icon: 'content', screen: { name: 'content' } },
     ...inline.map(itemFor),
     { label: 'Assets', icon: 'assets', screen: { name: 'assets' } },
+    /**
+     * One entry after Assets (`docs/specs/content-model/forms.md` phase 6, and
+     * decision 12: "A `Forms` nav item and three screens — list, builder,
+     * responses"). Ungated, matching Redirects and Schedules: `GET
+     * {base}/api/forms` is `READ`, so a viewer may see what has been built even
+     * though only an editor may change it and only a publisher may read what was
+     * submitted.
+     */
+    { label: 'Forms', icon: 'forms', screen: { name: 'forms' } },
   ]
 }
 
@@ -219,6 +228,12 @@ function administration(me: Me): NavItem[] {
  * the tree is where most documents live.
  */
 export function activeItem(groups: readonly NavGroup[], screen: Screen, type?: string): Screen {
+  // The builder and the responses table are both about one form, neither is
+  // linked from the sidebar by its own id (there is no per-form nav item, the
+  // same reasoning that keeps a page's editor off the nav), and `Forms` is the
+  // one item that answers "where does this belong". Checked before `edit`'s own
+  // early return since neither screen name is `'edit'`.
+  if (screen.name === 'form' || screen.name === 'responses') return { name: 'forms' }
   if (screen.name !== 'edit') return screen
   const match = groups
     .flatMap((g) => g.items)

@@ -1,0 +1,232 @@
+/*
+ * The form builder. Two columns below the header: the field list on the left,
+ * and either the selected field's settings or the form's own settings on the
+ * right — one panel, never both, so there is exactly one place at a time that
+ * answers "what am I editing".
+ */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 1400px;
+}
+
+.titleInput {
+  width: 100%;
+  min-width: 240px;
+  max-width: 480px;
+  height: var(--row-h);
+  padding: 0 var(--space-2);
+  font: inherit;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+}
+
+.titleInput:hover:not(:disabled) {
+  border-color: var(--border);
+}
+
+.titleInput:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
+  border-color: var(--fg-accent);
+  background: var(--bg-panel);
+}
+
+.titleInput:disabled {
+  color: var(--fg-subtle);
+}
+
+.structuralNote {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--state-accent-bg, var(--bg-inset));
+  color: var(--fg-muted);
+  font-size: var(--text-sm);
+}
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-4);
+}
+
+/* ---------------------------------------------------------------- fields --- */
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.fieldList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fieldList li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.fieldRow {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  height: var(--row-h);
+  padding: 0 var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fieldRow:hover {
+  background: var(--bg-inset);
+}
+
+.fieldRow:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
+}
+
+/* A left edge, not a shadow: an inset `box-shadow` is clipped by the border
+   radius on a rounded row and draws a curved bracket rather than a bar
+   (`List.module.css`'s own rule, restated here because this row is not built
+   on `List`/`Row`). */
+.fieldRowSelected {
+  position: relative;
+  background: var(--bg-inset);
+}
+
+.fieldRowSelected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: var(--radius-full);
+  background: var(--fg-accent);
+}
+
+.fieldRowKind {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.fieldRowLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Visible always, not hover-revealed: a keyboard user reordering fields has no
+   pointer to hover with, and `Table.tsx`'s own comment on `actions` is exactly
+   this trade the other way — a control with nothing else to focus first must
+   not be the thing hiding. */
+.fieldRowActions {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.note {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--fg-subtle);
+}
+
+.menuItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menuItemLabel {
+  font-weight: 550;
+}
+
+.menuItemHint {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+/* ----------------------------------------------------------------- panel --- */
+
+.panel {
+  min-width: 0;
+}
+
+.fieldPanel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-panel);
+}
+
+.panelHead {
+  display: flex;
+  align-items: center;
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.optionsLabel {
+  font-size: var(--text-sm);
+  font-weight: 550;
+  color: var(--fg);
+}
+
+.optionList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.optionRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.optionRow > input {
+  flex: 1 1 50%;
+  min-width: 0;
+}
+
+.loadingSkeleton {
+  height: 60vh;
+  border-radius: var(--radius-lg);
+  background: var(--bg-inset);
+}

@@ -50,6 +50,7 @@ export type IconName =
   | 'model'
   | 'redirects'
   | 'schedules'
+  | 'forms'
   | 'access'
   | 'settings'
 
@@ -181,6 +182,19 @@ export const ICONS: Record<IconName, ReactElement> = {
     <>
       <circle cx="12" cy="12" r="7.5" />
       <path d="M12 7.5v5l3.25 2" />
+    </>,
+  ),
+  /** A page with two field-rules and a completed check: a form is a document
+   *  somebody fills in and sends, not a table (`records`) or a picture (`assets`),
+   *  so the frame alone would collide with both. The check sits clear of the
+   *  rules by 4.5 units, which is what keeps it a third mark rather than a
+   *  continuation of the second rule. */
+  forms: svg(
+    <>
+      <rect x="6" y="3.5" width="12" height="17" rx="2" />
+      <path d="M9 8h6" />
+      <path d="M9 12h6" />
+      <path d="M9 16.5l2 2 4-4" />
     </>,
   ),
   /** A key: bow, shaft, one tooth. One rather than the usual two — two teeth

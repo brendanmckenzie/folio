@@ -30,6 +30,18 @@ export type Screen =
   | { name: 'redirects' }
   | { name: 'schedules' }
   | { name: 'settings' }
+  /** The forms list (`docs/specs/content-model/forms.md` decision 12: "A `Forms`
+   * nav item and three screens"). */
+  | { name: 'forms' }
+  /** The builder for one form — its questions, its settings, its concurrency
+   * guard. Its own top-level segment, the way `edit` is its own segment beside
+   * `documents`: a form is not a document, and the id is what a save's
+   * `expectedUpdatedAt` names, never a slug (decision 3). */
+  | { name: 'form'; id: string }
+  /** One form's responses: the table, the filters, the CSV export. `id` is the
+   * form's, not a response's — a response is opened inside this screen rather
+   * than routed to its own URL. */
+  | { name: 'responses'; id: string }
   /** Passkeys, sessions and recent sign-ins for whoever is signed in.
    * `docs/specs/foundation/passkeys.md` decision 6: reached from the user menu,
    * deliberately **not** in `nav()` — `ui-nav.test.ts` asserts the absence. */
@@ -64,6 +76,7 @@ const FLAT = [
   'redirects',
   'schedules',
   'settings',
+  'forms',
   'account',
   'ui',
 ] as const
@@ -97,10 +110,12 @@ function screenOf(segments: string[], path: string): Screen {
   }
 
   if (segments.length === 2 && second) {
-    // Two two-segment screens, and both refuse an empty parameter above rather
+    // Four two-segment screens, and all refuse an empty parameter above rather
     // than routing to a screen that would immediately fetch `/documents/`.
     if (head === 'documents') return { name: 'documents', type: second }
     if (head === 'edit') return { name: 'edit', id: second }
+    if (head === 'form') return { name: 'form', id: second }
+    if (head === 'responses') return { name: 'responses', id: second }
   }
 
   return { name: 'missing', path }
@@ -153,6 +168,10 @@ function pathOf(screen: Screen): string {
       return `/documents/${encodeURIComponent(screen.type)}`
     case 'edit':
       return `/edit/${encodeURIComponent(screen.id)}`
+    case 'form':
+      return `/form/${encodeURIComponent(screen.id)}`
+    case 'responses':
+      return `/responses/${encodeURIComponent(screen.id)}`
     case 'missing':
       return screen.path
     default:
@@ -200,9 +219,20 @@ export interface CrumbContext {
    * running shell showed.
    */
   root?: Crumb | null
+  /**
+   * A form's own label, by id — for the builder's and the responses table's
+   * breadcrumb and tab title. Absent while the form has not loaded yet, the
+   * same "not known" posture `root === undefined` takes for a document: this
+   * module is pure parse/format and holds no fetch of its own
+   * (`docs/specs/content-model/forms.md` phase 6).
+   */
+  formLabel?: (id: string) => string | undefined
 }
 
-const TITLES: Record<Exclude<ScreenName, 'documents' | 'edit' | 'missing'>, string> = {
+const TITLES: Record<
+  Exclude<ScreenName, 'documents' | 'edit' | 'form' | 'responses' | 'missing'>,
+  string
+> = {
   home: 'Home',
   content: 'Content',
   assets: 'Assets',
@@ -211,6 +241,7 @@ const TITLES: Record<Exclude<ScreenName, 'documents' | 'edit' | 'missing'>, stri
   redirects: 'Redirects',
   schedules: 'Schedules',
   settings: 'Settings',
+  forms: 'Forms',
   account: 'Your account',
   ui: 'Design system',
 }
@@ -226,6 +257,18 @@ export function crumbs(route: Route, ctx: CrumbContext = {}): Crumb[] {
 
   if (s.name === 'documents') {
     return [{ text: ctx.label?.(s.type) ?? s.type }]
+  }
+
+  if (s.name === 'form') {
+    return [{ text: 'Forms', screen: { name: 'forms' } }, { text: ctx.formLabel?.(s.id) ?? 'Form' }]
+  }
+
+  if (s.name === 'responses') {
+    return [
+      { text: 'Forms', screen: { name: 'forms' } },
+      { text: ctx.formLabel?.(s.id) ?? 'Form', screen: { name: 'form', id: s.id } },
+      { text: 'Responses' },
+    ]
   }
 
   if (s.name === 'edit') {

@@ -39,6 +39,7 @@ const EVERY_KIND: Field['kind'][] = [
   'references',
   'blocks',
   'collection',
+  'form',
 ]
 
 describe('controlFor', () => {
@@ -74,6 +75,7 @@ describe('controlFor', () => {
       fields.references(),
       fields.blocks({ allow: ['x'] }),
       fields.collection(),
+      fields.form(),
     ]
     expect(new Set(built.map((f) => f.kind))).toEqual(new Set(EVERY_KIND))
 
