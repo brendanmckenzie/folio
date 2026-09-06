@@ -101,7 +101,10 @@ const r = folio.reader(env, req)                  // one D1 session per request
 const page = await r.page(path, { locale })       // doc + story + resolution + access + headers
 if (!page) {
   const miss = await r.miss(path)                 // redirect + state, one round trip
-  if (miss.kind === 'redirect') return Response.redirect(miss.to, miss.status)
+  // `miss.to` is rooted (`/guides/new`), so this is a URL and not a path the
+  // browser would resolve against the page it is already on. Reattach
+  // `url.search` yourself if you want query strings to survive.
+  if (miss.kind === 'redirect') return Response.redirect(new URL(miss.to, url.origin), miss.status)
   return new Response('Not found', { status: miss.kind === 'gone' ? 410 : 404 })
 }
 return html(

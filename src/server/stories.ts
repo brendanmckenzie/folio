@@ -43,6 +43,7 @@ import {
   redirectOf,
   type RedirectRow,
   redirectStatements,
+  rootedTarget,
 } from './redirects'
 import type { FolioMiss } from './types'
 import { clearSchedulesStatements } from './schedules'
@@ -1108,7 +1109,20 @@ export async function pathMiss(db: FolioDb, path: string): Promise<FolioMiss> {
   // `batch` types every result alike and these two select different shapes, so
   // each row is read back at the type its own statement returns.
   const redirect = redirectOf(normalisePath(path), redirects?.results[0] as RedirectRow | undefined)
-  if (redirect) return { kind: 'redirect', to: redirect.to, status: redirect.status }
+  // **Rooted, unlike everything else Folio calls a path.** Stored paths carry no
+  // leading slash (`guides/safari`), and this one value leaves the library as a
+  // `Location` header — where a bare `guides/…` is a *relative* URL the browser
+  // resolves against the page it is already on. `/guides/safari` redirecting to
+  // `guides/new` sends the visitor to `/guides/safari/guides/new`, a 404, and
+  // every rename on the site is quietly broken in exactly that shape. Observed
+  // on All About Africa, whose host wrote the naive `redirect(miss.to)` that
+  // AGENTS.md and README.md both showed.
+  //
+  // Rooting it here rather than telling ten hosts to remember: `new URL(to,
+  // origin)` — what the handbook and both examples do — answers the same URL for
+  // a rooted path as for a bare one, so the careful spelling keeps working and
+  // the obvious one stops being wrong.
+  if (redirect) return { kind: 'redirect', to: rootedTarget(redirect.to), status: redirect.status }
 
   return statusOf(statuses?.results[0] as StatusRow | undefined) === 'unpublished'
     ? { kind: 'gone' }
@@ -1742,7 +1756,19 @@ export async function updateStoryStatement(
     title: patch.title?.trim() || current.title,
     slug: isRoot
       ? ''
-      : uniqueSlug(siblings, group, slugify(patch.slug ?? patch.title ?? current.slug), id),
+      : // **`patch.title` is deliberately not a slug source here.** Creating a
+        // document derives its slug from its title (`createStoryStatement`
+        // does exactly that, and it is the right default for a row that has no
+        // URL yet); *updating* one must not, because the slug is a URL the site
+        // already serves and the title is editorial copy somebody retypes.
+        //
+        // It did until 2026-09-06, and the handbook had already documented the
+        // opposite — "a title-only patch … fires no `pathsChanged`, by design".
+        // The code fired one: renaming a page moved it. Observed on All About
+        // Africa's staging, where one `PATCH { title }` turned `guides/safari`
+        // into `guides/comparing-safari-in-east-and-southern-africa` and left a
+        // redirect behind, with nothing in the response to say a URL had moved.
+        uniqueSlug(siblings, group, slugify(patch.slug ?? current.slug), id),
     parentId,
     ord:
       patch.index !== undefined || parentId !== current.parentId

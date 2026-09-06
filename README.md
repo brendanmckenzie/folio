@@ -232,7 +232,9 @@ const reader = folio.reader(env, req)          // one D1 session for the whole r
 const page = await reader.page(path)
 if (!page) {
   const miss = await reader.miss(path)         // redirect + state, one round trip
-  if (miss.kind === 'redirect') return Response.redirect(miss.to, miss.status)
+  // `miss.to` is rooted (`/guides/new`); `new URL(…, origin)` makes it absolute,
+  // which is what `Response.redirect` requires.
+  if (miss.kind === 'redirect') return Response.redirect(new URL(miss.to, url.origin), miss.status)
   return new Response('Not found', { status: miss.kind === 'gone' ? 410 : 404 })
 }
 

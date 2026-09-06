@@ -196,6 +196,41 @@ against a version skew you have to manage. The user-visible symptom of a bump is
 that an editor who left a tab open across your deploy has to reload. Bumps are
 cheap and are made freely.
 
+### A title-only patch no longer moves the page (2026-09-06)
+
+**Two bugs, one upgrade, and both were silent.** Read this one even if you skip
+the rest.
+
+`PATCH /documents/:id` with a `title` and no `slug` re-derived the slug from the
+new title, so **renaming a page changed its URL**, recorded a redirect and fired
+`pathsChanged` — while the handbook had documented the opposite all along ("a
+title-only patch … fires no `pathsChanged`, by design"). Creating a document
+still derives its slug from its title, which is right; updating one no longer
+does. Pass `slug` when you mean to move a page.
+
+**Check your content.** Anything that patched a title through the API or the
+admin may have moved. Renamed pages are still reachable — a redirect was
+recorded — but their URLs are slugified titles rather than the slugs somebody
+chose. Look for auto redirects whose target is a long slugified title:
+
+```sql
+select from_path, to_path from redirects where source = 'auto' order by created_at desc;
+```
+
+Fix one by patching the slug back (`PATCH /documents/:id {"slug":"safari"}`) and
+republishing; the redirect from the accidental path stays, which is harmless.
+
+And `FolioMiss.to` is now **rooted** — `/guides/new`, not `guides/new`. It is the
+one path-shaped value in the API that leaves as a `Location` header, where a bare
+path is a *relative* URL: the browser resolves it against the page it is already
+on, so `/guides/safari` redirecting to `guides/new` landed on
+`/guides/safari/guides/new` and 404'd. Every rename redirect was broken in that
+shape on any host that wrote `redirect(miss.to)` — which is what `AGENTS.md` and
+`README.md` both showed, and both are corrected. If you copied the careful
+spelling from the handbook or either example (`new URL(miss.to, url.origin)`),
+nothing changes for you: that answers the same URL either way. An absolute
+off-site target is untouched.
+
 ### Collection items no longer carry each document (2026-09-06)
 
 `item.doc` on a `collection` field and on a `folio.query` result is now

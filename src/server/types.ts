@@ -142,9 +142,15 @@ export type ReadBindings = Omit<FolioBindings, 'db'> & { db: FolioDb }
  * reimplementing it as two sequential calls to `redirect` then `status`.
  */
 export type FolioMiss =
-  | { kind: 'redirect'; to: string; status: number }
-  | { kind: 'gone' }
-  | { kind: 'not-found' }
+  /**
+   * `to` is **rooted** — `/guides/new`, not the bare `guides/new` Folio stores
+   * and matches paths by. It is the one path-shaped value in this API that
+   * leaves as a `Location` header, and a bare one there is a relative URL: the
+   * browser resolves it against the page it is already on and lands on
+   * `/old/guides/new`. So `Response.redirect(new URL(miss.to, url.origin))` and
+   * the barer `redirect(miss.to)` now answer the same thing.
+   */
+  { kind: 'redirect'; to: string; status: number } | { kind: 'gone' } | { kind: 'not-found' }
 
 /**
  * One request's worth of reads, on one D1 session.

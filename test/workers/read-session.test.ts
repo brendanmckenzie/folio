@@ -368,6 +368,48 @@ describe('folio.miss(): one round trip for a path with no live page', () => {
     })
   })
 
+  /**
+   * **The case above stores an already-rooted target; a real one is not.**
+   * `redirectStatements` writes `to_path` in `stories.path` form — no leading
+   * slash — so every auto-redirect a rename records looks like `guides/new`.
+   * Handed to a `Location` header that is a *relative* URL, and the browser
+   * resolves it against the page it is already on: `/guides/safari` →
+   * `/guides/safari/guides/new`, a 404 with nothing anywhere saying why.
+   *
+   * All About Africa shipped exactly that, from the `redirect(miss.to)` spelling
+   * AGENTS.md and README.md both showed. `miss` roots the target now, so the
+   * obvious spelling and the careful `new URL(to, origin)` one agree.
+   */
+  it('roots a stored path, because `to` leaves as a Location header', async () => {
+    await env.DB.prepare(
+      `insert into redirects (from_path, to_path, status, source, created_at)
+       values ('rs-bare', 'guides/new-home', 301, 'auto', ?)`,
+    )
+      .bind(Date.now())
+      .run()
+
+    await expect(makeFolio().miss(env, 'rs-bare')).resolves.toEqual({
+      kind: 'redirect',
+      to: '/guides/new-home',
+      status: 301,
+    })
+  })
+
+  it('leaves an absolute off-site target alone', async () => {
+    await env.DB.prepare(
+      `insert into redirects (from_path, to_path, status, source, created_at)
+       values ('rs-offsite', 'https://example.com/Elsewhere', 301, 'manual', ?)`,
+    )
+      .bind(Date.now())
+      .run()
+
+    await expect(makeFolio().miss(env, 'rs-offsite')).resolves.toEqual({
+      kind: 'redirect',
+      to: 'https://example.com/Elsewhere',
+      status: 301,
+    })
+  })
+
   it('refuses an unsafe stored target exactly as folio.redirect does', async () => {
     await env.DB.prepare(
       `insert into redirects (from_path, to_path, status, source, created_at)

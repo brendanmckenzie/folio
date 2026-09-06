@@ -84,6 +84,26 @@ export function normaliseTarget(input: string): string {
   return normalisePath(trimmed)
 }
 
+/**
+ * A stored target as a `Location` header may spell it.
+ *
+ * `to_path` is stored in `stories.path` form — no leading slash — and that is a
+ * **relative** URL in a `Location`: the browser resolves it against the page it
+ * is already on, so `/guides/safari` → `guides/new` lands on
+ * `/guides/safari/guides/new`. Every rename on a site is broken in that shape,
+ * and it 404s rather than erroring, so nothing says so.
+ *
+ * Three cases and only the third moves: an absolute target is a manual off-site
+ * redirect and is already a URL; one that is somehow already rooted is left
+ * alone rather than turned into `//host`, which a browser reads as a
+ * protocol-relative URL to another origin; a bare stored path gets its slash.
+ */
+export function rootedTarget(to: string): string {
+  const trimmed = to.trim()
+  if (isAbsoluteTarget(trimmed) || trimmed.startsWith('/')) return trimmed
+  return `/${trimmed}`
+}
+
 export interface RedirectWrite {
   /** The path just vacated, already in `stories.path` form. */
   from: string

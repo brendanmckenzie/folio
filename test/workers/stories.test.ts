@@ -243,8 +243,11 @@ describe('duplicateStory', () => {
 })
 
 describe('updateStory', () => {
-  it('recomputes the whole subtree of paths when a parent is renamed', async () => {
-    const updated = await updateStory(env.DB, 'sty_about', { title: 'About Us' })
+  it('recomputes the whole subtree of paths when a parent is reslugged', async () => {
+    // `{ slug }`, not `{ title }`: a title-only patch deliberately moves nothing
+    // (see 'a title-only patch leaves the URL alone' below), so driving a subtree
+    // path test through the title would be testing the bug this suite now pins.
+    const updated = await updateStory(env.DB, 'sty_about', { slug: 'about-us' })
 
     expect(updated.slug).toBe('about-us')
     expect(updated.path).toBe('about-us')
@@ -274,8 +277,8 @@ describe('updateStory', () => {
     const d = await createStory(env.DB, { title: 'D', parentId: c.id, type: PAGE })
     expect(d.path).toBe('about/b/c/d')
 
-    // Rename the middle of the chain: everything below it keeps the whole prefix.
-    await updateStory(env.DB, c.id, { title: 'See' })
+    // Reslug the middle of the chain: everything below it keeps the whole prefix.
+    await updateStory(env.DB, c.id, { slug: 'see' })
     expect((await storyById(env.DB, d.id))?.path).toBe('about/b/see/d')
 
     // Move the leaf under a different deep parent: the prefix is rebuilt from the
@@ -331,11 +334,33 @@ describe('updateStory', () => {
     expect(result.parentId).toBeNull()
   })
 
-  it('suffixes the slug on collision when renaming into a taken slug', async () => {
+  it('suffixes the slug on collision when reslugging into a taken slug', async () => {
     const created = await createStory(env.DB, { title: 'Contact', type: PAGE })
-    const updated = await updateStory(env.DB, created.id, { title: 'About' })
+    const updated = await updateStory(env.DB, created.id, { slug: 'about' })
 
     expect(updated.slug).toBe('about-2')
+  })
+
+  /**
+   * The handbook has always said a title-only patch "fires no `pathsChanged`, by
+   * design". The code disagreed until 2026-09-06: `patch.title` was a slug
+   * source on update as well as on create, so retyping a heading silently moved
+   * the page and left a redirect behind. It cost All About Africa's staging the
+   * hand-set `guides/safari`, which became
+   * `guides/comparing-safari-in-east-and-southern-africa` on one `PATCH {title}`.
+   *
+   * Creating still derives a slug from the title — that is `createStory`'s job
+   * and the row has no URL yet. This is only about the update door.
+   */
+  it('a title-only patch leaves the URL alone', async () => {
+    const before = await storyById(env.DB, 'sty_about')
+    const updated = await updateStory(env.DB, 'sty_about', { title: 'Completely Different' })
+
+    expect(updated.title).toBe('Completely Different')
+    expect(updated.slug).toBe(before?.slug)
+    expect(updated.path).toBe(before?.path)
+    // …and therefore vacates nothing, so there is no redirect to record.
+    expect(await redirectFor(String(before?.path))).toBeNull()
   })
 
   it('rejects updating an unknown story', async () => {
@@ -391,7 +416,7 @@ describe('redirects (redirects.md): captured inside updateStory/createStory', ()
     expect(created.path).toBe('contact')
 
     // 'about' is already taken at the root, so this lands on 'about-2'.
-    const updated = await updateStory(env.DB, created.id, { title: 'About' })
+    const updated = await updateStory(env.DB, created.id, { slug: 'about' })
     expect(updated.slug).toBe('about-2')
 
     expect((await redirectFor('contact'))?.to).toBe('about-2')
@@ -1082,7 +1107,9 @@ describe('document types: updateStory across the routed/unrouted fence', () => {
     const renamed = await updateStory(env.DB, ada.id, { title: 'Grace Hopper' }, TYPES)
 
     expect(renamed.title).toBe('Grace Hopper')
-    expect(renamed.slug).toBe('grace-hopper')
+    // The slug is untouched by a title edit, here as everywhere: an unrouted
+    // document has no path to break, but it does have a slug somebody chose.
+    expect(renamed.slug).toBe('ada')
     expect(renamed.path).toBeNull()
     expect((await storyById(env.DB, ada.id))?.path).toBeNull()
   })
@@ -1194,7 +1221,7 @@ describe('document types: updateStory across the routed/unrouted fence', () => {
         .bind('sty_legacy', 'insight', 'legacy', 'legacy', 'a9', 'Legacy')
         .run()
 
-      const renamed = await updateStory(env.DB, 'sty_legacy', { title: 'Still editable' }, TYPES)
+      const renamed = await updateStory(env.DB, 'sty_legacy', { slug: 'still-editable' }, TYPES)
       expect(renamed.slug).toBe('still-editable')
     })
   })
