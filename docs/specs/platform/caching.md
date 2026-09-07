@@ -713,8 +713,9 @@ re-test, and Ground truth records it as measured single-colo.
 
 ## Open questions
 
-All three opened with this spec were closed on 2026-07-30 by deploying a
-throwaway probe Worker and by running the demo. The measurements are in Ground
+**None.** Three of the four opened with this spec were closed on 2026-07-30 by
+deploying a throwaway probe Worker and by running the demo; the fourth needed a
+deployment, and there was none until 2026-09-06. The measurements are in Ground
 truth; the answers are recorded here so the reasoning is not lost.
 
 - ~~**Does `purge()` throw or resolve `{ success: false }` when caching is
@@ -732,11 +733,33 @@ truth; the answers are recorded here so the reasoning is not lost.
   cookie. The `Set-Cookie` trap is real but does not currently apply, and the
   edge case entry stays because a host can reintroduce it.
 
-Still open, and now the only one:
+- ~~**Is `Vary: Origin` on the demo's responses a dev artefact or a production
+  one?**~~ **A dev artefact, and it never reached a deployment.** Measured
+  2026-09-07 on the published home page of all four: `staging.allaboutafrica.au`,
+  `allaboutafrica.au`, `staging.takeoffgo.com` and `www.takeoffgo.com`. **No
+  `Vary` header of any kind** on any of them — not `Origin`, not anything else,
+  so there is no cache variant to reason about.
 
-- **Is `Vary: Origin` on the demo's responses a dev artefact or a production
-  one?** It is a cache variant. Harmless for browser navigation, which sends no
-  `Origin`, but it should be confirmed rather than assumed in Phase 4.
+  **Four rather than two, and the second pair is what makes this an answer rather
+  than an observation.** The takeoffgo pair is a different host Worker with its
+  own configuration: a header set by Folio would appear on all four, and a header
+  set by one host's own middleware would appear on two. It appears on none, which
+  is the only shape of result that rules Folio out. This question could not be
+  asked at all until 2026-09-06 — the spec's own note says "confirmed rather than
+  assumed in Phase 4", and at the time there was nothing deployed to confirm
+  against.
+
+  Two things measured alongside it, both matching the design rather than
+  qualifying it: `cache-control` is byte-identical on all four and is exactly
+  what `cacheHeaders` computes — `max-age=0` deliberately, because a purge cannot
+  reach a browser cache and raising it buys a stale copy nothing can evict, and
+  `s-maxage` at a week. And `cf-cache-status: HIT` on all four, so these are real
+  edge hits rather than origin responses that merely carry the right headers.
+
+  `Cache-Tag` is absent from the client's view too, which is expected rather than
+  a finding: Cloudflare strips it before the response reaches a client, and that
+  is why `scripts/cache-probe.mjs --token` remains the only thing that can
+  observe a tag or a purge at all.
 
 ## Implementation notes
 
