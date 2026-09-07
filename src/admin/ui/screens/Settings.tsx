@@ -280,6 +280,7 @@ function Types({
     {
       key: 'type',
       label: 'Type',
+      width: '22%',
       /*
        * `.stack`, not a bare `.pair`: the label, then the name and its badges on a
        * declared second line. This is the one first column that shares its row with
@@ -306,11 +307,13 @@ function Types({
     {
       key: 'kind',
       label: 'Kind',
+      width: '9%',
       cell: (row) => <Badge tone={kindTone(row.kind)}>{row.kind}</Badge>,
     },
     {
       key: 'root',
       label: 'Root block',
+      width: '13%',
       /*
        * Filters to that block, which is the second route into eighty-seven of
        * them: "which block is behind this type, and what does it declare" is a
@@ -337,6 +340,7 @@ function Types({
     {
       key: 'title',
       label: 'Title from',
+      width: '11%',
       cell: (row) =>
         row.titleField ? (
           <span className={css.name}>
@@ -363,11 +367,13 @@ function Types({
     {
       key: 'where',
       label: 'Where it can live',
+      width: '17%',
       cell: (row) => <span className={css.clause}>{row.where}</span>,
     },
     {
       key: 'top',
       label: 'Top level',
+      width: '9%',
       /*
        * The refusal an editor actually meets, given its own column: an Insight
        * that will not be created at the root of the tree is `under`, and the
@@ -391,11 +397,13 @@ function Types({
     {
       key: 'group',
       label: 'Sidebar group',
+      width: '10%',
       cell: (row) => row.group || <span className={css.blank}>—</span>,
     },
     {
       key: 'preview',
       label: 'Previewed on',
+      width: '9%',
       cell: (row) => row.preview || <span className={css.blank}>—</span>,
     },
   ]
@@ -505,6 +513,7 @@ function Fields({ card }: { card: BlockCard }) {
     {
       key: 'field',
       label: 'Field',
+      width: '40%',
       /* `help` is a second line by declaration, not by flex wrapping — see `.help`
        * in the stylesheet for the two tables that disagreed about it. */
       cell: (row) => (
@@ -517,16 +526,23 @@ function Fields({ card }: { card: BlockCard }) {
         </span>
       ),
     },
-    { key: 'kind', label: 'Kind', cell: (row) => <span className={css.name}>{row.kind}</span> },
-    { key: 'flags', label: 'Flags', cell: (row) => <Flags row={row} /> },
+    {
+      key: 'kind',
+      label: 'Kind',
+      width: '10%',
+      cell: (row) => <span className={css.name}>{row.kind}</span>,
+    },
+    { key: 'flags', label: 'Flags', width: '14%', cell: (row) => <Flags row={row} /> },
     {
       key: 'detail',
       label: 'Constraints',
+      width: '15%',
       cell: (row) => row.detail || <span className={css.blank}>—</span>,
     },
     {
       key: 'default',
       label: 'Default',
+      width: '10%',
       cell: (row) =>
         row.fieldDefault ? (
           <span className={css.name}>{row.fieldDefault}</span>
@@ -537,6 +553,7 @@ function Fields({ card }: { card: BlockCard }) {
     {
       key: 'showIf',
       label: 'Shown when',
+      width: '11%',
       cell: (row) => row.showIf || <span className={css.blank}>always</span>,
     },
   ]
@@ -619,6 +636,7 @@ function Slots({ card }: { card: BlockCard }) {
     {
       key: 'slot',
       label: 'Slot',
+      width: '30%',
       cell: (row) => (
         <span className={css.pair}>
           <span className={css.pairLabel}>{row.label}</span>
@@ -629,9 +647,12 @@ function Slots({ card }: { card: BlockCard }) {
     {
       key: 'allow',
       label: 'Allows',
+      // The widest thing in this table by a distance: a permissive slot lists
+      // fourteen block names, where the slot's own label and name are two words.
+      width: '56%',
       cell: (row) => <span className={css.name}>{row.allow.join(', ')}</span>,
     },
-    { key: 'max', label: 'Max children', numeric: true, cell: (row) => row.max },
+    { key: 'max', label: 'Max children', width: '14%', numeric: true, cell: (row) => row.max },
   ]
   return (
     <>
@@ -651,6 +672,7 @@ function Presets({ card }: { card: BlockCard }) {
     {
       key: 'preset',
       label: 'Preset',
+      width: '40%',
       cell: (row) => (
         <span className={css.pair}>
           <span className={css.pairLabel}>{row.label}</span>
@@ -669,6 +691,7 @@ function Presets({ card }: { card: BlockCard }) {
     {
       key: 'sets',
       label: 'Sets',
+      width: '40%',
       cell: (row) =>
         row.sets.length ? (
           <span className={css.name}>{row.sets.join(', ')}</span>
@@ -679,6 +702,7 @@ function Presets({ card }: { card: BlockCard }) {
     {
       key: 'children',
       label: 'Plants',
+      width: '20%',
       cell: (row) =>
         row.children.length ? (
           <span className={css.name}>{row.children.join(', ')}</span>
@@ -711,6 +735,7 @@ function Globals({ view, mount }: { view: SettingsView; mount: string }) {
     {
       key: 'global',
       label: 'Global',
+      width: '44%',
       cell: (row) => (
         <span className={css.pair}>
           <span className={css.pairLabel}>{row.label}</span>
@@ -721,9 +746,10 @@ function Globals({ view, mount }: { view: SettingsView; mount: string }) {
     {
       key: 'root',
       label: 'Root block',
+      width: '28%',
       cell: (row) => <span className={css.name}>{row.root}</span>,
     },
-    { key: 'preview', label: 'Previewed on', cell: (row) => row.preview },
+    { key: 'preview', label: 'Previewed on', width: '28%', cell: (row) => row.preview },
   ]
   return (
     <>
@@ -766,6 +792,7 @@ function Locales({ view }: { view: SettingsView }) {
     {
       key: 'code',
       label: 'Code',
+      width: '14%',
       cell: (row) => (
         <span className={css.pair}>
           <Badge mono>{row.code}</Badge>
@@ -776,6 +803,7 @@ function Locales({ view }: { view: SettingsView }) {
     {
       key: 'role',
       label: 'Role',
+      width: '16%',
       cell: (row) =>
         row.source ? (
           <Badge
@@ -791,6 +819,7 @@ function Locales({ view }: { view: SettingsView }) {
     {
       key: 'fallback',
       label: 'Declared fallback',
+      width: '22%',
       cell: (row) =>
         row.fallback ? (
           <span className={css.name}>{row.fallback}</span>
@@ -801,6 +830,7 @@ function Locales({ view }: { view: SettingsView }) {
     {
       key: 'order',
       label: 'An untranslated field reads',
+      width: '48%',
       cell: (row) => <span className={css.name}>{row.readOrder.join(' → ')}</span>,
     },
   ]
@@ -828,6 +858,7 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
     {
       key: 'provider',
       label: 'Provider',
+      width: '18%',
       cell: (row) => (
         <span className={css.pair}>
           <span className={css.pairLabel}>{row.label}</span>
@@ -835,10 +866,16 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
         </span>
       ),
     },
-    { key: 'flow', label: 'Flow', cell: (row) => <span className={css.clause}>{row.flow}</span> },
+    {
+      key: 'flow',
+      label: 'Flow',
+      width: '14%',
+      cell: (row) => <span className={css.clause}>{row.flow}</span>,
+    },
     {
       key: 'unknown',
       label: 'An email with no account',
+      width: '26%',
       cell: (row) => <span className={css.clause}>{row.unknownEmail}</span>,
     },
     // Where to go to change somebody's role, which is the fact an editor needs:
@@ -847,11 +884,13 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
     {
       key: 'roles',
       label: 'Roles',
+      width: '20%',
       cell: (row) => <span className={css.clause}>{row.roles}</span>,
     },
     {
       key: 'domains',
       label: 'Enforced domains',
+      width: '22%',
       cell: (row) => <span className={css.clause}>{row.domains}</span>,
     },
   ]
@@ -936,10 +975,16 @@ function SignIn({ view, me, mount }: { view: SettingsView; me: Me; mount: string
 
 function Hooks({ view }: { view: SettingsView }) {
   const columns: Column<HookRow>[] = [
-    { key: 'event', label: 'Event', cell: (row) => <span className={css.name}>{row.event}</span> },
+    {
+      key: 'event',
+      label: 'Event',
+      width: '25%',
+      cell: (row) => <span className={css.name}>{row.event}</span>,
+    },
     {
       key: 'awaited',
       label: 'Awaited',
+      width: '75%',
       cell: (row) =>
         row.awaited ? (
           <Badge
@@ -996,9 +1041,19 @@ function Facts({
   heading?: string
 }) {
   const columns: Column<Fact>[] = [
-    { key: 'label', label: 'Setting', cell: (row) => row.label },
-    { key: 'value', label: 'Value', cell: (row) => <span className={css.name}>{row.value}</span> },
-    { key: 'why', label: 'Why', cell: (row) => <span className={css.why}>{row.why}</span> },
+    { key: 'label', label: 'Setting', width: '22%', cell: (row) => row.label },
+    {
+      key: 'value',
+      label: 'Value',
+      width: '18%',
+      cell: (row) => <span className={css.name}>{row.value}</span>,
+    },
+    {
+      key: 'why',
+      label: 'Why',
+      width: '60%',
+      cell: (row) => <span className={css.why}>{row.why}</span>,
+    },
   ]
   return (
     <>

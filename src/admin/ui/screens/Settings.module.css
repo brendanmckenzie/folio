@@ -264,10 +264,19 @@
  * live` to 145px, where a clause that had fitted on one line broke over four. The
  * table was no shorter than the clipping it replaced, just taller.
  *
- * `auto` puts every column back on the ordinary algorithm: max-content while there
- * is room, and the shortfall shared proportionally when there is not. That is
- * exactly the degradation this screen wants, and it is why nothing here needs a
- * width of its own.
+ * **`auto` was then believed to be enough, and it is not.** The claim below used to
+ * be that `auto` "puts every column back on the ordinary algorithm: max-content
+ * while there is room" — and the ordinary algorithm, measured on this screen at
+ * 1440px, gives *every pixel* of the surplus to column one: 634px of `Type` for the
+ * word "Page", 725px of `Field`, 986px of `Slot` for a cell wanting 121px. Whatever
+ * the tables wanted, the first column got the difference, and `Where it can live`
+ * still broke over three lines beside it.
+ *
+ * So every table on this screen now declares its widths (`Column.width`), which
+ * switches it to `table-layout: fixed` — the one mechanism that apportions a table
+ * rather than negotiating with it. These two lines stay because they cost nothing
+ * and they keep the *undeclared* table honest: `width: auto` is "no preference", so
+ * a `<col>` still wins wherever one is declared.
  */
 .screen th:first-child,
 .screen td:first-child {
@@ -451,20 +460,57 @@
 
 /* ------------------------------------------------------- block type cards --- */
 
+/*
+ * **One list with dividers, not thirty-five cards.**
+ *
+ * This was `gap: 1px` over a `.card` that carried its own border and radius, and
+ * at that gap the two radii of adjacent rows do not read as a gap at all — they
+ * read as a stack of separate boxes jammed together, each with a 2px double
+ * border along the join and a pair of notches where the corners meet. Reported as
+ * "rounded rects but they sit flush with each other, which looks a bit odd", and
+ * that is exactly what it is: card treatment doing list work.
+ *
+ * A container that owns the border and radius, and rows that own only a divider,
+ * is the same shape `List.module.css` uses for every other row in this admin. The
+ * radius has to clip the rows' hover fill, or the first row's background squares
+ * off the top two corners.
+ *
+ * **`clip`, not `hidden`, and the difference is load-bearing.** `hidden` makes
+ * this element a scrollport, and a scrollport that cannot scroll is one the open
+ * row's sticky summary sticks to — so the summary scrolled away with its rows
+ * (measured: 99px above the top of `main` when it should have been pinned to it).
+ * `clip` clips without creating a scrollport, which leaves `main` as the nearest
+ * one, where the sticky is aimed.
+ */
 .cards {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-}
-
-.card {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-panel);
+  overflow: clip;
 }
 
+.card + .card {
+  border-top: 1px solid var(--border);
+}
+
+/*
+ * An open row is a different kind of thing from the thirty-four closed ones
+ * around it, and the *only* cue it used to have was a slightly darker border it
+ * shares with its neighbours. Expanded, a block puts two tables and a preset list
+ * on screen — enough that "which block am I reading" stops being obvious — so the
+ * row it belongs to is tinted and its edges are drawn strongly, and the body is
+ * indented under a rule so the panel is visibly *inside* the row rather than
+ * following it.
+ */
 .card[open] {
-  border-color: var(--border-strong);
+  background: var(--bg-inset);
+}
+
+.card[open] + .card,
+.card:has(+ .card[open]) {
+  border-top-color: var(--border-strong);
 }
 
 /* One line, closed. Eighty-seven of these is a scrollable list; eighty-seven
@@ -515,12 +561,44 @@
   color: var(--fg-subtle);
 }
 
+/*
+ * The panel sits on the panel background, inset from the tinted row and behind a
+ * left rule: two cues that what is inside belongs to the row above it and stops
+ * where the tint comes back. The tables inside are wide, so the inset is small —
+ * a gutter, not a margin.
+ */
 .cardBody {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-3) var(--space-3);
   border-top: 1px solid var(--border);
+  border-left: 2px solid var(--border-strong);
+  background: var(--bg-panel);
+}
+
+/*
+ * The row's own heading stays put while its tables scroll past it.
+ *
+ * The complaint this answers is that expanding a block "reveals a lot of
+ * information that could get lost" — the fields table alone runs to twelve rows,
+ * and once the summary has scrolled off there is nothing on screen naming the
+ * block whose schema you are reading.
+ *
+ * **Rejected: offsetting the tables' own sticky `th` to sit under this.** It was
+ * written first, as `.card[open] .cardBody th { top: var(--row-h) }`, on the
+ * assumption that both stick to the same scrollport. They do not — `Table`'s
+ * `.scroll` wrapper is `overflow: auto`, so a `th` sticks inside its own table,
+ * which is 57px tall for a one-row slots table. The offset pushed the header 28px
+ * down *inside* that box and covered the only row it labelled. There is nothing
+ * to collide with: a `th` in a box the height of its own table never leaves it.
+ */
+.card[open] > .summary {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-inset);
+  box-shadow: 0 1px 0 var(--border);
 }
 
 /* ------------------------------------------------------------------ layout --- */

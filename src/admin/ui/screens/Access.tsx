@@ -347,10 +347,16 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
   ]
 
   const tokenColumns: Column<TokenRow>[] = [
-    { key: 'name', label: 'Name', cell: (token) => <span className={css.name}>{token.name}</span> },
+    {
+      key: 'name',
+      label: 'Name',
+      width: '26%',
+      cell: (token) => <span className={css.name}>{token.name}</span>,
+    },
     {
       key: 'scopes',
       label: 'Permissions',
+      width: '24%',
       cell: (token) => (
         <span className={css.scopeList}>
           {token.scopes.length === 0 ? (
@@ -381,6 +387,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
     {
       key: 'status',
       label: 'Status',
+      width: '10%',
       cell: (token) => {
         const status = tokenStatus(token)
         return (
@@ -398,11 +405,13 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
     {
       key: 'created',
       label: 'Created',
+      width: '12%',
       cell: (token) => <span className={css.stamp}>{since(token.createdAt)}</span>,
     },
     {
       key: 'used',
       label: 'Last used',
+      width: '14%',
       // Stamped whether the request succeeded or was refused for a missing scope
       // (`readToken`), because the question this column answers is "is this
       // credential in use", not "did it work".
@@ -411,6 +420,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
     {
       key: 'act',
       label: 'Actions',
+      width: '14%',
       cell: (token) => {
         const refusal = revokeRefusal(token)
         return (

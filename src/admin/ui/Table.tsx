@@ -8,6 +8,26 @@ export interface Column<T> {
   numeric?: boolean
   /** Absent means the column cannot be sorted, which is the default. */
   sortable?: boolean
+  /**
+   * A declared width — a percentage, normally. Declaring one on **any** column
+   * switches the whole table to `table-layout: fixed` and emits a `<colgroup>`,
+   * which is the only thing that actually controls a column's width here.
+   *
+   * Needed because auto layout hands *all* the surplus to one column. With
+   * `width: 100%` on the table, a table whose columns want 815px in a 1168px
+   * container has 353px to place, and Chrome gives every pixel of it to the
+   * first column: Settings' document types table drew a 634px `Type` column to
+   * hold the word "Page" while `Where it can live` wrapped "Anywhere in the
+   * tree" over three lines at 84px. Measured, not guessed — and neither a
+   * `max-width` on the cell nor a percentage under auto layout moves it, because
+   * table layout ignores both.
+   *
+   * So this is for a table whose columns are *known* — an explanatory table, or
+   * a record table with few enough columns to apportion. A table with no widths
+   * keeps the old behaviour, which is right when the rows nearly fill the width
+   * they are given.
+   */
+  width?: string
   cell: (row: T) => ReactNode
 }
 
@@ -90,9 +110,31 @@ export function Table<T>({
 }: Props<T>) {
   if (rows.length === 0 && empty) return <>{empty}</>
 
+  /*
+   * One declared width is enough to switch the table over, because a partly
+   * declared table is the worst of both: the undeclared columns split whatever
+   * is left equally, which is at least predictable, where auto layout would go
+   * back to piling the surplus onto column one.
+   *
+   * The `select` and `actions` slots get a `<col>` of their own so the columns
+   * line up with the cells — they are outside `columns` by design (see their
+   * props) and a colgroup that skipped them would shift every width one cell to
+   * the left.
+   */
+  const fixed = columns.some((column) => column.width !== undefined)
+
   return (
     <div className={css.scroll}>
-      <table className={css.table} aria-label={label}>
+      <table className={`${css.table} ${fixed ? css.fixed : ''}`} aria-label={label}>
+        {fixed ? (
+          <colgroup>
+            {select ? <col className={css.select} /> : null}
+            {columns.map((column) => (
+              <col key={column.key} {...(column.width ? { style: { width: column.width } } : {})} />
+            ))}
+            {actions ? <col /> : null}
+          </colgroup>
+        ) : null}
         <thead>
           <tr>
             {select ? <th className={css.select}>{select.head}</th> : null}

@@ -131,6 +131,38 @@
   width: 100%;
 }
 
+/*
+ * A table that declares its own column widths (`Column.width`), which is the
+ * only mechanism that actually apportions them — see that field for the
+ * measurements.
+ *
+ * `:not(.fixed)` on the slack rule above would have been the tidier spelling and
+ * is wrong: that rule names four selectors and this needs to beat all four with
+ * no reliance on module order, so it restates them at one more class of
+ * specificity instead. Overriding by specificity rather than by stylesheet order
+ * is the same choice `Settings.module.css` makes and gives its reason for.
+ */
+.table.fixed {
+  table-layout: fixed;
+}
+
+.table.fixed th:first-child:not(.select),
+.table.fixed td:first-child:not(.select),
+.table.fixed th.select + th,
+.table.fixed td.select + td {
+  width: auto;
+}
+
+/*
+ * Declared widths are only worth declaring if the content can use them, so a
+ * fixed table wraps. Without this every cell keeps `nowrap` from below and a
+ * column narrower than its content clips instead of using its second line —
+ * which is the failure the widths exist to fix, one layer down.
+ */
+.table.fixed td {
+  white-space: normal;
+}
+
 .open {
   padding: 0;
   font: inherit;
