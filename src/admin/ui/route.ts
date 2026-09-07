@@ -46,9 +46,6 @@ export type Screen =
    * `docs/specs/foundation/passkeys.md` decision 6: reached from the user menu,
    * deliberately **not** in `nav()` — `ui-nav.test.ts` asserts the absence. */
   | { name: 'account' }
-  /** The kitchen sink. Dev only, at `{base}/ui` — which it now has to itself,
-   * having read `{base}/ui/ui` while the shell was under its own `/ui` prefix. */
-  | { name: 'ui' }
   | { name: 'missing'; path: string }
 
 export type ScreenName = Screen['name']
@@ -78,7 +75,6 @@ const FLAT = [
   'settings',
   'forms',
   'account',
-  'ui',
 ] as const
 
 /**
@@ -243,7 +239,6 @@ const TITLES: Record<
   settings: 'Settings',
   forms: 'Forms',
   account: 'Your account',
-  ui: 'Design system',
 }
 
 /**

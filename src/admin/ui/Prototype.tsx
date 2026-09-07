@@ -9,7 +9,6 @@ import {
 import { DEFAULT_FLAT_SORT, type FlatSort, type StoryMeta } from '../../core/story'
 import { onUnauthorized, send, signInUrl } from '../api'
 import { actorLabel, fetchMe, type Me, OPEN } from '../me'
-import { Kitchen } from './Kitchen'
 import type { MenuItem } from './Menu'
 import { activeItem, nav } from './nav'
 import { Palette, type PaletteAction } from './Palette'
@@ -353,9 +352,10 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
    * The user menu. Two items again, as it was before this admin had only one
    * thing to do about who you are: "Your account" first, "Sign out" last and
    * `danger`, and the ordering is deliberate — the destructive one is not the
-   * first thing a click lands on. The kitchen sink used to be here too; it is a
-   * dev surface and still answers at `{base}/ui`, but a link to it is not
-   * something an editor should find under their own name.
+   * first thing a click lands on. The kitchen sink used to be here, then stopped
+   * being linked from here on the grounds that a dev surface is not something an
+   * editor should find under their own name — and is now deleted outright, so
+   * `{base}/ui` is an ordinary unknown path.
    *
    * "Your account" is `{base}/account` — `docs/specs/foundation/passkeys.md`
    * decision 6 — which is why it is reached from here and not from `nav()`:
@@ -802,9 +802,6 @@ function screenFor(a: ScreenArgs) {
 
     case 'account':
       return <Account apiBase={boot.apiBase} me={a.me} loading={a.loading} onNotice={a.notify} />
-
-    case 'ui':
-      return <Kitchen />
 
     case 'missing':
       return (

@@ -34,9 +34,6 @@ describe('parse', () => {
     // Reached from the user menu, never the sidebar (`ui-nav.test.ts`), but a URL
     // like any other: `docs/specs/foundation/passkeys.md` decision 6.
     expect(parse('/folio/account', MOUNT).screen).toEqual({ name: 'account' })
-    // The kitchen sink, which finally has a sane URL: it read `/folio/ui/ui` while
-    // the shell was itself under a `/ui` prefix.
-    expect(parse('/folio/ui', MOUNT).screen).toEqual({ name: 'ui' })
   })
 
   it('reads the four parameterised screens', () => {
@@ -90,6 +87,15 @@ describe('parse', () => {
       name: 'missing',
       path: '/folio/api/stories',
     })
+    // `{base}/ui` was the kitchen sink, deleted with the screen itself: a design
+    // system demo that shipped in every consumer's admin bundle. Asserted rather
+    // than left implicit because `Screen`, `FLAT` and `TITLES` are three lists a
+    // later edit adds a name back to by reflex, and a screen that renders nothing
+    // is a worse failure than a path that says it is not there.
+    expect(parse('/folio/ui', MOUNT).screen).toEqual({
+      name: 'missing',
+      path: '/folio/ui',
+    })
   })
 
   it('is missing for a path outside the mount, including one that only looks like it', () => {
@@ -133,7 +139,6 @@ describe('href', () => {
       { name: 'settings' },
       { name: 'forms' },
       { name: 'account' },
-      { name: 'ui' },
       { name: 'documents', type: 'person' },
       { name: 'edit', id: 'sty_abc' },
       { name: 'form', id: 'frm_abc' },
