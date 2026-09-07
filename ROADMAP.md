@@ -472,6 +472,11 @@ Deferred or uncovered, each named rather than glossed:
 - **No `retentionDays`, no per-response comments, no spam score, no vendor
   integration.** `verify` is a host function precisely so Folio never names a
   captcha vendor, holds a key or has a timeout policy.
+- **A form has no logic and no layout at all**: every question is visible, always
+  required-or-not, and stacked one per row. Reported by the second host on
+  2026-09-07 over the narrowest possible case — a first/last name pair that used to
+  share a row and now does not — and the narrow case is the wrong frame. **Section 4
+  of *Next* below** is the market scan and the position it argues for.
 
 ## Next
 
@@ -705,6 +710,149 @@ document at a time in its own `try`. The three per-document workflows (duplicate
 delete) moved out of their routes into `server/documents.ts` on the way, because the
 delete batch already existed in two copies and a third is where one of them forgets the
 schedule cleanup.
+
+
+### 4. A form has no logic, and the market says whose renderer that is
+
+**Raised 2026-09-07 by the second host** (`takeoffgo/takeoffgo-website`) as the
+smallest possible complaint: `/contact` used to wrap first and last name in a
+`<div className="basic-columns">`, an editor rebuilt the form on the Forms screen,
+and the pair is now stacked. The complaint is true and the frame is wrong.
+`ResolvedForm.fields` is a flat array of always-visible questions, so the missing
+thing is not two columns — it is that **a form carries no logic and no
+presentation of any kind**, and layout is simply the first axis anybody trips over.
+
+A scan of what is on the market in September 2026 splits it cleanly, and the split
+is over **who owns the renderer**:
+
+- **Rich logic, their markup.** Typeform (logic jumps, recall, calculator
+  variables), Cognito Forms (formula logic, calculations, repeating sections,
+  conditional pages), Jotform, Fillout (logic that reads live Airtable/Notion/
+  Sheets data, options from a REST endpoint), Feathery and Formsort (picklists from
+  Sheets/Salesforce/custom APIs, "API variables"), Gravity Forms (conditional logic
+  on fields, pages, notifications *and* confirmations; live merge tags;
+  save-and-continue; nested forms as repeaters). Every one of them ships the form as
+  an embed or a hosted page, and that is *why* they can be this rich: for them the
+  logic and the markup are one artifact.
+- **Your markup, no logic.** Payload's form-builder plugin, which is close enough
+  to be unnerving — an editor builds a form in the admin and "your front-end can map
+  over this schema, render its own UI components, and match your brand's design
+  system", thirteen field types against our fourteen, and **no conditional logic on
+  a field at all** (its only conditions are on the payment field's price). The same
+  trade we made, with the same consequence.
+- **The one that has thought about the seam** is SurveyJS, worth reading as prior
+  art: `survey-core` is a platform-independent logic engine, `survey-react-ui` only
+  renders, and the JSON schema is declarative and never mutated. Their essay on why
+  `react-jsonschema-form` collapses is the argument for that split — when the schema
+  *is* the behaviour, a conditional branch unmounts and remounts fields, React sees
+  a new form rather than a continuation, and input state and the error tree are
+  lost. But SurveyJS still owns the field-level renderer; you theme its questions,
+  you do not hand it your own `<Input>`.
+
+**Nobody ships rich logic with the host's own components.** Camp one will not,
+because the renderer is the product; camp two has not, because it stopped at the
+schema. Folio is already standing on the right side of that gap.
+
+The position, then, is **three layers, of which Folio ships two**:
+
+1. **The descriptor** — data. What an editor authored, compiled server-side,
+   localised, cache-tagged. Exists; grows.
+2. **The engine** — pure functions in `folio/core`. Given a descriptor and the
+   answers so far: what is visible, what is required, what is valid, which step this
+   is. Isomorphic, React-free, no DOM. **The submit route calls the same
+   functions**, so a browser is never the enforcement.
+3. **The binding** — an optional headless hook on a new subpath (`folio/form`).
+   No markup, no CSS, no injected script; prop-getters that spread onto the host's
+   own components. TanStack Form's posture, not Formik's.
+
+**Layer 3 being optional is the whole point**, and it is the thing no product in
+the scan can claim: with JavaScript off the form posts natively and the server
+applies identical rules, because it is identical code. That is already true of
+Folio's forms and the design must not break it.
+
+Two primitives we already own do most of the work. **`FieldCondition` and
+`matches()`** (`core/conditions.ts`, both already exported from `folio/core`) are a
+JSON-serialisable condition language with a total evaluator whose signature is
+`matches(condition, Record<string, Json>)` — which is exactly the shape of a form's
+answers, so `showIf` on a question is nearly free and the builder inherits the
+inspector's condition editor. And **`ContentQuery`** (`core/query.ts`) already
+resolves a narrowed content query onto the `Resolution`.
+
+Ranked by value × fits-a-library:
+
+1. **Conditional fields** — `showIf?: FieldCondition`, evaluated on both sides.
+2. **Options from content** — a `select` whose choices are a `ContentQuery`. Every
+   product above sells "connect your dropdown to Salesforce" as a paid connector;
+   ours is "the published trips under /trips, narrowed by the editor", with no
+   connector, no key and no polling, resolved on the pass a `collection` field
+   already uses and purged by the tags it already emits. **The most differentiated
+   item on the list, and the one to lead with** — nobody else can do it, because
+   nobody else is also the content.
+3. **Conditional requiredness and cross-field validation** — same vocabulary,
+   different verb; `requireIf`, plus `rules: { when, message }[]`.
+4. **Prefill** — first-class `prefill: 'query' | 'none'`, plus a host-supplied map
+   through `folio.resolve`. Take Off Go has already hand-rolled the query half.
+5. **Steps** — `step?: number`; the engine reports membership and completeness, and
+   with no JS the form is one page.
+6. **Layout** — a `width` token stored, compiled to a span out of twelve. CSS grid
+   auto-flow *is* the row algorithm, so Folio ships no row objects and no opinion
+   about when a row stops being one; the host's breakpoint collapses it. This is the
+   original complaint, and it is one axis of six.
+7. **Options the host supplies** — the escape hatch for genuinely external data.
+   Folio holds no key and names no vendor, `verify`'s posture exactly.
+
+**Refused, with reasons, because each is where the library becomes a platform:**
+
+- **An expression language.** SurveyJS's `iif()`/`age()`/`sumInArray()` means a
+  parser and an evaluator running on an anonymous POST, an authoring UI, and a
+  permanent compatibility surface. Conditions cover visibility, requiredness,
+  validation and branching. The honest casualty is **calculated values** (pricing,
+  scoring) and the honest answer is the `submitted` hook, which can compute anything
+  after the fact.
+- **Piping/recall in labels.** `{firstName}` interpolation puts a template language
+  inside an editor's string, to be escaped at render in markup Folio does not
+  control. XSS by way of a label.
+- **Payments, signature, address autocomplete.** Ship the seam — a `custom` kind
+  carrying an opaque `config` — never the widget.
+- **Any injected script.**
+
+Four things in the current code bite whatever gets built, and all four are the kind
+that read as green:
+
+- **Conditions must be re-evaluated server-side or they are a lie.** A required
+  field hidden by a condition must not block a submission, and an answer *to* an
+  excluded field must be dropped rather than stored — otherwise the first crafted
+  POST writes fields the visitor was never shown. The largest piece of work here,
+  and not optional.
+- **`shapeOf` and `formChanged` have to grow.** `formChanged` fires only on a
+  structural save (`server/routes/forms.ts:218`) and `shapeOf` is
+  name/kind/required/option-values. A logic change is *more* structural than a
+  `required` flag — it changes what the server will accept — and `shapeOf` cannot
+  see it, so nothing purges `form:<id>` and a cached page keeps the old rules for
+  its whole TTL. `shapeOf` should come to mean "anything the server enforces".
+- **`v.object` strips unknown keys.** Anything added to `FormField` must also land
+  in `FORM_FIELD` (`server/validate.ts:1791`) or the builder saves happily, the
+  PATCH body drops it before `validateFormFields` sees it, and the column never
+  receives it. Silent, and it reads as a builder bug.
+- **A response gains a third state.** The CSV already separates "this field did not
+  exist yet" (`—`) from "they left it blank" (empty); branching adds "they were
+  never asked", which is real data about the path taken. **Repeating groups break
+  the model outright** — a response is a flat key→value map and a repeater is not,
+  which is the concrete reason to defer them rather than a vague one.
+
+There is also a documented accessibility finding worth carrying into the handbook
+and the builder's copy rather than enforcing: GOV.UK's research on conditionally
+revealed questions found screen reader users could tell that something had changed
+but not what its relationship to the question was. Reveals of *a single input*
+tested fine; multiple fields or prose did not — which argues for steps over deep
+nesting.
+
+**Sequencing, when this is picked up:** conditional visibility and requiredness,
+the pure engine, server-side re-evaluation, layout and prefill are one coherent
+spec and most of the perceived power. Content-sourced options is a second, and is
+independent. Steps plus the `folio/form` hook is a third, and the hook is worth far
+more once there is state to manage. Repeating groups, save-and-resume, partial
+submissions and calculated values are named rather than planned.
 
 
 ## Uncovered from the reference project
