@@ -59,11 +59,18 @@ export function shellRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * router decides everything else — so making it resolve the host's environment would
    * give **eight screens** a dependency on it for a boolean **one** of them needs.
    *
-   * `routes/editor.ts` passes them instead. It has already resolved the environment by
-   * the time it renders (it reads the story to 404 an unknown id), and the space
-   * channel is the editor's concern. If presence ever has to be site-wide, the flag
-   * belongs on `GET {base}/api/me` — which resolves the environment anyway — rather
-   * than back here.
+   * `routes/editor.ts` passed them instead, on the reasoning that it has already
+   * resolved the environment by the time it renders and that the space channel was
+   * the editor's concern. **That last clause stopped being true on 2026-09-07**,
+   * when the shell mounted the channel and presence became site-wide — and one
+   * route answering a flag every route's page reads is worse than no flag at all,
+   * because a browser entering anywhere else read `undefined` and stayed off for
+   * the session.
+   *
+   * So the flag went where the sentence that used to end this comment said it
+   * belongs: `GET {base}/api/me`, which resolves the environment anyway to read
+   * the session. `shellPage` takes no bindings at all now, and this route and the
+   * editor's render the identical shell.
    */
   app.get('/', requireHtmlAccess<Env>(rt, READ_DRAFT), () => shellPage(rt))
   app.get('/*', requireHtmlAccess<Env>(rt, READ_DRAFT), () => shellPage(rt))

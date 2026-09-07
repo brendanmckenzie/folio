@@ -333,24 +333,17 @@ export function peersIn(peers: readonly SpacePresence[], storyId: string): Space
   return avatarsOf(peers.filter((p) => p.storyId === storyId))
 }
 
-/**
- * What a peer's avatar says: their name, where they are, and how many tabs.
+/*
+ * `followLabel` was here, and is deleted rather than kept as groundwork.
  *
- * "on a list screen" is a real answer rather than a missing one — an editor
- * browsing the tree is present and worth showing, and saying so is better than an
- * avatar that looks broken. Pure and exported so the wording is tested without
- * mounting anything.
+ * It was moved out of `admin/TopBar.tsx` when port phase 8 deleted that file, on
+ * the grounds that the rebuilt top bar would want it back. When the top bar
+ * finally got avatars (#4, 2026-09-07) it wanted an **accessible name** instead —
+ * `ui/space-mount.ts`'s `avatarLabel`, a sentence, because a coloured circle has
+ * no name of its own — rather than this display form with its dashes and
+ * parentheses. Two exported functions for one job, one of them untested and
+ * carrying a comment that had become false, is worse than one.
  *
- * Moved here from `admin/TopBar.tsx` when port phase 8 deleted it, next to the
- * `SpaceAvatar` it describes. **Nothing renders it today**, and that is a real gap
- * rather than dead code: the rebuilt editor has per-story presence but has not yet
- * joined the space channel, so the top bar has no avatars to label. See
- * `ui-architecture.md`'s open question 7.
+ * `peersIn` above stays uncalled, and that difference is deliberate: it is for the
+ * tree-row dots, which are deferred rather than replaced.
  */
-export function followLabel(peer: SpaceAvatar): string {
-  const tabs = peer.tabs > 1 ? ` · ${peer.tabs} tabs` : ''
-  if (peer.storyId === null) return `${peer.name} — on a list screen${tabs}`
-  const where = peer.storyTitle ?? 'a document'
-  const locale = peer.locale ? ` (${peer.locale})` : ''
-  return `${peer.name} — ${where}${locale}${tabs}`
-}

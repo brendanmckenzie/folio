@@ -1,0 +1,55 @@
+/*
+ * The avatar row in the top bar. Inside `.right`, which is already
+ * `flex: 0 0 auto`, so this never competes with the breadcrumb for width — the
+ * trail gives up its early segments instead, which is what `TopBar.module.css`
+ * arranged.
+ */
+
+.avatars {
+  display: flex;
+  align-items: center;
+  /* Overlapped rather than gapped: four people in a 40px bar should read as a
+     stack. The 6px here pays back the first circle's negative margin, so the row
+     starts where it would have without the overlap — a `:first-child` override
+     would do the same thing and would also have to be undone if the row ever
+     gained a label before it. */
+  padding-left: 6px;
+  flex: 0 0 auto;
+}
+
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: -6px;
+  border-radius: var(--radius-full);
+  /*
+   * Two rings, and the inner one is load-bearing.
+   *
+   * The outer is the bar's own colour, so the stack reads as separate people at
+   * any two adjacent colours — a gap, not an outline. On its own that leaves a
+   * pale avatar invisible: `fallbackColour` (`core/protocol.ts`) takes the top 24
+   * bits of a hash of the actor id, so it returns *any* colour including one at
+   * `#fefefe`, and `--bg-panel` is `#ffffff` in light mode. A white disc with a
+   * white gap on a white bar is not an avatar.
+   *
+   * So the inner hairline draws the disc's own edge. `inset` is safe here and is
+   * the case `CLAUDE.md`'s warning does not cover: an inset shadow *is* clipped
+   * by the border radius, which is why a 2px left edge on a rounded row draws a
+   * curved bracket — but a ring on every side of a circle is exactly a ring, and
+   * clipping to the radius is what makes it follow the circle.
+   */
+  box-shadow:
+    0 0 0 1.5px var(--bg-panel),
+    inset 0 0 0 1px rgb(0 0 0 / 22%);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  /* The glyphs, separately: white initials on a pale disc need their own edge,
+     and a text shadow reaches only the text. The disc is the ring above. */
+  text-shadow: 0 0 2px rgb(0 0 0 / 45%);
+  user-select: none;
+}

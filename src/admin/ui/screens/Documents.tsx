@@ -40,6 +40,14 @@ interface Props {
   onNotice: (message: string) => void
   /** The open document, if the editor was reached from here. */
   selected?: string
+  /**
+   * Hands this screen's `reload` to the shell, which calls it when the space
+   * channel reports that somebody *else* created, published or deleted a
+   * document (`Prototype.tsx`'s `listReload`). Registered in an effect and
+   * unregistered on unmount, so the shell never holds a stale closure over a
+   * screen that is gone.
+   */
+  registerReload: (reload: (() => void) | null) => void
 }
 
 const STATES = [
@@ -90,6 +98,17 @@ export function Documents(props: Props) {
   const [busy, setBusy] = useState(false)
 
   const go = useCallback((next: DocumentsUrl) => onQuery(documentsQuery(next)), [onQuery])
+
+  /**
+   * The shell's handle on this screen's page. A registration rather than a
+   * counter prop, for the reason on `Prototype.tsx`'s `listReload`: both
+   * dependencies here are values the body reads.
+   */
+  const { registerReload } = props
+  useEffect(() => {
+    registerReload(data.reload)
+    return () => registerReload(null)
+  }, [registerReload, data.reload])
 
   const columns = useMemo(
     () =>

@@ -736,13 +736,21 @@ break every existing host on upgrade.
 
 What it buys, on every open editor:
 
-- **Who is in the site.** Avatars in the top bar say which document each person
-  is in and which language they are in, and a dot appears on that page's row in
-  the tree. Click an avatar and you land where they are, in their locale, on their
-  block — follow-mode is a client feature over presence, with nothing new on the
-  wire. Continuous following is deliberately not built: it needs an exit
-  affordance, a "they left" state and scroll sync the preview bridge has no way
-  to carry.
+- **Who is in the site.** Avatars in the top bar, one per person rather than per
+  tab, saying which document each of them has open — or that they are elsewhere in
+  the CMS, which is a real answer and not a missing one.
+
+  Three things over presence are **deferred past 1.0** (owner, 2026-09-07) and are
+  named here rather than described as working: a dot on that page's row in the
+  tree; follow-mode on clicking an avatar, which would be a client feature over
+  presence with nothing new on the wire; and the language each person is editing
+  in, which the wire carries and no client fills — the active locale is editor
+  state rather than a URL parameter (`localisation.md` decision 6), so the shell
+  that draws the avatar row cannot see it.
+
+  Continuous following was already not built, and for its own reasons: it needs an
+  exit affordance, a "they left" state and scroll sync the preview bridge has no
+  way to carry.
 - **A rename fixes your links.** Somebody else moving a page reaches your tree,
   and the resolution rebuilt from it reaches your preview as a `resolve` frame —
   so every link to that page in the page you are looking at updates live, with no

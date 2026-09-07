@@ -459,6 +459,45 @@ describe('sessions over HTTP', () => {
     expect(body.actor.roleFrom).toBeNull()
   })
 
+  /**
+   * The `SPACE` flag, and **the reason it is answered here at all**.
+   *
+   * It used to travel on the shell's HTML bootstrap, filled from `bindings` —
+   * which only `routes/editor.ts` passed, because `routes/shell.ts`'s wildcard
+   * deliberately does not resolve the host's environment. That was fine while the
+   * space channel was the editor's alone. The day the shell mounted it (#4,
+   * 2026-09-07) it became every screen's flag, and a browser entering at `{base}`
+   * or `{base}/content` read `undefined`, took it as false, and opened no socket
+   * for the rest of the session however it navigated afterwards — the whole
+   * feature absent on the ordinary entry path, with every gate green.
+   *
+   * Both directions, because only the pair says anything: a route that hardcoded
+   * `true` and a route that hardcoded `false` each pass one of these.
+   */
+  it('GET /folio/api/me says whether the host declared the space binding', async () => {
+    const withoutSpace = folioWith(magicAuth)
+    const cookie = await signedIn(withoutSpace)
+
+    expect(
+      await (await call(withoutSpace, '/folio/api/me', { headers: { cookie } })).json(),
+    ).toMatchObject({
+      space: false,
+    })
+
+    const withSpace = createFolio<Cloudflare.Env>({
+      blocks: [page],
+      root: 'page',
+      bindings: (e) => ({ ...bindings(e), space: e.SPACE }),
+      basePath: '/folio',
+      auth: magicAuth,
+    })
+    expect(
+      await (await call(withSpace, '/folio/api/me', { headers: { cookie } })).json(),
+    ).toMatchObject({
+      space: true,
+    })
+  })
+
   it('GET /folio/api/me names the provider that minted this browser’s session', async () => {
     // `session.provider` is `sessions.provider`, not `users.provider`: which
     // door *this* browser came through, which is what

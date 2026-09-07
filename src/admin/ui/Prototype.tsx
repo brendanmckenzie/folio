@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import './tokens.css'
 import {
   type DocumentType,
@@ -8,12 +8,16 @@ import {
 } from '../../core/schema'
 import { DEFAULT_FLAT_SORT, type FlatSort, type StoryMeta } from '../../core/story'
 import { onUnauthorized, send, signInUrl } from '../api'
+import type { SpaceEvent, SpacePresence } from '../../core/protocol'
+import { spaceEventEffect, useSpace } from '../hooks/useSpace'
 import { actorLabel, fetchMe, type Me, OPEN } from '../me'
 import type { MenuItem } from './Menu'
 import { activeItem, nav } from './nav'
 import { Palette, type PaletteAction } from './Palette'
 import { type Crumb, type CrumbContext, crumbs, documentTitle, href, type Screen } from './route'
 import { useRemembered, useRememberedString } from './remembered'
+import { applySpaceEffect, spaceIdentity, spaceWhere } from './space-mount'
+import { SpaceAvatars } from './SpaceAvatars'
 import { Access } from './screens/Access'
 import { Account } from './screens/Account'
 // `ASSET_VIEW_KEY` and not a string literal: the picker is mounted by an asset
@@ -46,6 +50,24 @@ import { useRouter } from './useRouter'
 import { useSearch } from './useSearch'
 import { globalPreviewUrl, usePreviewHost, useStory } from './useStory'
 
+/**
+ * The two strings the server-rendered shell hands the client, and nothing else.
+ *
+ * **A feature flag does not belong here, and one used to.** `space` — whether the
+ * host declared the `SPACE` binding — sat on this object from the deletion of
+ * `adminPage` until 2026-09-07, and it never worked once anything read it: only
+ * `routes/editor.ts` passed bindings to `shellPage`, because `routes/shell.ts`'s
+ * wildcard deliberately does not resolve the host's environment for a boolean one
+ * screen needed. Then the shell mounted the space channel, which made it every
+ * screen's boolean. It is `Me.space` now, off `GET {base}/api/me`, which
+ * `routes/shell.ts`'s own comment had already named as where it belongs in that
+ * case.
+ *
+ * Worth the paragraph because a bootstrap is the obvious place to put a flag and
+ * is the wrong place twice over: it is answered per *route* rather than per
+ * *site*, and the client reads it once and holds it for the session, so a route
+ * that forgets to fill it is a feature that stays off through every navigation.
+ */
 export interface PrototypeBoot {
   /**
    * Where Folio is mounted, and therefore where every screen lives: the router is
@@ -54,25 +76,6 @@ export interface PrototypeBoot {
   base: string
   /** Where the admin's internal JSON lives — `${base}/api`. */
   apiBase: string
-  /**
-   * Whether the host declared the `SPACE` binding
-   * (`../../../docs/specs/editing/live-collaboration.md`).
-   *
-   * False and everything that channel carries — cross-story presence, a tree that
-   * updates itself when somebody else renames a page — is absent, with nothing
-   * attempted and nothing logged. Feature-detected through the bootstrap rather than
-   * by a failed socket upgrade, so a host that has not declared it does not get a
-   * console full of retries.
-   *
-   * **Nothing reads it yet.** The rebuilt editor has per-story presence off the
-   * document socket and has not joined the space channel, which is what
-   * `ui-architecture.md` open question 7 still owes — and `admin/spaceStore.ts` and
-   * `hooks/useSpace.ts` were kept through port phase 8 precisely so that work is a
-   * wiring job rather than a rewrite. The flag is here because the *route* that
-   * answers it is here; it arrived with the deletion of `adminPage`, which was the
-   * only page that had ever carried it.
-   */
-  space?: boolean
 }
 
 /**
@@ -227,6 +230,149 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
       })
   }, [boot.apiBase])
   const onStoryChanged = local ? reloadGlobals : fetched.reload
+
+  /* ------------------------------------------------- the space channel --- */
+
+  /**
+   * The list screen's own `reload`, handed up.
+   *
+   * `reload: true` off a structural event means "re-read the list on screen", and
+   * the shell does not hold one: Content holds levels through `useContent` and
+   * Documents holds a page through `useDocuments`, each with its own `reload`
+   * that knows which of the two modes it is in. So the screen registers its
+   * function here and the shell calls it.
+   *
+   * **Rejected a monotonic counter threaded down as a prop**, which is the
+   * obvious shape and which `useContent`'s own `reload` had already tried and
+   * removed: "an `epoch` in a dependency array is a value the body never looks
+   * at, which is exactly the shape `useExhaustiveDependencies` is right to
+   * complain about" (`screens/useContent.ts`). Putting the counter one level up,
+   * in the screen, has the identical smell for the identical reason and would
+   * need a `biome-ignore` to pass the lint gate. Registering a function has a
+   * dependency array whose entries the body actually reads.
+   *
+   * Also rejected remounting the screen on a changed `key`, which reloads by
+   * throwing the component away: it would lose the selection, the scroll
+   * position and the create dialog somebody had open, to refresh a list.
+   *
+   * A ref rather than state, because a screen registering must not re-render the
+   * shell — the same reason `useSpace` keeps its `onEvent` in one. Null on every
+   * screen that has no list, where a reload is correctly nothing at all.
+   */
+  const listReload = useRef<(() => void) | null>(null)
+  const registerReload = useCallback((reload: (() => void) | null) => {
+    listReload.current = reload
+  }, [])
+
+  /**
+   * The advisory identity, made **once**. `useSpace` holds it in a ref precisely
+   * because a new object per render would rebuild the socket, so this must not be
+   * an expression in the component body.
+   */
+  const [identity] = useState(spaceIdentity)
+
+  /**
+   * The peer list, for naming the actor an event came from.
+   *
+   * Read out of a ref rather than closed over, because `onSpaceEvent` is an
+   * argument to `useSpace` and therefore cannot reference its result. Assigned
+   * during render, which is what `useSpace` does with its handler and
+   * `useContent` with its levels.
+   */
+  const peers = useRef<readonly SpacePresence[]>([])
+
+  const onSpaceEvent = useCallback(
+    (event: SpaceEvent) => {
+      applySpaceEffect(
+        spaceEventEffect(event, {
+          openStoryId: screen.name === 'edit' ? screen.id : '',
+          // Null under `auth: 'open'`, where there is no verified actor to
+          // compare against — and where the events carry a null actor anyway,
+          // since a write with no identity behind it has none to report.
+          myActor: me.actor?.id ?? null,
+          // `Someone`, which is the wording `live-collaboration.md`'s
+          // implementation notes specify for an actor the peer list cannot name.
+          // Never "somebody else": under `auth: 'open'` every event carries a
+          // null actor, so the own-echo guard in `spaceEventEffect` cannot fire
+          // and this labels your *own* publish — "somebody else published this
+          // page" would be a claim the null-actor case cannot support.
+          nameOf: (actor) => peers.current.find((p) => p.actor === actor)?.name ?? 'Someone',
+        }),
+        {
+          /**
+           * "Re-read what is on screen", which is two different things.
+           *
+           * A list screen registered its own `reload` above. **The editor did
+           * not, and it is the one screen the notices are addressed to**, so
+           * without the second line here a colleague publishing the page you have
+           * open toasts "Ben published this page" and changes nothing: the
+           * `stories` row is not refetched, `story.state` stays `draft`,
+           * `publishStatus` reads that as `isLive: false`, and the Publish button
+           * stays enabled beside a status line that has not moved. That is the
+           * exact regression `onStoryChanged` was added for (see `reloadGlobals`
+           * above) and the acceptance criterion the space channel's spec states as
+           * "her unpublished-changes state recomputes".
+           *
+           * Unconditional rather than gated on the event naming this story: an
+           * *ancestor* being renamed changes this row's path without ever
+           * mentioning its id, and the cost is one `?ids=` fetch of a row the
+           * screen is already showing.
+           */
+          reload: () => {
+            listReload.current?.()
+            if (screen.name === 'edit') onStoryChanged()
+          },
+          globals: reloadGlobals,
+          notice: setNotice,
+        },
+      )
+    },
+    [screen, me, reloadGlobals, onStoryChanged],
+  )
+
+  const where = spaceWhere(screen, open)
+  const space = useSpace({
+    apiBase: boot.apiBase,
+    // `/api/me`'s flag, which is the host having declared the binding. False and
+    // nothing is attempted: no socket, no retries, no console — including for
+    // the moment before `/me` answers, where `OPEN` omits it.
+    //
+    // Off `me` and not off the bootstrap, and that is the fix rather than the
+    // shape it was always going to have: the bootstrap carried this flag only
+    // from `routes/editor.ts`, so a browser entering anywhere but a document's
+    // own URL saw `undefined`, and `useSpace` memoises its store on `enabled` —
+    // so navigating into a document afterwards did not turn it on either. The
+    // whole feature was absent for the ordinary entry path.
+    enabled: me.space ?? false,
+    identity,
+    storyId: where.storyId,
+    storyTitle: where.storyTitle,
+    // The shell does not know the locale — the editor does, and threading it up
+    // for this would put the editor's state in the shell to decorate an avatar.
+    // `SpacePresence.locale` is nullable for exactly this, and `avatarLabel`
+    // drops the clause when it is absent.
+    locale: null,
+    // The document socket carries the real per-block selection; a cross-story
+    // avatar row is not where it would be shown.
+    selection: null,
+    onEvent: onSpaceEvent,
+  })
+  peers.current = space.peers
+
+  /**
+   * The channel's own notices — a protocol mismatch, a session that ended, an
+   * `error` frame — into the same toast somebody else's write uses.
+   *
+   * `SpaceStore` had written these since it was built and nothing read them, so
+   * every terminal close was silent: the avatar row vanished and the carefully
+   * worded "Reload the page: this editor and the server disagree on the protocol
+   * version." went nowhere. Which matters more than it sounds, because
+   * `PROTOCOL_VERSION` is meant to be cheap to bump — and it is only cheap if the
+   * stale tab is told rather than quietly losing presence.
+   */
+  useEffect(() => {
+    if (space.notice) setNotice(space.notice)
+  }, [space.notice])
 
   const groups = useMemo(
     () => nav({ types, globals: manifest?.globals ?? [], me }),
@@ -418,6 +564,10 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
         mount={boot.base}
         collapsed={sidebar.value}
         onToggleSidebar={sidebar.toggle}
+        // Who else is in the site. `SpaceAvatars` renders null when nobody is,
+        // which is also the whole of what a deployment without the `SPACE`
+        // binding sees.
+        presence={<SpaceAvatars avatars={space.avatars} />}
         onSearch={() => setPalette(true)}
         actor={actorLabel(me)}
         user={user}
@@ -451,6 +601,7 @@ export function Prototype({ boot }: { boot: PrototypeBoot }) {
           setHistoryOpen,
           preview: previewFor(open, previewType, previewHost, boot.base),
           onFormLabel: (id, formLabel) => setFormTitle({ id, label: formLabel }),
+          registerReload,
         })}
       </Shell>
       {palette ? (
@@ -520,6 +671,14 @@ interface ScreenArgs {
    * builder's job is to call this once its fetch answers, not to hold the
    * breadcrumb itself. */
   onFormLabel: (id: string, label: string) => void
+  /**
+   * How a list screen hands its own `reload` to the shell, so the space channel
+   * can re-read the list when somebody else moves, publishes or deletes a page.
+   *
+   * A screen with no list never calls it, and a reload on such a screen is
+   * correctly nothing. See `listReload` above for the two shapes this beat.
+   */
+  registerReload: (reload: (() => void) | null) => void
 }
 
 /**
@@ -562,6 +721,7 @@ function screenFor(a: ScreenArgs) {
           // tell "this type has no title field" from "I was not told", so it stays
           // silent rather than printing a false claim about the schema.
           schema={a.schema}
+          registerReload={a.registerReload}
           remembered={{ view: a.contentView.value, sort: a.contentSort.value }}
           onRemember={(next) => {
             a.contentView.set(next.view)
@@ -675,6 +835,7 @@ function screenFor(a: ScreenArgs) {
           }
           onOpen={a.go}
           onNotice={a.notify}
+          registerReload={a.registerReload}
           {...(a.open ? { selected: a.open.id } : {})}
         />
       )

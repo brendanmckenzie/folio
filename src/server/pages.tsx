@@ -47,7 +47,7 @@ const ADMIN_STYLE = `body.folio-admin { margin: 0 }`
  * the application there; here `/edit/:id` is one route among eleven and the id is
  * in the URL where it belongs.
  */
-export function shellPage(rt: FolioRuntime, bindings?: ReadBindings): Promise<Response> {
+export function shellPage(rt: FolioRuntime): Promise<Response> {
   const { entries, stylesheets } = rt.page('admin')
   return html(
     <Shell
@@ -84,27 +84,35 @@ export function shellPage(rt: FolioRuntime, bindings?: ReadBindings): Promise<Re
             four of its uses turned out not to be JSON at all.
           */}
           {/*
-            `space` is how the admin **feature-detects the space channel**
-            (`../../docs/specs/editing/live-collaboration.md`): a host that has not
-            declared the binding must not have its console filled with a socket
-            retrying forever, so the answer travels in the bootstrap rather than being
-            discovered by a failed upgrade.
-            
-            It arrives here from the deleted `adminPage`, which was the only place it
-            had ever been answered. **`bindings` is optional and only the editor route
-            passes it** — `routes/shell.ts`'s wildcard deliberately does not, because
+            Two values and no third, which is why this page takes no `bindings`.
+
+            A `space` flag lived here — whether the host declared the `SPACE`
+            binding, for the admin to feature-detect the space channel without a
+            socket retrying forever against a host that has not. It was answered
+            from `bindings`, which only `routes/editor.ts` passed: `routes/shell.ts`'s
+            wildcard deliberately does not resolve the host's environment, because
             `app.test.ts` builds a Folio whose accessor *throws* and asserts the shell
-            still answers 200. Making the wildcard resolve the environment would give
-            eight screens a dependency on it for a boolean one of them needs. Absent
-            means `false`, which is the safe reading: no channel announced is no channel
-            attempted.
+            still answers 200.
+
+            That was defensible while the channel was the editor's alone. It stopped
+            being defensible the day the shell mounted it (2026-09-07), because the
+            shell is every screen: a browser entering at `{base}` or `{base}/content`
+            read `undefined`, took it as false, and — since `useSpace` memoises its
+            store on `enabled` — stayed off for the whole session however it
+            navigated. The flag is on `GET {base}/api/me` now, which resolves the
+            environment anyway to read the session, and which `routes/shell.ts` had
+            already named as where it belongs once presence went site-wide.
+
+            The general form, since a bootstrap is the obvious place to put a flag:
+            this object is answered per *route* and cached by the client for the
+            session, so a route that forgets a field is a feature that stays off.
+            Only put things here that every route rendering this page can answer.
           */}
           <Bootstrap
             global="__FOLIO_SHELL__"
             value={{
               base: rt.base,
               apiBase: `${rt.base}/api`,
-              space: Boolean(bindings?.space),
             }}
           />
         </>

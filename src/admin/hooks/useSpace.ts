@@ -97,6 +97,23 @@ export interface Space {
   avatars: SpaceAvatar[]
   /** Whether the channel exists at all on this deployment. */
   enabled: boolean
+  /**
+   * The channel's own last word about itself, or null: an unreadable frame, a
+   * `PROTOCOL_VERSION` mismatch, an `error` frame, or one of the three terminal
+   * closes.
+   *
+   * `SpaceStore` has written these since it was built and **nothing read them
+   * until the mount existed**, which made every terminal close silent: a tab left
+   * open across a version bump got a 4001, `disconnect()`, an empty peer list —
+   * so the avatar row simply vanished and "Reload the page: this editor and the
+   * server disagree on the protocol version." was discarded. Bumping the wire is
+   * described as cheap in `CLAUDE.md` precisely because both ends ship together;
+   * that is only true if the stale tab is told.
+   *
+   * Distinct from `spaceEventEffect`'s `notice`, which is about somebody else's
+   * write. This one is about the socket.
+   */
+  notice: string | null
 }
 
 interface Options {
@@ -164,7 +181,7 @@ export function useSpace(opts: Options): Space {
 
   const avatars = useMemo(() => avatarsOf(state.peers), [state.peers])
 
-  return { connected: state.connected, peers: state.peers, avatars, enabled }
+  return { connected: state.connected, peers: state.peers, avatars, enabled, notice: state.notice }
 }
 
 /** The store-less case, as a stable pair `useSyncExternalStore` accepts. */

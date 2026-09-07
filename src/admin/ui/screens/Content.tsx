@@ -91,6 +91,13 @@ interface Props {
   /** The remembered view and sort, used when the URL names neither. */
   remembered: { view: ViewMode; sort: FlatSort }
   onRemember: (next: { view: ViewMode; sort: FlatSort }) => void
+  /**
+   * Hands this screen's `reload` to the shell, which calls it when the space
+   * channel reports that somebody *else* moved, published or deleted a page
+   * (`Prototype.tsx`'s `listReload`). Registered in an effect and unregistered on
+   * unmount, so the shell never holds a stale closure over a screen that is gone.
+   */
+  registerReload: (reload: (() => void) | null) => void
 }
 
 /** Eight placeholder rows, named rather than indexed — an index key on a list
@@ -144,6 +151,28 @@ export function Content(props: Props) {
   const url = parseContentUrl(props.query, props.remembered)
   const filter = filterOf(url)
   const data = useContent(apiBase, url)
+
+  /**
+   * The shell's handle on this screen's data.
+   *
+   * Both entries in the dependency array are values the body reads, which is the
+   * reason this is a registration rather than a counter prop the effect watches —
+   * see `Prototype.tsx`'s `listReload`, and `useContent`'s `reload`, which had
+   * already rejected the counter shape inside this screen's own data hook.
+   *
+   * Note what `data.reload` does in tree mode: it drops every expanded level and
+   * re-reads only the top one, on the reasoning that after a *reparent* the
+   * server is the authority on which level a row belongs to. That is right for a
+   * write you made yourself and arguably wrong here, where a colleague renaming
+   * an unrelated page collapses your tree. Left alone deliberately: changing
+   * `reload` changes it for the four local write paths that also call it, which
+   * is beyond the issue that mounted this channel.
+   */
+  const { registerReload } = props
+  useEffect(() => {
+    registerReload(data.reload)
+    return () => registerReload(null)
+  }, [registerReload, data.reload])
 
   /**
    * Which nodes are open — **remembered, and deliberately not in the URL**.

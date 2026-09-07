@@ -98,6 +98,28 @@ export interface Me {
    * `../../docs/specs/foundation/passkeys.md` decision 6.
    */
   passkeys?: { allowed: boolean; reason?: string }
+  /**
+   * Whether the host declared the `SPACE` binding, and therefore whether the
+   * shell opens the space channel (`../../docs/specs/editing/live-collaboration.md`).
+   *
+   * **On this response and not on the shell's bootstrap**, which is where it
+   * used to be. The bootstrap only carried it from `routes/editor.ts`, because
+   * `routes/shell.ts`'s wildcard deliberately does not resolve the host's
+   * environment — so a browser entering at `{base}` or `{base}/content`, which
+   * is nearly all of them, read `undefined` as false and opened no socket for
+   * the rest of the session however it navigated. Presence became site-wide the
+   * day the shell mounted the channel, and `routes/shell.ts` had already named
+   * this route as where the flag belongs in that case.
+   *
+   * Absent from `OPEN` below, which is a guess made before any response: false
+   * is the safe reading either way, since no channel announced is no channel
+   * attempted.
+   *
+   * Not a permission, so no predicate below reads it. The socket admits any
+   * role — a viewer already gets the story socket, and seeing who else is here
+   * is not an editing capability.
+   */
+  space?: boolean
 }
 
 /**

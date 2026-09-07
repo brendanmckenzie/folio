@@ -143,8 +143,14 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * **is** the check. Passing it into the page would be an optimisation the shell
      * cannot use, because `useStory` fetches by id through `?ids=` anyway and a
      * server-rendered row would be a second source of truth for the same document.
+     *
+     * `bindings` used to go in too, for the bootstrap's `space` flag, which made
+     * this the only route that answered it — and therefore made the space channel
+     * absent for every browser that entered the admin anywhere else. That flag is
+     * on `GET {base}/api/me` now, so this route renders the same shell as every
+     * other one.
      */
-    return shellPage(rt, bindings)
+    return shellPage(rt)
   })
 
   /**

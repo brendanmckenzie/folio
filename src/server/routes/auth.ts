@@ -784,10 +784,33 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       }
       passkeys = { passkeys: reason ? { allowed: false, reason } : { allowed: true } }
     }
+    /**
+     * Whether the host declared the `SPACE` binding
+     * (`../../../docs/specs/editing/live-collaboration.md`).
+     *
+     * **It is answered here rather than on the shell's bootstrap**, and
+     * `routes/shell.ts` pre-registered exactly that move: "if presence ever has
+     * to be site-wide, the flag belongs on `GET {base}/api/me` — which resolves
+     * the environment anyway". It became site-wide the day the admin mounted the
+     * channel, because the mount lives in the shell and the shell is every
+     * screen. On the bootstrap only `routes/editor.ts` passed bindings, so a
+     * browser that entered at `{base}` or `{base}/content` — which is almost all
+     * of them — got `undefined`, read it as false, and opened no socket for the
+     * whole session no matter where it navigated afterwards.
+     *
+     * Free here: this route has already resolved the environment to read the
+     * session, which is the argument for putting it here and not the reason it
+     * moved.
+     *
+     * Any role, matching the socket's own gate: seeing who else is in the site is
+     * not an editing capability, and a viewer already gets the story socket.
+     */
+    const space = Boolean(rt.space(c.var.bindings()))
     return c.json({
       mode: rt.auth.mode,
       actor: safe,
       loginUrl: `${rt.base}/login`,
+      space,
       ...session,
       ...passkeys,
       ...(policy ? { policy } : {}),
