@@ -4,6 +4,7 @@ import {
   derivePaths,
   descendants,
   draftState,
+  isLive,
   liveDescendants,
   slugify,
   storyState,
@@ -264,6 +265,24 @@ describe('draftState', () => {
 
   it('falls back to storyState for a published_sync_id ahead of draft (should not arise, but not "changed")', () => {
     expect(draftState(1000, null, 5, 6)).toBe('live')
+  })
+})
+
+describe('isLive', () => {
+  /*
+   * The predicate exists because the rule was written out by hand four times and
+   * two of those got it wrong — most visibly the editor's Unpublish, which greyed
+   * itself out with "Only a live page can be unpublished" on every page that had
+   * an unpublished edit.
+   */
+  it('counts a page mid-edit as live, because it is still serving the public', () => {
+    expect(isLive('live')).toBe(true)
+    expect(isLive('changed')).toBe(true)
+  })
+
+  it('does not count a draft or a page that has been taken down', () => {
+    expect(isLive('draft')).toBe(false)
+    expect(isLive('unpublished')).toBe(false)
   })
 })
 

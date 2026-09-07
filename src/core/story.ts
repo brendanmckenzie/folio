@@ -149,9 +149,23 @@ export function storyState(
  *
  * Deliberately coarser than a diff: an edit that cancels itself out still
  * advances the watermark, so a row can read `'changed'` with nothing left to
- * publish. That is the accepted trade for rendering a tree without opening
- * every Durable Object — the open story's own diff (the admin's
- * `usePublishedDoc`) overrides this comparison for the page being edited.
+ * publish. That is the accepted trade for rendering a tree without opening every
+ * Durable Object.
+ *
+ * **What the open story's own diff does about it, precisely.** This comment used
+ * to say that diff (the admin's `usePublishedDoc`) "overrides this comparison for
+ * the page being edited", and it does not override the badge — the editor draws
+ * `story.state` like every other list, so that one document does not disagree
+ * with every screen it appears on. What the diff overrides is the *status line*:
+ * it reads "Up to date", Publish stays enabled because publishing re-stamps the
+ * watermark and clears the flag, and the line carries `SETTLED_TITLE` to explain
+ * the pair. `EditorShell.tsx` is where all three are decided.
+ *
+ * The exact fix, if this is ever worth paying for: store a content hash beside
+ * each watermark — publish writes the published document's, the debounced alarm
+ * writes the draft's — and compare those instead of log positions. That is a
+ * migration, a `StoryDO` change and a publish change, for a false positive that
+ * costs a stale badge, which is why it has not been done.
  */
 export function draftState(
   publishedAt: number | null,
@@ -161,6 +175,37 @@ export function draftState(
 ): StoryState {
   const base = storyState(publishedAt, unpublishedAt)
   return base === 'live' && draftSyncId > publishedSyncId ? 'changed' : base
+}
+
+/**
+ * **Is this document serving the public?** `'changed'` is, and that is the whole
+ * reason this exists as a predicate rather than as `state === 'live'` written out
+ * at each site.
+ *
+ * The rule was already stated twice — `liveDescendants` below spells the pair out
+ * and says why — and the third and fourth sites got it wrong by writing the
+ * shorter thing:
+ *
+ * - The editor's **Unpublish** was `story.state === 'live'`, so a page with any
+ *   unpublished edit could not be taken down at all: the menu item greyed itself
+ *   out with "Only a live page can be unpublished" on a page that was, in fact,
+ *   live. Not an edge case — `'changed'` is the normal state of a page somebody
+ *   has been working on.
+ * `liveDescendants` below and the editor's Unpublish both read this.
+ * **`publishStatus` deliberately does not**, and that is the interesting
+ * exception: its `isLive` argument decides whether Publish is pointless, and on a
+ * `'changed'` row whose content already matches its publish, publishing is *not*
+ * pointless — it re-stamps `published_sync_id`, which is the only thing that
+ * clears the flag. Handing it `isLive` there disables the one control that can
+ * resolve the state. `EditorShell.tsx` spells that out where it passes the narrow
+ * test on purpose.
+ *
+ * `'unpublished'` is not live either: it is a page that has been taken down, and
+ * `unpublished-changes.md`'s implementation notes record why Publish must stay
+ * enabled there too.
+ */
+export function isLive(state: StoryState): boolean {
+  return state === 'live' || state === 'changed'
 }
 
 /**
@@ -502,7 +547,7 @@ export function descendants(rows: readonly StoryMeta[], id: string): string[] {
 export function liveDescendants(rows: readonly StoryMeta[], id: string): StoryMeta[] {
   const ids = new Set(descendants(rows, id))
   ids.delete(id)
-  return rows.filter((r) => ids.has(r.id) && (r.state === 'live' || r.state === 'changed'))
+  return rows.filter((r) => ids.has(r.id) && isLive(r.state))
 }
 
 export function slugify(input: string): string {

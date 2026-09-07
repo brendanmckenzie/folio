@@ -5,7 +5,7 @@ import type { LocaleConfig, LocaleContext } from '../../../core/locales'
 import type { Presence } from '../../../core/protocol'
 import type { Resolution } from '../../../core/resolve'
 import { type DocumentType, type SchemaIndex, singletonId } from '../../../core/schema'
-import type { StoryMeta } from '../../../core/story'
+import { isLive, type StoryMeta } from '../../../core/story'
 import type { Blocks } from '../../hooks/useBlocks'
 import { canPublish, type Me, whyNot } from '../../me'
 import type { StoryStore } from '../../store'
@@ -32,6 +32,7 @@ import {
   type Viewport,
   VIEWPORT_NAMES,
   VIEWPORTS,
+  SETTLED_TITLE,
 } from './editor-model'
 import { historyWhen } from './history-model'
 import { useEditor } from './useEditor'
@@ -283,6 +284,32 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
   const viewing = editor.versions.viewing
   const live = editor.versions.source.mode === 'live'
   const mayPublish = canPublish(props.me)
+  /*
+   * **A live page whose draft is identical to it, still flagged `changed`.**
+   *
+   * `draftState` compares log positions rather than content, so an edit that
+   * cancels itself out — a typo and its undo — advances the watermark and leaves
+   * the row reading `changed` with nothing left to publish. A real deployment
+   * drew `changed` and "Up to date" eight pixels apart with no compare button
+   * between them, because there was genuinely nothing to compare.
+   *
+   * Three things follow, and the first two are what makes them agree:
+   *
+   * - The badge **keeps saying `changed`**, because the row does and the tree
+   *   will too. Overriding it here was tried first and moves the confusion rather
+   *   than resolving it: the editor would then disagree with every list this
+   *   document appears in.
+   * - The status line explains itself instead (`SETTLED_TITLE`), naming both the
+   *   fact and the remedy — which is the half that was missing.
+   * - Publish **stays enabled**, so `publishStatus` is deliberately handed the
+   *   narrow `state === 'live'` and not `isLive`. Publishing is not a no-op in
+   *   this state: it re-stamps `published_sync_id`, which is the only thing that
+   *   clears the flag. Disabling it would leave the row amber with no way out.
+   */
+  const settled =
+    story.state === 'changed' &&
+    editor.published.delta !== null &&
+    editor.published.delta.total === 0
   const status = publishStatus(
     editor.state.connected,
     editor.state.inflight,
@@ -418,7 +445,9 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
               {status.label}
             </button>
           ) : (
-            <span className={css.statusFlat}>{status.label}</span>
+            <span className={css.statusFlat} {...(settled ? { title: SETTLED_TITLE } : {})}>
+              {status.label}
+            </span>
           )}
 
           <span className={css.spacer} />
@@ -521,7 +550,10 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                 id: 'unpublish',
                 label: 'Unpublish…',
                 danger: true,
-                disabled: !(story.state === 'live' && live && mayPublish),
+                // `isLive`, not `state === 'live'`: a page with unpublished edits
+                // reads `changed` and is still serving the public, so this refused
+                // to take down the very pages most likely to need taking down.
+                disabled: !(isLive(story.state) && live && mayPublish),
                 reason: whyNot(props.me, 'publish') ?? 'Only a live page can be unpublished',
                 run: () => setConfirm('unpublish'),
               },

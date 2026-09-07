@@ -594,6 +594,19 @@ export function behindNotice(status: MigrationStatus | null): string | null {
 }
 
 /**
+ * Why a live page can read `changed` and "Up to date" at once, for the status
+ * line's `title`.
+ *
+ * The state is rare, cosmetic and self-correcting, so it earns a tooltip rather
+ * than a line of top bar: an editor who notices the contradiction gets the
+ * explanation and the remedy, and everybody else sees the same three words they
+ * always did. `EditorShell.tsx` computes when it applies and argues why the badge
+ * is left alone.
+ */
+export const SETTLED_TITLE =
+  'This page already matches the published version. It is flagged as changed because edits landed after the last publish and cancelled each other out; publishing again clears the flag.'
+
+/**
  * Phrased from the viewer's standpoint: they are looking at the version, so
  * differences are described as what the *draft* has done since.
  *
