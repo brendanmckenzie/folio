@@ -153,6 +153,12 @@ export interface AssetBrowserProps {
    * *New folder* dialog and fixed with `compact`. Filing forty files is a
    * library-management gesture and belongs on the screen; picking one is what the
    * picker is for.
+   *
+   * **The screen passes it conditionally now** — `bulk={mayWrite}` — because all
+   * four of the actions are writes, so a tick-box layer offered to a viewer feeds
+   * a bar with nothing in it but *Clear* (issue #7). It stays a boolean rather
+   * than growing a role, so this component still knows nothing about who is
+   * signed in.
    */
   bulk?: boolean
   /**
@@ -161,6 +167,34 @@ export interface AssetBrowserProps {
    * (it takes no `onNotice`, because a dialog has nowhere to put a toast).
    */
   onNotice?: (message: string) => void
+  /**
+   * Whether this person may write to the library at all — `ASSETS` (editor+) on
+   * the server, which is every write in `server/routes/assets.ts` bar one. False
+   * withdraws *Upload*, *New folder*, the per-folder edit affordance and *Manage
+   * tags*, because none of them can succeed for a viewer and
+   * `../../../docs/ui-architecture.md`'s `## Cross-cutting` says an impossible
+   * control is absent rather than refused after the click (issue #7).
+   *
+   * **A boolean rather than `Me`, and it defaults to true**, because of the second
+   * mount. `AssetPicker` is opened from `fields/AssetField.tsx`, whose two
+   * triggers (`:85` and `:205`) are both already `disabled={!editable}` over
+   * `readOnly = !live || !canEdit(me)` (`./useEditor.ts:300`) — so a viewer
+   * cannot open the picker in the first place, and threading `me` down the field
+   * chain to re-derive a fact the editor already enforces buys nothing. The
+   * default keeps that mount exactly as it was.
+   */
+  mayWrite?: boolean
+  /**
+   * Whether this person may start the bulk **describe** run: `ADMIN`, and the one
+   * route in this feature that is (`POST {base}/api/assets/describe`, decision
+   * 16) because it spends money — one model call per file, on the host's account.
+   *
+   * Separate from `mayWrite` because they are separate roles: an editor may file,
+   * tag and delete forty files and may not spend forty model calls. `ADMIN`
+   * implies editor, so this being true implies `mayWrite`. Defaults to true for
+   * the picker's sake, which never passes `bulk` and so never draws the control.
+   */
+  mayDescribe?: boolean
 }
 
 /**
@@ -194,6 +228,8 @@ export function AssetBrowser(props: AssetBrowserProps) {
   const { apiBase, mount, url, onUrl, data, upload, selected, label, kinds, accept, compact } =
     props
   const { bulk, onNotice } = props
+  const mayWrite = props.mayWrite ?? true
+  const mayDescribe = props.mayDescribe ?? true
   const grid = useRef<HTMLDivElement>(null)
   const file = useRef<HTMLInputElement>(null)
 
@@ -476,7 +512,15 @@ export function AssetBrowser(props: AssetBrowserProps) {
 
   const report = uploadSummary(upload.entries)
 
-  const uploadButton = (
+  /**
+   * *Upload*, or nothing at all without `ASSETS`.
+   *
+   * `null` rather than a disabled button: `Uploading…` is a refusal that clears
+   * itself and belongs on the control, while a role is not, so the two are the
+   * two halves of `## Cross-cutting`'s one rule. Held in a variable because it is
+   * mounted twice — the controls row and the empty state — and both must agree.
+   */
+  const uploadButton = mayWrite ? (
     <Button
       size="sm"
       variant="primary"
@@ -486,29 +530,33 @@ export function AssetBrowser(props: AssetBrowserProps) {
     >
       Upload
     </Button>
-  )
+  ) : null
 
   return (
     <div className={css.browser}>
       {/*
-        The real file input, always present. Dropping is the fast path and it is a
-        pointer gesture, so it can never be the only one — `ui-architecture.md`'s
-        acceptance for every phase includes "fully keyboard-operable".
+        The real file input, present wherever uploading is. Dropping is the fast
+        path and it is a pointer gesture, so it can never be the only one —
+        `ui-architecture.md`'s acceptance for every phase includes "fully
+        keyboard-operable" — and it goes with the button rather than staying
+        behind as a focusable control nothing can reach a use for.
       */}
-      <input
-        ref={file}
-        type="file"
-        multiple
-        accept={accept}
-        className={css.srOnly}
-        aria-label="Upload files"
-        onChange={(e) => {
-          upload.add(e.target.files)
-          // Cleared so choosing the same file twice in a row is two uploads rather
-          // than one and then silence.
-          e.target.value = ''
-        }}
-      />
+      {mayWrite ? (
+        <input
+          ref={file}
+          type="file"
+          multiple
+          accept={accept}
+          className={css.srOnly}
+          aria-label="Upload files"
+          onChange={(e) => {
+            upload.add(e.target.files)
+            // Cleared so choosing the same file twice in a row is two uploads rather
+            // than one and then silence.
+            e.target.value = ''
+          }}
+        />
+      ) : null}
 
       <div className={css.layout}>
         {/*
@@ -523,6 +571,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
           url={url}
           onUrl={onUrl}
           compact={compact}
+          mayWrite={mayWrite}
           {...(onNotice ? { onNotice } : {})}
         />
 
@@ -658,7 +707,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
               </fieldset>
             ) : null}
 
-            <span className={css.controlsEnd}>{uploadButton}</span>
+            {uploadButton ? <span className={css.controlsEnd}>{uploadButton}</span> : null}
           </div>
 
           {/*
@@ -731,16 +780,21 @@ export function AssetBrowser(props: AssetBrowserProps) {
                   Move
                 </Button>
                 {/*
-                  Absent, not disabled, with no `describe` configured — and the
-                  only bulk control here that is `ADMIN` rather than `ASSETS`
-                  (decision 16). The role is enforced by the route; this button
-                  is drawn for an editor too, and an editor pressing it gets the
-                  403 as a message. Hiding it by role would need the admin to
-                  know the viewer's role here, which it does not, and a control
-                  that appears for some people and not others is a worse way to
-                  learn about a permission than a sentence saying so.
+                  Absent on two independent counts, and both are the same rule:
+                  with no `describe` configured, and for anybody below `ADMIN`.
+                  It is the only bulk control here that is `ADMIN` rather than
+                  `ASSETS` (decision 16), because it spends money.
+
+                  This comment used to argue the opposite — that the button was
+                  drawn for an editor and the 403 was the sentence that taught
+                  them, "because hiding it by role would need the admin to know
+                  the viewer's role here, which it does not". It does now (issue
+                  #7): `mayDescribe` arrives from `Assets.tsx`, and
+                  `## Cross-cutting`'s rule is that a control whose gate can
+                  never pass for this person is absent rather than refused after
+                  the click.
                 */}
-                {describe.configured ? (
+                {describe.configured && mayDescribe ? (
                   <Button
                     size="sm"
                     disabled={count === 0 || running}
@@ -845,7 +899,11 @@ export function AssetBrowser(props: AssetBrowserProps) {
                 )}
               </div>
             ) : rows.length === 0 ? (
-              <Empty narrowed={narrowed} onClear={() => onUrl(withFilter(url, NO_FILTERS))}>
+              <Empty
+                narrowed={narrowed}
+                mayWrite={mayWrite}
+                onClear={() => onUrl(withFilter(url, NO_FILTERS))}
+              >
                 {uploadButton}
               </Empty>
             ) : url.view === 'grid' ? (
@@ -1382,6 +1440,7 @@ function Sidebar({
   url,
   onUrl,
   compact,
+  mayWrite,
   onNotice,
 }: {
   /** Held by `AssetBrowser` and passed down, so the sidebar, the bulk *Tag*
@@ -1395,6 +1454,11 @@ function Sidebar({
    * editing a folder, and managing the tag vocabulary. See `NewFolderDialog`'s
    * own header for why a `Dialog` cannot be opened from on top of one. */
   compact: boolean | undefined
+  /** Whether this person may write to the library — `ASSETS`. Suppresses the same
+   * three affordances `compact` does, for a different reason: `compact` is "a
+   * second `Dialog` cannot open from inside the picker's", this is "a viewer's
+   * folder rename can never succeed". See `AssetBrowser`'s own prop. */
+  mayWrite: boolean
   onNotice?: (message: string) => void
 }) {
   const [creating, setCreating] = useState(false)
@@ -1439,7 +1503,7 @@ function Sidebar({
               >
                 {folder.name}
               </button>
-              {compact ? null : (
+              {compact || !mayWrite ? null : (
                 <button
                   type="button"
                   className={css.rowEdit}
@@ -1462,7 +1526,7 @@ function Sidebar({
             Unfiled
           </button>
         </fieldset>
-        {compact ? null : (
+        {compact || !mayWrite ? null : (
           <Button size="sm" variant="subtle" onClick={() => setCreating(true)}>
             New folder
           </Button>
@@ -1508,7 +1572,7 @@ function Sidebar({
           A folder row is a full-width line in a spine you point at, so it can
           carry its own.
         */}
-        {compact || tags.tags.length === 0 ? null : (
+        {compact || !mayWrite || tags.tags.length === 0 ? null : (
           <Button size="sm" variant="subtle" onClick={() => setManagingTags(true)}>
             Manage tags
           </Button>
@@ -2342,15 +2406,31 @@ function Cell({ row, column, mount }: { row: AssetRow; column: AssetColumn; moun
 
 /* ------------------------------------------------------------------- empty --- */
 
-/** Two empty states, because they are different facts: an empty library wants an
- * upload, and a filter that matches nothing wants clearing. An `EmptyState` with no
- * action is an error message. */
+/**
+ * Two empty states, because they are different facts: an empty library wants an
+ * upload, and a filter that matches nothing wants clearing.
+ *
+ * "An `EmptyState` with no action is an error message" is the rule this used to
+ * end on, and there is now a third case that has none: an empty library seen by
+ * somebody without `ASSETS`, whose upload button is absent (issue #7). The rule
+ * still holds and the escape is the *body* — a next step can be a sentence rather
+ * than a button, and "files that editors upload here are what a document's image
+ * and file fields point at" is one. What it must not be is the instruction it
+ * replaces: "drop files anywhere here" told a viewer to do something that could
+ * only fail. `Redirects.tsx`'s empty state resolves the same case the same way.
+ */
 function Empty({
   narrowed,
+  mayWrite,
   onClear,
   children,
 }: {
   narrowed: boolean
+  /** Whether this person may upload — `ASSETS`. Changes the body as well as the
+   * action, because "drop files anywhere here" is an instruction a viewer cannot
+   * follow, and an empty state whose next step is impossible is worse than one
+   * with no next step at all. */
+  mayWrite: boolean
   onClear: () => void
   children: ReactNode
 }) {
@@ -2370,7 +2450,11 @@ function Empty({
   return (
     <EmptyState
       title="Nothing uploaded yet"
-      body="Drop files anywhere here, or choose them. Images get their dimensions read on the way in, and are resized on the way out."
+      body={
+        mayWrite
+          ? 'Drop files anywhere here, or choose them. Images get their dimensions read on the way in, and are resized on the way out.'
+          : 'Nothing has been added to this library. Files that editors upload here are what a document’s image and file fields point at.'
+      }
       action={children}
     />
   )

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { canAdmin, canManageAssets, type Me } from '../../me'
 import { Button } from '../Button'
 import { EmptyState } from '../EmptyState'
 import {
@@ -24,6 +25,13 @@ interface Props {
    * `/asset/:key`, which is not part of the internal API, and the usage list's links
    * are real `<a href>` into the shell. */
   mount: string
+  /**
+   * Who is signed in, for the two role gates this screen computes and hands to
+   * `AssetBrowser`. Every write in the media library is `ASSETS` (editor) except
+   * the bulk describe run, which is `ADMIN` because it spends money — see
+   * `AssetBrowser`'s `mayWrite` and `mayDescribe`.
+   */
+  me: Me
   query: Readonly<Record<string, string>>
   /** `replace`, not `push`: a filter keystroke must not be a history entry. */
   onQuery: (next: Record<string, string | undefined>) => void
@@ -70,6 +78,17 @@ interface Props {
  */
 export function Assets(props: Props) {
   const { apiBase, mount, onQuery, onNotice, onRemember } = props
+  /**
+   * The two role gates, computed here because this is the mount that has `me` —
+   * `AssetBrowser` takes booleans rather than `me` for the reason its own props
+   * give: the picker is the second mount and is exempt.
+   *
+   * `mayWrite` is `ASSETS` (editor). `mayDescribe` is `ADMIN` and therefore
+   * implies `mayWrite`, so there is no state where the describe run is offered
+   * over a selection layer that is not.
+   */
+  const mayWrite = canManageAssets(props.me)
+  const mayDescribe = canAdmin(props.me)
   const url = parseAssetsUrl(props.query, props.remembered)
   /**
    * The page size, fitted to the viewport rather than fixed.
@@ -149,7 +168,7 @@ export function Assets(props: Props) {
   const upload = useUploads(apiBase, onUploaded)
 
   const onFiles = useCallback((files: FileList | null) => upload.add(files), [upload])
-  const drop = useDropTarget(onFiles)
+  const drop = useDropTarget(onFiles, mayWrite)
 
   const remove = useCallback(
     async (row: AssetRow) => {
@@ -190,6 +209,13 @@ export function Assets(props: Props) {
     // — "upload by dropping anywhere on the screen" — and it is why the handlers are
     // here rather than on the grid: dropping onto the detail panel, the filter bar or
     // the empty space beside a short page all mean the same thing.
+    //
+    // Attached either way, and `useDropTarget`'s `enabled` is what withdraws it.
+    // Dropping is the pointer form of the Upload button, so a viewer must not
+    // reach an upload through it — but *not spreading the handlers* is the wrong
+    // way to say so: the browser's default action for a file dropped on a page is
+    // to navigate to it, so a stray drop would replace the admin with a JPEG and
+    // discard whatever was open. The hook swallows the event and offers nothing.
     <div className={css.screen} {...drop.handlers}>
       {/*
         `data-open` follows `url.asset` rather than the resolved row: the cold-link
@@ -209,9 +235,21 @@ export function Assets(props: Props) {
           onSelect={(id) => go({ ...url, asset: id })}
           label="Media library"
           kinds
-          // The selection layer, screen-only — `AssetBrowser`'s own `bulk` prop
-          // says why the picker must not have it.
-          bulk
+          /*
+            The selection layer, screen-only — `AssetBrowser`'s own `bulk` prop
+            says why the picker must not have it — and **only for a role that can
+            act on a selection.** All four bulk actions are writes (`tag`,
+            `untag`, `move`, `delete` — `core/assets.ts`'s `AssetBulkAction`), so a
+            checkbox layer that feeds a bar holding nothing but *Clear* is itself
+            an impossible control; `bulk={mayWrite}` withdraws the tick boxes, the
+            bar and *select all matching* in one value rather than hiding the
+            buttons and leaving the machinery that fed them. The bar's fifth
+            button, *Describe*, is `ADMIN` rather than `ASSETS` and is gated
+            separately by `mayDescribe`.
+          */
+          bulk={mayWrite}
+          mayWrite={mayWrite}
+          mayDescribe={mayDescribe}
           onNotice={onNotice}
         />
 
@@ -235,6 +273,11 @@ export function Assets(props: Props) {
               data.reload()
             }}
             onNotice={onNotice}
+            // The same gate the browser gets, and the panel needs it separately:
+            // the alt text, description, folder and tag editors are all `ASSETS`
+            // and all live in there, so a viewer opening `?asset=…` reached five
+            // controls the grid had already stopped offering.
+            mayWrite={mayWrite}
           />
         ) : subject.state === 'loading' ? (
           // A skeleton panel, not a spinner: the panel's shape is known before its

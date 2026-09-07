@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { DocumentType, SchemaIndex } from '../../../core/schema'
 import type { StoryBulkAction, FlatSort } from '../../../core/story'
 import type { BulkRefusal } from '../../../core/bulk'
+import { canCreateContent, type Me } from '../../me'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { EmptyState } from '../EmptyState'
@@ -67,6 +68,14 @@ interface Props {
   /** The admin's internal JSON base — the reads here and the writes the bulk
    * actions make. */
   apiBase: string
+  /**
+   * Who is signed in, for the role gates below. Every control on this screen that
+   * writes is absent for somebody whose role cannot take it — the bulk bar's five
+   * actions through `actionsFor`, and `New page` — because
+   * `../../../docs/ui-architecture.md`'s `## Cross-cutting` says an impossible
+   * control is absent rather than refused after the click (issue #7).
+   */
+  me: Me
   query: Readonly<Record<string, string>>
   /** `replace`, not `push`: a filter keystroke must not be a history entry. */
   onQuery: (next: Record<string, string | undefined>) => void
@@ -488,16 +497,22 @@ export function Content(props: Props) {
               aria-label="Search pages"
               onChange={(e) => go(withFilter(url, { q: e.target.value }))}
             />
-            <NewPageButton
-              types={pageTypes}
-              schema={props.schema}
-              apiBase={apiBase}
-              onCreated={(id) => {
-                data.reload()
-                onOpen({ name: 'edit', id })
-              }}
-              onNotice={onNotice}
-            />
+            {/* Absent, not disabled: a role that may not create a page can never
+                make this button work, and the button that stays is the one whose
+                refusal is situational — `No page type may be created at the top
+                level` inside `NewPageButton`. */}
+            {canCreateContent(props.me) ? (
+              <NewPageButton
+                types={pageTypes}
+                schema={props.schema}
+                apiBase={apiBase}
+                onCreated={(id) => {
+                  data.reload()
+                  onOpen({ name: 'edit', id })
+                }}
+                onNotice={onNotice}
+              />
+            ) : null}
           </>
         }
       />
@@ -592,7 +607,7 @@ export function Content(props: Props) {
           summary={bar}
           busy={busy}
           progress={progress}
-          actions={actionsFor(selection)}
+          actions={actionsFor(selection, props.me)}
           onClear={() => setSelection(NOTHING)}
           onRun={start}
           // Only a select-all can show what it selected: a captured filter is a URL
@@ -932,9 +947,11 @@ function SelectionBar({
   busy: boolean
   /** The job's own progress, while a run takes more than one call. */
   progress: string | null
-  /** Which of the five this selection may be given — `duplicate` is absent for a
-   * select-all, because the server refuses it there and an impossible control is
-   * absent rather than disabled. */
+  /** Which of the five this selection may be given. `duplicate` is absent for a
+   * select-all because the server refuses it there, and any of the five is absent
+   * for a role that may not take it — both because an impossible control is
+   * absent rather than disabled. `actionsFor` holds the whole rule; a viewer's
+   * bar therefore offers `Clear` and nothing else. */
   actions: readonly StoryBulkAction[]
   onClear: () => void
   onRun: (action: StoryBulkAction) => void

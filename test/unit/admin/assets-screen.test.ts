@@ -15,6 +15,7 @@ import {
   dirOf,
   extensionOf,
   folderDepth,
+  folderNameFor,
   gridStep,
   humanSize,
   indentedFolderName,
@@ -853,5 +854,51 @@ describe('the upload report', () => {
   it('reads as a plain success when nothing failed', () => {
     expect(uploadSummary([entry('a', 'done')]).text).toBe('Uploaded 1 file')
     expect(uploadSummary([entry('a', 'done'), entry('b', 'done')]).text).toBe('Uploaded 2 files')
+  })
+})
+
+/**
+ * `folderNameFor` — the read-only register's answer for "which folder is this in"
+ * (issue #7).
+ *
+ * Every one of these four is a *different fact*, and the reason this function
+ * exists rather than a `?? 'Unfiled'` at the call site is that the obvious
+ * spelling collapses three of them into the first. The render test cannot see the
+ * difference: `mountAt` flushes the folder fetch before it asserts, so a naive
+ * fallback passes there — verified by breaking it. This is the only place the
+ * loading and deleted cases are observable at all.
+ */
+describe('folderNameFor', () => {
+  const loaded = (...rows: { id: string; name: string }[]) => ({ folders: rows, loading: false })
+
+  it('calls a null folder Unfiled, with no regard for the fetch', () => {
+    // The state every row starts in (`0008_asset_organisation.sql`), and the one
+    // case that is a claim rather than an absence — so it needs no folder list.
+    expect(folderNameFor(null, { folders: [], loading: true })).toBe('Unfiled')
+    expect(folderNameFor(null, loaded())).toBe('Unfiled')
+  })
+
+  it('names the folder once the list has arrived', () => {
+    expect(
+      folderNameFor(
+        'afl_b',
+        loaded({ id: 'afl_a', name: 'Press' }, { id: 'afl_b', name: 'Brand' }),
+      ),
+    ).toBe('Brand')
+  })
+
+  it('says "not known yet" rather than Unfiled while the list is in flight', () => {
+    // The defect this function was extracted to make impossible: an asset filed
+    // under Brand read as *Unfiled* for the length of a round trip, which is a
+    // false statement about the row rather than a slow one.
+    expect(folderNameFor('afl_b', { folders: [], loading: true })).toBe('…')
+  })
+
+  it('says "absent" for a folder that is gone, not Unfiled', () => {
+    // Loaded, and the id matches nothing: the folder was deleted out from under
+    // this row. An absence, which is a third answer again — and it is also what a
+    // *failed* fetch produces, since `useFolders` puts the failure in `error` and
+    // leaves `folders` empty with `loading` false.
+    expect(folderNameFor('afl_gone', loaded({ id: 'afl_a', name: 'Press' }))).toBe('—')
   })
 })

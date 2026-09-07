@@ -35,14 +35,22 @@ import type { BadgeTone } from '../Badge'
  * names below exist so a call site reads as the thing it is about rather than as a
  * role check that happens to be shared.
  *
- * Local to this screen rather than in `admin/me.ts`, deliberately. `me.ts` is the
- * admin's only source of truth about permissions and this belongs there — but its
- * vocabulary is `edit / create / publish / manage`, and `admin` is a fifth need
- * with exactly one consumer today. It moves there when Access lands and there are
- * two.
+ * **This used to say it moves into `admin/me.ts` "when Access lands and there are
+ * two", and that has now happened**: issue #7 added `canAdmin` there, with three
+ * consumers. It stays here anyway, for a reason that only became visible once the
+ * two existed side by side — **they disagree about a token, on purpose.**
  *
- * Note it is **true under `auth: 'open'`**, unlike `canManageAccess`. That is not
- * an inconsistency: the access surface 404s on an open deployment, while
+ * `canAdmin` refuses every token actor, because `me.ts`'s whole posture is that a
+ * token is not a person driving the admin (see `canEdit`: "a token is not a person
+ * with a cursor"). This one grants an admin-scoped token, matching the server's
+ * `allows()`, because Model's Run is the one screen an admin-scoped token can
+ * legitimately be pointed at — an import script's own migration check — and the
+ * refusal it renders is a `reason` rather than an absence, so being wrong here
+ * greys out a control the server would have allowed. Folding the two together
+ * would have to pick one answer and would be wrong for one of the two call sites.
+ *
+ * Note both are **true under `auth: 'open'`**, unlike `canManageAccess`. That is
+ * not an inconsistency: the access surface 404s on an open deployment, while
  * `requireAccess` passes every request through on one — so a Run button that
  * greyed itself out there would be refusing something the server allows.
  */

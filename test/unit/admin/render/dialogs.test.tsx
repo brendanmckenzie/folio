@@ -126,6 +126,11 @@ const SURFACES: [name: string, mount: () => React.ReactElement][] = [
         onDelete={noop}
         onChanged={noop}
         onNotice={noop}
+        // Required rather than defaulted (issue #7): the panel's five editors and
+        // its Delete are `ASSETS`, and a default would fail open. `true` here
+        // mounts the branch this file is about — the write register, which is the
+        // one with the portalled dialogs in it.
+        mayWrite
       />
     ),
   ],

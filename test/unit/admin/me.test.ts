@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest'
 import type { Role } from '../../../src/server/auth/roles'
 import {
   actorLabel,
+  canAdmin,
   canDeleteForms,
   canEdit,
   canManageAccess,
+  canManageAssets,
   canManageContent,
   canPublish,
+  canReadResponses,
   type Me,
   OPEN,
   whyNot,
@@ -42,8 +45,12 @@ describe('auth: open', () => {
     // The routes 404 there — there is no admin and no way to become one — so
     // offering the rail would be offering a broken screen.
     expect(canManageAccess(OPEN)).toBe(false)
-    // Deleting a form is an ordinary content permission, unlike the access
-    // surface: it holds under `auth: 'open'` rather than 404ing there.
+    expect(canManageAssets(OPEN)).toBe(true)
+    expect(canReadResponses(OPEN)).toBe(true)
+    // Deleting a form and starting a describe run are ordinary content
+    // permissions, unlike the access surface: both hold under `auth: 'open'`
+    // rather than 404ing there.
+    expect(canAdmin(OPEN)).toBe(true)
     expect(canDeleteForms(OPEN)).toBe(true)
     expect(whyNot(OPEN, 'edit')).toBeUndefined()
     expect(actorLabel(OPEN)).toBeNull()
@@ -69,6 +76,33 @@ describe('roles', () => {
     expect(canManageAccess(user('admin'))).toBe(true)
   })
 
+  it('puts assets at editor, because an asset has no URL to withdraw', () => {
+    // `ASSETS` is editor+ on the server and says why: putting a file in the
+    // library or taking it out is not a publishing act the way moving a document
+    // is. So this is deliberately *weaker* than `canManageContent`.
+    expect(canManageAssets(user('viewer'))).toBe(false)
+    expect(canManageAssets(user('editor'))).toBe(true)
+    expect(canManageAssets(user('publisher'))).toBe(true)
+  })
+
+  it('reserves form responses for a publisher, unlike building the form', () => {
+    // `FORMS` is publisher+, and the gap from `READ` is the point: these rows are
+    // what strangers typed about themselves. An editor who may build the form is
+    // not thereby somebody who may read the enquiries — which is the gate issue #7
+    // found missing on the Forms screen's own `Responses` button.
+    expect(canReadResponses(user('editor'))).toBe(false)
+    expect(canReadResponses(user('publisher'))).toBe(true)
+    expect(canReadResponses(user('admin'))).toBe(true)
+  })
+
+  it('reserves the two expensive routes for an admin, but not the access surface', () => {
+    // `canAdmin` and `canManageAccess` both mean "admin" and are not the same
+    // predicate: the access routes 404 under `auth: 'open'` and these two do not.
+    expect(canAdmin(user('publisher'))).toBe(false)
+    expect(canAdmin(user('admin'))).toBe(true)
+    expect([canAdmin(OPEN), canManageAccess(OPEN)]).toEqual([true, false])
+  })
+
   it('reserves deleting a form for an admin, unlike building one', () => {
     // Checkpoint 8: "Responses read at publisher; export and delete at admin.
     // Building a form stays at editor."
@@ -86,6 +120,9 @@ describe('a token in the admin', () => {
     expect(canEdit(token)).toBe(false)
     expect(canPublish(token)).toBe(false)
     expect(canManageAccess(token)).toBe(false)
+    expect(canManageAssets(token)).toBe(false)
+    expect(canReadResponses(token)).toBe(false)
+    expect(canAdmin(token)).toBe(false)
     expect(canDeleteForms(token)).toBe(false)
     expect(actorLabel(token)).toBe('token:import-script')
   })

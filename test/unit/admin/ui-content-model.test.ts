@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { StoryBulkReport } from '../../../src/server/bulk'
+import type { Role } from '../../../src/server/auth/roles'
+import { type Me, OPEN } from '../../../src/admin/me'
 import {
   actionsFor,
   allShownSelected,
@@ -330,7 +332,7 @@ describe('an explicit selection', () => {
   })
 
   it('offers all five actions, duplicate included', () => {
-    expect(actionsFor(new Set(['a']))).toEqual([
+    expect(actionsFor(new Set(['a']), OPEN)).toEqual([
       'publish',
       'unpublish',
       'duplicate',
@@ -449,7 +451,7 @@ describe('select-all-matching', () => {
     // A duplicate adds documents to the very set it is walking, and excluding what
     // the job created would mean materialising the id list. Structural, so the
     // control is absent rather than disabled.
-    expect(actionsFor(drafts())).toEqual(['publish', 'unpublish', 'move', 'delete'])
+    expect(actionsFor(drafts(), OPEN)).toEqual(['publish', 'unpublish', 'move', 'delete'])
   })
 
   it('survives the `[ Tree | Flat ]` toggle, exactly as an explicit one does', () => {
@@ -833,6 +835,66 @@ describe('isStoryId', () => {
     for (const junk of ['', '#root', 'a b', 'a/b', 'a,b', '../etc', 'sty?x=1']) {
       expect(isStoryId(junk)).toBe(false)
     }
+  })
+})
+
+/**
+ * The bulk bar's role filter (issue #7).
+ *
+ * **Asserted here rather than through a mounted bar, deliberately**, and the
+ * render test says the same thing from the other end: three of the five actions
+ * need a *selection* to exist at all, so a mounted assertion would have to tick a
+ * checkbox in a tree to get at what one call answers directly — and `actionsFor`
+ * is the seam the whole rule lives in. What the render file covers instead is the
+ * half a pure function cannot: that the screen really passes `me` here.
+ *
+ * The three predicates are three different questions, so the table below is the
+ * point: an editor is not "no bulk actions", it is `duplicate` alone.
+ */
+describe('the bulk bar against a role', () => {
+  /** Its own copy: `select-all-matching`'s is scoped to that block. */
+  const drafts = () => selectAllMatching({ state: 'draft' as const }, 51420)
+  const actor = (role: Role): Me => ({
+    mode: 'session',
+    actor: { kind: 'user', id: 'usr_a', name: 'Ann', colour: '#123456', role },
+    loginUrl: '/folio/login',
+  })
+
+  it('offers a viewer nothing at all', () => {
+    // The defect issue #7 names: a viewer's Delete can never succeed, so it is
+    // impossible rather than refusable, and `## Cross-cutting` says absent.
+    expect(actionsFor(new Set(['a']), actor('viewer'))).toEqual([])
+  })
+
+  it('offers an editor duplicate and nothing else', () => {
+    // `CREATE` is editor (a new document is a draft at a path nothing links to);
+    // `MANAGE` and `PUBLISH` are publisher, because both act on a live URL.
+    expect(actionsFor(new Set(['a']), actor('editor'))).toEqual(['duplicate'])
+  })
+
+  it('offers a publisher and an admin all five', () => {
+    const five = ['publish', 'unpublish', 'duplicate', 'move', 'delete']
+    expect(actionsFor(new Set(['a']), actor('publisher'))).toEqual(five)
+    expect(actionsFor(new Set(['a']), actor('admin'))).toEqual(five)
+  })
+
+  it('offers everything on a deployment with no accounts', () => {
+    // `auth: 'open'` has no roles to be short of, and it is the assertion that
+    // catches a gate written as `role === 'admin'` rather than through `me.ts`.
+    expect(actionsFor(new Set(['a']), OPEN)).toHaveLength(5)
+  })
+
+  it('stacks with the select-all filter rather than replacing it', () => {
+    // Two independent reasons for `duplicate` to be absent, and an editor in
+    // select-all mode is where they meet: the role allows it and the server
+    // refuses it, so the answer is empty rather than `['duplicate']`.
+    expect(actionsFor(drafts(), actor('editor'))).toEqual([])
+    expect(actionsFor(drafts(), actor('publisher'))).toEqual([
+      'publish',
+      'unpublish',
+      'move',
+      'delete',
+    ])
   })
 })
 

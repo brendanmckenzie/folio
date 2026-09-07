@@ -129,6 +129,108 @@ const GLOBAL = {
 }
 
 /**
+ * One row each for the four list routes that have a **role-gated per-row
+ * control** — and every other list stays empty (issue #7).
+ *
+ * The argument above for answering everything empty still holds for the smoke
+ * layer, and these do not weaken it: a screen that throws on an empty list is
+ * still what the other fifteen routes catch. What an empty list cannot do is prove
+ * a *row's* control is absent. Documents' `Delete`, Redirects' `Delete`,
+ * Schedules' `Cancel` and Forms' `Responses` are all rendered per row, so "the
+ * control is absent for a viewer" over a table with no rows is true of every role
+ * and proves nothing — which is precisely the vacuous assertion
+ * `docs/1.0-plan.md` records this project finding in three of its own tests.
+ *
+ * Asserting the *actions column header* instead was the alternative, and it is
+ * weaker in exactly the way that matters: two of those four rows hold two buttons
+ * at two different roles, so removing the gate from one of them leaves the column
+ * where it was and the check stays green with the defect back.
+ */
+const RECORD = {
+  ...STORY,
+  id: 'sty_ada',
+  type: 'person',
+  title: 'Ada',
+  // A record has no URL of its own (`document-types.md` checkpoint 2), which is
+  // what makes it a *record* rather than a page with an empty path.
+  path: null,
+  slug: 'ada',
+  url: null,
+  previewUrl: null,
+  state: 'draft',
+  // The type's `indexed` fields, and empty is the honest shape: a cell with no
+  // published value renders the deliberate `—`, which is a state the screen has
+  // to handle anyway.
+  indexed: {},
+}
+
+/**
+ * One asset, for the media library's **detail panel**. The grid stays empty; see
+ * the by-id branch in `bodyFor` for why the two are different answers.
+ *
+ * `tags` is why this is a literal rather than a spread of something else:
+ * `AssetRow` widens the server's row with the tags the list route joins in, and
+ * `AssetDetail`'s read-only register reads `row.tags.length` directly. A row
+ * without it renders as a crash, not as an empty tag list.
+ *
+ * `alt` empty with `altAuto` set is the interesting pair rather than an arbitrary
+ * one: `toAssetValue` reads `alt || altAuto`, so it is the case where a panel that
+ * rendered only `alt` would tell a viewer this file has no alt text while a
+ * document renders some.
+ */
+const ASSET = {
+  id: 'ast_one',
+  key: 'assets/ast_one/hero.png',
+  filename: 'hero.png',
+  contentType: 'image/png',
+  size: 12_345,
+  width: 1200,
+  height: 630,
+  alt: '',
+  altAuto: 'A harbour at dusk',
+  description: 'The hero image on the home page',
+  descriptionAuto: '',
+  createdAt: 1,
+  // **Filed, not unfiled**, and that is the point of the value. `Unfiled` is a
+  // real state rather than an absence, so a panel that fell back to it while
+  // `GET {base}/api/assets/folders` was in flight would be indistinguishable from
+  // a correct one for every asset whose `folderId` is null. Answering a folder id
+  // — and a folder row below — is what lets the assertion tell the fact from the
+  // fallback.
+  folderId: 'afl_brand',
+  describedAt: null,
+  describeError: null,
+  tags: [],
+}
+
+/** The one folder, so `ASSET`'s `folderId` resolves to a name. */
+const FOLDER = { id: 'afl_brand', name: 'Brand', path: 'Brand', parentId: null, createdAt: 1 }
+
+const REDIRECT = {
+  from: '/old-services',
+  to: '/services',
+  status: 301,
+  source: 'auto',
+  storyId: STORY.id,
+  createdAt: 1,
+}
+
+const SCHEDULE = {
+  id: 'sch_one',
+  storyId: STORY.id,
+  action: 'publish',
+  // Far enough ahead that `health` reports nothing: an overdue row would put a
+  // banner on the screen, which is a state worth a test of its own and not this
+  // one's subject.
+  at: 4_000_000_000_000,
+  status: 'pending',
+  actor: 'usr_admin',
+  createdAt: 1,
+  attempts: 0,
+  lastError: null,
+}
+
+/**
  * A page of nothing, in every envelope shape the admin's list routes use.
  *
  * One object rather than a per-route table, because the alternative is a fixture
@@ -160,12 +262,17 @@ const EMPTY_PAGE = {
   hasMore: false,
 }
 
-/** One form, for the builder and the responses screen. */
+/** One form, for the list, the builder and the responses screen. */
 const FORM = {
   id: 'frm_one',
   name: 'contact',
   label: 'Contact',
   fields: [],
+  // The two aggregates the list route only computes when asked, and `useForms`
+  // always asks (`?count=1&counts=1`). Without them the row reads "undefined
+  // questions", which is the fixture lying rather than the screen being wrong.
+  questions: 0,
+  responses: 0,
   version: 1,
   open: true,
   closesAt: null,
@@ -211,6 +318,42 @@ function bodyFor(url: string): unknown {
   // The boot's third request, and the only source of a global's row.
   if (path === `${API}/documents` && query.includes('kind=singleton')) {
     return { ...EMPTY_PAGE, rows: [GLOBAL] }
+  }
+  // The four routes that answer a row rather than an empty page — see the block
+  // comment on `RECORD` for why these four and no others. All four read `rows`,
+  // which is why they are branches here rather than keys on `EMPTY_PAGE`.
+  if (path === `${API}/documents`) return { ...EMPTY_PAGE, rows: [RECORD] }
+  if (path === `${API}/redirects`) return { ...EMPTY_PAGE, rows: [REDIRECT] }
+  if (path === `${API}/schedules`) return { ...EMPTY_PAGE, rows: [SCHEDULE] }
+  if (path === `${API}/forms`) return { ...EMPTY_PAGE, rows: [FORM] }
+  /*
+   * The asset **lookup**, not the list — and that distinction is load-bearing.
+   *
+   * The detail panel holds five role-gated controls of its own and only renders
+   * for a resolved row, so something has to answer one. `panelSubject` takes it
+   * from either the loaded page (`inHand`) or `GET {base}/api/assets/:id`
+   * (`lookup`), and answering the *list* was the first attempt: it also made the
+   * media library non-empty, which broke the two assertions about the empty
+   * state's prose. Answering only the by-id route gives the panel a row and
+   * leaves the grid empty, so both hold at once — the same reason `/stories?ids=`
+   * is a branch of its own above.
+   */
+  if (path === `${API}/assets/${ASSET.id}`) return ASSET
+  // The folder vocabulary, so the panel can name the folder the asset is in
+  // rather than falling back. `EMPTY_PAGE`'s `folders: []` answered this before,
+  // which made *every* asset read as unfiled.
+  if (path === `${API}/assets/folders`) return { ...EMPTY_PAGE, rows: [FOLDER] }
+  /*
+   * A deployment that *does* describe images.
+   *
+   * `useDescribe` draws no control at all when this answers nothing, which is the
+   * same "absent" pattern arriving from a different direction — and it would make
+   * the bulk *Describe* button invisible to every role, so the assertion that an
+   * admin can see it would pass against a button nobody can ever see. Answering
+   * `configured` is what puts the one `ADMIN` control in this feature on screen.
+   */
+  if (path === `${API}/assets/describe`) {
+    return { configured: true, onUpload: false, images: false, batch: 10 }
   }
 
   if (path === `${API}/schema`) return MANIFEST

@@ -32,6 +32,7 @@ import type {
   StoryState,
 } from '../../../core/story'
 import type { BulkFailure, BulkRefusal, BulkReport } from '../../../core/bulk'
+import { canCreateContent, canManageContent, canPublish, type Me } from '../../me'
 
 /* ------------------------------------------------------------------- modes --- */
 
@@ -630,15 +631,32 @@ export const BULK_ACTIONS: readonly StoryBulkAction[] = [
 /**
  * The actions a selection may be given, which is not always all five.
  *
+ * Two independent filters, and they are the two halves of one rule —
+ * `## Cross-cutting`'s "impossible controls are absent; refusable ones explain
+ * themselves before the click."
+ *
  * **`duplicate` is absent in select-all mode**, not disabled. The server refuses
  * it there (`bulk-writes.md` decision 6) because a duplicate adds documents to the
  * very set it is walking — the copy of a draft is a draft — and fixing that
  * properly would mean remembering the ids it created, which is materialising the
  * id list this shape exists to avoid. So the refusal is structural rather than
- * situational, and `## Cross-cutting` says an impossible control is absent.
+ * situational.
+ *
+ * **An action this person's role cannot take is absent too** (issue #7), for the
+ * same reason and one step further out: a viewer's Delete cannot succeed however
+ * long they wait, so it is impossible rather than refusable. Each of the five is
+ * filtered against the predicate mirroring the `Access` its route declares —
+ * `publish`/`unpublish` are `PUBLISH`, `move`/`delete` are `MANAGE`, `duplicate`
+ * is `CREATE` — which is why the argument is `Me` and not a boolean: the three are
+ * genuinely three different questions, and a viewer gets an empty array while an
+ * editor gets `duplicate` alone.
  */
-export function actionsFor(selection: Selection): readonly StoryBulkAction[] {
-  return isAll(selection) ? BULK_ACTIONS.filter((action) => action !== 'duplicate') : BULK_ACTIONS
+export function actionsFor(selection: Selection, me: Me): readonly StoryBulkAction[] {
+  return BULK_ACTIONS.filter((action) => {
+    if (action === 'duplicate') return !isAll(selection) && canCreateContent(me)
+    if (action === 'publish' || action === 'unpublish') return canPublish(me)
+    return canManageContent(me)
+  })
 }
 
 /**

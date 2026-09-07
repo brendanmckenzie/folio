@@ -168,6 +168,37 @@ export function canManageContent(me: Me): boolean {
 }
 
 /**
+ * May they upload, rename or delete a file, or manage folders and tags?
+ *
+ * `editor`, mirroring `ASSETS` on the server — `POST {base}/api/assets` and every
+ * other write in `server/routes/assets.ts` — and **editor rather than publisher
+ * on purpose.** An asset has no URL of its own that the site serves, so putting
+ * one in the library or taking it out is not a publishing act the way moving a
+ * document is; `ASSETS`' own comment and `CREATE`'s make the same distinction.
+ *
+ * The one write in that feature which is stronger is the bulk describe run
+ * (`POST {base}/api/assets/describe`), because it spends money — that one is
+ * `canAdmin`.
+ */
+export function canManageAssets(me: Me): boolean {
+  return canEdit(me)
+}
+
+/**
+ * May they read what people typed into a form?
+ *
+ * `publisher`, mirroring `FORMS` (`GET {base}/api/forms/:id/responses`), and the
+ * gap from every other reader is the point. `server/auth/roles.ts` makes the
+ * argument where the constant is declared: every other reader in that file is
+ * about the site's own content, and these rows are what strangers typed about
+ * themselves — a name, an address, a CV. An editor who may build the form is not
+ * thereby somebody who may read the enquiries.
+ */
+export function canReadResponses(me: Me): boolean {
+  return canPublish(me)
+}
+
+/**
  * May they manage editors and tokens? Never under `auth: 'open'`, where the
  * surface does not exist server-side either (it 404s), so offering the rail would
  * be offering a broken screen.
@@ -178,18 +209,41 @@ export function canManageAccess(me: Me): boolean {
 }
 
 /**
- * May they delete a form? `admin`, matching `DELETE {base}/api/forms/:id`'s
- * `ADMIN` access (`docs/specs/content-model/forms.md` checkpoint 8: "Responses
- * read at publisher; export and delete at admin. Building a form stays at
- * editor.") — deliberately `atLeast(…, 'admin')` like `canEdit`/`canPublish`
- * rather than `canManageAccess`'s exact-role, mode-gated check: a form's delete
- * is an ordinary content permission that also holds under `auth: 'open'`, not a
- * surface that stops existing without accounts.
+ * May they do the `admin`-only things that are **not** the access surface?
+ *
+ * `ADMIN` on the server. Several routes declare it — `POST
+ * {base}/api/assets/describe`, `DELETE {base}/api/forms/:id`, that form's CSV
+ * export and both of its response deletes, plus `POST {base}/api/migrate`,
+ * `POST {base}/api/reindex` and `GET {base}/api/audit` — and the four this
+ * predicate gates today are the first four: the describe run because it spends
+ * money, and the three form ones because each destroys or exports what strangers
+ * typed. Model's own `Run` reads `model-model.ts`'s `isAdmin` instead, which is
+ * the same question asked one way for a *token*; see its header.
+ *
+ * Deliberately `atLeast(…, 'admin')` like `canEdit`/`canPublish`, and true under
+ * `auth: 'open'` — unlike `canManageAccess`, whose exact-role, mode-gated check
+ * exists because *that* surface stops existing without accounts. These do not:
+ * they are ordinary content routes that happen to be expensive or irreversible,
+ * and a deployment with no accounts reaches all of them.
  */
-export function canDeleteForms(me: Me): boolean {
+export function canAdmin(me: Me): boolean {
   if (me.mode === 'open') return true
   const user = asUser(me)
   return user !== null && atLeast(user.role, 'admin')
+}
+
+/**
+ * May they delete a form? `admin`, matching `DELETE {base}/api/forms/:id`'s
+ * `ADMIN` access (`docs/specs/content-model/forms.md` checkpoint 8: "Responses
+ * read at publisher; export and delete at admin. Building a form stays at
+ * editor.").
+ *
+ * `canAdmin`, which is where the argument that used to be written out here now
+ * lives: a form's delete is an ordinary content permission that also holds under
+ * `auth: 'open'`, not a surface that stops existing without accounts.
+ */
+export function canDeleteForms(me: Me): boolean {
+  return canAdmin(me)
 }
 
 /** The label for the user menu, or null when there is nobody to name. */

@@ -10,6 +10,7 @@ import {
   addedOn,
   type AssetRow,
   dimensionsOf,
+  folderNameFor,
   humanSize,
   indentedFolderName,
   isRenderableImage,
@@ -52,6 +53,27 @@ export interface AssetDetailProps {
    * showing the alt text somebody just replaced. */
   onChanged: (row: AssetRow) => void
   onNotice: (message: string) => void
+  /**
+   * Whether this person may write to the library — `ASSETS` (editor+), the same
+   * gate `AssetBrowser` takes and for the same reason (issue #7). False withdraws
+   * every editor in this panel and *Delete*, because none of them can succeed.
+   *
+   * **The values do not go with the controls.** Alt text, description, folder and
+   * tags are *information* as much as they are fields — "what does this file say
+   * it is" is a question a viewer legitimately has, and a panel that answers it
+   * only for people who could change it would be hiding content to enforce a
+   * permission. So those four come back as `Fact` rows, which is the read-only
+   * register this panel already uses for type, size and key. *Describe* and
+   * *Delete* have no value to show and are simply absent.
+   *
+   * **Required, unlike `AssetBrowser.mayWrite`**, and the asymmetry is the point.
+   * That one defaults to true because `AssetPicker` genuinely relies on the
+   * default; this panel has exactly one mount and it always passes the value, so a
+   * default here would protect nothing and would fail *open* — a second mount that
+   * forgot it would offer five writes. Symmetry is a weaker argument than failing
+   * closed.
+   */
+  mayWrite: boolean
 }
 
 /**
@@ -82,6 +104,7 @@ export function AssetDetail({
   onDelete,
   onChanged,
   onNotice,
+  mayWrite,
 }: AssetDetailProps) {
   const titleId = useId()
   const panel = useRef<HTMLElement>(null)
@@ -141,11 +164,22 @@ export function AssetDetail({
         </Fact>
       </dl>
 
-      <AltText apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
-      <DescriptionEditor apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
-      <DescribeAction apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
-      <FolderEditor apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
-      <TagsEditor apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
+      {mayWrite ? (
+        <>
+          <AltText apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
+          <DescriptionEditor
+            apiBase={apiBase}
+            row={row}
+            onChanged={onChanged}
+            onNotice={onNotice}
+          />
+          <DescribeAction apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
+          <FolderEditor apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
+          <TagsEditor apiBase={apiBase} row={row} onChanged={onChanged} onNotice={onNotice} />
+        </>
+      ) : (
+        <ReadOnlyMeta apiBase={apiBase} row={row} />
+      )}
 
       {/*
         The focal point, and the honest answer about it.
@@ -164,7 +198,20 @@ export function AssetDetail({
         field that places it, per block.
       </p>
 
-      <Uses apiBase={apiBase} mount={mount} row={row} />
+      {/*
+        **`Uses` is a read this person may not make.** `GET
+        {base}/api/assets/:id/usage` is `EDIT` (`server/routes/assets.ts`), not
+        `READ` — deliberately, because it reports on published content and is the
+        dialog before a delete — and `EDIT` is the same rung as `ASSETS`, so
+        `mayWrite` is exactly its gate rather than a second one that happens to
+        agree.
+
+        Left ungated it renders *"Could not check what uses this: Your role
+        (viewer) may not do that; editor is required."* — a role refusal reported
+        after the fact, in the one panel issue #7 turned into a surface a viewer is
+        meant to read. Absent instead, like every other impossible thing here.
+      */}
+      {mayWrite ? <Uses apiBase={apiBase} mount={mount} row={row} /> : null}
 
       <div className={css.panelFoot}>
         {/* The original bytes, untransformed, and `download` so a click saves rather
@@ -172,9 +219,13 @@ export function AssetDetail({
         <a className={css.download} href={originalUrl(mount, row)} download={row.filename}>
           Download
         </a>
-        <Button size="sm" variant="danger" onClick={onDelete}>
-          Delete
-        </Button>
+        {/* `Download` is `READ` — it is the same bytes the public `/asset/:key`
+            serves — and `Delete` is `ASSETS`, so only the second one goes. */}
+        {mayWrite ? (
+          <Button size="sm" variant="danger" onClick={onDelete}>
+            Delete
+          </Button>
+        ) : null}
       </div>
     </aside>
   )
@@ -188,6 +239,44 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
     </>
   )
 }
+
+/**
+ * The four editable values, read-only, for somebody without `ASSETS`.
+ *
+ * This is the half of issue #7's rule that is easy to get wrong in the other
+ * direction. The *controls* are impossible for a viewer and are therefore absent;
+ * the *values* are not controls at all. "What does this file say it is, and where
+ * is it filed" is a question anybody reading the library has, and answering it
+ * only for people who could change the answer would be using a permission to hide
+ * content. So the four come back as `Fact` rows — the register this panel already
+ * uses for type, size and key — and `Describe` and `Delete`, which have no value
+ * to show, are simply gone.
+ *
+ * `alt || altAuto` and `description || descriptionAuto` in that order, matching
+ * `toAssetValue`: a human edit wins, and the machine-written one is what a
+ * document actually renders when there is no human one. Rendering only `alt` here
+ * would say "no alt text" about a file that has some.
+ */
+function ReadOnlyMeta({ apiBase, row }: { apiBase: string; row: AssetRow }) {
+  // The same hook `FolderEditor` uses, for the same one fact: `row.folderId` is an
+  // id and the panel wants the name. `row.tags` needs no fetch — the list route
+  // carries them, which is why `AssetRow` widens the server's row with them.
+  const folders = useFolders(apiBase)
+  return (
+    <dl className={css.facts}>
+      <Fact label="Alt text">{row.alt || row.altAuto || EMPTY}</Fact>
+      <Fact label="Description">{row.description || row.descriptionAuto || EMPTY}</Fact>
+      <Fact label="Folder">{folderNameFor(row.folderId, folders)}</Fact>
+      <Fact label="Tags">
+        {row.tags.length === 0 ? EMPTY : row.tags.map((tag) => tag.name).join(', ')}
+      </Fact>
+    </dl>
+  )
+}
+
+/** An em dash for a value that is genuinely absent, which is what the asset table's
+ * own empty cells render — the same distinction, in the same feature. */
+const EMPTY = '—'
 
 /* ---------------------------------------------------------------- alt text --- */
 

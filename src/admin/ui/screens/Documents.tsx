@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { DocumentType, SchemaIndex } from '../../../core/schema'
+import { canCreateContent, canManageContent, type Me } from '../../me'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { EmptyState } from '../EmptyState'
@@ -33,6 +34,16 @@ interface Props {
   type: DocumentType
   schema: SchemaIndex
   apiBase: string
+  /**
+   * Who is signed in, for the role gates below.
+   *
+   * `Duplicate` is `CREATE` (editor), `Delete` and the create button are
+   * `CREATE`/`MANAGE`, and each is **absent** for a role that cannot take it
+   * rather than refused after the click — `../../../docs/ui-architecture.md`'s
+   * `## Cross-cutting`, and the defect issue #7 names by name: a viewer was
+   * offered Delete here and told about it by the server.
+   */
+  me: Me
   query: Readonly<Record<string, string>>
   /** `replace`, not `push`: a filter keystroke must not be a history entry. */
   onQuery: (next: Record<string, string | undefined>) => void
@@ -90,6 +101,8 @@ const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
  */
 export function Documents(props: Props) {
   const { type, schema, apiBase, onQuery, onNotice, onOpen } = props
+  const mayCreate = canCreateContent(props.me)
+  const mayManage = canManageContent(props.me)
   const url = parseDocumentsUrl(props.query)
   const filter = filterOf(url)
   const data = useDocuments(apiBase, type.name, url)
@@ -207,13 +220,15 @@ export function Documents(props: Props) {
               aria-label={`Search ${type.label.toLowerCase()}`}
               onChange={(e) => go({ ...url, q: e.target.value })}
             />
-            <NewDocumentButton
-              type={type}
-              schema={schema}
-              apiBase={apiBase}
-              onCreated={(id) => onOpen({ name: 'edit', id })}
-              onNotice={onNotice}
-            />
+            {mayCreate ? (
+              <NewDocumentButton
+                type={type}
+                schema={schema}
+                apiBase={apiBase}
+                onCreated={(id) => onOpen({ name: 'edit', id })}
+                onNotice={onNotice}
+              />
+            ) : null}
           </>
         }
       />
@@ -254,28 +269,44 @@ export function Documents(props: Props) {
             if (sort) go(withSort(url, sort))
           }}
           onOpen={(row) => onOpen({ name: 'edit', id: row.id })}
-          actions={(row) => (
-            <span className={css.rowActions}>
-              <Button
-                size="sm"
-                variant="subtle"
-                disabled={busy}
-                title={`Duplicate ${row.title || 'this document'}`}
-                onClick={() => void write(row, 'duplicate')}
-              >
-                Duplicate
-              </Button>
-              <Button
-                size="sm"
-                variant="subtle"
-                disabled={busy}
-                title={`Delete ${row.title || 'this document'}`}
-                onClick={() => setDeleting(row)}
-              >
-                Delete
-              </Button>
-            </span>
-          )}
+          /*
+            Both row actions are role-gated, and the *whole column* goes with
+            them: `Table`'s `actions` is optional and it draws no header cell and
+            no `<td>` without one, so a viewer gets a table one column narrower
+            rather than a hover target that reveals nothing. Passing a function
+            that returns an empty span would leave the column, which is the
+            version of this that looks like a rendering bug.
+          */
+          {...(mayCreate || mayManage
+            ? {
+                actions: (row: DocumentRow) => (
+                  <span className={css.rowActions}>
+                    {mayCreate ? (
+                      <Button
+                        size="sm"
+                        variant="subtle"
+                        disabled={busy}
+                        title={`Duplicate ${row.title || 'this document'}`}
+                        onClick={() => void write(row, 'duplicate')}
+                      >
+                        Duplicate
+                      </Button>
+                    ) : null}
+                    {mayManage ? (
+                      <Button
+                        size="sm"
+                        variant="subtle"
+                        disabled={busy}
+                        title={`Delete ${row.title || 'this document'}`}
+                        onClick={() => setDeleting(row)}
+                      >
+                        Delete
+                      </Button>
+                    ) : null}
+                  </span>
+                ),
+              }
+            : {})}
           empty={
             <EmptyState
               title={isNarrowed(filter) ? 'Nothing matches' : `No ${type.label.toLowerCase()} yet`}

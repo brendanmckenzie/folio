@@ -420,40 +420,66 @@ export interface DropTarget {
  * Drag and drop is **never the only route**: every caller also has a real file
  * input, because a pointer gesture is not keyboard-operable and
  * `ui-architecture.md`'s acceptance for every phase includes that it is.
+ *
+ * **`enabled: false` still swallows the drop.** It is how a caller without
+ * `ASSETS` withdraws the gesture — no veil, no `onFiles`, `dropEffect: 'none'` so
+ * the cursor says so mid-drag — and the handlers stay attached on purpose. The
+ * first version of issue #7's gate simply stopped spreading them, which hands the
+ * drop back to the browser: the default action for a file dropped on a page is to
+ * *navigate to it*, so a viewer's stray drop replaced the admin with a JPEG and
+ * discarded whatever they had open. That is worse than the 403 toast it was
+ * meant to remove. Absence of an affordance is not absence of a handler.
  */
-export function useDropTarget(onFiles: (files: FileList | null) => void): DropTarget {
+export function useDropTarget(
+  onFiles: (files: FileList | null) => void,
+  enabled = true,
+): DropTarget {
   const [depth, setDepth] = useState(0)
 
-  const onDragEnter = useCallback((e: DragEvent) => {
-    if (!hasFiles(e)) return
-    e.preventDefault()
-    setDepth((d) => d + 1)
-  }, [])
+  const onDragEnter = useCallback(
+    (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      if (enabled) setDepth((d) => d + 1)
+    },
+    [enabled],
+  )
 
-  const onDragOver = useCallback((e: DragEvent) => {
-    if (!hasFiles(e)) return
-    // Without this the browser navigates to the dropped file, which is the default
-    // and is the single most common way a drop target silently does not work.
-    e.preventDefault()
-    e.dataTransfer.dropEffect = 'copy'
-  }, [])
+  const onDragOver = useCallback(
+    (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      // Without this the browser navigates to the dropped file, which is the default
+      // and is the single most common way a drop target silently does not work.
+      e.preventDefault()
+      e.dataTransfer.dropEffect = enabled ? 'copy' : 'none'
+    },
+    [enabled],
+  )
 
-  const onDragLeave = useCallback((e: DragEvent) => {
-    if (!hasFiles(e)) return
-    setDepth((d) => Math.max(0, d - 1))
-  }, [])
+  const onDragLeave = useCallback(
+    (e: DragEvent) => {
+      if (!hasFiles(e) || !enabled) return
+      setDepth((d) => Math.max(0, d - 1))
+    },
+    [enabled],
+  )
 
   const onDrop = useCallback(
     (e: DragEvent) => {
       if (!hasFiles(e)) return
+      // Prevented whether or not this caller may upload — see the header.
       e.preventDefault()
+      if (!enabled) return
       setDepth(0)
       onFiles(e.dataTransfer.files)
     },
-    [onFiles],
+    [onFiles, enabled],
   )
 
-  return { over: depth > 0, handlers: { onDragEnter, onDragOver, onDragLeave, onDrop } }
+  return {
+    over: enabled && depth > 0,
+    handlers: { onDragEnter, onDragOver, onDragLeave, onDrop },
+  }
 }
 
 /** Whether this drag carries files at all. A dragged *link* or a text selection

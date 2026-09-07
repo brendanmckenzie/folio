@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { canPublish, type Me } from '../../me'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { Dialog } from '../Dialog'
@@ -32,6 +33,14 @@ import { useSchedules } from './useSchedules'
 
 interface Props {
   apiBase: string
+  /**
+   * Who is signed in, for the one role gate on this screen. Cancelling a schedule
+   * is `PUBLISH` — it is a publish or an unpublish being called off — so the
+   * control is **absent** for a weaker role rather than refused after the click
+   * (`../../../docs/ui-architecture.md`'s `## Cross-cutting`, issue #7). Reading
+   * the list is `READ`, so a viewer still sees what is coming.
+   */
+  me: Me
   query: Readonly<Record<string, string>>
   onQuery: (next: Record<string, string | undefined>) => void
   onNotice: (message: string) => void
@@ -80,7 +89,8 @@ const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
  * No sort, for the reason `listSchedules` orders by `at` ascending: soonest first is
  * the only ordering a person reads this list in, and a second keyset buys nothing.
  */
-export function Schedules({ apiBase, query, onQuery, onNotice, onOpen }: Props) {
+export function Schedules({ apiBase, me, query, onQuery, onNotice, onOpen }: Props) {
+  const mayPublish = canPublish(me)
   const url = parseSchedulesUrl(query)
   const data = useSchedules(apiBase, url)
 
@@ -258,19 +268,27 @@ export function Schedules({ apiBase, query, onQuery, onNotice, onOpen }: Props) 
            * the world and more useful than a click that goes nowhere.
            */
           onOpen={(row) => onOpen(row.storyId)}
-          actions={(row) => (
-            <span className={css.rowActions}>
-              <Button
-                size="sm"
-                variant="subtle"
-                disabled={busy}
-                title={`Cancel the scheduled ${row.action} of ${titleOf(row)}`}
-                onClick={() => setCancelling(row)}
-              >
-                Cancel
-              </Button>
-            </span>
-          )}
+          /* The row's only action is `PUBLISH`, so the actions column goes with it
+             for a weaker role — `Table` draws neither its header cell nor its
+             `<td>` without this prop. The confirmation dialog below is behind this
+             button and therefore unreachable without it. */
+          {...(mayPublish
+            ? {
+                actions: (row: ResolvedSchedule) => (
+                  <span className={css.rowActions}>
+                    <Button
+                      size="sm"
+                      variant="subtle"
+                      disabled={busy}
+                      title={`Cancel the scheduled ${row.action} of ${titleOf(row)}`}
+                      onClick={() => setCancelling(row)}
+                    >
+                      Cancel
+                    </Button>
+                  </span>
+                ),
+              }
+            : {})}
           empty={
             <EmptyState
               title={narrowed ? 'Nothing matches' : 'Nothing is scheduled'}

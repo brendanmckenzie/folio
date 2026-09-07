@@ -441,6 +441,39 @@ export function folderDepth(folder: Pick<AssetFolder, 'path'>): number {
 }
 
 /**
+ * What to say a filed asset's folder is, given a folder list that may not have
+ * arrived — the read-only register of the detail panel (issue #7).
+ *
+ * **`Unfiled` is a claim, not a fallback**, and separating the two is the whole
+ * job. `folders.find(…) ?? 'Unfiled'` is the obvious spelling and it is wrong:
+ * `useFolders` starts `loading` with an empty list, so a file in *Brand/Logos*
+ * reads as unfiled for the length of a round trip — and for ever if the fetch
+ * fails, since the failure lands in `folders.error` and a fallback never looks
+ * there. The control this replaced guarded the same value with `disabled={saving
+ * || folders.loading}`; a read-only register cannot disable anything, so its
+ * guard has to be saying less instead.
+ *
+ * Four answers, and each is a different fact: `null` is genuinely *Unfiled*, the
+ * one case needing no fetch at all; a match is the name; no match while loading
+ * is "not known yet"; and no match after loading is a folder that has been
+ * deleted out from under the row, which is an absence rather than a state.
+ *
+ * Pure and here rather than in the component, so the four are testable without a
+ * DOM — `../../../test/unit/admin/assets-screen.test.ts`.
+ */
+export function folderNameFor(
+  folderId: string | null,
+  folders: { folders: readonly Pick<AssetFolder, 'id' | 'name'>[]; loading: boolean },
+): string {
+  if (folderId === null) return 'Unfiled'
+  const folder = folders.folders.find((f) => f.id === folderId)
+  if (folder) return folder.name
+  // An ellipsis while it is still coming, and then the em dash every other absent
+  // cell on this screen uses.
+  return folders.loading ? '…' : '—'
+}
+
+/**
  * A folder's name, indented for a plain-text context — a `<select>`'s `<option>`,
  * which cannot reliably take CSS padding across browsers the way a real element in
  * the sidebar tree can. Two non-breaking spaces per level of depth: a regular space

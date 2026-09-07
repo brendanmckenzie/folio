@@ -708,6 +708,7 @@ function screenFor(a: ScreenArgs) {
         <Content
           mount={boot.base}
           apiBase={boot.apiBase}
+          me={a.me}
           query={route.query}
           onQuery={(next) => a.replace({ name: 'content' }, { ...route.query, ...next })}
           onOpen={a.go}
@@ -829,6 +830,7 @@ function screenFor(a: ScreenArgs) {
           type={type}
           schema={a.schema}
           apiBase={boot.apiBase}
+          me={a.me}
           query={route.query}
           onQuery={(next) =>
             a.replace({ name: 'documents', type: type.name }, { ...route.query, ...next })
@@ -846,6 +848,7 @@ function screenFor(a: ScreenArgs) {
         <Assets
           apiBase={boot.apiBase}
           mount={boot.base}
+          me={a.me}
           query={route.query}
           onQuery={(next) => a.replace({ name: 'assets' }, { ...route.query, ...next })}
           onNotice={a.notify}
@@ -933,6 +936,7 @@ function screenFor(a: ScreenArgs) {
       return (
         <Redirects
           apiBase={boot.apiBase}
+          me={a.me}
           query={route.query}
           onQuery={(next) => a.replace({ name: 'redirects' }, { ...route.query, ...next })}
           onNotice={a.notify}
@@ -943,6 +947,7 @@ function screenFor(a: ScreenArgs) {
       return (
         <Schedules
           apiBase={boot.apiBase}
+          me={a.me}
           query={route.query}
           onQuery={(next) => a.replace({ name: 'schedules' }, { ...route.query, ...next })}
           onNotice={a.notify}

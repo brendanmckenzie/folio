@@ -42,6 +42,24 @@ export interface AssetPickerProps {
    * client-side. */
   onPick: (value: AssetValue) => void
   onClose: () => void
+  /**
+   * Whether the person may upload from inside the picker — `ASSETS` on the
+   * server. Forwarded to `AssetBrowser`, and **optional, defaulting to true,
+   * because nothing passes it today and that is correct.**
+   *
+   * The picker is opened by `fields/AssetField.tsx`, and by **both** of its
+   * triggers — the single field's at `:85` and the repeating field's at `:205` —
+   * each already `disabled={!editable}`. That value is
+   * `readOnly = !live || !canEdit(me)` (`./useEditor.ts:300`), threaded through
+   * `EditorShell` and the one `Inspector` mount to `inspector-model.ts`'s
+   * `isEditable`. So a role that cannot write an asset cannot write the field
+   * either, and never reaches this dialog; threading `me` down the field chain to
+   * re-derive that would add a prop to every field to answer a question the
+   * editor has already answered. The seam is here for the caller that one day is
+   * not a field — and it now covers the drop target as well as the button, which
+   * it did not at first.
+   */
+  mayWrite?: boolean
 }
 
 /**
@@ -75,7 +93,14 @@ export interface AssetPickerProps {
  * `{base}/edit/:id` until port phase 7, exactly as `StoryTree.tsx` did at phase 2. It
  * goes with the file that uses it.
  */
-export function AssetPicker({ apiBase, mount, accept, onPick, onClose }: AssetPickerProps) {
+export function AssetPicker({
+  apiBase,
+  mount,
+  accept,
+  onPick,
+  onClose,
+  mayWrite = true,
+}: AssetPickerProps) {
   const remembered = useRememberedString<AssetView>(ASSET_VIEW_KEY, DEFAULT_ASSET_VIEW, isAssetView)
 
   /**
@@ -133,7 +158,10 @@ export function AssetPicker({ apiBase, mount, accept, onPick, onClose }: AssetPi
   const upload = useUploads(apiBase, onUploaded)
 
   const onFiles = useCallback((files: FileList | null) => upload.add(files), [upload])
-  const drop = useDropTarget(onFiles)
+  // `mayWrite` gates the gesture the same way it gates the button, and through the
+  // hook rather than by withholding the handlers — see `useDropTarget`'s header for
+  // why an unattached drop target is worse than a swallowed one.
+  const drop = useDropTarget(onFiles, mayWrite)
 
   /**
    * The selected row, resolved by id when the page does not hold it.
@@ -195,6 +223,7 @@ export function AssetPicker({ apiBase, mount, accept, onPick, onClose }: AssetPi
           kinds={imposed === undefined}
           accept={accept}
           compact
+          mayWrite={mayWrite}
         />
         {drop.over ? (
           <div className={css.dropVeil} aria-hidden="true">

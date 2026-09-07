@@ -1,5 +1,5 @@
 import { useCallback, useId, useState } from 'react'
-import { canDeleteForms, canEdit, type Me } from '../../me'
+import { canDeleteForms, canEdit, canReadResponses, type Me } from '../../me'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { Dialog } from '../Dialog'
@@ -50,6 +50,15 @@ const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
  */
 export function Forms({ apiBase, me, onOpen, onNotice }: Props) {
   const data = useForms(apiBase)
+  /**
+   * The two row actions, and they are **two different roles** — which is why the
+   * gap issue #7 found here was invisible: `New form` and `Delete` were both
+   * gated and `Responses` was not, on the one screen believed to be correct.
+   * `GET {base}/api/forms/:id/responses` is `FORMS` (publisher), so an editor
+   * clicking it reached a 403 to learn something the button could have not said.
+   */
+  const mayRead = canReadResponses(me)
+  const mayDelete = canDeleteForms(me)
 
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState<FormRow | null>(null)
@@ -186,28 +195,38 @@ export function Forms({ apiBase, me, onOpen, onNotice }: Props) {
           rows={data.page.rows}
           rowKey={(row) => row.id}
           onOpen={(row) => onOpen({ name: 'form', id: row.id })}
-          actions={(row) => (
-            <span className={css.rowActions}>
-              <Button
-                size="sm"
-                variant="subtle"
-                onClick={() => onOpen({ name: 'responses', id: row.id })}
-              >
-                Responses
-              </Button>
-              {canDeleteForms(me) ? (
-                <Button
-                  size="sm"
-                  variant="subtle"
-                  disabled={busy}
-                  title={`Delete "${row.label}"`}
-                  onClick={() => setDeleting(row)}
-                >
-                  Delete
-                </Button>
-              ) : null}
-            </span>
-          )}
+          /* Neither action available means no actions column at all: `Table`
+             draws its header cell and its `<td>` only when this prop is passed,
+             so an editor gets a table one column narrower rather than a hover
+             target that reveals nothing. */
+          {...(mayRead || mayDelete
+            ? {
+                actions: (row: FormRow) => (
+                  <span className={css.rowActions}>
+                    {mayRead ? (
+                      <Button
+                        size="sm"
+                        variant="subtle"
+                        onClick={() => onOpen({ name: 'responses', id: row.id })}
+                      >
+                        Responses
+                      </Button>
+                    ) : null}
+                    {mayDelete ? (
+                      <Button
+                        size="sm"
+                        variant="subtle"
+                        disabled={busy}
+                        title={`Delete "${row.label}"`}
+                        onClick={() => setDeleting(row)}
+                      >
+                        Delete
+                      </Button>
+                    ) : null}
+                  </span>
+                ),
+              }
+            : {})}
           empty={
             <EmptyState
               title="No forms yet"

@@ -121,11 +121,12 @@ export function Home({ apiBase, mount, types, globals, me, onOpen, onNotice }: P
     // `ASSETS` are both the `editor` role, and `admin/me.ts` models roles.
     //
     // **Absent rather than disabled**, per the cross-cutting rule — a viewer's create
-    // is impossible, not refusable. `ui-architecture.md`'s open question 8 notes that
-    // Content and Documents are both still wrong about this and asks for one rule
-    // applied to every screen rather than a branch in whichever was touched last;
-    // this uses that one rule (`canCreateContent`) rather than inventing a local one,
-    // so it is the same fix arriving early rather than a seventh opinion.
+    // is impossible, not refusable. This screen used that one rule
+    // (`canCreateContent`) rather than inventing a local one, which is what made it
+    // the fix arriving early rather than a seventh opinion; issue #7 has since applied
+    // the same rule to every control on the other six list screens, so the predicate
+    // read here is the one Content, Documents, Assets, Redirects, Schedules and Forms
+    // all read too.
     //
     // It does flicker once on a cold load: `me` is the optimistic `OPEN` until
     // `/me` answers, so a viewer sees the actions for one round trip and then does

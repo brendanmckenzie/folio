@@ -1,4 +1,5 @@
 import { useCallback, useId, useState } from 'react'
+import { canManageContent, type Me } from '../../me'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { Dialog } from '../Dialog'
@@ -35,6 +36,14 @@ import { useRedirects } from './useRedirects'
 
 interface Props {
   apiBase: string
+  /**
+   * Who is signed in, for the role gates below. Adding and deleting a redirect
+   * are both `MANAGE` (publisher) — `redirects.md`'s own reasoning is that a
+   * redirect changes what URL the site serves — so both controls are **absent**
+   * for a weaker role rather than refused after the click
+   * (`../../../docs/ui-architecture.md`'s `## Cross-cutting`, issue #7).
+   */
+  me: Me
   query: Readonly<Record<string, string>>
   /** `replace`, not `push`: a filter keystroke must not be a history entry. */
   onQuery: (next: Record<string, string | undefined>) => void
@@ -75,7 +84,8 @@ const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
  * the reason `listRedirects` states: a second keyset over `from_path` buys scrolling
  * to a path the search box already jumps to.
  */
-export function Redirects({ apiBase, query, onQuery, onNotice }: Props) {
+export function Redirects({ apiBase, me, query, onQuery, onNotice }: Props) {
+  const mayManage = canManageContent(me)
   const url = parseRedirectsUrl(query)
   const data = useRedirects(apiBase, url)
 
@@ -216,9 +226,11 @@ export function Redirects({ apiBase, query, onQuery, onNotice }: Props) {
               aria-label="Search redirects by path"
               onChange={(e) => go({ ...url, q: e.target.value })}
             />
-            <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
-              New redirect
-            </Button>
+            {mayManage ? (
+              <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
+                New redirect
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -262,19 +274,27 @@ export function Redirects({ apiBase, query, onQuery, onNotice }: Props) {
              information rather than a foreign key precisely so a redirect can
              outlive it. A first column that looked clickable and answered nothing
              would be worse than one that does not. */
-          actions={(row) => (
-            <span className={css.rowActions}>
-              <Button
-                size="sm"
-                variant="subtle"
-                disabled={busy}
-                title={`Delete the redirect from ${pathLabel(row.from)}`}
-                onClick={() => setDeleting(row)}
-              >
-                Delete
-              </Button>
-            </span>
-          )}
+          /* The row's only action is `MANAGE`, so the whole actions column goes
+             with it for a weaker role — `Table` draws neither the header cell nor
+             the `<td>` without this prop, which is what makes "absent" mean absent
+             rather than an empty hover target. */
+          {...(mayManage
+            ? {
+                actions: (row: RedirectRow) => (
+                  <span className={css.rowActions}>
+                    <Button
+                      size="sm"
+                      variant="subtle"
+                      disabled={busy}
+                      title={`Delete the redirect from ${pathLabel(row.from)}`}
+                      onClick={() => setDeleting(row)}
+                    >
+                      Delete
+                    </Button>
+                  </span>
+                ),
+              }
+            : {})}
           empty={
             <EmptyState
               title={narrowed ? 'Nothing matches' : 'No redirects yet'}
@@ -283,16 +303,26 @@ export function Redirects({ apiBase, query, onQuery, onNotice }: Props) {
                   ? 'Try a different source, or clear the search.'
                   : 'Renaming, moving or deleting a page writes one of these automatically, so this fills itself over time. Add one by hand for a URL that never existed here — a print campaign, or a page from an older site.'
               }
+              /*
+                No action for somebody who may not add one, and deliberately no
+                invented substitute: `## Cross-cutting` says an empty state with
+                no action is an error message, and the escape here is that the
+                body above **is** the next step. "Renaming, moving or deleting a
+                page writes one of these automatically, so this fills itself over
+                time" is a true and useful thing for a viewer to read — the table
+                is empty because nothing has happened yet, not because they are
+                being kept out of it.
+              */
               action={
                 narrowed ? (
                   <Button size="sm" onClick={() => go({ source: 'all', q: '' })}>
                     Clear filters
                   </Button>
-                ) : (
+                ) : mayManage ? (
                   <Button size="sm" variant="primary" onClick={() => setCreating(true)}>
                     New redirect
                   </Button>
-                )
+                ) : undefined
               }
             />
           }
