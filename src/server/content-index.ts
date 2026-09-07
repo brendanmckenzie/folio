@@ -233,32 +233,47 @@ export function indexStatements(
  * (`migrations/0002_asset_refs.sql`). "Used by N **published** documents" is the
  * claim the Assets panel makes.
  *
- * **The `in (…)` list is not chunked, and that is deliberate.** Every statement
- * here binds the whole set in one go, so a subtree wider than about ninety
- * documents fails — recorded in `ROADMAP.md` under "Known smaller issues" and
- * left there on purpose: `deleteStoryStatement` returns five things that all bind
- * the same list into the same batch, and fixing one of them moves the failure to
- * the next while reading as fixed. Adding the full-text pair here takes this
- * function from two of those statements to four; it does not change the shape of
- * the problem, and whoever fixes it now has four to fix rather than two.
+ * **The `in (…)` list is chunked against `BIND_BUDGET`, and it has to be.** `ids`
+ * is a delete's whole subtree, and deleting a section of a real site is an
+ * ordinary act that goes past ninety documents — one bind per id, so the budget
+ * is the chunk size and each chunk costs four statements. They all join the
+ * returned array and therefore the same batch: the cap is per *statement*, never
+ * per batch, so more statements buys the fix without costing the delete its
+ * transaction. This used to bind the whole list in one go and say so, on the
+ * reasoning that `deleteStoryStatement` returns five arrays that all bind it and
+ * a half-fix would move the failure to the next while reading as fixed. That was
+ * true, and all five chunk now.
+ *
+ * **Grouped per chunk rather than per table**, and the last two are why: FTS5's
+ * `'delete'` reads a row's old values out of `content_text`, so it has to precede
+ * the `delete` that removes them. Interleaving the groups is safe because a
+ * chunk's four statements only ever name that chunk's own ids — chunk one's
+ * `delete from content_text` cannot empty the rows chunk two's `'delete'` is
+ * about to read.
+ *
+ * No length guard: `bindChunks` is empty in, empty out, which is what keeps
+ * `in ()` — not valid SQL — unreachable.
  */
 export function clearIndexStatements(db: FolioDb, ids: readonly string[]): D1PreparedStatement[] {
-  if (ids.length === 0) return []
-  const placeholders = ids.map(() => '?').join(', ')
-  return [
-    db.prepare(`delete from content_index where story_id in (${placeholders})`).bind(...ids),
-    db.prepare(`delete from content_refs where from_story in (${placeholders})`).bind(...ids),
-    // De-index before the rows go, for the reason `indexStatements` spells out:
-    // FTS5's `'delete'` reads the old values out of `content_text`, so after the
-    // delete it reads nothing, raises nothing, and orphans the tokens.
-    db
-      .prepare(
-        `insert into content_fts(content_fts, rowid, title, body)
-         select 'delete', id, title, body from content_text where story_id in (${placeholders})`,
-      )
-      .bind(...ids),
-    db.prepare(`delete from content_text where story_id in (${placeholders})`).bind(...ids),
-  ]
+  const out: D1PreparedStatement[] = []
+  for (const chunk of bindChunks(ids, 1)) {
+    const placeholders = chunk.map(() => '?').join(', ')
+    out.push(
+      db.prepare(`delete from content_index where story_id in (${placeholders})`).bind(...chunk),
+      db.prepare(`delete from content_refs where from_story in (${placeholders})`).bind(...chunk),
+      // De-index before the rows go, for the reason `indexStatements` spells out:
+      // FTS5's `'delete'` reads the old values out of `content_text`, so after the
+      // delete it reads nothing, raises nothing, and orphans the tokens.
+      db
+        .prepare(
+          `insert into content_fts(content_fts, rowid, title, body)
+           select 'delete', id, title, body from content_text where story_id in (${placeholders})`,
+        )
+        .bind(...chunk),
+      db.prepare(`delete from content_text where story_id in (${placeholders})`).bind(...chunk),
+    )
+  }
+  return out
 }
 
 /**
@@ -283,14 +298,20 @@ export function clearIndexStatements(db: FolioDb, ids: readonly string[]): D1Pre
  * callers genuinely differ: an unpublish must keep them and a delete must not.
  * A `boolean` parameter would put that distinction at the call site, where the
  * reason for it is invisible.
+ *
+ * Chunked for the reason `clearIndexStatements` is, and separately from it: the
+ * two are called with the same subtree by `deleteStoryStatement`, so a delete
+ * that chunked one and not the other would fail on whichever was left — in the
+ * same batch, at the same width, and looking fixed.
  */
 export function clearInboundRefStatements(
   db: FolioDb,
   targets: readonly string[],
 ): D1PreparedStatement[] {
-  if (targets.length === 0) return []
-  const placeholders = targets.map(() => '?').join(', ')
-  return [db.prepare(`delete from content_refs where to_id in (${placeholders})`).bind(...targets)]
+  return bindChunks(targets, 1).map((chunk) => {
+    const placeholders = chunk.map(() => '?').join(', ')
+    return db.prepare(`delete from content_refs where to_id in (${placeholders})`).bind(...chunk)
+  })
 }
 
 /**

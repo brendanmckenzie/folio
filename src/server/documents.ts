@@ -139,7 +139,9 @@ export async function moveDocument<Env>(
  *
  * - *One batch* so a reader never finds versions for a story that is gone, a
  *   collection that still lists it, a schedule due to publish it next Tuesday, or a
- *   redirect for a delete that never committed.
+ *   redirect for a delete that never committed. One batch of *many* statements: a
+ *   wide subtree chunks every group against D1's per-statement parameter cap, and
+ *   the cap being per statement is exactly what lets it stay one batch.
  * - *The purge second*, because purging first and then failing the D1 write would
  *   leave the id deletable-again while its object already held a blank document.
  *   Failing the other way leaves an orphaned object, which is the safer side: it is
@@ -157,13 +159,16 @@ export async function deleteDocument<Env>(
   const found = await deleteStoryStatement(deps.db, id, { redirect: opts.redirect }, deps.types)
   if (!found) return null
 
-  const versions = deleteVersionsStatement(deps.db, found.ids)
+  // Five spreads, and every one of them is a chunked group rather than a single
+  // statement: each binds the whole subtree at one parameter per id, and D1
+  // refuses the 101st on a statement. One batch still, because the cap is per
+  // statement — more statements in the transaction, not more transactions.
   await deps.db.batch([
-    found.statement,
+    ...found.storyStatements,
     ...found.redirectStatements,
     ...found.indexStatements,
     ...found.scheduleStatements,
-    ...(versions ? [versions] : []),
+    ...deleteVersionsStatement(deps.db, found.ids),
   ])
 
   // Best-effort, and deliberately outside any caller's try/catch: the rows are

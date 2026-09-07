@@ -24,7 +24,7 @@ import { clampLimit, decodeCursor, type Page, paginate } from '../core/paginatio
 import type { Schedule, ScheduleAction, ScheduleStatus } from '../core/story'
 import { FolioError } from './errors'
 import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
-import type { FolioDb } from './db'
+import { bindChunks, type FolioDb } from './db'
 
 const COLS = `id, story_id as storyId, action, at, status, actor,
               created_at as createdAt, attempts, last_error as lastError`
@@ -157,15 +157,22 @@ export async function clearSchedule(
 
 /**
  * Every schedule for a set of documents, unrun — for `deleteStoryStatement`'s
- * batch. Empty in, empty out: `in ()` is not valid SQL.
+ * batch. Empty in, empty out: `in ()` is not valid SQL, and `bindChunks` returns
+ * no chunks for no ids, so that is unreachable without a guard of its own.
+ *
+ * `storyIds` is a delete's whole subtree, so this chunks against `db.ts`'s
+ * `BIND_BUDGET` like the four other groups that batch alongside it. One bind per
+ * id; the extra statements join the array the caller batches, and the cap is per
+ * statement rather than per batch, so the delete stays one transaction.
  */
 export function clearSchedulesStatements(
   db: FolioDb,
   storyIds: readonly string[],
 ): D1PreparedStatement[] {
-  if (storyIds.length === 0) return []
-  const placeholders = storyIds.map(() => '?').join(', ')
-  return [db.prepare(`delete from schedules where story_id in (${placeholders})`).bind(...storyIds)]
+  return bindChunks(storyIds, 1).map((chunk) => {
+    const placeholders = chunk.map(() => '?').join(', ')
+    return db.prepare(`delete from schedules where story_id in (${placeholders})`).bind(...chunk)
+  })
 }
 
 /** Deletes one schedule by id — what the sweep runs after the publish it fired. */

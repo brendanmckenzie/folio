@@ -1844,10 +1844,20 @@ export async function updateStory(
 }
 
 /**
- * What deleting `id` would remove, and the statement that does it, unrun: a
- * caller batches this alongside the versions cleanup so a story's rows and its
+ * What deleting `id` would remove, and the statements that do it, unrun: a
+ * caller batches these alongside the versions cleanup so a story's rows and its
  * version history disappear in one transaction rather than one succeeding
  * while the other fails. Null when there is no such story.
+ *
+ * **Three of the four arrays bind the whole of `ids` into single statements, and
+ * all three chunk** against `db.ts`'s `BIND_BUDGET` — `storyStatements`,
+ * `indexStatements` and `scheduleStatements`. That is what makes deleting a
+ * subtree wider than a hundred documents work at all. `redirectStatements` is the
+ * exception and needs no chunking: it is already per descendant, at six binds
+ * apiece. The fifth group is `deleteVersionsStatement` (`versions.ts`), which
+ * chunks for the same reason and which `deleteDocument` (`documents.ts`) fetches
+ * and batches with these — the one place all five meet, and the whole point of it
+ * being one place is that a group cannot be forgotten there.
  *
  * `redirect: true` (redirects.md's architecture decision 4, "deleting a page
  * offers a redirect to its parent") adds one redirect statement per
@@ -1878,7 +1888,21 @@ export async function deleteStoryStatement(
    * `../platform/caching.md`'s purge hook has to name that type.
    */
   types: string[]
-  statement: D1PreparedStatement
+  /**
+   * The `delete from stories` statements themselves — **plural, and chunked
+   * against `db.ts`'s `BIND_BUDGET`.**
+   *
+   * This was one `D1PreparedStatement` binding the whole subtree, which D1
+   * refuses above a hundred ids, so deleting a section of a real site failed
+   * outright. Fixing only this one would have moved the failure to the next
+   * statement in the same batch and read as fixed — `indexStatements`,
+   * `scheduleStatements` and `deleteVersionsStatement` all bind the same list —
+   * which is why it was left whole rather than half-done and why all of them
+   * chunk now. The cap is per statement and not per batch, so the extra
+   * statements cost the delete round trips inside a transaction it already had,
+   * not the transaction.
+   */
+  storyStatements: D1PreparedStatement[]
   redirectStatements: D1PreparedStatement[]
   /**
    * `content_index` / `content_refs` rows for the same ids
@@ -1933,17 +1957,26 @@ export async function deleteStoryStatement(
   }
 
   const ids = descendants(rows, id)
-  const paths = ids.map((descId) => rows.find((r) => r.id === descId)?.path ?? null)
-  const types_ = ids.map((descId) => rows.find((r) => r.id === descId)?.type ?? '')
-  const placeholders = ids.map(() => '?').join(', ')
-  const statement = db.prepare(`delete from stories where id in (${placeholders})`).bind(...ids)
+  // One index over the subtree, read three times below — `paths`, `types` and the
+  // redirect loop each wanted a row by id and each did its own `rows.find`, which
+  // is three O(n^2) walks at exactly the widths this function's chunking is about.
+  const byId = new Map(rows.map((r) => [r.id, r]))
+  const paths = ids.map((descId) => byId.get(descId)?.path ?? null)
+  const types_ = ids.map((descId) => byId.get(descId)?.type ?? '')
+  // Chunked, one bind per id. `stories.parent_id` carries no foreign key
+  // (`migrations/0001_init.sql`), so a chunk boundary between a parent and its
+  // child is not a constraint violation and the chunks may run in any order.
+  const storyStatements = bindChunks(ids, 1).map((chunk) => {
+    const placeholders = chunk.map(() => '?').join(', ')
+    return db.prepare(`delete from stories where id in (${placeholders})`).bind(...chunk)
+  })
 
   const redirects: D1PreparedStatement[] = []
   if (opts.redirect) {
     const parent = target.parentId ? await storyById(db, target.parentId) : undefined
     const parentPath = parent?.path ?? ''
     for (const descId of ids) {
-      const row = rows.find((r) => r.id === descId)
+      const row = byId.get(descId)
       // No path vacated, so no redirect to write.
       if (!row || row.path === null) continue
       redirects.push(...redirectStatements(db, { from: row.path, to: parentPath, storyId: row.id }))
@@ -1954,7 +1987,7 @@ export async function deleteStoryStatement(
     ids,
     paths,
     types: types_,
-    statement,
+    storyStatements,
     redirectStatements: redirects,
     indexStatements: [...clearIndexStatements(db, ids), ...clearInboundRefStatements(db, ids)],
     scheduleStatements: clearSchedulesStatements(db, ids),
@@ -1969,7 +2002,7 @@ export async function deleteStory(
 ): Promise<string[]> {
   const found = await deleteStoryStatement(db, id, {}, types)
   if (!found) return []
-  await db.batch([found.statement, ...found.indexStatements, ...found.scheduleStatements])
+  await db.batch([...found.storyStatements, ...found.indexStatements, ...found.scheduleStatements])
   return found.ids
 }
 

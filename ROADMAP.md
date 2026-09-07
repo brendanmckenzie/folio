@@ -918,32 +918,34 @@ an unsorted flat list, which stops working somewhere around 15.
 
 ## Known smaller issues
 
-- **Six more queries still bind a caller-sized list in one statement, and D1's cap
+- **Three more queries still bind a caller-sized list in one statement, and D1's cap
   is exactly 100.** The two that were failing in the field are fixed — `publish`
   (`content-index.ts`'s `indexStatements`, which threw at 21 index rows or 34
   outbound refs and took the whole publish batch with it) and `resolve()`'s
   narrowed read (`storiesFor`, `publishedDocsByIds`, which failed a *page render*
-  past a hundred links). `server/db.ts` now carries the measured cap, a budget
-  with margin, and `bindChunks`, so the remaining ones are a mechanical fix
-  rather than a discovery. In rough order of how reachable each is:
+  past a hundred links) — and so is the **subtree delete** (below), which was
+  found by reading rather than by anybody hitting it. `server/db.ts` now
+  carries the measured cap, a budget with margin, and `bindChunks`, so the
+  remaining ones are a mechanical fix rather than a discovery. In rough order of
+  how reachable each is:
 
-  - **A delete of a subtree wider than a hundred documents.**
-    `deleteStoryStatement` (`stories.ts`) binds the whole subtree in one
-    `delete from stories where id in (…)`, and `clearIndexStatements`,
-    `clearInboundRefStatements`, `clearSchedulesStatements` and
-    `deleteVersionsStatement` each bind it again. Deleting a section of a large
-    site is an ordinary act, so this is the one most likely to be hit next. It is
-    listed here rather than fixed because `statement` is a single
-    `D1PreparedStatement` on that function's five-part return and every one of the
-    five would want chunking together — a half-fix would move the failure to a
-    different statement in the same batch and read as fixed.
+  - ~~**A delete of a subtree wider than a hundred documents.**~~ — **fixed
+    2026-09-07** (issue #6). All five statement groups chunk against
+    `BIND_BUDGET` together, which is why it was left whole rather than half-done:
+    `deleteStoryStatement`'s `statement` was one `D1PreparedStatement` and is now
+    `storyStatements`, a list, alongside the four arrays beside it —
+    `clearIndexStatements` (four statements, since spec 30 added `content_text`
+    and the FTS5 `'delete'`), `clearInboundRefStatements`,
+    `clearSchedulesStatements` and `deleteVersionsStatement`, which returns an
+    empty array rather than `null` now that it is plural. `deleteDocument`
+    (`documents.ts`) is still the one place that batches all five, and it is still
+    **one** batch: the cap is per statement, so more statements in the transaction
+    is the fix rather than a trade against atomicity.
 
-    **`clearIndexStatements` is now four of those statements rather than two**
-    (spec 30 phase 3): full-text search added `content_text` and the FTS5
-    `'delete'` command that de-indexes it, and both bind the same `in (…)` list
-    the other two do. They were written that way on purpose, to match the
-    function around them rather than to half-fix it. Whoever chunks this fixes
-    four statements in that one function, not two.
+    `test/workers/subtree-delete.test.ts` deletes a subtree past the cap with a
+    row in every table the delete touches. Un-chunking any one group reds it, and
+    so does truncating a group to its first chunk — the second failure mode, which
+    errors nowhere and simply leaves the ids past the budget behind.
   - **The admin's Data list at a page size above a hundred.** `indexedValuesFor`
     (`content-index.ts`) binds one parameter per row on the page, and
     `limitParam(…, 50, 200)` lets a caller ask for 200.

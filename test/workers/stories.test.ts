@@ -669,7 +669,7 @@ describe('publishedDocsByIds and unpublish: references degrade, they do not brea
 })
 
 describe('deleteStoryStatement', () => {
-  it('returns the affected ids and an unrun statement', async () => {
+  it('returns the affected ids and unrun statements', async () => {
     const found = await deleteStoryStatement(env.DB, 'sty_about')
 
     expect([...(found?.ids ?? [])].sort()).toEqual(['sty_about', 'sty_team'])
@@ -677,11 +677,13 @@ describe('deleteStoryStatement', () => {
     // Still there: the statement has not been executed yet.
     expect(await storyByPath(env.DB, 'about')).not.toBeNull()
 
-    await found?.statement.run()
+    // Plural, and batched: `storyStatements` is one `delete from stories` per
+    // `BIND_BUDGET`-sized chunk of the subtree, so a caller runs the group.
+    await env.DB.batch(found!.storyStatements)
     expect(await storyByPath(env.DB, 'about')).toBeNull()
   })
 
-  it('returns null for an unknown id, without preparing a statement', async () => {
+  it('returns null for an unknown id, without preparing any statements', async () => {
     expect(await deleteStoryStatement(env.DB, 'sty_nope')).toBeNull()
   })
 
@@ -701,7 +703,7 @@ describe('deleteStoryStatement', () => {
       const found = await deleteStoryStatement(env.DB, 'sty_about', { redirect: true })
       expect(found?.redirectStatements.length).toBeGreaterThan(0)
 
-      await env.DB.batch([found!.statement, ...found!.redirectStatements])
+      await env.DB.batch([...found!.storyStatements, ...found!.redirectStatements])
 
       // sty_about's parent is the root, path ''. Both it and its descendant
       // 'about/team' redirect there — the nearest surviving ancestor, since the
@@ -714,7 +716,7 @@ describe('deleteStoryStatement', () => {
 
     it("redirects to the deleted node's own parent, not the root, when it is nested", async () => {
       const found = await deleteStoryStatement(env.DB, 'sty_team', { redirect: true })
-      await env.DB.batch([found!.statement, ...found!.redirectStatements])
+      await env.DB.batch([...found!.storyStatements, ...found!.redirectStatements])
 
       expect((await redirectFor('about/team'))?.to).toBe('about')
     })
@@ -723,7 +725,7 @@ describe('deleteStoryStatement', () => {
   describe('with { redirect: false } (the escape hatch)', () => {
     it('writes no redirect: the path simply 404s', async () => {
       const found = await deleteStoryStatement(env.DB, 'sty_about', { redirect: false })
-      await env.DB.batch([found!.statement, ...found!.redirectStatements])
+      await env.DB.batch([...found!.storyStatements, ...found!.redirectStatements])
 
       expect(await redirectFor('about')).toBeNull()
       expect(await redirectFor('about/team')).toBeNull()

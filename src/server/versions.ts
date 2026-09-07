@@ -5,7 +5,7 @@ import type { StoryMeta } from '../core/story'
 import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
 import { keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
 import { storiesFor } from './stories'
-import type { FolioDb } from './db'
+import { bindChunks, type FolioDb } from './db'
 
 export type VersionKind = 'publish' | 'checkpoint'
 
@@ -195,20 +195,40 @@ export async function writeVersion(db: FolioDb, input: WriteVersionInput): Promi
   return meta
 }
 
-/** The delete, unrun, or null when there is nothing to remove: a caller batches
- * this alongside the stories-row delete so a story and its version history
- * disappear together. */
+/**
+ * The delete, unrun: a caller batches these alongside the stories-row delete so a
+ * story and its version history disappear together.
+ *
+ * **A list rather than one statement, and empty rather than `null`.** `storyIds`
+ * is a delete's whole subtree, and D1 refuses the 101st bound parameter on a
+ * statement, so this chunks against `db.ts`'s `BIND_BUDGET` like the four other
+ * groups `deleteDocument` batches with it. One bind per id; the cap is per
+ * statement and not per batch, so the chunks cost the delete nothing but round
+ * trips inside a transaction it already had.
+ *
+ * The old `| null` return existed to keep `in ()` — not valid SQL — out of the
+ * batch, and `bindChunks` answers that by returning no chunks for no ids. An
+ * empty array is also what a caller wants: it spreads, where `null` had to be
+ * tested for at every call site.
+ */
 export function deleteVersionsStatement(
   db: FolioDb,
   storyIds: readonly string[],
-): D1PreparedStatement | null {
-  if (!storyIds.length) return null
-  const placeholders = storyIds.map(() => '?').join(', ')
-  return db.prepare(`delete from versions where story_id in (${placeholders})`).bind(...storyIds)
+): D1PreparedStatement[] {
+  return bindChunks(storyIds, 1).map((chunk) => {
+    const placeholders = chunk.map(() => '?').join(', ')
+    return db.prepare(`delete from versions where story_id in (${placeholders})`).bind(...chunk)
+  })
 }
 
+/**
+ * `deleteVersionsStatement`, run — and run as a `batch`, because it is now more
+ * than one statement for a wide subtree and the halves of one story's history
+ * must not land separately.
+ */
 export async function deleteVersionsFor(db: FolioDb, storyIds: readonly string[]): Promise<void> {
-  await deleteVersionsStatement(db, storyIds)?.run()
+  const statements = deleteVersionsStatement(db, storyIds)
+  if (statements.length) await db.batch(statements)
 }
 
 /* ---------------------------------------------------------- site-wide reads --- */
