@@ -459,7 +459,7 @@ export function folderDepth(folder: Pick<AssetFolder, 'path'>): number {
  * deleted out from under the row, which is an absence rather than a state.
  *
  * Pure and here rather than in the component, so the four are testable without a
- * DOM — `../../../test/unit/admin/assets-screen.test.ts`.
+ * DOM — `../../../../test/unit/admin/assets-screen.test.ts`.
  */
 export function folderNameFor(
   folderId: string | null,

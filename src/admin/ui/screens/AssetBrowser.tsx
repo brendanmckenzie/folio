@@ -172,7 +172,7 @@ export interface AssetBrowserProps {
    * the server, which is every write in `server/routes/assets.ts` bar one. False
    * withdraws *Upload*, *New folder*, the per-folder edit affordance and *Manage
    * tags*, because none of them can succeed for a viewer and
-   * `../../../docs/ui-architecture.md`'s `## Cross-cutting` says an impossible
+   * `../../../../docs/ui-architecture.md`'s `## Cross-cutting` says an impossible
    * control is absent rather than refused after the click (issue #7).
    *
    * **A boolean rather than `Me`, and it defaults to true**, because of the second

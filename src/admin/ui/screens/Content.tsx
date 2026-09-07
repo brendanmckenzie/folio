@@ -72,7 +72,7 @@ interface Props {
    * Who is signed in, for the role gates below. Every control on this screen that
    * writes is absent for somebody whose role cannot take it — the bulk bar's five
    * actions through `actionsFor`, and `New page` — because
-   * `../../../docs/ui-architecture.md`'s `## Cross-cutting` says an impossible
+   * `../../../../docs/ui-architecture.md`'s `## Cross-cutting` says an impossible
    * control is absent rather than refused after the click (issue #7).
    */
   me: Me

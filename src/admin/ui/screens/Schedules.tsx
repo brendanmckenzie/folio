@@ -37,7 +37,7 @@ interface Props {
    * Who is signed in, for the one role gate on this screen. Cancelling a schedule
    * is `PUBLISH` — it is a publish or an unpublish being called off — so the
    * control is **absent** for a weaker role rather than refused after the click
-   * (`../../../docs/ui-architecture.md`'s `## Cross-cutting`, issue #7). Reading
+   * (`../../../../docs/ui-architecture.md`'s `## Cross-cutting`, issue #7). Reading
    * the list is `READ`, so a viewer still sees what is coming.
    */
   me: Me

@@ -41,7 +41,7 @@ interface Props {
    * are both `MANAGE` (publisher) — `redirects.md`'s own reasoning is that a
    * redirect changes what URL the site serves — so both controls are **absent**
    * for a weaker role rather than refused after the click
-   * (`../../../docs/ui-architecture.md`'s `## Cross-cutting`, issue #7).
+   * (`../../../../docs/ui-architecture.md`'s `## Cross-cutting`, issue #7).
    */
   me: Me
   query: Readonly<Record<string, string>>

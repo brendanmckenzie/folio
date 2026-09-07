@@ -39,7 +39,7 @@ interface Props {
    *
    * `Duplicate` is `CREATE` (editor), `Delete` and the create button are
    * `CREATE`/`MANAGE`, and each is **absent** for a role that cannot take it
-   * rather than refused after the click — `../../../docs/ui-architecture.md`'s
+   * rather than refused after the click — `../../../../docs/ui-architecture.md`'s
    * `## Cross-cutting`, and the defect issue #7 names by name: a viewer was
    * offered Delete here and told about it by the server.
    */
