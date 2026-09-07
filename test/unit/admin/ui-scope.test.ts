@@ -11,11 +11,23 @@ import { scoped, UI_SCOPE } from '../../../src/admin/ui/scope'
  * own padding-plus-border wider than the panel holding it** — 18px, clipped at the
  * panel's edge. It was reported as "the right panel has no padding".
  *
- * It is a source-text test because the admin's suite mounts nothing (see
- * `vitest.config.ts`): there is no DOM here to ask for a computed style. That makes
- * it a weaker assertion than a rendered one — it proves the class is *applied*, not
- * that it lands on the outermost node — and it is still worth having, because the
- * failure it catches is a silent omission in a file nobody was editing.
+ * **There is a DOM now** — `vitest.config.ts`'s `render` project, added with #14 —
+ * and this file is still source-text on purpose, because the two halves catch
+ * different things:
+ *
+ *   - here: every `.tsx` under `src/admin/`, walked, so a portal added tomorrow is
+ *     covered without anybody remembering to add it anywhere. And the
+ *     *stylesheet's* own selectors, which no render can ask about: a rendered node
+ *     cannot tell you that a rule in `tokens.css` escaped the `.folio-ui` scope.
+ *   - `render/ui-scope-render.test.tsx`: that the class lands on the node
+ *     `createPortal` actually mounts. That is the half this file cannot reach —
+ *     move `scoped(css.wrap)` one element inwards and everything below still
+ *     passes while every token silently stops applying, which is the failure that
+ *     shipped, one level up.
+ *
+ * So neither replaces the other, and the reason this one reads CSS as *text*
+ * rather than through a computed style is unchanged: it is checking the rule, not
+ * its effect.
  */
 
 const src = (path: string) =>

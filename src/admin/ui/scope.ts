@@ -22,8 +22,13 @@
  *
  * So: a constant rather than a string literal in six files, because the failure
  * mode of forgetting it is a layout that looks like a padding bug three
- * components away from the omission. `scope-test.ts` asserts every portal root
- * carries it.
+ * components away from the omission. Two tests assert it, and they catch
+ * different things: `test/unit/admin/ui-scope.test.ts` reads every `.tsx` under
+ * `admin/` as source, so a fifth portal is covered without anybody adding it to a
+ * list, and `test/unit/admin/render/ui-scope-render.test.tsx` mounts each portal
+ * and checks the class landed on the node `createPortal` actually gave the
+ * document — which the source check cannot see, and which is where moving the
+ * class one element inwards would hide.
  *
  * **A portal must re-declare it.** `createPortal` moves a subtree to
  * `document.body`, which is outside the shell, so CSS scoping does not follow it

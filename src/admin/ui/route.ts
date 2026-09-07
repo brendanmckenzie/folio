@@ -4,9 +4,12 @@
  * `docs/design-system.md`'s first commitment is that the URL is the state: if a
  * person can see it, they can link to it. That only holds if there is exactly one
  * place that knows what a URL means, and it has to be testable without a browser —
- * the admin's whole suite runs in Node and mounts no components
- * (`vitest.config.ts`), so the router is parsing and formatting, and the hook that
- * talks to `history` holds no knowledge of its own.
+ * so the router is parsing and formatting, and the hook that talks to `history`
+ * holds no knowledge of its own. `ui-route.test.ts` runs in the `unit` project,
+ * `environment: 'node'`, and needs nothing else. (There *is* a DOM in the suite
+ * now — the `render` project, `test/unit/admin/render/**` — and this file's tests
+ * still do not want one. That is the point rather than an accident: a router
+ * whose tests need a browser is a router that knows something it should not.)
  *
  * **Every path here is relative to a mount prefix**, because `basePath` is
  * host-configurable — and that paid for itself immediately. The shell was mounted

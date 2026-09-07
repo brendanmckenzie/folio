@@ -37,9 +37,12 @@ import {
 /**
  * The Settings screen's arithmetic — `docs/ui-architecture.md`'s port phase 5.
  *
- * No test here mounts a component, because no admin test does (`vitest.config.ts`
- * runs the unit project under `environment: 'node'`), so what is pinned is what a
- * row *says*. Two of those are worth more than the rest and are the reason the
+ * No test *here* mounts a component: this file is in the `unit` project, which is
+ * `environment: 'node'`, so what is pinned is what a row *says*. Since #14 there
+ * is a DOM in the suite — the `render` project — and it mounts this screen among
+ * the other 32 to prove the tree assembles. It asserts nothing about the
+ * arithmetic below, deliberately; that is this file's job and it has better
+ * inputs for it than a fixture. Two of those are worth more than the rest and are the reason the
  * file is longer than the screen's markup:
  *
  *   - **`under`**, because an Insight that will not be created at the top level is

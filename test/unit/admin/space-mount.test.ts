@@ -282,13 +282,22 @@ describe('SpaceAvatars', () => {
  * that can fail at all if the mount is dropped, which is what makes it worth
  * having. The e2e script cannot: it passes with the mount removed.
  *
- * **Retire this when #14's render tests land.** A mounted shell asserting a
- * non-empty top bar given two peers is strictly better than matching source.
+ * **#14's render tests have landed and do not replace these three.** That note
+ * used to say "retire this when they do", so here is what is actually still owed.
  *
- * Until then, note that `readFileSync` runs in the `describe` body, so a **rename
- * of the file below breaks all 27 tests in this file at collection**, not the
- * three that read it. #2 renames `ui/Prototype.tsx` to `ui/Admin.tsx`; this path
- * has to move with it.
+ * `render/screens.test.tsx` mounts the shell at nineteen URLs, but it does so with
+ * `/me` answering `space: false` — which is deliberate, because `enabled: false`
+ * is what stops `useSpace` opening a socket, and the render project stubs
+ * `WebSocket` to a silent class for the same reason. So no peer ever arrives, the
+ * avatar row correctly renders nothing, and a mounted assertion about the top bar
+ * would be asserting the empty case. Replacing these three needs a fixture that
+ * declares the binding *and* feeds the store a `presence` frame — worth having,
+ * and more than a smoke layer.
+ *
+ * Also note `readFileSync` runs in the `describe` body, so a **rename of the file
+ * below breaks all 27 tests in this file at collection**, not the three that read
+ * it. #2 renames `ui/Prototype.tsx` to `ui/Admin.tsx`; this path has to move with
+ * it.
  */
 describe('the shell mounts the channel', () => {
   const shell = readFileSync(
