@@ -91,13 +91,26 @@
  *
  * `overflow: hidden` and not `auto`: with the chain in place nothing here should
  * ever overflow, and `auto` would answer a broken chain with a second scrollbar
- * inside the first instead of looking wrong. The body is still `flex: 0 1 auto`, so
- * a picker over an empty library is a short dialog rather than a full-height one
- * with a hole in it.
+ * inside the first instead of looking wrong.
+ *
+ * **The body takes the height it is given rather than the height its content came
+ * to**, which reverses what stood here on 2026-09-07 — "a picker over an empty
+ * library is a short dialog rather than a full-height one with a hole in it". A nice
+ * property, and it cost more than it was worth once the browser inside started
+ * sizing its *page* to the region: a content-sized dialog makes the region's height
+ * a function of how many tiles are in it, and the page size a function of the
+ * region, so asking for a screenful shrank the dialog, which shrank the next
+ * screenful, twenty tiles to sixteen to twelve. A picker that changes size as you
+ * page through it was never good either; the loop is only what made it a bug.
  */
+.panel:has(> .fill) {
+  height: 100%;
+}
+
 .fill {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
   overflow: hidden;
 }
 

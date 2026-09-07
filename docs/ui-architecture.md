@@ -280,11 +280,11 @@ launched from a field, with no search, no filter, no sort, no metadata, no usage
 information, and a red **Delete** link under every tile that fires immediately.
 
 The screen: a grid or table (toggled, remembered), filename search, type and size
-filters, sort by date or name or size. **A page is as big as the screen is**: the
-tile grid and the table are both measured, and the page comes back a whole number of
-rows holding roughly two screenfuls, so *Next* means the same gesture on a laptop and
-on a 27" monitor rather than "scroll three times first" on one and "page immediately"
-on the other. Selecting one opens a detail panel —
+filters, sort by date or name or size. **A page is one screenful and does not
+scroll** (owner, 2026-09-07): the tile grid and the table are both measured, and the
+page comes back the whole number of rows that fit — so *Next* is how you see the next
+thing rather than a second way to do what the scroll wheel was already doing, and it
+means the same gesture on a laptop and on a 27" monitor. Selecting one opens a detail panel —
 preview, dimensions, bytes, alt text, focal point, and **where it is used**.
 Upload by dropping anywhere on the screen. Delete confirms, and the confirmation
 names the documents that reference it.

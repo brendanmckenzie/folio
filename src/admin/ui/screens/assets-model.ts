@@ -16,7 +16,7 @@
  * (`humanSize`, the thumbnail URL shape, and `keyAssets` at the foot of the file —
  * the last of which is a *field's* concern rather than this screen's, and says so).
  */
-import type { AssetFolder, AssetSort, AssetTag } from '../../../core/assets'
+import type { AssetFilter, AssetFolder, AssetSort, AssetTag } from '../../../core/assets'
 import type { AssetValue } from '../../../core/values'
 import type { AssetRow as ServerAssetRow } from '../../../server/assets'
 
@@ -308,6 +308,30 @@ export function withFilter(
   if (patch.untagged) next.tags = []
   return next
 }
+
+/**
+ * Every filter, off — what *Clear filters* means.
+ *
+ * **The inverse of `isNarrowed`, and it has to be stated once or it drifts.** The
+ * empty state assembled this patch inline and was missing `failed`, so with the
+ * *Failed* chip on, *Clear filters* cleared six things, left the seventh, and
+ * answered the same empty list — a button that visibly does nothing. `undescribed`
+ * would have gone the same way the next time a chip was added.
+ *
+ * `assets-screen.test.ts` asserts the pair against each other rather than against a
+ * list written a third time: clearing this must make `isNarrowed` false whatever a
+ * URL was narrowed by.
+ */
+export const NO_FILTERS = {
+  kind: 'all',
+  q: '',
+  folder: undefined,
+  unfiled: false,
+  tags: [],
+  untagged: false,
+  undescribed: false,
+  failed: false,
+} as const satisfies Parameters<typeof withFilter>[1]
 
 /**
  * Telling "nothing uploaded yet" from "nothing matches", which are different empty
@@ -887,4 +911,170 @@ export function keyAssets(
   })
 
   return out as KeyedAsset[]
+}
+
+/* --------------------------------------------------------------- selection --- */
+
+/*
+ * The bulk selection, its two shapes, and the wire bodies built from it.
+ *
+ * **Here rather than in `AssetBrowser.tsx`, since 2026-09-07**, and the move was
+ * paid for by a bug this file's own header predicts. `describeBody` below used to
+ * be assembled inline in the component, one spread short of the shape the route
+ * parses — every batched *Describe* answered `selection must be a JSON object`,
+ * and nothing could have caught it, because no test mounts a component. Building
+ * a request body is arithmetic over plain data, so it belongs where a Node test
+ * can reach it. `responses-model.ts`'s `selectionBody` is the precedent.
+ */
+/**
+ * What the bulk layer holds, in the two shapes a selection comes in
+ * (`core/bulk.ts`'s `BulkSelection<AssetFilter>`, as component state).
+ *
+ * `Set`s rather than arrays because every read here is a membership test — one
+ * per tile, per render — and the wire shape is built once, at post time, by
+ * `selectionBody`. The captured half stores the *filter*, not the URL: a select-all
+ * captures conditions at the moment it is clicked and must survive the person
+ * changing a chip afterwards, which is the property the server's `expected`
+ * guard is checking against.
+ */
+export type Ticked =
+  | { all: false; ids: ReadonlySet<string> }
+  | { all: true; filter: AssetFilter; expected: number; exclude: ReadonlySet<string> }
+
+export const NOTHING: Ticked = { all: false, ids: new Set() }
+
+export function isTicked(ticked: Ticked, id: string): boolean {
+  return ticked.all ? !ticked.exclude.has(id) : ticked.ids.has(id)
+}
+
+/** How many files the selection means. Never below zero: `exclude` can outgrow
+ * `expected` if the set shrank under a person who kept ticking. */
+export function tickCount(ticked: Ticked): number {
+  return ticked.all ? Math.max(ticked.expected - ticked.exclude.size, 0) : ticked.ids.size
+}
+
+/** Ticking a row off a select-all **adds to `exclude`** rather than collapsing
+ * the selection into ids — which is what keeps "all 4,812 except these two" four
+ * small JSON fields instead of 4,810 of them. */
+export function toggleTick(ticked: Ticked, id: string): Ticked {
+  if (ticked.all) {
+    const exclude = new Set(ticked.exclude)
+    if (!exclude.delete(id)) exclude.add(id)
+    return { ...ticked, exclude }
+  }
+  const ids = new Set(ticked.ids)
+  if (!ids.delete(id)) ids.add(id)
+  return { all: false, ids }
+}
+
+export function tickAllShown(ticked: Ticked, rows: readonly AssetRow[]): Ticked {
+  const on = rows.length > 0 && rows.every((row) => isTicked(ticked, row.id))
+  if (ticked.all) {
+    const exclude = new Set(ticked.exclude)
+    for (const row of rows) {
+      if (on) exclude.add(row.id)
+      else exclude.delete(row.id)
+    }
+    return { ...ticked, exclude }
+  }
+  const ids = new Set(ticked.ids)
+  for (const row of rows) {
+    if (on) ids.delete(row.id)
+    else ids.add(row.id)
+  }
+  return { all: false, ids }
+}
+
+/**
+ * The screen's filter as a captured `AssetFilter` — the same conditions
+ * `assetsParams` puts on the list request, so the count the person read and the
+ * count the guard re-runs are over one set of clauses.
+ *
+ * `kind: 'all'` and an empty `q` are omitted rather than sent, because
+ * `assetFilterSql` reads both for truthiness and a captured `q: ''` would be a
+ * filter key that means nothing and looks like it means something.
+ */
+export function capturedFilter(url: AssetsUrl): AssetFilter {
+  const q = url.q.trim()
+  return {
+    ...(q ? { q } : {}),
+    ...(url.kind === 'all' ? {} : { kind: url.kind }),
+    ...(url.folder === undefined ? {} : { folder: url.folder }),
+    ...(url.unfiled ? { unfiled: true } : {}),
+    ...(url.tags.length === 0 ? {} : { tags: [...url.tags] }),
+    ...(url.untagged ? { untagged: true } : {}),
+    ...(url.undescribed ? { undescribed: true } : {}),
+    ...(url.failed ? { failed: true } : {}),
+  }
+}
+
+/** The `selection` field of a bulk body. `exclude` is omitted when empty rather
+ * than sent as `[]`: the route's two options are `v.strictObject`, so every key
+ * in the body is one it reads. */
+export function selectionBody(ticked: Ticked): Record<string, unknown> {
+  if (!ticked.all) return { ids: [...ticked.ids] }
+  return {
+    all: true,
+    filter: ticked.filter,
+    expected: ticked.expected,
+    ...(ticked.exclude.size === 0 ? {} : { exclude: [...ticked.exclude] }),
+  }
+}
+
+/**
+ * The whole body a describe run posts — **`selection` and its siblings**, not the
+ * selection on its own.
+ *
+ * The nesting is the entire point of this function existing. `POST
+ * {base}/api/assets/describe` reads `body.selection` (`AssetDescribeBody`), the
+ * same as every other bulk route, and the component built `{ ...selection,
+ * dryRun }` instead — so a run refused on its own request body before it reached
+ * the count guard, with a message about JSON that names nothing anybody clicked.
+ * One place builds it now, both the dry run and the real one call it, and the
+ * test below pins the shape.
+ *
+ * `backlogOnly` reshapes the *selection* and nothing else, and only for a captured
+ * *select all*: it adds `undescribed` to the filter, which means `expected` has to
+ * be recounted for the narrowed filter or the guard refuses every time — so the
+ * count comes in as an argument rather than being read here. A ticked list of ids
+ * has nothing to narrow; those files were chosen one at a time.
+ */
+export function describeBody(
+  ticked: Ticked,
+  opts: {
+    /** The narrowed selection to use instead, when a captured *select all* is
+     * being run over the backlog. Built by the caller because it needs a count. */
+    backlog?: Record<string, unknown>
+    dryRun?: boolean
+    continueFrom?: string | null
+  } = {},
+): Record<string, unknown> {
+  return {
+    selection: opts.backlog ?? selectionBody(ticked),
+    ...(opts.dryRun === undefined ? {} : { dryRun: opts.dryRun }),
+    ...(opts.continueFrom === undefined || opts.continueFrom === null
+      ? {}
+      : { continueFrom: opts.continueFrom }),
+  }
+}
+
+/**
+ * The narrowed selection a *describe the backlog* run walks: the captured filter
+ * plus `undescribed`, counted afresh.
+ *
+ * `exclude` is kept rather than dropped: a file somebody ticked off must stay
+ * untouched. It may not be in the narrowed set at all, which makes the job's
+ * ceiling an under-count and stops the walk early — the safe direction, and the
+ * only one available without materialising ids.
+ */
+export function backlogSelection(
+  ticked: Extract<Ticked, { all: true }>,
+  expected: number,
+): Record<string, unknown> {
+  return {
+    all: true,
+    filter: { ...ticked.filter, undescribed: true } satisfies AssetFilter,
+    expected,
+    ...(ticked.exclude.size === 0 ? {} : { exclude: [...ticked.exclude] }),
+  }
 }

@@ -726,18 +726,32 @@
 /* --------------------------------------------------------------- skeletons --- */
 
 /*
- * Matches `.tileFrame` plus the two text lines under it, so the grid does not jump
- * when the answer lands. That is the whole reason a skeleton beats a spinner.
+ * A placeholder line inside a skeleton tile.
  *
- * There is no `.skeletonGrid` to go with it any more, and deliberately: it was a copy
- * of `.grid`'s template, and the copy had already drifted — `.gridCompact` narrows the
- * picker's tiles and was never applied to it, so the dialog's skeletons laid out three
- * to a row where the tiles replacing them went four. The loading state now uses the
- * same two classes the grid does, which is the only way the two cannot disagree.
+ * **There is no `.skeletonTile` and no `.skeletonGrid` any more.** Both were copies
+ * of the real thing's measurements, and both copies had drifted. `.skeletonGrid`
+ * duplicated `.grid`'s template and never picked up `.gridCompact`, so the picker's
+ * skeletons laid out three to a row where the tiles replacing them went four.
+ * `.skeletonTile` was a single `aspect-ratio: 0.78` box standing in for a frame plus
+ * two text lines, and it came out about 10% taller than the tile it stood in for.
+ *
+ * Neither mattered much while a skeleton was only something to look at. Both matter
+ * now: the first page's size is measured off the skeletons, so a skeleton that is not
+ * shaped like a tile is a page that is not shaped like the screen. The loading state
+ * is built from `.tile`, `.tileFrame`, `.tileName` and `.tileMeta` instead — the same
+ * classes, so it cannot disagree — with this giving the two empty text nodes the line
+ * box their text will occupy.
+ *
+ * `1lh` is exactly that line box. The `em` above it is the fallback for a browser
+ * without `lh` units, where an invalid height would collapse the line to nothing.
  */
-.skeletonTile {
-  aspect-ratio: 0.78;
-  border-radius: var(--radius-md);
+.skeletonText {
+  height: 1.4em;
+  /* biome-ignore lint/suspicious/noDuplicateProperties: this is the answer and the
+     `em` above is its fallback — a browser without `lh` units drops this line as
+     invalid and keeps that one, which is the whole point of writing both. */
+  height: 1lh;
+  border-radius: var(--radius-sm);
   background: var(--bg-inset);
 }
 

@@ -35,15 +35,28 @@ describe('columnsOf', () => {
 describe('pageSizeFor', () => {
   /**
    * The whole point. Two boxes with the same tiles and different heights get
-   * different pages, and each is the same amount of scrolling.
+   * different pages, and each one is a screenful.
    */
   it('grows with the height it is given', () => {
     const tiles = { columns: 6, pitch: 250 }
     const laptop = pageSizeFor({ ...tiles, available: 700 }, FIT)
     const monitor = pageSizeFor({ ...tiles, available: 1300 }, FIT)
-    expect(laptop).toBe(36) // round(700 × 2 ÷ 250) = 6 rows
-    expect(monitor).toBe(60) // round(1300 × 2 ÷ 250) = 10 rows
+    expect(laptop).toBe(12) // floor(700 ÷ 250) = 2 rows
+    expect(monitor).toBe(30) // floor(1300 ÷ 250) = 5 rows
     expect(monitor).toBeGreaterThan(laptop)
+  })
+
+  /**
+   * **The page must not scroll** (owner, 2026-09-07), so the row count rounds down
+   * and never up: a page that filled 5.9 screens' worth of rows would put its last
+   * row and the pager under the fold, which is the pager sitting behind the scroll
+   * bar it was meant to replace.
+   */
+  it('never asks for more rows than fit', () => {
+    for (const available of [700, 830, 999, 1300, 1301]) {
+      const size = pageSizeFor({ columns: 4, pitch: 210, available }, FIT)
+      expect((size / 4) * 210).toBeLessThanOrEqual(available)
+    }
   })
 
   /**
@@ -55,24 +68,20 @@ describe('pageSizeFor', () => {
     for (const columns of [2, 3, 4, 5, 6, 7, 8]) {
       const size = pageSizeFor({ columns, pitch: 210, available: 830 }, FIT)
       expect(size % columns).toBe(0)
+      expect(size).toBeGreaterThan(0)
     }
-  })
-
-  /** More than one screenful, so *Next* is not simply a worse scroll bar. */
-  it('holds two screenfuls, not one', () => {
-    expect(pageSizeFor({ columns: 1, pitch: 40, available: 800 }, FIT)).toBe(40)
   })
 
   /** The route silently reduces anything above its own clamp, which would leave the
    * pager and the server disagreeing about what a page holds. */
   it('never asks past the route’s clamp', () => {
-    expect(pageSizeFor({ columns: 8, pitch: 30, available: 2000 }, FIT)).toBe(FIT.max)
+    expect(pageSizeFor({ columns: 8, pitch: 20, available: 2000 }, FIT)).toBe(FIT.max)
   })
 
-  /** A page of one row makes *Next* the only way to see anything — the pathological
-   * end of the complaint this exists to fix. */
-  it('never falls below two rows', () => {
-    expect(pageSizeFor({ columns: 4, pitch: 400, available: 120 }, FIT)).toBe(8)
+  /** One row is a real answer on a window too short for two, not a guard: asking for
+   * two there would put the page straight back behind a scrollbar. Zero is not. */
+  it('never falls below one row', () => {
+    expect(pageSizeFor({ columns: 4, pitch: 400, available: 120 }, FIT)).toBe(4)
   })
 
   /**

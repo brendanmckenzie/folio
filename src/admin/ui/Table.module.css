@@ -46,11 +46,6 @@
  * (`wrap`, and which column absorbs the slack) rather than write a second
  * screen-level override. One override is a special case; two is a missing option.
  */
-.table th:first-child,
-.table td:first-child {
-  width: 100%;
-}
-
 .table th {
   position: sticky;
   top: 0;
@@ -116,6 +111,24 @@
 .numeric {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * "The first column", meaning the first one that carries *content*.
+ *
+ * A selection layer puts a checkbox cell in front of it, and `:first-child` then
+ * names that — so `width: 100%` landed on the checkbox, which outranks `.select`'s
+ * own `width: 1%` on specificity and takes the whole table's slack. On a wide
+ * screen that is a checkbox column holding most of the width with every real
+ * column crushed against the right. Reported against the Assets table, and the
+ * Responses table had it too, because the bug is in the rule rather than in either
+ * screen.
+ */
+.table th:first-child:not(.select),
+.table td:first-child:not(.select),
+.table th.select + th,
+.table td.select + td {
+  width: 100%;
 }
 
 .open {

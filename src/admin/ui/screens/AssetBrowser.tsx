@@ -39,6 +39,17 @@ import {
   withFilter,
   withSort,
   withView,
+  backlogSelection,
+  capturedFilter,
+  describeBody,
+  isTicked,
+  NO_FILTERS,
+  NOTHING,
+  selectionBody,
+  type Ticked,
+  tickAllShown,
+  tickCount,
+  toggleTick,
 } from './assets-model'
 import css from './Assets.module.css'
 import type { AssetsData, Uploads } from './useAssets'
@@ -320,7 +331,10 @@ export function AssetBrowser(props: AssetBrowserProps) {
   const run = async (action: AssetBulkAction, extra: Record<string, unknown> = {}) => {
     setRunning(true)
     try {
-      finished(action, await runAssetJob(apiBase, action, { selection: bodyOf(ticked), ...extra }))
+      finished(
+        action,
+        await runAssetJob(apiBase, action, { selection: selectionBody(ticked), ...extra }),
+      )
     } catch (e) {
       setJob(null)
       onNotice?.((e as Error).message)
@@ -337,7 +351,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
     setJob('delete')
     try {
       const outcome = await runAssetJob(apiBase, 'delete', {
-        selection: bodyOf(ticked),
+        selection: selectionBody(ticked),
         dryRun: true,
       })
       if ('refused' in outcome) {
@@ -352,31 +366,21 @@ export function AssetBrowser(props: AssetBrowserProps) {
   }
 
   /**
-   * The body a describe run posts, built **once** and posted by both the dry run
-   * and the real one — so the number somebody read is the number the count guard
-   * re-checks, and a *select all* cannot be previewed as one set and run over
-   * another.
+   * The selection a describe run walks, built **once** and used by both the dry
+   * run and the real one — so the number somebody read is the number the count
+   * guard re-checks, and a *select all* cannot be previewed as one set and run
+   * over another.
    *
-   * `backlogOnly` is the only thing that reshapes it, and it is offered for a
-   * captured *select all* alone: it adds `undescribed` to the filter and reads
-   * the count **for that narrowed filter**, because `expected` has to be the
-   * count of the set actually being run over or the guard refuses every time.
-   * For a ticked list of ids there is nothing to narrow — those files were
-   * chosen one at a time.
+   * The only impure part: `backlogSelection` needs a count for the narrowed
+   * filter, because `expected` has to be the count of the set actually being run
+   * over or the guard refuses every time. Everything else is `assets-model.ts`'s.
    */
-  const describeBody = async (backlogOnly: boolean): Promise<Record<string, unknown>> => {
-    if (!ticked.all || !backlogOnly) return bodyOf(ticked)
-    const filter: AssetFilter = { ...ticked.filter, undescribed: true }
-    return {
-      all: true,
-      filter,
-      expected: await countMatching(apiBase, filter),
-      // Kept, not dropped: a file somebody ticked off must stay untouched. It
-      // may not be in the narrowed set at all, which makes the job's ceiling an
-      // under-count and stops the walk early — the safe direction, and the only
-      // one available without materialising ids.
-      ...(ticked.exclude.size === 0 ? {} : { exclude: [...ticked.exclude] }),
-    }
+  const describeSelection = async (backlogOnly: boolean): Promise<Record<string, unknown>> => {
+    if (!ticked.all || !backlogOnly) return selectionBody(ticked)
+    return backlogSelection(
+      ticked,
+      await countMatching(apiBase, { ...ticked.filter, undescribed: true }),
+    )
   }
 
   /** Opens the panel and asks what the run would do — `dryRun`, which calls the
@@ -392,14 +396,15 @@ export function AssetBrowser(props: AssetBrowserProps) {
       finished: false,
     })
     try {
-      const body = await describeBody(backlogOnly)
-      const outcome = await postDescribe(apiBase, { ...body, dryRun: true })
+      const selection = await describeSelection(backlogOnly)
+      const body = describeBody(ticked, { backlog: selection, dryRun: true })
+      const outcome = await postDescribe(apiBase, body)
       setDescribeRun((prev) =>
         prev === null
           ? prev
           : 'refused' in outcome
             ? { ...prev, error: refusedText(outcome.refused) }
-            : { ...prev, body, total: outcome.total },
+            : { ...prev, body: selection, total: outcome.total },
       )
     } catch (e) {
       setDescribeRun((prev) => (prev === null ? prev : { ...prev, error: (e as Error).message }))
@@ -425,10 +430,10 @@ export function AssetBrowser(props: AssetBrowserProps) {
     const totals = emptyRun()
     try {
       for (;;) {
-        const outcome = await postDescribe(apiBase, {
-          ...body,
-          ...(continueFrom === null ? {} : { continueFrom }),
-        })
+        const outcome = await postDescribe(
+          apiBase,
+          describeBody(ticked, { backlog: body, continueFrom }),
+        )
         if ('refused' in outcome) {
           setDescribeRun((prev) =>
             prev === null ? prev : { ...prev, error: refusedText(outcome.refused) },
@@ -822,35 +827,25 @@ export function AssetBrowser(props: AssetBrowserProps) {
                 }
                 aria-hidden="true"
               >
-                {SKELETONS.slice(0, url.view === 'grid' ? 24 : 8).map((key) => (
-                  <div
-                    className={url.view === 'grid' ? css.skeletonTile : css.skeletonRow}
-                    // Measurable, because the first page's size is decided from what
-                    // is on screen and this is what is on screen. A skeleton is the
-                    // same shape as the thing it stands in for — that is why it beats
-                    // a spinner — so it is also the right thing to measure.
-                    data-fit=""
-                    key={key}
-                  />
-                ))}
+                {SKELETONS.slice(0, url.view === 'grid' ? 24 : 8).map((key) =>
+                  // `data-fit` on each: the first page's size is decided from what is
+                  // on screen, and this is what is on screen. Which is also why the
+                  // grid's skeleton is assembled from `.tile`'s own parts rather than
+                  // from one box approximating them — a skeleton that is not the
+                  // shape of a tile makes a page that is not the shape of the screen.
+                  url.view === 'grid' ? (
+                    <div className={css.tile} data-fit="" key={key}>
+                      <div className={css.tileFrame} />
+                      <div className={`${css.tileName} ${css.skeletonText}`} />
+                      <div className={`${css.tileMeta} ${css.skeletonText}`} />
+                    </div>
+                  ) : (
+                    <div className={css.skeletonRow} data-fit="" key={key} />
+                  ),
+                )}
               </div>
             ) : rows.length === 0 ? (
-              <Empty
-                narrowed={narrowed}
-                onClear={() =>
-                  onUrl(
-                    withFilter(url, {
-                      kind: 'all',
-                      q: '',
-                      folder: undefined,
-                      unfiled: false,
-                      tags: [],
-                      untagged: false,
-                      undescribed: false,
-                    }),
-                  )
-                }
-              >
+              <Empty narrowed={narrowed} onClear={() => onUrl(withFilter(url, NO_FILTERS))}>
                 {uploadButton}
               </Empty>
             ) : url.view === 'grid' ? (
@@ -1012,101 +1007,6 @@ export function AssetBrowser(props: AssetBrowserProps) {
 /* --------------------------------------------------------------- selection --- */
 
 /**
- * What the bulk layer holds, in the two shapes a selection comes in
- * (`core/bulk.ts`'s `BulkSelection<AssetFilter>`, as component state).
- *
- * `Set`s rather than arrays because every read here is a membership test — one
- * per tile, per render — and the wire shape is built once, at post time, by
- * `bodyOf`. The captured half stores the *filter*, not the URL: a select-all
- * captures conditions at the moment it is clicked and must survive the person
- * changing a chip afterwards, which is the property the server's `expected`
- * guard is checking against.
- */
-type Ticked =
-  | { all: false; ids: ReadonlySet<string> }
-  | { all: true; filter: AssetFilter; expected: number; exclude: ReadonlySet<string> }
-
-const NOTHING: Ticked = { all: false, ids: new Set() }
-
-function isTicked(ticked: Ticked, id: string): boolean {
-  return ticked.all ? !ticked.exclude.has(id) : ticked.ids.has(id)
-}
-
-/** How many files the selection means. Never below zero: `exclude` can outgrow
- * `expected` if the set shrank under a person who kept ticking. */
-function tickCount(ticked: Ticked): number {
-  return ticked.all ? Math.max(ticked.expected - ticked.exclude.size, 0) : ticked.ids.size
-}
-
-/** Ticking a row off a select-all **adds to `exclude`** rather than collapsing
- * the selection into ids — which is what keeps "all 4,812 except these two" four
- * small JSON fields instead of 4,810 of them. */
-function toggleTick(ticked: Ticked, id: string): Ticked {
-  if (ticked.all) {
-    const exclude = new Set(ticked.exclude)
-    if (!exclude.delete(id)) exclude.add(id)
-    return { ...ticked, exclude }
-  }
-  const ids = new Set(ticked.ids)
-  if (!ids.delete(id)) ids.add(id)
-  return { all: false, ids }
-}
-
-function tickAllShown(ticked: Ticked, rows: readonly AssetRow[]): Ticked {
-  const on = rows.length > 0 && rows.every((row) => isTicked(ticked, row.id))
-  if (ticked.all) {
-    const exclude = new Set(ticked.exclude)
-    for (const row of rows) {
-      if (on) exclude.add(row.id)
-      else exclude.delete(row.id)
-    }
-    return { ...ticked, exclude }
-  }
-  const ids = new Set(ticked.ids)
-  for (const row of rows) {
-    if (on) ids.delete(row.id)
-    else ids.add(row.id)
-  }
-  return { all: false, ids }
-}
-
-/**
- * The screen's filter as a captured `AssetFilter` — the same conditions
- * `assetsParams` puts on the list request, so the count the person read and the
- * count the guard re-runs are over one set of clauses.
- *
- * `kind: 'all'` and an empty `q` are omitted rather than sent, because
- * `assetFilterSql` reads both for truthiness and a captured `q: ''` would be a
- * filter key that means nothing and looks like it means something.
- */
-function capturedFilter(url: AssetsUrl): AssetFilter {
-  const q = url.q.trim()
-  return {
-    ...(q ? { q } : {}),
-    ...(url.kind === 'all' ? {} : { kind: url.kind }),
-    ...(url.folder === undefined ? {} : { folder: url.folder }),
-    ...(url.unfiled ? { unfiled: true } : {}),
-    ...(url.tags.length === 0 ? {} : { tags: [...url.tags] }),
-    ...(url.untagged ? { untagged: true } : {}),
-    ...(url.undescribed ? { undescribed: true } : {}),
-    ...(url.failed ? { failed: true } : {}),
-  }
-}
-
-/** The `selection` field of a bulk body. `exclude` is omitted when empty rather
- * than sent as `[]`: the route's two options are `v.strictObject`, so every key
- * in the body is one it reads. */
-function bodyOf(ticked: Ticked): Record<string, unknown> {
-  if (!ticked.all) return { ids: [...ticked.ids] }
-  return {
-    all: true,
-    filter: ticked.filter,
-    expected: ticked.expected,
-    ...(ticked.exclude.size === 0 ? {} : { exclude: [...ticked.exclude] }),
-  }
-}
-
-/**
  * What the bar says.
  *
  * **The invisible part of a selection is named rather than implied**, because
@@ -1203,8 +1103,11 @@ interface DescribeRunState {
   /** Narrowed to files that have never been described. Offered for a captured
    * *select all* only; a ticked list of ids has nothing to narrow. */
   backlogOnly: boolean
-  /** The body the dry run built, reposted verbatim by the real run. Null while
-   * the preview is in flight. */
+  /** The **selection** the dry run was previewed over, reused verbatim by the
+   * real run — so the number somebody read and the set that is walked cannot be
+   * two different things. `describeBody` wraps it for the wire; keeping the
+   * selection rather than the whole body is what lets the run add its cursor
+   * without reaching inside a nested object. Null while the preview is in flight. */
   body: Record<string, unknown> | null
   /** The job's ceiling, as the dry run reported it. */
   total: number | null

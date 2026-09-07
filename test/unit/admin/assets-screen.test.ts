@@ -20,6 +20,7 @@ import {
   indentedFolderName,
   isAssetView,
   isNarrowed,
+  NO_FILTERS,
   isRenderableImage,
   kindForAccept,
   MAX_TAG_FILTER,
@@ -33,6 +34,9 @@ import {
   toggleTagFilter,
   typeLabel,
   uploadSummary,
+  selectionBody,
+  describeBody,
+  backlogSelection,
   withFilter,
   withSort,
   withView,
@@ -100,6 +104,117 @@ const url = (extra: Partial<AssetsUrl> = {}): AssetsUrl => ({
   failed: false,
   asset: undefined,
   ...extra,
+})
+
+/**
+ * The three things that were reported broken on 2026-09-07, all of which were
+ * unreachable from a test because they lived in `AssetBrowser.tsx` — the component
+ * file no unit test mounts. They live in the model now, which is what these pin.
+ */
+describe('the selection, as the wire carries it', () => {
+  const ticked = { all: false as const, ids: new Set(['ast_a', 'ast_b']) }
+  const captured = {
+    all: true as const,
+    filter: { kind: 'image' as const },
+    expected: 82,
+    exclude: new Set<string>(),
+  }
+
+  it('sends ids for a ticked list, and conditions for a captured select-all', () => {
+    expect(selectionBody(ticked)).toEqual({ ids: ['ast_a', 'ast_b'] })
+    expect(selectionBody(captured)).toEqual({
+      all: true,
+      filter: { kind: 'image' },
+      expected: 82,
+    })
+  })
+
+  /** Omitted rather than sent as `[]`: the route's options are `v.strictObject`. */
+  it('omits an empty exclude', () => {
+    expect(selectionBody(captured)).not.toHaveProperty('exclude')
+    expect(selectionBody({ ...captured, exclude: new Set(['ast_c']) })).toMatchObject({
+      exclude: ['ast_c'],
+    })
+  })
+
+  /**
+   * **The bug.** Every batched *Describe* answered `selection must be a JSON
+   * object`, because the component posted the selection's own keys at the top level
+   * and `AssetDescribeBody` reads `body.selection`. Nesting is the whole contract.
+   */
+  it('nests the selection under `selection`, which is what the route parses', () => {
+    const body = describeBody(ticked, { dryRun: true })
+    expect(body).toEqual({ selection: { ids: ['ast_a', 'ast_b'] }, dryRun: true })
+    expect(body).not.toHaveProperty('ids')
+  })
+
+  it('carries a cursor when the run has one, and nothing when it does not', () => {
+    expect(describeBody(ticked)).toEqual({ selection: { ids: ['ast_a', 'ast_b'] } })
+    expect(describeBody(ticked, { continueFrom: null })).not.toHaveProperty('continueFrom')
+    expect(describeBody(ticked, { continueFrom: 'cur_1' })).toMatchObject({
+      continueFrom: 'cur_1',
+    })
+  })
+
+  /** The backlog run narrows the *selection* and nothing else, and the count comes
+   * in from the caller because it has to be recounted for the narrowed filter. */
+  it('narrows a captured select-all to the backlog, keeping what was ticked off', () => {
+    const backlog = backlogSelection({ ...captured, exclude: new Set(['ast_c']) }, 41)
+    expect(backlog).toEqual({
+      all: true,
+      filter: { kind: 'image', undescribed: true },
+      expected: 41,
+      exclude: ['ast_c'],
+    })
+    expect(describeBody(captured, { backlog, dryRun: true })).toEqual({
+      selection: backlog,
+      dryRun: true,
+    })
+  })
+})
+
+/**
+ * *Clear filters* used to be a patch written out by hand in the empty state, and it
+ * was missing `failed` — so with the *Failed* chip on it cleared six things, left
+ * the seventh, and answered the same empty list.
+ */
+describe('NO_FILTERS', () => {
+  it('un-narrows a URL narrowed by any single filter', () => {
+    const narrowings: Partial<AssetsUrl>[] = [
+      { kind: 'image' },
+      { q: 'logo' },
+      { folder: 'clients/acme' },
+      { unfiled: true },
+      { tags: ['headshot'] },
+      { untagged: true },
+      { undescribed: true },
+      { failed: true },
+    ]
+    for (const narrowing of narrowings) {
+      const narrowed = url(narrowing)
+      expect(isNarrowed(narrowed)).toBe(true)
+      expect(isNarrowed(withFilter(narrowed, NO_FILTERS))).toBe(false)
+    }
+  })
+
+  it('un-narrows a URL narrowed by all of them at once', () => {
+    const narrowed = url({
+      kind: 'image',
+      q: 'logo',
+      folder: 'clients/acme',
+      tags: ['headshot'],
+      undescribed: true,
+      failed: true,
+    })
+    expect(isNarrowed(withFilter(narrowed, NO_FILTERS))).toBe(false)
+  })
+
+  /** A filter is about the list; the open file is not part of it. */
+  it('leaves the open asset and the view alone', () => {
+    const cleared = withFilter(url({ q: 'logo', asset: 'ast_x', view: 'table' }), NO_FILTERS)
+    expect(cleared.asset).toBe('ast_x')
+    expect(cleared.view).toBe('table')
+  })
 })
 
 describe('the URL model', () => {

@@ -4,10 +4,11 @@
  * A constant page size is wrong on every screen except the one it was chosen at. 48
  * tiles is two and a half screenfuls on a laptop and most of one on a 27" monitor, so
  * the same *Next* button means "scroll three times, then page" in one place and
- * "page immediately" in the other. The number that stays constant should be the
- * amount of scrolling a page costs, not the number of rows in it — which makes the
- * page size a function of the viewport, and the viewport something only the browser
- * can answer.
+ * "page immediately" in the other. **A page is one screenful** (owner, 2026-09-07):
+ * it fills the region and does not scroll, so *Next* is the way to see the next
+ * thing rather than a second way to do what the scroll wheel was already doing.
+ * That makes the page size a function of the viewport, and the viewport something
+ * only the browser can answer.
  *
  * The unit of measurement is a rendered cell: a tile, a table row, or the skeleton
  * standing in for either. Cells carry `data-fit` and the caller names the selector,
@@ -17,17 +18,6 @@
  * followed by a corrected one.
  */
 import { type RefObject, useCallback, useEffect, useLayoutEffect, useState } from 'react'
-
-/**
- * How many screenfuls a page holds.
- *
- * Not one. A pager whose page is exactly what fits means pressing *Next* as often as
- * you would otherwise scroll, which is a worse gesture than the scrolling it
- * replaces. Two is the smallest number that keeps paging feeling like paging: the
- * page opens full, one scroll reaches the end of it, and *Next* is the third gesture
- * rather than the first.
- */
-const SCREENS = 2
 
 export interface Fit {
   /** Selects one measurable cell inside the box. */
@@ -101,20 +91,26 @@ export interface Measured {
  * unit tests run in Node with no jsdom, and this is the half that can be got wrong
  * quietly.
  *
- * Rounded to a whole number of **rows**, always, which is what the old constant was
- * reaching for: 48 was chosen because it divides by 2, 3, 4, 6 and 8, so no page ever
- * ends in a ragged half-row that reads as a failed load. Multiplying the measured
- * column count is the same property without having to pick a number that happens to
- * have it.
+ * **A page is one screenful, and it does not scroll** (owner, 2026-09-07). That is
+ * what `Math.floor` is for: a page that rounded up would end in a row hanging below
+ * the fold, so the pager would sit under a scrollbar and *Next* would stop being the
+ * way to see the next thing. Rounding down leaves at most a row's worth of space at
+ * the bottom, and that space is the honest cost of the page boundary lining up with
+ * the screen.
  *
- * Two rows is the floor. A page of one row makes *Next* the only way to see anything,
- * which is the pathological end of the same complaint this fixes; it can only arise
- * from a box measured mid-layout or a viewport shorter than a tile.
+ * A whole number of **rows**, always, which is what the old constant was reaching
+ * for: 48 was chosen because it divides by 2, 3, 4, 6 and 8, so no page ever ends in
+ * a ragged half-row that reads as a failed load. Multiplying the measured column
+ * count is the same property without having to pick a number that happens to have it.
+ *
+ * One row is the floor, and it is a real answer rather than a guard: on a window too
+ * short for two, one row is what fits, and asking for two would put the page back
+ * behind a scrollbar.
  */
 export function pageSizeFor(measured: Measured, fit: Fit): number {
   const { columns, pitch, available } = measured
   if (columns < 1 || pitch <= 0 || available <= 0) return fit.fallback
-  const rows = Math.max(2, Math.round((available * SCREENS) / pitch))
+  const rows = Math.max(1, Math.floor(available / pitch))
   return Math.min(fit.max, columns * rows)
 }
 
@@ -130,29 +126,75 @@ export function fittedPage(box: HTMLElement, fit: Fit): number {
 }
 
 /**
- * The height a screenful is, counted from the top of the results region to the
- * bottom of the window.
+ * The height a screenful is: the space the results region has to fill.
  *
- * **The window, not the box**, and the box's own height is deliberately not consulted
- * even though it is usually the more precise answer. It is only *sometimes* the right
- * one: the browser frames itself above 1100px and inside a dialog, where the box is a
- * bounded scroller, and below that it is a page scroll where the box's height is
- * whatever its content came to. A rule that used the box would therefore have to
- * decide which arrangement it was in, and the only signals for that are circular —
- * "does the content overflow" is a question about the page size being computed.
+ * **The space, not the box** — and the difference is the whole reason this is more
+ * than one line. The box's own height is the more precise answer *when the box is
+ * bounded*, and it is bounded on the screen above 1100px. It is not bounded in the
+ * picker dialog, whose panel used to size to its content: measuring the box there
+ * made the region's height a function of the page size and the page size a function
+ * of the region, and the picker walked itself down twenty tiles, sixteen, twelve.
+ * (`Dialog.module.css`'s `.fill` now gives the panel a definite height, which fixes
+ * that end of it; measuring the space rather than the box is what makes the
+ * arithmetic immune to the next layout that does the same thing.)
  *
- * So it measures the one thing that is true in both: the window is the screen, and
- * the region starts where it starts. It overshoots by whatever furniture sits below
- * the region — the pager, a dialog's footer — which is the safe direction: a page
- * slightly larger than the space is a page whose last row peeks below the fold, and
- * that is the cue that scrolling continues.
+ * So: the window, less where the region starts, less the **furniture that has to fit
+ * below it** — the pager, a dialog's footer, the padding under both. Every term is a
+ * fixed-height thing measured off the DOM, so nothing here changes when the number of
+ * rows does, which is what makes a re-measure return the same answer rather than a
+ * smaller one.
  *
  * `Math.max(0, top)` for the scrolled-down case, where the region's top has gone
  * above the window and a raw subtraction would ask for more than a screen.
  */
 function availableHeight(box: HTMLElement): number {
-  const top = box.getBoundingClientRect().top
-  return Math.max(0, window.innerHeight - Math.max(0, top))
+  const top = Math.max(0, box.getBoundingClientRect().top)
+  return Math.max(0, window.innerHeight - top - furnitureBelow(box))
+}
+
+/**
+ * Everything that must fit under the results region, summed up its ancestry.
+ *
+ * At each level: the siblings that stack **below** the box, plus the gap each one
+ * brings with it, plus the parent's own bottom padding and border. Walked to the
+ * body, because the furniture is not all in one place — the pager is two levels down
+ * from the dialog footer, and the wrapper's padding is above them both.
+ *
+ * Two filters, and both matter:
+ *
+ * - **A row parent contributes nothing.** `.layout` puts the folder sidebar *beside*
+ *   the grid, so it takes width and no height at all; counting it would subtract a
+ *   full-height column from the space the grid has.
+ * - **Below means starting below the box's top**, not below its bottom. The bottom
+ *   moves with the content, which is exactly the dependency this function exists to
+ *   avoid; the top does not.
+ */
+function furnitureBelow(box: HTMLElement): number {
+  let total = 0
+  let el: HTMLElement = box
+  const from = box.getBoundingClientRect().top
+  while (el.parentElement && el !== document.body) {
+    const parent = el.parentElement
+    const style = getComputedStyle(parent)
+    const stacked = !style.display.includes('flex') || !style.flexDirection.startsWith('row')
+    if (stacked) {
+      const gap = px(style.rowGap)
+      for (const sibling of parent.children) {
+        if (sibling === el) continue
+        const rect = sibling.getBoundingClientRect()
+        if (rect.top >= from + 1) total += rect.height + gap
+      }
+    }
+    total += px(style.paddingBottom) + px(style.borderBottomWidth)
+    el = parent
+  }
+  return total
+}
+
+/** A computed length in pixels. `normal` (a `row-gap` nobody set) is zero. */
+function px(value: string): number {
+  const n = Number.parseFloat(value)
+  return Number.isFinite(n) ? n : 0
 }
 
 /**
