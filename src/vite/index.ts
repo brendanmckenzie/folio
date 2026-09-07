@@ -14,6 +14,19 @@ const RESOLVED_PREVIEW = `\0${VIRTUAL_PREVIEW}`
  */
 const SINGLE_CSS_BUNDLE = 'folio-client.css'
 
+/**
+ * The two client entries this plugin adds, each paired with the one stylesheet
+ * `__FOLIO_ASSETS__` links for it.
+ *
+ * Both names are fixed for the same reason `SINGLE_CSS_BUNDLE` is, and that fixed
+ * name is exactly one file — which is the assumption `importHoistedCss` exists to
+ * repair. See it for what breaks without it.
+ */
+const ENTRY_STYLESHEETS: ReadonlyArray<readonly [entry: string, stylesheet: string]> = [
+  ['folio-admin.js', 'folio-admin.css'],
+  ['folio-preview.js', 'folio-preview.css'],
+]
+
 export interface FolioPluginOptions {
   /**
    * Module with a named `blocks` export listing the project's block
@@ -210,6 +223,26 @@ export function folio(options: FolioPluginOptions): Plugin[] {
       assertCssStrategyWasVisible(resolved, noSplit)
     },
 
+    /**
+     * **`order: 'post'` is load-bearing.** `vite:css-post` rewrites this graph in
+     * its own `generateBundle`: a chunk that turned out to hold nothing but CSS is
+     * deleted, its `importedCss` merged into every chunk that imported it, and
+     * those chunks' `imports` rewritten to drop it. Reading the bundle before that
+     * runs is reading a graph that is about to change shape.
+     *
+     * Nothing here happens when code splitting is off: there is one stylesheet
+     * then, both entries already link it, and it holds everything by construction.
+     */
+    generateBundle: {
+      order: 'post',
+      handler(_options, bundle) {
+        if (noSplit) return
+        for (const [entry, stylesheet] of ENTRY_STYLESHEETS) {
+          importHoistedCss(this, bundle as unknown as Bundle, entry, stylesheet)
+        }
+      },
+    },
+
     resolveId(id) {
       if (id === VIRTUAL_PREVIEW) return RESOLVED_PREVIEW
       return null
@@ -288,6 +321,126 @@ function assertCssStrategyWasVisible(
       'Set `build.cssCodeSplit: false` (or `environments.client.build.cssCodeSplit: false`) in vite.config.ts so the plugin can see it, ' +
       'or find the plugin that is setting it and let it be configured instead.',
   )
+}
+
+/**
+ * Only the parts of Rollup's output bundle the CSS walk below reads. Structural,
+ * like `assertCssStrategyWasVisible` and `foldClientEntries` above, so the plugin
+ * keeps compiling against both Vite majors in `peerDependencies` without pinning
+ * itself to one release's Rollup types.
+ */
+interface Bundle {
+  [fileName: string]:
+    | {
+        type: 'chunk'
+        imports?: string[]
+        viteMetadata?: { importedCss?: Set<string> }
+        source?: undefined
+      }
+    | { type: 'asset'; imports?: undefined; viteMetadata?: undefined; source: string | Uint8Array }
+}
+
+/** The one thing `importHoistedCss` needs from the plugin context. */
+interface EmitsAssets {
+  emitFile(file: { type: 'asset'; fileName: string; source: string }): string
+}
+
+/**
+ * Every stylesheet an entry needs, in the order Vite would have linked them.
+ *
+ * Mirrors Vite's own `getCssFilesForChunk`, which is what it uses to write the
+ * `<link>` tags for an HTML entry: depth-first over `imports`, a chunk's
+ * dependencies before the chunk's own CSS, first occurrence wins. Matching it is
+ * the point — the file we are assembling stands in for those tags.
+ *
+ * **`dynamicImports` is deliberately not walked**, also mirroring Vite: CSS behind
+ * a dynamic import is fetched by the preload helper when the import runs, so
+ * linking it up front would load stylesheets for code that may never execute.
+ */
+function cssReachableFrom(bundle: Bundle, entryFileName: string): string[] {
+  const seenChunks = new Set<string>()
+  const seenCss = new Set<string>()
+  const files: string[] = []
+
+  const walk = (fileName: string): void => {
+    const chunk = bundle[fileName]
+    if (chunk?.type !== 'chunk' || seenChunks.has(fileName)) return
+    seenChunks.add(fileName)
+    for (const imported of chunk.imports ?? []) walk(imported)
+    for (const css of chunk.viteMetadata?.importedCss ?? []) {
+      if (seenCss.has(css)) continue
+      seenCss.add(css)
+      files.push(css)
+    }
+  }
+
+  walk(entryFileName)
+  return files
+}
+
+/**
+ * Pull the stylesheets Rollup hoisted out of an entry back into the one file
+ * `__FOLIO_ASSETS__` links for it.
+ *
+ * **The bug this fixes is the preview iframe rendering the host's blocks with no
+ * styling at all**, behind a 200, in a build with nothing wrong in it. With code
+ * splitting on, `folio-preview.css` holds only what the *preview entry's own
+ * chunk* imported — which is `preview.css`, this library's selection outlines and
+ * empty-slot placeholders. The host's block CSS is imported by the preview entry
+ * *and* by the host's own page routes, so Rollup does the obviously right thing
+ * and hoists it into a shared chunk with a content-hashed name. `previewCss` was
+ * baked in `config()` and names one fixed file, so it never mentions that chunk.
+ *
+ * The condition is not exotic and does not depend on how a host is written: the
+ * preview entry exists **to render the host's blocks**, and any host that also
+ * renders those blocks on its own pages — which is the entire purpose of the
+ * blocks — shares that CSS. It went unseen because `examples/demo` styles its
+ * blocks from a hand-written `public/site.css` and imports no CSS through Vite at
+ * all, so `pnpm build:demo` has never emitted a hoisted chunk to get this wrong.
+ *
+ * `@import` rather than concatenating the bytes, for three reasons that all point
+ * the same way: the host's public pages link that same hashed file, so the editor
+ * reuses their cache entry instead of downloading a second copy; `url()` inside
+ * the imported CSS keeps resolving against `/assets/`, where its images actually
+ * are, rather than against this file at the root; and an `@import`ed sheet
+ * cascades *before* the importing file's own rules, which is the order these two
+ * want — host styles first, this library's editing chrome over the top.
+ *
+ * The cost is one serialised request in the editor's iframe, which is the right
+ * place to pay it.
+ */
+function importHoistedCss(
+  ctx: EmitsAssets,
+  bundle: Bundle,
+  entryFileName: string,
+  stylesheet: string,
+): void {
+  // The entry's own CSS is `stylesheet` itself; everything else was hoisted.
+  const hoisted = cssReachableFrom(bundle, entryFileName).filter((file) => file !== stylesheet)
+  if (hoisted.length === 0) return
+
+  const rules = hoisted.map((file) => `@import url("/${file}");`).join('\n')
+  const own = bundle[stylesheet]
+
+  // An entry can reach hoisted CSS while importing none of its own, in which case
+  // Vite emits no file at this name and the baked link is already a 404. Writing
+  // it here fixes that case too.
+  if (own?.type !== 'asset') {
+    ctx.emitFile({ type: 'asset', fileName: stylesheet, source: `${rules}\n` })
+    return
+  }
+
+  const source = typeof own.source === 'string' ? own.source : new TextDecoder().decode(own.source)
+  /**
+   * `@charset` has to be the first thing in a stylesheet and `@import` has to
+   * precede every rule that is not one, so the two orders conflict unless the
+   * charset stays put. Vite writes one whenever the file holds a non-ASCII byte,
+   * which a block's content very often does.
+   */
+  const charset = /^@charset\s+"[^"]*";/.exec(source)
+  own.source = charset
+    ? `${charset[0]}\n${rules}\n${source.slice(charset[0].length)}`
+    : `${rules}\n${source}`
 }
 
 /**

@@ -195,6 +195,7 @@ build and the asset constants. Do not hand-roll them.
 | --- | --- |
 | `ReferenceError: require is not defined` at Worker startup, from a stack naming nothing you wrote | `react-dom/server.edge` is CommonJS and was left external. `folio/vite` force-includes it in `optimizeDeps`; a host that replaced that config dropped it. |
 | Admin renders unstyled; its stylesheet 404s behind a 200 | `build.cssCodeSplit: false` reached the build without being set in your own `vite.config.ts` — usually a framework plugin set it. The plugin cannot see that and throws at `configResolved` naming the cause. Set it in your own config. |
+| The editor's preview iframe renders your blocks unstyled, and the live page is fine | Fixed in the plugin: with code splitting on, Rollup hoists CSS shared between the preview entry and your own pages into a content-hashed chunk that `previewCss` could not name, and `folio-preview.css` held only Folio's editing chrome. The plugin now `@import`s the hoisted files from it. If you still see this, your `folio` is older than that fix. |
 | A referenced document's asset field is empty | A block's `render` gets no `Resolution`, so it cannot resolve an asset belonging to a *referenced* document. Only the `url` arm works today. Known limitation. |
 | Typecheck reports two incompatible `Plugin` types | Folio installed by directory path. Use a SHA or a tarball. |
 | A path Folio should own returns your 404 | Your router ran before `folio.handle()`. |

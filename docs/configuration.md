@@ -251,6 +251,18 @@ adminCss: ['/admin-tweaks.css'],
 `assets` is not something you author — pass the plugin's global through, in the
 same file as `createFolio`.
 
+**These two lists are for stylesheets Vite does not bundle**: a hand-written
+`public/site.css`, a font provider's URL, a CDN link. CSS that reaches your
+blocks through an `import` — a CSS module beside a component, a `.scss` your
+block pulls in — is already in the client build, and `assets` carries it: the
+plugin resolves what each entry actually needs at bundle time, including the
+shared chunks Rollup hoists that CSS into once your own pages import the same
+blocks. You could not name those anyway, since their filenames carry a content
+hash and `__FOLIO_ASSETS__` is baked before Rollup picks one.
+
+So list `/site.css` here if you serve one, and nothing at all if your blocks are
+styled by imports.
+
 ---
 
 ### Behaviour
