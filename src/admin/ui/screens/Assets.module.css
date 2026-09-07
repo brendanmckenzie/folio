@@ -725,14 +725,16 @@
 
 /* --------------------------------------------------------------- skeletons --- */
 
-.skeletonGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: var(--space-3);
-}
-
-/* Matches `.tileFrame` plus the two text lines under it, so the grid does not jump
-   when the answer lands. That is the whole reason a skeleton beats a spinner. */
+/*
+ * Matches `.tileFrame` plus the two text lines under it, so the grid does not jump
+ * when the answer lands. That is the whole reason a skeleton beats a spinner.
+ *
+ * There is no `.skeletonGrid` to go with it any more, and deliberately: it was a copy
+ * of `.grid`'s template, and the copy had already drifted — `.gridCompact` narrows the
+ * picker's tiles and was never applied to it, so the dialog's skeletons laid out three
+ * to a row where the tiles replacing them went four. The loading state now uses the
+ * same two classes the grid does, which is the only way the two cannot disagree.
+ */
 .skeletonTile {
   aspect-ratio: 0.78;
   border-radius: var(--radius-md);

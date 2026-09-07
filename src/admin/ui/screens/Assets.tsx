@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '../Button'
 import { EmptyState } from '../EmptyState'
 import { ListHeader } from '../List'
@@ -14,7 +14,8 @@ import { AssetBrowser } from './AssetBrowser'
 import { AssetDeleteDialog } from './AssetDeleteDialog'
 import { AssetDetail } from './AssetDetail'
 import css from './Assets.module.css'
-import { useAsset, useAssets, useDropTarget, useUploads } from './useAssets'
+import { useFittedPage } from '../fit'
+import { ASSETS_FIT, useAsset, useAssets, useDropTarget, useUploads } from './useAssets'
 import { messageOf } from './useContent'
 
 interface Props {
@@ -71,7 +72,17 @@ interface Props {
 export function Assets(props: Props) {
   const { apiBase, mount, onQuery, onNotice, onRemember } = props
   const url = parseAssetsUrl(props.query, props.remembered)
-  const data = useAssets(apiBase, url)
+  /**
+   * The page size, fitted to the viewport rather than fixed.
+   *
+   * `null` on the first render and a number by the first layout effect, which is why
+   * `useAssets` refuses to fetch until it has one: the size is decided from the
+   * skeletons `AssetBrowser` has already put in the box, so opening this screen is
+   * still exactly one request.
+   */
+  const results = useRef<HTMLDivElement>(null)
+  const pageSize = useFittedPage(results, ASSETS_FIT)
+  const data = useAssets(apiBase, url, pageSize)
 
   const [deleting, setDeleting] = useState<AssetRow | null>(null)
 
@@ -191,6 +202,7 @@ export function Assets(props: Props) {
       */}
       <div className={css.body} data-open={url.asset ? '' : undefined}>
         <AssetBrowser
+          resultsRef={results}
           apiBase={apiBase}
           mount={mount}
           url={url}

@@ -180,7 +180,10 @@ that, and it was a wrong answer arrived at confidently. Five blocks:
 - **Latest published** — recent publishes, with who and when. Strapi's *last
   published entries*, WordPress's Activity panel. Cheap and exact: the `versions`
   table already holds one row per publish with its actor and timestamp, so this is
-  a site-wide query over data written for another purpose.
+  a site-wide query over data written for another purpose. **One row per document,
+  not per publish**: a page published five times in an afternoon filled five of the
+  six rows here and reported the editor's activity as the site's, so the query keeps
+  only each story's most recent publish (`listRecentPublishes`).
 - **Latest media** — the newest uploads as thumbnails. The one block nobody else
   has by default, and nearly free: `listAssets` is already ordered by `created_at`
   descending. A CMS that treats assets as a first-class place should show them.
@@ -212,7 +215,11 @@ and the type chip can be a column rather than a repeated word on every row.
 
 - **Rows are the tree**, indented 16px per level, with expand/collapse. Collapse
   matters now for two reasons rather than one: it is how a large site is navigated,
-  and it is what makes lazy per-level loading honest (see *Dependencies*).
+  and it is what makes lazy per-level loading honest (see *Dependencies*). **Which
+  nodes are open is remembered**, not linked: a link to a page in a tree is a link to
+  the page, not to a particular shape of tree, but the shape is still yours and the
+  screen unmounts every time you open a document. Restoring asks only for the levels
+  a *visible* row needs, so a week of browsing does not become a burst of requests.
 - **A `[ Tree | Flat ]` toggle**, added 2026-07-31 (owner's call;
   `foundation/pagination.md` decision 2a). Flat is every routed page with no
   structure, sorted by last edited, title or path — because a tree tells you how the
@@ -273,7 +280,11 @@ launched from a field, with no search, no filter, no sort, no metadata, no usage
 information, and a red **Delete** link under every tile that fires immediately.
 
 The screen: a grid or table (toggled, remembered), filename search, type and size
-filters, sort by date or name or size. Selecting one opens a detail panel —
+filters, sort by date or name or size. **A page is as big as the screen is**: the
+tile grid and the table are both measured, and the page comes back a whole number of
+rows holding roughly two screenfuls, so *Next* means the same gesture on a laptop and
+on a 27" monitor rather than "scroll three times first" on one and "page immediately"
+on the other. Selecting one opens a detail panel —
 preview, dimensions, bytes, alt text, focal point, and **where it is used**.
 Upload by dropping anywhere on the screen. Delete confirms, and the confirmation
 names the documents that reference it.

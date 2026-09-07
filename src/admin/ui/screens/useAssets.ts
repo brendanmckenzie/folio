@@ -1,6 +1,7 @@
 import type { Dispatch, DragEvent, SetStateAction } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Page } from '../../../core/pagination'
+import type { Fit } from '../fit'
 import { type AssetRow, type AssetsUrl, assetsParams, type UploadEntry } from './assets-model'
 import { messageOf } from './useContent'
 
@@ -16,15 +17,43 @@ import { messageOf } from './useContent'
  */
 
 /**
- * Rows per request.
+ * Rows per request when the layout cannot be measured.
+ *
+ * The page size is normally the caller's, fitted to the viewport by `ui/fit.ts` — a
+ * constant is two and a half screenfuls on a laptop and most of one on a large
+ * monitor, so the same *Next* button means two different gestures. This is what is
+ * used when there is nothing to measure: no box, no cells, a result that is empty.
  *
  * 48 rather than the route's default 50, and the reason is the grid: at the tile
  * sizes this screen uses a row is 2, 3, 4, 6 or 8 tiles wide depending on the
  * viewport, and 48 divides by every one of them. 50 leaves a ragged pair on the last
  * row at four columns and a single tile at six, which reads as a loading failure
- * rather than the end of a page.
+ * rather than the end of a page. A measured size gets the same property for free, by
+ * being a whole number of measured rows.
  */
-const PAGE = 48
+export const ASSETS_PAGE = 48
+
+/** The route's own clamp (`routes/assets.ts`). Asking past it is not refused, it is
+ * silently reduced — which would leave the pager's arithmetic disagreeing with the
+ * server's about what a page holds. */
+export const ASSETS_PAGE_MAX = 200
+
+/**
+ * What the pager measures, for `useFittedPage`.
+ *
+ * Here rather than in each mount, for the reason the hooks themselves are here: the
+ * screen and the picker are one implementation with two mounts, and a page size they
+ * computed from two copies of these options is the one way they could start
+ * disagreeing about what a page holds.
+ *
+ * `[data-fit]` covers all three things a result can be — a skeleton, a tile, a table
+ * row — so one selector serves both views and the loading state that precedes either.
+ */
+export const ASSETS_FIT: Fit = {
+  cells: '[data-fit]',
+  fallback: ASSETS_PAGE,
+  max: ASSETS_PAGE_MAX,
+}
 
 /**
  * How long the search box waits before it is a request.
@@ -55,7 +84,13 @@ export interface AssetsData {
   reload: () => void
 }
 
-export function useAssets(apiBase: string, url: AssetsUrl): AssetsData {
+/**
+ * @param pageSize rows per request, or `null` while the layout is still being
+ * measured. **Null means no request**, deliberately: the first page's size is decided
+ * from the skeletons already on screen, so waiting one commit for it is what keeps
+ * opening this screen to a single fetch rather than a guess and a correction.
+ */
+export function useAssets(apiBase: string, url: AssetsUrl, pageSize: number | null): AssetsData {
   const [page, setPage] = useState<AssetsData['page']>({
     rows: [],
     cursor: null,
@@ -78,7 +113,11 @@ export function useAssets(apiBase: string, url: AssetsUrl): AssetsData {
   // Serialised, because a fresh object every render would restart the effect below.
   // The string is also exactly what goes on the wire, so there is no second
   // representation to keep in step.
-  const params = assetsParams(settled, { limit: PAGE, cursor, count: true }).toString()
+  const params = assetsParams(settled, {
+    limit: pageSize ?? ASSETS_PAGE,
+    cursor,
+    count: true,
+  }).toString()
 
   const fetchPage = useCallback(async () => {
     setPage((prev) => ({ ...prev, loading: true }))
@@ -92,8 +131,9 @@ export function useAssets(apiBase: string, url: AssetsUrl): AssetsData {
   }, [apiBase, params])
 
   useEffect(() => {
+    if (pageSize === null) return
     void fetchPage()
-  }, [fetchPage])
+  }, [fetchPage, pageSize])
 
   /**
    * A filter, a sort or a direction change invalidates the cursor stack: each is a
@@ -105,8 +145,13 @@ export function useAssets(apiBase: string, url: AssetsUrl): AssetsData {
    * than listing `sort`, `dir`, `kind` and `q` separately is what keeps a fifth
    * filter from being added without a reset. Note that `view` is not in it: grid and
    * table are two arrangements of one query, so switching costs no request.
+   *
+   * **Nor is the page size**, which is why the constant is passed here rather than
+   * `pageSize`. A keyset cursor names a *position* — the last row already shown — and
+   * a position does not stop being one because the page that follows it got taller.
+   * Keying on it would mean a window resize threw you back to page one.
    */
-  const identity = assetsParams(settled, { limit: PAGE, count: true }).toString()
+  const identity = assetsParams(settled, { limit: ASSETS_PAGE, count: true }).toString()
   // biome-ignore lint/correctness/useExhaustiveDependencies: `identity` is the trigger, not a value the body reads — it only clears. Naming it is the point; reading it to satisfy the rule would misstate what this depends on
   useEffect(() => {
     setCursor(null)

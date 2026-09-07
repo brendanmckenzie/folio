@@ -147,7 +147,10 @@ export function Table<T>({
           {rows.map((row) => {
             const key = rowKey(row)
             return (
-              <tr key={key} className={key === currentKey ? css.current : undefined}>
+              // `data-fit` marks a body row as measurable — `ui/fit.ts` reads one
+              // to work out how many fit on a screen. Header rows deliberately do
+              // not carry it: it is sticky, so it is not part of what scrolls past.
+              <tr key={key} data-fit="" className={key === currentKey ? css.current : undefined}>
                 {select ? <td className={css.select}>{select.cell(row)}</td> : null}
                 {columns.map((column, i) => (
                   <td key={column.key} className={column.numeric ? css.numeric : undefined}>

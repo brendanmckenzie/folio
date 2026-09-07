@@ -102,3 +102,80 @@ function readString<T extends string>(
     return fallback
   }
 }
+
+/**
+ * How many members survive a write.
+ *
+ * A bound on the *stored string*, not on the feature: the one caller is Content's
+ * expanded nodes, and collapsing removes an id, so a set that grows without limit is
+ * a browsing session nobody ever tidied rather than anything a person meant. The
+ * most recent are kept, because `Set` iterates in insertion order and the node you
+ * expanded last is the one you are most likely to come back to.
+ *
+ * It is deliberately not a bound on how much work restoring costs. That is
+ * `Content.tsx`'s to make, and it makes it by fetching only the levels a *visible*
+ * row asks for — an expanded node inside a collapsed ancestor is never drawn, so it
+ * is never fetched, however many of them are remembered.
+ */
+const SET_LIMIT = 200
+
+/**
+ * The same again, for a set of ids — Content's expanded nodes, and nothing else yet.
+ *
+ * A set rather than a third `useRememberedString` over a joined value, because the
+ * one operation this has is *toggle one member*, and every caller of the string
+ * version would have to split, edit and rejoin to get it.
+ *
+ * `valid` is required for the reason it is required there, and here the argument is
+ * sharper: what comes out of storage is a list of *identifiers*, and an id that no
+ * longer exists — or never did — is a request per member. Screening on the way in is
+ * what keeps a stale preference from being a burst of 404s.
+ *
+ * Comma-separated rather than JSON: the members are ids, whose alphabet excludes a
+ * comma, so the encoding cannot be ambiguous and reading it back cannot throw.
+ */
+export function useRememberedSet(key: string, valid: (raw: string) => boolean) {
+  const [value, setValue] = useState<ReadonlySet<string>>(() => readSet(key, valid))
+
+  useEffect(() => {
+    setValue(readSet(key, valid))
+  }, [key, valid])
+
+  const write = useCallback(
+    (next: ReadonlySet<string>) => {
+      // Trimmed once, so what is in memory and what is in storage cannot disagree
+      // about which members survived.
+      const kept = next.size > SET_LIMIT ? new Set([...next].slice(-SET_LIMIT)) : next
+      setValue(kept)
+      try {
+        localStorage.setItem(key, [...kept].join(','))
+      } catch {
+        // As above: it still changed, it just will not be that way next time.
+      }
+    },
+    [key],
+  )
+
+  // Closes over the current value for the same reason `useRemembered.toggle` does:
+  // the one a caller can see is the one a toggle has to invert.
+  const toggle = useCallback(
+    (member: string) => {
+      const next = new Set(value)
+      if (!next.delete(member)) next.add(member)
+      write(next)
+    },
+    [value, write],
+  )
+
+  return { value, set: write, toggle }
+}
+
+function readSet(key: string, valid: (raw: string) => boolean): ReadonlySet<string> {
+  try {
+    const saved = localStorage.getItem(key)
+    if (!saved) return new Set()
+    return new Set(saved.split(',').filter(valid).slice(-SET_LIMIT))
+  } catch {
+    return new Set()
+  }
+}

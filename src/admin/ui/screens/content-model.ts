@@ -53,6 +53,22 @@ export type StateFilter = 'all' | StoryState
  */
 export const ROOT = '#root'
 
+/**
+ * Whether a string is shaped like a story id.
+ *
+ * The same alphabet `validate.ts`'s `ID` screens on, restated here for the one thing
+ * on this screen that reads ids back out of `localStorage`: the remembered expanded
+ * set. Everything else gets its ids from a response, where they are the server's own.
+ *
+ * It cannot tell a live id from a deleted one — nothing on the client can — and does
+ * not need to: an expanded node that no longer exists is simply never drawn, because
+ * it is not in any level its parent answers with. What this stops is the other case,
+ * a value that was never an id at all, which would otherwise be spliced into a URL.
+ */
+export function isStoryId(raw: string): boolean {
+  return /^[A-Za-z0-9_.:-]+$/.test(raw)
+}
+
 /** A story row as the level route answers it: `StoryMeta` plus how many children
  * it has, which is what tells the screen whether to draw a twisty without
  * fetching the level below to find out. */

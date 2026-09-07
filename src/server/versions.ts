@@ -33,7 +33,9 @@ export interface VersionMeta {
 const META = `id, story_id as storyId, kind, label, title, actor,
               created_at as createdAt, schema_id as schemaId`
 
-/** `META` qualified, for the one query that joins `stories` (see `getVersion`). */
+/** `META` qualified. Needed wherever `versions` is not the only table in scope: the
+ * query that joins `stories` (`getVersion`), and the one that correlates `versions`
+ * with itself (`listRecentPublishes`). */
 const V_META = `v.id, v.story_id as storyId, v.kind, v.label, v.title, v.actor,
                 v.created_at as createdAt, v.schema_id as schemaId`
 
@@ -238,11 +240,49 @@ export interface RecentPublish {
 }
 
 /**
- * The most recent publishes, newest first.
+ * A publish is only in this list if it is **its story's most recent one**.
+ *
+ * The whole clause, because it is the shape that keeps keyset paging honest: it is a
+ * *filter* over `versions`, evaluated per row, so the surviving set is still ordered
+ * by `(created_at, id)` and a cursor still names a position in it. A `group by
+ * story_id` would answer the same question and would not — an aggregate has no row
+ * for a cursor to resume after, so paging it means paging a grouped set by a key the
+ * grouping does not carry.
+ *
+ * The tiebreak is `id`, matching `NEWEST_FIRST` exactly. Two publishes of one story
+ * in the same millisecond are a real possibility for a programmatic writer, and a
+ * predicate that compared only `created_at` would keep both — which is the bug this
+ * exists to fix, reappearing at the one moment it is hardest to reproduce.
+ *
+ * `versions_story` is `(story_id, created_at desc)`, so each row's lookup is an index
+ * seek on the pair the subquery filters by.
+ */
+const LATEST_PER_STORY = `not exists (
+  select 1 from versions later
+  where later.story_id = v.story_id
+    and later.kind = 'publish'
+    and (later.created_at > v.created_at
+         or (later.created_at = v.created_at and later.id > v.id))
+)`
+
+/**
+ * The most recent publishes, newest first — **one row per story**.
  *
  * **`kind = 'publish'` and not every version.** A checkpoint is a version too and is
  * not a publish; a list called "latest published" that counted an editor's private
  * save point as a release would be worse than no list.
+ *
+ * **And one publish per story**, which is not what a `versions` scan answers on its
+ * own. A page published five times in an afternoon is five rows, and a block six
+ * rows tall filled with the same page five times reports the *editor's* activity
+ * while claiming to report the site's. "What went live lately" is a question about
+ * documents; the version is how it is answered, not what it is about. `LATEST_PER_STORY`
+ * above carries the argument for the shape of the filter.
+ *
+ * Rejected: deduplicating in the reader, after the page came back. It is two lines
+ * and it makes `limit` meaningless — a page of six that collapses to two is short by
+ * an amount nobody can predict, and the cursor would then have to come off a row that
+ * survived rather than off the last one read.
  *
  * **Two queries rather than a join**, which is the interesting choice here. The join
  * version needs both projections in one row, and `versions` and `stories` share
@@ -267,7 +307,8 @@ export async function listRecentPublishes(
   const resume = keysetWhere(NEWEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null)
   const { results } = await db
     .prepare(
-      `select ${META} from versions ${whereOf("kind = 'publish'", resume.sql)}
+      `select ${V_META} from versions v
+       ${whereOf("v.kind = 'publish'", LATEST_PER_STORY, resume.sql)}
        ${orderBy(NEWEST_FIRST)} limit ?`,
     )
     .bind(...resume.binds, limit + 1)

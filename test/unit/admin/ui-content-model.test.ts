@@ -15,6 +15,7 @@ import {
   isAll,
   isNarrowed,
   isSelected,
+  isStoryId,
   type Level,
   type LevelRow,
   type Levels,
@@ -811,6 +812,27 @@ describe('withFilter and withView', () => {
   it('switching to Flat keeps everything, because flat can express every filter', () => {
     const treeish: ContentUrl = { ...base(), view: 'tree', state: 'all' }
     expect(withView(treeish, 'flat')).toEqual({ ...treeish, view: 'flat' })
+  })
+})
+
+/**
+ * The screen on the one thing here that reads ids back out of `localStorage`: the
+ * remembered expanded set. A stale id is harmless — a node that no longer exists is
+ * never drawn, so it is never asked for — but a value that was never an id would be
+ * spliced into a request URL.
+ */
+describe('isStoryId', () => {
+  it('accepts the alphabet the server screens on', () => {
+    for (const id of ['sty_home', 'sty_a-b.c:d', 'ABC123', '#root'.slice(1)]) {
+      expect(isStoryId(id)).toBe(true)
+    }
+  })
+
+  it('refuses anything a request could not carry', () => {
+    // `#root` is the level key for the top level, and never a member of the set.
+    for (const junk of ['', '#root', 'a b', 'a/b', 'a,b', '../etc', 'sty?x=1']) {
+      expect(isStoryId(junk)).toBe(false)
+    }
   })
 })
 

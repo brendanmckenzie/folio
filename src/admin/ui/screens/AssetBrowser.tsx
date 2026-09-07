@@ -1,4 +1,4 @@
-import type { KeyboardEvent, ReactNode } from 'react'
+import type { KeyboardEvent, ReactNode, RefObject } from 'react'
 import { useRef, useState } from 'react'
 import type {
   AssetBulkAction,
@@ -12,6 +12,7 @@ import { Button } from '../Button'
 import { Dialog } from '../Dialog'
 import { EmptyState } from '../EmptyState'
 import { Field, Input, Select } from '../Field'
+import { columnsOf } from '../fit'
 import { type Column, Table } from '../Table'
 import {
   addedAgo,
@@ -56,9 +57,21 @@ import { type TagsData, useTags } from './useTags'
 const TILE_WIDTH = 320
 const CELL_WIDTH = 96
 
-/** Placeholder tiles and rows. Named rather than indexed, matching Content's and
- * Documents'. */
-const SKELETONS = ['s1', 's2', 's3', 's4', 's5', 's6', 's7', 's8', 's9', 's10', 's11', 's12']
+/**
+ * Placeholder tiles and rows. Named rather than indexed, matching Content's and
+ * Documents'.
+ *
+ * **Twenty-four rather than twelve**, and the extra dozen is load-bearing rather than
+ * decorative: the first page's size is measured from these, and `columnsOf` can only
+ * count the cells that are there. Twelve is under one row on a wide monitor, so the
+ * grid was measured as twelve columns wide however many it really was — and the page
+ * then came back a multiple of twelve, ending in the ragged half-row the whole
+ * arithmetic exists to avoid. Twenty-four covers two full rows out past 4K.
+ *
+ * It also simply looks more like a grid while it loads, which twelve stopped doing
+ * once a row held thirteen.
+ */
+const SKELETONS = Array.from({ length: 24 }, (_, i) => `s${i + 1}`)
 
 const SORTS: readonly { value: AssetSort; label: string }[] = [
   { value: 'created', label: 'Date added' },
@@ -81,6 +94,16 @@ export interface AssetBrowserProps {
   onUrl: (next: AssetsUrl) => void
   data: AssetsData
   upload: Uploads
+  /**
+   * The results scroller, handed up so the mount can measure it.
+   *
+   * The mount owns the page size — it is what calls `useAssets` — and the box that
+   * decides it is three components down. Passing the ref down is the smaller of the
+   * two arrangements: the alternative is a `onFit` callback and a second copy of the
+   * measuring in each mount, which is how the screen and the picker start disagreeing
+   * about what a page holds.
+   */
+  resultsRef?: RefObject<HTMLDivElement | null>
   /** The row this surface is pointing at. What that *means* is the mount's business
    * — see the header. */
   selected: string | undefined
@@ -784,17 +807,29 @@ export function AssetBrowser(props: AssetBrowserProps) {
             empty state sitting outside the scroller would size the frame differently
             from the thing that replaces it.
           */}
-          <div className={css.results}>
+          <div className={css.results} ref={props.resultsRef ?? null}>
             {firstLoad ? (
               // Skeleton tiles and rows, not a spinner: both have a known shape, so the
               // screen does not jump when the answer lands.
               <div
-                className={url.view === 'grid' ? css.skeletonGrid : css.skeletonRows}
+                // `.grid` itself, not a copy of it, so the skeletons sit exactly where
+                // the tiles will — including the picker's narrower columns, which a
+                // `.skeletonGrid` of its own had quietly stopped matching.
+                className={
+                  url.view === 'grid'
+                    ? `${css.grid} ${compact ? css.gridCompact : ''}`
+                    : css.skeletonRows
+                }
                 aria-hidden="true"
               >
-                {SKELETONS.slice(0, url.view === 'grid' ? 12 : 6).map((key) => (
+                {SKELETONS.slice(0, url.view === 'grid' ? 24 : 8).map((key) => (
                   <div
                     className={url.view === 'grid' ? css.skeletonTile : css.skeletonRow}
+                    // Measurable, because the first page's size is decided from what
+                    // is on screen and this is what is on screen. A skeleton is the
+                    // same shape as the thing it stands in for — that is why it beats
+                    // a spinner — so it is also the right thing to measure.
+                    data-fit=""
                     key={key}
                   />
                 ))}
@@ -2292,6 +2327,11 @@ function Tile({
     // at all and every tile was its own tab stop.
     <div
       data-tile=""
+      // Two attributes rather than one selector doing both jobs. `data-tile` is the
+      // grid's own traversal — arrow keys move between tiles and nothing else —
+      // while `data-fit` marks a cell the pager may measure, and the skeleton and
+      // the table row carry that one too without ever being tiles.
+      data-fit=""
       role="option"
       aria-selected={selected}
       tabIndex={focusable ? 0 : -1}
@@ -2431,24 +2471,4 @@ function Empty({
       action={children}
     />
   )
-}
-
-/**
- * How many tiles are in a row, measured rather than declared.
- *
- * `repeat(auto-fill, minmax(…))` decides the count from the available width, so the
- * only place the number exists is the rendered layout: a CSS custom property would
- * have to be kept in step with the grid template by hand, in a second file, and
- * would be wrong at every breakpoint nobody remembered to update. Counting the tiles
- * that share the first one's `offsetTop` asks the browser what it did.
- */
-function columnsOf(tiles: readonly HTMLElement[]): number {
-  const top = tiles[0]?.offsetTop
-  if (top === undefined) return 1
-  let n = 0
-  for (const tile of tiles) {
-    if (tile.offsetTop !== top) break
-    n += 1
-  }
-  return Math.max(1, n)
 }

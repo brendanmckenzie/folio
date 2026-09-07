@@ -169,8 +169,63 @@ describe('listRecentPublishes', () => {
     expect(page.rows.map((r) => r.version.storyId)).toEqual(['sty_about'])
   })
 
+  /**
+   * The whole point of the `not exists`. A page published five times in an afternoon
+   * used to fill five of the six rows this block draws — the editor's activity,
+   * reported as the site's.
+   */
+  it('answers one row per story: the latest publish, not every publish', async () => {
+    await publish('sty_about', 1000)
+    await publish('sty_about', 2000)
+    await publish('sty_about', 3000)
+    await publish('sty_team', 1500)
+
+    const page = await listRecentPublishes(env.DB, { limit: 10 })
+    expect(page.rows.map((r) => r.version.storyId)).toEqual(['sty_about', 'sty_team'])
+    // The *latest* one, so the title and the actor are the ones that went live last.
+    expect(page.rows[0]?.version.createdAt).toBe(3000)
+  })
+
+  /**
+   * The tiebreak, and the reason the predicate compares `id` as well as `created_at`.
+   * Two publishes of one story in the same millisecond are ordinary for a
+   * programmatic writer, and a predicate comparing only the timestamp keeps both —
+   * the bug above, back at the one moment it is hardest to reproduce.
+   */
+  it('keeps one of two publishes that share a timestamp', async () => {
+    await env.DB.prepare(
+      `insert into versions (id, story_id, kind, label, title, actor, created_at, doc)
+       values ('ver_a', 'sty_about', 'publish', null, 'A', null, 1000, '{}'),
+              ('ver_b', 'sty_about', 'publish', null, 'B', null, 1000, '{}')`,
+    ).run()
+
+    const page = await listRecentPublishes(env.DB, { limit: 10 })
+    expect(page.rows).toHaveLength(1)
+    // `NEWEST_FIRST`'s tiebreak is `id desc`, so the survivor is the higher id.
+    expect(page.rows[0]?.version.id).toBe('ver_b')
+  })
+
+  /**
+   * A checkpoint after a publish must not hide the publish. The predicate filters
+   * `kind = 'publish'` on **both** sides, so a private save point neither appears
+   * itself nor counts as a later publish of the same story.
+   */
+  it('does not let a later checkpoint suppress a story’s publish', async () => {
+    await publish('sty_about', 1000)
+    await publish('sty_about', 4000, 'checkpoint')
+
+    const page = await listRecentPublishes(env.DB, { limit: 10 })
+    expect(page.rows.map((r) => r.version.createdAt)).toEqual([1000])
+  })
+
   it('pages over a cursor', async () => {
-    for (const at of [1000, 2000, 3000, 4000]) await publish('sty_about', at)
+    // One publish each, because the list is now one row per story: four publishes of
+    // one page are one row and would page in a single step.
+    await publish('sty_home', 1000)
+    await publish('sty_about', 2000)
+    await publish('sty_team', 3000)
+    const fourth = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
+    await publish(fourth.id, 4000)
 
     const first = await listRecentPublishes(env.DB, { limit: 2 })
     expect(first.rows).toHaveLength(2)

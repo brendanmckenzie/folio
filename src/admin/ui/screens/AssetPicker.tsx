@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { AssetValue } from '../../../core/values'
 import { Button } from '../Button'
 import { Dialog } from '../Dialog'
@@ -14,7 +14,8 @@ import {
 } from './assets-model'
 import { AssetBrowser } from './AssetBrowser'
 import css from './Assets.module.css'
-import { useAsset, useAssets, useDropTarget, useUploads } from './useAssets'
+import { useFittedPage } from '../fit'
+import { ASSETS_FIT, useAsset, useAssets, useDropTarget, useUploads } from './useAssets'
 
 /**
  * The remembered view, shared with the screen.
@@ -106,7 +107,17 @@ export function AssetPicker({ apiBase, mount, accept, onPick, onClose }: AssetPi
   }))
   const [selected, setSelected] = useState<string | undefined>(undefined)
 
-  const data = useAssets(apiBase, url)
+  /**
+   * The page size, fitted to the viewport rather than fixed.
+   *
+   * `null` on the first render and a number by the first layout effect, which is why
+   * `useAssets` refuses to fetch until it has one: the size is decided from the
+   * skeletons `AssetBrowser` has already put in the box, so opening this screen is
+   * still exactly one request.
+   */
+  const results = useRef<HTMLDivElement>(null)
+  const pageSize = useFittedPage(results, ASSETS_FIT)
+  const data = useAssets(apiBase, url, pageSize)
 
   // Selected, not chosen. The file somebody just dropped in is almost certainly the
   // one they want, but committing on their behalf would close the dialog and write a
@@ -168,6 +179,7 @@ export function AssetPicker({ apiBase, mount, accept, onPick, onClose }: AssetPi
       */}
       <div className={css.dropZone} {...drop.handlers}>
         <AssetBrowser
+          resultsRef={results}
           apiBase={apiBase}
           mount={mount}
           url={url}

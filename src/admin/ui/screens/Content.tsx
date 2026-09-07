@@ -1,5 +1,5 @@
 import type { CSSProperties, KeyboardEvent } from 'react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { DocumentType, SchemaIndex } from '../../../core/schema'
 import type { StoryBulkAction, FlatSort } from '../../../core/story'
 import type { BulkRefusal } from '../../../core/bulk'
@@ -9,6 +9,7 @@ import { EmptyState } from '../EmptyState'
 import { List, ListHeader, Row } from '../List'
 import { Menu } from '../Menu'
 import { href, type Screen } from '../route'
+import { useRememberedSet } from '../remembered'
 import {
   actionsFor,
   allShownSelected,
@@ -24,6 +25,7 @@ import {
   isAll,
   isNarrowed,
   isSelected,
+  isStoryId,
   type LevelRow,
   type Matchable,
   type Move,
@@ -143,7 +145,20 @@ export function Content(props: Props) {
   const filter = filterOf(url)
   const data = useContent(apiBase, url)
 
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set())
+  /**
+   * Which nodes are open — **remembered, and deliberately not in the URL**.
+   *
+   * `ContentUrl` states the second half: a link to a page in a tree is a link to the
+   * page, not to a particular shape of tree. But the shape is still *yours*, and this
+   * screen unmounts every time you open a document — so without a memory, walking
+   * into a page three levels down and pressing back collapsed the whole tree and left
+   * you to find your way there again. The same rule the view and the sort already
+   * get: linkable first, convenient second.
+   */
+  const { value: expanded, toggle: toggleExpanded } = useRememberedSet(
+    'folio.content.expanded',
+    isStoryId,
+  )
   const [selection, setSelection] = useState<Selection>(NOTHING)
   const [moving, setMoving] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -209,18 +224,39 @@ export function Content(props: Props) {
   const total = url.view === 'tree' ? rootLevel?.total : data.flat.total
 
   const toggleOpen = (row: LevelRow) => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (!next.delete(row.id)) {
-        next.add(row.id)
-        // Asked for on expand rather than up front, which is the whole point of
-        // per-level loading. `openLevel` is idempotent, so re-opening a node
-        // already fetched costs no request.
-        data.openLevel(row.id)
-      }
-      return next
-    })
+    const opening = !expanded.has(row.id)
+    toggleExpanded(row.id)
+    // Asked for on expand rather than up front, which is the whole point of
+    // per-level loading. `openLevel` is idempotent, so re-opening a node already
+    // fetched costs no request — and it *does* re-ask for a level that failed, which
+    // is why the gesture keeps its own call rather than leaving everything to the
+    // effect below: that one deliberately never retries.
+    if (opening) data.openLevel(row.id)
   }
+
+  /**
+   * The levels a remembered expansion needs, asked for as they become **visible**.
+   *
+   * Restoring is not "fetch every id in `expanded`". An expanded node inside a
+   * collapsed ancestor is never drawn, so fetching it would be a request for rows
+   * nobody can see; and a person who has browsed a large tree for a week has
+   * remembered rather a lot of them. Walking the *visible* rows instead makes the
+   * restore breadth-first and self-limiting — the root arrives, its open children
+   * become visible and are asked for, theirs become visible next — so the cost is
+   * the depth of what is on screen rather than the size of the memory.
+   *
+   * Guarded on the level being **absent**, not on `openLevel`'s own idempotence. A
+   * level that failed is present-with-an-error, and `openLevel` retries one of
+   * those: from an effect that re-runs on every change to `levels`, that is a failed
+   * request in a loop. Retrying is the twisty's job, above.
+   */
+  useEffect(() => {
+    if (url.view !== 'tree') return
+    for (const row of rows) {
+      if (row.kind !== 'story' || !row.expanded) continue
+      if (!data.levels[row.row.id]) data.openLevel(row.row.id)
+    }
+  }, [url.view, rows, data.levels, data.openLevel])
 
   /* -------------------------------------------------------------- keyboard --- */
 
