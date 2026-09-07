@@ -26,6 +26,7 @@ import {
   storyLabel,
   type StoryTitles,
   whyNotRun,
+  whyNothingToRun,
 } from './model-model'
 import { useModel, useStoryTitles } from './useModel'
 
@@ -154,11 +155,16 @@ export function Model({ apiBase, mount, me, onNotice }: Props) {
                 buttons explain themselves rather than being absent: absent is for a
                 control that could never act, and this one acts for the person one
                 seat over.
+
+                They are also disabled when **nothing is declared** to run
+                (`whyNothingToRun`), which is the state this site is in and the state
+                they used to lie about: enabled, and a click that walked every
+                document to apply none of them.
               */}
               <Button
                 size="sm"
-                disabled={!mayRun || data.run?.running === true}
-                reason={whyNotRun(me) ?? 'A run is in flight'}
+                disabled={!mayRun || rows.length === 0 || data.run?.running === true}
+                reason={whyNotRun(me) ?? whyNothingToRun(rows.length) ?? 'A run is in flight'}
                 onClick={() => data.start({ dryRun: true })}
               >
                 Preview
@@ -166,8 +172,8 @@ export function Model({ apiBase, mount, me, onNotice }: Props) {
               <Button
                 variant="primary"
                 size="sm"
-                disabled={!mayRun || data.run?.running === true}
-                reason={whyNotRun(me) ?? 'A run is in flight'}
+                disabled={!mayRun || rows.length === 0 || data.run?.running === true}
+                reason={whyNotRun(me) ?? whyNothingToRun(rows.length) ?? 'A run is in flight'}
                 onClick={() => data.start({ dryRun: false })}
               >
                 Run

@@ -92,6 +92,26 @@ export function whyNotRun(me: Me): string | undefined {
     : `Your role (${actor.role}) may not run a migration; admin is required`
 }
 
+/**
+ * The *other* reason Preview and Run cannot act: there is nothing declared for
+ * them to run.
+ *
+ * A site with no `migrations` option had both buttons enabled, and clicking
+ * either walked every document, applied nothing, and reported a run of zero —
+ * indistinguishable from a broken button, and reported as "I'm not really sure
+ * what preview/run are meant to do but they don't seem to be doing much". The
+ * empty state directly above them already explains what a migration is; the
+ * buttons now agree with it instead of contradicting it.
+ *
+ * Separate from `whyNotRun` because the two answer different questions and the
+ * caller shows whichever applies first: a non-admin on a site with no migrations
+ * should be told about the permission, since that is the one that would still
+ * refuse them once a migration exists.
+ */
+export function whyNothingToRun(declared: number): string | undefined {
+  return declared === 0 ? 'No content migrations are declared' : undefined
+}
+
 /* ------------------------------------------------------------ migrations --- */
 
 /**
@@ -434,6 +454,28 @@ const GROUPS: Record<AuditGroup['kind'], { title: string; body: string }> = {
     title: 'In the schema',
     body: 'Mistakes in the declarations themselves. No document is involved — these are code faults, and every one of them is silent at runtime, which is the reason they are reported at all.',
   },
+}
+
+/**
+ * **What to do about a fault in this group**, one sentence, per group rather than
+ * per check.
+ *
+ * Home's *Needs attention* block names the fault and then this, because a fault
+ * with no stated remedy is not actionable however precisely it is named
+ * (`home-model.ts`'s `attention` argues the granularity). The Model screen does
+ * not draw these: there, the group's own `body` and the family's are on screen
+ * together and have the room to say it properly.
+ *
+ * `stories` is the vague one, and honestly so — its checks range from a document
+ * of an undeclared type to one approaching the size cap, and the only thing they
+ * share is that the document itself is what needs opening.
+ */
+export const REMEDIES: Record<AuditGroup['kind'], string> = {
+  content:
+    'Fix in a content migration, then Preview and Run it on Content model. Nothing here is broken on the live site.',
+  stories: 'Open the documents on Content model; each needs its own decision.',
+  schema:
+    "A code fault: fix the declaration in this site's createFolio call. No document is involved.",
 }
 
 /**

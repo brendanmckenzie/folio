@@ -16,6 +16,7 @@ import {
   type RunState,
   runNotice,
   storyLabel,
+  whyNothingToRun,
   whyNotRun,
 } from '../../../src/admin/ui/screens/model-model'
 import type { ContentFinding, SchemaFinding, StoryFinding } from '../../../src/server/audit'
@@ -83,6 +84,16 @@ describe('who may run a migration', () => {
     expect(whyNotRun({ mode: 'session', actor: null, loginUrl: '/l' })).toBe(
       'Sign in to run a migration',
     )
+  })
+
+  /*
+   * The other reason the buttons cannot act, and the one they used to lie about:
+   * on a site with no `migrations` option both were enabled, and clicking either
+   * walked every document to apply nothing.
+   */
+  it('refuses a run when nothing is declared to run', () => {
+    expect(whyNothingToRun(0)).toBe('No content migrations are declared')
+    expect(whyNothingToRun(1)).toBeUndefined()
   })
 })
 
