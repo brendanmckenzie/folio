@@ -850,18 +850,17 @@ describe('publishStatus', () => {
  * that had just been published. It went unnoticed because nothing asserted the
  * connection existed and every unit test calls `publishStatus` directly.
  *
- * A source-text assertion because the admin's suite mounts no components
- * (`vitest.config.ts`). It proves the prop is passed, which is the thing that was
- * missing; it cannot prove the fetch resolves.
+ * A source-text assertion because what it checks is a prop passed at a call site
+ * rather than anything a rendered tree would show. This comment used to say the
+ * admin's suite mounts no components, which stopped being true when #14 added the
+ * `render` project (`test/unit/admin/render/**`, `environment: 'happy-dom'`) —
+ * this file is still in `unit`, on Node, and wants nothing else.
  */
 describe('the open row is refreshed after a write', () => {
-  const prototype = readFileSync(
-    new URL('../../../src/admin/ui/Prototype.tsx', import.meta.url),
-    'utf8',
-  )
+  const admin = readFileSync(new URL('../../../src/admin/ui/Admin.tsx', import.meta.url), 'utf8')
 
   it('passes onStoryChanged down to the editor', () => {
-    expect(prototype).toMatch(/onStoryChanged=\{a\.onStoryChanged\}/)
+    expect(admin).toMatch(/onStoryChanged=\{a\.onStoryChanged\}/)
   })
 
   it('refreshes a global from the singleton call, not from useStory', () => {
@@ -869,8 +868,8 @@ describe('the open row is refreshed after a write', () => {
     // derived id and the boot's `?kind=singleton` call is what holds it — so
     // `fetched.reload` would refresh nothing for the one screen most likely to be
     // publishing: a global.
-    expect(prototype).toMatch(/const onStoryChanged = local \? reloadGlobals : fetched\.reload/)
-    expect(prototype).toContain('documents?kind=singleton')
+    expect(admin).toMatch(/const onStoryChanged = local \? reloadGlobals : fetched\.reload/)
+    expect(admin).toContain('documents?kind=singleton')
   })
 })
 

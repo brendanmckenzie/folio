@@ -25,7 +25,7 @@ import type { StoryMeta } from '../../../src/core/story'
  *
  * **`scripts/space-test.mjs` cannot see this feature.** It drives the server over
  * a real socket and asserts the peer list and presence, and it passes identically
- * with the mount removed from `Prototype.tsx` — verified by removing it. The e2e
+ * with the mount removed from `Admin.tsx` — verified by removing it. The e2e
  * tier proves the channel works; nothing there proves anybody is listening.
  */
 
@@ -296,14 +296,10 @@ describe('SpaceAvatars', () => {
  *
  * Also note `readFileSync` runs in the `describe` body, so a **rename of the file
  * below breaks all 27 tests in this file at collection**, not the three that read
- * it. #2 renames `ui/Prototype.tsx` to `ui/Admin.tsx`; this path has to move with
- * it.
+ * it. The path is to `ui/Admin.tsx` and must move when the file is renamed.
  */
 describe('the shell mounts the channel', () => {
-  const shell = readFileSync(
-    new URL('../../../src/admin/ui/Prototype.tsx', import.meta.url),
-    'utf8',
-  )
+  const shell = readFileSync(new URL('../../../src/admin/ui/Admin.tsx', import.meta.url), 'utf8')
 
   it('calls `useSpace`, which nothing did for five weeks', () => {
     expect(shell).toMatch(/useSpace\(\{/)

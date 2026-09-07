@@ -92,7 +92,7 @@ interface Props {
    *
    * **Optional, and the screen is correct without it**: `createForm` falls back to
    * `Title`, which is what every declared `page` type's title field is called in
-   * practice. It is optional rather than required because `Prototype.tsx` does not
+   * practice. It is optional rather than required because `Admin.tsx` does not
    * pass it yet and that file is not this screen's to edit; the fix there is one
    * line, `schema={a.schema}`, and `a.schema` is already in scope.
    */
@@ -103,7 +103,7 @@ interface Props {
   /**
    * Hands this screen's `reload` to the shell, which calls it when the space
    * channel reports that somebody *else* moved, published or deleted a page
-   * (`Prototype.tsx`'s `listReload`). Registered in an effect and unregistered on
+   * (`Admin.tsx`'s `listReload`). Registered in an effect and unregistered on
    * unmount, so the shell never holds a stale closure over a screen that is gone.
    */
   registerReload: (reload: (() => void) | null) => void
@@ -166,7 +166,7 @@ export function Content(props: Props) {
    *
    * Both entries in the dependency array are values the body reads, which is the
    * reason this is a registration rather than a counter prop the effect watches —
-   * see `Prototype.tsx`'s `listReload`, and `useContent`'s `reload`, which had
+   * see `Admin.tsx`'s `listReload`, and `useContent`'s `reload`, which had
    * already rejected the counter shape inside this screen's own data hook.
    *
    * Note what `data.reload` does in tree mode: it drops every expanded level and

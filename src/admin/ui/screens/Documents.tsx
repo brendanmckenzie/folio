@@ -54,7 +54,7 @@ interface Props {
   /**
    * Hands this screen's `reload` to the shell, which calls it when the space
    * channel reports that somebody *else* created, published or deleted a
-   * document (`Prototype.tsx`'s `listReload`). Registered in an effect and
+   * document (`Admin.tsx`'s `listReload`). Registered in an effect and
    * unregistered on unmount, so the shell never holds a stale closure over a
    * screen that is gone.
    */
@@ -114,7 +114,7 @@ export function Documents(props: Props) {
 
   /**
    * The shell's handle on this screen's page. A registration rather than a
-   * counter prop, for the reason on `Prototype.tsx`'s `listReload`: both
+   * counter prop, for the reason on `Admin.tsx`'s `listReload`: both
    * dependencies here are values the body reads.
    */
   const { registerReload } = props

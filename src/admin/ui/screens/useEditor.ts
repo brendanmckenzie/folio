@@ -67,7 +67,7 @@ export interface EditorOptions {
    * unpublish moved its state, and it is the *caller's* row.
    *
    * The seam is here rather than a second fetch of the same row from in here,
-   * which is how two views of one document start disagreeing. `Prototype` supplies
+   * which is how two views of one document start disagreeing. `Admin` supplies
    * it; `useStory` grew a `reload` for the purpose, and a global's row is refreshed
    * from the boot's singleton call instead, because that is where it came from.
    *

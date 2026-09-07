@@ -241,7 +241,7 @@ export const EDITOR_UNKNOWN_NOTE =
  * the page tree entirely rather than squatting a URL". `path === ''` is the home
  * page, whose path is genuinely the empty string, and `/` is what a person reads
  * that as. The same three cases the palette's hint distinguishes
- * (`Prototype.tsx`'s `usePaletteActions`), and stated here instead of a fourth time
+ * (`Admin.tsx`'s `usePaletteActions`), and stated here instead of a fourth time
  * because this is the second list to need them.
  */
 export function placeOf(

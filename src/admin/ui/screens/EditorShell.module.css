@@ -34,7 +34,7 @@
  * The second breakpoint's other half — the shell's own sidebar — is
  * `Sidebar.module.css`'s to write, and it is not this phase's file. What is here is
  * the editor's *left* column, which is what `⌘\` means inside the editor
- * (`Prototype.tsx` resolves that ambiguity by context) and which has the same
+ * (`Admin.tsx` resolves that ambiguity by context) and which has the same
  * problem at the same width.
  */
 

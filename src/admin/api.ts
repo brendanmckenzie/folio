@@ -13,7 +13,7 @@
  */
 
 /**
- * What to do about a 401, registered by the shell (`ui/Prototype.tsx`) once `/me`
+ * What to do about a 401, registered by the shell (`ui/Admin.tsx`) once `/me`
  * has answered.
  *
  * A callback rather than a `window.location.assign` inline, for two reasons: this

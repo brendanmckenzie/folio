@@ -127,7 +127,7 @@ describe('the styling scope', () => {
   /**
    * The portal sweep above asks "does this file portal?", and that is the wrong
    * question by one case. `Toast` is rendered as a *sibling* of `Shell`
-   * (`Prototype.tsx`), so it is already at the root of the tree and has no reason
+   * (`Admin.tsx`), so it is already at the root of the tree and has no reason
    * to portal — and it was outside `.folio-ui` all the same, inheriting nothing.
    * It shipped, and was reported as a toast in Times.
    *

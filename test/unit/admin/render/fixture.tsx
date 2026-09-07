@@ -21,7 +21,7 @@ import { render } from '@testing-library/react'
 import { act } from 'react'
 import type { Manifest } from '../../../../src/core/schema'
 import { type Me, OPEN } from '../../../../src/admin/me'
-import { Prototype } from '../../../../src/admin/ui/Prototype'
+import { Admin } from '../../../../src/admin/ui/Admin'
 
 export const MOUNT = '/folio'
 export const API = '/folio/api'
@@ -419,14 +419,14 @@ export function stubFetch(me: Me = ADMIN): string[] {
  *
  * **The shell rather than the screen**, and that is the point of the file: the
  * props every screen actually receives are assembled by `screenFor` in
- * `Prototype.tsx`, so a test that hand-rolls them is testing its own idea of the
+ * `Admin.tsx`, so a test that hand-rolls them is testing its own idea of the
  * wiring. Mounting at a URL exercises the real thing — which is also how a screen
  * that renders only when the manifest has landed gets covered in both states.
  */
 export async function mountAt(path: string, me: Me = ADMIN) {
   const asked = stubFetch(me)
   window.history.replaceState(null, '', path)
-  const result = render(<Prototype boot={BOOT} />)
+  const result = render(<Admin boot={BOOT} />)
   // Four flushes, not one: the boot's `Promise.all` resolves, which renders the
   // screen, whose own effect fetches, whose answer sets state that a *third*
   // effect reads — the editor's row and the form builder's label are both three

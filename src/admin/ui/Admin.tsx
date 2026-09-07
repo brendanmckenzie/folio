@@ -68,7 +68,7 @@ import { globalPreviewUrl, usePreviewHost, useStory } from './useStory'
  * *site*, and the client reads it once and holds it for the session, so a route
  * that forgets to fill it is a feature that stays off through every navigation.
  */
-export interface PrototypeBoot {
+export interface AdminBoot {
   /**
    * Where Folio is mounted, and therefore where every screen lives: the router is
    * relative to it, which is what made the prefix move free on the client.
@@ -96,7 +96,7 @@ export interface PrototypeBoot {
  * each asking for the ids or paths it needs
  * (`docs/specs/foundation/pagination.md` decision 7).
  */
-export function Prototype({ boot }: { boot: PrototypeBoot }) {
+export function Admin({ boot }: { boot: AdminBoot }) {
   const { route, go, replace } = useRouter(boot.base)
   const [manifest, setManifest] = useState<Manifest | null>(null)
   const [me, setMe] = useState<Me>(OPEN)
@@ -623,7 +623,7 @@ const isSort = (raw: string): raw is FlatSort =>
 
 interface ScreenArgs {
   route: ReturnType<typeof useRouter>['route']
-  boot: PrototypeBoot
+  boot: AdminBoot
   loading: boolean
   /** The open document's own fetch is in flight (`useStory`). Distinct from
    * `loading`, which is the shell's boot: only the editor cares about the

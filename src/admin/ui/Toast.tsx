@@ -14,7 +14,7 @@ import { scoped } from './scope'
  * reflow a control somebody is about to click.
  *
  * **`scoped`, and it is not optional.** This is rendered as a *sibling* of
- * `Shell` (`Prototype.tsx`), so unlike everything else in the admin it is not
+ * `Shell` (`Admin.tsx`), so unlike everything else in the admin it is not
  * inside the shell's `.folio-ui` and inherits nothing from it — which shipped,
  * and showed up as a toast rendered in the browser's default serif. `Times` was
  * the visible half; it was also missing `box-sizing: border-box` and the one

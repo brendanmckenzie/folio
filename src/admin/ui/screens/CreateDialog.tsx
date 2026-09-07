@@ -166,7 +166,7 @@ export function CreateDialog({
  * no title field from one whose definition it simply has not been handed, and
  * guessing the second wrote *"Page has no title field"* under a `page` — false, and
  * it reads as a broken schema rather than as a missing prop. Silence is the honest
- * third answer, and it is what Content shows until `Prototype.tsx` passes its
+ * third answer, and it is what Content shows until `Admin.tsx` passes its
  * schema down.
  *
  * The genuinely absent case is still asked for a name and still keeps it: the value
