@@ -18,10 +18,12 @@ interface Props {
 }
 
 /**
- * The top bar: **a breadcrumb, not a title** (`docs/ui-architecture.md`, the
- * shell). That is the fix for the review's finding that a record opened from a
- * list had no way back to it — every segment but the last is a link, and the last
- * is where you are.
+ * The top bar: **the trail and the screen's heading at once** (`docs/ui-architecture.md`,
+ * the shell; issue #8 for the second half). Every segment but the last is a link —
+ * which is the fix for the review's finding that a record opened from a list had
+ * no way back to it — and the last segment is both where you are and what the
+ * screen is called: it renders as the page's one `h1`, so a screen names itself by
+ * being found rather than by rendering its own title a second time underneath.
  *
  * 40px, one hairline, and nothing on it that belongs to a screen. Per-screen
  * actions live on the screen, where the thing they act on is.
@@ -35,7 +37,13 @@ export function TopBar({ crumbs, mount, presence, onSearch, actor, user }: Props
           // the text for the last one — of which there is exactly one. Unique
           // without an index, so React reuses the right node when a trail grows a
           // level rather than reusing by position.
-          <span className={css.crumb} key={crumb.screen ? href(crumb.screen, mount) : crumb.text}>
+          //
+          // A `div` and not a `span`, which it was until the last crumb became an
+          // `h1`: a `span` may only contain phrasing content, and a heading is flow
+          // content. Nothing renders differently — `.crumb` sets `display` itself —
+          // and React does not warn about this pair, so the invalid nesting would
+          // have been invisible in every test and every browser.
+          <div className={css.crumb} key={crumb.screen ? href(crumb.screen, mount) : crumb.text}>
             {i > 0 ? (
               <span className={css.sep} aria-hidden="true">
                 /
@@ -46,11 +54,11 @@ export function TopBar({ crumbs, mount, presence, onSearch, actor, user }: Props
                 {crumb.text}
               </a>
             ) : (
-              <span className={css.here} aria-current="page">
+              <h1 className={css.here} aria-current="page">
                 {crumb.text}
-              </span>
+              </h1>
             )}
-          </span>
+          </div>
         ))}
       </nav>
 

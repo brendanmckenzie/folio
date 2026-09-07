@@ -146,7 +146,6 @@ export function Forms({ apiBase, me, onOpen, onNotice }: Props) {
   if (data.page.error && data.page.rows.length === 0) {
     return (
       <div className={css.screen}>
-        <ListHeader level={1}>Forms</ListHeader>
         <EmptyState
           title="Could not load forms"
           body={data.page.error}
@@ -165,7 +164,6 @@ export function Forms({ apiBase, me, onOpen, onNotice }: Props) {
   return (
     <div className={css.screen}>
       <ListHeader
-        level={1}
         actions={
           canEdit(me) ? (
             <Button variant="primary" size="sm" onClick={() => setCreating(true)}>
@@ -173,9 +171,7 @@ export function Forms({ apiBase, me, onOpen, onNotice }: Props) {
             </Button>
           ) : undefined
         }
-      >
-        Forms
-      </ListHeader>
+      />
 
       {firstLoad ? (
         <div className={css.skeletons} aria-hidden="true">

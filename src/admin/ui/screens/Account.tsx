@@ -153,7 +153,6 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
   if (gate.kind === 'open') {
     return (
       <div className={css.screen}>
-        <ListHeader level={1}>Your account</ListHeader>
         <EmptyState
           title="This deployment has no accounts"
           body="`auth` is not configured on the host Worker, so there is nobody signed in and nothing here to show."
@@ -164,7 +163,6 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
   if (gate.kind === 'anonymous') {
     return (
       <div className={css.screen}>
-        <ListHeader level={1}>Your account</ListHeader>
         <EmptyState
           title="Sign in to see your account"
           body="Passkeys, sessions and sign-in history are only shown to a signed-in person."
@@ -180,7 +178,6 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
   if (gate.kind === 'token') {
     return (
       <div className={css.screen}>
-        <ListHeader level={1}>Your account</ListHeader>
         <EmptyState
           title="A token has no account"
           body="This session is authenticated by an API token, which has no passkeys and no browser of its own to sign out."
@@ -302,8 +299,6 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
 
   return (
     <div className={css.screen}>
-      <ListHeader level={1}>Your account</ListHeader>
-
       <section className={css.section} aria-label="Identity">
         <ListHeader>Identity</ListHeader>
         <dl className={css.identity}>
@@ -540,7 +535,6 @@ function Skeleton() {
 function Booting() {
   return (
     <div className={css.screen}>
-      <ListHeader level={1}>Your account</ListHeader>
       {(['Identity', 'Passkeys', 'Sessions', 'Recent sign-ins'] as const).map((label) => (
         <section className={css.section} key={label} aria-label={label}>
           <ListHeader>{label}</ListHeader>

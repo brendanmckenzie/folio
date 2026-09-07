@@ -22,7 +22,6 @@ import {
   quickCards,
   RECENT_LIMIT,
 } from './home-model'
-import { ListHeader } from '../List'
 import css from './Home.module.css'
 import { messageOf } from './useContent'
 import { type Block, useHome } from './useHome'
@@ -98,13 +97,12 @@ const TILE_WIDTH = 320
  *    it was on screen.
  *
  * The section headings are `h2` under the screen's own `h1`, and **not**
- * `ListHeader`, for a reason that survives even though `ListHeader` now has a
- * screen-title register: it emits a heading with no `id`, so a
+ * `ListHeader`, because it emits a heading with no `id`, so a
  * `<section aria-labelledby>` has nothing to point at. Model — the only other screen
- * with several sections — reached the same conclusion independently. The title itself
- * *is* `ListHeader level={1}`, so all eight screens name themselves the same way;
- * this screen rolled its own `h1` first, which is what exposed the fact that every
- * other one had no `h1` at all.
+ * with several sections — reached the same conclusion independently. The screen's
+ * own `h1` is the breadcrumb's last crumb now (issue #8, `TopBar.tsx`); before that
+ * it was this screen's own, hand-rolled — this screen rolling one first is what
+ * exposed the fact that every other platform screen had no `h1` at all.
  *
  * Two blocks carry no "see all" link, and that is a real absence rather than an
  * oversight: **no screen lists recency across every type.** Content's flat mode
@@ -139,8 +137,6 @@ export function Home({ apiBase, mount, types, globals, me, onOpen, onNotice }: P
 
   return (
     <div className={css.screen}>
-      <ListHeader level={1}>Home</ListHeader>
-
       <QuickAccess
         cards={cards}
         mount={mount}

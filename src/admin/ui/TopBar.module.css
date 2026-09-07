@@ -70,9 +70,19 @@
   outline-offset: 2px;
 }
 
+/*
+ * The screen's `h1` (issue #8) — heading type, matching `List.module.css`'s old
+ * `.headerScreen` exactly, since it replaces what that register used to draw.
+ *
+ * `margin: 0` is load-bearing and not the usual reset: an `h1`'s default margin
+ * would grow the bar past the 40px the editor's `100vh - 40px` preview depends on.
+ */
 .here {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--fg);
-  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
 }

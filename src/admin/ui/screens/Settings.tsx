@@ -93,7 +93,6 @@ export function Settings(props: Props) {
   const header = (
     <div className={css.head}>
       <ListHeader
-        level={1}
         actions={
           <input
             className={css.search}
@@ -104,9 +103,7 @@ export function Settings(props: Props) {
             onChange={(e) => onQuery(settingsQuery({ q: e.target.value }))}
           />
         }
-      >
-        Settings
-      </ListHeader>
+      />
     </div>
   )
 
@@ -188,12 +185,14 @@ export function Settings(props: Props) {
 /**
  * A section's frame.
  *
- * **`h2`, and it used to be an `h3` for a reason that expired.** The comment here
- * said `ListHeader` renders the screen's heading as an `h2`, so a section had to
- * start at `h3`. That was true before `ListHeader` grew its `level` prop; with
- * `level={1}` above, the outline ran `h1` → `h3` → `h4` and skipped a level, which
- * is the one thing a heading structure is not allowed to do. Sections are `h2` and
- * the tables inside them are `h3` (`.subHeading`).
+ * **`h2`, and this file went through two wrong reasons to make it something else
+ * before landing here.** The comment used to say `ListHeader` renders the screen's
+ * heading as an `h2`, so a section had to start at `h3` — true before `ListHeader`
+ * grew a `level` prop. It then briefly said `level={1}` made this screen's own
+ * `h1`, so a section starting at `h2` skipped nothing. Both are gone: the screen's
+ * `h1` is the breadcrumb's last crumb now (issue #8), above everything this
+ * component renders, so the outline is `h1` (top bar) → `h2` (this section) → `h3`
+ * (the tables inside it, `.subHeading`) — still correct, and still skips nothing.
  *
  * The count sits outside the heading rather than inside it, so a screen reader
  * announcing the section says "Document types" rather than "Document types 4 of

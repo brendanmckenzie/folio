@@ -25,8 +25,11 @@
 
 /* Section headings. Deliberately heavier than `ListHeader`'s 11px uppercase, which
    is a section *label*: `ui-architecture.md`'s open question 3 found that the
-   greyer of two competing headings was reading as the screen's title, and whichever
-   way that is resolved, the heading inside a screen needs the weight. */
+   greyer of two competing headings was reading as the screen's title, and it is
+   resolved now — the screen's own title is the breadcrumb's last crumb (issue #8),
+   an `h1` above this one, so the outline runs `h1` (top bar) → `h2` (this heading)
+   → `h3` (`.subheading`) and this one still needs the weight to read as a real
+   section rather than a caption. */
 .heading {
   margin: 0;
   font-size: var(--text-lg);

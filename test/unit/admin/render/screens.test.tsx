@@ -27,31 +27,37 @@ import { API, mountAt } from './fixture'
  * type, and so a route that stops parsing shows up here as a screen that renders
  * "Not found" rather than as a type error. `missing` is in the list because it is
  * a screen with a component like any other.
+ *
+ * The fourth column is the expected `h1` text — issue #8's invariant is "exactly
+ * one `h1` per screen, and it is the top bar's last crumb" — and it is **hard-coded
+ * here, not derived from `crumbs()`**: a test that computed its expectation from the
+ * same function the component reads asserts only that the code agrees with itself,
+ * which passes even if both sides are wrong about what the crumb should say.
  */
-const ROUTES: [name: string, path: string, title: string][] = [
-  ['home', '/folio', 'Folio'],
-  ['content', '/folio/content', 'Content'],
-  ['content, flat mode', '/folio/content?view=flat', 'Content'],
-  ['documents', '/folio/documents/person', 'Person'],
-  ['documents, an undeclared type', '/folio/documents/nosuchtype', 'nosuchtype'],
-  ['assets', '/folio/assets', 'Assets'],
-  ['assets, table view', '/folio/assets?view=table', 'Assets'],
-  ['edit', '/folio/edit/sty_home', 'Home'],
-  ['edit, a global', '/folio/edit/sng_header', 'Header'],
-  ['access', '/folio/access', 'Access'],
-  ['model', '/folio/model', 'Model'],
-  ['redirects', '/folio/redirects', 'Redirects'],
-  ['schedules', '/folio/schedules', 'Schedules'],
-  ['settings', '/folio/settings', 'Settings'],
-  ['forms', '/folio/forms', 'Forms'],
-  ['form', '/folio/form/frm_one', 'Contact'],
+const ROUTES: [name: string, path: string, title: string, h1: string][] = [
+  ['home', '/folio', 'Folio', 'Home'],
+  ['content', '/folio/content', 'Content', 'Content'],
+  ['content, flat mode', '/folio/content?view=flat', 'Content', 'Content'],
+  ['documents', '/folio/documents/person', 'Person', 'Person'],
+  ['documents, an undeclared type', '/folio/documents/nosuchtype', 'nosuchtype', 'nosuchtype'],
+  ['assets', '/folio/assets', 'Assets', 'Assets'],
+  ['assets, table view', '/folio/assets?view=table', 'Assets', 'Assets'],
+  ['edit', '/folio/edit/sty_home', 'Home', 'Home'],
+  ['edit, a global', '/folio/edit/sng_header', 'Header', 'Header'],
+  ['access', '/folio/access', 'Access', 'Access'],
+  ['model', '/folio/model', 'Model', 'Model'],
+  ['redirects', '/folio/redirects', 'Redirects', 'Redirects'],
+  ['schedules', '/folio/schedules', 'Schedules', 'Schedules'],
+  ['settings', '/folio/settings', 'Settings', 'Settings'],
+  ['forms', '/folio/forms', 'Forms', 'Forms'],
+  ['form', '/folio/form/frm_one', 'Contact', 'Contact'],
   // 'Responses', not the form's label: `documentTitle` takes the *last* crumb and
   // this screen's trail is Forms / <the form> / Responses. Asserting 'Contact'
   // here failed, which is the assertion working — the middle crumb is where the
   // label lands, and `form` above is the route that proves it arrives.
-  ['responses', '/folio/responses/frm_one', 'Responses'],
-  ['account', '/folio/account', 'Your account'],
-  ['missing', '/folio/nosuchscreen', 'Not found'],
+  ['responses', '/folio/responses/frm_one', 'Responses', 'Responses'],
+  ['account', '/folio/account', 'Your account', 'Your account'],
+  ['missing', '/folio/nosuchscreen', 'Not found', 'Not found'],
 ]
 
 describe('every screen mounts', () => {
@@ -68,6 +74,40 @@ describe('every screen mounts', () => {
       // `route.ts` already owns the mapping (`TITLES`), so this couples the test
       // to the router rather than to nineteen components' markup.
       expect(document.title).toContain(title)
+    })
+  }
+})
+
+/**
+ * Issue #8: the screen dropped its own heading, and the breadcrumb's last crumb
+ * became the page's `h1`. Two ways for that to be silently false, and each needs
+ * its own assertion:
+ *
+ * - A screen could still render a second `h1` of its own (`Home.tsx` rolled one
+ *   before this issue, and `Stub.tsx` did too) — undetectable by counting the top
+ *   bar's heading in isolation, since a second one elsewhere in the tree would
+ *   simply coexist with it.
+ * - The top bar could stop rendering an `h1` at all (a regression back to a
+ *   `<span>`) — undetectable by asking only "is there an `h1` with this text",
+ *   since `getByRole('heading', { level: 1 })` matches the *first* of however many
+ *   there are and says nothing about the rest.
+ *
+ * `document.querySelectorAll` rather than `container` — a portal renders outside
+ * the container `render()` returns, and a stray heading anywhere in the document
+ * is exactly the failure being ruled out — and the exact-array form
+ * (`toEqual([expected])`) rather than a single `getByRole` lookup, because the
+ * array form is the only one that fails when there are *two* `h1`s instead of one.
+ */
+describe('exactly one h1 per screen, and it is the breadcrumb', () => {
+  for (const [name, path, , h1] of ROUTES) {
+    it(`${name} — ${path}`, async () => {
+      await mountAt(path)
+      const h1s = Array.from(document.querySelectorAll('h1'))
+      expect(h1s.map((el) => el.textContent)).toEqual([h1])
+      // Not just "an h1 with this text somewhere" — the one h1 has to be the top
+      // bar's last crumb, or a screen that kept its own heading while the top bar
+      // lost one would pass the line above by coincidence.
+      expect(h1s[0]?.closest('nav[aria-label="Breadcrumb"]')).not.toBeNull()
     })
   }
 })

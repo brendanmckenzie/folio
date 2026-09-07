@@ -818,7 +818,7 @@ function screenFor(a: ScreenArgs) {
       // where `DataList.tsx`'s "Unknown type" heading goes.
       if (!type) {
         return (
-          <Stub title={wanted}>
+          <Stub>
             No document type named <code>{wanted}</code> is declared. It was renamed or removed in
             code; documents still carrying it are listed by <code>GET {boot.apiBase}/audit</code>.
           </Stub>
@@ -966,7 +966,7 @@ function screenFor(a: ScreenArgs) {
 
     case 'missing':
       return (
-        <Stub title="Not found">
+        <Stub>
           Nothing is routed at <code>{route.screen.path}</code>.
         </Stub>
       )

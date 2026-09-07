@@ -81,15 +81,12 @@ export function Model({ apiBase, mount, me, onNotice }: Props) {
   return (
     <div className={css.screen}>
       <ListHeader
-        level={1}
         actions={
           <Button size="sm" disabled={data.statusLoading} reason="Loading…" onClick={data.reload}>
             Refresh
           </Button>
         }
-      >
-        Content model
-      </ListHeader>
+      />
 
       {/*
         A banner in flow, never an overlay — `ui-architecture.md`'s cross-cutting

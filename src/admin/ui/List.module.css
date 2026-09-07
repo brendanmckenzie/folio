@@ -216,37 +216,20 @@
 }
 
 /*
- * A screen's own title. See `ListHeader`'s `level` prop for why this exists: every
- * platform screen was using `.headerTitle` — a *section* label — as its page
- * heading, so a screen's name rendered smaller and greyer than the breadcrumb above
- * it, and none of them had an `h1`.
- *
- * Sized against the tokens rather than picking a number: this is the one heading on
- * the screen, so it takes the largest step the scale offers and nothing more. The
- * subject of a platform screen is the *list*, not its name.
- */
-.headerScreen {
-  margin: 0;
-  font-size: var(--text-lg);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--fg);
-}
-
-/*
  * **`.header`'s `padding: 0 var(--space-2)` is a *row* gutter, and it stays.**
  *
- * Worth stating because the obvious-looking change is wrong. A screen title looked
- * 8px over-indented on Settings, and the tempting fix is to drop the padding when
- * `level === 1` — a heading has no rows to align to, so the gutter reads as a
- * mistake. On Content, Assets and every other `List`-bodied screen it is not a
- * mistake: `.row` carries the same 8px, so the title and its rows share one left
- * edge *because* of this padding, and removing it would misalign five screens to
- * fix one.
+ * On Content, Assets and every other `List`-bodied screen it earns its place:
+ * `.row` carries the same 8px, so `ListHeader`'s section label — or its
+ * actions-only row, now that the screen's own title lives in the top bar rather
+ * than here (issue #8) — shares one left edge with the rows below it *because* of
+ * this padding.
  *
- * The gutter's real job is to match **whatever the screen's body is**, which is a
- * property of the screen and not of the heading level. So a screen whose body has
- * no rows cancels it locally — `Settings.module.css`'s `.head` does, with a
+ * It used to also carry a screen's own title, at the `level={1}` register this
+ * file no longer has, and there the 8px genuinely looked over-indented on
+ * Settings. That register is gone rather than the gutter: the gutter's job was
+ * always to match **whatever the screen's body is**, which is a property of the
+ * screen and not of what this component renders, so a screen whose body has no
+ * rows still cancels it locally — `Settings.module.css`'s `.head` does, with a
  * `margin: 0 -8px` and a comment. That is the precedent to copy.
  *
  * The table-bodied screens (Access, Model, Redirects) are 4px out for the same

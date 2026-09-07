@@ -222,9 +222,7 @@ export function Schedules({ apiBase, query, onQuery, onNotice, onOpen }: Props) 
             </fieldset>
           </>
         }
-      >
-        Schedules
-      </ListHeader>
+      />
 
       {warning ? (
         /* `role="status"` and not `alert`: this is a condition the screen arrived

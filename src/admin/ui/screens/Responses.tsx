@@ -197,7 +197,6 @@ export function Responses({
   if (data.formError) {
     return (
       <div className={css.screen}>
-        <ListHeader level={1}>Responses</ListHeader>
         <EmptyState title="Could not load this form" body={data.formError} />
       </div>
     )
@@ -206,7 +205,6 @@ export function Responses({
   if (data.page.error && rows.length === 0) {
     return (
       <div className={css.screen}>
-        <ListHeader level={1}>{label || 'Responses'}</ListHeader>
         <EmptyState
           title="Could not load responses"
           body={data.page.error}
@@ -251,7 +249,6 @@ export function Responses({
   return (
     <div className={css.screen}>
       <ListHeader
-        level={1}
         actions={
           <>
             <input
@@ -275,9 +272,7 @@ export function Responses({
             ) : null}
           </>
         }
-      >
-        {label || 'Responses'}
-      </ListHeader>
+      />
 
       <div className={css.controls}>
         <fieldset className={css.dates}>

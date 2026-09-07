@@ -287,42 +287,29 @@ export function Row({
 }
 
 /**
- * The header above a list, in one of two registers.
+ * The header above a list — a **section label**, never the screen's own title.
  *
- * **`level={1}` is the screen's own title; the default is a section label.** One
- * component with two registers rather than two components, because the *actions*
- * slot is identical either way — a screen's search box and a section's `New token`
- * button sit in the same place and want the same layout.
+ * That title belongs to the top bar now: the breadcrumb's last crumb is the
+ * screen's `h1` (issue #8, `TopBar.tsx`). This component used to carry a `level`
+ * prop that let it stand in for that heading too, at `--text-lg`, and the finding
+ * that led to it is worth keeping even though the fix moved elsewhere: every
+ * platform screen used this component's uppercase `--text-xs` register as its page
+ * title, so a screen's name rendered smaller and greyer than the breadcrumb above
+ * it — inverted hierarchy — and because that register emitted `h2`, no platform
+ * screen had an `h1` at all. Giving the breadcrumb the title fixes both halves at
+ * once, which is why this component only needs the one register back.
  *
- * The distinction was found by looking at the finished screens side by side and it
- * was a real defect, not a preference. Every platform screen used this as its page
- * title, and its style is a **section label** — `--text-xs`, uppercase, tracked,
- * `--fg-subtle`. So a screen's name rendered smaller and greyer than the breadcrumb
- * above it, which is inverted hierarchy; Home, which had rolled its own `h1`, looked
- * like a different application; and because this emitted `h2`, **no platform screen
- * had an `h1` at all**, which is the a11y half of the same mistake.
+ * `children` is optional for the same reason: a screen with actions and no name of
+ * its own — most of them, now — renders this as an actions-only row.
  *
- * The uppercase micro-header is still the right thing for a section, and it is still
- * the one place `--text-xs` tracking is allowed — Access's two tables and Home's five
- * blocks both want it. It is just not what a page is called.
+ * The uppercase micro-header is still the right thing for a section, and it is
+ * still the one place `--text-xs` tracking is allowed — Access's two tables and
+ * Home's five blocks both want it.
  */
-export function ListHeader({
-  children,
-  actions,
-  level = 2,
-}: {
-  children: ReactNode
-  actions?: ReactNode
-  /** `1` for the screen's title, `2` for a section inside it. */
-  level?: 1 | 2
-}) {
+export function ListHeader({ children, actions }: { children?: ReactNode; actions?: ReactNode }) {
   return (
     <div className={css.header}>
-      {level === 1 ? (
-        <h1 className={css.headerScreen}>{children}</h1>
-      ) : (
-        <h2 className={css.headerTitle}>{children}</h2>
-      )}
+      {children ? <h2 className={css.headerTitle}>{children}</h2> : null}
       {actions ? <div className={css.headerActions}>{actions}</div> : null}
     </div>
   )

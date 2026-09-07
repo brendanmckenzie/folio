@@ -41,7 +41,6 @@ import {
   withFieldText,
   withOptionLabel,
 } from './form-model'
-import { Stub } from './Stub'
 import { messageOf } from './useContent'
 import { useForm } from './useForm'
 
@@ -110,9 +109,10 @@ export function FormBuilder({
 
   if (data.notFound) {
     return (
-      <Stub title="No such form">
-        This form was deleted, or the link to it is stale. It no longer exists.
-      </Stub>
+      <EmptyState
+        title="No such form"
+        body="This form was deleted, or the link to it is stale. It no longer exists."
+      />
     )
   }
 
@@ -223,7 +223,6 @@ export function FormBuilder({
   return (
     <div className={css.screen}>
       <ListHeader
-        level={1}
         actions={
           <>
             {showLocales ? (
@@ -260,12 +259,20 @@ export function FormBuilder({
           </>
         }
       >
-        {/* A plain `<input>`, not the shared `Input` — that wrapper always
-            applies `Field.module.css`'s `.control` and deliberately omits
-            `className` (`Field.tsx`), because it exists for the one look a
-            labelled field control has. A screen title styled like a form field
-            is the wrong look, the same reason `Redirects.tsx`'s search box is
-            a bare `<input>` too. */}
+        {/*
+          The screen's `h1` is the breadcrumb's last crumb now (issue #8), not this
+          input — this renders inside `ListHeader`'s section-label `h2`, whose
+          class affects nothing here because the input carries its own font. It
+          stays as `children` anyway, because it is not a title: it is the form's
+          editable name, a rename control rather than a heading.
+
+          A plain `<input>`, not the shared `Input` — that wrapper always
+          applies `Field.module.css`'s `.control` and deliberately omits
+          `className` (`Field.tsx`), because it exists for the one look a
+          labelled field control has. A screen title styled like a form field
+          is the wrong look, the same reason `Redirects.tsx`'s search box is
+          a bare `<input>` too.
+        */}
         <input
           className={css.titleInput}
           aria-label="Form label"
@@ -768,7 +775,7 @@ function FormSettingsPanel({
 }) {
   return (
     <div className={css.fieldPanel}>
-      <ListHeader level={2}>Settings</ListHeader>
+      <ListHeader>Settings</ListHeader>
 
       <Field
         label="Name"

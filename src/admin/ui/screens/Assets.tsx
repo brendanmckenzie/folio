@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '../Button'
 import { EmptyState } from '../EmptyState'
-import { ListHeader } from '../List'
 import {
   type AssetRow,
   type AssetsUrl,
@@ -173,7 +172,6 @@ export function Assets(props: Props) {
   if (data.page.error && data.page.rows.length === 0) {
     return (
       <div className={css.screen}>
-        <ListHeader level={1}>Assets</ListHeader>
         <EmptyState
           title="Could not load the media library"
           body={data.page.error}
@@ -193,8 +191,6 @@ export function Assets(props: Props) {
     // here rather than on the grid: dropping onto the detail panel, the filter bar or
     // the empty space beside a short page all mean the same thing.
     <div className={css.screen} {...drop.handlers}>
-      <ListHeader level={1}>Assets</ListHeader>
-
       {/*
         `data-open` follows `url.asset` rather than the resolved row: the cold-link
         message below is also a panel and wants the same second column, or it stretches

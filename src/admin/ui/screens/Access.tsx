@@ -761,7 +761,6 @@ function Unavailable({ gate }: { gate: Exclude<AccessGate, { kind: 'ok' }> }) {
   if (gate.kind === 'open') {
     return (
       <div className={css.screen}>
-        <ListHeader level={1}>Access</ListHeader>
         <EmptyState
           title="This deployment has no accounts"
           body={
@@ -781,7 +780,6 @@ function Unavailable({ gate }: { gate: Exclude<AccessGate, { kind: 'ok' }> }) {
   if (gate.kind === 'anonymous') {
     return (
       <div className={css.screen}>
-        <ListHeader level={1}>Access</ListHeader>
         <EmptyState
           title="Sign in to manage access"
           body="Editors and tokens are only listed to a signed-in admin."
@@ -800,7 +798,6 @@ function Unavailable({ gate }: { gate: Exclude<AccessGate, { kind: 'ok' }> }) {
 
   return (
     <div className={css.screen}>
-      <ListHeader level={1}>Access</ListHeader>
       <EmptyState
         title="You may not manage access"
         body={

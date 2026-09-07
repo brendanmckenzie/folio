@@ -187,7 +187,6 @@ export function Redirects({ apiBase, query, onQuery, onNotice }: Props) {
   if (data.page.error && data.page.rows.length === 0) {
     return (
       <div className={css.screen}>
-        <ListHeader level={1}>Redirects</ListHeader>
         <EmptyState
           title="Could not load redirects"
           body={data.page.error}
@@ -207,7 +206,6 @@ export function Redirects({ apiBase, query, onQuery, onNotice }: Props) {
   return (
     <div className={css.screen}>
       <ListHeader
-        level={1}
         actions={
           <>
             <input
@@ -223,9 +221,7 @@ export function Redirects({ apiBase, query, onQuery, onNotice }: Props) {
             </Button>
           </>
         }
-      >
-        Redirects
-      </ListHeader>
+      />
 
       <div className={css.controls}>
         {/* A `<fieldset>` with a hidden `<legend>` rather than `role="group"` plus
