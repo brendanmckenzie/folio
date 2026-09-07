@@ -111,35 +111,65 @@ rather than emailing it — there is no mail binding. Seeded accounts live in
 `/dev/last-signin` is a demo-only stand-in for a mailbox and 404s off localhost. It is
 not a Folio route and should not be copied into a real host.
 
-## This is greenfield, and that is a licence
+## This was greenfield, and the licence is now three licences
 
-**This section used to open "Zero users. No remote. Nothing deployed." Two of those
-three stopped being true on 2026-09-06**, and the licence is narrower than it was
-without being revoked. What is true now: **one consumer, one remote, two live
-deployments.** All About Africa (`takeoffgo/allaboutafrica-website`) runs Folio on
-`staging.allaboutafrica.au` and `allaboutafrica.au`, pinned to a full SHA, with
-real content in D1 and R2 and real editors signing in.
+**This section used to open "Zero users. No remote. Nothing deployed."** All three
+stopped being true, in two steps, and the licence narrowed each time without ever
+being revoked. What is true now: **two consumers, one remote, four live
+deployments, and a version number.**
 
-The owner's position still overrides the instinct toward compatibility you will
-find in this repo's history, because one known consumer is not the same as users:
+- `takeoffgo/allaboutafrica-website` → `staging.allaboutafrica.au`,
+  `allaboutafrica.au`
+- `takeoffgo/takeoffgo-website` → `staging.takeoffgo.com`, `www.takeoffgo.com`
 
-- **Backwards compatibility is still not a constraint** — for the wire, for stored
-  documents, for logs. There is exactly one consumer, it pins a SHA, and it upgrades
-  deliberately. Break what you need to; the host moves with you, and a breaking
-  change is a line in its upgrade commit rather than a deprecation cycle.
-- **A thing existing is still not an argument for keeping it.** If a design is
-  wrong, replace it.
-- **Pivots are still allowed.**
+Both pin a full 40-character SHA, both hold real content in D1 and R2, and both
+have real editors signing in. (This section said "one consumer … two live
+deployments" until 2026-09-07, while "Releasing" below said "two private sites".
+The lower number was the one the licence's own argument rested on, which is the
+worst place for a stale count to sit.)
 
-**What changed is the schema, and only the schema.** `0001`–`0010` are applied to
-two live databases, so *editing a landed migration in place no longer does what it
-used to*: a fresh database gets your edit and those two do not, and they diverge
-with nothing to say so. The July 2026 collapse of ten migrations into `0001_init.sql`
-was correct then and would be wrong now. **Rebuilding a table is still fair game —
-spell it as a new migration.** That is the whole of the difference.
+**The instinct toward compatibility you will find in this repo's history is still
+mostly wrong** — two known consumers that pin a SHA and upgrade deliberately are
+not users, and a breaking change is still a line in an upgrade commit rather than
+a deprecation cycle. What has changed is that "break what you need to" now means
+three different things depending on what you are breaking:
 
-Also gone: "nothing deployed" was the reason `scripts/cache-probe.mjs` could not be
-run. It can be, against either environment.
+| What | Licence |
+| --- | --- |
+| **Stored documents, the mutation log** | **Break freely.** Unchanged. Both are per-Durable-Object state, `scripts/e2e.sh` wipes them on every run, and neither is part of the published contract. |
+| **The wire (`PROTOCOL_VERSION`), the `exports` surface, `createFolio`'s config keys** | **Breaking is a major bump.** From `1.0.0` this repo honours semver (#1), so removing or narrowing any of them is `2.0.0`, not a line in a commit. |
+| **The D1 schema** | **A new migration, only.** Never edit a landed one. |
+
+Two things about the middle row, because it is the one that is easy to
+over-apply.
+
+**A major bump is cheap here and is not a deprecation cycle.** No consumer uses a
+floating range, so honouring semver means incrementing a number — never
+maintaining a `1.x` branch, never shipping a shim, never keeping a name alive for
+somebody who might be using it. If a design is wrong, replace it and bump. "A
+thing existing is not an argument for keeping it" survives intact; only the
+bookkeeping changed. Pivots are still allowed.
+
+**`PROTOCOL_VERSION` is still cheap to bump, and semver does not touch it.** Both
+ends ship in the same deploy, so the version is a guard against a *stale tab*
+rather than a compatibility mechanism — a mismatch is refused and the tab is told
+to reload, which is the whole feature. Semver governs the **package version**, not
+that number. This distinction is easy to lose and losing it would make people
+reluctant to bump the one version whose entire purpose is being bumped. It is at
+**4**. What made it expensive for a while was `folio/engine` re-exporting the
+frame types, so a host could in principle have built against them; #13 removed
+them (`605e62b`), and the wire is private again.
+
+**The schema row is the oldest of the three narrowings** and the most concrete:
+`0001`–`0010` are applied to four live databases now, so *editing a landed
+migration in place no longer does what it used to* — a fresh database gets your
+edit and those four do not, and they diverge with nothing to say so. The July 2026
+collapse of ten migrations into `0001_init.sql` was correct then and would be
+wrong now. **Rebuilding a table is still fair game — spell it as a new
+migration.**
+
+Also gone: "nothing deployed" was the reason `scripts/cache-probe.mjs` could not
+be run. It can be, against any of the four.
 
 Documents written before any of this argue at length for additive change and
 byte-identical serialisation — `docs/sync-design.md` invariant 10 is the clearest
@@ -162,8 +192,8 @@ migrations end up sharing a number. Next free is `0011`.
 
 A new one is the next number and normally a plain `alter table`, but rebuilding a
 table — `stories` included — is fair game when the shape is wrong. **Editing a
-landed one is not**, now that two live databases have them applied: a fresh database
-would get the edit and those two would not. A rebuild has to
+landed one is not**, now that four live databases have them applied: a fresh database
+would get the edit and those four would not. A rebuild has to
 carry every column and recreate every index, which is a correctness chore, not a
 reason to avoid it.
 
@@ -187,10 +217,15 @@ guessed at. It is at **4**. Both ends ship in the same deploy, so a version is a
 guard against a stale tab, not a compatibility mechanism — bumping is cheap, and so
 is redesigning what the frames contain.
 
-**The mutation log is not sacred.** It is per-Durable-Object state on a system with
-no users, and `scripts/e2e.sh` wipes it on every run. A wire change may reinterpret
-what older frames meant, and it may drop them: the fallback for an unreadable log is
-to reset local state, which costs nothing today. Two shims exist purely for the old
+**The mutation log is not sacred.** It is per-Durable-Object state, `scripts/e2e.sh`
+wipes it on every run, and it is not part of the published contract — the top row of
+the licence table above, and the one row that did not narrow. (This said "on a system
+with no users", which stopped being true on 2026-09-06; the conclusion did not
+change, because it never rested on that. Editors on four deployments have live drafts
+in these objects, and the log is still resettable, because resetting one costs a
+person a redo rather than costing the site a document: the published snapshot is in
+D1.) A wire change may reinterpret what older frames meant, and it may drop them: the
+fallback for an unreadable log is to reset local state. Two shims exist purely for the old
 rule — a `set` with no `locale` meaning a source-locale write, and `invert` omitting
 the key so a fresh inverse serialises byte-identically to a pre-v3 one — and both
 are free to go the next time that code is touched.
