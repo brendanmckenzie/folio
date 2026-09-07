@@ -187,6 +187,28 @@ export function same(a: Route, b: Route): boolean {
   return href(a.screen, '', a.query) === href(b.screen, '', b.query)
 }
 
+/**
+ * A link into the page already showing — `href="#settings-caching"` — which the
+ * router must leave to the browser.
+ *
+ * Its own function, and pure, because it decides a branch inside a delegated
+ * click handler that no Node test can mount: the admin's convention is that such
+ * a part is a pure function with a test rather than a condition nobody can reach
+ * (`useVersions`' `appendRows` says the same thing). It is spelled against the
+ * three fields of a resolved `URL` rather than an `HTMLAnchorElement`, which is
+ * what makes it callable from a test.
+ *
+ * `search` counts. A bare fragment resolves against the current URL, so it always
+ * matches, while `?q=hero#settings-blocks` from an unfiltered screen is a real
+ * change of state and belongs to the router.
+ */
+export function isSameDocumentFragment(
+  anchor: { hash: string; pathname: string; search: string },
+  here: { pathname: string; search: string },
+): boolean {
+  return anchor.hash !== '' && anchor.pathname === here.pathname && anchor.search === here.search
+}
+
 /* ------------------------------------------------------------- breadcrumbs --- */
 
 export interface Crumb {

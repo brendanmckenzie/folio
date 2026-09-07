@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { crumbs, documentTitle, href, parse, same } from '../../../src/admin/ui/route'
+import {
+  crumbs,
+  documentTitle,
+  href,
+  isSameDocumentFragment,
+  parse,
+  same,
+} from '../../../src/admin/ui/route'
 
 /**
  * The URL model. Every one of these is a claim `docs/design-system.md` makes as a
@@ -187,6 +194,58 @@ describe('same', () => {
 
   it('is false for two different screens', () => {
     expect(same(parse('/folio/content', MOUNT), parse('/folio/assets', MOUNT))).toBe(false)
+  })
+})
+
+describe('isSameDocumentFragment', () => {
+  /*
+   * The bug this exists for: Settings' seven jump links did nothing at all,
+   * because a bare fragment resolves to the current pathname and the router read
+   * that as an internal navigation to the screen already showing — so it called
+   * `preventDefault()` and then returned, dropping the fragment.
+   */
+  it('is true for a bare fragment, which resolves to the page already showing', () => {
+    expect(
+      isSameDocumentFragment(
+        { hash: '#settings-caching', pathname: '/folio/settings', search: '' },
+        { pathname: '/folio/settings', search: '' },
+      ),
+    ).toBe(true)
+  })
+
+  it('keeps the filter, because a fragment link resolves against it too', () => {
+    expect(
+      isSameDocumentFragment(
+        { hash: '#settings-blocks', pathname: '/folio/settings', search: '?q=hero' },
+        { pathname: '/folio/settings', search: '?q=hero' },
+      ),
+    ).toBe(true)
+  })
+
+  it('is false for a fragment that also changes the query, which is a real navigation', () => {
+    expect(
+      isSameDocumentFragment(
+        { hash: '#settings-blocks', pathname: '/folio/settings', search: '?q=hero' },
+        { pathname: '/folio/settings', search: '' },
+      ),
+    ).toBe(false)
+  })
+
+  it('is false for another screen and for a link with no fragment at all', () => {
+    expect(
+      isSameDocumentFragment(
+        { hash: '#settings-blocks', pathname: '/folio/content', search: '' },
+        { pathname: '/folio/settings', search: '' },
+      ),
+    ).toBe(false)
+    // The ordinary case, which must stay with the router: every link in the
+    // sidebar looks like this.
+    expect(
+      isSameDocumentFragment(
+        { hash: '', pathname: '/folio/settings', search: '' },
+        { pathname: '/folio/settings', search: '' },
+      ),
+    ).toBe(false)
   })
 })
 

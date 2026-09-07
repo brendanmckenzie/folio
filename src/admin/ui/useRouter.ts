@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { href, parse, type Route, same, type Screen } from './route'
+import { href, isSameDocumentFragment, parse, type Route, same, type Screen } from './route'
 
 /**
  * The one place that talks to `history`, and the only part of the router that
@@ -83,6 +83,22 @@ export function useRouter(mount: string): Router {
       const anchor = (e.target as Element | null)?.closest?.('a')
       if (!(anchor instanceof HTMLAnchorElement) || anchor.target === '_blank') return
       if (anchor.origin !== window.location.origin) return
+      /*
+       * A link into *this* document is the browser's job, not the router's.
+       *
+       * `href="#settings-caching"` resolves to the current pathname, so it read as
+       * an internal navigation, got `preventDefault()`d, parsed to the screen we
+       * are already on, and returned — which dropped the fragment on the floor.
+       * Settings' seven jump links did nothing at all, on a screen whose own
+       * comment calls the anchor list the reason it is one scrollable document.
+       *
+       * Handing it back to the browser is the whole fix: native fragment
+       * navigation scrolls the nearest scrollable ancestor, which is the admin's
+       * `main`, and it sets `:target` and the history entry for free. Verified in
+       * Chrome against the deployed admin before this was written — the shell's
+       * `main` scrolled to 2808px while a click did nothing.
+       */
+      if (isSameDocumentFragment(anchor, window.location)) return
       // Outside the mount is a real navigation — a preview URL, the login page,
       // the host's own site. The shell does not own those and must not swallow
       // them.
