@@ -20,7 +20,7 @@ Cheap, independently valuable, and none of them blocked on anything. Two carry a
 migration and therefore have to precede `document-types`, which rebuilds `stories`;
 the rest can land in any order.
 
-| # | Spec | Group | Size | Wire | Migration | From |
+| # | Spec | Group | Size | Wire | Pre-collapse Migration | From |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | [Unpublish](editing/unpublish.md) | editing | S | — | `0003` | competitor scan |
 | 2 | [Redirects](platform/redirects.md) | platform | S | — | `0004` | competitor scan |
@@ -30,9 +30,17 @@ the rest can land in any order.
 | 6 | [Duplicate and paste](editing/duplicate-and-paste.md) | editing | S–M | — | — | competitor scan |
 | 7 | [Lifecycle hooks](platform/publish-hooks.md) | platform | S | — | — | competitor scan |
 
+**The `Pre-collapse Migration` column is history, not a claim.** Ten migrations were
+folded into `0001_init.sql` in July 2026, so a number here is what the spec held
+*before* that and says nothing about what is on disk now — spec 12's `0009` is a
+deliberate hole today and spec 13's `0010` is on disk as forms. What each of the
+collapsed ten added is recorded under [D1 migration ledger](#d1-migration-ledger),
+which is also the only place to read the current numbering and the next free
+number. `CLAUDE.md`'s "The two ledgers" says the same thing from the other side.
+
 ## The main line (8–16)
 
-| # | Spec | Group | Size | Wire | Migration | From |
+| # | Spec | Group | Size | Wire | Pre-collapse Migration | From |
 | --- | --- | --- | --- | --- | --- | --- |
 | 8 | [Document types](foundation/document-types.md) | foundation | M | — | `0006` | prerequisite |
 | 9 | [Globals](content-model/globals.md) | content model | S | — | — | feedback #5 |
@@ -43,6 +51,14 @@ the rest can land in any order.
 | 14 | [Data documents](content-model/data-documents.md) | content model | M | — | — | feedback #6 |
 | 15 | [Content API](platform/content-api.md) | platform | M | — | — | feedback #7 |
 | 16 | [Live collaboration](editing/live-collaboration.md) | editing | M | v4 | — | feedback #8 |
+
+**The `Pre-collapse Migration` column is history, not a claim.** Ten migrations were
+folded into `0001_init.sql` in July 2026, so a number here is what the spec held
+*before* that and says nothing about what is on disk now — spec 12's `0009` is a
+deliberate hole today and spec 13's `0010` is on disk as forms. What each of the
+collapsed ten added is recorded under [D1 migration ledger](#d1-migration-ledger),
+which is also the only place to read the current numbering and the next free
+number. `CLAUDE.md`'s "The two ledgers" says the same thing from the other side.
 
 ## After the main line (17–)
 
