@@ -44,7 +44,7 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
    */
   app.onError((err, c) => {
     if (err instanceof FolioError) return c.json(envelope(err), err.status)
-    console.error(`folio: unhandled error in ${c.req.method} ${c.req.path}`, err)
+    rt.logger.error(`folio: unhandled error in ${c.req.method} ${c.req.path}`, err)
     return c.json(INTERNAL, 500)
   })
 
@@ -218,7 +218,7 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // `authRoutes` stays ahead of the rest for its original reason: `/login/verify`
   // must not be read as `/login/:provider`.
   app.route('/', authRoutes<Env>(rt))
-  app.route('/', assetFileRoutes<Env>())
+  app.route('/', assetFileRoutes<Env>(rt))
   /**
    * `{base}/f/:id` — the public form submit
    * (`../../docs/specs/content-model/forms.md` architecture decision 3).

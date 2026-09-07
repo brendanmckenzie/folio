@@ -30,6 +30,7 @@ import { type Role, isRole } from './roles'
 import { type NewSession, newSession, sessionStatements } from './session'
 import { createUserStatement, normaliseEmail, type UserRow, userByEmail } from './users'
 import type { FolioDb } from '../db'
+import type { FolioLogger } from '../types'
 
 /** Why a sign-in did not happen. The same two words the login page's `?error=`
  * vocabulary already uses, so a route translates rather than invents. */
@@ -100,6 +101,7 @@ export async function completeSignIn(
      */
     extra?: readonly D1PreparedStatement[]
   } = { userAgent: null },
+  logger: FolioLogger = console,
 ): Promise<SignInResult> {
   const now = ctx.now ?? Date.now()
   const email = normaliseEmail(identity.email)
@@ -156,11 +158,11 @@ export async function completeSignIn(
       // A configuration bug, never a silent default (decision 5). The person
       // sees `error=provider` and the host sees this line; what must not happen
       // is a role appearing from nowhere because a mapper threw.
-      console.error(`folio: ${provider.id}'s roleFrom threw`, err)
+      logger.error(`folio: ${provider.id}'s roleFrom threw`, err)
       return refuse('provider', 'mapper', existing?.id ?? null)
     }
     if (answer !== null && !isRole(answer)) {
-      console.error(
+      logger.error(
         `folio: ${provider.id}'s roleFrom answered '${String(answer)}', which is not a role`,
       )
       return refuse('provider', 'mapper', existing?.id ?? null)

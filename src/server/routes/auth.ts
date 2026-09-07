@@ -178,13 +178,18 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       } catch (err) {
         // Logged and shown, never swallowed: a gate that has stopped verifying
         // looks exactly like a gate nobody is standing at.
-        console.error(`folio: ${provider.id} could not resolve an identity`, err)
+        rt.logger.error(`folio: ${provider.id} could not resolve an identity`, err)
         return 'provider'
       }
       if (!identity) continue
-      const result = await completeSignIn(c.var.bindings().db, auth, provider, identity, {
-        userAgent: c.req.header('user-agent') ?? null,
-      })
+      const result = await completeSignIn(
+        c.var.bindings().db,
+        auth,
+        provider,
+        identity,
+        { userAgent: c.req.header('user-agent') ?? null },
+        rt.logger,
+      )
       if (!result.ok) return result.reason
       return new Response(null, {
         status: 302,
@@ -304,7 +309,7 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           // A failed send is the host's problem to see in its logs, never the
           // requester's to learn about: "we could not mail you" is a weaker
           // oracle than an outright "unknown address", but it is still one.
-          console.error('folio: a sign-in link failed to send', err)
+          rt.logger.error('folio: a sign-in link failed to send', err)
         }
       }
     }
@@ -346,6 +351,7 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       auth.mail,
       { email },
       { userAgent: c.req.header('user-agent') ?? null },
+      rt.logger,
     )
     if (!result.ok) {
       return c.redirect(`${rt.base}/login?error=${result.reason}&next=${encodeURIComponent(next)}`)
@@ -494,6 +500,7 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       provider,
       { email: found.user.email },
       { userAgent: c.req.header('user-agent') ?? null, extra: [stamp] },
+      rt.logger,
     )
     if (!result.ok) return refuse()
 
@@ -551,7 +558,7 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       // into putting it somewhere. The cookie envelope below carries it.
       started = await provider.start(c.env, { redirectUri })
     } catch (err) {
-      console.error(`folio: ${provider.id} sign-in could not start`, err)
+      rt.logger.error(`folio: ${provider.id} sign-in could not start`, err)
       return c.redirect(`${rt.base}/login?error=provider&next=${encodeURIComponent(next)}`)
     }
 
@@ -603,13 +610,18 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         state: envelope.state,
       })
     } catch (err) {
-      console.error(`folio: ${provider.id} sign-in failed`, err)
+      rt.logger.error(`folio: ${provider.id} sign-in failed`, err)
       return bail('provider')
     }
 
-    const result = await completeSignIn(c.var.bindings().db, auth, provider, identity, {
-      userAgent: c.req.header('user-agent') ?? null,
-    })
+    const result = await completeSignIn(
+      c.var.bindings().db,
+      auth,
+      provider,
+      identity,
+      { userAgent: c.req.header('user-agent') ?? null },
+      rt.logger,
+    )
     if (!result.ok) return bail(result.reason)
 
     return new Response(null, {

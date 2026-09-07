@@ -24,6 +24,7 @@ import { assetReferences, clearInboundRefStatements } from './content-index'
 import { type Direction, type Keyset, keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
 import { storiesFor } from './stories'
 import { bindChunks, type FolioDb } from './db'
+import type { FolioLogger } from './types'
 
 /** Matches the Images binding's own input ceiling, so failures happen up front. */
 export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -868,6 +869,7 @@ export async function serveAsset(
   key: string,
   transform: AssetTransform & { focal?: { x: number; y: number } },
   request: Request,
+  logger: FolioLogger = console,
 ): Promise<Response> {
   const object = await bucket.get(key)
   if (!object) throw new FolioError('not_found', 'No such asset')
@@ -964,7 +966,7 @@ export async function serveAsset(
   } catch (e) {
     // Never silent: a transform failure that goes unlogged is indistinguishable
     // from "nobody ever requested this variant".
-    console.error(`folio: asset transform failed for ${key}`, e)
+    logger.error(`folio: asset transform failed for ${key}`, e)
     // A transform failing is not a reason to show a broken image. Re-fetch,
     // because `object.body` was consumed by the attempt. Short-lived rather
     // than immutable: this is the original standing in for a variant that
@@ -982,7 +984,7 @@ export async function serveAsset(
   try {
     await cache.put(canonical, response.clone())
   } catch (e) {
-    console.error(`folio: asset cache write failed for ${key}`, e)
+    logger.error(`folio: asset cache write failed for ${key}`, e)
   }
   return response
 }

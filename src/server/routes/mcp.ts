@@ -406,8 +406,11 @@ export function mcpRoutes<Env>(
    * that mapping because it owns which error was raised.
    */
   routes.post('/mcp', async (c) => {
-    const { status, response } = await handleRpc(await c.req.text(), methodsFor(c), (name) =>
-      c.req.header(name),
+    const { status, response } = await handleRpc(
+      await c.req.text(),
+      methodsFor(c),
+      (name) => c.req.header(name),
+      rt.logger,
     )
     // A notification has no response, and 202 is what Streamable HTTP says to
     // answer when there is nothing to send back.

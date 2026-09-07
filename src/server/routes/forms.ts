@@ -69,7 +69,7 @@ import {
 } from '../forms'
 import { hookCtx, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
-import type { FolioEnv } from '../types'
+import type { FolioEnv, FolioLogger } from '../types'
 import {
   DOWNLOAD_CONTENT_TYPE,
   fieldNameParam,
@@ -171,7 +171,7 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const ids = formIdListQuery(c.req.query('ids'))
     if (ids.length === 0) return c.json({})
 
-    const forms = await formsByIds(c.var.bindings().db, ids)
+    const forms = await formsByIds(c.var.bindings().db, ids, rt.logger)
     const locale = rt.localeOf(c.req.query('locale'))
     const page = c.req.query('page')
     const ctx = {
@@ -183,7 +183,7 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   })
 
   app.get('/forms/:id', requireAccess<Env>(rt, READ), async (c) => {
-    const form = await formById(c.var.bindings().db, formIdParam(c.req.param('id')))
+    const form = await formById(c.var.bindings().db, formIdParam(c.req.param('id')), rt.logger)
     if (!form) throw new FolioError('not_found', 'Unknown form')
     return c.json(form)
   })
@@ -261,7 +261,7 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.get('/forms/:id/usage', requireAccess<Env>(rt, EDIT), async (c) => {
     const db = c.var.bindings().db
     const id = formIdParam(c.req.param('id'))
-    const form = await formById(db, id)
+    const form = await formById(db, id, rt.logger)
     if (!form) throw new FolioError('not_found', 'Unknown form')
 
     const usage = await formUsage(db, id)
@@ -337,7 +337,7 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.get('/forms/:id/responses.csv', requireAccess<Env>(rt, ADMIN), async (c) => {
     const db = c.var.bindings().db
-    const form = await formById(db, formIdParam(c.req.param('id')))
+    const form = await formById(db, formIdParam(c.req.param('id')), rt.logger)
     if (!form) throw new FolioError('not_found', 'Unknown form')
 
     const { filename, body } = await responseCsv(
@@ -391,6 +391,7 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       formIdParam(c.req.param('id')),
       responseIdParam(c.req.param('rid')),
       media,
+      rt.logger,
     )
     if (!result.deleted) throw new FolioError('not_found', 'Unknown response')
     return c.json(result)
@@ -412,7 +413,7 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const body = await parseBody(c.req, ResponseBulkBody)
     requireCursor(body.continueFrom ?? undefined)
 
-    const outcome = await deleteResponses({ db, media }, id, body.selection, {
+    const outcome = await deleteResponses({ db, media, logger: rt.logger }, id, body.selection, {
       ...(body.dryRun === undefined ? {} : { dryRun: body.dryRun }),
       ...(body.continueFrom === undefined ? {} : { continueFrom: body.continueFrom }),
       ...(body.batch === undefined ? {} : { batch: body.batch }),
@@ -655,7 +656,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     const id = formIdParam(c.req.param('id'))
     const { db, media } = c.var.bindings()
-    const form = await formById(db, id)
+    const form = await formById(db, id, rt.logger)
     if (!form) {
       return replyTo({
         json,
@@ -808,7 +809,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         now,
       })
     } catch (err) {
-      await compensate(media, uploads.files)
+      await compensate(media, uploads.files, rt.logger)
       throw err
     }
 
@@ -816,7 +817,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // it, one of which lost the `not exists`. Its objects have no row and never
     // will, so they go now (decision 15: *"a compensating `bucket.delete` if the
     // insert throws **or the duplicate guard fires**"*).
-    if (!inserted.stored) await compensate(media, uploads.files)
+    if (!inserted.stored) await compensate(media, uploads.files, rt.logger)
 
     if (inserted.stored) {
       await rt.hookRunner(hookCtx(c)).run('submitted', {
@@ -854,6 +855,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 async function compensate(
   bucket: R2Bucket | undefined,
   files: readonly PreparedUpload[],
+  logger: FolioLogger = console,
 ): Promise<void> {
   if (!bucket || files.length === 0) return
   try {
@@ -862,7 +864,7 @@ async function compensate(
       files.map((file) => file.key),
     )
   } catch (err) {
-    console.error('folio: form upload cleanup failed', err)
+    logger.error('folio: form upload cleanup failed', err)
   }
 }
 
@@ -896,7 +898,7 @@ async function verified<Env>(
   try {
     return (await verify({ req, body: rawBodyOf(body), form: formMeta(form) }, env)) === true
   } catch (err) {
-    console.error('folio: form verify failed', err)
+    rt.logger.error('folio: form verify failed', err)
     return false
   }
 }

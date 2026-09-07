@@ -27,6 +27,7 @@
  */
 import type { FolioErrorCode } from '../errors'
 import { FolioError } from '../errors'
+import type { FolioLogger } from '../types'
 
 /** The only version of JSON-RPC there is, and the only one MCP uses. */
 export const JSONRPC_VERSION = '2.0'
@@ -424,6 +425,7 @@ export async function handleRpc(
   text: string,
   methods: RpcMethods,
   header: HeaderLookup,
+  logger: FolioLogger = console,
 ): Promise<RpcOutcome> {
   const message = parse(text)
   if (message.kind === 'refused') {
@@ -441,7 +443,7 @@ export async function handleRpc(
       try {
         await method(message.params)
       } catch (err) {
-        console.error(`folio: mcp notification ${message.method} failed`, err)
+        logger.error(`folio: mcp notification ${message.method} failed`, err)
       }
     }
     return ACCEPTED
@@ -501,7 +503,7 @@ export async function handleRpc(
   } catch (err) {
     if (err instanceof RpcFault) return refuse(message.id, err.code, err.message, err.data)
     if (err instanceof FolioError) return refuse(message.id, rpcCodeFor(err.code), err.message)
-    console.error(`folio: unhandled error in mcp ${message.method}`, err)
+    logger.error(`folio: unhandled error in mcp ${message.method}`, err)
     return refuse(message.id, INTERNAL_ERROR, 'Something went wrong.')
   }
 }

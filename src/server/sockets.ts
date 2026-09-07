@@ -111,6 +111,10 @@ export async function liveSession<A extends SocketSession>(
   try {
     expiresAt = await sessionExpiry(db, a.session)
   } catch (err) {
+    // Stays on `console`, deliberately (`FolioConfig.logger`, #16): both callers
+    // are Durable Objects (`StoryDO`, `SpaceDO`) constructed by the platform from
+    // a config that carries only a `db` accessor, with no path back to
+    // `createFolio`'s config — see `story-do.ts`'s `alarm()` for the same note.
     console.error(`${label}: could not re-check a session; keeping the socket open`, err)
     const kept: A = { ...a, checkedAt: now }
     ws.serializeAttachment(kept)

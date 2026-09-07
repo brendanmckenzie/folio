@@ -126,7 +126,7 @@ export function apiRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
         c.executionCtx.waitUntil(
           describeOnUpload(
-            { db, media, images, assetBase, describe: rt.describe, env: c.env },
+            { db, media, images, assetBase, describe: rt.describe, env: c.env, logger: rt.logger },
             row,
           ),
         )

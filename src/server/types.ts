@@ -465,6 +465,33 @@ export type StoryStub = Pick<
  */
 export type SpaceStub = Pick<SpaceDO, 'broadcastEvent' | 'fetch'>
 
+/**
+ * Where Folio sends the roughly forty operational events its own code already
+ * logs by hand: a cache purge that did not happen, a scheduled publish that
+ * failed three times, a sign-in provider whose mapper threw. Optional on
+ * `FolioConfig`, defaulting to `console`, so a host that configures nothing
+ * behaves exactly as every version before this key did.
+ *
+ * **Two methods, not a level, a filter, or structured fields** (owner decision,
+ * 2026-09-07). Every existing call site already knows whether it is `error` or
+ * `warn`; asking it to pick a numeric level would decide nothing a host could
+ * not already tell from which method was called. Structured event fields
+ * (a request id, a trigger name, a story id) are deferred on purpose: they can
+ * arrive later as an **additional optional argument** without touching this
+ * signature, which is the whole reason the shape ships this narrow now rather
+ * than designing that later — widening a logger's call signature is free before
+ * `1.0.0` carries a semver promise and a breaking change the moment it does.
+ *
+ * `...detail: unknown[]` rather than a fixed second parameter: the calls this
+ * replaces pass an `Error` in most places, a plain string in some, and an array
+ * of D1's own errors in `cache-purge.ts` — a rest parameter accepts all three
+ * without this interface deciding anything about their shape.
+ */
+export interface FolioLogger {
+  error(message: string, ...detail: unknown[]): void
+  warn(message: string, ...detail: unknown[]): void
+}
+
 export interface FolioConfig<Env> {
   blocks: readonly AnyBlockDef[] | Registry
   /**
@@ -582,6 +609,19 @@ export interface FolioConfig<Env> {
    * to veto or rewrite a publish. Validated for unknown keys at construction.
    */
   hooks?: FolioHooks<Env>
+  /**
+   * Where Folio sends its own operational log lines — see `FolioLogger`.
+   * Absent means `console`, which is also what every call site already used
+   * before this key existed, so an unconfigured host's log output does not
+   * move.
+   *
+   * Threaded through `FolioRuntime` the way `hooks` and `gate` already are:
+   * resolved once here, read at every one of the roughly forty call sites
+   * that used to write `console.error`/`console.warn` directly. The messages
+   * at those sites, including their `folio:` prefix, are unchanged — only the
+   * sink is configurable now.
+   */
+  logger?: FolioLogger
   /**
    * Members-only pages, for a site whose membership lives outside Folio
    * (`../platform/visitor-access.md`). Names a root-block field and two host

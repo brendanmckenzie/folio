@@ -363,6 +363,11 @@ export function createStoryDO<Env>(
           .bind(row.syncId, Date.now(), name)
           .run()
       } catch (err) {
+        // Stays on `console`, deliberately (`FolioConfig.logger`, #16): this
+        // object is constructed by the platform from `StoryDOConfig`, which
+        // carries only `db(env)` — there is no path back to `createFolio`'s
+        // config from inside a Durable Object, and inventing one to smuggle a
+        // logger in is a bigger change than this issue asks for.
         console.error(`story-do: failed to write the draft watermark for ${name}`, err)
         try {
           await this.ctx.storage.setAlarm(Date.now() + WATERMARK_DEBOUNCE_MS)

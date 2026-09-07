@@ -39,6 +39,7 @@
  */
 import { ANY_TYPE_TAG, formTag, globalTag, storyTag, typeTag } from '../core/cache-tags'
 import type { FolioHooks } from './hooks'
+import type { FolioLogger } from './types'
 
 /** Workers Cache's own cap on one `purge()` call. */
 export const MAX_TAGS_PER_PURGE = 100
@@ -150,6 +151,7 @@ function tagsFor(id: string, type: string, globals: readonly string[]): string[]
 export function cachePurgeHooks<Env>(
   globals: readonly string[],
   capability: PurgeCapability = platformPurge,
+  logger: FolioLogger = console,
 ): FolioHooks<Env> {
   /**
    * Awaited, not fired and forgotten (decision 5). `waitUntil` would let the
@@ -172,12 +174,12 @@ export function cachePurgeHooks<Env>(
 
     try {
       if (plan.everything) {
-        console.warn(
+        logger.warn(
           `folio: ${trigger} purged the whole cache — ${plan.tags} tags is over ${MAX_PURGE_CALLS} calls`,
         )
         const result = await fn({ purgeEverything: true })
         if (!result.success) {
-          console.error(`folio: ${trigger} could not flush the cache`, result.errors)
+          logger.error(`folio: ${trigger} could not flush the cache`, result.errors)
         }
         return
       }
@@ -187,13 +189,13 @@ export function cachePurgeHooks<Env>(
         // already landed. Self-healing rather than permanently stale — the next
         // publish of the same story purges the same tag.
         if (!result.success) {
-          console.error(`folio: ${trigger} could not purge`, batch.join(','), result.errors)
+          logger.error(`folio: ${trigger} could not purge`, batch.join(','), result.errors)
         }
       }
     } catch (err) {
       // Trap 2: the absent capability is handled above, so anything reaching
       // here is a genuine runtime error and worth a line of its own.
-      console.error(`folio: ${trigger} failed to purge`, err)
+      logger.error(`folio: ${trigger} failed to purge`, err)
     }
   }
 
@@ -254,16 +256,16 @@ export function cachePurgeHooks<Env>(
     reindexed: async ({ count }) => {
       const fn = await capability()
       if (!fn) return
-      console.warn(
+      logger.warn(
         `folio: reindex purged the whole cache — ${count} documents, and which pages hold a collection is not recorded anywhere`,
       )
       try {
         const result = await fn({ purgeEverything: true })
         if (!result.success) {
-          console.error('folio: reindex could not flush the cache', result.errors)
+          logger.error('folio: reindex could not flush the cache', result.errors)
         }
       } catch (err) {
-        console.error('folio: reindex failed to purge', err)
+        logger.error('folio: reindex failed to purge', err)
       }
     },
 

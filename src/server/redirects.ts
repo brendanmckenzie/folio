@@ -24,6 +24,7 @@
 import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
 import { isSafeHref } from '../core/values'
 import type { FolioDb } from './db'
+import type { FolioLogger } from './types'
 
 export interface Redirect {
   from: string
@@ -168,9 +169,10 @@ export function clearRedirectAtStatement(db: FolioDb, path: string): D1PreparedS
 export async function lookupRedirect(
   db: FolioDb,
   path: string,
+  logger: FolioLogger = console,
 ): Promise<{ to: string; status: number } | null> {
   const from = normalisePath(path)
-  return redirectOf(from, await redirectAtStatement(db, path).first<RedirectRow>())
+  return redirectOf(from, await redirectAtStatement(db, path).first<RedirectRow>(), logger)
 }
 
 /** What a redirect lookup selects, before `redirectOf` has screened it. */
@@ -192,10 +194,14 @@ export function redirectAtStatement(db: FolioDb, path: string): D1PreparedStatem
  * gets the identical refusal rather than a second copy of the rule — which is
  * the rule that keeps a stored `javascript:` target out of a `Location` header.
  */
-export function redirectOf(from: string, row: RedirectRow | null | undefined): RedirectRow | null {
+export function redirectOf(
+  from: string,
+  row: RedirectRow | null | undefined,
+  logger: FolioLogger = console,
+): RedirectRow | null {
   if (!row) return null
   if (!isSafeHref(row.to)) {
-    console.error(`folio: redirect ${from} -> ${row.to} refused an unsafe target`)
+    logger.error(`folio: redirect ${from} -> ${row.to} refused an unsafe target`)
     return null
   }
   return row

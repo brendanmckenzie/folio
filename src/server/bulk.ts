@@ -51,6 +51,7 @@ import { FolioError, rethrow } from './errors'
 import { publish, type PublishDeps, unpublish } from './publish'
 import { countStories, storiesFor, storiesMatching } from './stories'
 import type { FolioDb } from './db'
+import type { FolioLogger } from './types'
 
 /** How many documents one call acts on before handing back a cursor. */
 export const DEFAULT_BULK_BATCH = 25
@@ -109,8 +110,15 @@ export interface BulkOptions {
  * resolvers, and duplicate/move/delete need the declared types and the Durable Object
  * stub. Assembled in one place, `routes/bulk.ts`, from `rt.publishDeps` plus two
  * fields.
+ *
+ * `logger` is optional here and required on `FolioRuntime.publishDeps`'s own
+ * return type: `routes/bulk.ts` spreads that result into every `BulkDeps` it
+ * builds, so a real caller always carries one, and `reasonOf` below still
+ * falls back to `console` for a test fixture that builds a bare `PublishDeps`.
  */
-export interface BulkDeps<Env = unknown> extends PublishDeps<Env>, DocumentDeps<Env> {}
+export interface BulkDeps<Env = unknown> extends PublishDeps<Env>, DocumentDeps<Env> {
+  logger?: FolioLogger
+}
 
 /**
  * One batch of a bulk write.
@@ -220,7 +228,7 @@ export async function runBulk<Env>(
       await one(deps, action, row, { ...opts, actor, index: indexFor(opts, seen + at) })
       report.done++
     } catch (err) {
-      report.failed.push({ id: row.id, title: row.title, message: reasonOf(err) })
+      report.failed.push({ id: row.id, title: row.title, message: reasonOf(err, deps.logger) })
     }
   }
 
@@ -367,12 +375,12 @@ function readCursor(raw: string): { after: string; seen: number } {
  * platform failure, so it gets the generic message here and the real one in the log —
  * exactly what `app.onError` does for a request, applied per document.
  */
-function reasonOf(err: unknown): string {
+function reasonOf(err: unknown, logger: FolioLogger = console): string {
   try {
     rethrow(err)
   } catch (translated) {
     if (translated instanceof FolioError) return translated.message
   }
-  console.error('folio: unreportable failure during a bulk write', err)
+  logger.error('folio: unreportable failure during a bulk write', err)
   return 'Something went wrong.'
 }

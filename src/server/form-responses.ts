@@ -63,6 +63,7 @@ import {
   uploadKeysOf,
 } from './forms'
 import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
+import type { FolioLogger } from './types'
 import {
   DOWNLOAD_CONTENT_TYPE,
   isPrintableAnswer,
@@ -1487,6 +1488,7 @@ export async function deleteResponse(
   formId: string,
   id: string,
   bucket?: R2Bucket,
+  logger: FolioLogger = console,
 ): Promise<DeleteResponseResult> {
   const row = await db
     .prepare('select files from form_responses where id = ? and form_id = ?')
@@ -1501,7 +1503,7 @@ export async function deleteResponse(
     .run()
   if ((result.meta.changes ?? 0) === 0) return { deleted: false, files: 0 }
 
-  await sweepUploads(bucket, keys)
+  await sweepUploads(bucket, keys, logger)
   return { deleted: true, files: keys.length }
 }
 
@@ -1514,12 +1516,16 @@ export async function deleteResponse(
  * orphaned object costs storage; a delete that reports failure over a row that is
  * gone costs trust in the button.
  */
-async function sweepUploads(bucket: R2Bucket | undefined, keys: readonly string[]): Promise<void> {
+async function sweepUploads(
+  bucket: R2Bucket | undefined,
+  keys: readonly string[],
+  logger: FolioLogger = console,
+): Promise<void> {
   if (!bucket || keys.length === 0) return
   try {
     await deleteUploads(bucket, keys)
   } catch (e) {
-    console.error('folio: could not delete uploaded files for a deleted response', e)
+    logger.error('folio: could not delete uploaded files for a deleted response', e)
   }
 }
 
@@ -1542,6 +1548,7 @@ export interface ResponseBulkDeps {
    *  a delete that found keys with no bucket leaves them rather than refusing —
    *  the rows are what the person asked to destroy. */
   media?: R2Bucket | undefined
+  logger?: FolioLogger
 }
 
 export interface ResponseBulkOptions {
@@ -1658,14 +1665,14 @@ export async function deleteResponses(
       report.failed.push({
         id: row.id,
         title: whenOf(row.createdAt),
-        message: reasonOf(e),
+        message: reasonOf(e, deps.logger),
       })
     }
   }
 
   // After the rows, once per batch rather than once per row: the keys are already
   // in hand and R2 takes a thousand at a time.
-  if (!dryRun) await sweepUploads(deps.media, keys)
+  if (!dryRun) await sweepUploads(deps.media, keys, deps.logger)
 
   report.seen = seen + consumed
   report.continueFrom =
@@ -1781,13 +1788,13 @@ function readResponseCursor(raw: string): { after: string; seen: number } {
 /** Why one row could not be deleted, as text that goes straight into a toast —
  *  `runAssetBulk`'s `reasonOf`, and anything `rethrow` declines to translate gets
  *  the generic sentence here and the real one in the log. */
-function reasonOf(e: unknown): string {
+function reasonOf(e: unknown, logger: FolioLogger = console): string {
   try {
     rethrow(e)
   } catch (translated) {
     if (translated instanceof FolioError) return translated.message
   }
-  console.error('folio: could not delete a form response', e)
+  logger.error('folio: could not delete a form response', e)
   return 'Could not delete it'
 }
 

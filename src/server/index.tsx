@@ -592,13 +592,13 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       } catch (err) {
         // The IdP is down, or a token is malformed. The host's route answers a
         // paywall rather than a 500, and this line is where the outage shows.
-        console.error('folio: gate.visitor threw; denying', err)
+        rt.logger.error('folio: gate.visitor threw; denying', err)
         return 'denied'
       }
       try {
         return (await gate.config.allows(who, value, ctx)) ? 'granted' : 'denied'
       } catch (err) {
-        console.error('folio: gate.allows threw; denying', err)
+        rt.logger.error('folio: gate.allows threw; denying', err)
         return 'denied'
       }
     }
@@ -708,7 +708,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         const story = await storyByPath(db, path)
         return story && rt.withUrls(story)
       },
-      redirect: (path) => lookupRedirect(db, path),
+      redirect: (path) => lookupRedirect(db, path, rt.logger),
       miss: (path) => pathMiss(db, path),
       stories: async (opts) => {
         const page = Math.max(Math.trunc(opts?.page ?? 1), 1)
@@ -789,7 +789,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     resolve: (env, doc, opts) => reader(env).resolve(doc, opts),
     query: (env, q) => reader(env).query(q),
     /**
-     * `alarmHookCtx(env)` for the hook context, here and in `migrate` below.
+     * `alarmHookCtx(env, rt.logger)` for the hook context, here and in `migrate` below.
      * Neither method takes an `ExecutionContext` — a deploy script has none to
      * offer — and that is exactly the case the alarm fallback was built for
      * (`publish-hooks.md` decision 3): the runner cannot tell which kind of
@@ -803,14 +803,14 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
           schema: rt.schema,
           typeOf: rt.typeOf,
           locales: rt.locales,
-          hooks: rt.hookRunner(alarmHookCtx(env)),
+          hooks: rt.hookRunner(alarmHookCtx(env, rt.logger)),
         },
         opts,
       ),
     /**
      * The scheduler's sweep (`../../docs/specs/platform/scheduled-publishing.md`).
      *
-     * `alarmHookCtx(env)` for the hook context, exactly as `reindex` and `migrate`
+     * `alarmHookCtx(env, rt.logger)` for the hook context, exactly as `reindex` and `migrate`
      * above: a `scheduled()` handler does have an `ExecutionContext`, but this
      * method's signature deliberately does not take one — a deploy script calling
      * the same sweep has none to offer, and Folio's own internal hooks (the space
@@ -824,7 +824,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * being restated here.
      */
     runSchedules: (env, opts) =>
-      runSchedules(rt.publishDeps(config.bindings(env), alarmHookCtx(env)), opts),
+      runSchedules(rt.publishDeps(config.bindings(env), alarmHookCtx(env, rt.logger)), opts),
     /**
      * The auth housekeeping sweep (`../../docs/specs/foundation/
      * auth-providers.md` decision 8). Assembled from bindings alone, exactly as
@@ -875,7 +875,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
           // Without this a migration that rewrites an indexed value or any prose
           // leaves content_index and content_text describing the old document.
           projection: rt.projection,
-          hooks: rt.hookRunner(alarmHookCtx(env)),
+          hooks: rt.hookRunner(alarmHookCtx(env, rt.logger)),
         },
         opts,
       )

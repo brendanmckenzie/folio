@@ -5,8 +5,11 @@
  * An asset knows nothing about blocks or stories — with exactly one exception,
  * added with the Assets screen: `GET /assets/:id/usage` answers *which documents*
  * use a file, so it needs the host's URL shaping (`rt.withUrls`) the same way the
- * document usage route does. `assetFileRoutes` below stays entirely
- * runtime-independent, which is what lets it be mounted on the bare path.
+ * document usage route does. `assetFileRoutes` below takes the runtime for one
+ * thing only, `rt.logger` — a transform failure and a cache-write failure on the
+ * public byte route are operational events a host wants in its own sink, and that
+ * is the only reason it is not runtime-independent. It is still mounted on the
+ * bare path, which was never about the argument.
  */
 import type { Context } from 'hono'
 import { Hono } from 'hono'
@@ -376,7 +379,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       const body = await parseBody(c.req, AssetBulkTagBody)
       return answer(
         c,
-        await runAssetBulk({ db: c.var.bindings().db }, action, body.selection, {
+        await runAssetBulk({ db: c.var.bindings().db, logger: rt.logger }, action, body.selection, {
           ...control(body),
           tagIds: body.tagIds,
         }),
@@ -391,7 +394,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const body = await parseBody(c.req, AssetBulkMoveBody)
     return answer(
       c,
-      await runAssetBulk({ db: c.var.bindings().db }, 'move', body.selection, {
+      await runAssetBulk({ db: c.var.bindings().db, logger: rt.logger }, 'move', body.selection, {
         ...control(body),
         folderId: body.folderId,
       }),
@@ -415,7 +418,10 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const { db, media } = c.var.bindings()
     if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
     const body = await parseBody(c.req, AssetBulkBody)
-    return answer(c, await runAssetBulk({ db, media }, 'delete', body.selection, control(body)))
+    return answer(
+      c,
+      await runAssetBulk({ db, media, logger: rt.logger }, 'delete', body.selection, control(body)),
+    )
   })
 
   /**
@@ -540,7 +546,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return answer(
       c,
       await runDescribe(
-        { db, media, images, assetBase, describe: rt.describe, env: c.env },
+        { db, media, images, assetBase, describe: rt.describe, env: c.env, logger: rt.logger },
         body.selection,
         {
           ...(body.dryRun === undefined ? {} : { dryRun: body.dryRun }),
@@ -591,7 +597,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // URL. The origin is only knowable here.
     const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
     const outcome = await describeAsset(
-      { db, media, images, assetBase, describe: rt.describe, env: c.env },
+      { db, media, images, assetBase, describe: rt.describe, env: c.env, logger: rt.logger },
       row,
     )
     return c.json({
@@ -661,7 +667,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
         c.executionCtx.waitUntil(
           describeOnUpload(
-            { db, media, images, assetBase, describe: rt.describe, env: c.env },
+            { db, media, images, assetBase, describe: rt.describe, env: c.env, logger: rt.logger },
             row,
           ),
         )
@@ -721,7 +727,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
  * charset screen, so this cannot be turned into a read primitive for a
  * co-tenanted key.
  */
-export function assetFileRoutes<Env>(): Hono<FolioEnv<Env>> {
+export function assetFileRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
 
   app.get('/asset/:key', async (c) => {
@@ -733,6 +739,7 @@ export function assetFileRoutes<Env>(): Hono<FolioEnv<Env>> {
       assetKeyParam(c.req.param('key')),
       parseTransform(new URL(c.req.url).searchParams),
       c.req.raw,
+      rt.logger,
     )
   })
 

@@ -46,6 +46,7 @@ import { bindChunks, type FolioDb } from './db'
 import { FolioError } from './errors'
 import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
 import { storiesFor } from './stories'
+import type { FolioLogger } from './types'
 
 /** A form as the builder reads it: the row, with its questions parsed. */
 export interface Form {
@@ -178,11 +179,11 @@ interface SummaryRow extends Omit<FormSummary, 'open' | 'responses'> {
  * through this file — every write validates first — so this is the shape
  * `redirectOf` uses for a row an older build or a hand-run script left behind.
  */
-function readFields(id: string, raw: string): FormField[] {
+function readFields(id: string, raw: string, logger: FolioLogger = console): FormField[] {
   try {
     return validateFormFields(JSON.parse(raw))
   } catch (err) {
-    console.error(`folio: form ${id} has unreadable fields`, err)
+    logger.error(`folio: form ${id} has unreadable fields`, err)
     return []
   }
 }
@@ -206,8 +207,8 @@ function fieldsFromInput(input: unknown): FormField[] {
   }
 }
 
-function toForm(row: FormRow): Form {
-  return { ...row, open: row.open !== 0, fields: readFields(row.id, row.fields) }
+function toForm(row: FormRow, logger: FolioLogger = console): Form {
+  return { ...row, open: row.open !== 0, fields: readFields(row.id, row.fields, logger) }
 }
 
 function toSummary(row: SummaryRow): FormSummary {
@@ -216,17 +217,25 @@ function toSummary(row: SummaryRow): FormSummary {
 
 /* ------------------------------------------------------------------ reads --- */
 
-export async function formById(db: FolioDb, id: string): Promise<Form | null> {
+export async function formById(
+  db: FolioDb,
+  id: string,
+  logger: FolioLogger = console,
+): Promise<Form | null> {
   const row = await db.prepare(`select ${COLS} from forms where id = ?`).bind(id).first<FormRow>()
-  return row ? toForm(row) : null
+  return row ? toForm(row, logger) : null
 }
 
-export async function formByName(db: FolioDb, name: string): Promise<Form | null> {
+export async function formByName(
+  db: FolioDb,
+  name: string,
+  logger: FolioLogger = console,
+): Promise<Form | null> {
   const row = await db
     .prepare(`select ${COLS} from forms where name = ?`)
     .bind(name)
     .first<FormRow>()
-  return row ? toForm(row) : null
+  return row ? toForm(row, logger) : null
 }
 
 /**
@@ -241,7 +250,11 @@ export async function formByName(db: FolioDb, name: string): Promise<Form | null
  * simply absent, which is what lets `resolveValue` answer `null` for a form that
  * has since been deleted.
  */
-export async function formsByIds(db: FolioDb, ids: readonly string[]): Promise<Form[]> {
+export async function formsByIds(
+  db: FolioDb,
+  ids: readonly string[],
+  logger: FolioLogger = console,
+): Promise<Form[]> {
   if (ids.length === 0) return []
   const pages = await Promise.all(
     bindChunks([...new Set(ids)], 1).map(async (chunk) => {
@@ -252,7 +265,7 @@ export async function formsByIds(db: FolioDb, ids: readonly string[]): Promise<F
       return results
     }),
   )
-  return pages.flat().map(toForm)
+  return pages.flat().map((row) => toForm(row, logger))
 }
 
 /* -------------------------------------------------------------- descriptor --- */

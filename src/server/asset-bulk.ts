@@ -62,6 +62,7 @@ import {
 import { bindChunks, type FolioDb } from './db'
 import { FolioError, rethrow } from './errors'
 import { whereOf } from './keyset'
+import type { FolioLogger } from './types'
 
 /** How many rows one call acts on before handing back a cursor. The same 25
  * `runBulk` defaults to, and for the same reason: `delete` issues a D1 batch and
@@ -82,10 +83,18 @@ export const MAX_ASSET_BULK_BATCH = 200
  * `media` is optional because three of the four actions never reach a bucket. A
  * `delete` without one refuses rather than pretending, matching
  * `DELETE {base}/api/assets/:id`.
+ *
+ * `logger` is optional and, unlike `bulk.ts`'s `BulkDeps`, gets no free ride from
+ * `rt.publishDeps`: there is no publish workflow behind any of the four actions,
+ * so `routes/assets.ts` builds this object from bindings and names `rt.logger`
+ * explicitly at all three call sites. Optional rather than required because
+ * `reasonOf`'s `console` fallback is the pre-`logger` behaviour and a test
+ * building deps by hand should not have to supply a sink to get it.
  */
 export interface AssetBulkDeps {
   db: FolioDb
   media?: R2Bucket | undefined
+  logger?: FolioLogger
 }
 
 export interface AssetBulkOptions {
@@ -237,7 +246,7 @@ export async function runAssetBulk(
       await one(deps, action, row, tags, opts)
       report.done++
     } catch (err) {
-      report.failed.push({ id: row.id, title: row.filename, message: reasonOf(err) })
+      report.failed.push({ id: row.id, title: row.filename, message: reasonOf(err, deps.logger) })
     }
   }
 
@@ -491,13 +500,13 @@ function readCursor(raw: string): { after: string; seen: number } {
  * a platform failure that gets the generic message here and the real one in the
  * log.
  */
-function reasonOf(err: unknown): string {
+function reasonOf(err: unknown, logger: FolioLogger = console): string {
   try {
     rethrow(err)
   } catch (translated) {
     if (translated instanceof FolioError) return translated.message
   }
-  console.error('folio: unreportable failure during a bulk asset write', err)
+  logger.error('folio: unreportable failure during a bulk asset write', err)
   return 'Something went wrong.'
 }
 

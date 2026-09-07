@@ -55,7 +55,7 @@ import { listTags } from './asset-tags'
 import { bindChunks, type FolioDb } from './db'
 import { FolioError, rethrow } from './errors'
 import { clampText, SERVED_CONTENT_TYPES } from './validate'
-import type { DescribeInput, DescribeResult, FolioDescribe } from './types'
+import type { DescribeInput, DescribeResult, FolioDescribe, FolioLogger } from './types'
 
 /** In-flight model calls per batch when a host names none. */
 export const DEFAULT_DESCRIBE_CONCURRENCY = 4
@@ -174,6 +174,15 @@ export interface DescribeDeps {
   assetBase: string
   describe: ResolvedDescribe
   env: unknown
+  /**
+   * Optional, and unlike `bulk.ts`'s `BulkDeps` it gets no free ride from
+   * `rt.publishDeps`: every call site (`routes/assets.ts`, `routes/api/index.ts`)
+   * builds this object from bindings, so all four name `rt.logger` explicitly.
+   * Optional rather than required because the `console` fallback below is the
+   * pre-`logger` behaviour, and a test assembling deps by hand should not have
+   * to supply a sink to get it.
+   */
+  logger?: FolioLogger
 }
 
 /** What one asset's attempt did. Every field is aggregable, because phase 7's
@@ -276,7 +285,8 @@ async function renditionOf(
       return { media: result.contentType(), bytes }
     } catch (e) {
       // Never silent: indistinguishable otherwise from a library of originals.
-      console.error(`folio: describe transform failed for ${row.key}`, e)
+      const logger = deps.logger ?? console
+      logger.error(`folio: describe transform failed for ${row.key}`, e)
     }
   }
 
@@ -677,7 +687,7 @@ export async function runDescribe(
       // nine calls of the batch down with it.
       slots[at] = {
         kind: 'failed',
-        failure: { id: row.id, title: row.filename, message: reasonOf(err) },
+        failure: { id: row.id, title: row.filename, message: reasonOf(err, deps.logger) },
       }
     }
   })
@@ -771,7 +781,8 @@ export async function describeOnUpload(deps: DescribeDeps, row: AssetRow): Promi
   try {
     await describeAsset(deps, row)
   } catch (e) {
-    console.error('folio: describing an upload failed', e)
+    const logger = deps.logger ?? console
+    logger.error('folio: describing an upload failed', e)
   }
 }
 
@@ -860,12 +871,12 @@ function readCursor(raw: string): { after: string; seen: number } {
  * rendered straight into a panel, and anything `rethrow` declines to translate
  * is a bug or a platform failure that gets the generic message here and the real
  * one in the log. */
-function reasonOf(err: unknown): string {
+function reasonOf(err: unknown, logger: FolioLogger = console): string {
   try {
     rethrow(err)
   } catch (translated) {
     if (translated instanceof FolioError) return translated.message
   }
-  console.error('folio: unreportable failure during a describe run', err)
+  logger.error('folio: unreportable failure during a describe run', err)
   return 'Something went wrong.'
 }

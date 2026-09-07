@@ -16,6 +16,7 @@ import type { Doc } from '../core/doc'
 import type { StoryMeta } from '../core/story'
 import type { FormResponse, SubmittedFile } from './form-responses'
 import type { FormMeta } from './forms'
+import type { FolioLogger } from './types'
 import type { VersionMeta } from './versions'
 
 export type HookEvent =
@@ -184,10 +185,11 @@ export interface FormChangedHookPayload<Env> extends HookBase<Env> {
  * editor happened to be signed in in that browser would be a lie about who filled
  * the form in.
  *
- * `runOne` swallows a throw with one `console.error`, as it does for every hook:
- * the row is already committed and a Slack outage must not turn a submission into
- * a 500 for the person who made it. `verify` is the opposite posture and runs
- * before the write, which is where a refusal belongs (decision 11).
+ * `runOne` swallows a throw with one logged line (`FolioConfig.logger`, default
+ * `console`), as it does for every hook: the row is already committed and a
+ * Slack outage must not turn a submission into a 500 for the person who made
+ * it. `verify` is the opposite posture and runs before the write, which is
+ * where a refusal belongs (decision 11).
  */
 export interface SubmittedHookPayload<Env> extends HookBase<Env> {
   form: FormMeta
@@ -318,6 +320,7 @@ async function runOne(
   name: HookEvent,
   fn: (payload: unknown) => unknown,
   payload: unknown,
+  logger: FolioLogger = console,
 ): Promise<void> {
   try {
     await fn(payload)
@@ -325,8 +328,9 @@ async function runOne(
     // The library's second observability hook after `app.onError`'s route
     // logging (errors.ts): one line, naming the event, and nothing else — a
     // Slack outage or a broken search index must never make publishing
-    // impossible (decision 2).
-    console.error(`folio: hook ${name} failed`, err)
+    // impossible (decision 2). This swallow is correct and does not change;
+    // only where the line goes does (`FolioConfig.logger`).
+    logger.error(`folio: hook ${name} failed`, err)
   }
 }
 
@@ -339,6 +343,7 @@ export function createHookRunner<Env>(
   hooks: FolioHooks<Env> | undefined,
   ctx: HookRunnerCtx<Env>,
   internal: InternalHooks<Env> = [],
+  logger: FolioLogger = console,
 ): HookRunner<Env> {
   const awaited = new Set(hooks?.await ?? [])
 
@@ -361,10 +366,10 @@ export function createHookRunner<Env>(
       // space broadcast, hands its RPC to `waitUntil` itself and so costs
       // nothing to await. A host hook for the same event can still assume they
       // have completed.
-      for (const fn of internalFns) await runOne(name, fn, payload)
+      for (const fn of internalFns) await runOne(name, fn, payload, logger)
       if (!hostFn) return
 
-      const task = runOne(name, hostFn, payload)
+      const task = runOne(name, hostFn, payload, logger)
       if (awaited.has(name)) await task
       else ctx.waitUntil(task)
     },

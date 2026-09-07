@@ -60,7 +60,14 @@ import type { PublishDeps } from './publish'
 import { type QueryDeps, runQuery } from './query'
 import { SPACE_NAME, spaceBroadcastHooks } from './space-events'
 import { ensureSingleton, listStories, publishedDocsByIds, storiesFor, storyById } from './stories'
-import type { ReadBindings, FolioConfig, PreviewMode, SpaceStub, StoryStub } from './types'
+import type {
+  FolioLogger,
+  ReadBindings,
+  FolioConfig,
+  PreviewMode,
+  SpaceStub,
+  StoryStub,
+} from './types'
 import type { FolioDb } from './db'
 
 const DEFAULT_BASE = '/folio'
@@ -199,6 +206,13 @@ export interface FolioRuntime {
    * supply, `verify` (`../content-model/forms.md` decision 9).
    */
   forms: ResolvedForms | null
+  /**
+   * `FolioConfig.logger`, defaulted to `console` — never null, unlike `gate` and
+   * `describe`. Every one of the roughly forty call sites this replaces used to
+   * log unconditionally, so an unconfigured host must keep doing exactly that
+   * rather than start silently doing nothing.
+   */
+  logger: FolioLogger
   /** A declared type by name, or undefined — a row whose type was removed from
    * the code still reads, it just has no schema to render ("Unknown type"). */
   typeOf: (name: string | undefined) => DocumentType | undefined
@@ -293,8 +307,18 @@ export interface FolioRuntime {
    * is the point (`../platform/publish-hooks.md` decision 3). Every route that
    * mutates a story reads `.hooks` off the result, not only the publish/
    * unpublish/checkpoint routes that also want the rest of `PublishDeps`.
+   *
+   * **Carries `logger` too**, widened past `publish.ts`'s own `PublishDeps` —
+   * `scheduler.ts`'s `runSchedules` and `bulk.ts`'s `runBulk` both take
+   * `deps.logger` for their own "unreportable failure" lines, and every one of
+   * their real call sites builds its deps from this function (directly, or by
+   * spreading it), so the resolved logger reaches them with no change to those
+   * call sites at all.
    */
-  publishDeps: (bindings: ReadBindings, hookCtx: HookRunnerCtx) => PublishDeps
+  publishDeps: (
+    bindings: ReadBindings,
+    hookCtx: HookRunnerCtx,
+  ) => PublishDeps & { logger: FolioLogger }
   /**
    * The hook runner on its own, for the two write paths that fire an event and
    * need none of the rest of `PublishDeps`: `runMigrations` and `reindex`
@@ -446,6 +470,10 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // (`identity-and-access.md` checkpoint 2). The widening cast is explained on
   // `FolioRuntime.auth`.
   const auth = resolveAuth(config.auth) as ResolvedAuth<unknown>
+  // No validation, unlike everything above: there is nothing to get wrong about
+  // a value that is either absent (default `console`, unchanged behaviour) or a
+  // host's own object satisfying two methods.
+  const logger: FolioLogger = config.logger ?? console
   const globals = config.globals ?? []
   const locales = config.locales
   const migrations = config.migrations ?? []
@@ -695,7 +723,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
      * A document with no `form` field issues no query at all: `formIds` answers
      * an empty array and this never touches D1.
      */
-    const formRows = formsByIds(db, doc ? formIds(doc, schema) : [])
+    const formRows = formsByIds(db, doc ? formIds(doc, schema) : [], logger)
 
     /** Pass two: the documents this one pulls in — references, and every global. */
     let docs: Record<string, Doc> = {}
@@ -903,8 +931,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    * person is watching, and the purge is the one that awaits a network call.
    */
   const internalHooks: FolioHooks<Env>[] = [
-    spaceBroadcastHooks<Env>(config, globals),
-    cachePurgeHooks<Env>(globals),
+    spaceBroadcastHooks<Env>(config, globals, logger),
+    // `undefined` for the capability, not omitted: a positional default only
+    // applies when the argument itself is `undefined`, and skipping past it
+    // to reach `logger` would mean naming the third parameter, which JS has
+    // no syntax for.
+    cachePurgeHooks<Env>(globals, undefined, logger),
   ]
 
   const hookRunner = (hookCtx: HookRunnerCtx): HookRunner<unknown> =>
@@ -912,9 +944,13 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       config.hooks,
       { env: hookCtx.env as Env, waitUntil: hookCtx.waitUntil },
       internalHooks,
+      logger,
     )
 
-  const publishDeps = (bindings: ReadBindings, hookCtx: HookRunnerCtx): PublishDeps => ({
+  const publishDeps = (
+    bindings: ReadBindings,
+    hookCtx: HookRunnerCtx,
+  ): PublishDeps & { logger: FolioLogger } => ({
     db: bindings.db,
     draft: (story) => draftFor(bindings, story),
     draftWithSyncId: (story) => draftForWithSyncId(bindings, story),
@@ -922,6 +958,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     titlesFor,
     projection,
     hooks: hookRunner(hookCtx),
+    logger,
   })
 
   /**
@@ -974,6 +1011,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     gate,
     describe,
     forms,
+    logger,
     typeOf,
     defaultType: fallbackType,
     titleFor,
@@ -1008,14 +1046,15 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
  * for free. A hook marked `{ await: true }` is still awaited under this
  * fallback — the runner does not know or care which kind of `waitUntil` it
  * was handed.
+ *
+ * `logger` defaults to `console` for a caller with no `FolioRuntime` in hand;
+ * every call site inside this library has one and passes `rt.logger`.
  */
-export function alarmHookCtx<Env>(env: Env): HookRunnerCtx<Env> {
+export function alarmHookCtx<Env>(env: Env, logger: FolioLogger = console): HookRunnerCtx<Env> {
   return {
     env,
     waitUntil: (p) => {
-      void p.catch((err) =>
-        console.error('folio: hook rejected with no waitUntil to catch it', err),
-      )
+      void p.catch((err) => logger.error('folio: hook rejected with no waitUntil to catch it', err))
     },
   }
 }

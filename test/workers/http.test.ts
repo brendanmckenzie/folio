@@ -32,6 +32,7 @@ import type {
   UpdatedHookPayload,
 } from '../../src/server/hooks'
 import type { Redirect } from '../../src/server/redirects'
+import type { FolioLogger } from '../../src/server/types'
 import { createFolio } from '../../src/server'
 import type { Page } from '../../src/core/pagination'
 import type { VersionMeta } from '../../src/server/versions'
@@ -843,7 +844,7 @@ const hookPage = defineBlock({
   render: () => null,
 })
 
-function folioWithHooks(hooks: FolioHooks<Cloudflare.Env>) {
+function folioWithHooks(hooks: FolioHooks<Cloudflare.Env>, logger?: FolioLogger) {
   return createFolio<Cloudflare.Env>({
     blocks: [hookPage],
     root: 'page',
@@ -851,6 +852,7 @@ function folioWithHooks(hooks: FolioHooks<Cloudflare.Env>) {
     basePath: '/folio',
     auth: 'open',
     hooks,
+    logger,
   })
 }
 
@@ -918,6 +920,39 @@ describe('lifecycle hooks (publish-hooks.md)', () => {
     expect(res.status).toBe(200)
     expect(body.ok).toBe(true)
     expect(logged.mock.calls.some((c) => c[0] === 'folio: hook published failed')).toBe(true)
+    logged.mockRestore()
+  })
+
+  /**
+   * `FolioConfig.logger` (#16), asserted through the **whole** chain rather than
+   * at a seam: `createFolio` → `createRuntime` → `hookRunner` → `runOne`'s one
+   * line. The test above provokes the same failure and reads it off `console`, so
+   * this one differs in exactly one input, which is the point — a logger resolved
+   * but never threaded would pass a seam-level test and fail this one.
+   */
+  it('sends that same event to a configured logger, and leaves console alone', async () => {
+    const story = await createStory('Hook Publish Throws With Logger')
+    const conn = await connect(story.id)
+    await conn.hello('alice')
+    conn.close()
+
+    const errors: unknown[][] = []
+    const folio2 = folioWithHooks(
+      {
+        published: () => {
+          throw new Error('boom from a published hook')
+        },
+      },
+      { error: (...args: unknown[]) => errors.push(args), warn: () => {} },
+    )
+
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const res = await callHooked(folio2, `/folio/api/story/${story.id}/publish`, { method: 'POST' })
+
+    expect(res.status).toBe(200)
+    expect(errors.some((c) => c[0] === 'folio: hook published failed')).toBe(true)
+    // A host that named a sink gets everything, and `console` gets nothing.
+    expect(logged).not.toHaveBeenCalled()
     logged.mockRestore()
   })
 

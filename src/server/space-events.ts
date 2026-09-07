@@ -27,7 +27,7 @@
  */
 import type { SpaceEvent } from '../core/protocol'
 import type { FolioHooks } from './hooks'
-import type { FolioConfig, SpaceStub } from './types'
+import type { FolioConfig, FolioLogger, SpaceStub } from './types'
 
 /**
  * The name of the one space instance. One for the whole site, because the whole
@@ -44,11 +44,12 @@ function emit(
   space: SpaceStub | null,
   event: SpaceEvent,
   waitUntil: (p: Promise<unknown>) => void,
+  logger: FolioLogger = console,
 ) {
   if (!space) return // no binding: the whole channel is absent, by design
   waitUntil(
     space.broadcastEvent(event).catch((err: unknown) => {
-      console.error(`folio: could not broadcast ${event.kind} to the space channel`, err)
+      logger.error(`folio: could not broadcast ${event.kind} to the space channel`, err)
     }),
   )
 }
@@ -66,6 +67,7 @@ function emit(
 export function spaceBroadcastHooks<Env>(
   config: FolioConfig<Env>,
   globals: readonly string[],
+  logger: FolioLogger = console,
 ): FolioHooks<Env> {
   const spaceFor = (env: Env): SpaceStub | null => {
     const ns = config.bindings(env).space
@@ -85,6 +87,7 @@ export function spaceBroadcastHooks<Env>(
           actor,
         },
         waitUntil,
+        logger,
       )
     },
 
@@ -100,11 +103,11 @@ export function spaceBroadcastHooks<Env>(
      * after-commit path for the sake of a row moving up one place.
      */
     pathsChanged: ({ env, waitUntil, changes, actor }) => {
-      emit(spaceFor(env), { kind: 'story.updated', changes, actor }, waitUntil)
+      emit(spaceFor(env), { kind: 'story.updated', changes, actor }, waitUntil, logger)
     },
 
     deleted: ({ env, waitUntil, ids, actor }) => {
-      emit(spaceFor(env), { kind: 'story.deleted', ids, actor }, waitUntil)
+      emit(spaceFor(env), { kind: 'story.deleted', ids, actor }, waitUntil, logger)
     },
 
     /**
@@ -125,12 +128,14 @@ export function spaceBroadcastHooks<Env>(
           versionId: version.id,
         },
         waitUntil,
+        logger,
       )
       if (globals.includes(story.type)) {
         emit(
           space,
           { kind: 'global.changed', name: story.type, storyId: story.id, actor },
           waitUntil,
+          logger,
         )
       }
     },

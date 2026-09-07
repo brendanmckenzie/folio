@@ -286,6 +286,43 @@ Unknown keys throw at construction, naming the typo and listing the valid names.
 > so every other one keeps serving the stale page. Invalidation in appearance
 > only.
 
+#### `logger: FolioLogger`
+
+Where Folio sends its own operational log lines: a cache purge that did not
+happen, a scheduled publish that failed three times, a sign-in provider whose
+mapper threw. Default `console`, so an unconfigured host's log output does not
+change.
+
+```ts
+interface FolioLogger {
+  error(message: string, ...detail: unknown[]): void
+  warn(message: string, ...detail: unknown[]): void
+}
+```
+
+```ts
+logger: {
+  error: (message, ...detail) => captureException(message, detail),
+  warn: (message, ...detail) => captureMessage(message, detail),
+},
+```
+
+Two methods, not a level, a filter, or structured fields (request id, trigger,
+story id) — every one of the roughly forty existing call sites already knows
+whether it is `error` or `warn`, and a structured shape can arrive later as an
+**additional optional argument** without touching this signature. `...detail`
+is a rest parameter rather than a fixed second one because the calls it
+replaces pass an `Error` in most places, a plain string in some, and an array
+of D1's own errors in one — this interface does not decide anything about
+their shape, and the messages themselves, including their `folio:` prefix, are
+unchanged.
+
+Threaded through `FolioRuntime` the way `hooks` and `gate` are: resolved once
+at construction, then read at every call site. A Durable Object (`StoryDO`,
+`SpaceDO`) is the one exception — it is constructed by the platform from a
+config with no path back to `createFolio`'s, so its two log lines stay on
+`console` regardless of this key.
+
 #### `gate: FolioGate<Env>`
 
 Members-only pages, for a site whose membership lives outside Folio.

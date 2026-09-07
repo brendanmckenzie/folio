@@ -49,6 +49,7 @@ import {
   dueSchedules,
   failScheduleStatement,
 } from './schedules'
+import type { FolioLogger } from './types'
 
 /** How many schedules one call fires before handing back a cursor. */
 export const DEFAULT_SCHEDULE_BATCH = 25
@@ -158,9 +159,10 @@ export interface ScheduleRunOptions {
  * `runMigrations` applies per document.
  */
 export async function runSchedules(
-  deps: PublishDeps,
+  deps: PublishDeps & { logger?: FolioLogger },
   opts: ScheduleRunOptions = {},
 ): Promise<ScheduleRunReport> {
+  const logger = deps.logger ?? console
   const now = opts.now ?? Date.now()
   const dryRun = opts.dryRun === true
   const batch = Math.min(
@@ -215,17 +217,17 @@ export async function runSchedules(
         // schedule cleanup so this is normally unreachable; it is still handled,
         // because a delete racing this sweep and a schedule written by a script for
         // an id that never existed both land here.
-        await clearRow(deps.db, row)
+        await clearRow(deps.db, row, logger)
         report.dropped.push(row.id)
         continue
       }
-      report.failed.push(await recordFailure(deps.db, row, reasonOf(err)))
+      report.failed.push(await recordFailure(deps.db, row, reasonOf(err), logger))
       continue
     }
 
     // The publish has committed, so this row's work is done. See the at-least-once
     // note in this function's own doc comment for why the clear comes second.
-    await clearRow(deps.db, row)
+    await clearRow(deps.db, row, logger)
   }
 
   report.remaining = await countDue(deps.db, now)
@@ -246,11 +248,11 @@ export async function runSchedules(
  * worked, so incrementing it would march a perfectly healthy schedule toward
  * `status: 'failed'` three sweeps from now.
  */
-async function clearRow(db: FolioDb, row: Schedule): Promise<void> {
+async function clearRow(db: FolioDb, row: Schedule, logger: FolioLogger = console): Promise<void> {
   try {
     await completeScheduleStatement(db, row.id).run()
   } catch (err) {
-    console.error(
+    logger.error(
       `folio: fired the schedule for ${row.storyId} but could not clear it; the next sweep will repeat it`,
       err,
     )
@@ -258,7 +260,12 @@ async function clearRow(db: FolioDb, row: Schedule): Promise<void> {
 }
 
 /** One failed attempt, written to the row and described for the report. */
-async function recordFailure(db: FolioDb, row: Schedule, reason: string): Promise<ScheduleFailure> {
+async function recordFailure(
+  db: FolioDb,
+  row: Schedule,
+  reason: string,
+  logger: FolioLogger = console,
+): Promise<ScheduleFailure> {
   const attempts = row.attempts + 1
   const givenUp = attempts >= MAX_SCHEDULE_ATTEMPTS
   const status: ScheduleStatus = givenUp ? 'failed' : 'pending'
@@ -269,7 +276,7 @@ async function recordFailure(db: FolioDb, row: Schedule, reason: string): Promis
   try {
     await failScheduleStatement(db, row.id, attempts, status, reason).run()
   } catch (err) {
-    console.error(`folio: could not record a failed schedule for ${row.storyId}`, err)
+    logger.error(`folio: could not record a failed schedule for ${row.storyId}`, err)
   }
   return { id: row.id, storyId: row.storyId, action: row.action, reason, attempts, givenUp }
 }

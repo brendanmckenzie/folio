@@ -373,6 +373,61 @@ describe('cachePurgeHooks', () => {
       expect(logged.mock.calls[0]?.[0]).toBe('folio: unpublish failed to purge')
       logged.mockRestore()
     })
+
+    /**
+     * `FolioLogger` (#16, `types.ts`): a real, already-provoked failure — the
+     * same rejected purge the first test in this block asserts — reaches a
+     * configured logger instead of `console`. This is the proof for #16, not a
+     * synthetic call: `cachePurgeHooks`'s third argument is exactly what
+     * `runtime.ts` threads `FolioConfig.logger` through as.
+     */
+    it('reaches a configured logger instead of console', async () => {
+      const { capability } = recorder({ success: false, errors: [{ code: 1, message: 'rate' }] })
+      const errors: unknown[][] = []
+      const logger = { error: (...args: unknown[]) => errors.push(args), warn: () => {} }
+      const hooks = cachePurgeHooks<Env>([], capability, logger)
+      const consoleLogged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      await expect(
+        fire(hooks, 'published', {
+          ...BASE,
+          story: STORY,
+          doc: DOC,
+          version: VERSION,
+          publishedAt: 1,
+        }),
+      ).resolves.toBeUndefined()
+
+      expect(errors).toHaveLength(1)
+      expect(errors[0]?.[0]).toBe('folio: publish could not purge')
+      expect(String(errors[0]?.[1])).toContain(storyTag('sty_a'))
+      // The whole point of a configured logger: console stays untouched.
+      expect(consoleLogged).not.toHaveBeenCalled()
+      consoleLogged.mockRestore()
+    })
+
+    /**
+     * The other half of the contract: a host that configures nothing keeps
+     * reaching `console`, byte-identical to every version before this key
+     * existed. Already covered above (`cachePurgeHooks<Env>([], capability)`
+     * with no third argument), named here so the pairing is explicit.
+     */
+    it('falls back to console when no logger is configured', async () => {
+      const { capability } = recorder({ success: false, errors: [{ code: 1, message: 'rate' }] })
+      const hooks = cachePurgeHooks<Env>([], capability)
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+      await fire(hooks, 'published', {
+        ...BASE,
+        story: STORY,
+        doc: DOC,
+        version: VERSION,
+        publishedAt: 1,
+      })
+
+      expect(logged).toHaveBeenCalledTimes(1)
+      logged.mockRestore()
+    })
   })
 
   it('resolves the capability per call rather than holding it', async () => {
