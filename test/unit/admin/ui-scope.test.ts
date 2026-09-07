@@ -112,6 +112,39 @@ describe('the styling scope', () => {
     }
   })
 
+  /**
+   * The portal sweep above asks "does this file portal?", and that is the wrong
+   * question by one case. `Toast` is rendered as a *sibling* of `Shell`
+   * (`Prototype.tsx`), so it is already at the root of the tree and has no reason
+   * to portal — and it was outside `.folio-ui` all the same, inheriting nothing.
+   * It shipped, and was reported as a toast in Times.
+   *
+   * So ask the stylesheet instead. **A `position: fixed` rule is the signature of a
+   * surface of its own**: it is out of flow, it is not inside anything, and whatever
+   * the shell hands its descendants does not reach it unless it says so. Five today,
+   * and the fifth is the one the other question missed.
+   */
+  it('is re-declared by every surface that takes itself out of flow', () => {
+    const fixed = tsxFiles()
+      .map((file) => ({ file, css: file.replace(/\.tsx$/, '.module.css') }))
+      .filter(({ css }) => {
+        try {
+          return rules(src(css)).some(({ body }) => /position:\s*fixed/.test(body))
+        } catch {
+          // No sibling stylesheet: nothing to say about it.
+          return false
+        }
+      })
+    // Dialog, Palette, FocusMode, HistoryPanel, Toast. Asserted so a sixth is a
+    // decision rather than an accident.
+    expect(fixed.map(({ file }) => file).sort()).toHaveLength(5)
+    for (const { file } of fixed) {
+      expect(src(file), `${file} is fixed-position but never applies ${UI_SCOPE}`).toMatch(
+        /scoped\(/,
+      )
+    }
+  })
+
   it('is never spelled as a literal, so the grep for it finds every site', () => {
     for (const file of tsxFiles()) {
       // `scope.ts` is the one place the string lives.

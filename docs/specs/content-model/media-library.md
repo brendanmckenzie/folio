@@ -1341,6 +1341,27 @@ path (a `localhost` URL is not publicly fetchable, so only the base64 branch ran
 rate limits, and behaviour at any scale past a single image. The README says to start
 a run on one asset from the detail panel.
 
+> **The public-URL path was never proven and is now gone (2026-09-07).** The first
+> real host pressed *Describe* and got `anthropic: 400 Unable to download the file`.
+> The URL was fine — 200, `image/webp`, 262kB, checked from three networks — and the
+> fetch was not: `allaboutafrica.au` blocks AI-crawler user agents zone-wide, and
+> `Claude-User` is the agent the Messages API uses to download an image. Probed
+> side by side on the same URL in the same second: `curl/8.7.1` 200,
+> `python-requests` 200, `AnthropicBanana/1.0` 200, `Claude-User/1.0` 403,
+> `ClaudeBot/1.0` 403, `GPTBot/1.1` 403.
+>
+> This is the paragraph above's "unproven" resolving to *wrong*, and decision 8's
+> reasoning with it. The cost the URL path avoided was real — bytes through the
+> isolate at `concurrency: 4` — but it was weighed against a benefit that does not
+> exist on the only platform Folio runs on: Cloudflare's AI-bot blocking is a
+> checkbox a content site is right to tick, and ticking it makes every describe run
+> fail with an error naming neither party. `anthropicDescriber` now fetches the
+> rendition itself and sends the bytes. The memory objection went with it, because
+> what it fetches is the 512px WebP the transform was already producing — a couple
+> of hundred kilobytes, not twenty megabytes — and that also brings `wrangler dev`
+> and anything behind Access inside the working set, both of which decision 8 had
+> written off.
+
 ### Phase 1 — the migration and the core vocabulary (2026-09-05, `f1e52a3`)
 
 Landed as planned: `migrations/0008_asset_organisation.sql`, `src/core/assets.ts`
