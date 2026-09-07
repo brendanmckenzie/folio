@@ -1079,7 +1079,7 @@ describe('createHookRunner', () => {
 
     /**
      * Internal hooks are awaited whatever the host's `await` list says
-     * (`../platform/caching.md` decision 5). The cache purge has to land before
+     * (`../../../docs/specs/platform/caching.md` decision 5). The cache purge has to land before
      * the response: the editor's very next act after publishing is to reload
      * the page, and `waitUntil` would let that reload race it.
      */

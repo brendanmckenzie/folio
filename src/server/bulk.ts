@@ -97,7 +97,7 @@ export interface BulkOptions {
   destination?: { parentId: string | null; index?: number }
   /**
    * `delete`'s redirect switch, defaulting to **true** exactly as
-   * `DELETE {base}/api/stories/:id` does (`../platform/redirects.md` decision 4): a
+   * `DELETE {base}/api/stories/:id` does (`../../docs/specs/platform/redirects.md` decision 4): a
    * bulk delete has to leave the redirects a hundred single deletes would.
    */
   redirect?: boolean

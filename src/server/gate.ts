@@ -28,7 +28,7 @@ import type { FolioGate } from './types'
  *     `reader.page()` tests, because what it has in hand is a document, and a
  *     document knows its root block's type and not its document type.
  *   - `types` holds the **document type** names whose root is one of those. This
- *     is what `../content-model/full-text-search.md` decision 11 compiles its
+ *     is what `../../docs/specs/content-model/full-text-search.md` decision 11 compiles its
  *     predicate from, because SQL can see `stories.type` and cannot see a root
  *     block's name.
  *

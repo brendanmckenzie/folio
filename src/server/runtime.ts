@@ -80,7 +80,7 @@ export interface PageAssets {
 
 /**
  * What a render needs beyond the document
- * (`../content-model/collections.md` decision 6).
+ * (`../../docs/specs/content-model/collections.md` decision 6).
  *
  * Everything here is optional and every default is the cheapest answer, which is
  * the point: `resolve(bindings, doc)` now costs one bounded query instead of a
@@ -94,7 +94,7 @@ export interface ResolveOptions {
   page?: number
   /**
    * A full-text term for every `searchable` `collection` field in the document
-   * (`../content-model/full-text-search.md` architecture decision 10), threaded
+   * (`../../docs/specs/content-model/full-text-search.md` architecture decision 10), threaded
    * through to `collectionQueries` beside `page`. A `collection` that does not
    * declare `searchable: true` ignores it, the same double enforcement
    * `filterable` already has.
@@ -180,7 +180,7 @@ export interface FolioRuntime {
   auth: ResolvedAuth<unknown>
   /**
    * `FolioConfig.gate`, validated, or **null for a site with no gate at all** —
-   * which is the case that must stay free (`../platform/visitor-access.md`): no
+   * which is the case that must stay free (`../../docs/specs/platform/visitor-access.md`): no
    * field is read, no host code runs, and every page keeps the cache headers it
    * always had.
    *
@@ -196,14 +196,14 @@ export interface FolioRuntime {
    * configured none** — which is the whole of "this site does not do this": the
    * describe routes answer `unsupported`, no machine column is ever written, and
    * an upload behaves exactly as it did before the feature existed
-   * (`../content-model/media-library.md` decision 8).
+   * (`../../docs/specs/content-model/media-library.md` decision 8).
    */
   describe: ResolvedDescribe | null
   /**
    * `FolioConfig.forms`, validated and defaulted, or **null for a host that
    * configured none** — which is not "forms are off": the honeypot still runs and
    * the default rate limit still applies. What is null is the half only a host can
-   * supply, `verify` (`../content-model/forms.md` decision 9).
+   * supply, `verify` (`../../docs/specs/content-model/forms.md` decision 9).
    */
   forms: ResolvedForms | null
   /**
@@ -257,7 +257,7 @@ export interface FolioRuntime {
    * A starting document for one document type: its root block's `'default'`
    * preset, with the title written into the type's own title field.
    *
-   * Exposed because `../platform/content-api.md`'s create is two writes across two
+   * Exposed because `../../docs/specs/platform/content-api.md`'s create is two writes across two
    * stores and the order matters: it validates the caller's content against this
    * seed *before* the D1 row exists, then seeds the object with the finished
    * document in one `getOrInit` rather than seeding blank and committing after —
@@ -268,7 +268,7 @@ export interface FolioRuntime {
   seed: (type: DocumentType | undefined, title: string) => Doc
   stub: (bindings: ReadBindings, id: string) => StoryStub
   /**
-   * The one space object (`../editing/live-collaboration.md`), or null when the
+   * The one space object (`../../docs/specs/editing/live-collaboration.md`), or null when the
    * host has not declared the binding — in which case everything that channel
    * carries is simply absent rather than broken.
    *
@@ -289,7 +289,7 @@ export interface FolioRuntime {
     story: StoryMeta,
   ) => Promise<{ doc: Doc; syncId: number }>
   resolve: (bindings: ReadBindings, doc?: Doc, opts?: ResolveOptions) => Promise<Resolution>
-  /** `ContentQuery` over published content (`../content-model/collections.md`). */
+  /** `ContentQuery` over published content (`../../docs/specs/content-model/collections.md`). */
   query: (bindings: ReadBindings, q: ContentQuery) => Promise<ContentPage>
   /**
    * Field names marked `indexed: true` on some declared type's root block — what a
@@ -304,7 +304,7 @@ export interface FolioRuntime {
    * run something after the response, built differently by an HTTP call site
    * (`c.env`, `c.executionCtx.waitUntil`) and a Durable Object alarm
    * (`alarmHookCtx`, this file) — `publish()` cannot tell the difference, which
-   * is the point (`../platform/publish-hooks.md` decision 3). Every route that
+   * is the point (`../../docs/specs/platform/publish-hooks.md` decision 3). Every route that
    * mutates a story reads `.hooks` off the result, not only the publish/
    * unpublish/checkpoint routes that also want the rest of `PublishDeps`.
    *
@@ -322,7 +322,7 @@ export interface FolioRuntime {
   /**
    * The hook runner on its own, for the two write paths that fire an event and
    * need none of the rest of `PublishDeps`: `runMigrations` and `reindex`
-   * (`../platform/caching.md`). Same host hooks, same internal list, same
+   * (`../../docs/specs/platform/caching.md`). Same host hooks, same internal list, same
    * ordering — `publishDeps` builds its own `hooks` from this, so there is one
    * place a runner is assembled rather than two that could register different
    * internal consumers.
@@ -428,28 +428,28 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   validatePresets(schema)
   // Same timing, same reason, and the same for `types`: an unknown root block,
   // two defaults, a duplicate name or an `under` chain that never reaches the
-  // top level all throw here (`../foundation/document-types.md`).
+  // top level all throw here (`../../docs/specs/foundation/document-types.md`).
   const types = documentTypes(config)
   validateTypes(types, schema)
   // Same timing, same reason: a typo in `hooks` (or in `await`) should fail
-  // loudly once, not silently never fire (`../platform/publish-hooks.md`).
+  // loudly once, not silently never fire (`../../docs/specs/platform/publish-hooks.md`).
   validateHooks(config.hooks)
   // Same timing, same reason, and after `validateTypes` because it needs both
   // `types` and `schema`: a `gate` whose field is translatable, unindexed, the
   // wrong kind, or declared on no `page` root is a gate the editor believes in
-  // and nothing enforces (`../platform/visitor-access.md` decision 8).
+  // and nothing enforces (`../../docs/specs/platform/visitor-access.md` decision 8).
   const gate = validateGate(config.gate, types, schema)
   // Same timing, same reason: `describe.fn` that is not a function, an unknown
   // key, or a `concurrency` outside 1–8 is a config mistake, and the request
   // that would otherwise discover it is a background `waitUntil` after an
   // upload — where nobody is looking and the only symptom is alt text that
-  // never appears (`../content-model/media-library.md` decision 8).
+  // never appears (`../../docs/specs/content-model/media-library.md` decision 8).
   const describe = validateDescribe(config.describe)
   // Same timing, same reason, one rung more insistent than `describe`: the
   // request that would otherwise discover a `verify` that is not a function is an
   // anonymous POST from the public internet, and `verify` fails closed — so the
   // symptom is a contact form that silently collects nothing, on the one route in
-  // this library a stranger can reach (`../content-model/forms.md` decision 11).
+  // this library a stranger can reach (`../../docs/specs/content-model/forms.md` decision 11).
   const forms = validateForms(config.forms)
   // Same timing, same reason: `globals` naming an unknown type or a non-
   // singleton one is a config mistake, not a runtime surprise the first page
@@ -458,12 +458,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // Same timing, same reason: a duplicate migration id, or a set whose declared
   // order and lexicographic order disagree, would migrate documents in an order
   // that depends on which comparison happened to be used
-  // (`../foundation/schema-migrations.md`).
+  // (`../../docs/specs/foundation/schema-migrations.md`).
   validateMigrations(config.migrations)
   // Same timing, same reason: a default locale that is not available, a duplicate
   // code, a fallback that does not exist or one that cycles would each turn into
   // a page rendered in the wrong language rather than an error
-  // (`../content-model/localisation.md`).
+  // (`../../docs/specs/content-model/localisation.md`).
   validateLocales(config.locales)
   // Same timing, one rung more insistent: `auth` has no default at all, so an
   // absent key throws here rather than quietly leaving the CMS open
@@ -480,7 +480,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const schemaId = latestMigrationId(migrations)
   const typeOf = (name: string | undefined) => typeByName(types, name)
   const fallbackType = defaultType(types)
-  // Root blocks only (`../content-model/collections.md` decision 2): the index is
+  // Root blocks only (`../../docs/specs/content-model/collections.md` decision 2): the index is
   // a *fixed* projection of a document, so which fields it holds cannot depend on
   // which blocks happen to be inside it. `/folio/audit` reports an `indexed` flag
   // on a block that is no type's root, which would otherwise do nothing silently.
@@ -642,7 +642,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    * The context a document needs that the document itself cannot hold.
    *
    * **This used to load every story in the site, on every page render**
-   * (`../content-model/collections.md` decision 6). Invisible at 40 pages and
+   * (`../../docs/specs/content-model/collections.md` decision 6). Invisible at 40 pages and
    * fatal at 800, and collections are what made it urgent — an insights index is
    * exactly the site that has 800 rows. It now loads the ids the document actually
    * needs:
@@ -713,7 +713,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         )
 
     /**
-     * The forms this document embeds (`../content-model/forms.md` decision 4),
+     * The forms this document embeds (`../../docs/specs/content-model/forms.md` decision 4),
      * **issued here rather than awaited later**: the ids come straight off the
      * document walk and depend on nothing pass one returns, so the read goes out
      * alongside it and both branches below wait once instead of twice. Serialising
@@ -894,7 +894,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     localeKey: (code) => localeOf(code)?.code ?? '',
     withUrls,
     // `ResolvedGate` narrowed to the three things a SQL predicate can use
-    // (`../content-model/full-text-search.md` decision 11). `types`, not
+    // (`../../docs/specs/content-model/full-text-search.md` decision 11). `types`, not
     // `roots`: SQL sees `stories.type` and cannot see a root block's name.
     // Absent on a deployment with no gate, and then `contentSql` emits nothing.
     ...(gate
@@ -907,7 +907,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
 
   /**
    * The `content_index` / `content_refs` rows a publish writes
-   * (`../content-model/collections.md`). Here rather than inside `publish()` for
+   * (`../../docs/specs/content-model/collections.md`). Here rather than inside `publish()` for
    * the same reason `titleFor` is: the projection needs the schema, the document
    * type and the locale config, which only this factory has.
    */
@@ -917,12 +917,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   /**
    * Hooks Folio registers on itself, run before any host hook for the same
    * event (`hooks.ts`'s `InternalHooks`) — the seam
-   * `../platform/publish-hooks.md` decision 5 built so there would be one
+   * `../../docs/specs/platform/publish-hooks.md` decision 5 built so there would be one
    * after-commit path rather than two conventions.
    *
    * Two occupants now, each a plain `FolioHooks` literal written exactly the
    * way a host writes one: the space channel's broadcast, and the cache purge
-   * (`../platform/caching.md`). No second path, no ordering of its own beyond
+   * (`../../docs/specs/platform/caching.md`). No second path, no ordering of its own beyond
    * this array's, and nothing for a future internal consumer to copy except
    * these.
    *
@@ -1039,7 +1039,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
 
 /**
  * `hookCtx` for a Durable Object alarm, which has no `ExecutionContext` to
- * take a `waitUntil` from (`../platform/publish-hooks.md` decision 3): the
+ * take a `waitUntil` from (`../../docs/specs/platform/publish-hooks.md` decision 3): the
  * fallback runs the task and catches anything it rejects with itself, so an
  * unawaited hook cannot turn into an unhandled rejection inside the alarm
  * handler the way an HTTP response has `executionCtx.waitUntil` to catch it

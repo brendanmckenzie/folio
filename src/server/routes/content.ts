@@ -149,7 +149,7 @@ export function contentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
 
   /**
-   * `READ`, and `../platform/content-api.md` — which owns this route's auth —
+   * `READ`, and `../../../docs/specs/platform/content-api.md` — which owns this route's auth —
    * **decided to leave it there**. Three reasons, in the order they mattered:
    *
    *   1. This route is *internal*. It is what the admin's collection input fetches,

@@ -20,8 +20,8 @@
  *
  * Every hook these fire is fired here, not at the call site. That is the property that
  * makes a bulk delete purge a host's cache exactly as a single delete does
- * (`../platform/caching.md`), and a host hook unable to tell which door a write came
- * through (`../platform/publish-hooks.md`).
+ * (`../../docs/specs/platform/caching.md`), and a host hook unable to tell which door a write came
+ * through (`../../docs/specs/platform/publish-hooks.md`).
  */
 import { cloneDoc } from '../core/clone'
 import type { Doc } from '../core/doc'
@@ -90,7 +90,7 @@ export async function duplicateDocument<Env>(
 
 /**
  * Rename, reslug, reparent or reorder a document — and write the redirects that fall
- * out of it (`../platform/redirects.md` decision 1).
+ * out of it (`../../docs/specs/platform/redirects.md` decision 1).
  *
  * `updateStoryStatement` owns every rule that applies: the root's fixed slug, the
  * cycle check, `under` constraints, fractional indices, unique slugs among siblings,
@@ -100,7 +100,7 @@ export async function duplicateDocument<Env>(
  * Both hooks, and they are not alternatives. `pathsChanged` is what a host purges a
  * vacated URL with, and stays silent for a title-only patch because nothing was
  * vacated; `updated` fires for exactly that case, because a title change alters
- * `StoryRef.title` on every page that links here (`../platform/caching.md`). A rename
+ * `StoryRef.title` on every page that links here (`../../docs/specs/platform/caching.md`). A rename
  * fires both, which is correct — they describe different facts about one write.
  *
  * `changes` comes back alongside the row for the reason `updateStoryStatement` computes
@@ -147,7 +147,7 @@ export async function moveDocument<Env>(
  *   Failing the other way leaves an orphaned object, which is the safer side: it is
  *   unreachable under this id, only under a *reused* one.
  * - *The hook regardless of the purge*, because the rows are gone either way and a
- *   host's cache must be purged either way (`../platform/publish-hooks.md`'s edge
+ *   host's cache must be purged either way (`../../docs/specs/platform/publish-hooks.md`'s edge
  *   case "partial success in the delete path").
  */
 export async function deleteDocument<Env>(

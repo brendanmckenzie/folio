@@ -491,7 +491,7 @@ export function createStoryDO<Env>(
     /**
      * The second door into the log, for a caller with no socket
      * (`schema-migrations.md` architecture decision 4). A content migration
-     * lands through here, and so does `../platform/content-api.md`'s write path.
+     * lands through here, and so does `../../docs/specs/platform/content-api.md`'s write path.
      *
      * **Not a new write path.** It runs the same `applyTransaction` the `tx`
      * frame does, so it inherits every guard: the cap, atomic validation, the
@@ -766,7 +766,7 @@ export function createStoryDO<Env>(
      * Whether a txId is already in this log, and how much it did. A **read**: it
      * writes nothing, broadcasts nothing and touches no alarm.
      *
-     * For `../platform/content-api.md`'s `Idempotency-Key`, and specifically for
+     * For `../../docs/specs/platform/content-api.md`'s `Idempotency-Key`, and specifically for
      * the retry whose recomputed diff is *empty* — the ordinary case, since the
      * first attempt already landed the change. `commit` alone cannot answer that
      * one: an empty transaction is within every cap, so probing with

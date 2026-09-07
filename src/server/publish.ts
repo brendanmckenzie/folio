@@ -53,7 +53,7 @@ export interface PublishDeps<Env = unknown> {
   titlesFor?: (story: StoryMeta, doc: Doc) => Record<string, string> | undefined
   /**
    * The document's `content_index` / `content_refs` rows
-   * (`../content-model/collections.md` architecture decision 3). Injected for the
+   * (`../../docs/specs/content-model/collections.md` architecture decision 3). Injected for the
    * same reason `titleFor` is: the projection needs the block schema, the
    * document type and the locale config, and only `createRuntime` has all three.
    *

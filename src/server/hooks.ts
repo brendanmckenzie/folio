@@ -92,7 +92,7 @@ export interface DeletedHookPayload<Env> extends HookBase<Env> {
    * `ids`' own document types, same order. Here for the same reason `paths` is:
    * the rows are gone by the time anything could look them up again, and a
    * deleted document leaves every collection over its type
-   * (`../platform/caching.md`) — so a consumer that has to invalidate an index
+   * (`../../docs/specs/platform/caching.md`) — so a consumer that has to invalidate an index
    * page needs the type and has no second chance to read it.
    */
   types: string[]
@@ -231,7 +231,7 @@ export interface FolioHooks<Env> {
   deleted?: (e: DeletedHookPayload<Env>) => unknown
   checkpointed?: (e: CheckpointedHookPayload<Env>) => unknown
   /**
-   * The four events `../platform/caching.md` added, for write paths that change
+   * The four events `../../docs/specs/platform/caching.md` added, for write paths that change
    * published bytes and used to fire nothing at all. Each one is a way a cached
    * page can go stale without any other event noticing:
    *
@@ -299,7 +299,7 @@ export interface HookRunnerCtx<Env = unknown> {
 
 /**
  * Hooks Folio registers on itself, run before any host hook for the same
- * event (decision 5) — the seam `../editing/live-collaboration.md`'s
+ * event (decision 5) — the seam `../../docs/specs/editing/live-collaboration.md`'s
  * space-channel broadcast hangs its own entry off, so there ends up being one
  * after-commit path rather than two conventions. A plain array of partial
  * `FolioHooks` literals: each internal consumer contributes its own object,
@@ -362,7 +362,7 @@ export function createHookRunner<Env>(
       // cache purge (`cache-purge.ts`) has to land before the response, or the
       // editor's reload — the very next thing they do after publishing — races
       // it and is served the entry that was just superseded
-      // (`../platform/caching.md` decision 5). The other internal consumer, the
+      // (`../../docs/specs/platform/caching.md` decision 5). The other internal consumer, the
       // space broadcast, hands its RPC to `waitUntil` itself and so costs
       // nothing to await. A host hook for the same event can still assume they
       // have completed.

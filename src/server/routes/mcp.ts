@@ -128,7 +128,7 @@ export function mcpRoutes<Env>(
    *     commit — the cache purge, and every host hook not named in `hooks.await`
    *     — and a route reaches it through `hookCtx(c)`, which dereferences
    *     `c.executionCtx`, populated by Hono from the third argument to
-   *     `app.fetch`. `../platform/caching.md` warns that a missing `waitUntil` is
+   *     `app.fetch`. `../../../docs/specs/platform/caching.md` warns that a missing `waitUntil` is
    *     unobservable in every test, because Workers Cache is not simulated by
    *     miniflare, so `test/workers/mcp.test.ts` asserts this on **the hook**
    *     rather than on the cache: the context handed to the outer `/mcp` POST has

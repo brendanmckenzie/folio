@@ -62,11 +62,11 @@ import type { FolioDb } from './db'
  * and `auditDocuments` stay callable from a test with a literal.
  */
 export interface AuditContext {
-  /** `FolioConfig.locales` (`../content-model/localisation.md`). Absent for a
+  /** `FolioConfig.locales` (`../../docs/specs/content-model/localisation.md`). Absent for a
    * single-locale site, and every locale check reads that as "nothing to say". */
   locales?: LocaleConfig
   /**
-   * The declared document types (`../content-model/collections.md`). Needed by one
+   * The declared document types (`../../docs/specs/content-model/collections.md`). Needed by one
    * check and one check only: whether a block carrying an `indexed` field is any
    * type's **root**, which is a property of the config rather than of the schema.
    * Absent means "cannot judge", not "no block is a root".
@@ -299,7 +299,7 @@ const missingField: DocumentCheck = (blok, def) => {
 
 /**
  * A translated value sitting in a field the schema does not mark `translatable`
- * (`../content-model/localisation.md` decision 4).
+ * (`../../docs/specs/content-model/localisation.md` decision 4).
  *
  * Not a bug in the renderer — the renderer honours it deliberately, so
  * un-marking a field cannot silently hide content somebody already translated —
@@ -330,7 +330,7 @@ const translatedNotTranslatable: DocumentCheck = (blok, def, ctx) => {
 
 /**
  * A translation under a locale code the config no longer declares
- * (`../content-model/localisation.md`'s first edge case).
+ * (`../../docs/specs/content-model/localisation.md`'s first edge case).
  *
  * Inert — nothing reads that code, so the page renders its fallback — which is
  * exactly why it needs saying out loud. Nothing strips these automatically,
@@ -477,7 +477,7 @@ function sizeDetail(bytes: number, locales: { code: string; bytes: number }[]): 
  *
  * The blok ceiling is the one anybody watches, and it is not the one
  * localisation moves: eight languages of long richtext is eight times the
- * payload at the same block count (`../content-model/localisation.md`
+ * payload at the same block count (`../../docs/specs/content-model/localisation.md`
  * checkpoint 2). So a document can be nowhere near `MAX_DOC_BLOKS` and still be
  * one translation pass away from a wall — with no symptom at all until an
  * editor's save is refused, because a document under the cap behaves perfectly.
@@ -664,7 +664,7 @@ const hiddenSummaryField: SchemaCheck = (schema) => {
 
 /**
  * A text-ish field nobody marked `translatable`
- * (`../content-model/localisation.md` checkpoint 2's stated mitigation).
+ * (`../../docs/specs/content-model/localisation.md` checkpoint 2's stated mitigation).
  *
  * Translatable is opt-in per field, deliberately — a default of "everything is
  * translatable" turns every schema into a translation surface nobody asked for.
@@ -704,7 +704,7 @@ const untranslatableText: SchemaCheck = (schema, ctx) => {
 
 /**
  * An `indexed` flag that can never take effect
- * (`../content-model/collections.md` architecture decision 2).
+ * (`../../docs/specs/content-model/collections.md` architecture decision 2).
  *
  * Two ways to write one, both silent without this check:
  *

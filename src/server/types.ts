@@ -50,7 +50,7 @@ import type { WriteResult } from './write'
  * *targets* from their drafts too, or a drafted page links to and pulls in
  * published copies of everything else and is internally inconsistent.
  *
- * `ResolveOptions.search` (`../content-model/full-text-search.md` architecture
+ * `ResolveOptions.search` (`../../docs/specs/content-model/full-text-search.md` architecture
  * decision 10) is the same shape a host reads its own `?q=` into and hands
  * straight to `resolve`, alongside `page` — this type carries it with no
  * change of its own, being a plain alias.
@@ -604,7 +604,7 @@ export interface FolioConfig<Env> {
   }
   /**
    * After-commit callbacks for the host: cache purges, search indexing,
-   * notifications (`../platform/publish-hooks.md`). Runs after a write has
+   * notifications (`../../docs/specs/platform/publish-hooks.md`). Runs after a write has
    * already landed, never inside it — there is no `before` hook and no way
    * to veto or rewrite a publish. Validated for unknown keys at construction.
    */
@@ -624,7 +624,7 @@ export interface FolioConfig<Env> {
   logger?: FolioLogger
   /**
    * Members-only pages, for a site whose membership lives outside Folio
-   * (`../platform/visitor-access.md`). Names a root-block field and two host
+   * (`../../docs/specs/platform/visitor-access.md`). Names a root-block field and two host
    * predicates; `reader.page()` consults them and answers `FolioPage.access`.
    *
    * Absent is the whole of "this site is public": no field is read, no host code
@@ -636,7 +636,7 @@ export interface FolioConfig<Env> {
   gate?: FolioGate<Env>
   /**
    * Machine-written alt text, descriptions and tags for the media library
-   * (`../content-model/media-library.md` decision 8). One host function; Folio
+   * (`../../docs/specs/content-model/media-library.md` decision 8). One host function; Folio
    * holds no API key and chooses no model.
    *
    * Absent is the whole of "this site does not do this": the describe routes
@@ -773,7 +773,7 @@ export interface Folio<Env> {
    * to load this page's ancestors, so a breadcrumb resolves; and
    * `cacheHeaders(resolution, { story })` needs it because a page never appears
    * in its own resolution and `story:<id>` is the tag its next publish purges
-   * by (`../platform/caching.md`).
+   * by (`../../docs/specs/platform/caching.md`).
    *
    * Deliberately a second call rather than a wider return from `published`,
    * which is a published type host code already reads.

@@ -270,7 +270,7 @@ describe('the tool table', () => {
 
   /**
    * `preview_document`'s `viewport` bounds are the one place this file has to
-   * pin a *number*, not a string enum: `../mcp/tools.ts` interpolates
+   * pin a *number*, not a string enum: `../../../src/server/mcp/tools.ts` interpolates
    * `MIN_DIMENSION`/`MAX_DIMENSION` from `shot.ts` into the description rather
    * than retyping them, precisely so the advertised range cannot drift from
    * the clamp `resolveViewport` actually applies. Same fork decision 2 exists

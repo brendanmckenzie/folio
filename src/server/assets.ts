@@ -283,7 +283,7 @@ export async function listAssets(
 /**
  * How many library rows match a filter, and nothing else — `countStories`'s twin
  * for the media library, and for the same one reason: **it is the bulk guard**
- * (`../content-model/media-library.md` decision 6, `bulk-writes.md` decision 3).
+ * (`../../docs/specs/content-model/media-library.md` decision 6, `bulk-writes.md` decision 3).
  *
  * The same `count(*)` over the same `assetFilterSql` the list route runs, so the
  * number in `Showing n of N` and the number the server re-checks before a bulk

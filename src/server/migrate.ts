@@ -179,7 +179,7 @@ export interface MigrateDeps {
    * and only `createRuntime` has all three.
    *
    * **This closes a gap that predates full-text search**
-   * (`../content-model/full-text-search.md` architecture decision 8). A run
+   * (`../../docs/specs/content-model/full-text-search.md` architecture decision 8). A run
    * rewrites `published_doc` for every document a migration touches, and used to
    * write nothing else: a migration that renamed an indexed field, or changed its
    * value, left `content_index` describing the document as it used to be until
@@ -194,7 +194,7 @@ export interface MigrateDeps {
    */
   projection?: (story: StoryMeta, doc: Doc) => ContentProjection
   /**
-   * Fires `migrated` once per batch (`../platform/caching.md`). Optional, like
+   * Fires `migrated` once per batch (`../../docs/specs/platform/caching.md`). Optional, like
    * `PublishDeps.hooks`, and absent is the behaviour every caller had before
    * the event existed: a run rewrites `published_doc` per story through
    * `stampSchemaStatement` and used to tell nobody, so a cached page could

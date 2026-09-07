@@ -156,7 +156,7 @@ export const toStoryMeta = withState
  * Every story row.
  *
  * `opts` is `folio.stories(env, { page, perPage })`
- * (`../content-model/collections.md` decision 6): the unpaginated form still
+ * (`../../docs/specs/content-model/collections.md` decision 6): the unpaginated form still
  * answers everything, because a sitemap of 40 pages should not have to page, and a
  * sitemap of 2,000 now can. Ordered by `id` when paged, so the pages partition the
  * set — without an ORDER BY, SQLite's row order is not something to page over.
@@ -179,7 +179,7 @@ export async function listStories(
  * reference's target), some by path (the rendered story's ancestors, for
  * breadcrumbs) — in one query where they fit in one, which is the whole reason
  * ancestors are addressed by path rather than walked up `parent_id`
- * (`../content-model/collections.md` decision 6, and `ancestorPaths`).
+ * (`../../docs/specs/content-model/collections.md` decision 6, and `ancestorPaths`).
  *
  * **Chunked internally, and there is no unchunked version to reach for.** Every
  * input this takes is caller-sized: a document with three hundred internal links
@@ -966,7 +966,7 @@ export interface DocumentUsage {
 
 /**
  * What points at this document, for the warning shown before it is deleted
- * (`../content-model/data-documents.md` architecture decision 4).
+ * (`../../docs/specs/content-model/data-documents.md` architecture decision 4).
  *
  * **Published references only, and the dialog says so.** `content_refs` is
  * written inside the publish batch, so that is all the table holds. Covering
@@ -1297,7 +1297,7 @@ export function stampSchemaStatement(
 
 /**
  * One batch of published documents, in `id` order, starting after `after` —
- * `POST /folio/reindex`'s resumable read (`../content-model/collections.md`).
+ * `POST /folio/reindex`'s resumable read (`../../docs/specs/content-model/collections.md`).
  *
  * Ordered by the primary key and resumed by a cursor rather than by OFFSET, the
  * same reasoning `storiesBehind` above spells out: the rows are the rows the
@@ -1650,7 +1650,7 @@ export async function duplicateStory(
 /**
  * A path this rename or move actually vacated, and where it now lives —
  * exactly the fact `redirectStatements` needs, and the one
- * `../platform/publish-hooks.md`'s `pathsChanged` hook fires with, because it
+ * `../../docs/specs/platform/publish-hooks.md`'s `pathsChanged` hook fires with, because it
  * is the only place both the old and the new path of every affected row are
  * known at once. Gone once `updateStoryStatement` returns, which is why that
  * hook has to fire at the route, not inside this file.
@@ -1682,7 +1682,7 @@ export interface StoryPatch {
    * Accepted only when it matches the row's existing type, so a client that
    * round-trips a whole story object is not punished for it. An actual change is
    * refused: moving a document between types is a schema migration, which needs
-   * the `retype` mutation `../platform/schema-migrations.md` adds.
+   * the `retype` mutation `../../docs/specs/foundation/schema-migrations.md` adds.
    */
   type?: string
 }
@@ -1698,7 +1698,7 @@ export async function updateStoryStatement(
   changes: PathChange[]
   /**
    * Which of the row's own fields this patch actually altered, for the
-   * `updated` hook (`../platform/caching.md`). Computed here, beside the
+   * `updated` hook (`../../docs/specs/platform/caching.md`). Computed here, beside the
    * `changes` diff, for the reason that one is: the "before" is gone once these
    * statements run, and a caller recomputing it would be a second answer that
    * could drift from this one.
@@ -1885,7 +1885,7 @@ export async function deleteStoryStatement(
    * `ids`' own document types, same order — the third fact that is gone the
    * moment this statement runs, needed for the same reason `paths` is: a
    * deleted document leaves every collection over its type, and
-   * `../platform/caching.md`'s purge hook has to name that type.
+   * `../../docs/specs/platform/caching.md`'s purge hook has to name that type.
    */
   types: string[]
   /**
@@ -1906,7 +1906,7 @@ export async function deleteStoryStatement(
   redirectStatements: D1PreparedStatement[]
   /**
    * `content_index` / `content_refs` rows for the same ids
-   * (`../content-model/collections.md`), for the same batch: a deleted story must
+   * (`../../docs/specs/content-model/collections.md`), for the same batch: a deleted story must
    * leave every collection in the same transaction it leaves the tree, or a query
    * returns an id with no document behind it.
    *
@@ -1921,7 +1921,7 @@ export async function deleteStoryStatement(
   indexStatements: D1PreparedStatement[]
   /**
    * Pending and failed schedules for the same ids
-   * (`../platform/scheduled-publishing.md`), for the same batch.
+   * (`../../docs/specs/platform/scheduled-publishing.md`), for the same batch.
    *
    * A schedule must **not** outlive its story, which is the opposite of a
    * `redirect`: a redirect exists precisely because the page stopped being at that
@@ -2089,7 +2089,7 @@ export async function publishStory(
 
 /**
  * The stories-row update for an unpublish, unrun for the same batching reason
- * as `publishStoryStatement`: a future caller (`../content-model/collections.md`'s
+ * as `publishStoryStatement`: a future caller (`../../docs/specs/content-model/collections.md`'s
  * publish batch) needs to drop query-index rows in the same transaction. This
  * spec's own `unpublish()` (`publish.ts`) has nothing else to batch it with —
  * it is the one workflow that writes D1 alone, with no version row and no

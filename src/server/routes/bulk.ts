@@ -141,7 +141,7 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   })
 
   /** Delete, with `redirect` defaulting to true so a bulk delete leaves the same
-   * redirects a hundred single deletes would (`../../platform/redirects.md`). */
+   * redirects a hundred single deletes would (`../../../docs/specs/platform/redirects.md`). */
   app.post('/bulk/delete', requireAccess<Env>(rt, MANAGE), async (c) => {
     const body = await parseBody(c.req, BulkDeleteBody)
     return answer(

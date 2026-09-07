@@ -66,7 +66,7 @@ export interface ReindexDeps {
   typeOf: (name: string | undefined) => DocumentType | undefined
   locales?: LocaleConfig
   /**
-   * Fires `reindexed` once per batch (`../platform/caching.md`). Optional for
+   * Fires `reindexed` once per batch (`../../docs/specs/platform/caching.md`). Optional for
    * the reason `MigrateDeps.hooks` is: absent is what every caller did before
    * the event existed. Unlike a migration this one cannot name what it
    * affected — it changes what *every* collection query answers, and which

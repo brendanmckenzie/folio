@@ -180,7 +180,7 @@ export async function previewPage(
   // `story` is what lets the narrowed resolution reach this page's ancestors (a
   // breadcrumb still has to resolve) and what lets a collection listing this very
   // document show its **draft** title rather than its published one
-  // (`../content-model/collections.md` decision 3).
+  // (`../../docs/specs/content-model/collections.md` decision 3).
   const resolution = await rt.resolve(bindings, doc, {
     draft: true,
     locale: opts?.locale,

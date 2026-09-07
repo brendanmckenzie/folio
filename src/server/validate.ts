@@ -127,7 +127,7 @@ const required = (max: number) => v.pipe(bounded(max), v.minLength(1, 'is requir
 
 /**
  * `bounded()`'s screen for text that **nobody typed** — what a model answered
- * (`../content-model/media-library.md` decision 8's `DescribeResult`).
+ * (`../../docs/specs/content-model/media-library.md` decision 8's `DescribeResult`).
  *
  * Same characters, same caps, opposite failure. `bounded` refuses, because a
  * person is holding the form and can be told which field is wrong; there is
@@ -237,7 +237,7 @@ export const CheckpointBody = v.object({ label: v.optional(bounded(120)) }, OBJE
 
 /**
  * What an editor can change about one library row
- * (`../content-model/media-library.md` decision 4 and phase 3).
+ * (`../../docs/specs/content-model/media-library.md` decision 4 and phase 3).
  *
  * Every field is `v.optional`, and absent means *leave it alone* — so `alt: ''`
  * clears the alt text while `{}` does not, and `folderId: null` unfiles the asset
@@ -272,7 +272,7 @@ export const AssetPatchBody = v.object(
 )
 
 /**
- * A tag, created or renamed (`../content-model/media-library.md` decision 4).
+ * A tag, created or renamed (`../../docs/specs/content-model/media-library.md` decision 4).
  *
  * `name` is what was typed and is what is displayed; the identity is
  * `core/assets.ts`'s `tagSlug` of it, which is why there is no `slug` field for a
@@ -287,7 +287,7 @@ export const AssetPatchBody = v.object(
 export const AssetTagBody = v.object({ name: required(60) }, OBJECT)
 
 /**
- * A media-library folder (`../content-model/media-library.md` decision 3).
+ * A media-library folder (`../../docs/specs/content-model/media-library.md` decision 3).
  *
  * `name` is what was typed and is what is displayed; the identity is `path`, the
  * slash-joined chain of *slugified* ancestor names that `asset-folders.ts`
@@ -353,7 +353,7 @@ export const MigrateBody = v.object(
 )
 
 /**
- * `POST /folio/reindex` (`../content-model/collections.md`). Shaped exactly like
+ * `POST /folio/reindex` (`../../docs/specs/content-model/collections.md`). Shaped exactly like
  * `MigrateBody` above, because it is the same kind of run: batched, resumable by an
  * id cursor, and safe to dry-run. An empty body means "sweep the first batch from
  * the start", which is what a one-off `curl` wants to be able to write.
@@ -1330,7 +1330,7 @@ export const BulkMoveBody = v.object(
 
 /**
  * `POST {base}/api/bulk/delete`. `redirect` defaults to **true**, matching
- * `DELETE {base}/api/stories/:id?redirect=` (`../platform/redirects.md` decision 4):
+ * `DELETE {base}/api/stories/:id?redirect=` (`../../docs/specs/platform/redirects.md` decision 4):
  * a bulk delete has to leave the redirects a hundred single deletes would, and the
  * escape hatch is for a page that should genuinely 404.
  *
@@ -1406,7 +1406,7 @@ export function assetSortQuery(raw: string | undefined): AssetSort {
 /**
  * `?folder=` on the asset list — a folder **`path`**, not an id, because the
  * filter is a range over `asset_folders.path` and includes descendants
- * (`../content-model/media-library.md` decision 3 and checkpoint 10). It is what
+ * (`../../docs/specs/content-model/media-library.md` decision 3 and checkpoint 10). It is what
  * a captured *select all* stores too, which is why the URL carries the path
  * rather than an id a later delete could invalidate.
  *
@@ -1434,7 +1434,7 @@ export function folderQuery(raw: string | undefined): string | undefined {
 
 /**
  * One `?tags=` value: a tag **slug**, which is the identity
- * (`../content-model/media-library.md` decision 4).
+ * (`../../docs/specs/content-model/media-library.md` decision 4).
  *
  * The charset is `tagSlug`'s own output — anything printable with no whitespace
  * in it — rather than an ASCII slug screen, for `ASSET_FOLDER_PATH`'s reason:
@@ -1478,7 +1478,7 @@ export function tagsQuery(raw: string[] | undefined): string[] | undefined {
 
 /**
  * The `AssetFilter` a media-library select-all **captured**
- * (`../content-model/media-library.md` decision 6), as a body field rather than a
+ * (`../../docs/specs/content-model/media-library.md` decision 6), as a body field rather than a
  * query string.
  *
  * Every member of `core/assets.ts`'s `AssetFilter` that a list route parses, and
@@ -1612,7 +1612,7 @@ export const AssetBulkBody = v.object(ASSET_BULK_CONTROL, OBJECT)
 
 /**
  * `POST {base}/api/assets/describe` — the batched enrichment run
- * (`../content-model/media-library.md` decision 10).
+ * (`../../docs/specs/content-model/media-library.md` decision 10).
  *
  * The same selection and the same job control as a bulk write, with **one
  * deliberate difference: `batch` is capped at 25, not 200.** A batch here is N

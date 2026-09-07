@@ -428,7 +428,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * caller cannot route around it: there is exactly one of a singleton by
    * definition, so a second copy is not a document its own schema can describe.
    * This is the debt `duplicate-and-paste.md` deferred to
-   * `../foundation/document-types.md`, which is what makes "singleton" mean
+   * `../../../docs/specs/foundation/document-types.md`, which is what makes "singleton" mean
    * anything at all.
    */
   app.post(
