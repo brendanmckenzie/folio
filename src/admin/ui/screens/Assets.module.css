@@ -844,6 +844,25 @@
 }
 
 /*
+ * **Nothing in the panel shrinks.** It scrolls, so a child that does not fit is one
+ * you scroll to rather than one squeezed to fit, and the default `flex-shrink: 1`
+ * says the opposite. Two kinds of child here have no content-based minimum to stop
+ * it: an `aspect-ratio` box (`.preview`, `.skeletonPreview`), whose transferred
+ * height is not a minimum, and a box that scrolls itself (`.uses` and `.describe`,
+ * through `.usageList` and `.runFailures` — a `min-height: auto` resolves to 0 when
+ * overflow is not `visible`). The first is the one you see: an over-full panel
+ * flattens the 4:3 frame and `object-fit: contain` letterboxes the photo inside it
+ * into a strip, which reads as a squashed image rather than as a layout fault.
+ *
+ * `> *` rather than an enumeration, unlike `.controls, .footer` above. There the
+ * list is the point, because `.results` beside them *must* shrink; here nothing
+ * must, so naming them would only be a list to forget the next entry from.
+ */
+.panel > * {
+  flex: none;
+}
+
+/*
  * **The wide screen is a frame, not a page.** This is what makes the two columns
  * beside each other each scroll on their own, and it is why neither can run off the
  * bottom of the window.
