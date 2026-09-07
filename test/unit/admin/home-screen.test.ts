@@ -14,7 +14,7 @@ import {
   publishActor,
   quickCards,
 } from '../../../src/admin/ui/screens/home-model'
-import type { AuditBatch } from '../../../src/admin/ui/screens/model-model'
+import { type AuditBatch, REMEDIES } from '../../../src/admin/ui/screens/model-model'
 import type { DocumentType } from '../../../src/core/schema'
 import type { MigrationStatus } from '../../../src/server/migrate'
 
@@ -310,7 +310,11 @@ describe('needs attention', () => {
     expect(needs.banner).toContain('3 documents')
   })
 
-  it('links a finding to the document it names, and a schema fault to Model', () => {
+  it('is one row per family, counted, and every row goes to Model', () => {
+    // Was one row per *finding*, linking each to the first document it named. On a
+    // real site that drew six rows all titled "Missing fields" with no remedy on
+    // any of them — see `attention` for why the unit is the family now, and why the
+    // per-document links stay on the screen this block links to.
     const audit: AuditBatch = {
       documents: 40,
       content: [
@@ -321,6 +325,14 @@ describe('needs attention', () => {
           documents: 3,
           bloks: 4,
           sample: ['sty_about', 'sty_team'],
+        },
+        {
+          check: 'orphan-key',
+          type: 'hero',
+          field: 'strapline',
+          documents: 1,
+          bloks: 1,
+          sample: ['sty_team'],
         },
       ],
       stories: [],
@@ -335,24 +347,78 @@ describe('needs attention', () => {
       continueFrom: null,
     }
     const rows = attention({ status: clean, audit }).rows
-    const orphan = rows.find((row) => row.subject === 'hero.subtitle')
-    expect(orphan?.screen).toEqual({ name: 'edit', id: 'sty_about' })
-    // A schema check reads no document — it is a code fault — so there is nothing to
-    // link to but the panel that explains it.
-    const schema = rows.find((row) => row.subject === 'hero.heading')
-    expect(schema?.screen).toEqual({ name: 'model' })
+
+    // Two orphan-key findings are one situation with one remedy.
+    expect(rows).toHaveLength(2)
+    expect(rows.every((row) => row.screen.name === 'model')).toBe(true)
+    expect(rows.map((row) => row.count)).toEqual([2, 1])
+    expect(rows.map((row) => row.subject)).toEqual([undefined, undefined])
+  })
+
+  it('states a remedy per group, and only shouts about the code faults', () => {
+    // The half that was missing: a fault named precisely and with nothing to do
+    // about it is not actionable. Tone follows the same split — `missing-field`
+    // renders blank rather than breaking, so ten of them in red is a launchpad
+    // crying wolf, while a schema fault is a mistake in the declarations.
+    const audit: AuditBatch = {
+      documents: 40,
+      content: [
+        {
+          check: 'missing-field',
+          type: 'cardGrid',
+          field: 'eyebrow',
+          documents: 28,
+          bloks: 74,
+          sample: ['sty_home'],
+        },
+      ],
+      stories: [],
+      schema: [
+        {
+          check: 'indexed-not-root',
+          block: 'hero',
+          field: 'heading',
+          detail: 'hero is no type’s root, so the flag does nothing',
+        },
+      ],
+      continueFrom: null,
+    }
+    const rows = attention({ status: clean, audit }).rows
+    const stored = rows.find((row) => row.title === 'Missing fields')
+    expect(stored?.tone).toBe('warn')
+    expect(stored?.detail).toBe(REMEDIES.content)
+    const schema = rows.find((row) => row.tone === 'danger')
+    expect(schema?.detail).toBe(REMEDIES.schema)
+  })
+
+  it('gives a pending migration the warn tone and its own id', () => {
+    const status: MigrationStatus = {
+      migrations: [{ id: '001-rename', description: 'Rename hero.heading', applied: false }],
+      pending: ['001-rename'],
+      behind: 1,
+    }
+    const row = attention({ status, audit: emptyAudit }).rows[0]
+    expect(row?.tone).toBe('warn')
+    expect(row?.subject).toBe('001-rename')
+    // One thing, so nothing to count — the badge draws the id instead.
+    expect(row?.count).toBeUndefined()
   })
 
   it('caps the list and reports the remainder rather than truncating silently', () => {
+    // The cap counts *families* now, so it takes one distinct check per row to
+    // reach it — which is the point: a hundred findings of one kind no longer
+    // crowd every other kind off the block.
     const audit: AuditBatch = {
       documents: 40,
-      content: [],
-      stories: Array.from({ length: ATTENTION_LIMIT + 4 }, (_, i) => ({
-        check: 'document-size',
-        story: `sty_${i}`,
-        type: 'page',
-        detail: `${i} bytes`,
+      content: Array.from({ length: ATTENTION_LIMIT + 4 }, (_, i) => ({
+        check: `synthetic-check-${i}`,
+        type: 'hero',
+        field: 'subtitle',
+        documents: 1,
+        bloks: 1,
+        sample: ['sty_about'],
       })),
+      stories: [],
       schema: [],
       continueFrom: null,
     }
@@ -361,11 +427,11 @@ describe('needs attention', () => {
     expect(needs.more).toBe(4)
   })
 
-  it('names a document-shaped finding by its story id, since nothing else is drawn beside it', () => {
-    // `AuditRow.subject` is null for a finding whose subject *is* a document, so the
-    // Model panel does not print the id twice — once as a mono subject and once as a
-    // link. This block draws no such link (the whole row navigates), so the id
-    // becomes the subject and appears exactly once.
+  it('sends a document-shaped finding to Model too, not to the one document', () => {
+    // This used to name the story id as the row's subject and open that document.
+    // A family of one still reads as a family: the count is what the badge draws,
+    // and `stories`' remedy is "open the documents on Content model", which is
+    // where the finding's own row and its explanation already are.
     const audit: AuditBatch = {
       documents: 1,
       content: [],
@@ -374,8 +440,11 @@ describe('needs attention', () => {
       continueFrom: null,
     }
     const row = attention({ status: clean, audit }).rows[0]
-    expect(row?.subject).toBe('sty_huge')
-    expect(row?.screen).toEqual({ name: 'edit', id: 'sty_huge' })
+    expect(row?.subject).toBeUndefined()
+    expect(row?.count).toBe(1)
+    expect(row?.tone).toBe('warn')
+    expect(row?.detail).toBe(REMEDIES.stories)
+    expect(row?.screen).toEqual({ name: 'model' })
   })
 })
 

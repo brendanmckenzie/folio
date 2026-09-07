@@ -187,9 +187,15 @@ that, and it was a wrong answer arrived at confidently. Five blocks:
 - **Latest media** — the newest uploads as thumbnails. The one block nobody else
   has by default, and nearly free: `listAssets` is already ordered by `created_at`
   descending. A CMS that treats assets as a first-class place should show them.
-- **Needs attention** — pending migrations and audit findings, one row each,
-  linking to `Model` or to the document. **Absent entirely when there is nothing
-  wrong** — no green tick, no "all clear" panel.
+- **Needs attention** — pending migrations one row each, and audit findings **one
+  row per family** with a count and a remedy, all linking to `Model`. **Absent
+  entirely when there is nothing wrong** — no green tick, no "all clear" panel.
+  This said "one row each, linking to `Model` or to the document" until
+  2026-09-07, which is what it built: a real site drew six rows all titled
+  "Missing fields", each with a red field name and no statement of what to do
+  about it, and the per-document link sent you to a document the remedy is not in.
+  The unit here is the *situation*, and the per-finding rows are on `Model`, where
+  the family's explanation is beside them.
 
 **Unpublished changes are not gone, they moved to where you would act on them:** a
 `state: changed` filter chip on Content. That is the KISS version — the capability

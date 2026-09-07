@@ -32,7 +32,7 @@ import type { StoryMeta } from '../../../core/story'
 import type { MigrationStatus } from '../../../server/migrate'
 import type { Me } from '../../me'
 import type { Screen } from '../route'
-import { type AuditBatch, auditGroups, driftBanner } from './model-model'
+import { type AuditBatch, auditGroups, driftBanner, REMEDIES } from './model-model'
 
 /* ------------------------------------------------------------------ counts --- */
 
@@ -339,21 +339,25 @@ export interface AttentionRow {
   /** What is wrong, in words. */
   title: string
   /**
-   * The identifier it is about — a migration id, `hero.heading`, a story id.
-   * Rendered monospaced, and absent when there is nothing to name.
-   *
-   * `AuditRow.subject` is null for a finding whose subject *is* a document, so that
-   * the Model panel does not draw the story id as a mono subject next to a link to
-   * the same id. Here it becomes the story id, because this block draws no such link
-   * — the whole row navigates — so the id appears once rather than twice.
+   * The identifier it is about, rendered monospaced — a migration's id. Absent on
+   * a finding, which is a whole family here and so names a count rather than one
+   * subject.
    */
   subject?: string
-  /** One short line about the finding. `AuditRow.note` when there is one — the
-   * varying half, which is what a single row wants — and the full sentence
-   * otherwise. */
+  /** How many findings the row stands for. Absent on a migration, which is one
+   * thing. */
+  count?: number
+  /** **What to do about it**, which is the half this block used to leave out
+   * entirely — see `attention`. */
   detail?: string
-  /** Where the row goes: the document for a finding that names one, Model for a
-   * migration and for a schema fault, which is about code and names no document. */
+  /**
+   * How loud the row is. A stored-value fault is `warn`: `missing-field`'s own
+   * description says it "renders blank rather than breaking, which is why nobody
+   * notices", and ten of those in `danger` red is a launchpad crying wolf. A
+   * schema fault is a code mistake and stays `danger`.
+   */
+  tone: 'warn' | 'danger'
+  /** Where the row goes. Always Model for a finding — see `attention`. */
   screen: Screen
 }
 
@@ -404,27 +408,50 @@ export function attention(input: {
       title: 'Migration not run',
       subject: id,
       ...(found?.description ? { detail: found.description } : {}),
+      tone: 'warn',
       screen: { name: 'model' },
     }
   })
 
+  /**
+   * **One row per family, and every row says what to do about it.**
+   *
+   * This was one row per *finding*, and on a real site that is what it looked
+   * like: six rows all titled "Missing fields", each with a red monospaced field
+   * name, no explanation, and "4 more on Content model" underneath — reported as
+   * "needs attention, unclear on how to actually resolve the issue", which was
+   * fair on both counts. Two things were wrong with it.
+   *
+   * The block is triage, so its unit is the *situation*, not the instance. Ten
+   * missing-field findings are one situation with one remedy, and rendering them
+   * as ten alarms both buries the other groups under the cap and makes a benign
+   * drift look like ten faults. The per-finding rows still exist, in full, on the
+   * screen this block links to — where the family's explanation is beside them.
+   *
+   * And a fault with no stated remedy is not actionable, however precisely it is
+   * named. `REMEDIES` is per group rather than per check because that is the
+   * granularity at which the answer actually differs: everything in `content` is
+   * fixed by a content migration, everything in `schema` by editing a
+   * declaration. A per-check remedy would be thirteen sentences saying those two
+   * things.
+   *
+   * The consequence is that a finding row now always goes to Model, where a
+   * migration row already went. That reverses this block's old rule — "the
+   * document when the finding names one, which is what makes a report a tool
+   * rather than a list" — and it has to: a family has no single document to open,
+   * and its remedy is one action rather than one per document. The rule still
+   * holds where the report is, which is the Model screen.
+   */
   const findings: AttentionRow[] = auditGroups(audit).flatMap((group) =>
-    group.families.flatMap((family) =>
-      family.rows.map((row): AttentionRow => {
-        const story = row.stories[0]
-        const subject = row.subject ?? story
-        const detail = row.note ?? row.detail
-        return {
-          key: `finding:${row.key}`,
-          kind: 'finding',
-          title: family.title,
-          ...(subject ? { subject } : {}),
-          ...(detail ? { detail } : {}),
-          // The document when the finding names one, which is what makes a report a
-          // tool rather than a list. A schema fault names no document — it is a code
-          // mistake — so it goes to Model, where the family's explanation is.
-          screen: story ? { name: 'edit', id: story } : { name: 'model' },
-        }
+    group.families.map(
+      (family): AttentionRow => ({
+        key: `finding:${group.kind}:${family.check}`,
+        kind: 'finding',
+        title: family.title,
+        count: family.rows.length,
+        detail: REMEDIES[group.kind],
+        tone: group.kind === 'schema' ? 'danger' : 'warn',
+        screen: { name: 'model' },
       }),
     ),
   )

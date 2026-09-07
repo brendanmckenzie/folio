@@ -10,6 +10,7 @@ import { List, Row } from '../List'
 import { href, type Screen } from '../route'
 import { type AssetRow, addedAgo, isRenderableImage, thumbUrl, typeLabel } from './assets-model'
 import { stateTone, when } from './content-rows'
+import { count } from './model-model'
 import {
   type ActorDirectory,
   type ActorLabel,
@@ -680,17 +681,22 @@ function Attention({
             <Row
               key={row.key}
               {...(row.detail ? { meta: row.detail } : {})}
-              {...(row.subject
+              {...(row.subject !== undefined || row.count !== undefined
                 ? {
                     trailing: (
-                      <Badge tone={row.kind === 'migration' ? 'warn' : 'danger'} mono>
-                        {row.subject}
+                      /*
+                        A migration names itself; a family counts itself. `mono` on
+                        the id because it is one, and not on the count because a
+                        tabular "9" dressed as code reads as an identifier.
+                      */
+                      <Badge tone={row.tone} mono={row.subject !== undefined}>
+                        {row.subject ?? count(row.count ?? 0, 'finding')}
                       </Badge>
                     ),
                   }
                 : {})}
-              // A finding links to the document it is about, a migration and a schema
-              // fault to Model. `attention` decides which; this only navigates.
+              // Every row goes to Model now, findings included — `attention` argues
+              // the reversal. This only navigates.
               onOpen={() => onOpen(row.screen)}
             >
               {row.title}
