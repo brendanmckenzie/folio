@@ -13,6 +13,13 @@ integration guide. `examples/starter` is a real workspace package that
 `pnpm typecheck` gates and that `bin/folio.mjs init` copies — **change it and you
 change what every new project starts from.**
 
+**Working towards 1.0? Start at `docs/1.0-plan.md`.** It is the execution plan for the
+twenty issues on the tracker — six ordered phases, the four constraints that fix the
+order, per-issue file scoping and model choice, and the orchestration rules from the
+previous multi-agent runs. It is also the briefing file every subagent on that work
+should read before its first edit, alongside "Invariants that are easy to break by
+accident" below.
+
 ## Commands, and how to tell whether they passed
 
 From the repo root:
@@ -51,8 +58,16 @@ the split. There is no GitHub Actions workflow — see "Releasing" below for why
 `fetch`/`WebSocket` — no browser. Run one with:
 
 ```
-./scripts/e2e.sh scripts/sync-test.mjs
+./scripts/e2e.sh scripts/sync-test.mjs     # one script
+./scripts/e2e-all.sh                       # all 22, one fresh database each
 ```
+
+**Both propagate the script's exit code**, so either can gate something. `e2e.sh` used
+to discard it — `node "$SCRIPT" ... || true` with a trailing `pkill ... || true` as the
+last statement — which meant the whole tier was decorative for as long as it existed.
+`e2e-all.sh` is a loop of reset-then-run rather than one server for all 22, because they
+share a database otherwise; that makes it minutes rather than seconds, which is why
+`release.mjs --tag` runs it and an ordinary push does not.
 
 **Never run them without resetting first**, and never two in one database. They mutate
 content and are not idempotent, so a stale database produces failures that look like

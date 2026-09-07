@@ -12,6 +12,7 @@
  *   node scripts/release.mjs           # gate, smoke-test, print the push command
  *   node scripts/release.mjs --push    # …and push it
  *   node scripts/release.mjs --no-gate # skip the gates (they were just run)
+ *   node scripts/release.mjs --tag     # …and add the end-to-end sweep
  *
  * What it does NOT do is push by default. Publishing is an explicit act, and the
  * printed command is one paste.
@@ -28,6 +29,17 @@ const args = new Set(process.argv.slice(2))
 const push = args.has('--push')
 const gate = !args.has('--no-gate')
 const force = args.has('--force')
+/**
+ * A tagged release gets a slower gate than a push, because a tag is rarer and
+ * more consequential: it is the thing a consumer pins by name. The end-to-end
+ * sweep is minutes of real dev servers and real databases — the only coverage
+ * this repository has of the sync and WebSocket paths — which is affordable
+ * once per tag and not once per push.
+ *
+ * It runs with the other three, before anything is stamped, committed or
+ * tagged, so a failure costs time and nothing else.
+ */
+const tag = args.has('--tag')
 
 const git = (...a) => execFileSync('git', a, { encoding: 'utf8' }).trim()
 
@@ -43,16 +55,16 @@ function die(message) {
  * plausible summary and never runs biome at all — so the direct binary, and the
  * status, are the only things trusted here. See CLAUDE.md.
  */
-function runGate(label, command, commandArgs) {
-  process.stdout.write(`· ${label} … `)
-  const result = spawnSync(command, commandArgs, { stdio: 'pipe' })
+function runGate(label, command, commandArgs, { stream = false } = {}) {
+  process.stdout.write(`· ${label} … ${stream ? '\n' : ''}`)
+  const result = spawnSync(command, commandArgs, { stdio: stream ? 'inherit' : 'pipe' })
   if (result.status !== 0) {
     console.log('FAILED')
     process.stdout.write(result.stdout?.toString() ?? '')
     process.stderr.write(result.stderr?.toString() ?? '')
     die(`${label} failed (exit ${result.status}). Nothing has been pushed.`)
   }
-  console.log('ok')
+  console.log(`${stream ? '· ' : ''}${label} ok`)
 }
 
 // ── preconditions ────────────────────────────────────────────────────────────
@@ -74,8 +86,11 @@ if (gate) {
   runGate('tests', 'pnpm', ['test'])
   runGate('biome', './node_modules/.bin/biome', ['ci', '.'])
   runGate('typecheck', 'pnpm', ['typecheck'])
+  // Streamed, not swallowed: it is 22 resets and 22 dev servers, and a gate with
+  // no output for ten minutes is indistinguishable from a hung one.
+  if (tag) runGate('end-to-end (22 scripts)', './scripts/e2e-all.sh', [], { stream: true })
 } else {
-  console.log('Gates skipped (--no-gate).')
+  console.log(`Gates skipped (--no-gate).${tag ? ' Including the end-to-end sweep.' : ''}`)
 }
 
 // ── smoke test ───────────────────────────────────────────────────────────────
