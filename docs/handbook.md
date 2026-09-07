@@ -13,6 +13,8 @@ when you want to start something.
 - **Bumping the pin?** [`UPGRADING.md`](../UPGRADING.md).
 - The `{base}/api/v1` contract is [`api.md`](api.md); the assistant surface is
   [`mcp.md`](mcp.md).
+- **Wondering what you may import?** [The exported surface](#the-exported-surface)
+  is every name Folio ships, by subpath, and what each is for.
 
 Sections are ordered roughly the way you meet them: the integration surface,
 then the content model, then editing, then the platform underneath.
@@ -3157,6 +3159,159 @@ against the production build via `vite preview`). They sign in first, through
 `scripts/lib/auth.mjs`: the demo's `send` logs the link and stashes it at a
 localhost-only `/dev/last-signin`, which is the stand-in for a mailbox that lets
 these run with no mail credentials at all.
+
+## The exported surface
+
+Every name Folio ships, what it is for, and — from `v1.0.0` — a semver promise
+about it. Removing or narrowing anything below is a major bump, which is the whole
+reason this section exists: it was written by walking the barrels against the docs
+and finding **103 names that appeared nowhere a consumer could read**, at the one
+moment when un-exporting was still free. Thirty-seven of them were internals that
+had leaked through an `index` re-export and are gone; the rest are here.
+
+The seven subpaths in `package.json`, and who each is for:
+
+| Subpath | For |
+| --- | --- |
+| `folio/core` | Defining blocks and rendering a `Resolution`. The whole contract for a host that does not mutate documents. |
+| `folio/engine` | Document *tooling*: bulk imports and content migrations. `apply` outside a transaction bypasses sync, undo and multiplayer, so ordinary host code has no business here. |
+| `folio/server` | `createFolio` and everything a host's Worker wires up. |
+| `folio/vite` | The build plugin. |
+| `folio/render` | `FolioDoc`, the component that renders a resolved document. Both live consumers import it. |
+| `folio/preview` | The preview bundle's own entry. Folio's, not a host's. |
+| `folio/admin-entry` | The admin bundle's entry, resolved by the Vite plugin. Folio's, not a host's. |
+
+**What is deliberately *not* exported**, because each has been asked for and
+refused: `ShareGrant` (what a live share link authorises — a second gate built out
+of it would not be the gate `handle()` runs), the socket's server-side frames and
+the admin↔preview `postMessage` protocol (Folio's private wire between its own
+admin and its own Durable Object; `PROTOCOL_VERSION` guards a stale tab and is not
+a compatibility surface), and the writer internals behind `folio.write`.
+
+### `folio/core`
+
+**Caching.** `cacheHeaders(resolution, opts)` and `cacheTags(resolution, opts)`
+take `CacheHeaderOptions` and `CacheTagOptions`; both answer the matching
+`CacheHeaders` / `CacheTags`. See [Caching](#caching).
+
+**Assets.** `AssetTransform` is the width/height/fit/format/quality set
+`ResolvedAsset` carries, and `FocalPoint` is the `{ x, y }` an `asset` field
+records per *use* rather than per file. `asAssets` and `resolveAssets` are the
+plural readers a `multiasset()` field needs, beside the documented singulars.
+`EMPTY_RESOLUTION` is the correct `Resolution` for resolving a bare asset value
+that has no references to resolve — a card image, a favicon — rather than a
+convenient one: `resolveAsset` reads only `assetBase` from it. See
+[Assets](#assets).
+
+**Richtext.** `RichtextDoc` is the document; `RichtextNode` and `RichtextMark` are
+its nodes and marks, with `RichtextNodeName` and `RichtextMarkName` the name
+unions a `richtext()` field's `allow` lists are drawn from. `RichtextLimits` is
+what `sanitiseRichtext(doc, limits)` enforces — and that function is the second
+line of defence rather than decoration, because content also arrives from an
+import or straight over the Content API, where the editor's own ProseMirror schema
+never saw it. `isRichtextEmpty` is the "render nothing" test a block wants before
+emitting a wrapper, and `fromPlainText` builds a document from a string, blank
+lines separating paragraphs. See [Richtext](#richtext).
+
+**Links.** `LinkKind` is the union `multilink({ allow })` narrows over.
+`isLinkEmpty` asks whether a link has enough filled in to be worth rendering. See
+[Links](#links).
+
+**Collections.** `ContentWhere` is one clause of a `ContentQuery` — a `TextOp`
+against a string or list, or a `RangeOp` (`gt`/`gte`/`lt`/`lte`) against a number
+or date. See [Collections](#collections).
+
+**Localisation.** `translationStatus(doc, schema, locale)` answers a
+`TranslationStatus`, whose gaps are `TranslationGap` — a uid, a block type, a
+field and its label, so a report can say "hero → heading" without holding the
+schema. See [Localisation](#localisation).
+
+**The publish projection.** `indexRowsFor(...)` answers `IndexRow[]` — a locale, a
+field, and the text or number written into `content_index`. A host importer that
+writes `published_doc` directly has to write the same rows a publish would, which
+is the only reason it is public. See [Collections](#collections).
+
+**Document types.** `typeByName` is the manifest lookup; `isRouted` is true for
+the one kind that lives in the page tree and owns a URL; `titleFieldOf` names the
+field a type titles itself by. All three exist so a host's own code can make sense
+of a `StoryMeta` or a `DocumentType` it was handed. See
+[Document types](#document-types).
+
+### `folio/engine`
+
+**The nested document shape**, which is what a bulk import builds rather than
+allocating uids and fractional orders by hand. `NestedInput` is one node on the
+way *in* — an absent `uid` means a new blok, an absent `type` inherits the stored
+one — and `NestedValue` is what a field holds inside it. `fromNested` and
+`toNested` take `FromNestedOptions` and `ToNestedOptions`. `NestedError` is the
+class `fromNested` throws, carrying the path it refused at, so an importer can
+report *which* node was wrong. See [Content API](#content-api).
+
+**The clipboard**, shared with the admin's copy-and-paste: `parseClipboard(text,
+schema)` validates untrusted text and answers a `ParsedClipboard` — the bloks, and
+where they came from — or an error, refusing rather than throwing.
+
+**The socket's client half.** `parseClientFrame` answers a `ClientFrame`, which is
+a `ClientMsg` plus the wire version; `HelloIdentity` is the actor, name and colour
+a client announces itself with. Exported for a test harness standing in for the
+admin. The *server* frames are not exported: nothing public produces one.
+
+### `folio/server`
+
+**Hooks.** Each event's payload is a type: `PublishedHookPayload`,
+`UnpublishedHookPayload`, `CreatedHookPayload`, `PathsChangedHookPayload`,
+`CheckpointedHookPayload` and the rest, all reachable through `FolioHooks`. A
+typed `published` hook wants its payload named whether or not prose does.
+`StoryChange` is what an `updated` payload lists: `title`, `slug`, `parent` or
+`ord`. See [Hooks](#hooks).
+
+**Auth providers.** The options each shipped provider takes: `PasskeyOptions`,
+`TrustedOptions`, `CloudflareAccessOptions` and `RoleFromClaimOptions`. See
+[Auth](#auth).
+
+**Access.** `TokenActor` is the token arm of `Actor`; `TokenRow` is an API token as
+a screen or a report draws it — scopes, who minted it, when it was last used,
+whether it is revoked. Its sibling `UserRow` is the editor equivalent. See
+[Auth](#auth).
+
+**Migrations, audit and reindex.** `folio.migrate(env, opts)` takes
+`MigrateOptions` and answers a `MigrateReport`, whose `oversized` entries are
+`MigrateOversized` — a document whose migration produced more mutations than one
+transaction may carry, and the transactions it was split into. `MigrationStatus` is
+what `GET {base}/api/migrations` answers, for a host typing that fetch or writing
+its own drift check. `folio.audit(env, opts)` takes `AuditOptions` and answers an
+`AuditReport` of `ContentFinding`, `StoryFinding` and `SchemaFinding`;
+`DocumentSizeFinding` narrows a `StoryFinding` with the published byte size and
+what each locale weighs inside it. `folio.reindex(env, opts)` takes
+`ReindexOptions`. See [Content migrations](#content-migrations).
+
+**The Content API.** `ApiDocument` and `ApiDocumentMeta` are the shapes
+`{base}/api/v1/documents` answers, and `ErrorEnvelope` is the `{ error: { code,
+message } }` every refusal carries. Both exist so a host calling its own API in
+TypeScript does not have to keep a second copy of the shape. See
+[`api.md`](api.md).
+
+**Reads.** `ContentWhere` is re-exported from core so a host holding a `folio`
+object needs one import. `documentUsage(db, id)` answers a `DocumentUsage` of
+`UsageRef` — what points at a document, for the warning before deleting it.
+`VersionKind` distinguishes a `publish` from a `checkpoint` in a `VersionMeta`.
+`TranslationStatus` is core's, re-exported for the same reason.
+
+**Caching.** `CacheHeaderOptions` and `CacheTagOptions`, as in core, plus
+`CacheVerdict` — `'cache'`, `'bypass'` or `null`, the decision
+`cacheVerdictFor` reaches for one request. Its `'bypass'` rules are the
+load-bearing half: caching is per-*entrypoint* and never Worker-wide, because a
+request cookie is not a bypass condition and a Worker-wide rule would put admin
+JSON in a shared cache. See [Caching](#caching).
+
+**The Durable Object.** `createStoryDO(config)` takes a `StoryDOConfig`, which is
+how a host whose D1 binding is not named `DB` builds its own `StoryDO`.
+
+**The describe seam.** `anthropicDescriber(options)` takes
+`AnthropicDescriberOptions`. It is the only place in this library that names a
+vendor, and it holds no privileged access to anything: it returns a `describe.fn`,
+so deleting it would cost a host twenty lines and no capability. See
+[Assets](#assets).
 
 ## Not built yet
 

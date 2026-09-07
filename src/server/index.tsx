@@ -72,7 +72,7 @@ export type { SpaceEvent, SpacePresence } from '../core/protocol'
  * reports, and the payload shapes the routes answer. `toNested` / `fromNested`
  * themselves ship from `folio/engine`, with the rest of the document tooling.
  */
-export type { WriteResult, WriteActor } from './write'
+export type { WriteResult } from './write'
 export type { ApiDocument, ApiDocumentMeta } from './routes/api/documents'
 export { API_VERSION } from './routes/api'
 export type { DocumentKind, DocumentType } from '../core/schema'
@@ -124,8 +124,7 @@ export type {
   ContentWhere,
   ResolvedCollection,
 } from '../core/query'
-export { countReferencesTo, indexedValuesFor, referencesTo } from './content-index'
-export type { IndexedValue, IndexedValues } from './content-index'
+export { countReferencesTo, referencesTo } from './content-index'
 /**
  * Data documents (`../../docs/specs/content-model/data-documents.md`): what
  * points at a document, for the warning shown before deleting it. Exported for a
@@ -242,7 +241,7 @@ export { FolioDoc } from '../preview/Render'
  */
 export type { RenderMode } from '../preview/Render'
 export type { PreviewMode } from './types'
-export { Shell, serializeJson } from './Document'
+export { Shell } from './Document'
 export type { StoryMeta, StoryNode } from '../core/story'
 export type { Resolution } from '../core/resolve'
 /**
@@ -301,7 +300,6 @@ export type {
   FolioPage,
   FolioPageOptions,
   FolioReader,
-  ReadBindings,
 } from './types'
 
 /**

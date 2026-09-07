@@ -24,8 +24,6 @@ export {
   DEFAULT_S_MAXAGE,
   formTag,
   globalTag,
-  MAX_CACHE_TAGS,
-  MAX_CACHE_TAG_BYTES,
   NO_STORE,
   SITE_TAG,
   storyTag,
@@ -67,12 +65,8 @@ export {
   MAX_PER_PAGE,
   collectionQueries,
   collectionQuery,
-  emptyContentPage,
-  isRangeOp,
-  isTextOp,
   normaliseQuery,
   queryKey,
-  WHERE_OPS,
 } from './query'
 export type {
   CollectionField,
@@ -91,7 +85,7 @@ export type {
 // The publish-time projection and the outbound-edge walk. Exported because a host
 // importer or a one-off script that writes `published_doc` directly has to be able
 // to write the same index rows a publish would.
-export { indexedFieldNames, indexedFields, indexRowsFor, isIndexed } from './index-projection'
+export { indexedFieldNames, indexRowsFor, isIndexed } from './index-projection'
 export type { IndexRow } from './index-projection'
 export { formIds, linkedIds, outboundRefs, referencedIdsAllLocales } from './refs'
 export type { OutboundRef } from './refs'
@@ -142,19 +136,15 @@ export {
   isImageAsset,
   isLinkEmpty,
   isSafeHref,
-  LINK_KINDS,
 } from './values'
 export type { AssetValue, FocalPoint, LinkKind, LinkValue } from './values'
 
 export {
   asRichtext,
-  EMPTY_DOC,
   fromPlainText,
   isRichtextEmpty,
   richtextToText,
   sanitiseRichtext,
-  RICHTEXT_MARKS,
-  RICHTEXT_NODES,
 } from './richtext'
 export type {
   RichtextDoc,
@@ -167,7 +157,6 @@ export type {
 
 export {
   buildResolution,
-  DEFAULT_ASSET_BASE,
   EMPTY_RESOLUTION,
   referencedIds,
   resolveAsset,
@@ -233,7 +222,6 @@ export {
   buildTree,
   derivePaths,
   descendants,
-  joinPath,
   newStoryId,
   slugify,
 } from './story'
@@ -243,7 +231,6 @@ export type { StoryMeta, StoryNode } from './story'
 // reads them off the manifest and a host's own code needs `isRouted`/`titleOf`
 // to make sense of a `StoryMeta` it was handed.
 export {
-  canNest,
   defaultType,
   isRouted,
   SINGLETON_PREFIX,

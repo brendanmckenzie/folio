@@ -22,7 +22,6 @@ export {
   childrenOf,
   compareSiblings,
   keyAtIndex,
-  keysBetween,
   newUid,
   subtree,
 } from './doc'
@@ -74,7 +73,7 @@ export type { Migration, MigrationContext } from './migrate'
 // than throwing.
 export { cloneDoc, cloneSubtree } from './clone'
 export { parseClipboard } from './clipboard'
-export type { ClipboardPayload, ParsedClipboard } from './clipboard'
+export type { ParsedClipboard } from './clipboard'
 
 // `blankBlok` needs `SchemaIndex` to look up a type's field defaults; re-exported
 // here for the same reason `Doc`/`Blok`/`Json` are.
@@ -103,34 +102,14 @@ export type { LocaleConfig, LocaleContext } from './locales'
 export {
   PROTOCOL_VERSION,
   docBytes,
-  docCapError,
   fallbackColour,
   isBlok,
   isMutation,
-  isClientMsg,
-  isPreviewMsg,
   parseClientFrame,
-  txCapError,
-  MAX_ACTOR_LEN,
   MAX_DOC_BLOKS,
   MAX_DOC_BYTES,
   MAX_FRAME_BYTES,
-  MAX_NAME_LEN,
   MAX_SELECTION_LEN,
   MAX_TX_MUTATIONS,
 } from './protocol'
-export type {
-  AdminToPreviewMsg,
-  ClientFrame,
-  ClientMsg,
-  Delta,
-  Framed,
-  HelloIdentity,
-  Presence,
-  PreviewFrame,
-  PreviewMsg,
-  PreviewMsgSource,
-  PreviewToAdminMsg,
-  ServerFrame,
-  ServerMsg,
-} from './protocol'
+export type { ClientFrame, ClientMsg, HelloIdentity, Presence } from './protocol'
