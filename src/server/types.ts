@@ -274,16 +274,26 @@ export interface FolioDescribe<Env> {
 }
 
 /**
- * What a host's `fn` is handed. Two ways to reach the same pixels, because
- * neither works everywhere:
+ * What a host's `fn` is handed.
  *
- *  - `url` is public and cheap — a model API fetches it directly, and it is a
- *    512px WebP wherever `images` is bound, which is an order of magnitude fewer
- *    tokens than a 20MB original.
- *  - `bytes()` is for a deployment a model API cannot reach: a local
- *    `wrangler dev`, a preview behind Access. **Lazy**, because at
- *    `concurrency: 4` and a 20MB ceiling, eagerly reading every one would put
- *    80MB of `ArrayBuffer` live in one isolate per batch.
+ * **`inline()` is the one way to the pixels, and it is bytes rather than a URL.**
+ * Handing a provider a URL to fetch was the original design and it does not
+ * survive contact with the platform Folio runs on: that fetch arrives from the
+ * provider's network announcing itself as an AI agent, and Cloudflare's
+ * AI-crawler blocking is a user-agent list a content site is right to be on. The
+ * result was a paid call refused by the site paying for it. `url` is still here
+ * because it is a true and occasionally useful fact about the asset — do not
+ * build a provider call on it.
+ *
+ * `inline()` answers a **512px WebP** wherever `images` is bound — transformed
+ * in this isolate from the R2 stream, the same way `serveAsset` does it, never
+ * by fetching our own route (that needs an `image-resizing` loop guard, which is
+ * why the serving route takes the stream directly). Without the binding it is
+ * the stored original, and that is the expensive case: an order of magnitude
+ * more tokens, and possibly over a provider's per-image ceiling.
+ *
+ * **Lazy**, because at `concurrency: 4` eagerly reading every one would put the
+ * whole batch's bytes live in one isolate.
  */
 export interface DescribeInput {
   id: string
@@ -292,10 +302,15 @@ export interface DescribeInput {
   width: number | null
   height: number | null
   /** `{base}/asset/<key>?w=512&f=webp` when `images` is bound, the original
-   * otherwise. Absolute, so a model API can fetch it without knowing the host. */
+   * otherwise. Absolute. **Not for a provider to fetch** — see above. */
   url: string
-  /** The same bytes, read from R2 on demand. Not read unless called. */
-  bytes(): Promise<ArrayBuffer>
+  /**
+   * The image as bytes a provider can accept, with the media type of *those
+   * bytes* rather than of the stored object — the row says `image/jpeg` where
+   * the rendition is `image/webp`, and sending the wrong one is a 400 about
+   * something else. Read from R2 on demand; not read unless called.
+   */
+  inline(): Promise<{ media: string; bytes: ArrayBuffer }>
   /**
    * Every tag that exists, for the prompt — and the *only* tags a result may
    * name (decision 11). A model handed an open vocabulary invents a near-synonym

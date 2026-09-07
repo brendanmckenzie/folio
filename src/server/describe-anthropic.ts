@@ -200,112 +200,36 @@ function vocabularyOf(tags: DescribeInput['tags']): string {
 }
 
 /**
- * The image, as bytes — and **we** are the ones who fetch them.
+ * The image, as bytes.
  *
- * This used to hand the model API a URL and let it fetch the file itself, which
- * is cheaper by every measure that was considered: nothing large enters this
- * isolate, and at `concurrency: 4` against a 20MB ceiling that is the difference
- * between a few kilobytes and eighty megabytes of live `ArrayBuffer`. The
- * measure that was *not* considered is the one that decided it.
+ * **Never as a URL.** Handing the Messages API a URL to fetch was the original
+ * design and it does not survive the platform Folio runs on: that fetch comes
+ * from Anthropic's network as `Claude-User`, Cloudflare's AI-crawler blocking is
+ * a user-agent list, and a content site is right to be on it. The first host to
+ * press *Describe* got a 403 from their own WAF, reported as `anthropic: 400
+ * Unable to download the file` — a paid call refused by the site paying for it,
+ * with an error naming neither party. Verified against `allaboutafrica.au` on
+ * 2026-09-07: `curl` 200 and `Claude-User/1.0` 403, same URL, same second.
  *
- * **It is their fetch, from their network, announcing itself as an AI agent —
- * and Folio only ever runs behind Cloudflare.** Cloudflare's AI-crawler blocking
- * is a checkbox a content site is right to tick, it is user-agent based, and
- * `Claude-User` is on the list. So the first host to try this got a 403 from
- * their own WAF, surfaced as `anthropic: 400 Unable to download the file`: a
- * paid call, refused by the site paying for it, with an error naming neither
- * party. Verified against `allaboutafrica.au` on 2026-09-07 — `curl` 200,
- * `Claude-User/1.0` 403, same URL, same second.
+ * The old comment called that "a deployment that is routable but not readable"
+ * and handed it to the host to write their own `fn`. Wrong owner: it is the
+ * default posture of the only platform Folio targets, and it fails identically
+ * for every host who ever ticks the box.
  *
- * The old comment called that case "a deployment that is routable but not
- * readable" and handed it to the host to write their own `fn`. That was the
- * wrong owner: it is not an exotic deployment, it is the default posture of the
- * only platform Folio targets, and it fails identically for every host who ever
- * ticks the box.
- *
- * So the bytes go inline, read from `input.url` — which is already the *small*
- * rendition, because `describeUrl` puts `?w=512&f=webp` on it wherever an Images
- * binding exists. That is what makes this affordable and it is the whole reason
- * the memory argument no longer bites: a 512px webp of a 5MB photograph is a
- * couple of hundred kilobytes, four of them in flight is about a megabyte, and
- * it is comfortably inside the API's own per-image ceiling that the transform
- * was already there to respect.
- *
- * Three failures it now survives that the URL path could not: a WAF or bot rule,
- * a deployment behind Access, and `wrangler dev` — whose `localhost` URL used to
- * need a special case here and now simply works, because the fetch is local to
- * the machine making it.
- *
- * `input.bytes()` stays as the fallback for when *we* cannot read the URL
- * either. It is the stored original, so it is the large one, and it is guarded
- * by the same ceiling.
+ * `input.inline()` does the reading, and the memory objection the URL path was
+ * built on goes with it — what comes back is a 512px WebP wherever an Images
+ * binding exists, a couple of hundred kilobytes rather than twenty megabytes,
+ * transformed in the isolate from the R2 stream. A first pass had *this* file
+ * fetch `input.url` instead, which looks equivalent and is not: a Worker
+ * fetching its own asset route needs an `image-resizing` loop guard, and when
+ * the self-fetch failed the only thing left to send was the full-size original.
+ * `describe.ts`'s `renditionOf` carries that story.
  */
 async function imageBlock(input: DescribeInput): Promise<unknown> {
-  const rendition = await renditionOf(input.url)
-  if (rendition) return inlineImage(rendition.media, rendition.bytes)
-
-  const media = INLINE_TYPES.has(input.contentType) ? input.contentType : null
-  if (!media) {
-    throw new Error(
-      `anthropic: ${input.url} could not be read, and ${input.contentType} cannot be sent inline`,
-    )
+  const { media, bytes } = await input.inline()
+  if (!INLINE_TYPES.has(media)) {
+    throw new Error(`anthropic: ${media} cannot be sent inline`)
   }
-  return inlineImage(media, await input.bytes())
-}
-
-/**
- * The rendition behind `input.url`, or `null` for anything not usable as one.
- *
- * Every "no" here falls through to the stored original rather than throwing,
- * because the original is always readable — this is an optimisation with a
- * safety net, not a second way to fail. The media type comes from the
- * *response*, never from the asset row: the row says `image/jpeg` and the
- * transform answers `image/webp`, and sending the API the wrong one is a 400
- * about something else entirely.
- */
-async function renditionOf(raw: string): Promise<{ media: string; bytes: ArrayBuffer } | null> {
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    return null
-  }
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null
-
-  let res: Response
-  try {
-    res = await fetch(url)
-  } catch {
-    return null
-  }
-  if (!res.ok) return null
-
-  const media = (res.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
-  if (!INLINE_TYPES.has(media)) return null
-  return { media, bytes: await res.arrayBuffer() }
-}
-
-/**
- * What the API accepts as inline bytes. Narrower than what Folio stores —
- * `uploadAsset` also admits AVIF and SVG — and it now gates both paths: the
- * rendition against the response's own content type, and the stored original
- * against the row's.
- */
-const INLINE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
-
-/**
- * One image block, refused before it is sent if it is over the API's ceiling.
- *
- * Checked here rather than left to the API because the failure is otherwise a
- * 400 that reads like a bug in Folio, and because it costs a round trip to learn
- * something `byteLength` already knows. It is reachable only on the fallback
- * path in practice — a 512px webp is never five megabytes — which is precisely
- * the path a host hits when their deployment is unreadable *and* their originals
- * are large, and they deserve a sentence naming both.
- */
-const MAX_INLINE_BYTES = 5 * 1024 * 1024
-
-function inlineImage(media: string, bytes: ArrayBuffer): unknown {
   if (bytes.byteLength > MAX_INLINE_BYTES) {
     throw new Error(
       `anthropic: the image is ${Math.round(bytes.byteLength / 1024 / 1024)}MB, over the API's 5MB limit — configure an Images binding so Folio can send a resized rendition`,
@@ -313,6 +237,26 @@ function inlineImage(media: string, bytes: ArrayBuffer): unknown {
   }
   return { type: 'image', source: { type: 'base64', media_type: media, data: base64(bytes) } }
 }
+
+/**
+ * What the API accepts as inline bytes. Narrower than what Folio stores —
+ * `uploadAsset` also admits AVIF and SVG — and with a binding configured it is
+ * almost always moot, because the rendition is WebP whatever went in. It bites
+ * on the no-binding path, where a message naming the type beats a 400 from
+ * somebody else's API.
+ */
+const INLINE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+
+/**
+ * The API's per-image ceiling, checked before the call rather than after.
+ *
+ * A round trip to be told something `byteLength` already knows is a wasted
+ * request, and the resulting 400 reads like a bug in Folio. Reachable in
+ * practice only without an Images binding, or when a transform failed and the
+ * original stood in — so the message names the binding that would have avoided
+ * both.
+ */
+const MAX_INLINE_BYTES = 5 * 1024 * 1024
 
 /** `btoa` takes a binary string, and a 20MB `apply(...)` overflows the stack. */
 function base64(bytes: ArrayBuffer): string {

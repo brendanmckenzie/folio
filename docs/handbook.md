@@ -937,9 +937,9 @@ export default createFolio<Env>({
 })
 ```
 
-`fn` is the whole seam. It is handed the image two ways — a transformed URL and a
-lazy `bytes()` — plus every tag that exists, and it answers `{ alt?,
-description?, tags? }`. Write your own with any provider; `anthropicDescriber` is
+`fn` is the whole seam. It is handed a lazy `inline()` that answers the image as
+`{ media, bytes }`, the asset's `url` as a fact about it, and every tag that
+exists; it answers `{ alt?, description?, tags? }`. Write your own with any provider; `anthropicDescriber` is
 a convenience over that seam and not a second one, so deleting it costs you
 twenty lines and no capability. It takes `model` and `prompt` if you want either.
 
@@ -963,18 +963,20 @@ Three things to know before you turn it on:
   model is sent a 512px WebP, which is an order of magnitude fewer tokens than a
   20MB original; without it the original goes, and it works and costs more. The
   admin's run panel says which of the two you are paying for.
-- **Folio reads the image and uploads it; the provider never fetches your
-  site.** `anthropicDescriber` used to hand over the URL and let the model API
-  fetch it, and that breaks on Cloudflare by default: AI-crawler blocking is
-  user-agent based, `Claude-User` is on the list, and the result is a paid call
-  refused by your own WAF and reported as `400 Unable to download the file`. It
-  now fetches the rendition itself and sends the bytes, so `wrangler dev`, a
-  preview behind Access and a zone that blocks AI agents all work unchanged. If
-  you write your own `fn`, do the same — `input.url` is yours to fetch, and
-  handing it to a provider is the trap this paragraph used to describe.
-  `input.bytes()` is the fallback when even you cannot read the URL, and an
-  image over the API's 5MB ceiling is refused with a message saying so rather
-  than spending the call.
+- **Folio uploads the bytes; the provider never fetches your site.**
+  `anthropicDescriber` used to hand over the URL and let the model API fetch it,
+  and that breaks on Cloudflare by default: AI-crawler blocking is user-agent
+  based, `Claude-User` is on the list, and the result is a paid call refused by
+  your own WAF and reported as `400 Unable to download the file`. So
+  `input.inline()` reads the image and the adapter sends it, which also makes
+  `wrangler dev` and a preview behind Access work unchanged. **If you write your
+  own `fn`, call `inline()` — do not hand `input.url` to a provider, and do not
+  fetch it yourself either**: a Worker fetching its own asset route needs an
+  `image-resizing` loop guard (see Resizing above), and when that self-fetch
+  fails the only thing left to send is the full-size original, which is silent
+  on every asset small enough to get away with it. `inline()` transforms from the
+  R2 stream instead, and an image over the API's 5MB ceiling is refused with a
+  message saying so rather than spending the call.
 - **The model may only choose tags that already exist.** Anything it invents is
   dropped and counted, so a prompt that keeps proposing `product-shot` shows up
   as a number rather than as a taxonomy full of near-synonyms.

@@ -54,7 +54,7 @@ import {
 import { listTags } from './asset-tags'
 import { bindChunks, type FolioDb } from './db'
 import { FolioError, rethrow } from './errors'
-import { clampText } from './validate'
+import { clampText, SERVED_CONTENT_TYPES } from './validate'
 import type { DescribeInput, DescribeResult, FolioDescribe } from './types'
 
 /** In-flight model calls per batch when a host names none. */
@@ -227,7 +227,65 @@ export function describeUrl(
 ): string {
   const key = row.key.split('/').map(encodeURIComponent).join('/')
   const src = `${assetBase.replace(/\/$/, '')}/${key}`
-  return images ? `${src}?w=512&f=webp` : src
+  return images ? `${src}?w=${DESCRIBE_WIDTH}&f=webp` : src
+}
+
+/** One number, so the URL and the rendition `inline()` builds cannot disagree. */
+export const DESCRIBE_WIDTH = 512
+
+/**
+ * The bytes a provider is sent: a 512px WebP where `images` is bound, the stored
+ * original where it is not.
+ *
+ * **Transformed here, from the R2 stream — never by fetching `describeUrl`.**
+ * That was tried and it is the wrong shape twice over. `handbook.md`'s Resizing
+ * section already records why the serving route takes the stream directly: a
+ * Worker fetching its own asset URL needs an `image-resizing` loop guard, which
+ * is the cost `/cdn-cgi/image/` was passed over for. And it fails in a way that
+ * hides: a self-fetch that does not come back leaves the *original* as the only
+ * thing left to send, so a 13MB photograph goes to the provider — or is refused
+ * by it — while every smaller asset in the same run quietly succeeds and nothing
+ * says the cheap path stopped working. Observed on `staging.allaboutafrica.au`
+ * on 2026-09-07: 87 assets fine, one 12.8MB JPEG refused, the transform behind
+ * the very same URL answering a 113kB WebP to `curl` the whole time.
+ *
+ * The failure policy is `serveAsset`'s, for the same reason: a transform that
+ * throws or yields nothing falls back to the original and logs, because a
+ * described asset at full cost beats an undescribed one. Both branches report
+ * the media type of the bytes they actually produced.
+ */
+async function renditionOf(
+  deps: DescribeDeps,
+  row: AssetRow,
+): Promise<{ media: string; bytes: ArrayBuffer }> {
+  const object = await deps.media.get(row.key)
+  if (!object) return { media: row.contentType, bytes: new ArrayBuffer(0) }
+
+  // SVG is deliberately absent from `SERVED_CONTENT_TYPES`: vector, so a resize
+  // means nothing, and the Images binding has no business parsing it.
+  if (deps.images && SERVED_CONTENT_TYPES.has(row.contentType)) {
+    try {
+      const result = await deps.images
+        .input(object.body)
+        .transform({ width: DESCRIBE_WIDTH })
+        .output({ format: 'image/webp' })
+      const bytes = await result.response().arrayBuffer()
+      // An empty result still arrives as a 200 — the same trap `serveAsset`
+      // buffers to catch, and here it would be an image with no pixels in it.
+      if (bytes.byteLength === 0) throw new Error('Transform produced no output')
+      return { media: result.contentType(), bytes }
+    } catch (e) {
+      // Never silent: indistinguishable otherwise from a library of originals.
+      console.error(`folio: describe transform failed for ${row.key}`, e)
+    }
+  }
+
+  // The original, re-read because a failed transform consumed the body above.
+  const original = deps.images ? await deps.media.get(row.key) : object
+  return {
+    media: row.contentType,
+    bytes: (await original?.arrayBuffer()) ?? new ArrayBuffer(0),
+  }
 }
 
 /**
@@ -320,7 +378,7 @@ export async function describeAsset(
     // between the row being read and the host calling — is an empty buffer
     // rather than a throw the host has to guard: `fn` is where the failure
     // belongs and it is recorded either way.
-    bytes: async () => (await deps.media.get(row.key))?.arrayBuffer() ?? new ArrayBuffer(0),
+    inline: () => renditionOf(deps, row),
     tags: tags.map((tag) => ({ id: tag.id, name: tag.name })),
   }
 

@@ -268,9 +268,12 @@ describe('what the host is handed', () => {
     expect(input?.tags).toEqual([{ id: expect.any(String), name: 'Headshot' }])
     expect(gets).not.toHaveBeenCalled()
 
-    // Lazy, but real: the host that does call it gets the object.
-    const bytes = await input!.bytes()
+    // Lazy, but real: the host that does call it gets the object. No Images
+    // binding in this fixture, so the rendition *is* the original and the media
+    // type is the row's.
+    const { media, bytes } = await input!.inline()
     expect(new TextDecoder().decode(bytes)).toBe('REALBYTES')
+    expect(media).toBe('image/png')
   })
 })
 

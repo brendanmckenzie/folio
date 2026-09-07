@@ -42,7 +42,8 @@ function inputOf(extra: Partial<DescribeInput> = {}): DescribeInput {
     width: 1200,
     height: 800,
     url: 'https://example.com/folio/asset/ast_abc123-photo.jpg?w=512&f=webp',
-    bytes: async () => new Uint8Array([1, 2, 3, 4]).buffer,
+    // What `describe.ts` hands over: the rendition, with *its* media type.
+    inline: async () => ({ media: 'image/webp', bytes: RENDITION }),
     tags: [
       { id: 'tag_1', name: 'Headshot' },
       { id: 'tag_2', name: 'Black and white' },
@@ -53,45 +54,27 @@ function inputOf(extra: Partial<DescribeInput> = {}): DescribeInput {
 
 const ENDPOINT = 'https://api.anthropic.com/v1/messages'
 
-/** Base64 of `RENDITION`, which is what an unmodified stub should send. */
+/** Base64 of `RENDITION`, which is what an unmodified `inputOf` should send. */
 const RENDITION = new Uint8Array([9, 9, 9, 9]).buffer
 const RENDITION_B64 = 'CQkJCQ=='
 
 /**
- * **Two** stubbed fetches, because there are two now: the rendition Folio reads
- * for itself, then the API call carrying it. The image is answered for any URL
- * that is not the endpoint, which is what lets every test above stay written
- * about the request alone.
- *
- * `image: null` makes that first fetch *throw*, which is the shape a DNS failure
- * or a refused connection takes; a `status` makes it answer one, which is the
- * shape a WAF takes.
+ * One stubbed answer, and **one stubbed fetch** — the adapter reaches the network
+ * exactly once now. An earlier revision had it fetch `input.url` for the image
+ * too, which needed a two-call stub; that self-fetch is gone (see `imageBlock`),
+ * and the count is asserted below so it does not come back unnoticed.
  */
-function answering(
-  text: string,
-  init: {
-    status?: number
-    stopReason?: string
-    image?: { status?: number; type?: string; bytes?: ArrayBuffer } | null
-  } = {},
-) {
-  const fetchMock = vi.fn(async (target: unknown) => {
-    if (String(target) !== ENDPOINT) {
-      if (init.image === null) throw new TypeError('fetch failed')
-      const image = init.image ?? {}
-      return new Response(image.bytes ?? RENDITION, {
-        status: image.status ?? 200,
-        headers: { 'content-type': image.type ?? 'image/webp' },
-      })
-    }
-    return new Response(
-      JSON.stringify({
-        content: [{ type: 'text', text }],
-        stop_reason: init.stopReason ?? 'end_turn',
-      }),
-      { status: init.status ?? 200, headers: { 'content-type': 'application/json' } },
-    )
-  })
+function answering(text: string, init: { status?: number; stopReason?: string } = {}) {
+  const fetchMock = vi.fn(
+    async () =>
+      new Response(
+        JSON.stringify({
+          content: [{ type: 'text', text }],
+          stop_reason: init.stopReason ?? 'end_turn',
+        }),
+        { status: init.status ?? 200, headers: { 'content-type': 'application/json' } },
+      ),
+  )
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
 }
@@ -217,115 +200,81 @@ describe('the request', () => {
 })
 
 /**
- * **Folio reads the image; the model API never does.**
+ * **Folio hands over bytes; the model API never fetches anything.**
  *
- * This block used to assert the opposite, and the sentence it was defending —
- * "the image path is chosen from the URL, not from a failed attempt" — was
- * defending the wrong thing. Handing over a URL means a third party fetching
- * your site while announcing itself as an AI agent, and Folio only runs behind
- * Cloudflare, whose AI-crawler blocking is user-agent based and lists
- * `Claude-User`. The first host to press *Describe* on a real library got a 403
- * from their own WAF, reported by the API as `400 Unable to download the file`.
+ * This block has been rewritten twice, and both rewrites are worth keeping in
+ * mind. It first asserted that a *URL* was handed over, defending "the image
+ * path is chosen from the URL, not from a failed attempt" — which turned out to
+ * be defending the wrong thing, because Cloudflare's AI-crawler blocking lists
+ * `Claude-User` and a content site is right to be on it.
  *
- * So the assertions invert: the bytes are read here, from the *rendition* URL
- * (already `?w=512&f=webp` wherever an Images binding exists, which is what
- * keeps this affordable), and `input.bytes()` is the net under it.
+ * The second version had this file fetch `input.url` itself. That worked for
+ * every asset small enough to hide it, and failed for a 12.8MB JPEG whose
+ * transform was answering a 113kB WebP to `curl` at the same moment — a Worker
+ * fetching its own asset route is exactly the pattern `handbook.md`'s Resizing
+ * section says needs a loop guard. The rendition is built in `describe.ts` now,
+ * from the R2 stream, and this file only encodes what it is given.
  */
-describe('where the image bytes come from', () => {
-  it('reads the rendition itself rather than asking the model API to fetch it', async () => {
+describe('the image block', () => {
+  it('sends the rendition it was handed, with the media type of those bytes', async () => {
     const fetchMock = answering('{}')
-    const bytes = vi.fn(async () => new ArrayBuffer(4))
-    await anthropicDescriber({ apiKey: KEY })(inputOf({ bytes }))
+    await anthropicDescriber({ apiKey: KEY })(inputOf())
 
-    // The rendition is fetched first, and it is the transform URL rather than
-    // the original: a 512px webp is what makes an inline image affordable.
-    expect(String(callsOf(fetchMock)[0]![0])).toBe(
-      'https://example.com/folio/asset/ast_abc123-photo.jpg?w=512&f=webp',
-    )
     expect(imageSent(fetchMock)).toEqual({
       type: 'image',
       source: { type: 'base64', media_type: 'image/webp', data: RENDITION_B64 },
     })
-    // R2 is still untouched on the path that works, which is the reason
-    // `bytes()` is a function rather than a buffer.
-    expect(bytes).toHaveBeenCalledTimes(0)
   })
 
-  it('trusts the response content type over the row, because the transform changes it', async () => {
-    // The row says `image/jpeg` and the rendition is webp. Sending the row's
-    // type would be a 400 about a mismatch rather than about anything real.
-    const fetchMock = answering('{}', { image: { type: 'image/webp; charset=binary' } })
-    await anthropicDescriber({ apiKey: KEY })(inputOf({ contentType: 'image/jpeg' }))
-
-    expect(imageSent(fetchMock)).toMatchObject({
-      source: { media_type: 'image/webp' },
-    })
-  })
-
-  it.each([
-    ['a WAF or bot rule', { image: { status: 403 } }],
-    ['a deployment behind Access', { image: { status: 302 } }],
-    ['a refused connection', { image: null }],
-    ['a rendition that is not an inline type', { image: { type: 'text/html' } }],
-  ])(
-    'falls back to the stored original when the rendition cannot be read: %s',
-    async (_why, init) => {
-      const fetchMock = answering('{}', init as Parameters<typeof answering>[1])
-      await anthropicDescriber({ apiKey: KEY })(inputOf())
-
-      // `inputOf`'s bytes are [1,2,3,4], and the media type is the row's.
-      expect(imageSent(fetchMock)).toEqual({
-        type: 'image',
-        source: { type: 'base64', media_type: 'image/jpeg', data: 'AQIDBA==' },
-      })
-    },
-  )
-
-  it.each(['file:///tmp/k.jpg', 'not a url at all'])(
-    'does not try to fetch %s, and falls back without spending a request on it',
-    async (url) => {
-      const fetchMock = answering('{}')
-      await anthropicDescriber({ apiKey: KEY })(inputOf({ url }))
-
-      // One call, and it is the API: nothing was attempted against the URL.
-      expect(callsOf(fetchMock)).toHaveLength(1)
-      expect(imageSent(fetchMock)).toMatchObject({
-        source: { type: 'base64', media_type: 'image/jpeg' },
-      })
-    },
-  )
-
-  it('reaches a localhost deployment, which the URL path never could', async () => {
-    // `wrangler dev` is the first place a host tries this, and its asset URL is
-    // fetchable from exactly one machine — the one now doing the fetching. This
-    // used to be a hard-coded special case taking the bytes path.
+  it('reaches the network exactly once, so no self-fetch has crept back in', async () => {
+    // The regression this guards is invisible in output: a self-fetch that works
+    // produces an identical request, and only fails on the assets big enough to
+    // matter.
     const fetchMock = answering('{}')
-    const bytes = vi.fn(async () => new ArrayBuffer(4))
+    await anthropicDescriber({ apiKey: KEY })(inputOf())
+
+    expect(callsOf(fetchMock)).toHaveLength(1)
+    expect(String(callsOf(fetchMock)[0]![0])).toBe(ENDPOINT)
+  })
+
+  it('trusts the handed media type over the row, because a transform changes it', async () => {
+    // The row says `image/jpeg`; the rendition is WebP. Sending the row's type
+    // is a 400 about a mismatch rather than about anything real.
+    const fetchMock = answering('{}')
     await anthropicDescriber({ apiKey: KEY })(
-      inputOf({ url: 'http://localhost:5199/folio/asset/k.jpg', bytes }),
+      inputOf({
+        contentType: 'image/jpeg',
+        inline: async () => ({ media: 'image/webp', bytes: RENDITION }),
+      }),
     )
 
     expect(imageSent(fetchMock)).toMatchObject({ source: { media_type: 'image/webp' } })
-    expect(bytes).toHaveBeenCalledTimes(0)
   })
 
-  it('names the reason when neither the rendition nor the original can be sent inline', async () => {
-    // AVIF and SVG are storable by `uploadAsset` and are not base64 image
-    // sources. With the rendition unreadable there is nothing to send, and a
-    // message naming both halves beats somebody else's 400.
-    answering('{}', { image: { status: 500 } })
-    await expect(
-      anthropicDescriber({ apiKey: KEY })(inputOf({ contentType: 'image/avif' })),
-    ).rejects.toThrow(/could not be read, and image\/avif cannot be sent inline/)
-  })
+  it.each(['image/avif', 'image/svg+xml', 'application/pdf'])(
+    'names %s rather than sending a type the API rejects',
+    async (media) => {
+      // Reachable without an Images binding, where the rendition is the stored
+      // original. AVIF and SVG are both storable by `uploadAsset`.
+      answering('{}')
+      await expect(
+        anthropicDescriber({ apiKey: KEY })(
+          inputOf({ inline: async () => ({ media, bytes: RENDITION }) }),
+        ),
+      ).rejects.toThrow(new RegExp(`${media.replace('+', '\\+')} cannot be sent inline`))
+    },
+  )
 
   it('refuses an oversized image before spending the call, and says how to fix it', async () => {
-    // Only reachable on the fallback path in practice — a 512px webp is never
-    // 5MB — so the message points at the binding that would have produced one.
-    answering('{}', { image: null })
+    // The path that found this: a 12.8MB original standing in for a rendition
+    // that never arrived. The message points at the binding, because that is
+    // what produces one.
+    answering('{}')
     await expect(
       anthropicDescriber({ apiKey: KEY })(
-        inputOf({ bytes: async () => new ArrayBuffer(6 * 1024 * 1024) }),
+        inputOf({
+          inline: async () => ({ media: 'image/jpeg', bytes: new ArrayBuffer(6 * 1024 * 1024) }),
+        }),
       ),
     ).rejects.toThrow(/6MB, over the API's 5MB limit — configure an Images binding/)
   })
