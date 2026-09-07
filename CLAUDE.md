@@ -310,6 +310,19 @@ are free to go the next time that code is touched.
   an inset `box-shadow`.** An inset shadow is clipped by the border radius, so a 2px
   left edge on a rounded row draws a curved bracket `(`, not a bar. `List.module.css`
   uses a `::before`. Both of these are UI-review findings that no test could catch.
+- **`@floating-ui/dom` is a dependency nothing here imports, and it has to stay.**
+  It reaches a host only through `@tiptap/react`, which declares the two menu
+  extensions as *optional* dependencies, one of which needs floating-ui and one of
+  which peers on it. Every path to it is therefore an optional edge, and npm 11
+  (11.6.2 verified) prunes it when it *updates* an existing lockfile — keeping
+  `@floating-ui/core` and `@floating-ui/utils`, which are in the tree only because
+  it needs them, and keeping the entry that declares the dependency on it. The lock
+  it writes names an edge to a package it omits, so the host's next `npm ci` dies
+  with `Missing: @floating-ui/dom@1.8.0 from lock file` before a line is built. On a
+  host that deploys from a branch push that reads as no deployment at all.
+  Declaring it here makes the edge non-optional in every consumer's tree, which is
+  the only place one fix covers them all. A dependency-tidying sweep will call it
+  unused; it is not.
 
 ## Releasing
 

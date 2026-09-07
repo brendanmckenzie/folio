@@ -68,6 +68,7 @@
     "vite": "^7 || ^8"
   },
   "dependencies": {
+    "@floating-ui/dom": "^1.8.0",
     "@tiptap/core": "^3.29.0",
     "@tiptap/extension-subscript": "^3.29.0",
     "@tiptap/extension-superscript": "^3.29.0",
