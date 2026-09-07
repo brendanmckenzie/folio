@@ -579,17 +579,32 @@ record coming back `broken`.
 
 None. Resolved as built:
 
-- **`under` constrains drag targets as well as creation**, with a refusal notice
-  rather than a silent no-op — checked in `updateStoryStatement` (a 400 whose
-  message names the allowed parents) and mirrored client-side in
-  `StoryTree.dropRefusal`, so the editor is told before the request rather than
-  by it. Two deliberate narrowings fell out of building it, both aimed at the
-  "less likely to make an existing tree undraggable" half of the original
-  question: the server checks `under` **only when the parent actually changes**,
-  so a plain title edit on a tree that predates the constraint still works; and
-  the admin lets a row whose own type is no longer declared be dragged anywhere,
-  since a config change must not freeze a tree and the server has the final say
-  regardless.
+- **`under` constrains creation, and was meant to constrain move targets the same
+  way.** Creation has a successor and it is accurate: `admin/ui/screens/Content.tsx`'s
+  `NewPageButton` filters the top-level *New page* menu to types with no `under`
+  (the `top` filter, `Content.tsx:1044`), and `create-model.ts` holds the dialog's
+  own rules. **Restamped 2026-09-07 — the move half is not what this bullet used to
+  say.** `StoryTree.dropRefusal` does not exist: there is no `StoryTree` in
+  `admin/` any more, and the client-side mirror it names has no successor — zero
+  `draggable` or `onDragStart` anywhere in `admin/`, and `List.tsx`'s own `handle`
+  slot ("the drag affordance, or a tree's disclosure control") is filled today only
+  with the disclosure control, never a drag handle. The move path is the keyboard
+  gestures, and `content-model.ts`'s `gestureMove` refuses only *structural*
+  impossibilities — "Nothing above it to nest under", "Already at the top level",
+  "Its parent is not loaded" — and does not check `under`. So a move to a parent
+  the type forbids is posted and the server's 400 in `updateStoryStatement` (still
+  the only `under` enforcement on a move, and its message still names the allowed
+  parents) arrives as a toast: the editor is told **by** the request, which is the
+  opposite of what this bullet used to claim. Two deliberate narrowings fell out of
+  building the server check and remain accurate regardless of which side enforces
+  it, both aimed at the "less likely to make an existing tree undraggable" half of
+  the original question: the server checks `under` **only when the parent actually
+  changes**, so a plain title edit on a tree that predates the constraint still
+  works; and a row whose own type is no longer declared may be moved anywhere, since
+  a config change must not freeze a tree and the server has the final say regardless.
+  That second one used to be a thing *the admin* did — it declined to refuse the
+  drag — and it is now true by omission rather than by design, because the client
+  checks nothing at all. Same outcome, no longer an argument for anything.
 
 ## Implementation notes
 

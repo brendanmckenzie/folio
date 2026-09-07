@@ -859,14 +859,28 @@ because a list route and the screen over it are one decision:
 
 ## Open questions
 
+Reordered 2026-09-07 to run 1 through 8 in numeric order — it had drifted to 1, 2,
+3, 8, 4, 5, 6, 7, with item 8 sitting between 3 and 4, which is probably how 2 and 4
+went stale unnoticed. Numbers are unchanged and still what `design-system.md`,
+`ui-review.md` and source comments mean by "item *n*"; only the physical order
+moved.
+
 1. ~~**Does `group` on `DocumentType` want to also order the sidebar?**~~
    **Answered while building the shell prototype:** groups order by *first
    appearance*, like the palette's, because alphabetical fights the declaration order
    every other list in Folio respects. Implemented in `admin/ui/nav.ts`.
-2. **Does a refused bulk job report what it would have done?** A count mismatch
-   says the set changed but not how. Showing the difference costs a second query and
-   might be worth it for a destructive action; for publish it is probably noise.
-3. **Do platform screens keep their own `h1`?** The breadcrumb already names a
+2. ~~**Does a refused bulk job report what it would have done?**~~ A count mismatch
+   says the set changed but not how. Showing the difference costs a second query
+   and might be worth it for a destructive action; for publish it is probably noise.
+   **Answered — `platform/bulk-writes.md` decision 7:** no, and it turned out to be
+   structural rather than the cost/benefit call above: saying *which* documents
+   joined or left the set means comparing the old set to a new one that was never
+   materialised, which is the whole point of the shape — even the cheap
+   approximation is still 51,420 ids. The refusal is a 409 whose body is the error
+   envelope plus `expected` and `actual` counts, and decision 7a's own recovery path,
+   *Show only selected*, is what answers "what is in there" — as an ordinary paged
+   read, not a diff.
+3. ~~**Do platform screens keep their own `h1`?**~~ The breadcrumb already names a
    single-segment screen, so `Content` currently renders twice — once in the top bar
    and once as the heading beneath it. Either the screens drop the heading and let the
    breadcrumb title them, or the breadcrumb stops rendering a one-segment trail.
@@ -876,21 +890,35 @@ because a list route and the screen over it are one decision:
    `--fg-subtle`, which is a section label; the breadcrumb above it is 13px at full
    contrast. So the smaller, greyer of the two is the one that is actually the
    screen's heading. Whichever way the duplication is resolved, the surviving one
-   needs the weight.
-8. **Should a control a role cannot use be absent on a list screen?** Content's bulk
-   Delete and Documents' per-row Delete are both offered to a viewer and refused by
-   the server, with the refusal reported. `## Cross-cutting` says impossible controls
-   are absent and refusable ones explain themselves — a viewer's delete is
-   *impossible*, so both screens are wrong in the same way. Named rather than
-   half-fixed: the fix is one rule applied to every screen at once (the shell already
-   holds `me`), not a branch in whichever screen was touched last.
-4. **Does flat mode want `sort=state`?** The one filter that is also a plausible
+   needs the weight. **That paragraph was already stale when it was written**:
+   `ListHeader` had grown a `level` prop in the meantime, so the real state was eight
+   screens rendering an `h1` at 15px under a 13px crumb — the duplication worse than
+   described, not better — while `Schedules` alone had never been touched and was
+   still the original 11px-under-13px defect verbatim.
+   **Resolved 2026-09-07 (`eabc410`):** the screens drop their heading; the top bar's
+   last crumb is the page's one `h1`, at `--text-lg`/600, matching what
+   `List.module.css`'s `.headerScreen` drew, and `ListHeader` lost its `level` prop
+   entirely — a section label again. It landed on **thirteen** screens plus `Stub`,
+   not the eight this item named, because `crumbs()` answers a single crumb for
+   `documents/:type` too. Proof: `test/unit/admin/render/screens.test.tsx` asserts
+   exactly one `h1` per route, its text equal to the last crumb, inside the
+   breadcrumb nav.
+4. ~~**Does flat mode want `sort=state`?**~~ The one filter that is also a plausible
    ordering, and the one sort with no index. Deferred in `pagination.md` rather than
-   guessed.
-5. **What is a tree's paging control?** Answered while building the Content port,
-   and recorded here because it is a **departure from Resolved 5**: a tree level
-   appends (`Show 25 more`) where every other list gets next / previous. It has to.
-   A level's rows have expanded descendants nested inside them, so replacing page
+   guessed. **Closed — `foundation/pagination.md`:** flat mode ships without
+   `sort=state`. The reason it is the sort with no index is that reason: decision 4
+   makes `state` a **SQL expression over four existing columns** — `published_at`,
+   `unpublished_at`, `draft_sync_id`, `published_sync_id` — rather than a stored
+   column, having rejected storing one because a denormalised copy can disagree with
+   the four it derives from and thereby decide whether a page appears in a
+   publisher's list at all. So ordering by it means indexing an expression nobody
+   has asked to sort by, and the cost lands as a write on every story forever, which
+   is the mistake `stories_draft_updated` already made once. Adding it later is one
+   index and one `order by`. Confirmed 2026-09-07 as still the position for 1.0.
+5. ~~**What is a tree's paging control?**~~ **Answered** while building the Content
+   port, and recorded here because it is a **departure from Resolved 5**: a tree
+   level appends (`Show 25 more`) where every other list gets next / previous. It has
+   to. A level's rows have expanded descendants nested inside them, so replacing page
    one with page two would either drop those subtrees or leave them under rows that
    are no longer on screen — and the indent, which is the only thing carrying
    ancestry, would stop meaning anything. Flat mode gets the real next / previous,
@@ -929,9 +957,44 @@ because a list route and the screen over it are one decision:
    and both are fixed by the same rewrite: it acted on the visible part of the
    selection only (publishing three of twelve, under a bar that said twelve), and it
    passed `index: 0` per document, which landed a moved set reversed.
-7. **Which Content columns are still owed?** Two of the seven. **Translations** wants
-   a single query over `published_doc` rather than N Durable Object reads
+7. ~~**Which Content columns are still owed?**~~ Two of the seven. **Translations**
+   wants a single query over `published_doc` rather than N Durable Object reads
    (`ROADMAP.md` already records this). **Editing now** wants the space channel, and
    joining it from a list screen would mean announcing a presence the wire has no
-   word for — "in no story" is not a location `SpacePresence` can express. Both land
-   with the editor port, which needs the channel anyway.
+   word for — "in no story" is not a location `SpacePresence` can express.
+   **Corrected 2026-09-07:** that last clause is wrong. The wire has always
+   expressed a null `storyId`: `core/protocol.ts`'s `SpacePresence.storyId` is
+   `string | null`, commented "Story id currently open, or null while the admin is
+   on a list screen," and it landed 2026-07-30 in `3a9f058` — the space channel's own
+   commit, one day before this question was written in `f074404`.
+   `admin/spaceStore.ts`'s `avatarsOf` already handles the null case deliberately,
+   giving the label to whichever tab actually names a document over one that is
+   "somewhere." The blocker this item named never existed. The channel is mounted
+   now (#4, `3e9f1a0`), so **Editing now**'s only remaining blocker is the
+   live-updating list cell — not the channel. Both owed columns are **deferred past
+   1.0** (decided 2026-09-07): Translations for the `published_doc` query above,
+   Editing now for that list cell.
+8. ~~**Should a control a role cannot use be absent on a list screen?**~~ Content's
+   bulk Delete and Documents' per-row Delete are both offered to a viewer and refused
+   by the server, with the refusal reported. `## Cross-cutting` says impossible
+   controls are absent and refusable ones explain themselves — a viewer's delete is
+   *impossible*, so both screens are wrong in the same way. Named rather than
+   half-fixed: the fix is one rule applied to every screen at once (the shell already
+   holds `me`), not a branch in whichever screen was touched last.
+   **Resolved 2026-09-07 (`97293a2`):** absent, which is the existing
+   `## Cross-cutting` rule applied — to all seven list screens, sixteen controls, not
+   the two this item named. `admin/me.ts` gained `canManageAssets`, `canReadResponses`
+   and `canAdmin`, each mirroring the `Access` its own route declares in
+   `server/auth/roles.ts`. Proof: `test/unit/admin/render/roles.test.tsx`, asserted
+   for viewer, editor, admin and a deployment with `auth: 'open'`.
+   **Two things stayed deliberately outside this fix's scope**, worth saying so the
+   item does not read as more complete than it is: `Model.tsx`'s migration Run and
+   `EditorShell.tsx`'s Publish are still role gates rendered as a `Button` `reason`
+   rather than an absence — both are outside this item's stated scope of the list
+   screens; and Content's keyboard reordering gestures (`content-model.ts`'s
+   `gestureMove`) still post and fail for a viewer, because its refusals are all
+   structural ("Nothing above it to nest under", "Already at the top level", "Its
+   parent is not loaded") and none of them checks role.
+
+All eight items above are closed as of 2026-09-07 — 1 and 6 already were; 2, 3, 4,
+5, 7 and 8 close in this sweep. This section has no open items.
