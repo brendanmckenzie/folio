@@ -265,18 +265,39 @@ describe('the image block', () => {
     },
   )
 
-  it('refuses an oversized image before spending the call, and says how to fix it', async () => {
-    // The path that found this: a 12.8MB original standing in for a rendition
-    // that never arrived. The message points at the binding, because that is
-    // what produces one.
-    answering('{}')
+  it('refuses an oversized image before spending the call, naming the size', async () => {
+    const fetchMock = answering('{}')
     await expect(
       anthropicDescriber({ apiKey: KEY })(
         inputOf({
           inline: async () => ({ media: 'image/jpeg', bytes: new ArrayBuffer(6 * 1024 * 1024) }),
         }),
       ),
-    ).rejects.toThrow(/6MB, over the API's 5MB limit — configure an Images binding/)
+    ).rejects.toThrow(/the image is 6\.0MB, over the API's 5MB inline limit/)
+    // Refused *before* the call, which is the whole reason the check is here.
+    expect(callsOf(fetchMock)).toHaveLength(0)
+  })
+
+  it('does not claim the Images binding is unconfigured, because it cannot know', async () => {
+    // The bug this pins (#21): the message asserted a missing binding and was
+    // read on a Worker where one was configured, working, and had described 86
+    // other assets — the file was simply over the binding's own 20MB input
+    // ceiling. `DescribeInput` carries nothing that distinguishes a rendition
+    // from an original, so the only honest message is one about Folio's
+    // behaviour rather than about this deployment's configuration.
+    answering('{}')
+    const err = await anthropicDescriber({ apiKey: KEY })(
+      inputOf({
+        inline: async () => ({ media: 'image/jpeg', bytes: new ArrayBuffer(6 * 1024 * 1024) }),
+      }),
+    ).then(
+      () => null,
+      (e: unknown) => e as Error,
+    )
+
+    expect(err, 'the oversized image resolved instead of throwing').not.toBeNull()
+    expect(err!.message).not.toMatch(/configure an Images binding/)
+    expect(err!.message).toMatch(/wherever an Images binding is configured/)
   })
 })
 

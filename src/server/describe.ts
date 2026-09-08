@@ -258,10 +258,24 @@ export const DESCRIBE_WIDTH = 512
  * on 2026-09-07: 87 assets fine, one 12.8MB JPEG refused, the transform behind
  * the very same URL answering a 113kB WebP to `curl` the whole time.
  *
- * The failure policy is `serveAsset`'s, for the same reason: a transform that
- * throws or yields nothing falls back to the original and logs, because a
- * described asset at full cost beats an undescribed one. Both branches report
- * the media type of the bytes they actually produced.
+ * **A refused transform is a failure, not a fallback to the original.** This is
+ * where `serveAsset`'s policy and this one part company, and the reason is that
+ * two limits sit either side of each other: the Images binding's `.input()`
+ * takes 20MB, and a provider's inline ceiling is a quarter of that (Anthropic's
+ * is 5MB). So the only images that can reach the fallback are the ones already
+ * four times too large to send, and handing them back turns *this file could not
+ * be resized* into whatever the provider says about size — on
+ * `allaboutafrica.au`, a 20,096,380-byte JPEG 96kB over the binding's limit
+ * reported as "the image is 19MB … configure an Images binding", on a Worker
+ * where the binding was configured and had just described 86 other assets
+ * (#21). Serving the original there costs nothing and helps nothing; the throw
+ * carries the transform's own words into `describe_error`, where somebody can
+ * read them against the row.
+ *
+ * The original still stands in for the two cases where it is genuinely the best
+ * bytes available: no binding at all, and a type the binding has no business
+ * parsing. Every branch reports the media type of the bytes it actually
+ * produced.
  */
 async function renditionOf(
   deps: DescribeDeps,
@@ -284,18 +298,29 @@ async function renditionOf(
       if (bytes.byteLength === 0) throw new Error('Transform produced no output')
       return { media: result.contentType(), bytes }
     } catch (e) {
-      // Never silent: indistinguishable otherwise from a library of originals.
+      // Both halves, because they reach different readers: the log keeps the
+      // exception whole for whoever is tailing the Worker, and the throw carries
+      // a bounded version of it to `describe_error` on the row. The size is
+      // included because the binding's own message rarely names it, and 20MB is
+      // the number that explains the failure.
       const logger = deps.logger ?? console
       logger.error(`folio: describe transform failed for ${row.key}`, e)
+      const detail = e instanceof Error ? e.message : String(e)
+      throw new Error(
+        `folio: the Images binding could not resize ${row.key} (${megabytes(row.size)}MB): ${detail}`,
+      )
     }
   }
 
-  // The original, re-read because a failed transform consumed the body above.
-  const original = deps.images ? await deps.media.get(row.key) : object
-  return {
-    media: row.contentType,
-    bytes: (await original?.arrayBuffer()) ?? new ArrayBuffer(0),
-  }
+  // The original: no binding to resize with, or a type there is no sense
+  // resizing. Never a transform that failed — that throws above.
+  return { media: row.contentType, bytes: await object.arrayBuffer() }
+}
+
+/** One decimal, because `Math.round` turns 5.4MB into "5MB, over the 5MB
+ * limit" — a true sentence that reads like a bug. */
+function megabytes(bytes: number): string {
+  return (bytes / 1024 / 1024).toFixed(1)
 }
 
 /**

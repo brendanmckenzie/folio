@@ -973,6 +973,17 @@ Three things to know before you turn it on:
   model is sent a 512px WebP, which is an order of magnitude fewer tokens than a
   20MB original; without it the original goes, and it works and costs more. The
   admin's run panel says which of the two you are paying for.
+
+  **An image the binding itself refuses fails, rather than falling back to the
+  original** — which is the opposite of what Resizing above does, deliberately.
+  The binding's `.input()` takes 20MB and a provider's inline ceiling is a
+  quarter of that, so a file too large to resize is several times too large to
+  send: standing the original in only replaces *this file could not be resized*
+  with a complaint about size from the provider. The row records the resize
+  error, and an explicit run over failed assets is what retries it once the file
+  is replaced with a smaller one. Note the asset route still serves such a file
+  at full size, so a page that renders it is unaffected; `/cdn-cgi/image/` is a
+  separate path with a higher input limit and resizes it fine.
 - **Folio uploads the bytes; the provider never fetches your site.**
   `anthropicDescriber` used to hand over the URL and let the model API fetch it,
   and that breaks on Cloudflare by default: AI-crawler blocking is user-agent

@@ -231,8 +231,13 @@ async function imageBlock(input: DescribeInput): Promise<unknown> {
     throw new Error(`anthropic: ${media} cannot be sent inline`)
   }
   if (bytes.byteLength > MAX_INLINE_BYTES) {
+    // What this can verify is the byte count and the ceiling. It cannot see
+    // whether an Images binding exists, so it says what Folio does rather than
+    // what this deployment is missing: the old wording asserted the binding was
+    // unconfigured and was read by a host whose binding was configured and
+    // working (#21).
     throw new Error(
-      `anthropic: the image is ${Math.round(bytes.byteLength / 1024 / 1024)}MB, over the API's 5MB limit — configure an Images binding so Folio can send a resized rendition`,
+      `anthropic: the image is ${megabytes(bytes.byteLength)}MB, over the API's 5MB inline limit — Folio sends a resized 512px rendition instead wherever an Images binding is configured`,
     )
   }
   return { type: 'image', source: { type: 'base64', media_type: media, data: base64(bytes) } }
@@ -251,12 +256,21 @@ const INLINE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/web
  * The API's per-image ceiling, checked before the call rather than after.
  *
  * A round trip to be told something `byteLength` already knows is a wasted
- * request, and the resulting 400 reads like a bug in Folio. Reachable in
- * practice only without an Images binding, or when a transform failed and the
- * original stood in — so the message names the binding that would have avoided
- * both.
+ * request, and the resulting 400 reads like a bug in Folio.
+ *
+ * **Reachable only where no Images binding is configured.** It used to be
+ * reachable one other way — a transform that failed, with the full-size original
+ * standing in — and that path is gone: `describe.ts`'s `renditionOf` throws the
+ * transform's own error instead, because a file the binding refuses is over
+ * *its* 20MB limit and therefore four times over this one. Nothing here can tell
+ * the two apart, which is why the message above names neither.
  */
 const MAX_INLINE_BYTES = 5 * 1024 * 1024
+
+/** One decimal: `Math.round` turns 5.4MB into "5MB, over the 5MB limit". */
+function megabytes(bytes: number): string {
+  return (bytes / 1024 / 1024).toFixed(1)
+}
 
 /** `btoa` takes a binary string, and a 20MB `apply(...)` overflows the stack. */
 function base64(bytes: ArrayBuffer): string {

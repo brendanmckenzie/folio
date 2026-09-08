@@ -292,6 +292,13 @@ export interface FolioDescribe<Env> {
  * the stored original, and that is the expensive case: an order of magnitude
  * more tokens, and possibly over a provider's per-image ceiling.
  *
+ * **With the binding, a transform it refuses rejects rather than answering the
+ * original.** The binding takes 20MB, every provider's inline ceiling is far
+ * below that, so an original that reaches a `fn` from this path is one that
+ * cannot be sent anyway — the rejection names the resize that failed instead of
+ * leaving the provider to complain about a size (#21). A `fn` need not catch it:
+ * `describeAsset` records a throw in `describe_error` like any other.
+ *
  * **Lazy**, because at `concurrency: 4` eagerly reading every one would put the
  * whole batch's bytes live in one isolate.
  */

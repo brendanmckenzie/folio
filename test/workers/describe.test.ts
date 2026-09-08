@@ -119,7 +119,15 @@ async function reset(): Promise<void> {
 
 /** One library row plus its object, so `bytes()` has something real to read. */
 async function seedAsset(
-  opts: { filename?: string; contentType?: string; alt?: string; body?: string } = {},
+  opts: {
+    filename?: string
+    contentType?: string
+    alt?: string
+    body?: string
+    /** The `size` column, where a test needs a realistic one without putting
+     * twenty megabytes in R2. Defaults to the body's own length. */
+    size?: number
+  } = {},
 ): Promise<string> {
   minted += 1
   const id = `ast_ds${String(minted).padStart(8, '0')}`
@@ -136,7 +144,7 @@ async function seedAsset(
       key,
       filename,
       opts.contentType ?? 'image/png',
-      body.length,
+      opts.size ?? body.length,
       opts.alt ?? '',
       Date.now(),
     )
@@ -274,6 +282,185 @@ describe('what the host is handed', () => {
     const { media, bytes } = await input!.inline()
     expect(new TextDecoder().decode(bytes)).toBe('REALBYTES')
     expect(media).toBe('image/png')
+  })
+})
+
+/**
+ * `renditionOf`, reached the only way a host can reach it: `input.inline()`.
+ *
+ * No Images binding is configured for this test worker on purpose
+ * (`wrangler.jsonc` binds none), so these pass a stub — the same shape
+ * `assets.test.ts` uses for `serveAsset`, and for the same reason: the branch
+ * that matters cannot be exercised without a binding to fail.
+ *
+ * **The property under test is that a refused transform is not survivable by
+ * sending the original** (#21). Two limits sit either side of each other: the
+ * binding takes 20MB and a provider's inline ceiling is a quarter of that, so
+ * every image that can reach the fallback is one that cannot be sent. Verified
+ * by breaking it — restore the `return` of the original in place of the throw
+ * and `blames the resize, not a binding it cannot see` goes red with the exact
+ * message from the report.
+ */
+describe('the bytes a provider is sent', () => {
+  function fakeImages(outcome: { bytes: ArrayBuffer; contentType: string } | Error) {
+    let inputs = 0
+    const transformer: ImageTransformer = {
+      transform: () => transformer,
+      draw: () => transformer,
+      output: async () => {
+        if (outcome instanceof Error) throw outcome
+        return {
+          response: () =>
+            new Response(outcome.bytes, { headers: { 'content-type': outcome.contentType } }),
+          contentType: () => outcome.contentType,
+          image: () => new ReadableStream(),
+        }
+      },
+    }
+    const images = {
+      input: () => {
+        inputs += 1
+        return transformer
+      },
+      info: async () => {
+        throw new Error('not exercised by this test')
+      },
+      hosted: {},
+    } as unknown as ImagesBinding
+    return { images, inputs: () => inputs }
+  }
+
+  /** The `DescribeInput` a `fn` would be handed, without describing anything. */
+  async function inputFor(deps: DescribeDeps, id: string): Promise<DescribeInput> {
+    let seen: DescribeInput | undefined
+    await describeAsset(
+      {
+        ...deps,
+        describe: validateDescribe<unknown>({
+          fn: async (input) => {
+            seen = input
+            return {}
+          },
+        })!,
+      },
+      await stored(id),
+    )
+    if (!seen) throw new Error('unreachable: the stub was not called')
+    return seen
+  }
+
+  it('hands over what the transform produced, with the media type of those bytes', async () => {
+    const id = await seedAsset({ filename: 'portrait.jpg', contentType: 'image/jpeg' })
+    const webp = new Uint8Array([1, 2, 3, 4]).buffer
+    const { images, inputs } = fakeImages({ bytes: webp, contentType: 'image/webp' })
+
+    const input = await inputFor(
+      depsFor(async () => ({}), images),
+      id,
+    )
+    const rendition = await input.inline()
+
+    expect(inputs()).toBe(1)
+    // The row says JPEG and the bytes are WebP. Reporting the row's type here
+    // is a 400 from the provider about a mismatch rather than about anything.
+    expect(rendition.media).toBe('image/webp')
+    expect(new Uint8Array(rendition.bytes)).toEqual(new Uint8Array([1, 2, 3, 4]))
+  })
+
+  it('blames the resize, not a binding it cannot see, when the transform fails', async () => {
+    // The reported case: 20,096,380 bytes, 6000x4000, about 96kB over the
+    // binding's own 20MB `.input()` ceiling, on a Worker whose binding had just
+    // described 86 other assets.
+    const id = await seedAsset({
+      filename: 'safari.jpg',
+      contentType: 'image/jpeg',
+      size: 20_096_380,
+    })
+    const { images } = fakeImages(new Error('ERROR 9412: Image too large'))
+    const row = await stored(id)
+
+    const input = await inputFor(
+      depsFor(async () => ({}), images),
+      id,
+    )
+    const failure = await input.inline().then(
+      () => null,
+      (e: unknown) => e as Error,
+    )
+
+    expect(failure).not.toBeNull()
+    // The key, the size and the binding's own words: everything a person needs
+    // to see that the file, not the configuration, is the problem.
+    expect(failure!.message).toContain(row.key)
+    expect(failure!.message).toContain('19.2MB')
+    expect(failure!.message).toContain('ERROR 9412: Image too large')
+    // The half that was wrong: it must not send somebody to configure a binding
+    // that is configured, and it must not answer bytes that cannot be sent.
+    expect(failure!.message).not.toMatch(/configure an Images binding/)
+  })
+
+  it('records that failure on the row rather than throwing out of the run', async () => {
+    const id = await seedAsset({
+      filename: 'safari.jpg',
+      contentType: 'image/jpeg',
+      size: 20_096_380,
+    })
+    const { images } = fakeImages(new Error('ERROR 9412: Image too large'))
+
+    // A `fn` that reads the pixels, which is every real one.
+    const outcome = await describeAsset(
+      depsFor(async (input) => {
+        await input.inline()
+        return { alt: 'never reached' }
+      }, images),
+      await stored(id),
+    )
+
+    expect(outcome.error).toMatch(/could not resize/)
+    const row = await stored(id)
+    expect(row.describeError).toMatch(/ERROR 9412/)
+    // Tried and failed, not never tried: it leaves the backlog and a run over
+    // `describe_error is not null` is what brings it back.
+    expect(row.describedAt).not.toBeNull()
+    // Nothing the model never said reached a column.
+    expect(row.altAuto).toBe('')
+  })
+
+  it('treats an empty transform output as a failure, not as an image with no pixels', async () => {
+    const id = await seedAsset({ filename: 'blank.png' })
+    const { images } = fakeImages({ bytes: new ArrayBuffer(0), contentType: 'image/webp' })
+
+    const input = await inputFor(
+      depsFor(async () => ({}), images),
+      id,
+    )
+
+    // A 200 with a zero-length body is the trap `serveAsset` buffers to catch.
+    // Sending it would be a paid call about nothing.
+    await expect(input.inline()).rejects.toThrow(/Transform produced no output/)
+  })
+
+  it('still stands the original in for a type there is no sense resizing', async () => {
+    // SVG is deliberately outside `SERVED_CONTENT_TYPES`: vector, and the
+    // binding has no business parsing attacker-supplied XML. So this is the
+    // fallback with a binding present, and it survives — the original is the
+    // best bytes that exist, and `imageBlock` refuses the *type* by name.
+    const id = await seedAsset({
+      filename: 'logo.svg',
+      contentType: 'image/svg+xml',
+      body: '<svg/>',
+    })
+    const { images, inputs } = fakeImages(new Error('never invoked'))
+
+    const input = await inputFor(
+      depsFor(async () => ({}), images),
+      id,
+    )
+    const { media, bytes } = await input.inline()
+
+    expect(inputs()).toBe(0)
+    expect(media).toBe('image/svg+xml')
+    expect(new TextDecoder().decode(bytes)).toBe('<svg/>')
   })
 })
 
@@ -1348,6 +1535,51 @@ describe('anthropicDescriber, through the seam', () => {
     // what brings it back.
     expect(row.describedAt).not.toBeNull()
     expect(row.describeError).toMatch(/overloaded/)
+  })
+
+  it('reports the resize that failed, not the binding, and spends no call doing it', async () => {
+    // #21 end to end, which is the only place the two halves meet: a file the
+    // Images binding refuses used to arrive at `imageBlock` as the full-size
+    // original, fail the 5MB inline check, and be reported as a missing binding
+    // on a Worker where one was configured and working. The body really is over
+    // the ceiling, so this is the reported failure rather than a description of
+    // it — under the old fallback the row reads "the image is 6.0MB, over the
+    // API's 5MB inline limit" and no assertion below survives.
+    const oversized = 'x'.repeat(6 * 1024 * 1024)
+    const id = await seedAsset({
+      filename: 'safari.jpg',
+      contentType: 'image/jpeg',
+      body: oversized,
+    })
+    const transformer = {
+      transform: () => transformer,
+      draw: () => transformer,
+      output: async () => {
+        throw new Error('ERROR 9412: Image too large')
+      },
+    } as unknown as ImageTransformer
+    const images = {
+      input: () => transformer,
+      info: async () => {
+        throw new Error('not exercised by this test')
+      },
+      hosted: {},
+    } as unknown as ImagesBinding
+
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const outcome = await describeAsset(
+      depsFor(anthropicDescriber({ apiKey: 'sk-ant-test' }), images),
+      await stored(id),
+    )
+
+    expect(outcome.error).toMatch(/Images binding could not resize/)
+    expect(outcome.error).toMatch(/ERROR 9412/)
+    expect(outcome.error).not.toMatch(/over the API's 5MB/)
+    expect(outcome.error).not.toMatch(/configure an Images binding/)
+    // Not one paid request: the failure is known before the body is built.
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 })
 
