@@ -6,6 +6,7 @@ import {
   cachePurgeHooks,
   MAX_PURGE_CALLS,
   MAX_TAGS_PER_PURGE,
+  purgeFormLayout,
   purgePlan,
   type PurgeCapability,
 } from '../../../src/server/cache-purge'
@@ -294,6 +295,21 @@ describe('cachePurgeHooks', () => {
     // which is what makes `content_refs`' 400-row truncation irrelevant here
     // (forms.md architecture decision 8).
     expect(calls).toEqual([{ tags: [formTag('frm_abc123abc123')] }])
+  })
+
+  describe('purgeFormLayout', () => {
+    it('purges exactly `form:<id>`, the same tag `formChanged` purges, with no host-visible event', async () => {
+      const { calls, capability } = recorder()
+      await purgeFormLayout('frm_abc123abc123', capability, console)
+      expect(calls).toEqual([{ tags: [formTag('frm_abc123abc123')] }])
+    })
+
+    it('is a silent no-op when the platform capability is absent', async () => {
+      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      await expect(purgeFormLayout('frm_abc123abc123', ABSENT, console)).resolves.toBeUndefined()
+      expect(logged).not.toHaveBeenCalled()
+      logged.mockRestore()
+    })
   })
 
   it('registers nothing for created, checkpointed or redirectsChanged', () => {

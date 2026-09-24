@@ -81,6 +81,13 @@
   gap: var(--space-1);
 }
 
+/* A question joined to the one above it (`beside`) draws indented, so a row
+   reads as a group rather than as another stacked line — the list's own
+   picture of `form-model.ts`'s `fieldRows`. */
+.fieldRowJoined {
+  margin-left: var(--space-3);
+}
+
 .fieldRow {
   display: flex;
   flex: 1 1 auto;

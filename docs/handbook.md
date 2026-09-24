@@ -1713,7 +1713,7 @@ makes a two-year-old response readable after the form has moved on.
 ### Embedding one
 
 ```tsx
-import { defineBlock, form, text } from 'folio/core'
+import { defineBlock, form, formLayout, text } from 'folio/core'
 
 export const contactForm = defineBlock({
   name: 'contactForm',
@@ -1725,13 +1725,26 @@ export const contactForm = defineBlock({
   render: ({ heading, form }) => {
     if (!form) return null
     if (!form.open) return <p>{form.closedMessage}</p>
+    const view = formLayout(form)
     return (
       <form method={form.method} action={form.action} encType={form.enctype}>
         {form.hidden.map((h) => (
           <input key={h.name} type="hidden" name={h.name} value={h.value} />
         ))}
         <input type="text" name={form.honeypot} tabIndex={-1} autoComplete="off" aria-hidden className="offscreen" />
-        {form.fields.map((f) => <Question key={f.name} {...f} />)}
+        {/* `hidden`-kind questions: layout-transparent, so `formLayout` hands
+            them back separately — render them anywhere in the form. */}
+        {view.inputs.map((f) => (
+          <input key={f.name} type="hidden" name={f.name} value={f.value ?? ''} />
+        ))}
+        {view.sections.map(({ section, rows }, i) => {
+          const body = rows.map((row) => (
+            <div key={row.key} className="row" style={{ '--cols': row.cells.map((c) => `${c.grow}fr`).join(' ') }}>
+              {row.cells.map((c) => (c.shown ? <Question key={c.field.name} {...c.field} /> : <div key={c.field.name} aria-hidden />))}
+            </div>
+          ))
+          return section ? <fieldset key={section.name}><legend>{section.label}</legend>{body}</fieldset> : <div key={i}>{body}</div>
+        })}
         <button>{form.submitLabel}</button>
       </form>
     )
@@ -1767,6 +1780,59 @@ anywhere.
 override. A form is the one place a design system has strong opinions, and the
 descriptor exists so a host can satisfy them without reimplementing the action
 URL, the locale fallback, the hidden inputs or the honeypot.
+
+### Layout: rows
+
+An editor can sit one question beside the one before it — `[First name][Last
+name]`, `[City][State][Postcode]` — and give each a relative width share (1 to 4;
+1 is the default). `form.fields` stays the flat array it always was, in the
+form's own order: layout is two optional keys on a question (`beside`, `grow`),
+not a second tree, so a host that never calls `formLayout` still gets every
+question, stacked, exactly as it did before this existed.
+
+`formLayout(form)` is the one function that turns those keys into what a render
+draws — group it once and reuse the shape everywhere:
+
+```tsx
+import { formLayout } from 'folio/core'
+
+const view = formLayout(form)
+// view.inputs   — `hidden`-kind questions: position-free, render anywhere
+// view.sections — [{ section: null, rows: [{ key, cells: [{ field, grow, shown }] }] }]
+```
+
+A row is the first question plus every following question with `beside`. A
+`statement` and the start of the form always break a row, whatever the next
+question's own `beside` says, and a `hidden` question is layout-transparent —
+it neither joins nor breaks one, which is why `formLayout` hands it back
+separately in `view.inputs` rather than leaving a stray cell in `view.sections`.
+At most four questions share a row; a fifth `beside` narrows into a row of its
+own instead of a fifth column nobody asked for. `sections` is always the one
+`section: null` group this slice — grouped questions under a real legend are a
+later addition, and a host that iterates `view.sections` now needs no changes
+when that lands, the same way `shown` (always `true` until conditional
+visibility exists) needs none either.
+
+Render each row as a CSS grid track list built from each cell's `grow`, and let
+the host's own breakpoint collapse it — Folio stores proportions, never
+breakpoints, so **a row is a suggestion for a wide container and stacking it is
+always correct**:
+
+```css
+.form { container: form / inline-size; }
+.row { display: grid; grid-template-columns: var(--cols, 1fr); gap: 1rem; }
+@container form (max-width: 36rem) { .row { grid-template-columns: 1fr; } }
+```
+
+A cell that is not `shown` (conditional visibility, not yet built) renders an
+empty `aria-hidden` slot, never a `visibility: hidden` input — that still posts
+a value in a native submission, where an absent element does not. DOM order is
+`form.fields`' own order, so tab order, reading order and visual order agree
+without the host doing anything to make that true.
+
+Layout keys are presentational: `beside`/`grow` never touch `shapeOf`, so
+changing them alone never bumps `version` and never fires `formChanged` — but
+saving one still purges the form's cached pages, [below](#two-things-about-the-cache).
 
 ### The two hidden inputs, which nothing else will tell you about
 
@@ -1972,6 +2038,15 @@ visitors markup for the old shape, and if the form gained a required field every
 one of them would submit something the live form refuses and see an error they
 could not possibly fix. With it, the window is the purge latency rather than the
 TTL.
+
+**Any other save purges the same tag, without becoming that event.** A label, a
+help text or a layout share (`beside`/`grow`) changes nothing `shapeOf` counts, so
+none of them bump `version` or fire `formChanged` — but a cached page still shows
+the old label or the old row, so the save purges `form:<id>` anyway, straight
+from the route rather than through the event. A host listening for `formChanged`
+never hears about one of these: that event's payload promises "the version this
+save bumped to", and a save that bumped nothing is not what it exists to
+announce.
 
 **It inherits the cross-entrypoint trap** described under [Caching](#caching): a
 purge issued from one `WorkerEntrypoint` does not touch what another one cached. A

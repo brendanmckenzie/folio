@@ -21,6 +21,7 @@ import { wasRefused } from '../../core/bulk'
 import { NO_STORE } from '../../core/cache-tags'
 import { honeypotName } from '../../core/forms'
 import { actorString, ADMIN, EDIT, FORMS, READ } from '../auth/roles'
+import { purgeFormLayout } from '../cache-purge'
 import { FolioError } from '../errors'
 import {
   type AnswerRefusal,
@@ -192,10 +193,14 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * A builder save.
    *
    * **`formChanged` fires only on a structural save**, which is what makes the
-   * purge honest: a page cached for a week holds the old markup, and if the form
+   * event honest: a page cached for a week holds the old markup, and if the form
    * gained a required field every cached visitor would submit something the live
-   * form refuses and see an error they could not possibly fix. A label edit
-   * changes no constraint, so it purges nothing (decision 7).
+   * form refuses and see an error they could not possibly fix. A label edit, or
+   * a layout-only one (`beside`/`grow`), changes no constraint, so it fires
+   * nothing and bumps no `version` (decision 7) — but it still purges the same
+   * `form:<id>`, through `purgeFormLayout` rather than through the event, so a
+   * host listening for `formChanged` never hears about a save that changed
+   * nothing it enforces (`docs/form-layout-approach.md` decision 2).
    *
    * The 409 for a stale `expectedUpdatedAt` comes out of `updateForm`, where the
    * guard is part of the `update` rather than a read in front of it.
@@ -220,6 +225,12 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         version: result.form.version,
         actor: actorString(c.var.actor),
       })
+    } else if (result.descriptorChanged) {
+      // `rt.formPurgeCapability` is `undefined` for every real host — the
+      // same default `purgeFormLayout` would pick on its own — and set only
+      // by a workers test that needs to observe this call at all
+      // (`FolioRuntime.formPurgeCapability`'s own comment).
+      await purgeFormLayout(id, rt.formPurgeCapability, rt.logger)
     }
     return c.json(result.form)
   })

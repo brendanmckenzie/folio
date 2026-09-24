@@ -43,7 +43,7 @@ import {
 } from '../core/schema'
 import { ancestorPaths, type StoryMeta, type StoryNode } from '../core/story'
 import { type ResolvedAuth, resolveAuth } from './auth/config'
-import { cachePurgeHooks } from './cache-purge'
+import { cachePurgeHooks, type PurgeCapability } from './cache-purge'
 import { type ContentProjection, contentProjection } from './content-index'
 import { type ResolvedDescribe, validateDescribe } from './describe'
 import { type ResolvedForms, validateForms } from './form-responses'
@@ -213,6 +213,17 @@ export interface FolioRuntime {
    * rather than start silently doing nothing.
    */
   logger: FolioLogger
+  /**
+   * Not `FolioConfig`'s — there is no public key for this, and there never
+   * should be. `formRoutes`' PATCH handler calls `purgeFormLayout(id,
+   * rt.formPurgeCapability, rt.logger)` rather than passing `undefined`
+   * (`platformPurge`'s own default) so a workers test can inject a fake
+   * `PurgeCapability` and observe the route's own call to it — otherwise
+   * unobservable in this environment, `cache-purge.ts`'s own header explains
+   * why. Undefined for every real host, which is exactly `purgeFormLayout`'s
+   * own default and therefore no behaviour change at all.
+   */
+  formPurgeCapability?: PurgeCapability
   /** A declared type by name, or undefined — a row whose type was removed from
    * the code still reads, it just has no schema to render ("Unknown type"). */
   typeOf: (name: string | undefined) => DocumentType | undefined
@@ -474,6 +485,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // a value that is either absent (default `console`, unchanged behaviour) or a
   // host's own object satisfying two methods.
   const logger: FolioLogger = config.logger ?? console
+  // Not a `FolioConfig` key — see `FolioRuntime.formPurgeCapability`. No public
+  // type names this, so a real `config` object can never carry it; the cast is
+  // local to this one read.
+  const formPurgeCapability = (
+    config as FolioConfig<Env> & { formPurgeCapability?: PurgeCapability }
+  ).formPurgeCapability
   const globals = config.globals ?? []
   const locales = config.locales
   const migrations = config.migrations ?? []
@@ -1012,6 +1029,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     describe,
     forms,
     logger,
+    formPurgeCapability,
     typeOf,
     defaultType: fallbackType,
     titleFor,

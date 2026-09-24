@@ -21,13 +21,16 @@ import {
   addField,
   addOption,
   MAX_FIELDS_REACHED,
+  canJoinPrevious,
+  canMoveField,
   closesAtFromInput,
   closesAtInputValue,
   fieldKindLabel,
   FIELD_KINDS,
   fieldNameRefusal,
+  fieldRows,
   fieldText,
-  moveField,
+  moveFieldStep,
   needsOptions,
   normaliseFieldName,
   optionLabel,
@@ -38,7 +41,9 @@ import {
   type TranslatableKey,
   updateField,
   updateOption,
+  withBeside,
   withFieldText,
+  withGrow,
   withOptionLabel,
 } from './form-model'
 import { messageOf } from './useContent'
@@ -142,12 +147,22 @@ export function FormBuilder({
   const showLocales = showLocaleSwitcher(locales)
   const hasResponses = (data.usage?.responses ?? 0) > 0
   const selectedField = draft.fields.find((f) => f.name === selected) ?? null
-  // Decision 7: `version` (and therefore a purge of `form:<id>`) only bumps on
-  // a *shape* change — a name, kind, required flag or option values added,
-  // removed or retyped — never on a label, help or translation edit.
+  // Decision 7: `version` (and therefore `formChanged`) only bumps on a
+  // *shape* change — a name, kind, required flag or option values added,
+  // removed or retyped — never on a label, help, translation or layout edit.
   // `shapeOf` is the one function that says which, shared with the server so
   // this can never disagree with what actually triggers `formChanged`.
   const structural = data.form ? shapeOf(draft.fields) !== shapeOf(data.form.fields) : false
+  // The list's own row grouping (`form-model.ts`'s `fieldRows`), and whether
+  // `beside` on the selected question could do anything at all — the first
+  // question in the form, and the one right after a statement, always start a
+  // fresh row regardless of it.
+  const rows = fieldRows(draft.fields)
+  const rowOfField = new Map(rows.flatMap((row, r) => row.map((i) => [draft.fields[i]?.name, r])))
+  // Every index but a row's first: the list draws these joined to the
+  // question above rather than starting a fresh line for them.
+  const joinedIndices = new Set(rows.flatMap((row) => row.slice(1)))
+  const joinable = selectedField ? canJoinPrevious(draft.fields, selectedField.name) : false
 
   const select = (name: string | null) => {
     setSelected(name)
@@ -170,8 +185,8 @@ export function FormBuilder({
     if (selected === name) select(null)
   }
 
-  const onMoveField = (from: number, to: number) => {
-    setDraft({ ...draft, fields: moveField(draft.fields, from, to) })
+  const onMoveField = (index: number, direction: -1 | 1) => {
+    setDraft({ ...draft, fields: moveFieldStep(draft.fields, index, direction) })
   }
 
   const save = async () => {
@@ -284,8 +299,10 @@ export function FormBuilder({
 
       {structural ? (
         <p className={css.structuralNote}>
-          Saving will change this form's shape, which purges every cached page that renders it
-          (decision 7) — a label or help-text edit alone does not.
+          Saving will change this form's shape — a question added, removed, renamed, retyped, made
+          required, or an option changed — which bumps its version as well as purging every cached
+          page that renders it. A label, help-text or layout-only change purges the same cache
+          without bumping the version.
         </p>
       ) : null}
 
@@ -293,13 +310,23 @@ export function FormBuilder({
         <div className={css.fields}>
           <ol className={css.fieldList}>
             {draft.fields.map((field, i) => (
-              <li key={field.name}>
+              <li
+                key={field.name}
+                className={joinedIndices.has(i) ? css.fieldRowJoined : undefined}
+              >
                 <button
                   type="button"
                   className={`${css.fieldRow} ${selected === field.name ? css.fieldRowSelected : ''}`}
                   onClick={() => select(field.name)}
                 >
-                  <span className={css.fieldRowKind}>{fieldKindLabel(field.kind)}</span>
+                  <span className={css.fieldRowKind}>
+                    {fieldKindLabel(field.kind)}
+                    {/* Which row this question draws in — `hidden` has none,
+                        being position-free on the live page. */}
+                    {field.kind !== 'hidden'
+                      ? ` · Row ${(rowOfField.get(field.name) ?? 0) + 1}`
+                      : ''}
+                  </span>
                   <span className={css.fieldRowLabel}>{field.label || field.name}</span>
                   {field.required ? <Badge tone="accent">Required</Badge> : null}
                 </button>
@@ -307,20 +334,23 @@ export function FormBuilder({
                   <Button
                     size="sm"
                     variant="subtle"
-                    disabled={!editable || i === 0}
+                    // Row-aware, not `i === 0`: the first member of a
+                    // multi-question row can still detach from its row-mates
+                    // without leaving position 0 (`canMoveField`).
+                    disabled={!editable || !canMoveField(draft.fields, i, -1)}
                     reason="Already first"
                     aria-label={`Move ${field.label || field.name} up`}
-                    onClick={() => onMoveField(i, i - 1)}
+                    onClick={() => onMoveField(i, -1)}
                   >
                     ↑
                   </Button>
                   <Button
                     size="sm"
                     variant="subtle"
-                    disabled={!editable || i === draft.fields.length - 1}
+                    disabled={!editable || !canMoveField(draft.fields, i, 1)}
                     reason="Already last"
                     aria-label={`Move ${field.label || field.name} down`}
-                    onClick={() => onMoveField(i, i + 1)}
+                    onClick={() => onMoveField(i, 1)}
                   >
                     ↓
                   </Button>
@@ -367,6 +397,7 @@ export function FormBuilder({
               source={source}
               editable={editable}
               showRenameWarning={hasResponses}
+              canJoinPrevious={joinable}
               onChange={(next) => onFieldChange(selectedField.name, next)}
             />
           ) : (
@@ -405,6 +436,7 @@ function FieldPanel({
   source,
   editable,
   showRenameWarning,
+  canJoinPrevious,
   onChange,
 }: {
   field: FormField
@@ -414,6 +446,9 @@ function FieldPanel({
   source: string
   editable: boolean
   showRenameWarning: boolean
+  /** Whether `beside` on this question could do anything at all — false for
+   *  the form's first real question and for one right after a `statement`. */
+  canJoinPrevious: boolean
   onChange: (next: FormField) => void
 }) {
   const [nameDraft, setNameDraft] = useState(field.name)
@@ -527,6 +562,53 @@ function FieldPanel({
             />
           )}
         </Field>
+      ) : null}
+
+      {/* Layout, not shape (`docs/form-layout-approach.md` decision 2): neither
+          control touches `shapeOf`, so neither bumps `version` — but saving
+          either still purges the cached page (`updateForm`'s
+          `descriptorChanged`). Not shown for `hidden` (position-free) or
+          `statement` (always its own row) — `rowsOf` ignores both anyway. */}
+      {locale === source && field.kind !== 'hidden' && field.kind !== 'statement' ? (
+        <>
+          <Field
+            label="Sit beside the previous question"
+            inline
+            help={
+              canJoinPrevious
+                ? undefined
+                : 'The first question in a form, or the one right after a statement, always starts its own row.'
+            }
+          >
+            {(id) => (
+              <input
+                id={id}
+                type="checkbox"
+                checked={field.beside === true}
+                disabled={!editable || !canJoinPrevious}
+                onChange={(e) => onChange(withBeside(field, e.target.checked))}
+              />
+            )}
+          </Field>
+          <Field
+            label="Row width share"
+            help="Relative to the other questions in its row. 1 is the default."
+          >
+            {(id) => (
+              <Select
+                id={id}
+                value={field.grow ?? 1}
+                disabled={!editable}
+                onChange={(e) => onChange(withGrow(field, Number(e.target.value)))}
+              >
+                <option value={1}>1 (default)</option>
+                <option value={2}>2</option>
+                <option value={3}>3</option>
+                <option value={4}>4</option>
+              </Select>
+            )}
+          </Field>
+        </>
       ) : null}
 
       {locale === source && supportsMax(field.kind) ? (

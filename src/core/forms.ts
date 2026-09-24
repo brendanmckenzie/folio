@@ -23,6 +23,7 @@
  * `resolve()` (`core/resolve.ts`) to a host's `render` with no server import in
  * between.
  */
+import type { Json } from './doc'
 
 /** The thirteen kinds a question on a form can be. */
 export type FormFieldKind =
@@ -123,6 +124,23 @@ export interface FormField {
   /** `statement` only: prose between questions. Renders no input and stores
    *  nothing. */
   text?: string
+  /**
+   * Joins the row the *previous* question is in, rather than starting a new
+   * one — layout, not shape (`docs/form-layout-approach.md` decision 2): it never
+   * touches `shapeOf`, never bumps `version`, and a save that changes only
+   * this still purges `form:<id>` (`server/forms.ts`'s `updateForm`).
+   * Narrowed rather than refused when it cannot apply — the form's first
+   * question, and the one right after a `statement` — see `rowsOf`.
+   */
+  beside?: boolean
+  /**
+   * This question's share of its row, relative to its row-mates — an `fr`
+   * unit, not a percentage, so a hidden neighbour never leaves a gap that has
+   * to be recomputed (owner decision: relative shares, 1–4). Absent means 1,
+   * which is why the type excludes it: a stored `1` and no key at all would
+   * be the same fact recorded two ways.
+   */
+  grow?: 2 | 3 | 4
   i18n?: Record<string, FormFieldI18n>
 }
 
@@ -267,6 +285,13 @@ function validateOneField(raw: Record<string, unknown>, kind: FormFieldKind): Fo
     field.text = raw.text
   }
 
+  // Layout, not shape: a bad value is dropped rather than thrown on, the same
+  // posture every other presentational key here takes — `readFields` calls
+  // this too, and a layout mistake must never turn into `[]` (narrow on read;
+  // the builder's own controls are what refuse on write).
+  if (typeof raw.beside === 'boolean') field.beside = raw.beside
+  if (raw.grow === 2 || raw.grow === 3 || raw.grow === 4) field.grow = raw.grow
+
   if (raw.i18n !== undefined) {
     const i18n = validateFieldI18n(raw.i18n)
     if (i18n) field.i18n = i18n
@@ -335,6 +360,55 @@ export function shapeOf(fields: readonly FormField[]): string {
   )
 }
 
+/** At most this many questions share one row (`docs/form-layout-approach.md`'s
+ *  Candidate C: "Name with a title field is four; HubSpot caps at three"). A
+ *  fifth `beside` question narrows into a row of its own rather than refusing
+ *  the save — `rowsOf` never throws. */
+export const MAX_ROW_CELLS = 4
+
+/**
+ * Which row each question falls in, in `fields`' own order — the one
+ * algorithm behind both `compileField`'s `row` and the admin builder's own
+ * grouping (`form-model.ts`'s `fieldRows`, which must agree with this on
+ * where a row starts; it disagrees on purpose about `hidden` fields, which
+ * this reuses the previous row number for and that function shows as their
+ * own line).
+ *
+ * A row is the first question plus every following question with `beside`.
+ * The start of the form, a `statement` and a row already at `MAX_ROW_CELLS`
+ * all start a fresh one — a `statement` starts a row of one and forces the
+ * *next* question into a fresh row too, whatever its own `beside` says.
+ * `hidden` questions are layout-transparent: they neither join nor break a
+ * row and are not counted against the cap, so this narrows a form that has
+ * one wedged between two halves of what is visually one row.
+ *
+ * Returns one row number per field, same length and order as `fields` — a
+ * `hidden` question's number is borrowed from whichever row is open when it
+ * is reached (or `0` before the first one opens), because nothing groups by
+ * it; `formLayout` filters `hidden` out before grouping by row number at all.
+ */
+export function rowsOf(fields: readonly FormField[]): number[] {
+  const rows: number[] = []
+  let row = -1
+  let cellsInRow = 0
+  let breaksNext = true // the start of the form breaks a row
+  for (const field of fields) {
+    if (field.kind === 'hidden') {
+      rows.push(Math.max(row, 0))
+      continue
+    }
+    const isStatement = field.kind === 'statement'
+    if (isStatement || breaksNext || !field.beside || cellsInRow >= MAX_ROW_CELLS) {
+      row += 1
+      cellsInRow = 0
+    }
+    rows.push(row)
+    cellsInRow += 1
+    breaksNext = isStatement
+  }
+  return rows
+}
+
 /**
  * A fixed pool of plausible-looking decoy field names (decision 9) — a
  * reserved-looking name like `_hp` is a name a competent bot skips, so the
@@ -401,6 +475,16 @@ export interface ResolvedFormField {
   maxBytes?: number
   value?: string
   text?: string
+  /** Which row this question is in, in `fields`' own order — consecutive
+   *  fields sharing a number form one row (`rowsOf`). Always present, unlike
+   *  everything else optional above, so a host can group `fields` itself
+   *  without reaching for `formLayout` when all it wants is the numbers. */
+  row: number
+  /** This question's share of its row, relative to its row-mates. Always
+   *  present and `1` when the stored `FormField` left `grow` unset — a host
+   *  writes `` `${grow}fr` `` straight onto a grid track with no fallback of
+   *  its own to remember. */
+  grow: number
 }
 
 /**
@@ -430,4 +514,103 @@ export interface ResolvedForm {
   successMessage: string
   closedMessage: string
   redirectTo: string | null
+}
+
+/* ------------------------------------------------------------- formLayout --- */
+
+/**
+ * One section's legend, for the day a form has more than one
+ * (`docs/form-layout-approach.md` slice 2). Unused this slice — `formLayout` never
+ * produces one — but shaped now so a host that groups on `LayoutSection`
+ * today needs no changes when it lands.
+ */
+export interface ResolvedFormSection {
+  name: string
+  label: string
+  help?: string
+}
+
+/** One cell of a row. `shown` is always `true` until slice 3's conditions
+ *  land; a host renders `!shown` as an empty, `aria-hidden` slot rather than
+ *  omitting it, which is what lets a `hold`ing neighbour keep its place. */
+export interface LayoutCell {
+  field: ResolvedFormField
+  grow: number
+  shown: boolean
+}
+
+/** One row: a stable `key` (the row's first field's name, unique across the
+ *  form) and its cells, left to right in `fields`' own order. */
+export interface LayoutRow {
+  key: string
+  cells: readonly LayoutCell[]
+}
+
+/** A section's own rows, or the one `section: null` group every question
+ *  belongs to until slice 2 gives some of them a real one. */
+export interface LayoutSection {
+  section: ResolvedFormSection | null
+  rows: readonly LayoutRow[]
+}
+
+/** What `formLayout` hands a host: rows to render in order, grouped into
+ *  sections, plus the `hidden`-kind questions rows have no room for. */
+export interface FormLayoutView {
+  sections: readonly LayoutSection[]
+  /** `hidden`-kind questions: position-free, rendered anywhere inside the
+   *  `<form>` — a host emits each as `<input type="hidden">` and moves on. */
+  inputs: readonly ResolvedFormField[]
+}
+
+/**
+ * Groups a compiled form's `fields` into the rows and sections a host draws —
+ * the one function so no host reimplements the grouping `rowsOf` already
+ * computed server-side (`docs/form-layout-approach.md` Candidate C). Pure: no
+ * fetch, no DOM, safe to call from a server render and from a preview bundle
+ * alike.
+ *
+ * `answers` is next slice's: once `showIf` exists, a cell whose question is
+ * not asked drops out (unless it `hold`s, staying with `shown: false`), a row
+ * with nothing shown is removed, and a section whose own condition fails or
+ * that has no rows left is removed too. Until then every cell is `shown` and
+ * the parameter changes nothing — accepted now so a host that calls
+ * `formLayout(form, answers)` today keeps compiling once slice 3 gives the
+ * second argument something to do.
+ */
+export function formLayout(form: ResolvedForm, _answers?: Record<string, Json>): FormLayoutView {
+  const inputs: ResolvedFormField[] = []
+  const rows: LayoutCell[][] = []
+  let openRow: number | null = null
+
+  for (const field of form.fields) {
+    if (field.kind === 'hidden') {
+      inputs.push(field)
+      continue
+    }
+    // `row`/`grow` are typed as always present, but a descriptor a host cached
+    // across a deploy (KV, its own `caches.default`) can be one an older
+    // `compileField` built, before either existed — narrowed here rather than
+    // trusted, the same posture `readFields` takes toward a stored row. A
+    // missing `row` falls back to a row of its own, never one row holding the
+    // whole form (`null` never equals `null` below, only a **present**
+    // `openRow` joins), and a missing `grow` falls back to the 1 default.
+    const row = typeof field.row === 'number' ? field.row : null
+    const grow = typeof field.grow === 'number' ? field.grow : 1
+    const cell: LayoutCell = { field, grow, shown: true }
+    if (row !== null && row === openRow) {
+      rows[rows.length - 1]?.push(cell)
+    } else {
+      rows.push([cell])
+      openRow = row
+    }
+  }
+
+  const layoutRows: LayoutRow[] = rows.map((cells) => ({
+    // `cells` is never empty — every row starts from a `push([cell])` above —
+    // so its first entry is never the hole `noUncheckedIndexedAccess` warns of.
+    key: cells[0]!.field.name,
+    cells,
+  }))
+
+  return { sections: [{ section: null, rows: layoutRows }], inputs }
 }

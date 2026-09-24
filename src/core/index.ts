@@ -96,10 +96,13 @@ export type { OutboundRef } from './refs'
 // reading of what a valid `FormField` is.
 export {
   FILE_ACCEPT,
+  formLayout,
   formSlug,
   honeypotName,
   MAX_FORM_FIELDS,
+  MAX_ROW_CELLS,
   RESERVED_PREFIX,
+  rowsOf,
   shapeOf,
   validateFormFields,
 } from './forms'
@@ -109,8 +112,13 @@ export type {
   FormFieldI18n,
   FormFieldKind,
   FormFieldOption,
+  FormLayoutView,
+  LayoutCell,
+  LayoutRow,
+  LayoutSection,
   ResolvedForm,
   ResolvedFormField,
+  ResolvedFormSection,
 } from './forms'
 
 // Full-text search (`../../docs/specs/content-model/full-text-search.md`). The

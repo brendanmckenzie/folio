@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
   FILE_ACCEPT,
+  formLayout,
   formSlug,
   honeypotName,
   MAX_FORM_FIELDS,
   RESERVED_PREFIX,
+  rowsOf,
   shapeOf,
   validateFormFields,
 } from '../../../src/core/forms'
-import type { FormField } from '../../../src/core/forms'
+import type { FormField, ResolvedForm, ResolvedFormField } from '../../../src/core/forms'
 
 /**
  * `core/forms.ts`'s pure vocabulary (`docs/specs/content-model/forms.md`
@@ -123,6 +125,19 @@ describe('validateFormFields', () => {
       min: 0,
       max: 120,
     })
+  })
+
+  it('carries `beside` and `grow` through when present, and narrows a bad `grow` away rather than throwing', () => {
+    const [joined] = validateFormFields([{ ...textField, beside: true, grow: 3 }]) as [FormField]
+    expect(joined).toEqual({ ...textField, beside: true, grow: 3 })
+
+    // Not 2, 3 or 4 (the doc's "1 is the default, and the type excludes it"):
+    // dropped, like every other malformed presentational key here — a layout
+    // mistake must never be the thing that empties `readFields`.
+    const [badGrow] = validateFormFields([{ ...textField, grow: 1 }]) as [FormField]
+    expect(badGrow.grow).toBeUndefined()
+    const [alsoBadGrow] = validateFormFields([{ ...textField, grow: 9 }]) as [FormField]
+    expect(alsoBadGrow.grow).toBeUndefined()
   })
 
   describe('options', () => {
@@ -327,6 +342,10 @@ describe('shapeOf', () => {
     expect(shapeOf([relabelled])).toBe(shapeOf([select]))
     expect(shapeOf([revalued])).not.toBe(shapeOf([select]))
   })
+
+  it('does NOT change for `beside` or `grow` — layout, not shape (decision 2)', () => {
+    expect(shapeOf([{ ...base, beside: true, grow: 3 }])).toBe(shapeOf([base]))
+  })
 })
 
 describe('honeypotName', () => {
@@ -360,5 +379,186 @@ describe('honeypotName', () => {
     ]
     expect(() => honeypotName('frm_x', everything)).not.toThrow()
     expect(typeof honeypotName('frm_x', everything)).toBe('string')
+  })
+})
+
+/* ------------------------------------------------------------------ rowsOf --- */
+
+describe('rowsOf', () => {
+  const q = (name: string, extra: Partial<FormField> = {}): FormField => ({
+    name,
+    kind: 'text',
+    label: name,
+    ...extra,
+  })
+
+  it("starts a new row at the start of the form, whatever the first question's own beside says", () => {
+    expect(rowsOf([q('first', { beside: true })])).toEqual([0])
+  })
+
+  it('joins a `beside` question to the row before it', () => {
+    expect(rowsOf([q('first'), q('last', { beside: true })])).toEqual([0, 0])
+  })
+
+  it('Name: [First][Middle][Last] all share a row, `beside` on everything but the first', () => {
+    const fields = [q('first'), q('middle', { beside: true }), q('last', { beside: true })]
+    expect(rowsOf(fields)).toEqual([0, 0, 0])
+  })
+
+  it('a `statement` is its own row, and breaks the row on both sides', () => {
+    const statement: FormField = { name: 'note', kind: 'statement', label: 'Note', text: 'Prose' }
+    // `last` sets `beside`, but a statement breaks the row it would have joined.
+    const fields = [q('first'), statement, q('last', { beside: true })]
+    expect(rowsOf(fields)).toEqual([0, 1, 2])
+  })
+
+  it(`a fifth beside question narrows into a new row rather than a row of five`, () => {
+    const fields = [
+      q('a'),
+      q('b', { beside: true }),
+      q('c', { beside: true }),
+      q('d', { beside: true }),
+      q('e', { beside: true }),
+    ]
+    expect(rowsOf(fields)).toEqual([0, 0, 0, 0, 1])
+  })
+
+  it('`hidden` questions are layout-transparent: they neither join nor break a row', () => {
+    // Hear: [How did you hear? ▾][Other] — `other` joins across a hidden field.
+    const hidden: FormField = { name: 'campaign', kind: 'hidden', label: 'Campaign', value: 'x' }
+    const fields = [q('how', { kind: 'select' }), hidden, q('other', { beside: true })]
+    expect(rowsOf(fields)).toEqual([0, 0, 0])
+  })
+
+  it('Address: [Street] then [City][State][Postcode] as two rows', () => {
+    const fields = [
+      q('street'),
+      q('city'),
+      q('state', { beside: true }),
+      q('postcode', { beside: true }),
+    ]
+    expect(rowsOf(fields)).toEqual([0, 1, 1, 1])
+  })
+})
+
+/* --------------------------------------------------------------- formLayout --- */
+
+function resolvedForm(fields: readonly ResolvedFormField[]): ResolvedForm {
+  return {
+    id: 'frm_test0000ab',
+    name: 'test',
+    action: '/f/frm_test0000ab',
+    method: 'post',
+    enctype: 'application/x-www-form-urlencoded',
+    version: 1,
+    open: true,
+    fields,
+    hidden: [],
+    honeypot: 'company_website',
+    submitLabel: 'Send',
+    successMessage: '',
+    closedMessage: '',
+    redirectTo: null,
+  }
+}
+
+function rf(name: string, row: number, extra: Partial<ResolvedFormField> = {}): ResolvedFormField {
+  return { name, kind: 'text', label: name, required: false, row, grow: 1, ...extra }
+}
+
+describe('formLayout', () => {
+  it('groups consecutive same-row fields into one row, inside the one `section: null` group', () => {
+    const view = formLayout(resolvedForm([rf('first', 0), rf('middle', 0), rf('last', 0)]))
+    expect(view.sections).toHaveLength(1)
+    expect(view.sections[0]?.section).toBeNull()
+    expect(view.sections[0]?.rows.map((r) => r.cells.map((c) => c.field.name))).toEqual([
+      ['first', 'middle', 'last'],
+    ])
+  })
+
+  it('starts a new row the moment the row number changes', () => {
+    const view = formLayout(
+      resolvedForm([rf('street', 0), rf('city', 1), rf('state', 1), rf('postcode', 1)]),
+    )
+    expect(view.sections[0]?.rows.map((r) => r.cells.map((c) => c.field.name))).toEqual([
+      ['street'],
+      ['city', 'state', 'postcode'],
+    ])
+  })
+
+  it('every cell is `shown` and carries its own `grow`, until slice 3 gives `shown` a second value', () => {
+    const view = formLayout(resolvedForm([rf('a', 0, { grow: 2 }), rf('b', 0, { grow: 4 })]))
+    const cells = view.sections[0]?.rows[0]?.cells ?? []
+    expect(cells.map((c) => ({ grow: c.grow, shown: c.shown }))).toEqual([
+      { grow: 2, shown: true },
+      { grow: 4, shown: true },
+    ])
+  })
+
+  it('pulls `hidden`-kind fields into `inputs`, position-free, and never into a row', () => {
+    const view = formLayout(
+      resolvedForm([
+        rf('how', 0, { kind: 'select' }),
+        rf('campaign', 0, { kind: 'hidden', value: 'spring' }),
+        rf('other', 0),
+      ]),
+    )
+    expect(view.inputs.map((f) => f.name)).toEqual(['campaign'])
+    expect(view.sections[0]?.rows[0]?.cells.map((c) => c.field.name)).toEqual(['how', 'other'])
+  })
+
+  it("a row's key is its first cell's name, stable across a render", () => {
+    const view = formLayout(resolvedForm([rf('a', 0), rf('b', 0), rf('c', 1)]))
+    expect(view.sections[0]?.rows.map((r) => r.key)).toEqual(['a', 'c'])
+  })
+
+  it('an empty form still answers one `section: null` group with no rows', () => {
+    const view = formLayout(resolvedForm([]))
+    expect(view.sections).toEqual([{ section: null, rows: [] }])
+    expect(view.inputs).toEqual([])
+  })
+
+  // Rows-slice review, finding 4: `row`/`grow` are typed as always present,
+  // but a descriptor a host cached across a deploy (KV, its own
+  // `caches.default`) can be one an older `compileField` built, before either
+  // existed. `field.row` is then `undefined` at runtime despite the type, and
+  // the old code's `openRow === field.row` joined every field into the one
+  // row `undefined === undefined` describes — a single row for the whole
+  // form, and `undefinedfr` tracks for a host following the handbook's CSS.
+  it('falls back to one row per field when `row` is missing, not one row for the whole form', () => {
+    // Cast through `unknown`: a stale descriptor is exactly a value this
+    // build's own types say cannot happen, which is the point of the test.
+    const stale = [
+      { name: 'a', kind: 'text', label: 'A', required: false },
+      { name: 'b', kind: 'text', label: 'B', required: false },
+    ] as unknown as ResolvedFormField[]
+    const view = formLayout(resolvedForm(stale))
+    expect(view.sections[0]?.rows.map((r) => r.cells.map((c) => c.field.name))).toEqual([
+      ['a'],
+      ['b'],
+    ])
+  })
+
+  it('falls back `grow` to 1 when it is missing, rather than to `undefined`', () => {
+    const stale = [
+      { name: 'a', kind: 'text', label: 'A', required: false, row: 0 },
+    ] as unknown as ResolvedFormField[]
+    const view = formLayout(resolvedForm(stale))
+    expect(view.sections[0]?.rows[0]?.cells[0]?.grow).toBe(1)
+  })
+
+  it('a present `row` still groups normally alongside a stale, `row`-less field', () => {
+    const fields = [
+      rf('a', 0),
+      { name: 'b', kind: 'text', label: 'B', required: false } as unknown as ResolvedFormField,
+      rf('c', 0),
+    ]
+    const view = formLayout(resolvedForm(fields))
+    // `b` (no `row`) never joins `a` or `c`'s row 0, on either side of it.
+    expect(view.sections[0]?.rows.map((r) => r.cells.map((c) => c.field.name))).toEqual([
+      ['a'],
+      ['b'],
+      ['c'],
+    ])
   })
 })

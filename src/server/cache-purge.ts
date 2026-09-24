@@ -143,26 +143,24 @@ function tagsFor(id: string, type: string, globals: readonly string[]): string[]
 }
 
 /**
- * The internal hook set. `globals` is `FolioConfig.globals` as the runtime
- * resolved it — the explicit list, not every singleton — so publishing the
- * header purges `global:header` and publishing a person record that happens to
- * be a singleton does not.
+ * The purge primitive every hook below shares, and the one `purgeFormLayout`
+ * (this file, below) reaches for directly when a save has no event of its own
+ * to hang off.
+ *
+ * Awaited, not fired and forgotten (decision 5). `waitUntil` would let the 200
+ * reach the editor before the purge lands, and the editor's very next act is
+ * to reload the page they just published (or saved). Workers Cache purge
+ * returns a real signal — unlike `cache.put()` — and a rate-limit rejection
+ * arrives as `success: false` rather than a throw, so both are inspected.
+ * Internal hooks are awaited by `createHookRunner` regardless of the host's
+ * `await` list, which is what makes this an actual guarantee rather than a
+ * hope wherever it is reached through one.
  */
-export function cachePurgeHooks<Env>(
-  globals: readonly string[],
-  capability: PurgeCapability = platformPurge,
-  logger: FolioLogger = console,
-): FolioHooks<Env> {
-  /**
-   * Awaited, not fired and forgotten (decision 5). `waitUntil` would let the
-   * 200 reach the editor before the purge lands, and the editor's very next act
-   * is to reload the page they just published. Workers Cache purge returns a
-   * real signal — unlike `cache.put()` — and a rate-limit rejection arrives as
-   * `success: false` rather than a throw, so both are inspected. Internal hooks
-   * are awaited by `createHookRunner` regardless of the host's `await` list,
-   * which is what makes this an actual guarantee rather than a hope.
-   */
-  const purge = async (trigger: string, tags: readonly string[]): Promise<void> => {
+function createPurger(
+  capability: PurgeCapability,
+  logger: FolioLogger,
+): (trigger: string, tags: readonly string[]) => Promise<void> {
+  return async (trigger, tags) => {
     const plan = purgePlan(tags)
     if (plan.batches.length === 0 && !plan.everything) return
 
@@ -198,6 +196,44 @@ export function cachePurgeHooks<Env>(
       logger.error(`folio: ${trigger} failed to purge`, err)
     }
   }
+}
+
+/**
+ * A form save changed what a host's `render` sees — a label, a layout share,
+ * anything `compileForm` puts on the descriptor — without bumping `version`
+ * (`docs/form-layout-approach.md` decision 2). `formChanged`'s own handler below
+ * already purges this same tag for the *structural* case; this is for the
+ * save that is not — the one `updateForm` reports as `descriptorChanged` but
+ * not `structural`.
+ *
+ * **Deliberately not routed through `formChanged`.** That event's payload
+ * promises "the version this save bumped to. Always present"
+ * (`hooks.ts`'s `FormChangedHookPayload`), and running it for a save that
+ * bumped nothing would break that promise for every host hook listening for
+ * it — a label edit is not the shape change that event exists to announce.
+ * So this purges the identical tag by the identical route, just with no
+ * host-visible event: `routes/forms.ts`'s PATCH handler calls it directly.
+ */
+export async function purgeFormLayout(
+  id: string,
+  capability: PurgeCapability = platformPurge,
+  logger: FolioLogger = console,
+): Promise<void> {
+  await createPurger(capability, logger)('form layout', [formTag(id)])
+}
+
+/**
+ * The internal hook set. `globals` is `FolioConfig.globals` as the runtime
+ * resolved it — the explicit list, not every singleton — so publishing the
+ * header purges `global:header` and publishing a person record that happens to
+ * be a singleton does not.
+ */
+export function cachePurgeHooks<Env>(
+  globals: readonly string[],
+  capability: PurgeCapability = platformPurge,
+  logger: FolioLogger = console,
+): FolioHooks<Env> {
+  const purge = createPurger(capability, logger)
 
   return {
     published: ({ story }) => purge('publish', tagsFor(story.id, story.type, globals)),

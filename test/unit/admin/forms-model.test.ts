@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { honeypotName } from '../../../src/core/forms'
+import type { FormField } from '../../../src/core/forms'
 import {
   BLANK_FORM_DRAFT,
   createFormBody,
@@ -16,13 +17,17 @@ import {
   addField,
   addOption,
   blankField,
+  canJoinPrevious,
+  canMoveField,
   closesAtFromInput,
   closesAtInputValue,
   fieldKindLabel,
   FIELD_KINDS,
   fieldNameRefusal,
+  fieldRows,
   fieldText,
   moveField,
+  moveFieldStep,
   needsOptions,
   normaliseFieldName,
   optionLabel,
@@ -33,7 +38,9 @@ import {
   uniqueFieldName,
   updateField,
   updateOption,
+  withBeside,
   withFieldText,
+  withGrow,
   withOptionLabel,
 } from '../../../src/admin/ui/screens/form-model'
 
@@ -415,6 +422,362 @@ describe('moveField', () => {
   it('is a no-op past either end, matching ReferencesField.tsx', () => {
     expect(moveField(fields, 0, -1).map((f) => f.name)).toEqual(['a', 'b', 'c'])
     expect(moveField(fields, 2, 3).map((f) => f.name)).toEqual(['a', 'b', 'c'])
+  })
+
+  // The doc's own risk: a move or a delete leaves a `beside` naming a
+  // predecessor the array no longer has, which silently re-forms a row with
+  // whoever is there instead. Both reducers detach it rather than let that
+  // happen (`form-layout-approach.md`'s "the builder's one subtle reducer").
+  it("clears `beside` on the question that slides into the moved one's old place", () => {
+    const joined = [
+      { name: 'a', kind: 'text', label: 'A' },
+      { name: 'b', kind: 'text', label: 'B', beside: true },
+      { name: 'c', kind: 'text', label: 'C' },
+    ] as const
+    // Moving `a` to the end leaves `b` right after `c` — without the clear,
+    // `b`'s `beside` would silently join `c`'s row instead of `a`'s.
+    const moved = moveField(joined, 0, 2)
+    expect(moved.map((f) => f.name)).toEqual(['b', 'c', 'a'])
+    expect(moved[0]?.beside).toBeUndefined()
+  })
+
+  it("clears the moved question's own `beside`, since its predecessor changed", () => {
+    const joined = [
+      { name: 'a', kind: 'text', label: 'A' },
+      { name: 'b', kind: 'text', label: 'B', beside: true },
+      { name: 'c', kind: 'text', label: 'C' },
+    ] as const
+    // `b` moves next to `c`; left alone, `beside` would join `c`'s row instead
+    // of the row it actually meant to join (`a`'s, which it left).
+    const moved = moveField(joined, 1, 2)
+    expect(moved.map((f) => f.name)).toEqual(['a', 'c', 'b'])
+    expect(moved[2]?.beside).toBeUndefined()
+  })
+
+  it('a no-op move (past either end, or from === to) leaves every `beside` alone', () => {
+    const joined = [
+      { name: 'a', kind: 'text', label: 'A' },
+      { name: 'b', kind: 'text', label: 'B', beside: true },
+    ] as const
+    expect(moveField(joined, 0, -1)[1]?.beside).toBe(true)
+    expect(moveField(joined, 0, 0)[1]?.beside).toBe(true)
+  })
+
+  // Rows-slice review, finding 1: detaching only `fields[at]` does nothing
+  // when a `hidden` question lands there, because `rowsOf` treats `hidden` as
+  // transparent — the real question *after* it is the one whose predecessor
+  // changed, and it still joins straight across the gap.
+  it('skips a `hidden` question to find the real predecessor whose `beside` must clear', () => {
+    const fields = [
+      { name: 'a', kind: 'text', label: 'A' },
+      { name: 'b', kind: 'text', label: 'B' },
+      { name: 'h', kind: 'hidden', label: 'H', value: 'x' },
+      { name: 'c', kind: 'text', label: 'C', beside: true },
+      { name: 'd', kind: 'text', label: 'D' },
+    ] as const
+    // Moving `b` to the end leaves `h` sliding into its place, with `c` right
+    // after — `c`'s `beside` must clear, not `h`'s (`h` never had one).
+    const result = moveField(fields, 1, 4)
+    expect(result.map((f) => f.name)).toEqual(['a', 'h', 'c', 'd', 'b'])
+    expect(result[2]?.beside).toBeUndefined()
+  })
+})
+
+describe('removeField', () => {
+  it("clears `beside` on the question that slides into the removed one's place", () => {
+    const joined = [
+      { name: 'a', kind: 'text', label: 'A' },
+      { name: 'b', kind: 'text', label: 'B' },
+      { name: 'c', kind: 'text', label: 'C', beside: true },
+    ] as const
+    // Removing `b` puts `c` right after `a` — without the clear, `c` would
+    // silently join a row `a` never asked to share.
+    const removed = removeField(joined, 'b')
+    expect(removed.map((f) => f.name)).toEqual(['a', 'c'])
+    expect(removed[1]?.beside).toBeUndefined()
+  })
+
+  it('leaves everything alone when the last question is removed', () => {
+    const joined = [
+      { name: 'a', kind: 'text', label: 'A' },
+      { name: 'b', kind: 'text', label: 'B', beside: true },
+    ] as const
+    expect(removeField(joined, 'b').map((f) => f.name)).toEqual(['a'])
+    expect(removeField(joined, 'b')[0]?.beside).toBeUndefined()
+  })
+
+  it('is a no-op for a name that is not there', () => {
+    const joined = [{ name: 'a', kind: 'text', label: 'A' }] as const
+    expect(removeField(joined, 'nope')).toEqual(joined)
+  })
+
+  // Rows-slice review, finding 1 (confirmed by probing): `A,B,H(hidden),C*`
+  // has rows A / B+C — deleting `B` used to detach whatever landed at its old
+  // index, which is `H`, a question that never had a `beside` to begin with.
+  // `C` kept joining straight across the gap and silently merged into `A`'s
+  // row. This fails on the code before the fix (it detaches `H`, a no-op, and
+  // leaves `C`'s `beside` in place).
+  it('skips a `hidden` question to find the real predecessor whose `beside` must clear', () => {
+    const fields = [
+      { name: 'a', kind: 'text', label: 'A' },
+      { name: 'b', kind: 'text', label: 'B' },
+      { name: 'h', kind: 'hidden', label: 'H', value: 'x' },
+      { name: 'c', kind: 'text', label: 'C', beside: true },
+    ] as const
+    const result = removeField(fields, 'b')
+    expect(result.map((f) => f.name)).toEqual(['a', 'h', 'c'])
+    expect(result[2]?.beside).toBeUndefined()
+  })
+
+  it('leaves everything alone when the removed question was itself `hidden`', () => {
+    // `hidden` is transparent to `rowsOf` wherever it sits — removing one
+    // changes no real question's predecessor.
+    const fields = [
+      { name: 'a', kind: 'text', label: 'A' },
+      { name: 'h', kind: 'hidden', label: 'H', value: 'x' },
+      { name: 'b', kind: 'text', label: 'B', beside: true },
+    ] as const
+    const result = removeField(fields, 'h')
+    expect(result.map((f) => f.name)).toEqual(['a', 'b'])
+    expect(result[1]?.beside).toBe(true)
+  })
+})
+
+/**
+ * Rows-slice review, finding 2: `moveField`'s raw `(from, to)` splice can
+ * land a question in the middle of a row it was never asked to join, pairing
+ * it with a neighbour the editor never chose. The owner has not ruled on
+ * this case; the rule this repo settled on (and `moveFieldStep` implements)
+ * is in its own doc comment. These tests are every branch of that rule.
+ */
+describe('moveFieldStep', () => {
+  const NAME = { name: 'first', kind: 'text', label: 'First' } as const
+  const MIDDLE = { name: 'middle', kind: 'text', label: 'Middle', beside: true } as const
+  const LAST = { name: 'last', kind: 'text', label: 'Last', beside: true } as const
+
+  it('reorders within a row, without pulling in a question outside it', () => {
+    // Name: [First][Middle][Last] — pressing "down" on First swaps it with
+    // Middle; the row stays one row, just reordered.
+    const fields = [NAME, MIDDLE, LAST]
+    const next = moveFieldStep(fields, 0, 1)
+    expect(next.map((f) => f.name)).toEqual(['middle', 'first', 'last'])
+    // Middle (now first) carries no `beside`; First and Last (now 2nd/3rd)
+    // both do — the row's own shape, reassigned to match position.
+    expect(next[0]?.beside).toBeUndefined()
+    expect(next[1]?.beside).toBe(true)
+    expect(next[2]?.beside).toBe(true)
+  })
+
+  it("carries each question's own `grow` with it when reordering within a row", () => {
+    const fields = [NAME, { ...MIDDLE, grow: 3 as const }, LAST]
+    const moved = moveFieldStep(fields, 2, -1) // swap Last and Middle
+    expect(moved.map((f) => f.name)).toEqual(['first', 'last', 'middle'])
+    expect(moved[2]?.grow).toBe(3) // Middle's own share travelled with it
+  })
+
+  it('a row-first question moving up detaches from its row-mates instead of leaving position 0', () => {
+    const fields = [NAME, MIDDLE, LAST]
+    const next = moveFieldStep(fields, 0, -1)
+    // First never moves — it never had `beside` to begin with — but Middle,
+    // the new row-first, loses the one that used to join it to First.
+    expect(next.map((f) => f.name)).toEqual(['first', 'middle', 'last'])
+    expect(next[1]?.beside).toBeUndefined()
+    expect(next[2]?.beside).toBe(true) // Last still correctly follows Middle
+  })
+
+  it('a row-last question moving down detaches itself, leaving the rest of the row intact', () => {
+    const fields = [NAME, MIDDLE, LAST]
+    const next = moveFieldStep(fields, 2, 1)
+    expect(next.map((f) => f.name)).toEqual(['first', 'middle', 'last'])
+    expect(next[1]?.beside).toBe(true) // First+Middle still one row
+    expect(next[2]?.beside).toBeUndefined() // Last is now standalone
+  })
+
+  // The review's exact probe: `P,F*,M` (`moveField(2, 1)` used to produce
+  // `P,M,F*`, pairing F with M — a row nobody asked for).
+  it('a standalone question moving past a multi-question row jumps clean over it', () => {
+    const P = { name: 'p', kind: 'text', label: 'P' } as const
+    const F = { name: 'f', kind: 'text', label: 'F', beside: true } as const
+    const M = { name: 'm', kind: 'text', label: 'M' } as const
+    const fields = [P, F, M]
+    const next = moveFieldStep(fields, 2, -1) // press "up" on M
+    expect(next.map((f) => f.name)).toEqual(['m', 'p', 'f'])
+    // P+F are still one row, untouched — M landed before them, not between.
+    expect(next[2]?.beside).toBe(true)
+  })
+
+  it('two standalone questions swap places, an ordinary adjacent move', () => {
+    const A = { name: 'a', kind: 'text', label: 'A' } as const
+    const B = { name: 'b', kind: 'text', label: 'B' } as const
+    expect(moveFieldStep([A, B], 0, 1).map((f) => f.name)).toEqual(['b', 'a'])
+    expect(moveFieldStep([A, B], 1, -1).map((f) => f.name)).toEqual(['b', 'a'])
+  })
+
+  it('is a no-op past either end of the whole list, for two standalone questions', () => {
+    // Unlike `NAME`/`MIDDLE` above, neither of these joins the other, so
+    // there is no row for either end to detach from — genuinely nowhere left
+    // to go, which `canMoveField` below pins as `false` for the same fields.
+    const A = { name: 'a', kind: 'text', label: 'A' } as const
+    const B = { name: 'b', kind: 'text', label: 'B' } as const
+    const fields = [A, B]
+    expect(moveFieldStep(fields, 0, -1)).toEqual(fields)
+    expect(moveFieldStep(fields, 1, 1)).toEqual(fields)
+  })
+
+  it('a `hidden` question is a plain single-step swap, never row-aware', () => {
+    const H = { name: 'h', kind: 'hidden', label: 'H', value: 'x' } as const
+    // Even sitting right before a row, moving the hidden question itself
+    // never reasons about rows — it has none.
+    const fields = [H, NAME, MIDDLE]
+    const next = moveFieldStep(fields, 0, 1)
+    expect(next.map((f) => f.name)).toEqual(['first', 'h', 'middle'])
+    expect(next[2]?.beside).toBe(true) // untouched
+  })
+
+  it('a row embedded around a `hidden` question travels together on a jump', () => {
+    // how[select] , campaign(hidden), other(beside) is one row; a standalone
+    // question jumping over it must carry the hidden one along, unchanged.
+    const HOW = {
+      name: 'how',
+      kind: 'select',
+      label: 'How',
+      options: [{ value: 'x', label: 'X' }],
+    } as const
+    const CAMPAIGN = { name: 'campaign', kind: 'hidden', label: 'Campaign', value: 'y' } as const
+    const OTHER = { name: 'other', kind: 'text', label: 'Other', beside: true } as const
+    const M = { name: 'm', kind: 'text', label: 'M' } as const
+    const fields = [M, HOW, CAMPAIGN, OTHER]
+    const next = moveFieldStep(fields, 0, 1) // press "down" on M
+    expect(next.map((f) => f.name)).toEqual(['how', 'campaign', 'other', 'm'])
+    expect(next[2]?.beside).toBe(true) // other still joins how, hidden intact between them
+  })
+})
+
+describe('canMoveField', () => {
+  it('is always true for any member of a multi-question row, even at either end of the whole form', () => {
+    const NAME = { name: 'first', kind: 'text', label: 'First' } as const
+    const MIDDLE = { name: 'middle', kind: 'text', label: 'Middle', beside: true } as const
+    const fields = [NAME, MIDDLE]
+    // The old rule (`i === 0` / `i === length - 1`) would disable both ends;
+    // both can still detach from the row they are in.
+    expect(canMoveField(fields, 0, -1)).toBe(true)
+    expect(canMoveField(fields, 1, 1)).toBe(true)
+  })
+
+  it('is false for a standalone question with nothing beyond it to swap with', () => {
+    const A = { name: 'a', kind: 'text', label: 'A' } as const
+    const B = { name: 'b', kind: 'text', label: 'B' } as const
+    expect(canMoveField([A, B], 0, -1)).toBe(false)
+    expect(canMoveField([A, B], 1, 1)).toBe(false)
+  })
+
+  it('is true for a standalone question with a row to jump over', () => {
+    const P = { name: 'p', kind: 'text', label: 'P' } as const
+    const F = { name: 'f', kind: 'text', label: 'F', beside: true } as const
+    const M = { name: 'm', kind: 'text', label: 'M' } as const
+    expect(canMoveField([P, F, M], 2, -1)).toBe(true)
+  })
+
+  it('is false for a `hidden` question at either end of the whole form', () => {
+    const H1 = { name: 'h1', kind: 'hidden', label: 'H1', value: 'x' } as const
+    const A = { name: 'a', kind: 'text', label: 'A' } as const
+    const H2 = { name: 'h2', kind: 'hidden', label: 'H2', value: 'y' } as const
+    const fields = [H1, A, H2]
+    expect(canMoveField(fields, 0, -1)).toBe(false)
+    expect(canMoveField(fields, 2, 1)).toBe(false)
+    // Both can still move the other way, into the middle question's place.
+    expect(canMoveField(fields, 0, 1)).toBe(true)
+    expect(canMoveField(fields, 2, -1)).toBe(true)
+  })
+})
+
+describe('withBeside / withGrow', () => {
+  const field = { name: 'a', kind: 'text', label: 'A' } as const
+
+  it('sets `beside` true and clears it back to absent, never storing false', () => {
+    const on = withBeside(field, true)
+    expect(on.beside).toBe(true)
+    expect(withBeside(on, false).beside).toBeUndefined()
+    // Already absent: a no-op, not an object carrying `beside: undefined`.
+    expect(Object.keys(withBeside(field, false))).toEqual(Object.keys(field))
+  })
+
+  it('stores 2, 3 or 4 and clears anything else back to the 1 default', () => {
+    expect(withGrow(field, 3).grow).toBe(3)
+    expect(withGrow(field, 1).grow).toBeUndefined()
+    expect(withGrow(field, 9).grow).toBeUndefined()
+    expect(withGrow(withGrow(field, 3), 1).grow).toBeUndefined()
+  })
+})
+
+describe('canJoinPrevious', () => {
+  it("refuses the form's first real question", () => {
+    const fields = [{ name: 'a', kind: 'text', label: 'A' }] as const
+    expect(canJoinPrevious(fields, 'a')).toBe(false)
+  })
+
+  it('refuses the question right after a statement', () => {
+    const fields = [
+      { name: 'note', kind: 'statement', label: 'Note', text: 'Prose' },
+      { name: 'a', kind: 'text', label: 'A' },
+    ] as const
+    expect(canJoinPrevious(fields, 'a')).toBe(false)
+  })
+
+  it('allows an ordinary question with a real predecessor', () => {
+    const fields = [
+      { name: 'a', kind: 'text', label: 'A' },
+      { name: 'b', kind: 'text', label: 'B' },
+    ] as const
+    expect(canJoinPrevious(fields, 'b')).toBe(true)
+  })
+
+  it('skips a `hidden` question when finding the real predecessor', () => {
+    const fields = [
+      { name: 'a', kind: 'text', label: 'A' },
+      { name: 'h', kind: 'hidden', label: 'H', value: '1' },
+      { name: 'b', kind: 'text', label: 'B' },
+    ] as const
+    expect(canJoinPrevious(fields, 'b')).toBe(true)
+  })
+})
+
+describe('fieldRows', () => {
+  it('groups a chain of `beside` questions into one row', () => {
+    const fields = [
+      { name: 'first', kind: 'text', label: 'First' },
+      { name: 'middle', kind: 'text', label: 'Middle', beside: true },
+      { name: 'last', kind: 'text', label: 'Last', beside: true },
+    ] as const
+    expect(fieldRows(fields)).toEqual([[0, 1, 2]])
+  })
+
+  it('a `hidden` question is always its own row, even between two that join', () => {
+    const fields = [
+      { name: 'how', kind: 'select', label: 'How' },
+      { name: 'campaign', kind: 'hidden', label: 'Campaign', value: 'x' },
+      { name: 'other', kind: 'text', label: 'Other', beside: true },
+    ] as const
+    expect(fieldRows(fields)).toEqual([[0, 2], [1]])
+  })
+
+  it('a statement breaks the row on both sides', () => {
+    const fields = [
+      { name: 'a', kind: 'text', label: 'A' },
+      { name: 'note', kind: 'statement', label: 'Note', text: 'Prose' },
+      { name: 'b', kind: 'text', label: 'B', beside: true },
+    ] as const
+    expect(fieldRows(fields)).toEqual([[0], [1], [2]])
+  })
+
+  it('caps a row at MAX_ROW_CELLS, narrowing a fifth `beside` into a new row', () => {
+    const fields: FormField[] = Array.from({ length: 5 }, (_, i) => ({
+      name: `f${i}`,
+      kind: 'text',
+      label: `F${i}`,
+      ...(i > 0 ? { beside: true } : {}),
+    }))
+    expect(fieldRows(fields)).toEqual([[0, 1, 2, 3], [4]])
   })
 })
 

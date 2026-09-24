@@ -35,6 +35,7 @@ import {
   honeypotName,
   type ResolvedForm,
   type ResolvedFormField,
+  rowsOf,
   shapeOf,
   validateFormFields,
 } from '../core/forms'
@@ -346,7 +347,11 @@ function translateOption(
  * reading one — and would carry whatever a later column adds to `FormField`
  * without anybody deciding it should be public. The projection is the decision.
  */
-function compileField(field: FormField, locale: LocaleContext | undefined): ResolvedFormField {
+function compileField(
+  field: FormField,
+  locale: LocaleContext | undefined,
+  row: number,
+): ResolvedFormField {
   const out: ResolvedFormField = {
     name: field.name,
     kind: field.kind,
@@ -354,6 +359,10 @@ function compileField(field: FormField, locale: LocaleContext | undefined): Reso
     // Always a boolean: a host writes `required={f.required}` and an absent key
     // would render `required` as present-and-false in some frameworks.
     required: field.required === true,
+    row,
+    // Always a number, never absent — a host writes `` `${grow}fr` `` with no
+    // fallback of its own to remember (`core/forms.ts`'s `ResolvedFormField`).
+    grow: field.grow ?? 1,
   }
   const help = translate(field, 'help', locale)
   if (help !== undefined) out.help = help
@@ -414,7 +423,8 @@ export const LOCALE_INPUT = '_folio_locale'
  *   exact shape, the same posture `presenceOf` takes toward a socket attachment.
  */
 export function compileForm(form: Form, ctx: FormRenderContext): ResolvedForm {
-  const fields = form.fields.map((field) => compileField(field, ctx.locale))
+  const rows = rowsOf(form.fields)
+  const fields = form.fields.map((field, i) => compileField(field, ctx.locale, rows[i] ?? 0))
   return {
     id: form.id,
     name: form.name,
@@ -673,9 +683,22 @@ export interface UpdateFormResult {
   /**
    * Whether `shapeOf` moved, and therefore whether `version` was bumped. The
    * route turns this into `formChanged`, and Folio's own hook turns *that* into
-   * a purge of `form:<id>` — a label edit fires neither (decision 7).
+   * a purge of `form:<id>` — decision 7, undisturbed: `version` is `shapeOf`'s
+   * question alone, never `descriptorChanged`'s below.
    */
   structural: boolean
+  /**
+   * Whether anything a host's `render` can see moved — a label, a layout
+   * share, `open`, a message, anything `compileForm` puts on the descriptor —
+   * whether or not it was also structural (`docs/form-layout-approach.md` decision
+   * 2). Every structural save is one of these too, but not the reverse: a
+   * label or a `beside` toggle changes this without changing `structural`.
+   * The route purges `form:<id>` for either, and fires the host-visible
+   * `formChanged` hook for neither on its own — that event's meaning stays
+   * fixed to `structural`, so a host relying on "the version this save bumped
+   * to" never sees it called for a save that bumped nothing.
+   */
+  descriptorChanged: boolean
 }
 
 /**
@@ -703,6 +726,12 @@ export async function updateForm(
   const fields = input.fields === undefined ? current.fields : fieldsFromInput(input.fields)
   const structural = shapeOf(fields) !== shapeOf(current.fields)
   const version = structural ? current.version + 1 : current.version
+  // Every field a save can touch is already reduced to `FormField[]` by the
+  // point it reaches here (`validateOneField`'s fixed key order, both for what
+  // was just parsed and for what `readFields` reconstructed off the row this
+  // read), so a full-array compare needs no key list of its own to fall out of
+  // sync with `ResolvedFormField` the way a hand-maintained one would.
+  const fieldsChanged = JSON.stringify(fields) !== JSON.stringify(current.fields)
 
   const name = input.name === undefined ? current.name : formSlug(input.name)
   if (name !== current.name) {
@@ -754,7 +783,18 @@ export async function updateForm(
       'This form was changed by somebody else. Reload it and make your change again.',
     )
   }
-  return { form: next, structural }
+
+  const descriptorChanged =
+    fieldsChanged ||
+    next.name !== current.name ||
+    next.open !== current.open ||
+    next.closesAt !== current.closesAt ||
+    next.successMessage !== current.successMessage ||
+    next.closedMessage !== current.closedMessage ||
+    next.submitLabel !== current.submitLabel ||
+    next.redirectTo !== current.redirectTo
+
+  return { form: next, structural, descriptorChanged }
 }
 
 /* ------------------------------------------------------- the R2 half --- */

@@ -183,6 +183,20 @@ describe('compileForm', () => {
     expect(compiled?.maxBytes).toBe(1024)
   })
 
+  it('computes `row` from `rowsOf` and defaults `grow` to 1, once per field', () => {
+    // Name: [First][Middle][Last] — a whole row, joined by `beside`.
+    const form = makeForm({
+      fields: [
+        { name: 'first', kind: 'text', label: 'First' },
+        { name: 'middle', kind: 'text', label: 'Middle', beside: true },
+        { name: 'last', kind: 'text', label: 'Last', beside: true, grow: 2 },
+      ],
+    })
+    const { fields } = compileForm(form, { base: BASE })
+    expect(fields.map((f) => f.row)).toEqual([0, 0, 0])
+    expect(fields.map((f) => f.grow)).toEqual([1, 1, 2])
+  })
+
   it('carries nothing a visitor should not see', () => {
     const form = makeForm({
       fields: [
@@ -212,18 +226,24 @@ describe('compileForm', () => {
       'version',
     ])
 
-    // And per question: the authoring `i18n` map is resolved away, not shipped.
+    // And per question: the authoring `i18n` map is resolved away, not shipped,
+    // and `row`/`grow` are always present — layout, on every question, whether
+    // or not it ever sets `beside` or `grow` itself.
     expect(Object.keys(descriptor.fields[0] ?? {}).sort()).toEqual([
+      'grow',
       'kind',
       'label',
       'name',
       'required',
+      'row',
     ])
     expect(descriptor.fields[1]).toEqual({
       name: 'source',
       kind: 'hidden',
       label: 'Source',
       required: false,
+      row: 0,
+      grow: 1,
       value: 'newsletter',
     })
   })

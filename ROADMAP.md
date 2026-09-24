@@ -472,11 +472,13 @@ Deferred or uncovered, each named rather than glossed:
 - **No `retentionDays`, no per-response comments, no spam score, no vendor
   integration.** `verify` is a host function precisely so Folio never names a
   captcha vendor, holds a key or has a timeout policy.
-- **A form has no logic and no layout at all**: every question is visible, always
-  required-or-not, and stacked one per row. Reported by the second host on
-  2026-09-07 over the narrowest possible case — a first/last name pair that used to
-  share a row and now does not — and the narrow case is the wrong frame. **Section 4
-  of *Next* below** is the market scan and the position it argues for.
+- **A form has no logic, and had no layout at all.** Every question is visible and
+  always required-or-not. Reported by the second host on 2026-09-07 over the
+  narrowest possible case — a first/last name pair that used to share a row and now
+  does not — and the narrow case was the wrong frame, which is why **section 4 of
+  *Next* below** is the market scan and the position it argues for rather than a fix
+  for that one pair. **Rows are done, as the first slice of that position** — see
+  section 4's own note for what shipped and what is still next.
 
 ## Next
 
@@ -800,6 +802,26 @@ Ranked by value × fits-a-library:
    original complaint, and it is one axis of six.
 7. **Options the host supplies** — the escape hatch for genuinely external data.
    Folio holds no key and names no vendor, `verify`'s posture exactly.
+
+**Layout (axis 6) is done, and shipped as explicit rows rather than as the span-out-
+of-twelve sketch above.** `docs/specs` carries no numbered spec for this — it is a
+narrower first slice of this section's own position, argued for in
+`docs/form-layout-approach.md` (three candidates against three test forms; Candidate C,
+"explicit rows and sections encoded over the flat list", won on the same grounds
+this section already argued: the flat array stays the one order, so `shapeOf`,
+`validateSubmission`, the CSV and the cap still see nothing new). What landed:
+`beside`/`grow` on `FormField`, `row`/`grow` always present on `ResolvedFormField`,
+and `formLayout()` in `folio/core` — the one function that groups a compiled form's
+flat `fields` into rows a host renders, returning its **final** shape
+(`sections`/`shown`) so sections and conditions add to it later without a breaking
+change. A row is capped at four cells and narrows rather than refuses a malformed
+one — `readFields`'s `[]` failure mode must never come from a layout mistake. A
+layout-only save purges `form:<id>` (a label edit now does too) without bumping
+`version` or firing `formChanged`, which keeps that event's meaning fixed to a
+structural save. **Sections, `showIf`/`hold` and steps are still next** — this
+slice's `sections` is always the one `section: null` group, and `formLayout`'s
+`answers` parameter is accepted but does nothing until conditional visibility
+lands, exactly as designed.
 
 **Refused, with reasons, because each is where the library becomes a platform:**
 

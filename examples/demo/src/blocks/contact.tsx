@@ -1,5 +1,13 @@
-import { createContext, useContext } from 'react'
-import { defineBlock, form, text, type ResolvedForm, type ResolvedFormField } from 'folio/core'
+import { createContext, Fragment, useContext } from 'react'
+import type { CSSProperties } from 'react'
+import {
+  defineBlock,
+  form,
+  formLayout,
+  text,
+  type ResolvedForm,
+  type ResolvedFormField,
+} from 'folio/core'
 
 /**
  * What the host read off its own URL after a submission
@@ -68,15 +76,14 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
   const id = `f-${field.name}`
   const bad = invalid || undefined
 
-  // Prose between questions: no input, nothing stored.
+  // Prose between questions: no input, nothing stored. `formLayout` still
+  // gives a `statement` a row of its own — it is never `hidden`, so it is
+  // never routed to `FormBody`'s `view.inputs` instead.
   if (field.kind === 'statement') {
     return <p className="form__statement">{field.text}</p>
   }
-  // A value the host's markup emits and the server validates and stores like
-  // any other answer (decision 13) — a campaign id, a source.
-  if (field.kind === 'hidden') {
-    return <input type="hidden" name={field.name} value={field.value ?? ''} />
-  }
+  // `hidden` never reaches here: `formLayout` pulls it out into
+  // `view.inputs`, position-free, before this component ever sees `field`.
 
   return (
     <div className="form__field">
@@ -223,6 +230,13 @@ export const contactForm = defineBlock({
 function FormBody({ descriptor }: { descriptor: ResolvedForm }) {
   const state = useContext(SubmissionStatus)
   const invalid = new Set(state?.form === descriptor.name ? state.invalid : [])
+  // `formLayout` (`folio/core`) is the one function that groups a compiled
+  // form's flat `fields` into rows and sections, so this host never
+  // reimplements the grouping `beside`/`grow` already describe. Called with no
+  // `answers` (this is a server render with no submission to react to yet), so
+  // every cell comes back `shown: true` — the whole of what that argument does
+  // until conditional visibility lands.
+  const view = formLayout(descriptor)
 
   return (
     <form method={descriptor.method} action={descriptor.action} encType={descriptor.enctype}>
@@ -247,9 +261,52 @@ function FormBody({ descriptor }: { descriptor: ResolvedForm }) {
         className="form__decoy"
       />
 
-      {descriptor.fields.map((field) => (
-        <Question key={field.name} field={field} invalid={invalid.has(field.name)} />
+      {/* `hidden`-kind questions: layout-transparent, so `formLayout` carries
+          them separately from every row — they render anywhere in the form. */}
+      {view.inputs.map((field) => (
+        <input key={field.name} type="hidden" name={field.name} value={field.value ?? ''} />
       ))}
+
+      {view.sections.map(({ section, rows }, i) => {
+        const body = rows.map((row) => (
+          <div
+            key={row.key}
+            className="form__row"
+            style={
+              { '--form-row-cols': row.cells.map((c) => `${c.grow}fr`).join(' ') } as CSSProperties
+            }
+          >
+            {row.cells.map((cell) =>
+              cell.shown ? (
+                <Question
+                  key={cell.field.name}
+                  field={cell.field}
+                  invalid={invalid.has(cell.field.name)}
+                />
+              ) : (
+                // A `hold`ing cell whose question is not currently asked
+                // (slice 3): an empty, `aria-hidden` slot, never a
+                // `visibility: hidden` input — that still posts a value in a
+                // native submission.
+                <div key={cell.field.name} aria-hidden="true" />
+              ),
+            )}
+          </div>
+        ))
+        // No section this slice — `formLayout` always answers the one
+        // `section: null` group — but a host writing against this shape now
+        // needs no changes once sections are real.
+        return section ? (
+          <fieldset key={section.name} className="form__section">
+            <legend>{section.label}</legend>
+            {section.help ? <p className="form__help">{section.help}</p> : null}
+            {body}
+          </fieldset>
+        ) : (
+          // biome-ignore lint/suspicious/noArrayIndexKey: one section, ever, this slice.
+          <Fragment key={i}>{body}</Fragment>
+        )
+      })}
 
       <button className="btn btn--primary" type="submit">
         {descriptor.submitLabel}

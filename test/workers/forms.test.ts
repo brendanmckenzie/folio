@@ -1,10 +1,12 @@
 import { createExecutionContext, env, SELF, waitOnExecutionContext } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { defineBlock, outboundRefs, text, toRegistry, toSchemaIndex } from '../../src/core'
+import { formTag } from '../../src/core/cache-tags'
 import type { Doc } from '../../src/core/doc'
 import type { Page } from '../../src/core/pagination'
 import type { ResolvedForm } from '../../src/core/forms'
 import { createFolio } from '../../src/server'
+import type { PurgeCapability } from '../../src/server/cache-purge'
 import {
   countResponsesByForm,
   deleteForm,
@@ -173,6 +175,55 @@ describe('the forms store', () => {
     expect(tightened.json.version).toBe(3)
   })
 
+  it('purges without bumping version for a layout-only or a label-only save (decision 2)', async () => {
+    const form = await makeForm('Volunteer')
+
+    // The baseline shape — `makeForm` starts with no questions at all, so this
+    // first save is genuinely structural and is not itself under test.
+    const seeded = await updateForm(env.DB, form.id, {
+      expectedUpdatedAt: form.updatedAt,
+      fields: [NAME_FIELD, EMAIL_FIELD],
+    })
+    expect(seeded?.structural).toBe(true)
+    const { version } = seeded!.form
+
+    // A save that changes nothing at all: neither `structural` nor
+    // `descriptorChanged`, so the route purges nothing for it.
+    const noOp = await updateForm(env.DB, form.id, { expectedUpdatedAt: seeded!.form.updatedAt })
+    expect(noOp?.structural).toBe(false)
+    expect(noOp?.descriptorChanged).toBe(false)
+
+    // `beside`/`grow` never touch `shapeOf`, so this bumps no version — but it
+    // is exactly the save `form-layout-approach.md` decision 2 wants purged.
+    const laidOut = await updateForm(env.DB, form.id, {
+      expectedUpdatedAt: noOp!.form.updatedAt,
+      fields: [NAME_FIELD, { ...EMAIL_FIELD, beside: true, grow: 2 }],
+    })
+    expect(laidOut?.structural).toBe(false)
+    expect(laidOut?.descriptorChanged).toBe(true)
+    expect(laidOut?.form.version).toBe(version)
+
+    // A label edit: same story — decision 2 revisits decision 7's silence on
+    // purpose, so this purges too, without becoming a `formChanged` event.
+    const relabelled = await updateForm(env.DB, form.id, {
+      expectedUpdatedAt: laidOut!.form.updatedAt,
+      fields: [{ ...NAME_FIELD, label: 'Full name' }, EMAIL_FIELD],
+    })
+    expect(relabelled?.structural).toBe(false)
+    expect(relabelled?.descriptorChanged).toBe(true)
+    expect(relabelled?.form.version).toBe(version)
+
+    // A structural save is `descriptorChanged` too — every structural save
+    // touches the descriptor, never the reverse.
+    const tightened = await updateForm(env.DB, form.id, {
+      expectedUpdatedAt: relabelled!.form.updatedAt,
+      fields: [{ ...NAME_FIELD, required: true }, EMAIL_FIELD],
+    })
+    expect(tightened?.structural).toBe(true)
+    expect(tightened?.descriptorChanged).toBe(true)
+    expect(tightened?.form.version).toBe(version + 1)
+  })
+
   it('refuses a save whose expectedUpdatedAt has moved', async () => {
     const form = await makeForm('Newsletter')
     const first = await patch<Form>(`/forms/${form.id}`, {
@@ -224,6 +275,31 @@ describe('the forms store', () => {
     const refused = await patch<ErrorBody>(`/forms/${form.id}`, {
       expectedUpdatedAt: form.updatedAt,
       fields: [{ name: '_folio_page', kind: 'text', label: 'Page' }],
+    })
+    expect(refused.status).toBe(400)
+  })
+
+  // Rows-slice review, finding 6: the PATCH schema used to refuse `grow: 1`
+  // with a 400, even though 1 is the documented default value a well-behaved
+  // API client could send explicitly. `validateOneField` still never stores
+  // it (1 is "absent", not a value), so this is the write-time gate accepting
+  // it and the core validator narrowing it away, not a change to what a form
+  // can end up holding.
+  it('accepts `grow: 1` (the documented default) rather than refusing it', async () => {
+    const form = await makeForm('GrowDefault')
+    const saved = await patch<Form>(`/forms/${form.id}`, {
+      expectedUpdatedAt: form.updatedAt,
+      fields: [{ ...NAME_FIELD, grow: 1 }],
+    })
+    expect(saved.status).toBe(200)
+    expect(saved.json.fields[0]?.grow).toBeUndefined()
+  })
+
+  it('still refuses a `grow` outside 1–4', async () => {
+    const form = await makeForm('GrowOutOfRange')
+    const refused = await patch<ErrorBody>(`/forms/${form.id}`, {
+      expectedUpdatedAt: form.updatedAt,
+      fields: [{ ...NAME_FIELD, grow: 5 }],
     })
     expect(refused.status).toBe(400)
   })
@@ -458,6 +534,37 @@ async function callHooked(
   return res!
 }
 
+/**
+ * `formPurgeCapability` is not a `FolioConfig` key — no public type names it,
+ * on purpose (`runtime.ts`'s own comment on `FolioRuntime.formPurgeCapability`),
+ * so a real host could never discover or set it; assigning it here on a plain
+ * object literal (rather than inline on the call) is what lets it through
+ * without a cast — TypeScript's excess-property check only fires on a
+ * literal passed directly as the argument. It exists for exactly this:
+ * nothing else in this environment can observe whether `routes/forms.ts`
+ * actually called `purgeFormLayout` (`purgeFormLayout wiring`, below) —
+ * Workers Cache is not simulated, and `vi.mock` cannot reach code the workers
+ * pool bundles into its own Worker instance (confirmed by trying it: every
+ * call count read zero, mocked through `SELF.fetch` and through
+ * `folio.handle()` alike).
+ */
+function folioWithPurgeCapability(capability: PurgeCapability) {
+  const config = {
+    blocks: [hookPage],
+    root: 'page',
+    bindings: (e: Cloudflare.Env) => ({
+      db: e.DB,
+      story: e.STORY,
+      media: e.MEDIA,
+      images: e.IMAGES,
+    }),
+    basePath: '/folio',
+    auth: 'open' as const,
+    formPurgeCapability: capability,
+  }
+  return createFolio<Cloudflare.Env>(config)
+}
+
 describe('formChanged', () => {
   it('fires on a structural save and on nothing else', async () => {
     const form = await makeForm('Hooked')
@@ -482,7 +589,9 @@ describe('formChanged', () => {
     })
     expect(cosmetic.status).toBe(200)
     // A label edit changes no constraint a cached page could now be violating,
-    // so it fires nothing and purges nothing (decision 7).
+    // so it fires nothing here — but it still purges, through
+    // `purgeFormLayout` rather than through this event (decision 2, and the
+    // `purgeFormLayout wiring` describe block below).
     expect(calls).toHaveLength(1)
   })
 
@@ -497,6 +606,133 @@ describe('formChanged', () => {
     })
     expect(stale.status).toBe(409)
     expect(calls).toHaveLength(0)
+  })
+})
+
+/**
+ * The PATCH route's own call to `purgeFormLayout` (`routes/forms.ts`) — rows-
+ * slice review finding 3. Nothing before this observed the wiring itself:
+ * deleting the route's call, or breaking `descriptorChanged` so it never
+ * reports true, passed every other test in this file.
+ *
+ * There is no real Workers Cache to inspect here (`cache-purge.ts`'s own
+ * header) and no way to `vi.mock` code the workers pool has already bundled
+ * into the Worker instance a request runs against — tried both, every call
+ * count read zero regardless of whether the request went through
+ * `SELF.fetch` or `folio.handle()` directly. `folioWithPurgeCapability`
+ * injects a fake `PurgeCapability` through the one seam that exists for
+ * exactly this (`FolioRuntime.formPurgeCapability`), so what is asserted
+ * below is the same thing `cache-purge.test.ts` asserts for `formChanged`:
+ * which tags a *real* platform call would have been asked to purge.
+ */
+describe('purgeFormLayout wiring', () => {
+  function harness() {
+    const calls: unknown[] = []
+    const capability: PurgeCapability = async () => async (options) => {
+      calls.push(options)
+      return { success: true, errors: [] }
+    }
+    const folio = folioWithPurgeCapability(capability)
+    return {
+      calls,
+      patch: async (id: string, body: Record<string, unknown>) => {
+        const res = await callHooked(folio, `/folio/api/forms/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+        })
+        return { status: res.status, json: await res.json<Form>() }
+      },
+    }
+  }
+
+  it('purges `form:<id>` for a label-only save', async () => {
+    const { calls, patch } = harness()
+    const form = await makeForm('Wired')
+    const seeded = await patch(form.id, {
+      expectedUpdatedAt: form.updatedAt,
+      fields: [NAME_FIELD, EMAIL_FIELD],
+    })
+    calls.length = 0 // that first save was structural
+
+    const relabelled = await patch(form.id, {
+      expectedUpdatedAt: seeded.json.updatedAt,
+      fields: [{ ...NAME_FIELD, label: 'Full name' }, EMAIL_FIELD],
+    })
+    expect(relabelled.status).toBe(200)
+    expect(calls).toEqual([{ tags: [formTag(form.id)] }])
+  })
+
+  it('purges `form:<id>` for a layout-only save (`beside`/`grow`)', async () => {
+    const { calls, patch } = harness()
+    const form = await makeForm('WiredLayout')
+    const seeded = await patch(form.id, {
+      expectedUpdatedAt: form.updatedAt,
+      fields: [NAME_FIELD, EMAIL_FIELD],
+    })
+    calls.length = 0
+
+    const laidOut = await patch(form.id, {
+      expectedUpdatedAt: seeded.json.updatedAt,
+      fields: [NAME_FIELD, { ...EMAIL_FIELD, beside: true, grow: 2 }],
+    })
+    expect(laidOut.status).toBe(200)
+    expect(calls).toEqual([{ tags: [formTag(form.id)] }])
+  })
+
+  it('purges for each of `open`, `closesAt`, `successMessage`, `closedMessage`, `submitLabel` and `redirectTo`, one at a time', async () => {
+    const { calls, patch } = harness()
+    const form = await makeForm('WiredScalars')
+    let at = form.updatedAt
+
+    const edits: Record<string, unknown>[] = [
+      { open: false },
+      { closesAt: Date.now() + 60_000 },
+      { successMessage: 'Thanks!' },
+      { closedMessage: 'Closed for now.' },
+      { submitLabel: 'Go' },
+      { redirectTo: '/thanks' },
+    ]
+    for (const edit of edits) {
+      calls.length = 0
+      const result = await patch(form.id, { expectedUpdatedAt: at, ...edit })
+      expect(result.status).toBe(200)
+      expect(calls).toEqual([{ tags: [formTag(form.id)] }])
+      at = result.json.updatedAt
+    }
+  })
+
+  it('purges nothing for a save that changed nothing', async () => {
+    const { calls, patch } = harness()
+    const form = await makeForm('WiredNoop')
+    const result = await patch(form.id, { expectedUpdatedAt: form.updatedAt })
+    expect(result.status).toBe(200)
+    expect(calls).toEqual([])
+  })
+
+  it('purges nothing directly for a structural save — that purges through `formChanged` instead', async () => {
+    const { calls, patch } = harness()
+    const form = await makeForm('WiredStructural')
+    const result = await patch(form.id, {
+      expectedUpdatedAt: form.updatedAt,
+      fields: [NAME_FIELD, EMAIL_FIELD],
+    })
+    expect(result.status).toBe(200)
+    expect(result.json.version).toBe(2)
+    // `formChanged`'s own purge goes through `cachePurgeHooks`, not through
+    // `rt.formPurgeCapability` — this harness only sees the direct call this
+    // slice added, so a structural save alone must read as none of it.
+    expect(calls).toEqual([])
+  })
+
+  it('purges nothing for a save that was refused', async () => {
+    const { calls, patch } = harness()
+    const form = await makeForm('WiredRefused')
+    const result = await patch(form.id, {
+      expectedUpdatedAt: form.updatedAt - 1,
+      label: 'Nope',
+    })
+    expect(result.status).toBe(409)
+    expect(calls).toEqual([])
   })
 })
 

@@ -299,8 +299,18 @@ p { text-wrap: pretty; }
    for one, deliberately — a form is the place a design system has the strongest
    opinions — so every class here is this project's own, drawn against the
    descriptor `resolve()` put on the resolution (src/blocks/contact.tsx). */
-.form { max-width: 46rem; padding: 2rem 1.5rem; margin-inline: auto; }
+.form { max-width: 46rem; padding: 2rem 1.5rem; margin-inline: auto; container: form / inline-size; }
 .form__heading { margin: 0 0 1.25rem; font-size: 1.5rem; }
+/* One row, `formLayout`'s own unit (`folio/core`): `--form-row-cols` is the
+   `fr` track list the block builds from each cell's `grow`, one for a row of
+   one. Folio stores proportions, never breakpoints — stacking a row is always
+   correct, so the one thing this project owns is where that happens. */
+.form__row { display: grid; grid-template-columns: var(--form-row-cols, 1fr); gap: 0 1rem; }
+@container form (max-width: 36rem) {
+  .form__row { grid-template-columns: 1fr; }
+}
+.form__section { margin: 0 0 1.1rem; padding: 0; border: 0; }
+.form__section legend { padding: 0; margin-bottom: 0.5rem; font-weight: 600; }
 .form__field { display: grid; gap: 0.35rem; margin-bottom: 1.1rem; }
 .form__label { font-size: 0.875rem; font-weight: 600; }
 .form__label abbr { color: #b4351e; text-decoration: none; }

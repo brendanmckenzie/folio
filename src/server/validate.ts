@@ -1809,6 +1809,22 @@ const FORM_FIELD = v.object(
     maxBytes: v.optional(v.pipe(v.number(), v.finite())),
     value: v.optional(bounded(2000)),
     text: v.optional(bounded(2000)),
+    // Layout, not shape (`docs/form-layout-approach.md` decision 2) — `beside`/
+    // `grow` never reach `shapeOf` and never bump `version`. `grow` accepts
+    // the full legal range, `1` included: `1` is the *stored* default (a
+    // client that writes the range's own default value should never see a
+    // 400 for it), not a value this gate should refuse — refusing here is the
+    // write-time half of "narrow on read, refuse on write", for a value a
+    // legitimate write should never send at all (a string, a `5`), and this
+    // schema is exactly that write-time gate, not the read path. `1` is still
+    // never *stored*: `validateOneField` (`core/forms.ts`), which also runs on
+    // the read path where a throw would empty `readFields`, drops it back to
+    // "absent" the same way it silently drops anything else out of range —
+    // narrowing, not refusing, because it cannot tell a legitimate stored
+    // value from one a byte flipped, and only refusing here would leave that
+    // case unreachable from a well-behaved client.
+    beside: v.optional(v.boolean()),
+    grow: v.optional(v.picklist([1, 2, 3, 4], 'must be 1, 2, 3 or 4')),
     i18n: v.optional(
       v.record(
         LOCALE_CODE,
