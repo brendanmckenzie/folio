@@ -309,14 +309,23 @@ describe('server/discover', () => {
   })
 
   /**
-   * **No cache directives.** Both are optional, and declaring one is a promise that
-   * this answer does not vary by caller. It does not today; promising it would be
-   * the thing quietly broken by the first capability that depends on who is asking.
+   * **The cache hints are required, and promise nothing.** `DiscoverResult` and
+   * `ListToolsResult` are both `CacheableResult` in the `2026-07-28` schema, and a
+   * strict client refused `tools/list` while they were omitted. `0` is
+   * "immediately stale"; `private` because the tool list varies by credential,
+   * and because discovery declaring itself shareable across callers would be
+   * broken by the first capability that depends on who is asking.
    */
-  it('declares no ttlMs or cacheScope', async () => {
-    const answer = await rpc<Record<string, unknown>>('server/discover')
-    expect(answer.result).not.toHaveProperty('ttlMs')
-    expect(answer.result).not.toHaveProperty('cacheScope')
+  it('declares ttlMs 0 and a private cacheScope on discovery and the tool list', async () => {
+    const headers = await tokenFor('content:read')
+    for (const answer of [
+      await rpc<Record<string, unknown>>('server/discover'),
+      await rpc<Record<string, unknown>>('tools/list'),
+      await rpc<Record<string, unknown>>('tools/list', {}, { headers }),
+    ]) {
+      expect(answer.result?.ttlMs).toBe(0)
+      expect(answer.result?.cacheScope).toBe('private')
+    }
   })
 
   /** The honest answer to "what may I do" with nothing presented: nothing. */

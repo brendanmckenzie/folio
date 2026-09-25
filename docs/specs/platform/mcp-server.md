@@ -1318,10 +1318,17 @@ Six things the change required, none of them obvious from the changelog:
    so it carries the two things true of every tool here and visible from none of them: the
    list is already scope-filtered, and a write is a real edit that appears live in an open
    editor and is undoable.
-5. **No `ttlMs` or `cacheScope`**, though the canonical example shows both. Declaring a
-   cache lifetime promises the answer does not vary by caller. It does not vary today, and
-   it is one small object to recompute — so the promise buys nothing and would be the thing
-   quietly broken by the first capability that depends on who is asking.
+5. **`ttlMs: 0` and `cacheScope: 'private'` on `server/discover` and `tools/list`.** This
+   said "no `ttlMs` or `cacheScope`" until 2026-09-26, on the belief that both were
+   optional. They are not: both results extend `CacheableResult` in the `2026-07-28`
+   schema, where the two fields are required, and a strict client refused `tools/list`
+   without them. The argument for omitting them survives in the values chosen. Declaring a
+   cache lifetime promises the answer does not vary by caller; `0` is "immediately stale"
+   and promises nothing, and `private` forbids sharing an answer across authorization
+   contexts, which `tools/list` needs because it varies by credential, and discovery keeps
+   so it cannot be broken by the first capability that depends on who is asking. The same
+   client also required `resultType` on every result, not only discovery's; it is now
+   stamped once, in `handleRpc`.
 6. **Three headers are now required and are validated against the body.** `Mcp-Method`
    mirrors `method`; `Mcp-Name` mirrors `params.name` on a `tools/call`, after decoding the
    Base64 sentinel a client must use for any value that is not plainly ASCII. The rule

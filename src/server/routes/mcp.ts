@@ -304,6 +304,24 @@ export function mcpRoutes<Env>(
     headers: credentialHeaders(c),
   })
 
+  /**
+   * **The cache hints, as the smallest promise the schema allows.** Both fields
+   * are *required* on `DiscoverResult` and `ListToolsResult` (`CacheableResult`
+   * in the `2026-07-28` schema), and a strict client refuses a result without
+   * them. This endpoint used to omit them in the belief they were optional —
+   * the canonical example shows them and the schema requires them.
+   *
+   * What omitting them was protecting still stands, so the values make no
+   * promise: `0` is "immediately stale, re-fetch whenever needed", which is how
+   * a client treated these answers before, and `private` forbids sharing one
+   * across authorization contexts. `tools/list` genuinely varies by credential,
+   * so `public` would be wrong there; discovery does not vary today, and
+   * declaring it `public` would be the thing quietly broken by the first
+   * capability that depends on who is asking. Both are one small object to
+   * recompute, so a longer lifetime buys nothing.
+   */
+  const UNCACHED = { ttlMs: 0, cacheScope: 'private' } as const
+
   const methodsFor = (c: Context<FolioEnv<Env>>): Record<string, RpcMethod> => ({
     /**
      * **Mandatory in `2026-07-28`** (`server/discover` is a MUST), and the whole
@@ -321,13 +339,10 @@ export function mcpRoutes<Env>(
      * under a client and there is no notification to promise. No `subscriptions`
      * capability for the same reason — nothing here ever pushes.
      *
-     * **No `ttlMs` or `cacheScope`.** Both are optional, and declaring a cache
-     * lifetime is a promise that this answer does not vary. It does not vary
-     * today, and it is one small object to recompute, so the promise buys nothing
-     * and would be the thing quietly broken by the first capability that depends
-     * on who is asking.
+     * **`ttlMs: 0` and `cacheScope: 'private'`: see `UNCACHED`.**
      */
     'server/discover': () => ({
+      ...UNCACHED,
       supportedVersions: SUPPORTED_VERSIONS,
       capabilities: { tools: {} },
       instructions: INSTRUCTIONS,
@@ -348,7 +363,9 @@ export function mcpRoutes<Env>(
      */
     ping: () => ({}),
 
+    /** Varies by credential, which is the case `private` exists for; see `UNCACHED`. */
     'tools/list': () => ({
+      ...UNCACHED,
       tools: offered(c.var.actor).map((tool) => ({
         name: tool.name,
         description: described(tool),
