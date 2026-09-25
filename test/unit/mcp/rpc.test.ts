@@ -71,7 +71,7 @@ describe('handleRpc', () => {
     expect(await post({ jsonrpc: '2.0', id: 7, method: 'probe' })).toEqual({
       jsonrpc: '2.0',
       id: 7,
-      result: { probed: true },
+      result: { probed: true, resultType: 'complete' },
     })
   })
 
@@ -84,7 +84,7 @@ describe('handleRpc', () => {
     const methods = {
       echo: (params: Record<string, unknown>) => {
         seen.push(params)
-        return null
+        return {}
       },
     }
     await post({ jsonrpc: '2.0', id: 1, method: 'echo', params: { a: 1 } }, methods)
@@ -202,6 +202,7 @@ describe('handleRpc', () => {
       {
         housekeeping: () => {
           ran++
+          return undefined
         },
       },
     )
@@ -314,11 +315,11 @@ describe('handleRpc', () => {
       {
         slow: async () => {
           await Promise.resolve()
-          return 'done'
+          return { done: true }
         },
       },
     )
-    expect(res?.result).toBe('done')
+    expect(res?.result).toEqual({ done: true, resultType: 'complete' })
   })
 })
 
@@ -412,7 +413,7 @@ describe('handleRpc, Streamable HTTP request metadata', () => {
       ...probe,
       params: { _meta: { 'io.modelcontextprotocol/protocolVersion': MCP_PROTOCOL_VERSION } },
     }
-    expect((await outcome(body)).response?.result).toEqual({ probed: true })
+    expect((await outcome(body)).response?.result).toEqual({ probed: true, resultType: 'complete' })
   })
 
   /**
@@ -421,7 +422,10 @@ describe('handleRpc, Streamable HTTP request metadata', () => {
    * header — what intermediaries actually route on — has already been checked.
    */
   it('accepts a body that omits _meta entirely, given a good header', async () => {
-    expect((await outcome(probe)).response?.result).toEqual({ probed: true })
+    expect((await outcome(probe)).response?.result).toEqual({
+      probed: true,
+      resultType: 'complete',
+    })
   })
 
   it('refuses a missing Mcp-Method header', async () => {
@@ -456,7 +460,10 @@ describe('handleRpc, Streamable HTTP request metadata', () => {
   })
 
   it('accepts a matching Mcp-Name', async () => {
-    expect((await outcome(call, tools)).response?.result).toEqual({ called: true })
+    expect((await outcome(call, tools)).response?.result).toEqual({
+      called: true,
+      resultType: 'complete',
+    })
   })
 
   /**
@@ -472,7 +479,7 @@ describe('handleRpc, Streamable HTTP request metadata', () => {
       'mcp-method': 'tools/call',
       'mcp-name': encoded,
     })
-    expect(res.response?.result).toEqual({ called: true })
+    expect(res.response?.result).toEqual({ called: true, resultType: 'complete' })
   })
 
   it('treats a malformed sentinel as a mismatch rather than crashing', async () => {

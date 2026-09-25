@@ -172,7 +172,16 @@ export function unsupportedVersion(requested: string | undefined): RpcFault {
 }
 
 /** One method's implementation. `params` is always an object, possibly empty. */
-export type RpcMethod = (params: Record<string, unknown>) => Promise<unknown> | unknown
+/**
+ * A result is always an object in MCP, which is what lets `handleRpc` stamp
+ * `resultType` on it. `void` is for a method only ever sent as a notification,
+ * whose answer goes nowhere.
+ */
+export type RpcResult = Record<string, unknown>
+
+export type RpcMethod = (
+  params: Record<string, unknown>,
+) => Promise<RpcResult | undefined> | RpcResult | undefined
 
 export type RpcMethods = Readonly<Record<string, RpcMethod>>
 
@@ -495,10 +504,23 @@ export async function handleRpc(
     return refuse(message.id, METHOD_NOT_FOUND, `No such method: '${message.method}'.`)
   }
 
+  /**
+   * **`resultType` is stamped here, on every result, not per method.** From
+   * `2026-07-28` a client MUST reject a result without it — the "absent means
+   * complete" bridge is for earlier-revision servers only — and nothing here
+   * ever answers `incomplete`, so one place owns it. It lived on
+   * `server/discover` alone for a while, and a strict client refused
+   * `tools/list`.
+   */
   try {
+    const result = await method(message.params)
     return {
       status: 200,
-      response: { jsonrpc: JSONRPC_VERSION, id: message.id, result: await method(message.params) },
+      response: {
+        jsonrpc: JSONRPC_VERSION,
+        id: message.id,
+        result: { ...(result ?? {}), resultType: 'complete' },
+      },
     }
   } catch (err) {
     if (err instanceof RpcFault) return refuse(message.id, err.code, err.message, err.data)

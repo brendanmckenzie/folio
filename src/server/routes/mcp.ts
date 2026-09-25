@@ -36,6 +36,7 @@ import {
   INVALID_PARAMS,
   RpcFault,
   type RpcMethod,
+  type RpcResult,
   rpcCodeFor,
   SUPPORTED_VERSIONS,
 } from '../mcp/rpc'
@@ -229,7 +230,7 @@ export function mcpRoutes<Env>(
   }
 
   /** The v1 route's answer as MCP tool content, or its envelope as a JSON-RPC error. */
-  const resultOf = async (res: Response): Promise<unknown> => {
+  const resultOf = async (res: Response): Promise<RpcResult> => {
     const text = await res.text()
     if (res.ok) return { content: [{ type: 'text', text }] }
 
@@ -327,7 +328,6 @@ export function mcpRoutes<Env>(
      * on who is asking.
      */
     'server/discover': () => ({
-      resultType: 'complete',
       supportedVersions: SUPPORTED_VERSIONS,
       capabilities: { tools: {} },
       instructions: INSTRUCTIONS,

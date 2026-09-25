@@ -331,8 +331,34 @@ describe('server/discover', () => {
    * patch is the most expensive way to be almost right.
    */
   it('answers ping, with or without a credential', async () => {
-    expect((await rpc('ping')).result).toEqual({})
-    expect((await rpc('ping', {}, { headers: await tokenFor('content:read') })).result).toEqual({})
+    expect((await rpc('ping')).result).toEqual({ resultType: 'complete' })
+    expect((await rpc('ping', {}, { headers: await tokenFor('content:read') })).result).toEqual({
+      resultType: 'complete',
+    })
+  })
+
+  /**
+   * **Every result carries `resultType`, not just discovery's.** A `2026-07-28`
+   * client MUST reject a result without it — the absent-means-complete bridge is
+   * for earlier-revision servers — and one strict client refused `tools/list`
+   * while this was set on `server/discover` alone.
+   */
+  it('stamps resultType on the result of every method', async () => {
+    const { id, headers } = await created()
+    const answers = [
+      await rpc<{ resultType: string }>('server/discover'),
+      await rpc<{ resultType: string }>('ping'),
+      await rpc<{ resultType: string }>('tools/list', {}, { headers }),
+      await rpc<{ resultType: string }>(
+        'tools/call',
+        { name: 'get_document', arguments: { id, status: 'draft' } },
+        { headers },
+      ),
+    ]
+    for (const answer of answers) {
+      expect(answer.error).toBeUndefined()
+      expect(answer.result?.resultType).toBe('complete')
+    }
   })
 
   it('answers a notification with 202 and no body', async () => {
