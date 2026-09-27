@@ -582,12 +582,17 @@ export function addOption(field: FormField): FormField {
   return { ...field, options: [...options, { value, label: `Option ${options.length + 1}` }] }
 }
 
-export function removeOption(field: FormField, value: string): FormField {
-  return { ...field, options: (field.options ?? []).filter((o) => o.value !== value) }
+/**
+ * Options are addressed by position, not by value: the value is what the
+ * editor is changing, and mid-edit it can collide with a sibling's (typing
+ * `b2` passes through `b`), at which point a value match edits both rows.
+ */
+export function removeOption(field: FormField, index: number): FormField {
+  return { ...field, options: (field.options ?? []).filter((_, i) => i !== index) }
 }
 
-export function updateOption(field: FormField, value: string, next: FormFieldOption): FormField {
-  return { ...field, options: (field.options ?? []).map((o) => (o.value === value ? next : o)) }
+export function updateOption(field: FormField, index: number, next: FormFieldOption): FormField {
+  return { ...field, options: (field.options ?? []).map((o, i) => (i === index ? next : o)) }
 }
 
 /* -------------------------------------------------------------- locale --- */
@@ -666,7 +671,10 @@ export function withOptionLabel(
   locale: string,
   source: string,
 ): FormField {
-  if (locale === source) return updateOption(field, value, { value, label })
+  if (locale === source) {
+    const index = (field.options ?? []).findIndex((o) => o.value === value)
+    return index === -1 ? field : updateOption(field, index, { value, label })
+  }
   const current = field.i18n?.[locale]?.options ?? {}
   const options = { ...current }
   if (label === '') delete options[value]

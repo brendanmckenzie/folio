@@ -802,7 +802,7 @@ describe('addOption / removeOption / updateOption', () => {
     expect(two.options?.[1]).toEqual({ value: 'option_2', label: 'Option 2' })
   })
 
-  it('removes by value', () => {
+  it('removes by position', () => {
     const field = {
       name: 'q',
       kind: 'select',
@@ -812,7 +812,7 @@ describe('addOption / removeOption / updateOption', () => {
         { value: 'b', label: 'B' },
       ],
     } as const
-    expect(removeOption(field, 'a').options).toEqual([{ value: 'b', label: 'B' }])
+    expect(removeOption(field, 0).options).toEqual([{ value: 'b', label: 'B' }])
   })
 
   it('updates one option in place, leaving the others untouched', () => {
@@ -825,9 +825,28 @@ describe('addOption / removeOption / updateOption', () => {
         { value: 'b', label: 'B' },
       ],
     } as const
-    const next = updateOption(field, 'a', { value: 'a', label: 'Renamed' })
+    const next = updateOption(field, 0, { value: 'a', label: 'Renamed' })
     expect(next.options).toEqual([
       { value: 'a', label: 'Renamed' },
+      { value: 'b', label: 'B' },
+    ])
+  })
+
+  it("edits one row even while its value passes through a sibling's", () => {
+    const field = {
+      name: 'q',
+      kind: 'select',
+      label: 'Q',
+      options: [
+        { value: 'a', label: 'A' },
+        { value: 'b', label: 'B' },
+      ],
+    } as const
+    // Retyping `a` as `b2`: the first keystroke collides with the sibling.
+    const mid = updateOption(field, 0, { value: 'b', label: 'A' })
+    const done = updateOption(mid, 0, { value: 'b2', label: 'A' })
+    expect(done.options).toEqual([
+      { value: 'b2', label: 'A' },
       { value: 'b', label: 'B' },
     ])
   })

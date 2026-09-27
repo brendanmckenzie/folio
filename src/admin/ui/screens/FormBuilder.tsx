@@ -779,8 +779,11 @@ function OptionsEditor({
     <div className={css.options}>
       <span className={css.optionsLabel}>Options</span>
       <ol className={css.optionList}>
-        {options.map((option) => (
-          <li key={option.value} className={css.optionRow}>
+        {/* Keyed by position: the value is what the first input edits, so a
+            value key remounts the row, and drops focus, on every keystroke. */}
+        {options.map((option, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: see above
+          <li key={index} className={css.optionRow}>
             {locale === source ? (
               <Input
                 value={option.value}
@@ -789,7 +792,7 @@ function OptionsEditor({
                 aria-label="Option value"
                 onChange={(e) =>
                   onChange(
-                    updateOption(field, option.value, {
+                    updateOption(field, index, {
                       value: e.target.value,
                       label: option.label,
                     }),
@@ -813,7 +816,7 @@ function OptionsEditor({
                 disabled={!editable || options.length <= 1}
                 reason={options.length <= 1 ? 'At least one option is required' : undefined}
                 aria-label={`Remove ${option.label || option.value}`}
-                onClick={() => onChange(removeOption(field, option.value))}
+                onClick={() => onChange(removeOption(field, index))}
               >
                 ×
               </Button>
