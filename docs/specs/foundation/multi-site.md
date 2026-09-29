@@ -1842,3 +1842,100 @@ under a header comment. Where the spec was wrong or silent:
   primary keys. Every other index is unchanged, and every
   row of every touched table survives with `site_id = 'default'` (`api_tokens`
   null).
+
+### Phase 2 (2026-09-29)
+
+`src/core/sites.ts`, `src/server/sites.ts` and `src/server/routes/sites.ts` are new;
+the chain-taking lookups, the served set, `Resolution.site` and `.path`, `handle()`'s
+scope segment and host confinement, `withScope`, `folio.cacheProps`,
+`folio.settings` and `folio.reader(env, req | { site })` landed as specified. A
+published single-site page's `Cache-Tag` and `Resolution` are pinned byte for byte by
+`test/workers/single-site-pin.test.ts`, written at `cb51211` before any of this.
+Where the spec was wrong or silent:
+
+- **Within one scope a redirect beats an unpublished row**, the reverse of decision
+  5's order (live, unpublished → gone, redirect). `pathMiss` has always answered the
+  redirect for a path holding both, `read-session.test.ts` pins it, and a single-site
+  deployment is a chain of one scope whose answers must not move. Across scopes the
+  two orders agree. `pickServing` walks: live serves, then that scope's redirect,
+  then its unpublished row is `gone`, then the next scope.
+- **`Resolution.site` and `.path` live in `src/core/resolve.ts`**, which the phase's
+  file list left out. Two optional fields, absent with no `sites`.
+- **Byte-identity at the Phase 1 head rested on scan order.** After `0011` put
+  `site_id` first in `stories_path`, `resolve()`'s pass-one read
+  (`id in (…) or path in (…)`) scanned the table and so answered in `rowid` order,
+  and the story map serialises in insertion order. Binding the chain made both halves
+  seeks, which reorders the rows; `storiesFor` therefore orders by `rowid` when a path
+  is in the statement and by `id` (the primary key's order) when only ids are, and
+  `listStories` unpaged by `rowid`. Ordering pass one by `id` alone turns the pin
+  test red.
+- **`withUrls` stayed one-argument**; `rt.urlsFor(site)` returns the site's
+  decorator. `rows.map(rt.withUrls)` is the idiom, and a second parameter would have
+  been handed the index. On a site with a preview origin, `previewUrl` and `draftUrl`
+  are the live URL's path on that origin.
+- **`HostResolveOptions` omits `site`.** Which site a render is for is the reader's
+  to decide; a host passing one in could resolve another site's content.
+  `ResolveOptions.site` is `SiteRender | null`, `null` being a multi-site render for
+  no site (an empty chain, which resolves nothing).
+- **`storiesFor` and `publishedDocsByIds` take the chain as an optional last
+  argument**, not required. An id read is a primary-key seek whether or not it is
+  scoped, and five callers outside `resolve()` (usage, bulk, versions, assets, forms)
+  read ids a route already holds. A **path** read without a chain throws, because
+  there it is both meaningless and a scan. Every read `resolve()` makes passes one.
+  The path lookups (`storyByPath`, `storyStatus`, `pathMiss`, `pageAt`,
+  `publishedDoc`, `lookupRedirect`) take it required and second, as the spec says.
+- **A single-site render issues exactly the statements it did.** The lookups batch
+  the redirect rows only on a chain of more than one scope: with one scope a redirect
+  only matters where the story is not live, and every reader that skips it answers
+  "nothing here" for such a row anyway. `pathMiss` always batches both, as before.
+- **The gate's `req.path` is the path below `{base}`** (`'/site/enter'`), null
+  outside it, and `grantFor` is the site a grant **or share** cookie verified for;
+  phase 5 computes it. `handle()` passes the real path, so a draft site's preview
+  origin answers the pre-grant paths now; nothing on it serves a page without the
+  grant phase 5 adds.
+- **A custom `sites.resolve` picks the site; the URL picks the surface**: `preview`
+  exactly when the URL's origin is the chosen site's preview origin.
+- **`folio.reader(env, { site })` is gated as that site's live surface**, so a
+  sitemap build for a draft or preview-status site reads nothing.
+- **Readers answer drafts only on a preview surface** on a multi-site deployment,
+  whatever the cookie. Who may, there, is phase 5's grant.
+- **`handle()`'s `?_folio=` branch hands every request back on a multi-site
+  deployment**, for phase 5: `previewPage` (`pages.tsx`) resolves without a site, and
+  drafts there need the grant.
+- **`site_required` is not one of `errors.ts`'s codes**, so `requireScope`
+  (`middleware.ts`) answers the envelope itself. It is mounted on no route yet: which
+  routes are scoped is phases 3 and 7's to declare. `withScope` is mounted in `app.ts`
+  ahead of `withActor`, which will need it.
+- **The registry routes refuse to delete `default`** (409): its id is reserved
+  against re-creation, so a deployment that deleted it could never have it back.
+  Removing the scope's `site_roles` in the delete batch is phase 3 item 5; the purges
+  and `siteChanged` are phase 7's.
+- **Draft-mode globals on a multi-site deployment read only rows the chain already
+  holds**, with no `ensureSingleton`, so rendering never writes. Until phase 4's
+  layers a non-default site therefore sees no global at all.
+- **`validateSites` requires `sites.admin` to be an origin with no path**, `https:`
+  or `http:` on `localhost`; a layered type name may be at most 27 characters
+  (`sng_` + name + `:` + a 32-character scope id within 64); `auth: 'open'` with
+  `sites` logs a warning, as the edge cases ask.
+- **`reader.tree()` on a chain is built by path**, not `parent_id`: an inherited
+  `info/parking` under a site's own forked `info` has the shared Info as its parent
+  row, and that row is not in the site's served set.
+- **Deferred, with the phase that owns each:**
+  - forms in `resolve()` are read by id with no chain (`forms.ts`, phase 7);
+  - the redirect *writes* bind no `site_id` in their `delete` and `update`
+    (`redirectStatements`, `deleteRedirect`), so on a multi-site deployment a rename
+    on one site would rewrite another's redirects (phase 7, with the routes that call
+    them);
+  - the list readers (`listStoryLevel`, `listStoriesFlat`, `listDocumentPage`,
+    `listRecentlyEdited`, `countStories`, `storiesMatching`) take a `scope` option
+    defaulting to `default`, and `searchStories` a `chain`; no route passes one yet
+    (phase 7);
+  - call sites outside this phase bound to `SINGLE_SITE_CHAIN` until their phase:
+    `routes/api/documents.ts` (by-path), `routes/editor.ts` (`/edit`'s root),
+    `routes/redirects.ts` (the occupied check and the loop check), `routes/stories.ts`
+    (`?ids=`/`?paths=`);
+  - readers outside this phase that still scan since `0011`: `forms.ts` by name
+    and the forms list, `asset-tags.ts` by slug and the tag list, `asset-folders.ts`
+    by path and the folder list, and the asset lists in `assets.ts` and
+    `asset-bulk.ts` (all phase 7). `test/workers/query-plan.test.ts` pins the hot
+    story and redirect readers on a one-scope and a three-scope chain.

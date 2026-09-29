@@ -7,8 +7,10 @@ import {
   blankSubtree,
   type BlockSchema,
   type SchemaIndex,
+  type DocumentType,
   type SubtreeBlok,
   validatePresets,
+  validateTypes,
 } from '../../../src/core/schema'
 
 // field-defaults-and-presets.md's ground truth: one mechanism at three
@@ -384,3 +386,34 @@ function chainSchema(n: number): SchemaIndex {
   }
   return out
 }
+
+/**
+ * `validateTypes`' name charset (`docs/specs/foundation/multi-site.md` decision 7):
+ * the one `validate.ts` already requires of a type named in a request, so nothing
+ * a host can use today is newly refused — and nothing can be named `promo:north`,
+ * which a layer id (`sng_<type>:<scope>`) would read as a scope.
+ */
+describe('validateTypes: the type-name charset', () => {
+  const index: SchemaIndex = { hero }
+  const typed = (name: string): DocumentType[] => [
+    { name, label: 'Page', kind: 'page', root: 'hero' },
+  ]
+
+  it('accepts letters, digits, underscores and hyphens', () => {
+    for (const name of ['page', 'Page', 'site_settings', 'news-item', 'v2', 'A-b_9']) {
+      expect(() => validateTypes(typed(name), index)).not.toThrow()
+    }
+  })
+
+  it('refuses a colon, which a layer id would read as a scope', () => {
+    expect(() => validateTypes(typed('promo:north'), index)).toThrow(
+      /'promo:north' may use only letters, digits/,
+    )
+  })
+
+  it('refuses everything else the request charset refuses', () => {
+    for (const name of ['news item', 'news.item', 'a/b', 'caf\u00e9', 'x\n']) {
+      expect(() => validateTypes(typed(name), index)).toThrow(/may use only letters, digits/)
+    }
+  })
+})

@@ -4,7 +4,7 @@
  */
 import { Hono } from 'hono'
 import { envelope, FolioError, INTERNAL } from './errors'
-import { withActor, withBindings } from './middleware'
+import { withActor, withBindings, withScope } from './middleware'
 import { accessRoutes } from './routes/access'
 import { API_VERSION, apiRoutes } from './routes/api'
 import { assetFileRoutes, assetRoutes } from './routes/assets'
@@ -22,6 +22,7 @@ import { shareRoutes, sharePageRoutes } from './routes/preview'
 import { redirectRoutes } from './routes/redirects'
 import { scheduleRoutes } from './routes/schedules'
 import { shellRoutes } from './routes/shell'
+import { siteRoutes } from './routes/sites'
 import { spaceRoutes } from './routes/space'
 import { storyRoutes } from './routes/stories'
 import type { FolioRuntime } from './runtime'
@@ -54,6 +55,12 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // nothing and — the part that matters — makes it depend on nothing new. See
   // middleware.ts.
   app.use('*', withBindings(config))
+
+  // The scope and the gated site `handle()` passed in its internal headers
+  // (`../../docs/specs/foundation/multi-site.md` decision 11), ahead of the actor,
+  // which will need the scope to know which role applies. Reads nothing on a
+  // deployment with no `sites`.
+  app.use('*', withScope(rt))
 
   // Straight after the bindings, because it needs them (behind their thunk) and
   // because every route below reads `c.var.actor`. It resolves an identity; it
@@ -167,6 +174,9 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   app.route('/api', migrationRoutes<Env>(rt))
   app.route('/api', contentRoutes<Env>(rt))
   app.route('/api', spaceRoutes<Env>(rt))
+  // `/sites*`, the registry (`multi-site.md` decision 1). Unscoped and platform
+  // tier; mounts nothing on a deployment with no `sites`.
+  app.route('/api', siteRoutes<Env>(rt))
 
   /**
    * `{base}/mcp` — the MCP endpoint (`../../docs/specs/platform/mcp-server.md`

@@ -7,6 +7,7 @@
  * uses `loadStory`.
  */
 import { Hono } from 'hono'
+import { SINGLE_SITE_CHAIN } from '../../core/sites'
 import { type SocketIdentity, withIdentity } from '../auth/identity'
 import { READ_DRAFT } from '../auth/roles'
 import { requireHtmlAccess } from '../middleware'
@@ -164,7 +165,7 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.get('/edit', requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {
     const db = c.var.bindings().db
-    const root = await storyByPath(db, '')
+    const root = await storyByPath(db, SINGLE_SITE_CHAIN, '')
     const first = root ?? (await listStories(db, { limit: 1, offset: 0 }))[0]
     return first ? c.redirect(`${rt.base}/edit/${first.id}`) : c.notFound()
   })

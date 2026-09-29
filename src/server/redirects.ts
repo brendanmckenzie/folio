@@ -22,6 +22,7 @@
  *   a path that a write has just this moment vacated.
  */
 import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
+import { DEFAULT_SITE } from '../core/sites'
 import { isSafeHref } from '../core/values'
 import type { FolioDb } from './db'
 import type { FolioLogger } from './types'
@@ -141,7 +142,11 @@ export function redirectStatements(db: FolioDb, input: RedirectWrite): D1Prepare
     // 3. The redirect for the path just vacated. `or replace` because the same
     //    path can be vacated more than once over a site's life. The key is
     //    `(site_id, from_path)` since `0011_sites.sql`, so the site is bound
-    //    rather than left to the column default; single-site until phase 2.
+    //    rather than left to the column default. **All three statements are
+    //    still single-site**: the first two do not bind `site_id`, so on a
+    //    multi-site deployment a rename on one site would rewrite another's
+    //    redirects. Threading the scope through the write paths is spec 23's
+    //    phase 7, which owns the routes that call this.
     db
       .prepare(
         `insert or replace into redirects (from_path, to_path, status, source, story_id, created_at, site_id)
@@ -152,17 +157,31 @@ export function redirectStatements(db: FolioDb, input: RedirectWrite): D1Prepare
 }
 
 /**
- * Clears any redirect that vacates `path`, unrun: `createStory` batches this
- * alongside its insert so a path a redirect currently claims is reachable again
- * the moment a story is created there (edge case: "a path vacated and
- * reoccupied by a different story").
+ * Clears any redirect that vacates `path` in one scope, unrun: `createStory`
+ * batches this alongside its insert so a path a redirect currently claims is
+ * reachable again the moment a story is created there (edge case: "a path
+ * vacated and reoccupied by a different story").
+ *
+ * Scoped, because the story being created is: another site's redirect at the
+ * same path is that site's routing, and a page appearing on this one says
+ * nothing about it. Bound either way, since the key is `(site_id, from_path)`.
  */
-export function clearRedirectAtStatement(db: FolioDb, path: string): D1PreparedStatement {
-  return db.prepare('delete from redirects where from_path = ?').bind(normalisePath(path))
+export function clearRedirectAtStatement(
+  db: FolioDb,
+  path: string,
+  site: string = DEFAULT_SITE,
+): D1PreparedStatement {
+  return db
+    .prepare('delete from redirects where site_id = ? and from_path = ?')
+    .bind(site, normalisePath(path))
 }
 
 /**
- * A redirect for `path`, or null. One indexed read on the primary key.
+ * A redirect for `path`, or null: the nearest one in `chain`
+ * (`../../docs/specs/foundation/multi-site.md` decision 5). One read on the
+ * primary key, `(site_id, from_path)` — which is why the chain is bound even on a
+ * single-site deployment, where it is `['default']`: without it the lookup is a
+ * scan of the table.
  *
  * `isSafeHref` is re-checked here, not only on write, so a row written by an
  * older build or a hand-run script cannot put `javascript:` in a `Location`
@@ -170,11 +189,17 @@ export function clearRedirectAtStatement(db: FolioDb, path: string): D1PreparedS
  */
 export async function lookupRedirect(
   db: FolioDb,
+  chain: readonly string[],
   path: string,
   logger: FolioLogger = console,
 ): Promise<{ to: string; status: number } | null> {
+  if (chain.length === 0) return null
   const from = normalisePath(path)
-  return redirectOf(from, await redirectAtStatement(db, path).first<RedirectRow>(), logger)
+  const { results } = await redirectAtStatement(db, chain, path).all<
+    RedirectRow & { site: string }
+  >()
+  const nearest = chain.map((scope) => results.find((row) => row.site === scope)).find(Boolean)
+  return redirectOf(from, nearest && { to: nearest.to, status: nearest.status }, logger)
 }
 
 /** What a redirect lookup selects, before `redirectOf` has screened it. */
@@ -184,11 +209,51 @@ export type RedirectRow = { to: string; status: number }
  * The lookup half of `lookupRedirect`, as a statement rather than an answer, so
  * a caller that is already asking the database something else can send both
  * together. `pathMiss` in stories.ts is the one that does.
+ *
+ * Every scope's row in the chain, each carrying its `site`: which one wins is
+ * decision 5's walk, and that is the caller's (`lookupRedirect` here,
+ * `pickServing` in stories.ts). The path is normalised here, so a caller passes
+ * whatever the request said.
  */
-export function redirectAtStatement(db: FolioDb, path: string): D1PreparedStatement {
+export function redirectAtStatement(
+  db: FolioDb,
+  chain: readonly string[],
+  path: string,
+): D1PreparedStatement {
+  const holes = chain.map(() => '?').join(', ')
   return db
-    .prepare('select to_path as "to", status from redirects where from_path = ?')
-    .bind(normalisePath(path))
+    .prepare(
+      `select to_path as "to", status, site_id as site from redirects
+       where site_id in (${holes}) and from_path = ?`,
+    )
+    .bind(...chain, normalisePath(path))
+}
+
+/**
+ * Every scope's redirect at each of `paths`, within `chain` — the redirects half of
+ * `resolve()`'s breadcrumb pick on a multi-site chain (`multi-site.md` decision 5).
+ * Each row carries its `path` and `site`, because which one applies is the
+ * caller's walk.
+ *
+ * Unchunked: `paths` is a story's ancestors, as many as it is deep, and the chain
+ * is at most three scopes.
+ */
+export async function redirectsAtPaths(
+  db: FolioDb,
+  chain: readonly string[],
+  paths: readonly string[],
+): Promise<(RedirectRow & { site: string; path: string })[]> {
+  if (chain.length === 0 || paths.length === 0) return []
+  const scopes = chain.map(() => '?').join(', ')
+  const holes = paths.map(() => '?').join(', ')
+  const { results } = await db
+    .prepare(
+      `select from_path as path, to_path as "to", status, site_id as site from redirects
+       where site_id in (${scopes}) and from_path in (${holes})`,
+    )
+    .bind(...chain, ...paths.map(normalisePath))
+    .all<RedirectRow & { site: string; path: string }>()
+  return results
 }
 
 /**

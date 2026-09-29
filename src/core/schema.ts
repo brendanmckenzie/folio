@@ -291,12 +291,24 @@ export function summarise(
  * should throw once, before a request is served, rather than becoming a
  * runtime 500 on whichever code path reaches it first.
  */
+const TYPE_NAME = /^[A-Za-z0-9_-]+$/
+
 export function validateTypes(types: readonly DocumentType[], schema: SchemaIndex): void {
   if (types.length === 0) throw new Error('folio: `types` is empty; declare at least one')
 
   const seen = new Set<string>()
   for (const type of types) {
     if (!type.name) throw new Error('folio: a document type has no `name`')
+    // The charset a type named in a request already has to pass (`validate.ts`'s
+    // `TYPE_NAME`), so no name a host can use today is newly refused. What it buys
+    // is the layer ids of multi-site (`multi-site.md` decision 7): `sng_<type>:<scope>`
+    // is parsed at the colon, and a type named `promo:north` would read as the
+    // `promo` layer of a scope called `north`.
+    if (!TYPE_NAME.test(type.name)) {
+      throw new Error(
+        `folio: document type '${type.name}' may use only letters, digits, '_' and '-'`,
+      )
+    }
     if (seen.has(type.name)) throw new Error(`folio: duplicate document type '${type.name}'`)
     seen.add(type.name)
 

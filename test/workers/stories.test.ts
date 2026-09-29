@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Doc } from '../../src/core/doc'
 import type { DocumentType } from '../../src/core/schema'
+import { SINGLE_SITE_CHAIN } from '../../src/core/sites'
 import { envelope, FolioError, rethrow } from '../../src/server/errors'
 import type { PublishDeps } from '../../src/server/publish'
 import { unpublish } from '../../src/server/publish'
@@ -206,7 +207,7 @@ describe('duplicateStory', () => {
     expect(dup.slug).toBe('about-2')
     expect(dup.path).toBe('about-2')
     // The source is untouched: still at its own path, still there.
-    expect(await storyByPath(env.DB, 'about')).not.toBeNull()
+    expect(await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'about')).not.toBeNull()
   })
 
   it('defaults to the source’s own parent, landing as a sibling', async () => {
@@ -252,9 +253,9 @@ describe('updateStory', () => {
     expect(updated.slug).toBe('about-us')
     expect(updated.path).toBe('about-us')
 
-    const team = await storyByPath(env.DB, 'about-us/team')
+    const team = await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'about-us/team')
     expect(team?.id).toBe('sty_team')
-    expect(await storyByPath(env.DB, 'about/team')).toBeNull()
+    expect(await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'about/team')).toBeNull()
   })
 
   /**
@@ -444,14 +445,17 @@ describe('redirects (redirects.md): captured inside updateStory/createStory', ()
       .bind('bad', 'javascript:alert(1)', 301, Date.now())
       .run()
 
-    expect(await lookupRedirect(env.DB, 'bad')).toBeNull()
+    expect(await lookupRedirect(env.DB, SINGLE_SITE_CHAIN, 'bad')).toBeNull()
   })
 
   it('lookupRedirect normalises case, slashes and query strings on the way in', async () => {
     await updateStory(env.DB, 'sty_about', { slug: 'about-us' })
 
-    expect(await lookupRedirect(env.DB, '/About/')).toEqual({ to: 'about-us', status: 301 })
-    expect(await lookupRedirect(env.DB, 'about?utm_source=x')).toEqual({
+    expect(await lookupRedirect(env.DB, SINGLE_SITE_CHAIN, '/About/')).toEqual({
+      to: 'about-us',
+      status: 301,
+    })
+    expect(await lookupRedirect(env.DB, SINGLE_SITE_CHAIN, 'about?utm_source=x')).toEqual({
       to: 'about-us',
       status: 301,
     })
@@ -558,22 +562,22 @@ describe('unpublishStoryStatement', () => {
 
 describe('storyStatus', () => {
   it('is "unknown" for a path with no story at all', async () => {
-    expect(await storyStatus(env.DB, 'does-not-exist')).toBe('unknown')
+    expect(await storyStatus(env.DB, SINGLE_SITE_CHAIN, 'does-not-exist')).toBe('unknown')
   })
 
   it('is "unknown" for a story that has never been published', async () => {
-    expect(await storyStatus(env.DB, 'about')).toBe('unknown')
+    expect(await storyStatus(env.DB, SINGLE_SITE_CHAIN, 'about')).toBe('unknown')
   })
 
   it('is "live" once published', async () => {
     await publishStoryStatement(env.DB, 'sty_about', pageDoc('Live'), 'About', 0).statement.run()
-    expect(await storyStatus(env.DB, 'about')).toBe('live')
+    expect(await storyStatus(env.DB, SINGLE_SITE_CHAIN, 'about')).toBe('live')
   })
 
   it('is "unpublished" once taken down, so a host can answer 410 instead of 404', async () => {
     await publishStoryStatement(env.DB, 'sty_about', pageDoc('Live'), 'About', 0).statement.run()
     await unpublishStoryStatement(env.DB, 'sty_about', 'alice').statement.run()
-    expect(await storyStatus(env.DB, 'about')).toBe('unpublished')
+    expect(await storyStatus(env.DB, SINGLE_SITE_CHAIN, 'about')).toBe('unpublished')
   })
 })
 
@@ -675,12 +679,12 @@ describe('deleteStoryStatement', () => {
     expect([...(found?.ids ?? [])].sort()).toEqual(['sty_about', 'sty_team'])
 
     // Still there: the statement has not been executed yet.
-    expect(await storyByPath(env.DB, 'about')).not.toBeNull()
+    expect(await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'about')).not.toBeNull()
 
     // Plural, and batched: `storyStatements` is one `delete from stories` per
     // `BIND_BUDGET`-sized chunk of the subtree, so a caller runs the group.
     await env.DB.batch(found!.storyStatements)
-    expect(await storyByPath(env.DB, 'about')).toBeNull()
+    expect(await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'about')).toBeNull()
   })
 
   it('returns null for an unknown id, without preparing any statements', async () => {
@@ -711,7 +715,7 @@ describe('deleteStoryStatement', () => {
       expect((await redirectFor('about'))?.to).toBe('')
       expect((await redirectFor('about/team'))?.to).toBe('')
 
-      expect(await storyByPath(env.DB, 'about')).toBeNull()
+      expect(await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'about')).toBeNull()
     })
 
     it("redirects to the deleted node's own parent, not the root, when it is nested", async () => {
@@ -735,16 +739,16 @@ describe('deleteStoryStatement', () => {
 
 describe('storyByPath', () => {
   it('resolves the root story at the empty-string path', async () => {
-    expect((await storyByPath(env.DB, ''))?.id).toBe('sty_home')
+    expect((await storyByPath(env.DB, SINGLE_SITE_CHAIN, ''))?.id).toBe('sty_home')
   })
 
   it('resolves nested stories by their full path', async () => {
-    expect((await storyByPath(env.DB, 'about'))?.id).toBe('sty_about')
-    expect((await storyByPath(env.DB, 'about/team'))?.id).toBe('sty_team')
+    expect((await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'about'))?.id).toBe('sty_about')
+    expect((await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'about/team'))?.id).toBe('sty_team')
   })
 
   it('returns null for an unknown path', async () => {
-    expect(await storyByPath(env.DB, 'nope')).toBeNull()
+    expect(await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'nope')).toBeNull()
   })
 })
 
@@ -860,7 +864,7 @@ describe('document types: createStory per kind', () => {
     // The whole point of checkpoint 2: no slug suffix, no path collision.
     expect(page.slug).toBe('contact')
     expect(page.path).toBe('contact')
-    expect((await storyByPath(env.DB, 'contact'))?.id).toBe(page.id)
+    expect((await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'contact'))?.id).toBe(page.id)
   })
 
   it('scopes an unrouted slug to its type, bumping a collision within it', async () => {
@@ -903,7 +907,7 @@ describe('document types: createStory per kind', () => {
 
     expect(insight.type).toBe('insight')
     expect(insight.path).toBe('insights/hello')
-    expect((await storyByPath(env.DB, 'insights/hello'))?.id).toBe(insight.id)
+    expect((await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'insights/hello'))?.id).toBe(insight.id)
   })
 
   describe('`under`', () => {
@@ -1168,7 +1172,7 @@ describe('document types: updateStory across the routed/unrouted fence', () => {
 
     await updateStory(env.DB, 'sty_about', { slug: 'about-us' }, TYPES)
 
-    expect((await storyByPath(env.DB, 'about-us/team'))?.id).toBe('sty_team')
+    expect((await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'about-us/team'))?.id).toBe('sty_team')
     const after = await storyById(env.DB, ada.id)
     expect(after?.path).toBeNull()
     expect(after?.updatedAt).toBe(before?.updatedAt)
@@ -1244,7 +1248,7 @@ describe('document types: delete and the deleted-hook paths', () => {
     const ada = await createStory(env.DB, { title: 'Ada', type: PERSON }, TYPES)
     expect(await deleteStory(env.DB, ada.id, TYPES)).toEqual([ada.id])
     expect((await listDocumentPage(env.DB, 'person', 'title')).rows).toEqual([])
-    expect(await storyByPath(env.DB, 'about/team')).not.toBeNull()
+    expect(await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'about/team')).not.toBeNull()
   })
 })
 
@@ -1255,11 +1259,11 @@ describe('document types: routing never reaches an unrouted document', () => {
 
     // Published, and still unreachable by any path — including the root's ''.
     expect((await storyById(env.DB, ada.id))?.publishedAt).not.toBeNull()
-    expect(await storyByPath(env.DB, '')).not.toBeNull()
-    expect((await storyByPath(env.DB, ''))?.id).toBe('sty_home')
-    expect(await storyByPath(env.DB, 'ada')).toBeNull()
-    expect(await storyStatus(env.DB, 'ada')).toBe('unknown')
-    expect(await publishedDoc(env.DB, 'ada')).toBeNull()
+    expect(await storyByPath(env.DB, SINGLE_SITE_CHAIN, '')).not.toBeNull()
+    expect((await storyByPath(env.DB, SINGLE_SITE_CHAIN, ''))?.id).toBe('sty_home')
+    expect(await storyByPath(env.DB, SINGLE_SITE_CHAIN, 'ada')).toBeNull()
+    expect(await storyStatus(env.DB, SINGLE_SITE_CHAIN, 'ada')).toBe('unknown')
+    expect(await publishedDoc(env.DB, SINGLE_SITE_CHAIN, 'ada')).toBeNull()
 
     // But it does resolve by id, which is how a reference reaches it.
     expect(await publishedDocsByIds(env.DB, [ada.id])).toEqual({ [ada.id]: pageDoc('Ada') })

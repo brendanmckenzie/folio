@@ -6,6 +6,7 @@
  */
 import { Hono } from 'hono'
 import { decodeCursor } from '../../core/pagination'
+import { SINGLE_SITE_CHAIN } from '../../core/sites'
 import { actorString, MANAGE, READ } from '../auth/roles'
 import { FolioError } from '../errors'
 import { hookCtx, requireAccess } from '../middleware'
@@ -28,7 +29,7 @@ import type { FolioDb } from '../db'
  * manual add can create that decision 3's write-time collapse never sees,
  * because there is no path being vacated here for that collapse to run on. */
 async function pointsBackAt(db: FolioDb, to: string, from: string): Promise<Redirect['to'] | null> {
-  const back = await lookupRedirect(db, to)
+  const back = await lookupRedirect(db, SINGLE_SITE_CHAIN, to)
   return back && normalisePath(back.to) === from ? back.to : null
 }
 
@@ -105,7 +106,7 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       )
     }
 
-    const occupied = await storyByPath(db, from)
+    const occupied = await storyByPath(db, SINGLE_SITE_CHAIN, from)
     if (occupied) {
       throw new FolioError(
         'conflict',

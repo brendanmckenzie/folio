@@ -41,6 +41,13 @@ import {
   validatePresets,
   validateTypes,
 } from '../core/schema'
+import {
+  type Registry as SiteRegistry,
+  SINGLE_SITE_CHAIN,
+  type SiteContext,
+  type SiteRef,
+  type Surface,
+} from '../core/sites'
 import { ancestorPaths, type StoryMeta, type StoryNode } from '../core/story'
 import { type ResolvedAuth, resolveAuth } from './auth/config'
 import { cachePurgeHooks, type PurgeCapability } from './cache-purge'
@@ -59,7 +66,16 @@ import {
 import type { PublishDeps } from './publish'
 import { type QueryDeps, runQuery } from './query'
 import { SPACE_NAME, spaceBroadcastHooks } from './space-events'
-import { ensureSingleton, listStories, publishedDocsByIds, storiesFor, storyById } from './stories'
+import { redirectsAtPaths } from './redirects'
+import { readRegistry, registrySnapshot, type ResolvedSites } from './sites'
+import {
+  ensureSingleton,
+  listStories,
+  pickServing,
+  publishedDocsByIds,
+  storiesFor,
+  storyById,
+} from './stories'
 import type {
   FolioLogger,
   ReadBindings,
@@ -71,6 +87,12 @@ import type {
 import type { FolioDb } from './db'
 
 const DEFAULT_BASE = '/folio'
+
+/** `url`'s path, query and fragment on another origin. */
+function onOrigin(url: string, origin: string): string {
+  const parsed = new URL(url, origin)
+  return `${origin}${parsed.pathname}${parsed.search}${parsed.hash}`
+}
 
 /** Client entries and stylesheets for one of the two HTML pages Folio serves. */
 export interface PageAssets {
@@ -115,6 +137,43 @@ export interface ResolveOptions {
    * document's own links, references, ancestors and the documents it pulls in.
    */
   stories?: 'needed' | 'all'
+  /**
+   * The site this render is for (`../../docs/specs/foundation/multi-site.md`
+   * decision 3), on a deployment with `sites`. **Every id-set read takes its
+   * chain**, so a reference, a link, a collection or an ancestor on one site never
+   * resolves to another site's content: an id outside the chain resolves exactly
+   * like a deleted one. It also fills `Resolution.site` and `.path`.
+   *
+   * Absent is the single-site chain, and a resolution with neither field — which
+   * is what keeps a deployment with no `sites` byte-identical. `null` is a
+   * multi-site render for no site: an empty chain, which resolves nothing.
+   */
+  site?: SiteRender | null
+}
+
+/** The rendering site as `resolve` takes it: the gated row, its surface, its chain. */
+export interface SiteRender {
+  site: SiteRef
+  surface: Surface
+  chain: readonly string[]
+}
+
+/**
+ * `FolioConfig.sites`, validated, plus the one registry snapshot this isolate
+ * holds (`server/sites.ts`). Null on a deployment with no `sites`, and then
+ * nothing anywhere reads the registry.
+ */
+export interface SitesRuntime extends ResolvedSites {
+  /** The registry, from this isolate's ten-second snapshot. */
+  registry: (env: unknown) => Promise<SiteRegistry>
+  /** The registry straight from the primary, for a write validating a claim. */
+  fresh: (env: unknown) => Promise<SiteRegistry>
+  /** Drop the snapshot, after this isolate wrote a registry change. */
+  drop: () => void
+  /** The configured globals and the settings type: every document that layers. */
+  layered: readonly string[]
+  /** The raw binding, for the `first-primary` registry read and nothing else. */
+  rawDb: (env: unknown) => D1Database
 }
 
 export interface FolioRuntime {
@@ -252,6 +311,10 @@ export interface FolioRuntime {
   projection: (story: StoryMeta, doc: Doc) => ContentProjection
   /** Where the routes are mounted, with no trailing slash. */
   base: string
+  /** `FolioConfig.sites`, validated, or null for a deployment with no `sites`. */
+  sites: SitesRuntime | null
+  /** The host's `route`, or the single-site default. */
+  route: (path: string, locale?: string, site?: SiteRef) => string
   /** True when a Vite dev client is configured, so the pages ship the preamble. */
   dev: boolean
   /**
@@ -262,8 +325,15 @@ export interface FolioRuntime {
   draftMode: boolean
   /** A story's public URL, and the same URL with the preview flag on it. */
   withUrls: <T extends StoryMeta>(story: T) => T
+  /**
+   * `withUrls` for one site of a multi-site deployment: `route` is handed the
+   * site, and the preview URLs are on its preview origin. A function returning
+   * the decorator, rather than a second parameter on `withUrls`, because
+   * `rows.map(rt.withUrls)` is the idiom and would hand it the index.
+   */
+  urlsFor: (site: SiteRef | undefined) => <T extends StoryMeta>(story: T) => T
   /** `withUrls` over a whole tree. */
-  decorate: (nodes: StoryNode[]) => StoryNode[]
+  decorate: (nodes: StoryNode[], site?: SiteRef) => StoryNode[]
   /**
    * A starting document for one document type: its root block's `'default'`
    * preset, with the title written into the type's own title field.
@@ -300,8 +370,16 @@ export interface FolioRuntime {
     story: StoryMeta,
   ) => Promise<{ doc: Doc; syncId: number }>
   resolve: (bindings: ReadBindings, doc?: Doc, opts?: ResolveOptions) => Promise<Resolution>
-  /** `ContentQuery` over published content (`../../docs/specs/content-model/collections.md`). */
-  query: (bindings: ReadBindings, q: ContentQuery) => Promise<ContentPage>
+  /**
+   * `ContentQuery` over published content (`../../docs/specs/content-model/collections.md`),
+   * within a chain's served set. Absent is the single-site chain.
+   */
+  query: (
+    bindings: ReadBindings,
+    q: ContentQuery,
+    chain?: readonly string[],
+    site?: SiteRef,
+  ) => Promise<ContentPage>
   /**
    * Field names marked `indexed: true` on some declared type's root block — what a
    * `where` or an `order` is checked against before it reaches SQL, and what the
@@ -430,6 +508,76 @@ export function validateAssets(assets: FolioConfig<unknown>['assets']): void {
   }
 }
 
+/**
+ * `FolioConfig.sites`, checked at construction (`multi-site.md`, "Construction-time
+ * validation"), like every other key above: a mistake here is a deployment that
+ * serves nothing, and the request that would discover it is the first visitor's.
+ *
+ * Only what the config itself can get wrong. Everything about particular sites —
+ * ids, hostnames, preview origins, the claims between them — is validated where
+ * it is written, on the registry routes (`server/sites.ts`).
+ *
+ * - `admin` is an absolute origin, `https:` (or `http:` on `localhost`): the one
+ *   origin sign-in and passkeys bind to.
+ * - `settings`, when named, is a declared `singleton`.
+ * - `route` is present, because every site's URLs leave the admin origin and a
+ *   default relative `route` would resolve against it.
+ * - every layered type's layer id fits a story id (64 characters) for the longest
+ *   scope id a registry write accepts (32).
+ */
+export function validateSites<Env>(
+  config: FolioConfig<Env>,
+  types: readonly DocumentType[],
+  logger: FolioLogger,
+): ResolvedSites | null {
+  const sites = config.sites
+  if (!sites) return null
+
+  let admin: URL
+  try {
+    admin = new URL(sites.admin)
+  } catch {
+    throw new Error(`folio: 'sites.admin' must be an absolute origin, like 'https://cms.example'`)
+  }
+  const local = admin.hostname === 'localhost' || admin.hostname.endsWith('.localhost')
+  if (admin.protocol !== 'https:' && !(admin.protocol === 'http:' && local)) {
+    throw new Error(`folio: 'sites.admin' must be https (or http on localhost)`)
+  }
+  if (sites.admin.replace(/\/+$/, '') !== admin.origin) {
+    throw new Error(`folio: 'sites.admin' must be an origin with no path, like '${admin.origin}'`)
+  }
+  if (sites.settings !== undefined && typeByName(types, sites.settings)?.kind !== 'singleton') {
+    throw new Error(
+      `folio: 'sites.settings' names '${sites.settings}', which is not a singleton type`,
+    )
+  }
+  if (!config.route) {
+    throw new Error(
+      "folio: 'route' is required with 'sites': every site's URLs are absolute, on its own hosts",
+    )
+  }
+  // `sng_` + type + `:` + a 32-character scope id, within `validate.ts`'s 64.
+  const layered = [...(config.globals ?? []), ...(sites.settings ? [sites.settings] : [])]
+  for (const name of layered) {
+    if (`sng_${name}:`.length + 32 > 64) {
+      throw new Error(
+        `folio: '${name}' is too long to layer: its layer ids would exceed 64 characters`,
+      )
+    }
+  }
+  if (config.auth === 'open') {
+    logger.warn(
+      "folio: 'sites' with auth: 'open' — every scope is editable and every preview origin shows drafts to anyone who reaches it",
+    )
+  }
+  return {
+    admin: admin.origin,
+    adminHost: admin.hostname,
+    settings: sites.settings,
+    resolve: sites.resolve,
+  }
+}
+
 export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const registry = toRegistry(config.blocks)
   const schema = toSchemaIndex(registry)
@@ -503,8 +651,28 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // on a block that is no type's root, which would otherwise do nothing silently.
   const indexed = indexedFieldNames(schema, types)
   const base = config.basePath ?? DEFAULT_BASE
-  const route = config.route ?? ((path: string) => `/${path}`)
+  const route: FolioRuntime['route'] = config.route ?? ((path: string) => `/${path}`)
   const assetBase = `${base}/asset`
+
+  // Same timing, same reason: an admin origin that is not one, or a settings type
+  // that is not a singleton, is a deployment that serves nothing
+  // (`../../docs/specs/foundation/multi-site.md`). Null with no `sites`, and then
+  // no snapshot exists and nothing below ever reads the registry.
+  const resolvedSites = validateSites(config, types, logger)
+  const sites: SitesRuntime | null = resolvedSites
+    ? (() => {
+        const snapshot = registrySnapshot()
+        const rawDb = (env: unknown) => config.bindings(env as Env).db
+        return {
+          ...resolvedSites,
+          registry: (env: unknown) => snapshot.get(rawDb(env)),
+          fresh: (env: unknown) => readRegistry(rawDb(env)),
+          drop: snapshot.drop,
+          layered: [...globals, ...(resolvedSites.settings ? [resolvedSites.settings] : [])],
+          rawDb,
+        }
+      })()
+    : null
 
   const localeOf = (code: string | undefined) => localeContext(locales, code)
   /** Declared locales other than the source, in declaration order. */
@@ -525,8 +693,18 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    * immediately below) are unchanged; `'draft'` is `platform/mcp-server.md`
    * decision 5's chrome-free render, added by `withUrls` for `draftUrl`.
    */
-  const previewUrlFor = (path: string, locale?: string, mode: PreviewMode = 'preview') => {
-    const url = route(path, locale)
+  const previewUrlFor = (
+    path: string,
+    locale?: string,
+    mode: PreviewMode = 'preview',
+    site?: SiteRef,
+  ) => {
+    const live = route(path, locale, site)
+    // On a multi-site deployment drafts are served only on a site's preview
+    // origin (`multi-site.md` decision 13), so the preview URL is the live URL's
+    // path on that origin. A site with no preview origin keeps the live URL: its
+    // preview is unavailable, and the page it lands on says so.
+    const url = site?.preview ? onOrigin(live, site.preview) : live
     const flagged = `${url}${url.includes('?') ? '&' : '?'}_folio=${mode}`
     return locale === undefined || locale === locales?.default
       ? flagged
@@ -544,27 +722,30 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    * the source locale's, which keeps every existing consumer — a sitemap, the
    * admin's "View live" — reading the same value it always did.
    */
-  const withUrls = <T extends StoryMeta>(story: T): T => {
-    if (story.path === null) return story
-    const path = story.path
-    const decorated: T = {
-      ...story,
-      url: route(path),
-      previewUrl: previewUrlFor(path),
-      draftUrl: previewUrlFor(path, undefined, 'draft'),
+  const urlsFor =
+    (site: SiteRef | undefined) =>
+    <T extends StoryMeta>(story: T): T => {
+      if (story.path === null) return story
+      const path = story.path
+      const decorated: T = {
+        ...story,
+        url: route(path, undefined, site),
+        previewUrl: previewUrlFor(path, undefined, 'preview', site),
+        draftUrl: previewUrlFor(path, undefined, 'draft', site),
+      }
+      if (!locales) return decorated
+      return {
+        ...decorated,
+        urls: Object.fromEntries(locales.available.map((l) => [l.code, route(path, l.code, site)])),
+        previewUrls: Object.fromEntries(
+          locales.available.map((l) => [l.code, previewUrlFor(path, l.code, 'preview', site)]),
+        ),
+        draftUrls: Object.fromEntries(
+          locales.available.map((l) => [l.code, previewUrlFor(path, l.code, 'draft', site)]),
+        ),
+      }
     }
-    if (!locales) return decorated
-    return {
-      ...decorated,
-      urls: Object.fromEntries(locales.available.map((l) => [l.code, route(path, l.code)])),
-      previewUrls: Object.fromEntries(
-        locales.available.map((l) => [l.code, previewUrlFor(path, l.code)]),
-      ),
-      draftUrls: Object.fromEntries(
-        locales.available.map((l) => [l.code, previewUrlFor(path, l.code, 'draft')]),
-      ),
-    }
-  }
+  const withUrls = urlsFor(undefined)
 
   /**
    * The inverse of `route`, for the one place Folio needs it: its own preview
@@ -586,8 +767,8 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     return clean
   }
 
-  const decorate = (nodes: StoryNode[]): StoryNode[] =>
-    nodes.map((n) => ({ ...withUrls(n), children: decorate(n.children) }))
+  const decorate = (nodes: StoryNode[], site?: SiteRef): StoryNode[] =>
+    nodes.map((n) => ({ ...urlsFor(site)(n), children: decorate(n.children, site) }))
 
   /**
    * A starting document for one document type: its root block's own 'default'
@@ -697,6 +878,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     opts?: ResolveOptions,
   ): Promise<Resolution> => {
     const db = bindings.db
+    // The rendering site's chain, or the one scope of a deployment with no
+    // `sites`. Bound on every id-set read below either way (`stories.ts`'s
+    // `chainClause`).
+    const render = opts?.site ?? undefined
+    const chain = opts?.site === null ? [] : (render?.chain ?? SINGLE_SITE_CHAIN)
+    const urlsOf = urlsFor(render?.site)
     const active = localeOf(opts?.locale)
     // Absent for the source locale, so a default-locale resolution is byte-
     // identical to a pre-localisation one (`localisation.md` decision 5). Every
@@ -721,13 +908,44 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     const remember = (rows: readonly StoryMeta[]) => {
       for (const row of rows) known.set(row.id, row)
     }
+    const requested = [...new Set([...directIds, ...globalIds])]
+    const ancestors = wantAll ? [] : ancestorPaths(opts?.story?.path ?? null)
     const pass1 = wantAll
-      ? listStories(db)
-      : storiesFor(
-          db,
-          [...new Set([...directIds, ...globalIds])],
-          ancestorPaths(opts?.story?.path ?? null),
-        )
+      ? listStories(db, undefined, chain)
+      : storiesFor(db, requested, ancestors, chain)
+    /**
+     * **Breadcrumb ancestors follow decision 5** (`multi-site.md`): pass one reads
+     * every scope's row at each ancestor path, and keeps per path only the row
+     * `pickServing` would serve there — so a site that forked `info` shows its own
+     * Info in the breadcrumb of an inherited `info/parking`, and a nearer redirect
+     * leaves the crumb out rather than linking to a page the site does not serve.
+     *
+     * The redirects at those paths are a second statement, sent alongside pass
+     * one, and only on a chain of more than one scope: with one scope there is no
+     * shadowing to decide, which is why a single-site render's statement count
+     * does not move (`read-session.test.ts`).
+     */
+    const ancestorRedirects =
+      chain.length > 1 && ancestors.length > 0
+        ? redirectsAtPaths(db, chain, ancestors)
+        : Promise.resolve([])
+    const served = async (rows: readonly StoryMeta[]): Promise<StoryMeta[]> => {
+      if (chain.length <= 1 || ancestors.length === 0) return [...rows]
+      const redirects = await ancestorRedirects
+      // A row asked for by id stays whatever it is — a link to the shared `info`
+      // still resolves to it — and a row that is only here as a crumb stays only
+      // if it is the one this site serves at its path.
+      const byId = new Set(requested)
+      const crumb = (row: StoryMeta) => row.path !== null && ancestors.includes(row.path)
+      const out = rows.filter((row) => byId.has(row.id) || !crumb(row))
+      for (const path of ancestors) {
+        const here = rows.filter((row) => row.path === path)
+        const at = redirects.filter((r) => r.path === path)
+        const pick = pickServing(chain, here, at)
+        if (pick?.kind === 'story' && !byId.has(pick.story.id)) out.push(pick.story)
+      }
+      return out
+    }
 
     /**
      * The forms this document embeds (`../../docs/specs/content-model/forms.md` decision 4),
@@ -740,6 +958,8 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
      * A document with no `form` field issues no query at all: `formIds` answers
      * an empty array and this never touches D1.
      */
+    // Not yet scoped by the chain: forms are `forms.ts`'s, and scoping them is
+    // spec 23's phase 7 (`multi-site.md`, "Implementation plan").
     const formRows = formsByIds(db, doc ? formIds(doc, schema) : [], logger)
 
     /** Pass two: the documents this one pulls in — references, and every global. */
@@ -747,7 +967,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     let globalDocs: Record<string, Doc> | undefined
 
     if (opts?.draft) {
-      remember(await pass1)
+      remember(await served(await pass1))
       // A reference to an id with no story row is unresolvable, and in draft mode
       // asking for its draft would *create* a Durable Object for a deleted story.
       // That is what keeps this branch sequential where the published one below
@@ -757,15 +977,27 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
         const [refEntries, globalEntries] = await Promise.all([
           Promise.all(liveRefIds.map(async (id) => [id, await draft(bindings, id)] as const)),
           Promise.all(
-            globals.map(async (name) => {
+            globals.map(async (name, i) => {
               const type = typeOf(name)!
+              // **A render on a multi-site deployment never writes** (decision
+              // 8): a global with no row in the chain is absent rather than
+              // ensured into existence. Layers are spec 23's phase 4; until
+              // then a site reads only the rows its chain already holds.
+              if (sites) {
+                const meta = known.get(globalIds[i]!)
+                return meta ? ([name, await draftFor(bindings, meta)] as const) : null
+              }
               const meta = await ensureSingleton(db, type, schemaId)
               return [name, await draftFor(bindings, meta)] as const
             }),
           ),
         ])
         docs = Object.fromEntries(refEntries)
-        globalDocs = globals.length ? Object.fromEntries(globalEntries) : undefined
+        globalDocs = globals.length
+          ? Object.fromEntries(
+              globalEntries.filter((entry): entry is readonly [string, Doc] => entry !== null),
+            )
+          : undefined
       }
     } else {
       /**
@@ -778,9 +1010,9 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
        */
       const wanted = [...new Set([...refIds, ...globalIds])]
       const [rows, combined] = await Promise.all([
-        pass1,
+        pass1.then(served),
         wanted.length > 0
-          ? publishedDocsByIds(db, wanted)
+          ? publishedDocsByIds(db, wanted, chain)
           : Promise.resolve<Record<string, Doc>>({}),
       ])
       remember(rows)
@@ -813,7 +1045,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
           if (!known.has(id)) nested.add(id)
         }
       }
-      if (nested.size > 0) remember(await storiesFor(db, [...nested]))
+      if (nested.size > 0) remember(await storiesFor(db, [...nested], [], chain))
     }
 
     /**
@@ -826,7 +1058,8 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
      * from the map, and `resolveValue` answers `null` for it: the same posture a
      * `reference` to a deleted document takes.
      */
-    const formPage = opts?.story?.path != null ? route(opts.story.path, active?.code) : undefined
+    const formPage =
+      opts?.story?.path != null ? route(opts.story.path, active?.code, render?.site) : undefined
     const forms = Object.fromEntries(
       (await formRows).map((form) => [
         form.id,
@@ -839,7 +1072,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     )
 
     const resolution: Resolution = {
-      ...buildResolution([...known.values()].map(withUrls), assetBase),
+      ...buildResolution([...known.values()].map(urlsOf), assetBase),
       ...localeField,
       ...pageField,
       ...searchField,
@@ -848,6 +1081,10 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       ...(Object.keys(docs).length > 0 ? { docs } : {}),
       ...(globalDocs ? { globals: globalDocs } : {}),
       ...(Object.keys(forms).length > 0 ? { forms } : {}),
+      // Multi-site only, and last, so a single-site resolution has neither key
+      // and serialises byte for byte as it always did (decision 15).
+      ...(render ? { site: siteContext(render) } : {}),
+      ...(render && opts?.story?.path != null ? { path: opts.story.path } : {}),
     }
 
     /** Pass four: the collection queries this document contains, run once each. */
@@ -858,7 +1095,8 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
 
     const answers = await Promise.all(
       [...queries].map(
-        async ([key, q]) => [key, await runQuery(queryDeps(db), q, { locale: active })] as const,
+        async ([key, q]) =>
+          [key, await runQuery(queryDeps(db, chain, render?.site), q, { locale: active })] as const,
       ),
     )
     const collections: Record<string, ResolvedCollection> = Object.fromEntries(answers)
@@ -903,13 +1141,18 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   }
 
   /** What `runQuery` needs, assembled from this runtime. */
-  const queryDeps = (db: FolioDb): QueryDeps => ({
+  const queryDeps = (
+    db: FolioDb,
+    chain: readonly string[] = SINGLE_SITE_CHAIN,
+    site?: SiteRef,
+  ): QueryDeps => ({
     db,
     indexed,
     // `''` for the source locale, an undeclared code, or a site with no locales —
     // exactly what `indexRowsFor` writes for the same three cases.
     localeKey: (code) => localeOf(code)?.code ?? '',
-    withUrls,
+    withUrls: urlsFor(site),
+    chain,
     // `ResolvedGate` narrowed to the three things a SQL predicate can use
     // (`../../docs/specs/content-model/full-text-search.md` decision 11). `types`, not
     // `roots`: SQL sees `stories.type` and cannot see a root block's name.
@@ -919,8 +1162,24 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       : {}),
   })
 
-  const query = (bindings: ReadBindings, q: ContentQuery): Promise<ContentPage> =>
-    runQuery(queryDeps(bindings.db), q, { locale: localeOf(q.locale) })
+  const query = (
+    bindings: ReadBindings,
+    q: ContentQuery,
+    chain: readonly string[] = SINGLE_SITE_CHAIN,
+    site?: SiteRef,
+  ): Promise<ContentPage> =>
+    runQuery(queryDeps(bindings.db, chain, site), q, { locale: localeOf(q.locale) })
+
+  /** `Resolution.site` for a render (`multi-site.md` decision 15). */
+  const siteContext = (render: SiteRender): SiteContext => ({
+    id: render.site.id,
+    name: render.site.name,
+    group: render.site.group,
+    status: render.site.status,
+    surface: render.surface,
+    chain: render.chain,
+    layered: sites?.layered ?? globals,
+  })
 
   /**
    * The `content_index` / `content_refs` rows a publish writes
@@ -1036,9 +1295,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     titlesFor,
     projection,
     base,
+    sites,
+    route,
     dev: Boolean(config.assets?.devClient),
     draftMode: config.draftMode === true,
     withUrls,
+    urlsFor,
     decorate,
     seed,
     stub,

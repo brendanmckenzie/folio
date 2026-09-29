@@ -23,6 +23,7 @@ import { isKnownLocale } from '../../../core/locales'
 import type { Mutation } from '../../../core/mutations'
 import { fieldShapeError, fromNested, type NestedDoc, toNested } from '../../../core/nested'
 import { type DocumentType, SINGLETON_PREFIX, typeByName } from '../../../core/schema'
+import { SINGLE_SITE_CHAIN } from '../../../core/sites'
 import type { StoryMeta, StoryState } from '../../../core/story'
 import {
   actorName,
@@ -278,7 +279,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const byPath = async (c: Context<FolioEnv<Env>>) => {
     const bindings = c.var.bindings()
     const path = storyPathParam(c.req.param('path'))
-    const story = await storyByPath(bindings.db, path)
+    const story = await storyByPath(bindings.db, SINGLE_SITE_CHAIN, path)
     if (!story || story.path === null) throw new FolioError('not_found', 'No document at that path')
     const locale = askedLocale(c)
     if (c.req.query('status') === 'draft') {

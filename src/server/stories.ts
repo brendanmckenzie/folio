@@ -8,6 +8,7 @@ import {
   singletonId,
   typeByName,
 } from '../core/schema'
+import { DEFAULT_SITE, layerId, SINGLE_SITE_CHAIN } from '../core/sites'
 import {
   ancestorPaths,
   buildTree,
@@ -35,6 +36,7 @@ import {
   indexedValuesFor,
   referencesTo,
 } from './content-index'
+import { FolioError } from './errors'
 import type { StoryChange } from './hooks'
 import {
   clearRedirectAtStatement,
@@ -47,7 +49,7 @@ import {
 } from './redirects'
 import type { FolioMiss } from './types'
 import { clearSchedulesStatements } from './schedules'
-import { bindChunks, type FolioDb } from './db'
+import { BIND_BUDGET, bindChunks, type FolioDb } from './db'
 
 const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18n,
               published_at as publishedAt, unpublished_at as unpublishedAt,
@@ -152,6 +154,66 @@ function parseTitleI18n(raw: string | null | undefined): Record<string, string> 
 /** `withState`, for `query.ts`. See `STORY_COLS`. */
 export const toStoryMeta = withState
 
+/* ------------------------------------------------------------ scopes --- */
+
+/**
+ * `site_id in (?, …)` over a chain (`../../docs/specs/foundation/multi-site.md`
+ * decision 3), and its binds.
+ *
+ * **Bound on a single-site deployment too**, as `SINGLE_SITE_CHAIN`. `0011` put
+ * `site_id` at the front of every index it re-keyed, so a reader that leaves it
+ * out is no longer a seek but a scan of the table — the same rows, answered
+ * slowly, with nothing in any result to say so. `test/workers/query-plan.test.ts`
+ * reads the plans back.
+ *
+ * An empty chain — a scope nobody registered — is `0 = 1`: no rows, no binds, and
+ * never the `in ()` SQLite would refuse.
+ */
+export function chainClause(
+  chain: readonly string[],
+  column = 'site_id',
+): { sql: string; binds: string[] } {
+  if (chain.length === 0) return { sql: '0 = 1', binds: [] }
+  return { sql: `${column} in (${chain.map(() => '?').join(', ')})`, binds: [...chain] }
+}
+
+/**
+ * Decision 6's served set, as a `where` fragment over `stories`: every row in the
+ * chain, less each **routed** row that a nearer scope shadows by having, at the
+ * same path, a non-draft story or a redirect — decision 5's walk, stated once for
+ * a whole set rather than per path.
+ *
+ * What a collection, a search and a site's sitemap all list, so a sitemap never
+ * advertises a URL that redirects on that site and a collection never lists the
+ * shared page a site has forked. Records never shadow: an unrouted row has no
+ * path to be shadowed at. A draft does not shadow either, which is what keeps a
+ * fork being prepared from blanking the page visitors see.
+ *
+ * On a single-site chain this is `chainClause` and nothing more: there is no
+ * nearer scope, so there is nothing to shadow and no subquery to pay for.
+ */
+export function servedClause(chain: readonly string[]): { sql: string; binds: string[] } {
+  const own = chainClause(chain, 'stories.site_id')
+  if (chain.length <= 1) return own
+  const binds: string[] = [...own.binds, chain[0]!]
+  const shadowed: string[] = []
+  for (let i = 1; i < chain.length; i++) {
+    const nearer = chain.slice(0, i)
+    const holes = nearer.map(() => '?').join(', ')
+    shadowed.push(`(stories.site_id = ?
+      and not exists (select 1 from stories near
+                       where near.site_id in (${holes}) and near.path = stories.path
+                         and (near.published_at is not null or near.unpublished_at is not null))
+      and not exists (select 1 from redirects rd
+                       where rd.site_id in (${holes}) and rd.from_path = stories.path))`)
+    binds.push(chain[i]!, ...nearer, ...nearer)
+  }
+  return {
+    sql: `${own.sql} and (stories.path is null or stories.site_id = ? or ${shadowed.join(' or ')})`,
+    binds,
+  }
+}
+
 /**
  * Every story row.
  *
@@ -164,13 +226,26 @@ export const toStoryMeta = withState
 export async function listStories(
   db: FolioDb,
   opts?: { limit: number; offset: number },
+  /**
+   * The chain whose served set to answer (`servedClause`). Defaulted to the
+   * single-site chain, which is every row a deployment with no `sites` has.
+   *
+   * The unpaged read keeps `rowid` order, which is the order it had when it was
+   * a bare scan of the table: a caller building a map from this list — `resolve`'s
+   * `stories: 'all'` — serialises it in that order.
+   */
+  chain: readonly string[] = SINGLE_SITE_CHAIN,
 ): Promise<StoryMeta[]> {
+  const served = servedClause(chain)
   const { results } = opts
     ? await db
-        .prepare(`select ${COLS} from stories order by id limit ? offset ?`)
-        .bind(opts.limit, opts.offset)
+        .prepare(`select ${COLS} from stories where ${served.sql} order by id limit ? offset ?`)
+        .bind(...served.binds, opts.limit, opts.offset)
         .all<StoryRow>()
-    : await db.prepare(`select ${COLS} from stories`).all<StoryRow>()
+    : await db
+        .prepare(`select ${COLS} from stories where ${served.sql} order by rowid`)
+        .bind(...served.binds)
+        .all<StoryRow>()
   return results.map(withState)
 }
 
@@ -214,26 +289,62 @@ export async function storiesFor(
   db: FolioDb,
   ids: readonly string[],
   paths: readonly string[] = [],
+  /**
+   * The chain to read within (`multi-site.md` decision 3). **Every id-set read in
+   * `resolve()` passes one**, so a reference on one site to another site's story
+   * id resolves exactly like a deleted one. Absent, ids are read unscoped — a
+   * story id is unique across the deployment, so an id read is a primary-key seek
+   * either way — and `paths` is refused, because a path means nothing without a
+   * scope and an unscoped path read is a scan of every site's rows.
+   */
+  chain?: readonly string[],
 ): Promise<StoryMeta[]> {
   if (ids.length === 0 && paths.length === 0) return []
+  if (paths.length > 0 && chain === undefined) {
+    throw new Error('storiesFor: a path read needs the chain it is a path in')
+  }
+  if (chain?.length === 0) return []
 
   // One bind per term whichever column it constrains, so the two lists share a
-  // single budget rather than each getting one of their own.
+  // single budget rather than each getting one of their own — less the chain's
+  // binds, which each half of the `or` repeats.
   const terms: Term[] = [
     ...ids.map((id) => ['id', id] as const),
     ...paths.map((path) => ['path', path] as const),
   ]
+  const scope = chain ? chainClause(chain) : null
+  const perChunk = BIND_BUDGET - 2 * (scope?.binds.length ?? 0)
+  const chunks: Term[][] = []
+  for (let at = 0; at < terms.length; at += perChunk) chunks.push(terms.slice(at, at + perChunk))
 
   const pages = await Promise.all(
-    bindChunks(terms, 1).map(async (chunk) => {
+    chunks.map(async (chunk) => {
       const chunkIds = chunk.filter(([column]) => column === 'id').map(([, value]) => value)
       const chunkPaths = chunk.filter(([column]) => column === 'path').map(([, value]) => value)
       const clauses: string[] = []
-      if (chunkIds.length > 0) clauses.push(`id in (${chunkIds.map(() => '?').join(', ')})`)
-      if (chunkPaths.length > 0) clauses.push(`path in (${chunkPaths.map(() => '?').join(', ')})`)
+      const binds: string[] = []
+      // The chain inside each half rather than around the `or`, so each half is
+      // a seek on its own index — the primary key for ids, `stories_path`
+      // `(site_id, path)` for paths — and neither is a scan.
+      if (chunkIds.length > 0) {
+        const holes = chunkIds.map(() => '?').join(', ')
+        clauses.push(scope ? `(id in (${holes}) and ${scope.sql})` : `id in (${holes})`)
+        binds.push(...chunkIds, ...(scope?.binds ?? []))
+      }
+      if (chunkPaths.length > 0 && scope) {
+        clauses.push(`(${scope.sql} and path in (${chunkPaths.map(() => '?').join(', ')}))`)
+        binds.push(...scope.binds, ...chunkPaths)
+      }
+      // The order this read answered in before the chain made both halves seeks:
+      // `id` for ids alone (the primary key's order), `rowid` once a path is in
+      // the statement (after `0011` re-keyed `stories_path` with `site_id`
+      // leading, a bare `path in` could not use it and the read scanned).
+      // `resolve()` builds its story map from these rows and a map serialises in
+      // insertion order, so this is what keeps a resolution byte-identical.
+      const order = chunkPaths.length > 0 ? 'rowid' : 'id'
       const { results } = await db
-        .prepare(`select ${COLS} from stories where ${clauses.join(' or ')}`)
-        .bind(...chunkIds, ...chunkPaths)
+        .prepare(`select ${COLS} from stories where ${clauses.join(' or ')} order by ${order}`)
+        .bind(...binds)
         .all<StoryRow>()
       return results
     }),
@@ -266,12 +377,17 @@ type Term = readonly ['id' | 'path', string]
  * `parent_id` loop terminates here instead of recursing until D1 gives up.
  */
 export async function subtreeRows(db: FolioDb, id: string): Promise<StoryMeta[]> {
+  // The scope rides down the recursion because a child is always in its parent's
+  // scope (`createStory` refuses anything else), and because `stories_parent_ord`
+  // leads with `site_id` since `0011`: joining on `parent_id` alone would scan the
+  // table once per level.
   const { results } = await db
     .prepare(
-      `with recursive tree(id) as (
-         select id from stories where id = ?
+      `with recursive tree(id, site_id) as (
+         select id, site_id from stories where id = ?
          union
-         select s.id from stories s join tree t on s.parent_id = t.id
+         select s.id, s.site_id from stories s
+           join tree t on s.site_id = t.site_id and s.parent_id = t.id
        )
        select ${COLS} from stories where id in (select id from tree)`,
     )
@@ -360,6 +476,12 @@ function keyOf(order: keyof typeof ORDERS, row: StoryMeta): [string | number, st
 export interface StoryPageOptions {
   limit?: number
   cursor?: string
+  /**
+   * The one scope whose own rows to list (`multi-site.md`, "scope's own rows").
+   * Defaulted to `default`, the only scope a deployment with no `sites` has, and
+   * bound either way: every index a list reads leads with `site_id` since `0011`.
+   */
+  scope?: string
   /** Everything except `parentId`, which the level reader takes as its own
    * argument because it is structure rather than a filter. */
   filter?: StoryFilter
@@ -488,10 +610,10 @@ export async function listStoryLevel(
   const resume = keysetWhere(SIBLING_ORDER, cursor)
   const filters = storyFilters(opts.filter)
 
-  const scope = parentId === null ? 'parent_id is null' : 'parent_id = ?'
-  const scopeBinds = parentId === null ? [] : [parentId]
-  const narrow = ['path is not null', scope, ...filters.sql]
-  const narrowBinds = [...scopeBinds, ...filters.binds]
+  const level = parentId === null ? 'parent_id is null' : 'parent_id = ?'
+  const levelBinds = parentId === null ? [] : [parentId]
+  const narrow = ['site_id = ?', 'path is not null', level, ...filters.sql]
+  const narrowBinds = [opts.scope ?? DEFAULT_SITE, ...levelBinds, ...filters.binds]
 
   const [rows, total] = await Promise.all([
     db
@@ -519,7 +641,8 @@ export async function listStoryLevel(
 
 /** The correlated child count. See `StoryLevelRow`. */
 const CHILD_COUNT = `(select count(*) from stories kids
-                      where kids.parent_id = stories.id and kids.path is not null) as childCount`
+                      where kids.site_id = stories.site_id and kids.parent_id = stories.id
+                        and kids.path is not null) as childCount`
 
 /**
  * Every routed page, flat and paged, in one of three orderings — the `[ Tree |
@@ -540,19 +663,20 @@ export async function listStoriesFlat(
   const keyset = ORDERS[sort]
   const resume = keysetWhere(keyset, cursor)
   const filters = storyFilters(opts.filter)
-  const narrow = ['path is not null', ...filters.sql]
+  const narrow = ['site_id = ?', 'path is not null', ...filters.sql]
+  const narrowBinds = [opts.scope ?? DEFAULT_SITE, ...filters.binds]
 
   const [rows, total] = await Promise.all([
     db
       .prepare(
         `select ${COLS} from stories ${whereOf(...narrow, resume.sql)} ${orderBy(keyset)} limit ?`,
       )
-      .bind(...filters.binds, ...resume.binds, limit + 1)
+      .bind(...narrowBinds, ...resume.binds, limit + 1)
       .all<StoryRow>(),
     opts.count
       ? db
           .prepare(`select count(*) as n from stories ${whereOf(...narrow)}`)
-          .bind(...filters.binds)
+          .bind(...narrowBinds)
           .first<{ n: number }>()
       : null,
   ])
@@ -638,8 +762,11 @@ export async function listDocumentPage(
   // narrowing of it, and its absence means something specific (every unrouted
   // document) rather than "any type".
   const filters = storyFilters(opts.filter, { indexedText: true })
-  const narrow = type ? ['type = ?', ...filters.sql] : ['path is null', ...filters.sql]
-  const narrowBinds = type ? [type, ...filters.binds] : filters.binds
+  const narrow = type
+    ? ['site_id = ?', 'type = ?', ...filters.sql]
+    : ['site_id = ?', 'path is null', ...filters.sql]
+  const scope = opts.scope ?? DEFAULT_SITE
+  const narrowBinds = type ? [scope, type, ...filters.binds] : [scope, ...filters.binds]
 
   const [rows, total] = await Promise.all([
     db
@@ -737,18 +864,20 @@ export async function listRecentlyEdited(
   const keyset = ORDERS.edited
   const resume = keysetWhere(keyset, cursor)
   const filters = storyFilters(opts.filter)
+  const narrow = ['site_id = ?', ...filters.sql]
+  const narrowBinds = [opts.scope ?? DEFAULT_SITE, ...filters.binds]
 
   const [rows, total] = await Promise.all([
     db
       .prepare(
-        `select ${COLS} from stories ${whereOf(...filters.sql, resume.sql)} ${orderBy(keyset)} limit ?`,
+        `select ${COLS} from stories ${whereOf(...narrow, resume.sql)} ${orderBy(keyset)} limit ?`,
       )
-      .bind(...filters.binds, ...resume.binds, limit + 1)
+      .bind(...narrowBinds, ...resume.binds, limit + 1)
       .all<StoryRow>(),
     opts.count
       ? db
-          .prepare(`select count(*) as n from stories ${whereOf(...filters.sql)}`)
-          .bind(...filters.binds)
+          .prepare(`select count(*) as n from stories ${whereOf(...narrow)}`)
+          .bind(...narrowBinds)
           .first<{ n: number }>()
       : null,
   ])
@@ -777,11 +906,16 @@ export async function listRecentlyEdited(
  * positional arguments to put a scope in, and two ways of saying "pages only" is
  * exactly the drift decision 5 exists to prevent.
  */
-export async function countStories(db: FolioDb, filter?: StoryFilter): Promise<number> {
+export async function countStories(
+  db: FolioDb,
+  filter?: StoryFilter,
+  /** The scope counted, as `StoryPageOptions.scope`. */
+  scope: string = DEFAULT_SITE,
+): Promise<number> {
   const filters = storyFilters(filter)
   const row = await db
-    .prepare(`select count(*) as n from stories ${whereOf(...filters.sql)}`)
-    .bind(...filters.binds)
+    .prepare(`select count(*) as n from stories ${whereOf('site_id = ?', ...filters.sql)}`)
+    .bind(scope, ...filters.binds)
     .first<{ n: number }>()
   return row?.n ?? 0
 }
@@ -827,11 +961,17 @@ export async function countStories(db: FolioDb, filter?: StoryFilter): Promise<n
 export async function storiesMatching(
   db: FolioDb,
   filter: StoryFilter,
-  opts: { limit: number; after?: string | null; exclude?: readonly string[] },
+  opts: {
+    limit: number
+    after?: string | null
+    exclude?: readonly string[]
+    /** The scope walked, as `StoryPageOptions.scope`. */
+    scope?: string
+  },
 ): Promise<StoryMeta[]> {
   const filters = storyFilters(filter)
-  const sql = [...filters.sql]
-  const binds = [...filters.binds]
+  const sql = ['site_id = ?', ...filters.sql]
+  const binds: unknown[] = [opts.scope ?? DEFAULT_SITE, ...filters.binds]
   if (opts.after) {
     sql.push('id > ?')
     binds.push(opts.after)
@@ -867,6 +1007,13 @@ export interface SearchOptions extends StoryPageOptions {
   types?: readonly string[]
   /** Which twenty rows get ranked. See `core/story.ts`'s `SearchSort`. */
   sort?: SearchSort
+  /**
+   * The chain searched (`multi-site.md`: `GET /search` is "chain, each hit
+   * carrying its `site`"). Every row in it, with no dedupe — this is the admin
+   * finding a document, not a visitor being served one. Defaulted to the
+   * single-site chain.
+   */
+  chain?: readonly string[]
 }
 
 /**
@@ -912,8 +1059,9 @@ export async function searchStories(
       : types.length > 0
         ? `type in (${types.map(() => '?').join(', ')})`
         : '1 = 0'
-  const narrow = [scope, ...filters.sql]
-  const narrowBinds = [...(types ?? []), ...filters.binds]
+  const inChain = chainClause(opts.chain ?? SINGLE_SITE_CHAIN)
+  const narrow = [inChain.sql, scope, ...filters.sql]
+  const narrowBinds = [...inChain.binds, ...(types ?? []), ...filters.binds]
 
   const [rows, total] = await Promise.all([
     db
@@ -1030,18 +1178,144 @@ export async function documentUsage(db: FolioDb, id: string): Promise<DocumentUs
   }
 }
 
+/* ------------------------------------------------------ lookups by path --- */
+
+/** What a path lookup selects of a story row, published document included. */
+type PathRow = StoryRow & { published_doc?: string | null }
+
+/** A `PathRow` without its document, as `withState` takes it. */
+function metaOf(row: PathRow): StoryRow {
+  const { published_doc, ...meta } = row
+  return meta
+}
+
+/** A redirect row as a path lookup reads it, with the scope that owns it. */
+type ScopedRedirect = RedirectRow & { site: string }
+
 /**
- * The one routing lookup. Needs no `path is not null` guard: an unrouted row
- * stores NULL, and SQL equality never matches NULL, so a record can never be
- * reached by path however it is spelled — which is exactly what
- * `document-types.md` checkpoint 2 buys. Same for `storyStatus` and
- * `publishedDoc` below.
+ * What a site serves at a path (`../../docs/specs/foundation/multi-site.md`
+ * decision 5), walking its chain nearest first. For each scope:
+ *
+ * 1. its story at the path, if **live**, serves;
+ * 2. otherwise its **redirect** at the path redirects;
+ * 3. otherwise, if its story was **unpublished** — live once, taken down on
+ *    purpose — the path is `gone` on this site, which is how a site suppresses a
+ *    page it would otherwise inherit;
+ * 4. otherwise (a draft, or no row) the next scope.
+ *
+ * So a site's own redirect beats an inherited page, and a fork being prepared
+ * does not blank the page visitors see.
+ *
+ * **2 before 3, which is not the spec's order**, and the reason is that it is
+ * today's: `redirects.md` puts a redirect ahead of an unpublished row at the same
+ * path, `pathMiss` has always answered that way, and a single-site deployment is
+ * a chain of one scope whose answers must not move. Across scopes the two orders
+ * agree; they differ only for a scope that holds both at one path.
+ *
+ * Pure, over rows one batch already read, so a render costs the round trips it
+ * always did. Null when nothing in the chain has anything at the path.
  */
-export async function storyByPath(db: FolioDb, path: string): Promise<StoryMeta | null> {
-  const row = await db
-    .prepare(`select ${COLS} from stories where path = ?`)
-    .bind(path)
-    .first<StoryRow>()
+export function pickServing<S extends Pick<StoryMeta, 'site' | 'publishedAt' | 'unpublishedAt'>>(
+  chain: readonly string[],
+  stories: readonly S[],
+  redirects: readonly ScopedRedirect[] = [],
+):
+  | { kind: 'story'; story: S }
+  | { kind: 'redirect'; redirect: ScopedRedirect }
+  | { kind: 'gone'; story: S }
+  | null {
+  for (const scope of chain) {
+    const story = stories.find((row) => (row.site ?? DEFAULT_SITE) === scope)
+    const state = story ? storyState(story.publishedAt, story.unpublishedAt) : null
+    if (story && state === 'live') return { kind: 'story', story }
+    const redirect = redirects.find((row) => row.site === scope)
+    if (redirect) return { kind: 'redirect', redirect }
+    if (story && state === 'unpublished') return { kind: 'gone', story }
+  }
+  return null
+}
+
+/**
+ * What an **authorised viewer** — an editor in draft mode, a preview — sees at a
+ * path: the first row in chain order, whatever its state (decision 5, "draft mode
+ * and preview choose differently"). A fork being prepared is exactly what its
+ * editor wants to look at, even while visitors are still served the page it
+ * shadows.
+ */
+export function pickEditing<S extends Pick<StoryMeta, 'site'>>(
+  chain: readonly string[],
+  stories: readonly S[],
+): S | null {
+  for (const scope of chain) {
+    const story = stories.find((row) => (row.site ?? DEFAULT_SITE) === scope)
+    if (story) return story
+  }
+  return null
+}
+
+/** The story rows at `path` in every scope of `chain`, as one statement. */
+function storiesAtStatement(
+  db: FolioDb,
+  chain: readonly string[],
+  path: string,
+  withDoc: boolean,
+): D1PreparedStatement {
+  const scope = chainClause(chain)
+  return db
+    .prepare(
+      `select ${COLS}${withDoc ? ', published_doc' : ''} from stories
+       where ${scope.sql} and path = ?`,
+    )
+    .bind(...scope.binds, path)
+}
+
+/**
+ * Every story row and every redirect at one path across the chain: **one round
+ * trip**, a `batch` of two statements — or one statement where a chain of one
+ * scope makes the redirects moot (below).
+ *
+ * `redirects: false` is the single-site shortcut and it is exact, not an
+ * approximation: with one scope, `pickServing` reaches a redirect only when the
+ * scope's own story is not live, and every reader that asks this without
+ * redirects either wants the story whatever its state (`storyByPath`) or answers
+ * "nothing here" for a non-live row regardless of why. So a single-site render
+ * issues exactly the statements it did before chains existed, which is what
+ * `read-session.test.ts` counts.
+ */
+async function rowsAt(
+  db: FolioDb,
+  chain: readonly string[],
+  path: string,
+  opts: { doc?: boolean; redirects: boolean },
+): Promise<{ stories: PathRow[]; redirects: ScopedRedirect[] }> {
+  if (chain.length === 0) return { stories: [], redirects: [] }
+  const stories = storiesAtStatement(db, chain, path, opts.doc === true)
+  if (!opts.redirects) {
+    const { results } = await stories.all<PathRow>()
+    return { stories: results, redirects: [] }
+  }
+  const [storyRows, redirectRows] = await db.batch([stories, redirectAtStatement(db, chain, path)])
+  return {
+    stories: (storyRows?.results ?? []) as PathRow[],
+    redirects: (redirectRows?.results ?? []) as ScopedRedirect[],
+  }
+}
+
+/**
+ * The row at a path as an editor sees it (`pickEditing`), whatever its state.
+ *
+ * Needs no `path is not null` guard: an unrouted row stores NULL, and SQL
+ * equality never matches NULL, so a record can never be reached by path however
+ * it is spelled — which is exactly what `document-types.md` checkpoint 2 buys.
+ * Same for every lookup below.
+ */
+export async function storyByPath(
+  db: FolioDb,
+  chain: readonly string[],
+  path: string,
+): Promise<StoryMeta | null> {
+  const { stories } = await rowsAt(db, chain, path, { redirects: false })
+  const row = pickEditing(chain, stories)
   return row && withState(row)
 }
 
@@ -1060,31 +1334,20 @@ export async function storyById(db: FolioDb, id: string): Promise<StoryMeta | nu
  * `unpublish.md`'s architecture decision 5. `'unknown'` covers both a path with
  * no story at all and a story that has never been published: neither has ever
  * served the public, so a host answering 404 for both is correct.
+ *
+ * On a chain, the answer is `pickServing`'s: an inherited live page is `'live'`,
+ * and a nearer redirect makes the path `'unknown'` to this question, since what
+ * the site does there is redirect.
  */
 export async function storyStatus(
   db: FolioDb,
+  chain: readonly string[],
   path: string,
 ): Promise<'live' | 'unpublished' | 'unknown'> {
-  return statusOf(await statusAtStatement(db, path).first<StatusRow>())
-}
-
-/** What a status lookup selects. */
-type StatusRow = { publishedAt: number | null; unpublishedAt: number | null }
-
-/** `storyStatus`'s query, as a statement a caller can batch alongside another. */
-function statusAtStatement(db: FolioDb, path: string): D1PreparedStatement {
-  return db
-    .prepare(
-      'select published_at as publishedAt, unpublished_at as unpublishedAt from stories where path = ?',
-    )
-    .bind(path)
-}
-
-/** `storyStatus`'s reading of a row, split out so `pathMiss` shares it exactly. */
-function statusOf(row: StatusRow | null | undefined): 'live' | 'unpublished' | 'unknown' {
-  if (!row) return 'unknown'
-  const state = storyState(row.publishedAt, row.unpublishedAt)
-  return state === 'draft' ? 'unknown' : state
+  const rows = await rowsAt(db, chain, path, { redirects: chain.length > 1 })
+  const served = pickServing(chain, rows.stories, rows.redirects)
+  if (served?.kind === 'story') return 'live'
+  return served?.kind === 'gone' ? 'unpublished' : 'unknown'
 }
 
 /**
@@ -1099,16 +1362,20 @@ function statusOf(row: StatusRow | null | undefined): 'live' | 'unpublished' | '
  *
  * A redirect wins when there is one. That order is `redirects.md`'s: a rename
  * records a redirect *and* leaves the old story unpublished, so asking about the
- * state first would answer 410 for a path that has a perfectly good new home.
+ * state first would answer 410 for a path that has a perfectly good new home. On
+ * a chain it is `pickServing`'s walk, which keeps that order within each scope.
  */
-export async function pathMiss(db: FolioDb, path: string): Promise<FolioMiss> {
-  const [redirects, statuses] = await db.batch([
-    redirectAtStatement(db, path),
-    statusAtStatement(db, path),
-  ])
-  // `batch` types every result alike and these two select different shapes, so
-  // each row is read back at the type its own statement returns.
-  const redirect = redirectOf(normalisePath(path), redirects?.results[0] as RedirectRow | undefined)
+export async function pathMiss(
+  db: FolioDb,
+  chain: readonly string[],
+  path: string,
+): Promise<FolioMiss> {
+  const rows = await rowsAt(db, chain, path, { redirects: true })
+  const served = pickServing(chain, rows.stories, rows.redirects)
+  // Screened exactly as `lookupRedirect` screens a row, so a stored
+  // `javascript:` target is refused here too.
+  const redirect =
+    served?.kind === 'redirect' ? redirectOf(normalisePath(path), served.redirect) : null
   // **Rooted, unlike everything else Folio calls a path.** Stored paths carry no
   // leading slash (`guides/safari`), and this one value leaves the library as a
   // `Location` header — where a bare `guides/…` is a *relative* URL the browser
@@ -1123,10 +1390,25 @@ export async function pathMiss(db: FolioDb, path: string): Promise<FolioMiss> {
   // a rooted path as for a bare one, so the careful spelling keeps working and
   // the obvious one stops being wrong.
   if (redirect) return { kind: 'redirect', to: rootedTarget(redirect.to), status: redirect.status }
+  return served?.kind === 'gone' ? { kind: 'gone' } : { kind: 'not-found' }
+}
 
-  return statusOf(statuses?.results[0] as StatusRow | undefined) === 'unpublished'
-    ? { kind: 'gone' }
-    : { kind: 'not-found' }
+/** What `pageAt` answers: the page a visitor is served, and the row an editor sees. */
+export interface PageAt {
+  /**
+   * The story that serves the path — or, when none is live, the row an editor
+   * sees there (`editing`), so `folio.status` and the unpublished/never-existed
+   * distinction still have a row to talk about.
+   */
+  story: StoryMeta
+  /** `story`'s published document, or null when nothing at the path is live. */
+  doc: Doc | null
+  /**
+   * `pickEditing`'s row: what draft mode reads the draft of. The same row as
+   * `story` on a single-site deployment; on a chain it differs exactly when a
+   * nearer scope holds a fork that is not yet live.
+   */
+  editing: StoryMeta
 }
 
 /**
@@ -1144,26 +1426,30 @@ export async function pathMiss(db: FolioDb, path: string): Promise<FolioMiss> {
  */
 export async function pageAt(
   db: FolioDb,
+  chain: readonly string[],
   path: string,
-): Promise<{ story: StoryMeta; doc: Doc | null } | null> {
-  const row = await db
-    .prepare(`select ${COLS}, published_doc from stories where path = ?`)
-    .bind(path)
-    .first<StoryRow & { published_doc: string | null }>()
-  if (!row) return null
-  const { published_doc, ...meta } = row
+): Promise<PageAt | null> {
+  const rows = await rowsAt(db, chain, path, { doc: true, redirects: chain.length > 1 })
+  const editing = pickEditing(chain, rows.stories)
+  if (!editing) return null
+  const served = pickServing(chain, rows.stories, rows.redirects)
+  const serving = served?.kind === 'story' ? served.story : null
   return {
-    story: withState(meta as StoryRow),
-    doc: published_doc ? (JSON.parse(published_doc) as Doc) : null,
+    story: withState(metaOf(serving ?? editing)),
+    doc: serving?.published_doc ? (JSON.parse(serving.published_doc) as Doc) : null,
+    editing: withState(metaOf(editing)),
   }
 }
 
-export async function publishedDoc(db: FolioDb, path: string): Promise<Doc | null> {
-  const row = await db
-    .prepare('select published_doc from stories where path = ?')
-    .bind(path)
-    .first<{ published_doc: string | null }>()
-  return row?.published_doc ? (JSON.parse(row.published_doc) as Doc) : null
+export async function publishedDoc(
+  db: FolioDb,
+  chain: readonly string[],
+  path: string,
+): Promise<Doc | null> {
+  const rows = await rowsAt(db, chain, path, { doc: true, redirects: chain.length > 1 })
+  const served = pickServing(chain, rows.stories, rows.redirects)
+  const doc = served?.kind === 'story' ? served.story.published_doc : null
+  return doc ? (JSON.parse(doc) as Doc) : null
 }
 
 /**
@@ -1181,14 +1467,28 @@ export async function publishedDoc(db: FolioDb, path: string): Promise<Doc | nul
 export async function publishedDocsByIds(
   db: FolioDb,
   ids: readonly string[],
+  /**
+   * The chain to read within, as `storiesFor`'s: `resolve()` always passes one,
+   * so a reference to another site's story id pulls in nothing. Absent reads by
+   * id alone, for a caller that already holds a row it is entitled to.
+   */
+  chain?: readonly string[],
 ): Promise<Record<string, Doc>> {
-  if (ids.length === 0) return {}
+  if (ids.length === 0 || chain?.length === 0) return {}
+  const scope = chain ? chainClause(chain) : null
+  const perChunk = BIND_BUDGET - (scope?.binds.length ?? 0)
+  const chunks: string[][] = []
+  for (let at = 0; at < ids.length; at += perChunk) chunks.push(ids.slice(at, at + perChunk))
   const pages = await Promise.all(
-    bindChunks(ids, 1).map(async (chunk) => {
+    chunks.map(async (chunk) => {
       const placeholders = chunk.map(() => '?').join(', ')
       const { results } = await db
-        .prepare(`select id, published_doc from stories where id in (${placeholders})`)
-        .bind(...chunk)
+        .prepare(
+          `select id, published_doc from stories where id in (${placeholders})${
+            scope ? ` and ${scope.sql}` : ''
+          }`,
+        )
+        .bind(...chunk, ...(scope?.binds ?? []))
         .all<{ id: string; published_doc: string | null }>()
       return results
     }),
@@ -1352,9 +1652,19 @@ export interface PublishedDocRow {
  * carries `parent_id = null` and grouping those by parent would make a hundred
  * records collide with each other and with every top-level page.
  */
-type SiblingGroup = { routed: true; parentId: string | null } | { routed: false; type: string }
+type SiblingGroup = { site: string } & (
+  | { routed: true; parentId: string | null }
+  | { routed: false; type: string }
+)
 
+/**
+ * **Within one scope** (`multi-site.md` decision 3), because every unique index a
+ * slug is checked against leads with `site_id` since `0011`: two sites may each
+ * have an `about`, and a top-level page on one is no sibling of a top-level page
+ * on another.
+ */
 function inGroup(row: StoryMeta, group: SiblingGroup): boolean {
+  if ((row.site ?? DEFAULT_SITE) !== group.site) return false
   return group.routed
     ? row.path !== null && row.parentId === group.parentId
     : row.path === null && row.type === group.type
@@ -1380,11 +1690,20 @@ function inGroup(row: StoryMeta, group: SiblingGroup): boolean {
 async function siblingGroupRows(db: FolioDb, group: SiblingGroup): Promise<StoryMeta[]> {
   const query = group.routed
     ? group.parentId === null
-      ? db.prepare(`select ${COLS} from stories where path is not null and parent_id is null`)
+      ? db
+          .prepare(
+            `select ${COLS} from stories
+             where site_id = ? and path is not null and parent_id is null`,
+          )
+          .bind(group.site)
       : db
-          .prepare(`select ${COLS} from stories where path is not null and parent_id = ?`)
-          .bind(group.parentId)
-    : db.prepare(`select ${COLS} from stories where path is null and type = ?`).bind(group.type)
+          .prepare(
+            `select ${COLS} from stories where site_id = ? and path is not null and parent_id = ?`,
+          )
+          .bind(group.site, group.parentId)
+    : db
+        .prepare(`select ${COLS} from stories where site_id = ? and path is null and type = ?`)
+        .bind(group.site, group.type)
   const { results } = await query.all<StoryRow>()
   return results.map(withState)
 }
@@ -1455,6 +1774,19 @@ export interface CreateStoryInput {
    * migrations to speak of.
    */
   schemaId?: string | null
+  /**
+   * The scope that will own the document (`multi-site.md` decision 3). Default
+   * `default`, the one scope of a deployment with no `sites`. A parent must be in
+   * the same scope: a site page under a shared parent is the design decision 5
+   * rejected, since renaming one shared section would move pages on every site.
+   */
+  site?: string
+  /**
+   * Create the scope's **root** — `slug = ''`, `path = ''`, no parent — rather
+   * than a page under one (decision 5, "Create home page"). Refused when the
+   * scope already has one; a routed type only.
+   */
+  root?: boolean
 }
 
 /**
@@ -1469,13 +1801,16 @@ export async function createStory(
 ): Promise<StoryMeta> {
   const type = input.type
   const routed = isRouted(type)
+  const site = input.site ?? DEFAULT_SITE
 
   if (!routed && input.parentId) throw new Error('An unrouted document cannot have a parent')
+  if (input.root && !routed) throw new FolioError('bad_request', 'Only a page can be a home page')
+  if (input.root && input.parentId) throw new FolioError('bad_request', 'A home page has no parent')
 
-  const parentId = routed ? (input.parentId ?? null) : null
+  const parentId = routed && !input.root ? (input.parentId ?? null) : null
   const group: SiblingGroup = routed
-    ? { routed: true, parentId }
-    : { routed: false, type: type.name }
+    ? { site, routed: true, parentId }
+    : { site, routed: false, type: type.name }
 
   /**
    * Two narrow reads in place of one read of every story on the site: the parent
@@ -1493,15 +1828,21 @@ export async function createStory(
   if (parent && parent.path === null) {
     throw new Error('Cannot create a page under an unrouted document')
   }
+  if (parent && (parent.site ?? DEFAULT_SITE) !== site) {
+    throw new FolioError('conflict', `"${parent.title}" belongs to another scope`)
+  }
   if (routed && !canNest(type, typeByName(types, parent?.type))) throw underError(type)
+  if (input.root && siblings.some((row) => row.path === '')) {
+    throw new FolioError('conflict', 'This scope already has a home page')
+  }
 
-  const slug = uniqueSlug(siblings, group, slugify(input.slug || input.title))
+  const slug = input.root ? '' : uniqueSlug(siblings, group, slugify(input.slug || input.title))
   const story: StoryMeta = {
     id: newStoryId(),
     type: type.name,
     parentId,
     slug,
-    path: routed ? joinPath(parent?.path ?? '', slug) : null,
+    path: input.root ? '' : routed ? joinPath(parent?.path ?? '', slug) : null,
     ord: orderAt(siblings, group, siblings.length),
     title: input.title.trim() || 'Untitled',
     publishedAt: null,
@@ -1510,9 +1851,8 @@ export async function createStory(
     draftUpdatedAt: null,
     publishedSyncId: 0,
     schemaId: input.schemaId ?? null,
-    // Every write names its scope (`0011_sites.sql`). Single-site until phase 2
-    // threads the request's scope through.
-    site: 'default',
+    // Every write names its scope (`0011_sites.sql`), `default` included.
+    site,
     forkedFrom: null,
     state: 'draft',
     hasUnpublishedChanges: false,
@@ -1542,7 +1882,7 @@ export async function createStory(
       story.site,
     )
   await db.batch(
-    story.path === null ? [insert] : [insert, clearRedirectAtStatement(db, story.path)],
+    story.path === null ? [insert] : [insert, clearRedirectAtStatement(db, story.path, site)],
   )
 
   return story
@@ -1566,11 +1906,18 @@ export async function ensureSingleton(
   /** The migration watermark to stamp on a freshly created row; see
    * `CreateStoryInput.schemaId` for why a new document is born up to date. */
   schemaId: string | null = null,
+  /**
+   * The scope whose layer this is (`multi-site.md` decision 8): `sng_<type>` for
+   * `default`, so every singleton that existed before multi-site keeps its id,
+   * and `sng_<type>:<scope>` otherwise (`layerId`). How the layer's *document*
+   * starts — bare or seeded — is the draft's business, not the row's.
+   */
+  scope: string = DEFAULT_SITE,
 ): Promise<StoryMeta> {
   if (type.kind !== 'singleton') {
     throw new Error(`Document type '${type.name}' is not a singleton`)
   }
-  const id = singletonId(type)
+  const id = scope === DEFAULT_SITE ? singletonId(type) : layerId(type.name, scope)
   const existing = await storyById(db, id)
   if (existing) return existing
 
@@ -1581,7 +1928,7 @@ export async function ensureSingleton(
        values (?, ?, null, ?, null, 'a0', ?, ?, ?, ?)
        on conflict (id) do nothing`,
     )
-    .bind(id, type.name, type.name, type.label, now, schemaId, 'default')
+    .bind(id, type.name, type.name, type.label, now, schemaId, scope)
     .run()
 
   const row = await storyById(db, id)
@@ -1615,7 +1962,13 @@ export async function ensureSingleton(
 export async function duplicateStory(
   db: FolioDb,
   id: string,
-  patch: { title?: string; parentId?: string | null },
+  patch: {
+    title?: string
+    parentId?: string | null
+    /** The scope the copy lands in (`multi-site.md`: "source in chain, copy in
+     * scope"). Default: the source's own. */
+    site?: string
+  },
   /** Required, unlike everywhere else this appears: the source's own type is
    * what says whether it is a singleton, and duplicating one has to be refused.
    * A default would turn a caller's omission into a runtime throw. */
@@ -1647,6 +2000,7 @@ export async function duplicateStory(
       // in. Claiming otherwise would leave a duplicate of a behind page
       // permanently unmigrated (`schema-migrations.md`).
       schemaId: source.schemaId ?? null,
+      site: patch.site ?? source.site ?? DEFAULT_SITE,
     },
     types,
   )
@@ -1744,6 +2098,13 @@ export async function updateStoryStatement(
   if (parent && parent.path === null) {
     throw new Error('Cannot move a page under an unrouted document')
   }
+  // A story never moves between scopes (`multi-site.md`'s edge cases): fork it,
+  // then delete the original. So its new parent is in its own scope or it has
+  // none.
+  const site = current.site ?? DEFAULT_SITE
+  if (parent && (parent.site ?? DEFAULT_SITE) !== site) {
+    throw new FolioError('conflict', `"${parent.title}" belongs to another scope`)
+  }
   // `under` is re-checked here, so a drag is constrained exactly as creation is
   // — but only when the parent actually changes. Checking it on every patch
   // would make a plain title edit fail on a tree that predates the constraint.
@@ -1753,8 +2114,8 @@ export async function updateStoryStatement(
   }
 
   const group: SiblingGroup = unrouted
-    ? { routed: false, type: current.type }
-    : { routed: true, parentId }
+    ? { site, routed: false, type: current.type }
+    : { site, routed: true, parentId }
   const siblings = await siblingGroupRows(db, group)
   const next: StoryMeta = {
     ...current,
@@ -1792,7 +2153,9 @@ export async function updateStoryStatement(
    * `resolve()` makes, and the reason ancestors are addressed by path rather than
    * walked up.
    */
-  const chain = parent ? [parent, ...(await storiesFor(db, [], ancestorPaths(parent.path)))] : []
+  const chain = parent
+    ? [parent, ...(await storiesFor(db, [], ancestorPaths(parent.path), [site]))]
+    : []
   const merged = [...rows.map((r) => (r.id === id ? next : r)), ...chain]
   // Routed rows only: an unrouted one has no ancestor chain to derive from and
   // is absent from the map, so `paths.get(r.id) ?? r.path` keeps its null.
@@ -1875,7 +2238,15 @@ export async function updateStory(
 export async function deleteStoryStatement(
   db: FolioDb,
   id: string,
-  opts: { redirect?: boolean } = {},
+  opts: {
+    redirect?: boolean
+    /**
+     * The chain of the scope that owns `id`, nearest first — what decides whether
+     * its root may go (below). Default: the owner alone, which is the whole chain
+     * of a deployment with no `sites`, and on which a root is never deletable.
+     */
+    chain?: readonly string[]
+  } = {},
   types: readonly DocumentType[] = [],
 ): Promise<{
   ids: string[]
@@ -1949,7 +2320,9 @@ export async function deleteStoryStatement(
   const rows = await subtreeRows(db, id)
   const target = rows.find((r) => r.id === id)
   if (!target) return null
-  if (target.path === '') throw new Error('Cannot delete the root story')
+  if (target.path === '' && !(await rootAbove(db, opts.chain ?? [target.site ?? DEFAULT_SITE]))) {
+    throw new Error('Cannot delete the root story')
+  }
   // A singleton exists because the schema says it does (`document-types.md`
   // architecture decision 7). Recognised by its declared kind, falling back to
   // the derived id so a row whose type has since been removed from the code is
@@ -1997,6 +2370,24 @@ export async function deleteStoryStatement(
     indexStatements: [...clearIndexStatements(db, ids), ...clearInboundRefStatements(db, ids)],
     scheduleStatements: clearSchedulesStatements(db, ids),
   }
+}
+
+/**
+ * Does any scope above the first in `chain` have a root (`multi-site.md`
+ * decision 5)? A scope's root is deletable exactly when one would replace it —
+ * evaluated now, at delete time, rather than when the root was created — so
+ * `shared`'s and `default`'s are never deletable, and a site's is once `shared`
+ * or its group has one of its own.
+ */
+async function rootAbove(db: FolioDb, chain: readonly string[]): Promise<boolean> {
+  const above = chain.slice(1)
+  if (above.length === 0) return false
+  const scope = chainClause(above)
+  const row = await db
+    .prepare(`select 1 as found from stories where ${scope.sql} and path = '' limit 1`)
+    .bind(...scope.binds)
+    .first<{ found: number }>()
+  return row !== null
 }
 
 /** Removes the story and everything beneath it. */

@@ -21,7 +21,9 @@ import type { Migration } from '../core/migrate'
 import type { Mutation } from '../core/mutations'
 import type { ContentPage, ContentQuery } from '../core/query'
 import type { Resolution } from '../core/resolve'
+import type { NestedValue } from '../core/nested'
 import type { DocumentType } from '../core/schema'
+import type { Registry as SiteRegistry, SiteRef, Surface } from '../core/sites'
 import type { StoryMeta, StoryNode } from '../core/story'
 import type { RenderMode } from '../preview/Render'
 import type { AuthConfig, OpenAuth } from './auth/config'
@@ -54,8 +56,12 @@ import type { WriteResult } from './write'
  * decision 10) is the same shape a host reads its own `?q=` into and hands
  * straight to `resolve`, alongside `page` — this type carries it with no
  * change of its own, being a plain alias.
+ *
+ * **Less `site`** (`../../docs/specs/foundation/multi-site.md`): which site a
+ * render is for is the reader's to decide from the request or the `{ site }` it
+ * was built with, and a host handing one in could resolve another site's content.
  */
-export type HostResolveOptions = ResolveOptions
+export type HostResolveOptions = Omit<ResolveOptions, 'site'>
 
 /**
  * The two values `?_folio=` takes, and the only two `handle()` recognises
@@ -178,6 +184,12 @@ export interface FolioGateContext {
   story: StoryMeta
   doc: Doc
   locale?: string
+  /**
+   * The site this page is being served for (`../../docs/specs/foundation/multi-site.md`),
+   * so a membership check can be per site. Null on a deployment with no `sites`, and
+   * for a reader that resolved to no site.
+   */
+  site: SiteRef | null
 }
 
 /**
@@ -441,6 +453,13 @@ export interface FolioReader {
   query: (q: ContentQuery) => Promise<ContentPage>
   global: (name: string) => Promise<Doc | null>
   /**
+   * The site this reader reads for (`../../docs/specs/foundation/multi-site.md`
+   * decision 4): the registry row the request's host (or the `{ site }` it was
+   * built with) gated to, or null — for no site, and always on a deployment with
+   * no `sites`. A reader with no site answers as a site with no content.
+   */
+  site: () => Promise<SiteRef | null>
+  /**
    * This session's bookmark, or null before its first query.
    *
    * A host that wants read-your-writes across two of its own requests carries
@@ -561,8 +580,14 @@ export interface FolioConfig<Env> {
    * function rather than by assuming a convention (see `pathForLocale` in
    * server/runtime.ts). Optional, so every existing `(path) => …` still
    * compiles and still means "the source locale".
+   *
+   * `site` is the third parameter, on a deployment with `sites` only
+   * (`../../docs/specs/foundation/multi-site.md` decision 1): there it is
+   * **required**, and must answer an absolute URL on one of the site's live hosts,
+   * because the admin is on another origin and a relative URL would resolve
+   * against it. Absent, the URL is the single-site one it always was.
    */
-  route?: (path: string, locale?: string) => string
+  route?: (path: string, locale?: string, site?: SiteRef) => string
   /**
    * The languages this site is available in
    * (`../../docs/specs/content-model/localisation.md`). Absent means a
@@ -727,6 +752,43 @@ export interface FolioConfig<Env> {
    * every share link lands on a published page and nothing says so.
    */
   draftMode?: boolean
+  /**
+   * Many sites in one deployment (`../../docs/specs/foundation/multi-site.md`).
+   * **Its presence turns multi-site on**; absent, the deployment is one implicit
+   * site called `default` and nothing about any request, URL, tag or role
+   * changes. Sites and groups themselves are registry rows a platform admin
+   * creates from the admin, not config (decision 1): this says only what must
+   * exist before the first row.
+   *
+   * Turning it on is the point of no return (`UPGRADING.md`): code with no site
+   * dimension would serve every site's rows as one.
+   */
+  sites?: SitesConfig
+}
+
+/**
+ * What `FolioConfig.sites` declares (`multi-site.md` decision 1).
+ */
+export interface SitesConfig {
+  /**
+   * The one origin of the admin, sign-in, passkeys, the registry and MCP —
+   * `https://cms.example`. Config because somebody must sign in to create the
+   * first site, and passkeys bind to it (decision 12). A request on this origin
+   * is the admin's before any registry row is considered, so no row can take it
+   * offline.
+   */
+  admin: string
+  /**
+   * A `singleton` type holding site-level fields (decision 2): always loaded as a
+   * global, layered shared → group → site, and read with `folio.settings`.
+   */
+  settings?: string
+  /**
+   * Replaces the default candidate step — live host, then preview origin — and
+   * nothing else. Whatever it answers is still gated by Folio: a group, `shared`
+   * or a site whose status keeps it closed is no site.
+   */
+  resolve?: (req: Request, registry: SiteRegistry) => string | null
 }
 
 export interface Folio<Env> {
@@ -747,8 +809,41 @@ export interface Folio<Env> {
    * bookmark carried by an editor's browser work. A caller with no request in
    * hand (a sitemap build, a cron, a warm-up) omits it and reads published
    * content only.
+   *
+   * **On a deployment with `sites`, `from` is required** (`multi-site.md`
+   * decision 4): the request, whose host decides the site, or `{ site }` for a
+   * caller with no request that knows which site it is building for. `{ site }`
+   * is gated as the site's live surface. Omitting it throws, as every one-shot
+   * read below does there — silently answering as no site would make a sitemap
+   * empty with nothing to say why.
    */
-  reader: (env: Env, req?: Request) => FolioReader
+  reader: (env: Env, from?: Request | { site: string }) => FolioReader
+  /**
+   * The Workers Cache props a gateway passes on its loopback
+   * (`multi-site.md` decision 15): `{ site, surface }` for a request a site
+   * serves, `{}` for no site, the admin origin, or a deployment with no `sites`
+   * (which reads no registry to answer it).
+   *
+   * The Workers Cache key is path, entrypoint, `ctx.props` and version — not the
+   * host — so the site and **the surface** have to be in the props: without the
+   * surface a preview origin's `noindex` and `frame-ancestors` would be served on
+   * the live site.
+   *
+   * ```ts
+   * return this.ctx.exports.CachedPages({ props: await folio.cacheProps(req, env) }).fetch(req, {
+   *   cf: { cacheKey: folio.cacheKey(req.url) },
+   * })
+   * ```
+   */
+  cacheProps: (req: Request, env: Env) => Promise<{ site?: string; surface?: Surface }>
+  /**
+   * The rendering site's settings (`multi-site.md` decision 2): the settings
+   * type's root block as a plain nested value — each field by name, a `max: 1`
+   * blocks field as one object and any other blocks field as an array, in the
+   * resolution's locale — or null when no settings type is configured or the
+   * resolution carries none.
+   */
+  settings: (resolution: Resolution) => NestedValue | null
   /**
    * Published document for a URL path, or null. `path` is locale-*independent*
    * (`localisation.md` checkpoint 4): `/about` and `/fr/about` are the same
@@ -1142,6 +1237,17 @@ export interface Folio<Env> {
  */
 export interface FolioVars {
   bindings: () => ReadBindings
+  /**
+   * The request's scope, from the `~<scope>` segment `handle()` stripped
+   * (`multi-site.md` decision 11), set by `withScope`. Null when the URL named
+   * none, and always on a deployment with no `sites`.
+   */
+  scope: string | null
+  /**
+   * The site `handle()` gated this request to on a site's own host, with the
+   * surface it arrived on. Null on the admin origin and with no `sites`.
+   */
+  site: { id: string; surface: Surface } | null
   story: StoryMeta
   /**
    * Who is making this request, resolved by `withActor` (middleware.ts) from the

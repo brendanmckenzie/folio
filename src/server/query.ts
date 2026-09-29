@@ -36,7 +36,8 @@ import { ftsQuery, splitSnippet } from '../core/search-projection'
 import { projectValue } from '../core/index-projection'
 import type { StoryMeta } from '../core/story'
 import { FolioError } from './errors'
-import { STORY_COLS, type StoryRow, toStoryMeta } from './stories'
+import { SINGLE_SITE_CHAIN } from '../core/sites'
+import { servedClause, STORY_COLS, type StoryRow, toStoryMeta } from './stories'
 import type { FolioDb } from './db'
 
 /** A statement's text and its binds, kept together so a test can read both. */
@@ -192,6 +193,16 @@ export function contentSql(
   /** `ResolvedGate`, narrowed. Decision 11; absent on an ungated deployment,
    * and then not one character of SQL below changes. */
   gate?: SearchGate,
+  /**
+   * The rendering scope's chain (`../../docs/specs/foundation/multi-site.md`
+   * decision 6): the rows are the chain's **served set** (`servedClause`), so a
+   * collection on one site never lists another's rows, nor a shared row the site
+   * has forked or redirected away. Every runtime caller passes one — the
+   * single-site chain included, because `stories_type` leads with `site_id` since
+   * `0011` and a query that does not bind it scans. Absent emits nothing, which is
+   * what this function's own unit tests pin.
+   */
+  chain?: readonly string[],
 ): { count: Sql; page: Sql; normalised: ReturnType<typeof normaliseQuery> } {
   const n = normaliseQuery(q, perPageMax)
 
@@ -268,6 +279,13 @@ export function contentSql(
   // Decision 5's empty token set. The clause rather than an early return so
   // every other refusal above has already had its say.
   if (n.search !== undefined && !searching) clauses.push('0 = 1')
+
+  // Last, so every bind above keeps the position it had before scopes existed.
+  if (chain) {
+    const served = servedClause(chain)
+    clauses.push(served.sql)
+    binds.push(...served.binds)
+  }
 
   const where = clauses.join(' and ')
   const dir = n.order.dir === 'asc' ? 'asc' : 'desc'
@@ -401,6 +419,11 @@ export interface QueryDeps {
   /** `FolioRuntime.gate`, narrowed — absent on a deployment with no gate.
    * Scopes a `search` and nothing else (decision 11). */
   gate?: SearchGate
+  /**
+   * The chain the query reads (`contentSql`'s `chain`). Defaulted to the
+   * single-site chain, which is every row a deployment with no `sites` has.
+   */
+  chain?: readonly string[]
 }
 
 /**
@@ -429,6 +452,7 @@ export async function runQuery(
     localeKey,
     opts.perPageMax,
     deps.gate,
+    deps.chain ?? SINGLE_SITE_CHAIN,
   )
 
   const [totalRow, rows] = await Promise.all([

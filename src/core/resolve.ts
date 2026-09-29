@@ -26,6 +26,7 @@ import {
   type ResolvedCollection,
 } from './query'
 import type { SchemaIndex } from './schema'
+import type { SiteContext } from './sites'
 import type { StoryMeta } from './story'
 import {
   asAsset,
@@ -147,6 +148,18 @@ export interface Resolution {
    * `docs` and `globals` follow.
    */
   forms?: Record<string, ResolvedForm>
+  /**
+   * The site this render is for (`../../docs/specs/foundation/multi-site.md`
+   * decision 15): its registry fields, the surface it was reached on, its chain
+   * and the documents that layer. **Absent with no `sites`**, so a single-site
+   * resolution is byte-identical to one from before multi-site existed.
+   */
+  site?: SiteContext
+  /**
+   * The rendered story's path, when `resolve` was given one — what a
+   * `path:<site>:<path>` tag needs. Absent with no `sites`, for the same reason.
+   */
+  path?: string
 }
 
 export const DEFAULT_ASSET_BASE = '/folio/asset'

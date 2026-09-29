@@ -1,4 +1,5 @@
 import type { Context, MiddlewareHandler } from 'hono'
+import { chain } from '../core/sites'
 import { readSessionCookie } from './auth/cookie'
 import { credentialOf, originAllowed, resolveActor } from './auth/resolve'
 import { type Access, type Actor, allows, refusalOf } from './auth/roles'
@@ -6,6 +7,7 @@ import { bookmarkCookie, type DbSession, readBookmark, sessionFor } from './db'
 import { FolioError } from './errors'
 import type { HookRunnerCtx } from './hooks'
 import type { FolioRuntime } from './runtime'
+import { SCOPE_HEADER, SITE_HEADER, SURFACE_HEADER } from './sites'
 import { storyById } from './stories'
 import type { ReadBindings, FolioConfig, FolioEnv } from './types'
 import { idParam, safeNext } from './validate'
@@ -59,6 +61,71 @@ export function withBindings<Env>(config: FolioConfig<Env>): MiddlewareHandler<F
     if (readSessionCookie(cookie) === null) return
     const bookmark = session.getBookmark()
     if (bookmark) c.res.headers.append('set-cookie', bookmarkCookie(c.req.url, bookmark))
+  }
+}
+
+/**
+ * Reads the request's scope and gated site into `c.var.scope` and `c.var.site`
+ * (`../../docs/specs/foundation/multi-site.md` decision 11).
+ *
+ * **Both come only from headers `handle()` wrote.** `handle()` deletes every
+ * internal header from every inbound request before setting any (`INTERNAL_HEADERS`,
+ * `sites.ts`), so a value here is one Folio put there: the `~<scope>` segment it
+ * stripped from the path, and the site and surface its status gate admitted.
+ *
+ * A scope nobody registered is a 404 — a route below never sees a scope it cannot
+ * resolve a chain for — and costs a registry read from this isolate's snapshot,
+ * only for a request that named one. On a deployment with no `sites` there is no
+ * scope and no site, and nothing is read: `handle()` answers a `~` segment there
+ * with a 404 before the app is reached.
+ */
+export function withScope<Env>(rt: FolioRuntime): MiddlewareHandler<FolioEnv<Env>> {
+  return async (c, next) => {
+    if (!rt.sites) {
+      c.set('scope', null)
+      c.set('site', null)
+      await next()
+      return
+    }
+    const scope = c.req.raw.headers.get(SCOPE_HEADER)
+    if (scope !== null && chain(await rt.sites.registry(c.env), scope).length === 0) {
+      throw new FolioError('not_found', `No site or group '${scope}'`)
+    }
+    const site = c.req.raw.headers.get(SITE_HEADER)
+    const surface = c.req.raw.headers.get(SURFACE_HEADER)
+    c.set('scope', scope)
+    c.set(
+      'site',
+      site !== null && (surface === 'live' || surface === 'preview') ? { id: site, surface } : null,
+    )
+    await next()
+  }
+}
+
+/**
+ * Refuses a scoped route that named no scope, on a deployment with `sites`:
+ * `400 site_required` (decision 11). A deployment with no `sites` has one scope,
+ * so there is nothing to require.
+ *
+ * Answered here rather than thrown as a `FolioError`, because `site_required` is
+ * its own code in the error envelope and not one of `errors.ts`'s general ones: a
+ * script that forgot its `~<site>` segment should be able to tell that apart from
+ * every other 400 without parsing a message.
+ */
+export function requireScope<Env>(rt: FolioRuntime): MiddlewareHandler<FolioEnv<Env>> {
+  return async (c, next) => {
+    if (rt.sites && c.var.scope === null) {
+      return c.json(
+        {
+          error: {
+            code: 'site_required',
+            message: `Name the site: ${rt.base}/~<site>/… (this deployment has many)`,
+          },
+        },
+        400,
+      )
+    }
+    await next()
   }
 }
 

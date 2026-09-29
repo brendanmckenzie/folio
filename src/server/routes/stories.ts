@@ -7,6 +7,7 @@ import { Hono } from 'hono'
 import { isKnownLocale, translationStatus } from '../../core/locales'
 import type { Page } from '../../core/pagination'
 import type { DocumentType } from '../../core/schema'
+import { SINGLE_SITE_CHAIN } from '../../core/sites'
 import { ancestorPaths, type StoryMeta } from '../../core/story'
 import { actorString } from '../auth/roles'
 import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
@@ -135,14 +136,19 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const ids = idListQuery(c.req.query('ids'))
     const paths = pathListQuery(c.req.query('paths'))
     if (ids.length > 0 || paths.length > 0) {
-      const rows = await storiesFor(db, ids, paths)
+      const rows = await storiesFor(db, ids, paths, SINGLE_SITE_CHAIN)
       // `?ancestors=1` pulls each row's breadcrumb chain in the same request.
       // Two queries rather than one, and worth it: the caller cannot compute
       // `ancestorPaths` before it knows the row's `path`, so the alternative is
       // a second round trip for something the server already has in hand.
       const chain =
         c.req.query('ancestors') === '1'
-          ? await storiesFor(db, [], [...new Set(rows.flatMap((row) => ancestorPaths(row.path)))])
+          ? await storiesFor(
+              db,
+              [],
+              [...new Set(rows.flatMap((row) => ancestorPaths(row.path)))],
+              SINGLE_SITE_CHAIN,
+            )
           : []
       const merged = new Map(rows.map((row) => [row.id, row]))
       for (const row of chain) merged.set(row.id, row)
