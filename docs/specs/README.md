@@ -30,14 +30,6 @@ the rest can land in any order.
 | 6 | [Duplicate and paste](editing/duplicate-and-paste.md) | editing | S–M | — | — | competitor scan |
 | 7 | [Lifecycle hooks](platform/publish-hooks.md) | platform | S | — | — | competitor scan |
 
-**The `Pre-collapse Migration` column is history, not a claim.** Ten migrations were
-folded into `0001_init.sql` in July 2026, so a number here is what the spec held
-*before* that and says nothing about what is on disk now — spec 12's `0009` is a
-deliberate hole today and spec 13's `0010` is on disk as forms. What each of the
-collapsed ten added is recorded under [D1 migration ledger](#d1-migration-ledger),
-which is also the only place to read the current numbering and the next free
-number. `CLAUDE.md`'s "The two ledgers" says the same thing from the other side.
-
 ## The main line (8–16)
 
 | # | Spec | Group | Size | Wire | Pre-collapse Migration | From |
@@ -74,7 +66,7 @@ sequence because the dependency graph is the same one.
 | 20 | [Bulk write endpoints](platform/bulk-writes.md) | platform | M | — | — | completion plan: gap 2 |
 | 21 | [Draft preview sharing](platform/draft-sharing.md) | platform | M | — | `0004` | completion plan: gap 4 |
 | 22 | [Build artifacts and `.d.ts`](foundation/package-build.md) | foundation | S | — | — | completion plan: gap 5 |
-| 23 | [Many sites in one deployment](foundation/multi-site.md) | foundation | XL | 5 | `0009` | owner, 2026-08-01 |
+| 23 | [Many sites in one deployment](foundation/multi-site.md) | foundation | XL | 5 | `0011`, `0012` | owner, 2026-08-01 |
 | 24 | [An MCP server](platform/mcp-server.md) | platform | M–L | — | — | feedback: ai-friendliness |
 | 25 | [Draft mode](platform/draft-mode.md) | platform | M | — | — | roadmap, twice: host-layout draft + cookie draft mode |
 | 26 | [Documentation that ships](foundation/documentation.md) | foundation | M | — | — | owner, 2026-08-29 |
@@ -98,7 +90,7 @@ page renders paywalled prose. The claimed migration numbers move with the build 
 per the rule below: on this order 31 carries none, 30 takes `0005`, 28 takes `0006`,
 29 takes `0007`, and 23 stays behind all of them. **Spec 32 (media library) joined
 after this paragraph was written** and its own header sequences it **after 29 and
-before 23**, so it takes `0008` and 23 restamps to `0009` — before multi-site scopes
+before 23**, so it takes `0008` and 23 restamps to `0009` (later `0011` and `0012`, below) — before multi-site scopes
 every list route, so 23 scopes the new asset tables in the same pass rather than
 retrofitting them. **`0005` has landed** — the column
 above now reads the decided number rather than the drafted one for all three.
@@ -292,11 +284,13 @@ triggers (spec 30 decision 1) and therefore no `BEGIN … END`.
 Spec 32's drafted contents named an `asset_tag_links` table that was built as
 `asset_taggings`.
 
-**`0009` is a hole, deliberately.** It is spec 23's `sites` migration, which is still
-a draft, and 33 took `0010` rather than closing the gap because renumbering a claim
-somebody else is working against is how two migrations end up sharing a number. The
-next free number is `0011`; a spec that wants `0009` should take it only if 23 is
-abandoned.
+**`0009` is a permanent hole.** It was spec 23's `sites` migration, and 33 took `0010`
+rather than closing the gap. It cannot be filled now: wrangler applies migrations by
+numeric prefix, so a `0009` that alters `forms` would run before `0010` creates it on
+a fresh database. Spec 23 (rewritten 2026-09-29, still a draft) claims `0011_sites.sql`
+and `0012_users_role_contract.sql` instead, and its build plan is
+[`../multi-site-plan.md`](../multi-site-plan.md). The next free number after those is
+`0013`.
 
 That is the standing rule having run its course rather than an exception to it: a
 claim is a stamp, not a landing, and every one of these restamped at least once as
@@ -304,8 +298,8 @@ the build order settled — 28 and 29 both moved when 30 went first, and 23 move
 make room for 32.
 
 **Landed on `main`: `0001`–`0008` and `0010`, and applied to All About Africa's
-staging and production databases on 2026-09-06. Claimed and not landed: `0009`
-(23). The next free number is `0011`.** Do not derive a number by counting the
+staging and production databases on 2026-09-06. Claimed and not landed: `0011`
+and `0012` (23); `0009` is a permanent gap. The next free number after those is `0013`.** Do not derive a number by counting the
 landed rows above; take the one your spec's header names, and if it is already on
 disk, stop rather than picking the next one yourself.
 
@@ -320,7 +314,8 @@ game — but it now has to be spelled as a migration rather than an edit.
 
 Spec 23 restamped `0008` → `0009` to make room for 32, which its own header sequences
 after 29 and before 23; spec 33 (forms) then took `0010`, sequencing itself after 32
-and before 23 in turn, so 23 stays last and did not move again. That is the standing rule working as intended rather than an
+and before 23 in turn, so 23 stays last. It moved once more on 2026-09-29, to `0011`
+and `0012`, when `0009` turned out to be unusable below `0010`. That is the standing rule working as intended rather than an
 exception to it: a claim is a stamp, not a landing, and the spec that builds first
 takes the number.
 
@@ -381,7 +376,8 @@ its own entry. Spec 25 (draft mode) is **done**, built 2026-08-30 — its `## Im
 record four Ground-truth corrections and the surprise that `READ_DRAFT` is a
 *viewer*-level gate, so every signed-in account can enter draft mode. Spec 23
 (multi-site) is the last one still **draft** and unstarted; its three open questions
-were resolved in place on 2026-08-04 without starting it. Spec 26 (documentation that ships) is **done**, written and built on 2026-08-29 after
+were resolved in place on 2026-08-04 without starting it, and it was rewritten on
+2026-09-29 and is ready to build. Spec 26 (documentation that ships) is **done**, written and built on 2026-08-29 after
 the owner observed that building a host meant pointing an assistant at *this*
 workspace — which was the only channel there was, because the split published no prose
 at all. It shipped a structural answer rather than the editorial one it planned.

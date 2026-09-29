@@ -83,10 +83,10 @@ and whether it needs anything from you beyond applying it.
 | `0006_auth.sql` | `sessions.provider`, a role-decided column, `auth_events` | Wire `folio.sweepAuth(env)` into your cron. Nothing breaks without it; the table just grows forever. |
 | `0007_passkeys.sql` | The WebAuthn credential store | Add `passkeys()` to `auth.providers`. Listing it is the whole opt-in. |
 | `0008_asset_organisation.sql` | Asset folders, tags, and six columns on `assets` | Nothing. Existing assets land at the root with no tags. |
-| `0009` | **Deliberately absent.** It is a claim held by a spec still in draft, left as a gap so nobody renumbers a migration somebody is working against. | — |
+| `0009` | **Permanently absent.** Nothing will ever take it: a migration numbered below `0010` cannot alter the tables `0010` creates on a fresh database, so the number is unusable. | — |
 | `0010_forms.sql` | Forms and responses | Nothing required. Add a `form()` field to a block to embed one, and a `submitted` hook to forward responses. |
 
-Next free number is `0011`.
+Next free number is `0011`; spec 23 (multi-site, still a draft) claims `0011` and `0012`, so after those it is `0013`.
 
 **A note on `0001_init.sql`:** it is plain `create table`, not
 `create table if not exists`. Applying it over a database that already has those

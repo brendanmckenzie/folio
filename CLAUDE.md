@@ -13,6 +13,9 @@ integration guide. `examples/starter` is a real workspace package that
 `pnpm typecheck` gates and that `bin/folio.mjs init` copies — **change it and you
 change what every new project starts from.**
 
+**Working on multi-site (spec 23)? Start at `docs/multi-site-plan.md`**, the build plan for
+`foundation/multi-site.md`: read it, and the spec's Ground truth, before the first edit.
+
 **Working towards 1.0? Start at `docs/1.0-plan.md`.** It is the execution plan for the
 twenty issues on the tracker — six ordered phases, the four constraints that fix the
 order, per-issue file scoping and model choice, and the orchestration rules from the
@@ -185,10 +188,11 @@ than a scatter.
 **D1 migrations** (`migrations/`). **There are nine: `0001`–`0008` and `0010`.**
 `0001_init.sql` holds the base schema — the ten that preceded it were collapsed into
 it (`docs/specs/README.md` keeps the record of what each added) — and `0002`–`0010`
-landed on top, five of them on 2026-09-06 with specs 28–33. **`0009` is a gap on
-purpose**: it is spec 23's claim, still a draft, and 33 took `0010` rather than
-close it, because renumbering a claim somebody is working against is how two
-migrations end up sharing a number. Next free is `0011`.
+landed on top, five of them on 2026-09-06 with specs 28–33. **`0009` is a permanent
+gap**: nothing will ever take it, because a migration numbered below `0010` cannot
+alter the `forms` tables that `0010` creates on a fresh database (wrangler applies by
+numeric prefix, so it would run before they exist). Spec 23 claims `0011_sites.sql`
+and `0012_users_role_contract.sql`; next free after those is `0013`.
 
 A new one is the next number and normally a plain `alter table`, but rebuilding a
 table — `stories` included — is fair game when the shape is wrong. **Editing a
@@ -441,9 +445,10 @@ section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
 
-**Specs 1–22 and 24–32 are done. Two are `draft`: 23 (`foundation/multi-site.md`,
-XL, unstarted since 2026-08-01) and 33 (`content-model/forms.md`, L, drafted
-2026-09-05, sequenced after 32 and before 23).** 28, 29, 30, 31 and 32 were all
+**Specs 1–22 and 24–33 are done. One is `draft`: 23 (`foundation/multi-site.md`,
+XL), rewritten 2026-09-29, reviewed and ready to build; its plan is
+`docs/multi-site-plan.md`.** (This said "two are `draft`" until 2026-09-29, with 33
+among them, long after 33 landed as `0010_forms.sql`.) 28, 29, 30, 31 and 32 were all
 built on the branch `specs-31-30-28-29` on 2026-09-05/06 and merged to `main`; each
 carries an `## Implementation notes` section recording where its plan was wrong,
 which is the half worth reading.
@@ -474,7 +479,7 @@ hard constraints and one is sequencing:
 
 Migration numbers in the drafts are claims. **On the decided order: 31 carries none,
 30 takes `0005` (landed), 28 takes `0006` (landed), 29 takes `0007`, 32 takes `0008`,
-33 takes `0010`, and 23 restamped to `0009` to make room.** The old rule still governs if the order
+33 takes `0010`, and 23 restamped to `0011` and `0012` (2026-09-29) once `0009` proved unusable.** The old rule still governs if the order
 moves again — whichever builds first takes the next free number and the others
 restamp, which is exactly what 23 just did.
 
