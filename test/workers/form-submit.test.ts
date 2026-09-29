@@ -452,7 +452,7 @@ describe('the rate limit', () => {
     await submit(form.id, { email: 'ada@example.com' }, { 'cf-connecting-ip': IP })
     const [withIp] = await rows(form.id)
     expect(withIp?.ip_hash).toMatch(/^[0-9a-f]{64}$/)
-    expect(withIp?.ip_hash).not.toContain('203')
+    expect(withIp?.ip_hash).not.toContain(IP)
 
     await submit(form.id, { email: 'grace@example.com' })
     const none = (await rows(form.id)).find((r) => r.id !== withIp?.id)
