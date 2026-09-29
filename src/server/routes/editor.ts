@@ -179,9 +179,9 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.get('/edit', requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {
     const db = c.var.bindings().db
     const within = await requestChain(c, rt)
-    // A multi-site request with no scope has no root to open; the shell under a
-    // `~<scope>` is spec 23's phase 8.
-    if (within.length === 0) return c.notFound()
+    // A multi-site request with no scope has no root to open: the admin shell at
+    // `{base}/` picks the caller's first scope, so an old bookmark lands there.
+    if (within.length === 0) return c.redirect(`${rt.base}/`)
     const root = await storyByPath(db, within, '')
     const first = root ?? (await listStories(db, { limit: 1, offset: 0 }, within))[0]
     return first ? c.redirect(`${rt.base}/edit/${first.id}`) : c.notFound()

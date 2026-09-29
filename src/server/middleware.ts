@@ -447,7 +447,10 @@ export function requireHtmlAccess<Env>(
     const actor = c.var.actor
     if (!actor) {
       const url = new URL(c.req.url)
-      const next = safeNext(`${url.pathname}${url.search}`, `${rt.base}/edit`)
+      const next = safeNext(
+        `${url.pathname}${url.search}`,
+        rt.sites ? `${rt.base}/` : `${rt.base}/edit`,
+      )
       return c.redirect(`${rt.base}/login?next=${encodeURIComponent(next)}`)
     }
     if (!allows(actor, access)) throw new FolioError('forbidden', refusalOf(actor, access))

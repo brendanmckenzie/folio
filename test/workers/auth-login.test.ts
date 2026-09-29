@@ -112,6 +112,63 @@ beforeEach(async () => {
 const seedEditor = (role: 'viewer' | 'editor' | 'publisher' | 'admin' = 'editor') =>
   createUser(env.DB, { email: 'ann@example.com', name: 'Ann', role })
 
+/* ------------------------------------------- where a sign-in lands, by shape --- */
+
+describe('the default post-sign-in destination', () => {
+  const multiSite = () =>
+    createFolio<Cloudflare.Env>({
+      blocks: [page],
+      root: 'page',
+      bindings,
+      basePath: '/folio',
+      auth: magicAuth,
+      route: (p) => (p ? `/${p}` : '/'),
+      sites: { admin: ORIGIN },
+    })
+
+  const verifyWith = async (folio: Folio, next?: string) => {
+    await seedEditor()
+    await requestLink(folio, 'ann@example.com')
+    const t = new URL(outbox[0]!.url).searchParams.get('t') ?? ''
+    return call(
+      folio,
+      `/folio/login/verify?t=${t}${next ? `&next=${encodeURIComponent(next)}` : ''}`,
+    )
+  }
+
+  it('is the editor on a single-site deployment', async () => {
+    const res = await verifyWith(folioWith(magicAuth))
+    expect(res.headers.get('location')).toBe('/folio/edit')
+  })
+
+  it('is the unscoped admin shell on a multi-site deployment', async () => {
+    const res = await verifyWith(multiSite())
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('/folio/')
+  })
+
+  it('yields to an explicit next on a multi-site deployment', async () => {
+    const res = await verifyWith(multiSite(), '/folio/~alpha/edit')
+    expect(res.headers.get('location')).toBe('/folio/~alpha/edit')
+  })
+
+  it('redirects a signed-in {base}/edit with no scope to {base}/ instead of a 404', async () => {
+    const folio = multiSite()
+    const signIn = await verifyWith(folio)
+    const cookie = `${SECURE_COOKIE}=${cookieFrom(signIn, SECURE_COOKIE)}`
+    const res = await call(folio, '/folio/edit', { headers: { cookie } })
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('/folio/')
+  })
+
+  it('sends an anonymous multi-site visitor to login with a next that resolves', async () => {
+    const res = await call(multiSite(), '/folio/edit')
+    const to = new URL(res.headers.get('location') ?? '', ORIGIN)
+    expect(to.pathname).toBe('/folio/login')
+    expect(to.searchParams.get('next')).toBe('/folio/edit')
+  })
+})
+
 /* --------------------------------------------------------- the login page --- */
 
 describe('GET /folio/login', () => {

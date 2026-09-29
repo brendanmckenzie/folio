@@ -122,7 +122,9 @@ async function loginBody(req: Request): Promise<{ email: string; next?: string }
 
 export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
-  const editorUrl = `${rt.base}/edit`
+  // A deployment with `sites` has no unscoped editor: the shell at `{base}/` sends the
+  // caller to their first scope, so that is where a sign-in with no `next` lands.
+  const editorUrl = rt.sites ? `${rt.base}/` : `${rt.base}/edit`
 
   /** The resolved auth, or a 404 for a deployment with `auth: 'open'`: there is
    * nothing to sign in to, so a login page would be a lie. */
