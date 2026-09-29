@@ -304,7 +304,11 @@ const FORM = {
  * would hang or reject depending on which one it got.
  */
 function bodyFor(url: string): unknown {
-  const withoutOrigin = url.replace(/^https?:\/\/[^/]+/, '')
+  // A scoped URL (`{base}/~alpha/api/…`) is answered as the unscoped one: the fixture's
+  // rows do not differ by scope, and the tests that care assert the URL that was asked.
+  const withoutOrigin = url
+    .replace(/^https?:\/\/[^/]+/, '')
+    .replace(/^\/folio\/~[a-z0-9-]+\//, '/folio/')
   const path = withoutOrigin.split('?')[0] ?? ''
   const query = withoutOrigin.slice(path.length)
 
@@ -356,6 +360,53 @@ function bodyFor(url: string): unknown {
     return { configured: true, onUpload: false, images: false, batch: 10 }
   }
 
+  // One person with grants, for the multi-site Access screen only: the single-site
+  // Access assertions are made over an empty table and must stay so. `ghost` is a
+  // scope the registry no longer has, which is the ignored-grant case.
+  if (path === `${API}/users` && currentMe.sites) {
+    return {
+      ...EMPTY_PAGE,
+      users: [
+        {
+          id: 'usr_bo',
+          email: 'bo@example.com',
+          name: 'Bo',
+          role: 'viewer',
+          colour: null,
+          provider: null,
+          roleFrom: null,
+          createdAt: 1,
+          lastSeenAt: null,
+          passkeys: 0,
+          grants: [
+            { scope: 'alpha', role: 'publisher', roleFrom: null },
+            { scope: 'ghost', role: 'editor', roleFrom: null },
+          ],
+        },
+      ],
+      total: 1,
+    }
+  }
+
+  // The registry, for the Sites screen, and one inherited page for Home's block.
+  if (path === `${API}/sites`) return REGISTRY
+  if (path === `${API}/inherited`) {
+    return {
+      rows: [
+        {
+          ...STORY,
+          id: 'sty_stores',
+          title: 'Stores',
+          path: 'stores',
+          site: 'shared',
+          shadowedBy: null,
+          forkedSince: false,
+        },
+      ],
+      cursor: null,
+    }
+  }
+
   if (path === `${API}/schema`) return MANIFEST
   if (path === `${API}/me`) return currentMe
   if (path === `${API}/counts`) return { pages: 0, types: {} }
@@ -389,6 +440,22 @@ function bodyFor(url: string): unknown {
     return { ...EMPTY_PAGE, ...STORY }
   }
   return EMPTY_PAGE
+}
+
+/** The registry the Sites screen reads: one group, two sites, one with no preview origin. */
+export const REGISTRY = {
+  groups: [{ id: 'north', name: 'North' }],
+  sites: [
+    {
+      id: 'alpha',
+      name: 'Alpha',
+      group: 'north',
+      status: 'live',
+      hosts: ['alpha.example'],
+      preview: 'https://preview.alpha.example',
+    },
+    { id: 'bravo', name: 'Bravo', group: null, status: 'draft', hosts: [], preview: null },
+  ],
 }
 
 let currentMe: Me = ADMIN

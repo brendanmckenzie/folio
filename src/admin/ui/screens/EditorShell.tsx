@@ -1,13 +1,14 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Blok, Doc } from '../../../core/doc'
 import type { LocaleConfig, LocaleContext } from '../../../core/locales'
 import type { Presence } from '../../../core/protocol'
 import type { Resolution } from '../../../core/resolve'
 import { type DocumentType, type SchemaIndex, singletonId } from '../../../core/schema'
+import { layerId } from '../../../core/sites'
 import { isLive, type StoryMeta } from '../../../core/story'
 import type { Blocks } from '../../hooks/useBlocks'
-import { canPublish, type Me, whyNot } from '../../me'
+import { atScope, canPublish, type Me, scopeName, whyNot } from '../../me'
 import type { StoryStore } from '../../store'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
@@ -25,6 +26,12 @@ import {
   describeAgainstDraft,
   editorLayout,
   hasNestedBloks,
+  inheritNotices,
+  noticeLink,
+  noticeText,
+  paneChoice,
+  paneLabel,
+  paneUnavailable,
   isNarrowedViewport,
   MAX_INSPECTOR,
   MIN_INSPECTOR,
@@ -35,7 +42,10 @@ import {
   SETTLED_TITLE,
 } from './editor-model'
 import { historyWhen } from './history-model'
+import { bareMount } from '../route'
 import { useEditor } from './useEditor'
+import { isLayerDocument, layerInfo, type LayerInfo, layerOf, scopesBelow } from './inspector-model'
+import { useForkStatus, useLayerDocs, useOverride } from './useSiteContext'
 
 /**
  * What the inspector — port phase 7b — is handed.
@@ -100,6 +110,12 @@ export interface EditorSlot {
    * know about.
    */
   form: boolean
+  /**
+   * How this global's layer stands against the layers below it, on a deployment with
+   * `sites` (`multi-site.md` decision 8); undefined for everything else, which is what
+   * keeps a single-site inspector free of labels.
+   */
+  layers?: LayerInfo
 
   /* ------------------------------------------------- port phase 7c's seams --- */
 
@@ -254,8 +270,29 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
     if (props.railCollapsed) props.onToggleRail()
   }, [props.railCollapsed, props.onToggleRail])
 
+  /**
+   * **Multi-site only** (`multi-site.md` decision 13): which site the pane shows this
+   * page in, and whether the browser refused the pane's cookie. Both are inert with no
+   * `sites` — `paneChoice` answers `none`, and nothing ever calls `onGrantBlocked`.
+   *
+   * `previewIn` is the picker; `blocked` is per (story, site, locale) and cleared when
+   * any of them changes, because a refusal is a fact about one frame. The callback is
+   * stable, since the bridge's message listener is re-subscribed by its identity.
+   */
+  const [previewIn, setPreviewIn] = useState<string | null>(null)
+  const pane = paneChoice(props.me, story, previewIn)
+  const paneSiteId = pane.kind === 'site' ? pane.site.id : null
+  const [blocked, setBlocked] = useState(false)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the three are the reset trigger, not values the body reads
+  useEffect(() => setBlocked(false), [story.id, paneSiteId])
+  const onGrantBlocked = useCallback(() => setBlocked(true), [])
+  const adminBase = bareMount(props.mount)
+
   const editor = useEditor({
     storyId: story.id,
+    pane,
+    adminBase,
+    onGrantBlocked,
     story,
     apiBase: props.apiBase,
     base: props.mount,
@@ -283,7 +320,9 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
   const width = useInspectorWidth()
   const viewing = editor.versions.viewing
   const live = editor.versions.source.mode === 'live'
-  const mayPublish = canPublish(props.me)
+  // Publishing is a role on the scope that **owns** the page, not the one being shown.
+  const owner = story.site ? atScope(props.me, story.site) : props.me
+  const mayPublish = canPublish(owner)
   /*
    * **A live page whose draft is identical to it, still flagged `changed`.**
    *
@@ -320,6 +359,40 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
   const banner = behindNotice(editor.migrations.status)
 
   /**
+   * The banners a deployment with `sites` adds over an open page (`inheritNotices`):
+   * read-only here with *Fork*, "Alpha overrides this page", and "the shared version
+   * has changed since you forked it". Each reads a route that exists only there, and
+   * each is asked only when it could apply.
+   */
+  const multi = props.me.sites !== undefined
+  const override = useOverride(
+    props.apiBase,
+    story,
+    multi && story.site !== undefined && story.site !== props.me.scope,
+  )
+  const fork = useForkStatus(props.apiBase, story, multi)
+  const notices = inheritNotices(props.me, story, { override, fork })
+  const [forking, setForking] = useState(false)
+  const forkIntoScope = async () => {
+    setForking(true)
+    try {
+      const res = await fetch(`${props.apiBase}/stories/${encodeURIComponent(story.id)}/fork`, {
+        method: 'POST',
+      })
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: { message?: string } }
+        throw new Error(body.error?.message ?? `Request failed (${res.status})`)
+      }
+      const made = (await res.json()) as { story: { id: string } }
+      props.onOpenDocument?.(made.story.id)
+    } catch (e) {
+      props.onNotice((e as Error).message)
+    } finally {
+      setForking(false)
+    }
+  }
+
+  /**
    * Publish, warning first when a locale is incomplete. A complete page — and
    * every page on a single-locale site — publishes on one click, exactly as
    * before: a confirmation that always appears is a confirmation nobody reads.
@@ -329,7 +402,42 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
     else void editor.publish.publish()
   }
 
+  /**
+   * The layers below an open global, and how each of its fields stands against them
+   * (`layerInfo`). Off unless this is a deployment with `sites` and the open document
+   * is a layer with something under it (`isLayerDocument`), so a single-site editor
+   * fetches nothing and labels nothing.
+   */
+  const layerIds = useMemo(
+    () => (isLayerDocument(story.id, multi) ? layerOf(story.id) : null),
+    [story.id, multi],
+  )
+  const ownChain = layerIds
+    ? props.me.sites?.scopes.find((scope) => scope.id === layerIds.scope)?.chain
+    : undefined
+  const below = useMemo(
+    () => (layerIds && ownChain ? scopesBelow(ownChain, layerIds.scope) : []),
+    [layerIds, ownChain],
+  )
+  const layerDocs = useLayerDocs(props.apiBase, layerIds?.type ?? null, below)
+  const shown = editor.shownDoc
+  const layers = useMemo(
+    () =>
+      layerIds && shown && !layerDocs.loading && layerDocs.docs.length === below.length
+        ? layerInfo({
+            doc: shown,
+            docs: layerDocs.docs,
+            below,
+            own: layerIds.scope,
+            schema: props.schema,
+            nameOf: (scope) => scopeName(props.me, scope),
+          })
+        : undefined,
+    [layerIds, shown, layerDocs.docs, layerDocs.loading, below, props.schema, props.me],
+  )
+
   const slot: EditorSlot = {
+    ...(layers ? { layers } : {}),
     store: editor.store,
     schema: props.schema,
     types: props.types,
@@ -361,7 +469,11 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
             props.types.find((type) => type.name === editor.globalHint)?.label ?? editor.globalHint,
         }
       : null,
-    onEditGlobal: (name) => props.onOpenDocument?.(singletonId(name)),
+    // The scope's own layer, on a deployment with `sites`: `sng_<type>` is `default`'s.
+    onEditGlobal: (name) =>
+      props.onOpenDocument?.(
+        props.me.sites && props.me.scope ? layerId(name, props.me.scope) : singletonId(name),
+      ),
     versions: editor.versions,
     versionTrail: editor.versionTrail,
     onNotice: props.onNotice,
@@ -450,6 +562,29 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
             </span>
           )}
 
+          {/* Multi-site: which site the pane shows this page in. A picker where more
+              than one can, a sentence where one does, and why-not where none can. */}
+          {paneLabel(pane) !== null ? (
+            pane.kind === 'site' && pane.choices.length > 1 ? (
+              <label className={css.previewIn}>
+                <span>Preview in</span>
+                <select
+                  className={css.locale}
+                  value={pane.site.id}
+                  onChange={(e) => setPreviewIn(e.target.value)}
+                >
+                  {pane.choices.map((choice) => (
+                    <option key={choice.id} value={choice.id}>
+                      {choice.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : (
+              <span className={css.statusFlat}>{paneLabel(pane)}</span>
+            )
+          ) : null}
+
           <span className={css.spacer} />
 
           {/* Only where there is more than one language to switch between: a
@@ -530,7 +665,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
               !mayPublish
             }
             reason={
-              whyNot(props.me, 'publish') ??
+              whyNot(owner, 'publish') ??
               (!live
                 ? 'Close the version preview first'
                 : status.nothingToPublish
@@ -554,7 +689,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                 // reads `changed` and is still serving the public, so this refused
                 // to take down the very pages most likely to need taking down.
                 disabled: !(isLive(story.state) && live && mayPublish),
-                reason: whyNot(props.me, 'publish') ?? 'Only a live page can be unpublished',
+                reason: whyNot(owner, 'publish') ?? 'Only a live page can be unpublished',
                 run: () => setConfirm('unpublish'),
               },
             ]}
@@ -580,6 +715,37 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
         {banner ? (
           <p className={css.banner} role="status">
             {banner}
+          </p>
+        ) : null}
+
+        {notices.map((notice) => {
+          const link = noticeLink(notice, props.mount)
+          return (
+            <p className={css.banner} role="status" key={notice.kind}>
+              {noticeText(notice)} {link ? <a href={link.href}>{link.text}</a> : null}
+              {notice.kind === 'readonly' && notice.canFork ? (
+                <Button
+                  size="sm"
+                  disabled={forking}
+                  reason="Forking…"
+                  onClick={() => void forkIntoScope()}
+                >
+                  Fork into {props.me.sites?.scopes.find((s) => s.id === props.me.scope)?.name}
+                </Button>
+              ) : null}
+            </p>
+          )
+        })}
+
+        {/* The browser refused the partitioned grant cookie (`site/enter?check=1`), so
+            the pane would be showing the published page as though it were the draft.
+            A top-level open keeps a first-party cookie (`multi-site.md`, edge cases). */}
+        {blocked && editor.src ? (
+          <p className={css.banner} role="alert">
+            Your browser blocked the cookie the preview needs.{' '}
+            <a href={editor.src} target="_blank" rel="noreferrer">
+              Open preview in a new tab
+            </a>
           </p>
         ) : null}
 
@@ -644,7 +810,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                   // Keyed on the story *and* the locale: switching language is a
                   // reload, because the host's own chrome and `<html lang>` change
                   // and no postMessage reaches those.
-                  key={`${story.id}:${editor.locale}`}
+                  key={`${story.id}:${editor.locale}:${paneSiteId ?? ''}`}
                   ref={editor.frame}
                   className={css.frame}
                   title={`Preview of ${story.title || story.id}`}
@@ -655,7 +821,10 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
               <div className={css.blank}>
                 <EmptyState
                   title="No page to preview yet"
-                  body={`This ${labelOf(props.types, story.type)} is routed, but the host's own route function returned no URL for ${story.path === '' ? '/' : `/${story.path}`}.`}
+                  body={
+                    paneUnavailable(pane) ??
+                    `This ${labelOf(props.types, story.type)} is routed, but the host's own route function returned no URL for ${story.path === '' ? '/' : `/${story.path}`}.`
+                  }
                 />
               </div>
             )}

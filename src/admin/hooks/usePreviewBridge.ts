@@ -56,7 +56,10 @@ interface Options {
  * preview origin. `previewUrl` is the story's own preview URL on that origin.
  */
 export function paneSrc(base: string, site: string, previewUrl: string): string {
-  const url = new URL(previewUrl, window.location.origin)
+  // Only the path and the query survive (`safeNext` on the server refuses anything
+  // else), so the base a relative URL is resolved against is irrelevant — and a fixed
+  // one keeps this pure, callable from a Node test with no `window`.
+  const url = new URL(previewUrl, 'https://preview.invalid')
   const next = `${url.pathname}${url.search}`
   return `${base}/~${encodeURIComponent(site)}/site/start?next=${encodeURIComponent(next)}`
 }

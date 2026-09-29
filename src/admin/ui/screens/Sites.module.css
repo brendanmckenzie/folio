@@ -1,0 +1,100 @@
+/*
+ * The Sites screen: a registry table, a tab for the selected scope's settings, and
+ * one dialog. Table furniture is `Table.module.css`; what is here is the layout the
+ * screen adds around it.
+ */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 1400px;
+}
+
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  padding: var(--space-2) var(--space-3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--fg-subtle);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.tab:hover {
+  color: var(--fg);
+}
+
+.tabOn {
+  color: var(--fg);
+  border-bottom-color: var(--fg-accent);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.name {
+  font-weight: 550;
+}
+
+.ids {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.blank {
+  color: var(--fg-subtle);
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.note {
+  margin: 0;
+  color: var(--fg-subtle);
+  font-size: var(--text-sm);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.scopes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 40rem;
+}
+
+.skeletons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.skeleton {
+  height: var(--row-h);
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+}
+
+.dialogNote {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+}

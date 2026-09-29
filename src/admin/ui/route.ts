@@ -49,6 +49,10 @@ export type Screen =
    * `docs/specs/foundation/passkeys.md` decision 6: reached from the user menu,
    * deliberately **not** in `nav()` — `ui-nav.test.ts` asserts the absence. */
   | { name: 'account' }
+  /** The site registry — sites, groups, hostnames, status
+   * (`docs/specs/foundation/multi-site.md` decision 1). Only a deployment with
+   * `sites` has it, and `nav()` offers it only to the platform. */
+  | { name: 'sites' }
   | { name: 'missing'; path: string }
 
 export type ScreenName = Screen['name']
@@ -78,7 +82,110 @@ const FLAT = [
   'settings',
   'forms',
   'account',
+  'sites',
 ] as const
+
+/* ------------------------------------------------------------------ scopes --- */
+
+/**
+ * The `~<scope>` segment (`multi-site.md` decision 11), the same shape
+ * `server/index.tsx` strips: a site, group or `shared` id.
+ */
+const SCOPE_SEGMENT = /^~([a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)$/
+
+/**
+ * Which scope a path is in, and the mount its screens are relative to.
+ *
+ * **The scope is part of the mount**, not a second dimension of the route: under
+ * `{base}/~alpha` every screen path (`/content`, `/edit/:id`) is exactly what it is
+ * with no scope, so `parse` and `href` below needed no change and every screen that
+ * takes `mount` builds a scoped link for free. Changing scope is therefore a real
+ * navigation to another mount rather than a state change — which is also what
+ * resets everything a scope owns (lists, the open document, the socket) without a
+ * screen having to remember to.
+ *
+ * With no `~` segment the mount is `base` and the scope is null: a single-site
+ * deployment always, and on a multi-site one only `{base}/sites` and the bare root.
+ */
+export function splitScope(
+  pathname: string,
+  base: string,
+): { scope: string | null; mount: string } {
+  if (pathname.startsWith(`${base}/`)) {
+    const segment = pathname.slice(base.length + 1).split('/')[0] ?? ''
+    const match = SCOPE_SEGMENT.exec(segment)
+    if (match) return { scope: match[1]!, mount: `${base}/${segment}` }
+  }
+  return { scope: null, mount: base }
+}
+
+/** `{base}/~<scope>`, or `base` for none. */
+export function scopedMount(base: string, scope: string | null): string {
+  return scope === null ? base : `${base}/~${scope}`
+}
+
+/**
+ * The admin's JSON base for a scope: `{base}/~<scope>/api`
+ * (`multi-site.md` decision 11), or `apiBase` untouched with none. `apiBase` is
+ * `{base}/api` at every mount today; this derives from whatever it is rather than
+ * assuming so.
+ */
+export function scopedApiBase(apiBase: string, base: string, scope: string | null): string {
+  if (scope === null || !apiBase.startsWith(base)) return apiBase
+  return `${scopedMount(base, scope)}${apiBase.slice(base.length)}`
+}
+
+/**
+ * The scope an `apiBase` is for, or null. What lets a component that is handed
+ * nothing but `apiBase` — a picker — know it is on a multi-site deployment and which
+ * scope it reads from, without a prop threaded through every control between it and
+ * the shell.
+ */
+export function scopeOfApiBase(apiBase: string): string | null {
+  const match = /\/~([a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?)(?:\/|$)/.exec(apiBase)
+  return match ? match[1]! : null
+}
+
+/** The mount with any `~<scope>` segment taken off: `{base}/~alpha` → `{base}`. What a
+ * link into *another* scope, or a handoff (`paneSrc`), is built from. */
+export function bareMount(mount: string): string {
+  return mount.replace(/\/~[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/, '')
+}
+
+/** The screens that mean the same thing in every scope, so switching scope keeps you on
+ * them; anything else (an open document, a form) belongs to the scope it was opened in. */
+const SCOPE_STABLE: ReadonlySet<Screen['name']> = new Set([
+  'home',
+  'content',
+  'assets',
+  'forms',
+  'redirects',
+  'schedules',
+  'model',
+  'settings',
+  'access',
+])
+
+/**
+ * Where the scope switcher goes: the same screen in the other scope when the screen is
+ * one that exists in every scope, else that scope's home.
+ */
+export function switchScopeUrl(base: string, scope: string, from: Screen): string {
+  return href(SCOPE_STABLE.has(from.name) ? from : { name: 'home' }, scopedMount(base, scope))
+}
+
+/**
+ * Whether a link is a navigation this router may take over: under the mount **and**
+ * in the same scope. Under a scoped mount that is just "under it"; under the bare
+ * mount a `~<scope>` path is another mount's screen, so it is a real page load and
+ * the new scope's shell boots against its own `apiBase`.
+ */
+export function isInsideMount(pathname: string, mount: string, base: string): boolean {
+  if (pathname !== mount && !pathname.startsWith(`${mount}/`)) return false
+  if (mount !== base) return true
+  const next = pathname.slice(base.length + 1).split('/')[0] ?? ''
+  return !SCOPE_SEGMENT.test(next)
+}
 
 /**
  * Splits a `pathname` + `search` string into a screen and its query.
@@ -264,6 +371,7 @@ const TITLES: Record<
   settings: 'Settings',
   forms: 'Forms',
   account: 'Your account',
+  sites: 'Sites',
 }
 
 /**

@@ -579,3 +579,11 @@
 .filter > span {
   overflow-wrap: anywhere;
 }
+
+/* A layered field's actions: Override, Reset to inherited, Remove. Always visible —
+   a control only a hover reveals is one the keyboard cannot reach. */
+.layerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}

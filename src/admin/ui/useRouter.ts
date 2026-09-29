@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
-import { href, isSameDocumentFragment, parse, type Route, same, type Screen } from './route'
+import {
+  href,
+  isInsideMount,
+  isSameDocumentFragment,
+  parse,
+  type Route,
+  same,
+  type Screen,
+} from './route'
 
 /**
  * The one place that talks to `history`, and the only part of the router that
@@ -32,7 +40,7 @@ export interface Router {
 const here = (mount: string): Route =>
   parse(window.location.pathname + window.location.search, mount)
 
-export function useRouter(mount: string): Router {
+export function useRouter(mount: string, base: string = mount): Router {
   const [route, setRoute] = useState<Route>(() => here(mount))
 
   useEffect(() => {
@@ -102,8 +110,9 @@ export function useRouter(mount: string): Router {
       // Outside the mount is a real navigation — a preview URL, the login page,
       // the host's own site. The shell does not own those and must not swallow
       // them.
-      const inside = anchor.pathname === mount || anchor.pathname.startsWith(`${mount}/`)
-      if (!inside) return
+      // Under the mount **and in its scope** (`isInsideMount`): a link to another
+      // scope is a page load, so that scope's shell boots against its own API.
+      if (!isInsideMount(anchor.pathname, mount, base)) return
       e.preventDefault()
       const next = parse(anchor.pathname + anchor.search, mount)
       if (same(next, here(mount))) return
@@ -112,7 +121,7 @@ export function useRouter(mount: string): Router {
     }
     document.addEventListener('click', onClick)
     return () => document.removeEventListener('click', onClick)
-  }, [mount])
+  }, [mount, base])
 
   return { route, go, replace }
 }

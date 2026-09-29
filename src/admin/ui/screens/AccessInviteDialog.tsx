@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import type { Role } from '../../../server/auth/roles'
+import type { Grants, Role } from '../../../server/auth/roles'
+import type { Me } from '../../me'
 import { Button } from '../Button'
 import { Dialog } from '../Dialog'
 import { Field, Input, Select } from '../Field'
 import css from './Access.module.css'
-import { ROLE_MEANING, ROLE_OPTIONS } from './access-model'
+import { GrantsEditor } from './AccessGrants'
+import { grantsRefusal, ROLE_MEANING, ROLE_OPTIONS, showsGrants } from './access-model'
 
 /**
  * Giving somebody access.
@@ -27,26 +29,43 @@ import { ROLE_MEANING, ROLE_OPTIONS } from './access-model'
 export function AccessInviteDialog({
   onClose,
   onInvite,
+  me,
 }: {
   onClose: () => void
-  onInvite: (body: { email: string; name?: string; role: Role }) => Promise<void>
+  onInvite: (body: { email: string; name?: string; role?: Role; grants?: Grants }) => Promise<void>
+  /**
+   * On a deployment with `sites` the role is a set of grants, one per scope, and the
+   * route refuses an invitation that names neither (`multi-site.md` decision 10).
+   * Absent with none, and then this is the single role it always was.
+   */
+  me?: Me
 }) {
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
   const [role, setRole] = useState<Role>('editor')
+  const [grants, setGrants] = useState<Grants>({})
   const [pending, setPending] = useState(false)
+  const many = me !== undefined && showsGrants(me)
 
   // The server's own rule, stated here only so the button can explain itself
   // before the click: `UserCreateBody`'s `EMAIL` requires an address, and a 400 for
   // an empty field is a worse answer than a disabled button that says what is
   // missing.
-  const refusal = email.trim() ? undefined : 'Enter an email address'
+  const refusal = email.trim()
+    ? many
+      ? grantsRefusal(grants)
+      : undefined
+    : 'Enter an email address'
 
   const submit = async () => {
     if (refusal) return
     setPending(true)
     try {
-      await onInvite({ email: email.trim(), ...(name.trim() ? { name: name.trim() } : {}), role })
+      await onInvite({
+        email: email.trim(),
+        ...(name.trim() ? { name: name.trim() } : {}),
+        ...(many ? { grants } : { role }),
+      })
     } finally {
       setPending(false)
     }
@@ -104,17 +123,24 @@ export function AccessInviteDialog({
           )}
         </Field>
 
-        <Field label="Role" help={ROLE_MEANING[role]}>
-          {(id) => (
-            <Select id={id} value={role} onChange={(e) => setRole(e.target.value as Role)}>
-              {ROLE_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </Select>
-          )}
-        </Field>
+        {many && me ? (
+          <div>
+            <p className={css.groupLabel}>Access</p>
+            <GrantsEditor me={me} value={grants} onChange={setGrants} />
+          </div>
+        ) : (
+          <Field label="Role" help={ROLE_MEANING[role]}>
+            {(id) => (
+              <Select id={id} value={role} onChange={(e) => setRole(e.target.value as Role)}>
+                {ROLE_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+        )}
       </form>
     </Dialog>
   )

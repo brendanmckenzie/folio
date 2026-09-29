@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Blok } from '../../../core/doc'
+import type { Blok, Doc } from '../../../core/doc'
 import type { LocaleConfig } from '../../../core/locales'
 import type { Resolution } from '../../../core/resolve'
 import type { DocumentType, SchemaIndex } from '../../../core/schema'
@@ -11,7 +11,19 @@ import { EmptyState } from '../EmptyState'
 import { FieldRow } from './fields/FieldRow'
 import { PageAddress } from './fields/PageAddress'
 import css from './Inspector.module.css'
-import { canFocus, visibleEntries } from './inspector-model'
+import {
+  belowBlok,
+  canFocus,
+  type FieldLayerInput,
+  inheritedValue,
+  LAYER_ACTION_LABEL,
+  type LayerInfo,
+  layerActions,
+  layerLabel,
+  layerMutations,
+  layerPrefix,
+  visibleEntries,
+} from './inspector-model'
 
 /**
  * What the inspector needs, which is a subset of `EditorShell.tsx`'s `EditorSlot` —
@@ -68,6 +80,15 @@ export interface InspectorProps {
    * richtext toolbar work before the chord is wired.
    */
   focus?: { field: string | null; open: (field: string | null) => void }
+  /**
+   * The document `blok` is drawn out of, and — on a deployment with `sites`, for a
+   * global's layer — how each field stands against the layers below it
+   * (`multi-site.md` decision 8). **Both absent is a single-site editor, a page, a
+   * record or the shared scope's own layer, and then no field carries a label or an
+   * action**: `layers` is the only thing that switches them on.
+   */
+  doc?: Doc | null
+  layers?: LayerInfo
 }
 
 /**
@@ -228,6 +249,7 @@ export function Inspector(props: InspectorProps) {
         <legend className={css.srOnly}>{def.label} fields</legend>
         {entries.map(([name, field]) => (
           <FieldRow
+            layer={layerFor(props, blok, name)}
             // `${blok.uid}:${name}`, so a field's identity never moves when a `showIf`
             // sibling appears or disappears — an in-flight upload in one field survives
             // a condition revealing another.
@@ -257,6 +279,33 @@ export function Inspector(props: InspectorProps) {
       </fieldset>
     </div>
   )
+}
+
+/**
+ * One field's layer label and actions, or undefined when it has none: no `layers`
+ * (everything but a global's layer on a multi-site deployment), or a block whose
+ * fields the layers do not label (`layerPrefix`).
+ */
+function layerFor(props: InspectorProps, blok: Blok, name: string): FieldLayerInput | undefined {
+  const { layers, doc, schema, readOnly, store } = props
+  if (!layers || !doc) return undefined
+  const prefix = layerPrefix(doc, schema, blok)
+  const state = prefix === null ? undefined : layers.states[`${prefix}${name}`]
+  if (!state) return undefined
+  const inherited = belowBlok(doc, layers.below, blok)
+  return {
+    state: state.state,
+    label: layerLabel(state, layers.nameOf),
+    actions: layerActions(state.state, readOnly).map((action) => ({
+      action,
+      label: LAYER_ACTION_LABEL[action],
+    })),
+    value: inheritedValue(state.state, inherited, name),
+    onAction: (action) => {
+      const mutations = layerMutations(action, blok, name, inherited)
+      if (mutations.length > 0) store.tx(mutations)
+    },
+  }
 }
 
 /**

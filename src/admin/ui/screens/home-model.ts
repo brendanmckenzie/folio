@@ -28,9 +28,11 @@
  */
 import type { DocumentType } from '../../../core/schema'
 import { singletonId } from '../../../core/schema'
+import { layerId } from '../../../core/sites'
 import type { StoryMeta } from '../../../core/story'
 import type { MigrationStatus } from '../../../server/migrate'
-import type { Me } from '../../me'
+import type { InheritedRow } from '../../../server/stories'
+import { canCreateContent, type Me } from '../../me'
 import type { Screen } from '../route'
 import { type AuditBatch, auditGroups, driftBanner, REMEDIES } from './model-model'
 
@@ -129,8 +131,14 @@ export function quickCards(input: {
   /** The library's total, from the same request that fills *Latest media*. */
   assets: number | undefined
   mayCreate: boolean
+  /**
+   * The scope being shown, on a deployment with `sites`; absent otherwise. With it a
+   * global's card links to *that scope's layer* (`layerId`) — `sng_<type>` is
+   * `default`'s and would open another site's document.
+   */
+  scope?: string | null
 }): QuickCard[] {
-  const { types, globals, counts, assets, mayCreate } = input
+  const { types, globals, counts, assets, mayCreate, scope } = input
   const cards: QuickCard[] = [
     {
       key: 'pages',
@@ -167,7 +175,7 @@ export function quickCards(input: {
       label: type.label,
       // Straight at the document, exactly as the sidebar does: a singleton's id is
       // derived from its type name, so no request is needed to address it.
-      screen: { name: 'edit', id: singletonId(type) },
+      screen: { name: 'edit', id: scope ? layerId(type.name, scope) : singletonId(type) },
       note: 'One document, always.',
     })
   }
@@ -540,4 +548,83 @@ export function homeRequests(apiBase: string): HomeRequests {
     audit: `${apiBase}/audit?batch=${AUDIT_BATCH}`,
     users: `${apiBase}/users?limit=${DIRECTORY_LIMIT}`,
   }
+}
+
+/* ------------------------------------------------------------- inherited --- */
+
+/**
+ * The pages a scope inherits, and what it can do about each
+ * (`multi-site.md` decision 5): *Fork* to make it its own, or — once it has — a
+ * pointer to the override and, when the shared original has been published since,
+ * the notice that says so.
+ *
+ * **Only on a deployment with `sites`, and only for a scope with something above
+ * it.** `shared` has nothing to inherit, and neither does a single-site host, so
+ * neither draws the section at all.
+ */
+export function showsInherited(me: Me): boolean {
+  const here = me.sites?.scopes.find((scope) => scope.id === me.scope)
+  return here !== undefined && here.chain.length > 1
+}
+
+export type InheritedAction =
+  /** The scope shows the inherited page. Fork makes it the scope's own. */
+  | { kind: 'fork' }
+  /** Fork is on offer in principle and refused here, with the reason. */
+  | { kind: 'blocked'; reason: string }
+  /** The scope has its own page at this path. */
+  | { kind: 'overridden'; id: string; changed: boolean }
+  /** Read-only: the caller cannot create in this scope. */
+  | { kind: 'none' }
+
+/**
+ * What one inherited row offers. A fork needs `CREATE` on the scope, and — the rule
+ * the server enforces with a 409 — a parent path the scope already owns or a
+ * top-level path. The parent is checked against the rows in hand only: a parent on
+ * another page of the list is left to the server, which says the same sentence.
+ */
+export function inheritedAction(
+  row: InheritedRow,
+  rows: readonly InheritedRow[],
+  me: Me,
+): InheritedAction {
+  if (row.shadowedBy !== null) {
+    return { kind: 'overridden', id: row.shadowedBy, changed: row.forkedSince }
+  }
+  if (!canCreateContent(me)) return { kind: 'none' }
+  const path = row.path ?? ''
+  const cut = path.lastIndexOf('/')
+  if (cut > 0) {
+    const parent = rows.find((candidate) => candidate.path === path.slice(0, cut))
+    if (parent && parent.shadowedBy === null) {
+      return { kind: 'blocked', reason: `Fork ${parent.title || parent.path} first` }
+    }
+  }
+  return { kind: 'fork' }
+}
+
+/** A row's owner as a word: the scope's name, or its id when it has none in hand. */
+export function ownerLabel(me: Me, row: Pick<StoryMeta, 'site'>): string {
+  const id = row.site ?? ''
+  return (
+    me.sites?.scopes.find((scope) => scope.id === id)?.name ?? (id === 'shared' ? 'Shared' : id)
+  )
+}
+
+/**
+ * Whether *Create home page* is on offer: a scope with no home page of its own, for
+ * someone who may create. `own` is the scope's row at `''`, or undefined.
+ */
+export function canCreateHome(me: Me, own: Pick<StoryMeta, 'id'> | undefined): boolean {
+  return me.sites !== undefined && own === undefined && canCreateContent(me)
+}
+
+/** The body of `POST /stories` for the home page: the type the host marked default,
+ * else the first page type. Null when the host declared no page type to make one of. */
+export function homePageBody(
+  types: readonly DocumentType[],
+): { title: string; type: string; root: true } | null {
+  const type =
+    types.find((t) => t.kind === 'page' && t.default) ?? types.find((t) => t.kind === 'page')
+  return type ? { title: 'Home', type: type.name, root: true } : null
 }

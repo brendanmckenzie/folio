@@ -19,11 +19,11 @@
  * makes a person tick three boxes to express one intention and then stores a
  * redundant list.
  */
-import type { Role, Scope } from '../../../server/auth/roles'
+import type { Grants, Role, Scope } from '../../../server/auth/roles'
 import { ROLES, SCOPES, hasScope } from '../../../server/auth/roles'
 import { roleSetByReason } from '../../../server/auth/roles-from'
 import type { TokenRow } from '../../../server/auth/tokens'
-import type { Me, MeUser } from '../../me'
+import { isMultiSite, type Me, type MeUser } from '../../me'
 import type { BadgeTone } from '../Badge'
 import { when } from './content-rows'
 
@@ -51,6 +51,13 @@ export interface AccessUser {
   createdAt: number
   lastSeenAt: number | null
   /**
+   * Every grant the person holds, each with who set it — `GET /users`' `grants`
+   * (`multi-site.md` decision 10). With no `sites` it is the one `*` entry `role`
+   * already is, and the screen never reads it. **Optional** because a row built
+   * before spec 23 has none.
+   */
+  grants?: readonly AccessGrant[]
+  /**
    * How many passkeys this person has enrolled.
    *
    * **Present on every row whether or not this deployment lists `passkeys()`** —
@@ -60,6 +67,14 @@ export interface AccessUser {
    * passkeys.md` decision 4).
    */
   passkeys: number
+}
+
+/** One grant as the route answers it. `roleFrom` is null for one Folio placed, or the
+ * id of the provider whose claims did. */
+export interface AccessGrant {
+  scope: string
+  role: Role
+  roleFrom: string | null
 }
 
 /* --------------------------------------------------------------- the gate --- */
@@ -99,7 +114,17 @@ export function accessGate(me: Me): AccessGate {
         'This session is authenticated by an API token. Sign in as an admin to manage access.',
     }
   }
-  if (me.actor.role !== 'admin') {
+  // With `sites`, users and tokens are the platform tier: `role` is the `*` grant and
+  // says nothing about any one site, so the answer is `platform`, and the sentence
+  // says so rather than naming a role the person may hold on some other page.
+  if (me.sites && !me.sites.platform) {
+    return {
+      kind: 'refused',
+      reason:
+        'Only a platform administrator manages editors and tokens. A site administrator’s role covers the site’s content.',
+    }
+  }
+  if (!me.sites && me.actor.role !== 'admin') {
     // Deliberately the same sentence shape as `refusalOf` on the server, so the
     // pre-emptive explanation and the 403 that would follow read alike.
     return {
@@ -499,4 +524,120 @@ export function parseAccessUrl(query: Readonly<Record<string, string>>): AccessU
 
 export function accessQuery(url: AccessUrl): Record<string, string | undefined> {
   return { new: url.open ?? undefined }
+}
+
+/* ------------------------------------------------------------------ grants --- */
+
+/** The `*` grant's scope id, and the words for it: on a deployment with `sites` it is
+ * the platform tier, and "everywhere" is what a person reads it as. */
+export const EVERYWHERE = '*'
+
+/** A scope's display name in a grant: `*` is "Every site", else the name the registry
+ * gave it, else the id — which is what a grant on a deleted scope reads as. */
+export function grantScopeLabel(me: Me, scope: string): string {
+  if (scope === EVERYWHERE) return 'Every site'
+  return me.sites?.scopes.find((candidate) => candidate.id === scope)?.name ?? scope
+}
+
+/** A grant as a table cell reads it. */
+export interface GrantRow extends AccessGrant {
+  label: string
+  /** Names a scope that no longer exists: the grant is listed and reaches nothing
+   * (`multi-site.md` decision 10). */
+  ignored: boolean
+}
+
+/**
+ * Every grant a person holds, `*` first, each flagged **ignored** when it names a
+ * scope the registry no longer has. The caller is a platform admin (Access is
+ * platform tier), so `me.sites.scopes` is every scope there is — `*` excepted, which
+ * is never a content scope and never ignored.
+ */
+export function grantRows(user: Pick<AccessUser, 'grants'>, me: Me): GrantRow[] {
+  const known = new Set(me.sites?.scopes.map((scope) => scope.id) ?? [])
+  return [...(user.grants ?? [])]
+    .sort((a, b) =>
+      a.scope === EVERYWHERE ? -1 : b.scope === EVERYWHERE ? 1 : a.scope < b.scope ? -1 : 1,
+    )
+    .map((grant) => ({
+      ...grant,
+      label: grantScopeLabel(me, grant.scope),
+      ignored: grant.scope !== EVERYWHERE && !known.has(grant.scope),
+    }))
+}
+
+/**
+ * Whether this person's grants can be edited here: not when a provider placed any of
+ * them. `PATCH /users/:id` answers 409 for **any** edit of a person whose role a
+ * sign-in set (`roleSetByReason`), because the next sign-in would overwrite it — so
+ * the control is replaced by the sentence, not offered and refused.
+ */
+export function grantsReason(user: Pick<AccessUser, 'grants' | 'roleFrom'>): string | null {
+  const placed = user.grants?.find((grant) => grant.roleFrom !== null)?.roleFrom ?? user.roleFrom
+  return placed ? roleSetByReason(placed) : null
+}
+
+/** The map the editor starts from: every grant the person has, ignored ones too, so
+ * saving does not silently drop a grant the admin has not looked at. */
+export function grantsOf(user: Pick<AccessUser, 'grants'>): Grants {
+  return Object.fromEntries((user.grants ?? []).map((grant) => [grant.scope, grant.role]))
+}
+
+/** The scopes a grant can name, `*` first: what the editor's scope `<select>` offers. */
+export function grantScopeOptions(me: Me): { id: string; label: string }[] {
+  return [
+    { id: EVERYWHERE, label: 'Every site (platform)' },
+    ...(me.sites?.scopes ?? []).map((scope) => ({ id: scope.id, label: scope.name })),
+  ]
+}
+
+/** `grants` with `scope` set to `role`: a new entry, or a change to one already there. */
+export function withGrant(grants: Grants, scope: string, role: Role): Grants {
+  return { ...grants, [scope]: role }
+}
+
+/** `grants` without `scope`. */
+export function withoutGrant(grants: Grants, scope: string): Grants {
+  const { [scope]: _gone, ...rest } = grants
+  return rest
+}
+
+/** The first scope not yet granted, for the editor's *Add* row; null when they all are. */
+export function nextScope(me: Me, grants: Grants): string | null {
+  return grantScopeOptions(me).find((option) => !(option.id in grants))?.id ?? null
+}
+
+/** Why a grant set cannot be saved: the route requires at least one. */
+export function grantsRefusal(grants: Grants): string | undefined {
+  return Object.keys(grants).length === 0 ? 'Give at least one grant' : undefined
+}
+
+/** Whether the Access screen shows grants at all. With no `sites` it shows a role,
+ * exactly as it always did. */
+export function showsGrants(me: Me): boolean {
+  return isMultiSite(me)
+}
+
+/* ---------------------------------------------------------------- binding --- */
+
+/**
+ * The presets a token can take: all of them unbound, and without *Full access* when
+ * it is bound to a scope — a bound token can never hold `admin` (`multi-site.md`
+ * decision 10), since the scope is the platform tier's.
+ */
+export function presetsFor(bound: boolean): readonly TokenPreset[] {
+  return bound ? TOKEN_PRESETS.filter((preset) => !preset.scopes.includes('admin')) : TOKEN_PRESETS
+}
+
+/** The scopes to keep when a binding is chosen: a selection holding `admin` cannot
+ * stay, and falls back to the default preset rather than to a silently smaller token. */
+export function scopesForBinding(selected: readonly Scope[], bound: boolean): Scope[] {
+  return bound && selected.includes('admin')
+    ? [...(scopesOfPreset(DEFAULT_PRESET) ?? [])]
+    : [...selected]
+}
+
+/** What a token's binding reads as in the table. Null is today's token, on every site. */
+export function bindingLabel(me: Me, site: string | null | undefined): string {
+  return site ? (me.sites?.scopes.find((scope) => scope.id === site)?.name ?? site) : 'Every site'
 }

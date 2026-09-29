@@ -11,7 +11,8 @@
  * tests run in Node and mount nothing (`vitest.config.ts`).
  */
 import { type DocumentType, singletonId } from '../../core/schema'
-import { canManageAccess, type Me } from '../me'
+import { layerId } from '../../core/sites'
+import { canManageAccess, canManageSites, type Me } from '../me'
 // Type-only, and it has to stay that way: `verbatimModuleSyntax` erases this
 // import entirely, so naming an icon here does not pull `icons.tsx` — or React —
 // into a module the Node tests import.
@@ -54,6 +55,12 @@ export interface NavInput {
   types: readonly DocumentType[]
   globals: readonly string[]
   me: Me
+  /**
+   * The scope being shown, on a deployment with `sites`; null on one page that has
+   * none (the Sites screen) and always with no `sites`. With it, a global links to
+   * *that scope's layer* (`layerId`) rather than to `sng_<type>`, which is `default`'s.
+   */
+  scope?: string | null
 }
 
 /**
@@ -63,10 +70,19 @@ export interface NavInput {
 export const GROUP_AT = 8
 
 export function nav(input: NavInput): NavGroup[] {
+  // A deployment with `sites` and no scope chosen: nothing scoped can be drawn
+  // (every list is a scope's own), so the nav is the registry alone — or nothing,
+  // for somebody who may not manage it, whose way in is the scope switcher.
+  if (input.me.sites && !input.scope) {
+    return canManageSites(input.me) ? [{ items: [sitesItem] }] : []
+  }
+
   const groups: NavGroup[] = [{ items: primary(input.types) }]
 
   const singles = input.types.filter((t) => t.kind === 'singleton')
-  if (singles.length > 0) groups.push(globalsGroup(singles, input.globals))
+  if (singles.length > 0) {
+    groups.push(globalsGroup(singles, input.globals, input.me.sites ? (input.scope ?? null) : null))
+  }
 
   const records = input.types.filter((t) => t.kind === 'record')
   if (records.length > GROUP_AT || records.some((t) => t.group)) {
@@ -156,7 +172,11 @@ function recordGroups(records: readonly DocumentType[]): NavGroup[] {
  * reach. Declared globals come first, then the rest in declaration order, because
  * that ordering is a real distinction even though the heading is not.
  */
-function globalsGroup(singles: readonly DocumentType[], globals: readonly string[]): NavGroup {
+function globalsGroup(
+  singles: readonly DocumentType[],
+  globals: readonly string[],
+  scope: string | null,
+): NavGroup {
   const declared = globals.filter((name) => singles.some((t) => t.name === name))
   const order = [...declared, ...singles.map((t) => t.name).filter((n) => !declared.includes(n))]
   const byName = new Map(singles.map((t) => [t.name, t]))
@@ -173,7 +193,10 @@ function globalsGroup(singles: readonly DocumentType[], globals: readonly string
           // it, including the ones `Manifest.globals` never declared: the
           // distinction the ordering makes is not one an icon can carry.
           icon: 'global',
-          screen: { name: 'edit' as const, id: singletonId(type) },
+          screen: {
+            name: 'edit' as const,
+            id: scope === null ? singletonId(type) : layerId(type.name, scope),
+          },
         },
       ]
     }),
@@ -192,8 +215,12 @@ function globalsGroup(singles: readonly DocumentType[], globals: readonly string
  * both explain a document being *behind the model*, which is a state an editor
  * sees in the inspector and currently cannot investigate.
  */
+/** The registry. Platform only (`canManageSites`), and a deployment with `sites`. */
+const sitesItem: NavItem = { label: 'Sites', icon: 'global', screen: { name: 'sites' } }
+
 function administration(me: Me): NavItem[] {
   return [
+    ...(canManageSites(me) ? [sitesItem] : []),
     { label: 'Model', icon: 'model', screen: { name: 'model' } },
     { label: 'Redirects', icon: 'redirects', screen: { name: 'redirects' } },
     /**
@@ -246,4 +273,34 @@ export function activeItem(groups: readonly NavGroup[], screen: Screen, type?: s
     if (list) return list.screen
   }
   return { name: 'content' }
+}
+
+/* ------------------------------------------------------------ the switcher --- */
+
+export interface ScopeOption {
+  id: string
+  name: string
+}
+
+export interface ScopeOptionGroup {
+  label: string
+  options: ScopeOption[]
+}
+
+/**
+ * The scope switcher's options, grouped Shared / Groups / Sites and empty groups
+ * dropped. Pure so the grouping is a test rather than a screenshot; the switcher
+ * itself is absent when `choices` is (`showsScopeSwitcher`), so this is never asked
+ * on a single-site deployment.
+ */
+export function scopeOptionGroups(
+  choices: readonly { id: string; name: string; kind: 'site' | 'group' | 'shared' }[],
+): ScopeOptionGroup[] {
+  const of = (kind: 'site' | 'group' | 'shared', label: string): ScopeOptionGroup => ({
+    label,
+    options: choices.filter((c) => c.kind === kind).map(({ id, name }) => ({ id, name })),
+  })
+  return [of('shared', 'Shared'), of('group', 'Groups'), of('site', 'Sites')].filter(
+    (group) => group.options.length > 0,
+  )
 }

@@ -6,6 +6,7 @@ import { Button } from '../../Button'
 import { Dialog } from '../../Dialog'
 import { EmptyState } from '../../EmptyState'
 import { Field, Input } from '../../Field'
+import { scopeOfApiBase } from '../../route'
 import css from './fields.module.css'
 import { type FormRow, formStatus, matchesForm, questionsLabel, statusHint } from '../forms-model'
 import { messageOf } from '../useContent'
@@ -64,7 +65,10 @@ export function useFormList(apiBase: string): FormList {
     let live = true
     void (async () => {
       try {
-        const res = await fetch(`${apiBase}/forms?limit=${LIMIT}`)
+        // A form embeds by chain on a deployment with `sites` (an `apiBase` under
+        // `~<scope>`): the scope's own and every form above it, never a sibling's.
+        const chain = scopeOfApiBase(apiBase) !== null ? '&chain=1' : ''
+        const res = await fetch(`${apiBase}/forms?limit=${LIMIT}${chain}`)
         if (!res.ok) throw new Error(await messageOf(res))
         const page = (await res.json()) as Page<FormRow>
         if (live) setList({ rows: page.rows, more: page.cursor !== null, loading: false })

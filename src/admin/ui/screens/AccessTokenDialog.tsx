@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { Scope } from '../../../server/auth/roles'
+import type { ScopeOptionGroup } from '../nav'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { Dialog } from '../Dialog'
@@ -11,11 +12,12 @@ import {
   EXPIRY_OPTIONS,
   SCOPE_MEANING,
   SCOPE_OPTIONS,
-  TOKEN_PRESETS,
   expiryDays,
   grantedBy,
   mintRefusal,
   presetOf,
+  presetsFor,
+  scopesForBinding,
   scopesOfPreset,
   toggleScope,
 } from './access-model'
@@ -72,10 +74,24 @@ export interface Minted {
 export function AccessTokenDialog({
   onClose,
   onMint,
+  bindings,
 }: {
   onClose: () => void
-  onMint: (body: { name: string; scopes: Scope[]; expiresInDays?: number }) => Promise<void>
+  onMint: (body: {
+    name: string
+    scopes: Scope[]
+    expiresInDays?: number
+    site?: string
+  }) => Promise<void>
+  /**
+   * The scopes a token can be bound to, on a deployment with `sites` (`multi-site.md`
+   * decision 14). Absent with none, and then there is no binding to choose and the
+   * dialog is exactly the one it always was.
+   */
+  bindings?: readonly ScopeOptionGroup[]
 }) {
+  const [site, setSite] = useState('')
+  const bound = site !== ''
   const [name, setName] = useState('')
   const [scopes, setScopes] = useState<Scope[]>(() => [...(scopesOfPreset(DEFAULT_PRESET) ?? [])])
   const [expiry, setExpiry] = useState('')
@@ -96,6 +112,7 @@ export function AccessTokenDialog({
         name: name.trim(),
         scopes,
         ...(days === undefined ? {} : { expiresInDays: days }),
+        ...(bound ? { site } : {}),
       })
     } finally {
       setPending(false)
@@ -138,6 +155,41 @@ export function AccessTokenDialog({
           )}
         </Field>
 
+        {bindings ? (
+          <Field
+            label="Works on"
+            help={
+              bound
+                ? 'It writes this scope and reads what it inherits. It cannot manage access.'
+                : 'Every site. A token bound to one site is the safer key for a script that only needs one.'
+            }
+          >
+            {(id) => (
+              <Select
+                id={id}
+                value={site}
+                onChange={(e) => {
+                  setSite(e.target.value)
+                  // Full access is the platform's; a binding cannot hold it, and a
+                  // selection that did falls back rather than shrinking unannounced.
+                  setScopes((held) => scopesForBinding(held, e.target.value !== ''))
+                }}
+              >
+                <option value="">Every site</option>
+                {bindings.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.options.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </Select>
+            )}
+          </Field>
+        ) : null}
+
         {/* A group of related controls is a `<fieldset>` with a visually hidden
             `<legend>` rather than `role="group"` plus `aria-label` — Biome's
             `useSemanticElements`, and the reset a bare fieldset needs is in
@@ -147,7 +199,7 @@ export function AccessTokenDialog({
         <fieldset className={css.presets}>
           <legend className={css.srOnly}>What this token may do</legend>
           <p className={css.groupLabel}>What it may do</p>
-          {TOKEN_PRESETS.map((option) => (
+          {presetsFor(bound).map((option) => (
             <label
               key={option.id}
               className={`${css.preset} ${preset === option.id ? css.presetOn : ''} ${
@@ -194,7 +246,7 @@ export function AccessTokenDialog({
           <summary className={css.scopeSummary}>Choose individual permissions</summary>
           <fieldset className={css.scopes}>
             <legend className={css.srOnly}>Individual permissions</legend>
-            {SCOPE_OPTIONS.map((scope) => {
+            {SCOPE_OPTIONS.filter((scope) => !(bound && scope === 'admin')).map((scope) => {
               const via = grantedBy(scope, scopes)
               const held = scopes.includes(scope)
               return (

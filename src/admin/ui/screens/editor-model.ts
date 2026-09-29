@@ -30,6 +30,9 @@ import type { LocaleContext } from '../../../core/locales'
 import { type SchemaIndex, slotsOf, summarise } from '../../../core/schema'
 import type { StoryMeta } from '../../../core/story'
 import type { MigrationStatus } from '../../../server/migrate'
+import { paneSrc } from '../../hooks/usePreviewBridge'
+import { canCreateContent, type Me, type MePreview, previewChoices, scopeName } from '../../me'
+import { href, type Screen } from '../route'
 
 /** What `summariseDiff` answers: how a draft and a version differ, in counts. */
 type Delta = ReturnType<typeof summariseDiff>
@@ -442,6 +445,188 @@ export function previewFrame(
   if (!story) return undefined
   if (!isSourceLocale) return story.previewUrls?.[locale] ?? preview
   return preview
+}
+
+/* ---------------------------------------------------------------- the pane --- */
+
+/**
+ * Where the pane loads, on a deployment with `sites` (`multi-site.md` decision 13).
+ *
+ * **A single-site deployment is `none` and the pane is what it always was**: the
+ * host's own `previewUrl`, same origin, no handoff. On multi-site the pane is a
+ * cross-origin iframe on a *site's* preview origin, so it needs three things a
+ * single-site editor never had to decide: which site to show the page in, that site's
+ * origin (the bridge hears only it), and a fresh grant minted by `site/start` on each
+ * (re)load.
+ */
+export type PaneChoice =
+  | { kind: 'none' }
+  /** No site can show this page: the caller may preview none whose chain reads from
+   * the page's scope. */
+  | { kind: 'unavailable'; reason: string }
+  | {
+      kind: 'site'
+      site: MePreview
+      /** The site's preview origin, or null — and then the page cannot be shown. */
+      origin: string | null
+      /** Every site this page can be previewed in, for the picker. */
+      choices: readonly MePreview[]
+    }
+
+/**
+ * Which site the pane previews `story` in.
+ *
+ * A page previews in the sites whose chain reads from its owner — its own site alone,
+ * its group's sites, every site for a shared page — narrowed to the caller's
+ * `previewable` (`previewChoices`). The default is the scope being shown when it is
+ * one of them (an alpha editor opening a shared page previews it in Alpha, "the
+ * shared page as Alpha would serve it"), else the first. `chosen` is the picker.
+ */
+export function paneChoice(
+  me: Me,
+  story: StoryMeta | undefined,
+  chosen: string | null,
+): PaneChoice {
+  if (!me.sites || !story) return { kind: 'none' }
+  const choices = previewChoices(me, story.site ?? me.scope ?? '')
+  if (choices.length === 0) {
+    return {
+      kind: 'unavailable',
+      reason: 'You cannot preview this page: none of the sites that show it are yours to preview.',
+    }
+  }
+  const site =
+    choices.find((candidate) => candidate.id === chosen) ??
+    choices.find((candidate) => candidate.id === me.scope) ??
+    choices[0]!
+  return { kind: 'site', site, origin: site.preview, choices }
+}
+
+/** What the bar says about the pane, or null on a single-site deployment. */
+export function paneLabel(pane: PaneChoice): string | null {
+  if (pane.kind === 'site') {
+    return pane.origin === null
+      ? `${pane.site.name} has no preview origin, so this page cannot be previewed there.`
+      : `Previewing in ${pane.site.name}`
+  }
+  return pane.kind === 'unavailable' ? pane.reason : null
+}
+
+/**
+ * Why the pane has nothing to show, when the reason is the deployment's rather than the
+ * host's route function: no site can show the page, or the site has no preview origin
+ * (`multi-site.md`'s edge cases). Null when the pane can load.
+ */
+export function paneUnavailable(pane: PaneChoice): string | null {
+  if (pane.kind === 'unavailable') return pane.reason
+  if (pane.kind === 'site' && pane.origin === null) return paneLabel(pane)
+  return null
+}
+
+/**
+ * The URL to give the pane's iframe, and to *Open preview in a new tab*: `site/start`
+ * on the admin origin, with the preview URL's path as `next`.
+ *
+ * `frame` is the same answer `previewFrame` gave a single-site editor (the source or
+ * the locale's `previewUrl`). On multi-site the story is named too — `_folio_id` —
+ * so a page whose path a nearer scope shadows still previews *this* page rather than
+ * the fork (decision 13, "Preview URLs carry the story"). A document with no path
+ * (a layer) has no id to name and gets none.
+ */
+export function paneSource(
+  pane: PaneChoice,
+  frame: string | undefined,
+  story: StoryMeta | undefined,
+  adminBase: string,
+): string | undefined {
+  if (pane.kind === 'none') return frame
+  if (pane.kind !== 'site' || pane.origin === null || !frame || !story) return undefined
+  const named = new URL(frame, 'https://preview.invalid')
+  if (story.path !== null) named.searchParams.set('_folio_id', story.id)
+  return paneSrc(adminBase, pane.site.id, `${named.pathname}${named.search}`)
+}
+
+/* ----------------------------------------------------------- inheritance --- */
+
+/**
+ * The banners over an open page that belongs to another scope than the one being
+ * shown (`multi-site.md` decision 5 and the edge cases), as data so the wording is a
+ * test and not a screenshot.
+ */
+export type InheritNotice =
+  /** A page owned higher in the chain, opened from a scope that only reads it. */
+  | { kind: 'readonly'; owner: string; canFork: boolean }
+  /** The scope has its own page at this path, which is what its visitors get. */
+  | { kind: 'overridden'; scope: string; id: string }
+  /** This page is a fork and its original has been published since. */
+  | { kind: 'forkChanged'; source: string; id: string }
+
+/** Whether the open page is another scope's (`story.site` differs from the one shown). */
+export function isInherited(me: Me, story: Pick<StoryMeta, 'site'>): boolean {
+  return me.sites !== undefined && story.site !== undefined && story.site !== me.scope
+}
+
+/**
+ * The notices for `story`. `override` is the scope's own row at the same path
+ * (`GET /stories?paths=`), `fork` the answer of `GET /story/:id/fork`; either is
+ * undefined until it has answered, and a notice is never drawn on a guess.
+ */
+export function inheritNotices(
+  me: Me,
+  story: StoryMeta,
+  known: {
+    override: Pick<StoryMeta, 'id'> | undefined
+    fork: { source: Pick<StoryMeta, 'id' | 'site'> | null; changed: boolean } | null | undefined
+  },
+): InheritNotice[] {
+  if (!me.sites) return []
+  const out: InheritNotice[] = []
+  if (isInherited(me, story)) {
+    out.push({
+      kind: 'readonly',
+      owner: scopeName(me, story.site ?? ''),
+      canFork: story.path !== null && canCreateContent(me),
+    })
+    if (known.override && me.scope) {
+      out.push({ kind: 'overridden', scope: scopeName(me, me.scope), id: known.override.id })
+    }
+  }
+  if (known.fork?.changed && known.fork.source) {
+    out.push({
+      kind: 'forkChanged',
+      source: scopeName(me, known.fork.source.site ?? ''),
+      id: known.fork.source.id,
+    })
+  }
+  return out
+}
+
+/** A notice's sentence. */
+export function noticeText(notice: InheritNotice): string {
+  switch (notice.kind) {
+    case 'readonly':
+      return `This page belongs to ${notice.owner}, so it is read-only here.`
+    case 'overridden':
+      return `${notice.scope} overrides this page.`
+    case 'forkChanged':
+      return `The ${notice.source} version has changed since you forked it.`
+  }
+}
+
+/** Where a notice's link goes: an override or a fork's source is another page to open. */
+export function noticeLink(
+  notice: InheritNotice,
+  mount: string,
+): { text: string; href: string } | null {
+  const open = (id: string): string => href({ name: 'edit', id } satisfies Screen, mount)
+  switch (notice.kind) {
+    case 'readonly':
+      return null
+    case 'overridden':
+      return { text: `Open ${notice.scope}’s version`, href: open(notice.id) }
+    case 'forkChanged':
+      return { text: `View the ${notice.source} version`, href: open(notice.id) }
+  }
 }
 
 /* --------------------------------------------------------------- the layout --- */

@@ -10,11 +10,32 @@ import { DEFAULT_FLAT_SORT, type FlatSort, type StoryMeta } from '../../core/sto
 import { onUnauthorized, send, signInUrl } from '../api'
 import type { SpaceEvent, SpacePresence } from '../../core/protocol'
 import { spaceEventEffect, useSpace } from '../hooks/useSpace'
-import { actorLabel, fetchMe, type Me, OPEN } from '../me'
+import {
+  actorLabel,
+  atScope,
+  fetchMe,
+  firstScope,
+  isMultiSite,
+  type Me,
+  OPEN,
+  scopeChoices,
+  showsScopeSwitcher,
+} from '../me'
 import type { MenuItem } from './Menu'
-import { activeItem, nav } from './nav'
+import { activeItem, nav, scopeOptionGroups } from './nav'
 import { Palette, type PaletteAction } from './Palette'
-import { type Crumb, type CrumbContext, crumbs, documentTitle, href, type Screen } from './route'
+import {
+  type Crumb,
+  type CrumbContext,
+  crumbs,
+  documentTitle,
+  href,
+  type Screen,
+  scopedApiBase,
+  scopedMount,
+  splitScope,
+  switchScopeUrl,
+} from './route'
 import { useRemembered, useRememberedString } from './remembered'
 import { applySpaceEffect, spaceIdentity, spaceWhere } from './space-mount'
 import { SpaceAvatars } from './SpaceAvatars'
@@ -35,6 +56,7 @@ import { Redirects } from './screens/Redirects'
 import { Responses } from './screens/Responses'
 import { Schedules } from './screens/Schedules'
 import { Settings } from './screens/Settings'
+import { Sites } from './screens/Sites'
 import type { ViewMode } from './screens/content-model'
 import { EditorShell } from './screens/EditorShell'
 import { BlockPicker } from './screens/BlockPicker'
@@ -96,10 +118,30 @@ export interface AdminBoot {
  * each asking for the ids or paths it needs
  * (`docs/specs/foundation/pagination.md` decision 7).
  */
-export function Admin({ boot }: { boot: AdminBoot }) {
-  const { route, go, replace } = useRouter(boot.base)
+export function Admin({ boot: bare }: { boot: AdminBoot }) {
+  /**
+   * **The scope is part of the mount** (`route.ts`'s `splitScope`): under
+   * `{base}/~alpha` the screens are relative to that, and the admin's JSON is
+   * `{base}/~alpha/api` (`multi-site.md` decision 11). `boot` below is that pair, so
+   * every screen keeps taking `boot.base` and `boot.apiBase` and is scoped for free.
+   * With no `~` segment — every single-site URL — it is `bare` unchanged, which is
+   * what keeps a single-site admin byte-for-byte as it was.
+   *
+   * Read once: changing scope is a page load (`switchScopeUrl`), so a scope's lists,
+   * its open document and its socket never outlive it.
+   */
+  const [inScope] = useState(() => splitScope(window.location.pathname, bare.base))
+  const scope = inScope.scope
+  const boot = useMemo<AdminBoot>(
+    () => ({ base: inScope.mount, apiBase: scopedApiBase(bare.apiBase, bare.base, scope) }),
+    [inScope.mount, bare.apiBase, bare.base, scope],
+  )
+  const { route, go, replace } = useRouter(boot.base, bare.base)
   const [manifest, setManifest] = useState<Manifest | null>(null)
-  const [me, setMe] = useState<Me>(OPEN)
+  // What the server said, and `me` below is that seen from `scope`: on a deployment
+  // with `sites` every permission predicate reads the role on the scope being shown.
+  const [rawMe, setMe] = useState<Me>(OPEN)
+  const me = useMemo(() => atScope(rawMe, scope), [rawMe, scope])
   const [globals, setGlobals] = useState<readonly StoryMeta[]>([])
   const [loading, setLoading] = useState(true)
   const [notice, setNotice] = useState<string | null>(null)
@@ -129,8 +171,10 @@ export function Admin({ boot }: { boot: AdminBoot }) {
   useEffect(() => {
     let live = true
     Promise.all([
-      fetch(`${boot.apiBase}/schema`).then((r) => r.json() as Promise<Manifest>),
-      fetchMe(boot.apiBase, boot.base),
+      // Both unscoped routes, so they are asked at the bare base: they answer the
+      // same under any scope, and a page with no scope has no other to ask.
+      fetch(`${bare.apiBase}/schema`).then((r) => r.json() as Promise<Manifest>),
+      fetchMe(bare.apiBase, bare.base),
       /**
        * The **singletons**, which are not in the tree: `storyTree` drops every
        * unrouted row, so a global's document is not in the paged `/stories` walk at
@@ -150,6 +194,11 @@ export function Admin({ boot }: { boot: AdminBoot }) {
        * boot path entirely: the Documents screen pages them, `useStory` resolves an
        * open one by id, and the palette searches for them.
        */
+      // On a deployment with `sites`, a page with no scope (the registry, the bare
+      // root) has no singletons: they are a scope's layers. The route answers
+      // `400 site_required` there and `.ok` below turns that into no rows, which is
+      // cheaper than waiting on `/me` to know whether to ask — that would serialise
+      // the boot of every single-site admin to spare one page a refused request.
       fetch(`${boot.apiBase}/documents?kind=singleton`, {
         headers: { accept: 'application/json' },
       })
@@ -171,7 +220,7 @@ export function Admin({ boot }: { boot: AdminBoot }) {
     return () => {
       live = false
     }
-  }, [boot.apiBase, boot.base])
+  }, [boot.apiBase, bare.apiBase, bare.base])
 
   /**
    * A 401 is a navigation, not a toast (`admin/api.ts`). Registered here rather than
@@ -375,9 +424,39 @@ export function Admin({ boot }: { boot: AdminBoot }) {
   }, [space.notice])
 
   const groups = useMemo(
-    () => nav({ types, globals: manifest?.globals ?? [], me }),
-    [types, manifest?.globals, me],
+    () => nav({ types, globals: manifest?.globals ?? [], me, scope }),
+    [types, manifest?.globals, me, scope],
   )
+
+  /**
+   * The scope switcher, which exists only where `/me` carried `sites`
+   * (`showsScopeSwitcher`): a single-site admin passes `Shell` nothing and draws
+   * what it always drew.
+   */
+  const switcher = useMemo(
+    () =>
+      showsScopeSwitcher(me)
+        ? {
+            groups: scopeOptionGroups(scopeChoices(me)),
+            current: scope,
+            onSwitch: (next: string) =>
+              window.location.assign(switchScopeUrl(bare.base, next, route.screen)),
+          }
+        : undefined,
+    [me, scope, bare.base, route.screen],
+  )
+
+  /**
+   * `{base}` on a deployment with `sites` is nobody's scope, so it goes to the
+   * caller's first (`multi-site.md`'s route table: "redirects to the caller's first
+   * scope"). Client-side, because the shell is one static page at every path and
+   * only `/me` knows who is asking.
+   */
+  const bareRoot = !loading && isMultiSite(me) && scope === null && route.screen.name === 'home'
+  const first = bareRoot ? firstScope(me) : null
+  useEffect(() => {
+    if (first !== null) window.location.replace(scopedMount(bare.base, first))
+  }, [first, bare.base])
 
   const label = (name: string) => types.find((t) => t.name === name)?.label
   const crumbContext = useMemo(
@@ -562,6 +641,7 @@ export function Admin({ boot }: { boot: AdminBoot }) {
         active={activeItem(groups, route.screen, open?.type)}
         crumbs={trail}
         mount={boot.base}
+        {...(switcher ? { switcher } : {})}
         collapsed={sidebar.value}
         onToggleSidebar={sidebar.toggle}
         // Who else is in the site. `SpaceAvatars` renders null when nobody is,
@@ -576,6 +656,8 @@ export function Admin({ boot }: { boot: AdminBoot }) {
         {screenFor({
           route,
           boot,
+          scope,
+          bareBase: bare.base,
           loading,
           // `useStory`'s own flight, separate from the boot's: the editor needs to
           // tell "the row is on its way" from "there is no such row".
@@ -599,7 +681,7 @@ export function Admin({ boot }: { boot: AdminBoot }) {
           assetView,
           historyOpen,
           setHistoryOpen,
-          preview: previewFor(open, previewType, previewHost, boot.base),
+          preview: previewFor(open, previewType, previewHost, boot.base, isMultiSite(me)),
           onFormLabel: (id, formLabel) => setFormTitle({ id, label: formLabel }),
           registerReload,
         })}
@@ -624,6 +706,10 @@ const isSort = (raw: string): raw is FlatSort =>
 interface ScreenArgs {
   route: ReturnType<typeof useRouter>['route']
   boot: AdminBoot
+  /** The scope in the URL, or null; `boot` is already scoped to it. */
+  scope: string | null
+  /** The mount with no scope, for links into another scope. */
+  bareBase: string
   loading: boolean
   /** The open document's own fetch is in flight (`useStory`). Distinct from
    * `loading`, which is the shell's boot: only the editor cares about the
@@ -689,6 +775,27 @@ interface ScreenArgs {
  */
 function screenFor(a: ScreenArgs) {
   const { route, boot } = a
+  // Multi-site: a page with no scope has one screen, and a scope the caller does not
+  // reach has none. Both are said rather than left to a wall of 403s.
+  if (!a.loading && isMultiSite(a.me)) {
+    // `account` is about the person, not a scope's content: its routes are unscoped.
+    if (a.scope === null && route.screen.name !== 'sites' && route.screen.name !== 'account') {
+      return (
+        <Stub>
+          {firstScope(a.me) === null
+            ? 'You have no role on any site here. Ask an administrator for access.'
+            : 'Choose a site.'}
+        </Stub>
+      )
+    }
+    if (a.scope !== null && !scopeChoices(a.me).some((choice) => choice.id === a.scope)) {
+      return (
+        <Stub>
+          You have no role on <code>{a.scope}</code>.
+        </Stub>
+      )
+    }
+  }
   switch (route.screen.name) {
     case 'home':
       return (
@@ -969,6 +1076,20 @@ function screenFor(a: ScreenArgs) {
     case 'account':
       return <Account apiBase={boot.apiBase} me={a.me} loading={a.loading} onNotice={a.notify} />
 
+    case 'sites':
+      return (
+        <Sites
+          apiBase={boot.apiBase}
+          base={a.bareBase}
+          me={a.me}
+          loading={a.loading}
+          settings={a.me.sites?.settings ?? null}
+          query={route.query}
+          onQuery={(next) => a.replace({ name: 'sites' }, { ...route.query, ...next })}
+          onNotice={a.notify}
+        />
+      )
+
     case 'missing':
       return (
         <Stub>
@@ -1060,10 +1181,18 @@ function previewFor(
   host: StoryMeta | undefined,
   /** The bare mount: a global's preview is an HTML page. */
   base: string,
+  /**
+   * A deployment with `sites`, where the pane is a site's preview origin and never
+   * the admin's. A global borrows a host page on that origin (`&as=`); the fallback
+   * — `{base}/preview/global/:name`, an admin-origin page — is not something a
+   * cross-origin pane can load, so a global with no host page has no preview there.
+   */
+  multi = false,
 ): string | undefined {
   if (!story) return undefined
   if (story.previewUrl) return story.previewUrl
   if (type?.kind !== 'singleton') return undefined
+  if (multi && !host?.previewUrl) return undefined
   return globalPreviewUrl(type, host ? [host] : [], base)
 }
 

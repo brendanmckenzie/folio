@@ -1,15 +1,16 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { useCallback, useState } from 'react'
 import { fallbackColour } from '../../../core/protocol'
-import type { Role, Scope } from '../../../server/auth/roles'
+import type { Grants, Role, Scope } from '../../../server/auth/roles'
 import type { TokenRow } from '../../../server/auth/tokens'
-import type { Me } from '../../me'
+import { type Me, scopeChoices } from '../../me'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { Dialog } from '../Dialog'
 import { EmptyState } from '../EmptyState'
 import { Select } from '../Field'
 import { ListHeader } from '../List'
+import { scopeOptionGroups } from '../nav'
 import { type Column, Table } from '../Table'
 import css from './Access.module.css'
 import {
@@ -21,15 +22,20 @@ import {
   SELF_ROLE_REASON,
   accessGate,
   accessQuery,
+  bindingLabel,
+  grantRows,
+  grantsReason,
   isSelf,
   parseAccessUrl,
   removePasskeysRefusal,
   revokeRefusal,
   roleFromReason,
+  showsGrants,
   since,
   tokenStatus,
   tokenStatusTone,
 } from './access-model'
+import { AccessGrantsDialog } from './AccessGrants'
 import { AccessInviteDialog } from './AccessInviteDialog'
 import { AccessTokenDialog, type Minted, MintedTokenDialog } from './AccessTokenDialog'
 import { type PagedList, useAccess } from './useAccess'
@@ -121,6 +127,9 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
   const [removing, setRemoving] = useState<AccessUser | null>(null)
   const [revoking, setRevoking] = useState<TokenRow | null>(null)
   const [removingPasskeys, setRemovingPasskeys] = useState<AccessUser | null>(null)
+  // Multi-site: whose grants are open in the editor. Always null with no `sites`.
+  const [editingGrants, setEditingGrants] = useState<AccessUser | null>(null)
+  const many = showsGrants(me)
 
   const close = useCallback(() => onQuery(accessQuery({ open: null })), [onQuery])
 
@@ -164,12 +173,24 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
     [apiBase],
   )
 
-  const invite = async (body: { email: string; name?: string; role: Role }) => {
+  const invite = async (body: { email: string; name?: string; role?: Role; grants?: Grants }) => {
     const ok = await run(async () => {
       await send('/users', 'POST', body)
-      return `${body.email} can sign in now, as a ${body.role}.`
+      return body.role
+        ? `${body.email} can sign in now, as a ${body.role}.`
+        : `${body.email} can sign in now, with the access you set.`
     }, data.users.reload)
     if (ok) close()
+  }
+
+  const changeGrants = async (user: AccessUser, grants: Grants) => {
+    const ok = await run(async () => {
+      await send(`/users/${encodeURIComponent(user.id)}`, 'PATCH', { grants })
+      // As a role change: the route drops their sessions so an old grant does not
+      // outlive its edit in an open socket, and a preview it admitted ends with them.
+      return `${user.name}’s access is updated. They will need to sign in again.`
+    }, data.users.reload)
+    if (ok) setEditingGrants(null)
   }
 
   const changeRole = (user: AccessUser, role: Role) =>
@@ -201,7 +222,12 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
       return `Removed every passkey for ${user.name}. Magic link or single sign-on still gets them in.`
     }, data.users.reload)
 
-  const mint = async (body: { name: string; scopes: Scope[]; expiresInDays?: number }) => {
+  const mint = async (body: {
+    name: string
+    scopes: Scope[]
+    expiresInDays?: number
+    site?: string
+  }) => {
     const ok = await run(async () => {
       const res = await send('/tokens', 'POST', body)
       const answer = (await res.json()) as { token: string }
@@ -253,9 +279,49 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
     },
     {
       key: 'role',
-      label: 'Role',
+      label: many ? 'Access' : 'Role',
       cell: (user) => {
         const self = isSelf(user.id, selfId)
+        if (many) {
+          // One role per scope. Ignored grants (a scope since deleted) are listed and
+          // said to reach nothing; provider-placed ones are read-only, with the reason
+          // where the button would be.
+          const placedBy = grantsReason(user)
+          return (
+            <span className={css.grantBadges}>
+              {grantRows(user, me).map((grant) => (
+                <Badge
+                  key={grant.scope}
+                  mono
+                  tone={grant.ignored ? 'warn' : 'neutral'}
+                  title={
+                    grant.ignored
+                      ? `${grant.scope} no longer exists, so this grant reaches nothing`
+                      : (grant.roleFrom ?? undefined)
+                  }
+                >
+                  {grant.label}: {grant.role}
+                  {grant.ignored ? ' (ignored)' : ''}
+                </Badge>
+              ))}
+              {placedBy ? (
+                <span className={css.blank} title={placedBy}>
+                  set by sign-in
+                </span>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="subtle"
+                  disabled={busy || self}
+                  reason={self ? SELF_ROLE_REASON : 'A write is in flight'}
+                  onClick={() => setEditingGrants(user)}
+                >
+                  Edit access
+                </Button>
+              )}
+            </span>
+          )
+        }
         // A role the identity provider's claims placed. Disabled rather than
         // absent, which is the one place this admin departs from "a control you
         // cannot use is not drawn": the reason *is* the message, and the badge
@@ -384,6 +450,16 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
         </span>
       ),
     },
+    ...(many
+      ? [
+          {
+            key: 'site',
+            label: 'Works on',
+            width: '12%',
+            cell: (token: TokenRow) => <Badge mono>{bindingLabel(me, token.site)}</Badge>,
+          },
+        ]
+      : []),
     {
       key: 'status',
       label: 'Status',
@@ -519,7 +595,18 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
         />
       </section>
 
-      {url.open === 'user' ? <AccessInviteDialog onClose={close} onInvite={invite} /> : null}
+      {url.open === 'user' ? (
+        <AccessInviteDialog onClose={close} onInvite={invite} {...(many ? { me } : {})} />
+      ) : null}
+
+      {editingGrants ? (
+        <AccessGrantsDialog
+          me={me}
+          user={editingGrants}
+          onClose={() => setEditingGrants(null)}
+          onSave={(grants) => changeGrants(editingGrants, grants)}
+        />
+      ) : null}
 
       {/*
         `&& minted === null` is not belt-and-braces, it is the handover.
@@ -532,7 +619,11 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
         than in the URL for the obvious reason, so it survives the clear.
       */}
       {url.open === 'token' && minted === null ? (
-        <AccessTokenDialog onClose={close} onMint={mint} />
+        <AccessTokenDialog
+          onClose={close}
+          onMint={mint}
+          {...(many ? { bindings: scopeOptionGroups(scopeChoices(me)) } : {})}
+        />
       ) : null}
       {minted ? <MintedTokenDialog minted={minted} onClose={() => setMinted(null)} /> : null}
 

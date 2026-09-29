@@ -1,10 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { Page } from '../../../../core/pagination'
 import type { StoryRef } from '../../../../core/resolve'
+import type { StoryMeta } from '../../../../core/story'
+import { Badge } from '../../Badge'
 import { Button } from '../../Button'
 import { Dialog } from '../../Dialog'
 import { EmptyState } from '../../EmptyState'
 import { Field, Input } from '../../Field'
-import { type Candidate, candidateHint, useCandidates } from './candidates'
+import { scopeOfApiBase } from '../../route'
+import {
+  CANDIDATE_LIMIT,
+  type Candidate,
+  type CandidateQuery,
+  candidateHint,
+  narrow,
+  useCandidates,
+} from './candidates'
 import css from './fields.module.css'
 
 interface Props {
@@ -49,11 +60,21 @@ interface Props {
  */
 export function DocumentPicker({ apiBase, label, routed, types, exclude, onPick, onClose }: Props) {
   const [q, setQ] = useState('')
-  const candidates = useCandidates(
-    apiBase,
-    { q, routed, ...(types ? { types } : {}), ...(exclude ? { exclude } : {}) },
-    true,
-  )
+  const query: CandidateQuery = {
+    q,
+    routed,
+    ...(types ? { types } : {}),
+    ...(exclude ? { exclude } : {}),
+  }
+  // On a deployment with `sites` (an `apiBase` under `~<scope>`) the picker offers the
+  // chain — this scope's documents and those above it, each badged with where it
+  // lives — through `/search`, which is chain-wide and fenced. The scope's own list
+  // routes (`/stories?flat=1`, `/documents`) would offer only its own rows, and a
+  // link may point up the chain. Exactly one of the two is asking.
+  const scope = scopeOfApiBase(apiBase)
+  const own = useCandidates(apiBase, query, scope === null)
+  const chain = useChainCandidates(apiBase, query, scope !== null)
+  const candidates: ChainCandidates = scope === null ? own : chain
 
   return (
     <Dialog
@@ -103,6 +124,9 @@ export function DocumentPicker({ apiBase, label, routed, types, exclude, onPick,
               <button type="button" className={css.pickerRow} onClick={() => onPick(row.id)}>
                 <span className={css.pickedTitle}>{row.title || 'Untitled'}</span>
                 <span className={css.pickedWhere}>{candidateHint(row)}</span>
+                {/* Where it lives, when that is not here — the scope is what tells a
+                    shared page from an override of it. */}
+                {row.site && row.site !== scope ? <Badge mono>{row.site}</Badge> : null}
               </button>
             </li>
           ))}
@@ -110,6 +134,70 @@ export function DocumentPicker({ apiBase, label, routed, types, exclude, onPick,
       )}
     </Dialog>
   )
+}
+
+/** `Candidates`, each row optionally carrying the scope that owns it. */
+interface ChainCandidates {
+  rows: (Candidate & { site?: string })[]
+  loading: boolean
+  error: string | null
+}
+
+/**
+ * The chain's candidates, off `GET /search` (`pagination.md` decision 8, which
+ * named the pickers as consumers), narrowed by the same `narrow` the scope's own
+ * lists go through and carrying each hit's owning scope.
+ *
+ * `kind=page` for a link, which only routed pages can be; any kind for a reference,
+ * narrowed by `types` where the field names them. Debounced like every other search
+ * box here would want, and quiet when disabled — a single-site picker never mounts it.
+ */
+function useChainCandidates(
+  apiBase: string,
+  query: CandidateQuery,
+  enabled: boolean,
+): ChainCandidates {
+  const [state, setState] = useState<{
+    found: StoryMeta[]
+    loading: boolean
+    error: string | null
+  }>({ found: [], loading: false, error: null })
+  const key = JSON.stringify(query)
+
+  useEffect(() => {
+    if (!enabled) return
+    const wanted = JSON.parse(key) as CandidateQuery
+    const abort = new AbortController()
+    setState((prev) => ({ ...prev, loading: true, error: null }))
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams({ sort: 'title', limit: String(CANDIDATE_LIMIT) })
+      if (wanted.q.trim()) params.set('q', wanted.q.trim())
+      if (wanted.routed) params.set('kind', 'page')
+      fetch(`${apiBase}/search?${params}`, { signal: abort.signal })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`Could not list documents (${res.status})`)
+          return ((await res.json()) as Page<StoryMeta>).rows
+        })
+        .then((found) => setState({ found, loading: false, error: null }))
+        .catch((e: Error) => {
+          if (abort.signal.aborted) return
+          setState({ found: [], loading: false, error: e.message })
+        })
+    }, 150)
+    return () => {
+      clearTimeout(timer)
+      abort.abort()
+    }
+  }, [apiBase, enabled, key])
+
+  return useMemo(() => {
+    const sites = new Map(state.found.map((row) => [row.id, row.site]))
+    const rows = narrow(state.found, JSON.parse(key) as CandidateQuery).map((candidate) => {
+      const site = sites.get(candidate.id)
+      return site ? { ...candidate, site } : candidate
+    })
+    return { rows, loading: state.loading, error: state.error }
+  }, [state, key])
 }
 
 /**

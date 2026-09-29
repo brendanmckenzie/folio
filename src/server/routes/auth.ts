@@ -42,6 +42,7 @@ import {
 import { listEvents, recordEventStatement } from '../auth/events'
 import { base64url } from '../auth/jwt'
 import { passkeyForAssertion, usePasskeyStatement } from '../auth/passkeys'
+import { meSites } from '../auth/me-sites'
 import { credentialOf, resolveActor } from '../auth/resolve'
 import { READ } from '../auth/roles'
 import { revokeSession, sessionProvider } from '../auth/session'
@@ -808,11 +809,32 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * not an editing capability, and a viewer already gets the story socket.
      */
     const space = Boolean(rt.space(c.var.bindings()))
+    /**
+     * **Many sites** (`multi-site.md`'s route table): the scopes this caller reaches
+     * and their role on each, the sites they may preview, and whether they are the
+     * platform. Its presence is how the admin knows the deployment has `sites` at
+     * all, so it is absent with none. Unscoped, like the rest of this route: `role`
+     * above is the `*` grant, and the per-scope answer is here. A token never drives
+     * the admin, so it is given none; `auth: 'open'` is every role on every scope,
+     * which is what the deployment does (`createFolio` warns).
+     */
+    let multi: { sites?: ReturnType<typeof meSites> } = {}
+    if (rt.sites && (rt.auth.mode === 'open' || actor?.kind === 'user')) {
+      const registry = await rt.sites.registry(c.env)
+      multi = {
+        sites: meSites(
+          registry,
+          actor?.kind === 'user' ? (actor.grants ?? { '*': actor.role }) : null,
+          rt.sites.settings,
+        ),
+      }
+    }
     return c.json({
       mode: rt.auth.mode,
       actor: safe,
       loginUrl: `${rt.base}/login`,
       space,
+      ...multi,
       ...session,
       ...passkeys,
       ...(policy ? { policy } : {}),

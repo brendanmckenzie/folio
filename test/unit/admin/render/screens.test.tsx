@@ -57,6 +57,9 @@ const ROUTES: [name: string, path: string, title: string, h1: string][] = [
   // label lands, and `form` above is the route that proves it arrives.
   ['responses', '/folio/responses/frm_one', 'Responses', 'Responses'],
   ['account', '/folio/account', 'Your account', 'Your account'],
+  // On a deployment with no `sites` the registry does not exist, and the screen says
+  // so; the multi-site shell is `multi-site.test.tsx`.
+  ['sites', '/folio/sites', 'Sites', 'Sites'],
   ['missing', '/folio/nosuchscreen', 'Not found', 'Not found'],
 ]
 

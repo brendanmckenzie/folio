@@ -24,13 +24,17 @@
  * inputs; the last two belong to focus mode, which is new.
  */
 import { matches } from '../../../core/conditions'
-import type { Blok, Json } from '../../../core/doc'
+import type { Blok, Doc, Json } from '../../../core/doc'
 import type { Field } from '../../../core/fields'
+import { type LayerState, layerStates, mergeLayers } from '../../../core/layers'
 import { isTranslatable } from '../../../core/locales'
+import type { Mutation } from '../../../core/mutations'
 import type { Presence } from '../../../core/protocol'
 import { asRichtext, isRichtextEmpty, richtextToText } from '../../../core/richtext'
 import type { SchemaIndex } from '../../../core/schema'
 import { asAsset, asAssets, asStoryIds } from '../../../core/values'
+import { singletonTypeOf } from '../../../core/sites'
+import { isBareLayer } from '../../../core/layers'
 
 /* ------------------------------------------------------------ which fields --- */
 
@@ -376,4 +380,197 @@ export function sourceText(field: Field, value: Json): string {
     default:
       return typeof value === 'object' ? JSON.stringify(value) : String(value)
   }
+}
+
+/* ---------------------------------------------------------------- layers --- */
+
+/**
+ * What the inspector needs to label a global's fields on a deployment with `sites`
+ * (`multi-site.md` decision 8). **Absent everywhere else** — a single-site editor,
+ * a page, a record and `shared`'s own layers are handed none, and draw no label.
+ */
+export interface LayerInfo {
+  /** `layerStates` for the layer being edited, keyed by field name (`slot.field`
+   * for a `max: 1` child that merges into the inherited one). */
+  states: Readonly<Record<string, LayerState>>
+  /** The layers below merged into one document: where *Override* copies from and
+   * what an inherited field shows. Undefined when nothing below says anything. */
+  below: Doc | undefined
+  /** A scope's display name, for "Inherited from Shared". */
+  nameOf: (scope: string) => string
+}
+
+/**
+ * Whether the open document is a layer that has something below it to inherit
+ * from: a singleton layer of any scope but `shared` (`isBareLayer`). The only place
+ * the labels exist — a global in the shared scope is an ordinary document.
+ */
+export function isLayerDocument(id: string, multiSite: boolean): boolean {
+  return multiSite && isBareLayer(id)
+}
+
+/** A layer's type name and own scope, or null for anything that is not one. */
+export function layerOf(id: string): { type: string; scope: string } | null {
+  return singletonTypeOf(id)
+}
+
+/**
+ * The scopes below `own` in `chain`, most general first — the order `layerStates`
+ * and `mergeLayers` take. `chain` is nearest first and begins with `own`.
+ */
+export function scopesBelow(chain: readonly string[], own: string): string[] {
+  return chain.filter((scope) => scope !== own).reverse()
+}
+
+/**
+ * The layer info for an open layer: `docs` are the layers below (parallel to `below`,
+ * `undefined` for a scope that has none), `doc` the open one.
+ */
+export function layerInfo(input: {
+  doc: Doc
+  docs: readonly (Doc | undefined)[]
+  below: readonly string[]
+  own: string
+  schema: SchemaIndex
+  nameOf: (scope: string) => string
+}): LayerInfo {
+  const { doc, docs, below, own, schema, nameOf } = input
+  return {
+    states: layerStates([...docs, doc], [...below, own], schema),
+    below: mergeLayers(docs, schema),
+    nameOf,
+  }
+}
+
+/**
+ * The key `layerStates` files this blok's fields under, or null when the blok's
+ * fields are not part of the layer's labelled surface: `''` for the root, `slot.` for
+ * the `max: 1` child that merges into the inherited one, nothing for anything deeper
+ * or in a many-blocks slot (those are replaced whole, not merged field by field).
+ */
+export function layerPrefix(doc: Doc, schema: SchemaIndex, blok: Blok): string | null {
+  if (blok.uid === doc.root) return ''
+  if (blok.parent !== doc.root || blok.slot === null) return null
+  const root = doc.bloks[doc.root]
+  const field = root ? schema[root.type]?.fields[blok.slot] : undefined
+  return field?.kind === 'blocks' && field.max === 1 ? `${blok.slot}.` : null
+}
+
+/** The blok in the merged-below document that `blok` continues, or undefined. */
+export function belowBlok(doc: Doc, below: Doc | undefined, blok: Blok): Blok | undefined {
+  if (!below) return undefined
+  if (blok.uid === doc.root) return below.bloks[below.root]
+  return Object.values(below.bloks).find(
+    (candidate) => candidate.parent === below.root && candidate.slot === blok.slot,
+  )
+}
+
+/** "Inherited from Shared", "Overridden here", "Removed here". */
+export function layerLabel(state: LayerState, nameOf: (scope: string) => string): string {
+  switch (state.state) {
+    case 'overridden':
+      return 'Overridden here'
+    case 'removed':
+      return 'Removed here'
+    case 'inherited':
+      return state.from === null ? 'Inherited' : `Inherited from ${nameOf(state.from)}`
+  }
+}
+
+export type LayerAction = 'override' | 'reset' | 'remove'
+
+export const LAYER_ACTION_LABEL: Record<LayerAction, string> = {
+  override: 'Override',
+  reset: 'Reset to inherited',
+  remove: 'Remove',
+}
+
+/**
+ * The actions a state offers: an inherited field can be overridden (its value is
+ * copied here) or removed; an overridden one can be reset or removed; a removed one
+ * can only be reset. **Absent, not disabled**, when the document is read-only.
+ */
+export function layerActions(state: LayerState['state'], readOnly: boolean): LayerAction[] {
+  if (readOnly) return []
+  switch (state) {
+    case 'inherited':
+      return ['override', 'remove']
+    case 'overridden':
+      return ['reset', 'remove']
+    case 'removed':
+      return ['reset']
+  }
+}
+
+/**
+ * The mutations one action writes for a field (`multi-site.md` decision 8).
+ *
+ * - **Override** writes the inherited value — and, on a translated field, **every
+ *   locale's** inherited value at once ("an untranslated site override", edge cases),
+ *   so the override is not silently source-only.
+ * - **Reset to inherited** is `unset`, source and every locale the layer holds.
+ * - **Remove** is `set` to `null`.
+ *
+ * `inherited` is the blok in the merged layers below. An override with nothing to copy
+ * writes nothing: the field is inherited-empty and typing into it is what overrides.
+ */
+export function layerMutations(
+  action: LayerAction,
+  blok: Blok,
+  name: string,
+  inherited: Blok | undefined,
+): Mutation[] {
+  switch (action) {
+    case 'remove':
+      return [{ t: 'set', uid: blok.uid, field: name, value: null }]
+    case 'reset': {
+      const locales = Object.entries(blok.i18n ?? {})
+        .filter(([, fields]) => name in fields)
+        .map(([locale]) => locale)
+      return [
+        { t: 'unset', uid: blok.uid, field: name },
+        ...locales.map((locale): Mutation => ({ t: 'unset', uid: blok.uid, field: name, locale })),
+      ]
+    }
+    case 'override': {
+      if (!inherited || !(name in inherited.data)) return []
+      const source = inherited.data[name] as Json
+      const translations = Object.entries(inherited.i18n ?? {})
+        .filter(([, fields]) => name in fields)
+        .map(
+          ([locale, fields]): Mutation => ({
+            t: 'set',
+            uid: blok.uid,
+            field: name,
+            value: fields[name] as Json,
+            locale,
+          }),
+        )
+      return [{ t: 'set', uid: blok.uid, field: name, value: source }, ...translations]
+    }
+  }
+}
+
+/**
+ * What an inherited or removed field's control shows while it is not the layer's
+ * own: the inherited value for the first, nothing for the second. Read-only — the
+ * control is enabled only once *Override* has written it here.
+ */
+export function inheritedValue(
+  state: LayerState['state'],
+  inherited: Blok | undefined,
+  name: string,
+): Json {
+  if (state !== 'inherited') return null
+  return (inherited?.data[name] ?? null) as Json
+}
+
+/** What a `FieldRow` is handed for a labelled field: the words, the buttons, the
+ * value to show while the field is not this layer's own, and what a button does. */
+export interface FieldLayerInput {
+  state: LayerState['state']
+  label: string
+  actions: { action: LayerAction; label: string }[]
+  value: Json
+  onAction: (action: LayerAction) => void
 }

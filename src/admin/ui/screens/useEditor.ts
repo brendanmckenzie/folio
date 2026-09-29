@@ -22,9 +22,9 @@ import { useReferencedDocs } from '../../hooks/useReferencedDocs'
 import { useResolvedForms } from '../../hooks/useResolvedForms'
 import { useUndoShortcut } from '../../hooks/useUndoShortcut'
 import { useVersions, useVersionsList } from '../../hooks/useVersions'
-import { canEdit, type Me } from '../../me'
+import { canEditIn, type Me } from '../../me'
 import { StoryStore, useStoreState } from '../../store'
-import { previewFrame } from './editor-model'
+import { type PaneChoice, paneSource, previewFrame } from './editor-model'
 
 /**
  * Everything the editor screen is, assembled from hooks that already existed.
@@ -61,6 +61,17 @@ export interface EditorOptions {
    * is what turns it into the URL for the locale being edited.
    */
   preview: string | undefined
+  /**
+   * Where the pane loads on a deployment with `sites` (`editor-model.ts`'s
+   * `paneChoice`); absent or `none` is a single-site editor, whose pane is exactly
+   * `preview`. With a site, the iframe goes through `site/start` on `adminBase` and
+   * the bridge is restricted to the site's preview origin.
+   */
+  pane?: PaneChoice
+  /** The mount with no scope: `site/start` is built from it. */
+  adminBase?: string
+  /** The pane's cookie check found the browser refusing the partitioned grant. */
+  onGrantBlocked?: () => void
   notify: (message: string) => void
   /**
    * The story row this screen was handed is out of date — a publish or an
@@ -257,6 +268,8 @@ export function useEditor(opts: EditorOptions): EditorApi {
     blocks,
     onPick: opts.onPick,
     onGlobalClick: setGlobalHint,
+    ...(opts.pane?.kind === 'site' && opts.pane.origin ? { origin: opts.pane.origin } : {}),
+    ...(opts.onGrantBlocked ? { onGrantBlocked: opts.onGrantBlocked } : {}),
   })
 
   const live = versions.source.mode === 'live'
@@ -297,7 +310,9 @@ export function useEditor(opts: EditorOptions): EditorApi {
 
   const shownDoc = versions.viewing?.doc ?? state.doc
   const selected = state.selection && shownDoc ? (shownDoc.bloks[state.selection] ?? null) : null
-  const readOnly = !live || !canEdit(me)
+  // The role on the scope that **owns** the story, not the one being shown: a shared
+  // page opened from `~alpha` is read there and written nowhere but `~shared`.
+  const readOnly = !live || !canEditIn(me, story?.site)
 
   const gaps = useMemo(
     () => (state.doc ? translationGaps(state.doc, schema, locales) : []),
@@ -329,7 +344,12 @@ export function useEditor(opts: EditorOptions): EditorApi {
     publish,
     migrations,
     frame,
-    src: previewFrame(story, opts.preview, locale, isSourceLocale),
+    src: paneSource(
+      opts.pane ?? { kind: 'none' },
+      previewFrame(story, opts.preview, locale, isSourceLocale),
+      story,
+      opts.adminBase ?? base,
+    ),
     globalHint,
   }
 }

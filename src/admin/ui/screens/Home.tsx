@@ -3,10 +3,12 @@ import type { DocumentType } from '../../../core/schema'
 import type { StoryMeta } from '../../../core/story'
 import type { RecentPublish } from '../../../server/versions'
 import { canCreateContent, type Me } from '../../me'
+import type { InheritedRow } from '../../../server/stories'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { EmptyState } from '../EmptyState'
-import { List, Row } from '../List'
+import { List, ListHeader, Row } from '../List'
+import { type Column, Table } from '../Table'
 import { href, type Screen } from '../route'
 import { type AssetRow, addedAgo, isRenderableImage, thumbUrl, typeLabel } from './assets-model'
 import { stateTone, when } from './content-rows'
@@ -15,17 +17,23 @@ import {
   type ActorDirectory,
   type ActorLabel,
   type Attention as AttentionModel,
+  canCreateHome,
   EDITOR_UNKNOWN_NOTE,
+  homePageBody,
+  inheritedAction,
   MEDIA_LIMIT,
+  ownerLabel,
   placeOf,
   publishActor,
   type QuickCard,
   quickCards,
   RECENT_LIMIT,
+  showsInherited,
 } from './home-model'
 import css from './Home.module.css'
 import { messageOf } from './useContent'
 import { type Block, useHome } from './useHome'
+import { type InheritedData, useInherited } from './useInherited'
 
 interface Props {
   apiBase: string
@@ -113,7 +121,9 @@ const TILE_WIDTH = 320
  */
 export function Home({ apiBase, mount, types, globals, me, onOpen, onNotice }: Props) {
   const data = useHome(apiBase, me, onNotice)
+  const inherited = useInherited(apiBase, showsInherited(me))
   const cards = quickCards({
+    scope: me.sites ? (me.scope ?? null) : null,
     types,
     globals,
     counts: data.counts,
@@ -150,6 +160,29 @@ export function Home({ apiBase, mount, types, globals, me, onOpen, onNotice }: P
         onCreated={data.reload}
       />
 
+      {showsInherited(me) ? (
+        <Inherited
+          data={inherited}
+          me={me}
+          types={types}
+          apiBase={apiBase}
+          mount={mount}
+          onOpen={onOpen}
+          onNotice={onNotice}
+        />
+      ) : (
+        // The home page is a scope's to make even where nothing is inherited
+        // (`shared`, or a group with no root of its own).
+        <CreateHome
+          data={inherited}
+          me={me}
+          types={types}
+          apiBase={apiBase}
+          onOpen={onOpen}
+          onNotice={onNotice}
+        />
+      )}
+
       <Changes block={data.changes} types={types} mount={mount} onOpen={onOpen} />
 
       <Published
@@ -164,6 +197,220 @@ export function Home({ apiBase, mount, types, globals, me, onOpen, onNotice }: P
 
       <Attention attention={data.attention} scope={data.auditScope} mount={mount} onOpen={onOpen} />
     </div>
+  )
+}
+
+/* -------------------------------------------------------- inherited pages --- */
+
+/**
+ * *Create home page* as a button: `POST /stories { root: true }` (`multi-site.md`
+ * decision 5), then open what it made. A scope has at most one, so the button is
+ * absent once it does — and absent, not disabled, for someone who may not create.
+ */
+function CreateHomeButton({
+  data,
+  me,
+  types,
+  apiBase,
+  onOpen,
+  onNotice,
+}: {
+  data: InheritedData
+  me: Me
+  types: readonly DocumentType[]
+  apiBase: string
+  onOpen: (screen: Screen) => void
+  onNotice: (message: string) => void
+}) {
+  const [pending, setPending] = useState(false)
+  const body = homePageBody(types)
+  if (!data.rootKnown || !body || !canCreateHome(me, data.ownRoot)) return null
+
+  const create = async () => {
+    setPending(true)
+    try {
+      const res = await fetch(`${apiBase}/stories`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (!res.ok) throw new Error(await messageOf(res))
+      onOpen({ name: 'edit', id: ((await res.json()) as { id: string }).id })
+    } catch (e) {
+      onNotice((e as Error).message)
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Button size="sm" disabled={pending} reason="Creating…" onClick={() => void create()}>
+      Create home page
+    </Button>
+  )
+}
+
+/** The button alone, for a scope with nothing inherited to list. */
+function CreateHome(props: Parameters<typeof CreateHomeButton>[0]) {
+  if (!props.data.rootKnown || !canCreateHome(props.me, props.data.ownRoot)) return null
+  return (
+    <section aria-label="Home page">
+      <ListHeader actions={<CreateHomeButton {...props} />}>Home page</ListHeader>
+      <p className={css.note}>This scope has no home page of its own yet.</p>
+    </section>
+  )
+}
+
+/**
+ * The pages this scope inherits (`multi-site.md` decision 5), each with *Fork* — a
+ * copy that is the scope's own, published to shadow the original — or, once forked,
+ * "Overridden here" and, if the original has been published since, the notice that
+ * says so. **Only on a deployment with `sites`, in a scope that has something above
+ * it** (`showsInherited`); a single-site Home never draws it.
+ *
+ * The action is a column, not a hover reveal: a Fork the keyboard cannot reach is a
+ * Fork that does not exist for some editors.
+ */
+function Inherited({
+  data,
+  me,
+  types,
+  apiBase,
+  mount,
+  onOpen,
+  onNotice,
+}: {
+  data: InheritedData
+  me: Me
+  types: readonly DocumentType[]
+  apiBase: string
+  mount: string
+  onOpen: (screen: Screen) => void
+  onNotice: (message: string) => void
+}) {
+  const id = useId()
+  const [forking, setForking] = useState<string | null>(null)
+  if (data.failed && data.rows.length === 0) return null
+
+  const fork = async (row: InheritedRow) => {
+    setForking(row.id)
+    try {
+      const res = await fetch(`${apiBase}/stories/${encodeURIComponent(row.id)}/fork`, {
+        method: 'POST',
+      })
+      if (!res.ok) throw new Error(await messageOf(res))
+      const made = (await res.json()) as { story: { id: string } }
+      data.reload()
+      onOpen({ name: 'edit', id: made.story.id })
+    } catch (e) {
+      onNotice((e as Error).message)
+    } finally {
+      setForking(null)
+    }
+  }
+
+  const columns: Column<InheritedRow>[] = [
+    {
+      key: 'title',
+      label: 'Page',
+      cell: (row) => (
+        <a className={css.more} href={href({ name: 'edit', id: row.id }, mount)}>
+          {row.title || <span className={css.untitled}>Untitled</span>}
+        </a>
+      ),
+    },
+    {
+      key: 'path',
+      label: 'Path',
+      cell: (row) => <code>{row.path === '' ? '/' : `/${row.path}`}</code>,
+    },
+    { key: 'owner', label: 'From', cell: (row) => <Badge mono>{ownerLabel(me, row)}</Badge> },
+    {
+      key: 'act',
+      label: 'Actions',
+      cell: (row) => {
+        const action = inheritedAction(row, data.rows, me)
+        switch (action.kind) {
+          case 'overridden':
+            return (
+              <span className={css.inheritedActions}>
+                <Badge tone="accent">Overridden here</Badge>
+                <a className={css.more} href={href({ name: 'edit', id: action.id }, mount)}>
+                  Open
+                </a>
+                {action.changed ? (
+                  <Badge tone="warn" title="The shared version has changed since you forked it">
+                    Original changed
+                  </Badge>
+                ) : null}
+              </span>
+            )
+          case 'fork':
+            return (
+              <Button
+                size="sm"
+                disabled={forking !== null}
+                reason="Forking…"
+                onClick={() => void fork(row)}
+              >
+                Fork
+              </Button>
+            )
+          case 'blocked':
+            return (
+              <Button size="sm" disabled reason={action.reason}>
+                Fork
+              </Button>
+            )
+          case 'none':
+            return <span className={css.stamp}>Read-only</span>
+        }
+      },
+    },
+  ]
+
+  return (
+    <section aria-labelledby={id}>
+      <div className={css.head}>
+        <h2 className={css.heading} id={id}>
+          Inherited pages
+        </h2>
+        <CreateHomeButton
+          data={data}
+          me={me}
+          types={types}
+          apiBase={apiBase}
+          onOpen={onOpen}
+          onNotice={onNotice}
+        />
+      </div>
+      {data.loading && data.rows.length === 0 ? (
+        <Skeletons />
+      ) : data.rows.length === 0 ? (
+        <EmptyState
+          title="Nothing is inherited"
+          body="Pages published higher up appear here, and can be forked into this scope."
+        />
+      ) : (
+        <>
+          <Table
+            label="Inherited pages"
+            columns={columns}
+            rows={data.rows}
+            rowKey={(row) => row.id}
+          />
+          {data.more ? (
+            <Button size="sm" onClick={data.showMore}>
+              Show more
+            </Button>
+          ) : null}
+        </>
+      )}
+      <p className={css.note}>
+        Forking copies the page into this scope as a draft. Later changes to the original do not
+        reach the copy.
+      </p>
+    </section>
   )
 }
 

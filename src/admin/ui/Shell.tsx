@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { MenuItem } from './Menu'
-import type { NavGroup } from './nav'
+import type { NavGroup, ScopeOptionGroup } from './nav'
 import type { Crumb, Screen } from './route'
 import { scoped } from './scope'
 import css from './Shell.module.css'
@@ -25,6 +25,12 @@ interface Props {
   /** Lets the editor take the whole area with no padding, while a platform screen
    * gets the gutter every list wants. */
   bare?: boolean
+  /** The scope switcher, on a deployment with `sites`. See `Sidebar`. */
+  switcher?: {
+    groups: readonly ScopeOptionGroup[]
+    current: string | null
+    onSwitch: (scope: string) => void
+  }
 }
 
 /**
@@ -46,6 +52,7 @@ export function Shell({
   user,
   children,
   bare,
+  switcher,
 }: Props) {
   return (
     // `scoped`, not `css.shell` alone: this is the root of every screen, and
@@ -57,6 +64,7 @@ export function Shell({
         mount={mount}
         collapsed={collapsed}
         onToggle={onToggleSidebar}
+        {...(switcher ? { switcher } : {})}
       />
       <div className={css.main}>
         <TopBar

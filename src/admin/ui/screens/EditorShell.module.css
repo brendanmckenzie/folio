@@ -505,3 +505,12 @@
  * place would trade the module boundary for the appearance of tidiness. The rule
  * there carries a pointer back here, and here is where the numbers are decided.
  */
+
+/* The "Preview in" picker: a label and a select on one line, in the bar. */
+.previewIn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--fg-subtle);
+  font-size: var(--text-sm);
+}

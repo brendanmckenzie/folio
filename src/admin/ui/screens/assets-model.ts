@@ -363,7 +363,7 @@ export function isNarrowed(url: AssetsUrl): boolean {
  */
 export function assetsParams(
   url: AssetsUrl,
-  opts: { limit: number; cursor?: string | null; count?: boolean },
+  opts: { limit: number; cursor?: string | null; count?: boolean; chain?: boolean },
 ): URLSearchParams {
   const params = new URLSearchParams({
     sort: url.sort,
@@ -384,6 +384,9 @@ export function assetsParams(
   if (url.failed) params.set('failed', '1')
   if (opts.count) params.set('count', '1')
   if (opts.cursor) params.set('cursor', opts.cursor)
+  // A picker reads everything the scope may use — its own library and the chain's —
+  // where the Assets screen manages the scope's own (`multi-site.md`'s route table).
+  if (opts.chain) params.set('chain', '1')
   return params
 }
 

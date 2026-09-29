@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import type { AssetValue } from '../../../core/values'
 import { Button } from '../Button'
 import { Dialog } from '../Dialog'
+import { scopeOfApiBase } from '../route'
 import { useRememberedString } from '../remembered'
 import {
   type AssetRow,
@@ -142,7 +143,10 @@ export function AssetPicker({
    */
   const results = useRef<HTMLDivElement>(null)
   const pageSize = useFittedPage(results, ASSETS_FIT)
-  const data = useAssets(apiBase, url, pageSize)
+  // On a deployment with `sites` (an `apiBase` under `~<scope>`) a picker offers the
+  // chain's library — shared assets included — and nothing outside it, which is the
+  // server's fence; the Assets screen manages only the scope's own.
+  const data = useAssets(apiBase, url, pageSize, scopeOfApiBase(apiBase) !== null)
 
   // Selected, not chosen. The file somebody just dropped in is almost certainly the
   // one they want, but committing on their behalf would close the dialog and write a

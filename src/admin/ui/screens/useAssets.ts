@@ -90,7 +90,13 @@ export interface AssetsData {
  * from the skeletons already on screen, so waiting one commit for it is what keeps
  * opening this screen to a single fetch rather than a guess and a correction.
  */
-export function useAssets(apiBase: string, url: AssetsUrl, pageSize: number | null): AssetsData {
+export function useAssets(
+  apiBase: string,
+  url: AssetsUrl,
+  pageSize: number | null,
+  /** A picker on a deployment with `sites`: the chain's library, not only the scope's. */
+  chain = false,
+): AssetsData {
   const [page, setPage] = useState<AssetsData['page']>({
     rows: [],
     cursor: null,
@@ -117,6 +123,7 @@ export function useAssets(apiBase: string, url: AssetsUrl, pageSize: number | nu
     limit: pageSize ?? ASSETS_PAGE,
     cursor,
     count: true,
+    chain,
   }).toString()
 
   const fetchPage = useCallback(async () => {

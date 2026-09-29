@@ -2448,3 +2448,89 @@ The review found no cross-site read or write. Four problems, fixed:
 
 Single-site hook payloads gain `purge` (when the event purged anything, and `reindexed`
 even with no platform) as well as `site: 'default'`; both are additive.
+
+### Phase 8 (2026-09-29)
+
+The admin: the scope in the URL and the API, the switcher, the Sites screen, inherited
+pages with Fork and *Create home page*, the fork and override notices, the pane on the
+handoff, the layer labels, the grants on the Access screen, and chain pickers. Nothing
+in `src/server/` changed except `/me`. New tests: `test/unit/admin/multi-site-admin.test.ts`
+(the models, in Node), `test/unit/admin/render/multi-site.test.tsx` (the shell, the
+Sites screen, the inspector and the pane, mounted), `test/unit/server/me-sites.test.ts`
+and `test/workers/me-sites.test.ts`. Where the plan was wrong, silent or reached past
+the files it named:
+
+- **The scope is part of the mount.** `route.ts`'s `splitScope` reads `{base}/~<scope>`
+  once and `Admin` hands every screen a mount and an `apiBase` that already carry it, so
+  `parse`, `href` and the forty places that build a link needed no change, and a
+  single-site URL splits to the bare mount it always was. **Changing scope is a page
+  load** (`switchScopeUrl`), not a state change: a scope's lists, open document and
+  socket cannot outlive it, and `useRouter` refuses to take over a link into another
+  scope (`isInsideMount`). Rejected: a `scope` field on `Route` threaded through every
+  `href` call, which is the same fact in forty more places. The one component handed
+  only `apiBase`, a picker, learns its scope from it (`scopeOfApiBase`).
+- **`/me` gains one key, `sites`, and only on a deployment with `sites`.** The spec's
+  row lists `sites`, `groups`, `scopes`, `previewable` and `platform`; they are one
+  object (`server/auth/me-sites.ts`): `scopes` holds shared, every group and every site
+  the caller reaches with `kind`, their effective role, its `chain`, a site's status and
+  preview origin; `previewable` carries each site's own `chain`, because a shared-only
+  role reaches no site's `scopes` entry and still previews all of them; `platform`,
+  `grants` and the `settings` type name. A token is sent none, and `auth: 'open'` is
+  every role on every scope. **`actor.role` is still the `*` grant**, which is what makes
+  a site admin *not* an admin to `canManageAccess`, `canAdmin` and `model-model.ts`'s
+  own `isAdmin`; the role on the scope being shown is `me.ts`'s `roleOf`, read through
+  `atScope(me, scope)`, and every predicate in the file goes through it.
+- **`canDeleteForms` is no longer `canAdmin`.** The server split `ADMIN` (platform) from
+  `SCOPE_ADMIN` in phase 3; the admin had one predicate for both. `canAdmin` is the
+  platform tier (the describe run) and `canDeleteForms` is admin on the form's scope.
+  Single-site they are the same question.
+- **A page is written under its owner's role, not the shown scope's.** An alpha editor
+  opening a shared page reads it (reads flow up) and cannot write it, so the editor's
+  `readOnly`, Publish and Unpublish ask `canEditIn(me, story.site)`, and the banner says
+  "this page belongs to Shared" with *Fork into Alpha* for someone who may create.
+- **The pane is `site/start` on the admin origin, never the preview URL.** `paneSource`
+  turns the story's `previewUrl` into the handoff (`paneSrc`, now pure) with `next` set
+  to its path and query plus `_folio_id`, so a page a fork shadows previews *this* page;
+  a document with no path names none. The bridge is given the site's preview origin and
+  `grant-blocked` shows *Open preview in a new tab* (the same URL: top-level, so the
+  cookie is first-party). The picker offers the sites whose chain reads from the page's
+  owner; a site with no preview origin, or a caller who may preview none, gets the
+  reason in the bar and in the empty stage rather than the host's "no route" sentence.
+  A global has no preview on multi-site unless a host page carries it: the
+  `{base}/preview/global/:name` fallback is an admin-origin page a cross-origin pane
+  cannot use.
+- **The Settings tab is a list of links into the ordinary editor** on each scope's layer
+  (`settingsHref`), not a second editing surface: the layer is a document and already has
+  the draft, publish and history. Opening it is what creates the layer (decision 8).
+- **Layer labels come from `layerStates`, fetched once per open layer.** The layers below
+  are read as drafts when the layer opens (`useLayerDocs`) and not kept live; an
+  inherited value another editor changes is picked up on the next open. Labels appear only
+  when `isLayerDocument` (a layer of any scope but `shared`, on a deployment with `sites`)
+  and the inspector is handed `layers`; without it no field carries a label or an action.
+  An inherited field shows the inherited value and is read-only until *Override* writes it,
+  every locale's at once; *Reset* unsets the source and every locale the layer holds;
+  *Remove* writes `null`. Only the root's fields and a `max: 1` child's are labelled
+  (`slot.field`); a many-blocks slot is replaced whole and has no per-field state.
+- **Grants are edited whole.** `PATCH /users/:id` replaces the set and answers 409 for a
+  person any of whose grants a sign-in placed, so those rows carry the sentence in place
+  of *Edit access*. A grant naming a deleted scope is listed as ignored and stays in the
+  set the editor starts from, so saving drops none unseen. A bound token cannot hold
+  `admin`: the binding removes *Full access* and the individual `admin` scope.
+- **Home reads `/inherited` for a scope with something above it** and the scope's own root
+  (`/stories?paths=`) for *Create home page*; Fork is refused with "Fork Info first" only
+  when the parent is on the page in hand, and left to the server's 409 otherwise.
+- **Pickers.** The document picker searches `/search` (chain-wide) on multi-site and badges
+  a hit from another scope; the asset and form pickers pass `chain=1`. **They carry no
+  badge:** neither the asset row nor the form row the list routes answer has a `site`, so
+  the scope cannot be named client-side. A server change, for a later pass.
+- **`{base}` redirects to the first scope on the client**, after `/me` answers: the shell
+  is one static page at every path and only `/me` knows who is asking. A page with no scope
+  (`{base}/sites`, `{base}/account`) has no singletons, and the boot's singleton request
+  is answered `400 site_required` there and read as no rows.
+- **Known gaps, none a regression.** `useGlobalDocs` fetches the current scope's layer
+  (`sng_<type>:<scope>`, `sng_<type>` for `default`), so "Edit ‹global› →" fires for a block
+  in the layer being edited, but not for one inherited from a layer further down the
+  chain. The asset and form pickers offer the chain but cannot badge a row by scope:
+  their list rows carry no `site`. The scope switcher is in the sidebar and so is hidden with it collapsed, which is
+  the editor's default. `Shell.tsx`, `assets-model.ts` and `useAssets.ts` were touched
+  beyond the files the plan names (a pass-through prop, and the pickers' `chain` flag).

@@ -254,3 +254,32 @@ h2.heading {
     transition: none !important;
   }
 }
+
+/*
+ * The scope switcher: one labelled select above the groups, on a deployment with
+ * `sites` only. Full width of the rail, like an item, so it reads as the thing the
+ * whole nav below is relative to.
+ */
+.scope {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-inline: var(--space-2);
+}
+
+.scopeLabel {
+  font-size: var(--text-xs);
+  color: var(--fg-subtle);
+}
+
+.scopeSelect {
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+}

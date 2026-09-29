@@ -1,19 +1,19 @@
 /**
- * The thirteen components under `ui/screens/` that **no route reaches**: the
+ * The fifteen components under `ui/screens/` that **no route reaches**: the
  * dialogs, the two pickers and the shortcut sheet, each opened by an interaction
  * rather than by a URL.
  *
- * `screens.test.tsx` mounts the shell at nineteen URLs, which covers eighteen of
- * the thirty-three files there, and `ui-scope-render.test.tsx` covers two more
+ * `screens.test.tsx` mounts the shell at twenty URLs, which covers nineteen of
+ * the thirty-six files there, and `ui-scope-render.test.tsx` covers two more
  * through their portals. Without this file the answer to "every screen renders"
- * would be twenty of thirty-three, with the missing thirteen being exactly the
+ * would be twenty-one of thirty-six, with the missing fifteen being exactly the
  * surfaces that appear at the moment somebody is about to destroy something.
  *
  * Mounted directly rather than driven to through a click, deliberately. Whether
  * the Delete button opens `DeleteDialog` is the screen's behaviour and belongs
  * with the screen's model tests; what is asserted here is that the dialog itself
- * assembles. Driving the interaction would make thirteen tests depend on
- * thirteen unrelated click paths, and a change to any one of them would fail this
+ * assembles. Driving the interaction would make fifteen tests depend on
+ * fifteen unrelated click paths, and a change to any one of them would fail this
  * file for a reason that has nothing to do with rendering.
  *
  * Every one is given the smallest props that render it, typed against the real row
@@ -35,6 +35,7 @@ import type { AssetRow } from '../../../../src/admin/ui/screens/assets-model'
 import type { DocumentType, SchemaIndex } from '../../../../src/core/schema'
 import { indexManifest } from '../../../../src/core/schema'
 import type { DocumentRow } from '../../../../src/admin/ui/screens/documents-model'
+import { AccessGrantsDialog } from '../../../../src/admin/ui/screens/AccessGrants'
 import { AccessInviteDialog } from '../../../../src/admin/ui/screens/AccessInviteDialog'
 import { AccessTokenDialog } from '../../../../src/admin/ui/screens/AccessTokenDialog'
 import { AccountPasskeyDialog } from '../../../../src/admin/ui/screens/AccountPasskeyDialog'
@@ -48,7 +49,9 @@ import { DeleteDialog } from '../../../../src/admin/ui/screens/DeleteDialog'
 import { FormDeleteDialog } from '../../../../src/admin/ui/screens/FormDeleteDialog'
 import { Keys } from '../../../../src/admin/ui/screens/Keys'
 import { MoveDialog } from '../../../../src/admin/ui/screens/MoveDialog'
-import { API, MANIFEST, MOUNT, stubFetch } from './fixture'
+import { SiteDialog } from '../../../../src/admin/ui/screens/SiteDialog'
+import { emptyForm } from '../../../../src/admin/ui/screens/sites-model'
+import { ADMIN, API, MANIFEST, MOUNT, stubFetch } from './fixture'
 
 const SCHEMA: SchemaIndex = indexManifest(MANIFEST)
 const PAGE_TYPE = MANIFEST.types[0] as DocumentType
@@ -103,8 +106,43 @@ const asyncNoop = async () => {}
  * failure says which surface rather than which index.
  */
 const SURFACES: [name: string, mount: () => React.ReactElement][] = [
+  [
+    'AccessGrants',
+    () => (
+      <AccessGrantsDialog
+        me={ADMIN}
+        user={{
+          id: 'usr_a',
+          email: 'a@example.com',
+          name: 'A',
+          role: 'editor',
+          colour: null,
+          provider: null,
+          roleFrom: null,
+          createdAt: 1,
+          lastSeenAt: null,
+          passkeys: 0,
+          grants: [{ scope: '*', role: 'editor', roleFrom: null }],
+        }}
+        onClose={noop}
+        onSave={asyncNoop}
+      />
+    ),
+  ],
   ['AccessInviteDialog', () => <AccessInviteDialog onClose={noop} onInvite={asyncNoop} />],
   ['AccessTokenDialog', () => <AccessTokenDialog onClose={noop} onMint={asyncNoop} />],
+  [
+    'SiteDialog',
+    () => (
+      <SiteDialog
+        mode="create"
+        initial={emptyForm('site')}
+        groups={[{ id: 'north', name: 'North' }]}
+        onClose={noop}
+        onSave={asyncNoop}
+      />
+    ),
+  ],
   [
     'AccountPasskeyDialog',
     () => <AccountPasskeyDialog apiBase={API} onClose={noop} onEnrolled={noop} />,
@@ -215,12 +253,12 @@ describe('every interaction-only surface mounts', () => {
  * message: "every screen renders" is only true until somebody adds a screen.
  *
  * Every `.tsx` directly under `ui/screens/` is in exactly one of three sets — the
- * eighteen the route sweep reaches, the two the portal test reaches, and the
- * thirteen above — so a thirty-fourth file fails here until it is classified.
+ * nineteen the route sweep reaches, the two the portal test reaches, and the
+ * fifteen above — so a thirty-seventh file fails here until it is classified.
  * `fields/` is deliberately excluded: those render inside `Inspector`, which the
  * `edit` routes mount, and they have no props of their own to give.
  */
-describe('the thirty-three screens are all accounted for', () => {
+describe('the thirty-six screens are all accounted for', () => {
   /** Reached by `screens.test.tsx`'s nineteen URLs, directly or nested. */
   const BY_ROUTE = [
     'Access',
@@ -240,6 +278,7 @@ describe('the thirty-three screens are all accounted for', () => {
     'Responses',
     'Schedules',
     'Settings',
+    'Sites',
     'Stub',
   ]
 
@@ -258,7 +297,7 @@ describe('the thirty-three screens are all accounted for', () => {
 
     const covered = [...BY_ROUTE, ...BY_PORTAL, ...SURFACES.map(([name]) => name)].sort()
 
-    expect(files.length).toBe(33)
+    expect(files.length).toBe(36)
     expect(covered).toEqual(files)
   })
 })

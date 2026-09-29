@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ICONS } from './icons'
 import { href, type Screen } from './route'
 import css from './Sidebar.module.css'
-import type { NavGroup } from './nav'
+import type { NavGroup, ScopeOptionGroup } from './nav'
 
 interface Props {
   groups: readonly NavGroup[]
@@ -12,6 +12,17 @@ interface Props {
   mount: string
   collapsed: boolean
   onToggle: () => void
+  /**
+   * The scope switcher, or absent. **Absent on a single-site deployment**, and that
+   * absence is the whole guarantee that it looks as it always did: `Admin` passes
+   * nothing unless `/me` carried `sites` (`showsScopeSwitcher`).
+   */
+  switcher?: {
+    groups: readonly ScopeOptionGroup[]
+    /** The scope being shown, or null on a page that has none. */
+    current: string | null
+    onSwitch: (scope: string) => void
+  }
 }
 
 const key = (screen: Screen): string =>
@@ -34,7 +45,7 @@ const key = (screen: Screen): string =>
  * stays in the DOM for a screen reader. The icons themselves are `aria-hidden`
  * (`icons.tsx`), which is what keeps that one name from being announced twice.
  */
-export function Sidebar({ groups, active, mount, collapsed, onToggle }: Props) {
+export function Sidebar({ groups, active, mount, collapsed, onToggle, switcher }: Props) {
   const activeKey = key(active)
   return (
     <nav
@@ -55,6 +66,28 @@ export function Sidebar({ groups, active, mount, collapsed, onToggle }: Props) {
           {collapsed ? '»' : '«'}
         </button>
       </div>
+
+      {switcher && !collapsed ? (
+        <label className={css.scope}>
+          <span className={css.scopeLabel}>Site</span>
+          <select
+            className={css.scopeSelect}
+            value={switcher.current ?? ''}
+            onChange={(e) => switcher.onSwitch(e.target.value)}
+          >
+            {switcher.current === null ? <option value="">Choose a site…</option> : null}
+            {switcher.groups.map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.options.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+      ) : null}
 
       {groups.map((group, i) => (
         <Group

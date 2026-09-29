@@ -4,12 +4,14 @@ import type { Field as FieldDef } from '../../../../core/fields'
 import type { Presence } from '../../../../core/protocol'
 import { asRichtext, sanitiseRichtext } from '../../../../core/richtext'
 import { RichText } from '../../../../preview/RichText'
+import { Button } from '../../Button'
 import { Field } from '../../Field'
 import {
   boundValue,
   type FieldMode,
   fieldMode,
   fieldWarning,
+  type FieldLayerInput,
   fieldWatchers,
   isEditable,
   isInlineControl,
@@ -49,6 +51,14 @@ interface Props {
   onFocusField: (field: string | null) => void
   /** What the store currently records as focused, so blur does not race itself. */
   focusedField: string | null
+  /**
+   * This field's standing against the layers below it, on a global's layer of a
+   * deployment with `sites` (`multi-site.md` decision 8); absent everywhere else, and
+   * then the row is exactly what it always was. While the field is not the layer's own
+   * (`inherited`, `removed`) its control shows the inherited value and cannot be
+   * typed into: *Override* is what makes it this layer's to edit.
+   */
+  layer?: FieldLayerInput | undefined
 }
 
 /**
@@ -63,9 +73,13 @@ interface Props {
 export function FieldRow(props: Props) {
   const { blok, name, field, isSourceLocale, locale, readOnly, peers, env } = props
 
+  const { layer } = props
   const mode = fieldMode(field, isSourceLocale)
-  const value = boundValue(blok, name, mode, locale)
-  const editable = isEditable(mode, readOnly)
+  // A field the layer has not overridden shows what it inherits, and is read-only
+  // until *Override* writes it here.
+  const notOwn = layer !== undefined && layer.state !== 'overridden'
+  const value = notOwn ? layer.value : boundValue(blok, name, mode, locale)
+  const editable = isEditable(mode, readOnly) && !notOwn
   const watchers = fieldWatchers(peers, blok.uid, name)
   const warning = fieldWarning(field, value)
   const label = field.label ?? name
@@ -78,6 +92,9 @@ export function FieldRow(props: Props) {
 
   const note = (
     <>
+      {/* Which layer this value is from. Beside the label, where a translator's
+          "shared across all languages" already sits. */}
+      {layer ? <span data-layer={layer.state}>{layer.label}</span> : null}
       {/* Says why the input below cannot be typed into, at the input rather than in a
           note somewhere else. */}
       {mode === 'shared' ? <span>shared across all languages</span> : null}
@@ -133,7 +150,7 @@ export function FieldRow(props: Props) {
         label={label}
         {...(field.required ? { required: true } : {})}
         {...(field.help ? { help: field.help } : {})}
-        {...(mode === 'shared' || watchers.length ? { note } : {})}
+        {...(mode === 'shared' || watchers.length || layer ? { note } : {})}
         // The same predicate that lays this row out *across* rather than down also
         // asks `Field` to put the label beside the box, because for a boolean those
         // are one decision: a 16px checkbox with 300px of empty column to its right
@@ -169,6 +186,23 @@ export function FieldRow(props: Props) {
                 onChange={(next) => props.onChange(blok.uid, name, next, writeLocale(mode, locale))}
               />
             </fieldset>
+
+            {/* Outside the fieldset above, which disables everything in it: these are
+                how a field that is not editable becomes so. */}
+            {layer && layer.actions.length > 0 ? (
+              <div className={css.layerActions}>
+                {layer.actions.map(({ action, label: text }) => (
+                  <Button
+                    key={action}
+                    size="sm"
+                    variant={action === 'remove' ? 'danger' : 'subtle'}
+                    onClick={() => layer.onAction(action)}
+                  >
+                    {text}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
 
             {/*
               The warning, here rather than through `Field`'s own `error` slot. `error`

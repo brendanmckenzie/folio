@@ -398,3 +398,39 @@
   border-color: var(--border);
   background: none;
 }
+
+/* ------------------------------------------------------------------ grants --- */
+
+/* One role per scope: a stack of rows, each a scope, a role and a remove. */
+.grants {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.grantRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 10rem) auto;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.grantScope {
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The grants cell in the editors table: badges that wrap rather than widen. */
+.grantBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.help {
+  margin: 0;
+  color: var(--fg-subtle);
+  font-size: var(--text-sm);
+}
