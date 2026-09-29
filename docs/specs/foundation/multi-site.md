@@ -2602,3 +2602,7 @@ than the spec's first plan:
   the owner of `index.tsx`, and `docs/handbook.md`'s "The exported surface" is
   unchanged until it is made.
 
+
+### After staging verification (2026-09-30)
+
+- **`reader.page()`'s `headers` carry `frame-ancestors <sites.admin>` on the preview surface.** Decisions 13 and 15 expected it, but only Folio's own responses passed through `framedBy`; a page a host renders and answers with `page.headers` did not, so a preview-origin page was frameable by anyone. It is added in `page()` for a multi-site deployment's preview surface only, never live and never single-site, and no policy is replaced (`cacheHeaders` and `no-store` set none). `draftAt()` returns a document, not headers, so it needs nothing.

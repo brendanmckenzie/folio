@@ -411,6 +411,13 @@ export interface FolioPage {
    * with the published headers is unpublished content on the edge under the
    * page's real URL; a published page answered with `Cache-Control` and no
    * `Cache-Tag` is cached for a week with no purge path.
+   *
+   * On a multi-site deployment's **preview** surface it also carries
+   * `Content-Security-Policy: frame-ancestors <sites.admin>`, the same policy Folio
+   * puts on its own preview-origin responses, so the admin may frame the page and
+   * nothing else may. Never on a live host, and never on a single-site deployment.
+   * A host that sets its own CSP should merge `frame-ancestors` into it rather than
+   * drop this one.
    */
   headers: Record<string, string>
 }

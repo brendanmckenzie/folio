@@ -1239,10 +1239,19 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
            * later. The cost is stated in the spec: a gated page is uncacheable
            * at the edge, for everyone, forever.
            */
-          headers:
-            drafted || access !== 'public'
+          headers: {
+            ...(drafted || access !== 'public'
               ? { 'cache-control': NO_STORE }
-              : cacheHeaders(resolution, { story: story.id }),
+              : cacheHeaders(resolution, { story: story.id })),
+            // On a site's preview origin the admin is the one page that may frame
+            // this, exactly as `framedBy` says of Folio's own responses (decision
+            // 13). Here because a host's page never passes through `framedBy`,
+            // and never on the live surface, where it would break every embed.
+            // `cacheHeaders` and `NO_STORE` set no policy, so nothing is replaced.
+            ...(rt.sites && within.render?.surface === 'preview'
+              ? { 'content-security-policy': `frame-ancestors ${rt.sites.admin}` }
+              : {}),
+          },
         }
       },
       resolve: async (doc, opts) =>

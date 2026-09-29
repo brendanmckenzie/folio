@@ -504,6 +504,31 @@ describe('step 4: the page', () => {
     expect(page?.headers['cache-tag']).toBeUndefined()
   })
 
+  /**
+   * Folio's own responses pass through `framedBy`; a host's page does not, so
+   * `page.headers` carries the policy itself, on the preview surface only.
+   */
+  it("names the admin in a published page's frame-ancestors on the preview origin only", async () => {
+    const onPreview = await folio.reader(env, new Request(`${ALPHA}/about`)).page('about')
+    expect(onPreview?.draft).toBe(false)
+    expect(onPreview?.headers['content-security-policy']).toBe(`frame-ancestors ${ADMIN}`)
+    expect(onPreview?.headers['cache-control']).toContain('s-maxage=')
+
+    const onLive = await folio.reader(env, new Request('https://alpha.example/about')).page('about')
+    expect(onLive?.story.id).toBe('sty_h_alpha_about')
+    expect(onLive?.headers['content-security-policy']).toBeUndefined()
+  })
+
+  it("names the admin in a draft page's frame-ancestors on the preview origin", async () => {
+    const grant = await handoff(E, 'alpha', '/about')
+    const page = await folio
+      .reader(env, new Request(`${ALPHA}/about`, { headers: grantCookie(grant) }))
+      .page('about')
+    expect(page?.draft).toBe(true)
+    expect(page?.headers['content-security-policy']).toBe(`frame-ancestors ${ADMIN}`)
+    expect(page?.headers['cache-control']).toContain('no-store')
+  })
+
   it('gives reader.page() nothing but the published page for that grant on the live host', async () => {
     const grant = await handoff(E, 'alpha', '/about')
     const page = await folio

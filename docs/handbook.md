@@ -3237,6 +3237,11 @@ is in the key so that headers a host sets only on its preview origin
 site, and a tag purge reaches every props variant. `cacheVerdict` treats the grant
 cookie as a Folio credential, so no draft request reaches the cached entrypoint.
 
+On a preview origin, `page.headers` from `reader.page()` also carries
+`Content-Security-Policy: frame-ancestors <sites.admin>`, so a page your route renders can be
+framed by the admin and by nothing else. It is never on a live host or a single-site
+deployment, and a CSP you set yourself should include the same `frame-ancestors`.
+
 With `sites`, a render on `alpha` (in group `north`) emits:
 
 | Tag | Purged by |

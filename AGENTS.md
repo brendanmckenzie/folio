@@ -241,7 +241,9 @@ comes with `page()`"). With `draftMode: true`, `{base}/draft/enter` on the previ
 origin accepts a preview grant in place of a session, and with neither redirects to
 `site/start`, which is how an editor arriving without a grant gets one. Cache none of it: `page.headers` is already
 `no-store`, and `folio.cacheVerdict` bypasses a request carrying the grant, draft or
-share cookie. A response header you set only on preview origins
+share cookie. `page.headers` on a preview origin also carries
+`Content-Security-Policy: frame-ancestors <sites.admin>` (never on a live host), so the
+admin's frame works with no code of yours. A response header you set only on preview origins
 (`X-Robots-Tag: noindex`) is safe because the surface is in the cache key.
 
 **A headless front end** (a separate Worker or a service binding) does not link

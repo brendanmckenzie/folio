@@ -356,6 +356,8 @@ describe('a host with no gate', () => {
     expect(page?.draft).toBe(false)
     expect(page?.headers['cache-control']).toContain('s-maxage=')
     expect(page?.headers['cache-tag']).toContain('story:sty_gt_mem')
+    // No `sites`, no preview surface, no `frame-ancestors`.
+    expect(page?.headers['content-security-policy']).toBeUndefined()
     // The document is untouched: no `gate` means no redaction, whatever the field
     // happens to hold.
     expect(Object.keys(page?.doc.bloks ?? {}).sort()).toEqual(['g0', 'g1'])
