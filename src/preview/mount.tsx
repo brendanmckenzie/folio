@@ -28,17 +28,31 @@ declare global {
        * `hydrateRoot`, not a rebuild. `#folio-root` stays static in this mode.
        */
       editing?: { global: string; mount: string }
+      /**
+       * `sites.admin`, on a deployment with `sites`
+       * (`../../docs/specs/foundation/multi-site.md` decision 13): the preview is on
+       * a site's own preview origin there, and the admin framing it is on another.
+       * Written into the bootstrap by the server, never taken from the URL or the
+       * frame. Absent, the admin is this preview's own origin, as it always was.
+       */
+      admin?: string
     }
   }
 }
 
+/**
+ * The one origin this preview talks to and hears from: the admin's. Same-origin
+ * where there is no `sites` (see core/protocol.ts); the configured admin origin
+ * where there is. Read once from the bootstrap, which only the server writes.
+ */
+const adminOrigin = (): string => window.__FOLIO__?.admin ?? window.location.origin
+
 function post(msg: PreviewToAdminMsg) {
   window.parent?.postMessage(
     { source: 'folio-preview', v: PROTOCOL_VERSION, ...msg },
-    // Same-origin is a hard requirement, not a courtesy check — see
-    // core/protocol.ts. A preview whose `previewUrl` lands on a different
-    // origin than the admin does not degrade, it just never gets here.
-    window.location.origin,
+    // An explicit target, never `*`: the frame carries the document being edited,
+    // and a preview embedded anywhere but the admin must tell nobody about it.
+    adminOrigin(),
   )
 }
 
@@ -58,10 +72,10 @@ function PreviewApp({
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      if (e.origin !== window.location.origin) return
+      if (e.origin !== adminOrigin()) return
       // Same hardening as the admin's side of this seam (see usePreviewBridge):
-      // origin alone only proves the sender is same-origin, not that it is the
-      // parent frame this preview was embedded in.
+      // origin alone only proves the sender is the admin's origin, not that it is
+      // the parent frame this preview was embedded in.
       if (e.source !== window.parent) return
       const data = e.data as Partial<PreviewFrame> | null
       if (data?.source !== 'folio-admin') return

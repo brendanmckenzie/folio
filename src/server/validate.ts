@@ -802,12 +802,38 @@ export type ShareCreateInput = v.InferOutput<typeof ShareCreateBody>
  * redirect out of a login page, the single most useful kind.
  */
 export function safeNext(raw: string | null | undefined, fallback: string): string {
-  if (!raw) return fallback
-  if (!raw.startsWith('/') || raw.startsWith('//')) return fallback
-  // A backslash is normalised to a slash by some browsers, so `/\evil.example`
-  // is the same trick wearing a different character.
-  if (raw.includes('\\')) return fallback
-  return raw.length > 500 ? fallback : raw
+  if (!raw || raw.length > 500) return fallback
+  if (!sameOriginPath(raw)) return fallback
+  // Percent-encoded forms of the same tricks (`/%09/evil.example`, `/%5Cevil`,
+  // `/%2F/evil`): a browser does not decode them in a `Location` path, but a
+  // screen that let them through would be one decode away from an open redirect
+  // wherever the value is used again. Undecodable is refused outright.
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(raw)
+  } catch {
+    return fallback
+  }
+  return sameOriginPath(decoded) ? raw : fallback
+}
+
+/**
+ * Whether `value` can only mean a path on the current origin, **as a browser reads
+ * it**. The WHATWG URL parser strips every tab, newline and carriage return and
+ * reads a backslash as a slash, so `/\t/evil.example` is `//evil.example`: a
+ * protocol-relative URL to another host. So any C0 control, DEL or backslash is
+ * refused, `//` is refused, and the value must then parse against a placeholder
+ * origin and keep it.
+ */
+function sameOriginPath(value: string): boolean {
+  if (!value.startsWith('/') || value.startsWith('//')) return false
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: refusing control characters is the point
+  if (/[\u0000-\u001f\u007f\\]/.test(value)) return false
+  try {
+    return new URL(value, 'https://next.invalid').origin === 'https://next.invalid'
+  } catch {
+    return false
+  }
 }
 
 export type StoryCreateInput = v.InferOutput<typeof StoryCreateBody>

@@ -2131,3 +2131,155 @@ spec was wrong, silent or split across files it did not name:
 - **The purge lines are tested through `cachePurgeHooks` with the runtime's own
   `sites.layered`**, not by a publish through the API: the publish hook's purge
   capability is the platform's, which a test cannot observe.
+
+### Phase 5 (2026-09-29)
+
+`src/server/auth/grants.ts` and `src/server/routes/handoff.ts` are new; decision 13's
+four-step trace, the grant cookie, `GrantActor` in the `Actor` union, the gate's grant
+and share admission for a draft site's preview origin, `_folio_id` with its banner,
+`frame-ancestors`, site-bound shares, MCP's token grant and the cache bypass landed as
+specified. `test/workers/handoff.test.ts` walks the trace one step per section, then the
+"Preview across origins" criteria and the draft-site rows of "Registry and status".
+Where the spec was wrong, silent or split across files it did not name:
+
+- **The browser matrix moved to the plan's Phase V.** "Testing requirements" puts a
+  manual run in Chrome, Firefox and Safari 26.2 at the end of this phase. No test here
+  can observe a partitioned cookie in a real browser, and a deployment is the first place
+  one can be seen, so both passes (same-site, then cross-site through a `workers.dev`
+  preview origin) run there. The accepted cost is that a browser-level defect is found
+  after release and fixed forward.
+- **Revocation is proven by `update`, never `delete`** (owner, 2026-09-29). D1 in
+  workerd pins foreign keys on, so "with foreign keys off" is not available. Each
+  `readGrant` refusal test expires the session, revokes, rebinds or narrows the token, or
+  moves the holder's `site_roles` row off the chain, all by `update`, with every row
+  still present, so only the statement's own conditions can refuse
+  (`auth-session.test.ts`, "readGrant"). `site_grants` declares no foreign key, so the
+  deletes that keep the table small are proven twice: a proxy records each `batch` call
+  as SQL and asserts the grant delete and the session delete went in one batch, grants
+  first, for every path in `session.ts` and `users.ts`; and the Access-screen and SSO
+  role changes are proven by the rows alone through `handle()`, since nothing but the
+  batch can remove them.
+- **There are eight `delete from sessions` paths, not seven.** Ground truth lists
+  `session.ts` (five), `sign-in.ts` and `users.ts`. `routes/access.ts`' grant-set
+  replacement (`PATCH /users/:id` with `grants`) deletes the user's sessions too. It,
+  `sign-in.ts` and `revokeUserSessions` batch `userSessionsDelete` (`session.ts`), which
+  is the grants delete and then the sessions delete. `users.ts`' `deleteUser` spells the
+  two statements out rather than importing `session.ts`, which imports it.
+- **Grants are read on a `first-primary` session.** A grant is written on the primary by
+  `site/enter` one redirect before the first page asks for it, and a replica behind that
+  write would refuse it, so the pane's first render would show the published page as the
+  draft. `PreviewSite.db` carries that session; only a request with a grant cookie on a
+  preview origin pays the primary round trip. On a `draft` site's preview origin a
+  `?_folio=` render reads the grant twice, once for the gate and once for the actor.
+- **The consume statement also writes the grant's expiry.** It is still one `update …
+  where code_hash = ? and site_id = ? and expires_at > ? returning …`. `expires_at` is a
+  `case`: for a session grant, the earlier of a day and the session's own expiry (read by
+  a subquery); for a token grant, five minutes.
+- **`withActor` resolves a grant only for a read on a preview origin's v1 routes or
+  `draft/enter`** (`GRANT_READS`, `middleware.ts`). Anywhere else a grant cookie is no
+  credential, so the request is as anonymous as it would be without it. This is a
+  second fence below `handle()`'s host confinement, and each is tested on its own: a walk
+  over every mounted route asserts the grant cookie changes no status except on that
+  allowlist, and `handle()` answers `null` for an admin route, a socket and `/mcp` on a
+  preview origin. `resolveActor` tries the session cookie, then the grant (when told the
+  preview site), then the bearer header, so a headless front end forwarding a visitor's
+  `Cookie` reads that visitor's drafts whatever its own token holds.
+- **The candidate step is exported** (`candidateFor`, `server/sites.ts`) so `handle()`
+  and the reader can gate a refused preview-origin request again with the grant or share
+  it carries (`routeGranted`, `index.tsx`). Only a draft site's preview origin is ever
+  refused there, so only its requests pay for the second look, and none without a cookie.
+  Under `auth: 'open'` every preview origin is admitted without a grant, as the edge
+  cases say.
+- **`site/start` checks eligibility before it checks the preview origin**, so a caller
+  who may not preview a site learns nothing about how it is set up. Its refusal does not
+  quote the site id, which is how `scope-partition.test.ts` tells it apart from the scope
+  403 every other route answers. A group, `shared`, or no scope at all is not a site and
+  answers 404, or 400 for no scope. A site with no preview origin is a 409 saying so.
+- **Share minting names its render site with `?site=`**, not a body field. The body's
+  schema (`ShareCreateBody`, `validate.ts`) is the single-site one, and valibot drops a
+  field it does not know without a word. `?site=` defaults to the request's scope when
+  that is a site; it must be in `sitesUnder` of the story's scope and have a preview
+  origin. A redeemed link on a multi-site deployment lands on Folio's draft render on the
+  preview origin with `_folio_id` naming the story, so the one page the link covers
+  renders even where a nearer scope shadows its path. With `draftMode` it lands on the
+  page's own path on the preview origin.
+- **`auth/shares.ts` and `routes/mcp.ts` changed, beyond the phase's file list.**
+  `createShare` writes `site_id`; `readShareByToken` and `claimShare` take the gated site
+  and require it; `shareAdmitsSite` is the gate's share check. MCP's `previewContext`
+  passes the scope, the actor and the registry to `shot.ts` on a deployment with sites.
+- **MCP's `preview_document` renders on the request's scope when that is a site, else on
+  the story's own site.** A shared or group page from a shared- or group-scoped call is
+  answered with a sentence naming the sites to call it from. The grant is the token's for
+  a token caller and the session's for a person. A fresh code is minted per capture
+  attempt, because each attempt is a new browser. A global's bare preview is an
+  admin-origin route behind a session, so on a multi-site deployment it degrades to the
+  rendered HTML rather than being photographed. With no `browser` binding nothing is
+  minted and the answer carries the plain preview-origin draft URL.
+- **`check=1` tests the cookie's presence, not its validity.** The step asks whether the
+  browser kept the cookie; what the grant is worth is `readGrant`'s, on the page itself.
+- **The grant cookie is `Secure` under both names.** `SameSite=None` and `Partitioned`
+  both require it, and `http://localhost` is a secure context that keeps a `Secure`
+  cookie.
+- **`folio.sweepAuth` sweeps `site_grants` without counting them.** The report's shape is
+  `Folio.sweepAuth`'s public type in `types.ts`, and the sweep also drops grants whose
+  session or token is gone or revoked.
+- **The admin bridge and preview mount take the origins; the pane's wiring is phase 8's.**
+  `usePreviewBridge` accepts `origin` (the site's preview origin: it hears only that
+  origin, and only from its own iframe, and posts only to it), `onGrantBlocked`, and
+  exports `paneSrc` for the pane's `site/start` URL. `preview/mount.tsx` posts only to,
+  and hears only from, `__FOLIO__.admin`, which `previewPage` writes into the bootstrap on
+  a preview origin. Passing the site's preview origin, routing the pane's `src` through
+  `paneSrc` and offering *Open preview in a new tab* on `grant-blocked` are the editor
+  screen's (`useEditor.ts`, `EditorShell.tsx`), beside phase 8's "preview in" site picker
+  from `/me`'s `previewable`. Until then a multi-site admin's pane does not show drafts.
+- **A token grant's binding must reach the site.** A token bound to `shared` cannot
+  preview a shared page on alpha, because it cannot reach `~alpha` at all
+  (`tokenScopesOn`). A person's shared grant can, by decision 13's whole-chain rule.
+
+- **After the phase 5 review (2026-09-29)**, seven findings were fixed. Each has a
+  permanent test that goes red when its fix is removed:
+  - **Every draft authority on a preview origin is held to decision 13 for the gated
+    site** (critical). The render paths asked `allows(actor, READ_DRAFT)`, which ignores
+    the scope, so a bravo editor's session, a person with no grant at all, and a
+    bravo-bound `content:read:draft` token all read alpha's drafts through `?_folio=` and
+    `reader.page()`. `mayPreviewDrafts(actor, registry, site)` (`auth/roles.ts`) is now
+    the one rule:
+    - a grant must be for the site;
+    - a person must hold `READ_DRAFT` on a scope of its chain or `*`;
+    - a token's binding must reach the site, with `content:read:draft` there.
+
+    `?_folio=`, `reader.page()` / `draftAt()` and draft mode's switch ask it. v1
+    `?status=draft` reaches the same answer through `scopedActor` and `ensureAccess`, and
+    `handoff.test.ts` asserts the two agree for every credential kind.
+  - **A session that may not preview the site no longer hides the grant.** On a preview
+    origin, `resolveActor` keeps a session only if `mayPreviewDrafts` admits it. Otherwise
+    it tries the grant, then the bearer token.
+  - **`frame-ancestors` never replaces a policy a route set** (critical). It had
+    overwritten `{base}/asset/:key`'s `default-src 'none'; sandbox`, so an uploaded SVG
+    ran script as the preview origin, beside the grant cookie. An asset's policy is now
+    byte-identical on every surface.
+  - **`safeNext` refuses every form a browser normalises into another host**, for every
+    caller, login included, which predates this spec. That covers any C0 control or DEL
+    anywhere (the URL parser strips tab, newline and carriage return), a backslash
+    anywhere, leading whitespace, and percent-encoded forms that decode to any of these
+    or to `//`. The value must also parse against a placeholder origin and keep it.
+    `/\t/evil.example` was the case that got through.
+  - **A share on a draft site admits only its own story.** The gate admits a share only
+    for a host path at which it covers a story (`sharedStoriesAt`). A reader so admitted
+    reads nothing but that story, as its draft: its chain is empty for every other
+    lookup, and `page()` / `draftAt()` refuse any other id. One link could otherwise
+    browse a whole unlaunched site through a host route.
+  - **MCP's grant is five minutes whoever calls.** A session caller's screenshot minted
+    a day-long grant. A short grant is marked by its id prefix (`sgs_`), which the
+    consume statement reads, because `0011` has landed and a column would be a new
+    migration for one flag.
+  - **With `draftMode`, a share lands on its own story.** When a nearer scope's fork
+    shadows the story's path on the render site, the link lands on Folio's draft render
+    of the story by `_folio_id`, not on the host's page, which would render the fork.
+  - **A share-admitted reader still reads its site's globals** (re-review, 2026-09-29).
+    Its empty chain had made `reader.global()` null, so a shared pre-launch page rendered
+    with no header or navigation. `global()` now reads the gated site's whole chain, the
+    same one `page()` resolves with, and reads published layers only: the share drafts its
+    one story and nothing else. `tree()`, `stories()` and `query()` stay empty for such a
+    request, because a listing would enumerate a pre-launch site. `FolioReader`'s doc
+    comment in `types.ts` says so.

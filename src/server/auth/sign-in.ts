@@ -33,7 +33,7 @@ import type {
 } from './config'
 import { recordEventStatement } from './events'
 import { type Role, isRole } from './roles'
-import { type NewSession, newSession, sessionStatements } from './session'
+import { type NewSession, newSession, sessionStatements, userSessionsDelete } from './session'
 import {
   createUserStatement,
   grantMap,
@@ -301,7 +301,8 @@ export async function completeSignIn(
       // admin's edit: a downgrade must not sit in an open socket's attachment
       // for the window a revocation may. Before the insert below, so the session
       // this sign-in is minting survives it.
-      db.prepare('delete from sessions where user_id = ?').bind(user.id),
+      // Their preview grants go with them (`grants.ts`), in the same batch.
+      ...userSessionsDelete(db, user.id),
       recordEventStatement(db, {
         kind: 'role_changed',
         userId: user.id,

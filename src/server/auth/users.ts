@@ -16,6 +16,7 @@
  * request to derive anything from.
  */
 import { fallbackColour } from '../../core/protocol'
+import { userGrantsDelete } from './grants'
 import { type Grants, type Role, isRole } from './roles'
 import { mintId } from './secrets'
 import { clampLimit, decodeCursor, type Page, paginate } from '../../core/pagination'
@@ -382,8 +383,8 @@ export async function updateUser(
 }
 
 /**
- * Removes an editor, every session they hold, every passkey they enrolled and
- * every grant they hold, in one batch.
+ * Removes an editor, every session they hold and the preview grants on them, every
+ * passkey they enrolled and every grant they hold, in one batch.
  *
  * All three deletes are explicit rather than left to the `on delete cascade`
  * their columns declare: whether D1 enforces foreign keys is a property of the
@@ -403,6 +404,10 @@ export async function deleteUser(db: FolioDb, id: string): Promise<boolean> {
   const existing = await userById(db, id)
   if (!existing) return false
   await db.batch([
+    // Every preview grant their sessions held (`grants.ts`), ahead of the sessions
+    // its subquery finds them through. Spelled out rather than `session.ts`'s
+    // `userSessionsDelete`, which would make the two files import each other.
+    userGrantsDelete(db, id),
     db.prepare('delete from sessions where user_id = ?').bind(id),
     // `foundation/passkeys.md`: a credential that outlived its account would be
     // an orphan row whose `user_id` no longer resolves, and `passkeyForAssertion`

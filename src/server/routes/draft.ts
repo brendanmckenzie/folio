@@ -5,7 +5,9 @@
  *
  * The cookie these set is a **flag, not a credential**: it says an editor wants
  * draft mode applied, and grants nothing on its own. The authority is the session
- * cookie and its role, re-checked by `folio.draftAt` on every single render. So a
+ * cookie and its role — on a multi-site deployment's preview origin, the preview
+ * grant (`multi-site.md` decision 13) — re-checked by `folio.draftAt` on every
+ * single render. So a
  * browser that keeps this cookie after its session dies simply stops seeing
  * drafts, with no stale grant to expire and nothing to revoke.
  *
@@ -14,7 +16,7 @@
  */
 import { Hono } from 'hono'
 import { clearDraftCookies, draftCookieName, serialiseCookie } from '../auth/cookie'
-import { READ_DRAFT } from '../auth/roles'
+import { mayPreviewDrafts, READ_DRAFT } from '../auth/roles'
 import { requireHtmlAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
@@ -41,6 +43,33 @@ export function draftRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * passes through, matching `handle()`'s preview branch, which grants the same
    * site the same thing for the same reason.
    */
+  /**
+   * **On a site's preview origin** (`../../../docs/specs/foundation/multi-site.md`
+   * decision 13) the authority is a preview grant rather than a session — the
+   * admin's session cookie is never sent to another origin — and `withActor` has
+   * already resolved one when it verified. With neither, there is no sign-in page
+   * here to send anybody to: the browser goes to `site/start` on the admin origin,
+   * which mints a grant and brings it back to this route.
+   */
+  app.use('/draft/enter', async (c, next) => {
+    const here = c.var.site
+    if (!rt.sites || here?.surface !== 'preview' || rt.auth.mode !== 'session') {
+      await next()
+      return
+    }
+    // Decision 13's rule for this site, the one every render path asks
+    // (`mayPreviewDrafts`): a session or token that cannot preview it is no
+    // authority here either, and goes to `site/start` like a stranger.
+    if (mayPreviewDrafts(c.var.actor, await rt.sites.registry(c.env), here.id)) {
+      await next()
+      return
+    }
+    const back = `${rt.base}/draft/enter?next=${encodeURIComponent(safeNext(c.req.query('next'), '/'))}`
+    return c.redirect(
+      `${rt.sites.admin}${rt.base}/~${here.id}/site/start?next=${encodeURIComponent(back)}`,
+    )
+  })
+
   app.get('/draft/enter', requireHtmlAccess<Env>(rt, READ_DRAFT), (c) => {
     const url = new URL(c.req.url)
     // `next` is attacker-controllable — it is in a link anyone can write — and

@@ -446,15 +446,35 @@ describe("reach: 'preview'", () => {
   })
 
   it('does not refuse a shared-only or group-only editor at site/start, and refuses them elsewhere', async () => {
+    // `withActor` lets both through to the route, which checks preview eligibility
+    // itself (decision 13): READ_DRAFT on any scope of the site's chain.
+    const shared = await call('/~alpha/site/start?next=/', N)
+    expect(shared.status).toBe(302)
+    expect(shared.headers.get('location')).toMatch(
+      /^https:\/\/preview\.alpha\.example\/folio\/site\/enter\?/,
+    )
+    const group = await call('/~alpha/site/start?next=/', R)
+    expect(group.status).toBe(302)
+    // Bravo is in no group, so north reaches nothing of it: the route's own 403,
+    // not the scope 403 every other route answers, which names the scope.
+    const refused = await call('/~bravo/site/start?next=/', R)
+    expect(refused.status).toBe(403)
+    expect((await errorOf(refused)).message).not.toContain("You have no role on 'bravo'")
     for (const who of [N, R]) {
-      // `site/start` itself is phase 5's; until then the shell's wildcard answers,
-      // and what matters here is that `withActor` let the request reach a route.
-      const start = await call('/~bravo/site/start?next=/', who)
-      expect(start.status).not.toBe(403)
       const edit = await call('/~bravo/edit', who)
       expect(edit.status).toBe(403)
       expect((await errorOf(edit)).message).toContain("'bravo'")
     }
+  })
+
+  it('mounts site/start and site/enter, and site/start alone is preview reach', () => {
+    const handoff = MOUNTED.filter((r) => r.path.startsWith('/folio/site/')).map(
+      (r) => `${r.method} ${r.path}`,
+    )
+    expect(handoff.sort()).toEqual(['GET /folio/site/enter', 'GET /folio/site/start'])
+    expect(
+      MOUNTED.filter((r) => routeScope(concrete(r.path)) === 'preview').map((r) => r.path),
+    ).toEqual(['/folio/site/start'])
   })
 })
 

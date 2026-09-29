@@ -142,7 +142,7 @@ export function effectiveRole(grants: Grants, registry: Registry, scope: string)
 /**
  * Whether these grants may preview a site whose chain is `siteChain` (decision 13):
  * `READ_DRAFT` on **any** scope in it, or on `*`. Every role gives `READ_DRAFT`, so
- * holding any grant there is enough. Phase 5's `site/start` asks this, on the one
+ * holding any grant there is enough. `site/start` (`routes/handoff.ts`) asks this, on the one
  * route `withActor` does not refuse for a caller with no role on the site.
  */
 export function previewEligible(grants: Grants, siteChain: readonly string[]): boolean {
@@ -250,7 +250,7 @@ export interface TokenActor {
  * the site's chain, published and draft, and nothing else** — no write anywhere, no
  * admin route, no socket — so `allows()` gives it `READ` and `READ_DRAFT` and
  * refuses every other `Access`. Which chain it may read is the fence's to check,
- * against `site`. Spec 23's phase 5 is what resolves a credential to one.
+ * against `site`. `readGrant` (`grants.ts`) resolves a grant cookie to one.
  */
 export interface GrantActor {
   kind: 'grant'
@@ -265,12 +265,39 @@ export interface GrantActor {
 }
 
 /**
- * Who a route sees. **`GrantActor` is not in it yet**: nothing resolves a credential
- * to one until spec 23's phase 5, and joining the union then is that phase's edit
- * (`routes/auth.ts`' `/me` narrows `Actor` to two kinds). `allows()` already
- * answers for it.
+ * Who a route sees. A `GrantActor` is resolved only on a site's preview origin, for
+ * a read (`withActor`), so a route on the admin origin never meets one; `allows()`
+ * refuses it everything but `READ` and `READ_DRAFT` wherever it does.
  */
-export type Actor = UserActor | TokenActor
+export type Actor = UserActor | TokenActor | GrantActor
+
+/**
+ * **The one rule for who may see a site's drafts on its preview origin**
+ * (`multi-site.md` decision 13), for every credential kind, so the render paths
+ * (`?_folio=`, `reader.page()` / `draftAt()`), draft mode's switch and the grant
+ * cannot disagree:
+ *
+ * - a **grant**: it was minted for this site (`readGrant` has re-checked the rest);
+ * - a **person**: `READ_DRAFT` on some scope of the site's chain, or `*`
+ *   (`previewEligible`) — never the bare `role`, which is a `*` grant or `viewer`
+ *   and says nothing about this site;
+ * - a **token**: its binding reaches the site (`tokenScopesOn`) and what it holds
+ *   there implies `content:read:draft`.
+ *
+ * `allows()` alone is not this question: it ignores the scope, which is why a
+ * bravo editor's session and a bravo-bound token once read alpha's drafts here.
+ */
+export function mayPreviewDrafts(actor: Actor | null, registry: Registry, site: string): boolean {
+  if (!actor) return false
+  if (actor.kind === 'grant') return actor.site === site
+  const siteChain = chain(registry, site)
+  if (siteChain.length === 0) return false
+  if (actor.kind === 'user') {
+    return previewEligible(actor.grants ?? { [ALL_SCOPES]: actor.role }, siteChain)
+  }
+  const scopes = tokenScopesOn(actor.scopes, actor.site ?? null, registry, site)
+  return scopes !== null && hasScope(scopes, READ_DRAFT.scope)
+}
 
 /**
  * What the activity trail and `versions.actor` record. A token says
@@ -278,6 +305,7 @@ export type Actor = UserActor | TokenActor
  */
 export function actorString(actor: Actor | null): string | null {
   if (!actor) return null
+  if (actor.kind === 'grant') return actor.userId ?? `token:${actor.name}`
   return actor.kind === 'user' ? actor.id : `token:${actor.name}`
 }
 
@@ -383,7 +411,7 @@ function platformRole(actor: UserActor): Role | null {
  * `auth: 'open'` bypass lives in the middleware, deliberately, so that this
  * file cannot be the reason an unauthenticated request got through.
  */
-export function allows(actor: Actor | GrantActor | null, access: Access): boolean {
+export function allows(actor: Actor | null, access: Access): boolean {
   if (!actor) return false
   // A preview grant reads, published and draft, and does nothing else — no tier,
   // no role, no scope beyond those two answers it (decision 13).
@@ -407,6 +435,7 @@ export function allows(actor: Actor | GrantActor | null, access: Access): boolea
  * person, since neither is guessable from the other end.
  */
 export function refusalOf(actor: Actor, access: Access): string {
+  if (actor.kind === 'grant') return 'A preview grant may read this site and do nothing else.'
   if (access.tier === 'platform') {
     if (actor.kind === 'token' && (actor.site ?? null) !== null) {
       return `This token is bound to '${actor.site}'; only an unbound token may do that.`

@@ -448,9 +448,20 @@ export interface FolioReader {
    * of every 404, which is the path a crawler spends its whole budget on.
    */
   miss: (path: string) => Promise<FolioMiss>
+  /**
+   * `stories`, `tree` and `query` answer **nothing** for a request a share admitted
+   * to a `draft` site (`../../docs/specs/foundation/multi-site.md` decision 13): the
+   * share covers its one story, and a listing would enumerate a pre-launch site.
+   * `page()` / `draftAt()` answer that story alone, and `global()` still answers.
+   */
   stories: (opts?: { page?: number; perPage?: number }) => Promise<StoryMeta[]>
   tree: () => Promise<StoryNode[]>
   query: (q: ContentQuery) => Promise<ContentPage>
+  /**
+   * A global's published layers, merged over the site's chain. For a request a
+   * share admitted to a `draft` site, still the gated site's whole chain — its one
+   * page needs its header — and still published layers only, never a draft.
+   */
   global: (name: string) => Promise<Doc | null>
   /**
    * The site this reader reads for (`../../docs/specs/foundation/multi-site.md`
@@ -1003,7 +1014,9 @@ export interface Folio<Env> {
    * Housekeeping for the auth tables nothing else prunes
    * (`../../docs/specs/foundation/auth-providers.md` decision 8): sessions past
    * expiry, sign-in challenges past their fifteen minutes or already consumed,
-   * and `auth_events` rows older than its 90-day retention window.
+   * and `auth_events` rows older than its 90-day retention window. It also
+   * deletes expired preview grants (`site_grants`, `multi-site.md` decision 13),
+   * which the returned counts do not include.
    *
    * **A host obligation with no signal when it is forgotten.** Nothing breaks
    * when a deployment never wires this into a cron — an expired session already

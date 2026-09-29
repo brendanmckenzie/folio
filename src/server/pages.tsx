@@ -13,7 +13,8 @@ import { wrapPreview } from '../core/render-wrap'
 import type { StoryMeta } from '../core/story'
 import { FolioDoc, type RenderMode, renderGlobalNode } from '../preview/Render'
 import { Bootstrap, ReactRefreshPreamble, Shell } from './Document'
-import type { FolioRuntime } from './runtime'
+import { PROTOCOL_VERSION } from '../core/protocol'
+import type { FolioRuntime, SiteRender } from './runtime'
 import type { ReadBindings, PreviewMode } from './types'
 
 /*
@@ -173,7 +174,32 @@ export async function previewPage(
   rt: FolioRuntime,
   bindings: ReadBindings,
   story: StoryMeta,
-  opts?: { as?: string; bare?: boolean; locale?: string; mode?: PreviewMode },
+  opts?: {
+    as?: string
+    bare?: boolean
+    locale?: string
+    mode?: PreviewMode
+    /**
+     * The site this preview renders on, on a deployment with `sites`
+     * (`../../docs/specs/foundation/multi-site.md` decision 13): every read the
+     * resolution makes takes its chain, and it fills `Resolution.site`. Absent is
+     * the single-site render, exactly as before.
+     */
+    site?: SiteRender
+    /**
+     * `sites.admin`, the one origin the preview may post to and hear from
+     * (decision 13, "every surface"), written into the bootstrap for
+     * `preview/mount.tsx`. Absent, the preview talks to its own origin, as it
+     * always has.
+     */
+    admin?: string
+    /**
+     * "Alpha overrides this page": the name of the nearer scope that shadows the
+     * story being previewed at its path (a `_folio_id` preview of a page the site
+     * has forked). Drawn above the page, outside anything that hydrates.
+     */
+    overriddenBy?: string
+  },
 ): Promise<Response> {
   const draft = opts?.mode === 'draft'
   const doc = await rt.draftFor(bindings, story)
@@ -185,6 +211,7 @@ export async function previewPage(
     draft: true,
     locale: opts?.locale,
     story,
+    ...(opts?.site ? { site: opts.site } : {}),
   })
   const { entries, stylesheets } = rt.page('preview')
 
@@ -241,12 +268,20 @@ export async function previewPage(
                 re-render per keystroke without going back to the network. */}
             <Bootstrap
               global="__FOLIO__"
-              value={editing ? { doc: editingDoc, resolution, editing } : { doc, resolution }}
+              value={{
+                ...(editing ? { doc: editingDoc, resolution, editing } : { doc, resolution }),
+                ...(opts?.admin ? { admin: opts.admin } : {}),
+              }}
             />
           </>
         )
       }
     >
+      {opts?.overriddenBy ? (
+        <p role="note" style={OVERRIDE_BANNER}>
+          {`${opts.overriddenBy} overrides this page. This is the page it overrides, not what ${opts.site?.site.name ?? 'this site'} serves here.`}
+        </p>
+      ) : null}
       {contextGlobals}
       {/**
        * `previewWrap` is the server half of the seam `mountPreview`'s `wrap` is
@@ -283,6 +318,72 @@ export async function previewPage(
     // calls it never to load. No entry, no module, no bridge — and a draft page is
     // a page, so it wants no hydration in the first place.
     draft ? [] : entries,
+  )
+}
+
+/** The "overrides this page" banner: inline, like every other style on Folio's
+ * own pages, and outside `#folio-root` so hydration never sees it. */
+const OVERRIDE_BANNER = {
+  margin: 0,
+  padding: '8px 12px',
+  font: '13px/1.4 system-ui, sans-serif',
+  background: '#fff7e0',
+  borderBottom: '1px solid #f0d890',
+  color: '#5c4400',
+} as const
+
+/* -------------------------------------------------------------- the handoff --- */
+
+/**
+ * The one script on the "your browser refused the preview cookie" page
+ * (`../../docs/specs/foundation/multi-site.md` decision 13, step 3). A static
+ * literal: the admin origin and the wire version travel as `data-` attributes, the
+ * login page's discipline. In an iframe it tells the admin, which offers *Open
+ * preview in a new tab*; at top level there is nobody to tell.
+ */
+const GRANT_BLOCKED_SCRIPT = `(function () {
+  var el = document.getElementById('folio-grant-blocked')
+  if (!el || window.parent === window) return
+  window.parent.postMessage(
+    { source: 'folio-preview', v: Number(el.getAttribute('data-v')), type: 'grant-blocked' },
+    el.getAttribute('data-admin')
+  )
+})()`
+
+/**
+ * What `{base}/site/enter?check=1` answers when the grant cookie it set one
+ * redirect ago did not come back: the browser refused it — a partitioned
+ * third-party cookie, in a browser that blocks those. **Without this step an editor
+ * would approve a published page as their draft**, which is the whole reason the
+ * handoff has a third hop (the spec's edge cases).
+ */
+export function grantBlockedPage(admin: string): Promise<Response> {
+  return html(
+    <Shell
+      title="Your browser refused the preview cookie"
+      bodyClass="folio-lapsed"
+      head={
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: a static literal stylesheet, no interpolation
+        <style dangerouslySetInnerHTML={{ __html: LAPSED_STYLE }} />
+      }
+    >
+      <div
+        className="folio-lapsed__card"
+        id="folio-grant-blocked"
+        data-admin={admin}
+        data-v={String(PROTOCOL_VERSION)}
+      >
+        <h1>Your browser refused the preview cookie</h1>
+        <p>
+          This preview needs a cookie your browser would not keep here, so what it would show is the
+          published page, not the draft.
+        </p>
+        <p>Open the preview in a new tab from the editor instead.</p>
+      </div>
+      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: a static literal script, no interpolation */}
+      <script dangerouslySetInnerHTML={{ __html: GRANT_BLOCKED_SCRIPT }} />
+    </Shell>,
+    [],
   )
 }
 

@@ -32,7 +32,7 @@ import {
   userById,
   type UserRow,
 } from '../auth/users'
-import { revokeUserSessions } from '../auth/session'
+import { revokeUserSessions, userSessionsDelete } from '../auth/session'
 import { FolioError } from '../errors'
 import { requireAccess, requireAuthConfigured } from '../middleware'
 import type { FolioRuntime } from '../runtime'
@@ -311,7 +311,7 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         ...replaceGrantsStatements(db, id, grants, null),
         ...(changed
           ? [
-              db.prepare('delete from sessions where user_id = ?').bind(id),
+              ...userSessionsDelete(db, id),
               recordEventStatement(db, {
                 kind: 'role_changed',
                 userId: id,

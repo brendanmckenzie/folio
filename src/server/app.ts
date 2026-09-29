@@ -13,6 +13,7 @@ import { bulkRoutes } from './routes/bulk'
 import { contentRoutes } from './routes/content'
 import { editorPageRoutes, editorRoutes } from './routes/editor'
 import { formRoutes, formSubmitRoutes } from './routes/forms'
+import { handoffRoutes } from './routes/handoff'
 import { historyRoutes } from './routes/history'
 import { mcpRoutes } from './routes/mcp'
 import { migrationRoutes } from './routes/migrations'
@@ -255,6 +256,13 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // Browser navigations that set and clear the draft flag, so they sit with the
   // other HTML routes rather than under `/api`.
   app.route('/', draftRoutes<Env>(rt))
+  /**
+   * `{base}/~<site>/site/start` and `{base}/site/enter` — the preview handoff
+   * (`../../docs/specs/foundation/multi-site.md` decision 13). Browser navigations,
+   * so on the bare mount, and ahead of `shellRoutes`' wildcard, which would answer
+   * both with the admin shell. Mounts nothing on a deployment with no `sites`.
+   */
+  app.route('/', handoffRoutes<Env>(rt))
 
   // (3) `shellRoutes`' wildcard covers every bare path, and it now covers
   // `{base}/edit/:id` too — **port phase 7 landed, so the rebuilt editor owns the

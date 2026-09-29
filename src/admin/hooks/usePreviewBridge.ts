@@ -31,6 +31,42 @@ interface Options {
    * click selects, which is correct wherever `resolution.globals` is empty.
    */
   onGlobalClick?: (name: string) => void
+  /**
+   * The origin the pane's document is on: the site's preview origin on a
+   * deployment with `sites` (`../../../docs/specs/foundation/multi-site.md`
+   * decision 13), where the pane is a cross-site iframe. The bridge hears only
+   * this origin, and only from the iframe it owns, and posts only to it. Absent is
+   * this window's own origin — the same-origin preview a single-site deployment
+   * has always had.
+   */
+  origin?: string
+  /**
+   * The pane's `site/enter?check=1` step found that the browser refused the
+   * partitioned grant cookie, so the pane would show the published page as though
+   * it were the draft. The admin offers *Open preview in a new tab* instead, whose
+   * top-level navigation keeps a first-party cookie (the spec's edge cases).
+   */
+  onGrantBlocked?: () => void
+}
+
+/**
+ * The pane's `src` on a deployment with `sites` (decision 13, "every surface"):
+ * `site/start` on the admin origin for the site being previewed, with the preview
+ * URL's path as `next`, so every (re)load mints a fresh grant for that site's
+ * preview origin. `previewUrl` is the story's own preview URL on that origin.
+ */
+export function paneSrc(base: string, site: string, previewUrl: string): string {
+  const url = new URL(previewUrl, window.location.origin)
+  const next = `${url.pathname}${url.search}`
+  return `${base}/~${encodeURIComponent(site)}/site/start?next=${encodeURIComponent(next)}`
+}
+
+/** Whether a message is the handoff's `grant-blocked` notice. Not a `PreviewMsg`:
+ * the page that sends it is Folio's server page, not the preview client, and it
+ * carries nothing but its type. */
+function isGrantBlocked(data: unknown): boolean {
+  const frame = data as { source?: unknown; type?: unknown } | null
+  return frame?.source === 'folio-preview' && frame.type === 'grant-blocked'
 }
 
 /**
@@ -171,8 +207,12 @@ export function usePreviewBridge({
   blocks,
   onPick,
   onGlobalClick,
+  origin,
+  onGrantBlocked,
 }: Options): (node: HTMLIFrameElement | null) => void {
   const frame = useRef<HTMLIFrameElement | null>(null)
+  // The pane's origin: the preview origin on a multi-site deployment, else ours.
+  const paneOrigin = origin ?? window.location.origin
   const bridge = useMemo(() => new PreviewBridge(), [])
 
   /**
@@ -198,9 +238,9 @@ export function usePreviewBridge({
 
   const toFrame = useCallback(
     (msg: AdminToPreviewMsg) => {
-      bridge.send(frame.current?.contentWindow, window.location.origin, msg)
+      bridge.send(frame.current?.contentWindow, paneOrigin, msg)
     },
-    [bridge],
+    [bridge, paneOrigin],
   )
 
   /**
@@ -237,11 +277,15 @@ export function usePreviewBridge({
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      if (e.origin !== window.location.origin) return
-      // Not just same-origin: the frame this bridge actually owns. Same-origin
+      if (e.origin !== paneOrigin) return
+      // Not just the pane's origin: the frame this bridge actually owns. Origin
       // alone would also admit a second preview instance, or a stale one still
       // finishing its own teardown mid-swap.
       if (e.source !== frame.current?.contentWindow) return
+      if (isGrantBlocked(e.data)) {
+        onGrantBlocked?.()
+        return
+      }
       const data = e.data as Partial<PreviewFrame> | null
       if (data?.source !== 'folio-preview') return
       if (!isPreviewMsg(data)) return
@@ -255,7 +299,7 @@ export function usePreviewBridge({
         const { resolution, selection, root } = latest.current
         bridge.onReady(
           frame.current?.contentWindow,
-          window.location.origin,
+          paneOrigin,
           readyFrames({
             doc: showing.current.doc ?? store.getSnapshot().doc,
             resolution,
@@ -285,7 +329,7 @@ export function usePreviewBridge({
     }
     window.addEventListener('message', onMessage)
     return () => window.removeEventListener('message', onMessage)
-  }, [blocks, bridge, onGlobalClick, onPick, store])
+  }, [blocks, bridge, onGlobalClick, onGrantBlocked, onPick, paneOrigin, store])
 
   /**
    * Entering or leaving a version preview swaps the document wholesale: no

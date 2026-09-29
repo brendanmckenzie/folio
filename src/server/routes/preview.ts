@@ -13,7 +13,9 @@
  *
  * `GET {base}/share?t=…` exchanges the token in the URL for a cookie and a 302 to
  * the document's **own** draft URL — `rt.withUrls(story).draftUrl`, which is the
- * host's `route()` function's answer with `?_folio=draft` on it. Nothing here
+ * host's `route()` function's answer with `?_folio=draft` on it (on a deployment
+ * with `sites`, the render site's copy of it on its preview origin, naming the
+ * story with `_folio_id`; see `siteTarget`). Nothing here
  * invents a URL, and nothing here renders a document: the redirect target is
  * answered by the same branch of `handle()` and rendered by the same `previewPage`
  * a signed-in editor's iframe reaches. There is no second renderer to drift.
@@ -40,8 +42,10 @@
  * review, and putting it behind the role that manages accounts would make the
  * feature unusable by the people who need it.
  */
-import { Hono } from 'hono'
+import { type Context, Hono } from 'hono'
 import { NO_STORE } from '../../core/cache-tags'
+import { chain, DEFAULT_SITE, sitesUnder } from '../../core/sites'
+import type { StoryMeta } from '../../core/story'
 import { serialiseCookie, shareCookieName, withShareToken } from '../auth/cookie'
 import { actorString, PUBLISH } from '../auth/roles'
 import {
@@ -56,7 +60,7 @@ import { FolioError } from '../errors'
 import { loadStory, requestScope, requireAccess, requireAuthConfigured } from '../middleware'
 import { expiredLinkPage } from '../pages'
 import type { FolioRuntime } from '../runtime'
-import { storyById } from '../stories'
+import { storyById, storyByPath } from '../stories'
 import type { FolioEnv } from '../types'
 import {
   idParam,
@@ -75,7 +79,9 @@ const SHARE_TOKEN = /^[0-9a-f]{64}$/
 /**
  * The absolute URL an editor sends. On the request's own origin, matching
  * `MagicLinkMail.url`'s rule and for the identical reason: it is going into an
- * email, so a path would be useless.
+ * email, so a path would be useless — or, on a deployment with `sites`, on the
+ * render site's preview origin (`multi-site.md` decision 13), the one place the
+ * link redeems.
  */
 function shareUrl(rt: FolioRuntime, requestUrl: string, token: string): string {
   const url = new URL(requestUrl)
@@ -84,6 +90,41 @@ function shareUrl(rt: FolioRuntime, requestUrl: string, token: string): string {
   url.hash = ''
   url.searchParams.set('t', token)
   return url.toString()
+}
+
+/**
+ * The site a new link renders on, on a deployment with `sites` (decision 13), or
+ * null with none.
+ *
+ * `?site=` names it, and defaults to the request's scope when that is a site. It
+ * must be one of `sitesUnder` the story's scope — so the national team shares a
+ * shared page on any site, a regional editor a group page on the group's sites, and
+ * a site's own page only on itself — and it must have a preview origin, because the
+ * link is on it. A query parameter rather than a body field, because the body's
+ * schema is the single-site one and a field it does not know is dropped silently.
+ */
+async function renderSite<Env>(
+  c: Context<FolioEnv<Env>>,
+  rt: FolioRuntime,
+  owner: string,
+): Promise<{ id: string; preview: string } | null> {
+  if (!rt.sites) return null
+  const registry = await rt.sites.registry(c.env)
+  const named = c.req.query('site') ?? c.var.scope
+  const site = registry.sites.find((s) => s.id === named)
+  if (!site || !sitesUnder(registry, owner).includes(site.id)) {
+    throw new FolioError(
+      'bad_request',
+      `Name the site to share this on: ?site=<one of ${sitesUnder(registry, owner).join(', ') || 'none'}>`,
+    )
+  }
+  if (!site.preview) {
+    throw new FolioError(
+      'conflict',
+      `${site.name} has no preview origin, so a link cannot show its drafts yet.`,
+    )
+  }
+  return { id: site.id, preview: site.preview }
 }
 
 /* ------------------------------------------------ managing links (JSON) --- */
@@ -110,8 +151,8 @@ export function shareRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     '/story/:id/share',
     requireAuthConfigured<Env>(rt),
     requireAccess<Env>(rt, PUBLISH),
-    // In the request's scope, as any publishing act is. Where a share of a page
-    // owned above may be minted for a site is spec 23's phase 5 (decision 13).
+    // `PUBLISH` on the story's own scope: the story must be in the request's scope,
+    // as any publishing act's is (`multi-site.md` decision 13).
     loadStory<Env>(rt, 'write'),
     async (c) => {
       const story = c.var.story
@@ -121,6 +162,7 @@ export function shareRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           `“${story.title}” is not a page, so it has no URL to preview. Only routed documents can be shared.`,
         )
       }
+      const render = await renderSite(c, rt, story.site ?? DEFAULT_SITE)
       const body = await parseOptionalBody(c.req, ShareCreateBody)
       const minted = await createShare(c.var.bindings().db, {
         storyId: story.id,
@@ -131,13 +173,15 @@ export function shareRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         // Off the session, never the body: see `ShareCreateBody`.
         createdBy: actorString(c.var.actor),
         note: body.note ?? null,
+        ...(render ? { site: render.id } : {}),
       })
       /**
        * **The only response in this feature that contains the token**, and there is
        * no way to read it back — only its SHA-256 is stored. Same rule and same
        * comment as `POST {base}/api/tokens`.
        */
-      return c.json({ url: shareUrl(rt, c.req.url, minted.token), share: minted.row }, 201, {
+      const on = render ? render.preview : c.req.url
+      return c.json({ url: shareUrl(rt, on, minted.token), share: minted.row }, 201, {
         'cache-control': NO_STORE,
       })
     },
@@ -205,6 +249,46 @@ export function shareRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
 /* --------------------------------------------- using a link (HTML, open) --- */
 
+/** Where a redeemed link lands with no `sites`: `route()`'s URL, or its draft. */
+function shareTarget(rt: FolioRuntime, story: StoryMeta): string | undefined {
+  const urls = rt.withUrls(story)
+  return rt.draftMode ? urls.url : urls.draftUrl
+}
+
+/**
+ * Where a redeemed link lands on a site's preview origin (decision 13: "target the
+ * preview origin's copy of the page"). With `draftMode`, the page's own path on the
+ * preview origin, where the host's route calls `reader.page()`; without, Folio's
+ * draft render there, **naming the story** (`_folio_id`) so the one page the link
+ * covers is what renders even where a nearer scope shadows its path.
+ */
+async function siteTarget<Env>(
+  c: Context<FolioEnv<Env>>,
+  rt: FolioRuntime,
+  siteId: string,
+  story: StoryMeta,
+): Promise<string | undefined> {
+  const registry = await rt.sites!.registry(c.env)
+  const site = registry.sites.find((s) => s.id === siteId)
+  if (!site?.preview) return undefined
+  const urls = rt.urlsFor(site)(story)
+  // The host's page renders whatever the site edits at that path, and a nearer
+  // scope's fork shadows a shared page there — so the link lands on the host's
+  // page only when that is this story, and on Folio's render of it by id otherwise.
+  const shadowed =
+    story.path !== null &&
+    (await storyByPath(c.var.bindings().db, chain(registry, site.id), story.path))?.id !== story.id
+  if (rt.draftMode && !shadowed) {
+    if (!urls.url) return undefined
+    const live = new URL(urls.url)
+    return `${site.preview}${live.pathname}${live.search}`
+  }
+  if (!urls.draftUrl) return undefined
+  const draft = new URL(urls.draftUrl)
+  draft.searchParams.set('_folio_id', story.id)
+  return draft.toString()
+}
+
 /**
  * The one route in the server that answers a stranger holding a credential.
  *
@@ -244,8 +328,16 @@ export function sharePageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     if (!token) return c.notFound()
     if (!SHARE_TOKEN.test(token)) return expiredLinkPage()
 
+    /**
+     * **On a deployment with `sites`, a link redeems only on its own site's preview
+     * origin** (decision 13): `shares.site_id` is the render site, and the gated
+     * site must equal it. Anywhere else — the admin origin, another site's preview
+     * origin, a live host (which never routes here) — it is a lapsed link.
+     */
+    const here = c.var.site
+    if (rt.sites && here?.surface !== 'preview') return expiredLinkPage()
     const bindings = c.var.bindings()
-    const grant = await readShareByToken(bindings.db, token)
+    const grant = await readShareByToken(bindings.db, token, undefined, here?.id)
     if (!grant) return expiredLinkPage()
 
     const story = await storyById(bindings.db, grant.storyId)
@@ -275,8 +367,8 @@ export function sharePageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * The cookie is identical either way, and so is the grant: this decides a
      * destination, not an authority.
      */
-    const urls = rt.withUrls(story)
-    const target = rt.draftMode ? urls.url : urls.draftUrl
+    const target =
+      rt.sites && here ? await siteTarget(c, rt, here.id, story) : shareTarget(rt, story)
     if (!target) return expiredLinkPage()
 
     /**

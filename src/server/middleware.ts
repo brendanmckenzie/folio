@@ -2,7 +2,7 @@ import type { Context, MiddlewareHandler } from 'hono'
 import { ALL_SCOPES, chain, DEFAULT_SITE, SINGLE_SITE_CHAIN } from '../core/sites'
 import type { StoryMeta } from '../core/story'
 import { readSessionCookie } from './auth/cookie'
-import { credentialOf, originAllowed, resolveActor } from './auth/resolve'
+import { credentialOf, originAllowed, type PreviewSite, resolveActor } from './auth/resolve'
 import {
   type Access,
   type Actor,
@@ -12,7 +12,7 @@ import {
   type Role,
   tokenScopesOn,
 } from './auth/roles'
-import { bookmarkCookie, type DbSession, readBookmark, sessionFor } from './db'
+import { bookmarkCookie, type DbSession, PRIMARY_FIRST, readBookmark, sessionFor } from './db'
 import { FolioError } from './errors'
 import type { HookRunnerCtx } from './hooks'
 import type { FolioRuntime } from './runtime'
@@ -254,6 +254,14 @@ async function scopedActor<Env>(
   if (!actor || kind === 'unscoped') return actor
 
   const registry = await sites.registry(c.env)
+  // A preview grant reads its site's chain and nothing else (decision 13); on any
+  // other scope it is a caller with no role there.
+  if (actor.kind === 'grant') {
+    if (!chain(registry, actor.site).includes(scope)) {
+      throw new FolioError('forbidden', `A preview of '${actor.site}' cannot read '${scope}'.`)
+    }
+    return actor
+  }
   if (bound !== null && chain(registry, bound).length === 0) {
     throw new FolioError('forbidden', `This token is bound to '${bound}', which no longer exists.`)
   }
@@ -273,6 +281,39 @@ async function scopedActor<Env>(
   }
   // The one route with no role to give: it checks preview eligibility itself.
   return { ...actor, role: role ?? 'viewer' }
+}
+
+/**
+ * Where a preview grant is worth asking about (`multi-site.md` decisions 12 and
+ * 13): a read, on the preview origin `handle()` gated this request as, of that
+ * site's v1 routes (a headless front end's draft read) or draft mode's switch.
+ * **Nowhere else** — no `{base}/api` admin route, no socket, no `/mcp`, no write —
+ * so a grant cookie anywhere else is no credential at all, and the request is as
+ * anonymous as it would be without it. `handle()` already answers nothing else on
+ * a preview origin; this is the same rule held a second time, where the actor is
+ * made.
+ *
+ * The grant is read on a `first-primary` session, from the raw binding
+ * (`PreviewSite.db` says why); only a request carrying a grant cookie on a
+ * preview origin reaches that read.
+ */
+const GRANT_READS = [/^\/api\/v1\//, /^\/draft\/enter$/]
+
+async function grantSite<Env>(
+  c: Context<FolioEnv<Env>>,
+  rt: FolioRuntime,
+  sites: NonNullable<FolioRuntime['sites']>,
+): Promise<PreviewSite | undefined> {
+  const site = c.var.site
+  if (site?.surface !== 'preview') return undefined
+  if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return undefined
+  const below = c.req.path.slice(rt.base.length) || '/'
+  if (!GRANT_READS.some((r) => r.test(below))) return undefined
+  return {
+    id: site.id,
+    registry: await sites.registry(c.env),
+    db: sites.rawDb(c.env).withSession(PRIMARY_FIRST),
+  }
 }
 
 /**
@@ -306,7 +347,8 @@ export function withActor<Env>(rt: FolioRuntime): MiddlewareHandler<FolioEnv<Env
           'That request came from another site. Reload the editor and try again.',
         )
       }
-      actor = await resolveActor(() => c.var.bindings().db, rt.auth, credential)
+      const preview = rt.sites ? await grantSite(c, rt, rt.sites) : undefined
+      actor = await resolveActor(() => c.var.bindings().db, rt.auth, credential, { preview })
     }
     // With `sites`, the scope decides the role (`multi-site.md` decision 10). With
     // none there is one scope, the actor is exactly what was resolved, and nothing

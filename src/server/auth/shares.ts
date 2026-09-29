@@ -16,10 +16,20 @@
  * be satisfied by one however the middleware is later rearranged.
  *
  * That is why this file is not wired into `resolve.ts`. `credentialOf` reads a
- * session cookie and a bearer header and neither will ever see the share cookie
- * (a different name — `cookie.ts`), so the *only* place in the server that can
- * act on a share is `handle()`'s preview branch, which asks `claimShare` for one
- * specific story id. There is no second caller and no way to make one useful.
+ * session cookie, a bearer header and a preview grant, and none of them is the
+ * share cookie (a different name — `cookie.ts`), so the only places in the server
+ * that can act on a share are `handle()`'s preview branch and a reader's draft,
+ * both asking `claimShare` about one specific story id — and, on a deployment with
+ * `sites`, `handle()`'s status gate asking `sharedStoriesAt` whether a draft site's
+ * preview origin should answer a request for one story's path.
+ *
+ * ## One site, on a deployment with `sites`
+ *
+ * `shares.site_id` is the **render site** (`multi-site.md` decision 13): the site
+ * whose preview origin the link is on. Every read here that is given a site
+ * requires it, so a link minted for alpha is a lapsed link on bravo's preview
+ * origin whatever it covers. With no `sites` no caller passes one and every
+ * statement is what it was.
  *
  * ## What it does not do
  *
@@ -168,6 +178,9 @@ export async function createShare(
     expiresAt: number
     createdBy?: string | null
     note?: string | null
+    /** The render site (`shares.site_id`); absent is `default`, a deployment with
+     * no `sites`. */
+    site?: string
   },
 ): Promise<MintedShare> {
   const token = mintSecret()
@@ -185,8 +198,8 @@ export async function createShare(
   await db
     .prepare(
       `insert into shares
-         (id, token_hash, story_id, created_by, created_at, expires_at, note)
-       values (?, ?, ?, ?, ?, ?, ?)`,
+         (id, token_hash, story_id, created_by, created_at, expires_at, note, site_id)
+       values (?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       row.id,
@@ -196,6 +209,7 @@ export async function createShare(
       row.createdAt,
       row.expiresAt,
       row.note,
+      input.site ?? 'default',
     )
     .run()
   return { row, token }
@@ -220,8 +234,9 @@ export interface ListSharesOptions {
   /**
    * Only the links on documents this scope owns (`multi-site.md`'s route table:
    * `/shares` is "scope's own rows"). By the story's scope rather than
-   * `shares.site_id`, the render site, which spec 23's phase 5 is what sets. Absent
-   * is every link, which is a deployment with no `sites`.
+   * `shares.site_id`, the render site: a shared page's link rendered on alpha is
+   * the shared scope's to list and revoke. Absent is every link, which is a
+   * deployment with no `sites`.
    */
   site?: string
 }
@@ -333,13 +348,16 @@ export async function readShareByToken(
   db: FolioDb,
   presented: string,
   now = Date.now(),
+  /** The gated site, on a deployment with `sites`: a link redeems only there. */
+  site?: string,
 ): Promise<ShareGrant | null> {
+  const onSite = site === undefined ? '' : ' and site_id = ?'
   const row = await db
     .prepare(
       `select id, story_id, expires_at from shares
-        where token_hash = ? and revoked_at is null and expires_at > ?`,
+        where token_hash = ? and revoked_at is null and expires_at > ?${onSite}`,
     )
-    .bind(await hashToken(presented), now)
+    .bind(await hashToken(presented), now, ...(site === undefined ? [] : [site]))
     .first<{ id: string; story_id: string; expires_at: number }>()
   return row ? { id: row.id, storyId: row.story_id, expiresAt: row.expires_at } : null
 }
@@ -369,12 +387,15 @@ export async function claimShare(
   presented: readonly string[],
   storyId: string,
   now = Date.now(),
+  /** The gated site, on a deployment with `sites`: a link covers its story there only. */
+  site?: string,
 ): Promise<ShareGrant | null> {
   if (presented.length === 0) return null
   const hashes = await Promise.all(presented.map(hashToken))
   const holes = hashes.map(() => '?').join(', ')
-  const where = `token_hash in (${holes}) and story_id = ? and revoked_at is null and expires_at > ?`
-  const binds = [...hashes, storyId, now]
+  const onSite = site === undefined ? '' : ' and site_id = ?'
+  const where = `token_hash in (${holes}) and story_id = ? and revoked_at is null and expires_at > ?${onSite}`
+  const binds = [...hashes, storyId, now, ...(site === undefined ? [] : [site])]
 
   const [read] = await db.batch<{ id: string; story_id: string; expires_at: number }>([
     db.prepare(`select id, story_id, expires_at from shares where ${where}`).bind(...binds),
@@ -384,6 +405,35 @@ export async function claimShare(
   ])
   const row = read?.results?.[0]
   return row ? { id: row.id, storyId: row.story_id, expiresAt: row.expires_at } : null
+}
+
+/**
+ * The stories these tokens are live links for, **rendered on `site` at `path`** —
+ * the status gate's question for a draft site's preview origin (`multi-site.md`
+ * decision 4: "a share cookie verifies for a story this site serves"). A
+ * stakeholder holding a share sees that one pre-launch page, and only it: a share
+ * admits a request for its story's own path and no other, so one link cannot open
+ * the rest of an unlaunched site to a host route calling `reader.page()`. Stamps
+ * nothing: admitting a request is not viewing a document.
+ */
+export async function sharedStoriesAt(
+  db: FolioDb,
+  presented: readonly string[],
+  site: string,
+  path: string,
+  now = Date.now(),
+): Promise<string[]> {
+  if (presented.length === 0) return []
+  const hashes = await Promise.all(presented.map(hashToken))
+  const { results } = await db
+    .prepare(
+      `select sh.story_id from shares sh join stories st on st.id = sh.story_id
+        where sh.token_hash in (${hashes.map(() => '?').join(', ')})
+          and sh.site_id = ? and sh.revoked_at is null and sh.expires_at > ? and st.path = ?`,
+    )
+    .bind(...hashes, site, now, path)
+    .all<{ story_id: string }>()
+  return results.map((row) => row.story_id)
 }
 
 /**

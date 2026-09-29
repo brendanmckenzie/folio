@@ -10,6 +10,8 @@ import {
   DEFAULT_SITE,
   gate as siteGate,
   layerId,
+  type Registry,
+  SHARED_SCOPE,
   SINGLE_SITE_CHAIN,
   type SiteRef,
 } from '../core/sites'
@@ -18,13 +20,14 @@ import { createApp } from './app'
 import { audit } from './audit'
 import { cacheKeyFor, cacheVerdictFor } from './cache-request'
 import { deleteStaleChallenges } from './auth/challenges'
-import { hasDraftCookie, shareCookieTokens } from './auth/cookie'
+import { hasDraftCookie, readGrantCookie, shareCookieTokens } from './auth/cookie'
 import { sweepEvents } from './auth/events'
-import { credentialOf, resolveActor } from './auth/resolve'
-import { allows, READ_DRAFT } from './auth/roles'
+import { readGrant, sweepGrants } from './auth/grants'
+import { credentialOf, type PreviewSite, resolveActor } from './auth/resolve'
+import { allows, mayPreviewDrafts, READ_DRAFT } from './auth/roles'
 import { deleteExpiredSessions } from './auth/session'
-import { claimShare } from './auth/shares'
-import { readBookmark, sessionFor } from './db'
+import { claimShare, sharedStoriesAt } from './auth/shares'
+import { PRIMARY_FIRST, readBookmark, sessionFor } from './db'
 import { envelope, FolioError } from './errors'
 import type { ResolvedGate } from './gate'
 import { runMigrations } from './migrate'
@@ -33,7 +36,15 @@ import { lookupRedirect } from './redirects'
 import { reindex } from './reindex'
 import { alarmHookCtx, createRuntime, type FolioRuntime, type SiteRender } from './runtime'
 import { runSchedules } from './scheduler'
-import { INTERNAL_HEADERS, routeRequest, SCOPE_HEADER, SITE_HEADER, SURFACE_HEADER } from './sites'
+import {
+  candidateFor,
+  INTERNAL_HEADERS,
+  routeRequest,
+  SCOPE_HEADER,
+  SITE_HEADER,
+  type SiteRoute,
+  SURFACE_HEADER,
+} from './sites'
 import {
   listStories,
   pageAt,
@@ -49,7 +60,7 @@ import {
 } from './stories'
 import { SpaceDO } from './space-do'
 import { createStoryDO, StoryDO } from './story-do'
-import type { Folio, FolioConfig, FolioGateContext, ReadBindings } from './types'
+import type { Folio, FolioConfig, FolioGateContext, PreviewMode, ReadBindings } from './types'
 import { commitAll } from './write'
 
 /**
@@ -365,6 +376,52 @@ function servesOnSite(
 }
 
 /**
+ * `Content-Security-Policy: frame-ancestors <sites.admin>` on every response Folio
+ * answers on a site's preview origin (`multi-site.md` decision 13): the admin is
+ * the one page that may frame a draft. Rebuilt rather than mutated, because a
+ * redirect's headers are immutable; an upgrade is never answered on a preview
+ * origin, and is handed back untouched if it ever were.
+ */
+function framedBy(res: Response, admin: string): Response {
+  if (res.status === 101 || res.webSocket) return res
+  // **Never replace a policy a route already set.** `{base}/asset/:key` answers
+  // `default-src 'none'; sandbox`, which is the whole reason an uploaded SVG may
+  // render inline; overwriting it let such an SVG run script as the preview
+  // origin, beside the grant cookie. A sandboxed response is no useful frame.
+  if (res.headers.has('content-security-policy')) return res
+  const out = new Response(res.body, res)
+  out.headers.set('content-security-policy', `frame-ancestors ${admin}`)
+  return out
+}
+
+/**
+ * How a draft site's preview origin admitted a request (decision 4): by a grant
+ * (`shareOnly` null), or by a share, which limits everything the request may read
+ * to the stories in `shareOnly`.
+ */
+interface Admission {
+  shareOnly: ReadonlySet<string> | null
+}
+
+/** The gated site a `?_folio=` request arrived for, on its preview origin. */
+interface PreviewOn {
+  render: SiteRender
+  registry: Registry
+  /** `sites.admin`, the one origin the preview talks to. */
+  admin: string
+}
+
+/** A scope's display name, for the "Alpha overrides this page" banner. */
+function scopeName(registry: Registry, scope: string): string {
+  if (scope === SHARED_SCOPE) return 'Shared content'
+  return (
+    registry.sites.find((s) => s.id === scope)?.name ??
+    registry.groups.find((g) => g.id === scope)?.name ??
+    scope
+  )
+}
+
+/**
  * The settings type's root as a plain value (`Folio.settings`): each field by
  * name, a `max: 1` blocks field as one object (or null), any other blocks field as
  * an array, read in the resolution's locale.
@@ -438,6 +495,244 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
   const rt = createRuntime(config)
   const app = createApp(config, rt)
 
+  /**
+   * The site a grant may be read for, on the primary (`PreviewSite`'s own comment
+   * says why a grant is the one credential read there).
+   */
+  const previewSite = (env: Env, on: Pick<PreviewOn, 'render' | 'registry'>): PreviewSite => ({
+    id: on.render.site.id,
+    registry: on.registry,
+    db: config.bindings(env).db.withSession(PRIMARY_FIRST),
+  })
+
+  /**
+   * The site a grant or share cookie on this request verifies for, when `site` is
+   * the request's preview-origin candidate (decision 4): the D1 read the status
+   * gate needs to admit a **draft** site's preview origin, made after the
+   * synchronous candidate step and never inside a custom resolver.
+   *
+   * **No read without a cookie**, the discipline `resolveActor` keeps: a stranger
+   * on a draft site's preview origin costs the database nothing. Under
+   * `auth: 'open'` every preview origin shows drafts without a grant (the spec's
+   * edge cases), so the candidate is admitted as it stands.
+   */
+  const grantFor = async (
+    env: Env,
+    req: Request,
+    registry: Registry,
+    site: string,
+    below: string | null,
+  ): Promise<Admission | null> => {
+    if (rt.auth.mode !== 'session') return { shareOnly: null }
+    const cookie = req.headers.get('cookie')
+    const grant = readGrantCookie(cookie)
+    const shared = shareCookieTokens(cookie)
+    if (!grant && shared.length === 0) return null
+    const raw = config.bindings(env).db
+    if (grant && (await readGrant(raw.withSession(PRIMARY_FIRST), grant, { id: site, registry }))) {
+      return { shareOnly: null }
+    }
+    // A share admits a request for **its own story's path** and nothing else
+    // (decision 4's "a story this site serves", decision 13's "limits it to its one
+    // story"). Only a host path can be one: under `{base}` the pre-grant paths are
+    // admitted already and nothing else is a share's.
+    if (shared.length > 0 && below === null) {
+      const url = new URL(req.url)
+      const asked = url.searchParams.get('locale')
+      const locale = asked !== null && isKnownLocale(rt.locales, asked) ? asked : undefined
+      const db = sessionFor(raw, { bookmark: readBookmark(cookie) })
+      const stories = await sharedStoriesAt(
+        db,
+        shared,
+        site,
+        rt.pathForLocale(url.pathname, locale),
+      )
+      if (stories.length > 0) return { shareOnly: new Set(stories) }
+    }
+    return null
+  }
+
+  /**
+   * `routeRequest`, and — when the gate refused a request on a site's preview
+   * origin — the same request gated again with the grant or share it carries.
+   * Only a draft site's preview origin is ever refused there, so only its requests
+   * pay for the second look.
+   */
+  const routeGranted = async (
+    sites: NonNullable<FolioRuntime['sites']>,
+    registry: Registry,
+    req: Request,
+    path: string | null,
+    env: Env,
+  ): Promise<SiteRoute & { shareOnly?: ReadonlySet<string> | null }> => {
+    const routed = routeRequest(sites, registry, req, { path, grantFor: null })
+    if (routed.kind !== 'none') return routed
+    const chosen = candidateFor(sites, registry, req)
+    if (!chosen || chosen === 'admin' || chosen.surface !== 'preview') return routed
+    const admitted = await grantFor(env, req, registry, chosen.site, path)
+    if (!admitted) return routed
+    const again = routeRequest(sites, registry, req, { path, grantFor: chosen.site })
+    return again.kind === 'site' ? { ...again, shareOnly: admitted.shareOnly } : again
+  }
+
+  /**
+   * `?_folio=preview|draft` on a host's own URL: Folio's render of the story at
+   * that path, or `null` so the host's own routing answers. On a deployment with
+   * `sites` it is answered only on a site's preview origin, for the gated site
+   * (`on`); with none, `on` is null and this is exactly the single-site branch.
+   */
+  const previewBranch = async (
+    req: Request,
+    url: URL,
+    env: Env,
+    mode: PreviewMode,
+    on: PreviewOn | null,
+  ): Promise<Response | null> => {
+    // On a session, like every other read (`db.ts`). This branch lives outside
+    // `basePath` on purpose, so `withBindings` never sees it and it is the one
+    // surface that has to open its own — and it is a render, so it makes the
+    // same three or four reads a published page does. An editor's bookmark
+    // matters here more than anywhere: a preview opened straight after a save
+    // is exactly the request that must not land on a replica behind it.
+    const bound = config.bindings(env)
+    const bindings: ReadBindings = {
+      ...bound,
+      db: sessionFor(bound.db, { bookmark: readBookmark(req.headers.get('cookie')) }),
+    }
+
+    // A preview renders the *draft*, so it needs the same gate the API routes
+    // got in identity-and-access.md — and it is the one such surface that lives
+    // outside `basePath`, so the app's own middleware never sees it. Without
+    // this, appending `?_folio=preview` to any URL would read unpublished
+    // content on a site that had otherwise closed its editor entirely.
+    //
+    // Refused by handing the request *back* rather than by answering 401: to
+    // an unauthenticated visitor the flag then means nothing at all and the
+    // host serves its ordinary published page, which is both the safe answer
+    // and the least surprising one.
+    /**
+     * A share token in the browser's cookie is the *second* way this branch can be
+     * satisfied (`../../docs/specs/platform/draft-sharing.md`), and it is
+     * deliberately narrower than the first in every dimension:
+     *
+     *   - It is **not an actor.** `claimShare` answers a `ShareGrant` — an id, one
+     *     story id, an expiry — which `allows()` cannot be called with, so no route
+     *     gate anywhere in the server can be satisfied by it. This branch is the
+     *     only code that can act on one at all.
+     *   - It authorises **one document**, checked against the story the requested
+     *     path actually resolves to, below. Another page's URL with the same cookie
+     *     is handed back to the host exactly as an unauthenticated one is.
+     *   - It cannot ask for `?as=`, also below.
+     *
+     * Only reached when the ordinary gate has already failed, and only when the
+     * cookie exists at all, so the "no D1 read for a request with no credential"
+     * discipline is intact: a stranger appending the flag to a random URL still
+     * costs the database nothing.
+     */
+    let shared: string[] = []
+    if (rt.auth.mode === 'session') {
+      // On a site's preview origin the credential is a preview grant (decision 13),
+      // read on the primary; the admin's session cookie never reaches this origin.
+      const preview = on ? previewSite(env, on) : undefined
+      const actor = await resolveActor(() => bindings.db, rt.auth, credentialOf(req), { preview })
+      // On a preview origin, decision 13's rule for this site, never `allows()`
+      // alone, which ignores the scope.
+      const mayDraft = on
+        ? mayPreviewDrafts(actor, on.registry, on.render.site.id)
+        : allows(actor, READ_DRAFT)
+      if (!mayDraft) {
+        shared = shareCookieTokens(req.headers.get('cookie'))
+        if (shared.length === 0) return null
+      }
+    }
+
+    // `?locale=` is what the admin's switcher appends (`localisation.md`
+    // decision 6). An undeclared code is refused the same way an undeclared
+    // `as` below is — by handing the request back, so the host's own routes
+    // win rather than Folio guessing what was meant.
+    const asked = url.searchParams.get('locale')
+    if (asked !== null && !isKnownLocale(rt.locales, asked)) return null
+    const locale = asked ?? undefined
+
+    // The path with the host's own locale decoration removed. Derived by
+    // asking `config.route` rather than by assuming a prefix convention: the
+    // admin built this URL from `previewUrls`, which `route` produced, so the
+    // inverse is exact for whatever shape the host chose (`pathForLocale`).
+    const path = rt.pathForLocale(url.pathname, locale)
+    const chain = on ? on.render.chain : SINGLE_SITE_CHAIN
+    const nearest = await storyByPath(bindings.db, chain, path)
+    /**
+     * `_folio_id` names the story the pane is previewing (decision 13, "preview URLs
+     * carry the story"), on a deployment with `sites` only. It renders when it is in
+     * the site's chain and its path is this one **even where a nearer scope shadows
+     * it** — the national team previews the shared page itself on a site that
+     * forked it, with a banner saying so. Anything else hands the request back.
+     */
+    const named = on ? url.searchParams.get('_folio_id') : null
+    const story = named !== null ? await storyById(bindings.db, named) : nearest
+    if (named !== null && (!story || !chain.includes(story.site ?? DEFAULT_SITE))) return null
+    // Not a story: hand it back so the host's own routing wins. An unrouted
+    // document can never be reached here anyway — `storyByPath` matches on
+    // `path = ?` and one stores NULL — but the check is spelled out because
+    // "a preview request for a record is the host's, not Folio's" is a rule
+    // (`document-types.md`), not an accident of SQL semantics.
+    if (!story || story.path === null || story.path !== path) return null
+
+    /**
+     * The share gate, and the reason it is *here* rather than beside the actor
+     * check: a grant names one story id, and the story is only known once the
+     * requested path has been resolved. A cookie for another document is refused
+     * the same way everything else in this branch is — by handing the request
+     * back, so the visitor sees the host's ordinary published page.
+     *
+     * One D1 round trip, which also stamps the view (`claimShare`).
+     */
+    if (
+      shared.length > 0 &&
+      !(await claimShare(bindings.db, shared, story.id, undefined, on?.render.site.id))
+    ) {
+      return null
+    }
+    const site = on
+      ? {
+          site: on.render,
+          admin: on.admin,
+          ...(nearest && nearest.id !== story.id
+            ? { overriddenBy: scopeName(on.registry, nearest.site ?? DEFAULT_SITE) }
+            : {}),
+        }
+      : {}
+
+    // `as` previews a singleton in the context of this page (`globals.md`
+    // decision 4). Naming anything that is not a configured global is the
+    // same refusal shape as a path with no story: null, so the host's own
+    // routes win rather than Folio guessing at what was meant.
+    const as = url.searchParams.get('as')
+    /**
+     * **A share grant may not use it.** `?as=` swaps the editable document for a
+     * *global's* draft — the site header, site settings — and the grant covers one
+     * page, not a singleton every page carries. Refused before the global is even
+     * looked up, so the refusal cannot depend on which globals happen to be
+     * configured.
+     *
+     * **Nor may a `draft` request**, for a reason of the same kind: `?as=` names
+     * the document being *edited* in the context of this page, and `draft` renders
+     * no editing surface at all — no bootstrap for the client to read the name
+     * from, no bridge to select in. Accepting it there would leave a parameter
+     * that parses, is understood, and changes nothing, which is worse than a
+     * refusal. Refused by handing the request back, like every other refusal in
+     * this branch.
+     */
+    if (as !== null && (shared.length > 0 || mode === 'draft')) return null
+    if (as !== null) {
+      const type = rt.typeOf(as)
+      if (type?.kind !== 'singleton' || !rt.globals.includes(as)) return null
+      return previewPage(rt, bindings, story, { as, locale, mode, ...site })
+    }
+
+    return previewPage(rt, bindings, story, { locale, mode, ...site })
+  }
+
   const handle: Folio<Env>['handle'] = async (inbound, env, ctx) => {
     const url = new URL(inbound.url)
     const underBase = url.pathname === rt.base || url.pathname.startsWith(`${rt.base}/`)
@@ -476,118 +771,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * and is the only answer that keeps "a host's own routes win at any path" true.
      */
     const mode = url.searchParams.get('_folio')
-    if (mode === 'preview' || mode === 'draft') {
-      // On a session, like every other read (`db.ts`). This branch lives outside
-      // `basePath` on purpose, so `withBindings` never sees it and it is the one
-      // surface that has to open its own — and it is a render, so it makes the
-      // same three or four reads a published page does. An editor's bookmark
-      // matters here more than anywhere: a preview opened straight after a save
-      // is exactly the request that must not land on a replica behind it.
-      const bound = config.bindings(env)
-      const bindings: ReadBindings = {
-        ...bound,
-        db: sessionFor(bound.db, { bookmark: readBookmark(req.headers.get('cookie')) }),
-      }
-
-      // A preview renders the *draft*, so it needs the same gate the API routes
-      // got in identity-and-access.md — and it is the one such surface that lives
-      // outside `basePath`, so the app's own middleware never sees it. Without
-      // this, appending `?_folio=preview` to any URL would read unpublished
-      // content on a site that had otherwise closed its editor entirely.
-      //
-      // Refused by handing the request *back* rather than by answering 401: to
-      // an unauthenticated visitor the flag then means nothing at all and the
-      // host serves its ordinary published page, which is both the safe answer
-      // and the least surprising one.
-      /**
-       * A share token in the browser's cookie is the *second* way this branch can be
-       * satisfied (`../../docs/specs/platform/draft-sharing.md`), and it is
-       * deliberately narrower than the first in every dimension:
-       *
-       *   - It is **not an actor.** `claimShare` answers a `ShareGrant` — an id, one
-       *     story id, an expiry — which `allows()` cannot be called with, so no route
-       *     gate anywhere in the server can be satisfied by it. This branch is the
-       *     only code that can act on one at all.
-       *   - It authorises **one document**, checked against the story the requested
-       *     path actually resolves to, below. Another page's URL with the same cookie
-       *     is handed back to the host exactly as an unauthenticated one is.
-       *   - It cannot ask for `?as=`, also below.
-       *
-       * Only reached when the ordinary gate has already failed, and only when the
-       * cookie exists at all, so the "no D1 read for a request with no credential"
-       * discipline is intact: a stranger appending the flag to a random URL still
-       * costs the database nothing.
-       */
-      let shared: string[] = []
-      if (rt.auth.mode === 'session') {
-        const actor = await resolveActor(() => bindings.db, rt.auth, credentialOf(req))
-        if (!allows(actor, READ_DRAFT)) {
-          shared = shareCookieTokens(req.headers.get('cookie'))
-          if (shared.length === 0) return null
-        }
-      }
-
-      // `?locale=` is what the admin's switcher appends (`localisation.md`
-      // decision 6). An undeclared code is refused the same way an undeclared
-      // `as` below is — by handing the request back, so the host's own routes
-      // win rather than Folio guessing what was meant.
-      const asked = url.searchParams.get('locale')
-      if (asked !== null && !isKnownLocale(rt.locales, asked)) return null
-      const locale = asked ?? undefined
-
-      // The path with the host's own locale decoration removed. Derived by
-      // asking `config.route` rather than by assuming a prefix convention: the
-      // admin built this URL from `previewUrls`, which `route` produced, so the
-      // inverse is exact for whatever shape the host chose (`pathForLocale`).
-      const path = rt.pathForLocale(url.pathname, locale)
-      const story = await storyByPath(bindings.db, SINGLE_SITE_CHAIN, path)
-      // Not a story: hand it back so the host's own routing wins. An unrouted
-      // document can never be reached here anyway — `storyByPath` matches on
-      // `path = ?` and one stores NULL — but the check is spelled out because
-      // "a preview request for a record is the host's, not Folio's" is a rule
-      // (`document-types.md`), not an accident of SQL semantics.
-      if (!story || story.path === null) return null
-
-      /**
-       * The share gate, and the reason it is *here* rather than beside the actor
-       * check: a grant names one story id, and the story is only known once the
-       * requested path has been resolved. A cookie for another document is refused
-       * the same way everything else in this branch is — by handing the request
-       * back, so the visitor sees the host's ordinary published page.
-       *
-       * One D1 round trip, which also stamps the view (`claimShare`).
-       */
-      if (shared.length > 0 && !(await claimShare(bindings.db, shared, story.id))) return null
-
-      // `as` previews a singleton in the context of this page (`globals.md`
-      // decision 4). Naming anything that is not a configured global is the
-      // same refusal shape as a path with no story: null, so the host's own
-      // routes win rather than Folio guessing at what was meant.
-      const as = url.searchParams.get('as')
-      /**
-       * **A share grant may not use it.** `?as=` swaps the editable document for a
-       * *global's* draft — the site header, site settings — and the grant covers one
-       * page, not a singleton every page carries. Refused before the global is even
-       * looked up, so the refusal cannot depend on which globals happen to be
-       * configured.
-       *
-       * **Nor may a `draft` request**, for a reason of the same kind: `?as=` names
-       * the document being *edited* in the context of this page, and `draft` renders
-       * no editing surface at all — no bootstrap for the client to read the name
-       * from, no bridge to select in. Accepting it there would leave a parameter
-       * that parses, is understood, and changes nothing, which is worse than a
-       * refusal. Refused by handing the request back, like every other refusal in
-       * this branch.
-       */
-      if (as !== null && (shared.length > 0 || mode === 'draft')) return null
-      if (as !== null) {
-        const type = rt.typeOf(as)
-        if (type?.kind !== 'singleton' || !rt.globals.includes(as)) return null
-        return previewPage(rt, bindings, story, { as, locale, mode })
-      }
-
-      return previewPage(rt, bindings, story, { locale, mode })
-    }
+    if (mode === 'preview' || mode === 'draft') return previewBranch(req, url, env, mode, null)
 
     return null
   }
@@ -599,14 +783,19 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
    * 0. **The admin origin first**, before any candidate, so no registry row can
    *    take the admin, sign-in or the registry offline. It answers everything
    *    under `{base}`, with a `~<scope>` segment stripped into the scope header.
-   * 1. Otherwise the candidate step, then Folio's status gate. No site is `null`:
-   *    the host's own routing answers, which is its 404.
+   * 1. Otherwise the candidate step, then Folio's status gate — with the grant or
+   *    share the request carries, for a draft site's preview origin
+   *    (`routeGranted`). No site is `null`: the host's own routing answers, which
+   *    is its 404.
    * 2. On a site's host, only what that surface serves (`servesOnSite`), with the
    *    gated site and surface in their headers.
    *
-   * **The `?_folio=` branch is not answered here yet.** Drafts on a multi-site
-   * deployment are served only on a site's preview origin, behind the grant that
-   * spec 23's phase 5 builds; until then that branch hands every request back.
+   * **The `?_folio=` branch is answered only on a site's preview origin**
+   * (decision 13): drafts on a multi-site deployment are served nowhere else, and
+   * there the credential is a preview grant. A live host hands it back.
+   *
+   * Every response Folio answers on a preview origin carries `frame-ancestors`
+   * naming the admin (`framedBy`).
    */
   const handleSites = async (
     sites: NonNullable<FolioRuntime['sites']>,
@@ -617,14 +806,31 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<Response | null> => {
-    if (below === null) return null
+    if (below === null) {
+      const mode = url.searchParams.get('_folio')
+      if (mode !== 'preview' && mode !== 'draft') return null
+      const registry = await sites.registry(env)
+      const routed = await routeGranted(sites, registry, req, null, env)
+      if (routed.kind !== 'site' || routed.surface !== 'preview') return null
+      const render: SiteRender = {
+        site: routed.site,
+        surface: routed.surface,
+        chain: chainOf(registry, routed.site.id),
+      }
+      const res = await previewBranch(req, url, env, mode, {
+        render,
+        registry,
+        admin: sites.admin,
+      })
+      return res && framedBy(res, sites.admin)
+    }
     const scope = segment ? segment[1]! : null
     if (below.startsWith('/~') && !segment) return null
     const rest = segment ? segment[2] || '/' : below
     const target = `${url.origin}${rt.base}${rest === '/' && segment ? '' : rest}${url.search}`
 
     const registry = await sites.registry(env)
-    const routed = routeRequest(sites, registry, req, { path: rest, grantFor: null })
+    const routed = await routeGranted(sites, registry, req, rest, env)
 
     if (routed.kind === 'admin') {
       const next = segment ? internalRequest(req, target, { [SCOPE_HEADER]: scope! }) : req
@@ -637,7 +843,8 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       [SITE_HEADER]: routed.site.id,
       [SURFACE_HEADER]: routed.surface,
     })
-    return app.fetch(next, env as Env & object, ctx)
+    const res = await app.fetch(next, env as Env & object, ctx)
+    return routed.surface === 'preview' ? framedBy(res, sites.admin) : res
   }
 
   /**
@@ -677,20 +884,36 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * lookup answers an empty chain with nothing: a reader "as a site with no
      * content".
      */
-    type Scoped = { render: SiteRender | null; chain: readonly string[] }
+    type Scoped = {
+      render: SiteRender | null
+      /**
+       * What every lookup binds. **Empty for a request a share admitted to a draft
+       * site**, so it reads nothing but its one story: `page()` and `draftAt()` look
+       * that story up on the render's own chain and refuse any other id.
+       */
+      chain: readonly string[]
+      registry: Registry | null
+      shareOnly: ReadonlySet<string> | null
+    }
     let scoped: Promise<Scoped> | null = null
     const scopeOnce = (): Promise<Scoped> => {
       scoped ??= (async (): Promise<Scoped> => {
         const sites = rt.sites
-        if (!sites) return { render: null, chain: SINGLE_SITE_CHAIN }
+        if (!sites) {
+          return { render: null, chain: SINGLE_SITE_CHAIN, registry: null, shareOnly: null }
+        }
         const registry = await sites.registry(env)
         let site: SiteRef | null = null
         let surface: 'live' | 'preview' = 'live'
+        let shareOnly: ReadonlySet<string> | null = null
         if (req) {
-          const routed = routeRequest(sites, registry, req, { path: null, grantFor: null })
+          // With the grant or share the request carries, so a host's own route on
+          // a draft site's preview origin reads that site for its previewer.
+          const routed = await routeGranted(sites, registry, req, null, env)
           if (routed.kind === 'site') {
             site = routed.site
             surface = routed.surface
+            shareOnly = routed.shareOnly ?? null
           }
         } else if (named !== undefined) {
           site = siteGate(
@@ -699,9 +922,14 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
             { path: null, grantFor: null },
           )
         }
-        if (!site) return { render: null, chain: [] }
+        if (!site) return { render: null, chain: [], registry, shareOnly: null }
         const chain = chainOf(registry, site.id)
-        return { render: { site, surface, chain }, chain }
+        return {
+          render: { site, surface, chain },
+          chain: shareOnly ? [] : chain,
+          registry,
+          shareOnly,
+        }
       })()
       return scoped
     }
@@ -741,14 +969,25 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       if (!req || story.path === null) return null
       // On a multi-site deployment drafts are served only on a site's preview
       // origin (decision 13), so a live host never reads one whatever the cookie
-      // says. Who may read one there is the grant spec 23's phase 5 builds.
-      if (rt.sites && (await scopeOnce()).render?.surface !== 'preview') return null
+      // says.
+      const within = await scopeOnce()
+      if (rt.sites && within.render?.surface !== 'preview') return null
       const header = req.headers.get('cookie')
       const wants = hasDraftCookie(header)
 
       if (wants && rt.auth.mode === 'session') {
-        const actor = await resolveActor(() => db, rt.auth, credentialOf(req))
-        if (allows(actor, READ_DRAFT)) return rt.draftFor(bindings, story)
+        // There, the credential is a preview grant (decision 13, step 4): a host's
+        // route calling `reader.page()` gets the chain's drafts by `pickEditing`.
+        const preview =
+          within.render && within.registry
+            ? previewSite(env, { render: within.render, registry: within.registry })
+            : undefined
+        const actor = await resolveActor(() => db, rt.auth, credentialOf(req), { preview })
+        const mayDraft =
+          within.render && within.registry
+            ? mayPreviewDrafts(actor, within.registry, within.render.site.id)
+            : allows(actor, READ_DRAFT)
+        if (mayDraft) return rt.draftFor(bindings, story)
       }
       // `auth: 'open'` has no actor to resolve and no role to check, so the
       // draft cookie alone is the authority — the same authority `handle()`'s
@@ -757,7 +996,10 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       if (wants && rt.auth.mode !== 'session') return rt.draftFor(bindings, story)
 
       const shared = shareCookieTokens(header)
-      if (shared.length > 0 && (await claimShare(db, shared, story.id))) {
+      if (
+        shared.length > 0 &&
+        (await claimShare(db, shared, story.id, undefined, within.render?.site.id))
+      ) {
         return rt.draftFor(bindings, story)
       }
       return null
@@ -877,7 +1119,9 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         // Unrouted documents are unreachable here by construction (`storyByPath`
         // matches `path = ?` and one stores NULL), but a record's draft not
         // being the host's to render at a URL is a rule, not an accident of SQL.
-        const story = await storyByPath(db, (await scopeOnce()).chain, path)
+        const within = await scopeOnce()
+        const story = await storyByPath(db, within.render?.chain ?? within.chain, path)
+        if (within.shareOnly && !(story && within.shareOnly.has(story.id))) return null
         return story ? draftFor(story) : null
       },
       page: async (path, opts) => {
@@ -889,8 +1133,15 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         // that sets cache tags needs both — a page never appears in its own
         // resolution, so `story:<id>` is the one tag it cannot derive.
         const within = await scopeOnce()
-        const found = await pageAt(db, within.chain, path)
+        const found = await pageAt(
+          db,
+          within.shareOnly ? (within.render?.chain ?? []) : within.chain,
+          path,
+        )
         if (!found) return null
+        // A request a share admitted to a draft site reads its one story, as its
+        // draft, and nothing else — not even what is published at the same path.
+        if (within.shareOnly && !within.shareOnly.has(found.editing.id)) return null
 
         // Asked before the published document is used, not after: an editor in
         // draft mode is reading this page *instead of* what is live, and a story
@@ -899,6 +1150,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         // a fork its editor is preparing while visitors still get the page it
         // will shadow (decision 5).
         const drafted = wantsDraft() ? await draftFor(found.editing) : null
+        if (within.shareOnly && !drafted) return null
         const doc = drafted ?? found.doc
         if (!doc) return null
         const story = drafted ? found.editing : found.story
@@ -996,7 +1248,12 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         if (type?.kind !== 'singleton') return null
         // The chain's layers, merged (`multi-site.md` decision 8). With no `sites`
         // the chain is `['default']` and this is the one `sng_<type>` read it was.
-        const { chain } = await scopeOnce()
+        // A request a share admitted to a draft site reads the gated site's whole
+        // chain here — the same chain `page()` resolves with, so its one story has
+        // its header and navigation — and, like every read, **published layers
+        // only**: the share drafts its one story and nothing else.
+        const within = await scopeOnce()
+        const chain = within.shareOnly ? (within.render?.chain ?? []) : within.chain
         const ids = [...chain].reverse().map((scope) => layerId(name, scope))
         const docs = await publishedDocsByIds(db, ids, chain)
         return (
@@ -1141,6 +1398,10 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     sweepAuth: async (env, opts) => {
       const db = config.bindings(env).db
       const now = opts?.now ?? Date.now()
+      // Preview grants first: their sweep drops the grants of sessions already
+      // gone, and `deleteExpiredSessions` takes the expired sessions' own grants
+      // in its batch. Not counted in the report, whose shape is the public type's.
+      await sweepGrants(db, now)
       const [sessions, challenges, events] = await Promise.all([
         deleteExpiredSessions(db, now),
         deleteStaleChallenges(db, now),

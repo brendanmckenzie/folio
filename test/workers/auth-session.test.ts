@@ -1,13 +1,22 @@
 import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { fallbackColour } from '../../src/core/protocol'
+import type { Registry } from '../../src/core/sites'
+import {
+  consumeGrantCode,
+  mintGrantCode,
+  readGrant,
+  sweepGrants,
+} from '../../src/server/auth/grants'
 import {
   createSession,
   deleteExpiredSessions,
   readSession,
+  revokeOtherSessions,
   revokeSession,
   revokeUserSessions,
   sessionExpiry,
+  userSessionsDelete,
 } from '../../src/server/auth/session'
 import {
   type AuthEventInput,
@@ -41,6 +50,7 @@ const DAY = 24 * 60 * 60 * 1000
 
 beforeEach(async () => {
   await env.DB.batch([
+    env.DB.prepare('delete from site_grants'),
     env.DB.prepare('delete from sessions'),
     env.DB.prepare('delete from api_tokens'),
     env.DB.prepare('delete from login_challenges'),
@@ -498,5 +508,296 @@ describe('auth_events', () => {
     const remaining = await listEvents(env.DB)
     expect(remaining.rows).toHaveLength(1)
     expect(remaining.rows[0]?.at).toBe(now - 89 * DAY)
+  })
+})
+
+/* ------------------------------------------------------- preview grants --- */
+
+/**
+ * Preview grants (`multi-site.md` decision 13, `src/server/auth/grants.ts`):
+ * `readGrant` re-checks, in one statement, the session or token behind the grant
+ * and the holder's current roles.
+ *
+ * **Every revocation here is an `update`, never a `delete`** (owner, 2026-09-29).
+ * D1 in workerd pins foreign keys on, so a deleted session or grant row could be
+ * removed by a cascade and the test would be watching that rather than the join.
+ * An expired session, a revoked token or a grant moved to another scope leaves
+ * every row in place, so the only thing that can refuse is `readGrant` itself.
+ */
+
+/** Alpha in group north, and bravo in none: enough chain for every case. */
+const REGISTRY: Registry = {
+  sites: [
+    { id: 'alpha', name: 'Alpha', group: 'north', status: 'live', hosts: [], preview: null },
+    { id: 'bravo', name: 'Bravo', group: null, status: 'live', hosts: [], preview: null },
+  ],
+  groups: [{ id: 'north', name: 'North' }],
+}
+const ALPHA = { id: 'alpha', registry: REGISTRY }
+
+async function sessionGrant(grants: Record<string, 'viewer' | 'editor' | 'publisher' | 'admin'>) {
+  const user = await createUser(env.DB, { email: `g${Math.random()}@example.com`, grants })
+  const session = await createSession(env.DB, user.id)
+  const code = await mintGrantCode(env.DB, { sessionId: session.id }, 'alpha')
+  const redeemed = await consumeGrantCode(env.DB, code.code, 'alpha')
+  if (!redeemed) throw new Error('the code did not redeem')
+  return { user, session, grant: redeemed.token }
+}
+
+async function tokenGrant(
+  scopes: Parameters<typeof createToken>[1]['scopes'],
+  site: string | null,
+) {
+  const minted = await createToken(env.DB, { name: `t${Math.random()}`, scopes, site })
+  const code = await mintGrantCode(env.DB, { tokenId: minted.row.id }, 'alpha')
+  const redeemed = await consumeGrantCode(env.DB, code.code, 'alpha')
+  if (!redeemed) throw new Error('the code did not redeem')
+  return { token: minted.row, grant: redeemed.token }
+}
+
+describe('readGrant', () => {
+  it("answers a GrantActor for a session's grant, for its site and no other", async () => {
+    const { user, grant } = await sessionGrant({ alpha: 'editor' })
+    const actor = await readGrant(env.DB, grant, ALPHA)
+    expect(actor).toMatchObject({ kind: 'grant', userId: user.id, tokenId: null, site: 'alpha' })
+    expect(await readGrant(env.DB, grant, { id: 'bravo', registry: REGISTRY })).toBeNull()
+    expect(await readGrant(env.DB, 'f'.repeat(64), ALPHA)).toBeNull()
+    expect(await readGrant(env.DB, 'not hex', ALPHA)).toBeNull()
+  })
+
+  it('accepts a grant on any scope of the chain, or *, and nothing outside it', async () => {
+    for (const scope of ['alpha', 'north', 'shared', '*']) {
+      const { grant } = await sessionGrant({ [scope]: 'viewer' })
+      expect(await readGrant(env.DB, grant, ALPHA), scope).not.toBeNull()
+    }
+    const { grant } = await sessionGrant({ bravo: 'admin' })
+    expect(await readGrant(env.DB, grant, ALPHA)).toBeNull()
+  })
+
+  it('refuses once the session has expired, by update: the join, not a cascade', async () => {
+    const { session, grant } = await sessionGrant({ alpha: 'editor' })
+    expect(await readGrant(env.DB, grant, ALPHA)).not.toBeNull()
+    await env.DB.prepare('update sessions set expires_at = ? where id = ?')
+      .bind(Date.now() - 1, session.id)
+      .run()
+    // Every row is still there; only the join can refuse.
+    const rows = await env.DB.prepare(
+      `select (select count(*) from sessions where id = ?) as s,
+              (select count(*) from site_grants where session_id = ?) as g`,
+    )
+      .bind(session.id, session.id)
+      .first<{ s: number; g: number }>()
+    expect(rows).toEqual({ s: 1, g: 1 })
+    expect(await readGrant(env.DB, grant, ALPHA)).toBeNull()
+  })
+
+  it('refuses once the alpha grant is moved off the chain on the Access screen, session kept', async () => {
+    const { user, session, grant } = await sessionGrant({ alpha: 'editor' })
+    await env.DB.prepare(
+      "update site_roles set scope_id = 'bravo' where user_id = ? and scope_id = 'alpha'",
+    )
+      .bind(user.id)
+      .run()
+    expect(await sessionExpiry(env.DB, session.id)).not.toBeNull()
+    expect(await readGrant(env.DB, grant, ALPHA)).toBeNull()
+  })
+
+  it('refuses a grant past its own expiry, and an unredeemed code presented as a grant', async () => {
+    const { grant } = await sessionGrant({ alpha: 'editor' })
+    await env.DB.prepare('update site_grants set expires_at = ? where token_hash = ?')
+      .bind(Date.now() - 1, await hashToken(grant))
+      .run()
+    expect(await readGrant(env.DB, grant, ALPHA)).toBeNull()
+
+    const user = await createUser(env.DB, {
+      email: 'code@example.com',
+      grants: { alpha: 'editor' },
+    })
+    const session = await createSession(env.DB, user.id)
+    const { code } = await mintGrantCode(env.DB, { sessionId: session.id }, 'alpha')
+    expect(await readGrant(env.DB, code, ALPHA)).toBeNull()
+  })
+
+  it("reads a token's grant while it is unrevoked, reaches the site and holds read-draft", async () => {
+    for (const site of [null, 'alpha', 'north']) {
+      const { grant } = await tokenGrant(['content:read:draft'], site)
+      expect(await readGrant(env.DB, grant, ALPHA), String(site)).toMatchObject({ kind: 'grant' })
+    }
+    // Bound somewhere that does not reach alpha, or without the scope: nothing.
+    expect(
+      await readGrant(env.DB, (await tokenGrant(['content:read:draft'], 'bravo')).grant, ALPHA),
+    ).toBeNull()
+    expect(
+      await readGrant(env.DB, (await tokenGrant(['content:read:draft'], 'shared')).grant, ALPHA),
+    ).toBeNull()
+    expect(
+      await readGrant(env.DB, (await tokenGrant(['content:read'], null)).grant, ALPHA),
+    ).toBeNull()
+    // `publish` implies `content:read:draft` (`roles.ts`' IMPLIES).
+    expect(
+      await readGrant(env.DB, (await tokenGrant(['publish'], null)).grant, ALPHA),
+    ).not.toBeNull()
+  })
+
+  it("refuses a token's grant once the token is revoked, rebound or narrowed, each by update", async () => {
+    const revoked = await tokenGrant(['content:read:draft'], 'alpha')
+    await revokeToken(env.DB, revoked.token.id)
+    expect(await readGrant(env.DB, revoked.grant, ALPHA)).toBeNull()
+
+    const rebound = await tokenGrant(['content:read:draft'], 'alpha')
+    await env.DB.prepare("update api_tokens set site_id = 'bravo' where id = ?")
+      .bind(rebound.token.id)
+      .run()
+    expect(await readGrant(env.DB, rebound.grant, ALPHA)).toBeNull()
+
+    const narrowed = await tokenGrant(['content:read:draft'], 'alpha')
+    await env.DB.prepare(`update api_tokens set scopes = '["content:read"]' where id = ?`)
+      .bind(narrowed.token.id)
+      .run()
+    expect(await readGrant(env.DB, narrowed.grant, ALPHA)).toBeNull()
+
+    const expired = await tokenGrant(['content:read:draft'], 'alpha')
+    await env.DB.prepare('update api_tokens set expires_at = ? where id = ?')
+      .bind(Date.now() - 1, expired.token.id)
+      .run()
+    expect(await readGrant(env.DB, expired.grant, ALPHA)).toBeNull()
+  })
+
+  it('sweeps expired grants and grants whose session or token is gone', async () => {
+    const kept = await sessionGrant({ alpha: 'editor' })
+    const stale = await sessionGrant({ alpha: 'editor' })
+    await env.DB.prepare('update site_grants set expires_at = ? where token_hash = ?')
+      .bind(Date.now() - 1, await hashToken(stale.grant))
+      .run()
+    const orphan = await tokenGrant(['content:read:draft'], null)
+    await revokeToken(env.DB, orphan.token.id)
+    expect(await sweepGrants(env.DB)).toBe(2)
+    expect(await readGrant(env.DB, kept.grant, ALPHA)).not.toBeNull()
+  })
+})
+
+/**
+ * Every `delete from sessions` batches that session's grants
+ * (`multi-site.md` decision 13: "sessions are still deleted with their grants in
+ * the same batch"). `site_grants` declares no foreign key, so nothing else could
+ * remove them; the proxy records each `batch` call's statements, as SQL, so the
+ * assertion is that the two deletes went **in one batch**, grants first, and the
+ * rows are then gone.
+ */
+function recording(db: D1Database) {
+  const sqlOf = new WeakMap<object, string>()
+  const batches: string[][] = []
+  const statement = (stmt: D1PreparedStatement, sql: string): D1PreparedStatement => {
+    sqlOf.set(stmt, sql)
+    const bind = stmt.bind.bind(stmt)
+    return Object.assign(stmt, {
+      bind: (...values: unknown[]) => statement(bind(...values), sql),
+    })
+  }
+  const proxy = new Proxy(db, {
+    get(target, prop, receiver) {
+      if (prop === 'prepare') return (sql: string) => statement(target.prepare(sql), sql)
+      if (prop === 'batch') {
+        return (stmts: D1PreparedStatement[]) => {
+          batches.push(stmts.map((s) => sqlOf.get(s) ?? '(unrecorded)'))
+          return target.batch(stmts)
+        }
+      }
+      const value = Reflect.get(target, prop, receiver)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+  /** Whether one batch deleted grants and then sessions. */
+  const together = () =>
+    batches.some((sqls) => {
+      const grants = sqls.findIndex((sql) => /delete from site_grants/.test(sql))
+      const sessions = sqls.findIndex((sql) => /delete from sessions/.test(sql))
+      return grants !== -1 && sessions !== -1 && grants < sessions
+    })
+  return { db: proxy, batches, together }
+}
+
+const grantsLeft = async () =>
+  (await env.DB.prepare('select count(*) as n from site_grants').first<{ n: number }>())?.n
+
+describe('sessions are deleted with their grants in the same batch', () => {
+  it('when a read finds the session expired', async () => {
+    const { session, grant } = await sessionGrant({ alpha: 'editor' })
+    await env.DB.prepare('update sessions set expires_at = ? where id = ?')
+      .bind(Date.now() - 1, session.id)
+      .run()
+    const r = recording(env.DB)
+    expect(await readSession(r.db, session.token)).toBeNull()
+    expect(r.together()).toBe(true)
+    expect(await grantsLeft()).toBe(0)
+    expect(await readGrant(env.DB, grant, ALPHA)).toBeNull()
+  })
+
+  it('when a browser signs out', async () => {
+    const user = await createUser(env.DB, { email: 'out@example.com', grants: { alpha: 'editor' } })
+    const session = await createSession(env.DB, user.id)
+    const code = await mintGrantCode(env.DB, { sessionId: session.id }, 'alpha')
+    await consumeGrantCode(env.DB, code.code, 'alpha')
+    const r = recording(env.DB)
+    await revokeSession(r.db, session.token)
+    expect(r.together()).toBe(true)
+    expect(await grantsLeft()).toBe(0)
+  })
+
+  it('when every other browser is signed out, keeping this one’s grants', async () => {
+    const user = await createUser(env.DB, {
+      email: 'others@example.com',
+      grants: { alpha: 'editor' },
+    })
+    const keep = await createSession(env.DB, user.id)
+    const other = await createSession(env.DB, user.id)
+    for (const s of [keep, other]) {
+      await consumeGrantCode(
+        env.DB,
+        (await mintGrantCode(env.DB, { sessionId: s.id }, 'alpha')).code,
+        'alpha',
+      )
+    }
+    const r = recording(env.DB)
+    expect(await revokeOtherSessions(r.db, user.id, keep.id)).toBe(1)
+    expect(r.together()).toBe(true)
+    const left = await env.DB.prepare('select session_id from site_grants').all<{
+      session_id: string
+    }>()
+    expect(left.results.map((row) => row.session_id)).toEqual([keep.id])
+  })
+
+  it('when every browser a user holds is signed out, and in the statements a role change batches', async () => {
+    for (const run of [
+      (db: D1Database, id: string) => revokeUserSessions(db, id),
+      async (db: D1Database, id: string) => {
+        await db.batch(userSessionsDelete(db, id))
+      },
+    ]) {
+      const { user } = await sessionGrant({ alpha: 'editor' })
+      const r = recording(env.DB)
+      await run(r.db, user.id)
+      expect(r.together()).toBe(true)
+      expect(await grantsLeft()).toBe(0)
+    }
+  })
+
+  it('when the sweep deletes expired sessions', async () => {
+    const { session } = await sessionGrant({ alpha: 'editor' })
+    await env.DB.prepare('update sessions set expires_at = ? where id = ?')
+      .bind(Date.now() - 1, session.id)
+      .run()
+    const r = recording(env.DB)
+    expect(await deleteExpiredSessions(r.db)).toBe(1)
+    expect(r.together()).toBe(true)
+    expect(await grantsLeft()).toBe(0)
+  })
+
+  it('when a user is removed', async () => {
+    const { user } = await sessionGrant({ alpha: 'editor' })
+    const r = recording(env.DB)
+    expect(await deleteUser(r.db, user.id)).toBe(true)
+    expect(r.together()).toBe(true)
+    expect(await grantsLeft()).toBe(0)
   })
 })

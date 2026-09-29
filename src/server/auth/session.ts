@@ -5,6 +5,12 @@
  * routes and the Durable Object's revocation re-check all reach the same three
  * functions rather than each writing their own SQL against the same two tables.
  */
+import {
+  expiredSessionGrantsDelete,
+  otherGrantsDelete,
+  sessionGrantsDelete,
+  userGrantsDelete,
+} from './grants'
 import type { Actor, Role } from './roles'
 import { isRole } from './roles'
 import { hashToken, mintSecret } from './secrets'
@@ -161,7 +167,10 @@ export async function readSession(
 
   const now = opts.now ?? Date.now()
   if (row.expires_at <= now) {
-    await db.prepare('delete from sessions where id = ?').bind(id).run()
+    await db.batch([
+      sessionGrantsDelete(db, id),
+      db.prepare('delete from sessions where id = ?').bind(id),
+    ])
     return null
   }
 
@@ -240,10 +249,13 @@ export async function sessionProvider(db: FolioDb, token: string): Promise<strin
 /** Signs out one browser. Takes the raw cookie token, since that is what the
  * logout route has. */
 export async function revokeSession(db: FolioDb, token: string): Promise<void> {
-  await db
-    .prepare('delete from sessions where id = ?')
-    .bind(await hashToken(token))
-    .run()
+  const id = await hashToken(token)
+  // Its preview grants in the same batch (`grants.ts`): `readGrant` would refuse
+  // them anyway, and this is what keeps the table from growing.
+  await db.batch([
+    sessionGrantsDelete(db, id),
+    db.prepare('delete from sessions where id = ?').bind(id),
+  ])
 }
 
 /**
@@ -309,21 +321,38 @@ export async function revokeOtherSessions(
   userId: string,
   keepId: string,
 ): Promise<number> {
-  const result = await db
-    .prepare('delete from sessions where user_id = ? and id != ?')
-    .bind(userId, keepId)
-    .run()
-  return result.meta.changes ?? 0
+  const [, result] = await db.batch([
+    otherGrantsDelete(db, userId, keepId),
+    db.prepare('delete from sessions where user_id = ? and id != ?').bind(userId, keepId),
+  ])
+  return result?.meta.changes ?? 0
+}
+
+/**
+ * Every browser a user holds, and every preview grant those sessions hold, as
+ * statements to batch: the grants first, because their delete finds them through
+ * the sessions. What a role change batches (`sign-in.ts`, `routes/access.ts`) and
+ * what removing a user batches (`users.ts`), so no `delete from sessions` for a
+ * whole user is written without its grants.
+ */
+export function userSessionsDelete(db: FolioDb, userId: string): D1PreparedStatement[] {
+  return [
+    userGrantsDelete(db, userId),
+    db.prepare('delete from sessions where user_id = ?').bind(userId),
+  ]
 }
 
 /** Signs out every browser a user holds — what a role downgrade or a "sign out
  * everywhere" acts on. */
 export async function revokeUserSessions(db: FolioDb, userId: string): Promise<void> {
-  await db.prepare('delete from sessions where user_id = ?').bind(userId).run()
+  await db.batch(userSessionsDelete(db, userId))
 }
 
 /** Housekeeping for sessions nobody returns to. Not on any request path. */
 export async function deleteExpiredSessions(db: FolioDb, now = Date.now()): Promise<number> {
-  const result = await db.prepare('delete from sessions where expires_at <= ?').bind(now).run()
-  return result.meta.changes ?? 0
+  const [, result] = await db.batch([
+    expiredSessionGrantsDelete(db, now),
+    db.prepare('delete from sessions where expires_at <= ?').bind(now),
+  ])
+  return result?.meta.changes ?? 0
 }

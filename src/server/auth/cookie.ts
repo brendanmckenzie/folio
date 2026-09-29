@@ -53,6 +53,22 @@ export const SECURE_DRAFT_COOKIE = '__Host-folio_draft'
 export const PLAIN_DRAFT_COOKIE = 'folio_draft'
 
 /**
+ * A preview grant on a site's preview origin
+ * (`../../../docs/specs/foundation/multi-site.md` decision 13).
+ *
+ * **A sixth name, never the session's**, so `readSessionCookie` never sees it and a
+ * browser holding only this one is no session at all: what it is worth is decided
+ * by `readGrant`, and only where `withActor` asks (a read on a preview origin).
+ * Unlike every other cookie here it is `SameSite=None; Partitioned`
+ * (`serialiseGrantCookie`), because the admin's preview pane is a cross-site
+ * iframe: a `Lax` cookie is never sent there and Safari refuses an unpartitioned
+ * one. CHIPS keys it by the top-level site too, so the pane's grant is visible only
+ * inside the admin.
+ */
+export const SECURE_GRANT_COOKIE = '__Host-folio_grant'
+export const PLAIN_GRANT_COOKIE = 'folio_grant'
+
+/**
  * The name to *write* for this request: prefixed on HTTPS, plain otherwise. Both
  * are read on the way in (`readCookie`), so a developer moving between localhost
  * and a deployed worker is never stuck holding a cookie the server will not
@@ -72,6 +88,10 @@ export function shareCookieName(url: URL | string): string {
 
 export function draftCookieName(url: URL | string): string {
   return isSecure(url) ? SECURE_DRAFT_COOKIE : PLAIN_DRAFT_COOKIE
+}
+
+export function grantCookieName(url: URL | string): string {
+  return isSecure(url) ? SECURE_GRANT_COOKIE : PLAIN_GRANT_COOKIE
 }
 
 /**
@@ -114,6 +134,40 @@ export function readSessionCookie(header: string | null | undefined): string | n
 
 export function readOidcCookie(header: string | null | undefined): string | null {
   return readCookie(header, SECURE_OIDC_COOKIE) ?? readCookie(header, PLAIN_OIDC_COOKIE)
+}
+
+/** A grant token, as `mintSecret()` produces it. */
+const GRANT_TOKEN = /^[0-9a-f]{64}$/
+
+/**
+ * The preview grant this request presents, under either name, screened to
+ * `mintSecret()`'s shape so nothing else reaches `hashToken` or a bind. Presence is
+ * all this says; `readGrant` is what it is worth.
+ */
+export function readGrantCookie(header: string | null | undefined): string | null {
+  const raw = readCookie(header, SECURE_GRANT_COOKIE) ?? readCookie(header, PLAIN_GRANT_COOKIE)
+  return raw && GRANT_TOKEN.test(raw) ? raw : null
+}
+
+/**
+ * The grant's `Set-Cookie` (decision 13 step 2): `Secure; HttpOnly; SameSite=None;
+ * Partitioned; Path=/`, expiring with the grant.
+ *
+ * **`Secure` on both names**, unlike `serialiseCookie`: `SameSite=None` without it
+ * is refused by every current browser, and `http://localhost` (and `*.localhost`)
+ * is a secure context in which a `Secure` cookie is kept. `Partitioned` requires
+ * `Secure` for the same reason.
+ */
+export function serialiseGrantCookie(url: URL | string, value: string, maxAge: number): string {
+  return [
+    `${grantCookieName(url)}=${value}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=None',
+    'Secure',
+    'Partitioned',
+    `Max-Age=${Math.max(0, Math.floor(maxAge))}`,
+  ].join('; ')
 }
 
 /**

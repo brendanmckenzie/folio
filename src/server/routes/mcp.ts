@@ -314,6 +314,17 @@ export function mcpRoutes<Env>(
     origin: c.req.url,
     headers: credentialHeaders(c),
     visible: (story) => inFence(c, rt, story, 'read'),
+    // With `sites`, the tool forwards no credential and mints a grant instead
+    // (`multi-site.md` decision 13), from the request's own scope and actor.
+    ...(rt.sites
+      ? {
+          sites: {
+            scope: c.var.scope,
+            actor: c.var.actor,
+            registry: () => rt.sites!.registry(c.env),
+          },
+        }
+      : {}),
   })
 
   /**

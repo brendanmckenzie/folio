@@ -174,7 +174,7 @@ export interface SitesRuntime extends ResolvedSites {
   drop: () => void
   /** The configured globals and the settings type: every document that layers. */
   layered: readonly string[]
-  /** The raw binding, for the `first-primary` registry read and nothing else. */
+  /** The raw binding, for the reads that must be `first-primary`: the registry and preview grants. */
   rawDb: (env: unknown) => D1Database
 }
 

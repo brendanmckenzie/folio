@@ -194,27 +194,41 @@ export function routeRequest(
   req: Request,
   gateReq: { path: string | null; grantFor: string | null },
 ): SiteRoute {
-  const url = new URL(req.url)
-  if (url.origin === sites.admin) return { kind: 'admin' }
-
-  // Step 1, the only replaceable one. A custom resolver names a candidate id; the
-  // surface is still decided by the URL, because a site's preview origin is a
-  // registry fact and not something a resolver may reassign.
-  let chosen: { site: string; surface: Surface } | null
-  if (sites.resolve) {
-    const id = sites.resolve(req, registry)
-    if (id === null) return { kind: 'none' }
-    const row = registry.sites.find((s) => s.id === id)
-    chosen = { site: id, surface: row?.preview === url.origin ? 'preview' : 'live' }
-  } else {
-    chosen = candidate(registry, url)
-  }
+  const chosen = candidateFor(sites, registry, req)
+  if (chosen === 'admin') return { kind: 'admin' }
   if (!chosen) return { kind: 'none' }
 
   // Step 2, always Folio's: a group, `shared` or a site the status keeps closed
   // is no site, whoever chose it.
   const site = gate(registry, chosen, gateReq)
   return site ? { kind: 'site', site, surface: chosen.surface } : { kind: 'none' }
+}
+
+/**
+ * Steps 0 and 1 of `routeRequest` alone: `'admin'` for the admin origin, otherwise
+ * the candidate, ungated, or null. Exported for the one caller that has to know
+ * which site a refused request was a candidate for — `handle()`, which then reads
+ * a grant or share cookie for it (a D1 read, decision 4: after this synchronous
+ * step and never inside a custom resolver) and gates again with `grantFor`.
+ */
+export function candidateFor(
+  sites: ResolvedSites,
+  registry: Registry,
+  req: Request,
+): 'admin' | { site: string; surface: Surface } | null {
+  const url = new URL(req.url)
+  if (url.origin === sites.admin) return 'admin'
+
+  // Step 1, the only replaceable one. A custom resolver names a candidate id; the
+  // surface is still decided by the URL, because a site's preview origin is a
+  // registry fact and not something a resolver may reassign.
+  if (sites.resolve) {
+    const id = sites.resolve(req, registry)
+    if (id === null) return null
+    const row = registry.sites.find((s) => s.id === id)
+    return { site: id, surface: row?.preview === url.origin ? 'preview' : 'live' }
+  }
+  return candidate(registry, url)
 }
 
 /* ---------------------------------------------- write-time validation --- */

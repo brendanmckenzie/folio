@@ -244,6 +244,51 @@ describe('safeNext: the login page cannot be turned into an open redirect', () =
     expect(safeNext('javascript:alert(1)', FALLBACK)).toBe(FALLBACK)
   })
 
+  /**
+   * The forms a browser normalises into `//host` (the phase 5 review): the WHATWG
+   * URL parser strips tab, newline and carriage return anywhere and reads a
+   * backslash as a slash, so each of these is a protocol-relative URL to another
+   * host once it is a `Location`. Percent-encoded forms that decode to one are
+   * refused too.
+   */
+  it('refuses every form a browser normalises into another host', () => {
+    for (const raw of [
+      '/\t/evil.example',
+      '/\n/evil.example',
+      '/\r/evil.example',
+      '/\t\t/evil.example/x',
+      '/\\evil.example',
+      '/\\\\evil.example',
+      '/x\\..\\..\\evil',
+      '/\u0000/evil.example',
+      '/\u007f/evil.example',
+      ' /evil.example',
+      '\t//evil.example',
+      '\n/folio/edit',
+      '/%09/evil.example',
+      '/%0A/evil.example',
+      '/%0d/evil.example',
+      '/%5Cevil.example',
+      '/%5c%5cevil.example',
+      '/%2F/evil.example',
+      '/%2f%2fevil.example',
+      '/%E0%A4%A',
+    ]) {
+      expect(safeNext(raw, FALLBACK), JSON.stringify(raw)).toBe(FALLBACK)
+    }
+    // Every one of them, had it been let through, would leave the site.
+    expect(new URL('/\t/evil.example', 'https://site.example').origin).toBe('https://evil.example')
+  })
+
+  it('keeps a path carrying an encoded query value', () => {
+    expect(safeNext('/folio/draft/enter?next=%2Fwelcome', FALLBACK)).toBe(
+      '/folio/draft/enter?next=%2Fwelcome',
+    )
+    expect(safeNext('/about?_folio=preview&_folio_id=sty_x', FALLBACK)).toBe(
+      '/about?_folio=preview&_folio_id=sty_x',
+    )
+  })
+
   it('falls back for absent, empty and absurdly long values', () => {
     expect(safeNext(undefined, FALLBACK)).toBe(FALLBACK)
     expect(safeNext(null, FALLBACK)).toBe(FALLBACK)

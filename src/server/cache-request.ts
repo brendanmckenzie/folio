@@ -9,7 +9,7 @@
  * only `Set-Cookie` on the response is — into a cache anyone can read. The
  * knowledge needed to answer it is Folio's: which paths it owns, that
  * `{base}/asset/:key` is public while `{base}/api/assets` is not, and the names
- * of the three cookies that mean "this render may be a draft". A host
+ * of the four cookies that mean "this render may be a draft". A host
  * re-deriving that list is a host one route away from a disclosure.
  *
  * `null` for a path Folio does not own, exactly as `handle()` answers null, and
@@ -19,7 +19,12 @@
  * the only honest way to cover a cache miniflare does not simulate — the
  * decidable part is unit-tested and the wiring is three lines in the host.
  */
-import { hasDraftCookie, readSessionCookie, shareCookieTokens } from './auth/cookie'
+import {
+  hasDraftCookie,
+  readGrantCookie,
+  readSessionCookie,
+  shareCookieTokens,
+} from './auth/cookie'
 
 /**
  * Whether a request may be served from a shared cache, as far as Folio can tell.
@@ -111,9 +116,10 @@ export function cacheKeyFor(url: string | URL): string {
  *   1. **Not a GET or HEAD.** Nothing else is cacheable, and a write reaching
  *      the cached entrypoint would be a write served from cache.
  *   2. **A WebSocket upgrade.** The sync socket is a `GET`.
- *   3. **Any Folio credential.** A draft or share cookie means this render may
- *      *be* a draft, and an editor's session means their responses can carry a
- *      bookmark `Set-Cookie`. Neither may populate or be answered from the entry
+ *   3. **Any Folio credential.** A draft, share or preview-grant cookie means
+ *      this render may *be* a draft — the grant is a whole site's drafts on its
+ *      preview origin (`multi-site.md` decision 15) — and an editor's session
+ *      means their responses can carry a bookmark `Set-Cookie`. Neither may populate or be answered from the entry
  *      the public reads. This is coarse on purpose — an editor is one of a
  *      handful of people, and the alternative is deciding per-route whether a
  *      credential mattered.
@@ -135,6 +141,7 @@ export function cacheVerdictFor(req: Request, base: string): CacheVerdict {
   const cookie = req.headers.get('cookie')
   if (
     readSessionCookie(cookie) !== null ||
+    readGrantCookie(cookie) !== null ||
     hasDraftCookie(cookie) ||
     shareCookieTokens(cookie).length > 0
   ) {

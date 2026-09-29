@@ -95,6 +95,27 @@ describe('cacheVerdictFor', () => {
     }
   })
 
+  /**
+   * A preview grant is a whole site's drafts on its preview origin
+   * (`multi-site.md` decisions 13 and 15), so a request carrying one must never
+   * populate, or be answered from, the entry a stranger reads — whichever path it
+   * is on, the host's own route calling `reader.page()` included.
+   */
+  it('refuses a request carrying a preview grant, under either name', () => {
+    const grant = 'a1b2c3d4'.repeat(8)
+    for (const cookie of [
+      `__Host-folio_grant=${grant}`,
+      `folio_grant=${grant}`,
+      `other=1; __Host-folio_grant=${grant}`,
+    ]) {
+      for (const path of ['/experience', '/folio/asset/abc123', '/']) {
+        expect(cacheVerdictFor(req(path, { headers: { cookie } }), BASE), `${path} ${cookie}`).toBe(
+          'bypass',
+        )
+      }
+    }
+  })
+
   it('does not refuse an unrelated cookie', () => {
     expect(cacheVerdictFor(req('/experience', { headers: { cookie: 'hubspotutk=x' } }), BASE)).toBe(
       null,

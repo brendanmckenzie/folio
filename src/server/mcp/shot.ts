@@ -34,10 +34,13 @@
  */
 import type { Blok } from '../../core/doc'
 import type { DocumentKind } from '../../core/schema'
+import { chain, DEFAULT_SITE, type Registry, type SiteRef, sitesUnder } from '../../core/sites'
 import type { StoryMeta } from '../../core/story'
+import { mintGrantCode } from '../auth/grants'
+import type { Actor } from '../auth/roles'
 import { FolioError } from '../errors'
 import { previewPage } from '../pages'
-import type { FolioRuntime } from '../runtime'
+import type { FolioRuntime, SiteRender } from '../runtime'
 import { storyById } from '../stories'
 import type { ReadBindings } from '../types'
 
@@ -148,7 +151,8 @@ export interface CaptureOptions {
   fullPage: boolean
   selector?: string
   /** `authorization`/`cookie`, copied from the caller — nothing else, the same
-   * rule `routes/mcp.ts`'s internal dispatch follows for a v1 tool. */
+   * rule `routes/mcp.ts`'s internal dispatch follows for a v1 tool. **Empty on a
+   * deployment with `sites`**, where the browser redeems a grant instead. */
   headers: Readonly<Record<string, string>>
 }
 
@@ -195,6 +199,40 @@ async function browserErrorMessage(res: Response): Promise<string> {
   return `Browser Rendering answered ${res.status}.`
 }
 
+/* ------------------------------------------------------------ multi-site --- */
+
+/**
+ * The site a multi-site preview renders on (`multi-site.md` decision 13): the
+ * request's scope when that is a site, or the story's own scope when that is one
+ * — otherwise a sentence saying what to do, because a shared or group page is
+ * previewed *on* a site and nothing here can guess which. The site must have a
+ * preview origin, since drafts are served nowhere else.
+ */
+async function renderSiteFor(
+  on: NonNullable<PreviewDocumentContext['sites']>,
+  story: StoryMeta,
+): Promise<(SiteRef & { preview: string; chain: readonly string[] }) | string> {
+  const registry = await on.registry()
+  const owner = story.site ?? DEFAULT_SITE
+  const site =
+    registry.sites.find((s) => s.id === on.scope && sitesUnder(registry, owner).includes(s.id)) ??
+    registry.sites.find((s) => s.id === owner)
+  if (!site) {
+    return `"${story.title}" belongs to '${owner}', which is not a site: call this tool at ${'{base}'}/~<site>/mcp for one of ${sitesUnder(registry, owner).join(', ') || 'no site'} to preview it there.`
+  }
+  if (!site.preview) {
+    return `${site.name} has no preview origin, so its drafts are not served anywhere and there is nothing to screenshot.`
+  }
+  return { ...site, preview: site.preview, chain: chain(registry, site.id) }
+}
+
+/** Whose grant a multi-site screenshot rides on: the token's, or the session's. */
+function holderOf(actor: Actor | null): { tokenId: string } | { sessionId: string } | null {
+  if (actor?.kind === 'token') return { tokenId: actor.id }
+  if (actor?.kind === 'user') return { sessionId: actor.session }
+  return null
+}
+
 /* --------------------------------------------------------- orchestration --- */
 
 export interface PreviewDocumentContext {
@@ -210,6 +248,18 @@ export interface PreviewDocumentContext {
    * fences — so a story outside it answers exactly as an unknown id.
    */
   visible: (story: StoryMeta) => Promise<boolean>
+  /**
+   * Present on a deployment with `sites` (`multi-site.md` decision 13): the
+   * request's scope, its actor and the registry. **Then the browser is handed no
+   * credential of the caller's at all** — `headers` is ignored — and reaches the
+   * draft through a five-minute token (or session) grant redeemed at the site's
+   * preview origin's `site/enter`, which is the only place drafts are served there.
+   */
+  sites?: {
+    scope: string | null
+    actor: Actor | null
+    registry: () => Promise<Registry>
+  }
 }
 
 type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
@@ -221,13 +271,14 @@ async function renderDraftHtml(
   bindings: ReadBindings,
   story: StoryMeta,
   target: PreviewTarget & { kind: 'page' | 'global' },
+  site?: SiteRender,
 ): Promise<string> {
-  const res = await previewPage(
-    rt,
-    bindings,
-    story,
-    target.kind === 'global' ? { bare: true, mode: 'draft' } : { mode: 'draft' },
-  )
+  const res = await previewPage(rt, bindings, story, {
+    ...(target.kind === 'global' ? { bare: true } : {}),
+    mode: 'draft',
+    // On a deployment with `sites`, resolved on the site it renders for.
+    ...(site ? { site } : {}),
+  })
   return res.text()
 }
 
@@ -279,7 +330,9 @@ async function run(
   const story = await storyById(bindings.db, id)
   if (!story || !(await ctx.visible(story))) throw new FolioError('not_found', 'Unknown document')
 
-  const decorated = rt.withUrls(story)
+  const on = ctx.sites ? await renderSiteFor(ctx.sites, story) : null
+  if (typeof on === 'string') return { content: [text(on)] }
+  const decorated = on ? rt.urlsFor(on)(story) : rt.withUrls(story)
   const target = chooseTarget(rt.base, decorated, rt.typeOf(story.type)?.kind)
 
   if (target.kind === 'none') {
@@ -294,6 +347,28 @@ async function run(
 
   const url = new URL(target.url, ctx.origin).toString()
   const caption = captionFor(target)
+  /**
+   * What the browser is sent to, per attempt, and with which headers. Single-site:
+   * the draft URL with the caller's own credential, as always. Multi-site: a fresh
+   * code for every attempt — each is a new browser with no cookie jar — redeemed at
+   * `site/enter`, and **no header of the caller's**.
+   */
+  const visit = async (): Promise<{ url: string; headers: Readonly<Record<string, string>> }> => {
+    if (!on || !ctx.sites) return { url, headers: ctx.headers }
+    const next = new URL(url)
+    next.searchParams.set('_folio_id', story.id)
+    const path = `${next.pathname}${next.search}`
+    const holder = holderOf(ctx.sites.actor)
+    // No holder is `auth: 'open'`, where a preview origin shows drafts to anyone.
+    if (!holder) return { url: next.toString(), headers: {} }
+    // Five minutes whoever calls (decision 13): a session caller's screenshot must
+    // not leave a day-long grant behind in a browser nobody owns.
+    const minted = await mintGrantCode(bindings.db, holder, on.id, undefined, { short: true })
+    const enter = new URL(`${on.preview}${rt.base}/site/enter`)
+    enter.searchParams.set('code', minted.code)
+    enter.searchParams.set('next', path)
+    return { url: enter.toString(), headers: {} }
+  }
 
   // A named uid has to exist in the draft *document* before anything is
   // attempted. Absent-from-the-document and present-but-unclippable (a
@@ -321,7 +396,15 @@ async function run(
       text(
         `${reason} ${caption} Here is the draft URL and its rendered HTML instead.\n\nURL: ${url}`,
       ),
-      text(await renderDraftHtml(rt, bindings, story, target)),
+      text(
+        await renderDraftHtml(
+          rt,
+          bindings,
+          story,
+          target,
+          on ? { site: on, surface: 'preview', chain: on.chain } : undefined,
+        ),
+      ),
     ],
   })
 
@@ -329,18 +412,24 @@ async function run(
     return degrade('No `browser` binding is configured, so no screenshot was taken.')
   }
 
-  const headers = ctx.headers
+  // A global's bare preview is an admin-origin route behind the caller's session,
+  // and on a multi-site deployment the browser carries no credential of theirs.
+  if (on && target.kind === 'global') {
+    return degrade(
+      'On a deployment with sites a global has no preview-origin page to photograph, so no screenshot was taken.',
+    )
+  }
+
   let png: Uint8Array | undefined
   let note = caption
 
   if (args.blok !== undefined) {
     try {
       png = await captureScreenshot(bindings.browser, {
-        url,
+        ...(await visit()),
         viewport: args.viewport,
         fullPage: false,
         selector: clipSelector(args.blok),
-        headers,
       })
       note += ` Clipped to block "${args.blok}" (${blokType}).`
     } catch {
@@ -354,10 +443,9 @@ async function run(
   if (!png) {
     try {
       png = await captureScreenshot(bindings.browser, {
-        url,
+        ...(await visit()),
         viewport: args.viewport,
         fullPage: args.fullPage,
-        headers,
       })
       if (args.blok !== undefined) {
         note += ` Block "${args.blok}" (${blokType}) has no clip target in the draft render — it does not render a host element there — so this is the whole viewport instead.`

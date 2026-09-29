@@ -734,8 +734,10 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // Handing a browser its own session id is not a credential leak — the hash
     // cannot be presented as the token — but it is internal detail with no
     // reader, and the smallest response is the one that cannot leak later.
+    // A preview grant never reaches here — `resolveActor` answers one only when
+    // asked for a preview origin, and this asks for none — so it is no one.
     const safe =
-      actor === null
+      actor === null || actor.kind === 'grant'
         ? null
         : actor.kind === 'user'
           ? {

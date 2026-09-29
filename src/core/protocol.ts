@@ -666,12 +666,15 @@ export function parseSpaceFrame(raw: string | ArrayBuffer): SpaceFrame | null {
  * Admin <-> preview postMessage protocol.
  *
  * A second, unrelated wire: the admin and its preview iframe, talking over
- * `window.postMessage` instead of a socket. Same-origin is a hard requirement
- * here, not a courtesy check — both sides post with an explicit target origin
- * of `window.location.origin` and refuse anything whose `event.origin` is not
- * that origin, so a `previewUrl` (see core/story.ts, computed in a host's
- * `route` config) pointed at a different origin does not degrade gracefully,
- * it simply never talks to the editor at all. `v` rides on every frame for
+ * `window.postMessage` instead of a socket. The origin check is a hard
+ * requirement here, not a courtesy — both sides post with an explicit target
+ * origin and refuse anything whose `event.origin` is not the one expected. With
+ * no `sites` that origin is `window.location.origin` on both ends, so a
+ * `previewUrl` (see core/story.ts, computed in a host's `route` config) pointed
+ * at a different origin never talks to the editor at all. On a multi-site
+ * deployment the admin accepts frames only from the site's preview origin and
+ * the iframe it owns, and the preview posts only to `sites.admin`, written into
+ * its bootstrap (`multi-site.md` decision 13). `v` rides on every frame for
  * the same reason it rides the socket: a mismatch should be visible, not
  * silently misapplied, even though in practice both ends of this channel are
  * the same deploy loaded a moment apart.
