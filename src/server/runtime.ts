@@ -1212,7 +1212,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     // applies when the argument itself is `undefined`, and skipping past it
     // to reach `logger` would mean naming the third parameter, which JS has
     // no syntax for.
-    cachePurgeHooks<Env>(globals, undefined, logger),
+    cachePurgeHooks<Env>(
+      globals,
+      undefined,
+      logger,
+      sites ? { registry: sites.registry, layered: sites.layered } : undefined,
+    ),
   ]
 
   const hookRunner = (hookCtx: HookRunnerCtx): HookRunner<unknown> =>

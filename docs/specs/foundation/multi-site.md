@@ -1939,3 +1939,32 @@ Where the spec was wrong or silent:
     by path and the folder list, and the asset lists in `assets.ts` and
     `asset-bulk.ts` (all phase 7). `test/workers/query-plan.test.ts` pins the hot
     story and redirect readers on a one-scope and a three-scope chain.
+
+### Phase 6 (2026-09-29)
+
+- **`cacheTags` reads `resolution.site` and `resolution.path`** and emits decision 15's
+  set; without `site` the code path is the old one, and `single-site-pin.test.ts` plus an
+  exact-array test in `cache-tags.test.ts` pin it. The scoped builders (`siteTag`,
+  `scopedGlobalTag`, `scopedTypeTag`, `scopedAnyTypeTag`, `pathTag`) are exported from
+  `core/cache-tags.ts` and are the only spelling either end uses. The shared layer's tag
+  is the unscoped `global:<name>`; every other chain scope gets `@<scope>`, whether or not
+  the layer exists. `path:` values are `encodeURIComponent`ed like every other tag, so
+  `stores/a` is `path:alpha:stores%2Fa`.
+- **A degraded page keeps `site:<id>`, its `path:` tag and its own `story:`.** The path
+  tag is kept because a path change is one of the things that must still reach it.
+- **The purger takes `sites?: { registry, layered }` as a fourth parameter**, wired at the
+  one construction line in `runtime.ts`. With it, `published`, `unpublished` and `updated`
+  (title) purge the owner's scoped set with `path:` fan-out through `sitesUnder`; a layer
+  of a configured global purges only its layer tag (plus `story:`). A registry that cannot
+  be read flushes (`purgeEverything`) rather than guess a fan-out.
+- **`checkpointed` still purges nothing.** The plan lists it among the scoped events, but a
+  checkpoint publishes nothing, so no cached page describes it; giving it a purge would
+  flush pages on every autosave-adjacent checkpoint for no staleness. Left as it was.
+- **Purge functions return what they issued** (`{ tags } | { everything: true }`), also
+  when the capability is absent, so phase 7 can put it in the payload's `purge`.
+  `purgeSite(id, waitUntil, opts?)` is exported and purges `site:<id>` now and after
+  `SITE_PURGE_DELAY_MS` (25 s) under `waitUntil`; nothing calls it yet (phase 7).
+- **Left to phase 7:** the owner-scoped `deleted`, `pathsChanged` and `redirectsChanged`
+  purges. They still emit today's unscoped tags on a multi-site deployment: `story:<id>`
+  is right, the unscoped `type:` and `global:` tags reach nothing a multi-site render
+  carries, and the `path:` tags are missing.

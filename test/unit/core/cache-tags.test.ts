@@ -8,7 +8,12 @@ import {
   formTag,
   globalTag,
   MAX_CACHE_TAGS,
+  pathTag,
   SITE_TAG,
+  scopedAnyTypeTag,
+  scopedGlobalTag,
+  scopedTypeTag,
+  siteTag,
   storyTag,
   typeTag,
 } from '../../../src/core/cache-tags'
@@ -348,5 +353,127 @@ describe('cacheHeaders', () => {
     expect(cacheControl(-5)).toContain('max-age=0')
     expect(cacheControl(Number.NaN)).toContain('max-age=0')
     expect(cacheControl(12.7)).toContain('max-age=12')
+  })
+})
+
+describe('cacheTags on a multi-site render (decision 15)', () => {
+  const site = (over: Partial<NonNullable<Resolution['site']>> = {}) => ({
+    id: 'alpha',
+    name: 'Alpha',
+    group: 'north',
+    status: 'live' as const,
+    surface: 'live' as const,
+    chain: ['alpha', 'north', 'shared'],
+    layered: ['header', 'siteSettings'],
+    ...over,
+  })
+  const multi = (over: Partial<Resolution> = {}): Resolution => ({
+    ...pageResolution(),
+    globals: {},
+    site: site(),
+    path: 'stores',
+    ...over,
+  })
+
+  it("single-site keeps today's exact set: no scoped tag, no path tag", () => {
+    const { tags } = cacheTags(pageResolution(), { story: 'sty_page' })
+    expect(tags).toEqual(
+      [
+        'site',
+        'story:sty_page',
+        'story:sty_b',
+        'story:rec_c',
+        'global:header',
+        'type:insight',
+      ].sort(),
+    )
+    expect(
+      tags.some((t) => t.includes('@') || t.startsWith('path:') || t.startsWith('site:')),
+    ).toBe(false)
+  })
+
+  it('emits the full scoped set for a render on alpha', () => {
+    const { tags, degraded } = cacheTags(multi(), { story: 'sty_page' })
+    expect(degraded).toBe(false)
+    expect(tags).toEqual(
+      [
+        'site:alpha',
+        'path:alpha:stores',
+        'story:sty_page',
+        'story:sty_b',
+        'story:rec_c',
+        'global:header',
+        'global:header@alpha',
+        'global:header@north',
+        'global:siteSettings',
+        'global:siteSettings@alpha',
+        'global:siteSettings@north',
+        'type:insight@alpha',
+        'type:insight@north',
+        'type:insight@shared',
+      ].sort(),
+    )
+    expect(tags).not.toContain(SITE_TAG)
+  })
+
+  it('emits the layer tags for layers that have no row: the first publish must reach the page', () => {
+    // `resolution.globals` is empty: no layer of `header` has been rendered from
+    // a row, yet every scope's tag is there.
+    const { tags } = cacheTags(multi({ globals: {} }), { story: null })
+    for (const name of ['header', 'siteSettings']) {
+      expect(tags).toContain(scopedGlobalTag(name, 'shared'))
+      expect(tags).toContain(scopedGlobalTag(name, 'north'))
+      expect(tags).toContain(scopedGlobalTag(name, 'alpha'))
+    }
+  })
+
+  it("spells shared's layer unscoped and every other scope with @", () => {
+    expect(scopedGlobalTag('header', 'shared')).toBe(globalTag('header'))
+    expect(scopedGlobalTag('header', 'north')).toBe('global:header@north')
+    expect(scopedTypeTag('event', 'shared')).toBe('type:event@shared')
+    expect(scopedAnyTypeTag('alpha')).toBe('type:*@alpha')
+    expect(pathTag('alpha', 'a/b')).toBe('path:alpha:a%2Fb')
+    expect(siteTag('alpha')).toBe('site:alpha')
+  })
+
+  it('tags an unfiltered collection per chain scope', () => {
+    const { tags } = cacheTags(
+      multi({
+        collections: { 'not json': { items: [], total: 0, page: 1, perPage: 1, pages: 0 } },
+      }),
+      { story: null },
+    )
+    expect(tags).toEqual(expect.arrayContaining(['type:*@alpha', 'type:*@north', 'type:*@shared']))
+    expect(tags).not.toContain(ANY_TYPE_TAG)
+  })
+
+  it('leaves out a group the site does not have', () => {
+    const { tags } = cacheTags(
+      multi({ site: site({ id: 'bravo', group: null, chain: ['bravo', 'shared'] }) }),
+      {
+        story: null,
+      },
+    )
+    expect(tags.filter((t) => t.includes('north'))).toEqual([])
+    expect(tags).toContain('type:insight@bravo')
+  })
+
+  it('omits the path tag when resolve was given no path', () => {
+    const { tags } = cacheTags(multi({ path: undefined }), { story: null })
+    expect(tags.some((t) => t.startsWith('path:'))).toBe(false)
+  })
+
+  it('a degraded page keeps site:, its path and its own story', () => {
+    const stories = Object.fromEntries(
+      Array.from({ length: MAX_CACHE_TAGS + 1 }, (_, i) => [
+        `sty_${i}`,
+        { id: `sty_${i}`, type: 'page', title: 'x', slug: 'x', path: 'x' },
+      ]),
+    ) as unknown as Resolution['stories']
+    const result = cacheTags(multi({ stories }), { story: 'sty_page' })
+    expect(result).toEqual({
+      tags: ['site:alpha', 'path:alpha:stores', 'story:sty_page'],
+      degraded: true,
+    })
   })
 })

@@ -18,6 +18,7 @@
  * be is `server/cache-purge.ts`'s platform call.
  */
 import type { Resolution } from './resolve'
+import { SHARED_SCOPE } from './sites'
 
 /** Always present, so a page over the tag budget is still reachable by the two
  * whole-site triggers (decision 8). Nothing purges it by name. */
@@ -66,6 +67,23 @@ export const typeTag = (name: string) => `type:${encode(name)}`
  * save purges this one tag with no lookup at all
  * (`../../docs/specs/content-model/forms.md` architecture decision 8). */
 export const formTag = (id: string) => `form:${encode(id)}`
+
+/**
+ * The scoped vocabulary, emitted only when the render carries `resolution.site`
+ * (`../../docs/specs/foundation/multi-site.md` decision 15). Same rule as the
+ * three above: the purge side in `server/cache-purge.ts` builds its tags from
+ * these, so the two ends cannot spell a scope differently.
+ *
+ * `shared` is the bottom of every chain and its layer keeps the unscoped
+ * `global:<name>`, so the first layer of a global is spelled as it always was.
+ */
+export const siteTag = (id: string) => `site:${encode(id)}`
+export const scopedGlobalTag = (name: string, scope: string) =>
+  scope === SHARED_SCOPE ? globalTag(name) : `${globalTag(name)}@${encode(scope)}`
+export const scopedTypeTag = (name: string, scope: string) => `${typeTag(name)}@${encode(scope)}`
+export const scopedAnyTypeTag = (scope: string) => `${ANY_TYPE_TAG}@${encode(scope)}`
+/** The page at `path` as `site` serves it, whichever scope owns the row. */
+export const pathTag = (site: string, path: string) => `path:${encode(site)}:${encode(path)}`
 
 /** The cache-tag set for a rendered page, and whether it had to be coarsened. */
 export interface CacheTags {
@@ -157,6 +175,25 @@ function collectionTypes(keys: readonly string[]): { types: string[]; any: boole
  * site            always
  * ```
  *
+ * With `resolution.site` (multi-site) the set is scoped instead (decision 15),
+ * and **single-site is untouched, byte for byte**:
+ *
+ * ```
+ * site:<id>                      always, in place of `site`
+ * global:<name>                  every configured global and the settings type
+ * global:<name>@<scope>          the same, per chain scope but `shared`, whether
+ *                                or not that layer exists yet
+ * type:<name>@<scope>            per collection type, per chain scope
+ * type:*@<scope>                 an unfiltered collection, per chain scope
+ * path:<id>:<path>               the page's own path, when resolve was given one
+ * story:, form:                  as above
+ * ```
+ *
+ * A layer tag is emitted for a layer that has no row yet: an editor's first
+ * publish of a site's header is a purge of `global:header@alpha`, and if no
+ * cached page carried it the purge would reach nothing and every page would
+ * serve the old header for its whole TTL.
+ *
  * `type:` is what makes collections work without a membership table: an index
  * page over `insight` is tagged `type:insight`, and publishing any insight
  * purges by that tag without anybody knowing which pages exist.
@@ -165,17 +202,37 @@ function collectionTypes(keys: readonly string[]): { types: string[]; any: boole
  * renders is readable.
  */
 export function cacheTags(resolution: Resolution, opts: CacheTagOptions): CacheTags {
-  const tags = new Set<string>([SITE_TAG])
+  const site = resolution.site
+  const pathTags = site && resolution.path !== undefined ? [pathTag(site.id, resolution.path)] : []
+  const tags = new Set<string>([site ? siteTag(site.id) : SITE_TAG, ...pathTags])
   if (opts.story) tags.add(storyTag(opts.story))
   // Ancestors are in here too, which is what covers a breadcrumb: rename a
   // section and every page under it is purged, with no edge ever recorded.
   for (const id of Object.keys(resolution.stories)) tags.add(storyTag(id))
-  for (const name of Object.keys(resolution.globals ?? {})) tags.add(globalTag(name))
+  if (site) {
+    // Every configured global, not only those this page rendered: the page may
+    // not use the header today, but the layer tag has to be there on the day it
+    // does and the cache has not been purged since.
+    const layered = new Set([...site.layered, ...Object.keys(resolution.globals ?? {})])
+    for (const name of layered) {
+      for (const scope of site.chain) tags.add(scopedGlobalTag(name, scope))
+      tags.add(globalTag(name))
+    }
+  } else {
+    for (const name of Object.keys(resolution.globals ?? {})) tags.add(globalTag(name))
+  }
   for (const id of Object.keys(resolution.forms ?? {})) tags.add(formTag(id))
 
   const collections = collectionTypes(Object.keys(resolution.collections ?? {}))
-  for (const type of collections.types) tags.add(typeTag(type))
-  if (collections.any) tags.add(ANY_TYPE_TAG)
+  if (site) {
+    for (const scope of site.chain) {
+      for (const type of collections.types) tags.add(scopedTypeTag(type, scope))
+      if (collections.any) tags.add(scopedAnyTypeTag(scope))
+    }
+  } else {
+    for (const type of collections.types) tags.add(typeTag(type))
+    if (collections.any) tags.add(ANY_TYPE_TAG)
+  }
   // The *members* as well as the type. `type:` covers membership changing —
   // something published, unpublished or deleted — but an index page also
   // renders each item's title and URL, and renaming one of them changes neither
@@ -198,7 +255,11 @@ export function cacheTags(resolution: Resolution, opts: CacheTagOptions): CacheT
     // by its own publish and by the two whole-site triggers, and `degraded`
     // says so out loud so a host can log it rather than discover it.
     return {
-      tags: opts.story ? [SITE_TAG, storyTag(opts.story)] : [SITE_TAG],
+      tags: [
+        site ? siteTag(site.id) : SITE_TAG,
+        ...pathTags,
+        ...(opts.story ? [storyTag(opts.story)] : []),
+      ],
       degraded: true,
     }
   }

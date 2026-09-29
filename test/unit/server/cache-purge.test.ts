@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from 'vitest'
 import { ANY_TYPE_TAG, formTag, globalTag, storyTag, typeTag } from '../../../src/core/cache-tags'
 import type { Doc } from '../../../src/core/doc'
+import type { Registry } from '../../../src/core/sites'
 import type { StoryMeta } from '../../../src/core/story'
 import {
   cachePurgeHooks,
   MAX_PURGE_CALLS,
   MAX_TAGS_PER_PURGE,
+  purgeSite,
+  SITE_PURGE_DELAY_MS,
   purgeFormLayout,
   purgePlan,
   type PurgeCapability,
@@ -461,5 +464,240 @@ describe('cachePurgeHooks', () => {
     await fire(hooks, 'unpublished', { ...BASE, story: STORY })
 
     expect(resolved).toBe(2)
+  })
+})
+
+describe('multi-site purges (decisions 4 and 15)', () => {
+  const registry: Registry = {
+    groups: [{ id: 'north', name: 'North' }],
+    sites: ['default', 'alpha', 'gamma', 'bravo'].map((id) => ({
+      id,
+      name: id,
+      group: id === 'alpha' || id === 'gamma' ? 'north' : null,
+      status: 'live' as const,
+      hosts: [],
+      preview: null,
+    })),
+  }
+  const hooksFor = (capability: PurgeCapability) =>
+    cachePurgeHooks<Env>(['header'], capability, undefined, {
+      registry: async () => registry,
+      layered: ['header', 'siteSettings'],
+    })
+  const owned = (site: string, over: Partial<StoryMeta> = {}): StoryMeta => ({
+    ...STORY,
+    id: 'sty_ev',
+    type: 'event',
+    path: 'events/a',
+    site,
+    ...over,
+  })
+  const publish = (hooks: FolioHooks<Env>, story: StoryMeta) =>
+    fire(hooks, 'published', { ...BASE, story, doc: DOC, version: VERSION, publishedAt: 1 })
+
+  it('a publish in bravo purges no tag an alpha render carries', async () => {
+    const { calls, capability } = recorder()
+    await publish(hooksFor(capability), owned('bravo'))
+    expect(new Set(calls[0]!.tags)).toEqual(
+      new Set(['story:sty_ev', 'type:event@bravo', 'type:*@bravo', 'path:bravo:events%2Fa']),
+    )
+    // alpha's chain is alpha, north, shared: none of its tags is bravo's.
+    expect(calls[0]!.tags!.some((t) => t.includes('alpha') || t.endsWith('@north'))).toBe(false)
+  })
+
+  it("a publish in a group fans its path out over the group's sites only", async () => {
+    const { calls, capability } = recorder()
+    await publish(hooksFor(capability), owned('north'))
+    expect(new Set(calls[0]!.tags)).toEqual(
+      new Set([
+        'story:sty_ev',
+        'type:event@north',
+        'type:*@north',
+        'path:alpha:events%2Fa',
+        'path:gamma:events%2Fa',
+      ]),
+    )
+  })
+
+  it('a publish in shared fans its path out over every site', async () => {
+    const { calls, capability } = recorder()
+    await publish(hooksFor(capability), owned('shared', { path: 'stores' }))
+    expect(new Set(calls[0]!.tags)).toEqual(
+      new Set([
+        'story:sty_ev',
+        'type:event@shared',
+        'type:*@shared',
+        'path:default:stores',
+        'path:alpha:stores',
+        'path:gamma:stores',
+        'path:bravo:stores',
+      ]),
+    )
+  })
+
+  it('a fork publishing purges the path on the forking site (a story without a path adds none)', async () => {
+    const { calls, capability } = recorder()
+    await publish(hooksFor(capability), owned('alpha', { path: 'stores', type: 'page' }))
+    expect(calls[0]!.tags).toContain('path:alpha:stores')
+    const unrouted = recorder()
+    await publish(hooksFor(unrouted.capability), owned('alpha', { path: null }))
+    expect(unrouted.calls[0]!.tags!.some((t) => t.startsWith('path:'))).toBe(false)
+  })
+
+  it('unpublish purges the same set as publish', async () => {
+    const a = recorder()
+    const b = recorder()
+    await publish(hooksFor(a.capability), owned('north'))
+    await fire(hooksFor(b.capability), 'unpublished', { ...BASE, story: owned('north') })
+    expect(b.calls[0]!.tags).toEqual(a.calls[0]!.tags)
+  })
+
+  it('a first layer publish purges the layer tag, the unscoped one for shared', async () => {
+    const shared = recorder()
+    await publish(
+      hooksFor(shared.capability),
+      owned('shared', { id: 'sng_header:shared', type: 'header', path: null }),
+    )
+    expect(new Set(shared.calls[0]!.tags)).toEqual(
+      new Set(['story:sng_header%3Ashared', 'global:header']),
+    )
+
+    const group = recorder()
+    await publish(
+      hooksFor(group.capability),
+      owned('north', { id: 'sng_header:north', type: 'header', path: null }),
+    )
+    expect(group.calls[0]!.tags).toContain('global:header@north')
+
+    const site = recorder()
+    await publish(
+      hooksFor(site.capability),
+      owned('alpha', { id: 'sng_siteSettings:alpha', type: 'siteSettings', path: null }),
+    )
+    expect(site.calls[0]!.tags).toContain('global:siteSettings@alpha')
+  })
+
+  it('a retitle purges the story and its path fan-out, not a type', async () => {
+    const { calls, capability } = recorder()
+    await fire(hooksFor(capability), 'updated', {
+      ...BASE,
+      story: owned('north'),
+      changed: ['title'],
+    })
+    expect(new Set(calls[0]!.tags)).toEqual(
+      new Set(['story:sty_ev', 'path:alpha:events%2Fa', 'path:gamma:events%2Fa']),
+    )
+  })
+
+  it("stays byte-identical without a registry: today's unscoped tags, whatever story.site says", async () => {
+    const { calls, capability } = recorder()
+    await fire(cachePurgeHooks<Env>([], capability), 'published', {
+      ...BASE,
+      story: owned('alpha'),
+      doc: DOC,
+      version: VERSION,
+      publishedAt: 1,
+    })
+    expect(new Set(calls[0]!.tags)).toEqual(new Set(['story:sty_ev', 'type:event', ANY_TYPE_TAG]))
+  })
+
+  it('returns the set it issued, even with no capability to carry it out', async () => {
+    const hooks = hooksFor(ABSENT)
+    const issued = await (hooks.published as (e: unknown) => Promise<unknown>)({
+      ...BASE,
+      story: owned('bravo'),
+      doc: DOC,
+      version: VERSION,
+      publishedAt: 1,
+    })
+    expect(issued).toEqual({
+      tags: ['path:bravo:events%2Fa', 'story:sty_ev', 'type:*@bravo', 'type:event@bravo'],
+    })
+  })
+
+  it('flushes rather than guess when the registry cannot be read', async () => {
+    const { calls, capability } = recorder()
+    const error = vi.fn()
+    const hooks = cachePurgeHooks<Env>(
+      ['header'],
+      capability,
+      { warn() {}, error, info() {} } as never,
+      {
+        registry: async () => {
+          throw new Error('d1 down')
+        },
+        layered: [],
+      },
+    )
+    await publish(hooks, owned('north'))
+    expect(calls).toEqual([{ purgeEverything: true }])
+    expect(error).toHaveBeenCalled()
+  })
+
+  it('still respects 100 tags per call on a shared publish across many sites', async () => {
+    const big: Registry = {
+      groups: [],
+      sites: Array.from({ length: 150 }, (_, i) => ({
+        id: `s${i}`,
+        name: `s${i}`,
+        group: null,
+        status: 'live' as const,
+        hosts: [],
+        preview: null,
+      })),
+    }
+    const { calls, capability } = recorder()
+    const hooks = cachePurgeHooks<Env>([], capability, undefined, {
+      registry: async () => big,
+      layered: [],
+    })
+    await publish(hooks, owned('shared'))
+    expect(calls.length).toBe(2)
+    expect(calls.every((c) => c.tags!.length <= MAX_TAGS_PER_PURGE)).toBe(true)
+    expect(calls.flatMap((c) => c.tags!)).toHaveLength(153)
+  })
+
+  describe('purgeSite', () => {
+    it('purges site:<id> now and again 25 seconds later under waitUntil', async () => {
+      const { calls, capability } = recorder()
+      const pending: Promise<unknown>[] = []
+      const slept: number[] = []
+      const issued = await purgeSite('alpha', (p) => pending.push(p), {
+        capability,
+        sleep: async (ms) => {
+          slept.push(ms)
+        },
+      })
+      expect(issued).toEqual({ tags: ['site:alpha'] })
+      expect(calls).toEqual([{ tags: ['site:alpha'] }])
+      expect(pending).toHaveLength(1)
+      await Promise.all(pending)
+      expect(slept).toEqual([25_000])
+      expect(SITE_PURGE_DELAY_MS).toBe(25_000)
+      expect(calls).toEqual([{ tags: ['site:alpha'] }, { tags: ['site:alpha'] }])
+    })
+
+    it('does not run the second purge until the delay has elapsed', async () => {
+      const { calls, capability } = recorder()
+      const pending: Promise<unknown>[] = []
+      let release: () => void = () => {}
+      await purgeSite('alpha', (p) => pending.push(p), {
+        capability,
+        sleep: () => new Promise<void>((r) => (release = r)),
+      })
+      await Promise.resolve()
+      expect(calls).toHaveLength(1)
+      release()
+      await Promise.all(pending)
+      expect(calls).toHaveLength(2)
+    })
+  })
+
+  it('reindex and migrate keep their meaning: reindex flushes, migrate is by story id', async () => {
+    const { calls, capability } = recorder()
+    const hooks = hooksFor(capability)
+    await fire(hooks, 'reindexed', { ...BASE, count: 3 })
+    await fire(hooks, 'migrated', { ...BASE, ids: ['sty_a'], migrations: ['m'] })
+    expect(calls).toEqual([{ purgeEverything: true }, { tags: ['story:sty_a'] }])
   })
 })

@@ -37,7 +37,20 @@
  * — so everything computable lives in `purgePlan` and `core/cache-tags.ts`, and
  * `scripts/cache-probe.mjs` is what exercises the rest against a deployment.
  */
-import { ANY_TYPE_TAG, formTag, globalTag, storyTag, typeTag } from '../core/cache-tags'
+import {
+  ANY_TYPE_TAG,
+  formTag,
+  globalTag,
+  pathTag,
+  scopedAnyTypeTag,
+  scopedGlobalTag,
+  scopedTypeTag,
+  siteTag,
+  storyTag,
+  typeTag,
+} from '../core/cache-tags'
+import { DEFAULT_SITE, type Registry, singletonTypeOf, sitesUnder } from '../core/sites'
+import type { StoryMeta } from '../core/story'
 import type { FolioHooks } from './hooks'
 import type { FolioLogger } from './types'
 
@@ -84,6 +97,32 @@ const platformPurge: PurgeCapability = async () => {
   } catch {
     return null
   }
+}
+
+/**
+ * How long after a registry edit the second `site:<id>` purge runs
+ * (`multi-site.md` decision 4). Past any other isolate's 10-second registry
+ * snapshot and any render that began inside it, and inside `waitUntil`'s limit.
+ */
+export const SITE_PURGE_DELAY_MS = 25_000
+
+/**
+ * What a purge asked Workers Cache for: exactly the set the purger computed,
+ * whether or not the capability was there to carry it out. The shape of a hook
+ * payload's `purge` (`multi-site.md` decision 16), so a headless host that
+ * caches on its own entrypoint can replay it.
+ */
+export type PurgeIssued = { tags: string[] } | { everything: true }
+
+/**
+ * What the scoped triggers need from a multi-site deployment: the registry (for
+ * `sitesUnder`'s path fan-out) and the documents that layer. Absent on a
+ * deployment with no `sites`, and then every trigger below is today's, exactly.
+ */
+export interface PurgeSites<Env> {
+  registry: (env: Env) => Promise<Registry>
+  /** `FolioConfig.globals` plus the settings type. */
+  layered: readonly string[]
 }
 
 /** What one trigger's tags turn into: some number of calls, or one flush. */
@@ -143,6 +182,43 @@ function tagsFor(id: string, type: string, globals: readonly string[]): string[]
 }
 
 /**
+ * The scoped counterpart of `tagsFor`: what publishing, unpublishing or retitling
+ * a story owned by one scope invalidates (`multi-site.md` decision 15).
+ *
+ * - A **layer** of a configured global (or the settings type) purges
+ *   `global:<name>` for the shared layer and `global:<name>@<scope>` for any
+ *   other. Pages carry that tag whether or not the layer existed when they
+ *   rendered, which is what makes a first publish reach them.
+ * - Anything else purges `type:<name>@<scope>` and `type:*@<scope>`, and its own
+ *   `path:<site>:<path>` on every site the scope reaches: the owner is `shared`,
+ *   so all of them; a group, its sites; a site, itself. The path tag is what
+ *   reaches a page that *fell back* to this row, which carries neither the
+ *   story's type nor a collection over it.
+ *
+ * `story:` in every case, as before. A publish in `bravo` produces no tag an
+ * `alpha` render carries, unless `bravo` is in `alpha`'s chain.
+ */
+function scopedTagsFor(
+  story: StoryMeta,
+  registry: Registry,
+  layered: readonly string[],
+  withType = true,
+): string[] {
+  const scope = story.site ?? DEFAULT_SITE
+  const tags = [storyTag(story.id)]
+  const layer = singletonTypeOf(story.id)
+  if (layer && layered.includes(layer.type)) {
+    tags.push(scopedGlobalTag(layer.type, story.site ?? layer.scope))
+    return tags
+  }
+  if (withType) tags.push(scopedTypeTag(story.type, scope), scopedAnyTypeTag(scope))
+  if (story.path !== null) {
+    for (const site of sitesUnder(registry, scope)) tags.push(pathTag(site, story.path))
+  }
+  return tags
+}
+
+/**
  * The purge primitive every hook below shares, and the one `purgeFormLayout`
  * (this file, below) reaches for directly when a save has no event of its own
  * to hang off.
@@ -159,16 +235,20 @@ function tagsFor(id: string, type: string, globals: readonly string[]): string[]
 function createPurger(
   capability: PurgeCapability,
   logger: FolioLogger,
-): (trigger: string, tags: readonly string[]) => Promise<void> {
+): (trigger: string, tags: readonly string[]) => Promise<PurgeIssued | null> {
   return async (trigger, tags) => {
     const plan = purgePlan(tags)
-    if (plan.batches.length === 0 && !plan.everything) return
+    if (plan.batches.length === 0 && !plan.everything) return null
+    const issued: PurgeIssued = plan.everything
+      ? { everything: true }
+      : { tags: plan.batches.flat() }
 
     const fn = await capability()
     // Not an error, and not logged as one: this is `wrangler dev`, a test, or a
     // host that has not turned caching on, and for all three the right answer is
-    // exactly the behaviour that existed before this file (decision 5).
-    if (!fn) return
+    // exactly the behaviour that existed before this file (decision 5). The set
+    // is still answered, so a payload's `purge` is what Folio computed.
+    if (!fn) return issued
 
     try {
       if (plan.everything) {
@@ -179,7 +259,7 @@ function createPurger(
         if (!result.success) {
           logger.error(`folio: ${trigger} could not flush the cache`, result.errors)
         }
-        return
+        return issued
       }
       for (const batch of plan.batches) {
         const result = await fn({ tags: batch })
@@ -195,7 +275,36 @@ function createPurger(
       // here is a genuine runtime error and worth a line of its own.
       logger.error(`folio: ${trigger} failed to purge`, err)
     }
+    return issued
   }
+}
+
+/**
+ * A registry edit touching `id` (`multi-site.md` decision 4): `site:<id>` purged
+ * now, and again `SITE_PURGE_DELAY_MS` later under the request's `waitUntil`.
+ *
+ * **Twice, because the first is not enough.** Another isolate may hold a
+ * registry snapshot up to ten seconds old, and a render that began inside that
+ * window can put a page into the cache *after* the first purge landed. The second
+ * runs past every such snapshot. Returns the first purge's set; the second is the
+ * same tag by construction.
+ */
+export async function purgeSite(
+  id: string,
+  waitUntil: (p: Promise<unknown>) => void,
+  opts: {
+    capability?: PurgeCapability
+    logger?: FolioLogger
+    /** Injectable so a test does not wait 25 real seconds. */
+    sleep?: (ms: number) => Promise<void>
+  } = {},
+): Promise<PurgeIssued | null> {
+  const purge = createPurger(opts.capability ?? platformPurge, opts.logger ?? console)
+  const sleep = opts.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+  const tag = [siteTag(id)]
+  const first = await purge('site change', tag)
+  waitUntil(sleep(SITE_PURGE_DELAY_MS).then(() => purge('site change (second)', tag)))
+  return first
 }
 
 /**
@@ -232,13 +341,66 @@ export function cachePurgeHooks<Env>(
   globals: readonly string[],
   capability: PurgeCapability = platformPurge,
   logger: FolioLogger = console,
+  sites?: PurgeSites<Env>,
 ): FolioHooks<Env> {
   const purge = createPurger(capability, logger)
 
-  return {
-    published: ({ story }) => purge('publish', tagsFor(story.id, story.type, globals)),
+  /**
+   * The tags for a story-carrying event: today's on a deployment with no
+   * `sites`, the owner's scoped set otherwise. A registry that cannot be read
+   * flushes rather than guessing which sites a shared row reaches: a wrong
+   * fan-out is a stale page nobody is told about.
+   */
+  const storyPurge = async (
+    trigger: string,
+    env: Env,
+    story: StoryMeta,
+    today: () => string[],
+    scoped: (registry: Registry, layered: readonly string[]) => string[],
+  ): Promise<PurgeIssued | null> => {
+    if (!sites) return purge(trigger, today())
+    let registry: Registry
+    try {
+      registry = await sites.registry(env)
+    } catch (err) {
+      logger.error(`folio: ${trigger} could not read the registry for ${story.id}`, err)
+      return everything(`${trigger}, registry unreadable`)
+    }
+    return purge(trigger, scoped(registry, sites.layered))
+  }
 
-    unpublished: ({ story }) => purge('unpublish', tagsFor(story.id, story.type, globals)),
+  const everything = async (trigger: string): Promise<PurgeIssued | null> => {
+    const fn = await capability()
+    const issued: PurgeIssued = { everything: true }
+    if (!fn) return issued
+    try {
+      const result = await fn({ purgeEverything: true })
+      if (!result.success)
+        logger.error(`folio: ${trigger} could not flush the cache`, result.errors)
+    } catch (err) {
+      logger.error(`folio: ${trigger} failed to purge`, err)
+    }
+    return issued
+  }
+
+  return {
+    published: ({ env, story }) =>
+      storyPurge(
+        'publish',
+        env,
+        story,
+        () => tagsFor(story.id, story.type, globals),
+        (registry, layered) => scopedTagsFor(story, registry, layered),
+      ),
+
+    unpublished: ({ env, story }) =>
+      storyPurge(
+        'unpublish',
+        env,
+        story,
+        () => tagsFor(story.id, story.type, globals),
+        (registry, layered) => scopedTagsFor(story, registry, layered),
+      ),
 
     /**
      * Purged by id, never by path — `paths` carries `null` for an unrouted
@@ -270,8 +432,16 @@ export function cachePurgeHooks<Env>(
      * invisible to every render (the spec's own edge case). Purging on it would
      * be a cache flush for a row moving up one place.
      */
-    updated: ({ story, changed }) =>
-      changed.includes('title') ? purge('retitle', [storyTag(story.id)]) : undefined,
+    updated: ({ env, story, changed }) =>
+      changed.includes('title')
+        ? storyPurge(
+            'retitle',
+            env,
+            story,
+            () => [storyTag(story.id)],
+            (registry, layered) => scopedTagsFor(story, registry, layered, false),
+          )
+        : undefined,
 
     /**
      * A migration knows exactly which published snapshots it rewrote, and
