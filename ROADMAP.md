@@ -903,6 +903,23 @@ previews; and minting needs `PUBLISH` on the story's own scope, so on a shared
 page the dialog offers a render site from `sitesUnder` of that scope
 (`multi-site.md` decision 13, "Shares").
 
+### 6. Multi-brand: two sites that look nothing alike, in one deployment
+
+**Raised 2026-09-30 by the owner**, at the end of the spec 23 build, as the real-world
+stress test of multi-site: allaboutafrica and takeoffgo, two brands of one company with
+no content or stylistic overlap, managed from one Folio. Spec 23 assumed "one design,
+per-site tokens"; this is the case where the brands differ completely, and the owner's
+direction is to make it work *nicely* for developers, AI coding agents and content
+authors rather than to avoid it.
+
+`docs/multi-brand-assessment.md` is the starting point: how both sites are built, what a
+merged deployment looks like, why the custom routes (quotes, invoices, payments,
+itineraries) are the easy part, and the Folio gaps it would hit — one block registry and
+one preview shell per deployment (decision 7), no per-site type visibility, no v1 lookup
+of a redirect or a gone page for a headless front end, no tool to move a site between
+deployments, unexported scoped tag builders, and a cross-Worker purge nobody has
+observed. It is the input to a spec, not the spec.
+
 ## Uncovered from the reference project
 
 **Cookie-based draft mode. Done 2026-08-30, as spec 25** (`platform/draft-mode.md`),
