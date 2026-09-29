@@ -224,9 +224,13 @@ one entrypoint" stands, including routing writes through the cached entrypoint.
 
 **5. Redirect the admin path on live hosts.** `handle()` leaves `{base}/…` to you on a
 live host, so an editor's `alpha.example/folio` bookmark lands on your 404. Before
-`folio.handle`, for a `GET` or `HEAD` on any host that is not the admin origin whose
-path is `{base}` or `{base}/…` other than `{base}/asset/…` and `{base}/f/…`, answer a
-`302` to the same path and query on the admin origin.
+`folio.handle`, for a `GET` or `HEAD` on a host that is neither the admin origin nor
+a preview origin, whose path is `{base}` or `{base}/…` other than `{base}/asset/…` and
+`{base}/f/…`, answer a `302` to the same path and query on the admin origin. **Leave
+preview origins alone**: they serve `{base}/site/enter`, `{base}/share` and
+`{base}/draft/*` themselves, and redirecting them bounces every preview handoff back
+to the admin. `(await folio.cacheProps(req, env)).surface === 'preview'` tells you
+which a request is on.
 
 **6. A preview origin renders drafts through your route too.** There the credential
 is the ask: a request whose preview grant (or session, or token) may preview the site

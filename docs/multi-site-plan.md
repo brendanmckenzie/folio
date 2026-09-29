@@ -594,7 +594,9 @@ The dependency itself is not committed in this phase.
      `staging.allaboutafrica.au`, `staging-cms.allaboutafrica.au`,
      `staging-preview.allaboutafrica.au` and the Worker's `workers.dev` hostname are all
      `noindex`, and `allaboutafrica.au` is not; its comment at `:105` names all four;
-   - when `sites` is on and the request's host is not the admin origin, a `GET` or
+   - when `sites` is on and the request's host is neither the admin origin nor a
+     preview origin (`folio.cacheProps(…).surface !== 'preview'`; redirecting a
+     preview origin bounced the handoff's `site/enter`, found in this phase), a `GET` or
      `HEAD` for `/folio` or `/folio/…` other than `/folio/asset/…` and `/folio/f/…` is
      a `302` to the same path and query on the admin origin, before `folio.handle`.
 5. **`wrangler.jsonc`, `env.staging` only**: `routes` gains
