@@ -205,6 +205,14 @@ export function failScheduleStatement(
 }
 
 export interface ListSchedulesOptions {
+  /**
+   * The one scope whose stories' schedules to list (`multi-site.md`: "`schedules`:
+   * through `stories`"). A schedule has no scope of its own, so it is the scope of
+   * the story it acts on, asked by a correlated `exists` on the primary key —
+   * a seek per schedule, not a scan of the stories. Absent lists every scope's, which
+   * is a deployment with no `sites`.
+   */
+  scope?: string
   limit?: number
   cursor?: string
   /** One document's schedules — the editor's own read. */
@@ -238,6 +246,12 @@ export async function listSchedules(
   // the header reads `n of N`. The same split every other paged reader makes.
   const narrow: string[] = []
   const narrowBinds: unknown[] = []
+  if (opts.scope !== undefined) {
+    narrow.push(
+      'exists (select 1 from stories s where s.id = schedules.story_id and s.site_id = ?)',
+    )
+    narrowBinds.push(opts.scope)
+  }
   if (opts.storyId) {
     narrow.push('story_id = ?')
     narrowBinds.push(opts.storyId)

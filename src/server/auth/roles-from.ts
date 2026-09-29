@@ -108,7 +108,7 @@ export function roleFromClaim(opts: RoleFromClaimOptions): RoleMapper {
   }
   const fallback = opts.default ?? null
 
-  return (identity: VerifiedIdentity): Role | RoleGrants | null => {
+  const mapper: RoleMapper = (identity: VerifiedIdentity): Role | RoleGrants | null => {
     const raw = readPath(identity.claims, path)
     // One value or many: a `groups` claim is an array and a `role` claim is
     // usually a string, and a mapper that only understood one of those would
@@ -131,6 +131,28 @@ export function roleFromClaim(opts: RoleFromClaimOptions): RoleMapper {
     }
     return scoped ? best : (best['*'] ?? null)
   }
+  // Recorded on the function itself so `validateSitesAuth` can see it: a mapper is
+  // otherwise opaque, and `default` is the one option that turns "nobody the map does
+  // not name" into a role on `*` (`defaultRoleOf`).
+  if (opts.default !== undefined) DEFAULTS.set(mapper, opts.default)
+  return mapper
+}
+
+/** The bare `default` each `roleFromClaim` mapper was built with, if any. */
+const DEFAULTS = new WeakMap<RoleMapper, Role>()
+
+/**
+ * The bare role a mapper built by `roleFromClaim` gives an identity **none of its map
+ * matched**, or undefined for a mapper with none (and for any hand-written mapper).
+ *
+ * On a deployment with `sites` that role is a grant on `*` — a role on every site, for
+ * anybody the directory admits at all — which is the hazard `validateSitesAuth`
+ * already refuses for `provision.role` (`multi-site.md` decision 17 is silent on
+ * `default`, and a role on every scope is exactly what the decision exists to stop
+ * a directory handing out by omission). It reads this to refuse it at construction.
+ */
+export function defaultRoleOf(mapper: unknown): Role | undefined {
+  return typeof mapper === 'function' ? DEFAULTS.get(mapper as RoleMapper) : undefined
 }
 
 /** Walks a dotted path through plain objects. Anything else — an array, a

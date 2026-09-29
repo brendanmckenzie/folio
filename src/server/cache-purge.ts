@@ -199,7 +199,7 @@ function tagsFor(id: string, type: string, globals: readonly string[]): string[]
  * `alpha` render carries, unless `bravo` is in `alpha`'s chain.
  */
 function scopedTagsFor(
-  story: StoryMeta,
+  story: Pick<StoryMeta, 'id' | 'type' | 'path' | 'site'>,
   registry: Registry,
   layered: readonly string[],
   withType = true,
@@ -299,10 +299,15 @@ export async function purgeSite(
     sleep?: (ms: number) => Promise<void>
   } = {},
 ): Promise<PurgeIssued | null> {
-  const purge = createPurger(opts.capability ?? platformPurge, opts.logger ?? console)
+  const capability = opts.capability ?? platformPurge
+  const purge = createPurger(capability, opts.logger ?? console)
   const sleep = opts.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
   const tag = [siteTag(id)]
   const first = await purge('site change', tag)
+  // Nothing to purge with (`wrangler dev`, a test, a host that has not enabled
+  // caching): a second call would be the same no-op, held open for 25 seconds under
+  // `waitUntil` for nothing.
+  if ((await capability()) === null) return first
   waitUntil(sleep(SITE_PURGE_DELAY_MS).then(() => purge('site change (second)', tag)))
   return first
 }
@@ -383,6 +388,29 @@ export function cachePurgeHooks<Env>(
     return issued
   }
 
+  /**
+   * The same rule for an event that carries no single story (`deleted`,
+   * `pathsChanged`, `redirectsChanged`): today's purge on a deployment with no
+   * `sites`, the scoped one otherwise, and a flush if the registry cannot be read.
+   */
+  const scopedPurge = async (
+    trigger: string,
+    env: Env,
+    label: string,
+    today: () => Promise<PurgeIssued | null>,
+    scoped: (registry: Registry, layered: readonly string[]) => string[],
+  ): Promise<PurgeIssued | null> => {
+    if (!sites) return today()
+    let registry: Registry
+    try {
+      registry = await sites.registry(env)
+    } catch (err) {
+      logger.error(`folio: ${trigger} could not read the registry for ${label}`, err)
+      return everything(`${trigger}, registry unreadable`)
+    }
+    return purge(trigger, scoped(registry, sites.layered))
+  }
+
   return {
     published: ({ env, story }) =>
       storyPurge(
@@ -406,11 +434,32 @@ export function cachePurgeHooks<Env>(
      * Purged by id, never by path — `paths` carries `null` for an unrouted
      * document, and a `pathPrefixes` design would have had to special-case it.
      * The tag design sidesteps it entirely.
+     *
+     * On a deployment with `sites`, the owner's scoped set for every deleted row
+     * (`payload.site` is the scope that owned them): its type and any-type tags at
+     * that scope, and its `path:` tag on every site the scope reaches, which is what
+     * reaches a page that had fallen back to a deleted row's path. A deleted row
+     * shows the inherited page again, so those cached pages are stale in the other
+     * direction too.
      */
-    deleted: ({ ids, types }) =>
-      purge(
+    deleted: ({ env, ids, types, paths, site }) =>
+      scopedPurge(
         'delete',
-        ids.flatMap((id, i) => tagsFor(id, types[i] ?? '', globals)),
+        env,
+        `${ids.length} deleted`,
+        () =>
+          purge(
+            'delete',
+            ids.flatMap((id, i) => tagsFor(id, types[i] ?? '', globals)),
+          ),
+        (registry, layered) =>
+          ids.flatMap((id, i) =>
+            scopedTagsFor(
+              { id, type: types[i] ?? '', path: paths[i] ?? null, site: site ?? DEFAULT_SITE },
+              registry,
+              layered,
+            ),
+          ),
       ),
 
     /**
@@ -418,12 +467,67 @@ export function cachePurgeHooks<Env>(
      * the new one is: it was rendered from this story, so it carries this
      * story's tag. Nothing has to know the old path, which is the second thing
      * decision 2's inversion buys.
+     *
+     * With `sites`, both paths as well: `path:<site>:<from>` reaches the pages that
+     * were served there (now a redirect), and `path:<site>:<to>` the page that was
+     * falling back at the path this row has just moved onto. Both on every site the
+     * owner's scope reaches.
      */
-    pathsChanged: ({ changes }) =>
-      purge(
+    pathsChanged: ({ env, changes, site }) =>
+      scopedPurge(
         'rename',
-        changes.map((c) => storyTag(c.id)),
+        env,
+        `${changes.length} moved`,
+        () =>
+          purge(
+            'rename',
+            changes.map((c) => storyTag(c.id)),
+          ),
+        (registry) => {
+          const reached = sitesUnder(registry, site ?? DEFAULT_SITE)
+          return changes.flatMap((c) => [
+            storyTag(c.id),
+            ...reached.flatMap((reachedSite) => [
+              pathTag(reachedSite, c.from),
+              pathTag(reachedSite, c.to),
+            ]),
+          ])
+        },
       ),
+
+    /**
+     * A redirect added or removed. **Nothing on a deployment with no `sites`**,
+     * exactly as before: Folio's tags describe rendered pages rather than paths, and
+     * a host that caches its own 404s purges by `pathPrefixes` in its own hook.
+     *
+     * With `sites` a redirect at a path changes what a *site* serves there — it
+     * beats an inherited page (decision 5) — and a page that fell back to the
+     * inherited row carries `path:<site>:<path>`, so that tag is purged on every
+     * site the redirect's scope reaches.
+     */
+    ...(sites
+      ? {
+          redirectsChanged: ({
+            env,
+            from,
+            site,
+          }: {
+            env: Env
+            from: string[]
+            site: string | null
+          }) =>
+            scopedPurge(
+              'redirect change',
+              env,
+              `${from.length} redirects`,
+              () => Promise.resolve(null),
+              (registry) =>
+                sitesUnder(registry, site ?? DEFAULT_SITE).flatMap((reached) =>
+                  from.map((path) => pathTag(reached, path)),
+                ),
+            ),
+        }
+      : {}),
 
     /**
      * Only a title matters here. `slug` and `parent` arrive with a
@@ -461,7 +565,10 @@ export function cachePurgeHooks<Env>(
      */
     reindexed: async ({ count }) => {
       const fn = await capability()
-      if (!fn) return
+      // Answered whether or not there was a platform to ask, like every purge here:
+      // the payload's `purge` is what Folio computed.
+      const issued: PurgeIssued = { everything: true }
+      if (!fn) return issued
       logger.warn(
         `folio: reindex purged the whole cache — ${count} documents, and which pages hold a collection is not recorded anywhere`,
       )
@@ -473,6 +580,7 @@ export function cachePurgeHooks<Env>(
       } catch (err) {
         logger.error('folio: reindex failed to purge', err)
       }
+      return issued
     },
 
     /**
@@ -495,14 +603,31 @@ export function cachePurgeHooks<Env>(
      */
     formChanged: ({ form }) => purge('form change', [formTag(form.id)]),
 
+    /**
+     * A registry edit (`multi-site.md` decision 4): `site:<id>` now and again 25
+     * seconds later. The hook rather than the route, so the record on the payload
+     * is what was issued, like every other purge here. Nothing on a deployment with
+     * no `sites`, which has no registry to edit.
+     */
+    ...(sites
+      ? {
+          siteChanged: ({
+            site,
+            waitUntil,
+          }: {
+            site: string
+            waitUntil: (p: Promise<unknown>) => void
+          }) => purgeSite(site, waitUntil, { capability, logger }),
+        }
+      : {}),
+
     // `created` and `checkpointed` are deliberately absent: neither publishes
     // anything, so no cached page can be describing either of them yet.
     //
-    // `redirectsChanged` is deliberately absent too, and for a different
-    // reason. A redirect changes what an *uncached* 404 path answers, and
-    // Folio's tags describe rendered pages rather than paths — there is no tag
-    // that would be the right one to purge. A host that caches its own 404s
-    // knows its origin and can purge by `pathPrefixes` in its own hook; the
-    // event exists so that it can.
+    // `redirectsChanged` purges nothing on a deployment with no `sites`, and for a
+    // different reason (above): a redirect changes what an *uncached* 404 path
+    // answers, and Folio's tags describe rendered pages rather than paths. A host
+    // that caches its own 404s knows its origin and can purge by `pathPrefixes` in
+    // its own hook; the event exists so that it can.
   }
 }

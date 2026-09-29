@@ -946,7 +946,9 @@ export async function auditSettings(
     // Most general first, as `mergeLayers` wants them.
     ids: [...chain(registry, site.id)].reverse().map((scope) => layerId(settings, scope)),
   }))
-  const docs = await publishedDocsByIds(db, [...new Set(chains.flatMap((c) => c.ids))])
+  // Every site's layers at once, by id: the audit is the platform tier's, and reads them
+  // wherever they live.
+  const docs = await publishedDocsByIds(db, [...new Set(chains.flatMap((c) => c.ids))], null)
   const rootType = types?.find((t) => t.name === settings)?.root
 
   const out: SettingsFinding[] = []

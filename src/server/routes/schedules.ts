@@ -18,7 +18,7 @@
  */
 import { Hono } from 'hono'
 import { actorString, PUBLISH, READ } from '../auth/roles'
-import { fenceStory, hookCtx, loadStory, requireAccess } from '../middleware'
+import { fenceStory, hookCtx, loadStory, requestScope, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import {
   checkScheduleTime,
@@ -71,6 +71,10 @@ export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // `storyFilterQuery` follows.
     return c.json(
       await listSchedules(c.var.bindings().db, {
+        // The scope's own documents' schedules: a schedule is the scope of its story,
+        // and another site's queue is not this one's to read. Only with `sites` —
+        // with none every schedule is `default`'s and the statement is what it was.
+        ...(rt.sites ? { scope: requestScope(c, rt) ?? '' } : {}),
         limit: limitParam(c.req.query('limit'), 50, 200),
         cursor,
         ...(story ? { storyId: idParam('story', story) } : {}),

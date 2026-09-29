@@ -372,6 +372,8 @@ export async function runMigrations(
       ids: republished,
       migrations: pending,
       actor: opts.actor ?? null,
+      // Every scope's documents are migrated together (`HookBase.site`).
+      site: null,
     })
   }
 

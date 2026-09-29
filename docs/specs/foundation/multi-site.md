@@ -2283,3 +2283,168 @@ Where the spec was wrong, silent or split across files it did not name:
     one story and nothing else. `tree()`, `stories()` and `query()` stay empty for such a
     request, because a listing would enumerate a pre-launch site. `FolioReader`'s doc
     comment in `types.ts` says so.
+
+### Phase 7 (2026-09-29)
+
+Assets, folders, tags, forms and responses, redirects, the schedules, published and
+shares lists, the story and document lists, content, search, the v1 API (three new
+routes), MCP, the space channel, hook payloads, the three remaining owner-scoped
+purges, `siteChanged` and the fork route landed. `test/workers/scope-partition.test.ts`'s
+deferred list is empty and asserted empty; `api-partition.test.ts` pins the v1 surface
+as a list. New tests: `multi-site-fork.test.ts`, `multi-site-library.test.ts`,
+`multi-site-headless.test.ts`, `test/unit/server/hooks-purge.test.ts`, and additions to
+`query-plan.test.ts` (every new list reader and scope-bound write, on the single-site chain and a site in a group, none a `SCAN`). Where the spec
+was wrong, silent or split across files it did not name:
+
+- **`storiesFor` and `publishedDocsByIds` take the chain as a required argument.**
+  `null` means *every scope* and is written out at the six places that ask for it: the
+  three usage readers (`documentUsage`, `assetUsage`, `formUsage`, which read a row
+  wherever it lives and then split it into *named* and *counted*), `listRecentPublishes`
+  and the bulk id batch (both already fenced by the route or by the statement), and the
+  platform audit. A path read with `null` still throws. `assetsFor`, `countAssets`,
+  `assetsMatching`, `listAssets` and `listAssetsByPage` take an `AssetScope`
+  (`readonly string[] | null`) the same way, defaulting to the single-site chain; only
+  the platform tier's describe run passes `null`.
+- **Write functions default their scope to `default`; the routes always pass it.** That
+  is phase 2's pattern (`createStory({ site })`, `ensureSingleton(…, scope = DEFAULT_SITE)`),
+  kept so a single-site caller and every existing test are unchanged. The proof that a
+  route passes it is not the default: it is `scope-partition.test.ts` walking every id
+  route and `multi-site-library.test.ts` writing through each as a site with a sibling.
+- **Defence in depth on writes.** An asset, folder, tag or form id route is fenced by
+  middleware (`fenceRow`, `fenceForm`) **and** its statement binds `site_id`
+  (`update … where id = ? and site_id = ?`, `ownFolder`, `ownTag`), so a fence that is
+  ever dropped from a mount still cannot act on another scope's row. The break-its show
+  it: dropping the middleware from a body-less `DELETE` (a folder, an asset) leaves the walk
+  green, and only removing the statement's binding as well turns it red. A route that
+  parses a body first (a tag's `PATCH`) turns red on the missing fence alone, its 404
+  having become a 400. The read routes have the middleware alone.
+- **Redirect writes bind the scope in all three statements** (`redirectStatements`
+  now requires `site`), and `DELETE /redirects/:from` and the list bind it too. A rename
+  on `alpha` used to delete `bravo`'s redirect away from the new path and rewrite every
+  `bravo` redirect that pointed at the old one.
+- **A fork's rename redirect outlives the fork.** Renaming a fork writes `stores →
+  our-stores` in alpha's scope, and deleting the fork does not remove it (it never has:
+  `redirect=false` only stops a *new* one). That redirect still beats the inherited page
+  (decision 5), so "WHEN it is deleted THEN alpha serves the shared `stores` again" holds
+  only once the redirect is removed too; the test does that through `DELETE /redirects/
+  stores`. Whether deleting a page should clear the redirects that point at it is a
+  question for `redirects.md`, not this phase; it is the same on a single-site
+  deployment. (The delete's own auto-redirect is fixed: see "After the phase 7 review".)
+- **Hook payloads.** `HookBase` gains `site` (the owning scope; `default` on a
+  single-site deployment; `null` for `migrated` and `reindexed`, which touch every scope)
+  and `purge`. The runner fills `site` from the emitter or the story, and `purge` from the
+  **return value of the internal purge hook**, so it is the record of the act and not a
+  second computation. Every purge function already answered what it issued (phase 6);
+  `reindexed` now does so without a platform too. `redirectsChanged` and `siteChanged`
+  are registered on the purger only on a deployment with `sites`, so a single-site
+  deployment's internal hook set is what it was. Single-site payloads gain `site:
+  'default'`, which is additive; two runner tests that pin a payload exactly moved.
+- **`siteChanged`** carries `{ site, kind, change, row }`, `row` being the registry
+  entry after the write (`null` once deleted), and Folio's own hook for it is
+  `purgeSite`: `site:<id>` now and again 25 seconds later, under the request's
+  `waitUntil`. It is the hook rather than a call from the route so that `purge` on the
+  payload is what was issued. `purgeSite` schedules no second purge when there is no
+  platform to purge on: it would be the same no-op, held open for 25 seconds.
+- **`deleteSite` also deletes `site_grants` and `shares` naming the site as their render
+  site**, in the same batch. `shares.site_id` is not a foreign key, and a link can never
+  redeem on a site that is gone.
+- **The fork** is `forkStory` (`stories.ts`) behind `POST /stories/:id/fork`. It copies
+  the source's published document (its draft when nothing is published) with fresh uids
+  and records `forked_from`. It is refused with a 409 for a parent the site does not own,
+  naming it ("Fork Info first"), for a site that already has a page at the path, for a
+  page the site already owns, and for a second root; a record is a 400 and a page outside
+  the chain a 404. It takes `CREATE` on the scope, so a viewer is a 403.
+- **"The shared version has changed since you forked it"** is `forkedSince` on each
+  `GET /inherited` row and `changed` on the new `GET /story/:id/fork`. `stories.created_at`
+  is in **seconds** and `published_at` in milliseconds; the comparison treats the fork's
+  whole creation second as "before", so a source published in the same second a fork was
+  made is not news. Both routes mount only on a deployment with `sites`, as does the fork.
+- **Duplicate is "source in chain, copy in scope"** (admin, v1 and bulk). A copy in another
+  scope than its source's has no parent of the source's to sit under, so it lands at the top
+  unless the caller names one of the scope's own. Share minting needed no change: phase 5's
+  `?site=` already lets `~shared` mint on any site under it.
+- **Bulk filter selections are scoped, not refused.** `BulkOptions.scope` is what a
+  captured filter is counted and walked against; the `501` is gone. An explicit id list is
+  checked against the scope (a duplicate against the chain) before the run starts, whole.
+  The same for `AssetBulkOptions.scope`, whose tags and folder must also be in it.
+- **Responses are a read of the form's chain, narrowed by the submitting site.**
+  `form_responses.site_id` is now written (`POST /f/:id` records the live host's site) and
+  every response reader takes the sites it may see: undefined on the form's own scope, the
+  sites the request's scope reaches otherwise. The duplicate window is per site, so the same
+  answer on two sites is two responses. `POST /f/:id` needs a live host of a site with the
+  form in its chain; the admin origin, a preview origin and a sibling's form answer the
+  unknown-form reply. `submitted` carries the receiving site, which is not always the
+  form's owner.
+- **Forms in `resolve()` are read within the chain.** `formsByIds` takes it (default the
+  single-site chain), as does `/forms/resolved`; a form outside it resolves like a deleted one.
+- **Usage counts.** The three usage routes name the uses in the chain and add `elsewhere`, a
+  count of the uses in scopes outside it (multi-site payloads only). A form's `responses` and
+  `files` in that payload are the submitting sites' the caller may see.
+- **`GET /assets` and `GET /forms` take `?chain=1`**; the folder and tag lists are the scope's
+  own. Tagging and filing across scopes are refused (`Unknown tag`, `Unknown folder`), and
+  the describe run's model is offered only the asset's own scope's tags (`DescribeDeps.scoped`),
+  with `addAssetTags` joining an asset only to a tag of its own scope in the statement itself.
+- **URLs are the request's site's.** `requestUrls` (`middleware.ts`) hands a route
+  `rt.urlsFor(site)` for a scope that is a site, so the admin's `url` and `previewUrl` are the
+  host's `route()` answer for that site and its preview origin, not a path on the admin origin.
+- **The v1 additions.** `GET /api/v1/sites/resolve` and `GET /api/v1/sites` are unscoped and
+  `READ`; a token bound to a scope sees that scope's sites only, and resolves no others. A
+  host is tried as `https` and then `http`, through the same `candidateFor` a first request
+  takes, so a custom `sites.resolve` sees what it would see there. `GET /~<site>/api/v1/pages/
+  {path}` is `reader.page()` over HTTP through an internal `GatedReaderFrom` (not public API):
+  the route runs the status gate once (`routes/api/served.ts`) and hands the gated row in, so
+  the gate is in one place. **The status gate reads "unless the caller holds `READ_DRAFT` on
+  the site's chain or a grant" as an override on both surfaces**: `mayPreviewDrafts` callers
+  are admitted whatever `?surface=` says, being able to read the site's drafts anyway.
+  `folio-cache-tags` is absent for a draft and for a page the visitor gate did not call public.
+  `documents/by-path` applies the same gate. `ApiDocumentMeta.site` is sent on a multi-site
+  deployment only. None of the three routes exists on a single-site deployment.
+- **The space channel.** `spaceNameFor(scope)` is `space` for `default` and `space:<scope>`
+  otherwise, used by `rt.space(bindings, scope)`, the socket route and the broadcast hooks,
+  which name the story's own scope from `payload.site`.
+- **`roleFromClaim`'s `default` is refused at construction on a deployment with `sites`.**
+  Decision 17 is silent on it, and a bare role for "anybody the map does not name" is a grant
+  on `*`: the same hazard `validateSitesAuth` already refuses for `provision.role`. A
+  `roleFromClaim` mapper records its bare `default` in a `WeakMap` (`defaultRoleOf`) so the
+  opaque function can be checked. A scoped `default` was not added.
+- **Beyond the phase's file list**, all necessary and none a design change: `validate.ts`
+  (`root` on the create bodies), `schedules.ts` and `versions.ts` (a `scope` on the two list
+  readers, as a correlated `exists` on `stories`' primary key), `bulk.ts` (`scope`),
+  `describe.ts` (the scoped vocabulary and the tagging guard), `reindex.ts` and `migrate.ts`
+  (`site: null`), `audit.ts` (`null` chain), `middleware.ts` (`fenceRow`, `requestUrls`,
+  `requestSite`, `chainResolver`), `types.ts`, `index.tsx`, `app.ts` and `runtime.ts`
+  (the reader factory, forms in `resolve()`), and `test/unit/server/pure.test.ts`,
+  `test/unit/server/cache-purge.test.ts` and `test/workers/stories.test.ts`, whose pinned
+  payloads and calls moved.
+- **Left, with the reason.** `form_responses` submitted from a site that is later deleted keep
+  their `site_id` (the delete refuses on `forms`, not on responses, as decision 1 lists);
+  they are the form owner's to read. `folio.sweepAuth` still does not count `site_grants`.
+  The stale comments named in the carry-forward at `mcp/tools.ts` were already corrected by
+  the phase 3 review.
+
+#### After the phase 7 review (2026-09-29)
+
+The review found no cross-site read or write. Four problems, fixed:
+
+- **A delete no longer writes a redirect at a path a scope above still serves.**
+  `deleteStoryStatement` skips the auto-redirect for a row whose path a scope further up
+  the deleting story's chain serves (a non-draft story there, or a redirect there), so
+  deleting a fork, or any page that shadows an inherited one, falls back (decision 5)
+  through the admin Delete, v1, MCP and bulk delete alike, on their default `redirect`.
+  Elsewhere the redirect is written as before, and a single-site chain has nothing above
+  it, so single-site is unchanged. The fork test now uses the default flag, top level and
+  nested. (A rename's redirect is a different thing and still outlives its fork.)
+- **Usage names every scope the caller can read.** `readableScopes` is the request's
+  chain plus every scope the caller holds a role on (a platform admin reads all); the
+  rest are counted in `elsewhere`. The routes' comments now say so.
+- **`deleteSite` is an extension of decision 1's list.** It also deletes every
+  `api_tokens` row bound to the scope (and the preview grants minted from them) in the
+  same batch, and is refused while any `form_responses` row carries the site id, the error
+  naming `form_responses`, so a re-registered id revives neither. The earlier note that
+  responses were "left" is superseded.
+- **The `byPath` comment** now says the status gate covers only the page-shaped reads,
+  `/pages` and `/documents/by-path`, and deliberately not `/documents`, `/documents/:id`
+  or search for a credentialed caller (decision 4). No behaviour change.
+
+Single-site hook payloads gain `purge` (when the event purged anything, and `reindexed`
+even with no platform) as well as `site: 'default'`; both are additive.

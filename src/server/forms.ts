@@ -41,12 +41,13 @@ import {
 } from '../core/forms'
 import type { LocaleContext } from '../core/locales'
 import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
+import { DEFAULT_SITE, SINGLE_SITE_CHAIN } from '../core/sites'
 import type { StoryMeta } from '../core/story'
 import { MAX_UPLOAD_BYTES } from './assets'
 import { bindChunks, type FolioDb } from './db'
 import { FolioError } from './errors'
 import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
-import { storiesFor } from './stories'
+import { chainClause, storiesFor } from './stories'
 import type { FolioLogger } from './types'
 
 /** A form as the builder reads it: the row, with its questions parsed. */
@@ -222,8 +223,20 @@ export async function formById(
   db: FolioDb,
   id: string,
   logger: FolioLogger = console,
+  /**
+   * Restrict to a form **this scope owns** (`multi-site.md` decision 3). The builder's
+   * writes pass it, so a form in another scope is exactly an absent one to
+   * `updateForm`; the id-keyed reads leave it out, because the id is unique and the
+   * route's fence (`fenceForm`) has already decided who may see the row.
+   */
+  site?: string,
 ): Promise<Form | null> {
-  const row = await db.prepare(`select ${COLS} from forms where id = ?`).bind(id).first<FormRow>()
+  const row = await db
+    .prepare(
+      `select ${COLS} from forms where id = ?${site === undefined ? '' : ' and site_id = ?'}`,
+    )
+    .bind(...(site === undefined ? [id] : [id, site]))
+    .first<FormRow>()
   return row ? toForm(row, logger) : null
 }
 
@@ -241,14 +254,20 @@ export async function formSiteOf(db: FolioDb, id: string): Promise<string | null
   return row?.site ?? null
 }
 
+/**
+ * A form by name **within one scope**: `forms_name` is `(site_id, name)` since `0011`,
+ * so two sites may each have a `contact`, and a lookup that leaves the scope out is a
+ * scan.
+ */
 export async function formByName(
   db: FolioDb,
   name: string,
+  site: string = DEFAULT_SITE,
   logger: FolioLogger = console,
 ): Promise<Form | null> {
   const row = await db
-    .prepare(`select ${COLS} from forms where name = ?`)
-    .bind(name)
+    .prepare(`select ${COLS} from forms where site_id = ? and name = ?`)
+    .bind(site, name)
     .first<FormRow>()
   return row ? toForm(row, logger) : null
 }
@@ -269,13 +288,26 @@ export async function formsByIds(
   db: FolioDb,
   ids: readonly string[],
   logger: FolioLogger = console,
+  /**
+   * The chain to read within (`multi-site.md` decision 3: "references, links,
+   * collections, search, forms and assets resolve only within the chain of the scope
+   * being rendered"). `resolve()` passes its render's, so a form id on a page that
+   * belongs to a scope outside it resolves exactly like a deleted one — the
+   * descriptor, its questions and its `action` are never handed to a render that is
+   * not entitled to them. `null` reads by id alone.
+   */
+  chain: readonly string[] | null = SINGLE_SITE_CHAIN,
 ): Promise<Form[]> {
-  if (ids.length === 0) return []
+  if (ids.length === 0 || chain?.length === 0) return []
+  const within = chain ? chainClause(chain) : null
   const pages = await Promise.all(
-    bindChunks([...new Set(ids)], 1).map(async (chunk) => {
+    bindChunks([...new Set(ids)], 1 + (within?.binds.length ?? 0)).map(async (chunk) => {
       const { results } = await db
-        .prepare(`select ${COLS} from forms where id in (${chunk.map(() => '?').join(', ')})`)
-        .bind(...chunk)
+        .prepare(
+          `select ${COLS} from forms
+           where id in (${chunk.map(() => '?').join(', ')})${within ? ` and ${within.sql}` : ''}`,
+        )
+        .bind(...chunk, ...(within?.binds ?? []))
         .all<FormRow>()
       return results
     }),
@@ -477,16 +509,23 @@ export function compileForm(form: Form, ctx: FormRenderContext): ResolvedForm {
 export async function countResponsesByForm(
   db: FolioDb,
   ids: readonly string[],
+  /**
+   * The submitting sites counted (`ListResponsesOptions.sites`): a shared form listed
+   * on one site reports that site's responses, not every site's. Absent is all.
+   */
+  sites?: readonly string[],
 ): Promise<Record<string, number>> {
   if (ids.length === 0) return {}
+  const within = sites === undefined ? null : chainClause(sites)
   const pages = await Promise.all(
-    bindChunks([...new Set(ids)], 1).map(async (chunk) => {
+    bindChunks([...new Set(ids)], 1 + (within?.binds.length ?? 0)).map(async (chunk) => {
       const { results } = await db
         .prepare(
           `select form_id as id, count(*) as n from form_responses
-           where form_id in (${chunk.map(() => '?').join(', ')}) group by form_id`,
+           where form_id in (${chunk.map(() => '?').join(', ')})${within ? ` and ${within.sql}` : ''}
+           group by form_id`,
         )
-        .bind(...chunk)
+        .bind(...chunk, ...(within?.binds ?? []))
         .all<{ id: string; n: number }>()
       return results
     }),
@@ -503,6 +542,15 @@ export async function countResponsesByForm(
 const FORMS_ORDER: Keyset = { columns: ['updated_at', 'id'], direction: 'desc' }
 
 export interface ListFormsOptions {
+  /**
+   * The scopes listed: one for "the forms of this scope" (a builder's list), the whole
+   * chain for a picker (`?chain=1`) — `multi-site.md`: "`/forms` take `?chain=1`".
+   * Defaults to the single-site chain and is bound either way: `forms_updated` leads
+   * with `site_id`, so a list that leaves it out is a scan and a sort.
+   */
+  chain?: readonly string[]
+  /** The submitting sites `counts` counts; see `countResponsesByForm`. */
+  sites?: readonly string[]
   limit?: number
   cursor?: string
   /** Adds `total` for the whole table — one extra `count(*)`, only when asked
@@ -520,17 +568,23 @@ export async function listForms(
   const limit = clampLimit(opts.limit, 50, 200)
   const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
   const resume = keysetWhere(FORMS_ORDER, cursor)
+  const within = chainClause(opts.chain ?? SINGLE_SITE_CHAIN)
 
   const [rows, total] = await Promise.all([
     db
       .prepare(
-        `select ${SUMMARY_COLS} from forms ${whereOf(resume.sql)} ${orderBy(FORMS_ORDER)} limit ?`,
+        `select ${SUMMARY_COLS} from forms ${whereOf(within.sql, resume.sql)} ${orderBy(FORMS_ORDER)} limit ?`,
       )
-      .bind(...resume.binds, limit + 1)
+      .bind(...within.binds, ...resume.binds, limit + 1)
       .all<SummaryRow>(),
-    // The count ignores the cursor deliberately: it counts the whole table,
+    // The count ignores the cursor deliberately: it counts the whole list,
     // which is what a header means by "of 12" and not "how many are left".
-    opts.count ? db.prepare('select count(*) as n from forms').first<{ n: number }>() : null,
+    opts.count
+      ? db
+          .prepare(`select count(*) as n from forms ${whereOf(within.sql)}`)
+          .bind(...within.binds)
+          .first<{ n: number }>()
+      : null,
   ])
 
   let page = paginate(rows.results.map(toSummary), limit, (row) => [row.updatedAt, row.id])
@@ -541,6 +595,7 @@ export async function listForms(
     const counts = await countResponsesByForm(
       db,
       page.rows.map((row) => row.id),
+      opts.sites,
     )
     page = { ...page, rows: page.rows.map((row) => ({ ...row, responses: counts[row.id] ?? 0 })) }
   }
@@ -566,13 +621,24 @@ export interface FormUsage {
   published: StoryMeta[]
   /** Distinct published documents rendering this form. */
   total: number
+  /** Distinct published documents in scopes outside the chain that render it:
+   * counted, never named (`multi-site.md`: "uses in readable scopes listed; others
+   * counted"). */
+  elsewhere: number
   /** Responses a delete would destroy. */
   responses: number
   /** Uploaded files a delete would destroy, counted across those responses. */
   files: number
 }
 
-export async function formUsage(db: FolioDb, id: string): Promise<FormUsage> {
+export async function formUsage(
+  db: FolioDb,
+  id: string,
+  /** The scopes whose uses are named. */
+  chain: readonly string[] = SINGLE_SITE_CHAIN,
+  /** The submitting sites whose responses and files are counted; absent is all. */
+  sites?: readonly string[],
+): Promise<FormUsage> {
   // The shape `assetReferences` (content-index.ts) has, with `kind` bound rather
   // than interpolated: `content_refs.to_id` holds whatever `kind` says it holds
   // (`core/refs.ts`), and for `form` that is a `frm_…` id.
@@ -584,22 +650,31 @@ export async function formUsage(db: FolioDb, id: string): Promise<FormUsage> {
       )
       .bind(id, 'form')
       .all<{ from: string }>(),
-    responseCounts(db, id),
+    responseCounts(db, id, sites),
   ])
 
   // `storiesFor` chunks, so an inbound list is its problem rather than this
   // one's — a form on every page of a 500-page site is the normal case for a
-  // footer contact form, not the pathological one.
-  const published = await storiesFor(
+  // footer contact form, not the pathological one. Read wherever they live (`null`)
+  // and split: the fence is on what is *named*.
+  const sources = await storiesFor(
     db,
     refs.results.map((row) => row.from),
+    [],
+    null,
   )
+  const published = sources.filter((story) => chain.includes(story.site ?? DEFAULT_SITE))
   published.sort(
     (a, b) =>
       (a.path === null ? 1 : 0) - (b.path === null ? 1 : 0) ||
       (a.path ?? a.title).localeCompare(b.path ?? b.title),
   )
-  return { published, total: published.length, ...counts }
+  return {
+    published,
+    total: published.length,
+    elsewhere: sources.length - published.length,
+    ...counts,
+  }
 }
 
 /**
@@ -614,13 +689,15 @@ export async function formUsage(db: FolioDb, id: string): Promise<FormUsage> {
 async function responseCounts(
   db: FolioDb,
   id: string,
+  sites?: readonly string[],
 ): Promise<{ responses: number; files: number }> {
+  const within = sites === undefined ? null : chainClause(sites)
   const row = await db
     .prepare(
       `select count(*) as responses, coalesce(sum(json_array_length(files)), 0) as files
-       from form_responses where form_id = ?`,
+       from form_responses where form_id = ?${within ? ` and ${within.sql}` : ''}`,
     )
-    .bind(id)
+    .bind(id, ...(within?.binds ?? []))
     .first<{ responses: number; files: number }>()
   return { responses: row?.responses ?? 0, files: row?.files ?? 0 }
 }
@@ -642,9 +719,15 @@ export interface CreateFormInput {
  * The pre-check exists as well, because it is what makes the message name the
  * form that is already there rather than only the slug.
  */
-export async function createForm(db: FolioDb, input: CreateFormInput): Promise<Form> {
+export async function createForm(
+  db: FolioDb,
+  input: CreateFormInput,
+  /** The scope that owns the form (`multi-site.md` decision 3): the request's. The name
+   * is unique within it, so two sites may each have a `contact`. */
+  site: string = DEFAULT_SITE,
+): Promise<Form> {
   const name = formSlug(input.name ?? input.label)
-  const taken = await formByName(db, name)
+  const taken = await formByName(db, name, site)
   if (taken) throw slugConflict(taken)
 
   const id = newFormId()
@@ -657,12 +740,11 @@ export async function createForm(db: FolioDb, input: CreateFormInput): Promise<F
     )
     // The target is `forms_name`'s columns exactly (`0011_sites.sql`): a target
     // naming fewer matches no unique index and D1 refuses the statement.
-    // Single-site until phase 7 scopes forms.
-    .bind(id, name, input.label, now, now, 'default')
+    .bind(id, name, input.label, now, now, site)
     .run()
 
   if ((result.meta.changes ?? 0) === 0) {
-    const winner = await formByName(db, name)
+    const winner = await formByName(db, name, site)
     // Unreachable unless the row went again between the insert and this read.
     if (!winner) throw new FolioError('conflict', `Could not create the form '${name}'`)
     throw slugConflict(winner)
@@ -736,8 +818,11 @@ export async function updateForm(
   db: FolioDb,
   id: string,
   input: UpdateFormInput,
+  /** The scope the form must be in: another scope's is absent (null), and a rename is
+   * checked against this scope's names alone. */
+  site: string = DEFAULT_SITE,
 ): Promise<UpdateFormResult | null> {
-  const current = await formById(db, id)
+  const current = await formById(db, id, undefined, site)
   if (!current) return null
 
   const fields = input.fields === undefined ? current.fields : fieldsFromInput(input.fields)
@@ -752,7 +837,7 @@ export async function updateForm(
 
   const name = input.name === undefined ? current.name : formSlug(input.name)
   if (name !== current.name) {
-    const taken = await formByName(db, name)
+    const taken = await formByName(db, name, site)
     if (taken) throw slugConflict(taken)
   }
 
@@ -775,7 +860,7 @@ export async function updateForm(
     .prepare(
       `update forms set name = ?, label = ?, fields = ?, version = ?, open = ?, closes_at = ?,
          closed_message = ?, success_message = ?, submit_label = ?, redirect_to = ?, updated_at = ?
-       where id = ? and updated_at = ?`,
+       where id = ? and updated_at = ? and site_id = ?`,
     )
     .bind(
       next.name,
@@ -791,6 +876,7 @@ export async function updateForm(
       next.updatedAt,
       id,
       input.expectedUpdatedAt,
+      site,
     )
     .run()
 
@@ -945,7 +1031,10 @@ export async function deleteForm(
   db: FolioDb,
   id: string,
   bucket?: R2Bucket,
+  /** The scope the form must be in: another scope's is absent (`deleted: false`). */
+  site: string = DEFAULT_SITE,
 ): Promise<DeleteFormResult> {
+  if ((await formSiteOf(db, id)) !== site) return { deleted: false, responses: 0, files: 0 }
   const counts = await responseCounts(db, id)
   if (counts.files > 0) {
     if (!bucket) {
@@ -963,7 +1052,7 @@ export async function deleteForm(
   const [, , removed] = await db.batch([
     db.prepare('delete from form_responses where form_id = ?').bind(id),
     db.prepare('delete from content_refs where to_id = ? and kind = ?').bind(id, 'form'),
-    db.prepare('delete from forms where id = ?').bind(id),
+    db.prepare('delete from forms where id = ? and site_id = ?').bind(id, site),
   ])
   const deleted = (removed?.meta.changes ?? 0) > 0
   return deleted ? { deleted, ...counts } : { deleted: false, responses: 0, files: 0 }

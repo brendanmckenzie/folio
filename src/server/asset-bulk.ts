@@ -49,15 +49,16 @@ import {
   readBulkCursor,
   writeBulkCursor,
 } from '../core/bulk'
-import { folderById } from './asset-folders'
+import { DEFAULT_SITE } from '../core/sites'
+import { folderSiteOf } from './asset-folders'
 import { tagsByIds } from './asset-tags'
 import {
   type AssetRow,
-  assetFilterSql,
   assetsFor,
   assetsMatching,
   countAssets,
   deleteAsset,
+  scopedAssetFilter,
 } from './assets'
 import { bindChunks, type FolioDb } from './db'
 import { FolioError, rethrow } from './errors'
@@ -98,6 +99,14 @@ export interface AssetBulkDeps {
 }
 
 export interface AssetBulkOptions {
+  /**
+   * The scope the run acts in (`multi-site.md`: "`/assets/bulk/*`: every id in
+   * scope"): the one thing a captured filter is read against, the scope every tag and
+   * folder named must be in, and the scope a delete or a move is bound to in SQL.
+   * Off the request, never the body. Absent is `default`, the one scope of a
+   * deployment with no `sites`.
+   */
+  scope?: string
   batch?: number
   /** The previous call's `continueFrom`. An opaque `(id, seen)` pair, not an id. */
   continueFrom?: string | null
@@ -146,6 +155,7 @@ export async function runAssetBulk(
   opts: AssetBulkOptions = {},
 ): Promise<AssetBulkOutcome> {
   const { db } = deps
+  const scope = opts.scope ?? DEFAULT_SITE
   const dryRun = opts.dryRun === true
   const batch = Math.min(
     Math.max(Math.trunc(opts.batch ?? DEFAULT_ASSET_BULK_BATCH), 1),
@@ -157,12 +167,15 @@ export async function runAssetBulk(
   // request error rather than as N identical per-row failures. An unknown tag id
   // in a bulk tag is a client bug, not twenty-five separate accidents, and a
   // report naming it twenty-five times is a report nobody reads.
-  const tags = action === 'tag' || action === 'untag' ? await requiredTags(db, opts.tagIds) : []
+  const tags =
+    action === 'tag' || action === 'untag' ? await requiredTags(db, opts.tagIds, scope) : []
   if (action === 'move') {
     if (!('folderId' in opts)) {
       throw new FolioError('bad_request', 'A bulk move needs a destination folder, or null')
     }
-    if (opts.folderId && !(await folderById(db, opts.folderId))) {
+    // In the run's scope: filing across scopes is refused (`multi-site.md`'s table),
+    // and a folder in another is exactly an unknown one.
+    if (opts.folderId && (await folderSiteOf(db, opts.folderId)) !== scope) {
       throw new FolioError('bad_request', 'Unknown folder')
     }
   }
@@ -190,7 +203,7 @@ export async function runAssetBulk(
   // job on a site with live editors would become un-completable, and the guard
   // confirms *intent* rather than freezing the table.
   if (selection.all && resume === null) {
-    const actual = await countAssets(db, selection.filter)
+    const actual = await countAssets(db, selection.filter, [scope])
     if (actual !== selection.expected) {
       return { refused: 'count', expected: selection.expected, actual }
     }
@@ -208,7 +221,7 @@ export async function runAssetBulk(
   // The one aggregate, before anything is written and only on the first call.
   // See `AssetBulkReport.usedOnPublished`.
   if (action === 'delete' && resume === null) {
-    report.usedOnPublished = await countUsedOnPublished(db, selection)
+    report.usedOnPublished = await countUsedOnPublished(db, selection, scope)
   }
 
   // The ceiling. A job that has consumed everything it agreed to is finished even
@@ -224,8 +237,8 @@ export async function runAssetBulk(
   // needs forty of them. It reads a full batch and acts on at most `allowance` of
   // what survives.
   const { rows, consumed, exhausted, last } = selection.all
-    ? await filterBatch(db, selection, resume?.after ?? null, batch, allowance)
-    : await idBatch(db, selection.ids, seen, Math.min(batch, allowance))
+    ? await filterBatch(db, selection, resume?.after ?? null, batch, allowance, scope)
+    : await idBatch(db, selection.ids, seen, Math.min(batch, allowance), scope)
 
   for (const [at, row] of rows.entries()) {
     if (row === null) {
@@ -243,7 +256,7 @@ export async function runAssetBulk(
       continue
     }
     try {
-      await one(deps, action, row, tags, opts)
+      await one(deps, action, row, tags, opts, scope)
       report.done++
     } catch (err) {
       report.failed.push({ id: row.id, title: row.filename, message: reasonOf(err, deps.logger) })
@@ -270,6 +283,7 @@ async function one(
   row: AssetRow,
   tags: readonly AssetTag[],
   opts: AssetBulkOptions,
+  scope: string,
 ): Promise<void> {
   const { db } = deps
   switch (action) {
@@ -307,8 +321,8 @@ async function one(
       // a folder is metadata, never part of the key, so filing a file that is
       // used on a published page cannot change a byte of that page.
       await db
-        .prepare('update assets set folder_id = ? where id = ?')
-        .bind(opts.folderId ?? null, row.id)
+        .prepare('update assets set folder_id = ? where id = ? and site_id = ?')
+        .bind(opts.folderId ?? null, row.id, scope)
         .run()
       return
     case 'delete':
@@ -316,7 +330,7 @@ async function one(
       // inbound edges in one D1 batch, then the object. Documents are left alone
       // on purpose.
       if (!deps.media) throw new FolioError('unsupported', 'No media bucket is configured')
-      await deleteAsset(db, deps.media, row.id)
+      await deleteAsset(db, deps.media, row.id, scope)
       return
   }
 }
@@ -330,12 +344,18 @@ async function one(
  * filter can find. Refusing here also means an untag naming a deleted tag says
  * so, rather than reporting a run of successes that removed nothing.
  */
-async function requiredTags(db: FolioDb, ids: readonly string[] | undefined): Promise<AssetTag[]> {
+async function requiredTags(
+  db: FolioDb,
+  ids: readonly string[] | undefined,
+  scope: string,
+): Promise<AssetTag[]> {
   const wanted = [...new Set(ids ?? [])]
   if (wanted.length === 0) {
     throw new FolioError('bad_request', 'Name at least one tag')
   }
-  const tags = await tagsByIds(db, wanted)
+  // In the run's scope: tagging across scopes is refused, so a tag from another is an
+  // unknown one.
+  const tags = await tagsByIds(db, wanted, scope)
   if (tags.length !== wanted.length) {
     const known = new Set(tags.map((tag) => tag.id))
     throw new FolioError('bad_request', `Unknown tag '${wanted.find((id) => !known.has(id))}'`)
@@ -364,10 +384,11 @@ async function requiredTags(db: FolioDb, ids: readonly string[] | undefined): Pr
 async function countUsedOnPublished(
   db: FolioDb,
   selection: BulkSelection<AssetFilter>,
+  scope: string,
 ): Promise<number> {
   const used = `exists (select 1 from content_refs r where r.kind = 'asset' and r.to_id = assets.key)`
   if (selection.all) {
-    const { clauses, binds } = assetFilterSql(selection.filter)
+    const { clauses, binds } = scopedAssetFilter(selection.filter, [scope])
     const row = await db
       .prepare(`select count(*) as n from assets ${whereOf(...clauses, used)}`)
       .bind(...binds)
@@ -381,9 +402,9 @@ async function countUsedOnPublished(
       const row = await db
         .prepare(
           `select count(*) as n from assets
-            where id in (${chunk.map(() => '?').join(', ')}) and ${used}`,
+            where id in (${chunk.map(() => '?').join(', ')}) and site_id = ? and ${used}`,
         )
-        .bind(...chunk)
+        .bind(...chunk, scope)
         .first<{ n: number }>()
       return row?.n ?? 0
     }),
@@ -435,8 +456,9 @@ async function filterBatch(
   after: string | null,
   limit: number,
   allowance: number,
+  scope: string,
 ): Promise<Batch> {
-  const rows = await assetsMatching(db, selection.filter, { limit, after })
+  const rows = await assetsMatching(db, selection.filter, { limit, after, scope: [scope] })
   const excluded = new Set(selection.exclude ?? [])
   const kept = excluded.size === 0 ? rows : rows.filter((row) => !excluded.has(row.id))
   // Trimmed to the ceiling *after* the exclusions, which is the only order that
@@ -469,9 +491,10 @@ async function idBatch(
   ids: readonly string[],
   seen: number,
   limit: number,
+  scope: string,
 ): Promise<Batch> {
   const slice = ids.slice(seen, seen + limit)
-  const found = new Map((await assetsFor(db, slice)).map((row) => [row.id, row]))
+  const found = new Map((await assetsFor(db, slice, [scope])).map((row) => [row.id, row]))
   return {
     rows: slice.map((id) => found.get(id) ?? null),
     consumed: slice.length,

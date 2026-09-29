@@ -553,7 +553,17 @@ export async function replaceHosts(
  * that still owns a row in any of them would orphan it under an id nothing can
  * reach, so the delete is refused instead.
  */
-const OWNED = ['stories', 'assets', 'asset_folders', 'asset_tags', 'forms', 'redirects'] as const
+const OWNED = [
+  'stories',
+  'assets',
+  'asset_folders',
+  'asset_tags',
+  'forms',
+  'redirects',
+  // The answers a site received to a form it does not own. They are content: left
+  // behind, they would be read again by whoever next takes the id.
+  'form_responses',
+] as const
 
 /**
  * Deletes a site or group — refused (409) while it owns content or, for a group,
@@ -586,6 +596,21 @@ export async function deleteSite(db: FolioDb, registry: Registry, id: string): P
     // `scope_id`, and a later sign-in whose mapper still names the scope drops that
     // entry (decision 17). Tokens bound to it are refused at use (`withActor`).
     db.prepare('delete from site_roles where scope_id = ?').bind(id),
+    // Preview grants and share links naming the site as their render site
+    // (`site_grants` and `shares` declare no foreign key on it): a grant is a
+    // credential for a site that no longer exists, and a share can never redeem.
+    // Explicit, like every cleanup here, and in the same batch.
+    db.prepare('delete from site_grants where site_id = ?').bind(id),
+    // Tokens bound to the scope, and the preview grants minted from them. The id can be
+    // registered again, and a token that authenticated on the old site must not
+    // authenticate on the new one.
+    db
+      .prepare(
+        'delete from site_grants where token_id in (select id from api_tokens where site_id = ?)',
+      )
+      .bind(id),
+    db.prepare('delete from api_tokens where site_id = ?').bind(id),
+    db.prepare('delete from shares where site_id = ?').bind(id),
     db.prepare('delete from sites where id = ?').bind(id),
   ])
 }

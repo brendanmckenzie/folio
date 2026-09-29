@@ -16,6 +16,7 @@
  */
 import type { Role, Scope } from './roles'
 import { isRole, isScope } from './roles'
+import { defaultRoleOf } from './roles-from'
 
 /** Deliberately open: anyone who reaches the editor may edit. Written out in
  * full, never a default. */
@@ -545,6 +546,20 @@ export function validateSitesAuth(auth: ResolvedAuth<unknown>): void {
       throw new Error(
         `folio: auth provider '${provider.id}' creates users, and on a deployment with` +
           ' `sites` a created user needs `roleFrom` to say where they may work',
+      )
+    }
+  }
+  // `roleFromClaim({ default })`, on any provider that places roles: the role for an
+  // identity none of the map matched is a grant on `*`, which on a deployment with
+  // `sites` is a role on every site for anybody the directory admits.
+  for (const provider of auth.config.providers) {
+    if (!('roleFrom' in provider)) continue
+    const fallback = defaultRoleOf(provider.roleFrom)
+    if (fallback !== undefined) {
+      throw new Error(
+        `folio: auth provider '${provider.id}' maps a default role ('${fallback}') with` +
+          " roleFromClaim's `default`, which on a deployment with `sites` would be a role on" +
+          ' every site for anybody the directory admits; drop it, and name each scope in `map`',
       )
     }
   }

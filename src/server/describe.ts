@@ -42,10 +42,12 @@ import {
   readBulkCursor,
   writeBulkCursor,
 } from '../core/bulk'
+import { DEFAULT_SITE } from '../core/sites'
 import { isImageAsset } from '../core/values'
 import {
   type AssetRow,
   assetById,
+  assetSiteOf,
   assetsFor,
   assetsMatching,
   countAssets,
@@ -183,6 +185,14 @@ export interface DescribeDeps {
    * to supply a sink to get it.
    */
   logger?: FolioLogger
+  /**
+   * The deployment has `sites` (`multi-site.md` decision 3): a tag is one scope's, an
+   * asset may only carry its own scope's, and so the vocabulary a model is offered is
+   * the asset's own scope's, read per scope rather than once for the whole library.
+   * Absent on a single-site deployment, where there is one vocabulary and nothing
+   * extra is read.
+   */
+  scoped?: boolean
 }
 
 /** What one asset's attempt did. Every field is aggregable, because phase 7's
@@ -211,8 +221,11 @@ export interface DescribeOutcome {
  * change during the run, and `describeAsset` takes the answer as an optional
  * dependency for exactly that reason.
  */
-export async function describeVocabulary(db: FolioDb): Promise<AssetTag[]> {
-  const page = await listTags(db, { limit: MAX_PROMPT_TAGS })
+export async function describeVocabulary(db: FolioDb, site?: string): Promise<AssetTag[]> {
+  const page = await listTags(db, {
+    limit: MAX_PROMPT_TAGS,
+    ...(site === undefined ? {} : { site }),
+  })
   return page.rows
 }
 
@@ -401,7 +414,15 @@ export async function describeAsset(
     return { row: await reread(db, row), skipped: true, tagged: [], tagsIgnored: 0, error: null }
   }
 
-  const tags = vocabulary ?? (await describeVocabulary(db))
+  // The asset's own scope's vocabulary on a deployment with `sites`: another scope's
+  // tag names are not this scope's to be shown to a third party, and could not be
+  // applied to it anyway (`addAssetTags`).
+  const tags =
+    vocabulary ??
+    (await describeVocabulary(
+      db,
+      deps.scoped ? ((await assetSiteOf(db, row.id)) ?? undefined) : undefined,
+    ))
   const input: DescribeInput = {
     id: row.id,
     filename: row.filename,
@@ -497,14 +518,20 @@ async function addAssetTags(
   assetId: string,
   tags: readonly AssetTag[],
 ): Promise<void> {
+  // **Only tags in the asset's own scope** (`multi-site.md`: "tagging across scopes
+  // refused"), stated in the statement rather than trusted to the vocabulary: a model
+  // answers ids it was offered, but this is the write, and a tagging row that joins an
+  // asset to another scope's tag is one no filter could ever explain. On a
+  // single-site deployment every tag is `default`'s and this admits all of them.
   await db.batch(
-    bindChunks(tags, 2).map((chunk) =>
+    bindChunks(tags, 1).map((chunk) =>
       db
         .prepare(
           `insert or ignore into asset_taggings (asset_id, tag_id)
-             values ${chunk.map(() => '(?, ?)').join(', ')}`,
+           select a.id, t.id from assets a join asset_tags t on t.site_id = a.site_id
+            where a.id = ? and t.id in (${chunk.map(() => '?').join(', ')})`,
         )
-        .bind(...chunk.flatMap((tag) => [assetId, tag.id])),
+        .bind(assetId, ...chunk.map((tag) => tag.id)),
     ),
   )
 }
@@ -647,7 +674,9 @@ export async function runDescribe(
   // run whose set moved by three files while an admin was reading it is refused
   // as a value, with the new count, rather than thrown.
   if (selection.all && resume === null) {
-    const actual = await countAssets(db, selection.filter)
+    // Every scope's: this run is the platform tier's (`ADMIN`), deployment-wide by
+    // design, and the one reader that asks for `null` explicitly.
+    const actual = await countAssets(db, selection.filter, null)
     if (actual !== selection.expected) {
       return { refused: 'count', expected: selection.expected, actual }
     }
@@ -683,7 +712,20 @@ export async function runDescribe(
    * Not read at all on a dry run: nothing consumes it, and a dry run is the
    * call that is meant to be free.
    */
-  const vocabulary = dryRun ? [] : await describeVocabulary(db)
+  const single = dryRun || deps.scoped ? [] : await describeVocabulary(db)
+  // With `sites`, one read per scope the batch touches, each memoised as a promise so
+  // concurrent rows of one scope share it.
+  const perScope = new Map<string, Promise<AssetTag[]>>()
+  const vocabularyOf = async (row: AssetRow): Promise<readonly AssetTag[]> => {
+    if (!deps.scoped) return single
+    const site = (await assetSiteOf(db, row.id)) ?? DEFAULT_SITE
+    let read = perScope.get(site)
+    if (!read) {
+      read = describeVocabulary(db, site)
+      perScope.set(site, read)
+    }
+    return read
+  }
 
   const slots: (Slot | null)[] = new Array(rows.length).fill(null)
   await inFlight(rows.length, deps.describe.concurrency, async (at) => {
@@ -705,7 +747,10 @@ export async function runDescribe(
       return
     }
     try {
-      slots[at] = { kind: 'done', outcome: await describeAsset(deps, row, vocabulary) }
+      slots[at] = {
+        kind: 'done',
+        outcome: await describeAsset(deps, row, await vocabularyOf(row)),
+      }
     } catch (err) {
       // `describeAsset` records a model failure rather than throwing, so what
       // reaches here is D1 or R2 itself — and even that must not take the other
@@ -845,7 +890,7 @@ async function filterBatch(
   limit: number,
   allowance: number,
 ): Promise<Batch> {
-  const rows = await assetsMatching(db, selection.filter, { limit, after })
+  const rows = await assetsMatching(db, selection.filter, { limit, after, scope: null })
   const excluded = new Set(selection.exclude ?? [])
   const kept = excluded.size === 0 ? rows : rows.filter((row) => !excluded.has(row.id))
   const acting = kept.length > allowance ? kept.slice(0, allowance) : kept
@@ -869,7 +914,7 @@ async function idBatch(
   limit: number,
 ): Promise<Batch> {
   const slice = ids.slice(seen, seen + limit)
-  const found = new Map((await assetsFor(db, slice)).map((row) => [row.id, row]))
+  const found = new Map((await assetsFor(db, slice, null)).map((row) => [row.id, row]))
   return {
     rows: slice.map((id) => found.get(id) ?? null),
     consumed: slice.length,

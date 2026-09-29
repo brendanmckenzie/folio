@@ -26,15 +26,28 @@
  * missed one is corrected by the next load anyway.
  */
 import type { SpaceEvent } from '../core/protocol'
+import { DEFAULT_SITE } from '../core/sites'
 import type { FolioHooks } from './hooks'
 import type { FolioConfig, FolioLogger, SpaceStub } from './types'
 
 /**
- * The name of the one space instance. One for the whole site, because the whole
- * point is knowing who is in the *site*; per-space sharding is named as the
- * escape hatch in the spec and is not built.
+ * The name of the space instance for `default`. One per **scope** since spec 23
+ * (`multi-site.md` decision 19): the whole point is knowing who is in the *site*, and
+ * an editor on `alpha` has no business seeing who is working on `bravo`, whose
+ * pages, titles and cursors would otherwise cross the fence in a presence frame.
  */
 export const SPACE_NAME = 'space'
+
+/**
+ * The space instance a scope's editors share: `space` for `default` — so a
+ * deployment with no `sites` addresses the object it always has — and
+ * `space:<scope>` for every other scope, a group and `shared` included. Events go to
+ * the **story's own scope** (`payload.site`), so a change to a shared page reaches
+ * the people on `~shared` and not the sites that inherit it.
+ */
+export function spaceNameFor(scope: string | null | undefined): string {
+  return !scope || scope === DEFAULT_SITE ? SPACE_NAME : `${SPACE_NAME}:${scope}`
+}
 
 /**
  * Sends one event, swallowing everything. Errors are logged, never thrown: the
@@ -69,15 +82,15 @@ export function spaceBroadcastHooks<Env>(
   globals: readonly string[],
   logger: FolioLogger = console,
 ): FolioHooks<Env> {
-  const spaceFor = (env: Env): SpaceStub | null => {
+  const spaceFor = (env: Env, scope: string | null): SpaceStub | null => {
     const ns = config.bindings(env).space
-    return ns ? (ns.get(ns.idFromName(SPACE_NAME)) as unknown as SpaceStub) : null
+    return ns ? (ns.get(ns.idFromName(spaceNameFor(scope))) as unknown as SpaceStub) : null
   }
 
   return {
-    created: ({ env, waitUntil, story, actor }) => {
+    created: ({ env, waitUntil, story, actor, site }) => {
       emit(
-        spaceFor(env),
+        spaceFor(env, site),
         {
           kind: 'story.created',
           id: story.id,
@@ -102,12 +115,12 @@ export function spaceBroadcastHooks<Env>(
      * that is stale until the next load, and closing it would mean a second
      * after-commit path for the sake of a row moving up one place.
      */
-    pathsChanged: ({ env, waitUntil, changes, actor }) => {
-      emit(spaceFor(env), { kind: 'story.updated', changes, actor }, waitUntil, logger)
+    pathsChanged: ({ env, waitUntil, changes, actor, site }) => {
+      emit(spaceFor(env, site), { kind: 'story.updated', changes, actor }, waitUntil, logger)
     },
 
-    deleted: ({ env, waitUntil, ids, actor }) => {
-      emit(spaceFor(env), { kind: 'story.deleted', ids, actor }, waitUntil, logger)
+    deleted: ({ env, waitUntil, ids, actor, site }) => {
+      emit(spaceFor(env, site), { kind: 'story.deleted', ids, actor }, waitUntil, logger)
     },
 
     /**
@@ -115,8 +128,8 @@ export function spaceBroadcastHooks<Env>(
      * global: the story event every open admin uses to recompute its badge, and
      * the `global.changed` hint for anything rendering that global's content.
      */
-    published: ({ env, waitUntil, story, version, publishedAt, actor }) => {
-      const space = spaceFor(env)
+    published: ({ env, waitUntil, story, version, publishedAt, actor, site }) => {
+      const space = spaceFor(env, site)
       emit(
         space,
         {

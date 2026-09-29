@@ -178,6 +178,12 @@ export const StoryCreateBody = v.object(
      * type.
      */
     type: v.optional(TYPE_NAME),
+    /**
+     * Create the scope's **home page** (`multi-site.md` decision 5, *Create home
+     * page*): `slug = ''`, `path = ''`, no parent. A scope has at most one, so it is
+     * a 409 when this one already does; `parentId` alongside it is a 400.
+     */
+    root: v.optional(v.boolean('must be true or false')),
   },
   OBJECT,
 )
@@ -532,6 +538,8 @@ export const DocumentCreateBody = v.object(
     slug: v.optional(bounded(200)),
     parentId: v.nullish(ID),
     type: v.optional(TYPE_NAME),
+    /** As `StoryCreateBody.root`: the scope's home page. */
+    root: v.optional(v.boolean('must be true or false')),
     content: v.optional(CONTENT),
   },
   OBJECT,

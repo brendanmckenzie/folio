@@ -1,5 +1,12 @@
 import type { Context, MiddlewareHandler } from 'hono'
-import { ALL_SCOPES, chain, DEFAULT_SITE, SINGLE_SITE_CHAIN } from '../core/sites'
+import {
+  ALL_SCOPES,
+  chain,
+  DEFAULT_SITE,
+  SHARED_SCOPE,
+  SINGLE_SITE_CHAIN,
+  type SiteRef,
+} from '../core/sites'
 import type { StoryMeta } from '../core/story'
 import { readSessionCookie } from './auth/cookie'
 import { credentialOf, originAllowed, type PreviewSite, resolveActor } from './auth/resolve'
@@ -12,7 +19,14 @@ import {
   type Role,
   tokenScopesOn,
 } from './auth/roles'
-import { bookmarkCookie, type DbSession, PRIMARY_FIRST, readBookmark, sessionFor } from './db'
+import {
+  bookmarkCookie,
+  type DbSession,
+  type FolioDb,
+  PRIMARY_FIRST,
+  readBookmark,
+  sessionFor,
+} from './db'
 import { FolioError } from './errors'
 import type { HookRunnerCtx } from './hooks'
 import type { FolioRuntime } from './runtime'
@@ -588,6 +602,110 @@ export async function fenceParent<Env>(
   const parent = await storyById(c.var.bindings().db, parentId)
   if (parent && !(await inFence(c, rt, parent, 'read'))) {
     throw new FolioError('not_found', 'Unknown parent')
+  }
+}
+
+/**
+ * The site row the request's scope names, or undefined: a group, `shared`, a
+ * scope nobody registered, and a deployment with no `sites` have none. What a
+ * reader that builds URLs (`rt.query`'s `site`, `rt.urlsFor`) is handed.
+ */
+export async function requestSite<Env>(
+  c: Context<FolioEnv<Env>>,
+  rt: FolioRuntime,
+): Promise<SiteRef | undefined> {
+  const scope = rt.sites ? c.var.scope : null
+  if (!rt.sites || scope === null) return undefined
+  return (await rt.sites.registry(c.env)).sites.find((site) => site.id === scope)
+}
+
+/**
+ * `rt.withUrls` as the request's site would see it: on a deployment with `sites`, a
+ * story's `url`, `previewUrl` and `draftUrl` are the host's `route()` answer **for
+ * that site** — an absolute URL on its host, and its preview URL on its preview
+ * origin (`multi-site.md` decisions 4 and 13). Without the site the admin, which sits
+ * on its own origin, would be handed paths that resolve to nothing there. A group or
+ * `shared` scope has no host, so its rows are decorated as `withUrls` always has.
+ */
+export async function requestUrls<Env>(
+  c: Context<FolioEnv<Env>>,
+  rt: FolioRuntime,
+): Promise<FolioRuntime['withUrls']> {
+  if (!rt.sites) return rt.withUrls
+  return rt.urlsFor(await requestSite(c, rt))
+}
+
+/**
+ * Every scope the caller may read — the request's chain, and any other scope they hold
+ * a role on (`multi-site.md`: usage lists "uses in readable scopes", counts the rest).
+ * A platform admin reads them all; a shared publisher who is also alpha's editor reads
+ * shared and alpha. Without `sites` it is the single-site chain.
+ */
+export async function readableScopes<Env>(
+  c: Context<FolioEnv<Env>>,
+  rt: FolioRuntime,
+): Promise<readonly string[]> {
+  const within = await requestChain(c, rt)
+  const actor = c.var.actor
+  if (!rt.sites || !actor) return within
+  const registry = await rt.sites.registry(c.env)
+  const every = [
+    SHARED_SCOPE,
+    ...registry.groups.map((g) => g.id),
+    ...registry.sites.map((s) => s.id),
+  ]
+  const readable = every.filter((scope) => {
+    if (actor.kind === 'user') {
+      return effectiveRole(actor.grants ?? { [ALL_SCOPES]: actor.role }, registry, scope) !== null
+    }
+    if (actor.kind === 'token') {
+      return tokenScopesOn(actor.scopes, actor.site ?? null, registry, scope) !== null
+    }
+    return false
+  })
+  return [...new Set([...within, ...readable])]
+}
+
+/**
+ * A scope's chain for a workflow that learns the scope only from a row it has just
+ * read (`documents.ts`' delete, which must know whether a scope above a deleted
+ * root has a root of its own). Absent with no `sites`, where a scope is its own whole
+ * chain.
+ */
+export function chainResolver<Env>(
+  c: Context<FolioEnv<Env>>,
+  rt: FolioRuntime,
+): ((scope: string) => Promise<readonly string[]>) | undefined {
+  const sites = rt.sites
+  return sites ? async (scope) => chain(await sites.registry(c.env), scope) : undefined
+}
+
+/**
+ * The fence for a route whose `:param` names a row that is not a story — an asset, a
+ * folder, a tag, a form. `siteOf` answers the scope that owns the row (a column of its
+ * own, so no payload changes shape) or null for none, and a row outside the request's
+ * chain (a read) or scope (a write) is exactly an unknown one (`multi-site.md`
+ * decision 10).
+ *
+ * **Absent passes**, so each route keeps its own 404 for an id nothing is behind.
+ * **Mounts nothing with no `sites`**: no read, no statement, so a single-site request
+ * is exactly what it was.
+ */
+export function fenceRow<Env>(
+  rt: FolioRuntime,
+  reach: Reach,
+  siteOf: (db: FolioDb, id: string) => Promise<string | null>,
+  what: string,
+  param = 'id',
+): MiddlewareHandler<FolioEnv<Env>> {
+  return async (c, next) => {
+    if (rt.sites) {
+      const site = await siteOf(c.var.bindings().db, c.req.param(param) ?? '')
+      if (site !== null && !(await inFence(c, rt, { site }, reach))) {
+        throw new FolioError('not_found', `Unknown ${what}`)
+      }
+    }
+    await next()
   }
 }
 

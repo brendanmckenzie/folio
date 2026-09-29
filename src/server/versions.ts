@@ -321,21 +321,38 @@ const LATEST_PER_STORY = `not exists (
  */
 export async function listRecentPublishes(
   db: FolioDb,
-  opts: { limit?: number; cursor?: string } = {},
+  opts: {
+    limit?: number
+    cursor?: string
+    /**
+     * The one scope whose stories' publishes to list (`multi-site.md`: `GET
+     * /published` is "scope's own rows"). In the statement rather than filtered
+     * after it, because the cursor comes off the version rows: dropping another
+     * scope's rows afterwards would make a short page look like the last one. A
+     * correlated `exists` on `stories`' primary key. Absent lists every scope's,
+     * which is a deployment with no `sites`.
+     */
+    scope?: string
+  } = {},
 ): Promise<Page<RecentPublish>> {
   const limit = clampLimit(opts.limit, 20, 100)
   const resume = keysetWhere(NEWEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null)
+  const scoped =
+    opts.scope === undefined
+      ? []
+      : ['exists (select 1 from stories s where s.id = v.story_id and s.site_id = ?)']
   const { results } = await db
     .prepare(
       `select ${V_META} from versions v
-       ${whereOf("v.kind = 'publish'", LATEST_PER_STORY, resume.sql)}
+       ${whereOf("v.kind = 'publish'", LATEST_PER_STORY, ...scoped, resume.sql)}
        ${orderBy(NEWEST_FIRST)} limit ?`,
     )
-    .bind(...resume.binds, limit + 1)
+    .bind(...(opts.scope === undefined ? [] : [opts.scope]), ...resume.binds, limit + 1)
     .all<VersionMeta>()
 
   const page = paginate(results, limit, (row) => [row.createdAt, row.id])
-  const stories = await storiesFor(db, [...new Set(page.rows.map((row) => row.storyId))])
+  // Rows the statement has already put in one scope, so the read is by id alone.
+  const stories = await storiesFor(db, [...new Set(page.rows.map((row) => row.storyId))], [], null)
   const byId = new Map(stories.map((story) => [story.id, story]))
   return {
     ...page,

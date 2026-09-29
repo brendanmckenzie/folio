@@ -31,6 +31,7 @@
  */
 import { type AssetTag, tagSlug } from '../core/assets'
 import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
+import { DEFAULT_SITE } from '../core/sites'
 import { bindChunks, type FolioDb } from './db'
 import { FolioError } from './errors'
 import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
@@ -78,15 +79,51 @@ export async function tagById(db: FolioDb, id: string): Promise<AssetTag | null>
   return db.prepare('select id, name, slug from asset_tags where id = ?').bind(id).first<AssetTag>()
 }
 
-/** By slug, which is the identity. There is deliberately no `tagByName`. */
-export async function tagBySlug(db: FolioDb, slug: string): Promise<AssetTag | null> {
+/**
+ * The scope that owns a tag (`asset_tags.site_id`), or null for no such tag: what the
+ * id-loader fence compares against (`multi-site.md` decision 10). A column of its own
+ * rather than a field on `AssetTag`, so no payload changes shape.
+ */
+export async function tagSiteOf(db: FolioDb, id: string): Promise<string | null> {
+  const row = await db
+    .prepare('select site_id as site from asset_tags where id = ?')
+    .bind(id)
+    .first<{ site: string }>()
+  return row?.site ?? null
+}
+
+/**
+ * By slug, which is the identity — **within one scope**: `asset_tags_slug` is
+ * `(site_id, slug)` since `0011`, so two sites may each have a `headshots`, and a
+ * lookup that leaves the scope out is a scan. There is deliberately no `tagByName`.
+ */
+export async function tagBySlug(
+  db: FolioDb,
+  slug: string,
+  site: string = DEFAULT_SITE,
+): Promise<AssetTag | null> {
   return db
-    .prepare('select id, name, slug from asset_tags where slug = ?')
-    .bind(slug)
+    .prepare('select id, name, slug from asset_tags where site_id = ? and slug = ?')
+    .bind(site, slug)
+    .first<AssetTag>()
+}
+
+/** A tag by id **that the scope owns**, or null: another scope's is an absent one. */
+async function ownTag(db: FolioDb, id: string, site: string): Promise<AssetTag | null> {
+  return db
+    .prepare('select id, name, slug from asset_tags where id = ? and site_id = ?')
+    .bind(id, site)
     .first<AssetTag>()
 }
 
 export interface ListTagsOptions {
+  /**
+   * The one scope whose vocabulary this is ("scope's own rows"): a tag is filing, and
+   * tagging across scopes is refused, so an asset carries only its own scope's tags.
+   * Defaults to `default`; bound either way, because `asset_tags_slug` leads with
+   * `site_id`.
+   */
+  site?: string
   limit?: number
   cursor?: string
   /**
@@ -133,8 +170,10 @@ export async function listTags(db: FolioDb, opts: ListTagsOptions = {}): Promise
   const group = opts.counts ? 'group by t.id' : ''
 
   const { results } = await db
-    .prepare(`${select} ${whereOf(resume.sql)} ${group} ${orderBy(TAG_ORDER)} limit ?`)
-    .bind(...resume.binds, limit + 1)
+    .prepare(
+      `${select} ${whereOf('t.site_id = ?', resume.sql)} ${group} ${orderBy(TAG_ORDER)} limit ?`,
+    )
+    .bind(opts.site ?? DEFAULT_SITE, ...resume.binds, limit + 1)
     .all<AssetTag>()
 
   return paginate(results, limit, (row) => [row.slug])
@@ -159,6 +198,8 @@ export async function listTags(db: FolioDb, opts: ListTagsOptions = {}): Promise
 export async function ensureTag(
   db: FolioDb,
   name: string,
+  /** The scope the tag is created or found in: the slug is unique within it. */
+  site: string = DEFAULT_SITE,
 ): Promise<{ tag: AssetTag; created: boolean }> {
   const slug = tagSlug(name)
   if (slug === '') throw new FolioError('bad_request', 'A tag name cannot be blank')
@@ -171,11 +212,10 @@ export async function ensureTag(
     )
     // The target is `asset_tags_slug`'s columns exactly (`0011_sites.sql`): a
     // target naming fewer matches no unique index and D1 refuses the statement.
-    // Single-site until phase 7 scopes the library.
-    .bind(id, name.trim(), slug, Date.now(), 'default')
+    .bind(id, name.trim(), slug, Date.now(), site)
     .run()
 
-  const tag = await tagBySlug(db, slug)
+  const tag = await tagBySlug(db, slug, site)
   // Unreachable: the insert either wrote this row or lost to one that is there.
   if (!tag) throw new FolioError('conflict', `Could not create the tag '${slug}'`)
   return { tag, created: tag.id === id }
@@ -191,14 +231,20 @@ export async function ensureTag(
  * `Headshots` — changes only what is displayed and is always allowed, because it
  * is the same tag by the only identity there is.
  */
-export async function renameTag(db: FolioDb, id: string, name: string): Promise<AssetTag | null> {
-  const row = await tagById(db, id)
+export async function renameTag(
+  db: FolioDb,
+  id: string,
+  name: string,
+  /** The scope the tag must be in: another scope's is absent (null). */
+  site: string = DEFAULT_SITE,
+): Promise<AssetTag | null> {
+  const row = await ownTag(db, id, site)
   if (!row) return null
 
   const slug = tagSlug(name)
   if (slug === '') throw new FolioError('bad_request', 'A tag name cannot be blank')
   if (slug !== row.slug) {
-    const clash = await tagBySlug(db, slug)
+    const clash = await tagBySlug(db, slug, site)
     if (clash) {
       throw new FolioError('conflict', `A tag named '${clash.name}' already occupies '${slug}'`)
     }
@@ -206,8 +252,8 @@ export async function renameTag(db: FolioDb, id: string, name: string): Promise<
 
   const renamed = { ...row, name: name.trim(), slug }
   await db
-    .prepare('update asset_tags set name = ?, slug = ? where id = ?')
-    .bind(renamed.name, renamed.slug, id)
+    .prepare('update asset_tags set name = ?, slug = ? where id = ? and site_id = ?')
+    .bind(renamed.name, renamed.slug, id, site)
     .run()
   return renamed
 }
@@ -228,8 +274,13 @@ export interface TagDeletion {
  * than guess. Both statements commit together, so a reader can never see a
  * tagging row pointing at a tag that is gone.
  */
-export async function deleteTag(db: FolioDb, id: string): Promise<TagDeletion | null> {
-  const row = await tagById(db, id)
+export async function deleteTag(
+  db: FolioDb,
+  id: string,
+  /** The scope the tag must be in: another scope's is absent (null). */
+  site: string = DEFAULT_SITE,
+): Promise<TagDeletion | null> {
+  const row = await ownTag(db, id, site)
   if (!row) return null
 
   const used = await db
@@ -239,7 +290,7 @@ export async function deleteTag(db: FolioDb, id: string): Promise<TagDeletion | 
 
   await db.batch([
     db.prepare('delete from asset_taggings where tag_id = ?').bind(id),
-    db.prepare('delete from asset_tags where id = ?').bind(id),
+    db.prepare('delete from asset_tags where id = ? and site_id = ?').bind(id, site),
   ])
 
   return { removedFrom: used?.n ?? 0 }
@@ -254,15 +305,26 @@ export async function deleteTag(db: FolioDb, id: string): Promise<TagDeletion | 
  * statement, which is what makes the per-asset `order by t.slug` a real ordering
  * rather than one that holds until the page crosses a chunk boundary.
  */
-export async function tagsByIds(db: FolioDb, ids: readonly string[]): Promise<AssetTag[]> {
+export async function tagsByIds(
+  db: FolioDb,
+  ids: readonly string[],
+  /**
+   * Restrict to one scope's tags. `setAssetTags` passes the asset's own, which is the
+   * whole of "tagging across scopes is refused": a tag id from another scope is simply
+   * not among the rows that come back, and the caller reads that as an unknown tag.
+   * Absent reads by id alone, for a caller that has already established the scope.
+   */
+  site?: string,
+): Promise<AssetTag[]> {
   const pages = await Promise.all(
     bindChunks([...new Set(ids)], 1).map(async (chunk) => {
       const { results } = await db
         .prepare(
           `select id, name, slug from asset_tags
-            where id in (${chunk.map(() => '?').join(', ')}) order by slug asc`,
+            where id in (${chunk.map(() => '?').join(', ')})${site === undefined ? '' : ' and site_id = ?'}
+            order by slug asc`,
         )
-        .bind(...chunk)
+        .bind(...chunk, ...(site === undefined ? [] : [site]))
         .all<AssetTag>()
       return results
     }),
@@ -333,9 +395,11 @@ export async function setAssetTags(
   db: FolioDb,
   assetId: string,
   tagIds: readonly string[],
+  /** The asset's scope: a tag from any other is an unknown tag. */
+  site: string = DEFAULT_SITE,
 ): Promise<AssetTag[]> {
   const wanted = [...new Set(tagIds)]
-  const tags = wanted.length === 0 ? [] : await tagsByIds(db, wanted)
+  const tags = wanted.length === 0 ? [] : await tagsByIds(db, wanted, site)
   if (tags.length !== wanted.length) {
     const known = new Set(tags.map((tag) => tag.id))
     const missing = wanted.find((id) => !known.has(id))

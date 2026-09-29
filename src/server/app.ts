@@ -27,9 +27,14 @@ import { siteRoutes } from './routes/sites'
 import { spaceRoutes } from './routes/space'
 import { storyRoutes } from './routes/stories'
 import type { FolioRuntime } from './runtime'
-import type { FolioConfig, FolioEnv } from './types'
+import type { FolioConfig, FolioEnv, GatedReaderFactory } from './types'
 
-export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono<FolioEnv<Env>> {
+export function createApp<Env>(
+  config: FolioConfig<Env>,
+  rt: FolioRuntime,
+  /** Builds a reader for a route that gated the site itself (`routes/api/pages.ts`). */
+  readerFor?: GatedReaderFactory<Env>,
+): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>().basePath(rt.base)
 
   /**
@@ -96,7 +101,7 @@ export function createApp<Env>(config: FolioConfig<Env>, rt: FolioRuntime): Hono
   // (1) `/api/v1` first, so `/api/v1/documents/:id` is never read as one of the
   // internal routes' `:id` patterns. Mounted *after* `withActor`, like everything
   // else, so a token and a session cookie are resolved by the same middleware.
-  app.route(`/api/${API_VERSION}`, apiRoutes<Env>(rt))
+  app.route(`/api/${API_VERSION}`, apiRoutes<Env>(rt, readerFor))
 
   /**
    * The manifest is derived from the config alone: no bindings, no I/O, no way for

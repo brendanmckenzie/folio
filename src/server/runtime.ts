@@ -67,7 +67,7 @@ import {
 } from './hooks'
 import type { PublishDeps } from './publish'
 import { type QueryDeps, runQuery } from './query'
-import { SPACE_NAME, spaceBroadcastHooks } from './space-events'
+import { spaceBroadcastHooks, spaceNameFor } from './space-events'
 import { redirectsAtPaths } from './redirects'
 import { readRegistry, registrySnapshot, type ResolvedSites } from './sites'
 import {
@@ -362,11 +362,13 @@ export interface FolioRuntime {
    * host has not declared the binding — in which case everything that channel
    * carries is simply absent rather than broken.
    *
-   * One instance for the whole site, named `'space'`: it is the only thing that
-   * can know who is in the site rather than in a document, and sharding it is
-   * named as the escape hatch rather than built.
+   * One instance per **scope** (`multi-site.md` decision 19): `'space'` for
+   * `default`, which is every deployment with no `sites`, and `'space:<scope>'`
+   * otherwise. It is the only thing that can know who is in the site rather than in
+   * a document, so it must not know who is in another one. An absent scope is
+   * `default`.
    */
-  space: (bindings: ReadBindings) => SpaceStub | null
+  space: (bindings: ReadBindings, scope?: string | null) => SpaceStub | null
   /**
    * The live draft for a story whose row the caller already has. Preferred over
    * `draft` wherever that is true: `draft` exists to look the row up.
@@ -836,9 +838,9 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const stub = ({ story }: ReadBindings, id: string): StoryStub =>
     story.get(story.idFromName(id)) as unknown as StoryStub
 
-  /** The single space instance, or null for a host without the binding. */
-  const space = ({ space: ns }: ReadBindings): SpaceStub | null =>
-    ns ? (ns.get(ns.idFromName(SPACE_NAME)) as unknown as SpaceStub) : null
+  /** The scope's space instance, or null for a host without the binding. */
+  const space = ({ space: ns }: ReadBindings, scope: string | null = null): SpaceStub | null =>
+    ns ? (ns.get(ns.idFromName(spaceNameFor(scope))) as unknown as SpaceStub) : null
 
   const draftFor = (bindings: ReadBindings, story: StoryMeta) =>
     stub(bindings, story.id).getOrInit(seedFor(story))
@@ -1009,9 +1011,11 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
      * A document with no `form` field issues no query at all: `formIds` answers
      * an empty array and this never touches D1.
      */
-    // Not yet scoped by the chain: forms are `forms.ts`'s, and scoping them is
-    // spec 23's phase 7 (`multi-site.md`, "Implementation plan").
-    const formRows = formsByIds(db, doc ? formIds(doc, schema) : [], logger)
+    // Within the render's chain like every other id-set read here (`multi-site.md`
+    // decision 3): a form owned by a scope outside it resolves exactly like a deleted
+    // one, so its questions and its `action` are never handed to a page that is not
+    // entitled to them.
+    const formRows = formsByIds(db, doc ? formIds(doc, schema) : [], logger, chain)
 
     /** Pass two: the documents this one pulls in — references, and every global. */
     let docs: Record<string, Doc> = {}

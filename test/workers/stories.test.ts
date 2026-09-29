@@ -655,7 +655,9 @@ describe('publishedDocsByIds and unpublish: references degrade, they do not brea
   it('an unpublished story stops resolving as a reference; publishedDocsByIds simply omits it', async () => {
     const doc = pageDoc('Referenced')
     await publishStoryStatement(env.DB, 'sty_about', doc, 'About', 0).statement.run()
-    expect(await publishedDocsByIds(env.DB, ['sty_about'])).toEqual({ sty_about: doc })
+    expect(await publishedDocsByIds(env.DB, ['sty_about'], SINGLE_SITE_CHAIN)).toEqual({
+      sty_about: doc,
+    })
 
     await unpublish(
       {
@@ -668,7 +670,7 @@ describe('publishedDocsByIds and unpublish: references degrade, they do not brea
       'alice',
     )
 
-    expect(await publishedDocsByIds(env.DB, ['sty_about'])).toEqual({})
+    expect(await publishedDocsByIds(env.DB, ['sty_about'], SINGLE_SITE_CHAIN)).toEqual({})
   })
 })
 
@@ -1266,7 +1268,9 @@ describe('document types: routing never reaches an unrouted document', () => {
     expect(await publishedDoc(env.DB, SINGLE_SITE_CHAIN, 'ada')).toBeNull()
 
     // But it does resolve by id, which is how a reference reaches it.
-    expect(await publishedDocsByIds(env.DB, [ada.id])).toEqual({ [ada.id]: pageDoc('Ada') })
+    expect(await publishedDocsByIds(env.DB, [ada.id], SINGLE_SITE_CHAIN)).toEqual({
+      [ada.id]: pageDoc('Ada'),
+    })
   })
 
   it('a record is absent from the tree and present in listStories', async () => {

@@ -16,13 +16,14 @@ import type { AssetTransform } from '../core/resolve'
 import { FolioError } from './errors'
 import { DOWNLOAD_CONTENT_TYPE, isInlineContentType, SERVED_CONTENT_TYPES } from './validate'
 import { type AssetFilter, type AssetSort, DEFAULT_ASSET_SORT } from '../core/assets'
-import { folderById, subtreeWhere } from './asset-folders'
+import { folderSiteOf, subtreeWhere } from './asset-folders'
 import { MAX_TAG_FILTER, setAssetTags } from './asset-tags'
+import { DEFAULT_SITE, SINGLE_SITE_CHAIN } from '../core/sites'
 import { clampLimit, type CursorPart, decodeCursor, type Page, paginate } from '../core/pagination'
 import type { StoryMeta } from '../core/story'
 import { assetReferences, clearInboundRefStatements } from './content-index'
 import { type Direction, type Keyset, keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
-import { storiesFor } from './stories'
+import { chainClause, storiesFor } from './stories'
 import { bindChunks, type FolioDb } from './db'
 import type { FolioLogger } from './types'
 
@@ -135,9 +136,21 @@ function keyOf(sort: AssetSort, row: AssetRow): [CursorPart, CursorPart] {
  * `undescribed`: this clause and `CAPTURED_ASSET_FILTER`'s key, or a captured
  * *retry the failures* run silently becomes a run over everything again.
  */
-export function assetFilterSql(filter: AssetFilter): { clauses: string[]; binds: unknown[] } {
+export function assetFilterSql(
+  filter: AssetFilter,
+  /**
+   * The scopes the rows are read in, **passed down to the two subqueries that would
+   * otherwise scan** — the folder range and the tag join — so `asset_folders_path` and
+   * `asset_tags_slug` (both `site_id` first since `0011`) are seeks. It adds no clause of
+   * its own on `assets`: that is `scopedAssetFilter`'s, and a captured *select all*
+   * arrives here with no scope at all. Absent, the subqueries are unscoped, exactly the
+   * statements the pure tests pin.
+   */
+  scope?: readonly string[] | null,
+): { clauses: string[]; binds: unknown[] } {
   const clauses: string[] = []
   const binds: unknown[] = []
+  const within = scope ? chainClause(scope) : null
 
   if (filter.q) {
     clauses.push(
@@ -156,8 +169,10 @@ export function assetFilterSql(filter: AssetFilter): { clauses: string[]; binds:
     // the materialised path makes a range rather than a join to a recursion.
     // `like` here would sweep in every sibling whose name starts with this one's.
     const range = subtreeWhere('path', filter.folder)
-    clauses.push(`folder_id in (select id from asset_folders where ${range.sql})`)
-    binds.push(...range.binds)
+    clauses.push(
+      `folder_id in (select id from asset_folders where ${within ? `${within.sql} and ` : ''}${range.sql})`,
+    )
+    binds.push(...(within?.binds ?? []), ...range.binds)
   }
   if (filter.unfiled) clauses.push('folder_id is null')
 
@@ -185,10 +200,10 @@ export function assetFilterSql(filter: AssetFilter): { clauses: string[]; binds:
     clauses.push(
       `id in (select g.asset_id from asset_taggings g
                 join asset_tags t on t.id = g.tag_id
-               where t.slug in (${slugs.map(() => '?').join(', ')})
+               where ${within ? `${within.sql.replace('site_id', 't.site_id')} and ` : ''}t.slug in (${slugs.map(() => '?').join(', ')})
                group by g.asset_id having count(*) = ?)`,
     )
-    binds.push(...slugs, slugs.length)
+    binds.push(...(within?.binds ?? []), ...slugs, slugs.length)
   }
   // `not exists` rather than `id not in (select asset_id from asset_taggings)`:
   // the correlated form probes `asset_taggings`'s primary key per row, while the
@@ -213,6 +228,35 @@ export function assetFilterSql(filter: AssetFilter): { clauses: string[]; binds:
 }
 
 /**
+ * Which scopes' library rows a read covers (`../../docs/specs/foundation/multi-site.md`
+ * decision 3): the **chain** — one scope for "the library", the whole chain for the
+ * picker (`?chain=1`) — or `null` for every scope, which only the platform tier's bulk
+ * describe asks for, being deployment-wide by design.
+ *
+ * Defaulted to `['default']` everywhere it is taken, which is every row of a
+ * deployment with no `sites`, and bound either way: `assets_created`,
+ * `assets_filename` and `assets_size` lead with `site_id` since `0011`, so a list that
+ * leaves it out is a scan and a sort.
+ */
+export type AssetScope = readonly string[] | null
+
+/**
+ * `assetFilterSql` with the scope in front of it. **Kept out of `assetFilterSql`
+ * itself** on purpose: that composer is shared with a captured *select all*, which is a
+ * JSON body a client wrote, and a scope in it would be one the client chose. The scope
+ * comes from the request and is added here, by the reader.
+ */
+export function scopedAssetFilter(
+  filter: AssetFilter,
+  scope: AssetScope = SINGLE_SITE_CHAIN,
+): { clauses: string[]; binds: unknown[] } {
+  const composed = assetFilterSql(filter, scope)
+  if (scope === null) return composed
+  const within = chainClause(scope)
+  return { clauses: [within.sql, ...composed.clauses], binds: [...within.binds, ...composed.binds] }
+}
+
+/**
  * `AssetFilter` (`core/assets.ts`) plus the paging controls — the filter half is
  * shared with a captured *select all* and with the query string a route parses,
  * which is why it is one type in `core/` rather than a second list of the same
@@ -224,6 +268,8 @@ export interface ListAssetsOptions extends AssetFilter {
   /** Adds `total` for the same filter. One extra `count(*)`, only when asked
    * (`../../docs/specs/foundation/pagination.md` decision 5). */
   count?: boolean
+  /** The scopes listed: the chain, or `null` for every scope. See `AssetScope`. */
+  chain?: AssetScope
   /** One of `core/assets.ts`'s `AssetSort` values. Absent is `created`. */
   sort?: AssetSort
   /**
@@ -258,7 +304,7 @@ export async function listAssets(
   const keyset: Keyset = opts.dir ? { ...ORDERS[sort], direction: opts.dir } : ORDERS[sort]
   const resume = keysetWhere(keyset, cursor)
 
-  const filter = assetFilterSql(opts)
+  const filter = scopedAssetFilter(opts, opts.chain)
   const where = whereOf(...filter.clauses, resume.sql)
 
   const [rows, total] = await Promise.all([
@@ -296,8 +342,12 @@ export async function listAssets(
  * Binds nothing a caller sizes — `assetFilterSql`'s own header carries the
  * arithmetic (eighteen at the widest).
  */
-export async function countAssets(db: FolioDb, filter: AssetFilter = {}): Promise<number> {
-  const { clauses, binds } = assetFilterSql(filter)
+export async function countAssets(
+  db: FolioDb,
+  filter: AssetFilter = {},
+  scope: AssetScope = SINGLE_SITE_CHAIN,
+): Promise<number> {
+  const { clauses, binds } = scopedAssetFilter(filter, scope)
   const row = await db
     .prepare(`select count(*) as n from assets ${whereOf(...clauses)}`)
     .bind(...binds)
@@ -307,6 +357,20 @@ export async function countAssets(db: FolioDb, filter: AssetFilter = {}): Promis
 
 export async function assetById(db: FolioDb, id: string): Promise<AssetRow | null> {
   return db.prepare(`select ${COLS} from assets where id = ?`).bind(id).first<AssetRow>()
+}
+
+/**
+ * The scope that owns an asset (`assets.site_id`), or null for no such asset: what the
+ * id-loader fence compares against (`multi-site.md` decision 10). A column of its own
+ * rather than a field on `AssetRow`, so no row a client already parses changes shape
+ * (`{base}/api/v1/assets` is a contract).
+ */
+export async function assetSiteOf(db: FolioDb, id: string): Promise<string | null> {
+  const row = await db
+    .prepare('select site_id as site from assets where id = ?')
+    .bind(id)
+    .first<{ site: string }>()
+  return row?.site ?? null
 }
 
 /**
@@ -324,13 +388,22 @@ export async function assetById(db: FolioDb, id: string): Promise<AssetRow | nul
  *
  * Empty in, empty out: `in ()` is not valid SQL.
  */
-export async function assetsFor(db: FolioDb, ids: readonly string[]): Promise<AssetRow[]> {
+export async function assetsFor(
+  db: FolioDb,
+  ids: readonly string[],
+  /** The scopes an id may be read in; an id owned elsewhere is simply absent. */
+  scope: AssetScope = SINGLE_SITE_CHAIN,
+): Promise<AssetRow[]> {
   if (ids.length === 0) return []
+  const within = scope === null ? null : chainClause(scope)
   const pages = await Promise.all(
-    bindChunks([...new Set(ids)], 1).map(async (chunk) => {
+    bindChunks([...new Set(ids)], 1 + (within?.binds.length ?? 0)).map(async (chunk) => {
       const { results } = await db
-        .prepare(`select ${COLS} from assets where id in (${chunk.map(() => '?').join(', ')})`)
-        .bind(...chunk)
+        .prepare(
+          `select ${COLS} from assets
+           where id in (${chunk.map(() => '?').join(', ')})${within ? ` and ${within.sql}` : ''}`,
+        )
+        .bind(...chunk, ...(within?.binds ?? []))
         .all<AssetRow>()
       return results
     }),
@@ -361,9 +434,15 @@ export async function assetsFor(db: FolioDb, ids: readonly string[]): Promise<As
 export async function assetsMatching(
   db: FolioDb,
   filter: AssetFilter,
-  opts: { limit: number; after?: string | null },
+  opts: {
+    limit: number
+    after?: string | null
+    /** The scopes walked: a captured filter is read against the request's, never a
+     * scope of its own. `null` is every scope (the platform tier's describe run). */
+    scope?: AssetScope
+  },
 ): Promise<AssetRow[]> {
-  const { clauses, binds } = assetFilterSql(filter)
+  const { clauses, binds } = scopedAssetFilter(filter, opts.scope)
   const sql = [...clauses]
   if (opts.after) {
     sql.push('id > ?')
@@ -427,24 +506,36 @@ export interface AssetUsage {
    * counts. Equal to `published.length`; named so a caller reading only the count
    * does not have to know that. */
   total: number
+  /** Distinct published documents in scopes **outside the chain** that use it:
+   * counted, never named (`multi-site.md`: "uses in readable scopes listed; others
+   * counted"). A shared logo is used by sites the caller has no role on. */
+  elsewhere: number
 }
 
-export async function assetUsage(db: FolioDb, key: string): Promise<AssetUsage> {
+export async function assetUsage(
+  db: FolioDb,
+  key: string,
+  /** The scopes whose uses are named. */
+  chain: readonly string[] = SINGLE_SITE_CHAIN,
+): Promise<AssetUsage> {
   const from = await assetReferences(db, key)
-  if (from.length === 0) return { published: [], total: 0 }
+  if (from.length === 0) return { published: [], total: 0, elsewhere: 0 }
 
   // A row whose source story has since been deleted is dropped rather than
   // reported as an untitled usage. `deleteStoryStatement` clears a deleted story's
   // edges in both directions, so this should not happen on a live site — but an
   // import that wrote edges directly would otherwise put a usage with no title and
   // no URL in front of somebody about to delete a file.
-  const published = await storiesFor(db, from)
+  // Read wherever they live (`null`), then split: the fence is on what is *named*, and
+  // the sources are primary-key seeks either way.
+  const sources = await storiesFor(db, from, [], null)
+  const published = sources.filter((story) => chain.includes(story.site ?? DEFAULT_SITE))
   published.sort(
     (a, b) =>
       (a.path === null ? 1 : 0) - (b.path === null ? 1 : 0) ||
       (a.path ?? a.title).localeCompare(b.path ?? b.title),
   )
-  return { published, total: published.length }
+  return { published, total: published.length, elsewhere: sources.length - published.length }
 }
 
 /**
@@ -525,7 +616,13 @@ export async function readCappedBody(
 export async function uploadAsset(
   db: FolioDb,
   bucket: R2Bucket,
-  input: { bytes: ArrayBuffer; filename: string },
+  input: {
+    bytes: ArrayBuffer
+    filename: string
+    /** The scope that owns the file (`multi-site.md` decision 3): the request's.
+     * Default `default`, the one scope of a deployment with no `sites`. */
+    site?: string
+  },
 ): Promise<AssetRow> {
   if (input.bytes.byteLength === 0) throw new Error('Empty upload')
   if (input.bytes.byteLength > MAX_UPLOAD_BYTES) {
@@ -579,8 +676,9 @@ export async function uploadAsset(
   try {
     await db
       .prepare(
-        `insert into assets (id, key, filename, content_type, size, width, height, alt, created_at)
-         values (?, ?, ?, ?, ?, ?, ?, '', ?)`,
+        `insert into assets (id, key, filename, content_type, size, width, height, alt, created_at,
+                             site_id)
+         values (?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
       )
       .bind(
         row.id,
@@ -591,6 +689,7 @@ export async function uploadAsset(
         row.width,
         row.height,
         row.createdAt,
+        input.site ?? DEFAULT_SITE,
       )
       .run()
   } catch (e) {
@@ -649,13 +748,18 @@ export async function updateAsset(
   db: FolioDb,
   id: string,
   patch: AssetPatch,
+  /** The scope the asset must be in: another scope's is absent (null), and a folder or
+   * tag from another scope is an unknown one — filing and tagging across scopes are
+   * refused (`multi-site.md`'s table). */
+  site: string = DEFAULT_SITE,
 ): Promise<AssetRow | null> {
   const row = await assetById(db, id)
-  if (!row) return null
+  if (!row || (await assetSiteOf(db, id)) !== site) return null
 
   if (patch.folderId) {
-    const folder = await folderById(db, patch.folderId)
-    if (!folder) throw new FolioError('bad_request', 'Unknown folder')
+    if ((await folderSiteOf(db, patch.folderId)) !== site) {
+      throw new FolioError('bad_request', 'Unknown folder')
+    }
   }
 
   const sets: string[] = []
@@ -675,11 +779,11 @@ export async function updateAsset(
 
   if (sets.length > 0) {
     await db
-      .prepare(`update assets set ${sets.join(', ')} where id = ?`)
-      .bind(...binds, id)
+      .prepare(`update assets set ${sets.join(', ')} where id = ? and site_id = ?`)
+      .bind(...binds, id, site)
       .run()
   }
-  if (patch.tags !== undefined) await setAssetTags(db, id, patch.tags)
+  if (patch.tags !== undefined) await setAssetTags(db, id, patch.tags, site)
 
   return sets.length > 0 ? assetById(db, id) : row
 }
@@ -702,9 +806,15 @@ export async function updateAsset(
  * why this calls it unchanged rather than writing a second delete
  * (`migrations/0002_asset_refs.sql`).
  */
-export async function deleteAsset(db: FolioDb, bucket: R2Bucket, id: string): Promise<boolean> {
+export async function deleteAsset(
+  db: FolioDb,
+  bucket: R2Bucket,
+  id: string,
+  /** The scope the asset must be in: another scope's is absent (false). */
+  site: string = DEFAULT_SITE,
+): Promise<boolean> {
   const row = await assetById(db, id)
-  if (!row) return false
+  if (!row || (await assetSiteOf(db, id)) !== site) return false
   // D1 before R2: if the row survives (the delete throws), the asset is still
   // listed and still resolves, so a retry is exactly a retry. Deleting the
   // object first and then failing the D1 delete would leave a row that points
@@ -713,7 +823,7 @@ export async function deleteAsset(db: FolioDb, bucket: R2Bucket, id: string): Pr
   // Batched, so the library row and its edges go together: a surviving edge to a
   // key with no row is a usage count for an asset that no longer exists.
   await db.batch([
-    db.prepare('delete from assets where id = ?').bind(id),
+    db.prepare('delete from assets where id = ? and site_id = ?').bind(id, site),
     ...clearInboundRefStatements(db, [row.key]),
   ])
   try {
@@ -1239,14 +1349,20 @@ function jpegSize(bytes: Uint8Array, view: DataView): { width: number; height: n
  */
 export async function listAssetsByPage(
   db: FolioDb,
-  opts: { page: number; perPage: number; filter?: AssetFilter },
+  opts: {
+    page: number
+    perPage: number
+    filter?: AssetFilter
+    /** The scopes listed; see `AssetScope`. Default: the single-site chain. */
+    chain?: AssetScope
+  },
 ): Promise<{ assets: AssetRow[]; total: number }> {
   const perPage = clampLimit(opts.perPage, 50, 200)
   const page = Math.max(1, Math.trunc(opts.page) || 1)
   // The same composer `listAssets` uses (decision 13). Absent, it emits nothing
   // and the statement is the unfiltered one this route has always answered — the
   // filters are additive, so a caller passing none gets exactly today's rows.
-  const filter = assetFilterSql(opts.filter ?? {})
+  const filter = scopedAssetFilter(opts.filter ?? {}, opts.chain)
   const where = whereOf(...filter.clauses)
   const [rows, total] = await Promise.all([
     db

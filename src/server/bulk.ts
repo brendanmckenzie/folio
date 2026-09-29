@@ -96,6 +96,14 @@ export interface BulkOptions {
    */
   destination?: { parentId: string | null; index?: number }
   /**
+   * The scope the run acts in (`multi-site.md`: "`/bulk/*`: every id in scope"), and
+   * the one thing a captured filter is read against: a filter selection walks and
+   * counts **this scope's own rows** and no other's, and a duplicate's copies land
+   * here. Absent is `default`, the one scope of a deployment with no `sites`. Off the
+   * request, never the body.
+   */
+  scope?: string
+  /**
    * `delete`'s redirect switch, defaulting to **true** exactly as
    * `DELETE {base}/api/stories/:id` does (`../../docs/specs/platform/redirects.md` decision 4): a
    * bulk delete has to leave the redirects a hundred single deletes would.
@@ -179,7 +187,7 @@ export async function runBulk<Env>(
   // The guard, once, at the start of the job — never on a resumed call. See the
   // module header; the spec's decision 3 records what re-checking would cost.
   if (selection.all && resume === null) {
-    const actual = await countStories(deps.db, selection.filter)
+    const actual = await countStories(deps.db, selection.filter, opts.scope)
     if (actual !== selection.expected) {
       return { refused: 'count', expected: selection.expected, actual }
     }
@@ -201,7 +209,7 @@ export async function runBulk<Env>(
 
   const limit = Math.min(batch, allowance)
   const { rows, consumed, last } = selection.all
-    ? await filterBatch(deps.db, selection, resume?.after ?? null, limit)
+    ? await filterBatch(deps.db, selection, resume?.after ?? null, limit, opts.scope)
     : await idBatch(deps.db, selection.ids, seen, limit)
 
   for (const [at, row] of rows.entries()) {
@@ -263,7 +271,9 @@ async function one<Env>(
       await unpublish(deps, story, opts.actor)
       return
     case 'duplicate':
-      await duplicateDocument(deps, story, {}, opts.actor)
+      // Into the run's scope: the source may be anywhere in the chain, the copy is
+      // this scope's own (`documents.ts`).
+      await duplicateDocument(deps, story, opts.scope ? { site: opts.scope } : {}, opts.actor)
       return
     case 'move':
       await moveDocument(
@@ -315,10 +325,12 @@ async function filterBatch(
   selection: FilterSelection<StoryFilter>,
   after: string | null,
   limit: number,
+  scope?: string,
 ): Promise<Batch> {
   const rows = await storiesMatching(db, selection.filter, {
     limit,
     after,
+    ...(scope === undefined ? {} : { scope }),
     ...(selection.exclude ? { exclude: selection.exclude } : {}),
   })
   return { rows, consumed: rows.length, last: rows.at(-1)?.id ?? null }
@@ -344,7 +356,10 @@ async function idBatch(
   limit: number,
 ): Promise<Batch> {
   const slice = ids.slice(seen, seen + limit)
-  const found = new Map((await storiesFor(db, slice)).map((row) => [row.id, row]))
+  // By id, unscoped: `routes/bulk.ts` has fenced every id in the selection against
+  // the request's scope (or chain, for a duplicate) before a batch runs, on every
+  // call including a resumed one, so a batch never holds a row it was not cleared to.
+  const found = new Map((await storiesFor(db, slice, [], null)).map((row) => [row.id, row]))
   return {
     rows: slice.map((id) => found.get(id) ?? null),
     consumed: slice.length,

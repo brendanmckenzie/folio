@@ -6,7 +6,7 @@
 import { Hono } from 'hono'
 import { actorString, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
 import { FolioError } from '../errors'
-import { fenceStory, hookCtx, inFence, loadStory, requireAccess } from '../middleware'
+import { fenceStory, hookCtx, inFence, loadStory, requestScope, requireAccess } from '../middleware'
 import { checkpoint } from '../publish'
 import type { FolioRuntime } from '../runtime'
 import { storyById } from '../stories'
@@ -135,6 +135,9 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const cursor = c.req.query('cursor')
     requireCursor(cursor)
     const page = await listRecentPublishes(c.var.bindings().db, {
+      // The scope's own publishes, and only with `sites`: with none every version is
+      // `default`'s and this is the statement it always was.
+      ...(rt.sites ? { scope: requestScope(c, rt) ?? '' } : {}),
       limit: limitParam(c.req.query('limit'), 20, 100),
       cursor,
     })

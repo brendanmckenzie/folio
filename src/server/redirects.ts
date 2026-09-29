@@ -107,6 +107,12 @@ export function rootedTarget(to: string): string {
 }
 
 export interface RedirectWrite {
+  /**
+   * The scope whose page vacated the path (`multi-site.md` decision 3). **Required**:
+   * every statement below binds it, because a redirect is one scope's routing and a
+   * rename on one site must not rewrite, collapse or delete another's.
+   */
+  site: string
   /** The path just vacated, already in `stories.path` form. */
   from: string
   /** Where it now resolves to. */
@@ -136,23 +142,26 @@ export function redirectStatements(db: FolioDb, input: RedirectWrite): D1Prepare
 
   return [
     // 1. The page lives at `to` now: any redirect *away* from it is wrong.
-    db.prepare('delete from redirects where from_path = ?').bind(to),
+    db.prepare('delete from redirects where site_id = ? and from_path = ?').bind(input.site, to),
     // 2. Collapse every existing chain that pointed at the path just vacated.
-    db.prepare('update redirects set to_path = ? where to_path = ?').bind(to, from),
+    db
+      .prepare('update redirects set to_path = ? where site_id = ? and to_path = ?')
+      .bind(to, input.site, from),
     // 3. The redirect for the path just vacated. `or replace` because the same
     //    path can be vacated more than once over a site's life. The key is
-    //    `(site_id, from_path)` since `0011_sites.sql`, so the site is bound
-    //    rather than left to the column default. **All three statements are
-    //    still single-site**: the first two do not bind `site_id`, so on a
-    //    multi-site deployment a rename on one site would rewrite another's
-    //    redirects. Threading the scope through the write paths is spec 23's
-    //    phase 7, which owns the routes that call this.
+    //    `(site_id, from_path)` since `0011_sites.sql`.
+    //
+    //    **All three bind the scope** (spec 23 phase 7). The first two used to
+    //    match on the path alone, so on a multi-site deployment a rename on `alpha`
+    //    deleted `bravo`'s redirect away from the same path and rewrote every
+    //    `bravo` redirect that pointed at it. They are also seeks now: `redirects_to`
+    //    leads with `site_id`, and a statement that leaves it out scans the table.
     db
       .prepare(
         `insert or replace into redirects (from_path, to_path, status, source, story_id, created_at, site_id)
          values (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(from, to, status, source, input.storyId, createdAt, 'default'),
+      .bind(from, to, status, source, input.storyId, createdAt, input.site),
   ]
 }
 
@@ -275,6 +284,13 @@ export function redirectOf(
 }
 
 export interface ListRedirectsOptions {
+  /**
+   * The one scope whose own redirects to list (`multi-site.md`: "scope's own
+   * rows"). Defaulted to `default`, the only scope a deployment with no `sites`
+   * has, and bound either way: `redirects`' primary key leads with `site_id`, so a
+   * list that leaves it out is a scan.
+   */
+  scope?: string
   limit?: number
   source?: 'auto' | 'manual'
   /**
@@ -342,8 +358,8 @@ export async function listRedirects(
   // `count(*)` that also carried the cursor clause would answer "how many rows are
   // left" rather than "how many match", and the header reads `n of N` where N is
   // the whole filter. The same split `listStoryLevel` makes, for the same reason.
-  const narrow: string[] = []
-  const narrowBinds: unknown[] = []
+  const narrow: string[] = ['site_id = ?']
+  const narrowBinds: unknown[] = [opts.scope ?? DEFAULT_SITE]
   if (opts.source) {
     narrow.push('source = ?')
     narrowBinds.push(opts.source)
@@ -397,7 +413,12 @@ export interface UpsertRedirectInput {
  * A manual redirect (decision 4's `source = 'manual'`): a single `insert or
  * replace`, not the three-statement collapse — see the module comment for why.
  */
-export async function upsertRedirect(db: FolioDb, input: UpsertRedirectInput): Promise<Redirect> {
+export async function upsertRedirect(
+  db: FolioDb,
+  input: UpsertRedirectInput,
+  /** The scope the redirect is added to. Required: the key is `(site_id, from_path)`. */
+  site: string,
+): Promise<Redirect> {
   const from = normalisePath(input.from)
   const to = normaliseTarget(input.to)
   const status = input.status ?? 301
@@ -408,18 +429,21 @@ export async function upsertRedirect(db: FolioDb, input: UpsertRedirectInput): P
       `insert or replace into redirects (from_path, to_path, status, source, story_id, created_at, site_id)
        values (?, ?, ?, 'manual', null, ?, ?)`,
     )
-    // Bound, as `redirectStatements` binds it: the key is `(site_id, from_path)`.
-    .bind(from, to, status, createdAt, 'default')
+    .bind(from, to, status, createdAt, site)
     .run()
 
   return { from, to, status, source: 'manual', storyId: null, createdAt }
 }
 
-/** True when a row for `from` was actually removed. */
-export async function deleteRedirect(db: FolioDb, from: string): Promise<boolean> {
+/**
+ * True when a row for `from` was actually removed **in that scope**. It used to
+ * match on the path alone, which on a multi-site deployment deleted the redirect at
+ * that path on every site: one site's publisher removing another's routing.
+ */
+export async function deleteRedirect(db: FolioDb, from: string, site: string): Promise<boolean> {
   const result = await db
-    .prepare('delete from redirects where from_path = ?')
-    .bind(normalisePath(from))
+    .prepare('delete from redirects where site_id = ? and from_path = ?')
+    .bind(site, normalisePath(from))
     .run()
   return (result.meta.changes ?? 0) > 0
 }

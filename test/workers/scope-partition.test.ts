@@ -1,4 +1,5 @@
 import { createExecutionContext, env } from 'cloudflare:test'
+import { Hono } from 'hono'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { defineBlock, text } from '../../src/core'
 import type { Doc, Json } from '../../src/core/doc'
@@ -26,6 +27,8 @@ import {
 import { createSession } from '../../src/server/auth/session'
 import { createShare } from '../../src/server/auth/shares'
 import { MCP_PROTOCOL_VERSION } from '../../src/server/mcp/rpc'
+import { mcpRoutes } from '../../src/server/routes/mcp'
+import { SCOPE_HEADER } from '../../src/server/sites'
 import { createToken } from '../../src/server/auth/tokens'
 import { createUser } from '../../src/server/auth/users'
 import { PREVIEW_REACH, routeScope } from '../../src/server/middleware'
@@ -258,7 +261,9 @@ beforeAll(async () => {
           RESPONSES[owner],
           ROWS.form[owner],
           JSON.stringify({ email: `x@${owner}.example` }),
-          owner,
+          // The shared form's answer was submitted on alpha (`~alpha` reads it as its
+          // own); alpha's and bravo's forms were answered on their own sites.
+          RESPONSE_SITE[owner],
         ),
       db
         .prepare(
@@ -266,6 +271,29 @@ beforeAll(async () => {
            values (?, ?, 'checkpoint', ?, ?, 1)`,
         )
         .bind(ROWS.version[owner], ROWS.story[owner], owner, JSON.stringify(rootDoc(owner))),
+      db
+        .prepare(
+          `insert into assets (id, key, filename, content_type, size, alt, created_at, site_id)
+           values (?, ?, ?, 'image/png', 1, '', 1, ?)`,
+        )
+        .bind(ROWS.asset[owner], `${ROWS.asset[owner]}-x.png`, `${owner}.png`, owner),
+      db
+        .prepare(
+          `insert into asset_folders (id, parent_id, name, path, created_at, site_id)
+           values (?, null, ?, ?, 1, ?)`,
+        )
+        .bind(ROWS.folder[owner], `${owner} press`, `${owner}-press`, owner),
+      db
+        .prepare(
+          `insert into asset_tags (id, name, slug, created_at, site_id) values (?, ?, ?, 1, ?)`,
+        )
+        .bind(ROWS.tag[owner], `${owner} tag`, `${owner}-tag`, owner),
+      db
+        .prepare(
+          `insert into redirects (from_path, to_path, status, source, created_at, site_id)
+           values (?, 'somewhere', 301, 'manual', 0, ?)`,
+        )
+        .bind(`${owner}-old`, owner),
     ]),
   ])
   for (const owner of ['alpha', 'bravo', 'shared'] as const) {
@@ -643,7 +671,7 @@ describe('the registry is platform tier', () => {
 
 /* ------------------------------------------------------------ the fence --- */
 
-type Kind = 'story' | 'form' | 'share' | 'version'
+type Kind = 'story' | 'form' | 'share' | 'version' | 'asset' | 'folder' | 'tag'
 
 /** The seeded row of each kind, per owning scope. */
 const ROWS: Record<Kind, Record<'alpha' | 'bravo' | 'shared', string>> = {
@@ -652,7 +680,11 @@ const ROWS: Record<Kind, Record<'alpha' | 'bravo' | 'shared', string>> = {
   // Filled in `beforeAll`: share ids are minted.
   share: { alpha: '', bravo: '', shared: '' },
   version: { alpha: 'ver_sp_alpha', bravo: 'ver_sp_bravo', shared: 'ver_sp_shared' },
+  asset: { alpha: 'ast_a1a1a1a1a1a1', bravo: 'ast_b0b0b0b0b0b0', shared: 'ast_5a5a5a5a5a5a' },
+  folder: { alpha: 'fld_a1a1a1a1a1a1', bravo: 'fld_b0b0b0b0b0b0', shared: 'fld_5a5a5a5a5a5a' },
+  tag: { alpha: 'tag_a1a1a1a1a1a1', bravo: 'tag_b0b0b0b0b0b0', shared: 'tag_5a5a5a5a5a5a' },
 }
+const RESPONSE_SITE = { alpha: 'alpha', bravo: 'bravo', shared: 'alpha' } as const
 const RESPONSES = {
   alpha: 'res_a1a1a1a1a1a1',
   bravo: 'res_b0b0b0b0b0b0',
@@ -680,34 +712,43 @@ const UNSCOPED_IDS = [
   'GET /login/:provider',
   'GET /login/:provider/callback',
   'GET /api/v1/documents/by-path/:path{.*}',
+  // The same path-addressed read as a page (`reader.page()` over HTTP): the chain and
+  // the status gate (`multi-site-headless.test.ts`).
+  'GET /api/v1/pages/:path{.*}',
 ]
 
 /**
- * **Deferred, and asserted exactly so the owning phase must empty it.** Spec 23's
- * phase 7 fences these (review finding 4): their rows' readers (`assets.ts`,
- * `asset-folders.ts`, `asset-tags.ts`, `redirects.ts`) do not yet select
- * `site_id`, and the public form submit is "a form in the submitting site's chain",
- * which needs the live host's site.
+ * **Deferred: none, and asserted empty.** Spec 23's phase 7 fenced the asset, folder
+ * and tag id routes (`LOADERS`, below), and scoped the two that take a *path* rather
+ * than a row (`SCOPED_BY_SQL`). An entry added here is a route somebody decided to
+ * leave unfenced, and the test that reads this list fails until it is empty again.
  */
-const DEFERRED_IDS = [
-  'GET /api/assets/:id',
-  'PATCH /api/assets/:id',
-  'DELETE /api/assets/:id',
-  'GET /api/assets/:id/usage',
-  'POST /api/assets/:id/describe',
-  'PATCH /api/assets/folders/:id',
-  'DELETE /api/assets/folders/:id',
-  'PATCH /api/assets/tags/:id',
-  'DELETE /api/assets/tags/:id',
-  'DELETE /api/redirects/:from{.+}',
-  'POST /f/:id',
-]
+const DEFERRED_IDS: string[] = []
+
+/**
+ * Routes whose id names nothing a URL could point at another scope with, or whose
+ * statement is bound to the request's scope in SQL so that another scope's row is
+ * simply not there: a redirect is addressed by *path*, and `DELETE` removes it in the
+ * request's scope alone; the public form submit is a form in the chain of the site
+ * whose live host received it. Each has its own cases below.
+ */
+const SCOPED_BY_SQL = ['DELETE /api/redirects/:from{.+}', 'POST /f/:id']
 
 /** Fenced, and tested by their own cases below rather than by the status walk:
  * the socket refuses with a close code, the editor page with a 404 page, and a
  * global's bare preview has no id in its path at all — the layer it shows is the
  * request's own scope's, so there is no other row for a URL to name. */
-const FENCED_ELSEWHERE = ['GET /api/story/:id/socket', 'GET /edit/:id', 'GET /preview/global/:name']
+const FENCED_ELSEWHERE = [
+  'GET /api/story/:id/socket',
+  'GET /edit/:id',
+  'GET /preview/global/:name',
+  // A read of the source and a write in the request's scope: not one reach, so not a
+  // row of the walk. Their own cases below.
+  'POST /api/stories/:id/duplicate',
+  'POST /api/v1/documents/:id/duplicate',
+  'POST /api/stories/:id/fork',
+  'GET /api/story/:id/fork',
+]
 
 describe('every id loader is a fence', () => {
   /**
@@ -715,11 +756,13 @@ describe('every id loader is a fence', () => {
    * `read` route answers a row up the chain and 404s one outside it; a `write`
    * route 404s both. `kind` says which seeded row fills the path.
    *
-   * **A form's responses are `write` even to read** (`routes/forms.ts`' `fenceForm`):
-   * up the chain they would be every site's submissions to a shared form, which
-   * spec 23's phase 7 scopes by submitting site.
+   * **A form's responses are a `read`, and a second fence sits behind it** (`routes/forms.ts`'
+   * `sitesOf`): up the chain they would be every site's submissions to a shared form, so
+   * a reader below the form's own scope sees only the answers its own sites received
+   * (`multi-site-library.test.ts`). Those rows carry `skipUp` — the walk must not act on
+   * answers the site is entitled to.
    */
-  const LOADERS: [string, string, 'read' | 'write', Kind][] = [
+  const LOADERS: [string, string, 'read' | 'write', Kind, 'skipUp'?][] = [
     ['GET', '/api/story/:id/document', 'read', 'story'],
     ['GET', '/api/story/:id/translation?locale=fr', 'read', 'story'],
     ['GET', '/api/story/:id/activity', 'read', 'story'],
@@ -730,7 +773,6 @@ describe('every id loader is a fence', () => {
     ['GET', '/api/versions/:versionId', 'read', 'version'],
     ['PATCH', '/api/stories/:id', 'write', 'story'],
     ['DELETE', '/api/stories/:id', 'write', 'story'],
-    ['POST', '/api/stories/:id/duplicate', 'write', 'story'],
     ['POST', '/api/story/:id/publish', 'write', 'story'],
     ['POST', '/api/story/:id/unpublish', 'write', 'story'],
     ['POST', '/api/story/:id/versions', 'write', 'story'],
@@ -744,19 +786,30 @@ describe('every id loader is a fence', () => {
     ['POST', '/api/v1/documents/:id/publish', 'write', 'story'],
     ['POST', '/api/v1/documents/:id/versions', 'write', 'story'],
     ['POST', '/api/v1/documents/:id/unpublish', 'write', 'story'],
-    ['POST', '/api/v1/documents/:id/duplicate', 'write', 'story'],
     ['POST', '/api/v1/documents/:id/restore', 'write', 'story'],
     ['DELETE', '/api/shares/:id', 'write', 'share'],
     ['GET', '/api/forms/:id', 'read', 'form'],
     ['GET', '/api/forms/:id/usage', 'read', 'form'],
     ['PATCH', '/api/forms/:id', 'write', 'form'],
     ['DELETE', '/api/forms/:id', 'write', 'form'],
-    ['GET', '/api/forms/:id/responses', 'write', 'form'],
-    ['GET', '/api/forms/:id/responses.csv', 'write', 'form'],
-    ['GET', '/api/forms/:id/responses/:rid', 'write', 'form'],
-    ['DELETE', '/api/forms/:id/responses/:rid', 'write', 'form'],
-    ['POST', '/api/forms/:id/responses/delete', 'write', 'form'],
-    ['GET', '/api/forms/:id/responses/:rid/file/:name', 'write', 'form'],
+    // Responses are a read since phase 7, with the submitting site as a second fence
+    // (its own cases below): `skipUp` keeps the walk from acting on the shared form's
+    // answers that the site is entitled to.
+    ['GET', '/api/forms/:id/responses', 'read', 'form', 'skipUp'],
+    ['GET', '/api/forms/:id/responses.csv', 'read', 'form', 'skipUp'],
+    ['GET', '/api/forms/:id/responses/:rid', 'read', 'form', 'skipUp'],
+    ['DELETE', '/api/forms/:id/responses/:rid', 'read', 'form', 'skipUp'],
+    ['POST', '/api/forms/:id/responses/delete', 'read', 'form', 'skipUp'],
+    ['GET', '/api/forms/:id/responses/:rid/file/:name', 'read', 'form', 'skipUp'],
+    ['GET', '/api/assets/:id', 'read', 'asset'],
+    ['GET', '/api/assets/:id/usage', 'read', 'asset'],
+    ['PATCH', '/api/assets/:id', 'write', 'asset'],
+    ['DELETE', '/api/assets/:id', 'write', 'asset'],
+    ['POST', '/api/assets/:id/describe', 'write', 'asset'],
+    ['PATCH', '/api/assets/folders/:id', 'write', 'folder'],
+    ['DELETE', '/api/assets/folders/:id', 'write', 'folder'],
+    ['PATCH', '/api/assets/tags/:id', 'write', 'tag'],
+    ['DELETE', '/api/assets/tags/:id', 'write', 'tag'],
   ]
 
   const at = (path: string, kind: Kind, owner: 'bravo' | 'shared') => {
@@ -796,17 +849,34 @@ describe('every id loader is a fence', () => {
     const left = await env.DB.prepare(
       `select (select count(*) from forms where id = ?) as forms,
               (select count(*) from form_responses where id = ?) as responses,
-              (select revoked_at from shares where id = ?) as revoked`,
+              (select revoked_at from shares where id = ?) as revoked,
+              (select alt from assets where id = ?) as alt,
+              (select count(*) from asset_folders where id = ?) as folders,
+              (select name from asset_tags where id = ?) as tag`,
     )
-      .bind(ROWS.form.bravo, RESPONSES.bravo, ROWS.share.bravo)
+      .bind(
+        ROWS.form.bravo,
+        RESPONSES.bravo,
+        ROWS.share.bravo,
+        ROWS.asset.bravo,
+        ROWS.folder.bravo,
+        ROWS.tag.bravo,
+      )
       .first()
-    expect(left).toEqual({ forms: 1, responses: 1, revoked: null })
+    expect(left).toEqual({
+      forms: 1,
+      responses: 1,
+      revoked: null,
+      alt: '',
+      folders: 1,
+      tag: 'bravo tag',
+    })
   })
 
   it('reads a shared row up the chain on every read loader', async () => {
     const wrong: string[] = []
-    for (const [method, path, reach, kind] of LOADERS) {
-      if (reach !== 'read') continue
+    for (const [method, path, reach, kind, skipUp] of LOADERS) {
+      if (reach !== 'read' || skipUp) continue
       const res = await call(`/~alpha${at(path, kind, 'shared')}`, U, init(method))
       if (res.status !== 200) wrong.push(`${method} ${path} → ${res.status}`)
     }
@@ -836,14 +906,17 @@ describe('every id loader is a fence', () => {
         !fenced.has(key) &&
         !FENCED_ELSEWHERE.includes(key) &&
         !UNSCOPED_IDS.includes(key) &&
+        !SCOPED_BY_SQL.includes(key) &&
         !DEFERRED_IDS.includes(key),
     )
     expect(unaccounted).toEqual([])
     // Nothing is listed twice, and nothing listed is gone from the app.
-    for (const key of [...UNSCOPED_IDS, ...DEFERRED_IDS, ...FENCED_ELSEWHERE]) {
+    for (const key of [...UNSCOPED_IDS, ...SCOPED_BY_SQL, ...DEFERRED_IDS, ...FENCED_ELSEWHERE]) {
       expect([key, withId.includes(key), fenced.has(key)]).toEqual([key, true, false])
     }
     expect(DEFERRED_IDS.filter((key) => UNSCOPED_IDS.includes(key))).toEqual([])
+    // Phase 7 is done: every id route is fenced, scoped in SQL, or unscoped by design.
+    expect(DEFERRED_IDS).toEqual([])
     // That is what makes the deferred list exact: an entry fenced into `LOADERS`
     // fails the line above until it leaves the list, and an unfenced route missing
     // from it fails `unaccounted`.
@@ -1103,6 +1176,64 @@ describe('MCP is scoped', () => {
     expect(own.text).not.toContain('site_required')
     const other = await mcp('/~alpha', U, 'get_document', { id: 'sty_sp_bravo' })
     expect(other.text).toContain('Unknown document')
+  })
+})
+
+describe('MCP dispatch', () => {
+  /**
+   * The route in isolation, with the request's scope decided by the test the way
+   * `handle()` and `withScope` decide it, and the mounted app replaced by a recorder.
+   * What is under test is one line: **the header a tool's sub-request carries is this
+   * request's own scope, and nothing a client sent.** Through `handle()` the two are
+   * indistinguishable, because it strips a client's internal headers first; this is the
+   * layer that must hold if it ever did not.
+   */
+  async function dispatched(scope: string | null, clientSent: Record<string, string>) {
+    const seen: (string | null)[] = []
+    const inner = {
+      fetch: async (req: Request) => {
+        seen.push(req.headers.get(SCOPE_HEADER))
+        return Response.json({ id: 'sty_sp_alpha' })
+      },
+    }
+    const outer = new Hono<{ Variables: Record<string, unknown> }>()
+    outer.use('*', async (c, next) => {
+      c.set('scope', scope)
+      c.set('actor', null)
+      c.set('bindings', () => ({}))
+      await next()
+    })
+    outer.route('/', mcpRoutes(createRuntime(config), inner as never))
+    const res = await outer.fetch(
+      new Request('https://cms.example/mcp', {
+        method: 'POST',
+        headers: {
+          ...clientSent,
+          'content-type': 'application/json',
+          'mcp-protocol-version': MCP_PROTOCOL_VERSION,
+          'mcp-method': 'tools/call',
+          'mcp-name': 'get_document',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'get_document', arguments: { id: 'sty_sp_alpha' } },
+        }),
+      }),
+      {},
+      createExecutionContext(),
+    )
+    expect(res.status).toBe(200)
+    return seen
+  }
+
+  it('sets the scope from its own request, whatever header the client sent', async () => {
+    expect(await dispatched('alpha', { [SCOPE_HEADER]: 'bravo' })).toEqual(['alpha'])
+  })
+
+  it('sets none when the request has none, rather than the one the client sent', async () => {
+    expect(await dispatched(null, { [SCOPE_HEADER]: 'bravo' })).toEqual([null])
   })
 })
 

@@ -9,6 +9,7 @@
  */
 import { Hono } from 'hono'
 import { type SocketIdentity, withIdentity } from '../auth/identity'
+import { requestScope } from '../middleware'
 import { CLOSE_FORBIDDEN, CLOSE_UNAUTHENTICATED } from '../sockets'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
@@ -46,7 +47,10 @@ export function spaceRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.get('/space/socket', async (c) => {
     if (c.req.header('Upgrade') !== 'websocket') return c.text('Expected websocket', 426)
     const bindings = c.var.bindings()
-    const space = rt.space(bindings)
+    // The request's own scope's channel (`multi-site.md` decision 19): `withActor`
+    // has already refused a caller with no role on it, so what joins is somebody
+    // who may see this scope's editors, and hears nothing from any other.
+    const space = rt.space(bindings, requestScope(c, rt))
     if (!space) return c.text('The space channel is not configured', 426)
 
     let identity: SocketIdentity | null = null

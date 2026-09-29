@@ -793,17 +793,22 @@ describe('redirectStatements', () => {
   it('builds exactly three statements, in order: delete, collapse, insert', () => {
     const { db, calls } = fakeDb()
     const statements = redirectStatements(db, {
+      site: 'default',
       from: 'about',
       to: 'about-us',
       storyId: 'sty_about',
     })
 
     expect(statements).toHaveLength(3)
-    expect(calls[0]?.sql).toMatch(/^delete from redirects where from_path = \?/)
-    expect(calls[0]?.args).toEqual(['about-us'])
+    // Every statement binds the scope (`multi-site.md` decision 3): a rename on one
+    // site must not delete, collapse or rewrite another site's redirects.
+    expect(calls[0]?.sql).toMatch(/^delete from redirects where site_id = \? and from_path = \?/)
+    expect(calls[0]?.args).toEqual(['default', 'about-us'])
 
-    expect(calls[1]?.sql).toMatch(/^update redirects set to_path = \? where to_path = \?/)
-    expect(calls[1]?.args).toEqual(['about-us', 'about'])
+    expect(calls[1]?.sql).toMatch(
+      /^update redirects set to_path = \? where site_id = \? and to_path = \?/,
+    )
+    expect(calls[1]?.args).toEqual(['about-us', 'default', 'about'])
 
     expect(calls[2]?.sql).toMatch(/insert or replace into redirects/)
     expect(calls[2]?.args).toEqual([
@@ -819,28 +824,38 @@ describe('redirectStatements', () => {
 
   it('normalises both from and to before any statement is built', () => {
     const { db, calls } = fakeDb()
-    redirectStatements(db, { from: '/About/', to: '/About-Us/', storyId: null })
+    redirectStatements(db, {
+      site: 'default',
+      from: '/About/',
+      to: '/About-Us/',
+      storyId: null,
+    })
 
-    expect(calls[0]?.args).toEqual(['about-us'])
-    expect(calls[1]?.args).toEqual(['about-us', 'about'])
+    expect(calls[0]?.args).toEqual(['default', 'about-us'])
+    expect(calls[1]?.args).toEqual(['about-us', 'default', 'about'])
     expect(calls[2]?.args?.slice(0, 2)).toEqual(['about', 'about-us'])
   })
 
   it('returns no statements when the path did not actually change', () => {
     const { db, calls } = fakeDb()
-    expect(redirectStatements(db, { from: 'about', to: 'about', storyId: 'sty_about' })).toEqual([])
+    expect(
+      redirectStatements(db, { site: 'default', from: 'about', to: 'about', storyId: 'sty_about' }),
+    ).toEqual([])
     expect(calls).toHaveLength(0)
   })
 
   it('returns no statements for the root, which never has a path to vacate', () => {
     const { db, calls } = fakeDb()
-    expect(redirectStatements(db, { from: '', to: '', storyId: 'sty_home' })).toEqual([])
+    expect(
+      redirectStatements(db, { site: 'default', from: '', to: '', storyId: 'sty_home' }),
+    ).toEqual([])
     expect(calls).toHaveLength(0)
   })
 
   it('accepts an absolute URL as the target without lowercasing or slash-stripping it', () => {
     const { db, calls } = fakeDb()
     redirectStatements(db, {
+      site: 'default',
       from: 'old-microsite',
       to: 'https://Example.com/Path/',
       storyId: null,
@@ -851,14 +866,21 @@ describe('redirectStatements', () => {
 
   it('defaults status to 301 and source to auto', () => {
     const { db, calls } = fakeDb()
-    redirectStatements(db, { from: 'a', to: 'b', storyId: 'sty_a' })
+    redirectStatements(db, { site: 'default', from: 'a', to: 'b', storyId: 'sty_a' })
     expect(calls[2]?.args?.[2]).toBe(301)
     expect(calls[2]?.args?.[3]).toBe('auto')
   })
 
   it('honours an explicit status and source', () => {
     const { db, calls } = fakeDb()
-    redirectStatements(db, { from: 'a', to: 'b', storyId: null, status: 302, source: 'manual' })
+    redirectStatements(db, {
+      site: 'default',
+      from: 'a',
+      to: 'b',
+      storyId: null,
+      status: 302,
+      source: 'manual',
+    })
     expect(calls[2]?.args?.[2]).toBe(302)
     expect(calls[2]?.args?.[3]).toBe('manual')
   })
@@ -933,8 +955,9 @@ describe('createHookRunner', () => {
     await runner.run('created', { story: STORY, actor: 'alice' })
     await Promise.all(tasks)
 
+    // `site` is the runner's own (`HookBase.site`): the story's scope, `default` here.
     expect(calls).toEqual([
-      { story: STORY, actor: 'alice', env: ctx.env, waitUntil: ctx.waitUntil },
+      { story: STORY, actor: 'alice', env: ctx.env, waitUntil: ctx.waitUntil, site: 'default' },
     ])
   })
 
@@ -1183,7 +1206,13 @@ describe('alarmHookCtx', () => {
     await runner.run('created', { story: STORY, actor: null })
 
     expect(calls).toEqual([
-      { story: STORY, actor: null, env: { marker: 'env' }, waitUntil: ctx.waitUntil },
+      {
+        story: STORY,
+        actor: null,
+        env: { marker: 'env' },
+        waitUntil: ctx.waitUntil,
+        site: 'default',
+      },
     ])
   })
 
@@ -1261,7 +1290,7 @@ describe('validateHooks', () => {
 
   it('names every valid key in the message it throws, so the list is discoverable', () => {
     expect(() => validateHooks({ reindex: () => {} } as unknown as FolioHooks<Env>)).toThrow(
-      /valid: await, checkpointed, created, deleted, formChanged, migrated, pathsChanged, published, redirectsChanged, reindexed, submitted, unpublished, updated/,
+      /valid: await, checkpointed, created, deleted, formChanged, migrated, pathsChanged, published, redirectsChanged, reindexed, siteChanged, submitted, unpublished, updated/,
     )
   })
 

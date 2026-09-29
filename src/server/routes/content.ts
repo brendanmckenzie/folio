@@ -13,7 +13,7 @@ import type { ContentQuery, ContentWhere, TextOp } from '../../core/query'
 import { isRangeOp, isTextOp, MAX_PER_PAGE, WHERE_OPS } from '../../core/query'
 import { actorString, ADMIN, READ } from '../auth/roles'
 import { FolioError } from '../errors'
-import { hookCtx, requireAccess } from '../middleware'
+import { hookCtx, requestChain, requestSite, requireAccess } from '../middleware'
 import { reindex } from '../reindex'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
@@ -173,7 +173,11 @@ export function contentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.get('/content', requireAccess<Env>(rt, READ), async (c) => {
     const url = new URL(c.req.url)
     const q = queryFromParams(url.searchParams)
-    return c.json(await rt.query(c.var.bindings(), q))
+    // Over the request's chain, deduped by decision 6's walk, with the site's own
+    // URLs (`multi-site.md`'s route table: `GET /content` is "chain, deduped").
+    return c.json(
+      await rt.query(c.var.bindings(), q, await requestChain(c, rt), await requestSite(c, rt)),
+    )
   })
 
   /**

@@ -321,8 +321,10 @@ describe('cachePurgeHooks', () => {
     expect(hooks.checkpointed).toBeUndefined()
     // A redirect changes what an uncached 404 path answers; Folio's tags
     // describe rendered pages, so there is no right tag to purge. The event
-    // exists for a host that caches its own 404s.
+    // exists for a host that caches its own 404s. (With `sites` it purges the
+    // `path:` tags a fallen-back page carries: see "the owner-scoped purges".)
     expect(hooks.redirectsChanged).toBeUndefined()
+    expect(hooks.siteChanged).toBeUndefined()
   })
 
   describe('when the platform capability is absent', () => {

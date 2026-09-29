@@ -426,6 +426,30 @@ export interface FolioPageOptions {
   page?: number
 }
 
+/**
+ * A reader for a caller that has **already decided which site it reads and whether it
+ * may see drafts** — the one internal way to build a `FolioReader` that is not from a
+ * `Request` carrying the site's host (`folio.reader(env, req)`) or a bare site id
+ * (`folio.reader(env, { site })`, gated as that site's live surface).
+ *
+ * `GET {base}/~<site>/api/v1/pages/{path}` is the only caller (`multi-site.md`
+ * decision 16): it is `reader.page()` over HTTP, on the admin origin, for a front end
+ * that names the site in the URL. It runs the status gate itself (`servedSite`) and
+ * hands the gated row in, so the reader does not gate a second time and the gate lives
+ * in exactly one place. `draft` is the caller's authority to read drafts, asked with
+ * `mayPreviewDrafts`, never a cookie. `request` is what the host's `gate.visitor` is
+ * given. **Not public API**: it is not on `Folio['reader']`.
+ */
+export interface GatedReaderFrom {
+  gated: SiteRef
+  surface: 'live' | 'preview'
+  request: Request
+  draft: boolean
+}
+
+/** Builds a reader for a caller that gated the site itself. See `GatedReaderFrom`. */
+export type GatedReaderFactory<Env> = (env: Env, from: GatedReaderFrom) => FolioReader
+
 export interface FolioReader {
   published: (path: string, locale?: string) => Promise<Doc | null>
   /**

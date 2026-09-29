@@ -4,12 +4,13 @@
  * through here — see redirects.ts's module comment for why the two paths
  * stay distinct.
  */
+import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { decodeCursor } from '../../core/pagination'
-import { SINGLE_SITE_CHAIN } from '../../core/sites'
+import { DEFAULT_SITE } from '../../core/sites'
 import { actorString, MANAGE, READ } from '../auth/roles'
 import { FolioError } from '../errors'
-import { hookCtx, requireAccess } from '../middleware'
+import { hookCtx, requestChain, requestScope, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import {
   deleteRedirect,
@@ -27,14 +28,26 @@ import type { FolioDb } from '../db'
 
 /** True when `to` already redirects straight back to `from` — the one loop a
  * manual add can create that decision 3's write-time collapse never sees,
- * because there is no path being vacated here for that collapse to run on. */
-async function pointsBackAt(db: FolioDb, to: string, from: string): Promise<Redirect['to'] | null> {
-  const back = await lookupRedirect(db, SINGLE_SITE_CHAIN, to)
+ * because there is no path being vacated here for that collapse to run on.
+ * Asked along the scope's chain, because that is the walk a visitor's request
+ * takes (`multi-site.md` decision 5). */
+async function pointsBackAt(
+  db: FolioDb,
+  chain: readonly string[],
+  to: string,
+  from: string,
+): Promise<Redirect['to'] | null> {
+  const back = await lookupRedirect(db, chain, to)
   return back && normalisePath(back.to) === from ? back.to : null
 }
 
 export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
+
+  // The scope whose own redirects these are (`multi-site.md`: "scope's own rows"),
+  // and `default` with no `sites`. A redirect is one scope's routing: it is listed,
+  // added and removed there, and never touches another's.
+  const scopeOf = (c: Context<FolioEnv<Env>>): string => requestScope(c, rt) ?? DEFAULT_SITE
 
   app.get('/redirects', requireAccess<Env>(rt, READ), async (c) => {
     const db = c.var.bindings().db
@@ -55,6 +68,7 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     }
     return c.json(
       await listRedirects(db, {
+        scope: scopeOf(c),
         limit,
         cursor,
         source: source === 'auto' || source === 'manual' ? source : undefined,
@@ -106,7 +120,11 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       )
     }
 
-    const occupied = await storyByPath(db, SINGLE_SITE_CHAIN, from)
+    // Only the scope's **own** page is a trap: a page it merely inherits is exactly
+    // what a redirect here is for overriding (decision 5: a site's own redirect beats
+    // an inherited page).
+    const scope = scopeOf(c)
+    const occupied = await storyByPath(db, [scope], from)
     if (occupied) {
       throw new FolioError(
         'conflict',
@@ -114,7 +132,7 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       )
     }
 
-    const loopsBackTo = await pointsBackAt(db, body.to, from)
+    const loopsBackTo = await pointsBackAt(db, await requestChain(c, rt), body.to, from)
     if (loopsBackTo !== null) {
       throw new FolioError(
         'conflict',
@@ -122,11 +140,11 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       )
     }
 
-    const redirect = await upsertRedirect(db, {
-      from: body.from,
-      to: body.to,
-      status: body.status,
-    })
+    const redirect = await upsertRedirect(
+      db,
+      { from: body.from, to: body.to, status: body.status },
+      scope,
+    )
     // A path that used to answer the host's own 404 now answers a redirect
     // (`../../../docs/specs/platform/caching.md`). Folio's own purge hook has
     // nothing to do with this — its tags describe rendered pages, not paths —
@@ -134,7 +152,7 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // only moment that knows which path changed meaning.
     await rt
       .hookRunner(hookCtx(c))
-      .run('redirectsChanged', { from: [from], actor: actorString(c.var.actor) })
+      .run('redirectsChanged', { from: [from], actor: actorString(c.var.actor), site: scope })
     return c.json(redirect, 201)
   })
 
@@ -142,13 +160,14 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   // than being cut at the first slash, the way a bare `:from` would.
   app.delete('/redirects/:from{.+}', requireAccess<Env>(rt, MANAGE), async (c) => {
     const from = c.req.param('from')
-    const removed = await deleteRedirect(c.var.bindings().db, from)
+    const removed = await deleteRedirect(c.var.bindings().db, from, scopeOf(c))
     // Only when a row actually went: deleting a redirect that was never there
     // changes nothing, and an event for it would be a purge for nothing.
     if (removed) {
       await rt.hookRunner(hookCtx(c)).run('redirectsChanged', {
         from: [normalisePath(from)],
         actor: actorString(c.var.actor),
+        site: scopeOf(c),
       })
     }
     return c.json({ deleted: removed })

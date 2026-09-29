@@ -60,7 +60,15 @@ import {
 } from './stories'
 import { SpaceDO } from './space-do'
 import { createStoryDO, StoryDO } from './story-do'
-import type { Folio, FolioConfig, FolioGateContext, PreviewMode, ReadBindings } from './types'
+import type {
+  Folio,
+  FolioConfig,
+  FolioGateContext,
+  FolioReader,
+  GatedReaderFrom,
+  PreviewMode,
+  ReadBindings,
+} from './types'
 import { commitAll } from './write'
 
 /**
@@ -493,7 +501,8 @@ function treeByPath(chain: readonly string[], rows: readonly StoryMeta[]) {
  */
 export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
   const rt = createRuntime(config)
-  const app = createApp(config, rt)
+  // `readerWith` is defined below, after the app that will call it at request time.
+  const app = createApp(config, rt, (env, from) => readerWith(env, from))
 
   /**
    * The site a grant may be read for, on the primary (`PreviewSite`'s own comment
@@ -861,9 +870,15 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
    * page needs: a document resolved against references older than itself renders
    * a card that has since been retitled.
    */
-  const reader: Folio<Env>['reader'] = (env, from) => {
-    const req = from instanceof Request ? from : undefined
-    const named = from !== undefined && !(from instanceof Request) ? from.site : undefined
+  const readerWith = (
+    env: Env,
+    from?: Request | { site: string } | GatedReaderFrom,
+  ): FolioReader => {
+    const gatedFrom =
+      from !== undefined && !(from instanceof Request) && 'gated' in from ? from : undefined
+    const req = from instanceof Request ? from : gatedFrom?.request
+    const named =
+      from !== undefined && !(from instanceof Request) && 'site' in from ? from.site : undefined
     if (rt.sites && from === undefined) throw new Error(NEEDS_SITE)
     if (!rt.sites && named !== undefined && named !== DEFAULT_SITE) {
       throw new Error(`folio: reader(env, { site: '${named}' }) needs \`sites\` configured`)
@@ -906,7 +921,11 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         let site: SiteRef | null = null
         let surface: 'live' | 'preview' = 'live'
         let shareOnly: ReadonlySet<string> | null = null
-        if (req) {
+        if (gatedFrom) {
+          // Gated by the caller (`GatedReaderFrom`), once, in its own route.
+          site = gatedFrom.gated
+          surface = gatedFrom.surface
+        } else if (req) {
           // With the grant or share the request carries, so a host's own route on
           // a draft site's preview origin reads that site for its previewer.
           const routed = await routeGranted(sites, registry, req, null, env)
@@ -948,9 +967,11 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * or a warm-up from pulling a draft into something cacheable.
      */
     const wantsDraft = (): boolean =>
-      req !== undefined &&
-      (hasDraftCookie(req.headers.get('cookie')) ||
-        shareCookieTokens(req.headers.get('cookie')).length > 0)
+      gatedFrom !== undefined
+        ? gatedFrom.draft
+        : req !== undefined &&
+          (hasDraftCookie(req.headers.get('cookie')) ||
+            shareCookieTokens(req.headers.get('cookie')).length > 0)
 
     /**
      * May this request see `story`'s draft, and if so, what is it.
@@ -966,6 +987,10 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * site would make the share's view count a lie.
      */
     const draftFor = async (story: StoryMeta): Promise<Doc | null> => {
+      // The caller that gated the site also decided whether it may read drafts, with
+      // `mayPreviewDrafts`; there is no cookie to ask about (`GatedReaderFrom`).
+      if (gatedFrom)
+        return gatedFrom.draft && story.path !== null ? rt.draftFor(bindings, story) : null
       if (!req || story.path === null) return null
       // On a multi-site deployment drafts are served only on a site's preview
       // origin (decision 13), so a live host never reads one whatever the cookie
@@ -1267,6 +1292,9 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       bookmark: () => db.getBookmark(),
     }
   }
+
+  /** The public `folio.reader`: a request or a bare site, never a caller-gated site. */
+  const reader: Folio<Env>['reader'] = (env, from) => readerWith(env, from)
 
   /**
    * `folio.cacheProps` (decision 15): the gated site and its surface, or `{}`. A

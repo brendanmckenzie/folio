@@ -15,6 +15,7 @@
  */
 import { Hono } from 'hono'
 import type { AssetFilter } from '../../../core/assets'
+import { DEFAULT_SITE } from '../../../core/sites'
 import {
   listAssetsByPage,
   MAX_UPLOAD_BYTES,
@@ -25,9 +26,9 @@ import {
 import { ASSETS, READ } from '../../auth/roles'
 import { describeOnUpload } from '../../describe'
 import { FolioError, rethrow } from '../../errors'
-import { requireAccess } from '../../middleware'
+import { requestScope, requireAccess } from '../../middleware'
 import type { FolioRuntime } from '../../runtime'
-import type { FolioEnv } from '../../types'
+import type { FolioEnv, GatedReaderFactory } from '../../types'
 import {
   contentLengthHeader,
   filenameQuery,
@@ -36,12 +37,17 @@ import {
   tagsQuery,
 } from '../../validate'
 import { documentRoutes } from './documents'
+import { pageRoutes } from './pages'
 import { searchRoutes } from './search'
+import { siteReadRoutes } from './sites'
 
 /** The one version there is. A `v2` would be a second `Hono` mounted beside this. */
 export const API_VERSION = 'v1'
 
-export function apiRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
+export function apiRoutes<Env>(
+  rt: FolioRuntime,
+  readerFor?: GatedReaderFactory<Env>,
+): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
 
   /**
@@ -57,6 +63,10 @@ export function apiRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
   app.route('/', documentRoutes<Env>(rt))
   app.route('/', searchRoutes<Env>(rt))
+  // The two below mount nothing on a deployment with no `sites`: their routes do not
+  // exist there, and `{base}/api/v1` is exactly what it always was.
+  app.route('/', siteReadRoutes<Env>(rt))
+  app.route('/', pageRoutes<Env>(rt, readerFor))
 
   /**
    * The media library and uploads, re-exposed at `assets:write` — a scope that
@@ -90,6 +100,9 @@ export function apiRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       page,
       perPage,
       filter: assetFilterQuery(c.req),
+      // The scope's own library (`multi-site.md`: `~<scope>/api/v1/*` is "every route
+      // as today, scoped"), and `default` with no `sites`.
+      chain: [requestScope(c, rt) ?? DEFAULT_SITE],
     })
     return c.json({ assets: listed.assets, page, perPage, total: listed.total })
   })
@@ -121,12 +134,25 @@ export function apiRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     contentLengthHeader(c.req.header('content-length'), MAX_UPLOAD_BYTES)
     try {
       const bytes = await readCappedBody(c.req.raw.body, MAX_UPLOAD_BYTES)
-      const row = await uploadAsset(db, media, { bytes, filename })
+      const row = await uploadAsset(db, media, {
+        bytes,
+        filename,
+        site: requestScope(c, rt) ?? DEFAULT_SITE,
+      })
       if (rt.describe?.onUpload) {
         const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
         c.executionCtx.waitUntil(
           describeOnUpload(
-            { db, media, images, assetBase, describe: rt.describe, env: c.env, logger: rt.logger },
+            {
+              db,
+              media,
+              images,
+              assetBase,
+              describe: rt.describe,
+              env: c.env,
+              logger: rt.logger,
+              scoped: rt.sites !== null,
+            },
             row,
           ),
         )

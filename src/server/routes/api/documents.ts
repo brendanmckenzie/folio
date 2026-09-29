@@ -24,7 +24,7 @@ import { isKnownLocale } from '../../../core/locales'
 import type { Mutation } from '../../../core/mutations'
 import { fieldShapeError, fromNested, type NestedDoc, toNested } from '../../../core/nested'
 import { type DocumentType, SINGLETON_PREFIX, typeByName } from '../../../core/schema'
-import { singletonTypeOf } from '../../../core/sites'
+import { DEFAULT_SITE, singletonTypeOf } from '../../../core/sites'
 import type { StoryMeta, StoryState } from '../../../core/story'
 import {
   actorName,
@@ -39,6 +39,7 @@ import {
 import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from '../../documents'
 import { FolioError, rethrow } from '../../errors'
 import {
+  chainResolver,
   ensureAccess,
   fenceParent,
   fenceStory,
@@ -47,6 +48,8 @@ import {
   type Reach,
   requestChain,
   requestScope,
+  requestSite,
+  requestUrls,
   requireAccess,
 } from '../../middleware'
 import { checkpoint, publish, unpublish } from '../../publish'
@@ -78,6 +81,7 @@ import {
 import { getVersion, listVersions } from '../../versions'
 import { commitAll, writeDocument, type WriteActor } from '../../write'
 import { queryFromParams } from '../content'
+import { servedSite } from './served'
 
 /** A document's row, as the API reports it. Every field is stable surface. */
 export interface ApiDocumentMeta {
@@ -96,6 +100,13 @@ export interface ApiDocumentMeta {
   state: StoryState
   publishedAt: number | null
   updatedAt: number
+  /**
+   * The scope that owns the document — a site, a group or `shared`
+   * (`multi-site.md` decision 3). **Present on a multi-site deployment only**, so a
+   * single-site deployment's payload is byte-for-byte what it was: a script written
+   * before `sites` never sees the key.
+   */
+  site?: string
 }
 
 export interface ApiDocument extends ApiDocumentMeta {
@@ -116,8 +127,14 @@ export interface ApiDocument extends ApiDocumentMeta {
  * `GET /documents/:id` answer describe a document identically, on purpose,
  * rather than each carrying its own copy of this field list.
  */
-export function toApiDocumentMeta(rt: FolioRuntime, story: StoryMeta): ApiDocumentMeta {
-  const decorated = rt.withUrls(story)
+export function toApiDocumentMeta(
+  rt: FolioRuntime,
+  story: StoryMeta,
+  /** `rt.withUrls`, or the request's site's (`requestUrls`): a multi-site row's URLs
+   * are the host's `route()` answer for a site. */
+  urls: FolioRuntime['withUrls'] = rt.withUrls,
+): ApiDocumentMeta {
+  const decorated = urls(story)
   return {
     id: story.id,
     type: story.type,
@@ -129,6 +146,7 @@ export function toApiDocumentMeta(rt: FolioRuntime, story: StoryMeta): ApiDocume
     state: story.state,
     publishedAt: story.publishedAt,
     updatedAt: story.updatedAt,
+    ...(rt.sites ? { site: story.site ?? DEFAULT_SITE } : {}),
   }
 }
 
@@ -203,7 +221,8 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return story
   }
 
-  const meta = (story: StoryMeta): ApiDocumentMeta => toApiDocumentMeta(rt, story)
+  const meta = (urls: FolioRuntime['withUrls'], story: StoryMeta): ApiDocumentMeta =>
+    toApiDocumentMeta(rt, story, urls)
 
   /**
    * One document, in the nested shape.
@@ -214,12 +233,13 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * one that round-trips through `PUT`.
    */
   const payload = (
+    urls: FolioRuntime['withUrls'],
     story: StoryMeta,
     doc: Doc,
     source: 'published' | 'draft',
     locale: string | undefined,
   ): ApiDocument => ({
-    ...meta(story),
+    ...meta(urls, story),
     source,
     ...(locale !== undefined ? { locale } : {}),
     content: toNested(doc, rt.schema, {
@@ -263,6 +283,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       stub: (id: string) => rt.stub(bindings, id),
       draft: (story: StoryMeta) => rt.draftFor(bindings, story),
       hooks: rt.hookRunner(hookCtx(c)),
+      chainOf: chainResolver(c, rt),
     }
   }
 
@@ -288,7 +309,16 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         'This route queries published content only. A draft lives in its own Durable Object, so it is read one document at a time: GET /documents/:id?status=draft.',
       )
     }
-    return c.json(await rt.query(c.var.bindings(), queryFromParams(url.searchParams)))
+    // The request's chain, deduped by decision 6's walk, with its site's URLs — the
+    // same call `GET /content` makes, so the two cannot answer differently.
+    return c.json(
+      await rt.query(
+        c.var.bindings(),
+        queryFromParams(url.searchParams),
+        await requestChain(c, rt),
+        await requestSite(c, rt),
+      ),
+    )
   })
 
   /**
@@ -301,13 +331,14 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const story = await load(c, idParam('id', c.req.param('id')), 'read')
     const locale = askedLocale(c)
     const wantDraft = c.req.query('status') === 'draft'
+    const urls = await requestUrls(c, rt)
 
     if (wantDraft) {
       ensureAccess(rt, c.var.actor, READ_DRAFT)
-      return c.json(payload(story, await rt.draftFor(bindings, story), 'draft', locale))
+      return c.json(payload(urls, story, await rt.draftFor(bindings, story), 'draft', locale))
     }
-    const published = await publishedFor(bindings, story)
-    return c.json(payload(story, published, 'published', locale))
+    const published = await publishedFor(c, story)
+    return c.json(payload(urls, story, published, 'published', locale))
   })
 
   /**
@@ -323,21 +354,34 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const byPath = async (c: Context<FolioEnv<Env>>) => {
     const bindings = c.var.bindings()
     const path = storyPathParam(c.req.param('path'))
+    // The status gate (`multi-site.md` decision 16), on the page-shaped reads only:
+    // `/pages/{path}` and this one. A site the caller's surface would not serve is a 404
+    // here as it is there. It is deliberately not on `/documents`, `/documents/:id` or
+    // search: a credentialed caller reads those by id or query on any scope it holds
+    // `content:read` on (decision 4), and the gate is about which host serves a page.
+    await servedSite(c, rt)
     const within = await requestChain(c, rt)
     const story = within.length > 0 ? await storyByPath(bindings.db, within, path) : null
     if (!story || story.path === null) throw new FolioError('not_found', 'No document at that path')
     const locale = askedLocale(c)
+    const urls = await requestUrls(c, rt)
     if (c.req.query('status') === 'draft') {
       ensureAccess(rt, c.var.actor, READ_DRAFT)
-      return c.json(payload(story, await rt.draftFor(bindings, story), 'draft', locale))
+      return c.json(payload(urls, story, await rt.draftFor(bindings, story), 'draft', locale))
     }
-    return c.json(payload(story, await publishedFor(bindings, story), 'published', locale))
+    return c.json(payload(urls, story, await publishedFor(c, story), 'published', locale))
   }
   app.get('/documents/by-path', requireAccess<Env>(rt, READ), byPath)
   app.get('/documents/by-path/:path{.*}', requireAccess<Env>(rt, READ), byPath)
 
-  const publishedFor = async (bindings: ReadBindings, story: StoryMeta): Promise<Doc> => {
-    const docs = await publishedDocsByIds(bindings.db, [story.id])
+  const publishedFor = async (c: Context<FolioEnv<Env>>, story: StoryMeta): Promise<Doc> => {
+    // Within the request's chain, though `story` has already been fenced: the row's
+    // document is read under the same rule as the row.
+    const docs = await publishedDocsByIds(
+      c.var.bindings().db,
+      [story.id],
+      await requestChain(c, rt),
+    )
     const doc = docs[story.id]
     if (!doc) {
       throw new FolioError(
@@ -433,7 +477,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       )
     }
 
-    return c.json(payload(story, seeded, 'draft', undefined), 201)
+    return c.json(payload(await requestUrls(c, rt), story, seeded, 'draft', undefined), 201)
   })
 
   /**
@@ -568,7 +612,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         rethrow(e)
       }
 
-      return c.json(meta(next))
+      return c.json(meta(await requestUrls(c, rt), next))
     },
   )
 
@@ -657,7 +701,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const id = idParam('id', c.req.param('id'))
     const story = await load(c, id, 'write')
     await unpublish(rt.publishDeps(bindings, hookCtx(c)), story, actorString(c.var.actor))
-    return c.json({ story: meta(await load(c, id, 'write')) })
+    return c.json({ story: meta(await requestUrls(c, rt), await load(c, id, 'write')) })
   })
 
   /**
@@ -670,20 +714,25 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * call — two requests, which is also what dragging a duplicated row is.
    */
   app.post('/documents/:id/duplicate', requireAccess<Env>(rt, CREATE), async (c) => {
-    // `'write'` until `duplicateDocument` lands the copy in the request's scope
-    // rather than its source's (spec 23 phase 7): see `routes/stories.ts`.
-    const story = await load(c, idParam('id', c.req.param('id')), 'write')
+    // The source may be anywhere in the chain and the copy lands in the request's scope
+    // ("source in chain, copy in scope"): see `routes/stories.ts`.
+    const story = await load(c, idParam('id', c.req.param('id')), 'read')
     const body = await parseOptionalBody(c.req, StoryDuplicateBody)
     await fenceParent(c, rt, body.parentId)
 
     let created: StoryMeta
     try {
-      created = await duplicateDocument(documentDeps(c), story, body, actorString(c.var.actor))
+      created = await duplicateDocument(
+        documentDeps(c),
+        story,
+        { ...body, site: requestScope(c, rt) ?? DEFAULT_SITE },
+        actorString(c.var.actor),
+      )
     } catch (e) {
       rethrow(e)
     }
 
-    return c.json({ document: meta(created) }, 201)
+    return c.json({ document: meta(await requestUrls(c, rt), created) }, 201)
   })
 
   /**

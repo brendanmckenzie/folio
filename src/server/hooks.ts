@@ -13,7 +13,9 @@
  * these too (see `runtime.ts`'s `alarmHookCtx`).
  */
 import type { Doc } from '../core/doc'
+import { DEFAULT_SITE, type GroupRef, type SiteRef } from '../core/sites'
 import type { StoryMeta } from '../core/story'
+import type { PurgeIssued } from './cache-purge'
 import type { FormResponse, SubmittedFile } from './form-responses'
 import type { FormMeta } from './forms'
 import type { FolioLogger } from './types'
@@ -32,6 +34,7 @@ export type HookEvent =
   | 'redirectsChanged'
   | 'formChanged'
   | 'submitted'
+  | 'siteChanged'
 
 /**
  * The same list at runtime, for `validateHooks`. A name must appear in both or
@@ -53,6 +56,7 @@ const HOOK_EVENTS: readonly HookEvent[] = [
   'redirectsChanged',
   'formChanged',
   'submitted',
+  'siteChanged',
 ]
 
 /** Every hook payload's common shape. Nothing else is injected: a hook that
@@ -62,6 +66,30 @@ export interface HookBase<Env> {
   env: Env
   waitUntil: (p: Promise<unknown>) => void
   actor: string | null
+  /**
+   * The scope that owns what changed (`../../docs/specs/foundation/multi-site.md`
+   * decision 16): the site, group or `shared` a story, form or redirect belongs to,
+   * `default` on a deployment with no `sites`, and the changed registry row's own
+   * id for `siteChanged`. **Null for the two events that are about the whole
+   * deployment** (`migrated`, `reindexed`), which touch every scope's rows.
+   *
+   * Set by the runner from the payload it is given, so an emitter that omits it
+   * cannot leave it out: a story's own `site`, else `default`.
+   */
+  site: string | null
+  /**
+   * Exactly what Folio's own purger asked Workers Cache for, when this event made
+   * it purge anything (decision 16): the tags, or a flush. A purge reaches only the
+   * entrypoint that issues it, so a headless host whose front end caches on its own
+   * entrypoint forwards this there instead of recomputing it.
+   *
+   * **Filled in by the runner from the internal hook's own return value**, so it
+   * cannot drift from what was issued. Absent for an event that purged nothing
+   * (`created`, `checkpointed`, a redirect change on a single-site deployment, a
+   * non-title `updated`). Set before a host hook runs, never before an internal
+   * one.
+   */
+  purge?: PurgeIssued
 }
 
 export interface PublishedHookPayload<Env> extends HookBase<Env> {
@@ -200,6 +228,23 @@ export interface SubmittedHookPayload<Env> extends HookBase<Env> {
   files: readonly SubmittedFile[]
 }
 
+/**
+ * A registry row changed (`multi-site.md` decisions 1 and 16): a site or group
+ * created, edited (status, hosts, preview origin, group, name) or deleted. `site`
+ * is the row's id, so a front end that keeps its own host map can refresh that one
+ * entry on the event instead of on a timer.
+ *
+ * `purge` is the `site:<id>` purge Folio issued. The second one, 25 seconds later
+ * (decision 4), is the same tag by construction and is not a separate event.
+ */
+export interface SiteChangedHookPayload<Env> extends HookBase<Env> {
+  site: string
+  kind: 'site' | 'group'
+  change: 'created' | 'updated' | 'deleted'
+  /** The row as it stands after the change, or null once it is deleted. */
+  row: SiteRef | GroupRef | null
+}
+
 /** Every event's full payload, keyed by name — what `FolioHooks` hands a
  * handler and what `HookRunner.run` builds before calling one. */
 export interface HookPayloadMap<Env> {
@@ -215,6 +260,7 @@ export interface HookPayloadMap<Env> {
   redirectsChanged: RedirectsChangedHookPayload<Env>
   formChanged: FormChangedHookPayload<Env>
   submitted: SubmittedHookPayload<Env>
+  siteChanged: SiteChangedHookPayload<Env>
 }
 
 /**
@@ -261,6 +307,12 @@ export interface FolioHooks<Env> {
    * needs durable delivery has a Queue binding and a row in D1 to read from.
    */
   submitted?: (e: SubmittedHookPayload<Env>) => unknown
+  /**
+   * A site or group in the registry was created, edited or deleted. Folio purges
+   * `site:<id>` itself, now and again 25 seconds later; this is for a host that
+   * keeps a front end's host map or cache of its own.
+   */
+  siteChanged?: (e: SiteChangedHookPayload<Env>) => unknown
   /** Events to await before responding. Everything else rides `waitUntil`. */
   await?: readonly HookEvent[]
 }
@@ -281,9 +333,17 @@ export function validateHooks<Env>(hooks: FolioHooks<Env> | undefined): void {
   }
 }
 
-/** What a caller must supply for one event: the payload minus what the
- * runner already knows (`env`, `waitUntil`) from its own `ctx`. */
-export type HookExtra<Env, E extends HookEvent> = Omit<HookPayloadMap<Env>[E], 'env' | 'waitUntil'>
+/**
+ * What a caller must supply for one event: the payload minus what the runner
+ * already knows (`env`, `waitUntil`) from its own `ctx`, and minus the two fields
+ * it fills itself. `site` may be given (a form's, a redirect's, `null` for the
+ * whole deployment); left out, it is the payload's `story.site`, else `default`.
+ * `purge` is given only by an emitter that issued the purge itself.
+ */
+export type HookExtra<Env, E extends HookEvent> = Omit<
+  HookPayloadMap<Env>[E],
+  'env' | 'waitUntil' | 'site' | 'purge'
+> & { site?: string | null; purge?: PurgeIssued }
 
 export interface HookRunner<Env> {
   run<E extends HookEvent>(name: E, extra: HookExtra<Env, E>): Promise<void>
@@ -321,9 +381,9 @@ async function runOne(
   fn: (payload: unknown) => unknown,
   payload: unknown,
   logger: FolioLogger = console,
-): Promise<void> {
+): Promise<unknown> {
   try {
-    await fn(payload)
+    return await fn(payload)
   } catch (err) {
     // The library's second observability hook after `app.onError`'s route
     // logging (errors.ts): one line, naming the event, and nothing else — a
@@ -331,7 +391,25 @@ async function runOne(
     // impossible (decision 2). This swallow is correct and does not change;
     // only where the line goes does (`FolioConfig.logger`).
     logger.error(`folio: hook ${name} failed`, err)
+    return undefined
   }
+}
+
+/** A return value that is a purge's record (`cache-purge.ts`'s `PurgeIssued`). */
+function isPurgeIssued(value: unknown): value is PurgeIssued {
+  if (typeof value !== 'object' || value === null) return false
+  const v = value as { tags?: unknown; everything?: unknown }
+  return (
+    v.everything === true || (Array.isArray(v.tags) && v.tags.every((t) => typeof t === 'string'))
+  )
+}
+
+/** The scope the payload's own row belongs to: `extra.site` when the emitter named
+ * one (`null` included), else the story's, else the one scope a single-site
+ * deployment has. */
+function siteOf(extra: { site?: string | null; story?: { site?: string } }): string | null {
+  if (extra.site !== undefined) return extra.site
+  return extra.story?.site ?? DEFAULT_SITE
 }
 
 /**
@@ -355,7 +433,12 @@ export function createHookRunner<Env>(
         : []
       if (!hostFn && internalFns.length === 0) return // no hook, no cost, no allocation
 
-      const payload: unknown = { ...extra, env: ctx.env, waitUntil: ctx.waitUntil }
+      const payload = {
+        ...(extra as object),
+        env: ctx.env,
+        waitUntil: ctx.waitUntil,
+        site: siteOf(extra as { site?: string | null; story?: { site?: string } }),
+      } as HookBase<Env>
 
       // Internal hooks always run first, and are **always awaited**, whatever
       // the host's `await` list says. That is not a courtesy to the host: the
@@ -366,7 +449,15 @@ export function createHookRunner<Env>(
       // space broadcast, hands its RPC to `waitUntil` itself and so costs
       // nothing to await. A host hook for the same event can still assume they
       // have completed.
-      for (const fn of internalFns) await runOne(name, fn, payload, logger)
+      //
+      // What the purge hook returns is what it asked Workers Cache for
+      // (`PurgeIssued`), and it becomes the payload's `purge` for everything after
+      // it — so a host's hook sees exactly what was issued, not a second
+      // computation of it (`multi-site.md` decision 16).
+      for (const fn of internalFns) {
+        const out = await runOne(name, fn, payload, logger)
+        if (payload.purge === undefined && isPurgeIssued(out)) payload.purge = out
+      }
       if (!hostFn) return
 
       const task = runOne(name, hostFn, payload, logger)

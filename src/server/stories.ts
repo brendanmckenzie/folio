@@ -288,19 +288,24 @@ export async function listStories(
 export async function storiesFor(
   db: FolioDb,
   ids: readonly string[],
-  paths: readonly string[] = [],
+  paths: readonly string[],
   /**
-   * The chain to read within (`multi-site.md` decision 3). **Every id-set read in
-   * `resolve()` passes one**, so a reference on one site to another site's story
-   * id resolves exactly like a deleted one. Absent, ids are read unscoped — a
-   * story id is unique across the deployment, so an id read is a primary-key seek
-   * either way — and `paths` is refused, because a path means nothing without a
+   * The chain to read within (`multi-site.md` decision 3). **Required**, so no
+   * caller can forget one: every id-set read in `resolve()` passes its render's, so
+   * a reference on one site to another site's story id resolves exactly like a
+   * deleted one, and a route passes the request's.
+   *
+   * `null` is the one deliberate exception — *every scope* — for a caller that must
+   * see a row wherever it lives to decide what to do with it (`documentUsage`,
+   * which lists the uses in readable scopes and counts the rest). A story id is
+   * unique across the deployment, so an id read is a primary-key seek either way.
+   * **`paths` is refused with `null`**, because a path means nothing without a
    * scope and an unscoped path read is a scan of every site's rows.
    */
-  chain?: readonly string[],
+  chain: readonly string[] | null,
 ): Promise<StoryMeta[]> {
   if (ids.length === 0 && paths.length === 0) return []
-  if (paths.length > 0 && chain === undefined) {
+  if (paths.length > 0 && chain === null) {
     throw new Error('storiesFor: a path read needs the chain it is a path in')
   }
   if (chain?.length === 0) return []
@@ -820,13 +825,15 @@ export async function listSingletons(
   db: FolioDb,
   types: readonly DocumentType[],
   schemaId: string | null = null,
+  /** The scope whose layers these are (`ensureSingleton`'s). */
+  scope: string = DEFAULT_SITE,
 ): Promise<StoryMeta[]> {
   const singletons = types.filter((t) => t.kind === 'singleton')
   const rows: StoryMeta[] = []
   // Sequential rather than `Promise.all`: each is a read then a conditional
   // insert on the same table, and a site declares a handful of globals, not
   // hundreds. Declaration order is also the order the sidebar shows them in.
-  for (const type of singletons) rows.push(await ensureSingleton(db, type, schemaId))
+  for (const type of singletons) rows.push(await ensureSingleton(db, type, schemaId, scope))
   return rows
 }
 
@@ -1110,6 +1117,14 @@ export interface DocumentUsage {
   total: number
   links: number
   references: number
+  /**
+   * Distinct published documents that use this one from a scope **outside the
+   * chain** asked about (`multi-site.md`: "uses in readable scopes listed; others
+   * counted"). Never named: a shared record is used by pages on sites the caller has
+   * no role on, and the delete dialog needs to say how many, not which. Always 0 on
+   * a deployment with no `sites`, and then not sent.
+   */
+  elsewhere: number
 }
 
 /**
@@ -1136,9 +1151,14 @@ export interface DocumentUsage {
  * no title and no URL. `total` counts what survives the join; `links` and
  * `references` come from the raw row counts and can exceed it.
  */
-export async function documentUsage(db: FolioDb, id: string): Promise<DocumentUsage> {
+export async function documentUsage(
+  db: FolioDb,
+  id: string,
+  /** The scopes whose uses are named; a use anywhere else is counted in `elsewhere`. */
+  chain: readonly string[],
+): Promise<DocumentUsage> {
   const [counts, rows] = await Promise.all([countReferencesTo(db, id), referencesTo(db, id)])
-  if (rows.length === 0) return { published: [], total: 0, links: 0, references: 0 }
+  if (rows.length === 0) return { published: [], total: 0, links: 0, references: 0, elsewhere: 0 }
 
   /**
    * The id list here is unbounded, and that is worth naming even though
@@ -1153,13 +1173,18 @@ export async function documentUsage(db: FolioDb, id: string): Promise<DocumentUs
    * referenced document. This read used to have to opt in to chunking, and the
    * one that would have failed loudest was the one that mattered most.
    */
-  const sources = await storiesFor(db, [...new Set(rows.map((r) => r.from))])
+  // Read wherever they live (`null`), then split: the fence is on what is *named*,
+  // not on what can be counted, and the sources are primary-key seeks either way.
+  const sources = await storiesFor(db, [...new Set(rows.map((r) => r.from))], [], null)
   const byId = new Map(sources.map((s) => [s.id, s]))
 
   const published: UsageRef[] = []
+  const outside = new Set<string>()
   for (const row of rows) {
     const story = byId.get(row.from)
-    if (story) published.push({ story, kind: row.kind === 'link' ? 'link' : 'reference' })
+    if (!story) continue
+    if (!chain.includes(story.site ?? DEFAULT_SITE)) outside.add(story.id)
+    else published.push({ story, kind: row.kind === 'link' ? 'link' : 'reference' })
   }
   // Routed documents first, by path, then unrouted by title: an editor scanning
   // "what breaks" wants the pages before the records.
@@ -1175,6 +1200,7 @@ export async function documentUsage(db: FolioDb, id: string): Promise<DocumentUs
     total: new Set(published.map((p) => p.story.id)).size,
     links: counts.links,
     references: counts.references,
+    elsewhere: outside.size,
   }
 }
 
@@ -1468,11 +1494,12 @@ export async function publishedDocsByIds(
   db: FolioDb,
   ids: readonly string[],
   /**
-   * The chain to read within, as `storiesFor`'s: `resolve()` always passes one,
-   * so a reference to another site's story id pulls in nothing. Absent reads by
-   * id alone, for a caller that already holds a row it is entitled to.
+   * The chain to read within, as `storiesFor`'s, and required for the same reason:
+   * `resolve()` and every route pass theirs, so a reference to another site's story
+   * id pulls in nothing. `null` reads by id alone, for a caller that already holds a
+   * row it is entitled to.
    */
-  chain?: readonly string[],
+  chain: readonly string[] | null,
 ): Promise<Record<string, Doc>> {
   if (ids.length === 0 || chain?.length === 0) return {}
   const scope = chain ? chainClause(chain) : null
@@ -1787,6 +1814,12 @@ export interface CreateStoryInput {
    * scope already has one; a routed type only.
    */
   root?: boolean
+  /**
+   * The inherited row this one overrides (`multi-site.md` decision 5), recorded so a
+   * fork can say "the shared version has changed since you forked it". Written by
+   * `forkStory` and nothing else.
+   */
+  forkedFrom?: string
 }
 
 /**
@@ -1853,7 +1886,7 @@ export async function createStory(
     schemaId: input.schemaId ?? null,
     // Every write names its scope (`0011_sites.sql`), `default` included.
     site,
-    forkedFrom: null,
+    forkedFrom: input.forkedFrom ?? null,
     state: 'draft',
     hasUnpublishedChanges: false,
     updatedAt: Date.now(),
@@ -1866,8 +1899,9 @@ export async function createStory(
   // An unrouted document claims no path, so there is nothing to clear.
   const insert = db
     .prepare(
-      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, schema_id, site_id)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, schema_id, site_id,
+                            forked_from)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       story.id,
@@ -1880,6 +1914,7 @@ export async function createStory(
       story.updatedAt,
       story.schemaId ?? null,
       story.site,
+      story.forkedFrom ?? null,
     )
   await db.batch(
     story.path === null ? [insert] : [insert, clearRedirectAtStatement(db, story.path, site)],
@@ -1986,6 +2021,7 @@ export async function duplicateStory(
   if (type.kind === 'singleton') throw new Error('Cannot duplicate a singleton document')
 
   const title = patch.title?.trim() || `${source.title} (copy)`
+  const target = patch.site ?? source.site ?? DEFAULT_SITE
   return createStory(
     db,
     {
@@ -1993,17 +2029,225 @@ export async function duplicateStory(
       slug: source.slug,
       // An unrouted source has no parent to be a sibling of; `createStory`
       // refuses a parent for it anyway, so this is only ever read for a page.
-      parentId: patch.parentId !== undefined ? patch.parentId : source.parentId,
+      // A copy in another scope than its source's has no parent of the source's to
+      // sit under (a page's parent is always in its own scope, decision 3), so it
+      // lands at the top unless the caller named one of the target's own.
+      parentId:
+        patch.parentId !== undefined
+          ? patch.parentId
+          : target === (source.site ?? DEFAULT_SITE)
+            ? source.parentId
+            : null,
       type,
       // The source's own watermark, not the latest: the copy's *document* is a
       // clone of the source's draft, so it is in exactly the shape the source is
       // in. Claiming otherwise would leave a duplicate of a behind page
       // permanently unmigrated (`schema-migrations.md`).
       schemaId: source.schemaId ?? null,
-      site: patch.site ?? source.site ?? DEFAULT_SITE,
+      site: target,
     },
     types,
   )
+}
+
+/* ------------------------------------------------------------------ forks --- */
+
+/**
+ * Overrides an inherited page (`multi-site.md` decision 5): a copy of a routed row
+ * owned higher in the chain, in `site`, **at the same slug**, as a draft, recording
+ * `forked_from`. Publishing it shadows the source on this site; unpublishing it
+ * suppresses the path; deleting it falls back. Later edits to the source do not
+ * reach it (the owner's accepted cost) — `forkStatus` says when there have been
+ * some.
+ *
+ * Row only: the copy's *document* is the caller's to seed (`routes/stories.ts`), for
+ * `duplicateStory`'s reason — it needs the source's published snapshot or its draft,
+ * and the Durable Object.
+ *
+ * **The parent rule.** A site's pages sit under the site's own pages, so the fork
+ * needs the parent path to be the site's own, or to be top level: forking
+ * `info/parking` into a site that inherits `info` is a 409 naming Info, "fork Info
+ * first". Renaming one shared section must never rewrite paths on fifty sites, and a
+ * site page under a shared parent is the design decision 5 beat.
+ *
+ * **The root.** A root has no parent and `createStory`'s `root: true` writes it, so
+ * forking an inherited root is how a site gets its own home page. It is refused when
+ * the site already has one.
+ *
+ * Refused, not renamed, when the site already has a row at the path: a fork exists to
+ * take *that* URL, and `uniqueSlug` quietly answering `stores-2` would put the copy
+ * where nothing links to it.
+ */
+export async function forkStory(
+  db: FolioDb,
+  source: StoryMeta,
+  opts: {
+    /** The scope that will own the fork: the request's. */
+    site: string
+    /** That scope's chain, nearest first. */
+    chain: readonly string[]
+    types: readonly DocumentType[]
+    schemaId?: string | null
+  },
+): Promise<StoryMeta> {
+  const owner = source.site ?? DEFAULT_SITE
+  if (source.path === null) throw new FolioError('bad_request', 'Only a page can be forked')
+  const type = typeByName(opts.types, source.type)
+  if (!type) throw new FolioError('bad_request', `Unknown document type: ${source.type}`)
+  if (owner === opts.site) {
+    throw new FolioError('conflict', `"${source.title}" already belongs to this site`)
+  }
+  if (!opts.chain.slice(1).includes(owner)) {
+    // Not owned above the scope: outside the chain is absent, and a row in the
+    // chain but not above it is the scope itself, refused above.
+    throw new FolioError('not_found', 'Unknown story')
+  }
+
+  const own = await storyByPath(db, [opts.site], source.path)
+  if (own) {
+    throw new FolioError(
+      'conflict',
+      `"${own.title}" already lives at /${source.path} on this site. Open it instead of forking.`,
+    )
+  }
+
+  let parentId: string | null = null
+  const root = source.path === ''
+  if (!root) {
+    const parentPath = source.path.includes('/')
+      ? source.path.slice(0, source.path.lastIndexOf('/'))
+      : ''
+    if (parentPath !== '') {
+      const parent = await storyByPath(db, [opts.site], parentPath)
+      if (!parent) {
+        const inherited = await storyByPath(db, opts.chain, parentPath)
+        const named = inherited?.title ?? parentPath
+        throw new FolioError(
+          'conflict',
+          `Fork ${named} first: "${source.title}" sits under it, and a site's page can only sit under a page the site owns.`,
+        )
+      }
+      parentId = parent.id
+    }
+  }
+
+  return createStory(
+    db,
+    {
+      title: source.title,
+      slug: source.slug,
+      parentId,
+      type,
+      schemaId: source.schemaId ?? opts.schemaId ?? null,
+      site: opts.site,
+      forkedFrom: source.id,
+      ...(root ? { root: true } : {}),
+    },
+    opts.types,
+  )
+}
+
+/**
+ * Whether a fork's source has been published since the fork was made — the "shared
+ * version has changed since you forked it" notice (`multi-site.md` decision 5).
+ *
+ * `stories.created_at` is in **seconds** (its column default is `unixepoch()`) and
+ * `published_at` in milliseconds, so the comparison lifts one to the other and treats
+ * the fork's whole creation second as "before": a source published in the same
+ * second the fork was made is not news.
+ */
+function changedSince(sourcePublishedAt: number | null, forkCreatedAtSeconds: number): boolean {
+  return sourcePublishedAt !== null && sourcePublishedAt >= (forkCreatedAtSeconds + 1) * 1000
+}
+
+/** A fork's source, and whether it has moved on — null for a story that is not a fork. */
+export interface ForkStatus {
+  /** The row this one was forked from, or null once it has been deleted. */
+  source: StoryMeta | null
+  /** The source has been published since the fork was made. */
+  changed: boolean
+}
+
+export async function forkStatus(db: FolioDb, story: StoryMeta): Promise<ForkStatus | null> {
+  if (!story.forkedFrom) return null
+  const [source, row] = await Promise.all([
+    storyById(db, story.forkedFrom),
+    db
+      .prepare('select created_at as at from stories where id = ?')
+      .bind(story.id)
+      .first<{ at: number }>(),
+  ])
+  return { source, changed: source !== null && changedSince(source.publishedAt, row?.at ?? 0) }
+}
+
+/** One inherited page, with what this site has done about it. */
+export interface InheritedRow extends StoryMeta {
+  /** The id of this site's own row at the same path — a fork, or a page made by hand
+   * there — or null while the site is still showing the inherited one. */
+  shadowedBy: string | null
+  /** The site's row is a fork of this one and this one has been published since. */
+  forkedSince: boolean
+}
+
+/**
+ * The routed rows this scope inherits (`multi-site.md`'s `GET /inherited`): every
+ * routed row owned **above** it that the walk would reach (a row a nearer group
+ * shadows is not on offer), keyset-paged by path, each with `shadowedBy` and
+ * `forkedSince`. What the Fork and *Create home page* actions are offered from.
+ *
+ * `servedClause` over the chain without its first scope is exactly "reached from
+ * above", so the shadowing rule is stated once. The scope's own row at a path is
+ * looked up after the page is cut, in one read of at most a page's paths.
+ */
+export async function listInherited(
+  db: FolioDb,
+  chain: readonly string[],
+  opts: { limit?: number; cursor?: string } = {},
+): Promise<Page<InheritedRow>> {
+  const own = chain[0]
+  const above = chain.slice(1)
+  if (own === undefined || above.length === 0) return { rows: [], cursor: null }
+
+  const limit = clampLimit(opts.limit, 50, 200)
+  const keyset = ORDERS.path
+  const resume = keysetWhere(keyset, opts.cursor ? decodeCursor(opts.cursor) : null)
+  const served = servedClause(above)
+  const { results } = await db
+    .prepare(
+      `select ${COLS} from stories
+       ${whereOf(served.sql, 'stories.path is not null', resume.sql)} ${orderBy(keyset)} limit ?`,
+    )
+    .bind(...served.binds, ...resume.binds, limit + 1)
+    .all<StoryRow>()
+  const page = paginate(results.map(withState), limit, (row) => keyOf('path', row))
+
+  const paths = page.rows.map((row) => row.path).filter((path): path is string => path !== null)
+  const shadows = new Map<string, { id: string; forkedFrom: string | null; at: number }>()
+  for (const chunk of bindChunks(paths, 1)) {
+    const { results: mine } = await db
+      .prepare(
+        `select id, path, forked_from as forkedFrom, created_at as at from stories
+         where site_id = ? and path in (${chunk.map(() => '?').join(', ')})`,
+      )
+      .bind(own, ...chunk)
+      .all<{ id: string; path: string; forkedFrom: string | null; at: number }>()
+    for (const row of mine) shadows.set(row.path, row)
+  }
+
+  return {
+    ...page,
+    rows: page.rows.map((row) => {
+      const mine = row.path === null ? undefined : shadows.get(row.path)
+      return {
+        ...row,
+        shadowedBy: mine?.id ?? null,
+        forkedSince:
+          mine !== undefined &&
+          mine.forkedFrom === row.id &&
+          changedSince(row.publishedAt, mine.at),
+      }
+    }),
+  }
 }
 
 /**
@@ -2183,7 +2427,7 @@ export async function updateStoryStatement(
     const to = paths.get(r.id) ?? r.path
     if (from === null || to === null || from === to) continue
     changes.push({ id: r.id, from, to })
-    statements.push(...redirectStatements(db, { from, to, storyId: r.id }))
+    statements.push(...redirectStatements(db, { from, to, storyId: r.id, site }))
   }
 
   // The target row only. A descendant whose path moved because its ancestor did
@@ -2246,6 +2490,12 @@ export async function deleteStoryStatement(
      * of a deployment with no `sites`, and on which a root is never deletable.
      */
     chain?: readonly string[]
+    /**
+     * The same, for a caller that does not know the owner until the row is read
+     * (`documents.ts`): asked only when the target is a root, with the owner's id.
+     * `chain` wins when both are given.
+     */
+    chainOf?: (scope: string) => Promise<readonly string[]>
   } = {},
   types: readonly DocumentType[] = [],
 ): Promise<{
@@ -2312,6 +2562,13 @@ export async function deleteStoryStatement(
    * it.
    */
   scheduleStatements: D1PreparedStatement[]
+  /**
+   * The scope that owned `ids` — the whole subtree is one scope's, because a child
+   * is always in its parent's — for the `deleted` hook, whose purge and space
+   * broadcast are the owner's (`multi-site.md` decisions 15 and 19). The rows are
+   * gone by the time anything could ask.
+   */
+  site: string
 } | null> {
   // The subtree is exactly what a delete cascades over, so it is exactly what this
   // needs to read. The only row outside it that matters is the parent, and only
@@ -2320,7 +2577,9 @@ export async function deleteStoryStatement(
   const rows = await subtreeRows(db, id)
   const target = rows.find((r) => r.id === id)
   if (!target) return null
-  if (target.path === '' && !(await rootAbove(db, opts.chain ?? [target.site ?? DEFAULT_SITE]))) {
+  const owner = target.site ?? DEFAULT_SITE
+  const chain = opts.chain ?? (opts.chainOf ? await opts.chainOf(owner) : [owner])
+  if (target.path === '' && !(await rootAbove(db, chain))) {
     throw new Error('Cannot delete the root story')
   }
   // A singleton exists because the schema says it does (`document-types.md`
@@ -2357,7 +2616,17 @@ export async function deleteStoryStatement(
       const row = byId.get(descId)
       // No path vacated, so no redirect to write.
       if (!row || row.path === null) continue
-      redirects.push(...redirectStatements(db, { from: row.path, to: parentPath, storyId: row.id }))
+      // A path a scope above still serves is not vacated: deleting falls back to it
+      // (decision 5), and a redirect here would beat it.
+      if (await servedAbove(db, chain.slice(1), row.path)) continue
+      redirects.push(
+        ...redirectStatements(db, {
+          from: row.path,
+          to: parentPath,
+          storyId: row.id,
+          site: row.site ?? DEFAULT_SITE,
+        }),
+      )
     }
   }
 
@@ -2365,11 +2634,34 @@ export async function deleteStoryStatement(
     ids,
     paths,
     types: types_,
+    site: target.site ?? DEFAULT_SITE,
     storyStatements,
     redirectStatements: redirects,
     indexStatements: [...clearIndexStatements(db, ids), ...clearInboundRefStatements(db, ids)],
     scheduleStatements: clearSchedulesStatements(db, ids),
   }
+}
+
+/**
+ * Does a scope in `above` serve `path` — a non-draft story, or a redirect — so that a
+ * page deleted below it is replaced rather than vacated? Empty `above` (a single-site
+ * deployment, or `shared`) is never.
+ */
+async function servedAbove(db: FolioDb, above: readonly string[], path: string): Promise<boolean> {
+  if (above.length === 0) return false
+  const scope = chainClause(above)
+  const rscope = chainClause(above, 'site_id')
+  const row = await db
+    .prepare(
+      `select 1 as found from stories
+        where ${scope.sql} and path = ? and (published_at is not null or unpublished_at is not null)
+       union all
+       select 1 from redirects where ${rscope.sql} and from_path = ?
+       limit 1`,
+    )
+    .bind(...scope.binds, path, ...rscope.binds, path)
+    .first<{ found: number }>()
+  return row !== null
 }
 
 /**

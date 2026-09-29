@@ -124,7 +124,12 @@ export async function reindex(
   // After the write, like every other lifecycle hook, and only when there was
   // one: a dry run and an empty sweep both leave the index exactly as it was.
   if (!dryRun && docs.length > 0) {
-    await deps.hooks?.run('reindexed', { count: docs.length, actor: opts.actor ?? null })
+    // `site: null`: a reindex rebuilds every scope's rows (`hooks.ts`'s `HookBase.site`).
+    await deps.hooks?.run('reindexed', {
+      count: docs.length,
+      actor: opts.actor ?? null,
+      site: null,
+    })
   }
 
   return {

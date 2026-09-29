@@ -1,6 +1,11 @@
 import { SELF } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
+import { defineBlock, text } from '../../src/core'
+import type { FolioBindings, FolioConfig } from '../../src/server'
+import { magicLink } from '../../src/server'
+import { createApp } from '../../src/server/app'
 import { MCP_PROTOCOL_VERSION } from '../../src/server/mcp/rpc'
+import { createRuntime } from '../../src/server/runtime'
 
 /**
  * The one rule that lets a contract and an unstable internal surface share the
@@ -248,5 +253,112 @@ describe('the bare mount', () => {
     // until the move, and four of that field's uses turned out not to be JSON.
     expect(html).toContain('"base":"/folio"')
     expect(html).toContain('"apiBase":"/folio/api"')
+  })
+})
+
+/**
+ * **The v1 surface, as a list.** Spec 23's phase 7 added three routes to it — `GET
+ * /sites/resolve`, `GET /sites` and `GET /pages/{path}` — and a version segment is a
+ * promise, so each was added here on purpose rather than by the test being loosened.
+ *
+ * The list is read off the mounted app (`app.routes`), so it is what a request can
+ * actually reach rather than what a file says, and it is written out in full: adding
+ * `{base}/api/v1/stories` by reflex fails this, and so does adding a route and
+ * forgetting it was a promise.
+ *
+ * **The three new routes exist only on a deployment with `sites`.** A single-site
+ * deployment's v1 surface is what it has always been — no `sites/resolve`, no
+ * `pages` — because a host with one site reads pages in its own Worker.
+ */
+describe('the v1 route list', () => {
+  const block = defineBlock({
+    name: 'apPage',
+    label: 'Page',
+    fields: { title: text({ label: 'Title' }) },
+    render: () => null,
+  })
+  const config = (multi: boolean): FolioConfig<Cloudflare.Env> => ({
+    blocks: [block],
+    root: 'apPage',
+    bindings: (e): FolioBindings => ({
+      db: e.DB,
+      story: e.STORY,
+      media: e.MEDIA,
+      images: e.IMAGES,
+    }),
+    basePath: '/folio',
+    auth: { providers: [magicLink<Cloudflare.Env>({ send: () => {} })] },
+    ...(multi
+      ? {
+          sites: { admin: 'https://cms.example' },
+          route: (p: string, _l: string | undefined, site?: { id: string }) =>
+            site ? `https://${site.id}.invalid/${p}` : `/${p}`,
+        }
+      : {}),
+  })
+  const v1 = (multi: boolean) => {
+    const c = config(multi)
+    const app = createApp(c, createRuntime(c))
+    return [
+      ...new Set(
+        app.routes
+          .filter((r) => r.method !== 'ALL' && r.path.startsWith('/folio/api/v1/'))
+          .map((r) => `${r.method} ${r.path.slice('/folio/api/v1'.length)}`),
+      ),
+    ].sort()
+  }
+
+  const SINGLE = [
+    'DELETE /documents/:id',
+    'GET /assets',
+    'GET /documents',
+    'GET /documents/:id',
+    'GET /documents/:id/versions',
+    'GET /documents/by-path',
+    'GET /documents/by-path/:path{.*}',
+    'GET /schema',
+    'GET /search',
+    'PATCH /documents/:id',
+    'PATCH /documents/:id/fields',
+    'POST /assets',
+    'POST /documents',
+    'POST /documents/:id/duplicate',
+    'POST /documents/:id/publish',
+    'POST /documents/:id/restore',
+    'POST /documents/:id/unpublish',
+    'POST /documents/:id/versions',
+    'PUT /documents/:id/content',
+  ]
+
+  it('is what it has always been on a deployment with one site', () => {
+    expect(v1(false)).toEqual(SINGLE)
+  })
+
+  it('gains exactly sites/resolve, sites and pages on a deployment with sites', () => {
+    expect(v1(true)).toEqual(
+      [...SINGLE, 'GET /pages', 'GET /pages/:path{.*}', 'GET /sites', 'GET /sites/resolve'].sort(),
+    )
+  })
+
+  it('answers none of the three on a single-site deployment, whose host has the reader', async () => {
+    for (const path of [
+      '/folio/api/v1/sites',
+      '/folio/api/v1/sites/resolve?host=x',
+      '/folio/api/v1/pages/about',
+    ]) {
+      const res = await SELF.fetch(`${ORIGIN}${path}`)
+      expect([path, res.status]).toEqual([path, 404])
+      expect((await res.json<{ error: { code: string } }>()).error.code).toBe('not_found')
+    }
+  })
+
+  it('keeps the new v1 names off the internal surface', () => {
+    const c = config(true)
+    const internal = createApp(c, createRuntime(c))
+      .routes.filter(
+        (r) => r.method !== 'ALL' && /^\/folio\/api\/(sites\/resolve|pages)(\/|$)/.test(r.path),
+      )
+      .map((r) => r.path)
+    expect(internal).toEqual([])
   })
 })

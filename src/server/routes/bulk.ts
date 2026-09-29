@@ -28,7 +28,14 @@ import type { StoryBulkAction } from '../../core/story'
 import { type Access, actorString, CREATE, MANAGE, PUBLISH } from '../auth/roles'
 import { type BulkDeps, type BulkOptions, runBulk } from '../bulk'
 import { FolioError } from '../errors'
-import { fenceParent, hookCtx, requestScope, requireAccess } from '../middleware'
+import {
+  chainResolver,
+  fenceParent,
+  hookCtx,
+  requestChain,
+  requestScope,
+  requireAccess,
+} from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import { storiesFor } from '../stories'
 import type { FolioEnv } from '../types'
@@ -49,6 +56,7 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       ...rt.publishDeps(bindings, hookCtx(c)),
       types: rt.types,
       stub: (id: string) => rt.stub(bindings, id),
+      chainOf: chainResolver(c, rt),
     }
   }
 
@@ -88,23 +96,21 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * row another scope owns is refused whole rather than acted on in part. One read,
    * and only with `sites`: with none every row is `default`'s.
    *
-   * A filter selection (`all: true`) is refused on a deployment with `sites` until
-   * the filters it compiles to take a scope (spec 23 phase 7): they read `default`
-   * today, which would be a write outside any other scope.
+   * **A duplicate reads its sources up the chain** ("source in chain, copy in
+   * scope"); every other action writes, and a write needs the row in the scope
+   * itself. A filter selection (`all: true`) names no ids to check: the run binds it
+   * to the scope (`BulkOptions.scope`), so it counts and walks this scope's own rows
+   * and no other's.
    */
   const inScope = async (
     c: Context<FolioEnv<Env>>,
     selection: BulkSelection<unknown>,
+    reach: 'read' | 'write' = 'write',
   ): Promise<void> => {
-    if (!rt.sites) return
-    if (selection.all) {
-      throw new FolioError(
-        'unsupported',
-        'Select the documents by id: a bulk action over a filter is not scoped to a site yet.',
-      )
-    }
+    if (!rt.sites || selection.all) return
     const scope = requestScope(c, rt)
-    const rows = await storiesFor(c.var.bindings().db, selection.ids, [], scope ? [scope] : [])
+    const within = reach === 'read' ? await requestChain(c, rt) : scope ? [scope] : []
+    const rows = await storiesFor(c.var.bindings().db, selection.ids, [], within)
     if (rows.length !== new Set(selection.ids).size) {
       throw new FolioError('not_found', 'One or more of those documents is not in this site')
     }
@@ -118,6 +124,9 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   ): BulkOptions => {
     requireCursor(body.continueFrom ?? undefined)
     return {
+      // The request's scope: what a filter selection is read against and where a
+      // duplicate's copies land (`BulkOptions.scope`). Only with `sites`.
+      ...(rt.sites ? { scope: requestScope(c, rt) ?? '' } : {}),
       ...(body.dryRun === undefined ? {} : { dryRun: body.dryRun }),
       ...(body.continueFrom === undefined ? {} : { continueFrom: body.continueFrom }),
       ...(body.batch === undefined ? {} : { batch: body.batch }),
@@ -143,7 +152,7 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   for (const [action, access] of PLAIN) {
     app.post(`/bulk/${action}`, requireAccess<Env>(rt, access), async (c) => {
       const body = await parseBody(c.req, BulkBody)
-      await inScope(c, body.selection)
+      await inScope(c, body.selection, action === 'duplicate' ? 'read' : 'write')
       return answer(c, await runBulk(deps(c), action, body.selection, control(c, body)))
     })
   }

@@ -4,21 +4,26 @@
  */
 import type { Context } from 'hono'
 import { Hono } from 'hono'
+import { cloneDoc } from '../../core/clone'
 import { isKnownLocale, translationStatus } from '../../core/locales'
 import type { Page } from '../../core/pagination'
 import type { DocumentType } from '../../core/schema'
+import { DEFAULT_SITE } from '../../core/sites'
 import { ancestorPaths, type StoryMeta } from '../../core/story'
 import { actorString } from '../auth/roles'
 import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
 import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from '../documents'
 import { FolioError, rethrow } from '../errors'
 import {
+  chainResolver,
   fenceParent,
   fenceStory,
   hookCtx,
   loadStory,
+  readableScopes,
   requestChain,
   requestScope,
+  requestUrls,
   requireAccess,
 } from '../middleware'
 import { publish, unpublish } from '../publish'
@@ -28,11 +33,15 @@ import {
   createStory,
   documentUsage,
   ensureSingleton,
+  forkStatus,
+  forkStory,
   listDocumentPage,
+  listInherited,
   listRecentlyEdited,
   listSingletons,
   listStoriesFlat,
   listStoryLevel,
+  publishedDocsByIds,
   searchStories,
   storiesFor,
 } from '../stories'
@@ -78,8 +87,8 @@ function actorFor<Env>(c: Context<FolioEnv<Env>>): string | null {
  * the object by hand is how an absent key becomes `total: undefined` and starts
  * appearing in the JSON.
  */
-function decorated<T extends StoryMeta>(rt: FolioRuntime, page: Page<T>): Page<T> {
-  return { ...page, rows: page.rows.map(rt.withUrls) }
+function decorated<T extends StoryMeta>(urls: FolioRuntime['withUrls'], page: Page<T>): Page<T> {
+  return { ...page, rows: page.rows.map((row) => urls(row)) }
 }
 
 export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
@@ -100,8 +109,16 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       stub: (id: string) => rt.stub(bindings, id),
       draft: (story: StoryMeta) => rt.draftFor(bindings, story),
       hooks: rt.hookRunner(hookCtx(c)),
+      chainOf: chainResolver(c, rt),
     }
   }
+
+  /**
+   * The scope whose own rows a list answers (`multi-site.md`'s route table:
+   * "scope's own rows"), and `default` on a deployment with no `sites`. A
+   * multi-site request with no scope never reaches a list (`site_required`).
+   */
+  const scopeOf = (c: Context<FolioEnv<Env>>): string => requestScope(c, rt) ?? DEFAULT_SITE
 
   /**
    * A declared document type by name, or `unsupported` (501) — not `not_found`:
@@ -162,7 +179,8 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           : []
       const merged = new Map(rows.map((row) => [row.id, row]))
       for (const row of chain) merged.set(row.id, row)
-      return c.json({ rows: [...merged.values()].map(rt.withUrls) })
+      const urls = await requestUrls(c, rt)
+      return c.json({ rows: [...merged.values()].map((row) => urls(row)) })
     }
 
     const cursor = c.req.query('cursor')
@@ -172,6 +190,9 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       cursor,
       filter: storyFilterQuery(c.req),
       count: c.req.query('count') === '1',
+      // The scope's own rows: an inherited page is on `GET /inherited`, not in the
+      // tree an editor here may rearrange.
+      scope: scopeOf(c),
     }
 
     /**
@@ -183,13 +204,14 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * Checked before `flat`, so a request naming both gets the wider set. Same
      * most-specific-first rule the `?ids=` branch above follows.
      */
+    const urls = await requestUrls(c, rt)
     if (c.req.query('recent') === '1') {
-      return c.json(decorated(rt, await listRecentlyEdited(db, opts)))
+      return c.json(decorated(urls, await listRecentlyEdited(db, opts)))
     }
 
     if (c.req.query('flat') === '1') {
       return c.json(
-        decorated(rt, await listStoriesFlat(db, flatSortQuery(c.req.query('sort')), opts)),
+        decorated(urls, await listStoriesFlat(db, flatSortQuery(c.req.query('sort')), opts)),
       )
     }
 
@@ -197,7 +219,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // request, so a client can build the URL without a conditional.
     const raw = c.req.query('parentId')
     const parentId = raw ? idParam('parentId', raw) : null
-    return c.json(decorated(rt, await listStoryLevel(db, parentId, opts)))
+    return c.json(decorated(urls, await listStoryLevel(db, parentId, opts)))
   })
 
   /**
@@ -229,14 +251,18 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.get('/documents', requireAccess<Env>(rt, READ), async (c) => {
     const bindings = c.var.bindings()
 
+    const scope = scopeOf(c)
     if (c.req.query('kind') === 'singleton') {
-      const rows = await listSingletons(bindings.db, rt.types, rt.schemaId)
-      return c.json({ rows: rows.map(rt.withUrls) })
+      const rows = await listSingletons(bindings.db, rt.types, rt.schemaId, scope)
+      const urls = await requestUrls(c, rt)
+      return c.json({ rows: rows.map((row) => urls(row)) })
     }
 
     const raw = c.req.query('type')
     const wanted = raw === undefined ? undefined : requireType(typeNameQuery(raw))
-    if (wanted?.kind === 'singleton') await ensureSingleton(bindings.db, wanted, rt.schemaId)
+    if (wanted?.kind === 'singleton') {
+      await ensureSingleton(bindings.db, wanted, rt.schemaId, scope)
+    }
 
     const cursor = c.req.query('cursor')
     requireCursor(cursor)
@@ -249,13 +275,14 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         cursor,
         filter: storyFilterQuery(c.req),
         count: c.req.query('count') === '1',
+        scope,
         dir: sortDirQuery(c.req.query('dir')),
         // Skipped on a site that marks nothing `indexed`, where the query would
         // be a round trip for an empty answer.
         indexed: rt.indexedFields.size > 0,
       },
     )
-    return c.json(decorated(rt, page))
+    return c.json(decorated(await requestUrls(c, rt), page))
   })
 
   /**
@@ -286,9 +313,10 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const db = c.var.bindings().db
     // Sequential over a handful of declared types would be a round trip each, and
     // these are independent aggregates over one indexed table.
+    const scope = scopeOf(c)
     const [pages, ...perType] = await Promise.all([
-      countStories(db, { routed: true }),
-      ...rt.types.map((type) => countStories(db, { type: type.name })),
+      countStories(db, { routed: true }, scope),
+      ...rt.types.map((type) => countStories(db, { type: type.name }, scope)),
     ])
     return c.json({
       pages,
@@ -326,7 +354,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const kind = searchKindQuery(c.req.query('kind'))
     return c.json(
       decorated(
-        rt,
+        await requestUrls(c, rt),
         await searchStories(c.var.bindings().db, {
           ...(kind ? { types: rt.types.filter((t) => t.kind === kind).map((t) => t.name) } : {}),
           sort: searchSortQuery(c.req.query('sort')),
@@ -334,6 +362,10 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           cursor,
           filter: storyFilterQuery(c.req),
           count: c.req.query('count') === '1',
+          // The whole chain, each hit carrying its `site` (`multi-site.md`): this is
+          // the admin finding a document to link or reference, and a link may point
+          // up the chain. It never reaches another site's.
+          chain: await requestChain(c, rt),
         }),
       ),
     )
@@ -360,10 +392,11 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     fenceStory<Env>(rt, 'read', { absent: 'pass' }),
     async (c) => {
       const id = idParam('id', c.req.param('id'))
-      const usage = await documentUsage(c.var.bindings().db, id)
+      const usage = await documentUsage(c.var.bindings().db, id, await readableScopes(c, rt))
+      const urls = await requestUrls(c, rt)
       return c.json({
         published: usage.published.map(({ story, kind }) => {
-          const decorated = rt.withUrls(story)
+          const decorated = urls(story)
           return {
             id: story.id,
             title: story.title,
@@ -377,6 +410,10 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         total: usage.total,
         links: usage.links,
         references: usage.references,
+        // Uses in scopes the caller cannot read: counted, never named. Every scope they can
+        // read (`readableScopes`) is named, not only the request's chain. Only a
+        // deployment with `sites` has any, and the single-site shape is unchanged.
+        ...(rt.sites ? { elsewhere: usage.elsewhere } : {}),
       })
     },
   )
@@ -418,7 +455,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const actor = actorFor(c)
     await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('created', { story, actor })
 
-    return c.json(rt.withUrls(story))
+    return c.json((await requestUrls(c, rt))(story))
   })
 
   /**
@@ -444,7 +481,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         rethrow(e)
       }
 
-      return c.json(rt.withUrls(next))
+      return c.json((await requestUrls(c, rt))(next))
     },
   )
 
@@ -468,22 +505,27 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.post(
     '/stories/:id/duplicate',
     requireAccess<Env>(rt, CREATE),
-    // `'write'` for now, not the spec's "source in chain, copy in scope": a copy
-    // lands in its source's scope until `duplicateDocument` threads the request's
-    // (spec 23 phase 7), so a source above the scope would be a write above it.
-    loadStory<Env>(rt, 'write'),
+    // The source may be anywhere in the chain and the copy lands in the request's
+    // scope (`multi-site.md`: "source in chain, copy in scope"), so a site can take a
+    // private copy of a shared page. A copy is a write in *this* scope, not above it.
+    loadStory<Env>(rt, 'read'),
     async (c) => {
       const body = await parseOptionalBody(c.req, StoryDuplicateBody)
       await fenceParent(c, rt, body.parentId)
 
       let created: StoryMeta
       try {
-        created = await duplicateDocument(documentDeps(c), c.var.story, body, actorFor(c))
+        created = await duplicateDocument(
+          documentDeps(c),
+          c.var.story,
+          { ...body, site: scopeOf(c) },
+          actorFor(c),
+        )
       } catch (e) {
         rethrow(e)
       }
 
-      return c.json({ story: rt.withUrls(created) }, 201)
+      return c.json({ story: (await requestUrls(c, rt))(created) }, 201)
     },
   )
 
@@ -606,6 +648,97 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       return c.json(translationStatus(doc, rt.schema, locale))
     },
   )
+
+  if (rt.sites) {
+    /**
+     * **Override an inherited page** (`multi-site.md` decision 5): a copy of a routed
+     * page owned higher in the chain, in the request's scope, at the same slug, as a
+     * draft, recording `forked_from`. `CREATE` on the scope — a fork is a page this
+     * site now owns — with the source read up the chain, as a duplicate's is.
+     *
+     * The copy takes the source's **published** document, or its draft when nothing
+     * is published: an editor forking a live page means "give me what visitors see".
+     * Fresh uids (`cloneDoc`), so nothing in it names the source's blocks. Row first,
+     * document second, `duplicateDocument`'s order and for its reason.
+     *
+     * A 409 for a parent the site does not own ("fork Info first"), for a scope that
+     * already has a page at the path or a home page, and for a page the scope already
+     * owns. The rules are `forkStory`'s.
+     */
+    app.post(
+      '/stories/:id/fork',
+      requireAccess<Env>(rt, CREATE),
+      loadStory<Env>(rt, 'read'),
+      async (c) => {
+        const bindings = c.var.bindings()
+        const source = c.var.story
+        const within = await requestChain(c, rt)
+
+        let created: StoryMeta
+        try {
+          created = await forkStory(bindings.db, source, {
+            site: scopeOf(c),
+            chain: within,
+            types: rt.types,
+            schemaId: rt.schemaId,
+          })
+        } catch (e) {
+          rethrow(e)
+        }
+
+        await rt.hookRunner(hookCtx(c)).run('created', { story: created, actor: actorFor(c) })
+
+        const published = (await publishedDocsByIds(bindings.db, [source.id], within))[source.id]
+        const doc = published ?? (await rt.draftFor(bindings, source))
+        await rt.stub(bindings, created.id).getOrInit(cloneDoc(doc))
+
+        return c.json({ story: (await requestUrls(c, rt))(created) }, 201)
+      },
+    )
+
+    /**
+     * The routed pages this scope inherits, keyset-paged by path, each with
+     * `shadowedBy` (the id of the scope's own row at that path) and `forkedSince`
+     * (that row is a fork of this one and this one has been published since): what
+     * the Fork and *Create home page* actions are offered from
+     * (`multi-site.md`'s route table).
+     */
+    app.get('/inherited', requireAccess<Env>(rt, READ), async (c) => {
+      const cursor = c.req.query('cursor')
+      requireCursor(cursor)
+      const page = await listInherited(c.var.bindings().db, await requestChain(c, rt), {
+        limit: limitParam(c.req.query('limit'), 50, 200),
+        cursor,
+      })
+      return c.json(decorated(await requestUrls(c, rt), page))
+    })
+
+    /**
+     * Where a page was forked from and whether that source has been published since
+     * — the editor's "the shared version has changed since you forked it" notice
+     * (decision 5, with a link, which is the source's `id`). Null for a page that is
+     * not a fork. The source is named only when the caller can read it: it is in the
+     * chain by construction (a fork's source is owned above), but a source deleted
+     * or moved since answers `source: null`.
+     */
+    app.get(
+      '/story/:id/fork',
+      requireAccess<Env>(rt, READ),
+      loadStory<Env>(rt, 'read'),
+      async (c) => {
+        const status = await forkStatus(c.var.bindings().db, c.var.story)
+        if (!status) return c.json({ fork: null })
+        const visible =
+          status.source && (await requestChain(c, rt)).includes(status.source.site ?? DEFAULT_SITE)
+        return c.json({
+          fork: {
+            source: visible && status.source ? (await requestUrls(c, rt))(status.source) : null,
+            changed: Boolean(visible) && status.changed,
+          },
+        })
+      },
+    )
+  }
 
   return app
 }

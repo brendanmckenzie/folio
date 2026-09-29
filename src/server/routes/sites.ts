@@ -10,17 +10,25 @@
  * Every write reads the registry fresh from the primary to validate against —
  * never the ten-second snapshot, or two writes a second apart could both claim
  * one host — and drops this isolate's snapshot afterwards, so the isolate that
- * made the change answers with it on its next request. The purges and the
- * `siteChanged` hook a registry write owes are phase 7's.
+ * made the change answers with it on its next request.
+ *
+ * **Every write then fires `siteChanged`** (`multi-site.md` decisions 4 and 16), and
+ * Folio's own hook for it purges `site:<id>` now and again 25 seconds later
+ * (`cache-purge.ts`'s `purgeSite`): another isolate may hold a registry ten seconds
+ * old, and a page it renders inside that window is cached after the first purge. The
+ * payload carries the changed row and exactly what was purged, so a headless front
+ * end that keeps its own host map refreshes that one entry on the event.
  *
  * Mounted only on a deployment with `sites`: with none there is no registry, and
  * these paths fall through to the `/api/*` 404 like any other unknown route.
  */
 import { Hono } from 'hono'
 import * as v from 'valibot'
-import { ADMIN } from '../auth/roles'
+import type { Context } from 'hono'
+import type { GroupRef, Registry, SiteRef } from '../../core/sites'
+import { actorString, ADMIN } from '../auth/roles'
 import { FolioError } from '../errors'
-import { requireAccess, requireAuthConfigured } from '../middleware'
+import { hookCtx, requireAccess, requireAuthConfigured } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import {
   createSite,
@@ -81,12 +89,38 @@ export function siteRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.use('/sites', requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, ADMIN))
   app.use('/sites/*', requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, ADMIN))
 
+  /**
+   * After a write that has already committed and dropped this isolate's snapshot:
+   * tell the internal hooks (the purge of `site:<id>`, twice) and then the host's.
+   * `row` is what the registry now holds under the id, or null once it is deleted.
+   */
+  const changed = async (
+    c: Context<FolioEnv<Env>>,
+    id: string,
+    kind: 'site' | 'group',
+    change: 'created' | 'updated' | 'deleted',
+    row: SiteRef | GroupRef | null,
+  ): Promise<void> => {
+    await rt.hookRunner(hookCtx(c)).run('siteChanged', {
+      site: id,
+      kind,
+      change,
+      row,
+      actor: actorString(c.var.actor),
+    })
+  }
+
+  /** A row's kind, from the fresh registry it is about to be edited in. */
+  const kindIn = (registry: Registry, id: string): 'site' | 'group' =>
+    registry.groups.some((group) => group.id === id) ? 'group' : 'site'
+
   app.get('/sites', async (c) => c.json(await sites.fresh(c.env)))
 
   app.post('/sites', async (c) => {
     const body = await parseBody(c.req, SiteCreateBody)
     const row = await createSite(c.var.bindings().db, await sites.fresh(c.env), body, ctx)
     sites.drop()
+    await changed(c, row.id, body.kind, 'created', row)
     return c.json(row, 201)
   })
 
@@ -96,23 +130,32 @@ export function siteRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     if (named !== undefined && named !== id) {
       throw new FolioError('bad_request', 'A site or group id cannot be changed')
     }
-    const row = await updateSite(c.var.bindings().db, await sites.fresh(c.env), id, patch, ctx)
+    const registry = await sites.fresh(c.env)
+    const row = await updateSite(c.var.bindings().db, registry, id, patch, ctx)
     sites.drop()
+    await changed(c, id, kindIn(registry, id), 'updated', row)
     return c.json(row)
   })
 
   app.put('/sites/:id/hosts', async (c) => {
     const id = idParam('id', c.req.param('id'))
     const { hosts } = await parseBody(c.req, HostsBody)
-    const row = await replaceHosts(c.var.bindings().db, await sites.fresh(c.env), id, hosts, ctx)
+    const registry = await sites.fresh(c.env)
+    const row = await replaceHosts(c.var.bindings().db, registry, id, hosts, ctx)
     sites.drop()
+    await changed(c, id, kindIn(registry, id), 'updated', row)
     return c.json(row)
   })
 
   app.delete('/sites/:id', async (c) => {
     const id = idParam('id', c.req.param('id'))
-    await deleteSite(c.var.bindings().db, await sites.fresh(c.env), id)
+    const registry = await sites.fresh(c.env)
+    const kind = kindIn(registry, id)
+    await deleteSite(c.var.bindings().db, registry, id)
     sites.drop()
+    // Its pages are cached under `site:<id>` and the host it answered on is now nobody's:
+    // the purge is the same, and a front end's host map drops the entry on `deleted`.
+    await changed(c, id, kind, 'deleted', null)
     return c.json({ deleted: id })
   })
 

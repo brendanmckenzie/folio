@@ -50,9 +50,11 @@ import {
   RESERVED_PREFIX,
 } from '../core/forms'
 import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
+import { DEFAULT_SITE } from '../core/sites'
 import { readCappedBody, safeFilename, sniffContentType } from './assets'
 import { hashToken } from './auth/secrets'
 import { bindChunks, type FolioDb } from './db'
+import { chainClause } from './stories'
 import { FolioError, rethrow } from './errors'
 import {
   deleteUploads,
@@ -1021,6 +1023,14 @@ export interface NewResponse {
   bodyHash: string
   files: readonly SubmittedFile[]
   now?: number
+  /**
+   * The site the submission arrived on — the live host that served the page the form
+   * was on (`multi-site.md`: "`form_responses`: `site_id` = submitting site"). A form
+   * owned by `shared` or a group is submitted from many sites, and this is how a site
+   * reads only its own answers to it. Default `default`, the one site of a deployment
+   * with no `sites`.
+   */
+  site?: string
 }
 
 export interface InsertedResponse {
@@ -1062,7 +1072,11 @@ export function newResponseId(): string {
  * page claimed: a page cached for a week submits against the live form, and the
  * stored stamp has to say which shape actually validated it (decision 7).
  *
- * Thirteen binds, fixed. Nothing here is sized by the submitter.
+ * Fifteen binds, fixed. Nothing here is sized by the submitter.
+ *
+ * The duplicate window is **per submitting site**: the same answers arriving on two
+ * sites within a minute are two submissions, and collapsing the second into the first
+ * would drop a response its site would never see.
  */
 export async function insertResponse(db: FolioDb, input: NewResponse): Promise<InsertedResponse> {
   const now = input.now ?? Date.now()
@@ -1079,11 +1093,11 @@ export async function insertResponse(db: FolioDb, input: NewResponse): Promise<I
   const result = await db
     .prepare(
       `insert into form_responses
-         (id, form_id, version, created_at, data, locale, page, ip_hash, body_hash, files)
-       select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         (id, form_id, version, created_at, data, locale, page, ip_hash, body_hash, files, site_id)
+       select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        where not exists (
          select 1 from form_responses
-         where form_id = ? and body_hash = ? and created_at > ?
+         where form_id = ? and body_hash = ? and created_at > ? and site_id = ?
        )`,
     )
     .bind(
@@ -1097,9 +1111,11 @@ export async function insertResponse(db: FolioDb, input: NewResponse): Promise<I
       input.ipHash,
       input.bodyHash,
       JSON.stringify(input.files),
+      input.site ?? DEFAULT_SITE,
       response.formId,
       input.bodyHash,
       now - DUPLICATE_WINDOW_MS,
+      input.site ?? DEFAULT_SITE,
     )
     .run()
 
@@ -1128,13 +1144,15 @@ export async function isDuplicateSubmission(
   formId: string,
   hash: string,
   now: number = Date.now(),
+  /** The submitting site: `insertResponse`'s window is per site, so this is. */
+  site: string = DEFAULT_SITE,
 ): Promise<boolean> {
   const row = await db
     .prepare(
       `select 1 as hit from form_responses
-       where form_id = ? and body_hash = ? and created_at > ? limit 1`,
+       where form_id = ? and body_hash = ? and created_at > ? and site_id = ? limit 1`,
     )
-    .bind(formId, hash, now - DUPLICATE_WINDOW_MS)
+    .bind(formId, hash, now - DUPLICATE_WINDOW_MS, site)
     .first<{ hit: number }>()
   return row !== null
 }
@@ -1165,10 +1183,13 @@ export async function responseFileOf(
   formId: string,
   responseId: string,
   field: string,
+  /** The submitting sites this reader may see; absent is all (`sitesClause`). */
+  sites?: readonly string[],
 ): Promise<SubmittedFile | null> {
+  const within = sitesClause(sites)
   const row = await db
-    .prepare('select files from form_responses where id = ? and form_id = ?')
-    .bind(responseId, formId)
+    .prepare(`select files from form_responses where id = ? and form_id = ?${within.sql}`)
+    .bind(responseId, formId, ...within.binds)
     .first<{ files: string }>()
   if (!row) return null
 
@@ -1337,9 +1358,15 @@ const RESPONSES_ORDER: Keyset = { columns: ['created_at', 'id'], direction: 'des
 function responseFilterSql(
   formId: string,
   filter: ResponseFilter,
+  sites?: readonly string[],
 ): { clauses: string[]; binds: (string | number)[] } {
   const clauses = ['form_id = ?']
   const binds: (string | number)[] = [formId]
+  if (sites !== undefined) {
+    const within = chainClause(sites)
+    clauses.push(within.sql)
+    binds.push(...within.binds)
+  }
   if (filter.from !== undefined) {
     clauses.push('created_at >= ?')
     binds.push(filter.from)
@@ -1355,6 +1382,22 @@ function responseFilterSql(
   return { clauses, binds }
 }
 
+/**
+ * `and site_id in (…)` over the submitting sites a reader may see, or nothing for
+ * "all of them" (`multi-site.md`: a response is read on the form's own scope in full,
+ * and on any other by the site that received it). A fragment to append to a `where`
+ * that already has a condition, with its binds. An empty list is `0 = 1`: a caller
+ * with no site sees no response.
+ */
+function sitesClause(
+  sites: readonly string[] | undefined,
+  column = 'site_id',
+): { sql: string; binds: string[] } {
+  if (sites === undefined) return { sql: '', binds: [] }
+  const within = chainClause(sites, column)
+  return { sql: ` and ${within.sql}`, binds: within.binds }
+}
+
 /** How many responses match, for the header and for the bulk delete's count
  *  guard — one function, so the number a person read and the number the guard
  *  re-runs cannot come from two different sets of clauses. */
@@ -1362,8 +1405,9 @@ export async function countResponses(
   db: FolioDb,
   formId: string,
   filter: ResponseFilter = {},
+  sites?: readonly string[],
 ): Promise<number> {
-  const { clauses, binds } = responseFilterSql(formId, filter)
+  const { clauses, binds } = responseFilterSql(formId, filter, sites)
   const row = await db
     .prepare(`select count(*) as n from form_responses ${whereOf(...clauses)}`)
     .bind(...binds)
@@ -1375,6 +1419,14 @@ export interface ListResponsesOptions {
   limit?: number
   cursor?: string
   filter?: ResponseFilter
+  /**
+   * The submitting sites whose responses are listed (`multi-site.md`: `form_responses`
+   * is "read with `FORMS` on the form's scope (all) or the submitting site (its
+   * own)"). **Absent is all of them**, which is the form's own scope, or a deployment
+   * with no `sites`. A shared form read from one site passes that site, and a group's
+   * passes its sites: the rest are another site's strangers' answers.
+   */
+  sites?: readonly string[]
   /**
    * Adds `total` for the filtered set **and** `oldest` for the whole form.
    *
@@ -1414,7 +1466,7 @@ export async function listResponses(
   const limit = clampLimit(opts.limit, 50, 200)
   const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
   const resume = keysetWhere(RESPONSES_ORDER, cursor)
-  const { clauses, binds } = responseFilterSql(formId, opts.filter ?? {})
+  const { clauses, binds } = responseFilterSql(formId, opts.filter ?? {}, opts.sites)
 
   const [rows, counted] = await Promise.all([
     db
@@ -1426,11 +1478,16 @@ export async function listResponses(
       .all<ResponseDbRow>(),
     opts.count
       ? Promise.all([
-          countResponses(db, formId, opts.filter ?? {}),
-          db
-            .prepare('select min(created_at) as oldest from form_responses where form_id = ?')
-            .bind(formId)
-            .first<{ oldest: number | null }>(),
+          countResponses(db, formId, opts.filter ?? {}, opts.sites),
+          (() => {
+            const within = sitesClause(opts.sites)
+            return db
+              .prepare(
+                `select min(created_at) as oldest from form_responses where form_id = ?${within.sql}`,
+              )
+              .bind(formId, ...within.binds)
+              .first<{ oldest: number | null }>()
+          })(),
         ])
       : null,
   ])
@@ -1452,10 +1509,14 @@ export async function responseById(
   db: FolioDb,
   formId: string,
   id: string,
+  sites?: readonly string[],
 ): Promise<ResponseRow | null> {
+  const within = sitesClause(sites)
   const row = await db
-    .prepare(`select ${RESPONSE_COLS} from form_responses where id = ? and form_id = ?`)
-    .bind(id, formId)
+    .prepare(
+      `select ${RESPONSE_COLS} from form_responses where id = ? and form_id = ?${within.sql}`,
+    )
+    .bind(id, formId, ...within.binds)
     .first<ResponseDbRow>()
   return row ? toResponse(row) : null
 }
@@ -1489,17 +1550,20 @@ export async function deleteResponse(
   id: string,
   bucket?: R2Bucket,
   logger: FolioLogger = console,
+  /** The submitting sites this caller may see, as `listResponses`'s. */
+  sites?: readonly string[],
 ): Promise<DeleteResponseResult> {
+  const within = sitesClause(sites)
   const row = await db
-    .prepare('select files from form_responses where id = ? and form_id = ?')
-    .bind(id, formId)
+    .prepare(`select files from form_responses where id = ? and form_id = ?${within.sql}`)
+    .bind(id, formId, ...within.binds)
     .first<{ files: string }>()
   if (!row) return { deleted: false, files: 0 }
 
   const keys = uploadKeysOf(row.files)
   const result = await db
-    .prepare('delete from form_responses where id = ? and form_id = ?')
-    .bind(id, formId)
+    .prepare(`delete from form_responses where id = ? and form_id = ?${within.sql}`)
+    .bind(id, formId, ...within.binds)
     .run()
   if ((result.meta.changes ?? 0) === 0) return { deleted: false, files: 0 }
 
@@ -1552,6 +1616,9 @@ export interface ResponseBulkDeps {
 }
 
 export interface ResponseBulkOptions {
+  /** The submitting sites the run may touch, as `ListResponsesOptions.sites`. Absent
+   * is all of them. */
+  sites?: readonly string[]
   batch?: number
   continueFrom?: string | null
   dryRun?: boolean
@@ -1618,7 +1685,7 @@ export async function deleteResponses(
   const seen = resume?.seen ?? 0
 
   if (selection.all && resume === null) {
-    const actual = await countResponses(db, formId, selection.filter)
+    const actual = await countResponses(db, formId, selection.filter, opts.sites)
     if (actual !== selection.expected) {
       return { refused: 'count', expected: selection.expected, actual }
     }
@@ -1638,8 +1705,16 @@ export async function deleteResponses(
   if (allowance <= 0) return report
 
   const { rows, consumed, exhausted, last } = selection.all
-    ? await responseFilterBatch(db, formId, selection, resume?.after ?? null, batch, allowance)
-    : await responseIdBatch(db, formId, selection.ids, seen, Math.min(batch, allowance))
+    ? await responseFilterBatch(
+        db,
+        formId,
+        selection,
+        resume?.after ?? null,
+        batch,
+        allowance,
+        opts.sites,
+      )
+    : await responseIdBatch(db, formId, selection.ids, seen, Math.min(batch, allowance), opts.sites)
 
   const keys: string[] = []
   for (const row of rows) {
@@ -1655,9 +1730,10 @@ export async function deleteResponses(
       continue
     }
     try {
+      const within = sitesClause(opts.sites)
       await db
-        .prepare('delete from form_responses where id = ? and form_id = ?')
-        .bind(row.id, formId)
+        .prepare(`delete from form_responses where id = ? and form_id = ?${within.sql}`)
+        .bind(row.id, formId, ...within.binds)
         .run()
       keys.push(...uploadKeysOf(row.files))
       report.done++
@@ -1717,8 +1793,9 @@ async function responseFilterBatch(
   after: string | null,
   limit: number,
   allowance: number,
+  sites?: readonly string[],
 ): Promise<ResponseBatch> {
-  const { clauses, binds } = responseFilterSql(formId, selection.filter)
+  const { clauses, binds } = responseFilterSql(formId, selection.filter, sites)
   const resume = after === null ? [] : ['id > ?']
   const { results } = await db
     .prepare(
@@ -1756,16 +1833,18 @@ async function responseIdBatch(
   ids: readonly string[],
   seen: number,
   limit: number,
+  sites?: readonly string[],
 ): Promise<ResponseBatch> {
   const slice = ids.slice(seen, seen + limit)
+  const within = sitesClause(sites)
   const pages = await Promise.all(
-    bindChunks(slice, 1).map(async (chunk) => {
+    bindChunks(slice, 1 + within.binds.length).map(async (chunk) => {
       const { results } = await db
         .prepare(
           `select id, created_at as createdAt, files from form_responses
-           where form_id = ? and id in (${chunk.map(() => '?').join(', ')})`,
+           where form_id = ? and id in (${chunk.map(() => '?').join(', ')})${within.sql}`,
         )
-        .bind(formId, ...chunk)
+        .bind(formId, ...chunk, ...within.binds)
         .all<BulkResponseRow>()
       return results
     }),
@@ -1989,19 +2068,24 @@ export function csvRow(cells: readonly string[]): string {
  *
  * Two binds, whatever the form holds.
  */
-export async function submittedKeys(db: FolioDb, formId: string): Promise<string[]> {
+export async function submittedKeys(
+  db: FolioDb,
+  formId: string,
+  sites?: readonly string[],
+): Promise<string[]> {
+  const within = sitesClause(sites, 'form_responses.site_id')
   const { results } = await db
     .prepare(
       `select distinct key from (
          select j.key as key from form_responses, json_each(form_responses.data) j
-          where form_responses.form_id = ?
+          where form_responses.form_id = ?${within.sql}
          union
          select json_extract(f.value, '$.field') as key
            from form_responses, json_each(form_responses.files) f
-          where form_responses.form_id = ?
+          where form_responses.form_id = ?${within.sql}
        ) where key is not null`,
     )
-    .bind(formId, formId)
+    .bind(formId, ...within.binds, formId, ...within.binds)
     .all<{ key: string }>()
   return results.map((row) => row.key)
 }
@@ -2032,8 +2116,10 @@ export async function responseCsv(
   db: FolioDb,
   form: Form,
   filter: ResponseFilter = {},
+  /** The submitting sites exported, as `ListResponsesOptions.sites`. */
+  sites?: readonly string[],
 ): Promise<ResponseCsv> {
-  const columns = responseCsvColumns(form.fields, await submittedKeys(db, form.id))
+  const columns = responseCsvColumns(form.fields, await submittedKeys(db, form.id, sites))
   const encoder = new TextEncoder()
   const date = new Date().toISOString().slice(0, 10)
 
@@ -2052,6 +2138,7 @@ export async function responseCsv(
       const page = await listResponses(db, form.id, {
         limit: CSV_PAGE,
         filter,
+        ...(sites === undefined ? {} : { sites }),
         ...(cursor ? { cursor } : {}),
       })
       let chunk = ''

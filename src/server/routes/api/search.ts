@@ -24,7 +24,7 @@ import { Hono } from 'hono'
 import type { Page } from '../../../core/pagination'
 import type { StoryMeta } from '../../../core/story'
 import { READ } from '../../auth/roles'
-import { requireAccess } from '../../middleware'
+import { requestChain, requestUrls, requireAccess } from '../../middleware'
 import type { FolioRuntime } from '../../runtime'
 import { searchStories } from '../../stories'
 import type { FolioEnv } from '../../types'
@@ -59,6 +59,9 @@ export function searchRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     requireCursor(cursor)
 
     const page: Page<StoryMeta> = await searchStories(c.var.bindings().db, {
+      // The whole chain, each hit carrying its `site` (`ApiDocumentMeta.site`): a link
+      // may point up it and never sideways (`multi-site.md`'s route table).
+      chain: await requestChain(c, rt),
       limit: limitParam(c.req.query('limit'), 20, 100),
       cursor,
       filter: {
@@ -69,9 +72,10 @@ export function searchRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       count: c.req.query('count') === '1',
     })
 
+    const urls = await requestUrls(c, rt)
     const result: Page<ApiDocumentMeta> = {
       ...page,
-      rows: page.rows.map((row) => toApiDocumentMeta(rt, row)),
+      rows: page.rows.map((row) => toApiDocumentMeta(rt, row, urls)),
     }
     return c.json(result)
   })

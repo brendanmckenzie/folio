@@ -26,6 +26,7 @@
 import { cloneDoc } from '../core/clone'
 import type { Doc } from '../core/doc'
 import type { DocumentType } from '../core/schema'
+import { DEFAULT_SITE } from '../core/sites'
 import type { StoryMeta } from '../core/story'
 import type { HookRunner } from './hooks'
 import {
@@ -56,6 +57,13 @@ export interface DocumentDeps<Env = unknown> {
   /** Fires the after-commit lifecycle hooks. Absent only in tests that exercise a
    * workflow with no `createRuntime` behind it. */
   hooks?: HookRunner<Env>
+  /**
+   * A scope's chain, nearest first (`multi-site.md` decision 5): what decides
+   * whether a deleted **root** may go — refused when no scope above it has one, at
+   * delete time. Absent, a scope is its own whole chain, which is a deployment with
+   * no `sites` and there a root is never deletable.
+   */
+  chainOf?: (scope: string) => Promise<readonly string[]>
 }
 
 /**
@@ -73,7 +81,13 @@ export interface DocumentDeps<Env = unknown> {
 export async function duplicateDocument<Env>(
   deps: DocumentDeps<Env>,
   source: StoryMeta,
-  patch: { title?: string; parentId?: string | null },
+  /**
+   * `site` is the scope the copy lands in (`multi-site.md`: "source in chain, copy in
+   * scope"); absent, the source's own. A copy of a row a nearer scope inherits is how
+   * a site takes a private copy of a shared page without forking it (which keeps the
+   * slug and the path).
+   */
+  patch: { title?: string; parentId?: string | null; site?: string },
   actor: string | null,
 ): Promise<StoryMeta> {
   const created = await duplicateStory(deps.db, source.id, patch, deps.types)
@@ -122,7 +136,9 @@ export async function moveDocument<Env>(
   )
   if (statements.length) await deps.db.batch(statements)
 
-  if (changes.length) await deps.hooks?.run('pathsChanged', { changes, actor })
+  if (changes.length) {
+    await deps.hooks?.run('pathsChanged', { changes, actor, site: next.site ?? DEFAULT_SITE })
+  }
   if (updated.length) await deps.hooks?.run('updated', { story: next, changed: updated, actor })
 
   return { next, changes }
@@ -156,7 +172,12 @@ export async function deleteDocument<Env>(
   opts: { redirect?: boolean },
   actor: string | null,
 ): Promise<{ deleted: string[]; paths: (string | null)[]; types: string[] } | null> {
-  const found = await deleteStoryStatement(deps.db, id, { redirect: opts.redirect }, deps.types)
+  const found = await deleteStoryStatement(
+    deps.db,
+    id,
+    { redirect: opts.redirect, ...(deps.chainOf ? { chainOf: deps.chainOf } : {}) },
+    deps.types,
+  )
   if (!found) return null
 
   // Five spreads, and every one of them is a chunked group rather than a single
@@ -188,6 +209,7 @@ export async function deleteDocument<Env>(
     paths: found.paths,
     types: found.types,
     actor,
+    site: found.site,
   })
 
   return { deleted: found.ids, paths: found.paths, types: found.types }
