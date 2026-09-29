@@ -7,13 +7,20 @@ import { Hono } from 'hono'
 import { isKnownLocale, translationStatus } from '../../core/locales'
 import type { Page } from '../../core/pagination'
 import type { DocumentType } from '../../core/schema'
-import { SINGLE_SITE_CHAIN } from '../../core/sites'
 import { ancestorPaths, type StoryMeta } from '../../core/story'
 import { actorString } from '../auth/roles'
 import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
 import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from '../documents'
 import { FolioError, rethrow } from '../errors'
-import { hookCtx, loadStory, requireAccess } from '../middleware'
+import {
+  fenceParent,
+  fenceStory,
+  hookCtx,
+  loadStory,
+  requestChain,
+  requestScope,
+  requireAccess,
+} from '../middleware'
 import { publish, unpublish } from '../publish'
 import type { FolioRuntime } from '../runtime'
 import {
@@ -136,7 +143,10 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const ids = idListQuery(c.req.query('ids'))
     const paths = pathListQuery(c.req.query('paths'))
     if (ids.length > 0 || paths.length > 0) {
-      const rows = await storiesFor(db, ids, paths, SINGLE_SITE_CHAIN)
+      // Within the request's chain (`multi-site.md` decision 10): an id another site
+      // owns is absent here, exactly as a deleted one is.
+      const within = await requestChain(c, rt)
+      const rows = await storiesFor(db, ids, paths, within)
       // `?ancestors=1` pulls each row's breadcrumb chain in the same request.
       // Two queries rather than one, and worth it: the caller cannot compute
       // `ancestorPaths` before it knows the row's `path`, so the alternative is
@@ -147,7 +157,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
               db,
               [],
               [...new Set(rows.flatMap((row) => ancestorPaths(row.path)))],
-              SINGLE_SITE_CHAIN,
+              within,
             )
           : []
       const merged = new Map(rows.map((row) => [row.id, row]))
@@ -344,30 +354,36 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * it precedes is `MANAGE`, so a plain editor never sees the dialog anyway — they
    * may create and duplicate (`CREATE`), but not delete.
    */
-  app.get('/documents/:id/usage', requireAccess<Env>(rt, EDIT), async (c) => {
-    const id = idParam('id', c.req.param('id'))
-    const usage = await documentUsage(c.var.bindings().db, id)
-    return c.json({
-      published: usage.published.map(({ story, kind }) => {
-        const decorated = rt.withUrls(story)
-        return {
-          id: story.id,
-          title: story.title,
-          path: story.path,
-          // `''` rather than absent for an unrouted source, matching
-          // `StoryRef.url`: a record referencing a record has no URL to offer.
-          url: decorated.url ?? '',
-          kind,
-        }
-      }),
-      total: usage.total,
-      links: usage.links,
-      references: usage.references,
-    })
-  })
+  app.get(
+    '/documents/:id/usage',
+    requireAccess<Env>(rt, EDIT),
+    fenceStory<Env>(rt, 'read', { absent: 'pass' }),
+    async (c) => {
+      const id = idParam('id', c.req.param('id'))
+      const usage = await documentUsage(c.var.bindings().db, id)
+      return c.json({
+        published: usage.published.map(({ story, kind }) => {
+          const decorated = rt.withUrls(story)
+          return {
+            id: story.id,
+            title: story.title,
+            path: story.path,
+            // `''` rather than absent for an unrouted source, matching
+            // `StoryRef.url`: a record referencing a record has no URL to offer.
+            url: decorated.url ?? '',
+            kind,
+          }
+        }),
+        total: usage.total,
+        links: usage.links,
+        references: usage.references,
+      })
+    },
+  )
 
   app.post('/stories', requireAccess<Env>(rt, CREATE), async (c) => {
     const body = await parseBody(c.req, StoryCreateBody)
+    await fenceParent(c, rt, body.parentId)
     const bindings = c.var.bindings()
     const type = requireType(body.type)
     // A singleton is created by first access, never by a request that asks for
@@ -386,7 +402,13 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       // schema, so stamping the latest migration is the true answer and keeps a
       // page created five seconds ago out of the behind-the-model banner
       // (`schema-migrations.md`).
-      story = await createStory(bindings.db, { ...body, type, schemaId: rt.schemaId }, rt.types)
+      // In the request's scope: `default` with no `sites` (`multi-site.md` decision 3).
+      // A multi-site request with no scope never gets here (`site_required`).
+      story = await createStory(
+        bindings.db,
+        { ...body, type, schemaId: rt.schemaId, site: requestScope(c, rt) ?? undefined },
+        rt.types,
+      )
     } catch (e) {
       // `Unknown parent` is the client's mistake; a path collision is a
       // conflict; a D1 failure is nobody's business but the log's.
@@ -406,19 +428,25 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * document, so a bulk move and a drag cannot come to disagree about what a move
    * *is*.
    */
-  app.patch('/stories/:id', requireAccess<Env>(rt, MANAGE), async (c) => {
-    const id = idParam('id', c.req.param('id'))
-    const body = await parseBody(c.req, StoryPatchBody)
+  app.patch(
+    '/stories/:id',
+    requireAccess<Env>(rt, MANAGE),
+    fenceStory<Env>(rt, 'write'),
+    async (c) => {
+      const id = idParam('id', c.req.param('id'))
+      const body = await parseBody(c.req, StoryPatchBody)
+      await fenceParent(c, rt, body.parentId)
 
-    let next: StoryMeta
-    try {
-      next = (await moveDocument(documentDeps(c), id, body, actorFor(c))).next
-    } catch (e) {
-      rethrow(e)
-    }
+      let next: StoryMeta
+      try {
+        next = (await moveDocument(documentDeps(c), id, body, actorFor(c))).next
+      } catch (e) {
+        rethrow(e)
+      }
 
-    return c.json(rt.withUrls(next))
-  })
+      return c.json(rt.withUrls(next))
+    },
+  )
 
   /**
    * Duplicate a document (`duplicate-and-paste.md`). Row first, seed second
@@ -440,9 +468,13 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.post(
     '/stories/:id/duplicate',
     requireAccess<Env>(rt, CREATE),
-    loadStory<Env>(),
+    // `'write'` for now, not the spec's "source in chain, copy in scope": a copy
+    // lands in its source's scope until `duplicateDocument` threads the request's
+    // (spec 23 phase 7), so a source above the scope would be a write above it.
+    loadStory<Env>(rt, 'write'),
     async (c) => {
       const body = await parseOptionalBody(c.req, StoryDuplicateBody)
+      await fenceParent(c, rt, body.parentId)
 
       let created: StoryMeta
       try {
@@ -462,22 +494,27 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * — which this route reports as `{ deleted: [] }` rather than a 404, because the
    * caller asked for a state of the world and has it.
    */
-  app.delete('/stories/:id', requireAccess<Env>(rt, MANAGE), async (c) => {
-    const target = idParam('id', c.req.param('id'))
-    // redirects.md's architecture decision 4: checked by default in the admin's
-    // confirmation, an escape hatch for a page that should genuinely 404.
-    const redirect = c.req.query('redirect') !== 'false'
+  app.delete(
+    '/stories/:id',
+    requireAccess<Env>(rt, MANAGE),
+    fenceStory<Env>(rt, 'write', { absent: 'pass' }),
+    async (c) => {
+      const target = idParam('id', c.req.param('id'))
+      // redirects.md's architecture decision 4: checked by default in the admin's
+      // confirmation, an escape hatch for a page that should genuinely 404.
+      const redirect = c.req.query('redirect') !== 'false'
 
-    try {
-      const found = await deleteDocument(documentDeps(c), target, { redirect }, actorFor(c))
-      return c.json({ deleted: found?.deleted ?? [] })
-    } catch (e) {
-      // `Cannot delete the root story` is a conflict; a failed batch is internal.
-      // Nothing beyond the batch can throw — the purge swallows its own failure,
-      // inside `deleteDocument`, for the reason recorded there.
-      rethrow(e)
-    }
-  })
+      try {
+        const found = await deleteDocument(documentDeps(c), target, { redirect }, actorFor(c))
+        return c.json({ deleted: found?.deleted ?? [] })
+      } catch (e) {
+        // `Cannot delete the root story` is a conflict; a failed batch is internal.
+        // Nothing beyond the batch can throw — the purge swallows its own failure,
+        // inside `deleteDocument`, for the reason recorded there.
+        rethrow(e)
+      }
+    },
+  )
 
   /**
    * A translation layer over publish.ts and nothing more: both inputs are checked
@@ -485,32 +522,42 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * on a request that cannot land — and the story's own existence is the
    * workflow's to check, because a scheduled publish has to check it too.
    */
-  app.post('/story/:id/publish', requireAccess<Env>(rt, PUBLISH), async (c) => {
-    const id = idParam('id', c.req.param('id'))
-    const actor = actorFor(c)
+  app.post(
+    '/story/:id/publish',
+    requireAccess<Env>(rt, PUBLISH),
+    fenceStory<Env>(rt, 'write'),
+    async (c) => {
+      const id = idParam('id', c.req.param('id'))
+      const actor = actorFor(c)
 
-    const { publishedAt, publishedSyncId, version } = await publish(
-      rt.publishDeps(c.var.bindings(), hookCtx(c)),
-      id,
-      actor,
-    )
-    return c.json({ ok: true, publishedAt, publishedSyncId, version })
-  })
+      const { publishedAt, publishedSyncId, version } = await publish(
+        rt.publishDeps(c.var.bindings(), hookCtx(c)),
+        id,
+        actor,
+      )
+      return c.json({ ok: true, publishedAt, publishedSyncId, version })
+    },
+  )
 
   /**
    * Clears the published snapshot. `loadStory` runs first so an unknown id
    * 404s before `unpublish` does anything, and hands the row it already found
    * straight to the workflow instead of a second lookup by id.
    */
-  app.post('/story/:id/unpublish', requireAccess<Env>(rt, PUBLISH), loadStory<Env>(), async (c) => {
-    const actor = actorFor(c)
-    const { unpublishedAt } = await unpublish(
-      rt.publishDeps(c.var.bindings(), hookCtx(c)),
-      c.var.story,
-      actor,
-    )
-    return c.json({ ok: true, unpublishedAt })
-  })
+  app.post(
+    '/story/:id/unpublish',
+    requireAccess<Env>(rt, PUBLISH),
+    loadStory<Env>(rt, 'write'),
+    async (c) => {
+      const actor = actorFor(c)
+      const { unpublishedAt } = await unpublish(
+        rt.publishDeps(c.var.bindings(), hookCtx(c)),
+        c.var.story,
+        actor,
+      )
+      return c.json({ ok: true, unpublishedAt })
+    },
+  )
 
   /**
    * A story's live draft, for resolving a `reference` in the admin.
@@ -519,8 +566,11 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * render, and pushes the result into the preview with the resolution. The
    * preview re-renders on every keystroke and must never reach the network.
    */
-  app.get('/story/:id/document', requireAccess<Env>(rt, READ_DRAFT), loadStory<Env>(), async (c) =>
-    c.json({ doc: await rt.draftFor(c.var.bindings(), c.var.story) }),
+  app.get(
+    '/story/:id/document',
+    requireAccess<Env>(rt, READ_DRAFT),
+    loadStory<Env>(rt, 'read'),
+    async (c) => c.json({ doc: await rt.draftFor(c.var.bindings(), c.var.story) }),
   )
 
   /**
@@ -543,7 +593,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.get(
     '/story/:id/translation',
     requireAccess<Env>(rt, READ_DRAFT),
-    loadStory<Env>(),
+    loadStory<Env>(rt, 'read'),
     async (c) => {
       const locale = c.req.query('locale')
       if (locale === undefined) {

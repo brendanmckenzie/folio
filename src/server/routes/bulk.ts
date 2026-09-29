@@ -23,12 +23,14 @@
  */
 import type { Context } from 'hono'
 import { Hono } from 'hono'
-import { type BulkOutcome, wasRefused } from '../../core/bulk'
+import { type BulkOutcome, type BulkSelection, wasRefused } from '../../core/bulk'
 import type { StoryBulkAction } from '../../core/story'
 import { type Access, actorString, CREATE, MANAGE, PUBLISH } from '../auth/roles'
 import { type BulkDeps, type BulkOptions, runBulk } from '../bulk'
-import { hookCtx, requireAccess } from '../middleware'
+import { FolioError } from '../errors'
+import { fenceParent, hookCtx, requestScope, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
+import { storiesFor } from '../stories'
 import type { FolioEnv } from '../types'
 import { BulkBody, BulkDeleteBody, BulkMoveBody, parseBody, requireCursor } from '../validate'
 
@@ -80,6 +82,34 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     )
   }
 
+  /**
+   * Every id in the request's scope (`multi-site.md`'s route table: "`/bulk/*`:
+   * every id in scope"), checked before the job starts, so a selection naming one
+   * row another scope owns is refused whole rather than acted on in part. One read,
+   * and only with `sites`: with none every row is `default`'s.
+   *
+   * A filter selection (`all: true`) is refused on a deployment with `sites` until
+   * the filters it compiles to take a scope (spec 23 phase 7): they read `default`
+   * today, which would be a write outside any other scope.
+   */
+  const inScope = async (
+    c: Context<FolioEnv<Env>>,
+    selection: BulkSelection<unknown>,
+  ): Promise<void> => {
+    if (!rt.sites) return
+    if (selection.all) {
+      throw new FolioError(
+        'unsupported',
+        'Select the documents by id: a bulk action over a filter is not scoped to a site yet.',
+      )
+    }
+    const scope = requestScope(c, rt)
+    const rows = await storiesFor(c.var.bindings().db, selection.ids, [], scope ? [scope] : [])
+    if (rows.length !== new Set(selection.ids).size) {
+      throw new FolioError('not_found', 'One or more of those documents is not in this site')
+    }
+  }
+
   /** The job-control fields, off any of the three bodies. `actor` is the session's
    * and never the body's: "who published this" is not a value anybody may type. */
   const control = (
@@ -113,6 +143,7 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   for (const [action, access] of PLAIN) {
     app.post(`/bulk/${action}`, requireAccess<Env>(rt, access), async (c) => {
       const body = await parseBody(c.req, BulkBody)
+      await inScope(c, body.selection)
       return answer(c, await runBulk(deps(c), action, body.selection, control(c, body)))
     })
   }
@@ -128,6 +159,8 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.post('/bulk/move', requireAccess<Env>(rt, MANAGE), async (c) => {
     const body = await parseBody(c.req, BulkMoveBody)
+    await fenceParent(c, rt, body.parentId)
+    await inScope(c, body.selection)
     return answer(
       c,
       await runBulk(deps(c), 'move', body.selection, {
@@ -144,6 +177,7 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * redirects a hundred single deletes would (`../../../docs/specs/platform/redirects.md`). */
   app.post('/bulk/delete', requireAccess<Env>(rt, MANAGE), async (c) => {
     const body = await parseBody(c.req, BulkDeleteBody)
+    await inScope(c, body.selection)
     return answer(
       c,
       await runBulk(deps(c), 'delete', body.selection, {

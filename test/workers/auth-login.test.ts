@@ -1360,3 +1360,234 @@ describe('verifyIdToken', () => {
     await expect(verifyIdToken('nonsense', expected())).rejects.toThrow(/not a JWS/)
   })
 })
+
+/* ------------------------------------------------- grants from the directory --- */
+
+/**
+ * `docs/specs/foundation/multi-site.md` decision 17: on a deployment with `sites` a
+ * mapper answers a **grant set**, `roleFromClaim` takes the highest match per scope,
+ * and `completeSignIn` keeps `auth-providers.md`'s interaction table with "role"
+ * read as "the grant set" — replaced whole, stamped `role_from`, one `role_changed`,
+ * a scope the registry does not hold dropped with a note.
+ */
+describe('grants come from the directory', () => {
+  const GROUPS = roleFromClaim({
+    claim: 'groups',
+    map: {
+      'g-alpha': { scope: 'alpha', role: 'editor' },
+      'g-alpha-lead': { scope: 'alpha', role: 'publisher' },
+      'g-bravo': { scope: 'bravo', role: 'editor' },
+      'g-retired': { scope: 'zulu', role: 'editor' },
+      'g-central': 'admin',
+    },
+  })
+
+  function sitesFolio(provider: ReturnType<typeof oidcWith>) {
+    return createFolio<Cloudflare.Env>({
+      blocks: [page],
+      root: 'page',
+      bindings,
+      basePath: '/folio',
+      auth: { providers: [provider] },
+      route: (p, _locale, site) => (site ? `https://${site.id}.example/${p}` : `/${p}`),
+      sites: { admin: ORIGIN },
+    })
+  }
+
+  /** One SSO tenant on a multi-site deployment, as `tenant` above is on one site. */
+  function sitesTenant(over: Parameters<typeof oidcWith>[1] = {}) {
+    let claims: Record<string, unknown> = {}
+    const folio = sitesFolio(
+      oidcWith(
+        idpFetch(() => signIdToken(claims)),
+        { roleFrom: GROUPS, provision: { create: true }, ...over },
+      ),
+    )
+    return {
+      folio,
+      async signIn(overrides: Record<string, unknown>): Promise<Response> {
+        const { cookie, state } = await startFlow(folio)
+        claims = claimsFor(state, overrides)
+        return call(folio, `/folio/login/oidc/callback?code=abc&state=${state.state}`, {
+          headers: { cookie },
+        })
+      },
+    }
+  }
+
+  const grantsOf = async (email: string) => {
+    const user = await userByEmail(env.DB, email)
+    return user?.grants.map(({ scope, role, roleFrom }) => ({ scope, role, roleFrom }))
+  }
+
+  beforeAll(async () => {
+    await env.DB.prepare(
+      `insert or ignore into sites (id, kind, name, group_id, status, preview_origin, created_at, updated_at) values
+         ('alpha', 'site', 'Alpha', null, 'live', null, 0, 0),
+         ('bravo', 'site', 'Bravo', null, 'live', null, 0, 0)`,
+    ).run()
+  })
+
+  it('takes the highest match per scope: g-alpha and g-alpha-lead are {alpha: publisher}', async () => {
+    const { signIn } = sitesTenant()
+    const res = await signIn({ email: 'lead@example.com', groups: ['g-alpha', 'g-alpha-lead'] })
+
+    expect(res.status).toBe(302)
+    expect(await grantsOf('lead@example.com')).toEqual([
+      { scope: 'alpha', role: 'publisher', roleFrom: 'oidc' },
+    ])
+    const actor = (await readSession(env.DB, cookieFrom(res, SECURE_COOKIE)!)) as UserActor
+    expect(actor.grants).toEqual({ alpha: 'publisher' })
+  })
+
+  it('keeps each scope its own highest, never one role across them', async () => {
+    const { signIn } = sitesTenant()
+    await signIn({ email: 'both@example.com', groups: ['g-alpha-lead', 'g-bravo', 'g-central'] })
+
+    expect(await grantsOf('both@example.com')).toEqual([
+      { scope: '*', role: 'admin', roleFrom: 'oidc' },
+      { scope: 'alpha', role: 'publisher', roleFrom: 'oidc' },
+      { scope: 'bravo', role: 'editor', roleFrom: 'oidc' },
+    ])
+  })
+
+  it('refuses a person matching nothing, with an auth_events row', async () => {
+    const { signIn } = sitesTenant()
+    const res = await signIn({ email: 'nobody@example.com', groups: ['elsewhere'] })
+
+    expect(res.headers.get('location')).toContain('error=refused')
+    expect(await userByEmail(env.DB, 'nobody@example.com')).toBeNull()
+    expect(await events()).toEqual([
+      {
+        kind: 'sign_in_refused',
+        user_id: null,
+        actor: null,
+        detail: { email: 'nobody@example.com', reason: 'not_invited' },
+      },
+    ])
+  })
+
+  it('replaces the whole set when their groups change, revokes other sessions, and records one role_changed', async () => {
+    const { signIn } = sitesTenant()
+    await signIn({ email: 'mover@example.com', groups: ['g-alpha'] })
+    const mover = (await userByEmail(env.DB, 'mover@example.com'))!
+    const other = await createSession(env.DB, mover.id)
+    await env.DB.prepare('delete from auth_events').run()
+
+    const res = await signIn({ email: 'mover@example.com', groups: ['g-bravo'] })
+
+    expect(res.status).toBe(302)
+    expect(await grantsOf('mover@example.com')).toEqual([
+      { scope: 'bravo', role: 'editor', roleFrom: 'oidc' },
+    ])
+    expect(await readSession(env.DB, other.token)).toBeNull()
+    expect(await readSession(env.DB, cookieFrom(res, SECURE_COOKIE)!)).not.toBeNull()
+    expect(await events()).toEqual([
+      {
+        kind: 'role_changed',
+        user_id: mover.id,
+        actor: 'provider:oidc',
+        detail: { from: { alpha: 'editor' }, to: { bravo: 'editor' } },
+      },
+      { kind: 'sign_in', user_id: mover.id, actor: mover.id, detail: null },
+    ])
+  })
+
+  it('writes nothing when the set is unchanged', async () => {
+    const { signIn } = sitesTenant()
+    await signIn({ email: 'same@example.com', groups: ['g-alpha'] })
+    await env.DB.prepare('delete from auth_events').run()
+    await signIn({ email: 'same@example.com', groups: ['g-alpha'] })
+    expect((await events()).map((e) => e.kind)).toEqual(['sign_in'])
+  })
+
+  it('drops a mapped scope the registry does not hold, applies the rest, and notes it', async () => {
+    const warned: string[] = []
+    const { signIn } = sitesTenant()
+    const original = console.warn
+    console.warn = (message: string) => warned.push(message)
+    try {
+      await signIn({ email: 'retired@example.com', groups: ['g-alpha', 'g-retired'] })
+    } finally {
+      console.warn = original
+    }
+
+    expect(await grantsOf('retired@example.com')).toEqual([
+      { scope: 'alpha', role: 'editor', roleFrom: 'oidc' },
+    ])
+    expect(warned.some((line) => line.includes("'zulu'"))).toBe(true)
+    const user = (await userByEmail(env.DB, 'retired@example.com'))!
+    expect(await events()).toEqual([
+      { kind: 'sign_in', user_id: user.id, actor: user.id, detail: { dropped: ['zulu'] } },
+    ])
+  })
+
+  it('refuses when only dropped scopes remain', async () => {
+    const { signIn } = sitesTenant()
+    const res = await signIn({ email: 'gone@example.com', groups: ['g-retired'] })
+    expect(res.headers.get('location')).toContain('error=refused')
+    expect((await events())[0]?.detail).toEqual({
+      email: 'gone@example.com',
+      reason: 'not_invited',
+      dropped: ['zulu'],
+    })
+  })
+
+  it('refuses a person any of whose grants this provider placed, once it places nothing', async () => {
+    const { signIn } = sitesTenant()
+    await signIn({ email: 'left@example.com', groups: ['g-bravo'] })
+    const res = await signIn({ email: 'left@example.com', groups: [] })
+    expect(res.headers.get('location')).toContain('error=refused')
+    expect(await grantsOf('left@example.com')).toEqual([
+      { scope: 'bravo', role: 'editor', roleFrom: 'oidc' },
+    ])
+  })
+
+  it('will not let an admin edit a set a provider placed (409)', async () => {
+    const { folio, signIn } = sitesTenant()
+    await signIn({ email: 'placed@example.com', groups: ['g-alpha'] })
+    const placed = (await userByEmail(env.DB, 'placed@example.com'))!
+    const admin = await createUser(env.DB, { email: 'root@example.com', role: 'admin' })
+    const { token } = await createSession(env.DB, admin.id)
+
+    const res = await call(folio, `/folio/api/users/${placed.id}`, {
+      method: 'PATCH',
+      headers: { cookie: `${SECURE_COOKIE}=${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ grants: { bravo: 'editor' } }),
+    })
+    expect(res.status).toBe(409)
+    expect(await grantsOf('placed@example.com')).toEqual([
+      { scope: 'alpha', role: 'editor', roleFrom: 'oidc' },
+    ])
+  })
+
+  it('refuses provision.role, and provision.create with no roleFrom, at construction', () => {
+    expect(() =>
+      sitesFolio(
+        oidcWith(
+          idpFetch(() => ''),
+          { provision: { create: true, role: 'editor' } },
+        ),
+      ),
+    ).toThrow(/provisions with a role/)
+    expect(() =>
+      sitesFolio(
+        oidcWith(
+          idpFetch(() => ''),
+          { provision: { create: true } },
+        ),
+      ),
+    ).toThrow(/needs `roleFrom`/)
+    // The same provider on one site is today's configuration, and constructs.
+    expect(() =>
+      folioWith({
+        providers: [
+          oidcWith(
+            idpFetch(() => ''),
+            { provision: { create: true, role: 'editor' } },
+          ),
+        ],
+      }),
+    ).not.toThrow()
+  })
+})

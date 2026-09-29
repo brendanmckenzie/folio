@@ -368,6 +368,8 @@ describe('api tokens', () => {
       id: await hashToken(token),
       name: 'importer',
       scopes: ['content:write'],
+      // Bound to no scope: today's token (`multi-site.md` decision 14).
+      site: null,
     })
   })
 

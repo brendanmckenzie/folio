@@ -8,7 +8,7 @@
 import type { Actor, Role } from './roles'
 import { isRole } from './roles'
 import { hashToken, mintSecret } from './secrets'
-import { type UserRow, touchUserStatement, userColour } from './users'
+import { parseGrantMap, type UserRow, touchUserStatement, userColour } from './users'
 import type { FolioDb } from '../db'
 
 /** Default session length. Overridable with `AuthConfig.sessionDays`. */
@@ -112,6 +112,8 @@ interface SessionJoin {
    * in on a second machine by another door. */
   session_provider: string | null
   role_from: string | null
+  /** Every grant, as `json_group_object(scope_id, role)`; `'{}'` for none. */
+  grants: string | null
 }
 
 /**
@@ -123,6 +125,13 @@ interface SessionJoin {
  * D1 cost of being signed in at all. A left join, so a user with no grant still
  * resolves, as `viewer` (`0011_sites.sql`; nothing here reads `users.role`, which
  * `0012` drops).
+ *
+ * **Every other grant rides in the same statement**, as a correlated
+ * `json_group_object` over `site_roles`' primary key (`multi-site.md` decision
+ * 10), so a deployment with sites pays no second query to learn which scopes a
+ * person reaches. `withActor` turns them into the effective role on the request's
+ * scope; `role` here stays the `*` grant, which is the whole answer with no
+ * `sites`.
  *
  * An expired row answers null *and* is deleted, so an abandoned tab prunes its
  * own session on the request that discovers it — the periodic sweep
@@ -139,7 +148,9 @@ export async function readSession(
   const row = await db
     .prepare(
       `select s.id as session_id, s.expires_at, s.created_at, s.provider as session_provider,
-              u.id as user_id, u.email, u.name, u.colour, g.role, u.provider, g.role_from
+              u.id as user_id, u.email, u.name, u.colour, g.role, u.provider, g.role_from,
+              (select json_group_object(r.scope_id, r.role) from site_roles r
+                where r.user_id = u.id) as grants
          from sessions s join users u on u.id = s.user_id
          left join site_roles g on g.user_id = u.id and g.scope_id = '*'
         where s.id = ?`,
@@ -177,6 +188,8 @@ export async function readSession(
     // column true and `/me` had a reader for it.
     provider: row.provider,
     roleFrom: row.role_from,
+    // Only `userColour` reads this row; the actor below carries the grants.
+    grants: [],
     createdAt: row.created_at,
     lastSeenAt: null,
   }
@@ -191,6 +204,7 @@ export async function readSession(
     provider: row.session_provider,
     email: user.email,
     roleFrom: row.role_from,
+    grants: parseGrantMap(row.grants),
   }
 }
 

@@ -40,14 +40,23 @@ export interface VerifiedIdentity {
 }
 
 /**
- * Maps a verified identity to a role. `null` means "this identity holds no role
- * here"; the interaction table in the spec's decision 5 says what that does.
+ * A grant set a mapper places: scope id (a site, a group, `shared`) or `*` to role
+ * (`../../../docs/specs/foundation/multi-site.md` decision 17). A bare `Role` is
+ * `{ '*': role }`, which is everything a deployment with no `sites` means by one.
+ */
+export type RoleGrants = Readonly<Record<string, Role>>
+
+/**
+ * Maps a verified identity to a role — or, on a deployment with `sites`, to a set
+ * of grants. `null` means "this identity holds no role here"; the interaction table
+ * in `auth-providers.md` decision 5 says what that does, with "role" read as "the
+ * grant set".
  *
  * A function rather than a declarative `{ claim, map }` because a callback
  * covers what a DSL cannot — an app-roles claim versus a groups claim, a group
  * overage that points at a directory API, a role derived from the domain.
  */
-export type RoleMapper = (identity: VerifiedIdentity) => Role | null
+export type RoleMapper = (identity: VerifiedIdentity) => Role | RoleGrants | null
 
 /** Every kind carries these three. */
 interface ProviderBase {
@@ -506,4 +515,37 @@ function roleClause(provider: AuthProvider<unknown>): { provisionRole?: Role } {
   const provision = provisionOf(provider)
   if (provision === 'refuse' || !provision.role) return {}
   return { provisionRole: provision.role }
+}
+
+/**
+ * The two provisioning rules a deployment with `sites` adds (`multi-site.md`
+ * decision 17), checked at construction and naming the provider:
+ *
+ * - **no `provision.role`**: one role for every stranger is a `*` grant, which on a
+ *   deployment of many sites is a role on all of them for anybody the directory
+ *   admits;
+ * - **`provision: { create }` needs `roleFrom`**: a created user's grants must come
+ *   from somewhere, and with no default role only the mapper can say which scopes.
+ *
+ * With no `sites` neither applies, and nothing calls this.
+ */
+export function validateSitesAuth(auth: ResolvedAuth<unknown>): void {
+  if (auth.mode !== 'session') return
+  for (const provider of auth.config.providers) {
+    if (!('provision' in provider)) continue
+    const provision = provider.provision
+    if (provision === undefined || provision === 'refuse') continue
+    if (provision.role !== undefined) {
+      throw new Error(
+        `folio: auth provider '${provider.id}' provisions with a role, which on a deployment` +
+          ' with `sites` would be a role on every site; map roles with `roleFrom` instead',
+      )
+    }
+    if (typeof provider.roleFrom !== 'function') {
+      throw new Error(
+        `folio: auth provider '${provider.id}' creates users, and on a deployment with` +
+          ' `sites` a created user needs `roleFrom` to say where they may work',
+      )
+    }
+  }
 }

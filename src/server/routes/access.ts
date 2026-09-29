@@ -1,5 +1,6 @@
 /**
- * Managing editors and API tokens. `admin` role only.
+ * Managing editors and API tokens. Platform tier only (`ADMIN`): `*` + `admin` for
+ * a person, an unbound token with the `admin` scope (`multi-site.md` decision 10).
  *
  * Split from `auth.ts` deliberately: everything in that file is reachable
  * without a credential by definition, and everything here requires the strongest
@@ -12,8 +13,10 @@
  * a deploy step (see README).
  */
 import { Hono } from 'hono'
-import type { Scope } from '../auth/roles'
-import { ADMIN, actorString } from '../auth/roles'
+import * as v from 'valibot'
+import { ALL_SCOPES, type Registry, SHARED_SCOPE } from '../../core/sites'
+import type { Grants, Scope } from '../auth/roles'
+import { ADMIN, actorString, ROLES } from '../auth/roles'
 import { roleSetByReason } from '../auth/roles-from'
 import { countPasskeysByUser } from '../auth/passkeys'
 import { listEvents, oldestEventAt, recordEventStatement } from '../auth/events'
@@ -21,7 +24,9 @@ import { createToken, listTokens, revokeToken } from '../auth/tokens'
 import {
   createUserStatement,
   deleteUser,
+  grantMap,
   listUsers,
+  replaceGrantsStatements,
   updateUser,
   userByEmail,
   userById,
@@ -36,6 +41,37 @@ import { idParam, parseBody, TokenCreateBody, UserCreateBody, UserPatchBody } fr
 import { limitParam, requireCursor } from '../validate'
 
 const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * The bodies below, widened by what spec 23 adds (`multi-site.md` decisions 10 and
+ * 14): a token's binding and a person's grant set. Here rather than in
+ * `validate.ts` for the reason `routes/sites.ts` keeps its own: they only mean
+ * something on a deployment with `sites`, and the route is what knows whether this
+ * is one.
+ */
+const OBJECT = 'must be a JSON object'
+const SCOPE_ID = v.pipe(v.string('must be a string'), v.maxLength(64, 'is too long'))
+const GRANTS = v.pipe(
+  v.record(SCOPE_ID, v.picklist(ROLES, 'is not a role'), 'must map scopes to roles'),
+  v.check((set) => Object.keys(set).length <= 100, 'names at most 100 scopes'),
+)
+const TokenMintBody = v.object(
+  { ...TokenCreateBody.entries, site: v.optional(v.nullable(SCOPE_ID)) },
+  OBJECT,
+)
+const UserInviteBody = v.object({ ...UserCreateBody.entries, grants: v.optional(GRANTS) }, OBJECT)
+const UserEditBody = v.object({ ...UserPatchBody.entries, grants: v.optional(GRANTS) }, OBJECT)
+
+/**
+ * A scope a grant or a binding may name: `*`, `shared`, or a site or group the
+ * registry holds. Anything else is a 400 at the write — a grant nobody could ever
+ * exercise is a typo, not a permission.
+ */
+function knownScope(registry: Registry, scope: string, star: boolean): boolean {
+  if (scope === ALL_SCOPES) return star
+  if (scope === SHARED_SCOPE) return true
+  return registry.sites.some((s) => s.id === scope) || registry.groups.some((g) => g.id === scope)
+}
 
 /** What a user looks like over the wire. `email` is included — an admin managing
  * access needs it — and nothing else is hidden, because a user row holds no
@@ -52,6 +88,12 @@ function toJson(user: UserRow) {
      * The Access screen disables its `<select>` on this and says why, which is
      * the client half of the `409` below. */
     roleFrom: user.roleFrom,
+    /**
+     * Every grant, each with who set it (`multi-site.md` decision 10). With no
+     * `sites` it is the one `*` entry `role` already is. A grant naming a scope the
+     * registry no longer holds is listed here and reaches nothing.
+     */
+    grants: user.grants,
     createdAt: user.createdAt,
     lastSeenAt: user.lastSeenAt,
   }
@@ -59,6 +101,28 @@ function toJson(user: UserRow) {
 
 export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
+
+  /**
+   * A grant set a person may be given, checked against a fresh read of the
+   * registry (never the snapshot: a site deleted a second ago must not be granted).
+   * Refused outright on a deployment with no `sites`, which has one scope and says
+   * so with `role`.
+   */
+  const checkGrants = async (c: { env: Env }, grants: Grants): Promise<Grants> => {
+    if (!rt.sites) {
+      throw new FolioError('bad_request', 'This deployment has one site: set `role` instead.')
+    }
+    const registry = await rt.sites.fresh(c.env)
+    for (const scope of Object.keys(grants)) {
+      if (!knownScope(registry, scope, true)) {
+        throw new FolioError('bad_request', `grants names '${scope}', which is not a site or group`)
+      }
+    }
+    if (Object.keys(grants).length === 0) {
+      throw new FolioError('bad_request', 'grants must name at least one scope')
+    }
+    return grants
+  }
 
   // Both guards on every route in the file, in this order: "there is no such
   // thing here" comes before "you may not", so an `auth: 'open'` deployment
@@ -113,7 +177,19 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * a from-address (see magic-link.ts).
    */
   app.post('/users', async (c) => {
-    const body = await parseBody(c.req, UserCreateBody)
+    const body = await parseBody(c.req, UserInviteBody)
+    if (body.grants !== undefined && body.role !== undefined) {
+      throw new FolioError('bad_request', 'Name either `role` or `grants`, not both')
+    }
+    // With `sites`, an invitation names where the person may work. Today's default
+    // of `editor` is an `*` grant, which there would be an editor on every site.
+    if (rt.sites && body.role === undefined && body.grants === undefined) {
+      throw new FolioError(
+        'bad_request',
+        'Name `grants` (or `role`, for every site): this deployment has many sites',
+      )
+    }
+    const grants = body.grants === undefined ? undefined : await checkGrants(c, body.grants)
     const db = c.var.bindings().db
     if (await userByEmail(db, body.email)) {
       throw new FolioError('conflict', 'Someone with that address already has access.')
@@ -122,7 +198,8 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // `createUserStatement` rather than `createUser` for exactly the reason
     // `completeSignIn` uses it: the id has to exist before the write happens,
     // which it does because it is minted here rather than by the database.
-    const { user, statements } = createUserStatement(db, body)
+    const { grants: _, ...input } = body
+    const { user, statements } = createUserStatement(db, grants ? { ...input, grants } : input)
     await db.batch([
       ...statements,
       recordEventStatement(db, {
@@ -146,7 +223,11 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.patch('/users/:id', async (c) => {
     const id = idParam('id', c.req.param('id'))
-    const body = await parseBody(c.req, UserPatchBody)
+    const body = await parseBody(c.req, UserEditBody)
+    if (body.grants !== undefined && body.role !== undefined) {
+      throw new FolioError('bad_request', 'Name either `role` or `grants`, not both')
+    }
+    const grants = body.grants === undefined ? undefined : await checkGrants(c, body.grants)
     const db = c.var.bindings().db
     const self = c.var.actor
 
@@ -172,7 +253,11 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * can hold in their head. Somebody else changes your role; that is what having
      * more than one admin is for.
      */
-    if (body.role !== undefined && self?.kind === 'user' && self.id === id) {
+    if (
+      (body.role !== undefined || grants !== undefined) &&
+      self?.kind === 'user' &&
+      self.id === id
+    ) {
       throw new FolioError(
         'conflict',
         'You cannot change your own role. Ask another admin to change it for you.',
@@ -201,11 +286,44 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * opinion on whether they have access at all.
      */
     let previousRole: UserRow['role'] | undefined
-    if (body.role !== undefined) {
-      const target = await userById(db, id)
+    let target: UserRow | null = null
+    if (body.role !== undefined || grants !== undefined) {
+      target = await userById(db, id)
       if (!target) throw new FolioError('not_found', 'Unknown user')
-      if (target.roleFrom) throw new FolioError('conflict', roleSetByReason(target.roleFrom))
+      // Any grant a provider set, not only `*`: its next sign-in replaces the whole
+      // set (`multi-site.md` decision 17), so a hand edit anywhere in it would be
+      // the "it quietly changed" failure one level down.
+      const placed = target.grants.find((g) => g.roleFrom !== null)?.roleFrom ?? target.roleFrom
+      if (placed) throw new FolioError('conflict', roleSetByReason(placed))
       previousRole = target.role
+    }
+
+    if (grants !== undefined && target) {
+      /**
+       * The whole set, replaced, in one batch with what a role change owes: every
+       * session revoked (a downgrade must not sit in an open socket) and one
+       * `role_changed` naming both sets. A rename in the same body lands too.
+       */
+      const before = grantMap(target.grants)
+      const changed = JSON.stringify(sorted(before)) !== JSON.stringify(sorted(grants))
+      const renamed = await updateUser(db, id, { name: body.name })
+      await db.batch([
+        ...replaceGrantsStatements(db, id, grants, null),
+        ...(changed
+          ? [
+              db.prepare('delete from sessions where user_id = ?').bind(id),
+              recordEventStatement(db, {
+                kind: 'role_changed',
+                userId: id,
+                actor: actorString(self),
+                detail: { from: before, to: grants },
+              }),
+            ]
+          : []),
+      ])
+      const updated = (await userById(db, id)) ?? renamed
+      if (!updated) throw new FolioError('not_found', 'Unknown user')
+      return c.json({ user: toJson(updated) })
     }
 
     const updated = await updateUser(db, id, body)
@@ -307,11 +425,33 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * SHA-256 is stored.
    */
   app.post('/tokens', async (c) => {
-    const body = await parseBody(c.req, TokenCreateBody)
+    const body = await parseBody(c.req, TokenMintBody)
+    const site = body.site ?? null
+    /**
+     * **A bound token can never hold `admin`** (`multi-site.md` decision 10): the
+     * scope is the platform tier's, and a token bound to one site that could manage
+     * users or the registry would be a site-scoped key to the whole deployment.
+     * Refused at the mint rather than narrowed silently, like an unknown scope.
+     */
+    if (site !== null) {
+      if (!rt.sites) {
+        throw new FolioError(
+          'bad_request',
+          'This deployment has one site: a token is bound to none.',
+        )
+      }
+      if (body.scopes.includes('admin')) {
+        throw new FolioError('bad_request', 'A token bound to a site cannot hold the admin scope.')
+      }
+      if (!knownScope(await rt.sites.fresh(c.env), site, false)) {
+        throw new FolioError('bad_request', `site names '${site}', which is not a site or group`)
+      }
+    }
     const self = c.var.actor
     const minted = await createToken(c.var.bindings().db, {
       name: body.name,
       scopes: body.scopes as Scope[],
+      site,
       createdBy: self?.kind === 'user' ? self.id : null,
       expiresAt: body.expiresInDays ? Date.now() + body.expiresInDays * DAY_MS : null,
     })
@@ -329,4 +469,9 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   })
 
   return app
+}
+
+/** A grant map with its keys in order, so two sets compare by value. */
+function sorted(grants: Grants): [string, string][] {
+  return Object.entries(grants).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
 }

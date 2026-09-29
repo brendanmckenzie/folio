@@ -566,6 +566,12 @@ export async function deleteSite(db: FolioDb, registry: Registry, id: string): P
 
   await db.batch([
     db.prepare('delete from site_hosts where site_id = ?').bind(id),
+    // Every grant on the scope, whoever set it (decision 1): grants are not a reason
+    // to refuse a delete, so a retired site never waits on its editors signing in
+    // again. Explicit rather than left to a cascade `site_roles` does not declare on
+    // `scope_id`, and a later sign-in whose mapper still names the scope drops that
+    // entry (decision 17). Tokens bound to it are refused at use (`withActor`).
+    db.prepare('delete from site_roles where scope_id = ?').bind(id),
     db.prepare('delete from sites where id = ?').bind(id),
   ])
 }

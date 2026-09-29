@@ -7,10 +7,9 @@
  * uses `loadStory`.
  */
 import { Hono } from 'hono'
-import { SINGLE_SITE_CHAIN } from '../../core/sites'
 import { type SocketIdentity, withIdentity } from '../auth/identity'
 import { READ_DRAFT } from '../auth/roles'
-import { requireHtmlAccess } from '../middleware'
+import { inFence, requestChain, requireHtmlAccess, roleOnScope } from '../middleware'
 import { shellPage, previewPage } from '../pages'
 import type { FolioRuntime } from '../runtime'
 import { ensureSingleton, listStories, storyById, storyByPath } from '../stories'
@@ -70,7 +69,10 @@ export function editorRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const id = c.req.param('id')
     // A malformed id cannot name a story, so it takes the close path below
     // rather than a 400, for the reason documented above.
-    const story = isId(id) ? await storyById(bindings.db, id) : null
+    const found = isId(id) ? await storyById(bindings.db, id) : null
+    // Outside the request's chain it is not there (`multi-site.md` decision 10),
+    // which on the wire is the same terminal close a deleted story gets.
+    const story = found && (await inFence(c, rt, found, 'read')) ? found : null
     if (!story) return refuseSocket(CLOSE_PURGED, 'story deleted')
 
     // The verified identity handed to the object, or null under `auth: 'open'`,
@@ -82,11 +84,21 @@ export function editorRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       if (actor.kind !== 'user') {
         return refuseSocket(CLOSE_FORBIDDEN, 'an API token cannot open an editing session')
       }
+      /**
+       * **The role on the story's own scope**, not the request's (decision 10):
+       * opened under `~alpha`, a shared page is read up alpha's chain, and an alpha
+       * editor holds nothing there but the `viewer` every read implies — so the
+       * object refuses their `tx`, as it refuses any viewer's. The request's
+       * effective role would have been `editor`, and the socket is the one write
+       * path no `requireAccess` stands in front of.
+       */
+      const role = await roleOnScope(c, rt, actor, story.site ?? 'default')
+      if (role === null) return refuseSocket(CLOSE_FORBIDDEN, 'no role on this document')
       identity = {
         actor: actor.id,
         name: actor.name,
         colour: actor.colour,
-        role: actor.role,
+        role,
         session: actor.session,
         expiresAt: actor.expiresAt,
       }
@@ -126,7 +138,7 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     if (!isId(id)) return c.notFound()
     const bindings = c.var.bindings()
     const story = await storyById(bindings.db, id)
-    if (!story) return c.notFound()
+    if (!story || !(await inFence(c, rt, story, 'read'))) return c.notFound()
     /**
      * **The rebuilt shell, not `adminPage`** — port phase 7 landed and this URL is
      * the new editor's.
@@ -165,8 +177,12 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.get('/edit', requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {
     const db = c.var.bindings().db
-    const root = await storyByPath(db, SINGLE_SITE_CHAIN, '')
-    const first = root ?? (await listStories(db, { limit: 1, offset: 0 }))[0]
+    const within = await requestChain(c, rt)
+    // A multi-site request with no scope has no root to open; the shell under a
+    // `~<scope>` is spec 23's phase 8.
+    if (within.length === 0) return c.notFound()
+    const root = await storyByPath(db, within, '')
+    const first = root ?? (await listStories(db, { limit: 1, offset: 0 }, within))[0]
     return first ? c.redirect(`${rt.base}/edit/${first.id}`) : c.notFound()
   })
 
@@ -184,6 +200,10 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const name = c.req.param('name')
     const type = rt.typeOf(name)
     if (type?.kind !== 'singleton') return c.notFound()
+    // Which layer a scope previews, and that a preview never writes one into
+    // existence, are spec 23's phase 4 (decision 8). Until then a deployment with
+    // `sites` answers nothing here rather than creating `default`'s row for anyone.
+    if (rt.sites) return c.notFound()
     const bindings = c.var.bindings()
     const story = await ensureSingleton(bindings.db, type, rt.schemaId)
     /**

@@ -203,6 +203,13 @@ export interface PreviewDocumentContext {
    * becomes an absolute one a remote browser — or a person — can reach. */
   origin: string
   headers: Readonly<Record<string, string>>
+  /**
+   * Whether the request may read this story at all: inside its chain on a
+   * deployment with `sites` (`multi-site.md` decision 10), always with none. The
+   * one direct loader in MCP — every other tool dispatches to a v1 route that
+   * fences — so a story outside it answers exactly as an unknown id.
+   */
+  visible: (story: StoryMeta) => Promise<boolean>
 }
 
 type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
@@ -270,7 +277,7 @@ async function run(
   args: { blok?: string; viewport: Viewport; fullPage: boolean },
 ): Promise<{ content: Content[] }> {
   const story = await storyById(bindings.db, id)
-  if (!story) throw new FolioError('not_found', 'Unknown document')
+  if (!story || !(await ctx.visible(story))) throw new FolioError('not_found', 'Unknown document')
 
   const decorated = rt.withUrls(story)
   const target = chooseTarget(rt.base, decorated, rt.typeOf(story.type)?.kind)

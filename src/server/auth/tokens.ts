@@ -16,6 +16,12 @@ export interface TokenRow {
   id: string
   name: string
   scopes: Scope[]
+  /**
+   * The scope the token is bound to — a site, a group or `shared` — or null for a
+   * token bound to none (`../../../docs/specs/foundation/multi-site.md` decision
+   * 14). Null is today's token, and the only kind a deployment with no `sites` mints.
+   */
+  site: string | null
   createdBy: string | null
   createdAt: number
   expiresAt: number | null
@@ -27,6 +33,7 @@ interface RawToken {
   id: string
   name: string
   scopes: string
+  site_id: string | null
   created_by: string | null
   created_at: number
   expires_at: number | null
@@ -34,13 +41,15 @@ interface RawToken {
   revoked_at: number | null
 }
 
-const COLUMNS = 'id, name, scopes, created_by, created_at, expires_at, last_used_at, revoked_at'
+const COLUMNS =
+  'id, name, scopes, site_id, created_by, created_at, expires_at, last_used_at, revoked_at'
 
 function toToken(row: RawToken): TokenRow {
   return {
     id: row.id,
     name: row.name,
     scopes: parseScopes(row.scopes),
+    site: row.site_id,
     createdBy: row.created_by,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
@@ -61,6 +70,9 @@ export async function createToken(
   input: {
     name: string
     scopes: readonly Scope[]
+    /** The binding. `POST {base}/api/tokens` refuses one with `admin` before this
+     * is reached; this function writes what it is given. */
+    site?: string | null
     createdBy?: string | null
     expiresAt?: number | null
   },
@@ -70,6 +82,7 @@ export async function createToken(
     id: await hashToken(token),
     name: input.name.trim(),
     scopes: [...input.scopes],
+    site: input.site ?? null,
     createdBy: input.createdBy ?? null,
     createdAt: Date.now(),
     expiresAt: input.expiresAt ?? null,
@@ -78,10 +91,18 @@ export async function createToken(
   }
   await db
     .prepare(
-      `insert into api_tokens (id, name, scopes, created_by, created_at, expires_at)
-       values (?, ?, ?, ?, ?, ?)`,
+      `insert into api_tokens (id, name, scopes, site_id, created_by, created_at, expires_at)
+       values (?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(row.id, row.name, JSON.stringify(row.scopes), row.createdBy, row.createdAt, row.expiresAt)
+    .bind(
+      row.id,
+      row.name,
+      JSON.stringify(row.scopes),
+      row.site,
+      row.createdBy,
+      row.createdAt,
+      row.expiresAt,
+    )
     .run()
   return { row, token }
 }
@@ -153,7 +174,7 @@ export async function readToken(
   const row = toToken(raw)
   if (row.revokedAt !== null) return null
   if (row.expiresAt !== null && row.expiresAt <= now) return null
-  return { kind: 'token', id: row.id, name: row.name, scopes: row.scopes }
+  return { kind: 'token', id: row.id, name: row.name, scopes: row.scopes, site: row.site }
 }
 
 /** `Authorization: Bearer folio_…` → the presented token, or null. Case-

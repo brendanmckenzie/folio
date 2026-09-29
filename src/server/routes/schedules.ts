@@ -18,7 +18,7 @@
  */
 import { Hono } from 'hono'
 import { actorString, PUBLISH, READ } from '../auth/roles'
-import { hookCtx, loadStory, requireAccess } from '../middleware'
+import { fenceStory, hookCtx, loadStory, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import {
   checkScheduleTime,
@@ -96,29 +96,34 @@ export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * already live is the ordinary case too: an editor is saying "publish the edits I
    * make between now and Tuesday".
    */
-  app.post('/story/:id/schedule', requireAccess<Env>(rt, PUBLISH), loadStory<Env>(), async (c) => {
-    const body = await parseBody(c.req, ScheduleBody)
-    const bindings = c.var.bindings()
-    // Checked before the write and before the row is built: the past/horizon rule
-    // needs the current time, which a valibot schema does not have.
-    checkScheduleTime(body.at, Date.now())
+  app.post(
+    '/story/:id/schedule',
+    requireAccess<Env>(rt, PUBLISH),
+    loadStory<Env>(rt, 'write'),
+    async (c) => {
+      const body = await parseBody(c.req, ScheduleBody)
+      const bindings = c.var.bindings()
+      // Checked before the write and before the row is built: the past/horizon rule
+      // needs the current time, which a valibot schema does not have.
+      checkScheduleTime(body.at, Date.now())
 
-    const { schedule, statements } = setScheduleStatements(bindings.db, {
-      storyId: c.var.story.id,
-      action: body.action,
-      at: body.at,
-      // Off the session, never the body. The sweep passes this straight to
-      // `publish(deps, story, actor)`, so the version row and the `published`
-      // hook name the person who asked rather than the cron that ran.
-      actor: actorString(c.var.actor),
-    })
-    // One batch: the delete and the insert must land together, or a crash between
-    // them leaves the document with no schedule where it had one — a silent
-    // cancellation, which is the failure this feature cannot have.
-    await bindings.db.batch(statements)
+      const { schedule, statements } = setScheduleStatements(bindings.db, {
+        storyId: c.var.story.id,
+        action: body.action,
+        at: body.at,
+        // Off the session, never the body. The sweep passes this straight to
+        // `publish(deps, story, actor)`, so the version row and the `published`
+        // hook name the person who asked rather than the cron that ran.
+        actor: actorString(c.var.actor),
+      })
+      // One batch: the delete and the insert must land together, or a crash between
+      // them leaves the document with no schedule where it had one — a silent
+      // cancellation, which is the failure this feature cannot have.
+      await bindings.db.batch(statements)
 
-    return c.json(schedule, 201)
-  })
+      return c.json(schedule, 201)
+    },
+  )
 
   /**
    * Cancel a document's schedule for one action.
@@ -133,11 +138,18 @@ export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * schedule for a document that has since been deleted should succeed, not 404 on
    * the way to doing nothing.
    */
-  app.delete('/story/:id/schedule', requireAccess<Env>(rt, PUBLISH), async (c) => {
-    const id = idParam('id', c.req.param('id'))
-    const action = scheduleActionQuery(c.req.query('action'))
-    return c.json({ deleted: await clearSchedule(c.var.bindings().db, id, action) })
-  })
+  app.delete(
+    '/story/:id/schedule',
+    requireAccess<Env>(rt, PUBLISH),
+    // A story outside the request's scope is refused; one that is gone still is
+    // not, for the reason above.
+    fenceStory<Env>(rt, 'write', { absent: 'pass' }),
+    async (c) => {
+      const id = idParam('id', c.req.param('id'))
+      const action = scheduleActionQuery(c.req.query('action'))
+      return c.json({ deleted: await clearSchedule(c.var.bindings().db, id, action) })
+    },
+  )
 
   /**
    * Fire one batch of whatever is due, and answer a report with a `continueFrom`

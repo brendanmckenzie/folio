@@ -16,7 +16,7 @@
  * request to derive anything from.
  */
 import { fallbackColour } from '../../core/protocol'
-import { type Role, isRole } from './roles'
+import { type Grants, type Role, isRole } from './roles'
 import { mintId } from './secrets'
 import { clampLimit, decodeCursor, type Page, paginate } from '../../core/pagination'
 import { keysetWhere, OLDEST_FIRST, orderBy, whereOf } from '../keyset'
@@ -38,8 +38,23 @@ export interface UserRow {
    * (`../../../docs/specs/foundation/auth-providers.md` decision 5).
    */
   roleFrom: string | null
+  /**
+   * Every grant they hold, `*` included, each with who set it
+   * (`../../../docs/specs/foundation/multi-site.md` decision 10). `role` and
+   * `roleFrom` above are the `*` entry's, which is all there is with no `sites`.
+   * Ordered by scope id, so a list of them compares by value.
+   */
+  grants: readonly UserGrant[]
   createdAt: number
   lastSeenAt: number | null
+}
+
+/** One `site_roles` row, as the Access screen shows it. */
+export interface UserGrant {
+  scope: string
+  role: Role
+  /** Null for a grant Folio placed; a provider id for one a sign-in's claims set. */
+  roleFrom: string | null
 }
 
 interface RawUser {
@@ -51,6 +66,8 @@ interface RawUser {
   role: string | null
   provider: string | null
   role_from: string | null
+  /** `json_group_array` of `{ scope, role, from }`. */
+  grants: string | null
   created_at: number
   last_seen_at: number | null
 }
@@ -69,9 +86,33 @@ function toUser(row: RawUser): UserRow {
     role: isRole(row.role) ? row.role : 'viewer',
     provider: row.provider,
     roleFrom: row.role_from,
+    grants: parseGrantRows(row.grants),
     createdAt: row.created_at,
     lastSeenAt: row.last_seen_at,
   }
+}
+
+/** The grant rows `COLUMNS` aggregates, screened like `role`: an undeclared role
+ * is dropped. Sorted by scope, `*` first, so two sets compare by value. */
+function parseGrantRows(json: string | null): UserGrant[] {
+  let value: unknown
+  try {
+    value = JSON.parse(json ?? '[]')
+  } catch {
+    return []
+  }
+  if (!Array.isArray(value)) return []
+  const out: UserGrant[] = []
+  for (const entry of value) {
+    const { scope, role, from } = (entry ?? {}) as {
+      scope?: unknown
+      role?: unknown
+      from?: unknown
+    }
+    if (typeof scope !== 'string' || !isRole(role)) continue
+    out.push({ scope, role, roleFrom: typeof from === 'string' ? from : null })
+  }
+  return out.sort((a, b) => (a.scope < b.scope ? -1 : a.scope > b.scope ? 1 : 0))
 }
 
 /**
@@ -85,7 +126,41 @@ function toUser(row: RawUser): UserRow {
  */
 const COLUMNS = `id, email, name, colour, provider, created_at, last_seen_at,
   (select role from site_roles where user_id = users.id and scope_id = '*') as role,
-  (select role_from from site_roles where user_id = users.id and scope_id = '*') as role_from`
+  (select role_from from site_roles where user_id = users.id and scope_id = '*') as role_from,
+  (select json_group_array(json_object('scope', scope_id, 'role', role, 'from', role_from))
+     from site_roles where user_id = users.id) as grants`
+
+/**
+ * A user's whole grant set, replaced: every row goes, then one per entry, each
+ * stamped `roleFrom` (`multi-site.md` decision 17's "the mapper's answer replaces
+ * the whole set"; the Access screen's edit is the same replacement by hand).
+ * Unrun, for a caller to batch with what the change owes — a session purge, an
+ * `auth_events` row.
+ */
+export function replaceGrantsStatements(
+  db: FolioDb,
+  userId: string,
+  grants: Grants,
+  roleFrom: string | null,
+  at = Date.now(),
+): D1PreparedStatement[] {
+  return [
+    db.prepare('delete from site_roles where user_id = ?').bind(userId),
+    ...Object.entries(grants).map(([scope, role]) =>
+      db
+        .prepare(
+          `insert into site_roles (user_id, scope_id, role, role_from, created_at)
+           values (?, ?, ?, ?, ?)`,
+        )
+        .bind(userId, scope, role, roleFrom, at),
+    ),
+  ]
+}
+
+/** The set as a plain `Grants` map, for comparing and for `effectiveRole`. */
+export function grantMap(grants: readonly UserGrant[]): Grants {
+  return Object.fromEntries(grants.map((g) => [g.scope, g.role]))
+}
 
 /**
  * The `*` grant, written or replaced. `role_from` is set by whoever decided the
@@ -105,6 +180,26 @@ export function grantStatement(
        on conflict (user_id, scope_id) do update set role = excluded.role, role_from = excluded.role_from`,
     )
     .bind(userId, role, roleFrom, at)
+}
+
+/**
+ * A `json_group_object(scope_id, role)` read back as `Grants`. A role this build
+ * does not declare is dropped rather than read, so a database written by a newer
+ * deploy narrows a person's reach instead of failing open; malformed JSON is no
+ * grants at all.
+ */
+export function parseGrantMap(json: string | null): Grants {
+  if (!json) return {}
+  let value: unknown
+  try {
+    value = JSON.parse(json)
+  } catch {
+    return {}
+  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
+  const out: Record<string, Role> = {}
+  for (const [scope, role] of Object.entries(value)) if (isRole(role)) out[scope] = role
+  return out
 }
 
 /**
@@ -175,6 +270,12 @@ export interface UserInput {
   provider?: string | null
   /** The provider whose claims placed `role`, when one did. */
   roleFrom?: string | null
+  /**
+   * A whole grant set in place of `role` (`multi-site.md` decisions 10 and 17):
+   * the invitation of a site editor, or a sign-in whose mapper placed scopes. Every
+   * entry is stamped `roleFrom`. Absent, the user gets the one `*` grant at `role`.
+   */
+  grants?: Grants
 }
 
 /**
@@ -197,8 +298,8 @@ export async function createUser(db: FolioDb, input: UserInput): Promise<UserRow
  * rather than by the database. `createUser` above is the same thing for a caller
  * with nothing to batch it with.
  *
- * **Two statements, in this order**: the row, then its `*` grant, which names the
- * row. The insert does not name `role`, so the column's default fills it while it
+ * **The row first, then its grants**, which name the row: the one `*` grant at
+ * `role`, or one row per entry of `grants`. The insert does not name `role`, so the column's default fills it while it
  * exists and nothing breaks when `0012` drops it.
  */
 export function createUserStatement(
@@ -207,14 +308,21 @@ export function createUserStatement(
   at = Date.now(),
 ): { user: UserRow; statements: D1PreparedStatement[] } {
   const email = normaliseEmail(input.email)
+  const roleFrom = input.roleFrom ?? null
+  const set: Grants = input.grants ?? { '*': input.role ?? 'editor' }
+  const star = set['*']
   const user: UserRow = {
     id: mintId('usr'),
     email,
     name: input.name?.trim() || email.split('@')[0] || email,
     colour: input.colour ?? null,
-    role: input.role ?? 'editor',
+    // A set with no `*` entry reads `viewer` there, as `toUser` answers it.
+    role: star ?? 'viewer',
     provider: input.provider ?? null,
-    roleFrom: input.roleFrom ?? null,
+    roleFrom: star === undefined ? null : roleFrom,
+    grants: Object.entries(set)
+      .map(([scope, role]) => ({ scope, role, roleFrom }))
+      .sort((a, b) => (a.scope < b.scope ? -1 : a.scope > b.scope ? 1 : 0)),
     createdAt: at,
     lastSeenAt: null,
   }
@@ -225,7 +333,9 @@ export function createUserStatement(
          values (?, ?, ?, ?, ?, ?)`,
       )
       .bind(user.id, user.email, user.name, user.colour, user.provider, user.createdAt),
-    grantStatement(db, user.id, user.role, user.roleFrom, at),
+    ...(input.grants
+      ? replaceGrantsStatements(db, user.id, set, roleFrom, at).slice(1)
+      : [grantStatement(db, user.id, star ?? 'editor', roleFrom, at)]),
   ]
   return { user, statements }
 }
@@ -252,6 +362,13 @@ export async function updateUser(
     name: patch.name?.trim() || current.name,
     role: patch.role ?? current.role,
     colour: patch.colour === undefined ? current.colour : patch.colour,
+    grants:
+      patch.role === undefined
+        ? current.grants
+        : [
+            { scope: '*', role: patch.role, roleFrom: current.roleFrom },
+            ...current.grants.filter((g) => g.scope !== '*'),
+          ],
   }
   const row = db
     .prepare('update users set name = ?, colour = ? where id = ?')

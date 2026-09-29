@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { blocks, defineBlock, defineRecord, text } from '../../../src/core'
 import type { DocumentType } from '../../../src/core/schema'
-import { ADMIN, MANAGE } from '../../../src/server/auth/roles'
+import { MANAGE, SCOPE_ADMIN } from '../../../src/server/auth/roles'
 import { MAX_DIMENSION, MIN_DIMENSION } from '../../../src/server/mcp/shot'
 import {
   fillPath,
@@ -331,7 +331,9 @@ describe('the tool table', () => {
    */
   it('narrows delete_document to admin and preview_document for having no route, nothing else', () => {
     const deleteTool = toolByName('delete_document')
-    expect(deleteTool?.need).toBe(ADMIN)
+    // `admin` on the request's scope, not the platform tier (`multi-site.md`
+    // decision 10): deleting a document is a content act.
+    expect(deleteTool?.need).toBe(SCOPE_ADMIN)
     expect(deleteTool?.narrowed).toBe(true)
     // The route itself is only `MANAGE`, which is what makes this a narrowing
     // rather than a restatement.

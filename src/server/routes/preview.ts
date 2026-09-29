@@ -53,7 +53,7 @@ import {
   shareExpiry,
 } from '../auth/shares'
 import { FolioError } from '../errors'
-import { loadStory, requireAccess, requireAuthConfigured } from '../middleware'
+import { loadStory, requestScope, requireAccess, requireAuthConfigured } from '../middleware'
 import { expiredLinkPage } from '../pages'
 import type { FolioRuntime } from '../runtime'
 import { storyById } from '../stories'
@@ -110,7 +110,9 @@ export function shareRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     '/story/:id/share',
     requireAuthConfigured<Env>(rt),
     requireAccess<Env>(rt, PUBLISH),
-    loadStory<Env>(),
+    // In the request's scope, as any publishing act is. Where a share of a page
+    // owned above may be minted for a site is spec 23's phase 5 (decision 13).
+    loadStory<Env>(rt, 'write'),
     async (c) => {
       const story = c.var.story
       if (story.path === null) {
@@ -166,6 +168,8 @@ export function shareRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       cursor,
       ...(story ? { storyId: idParam('story', story) } : {}),
       ...(state ? { state } : {}),
+      // The scope's own links (decision 10's fence), and every link with no `sites`.
+      ...(rt.sites ? { site: requestScope(c, rt) ?? '' } : {}),
       count: c.req.query('count') === '1',
     })
     // Named `shares` rather than `rows`, the same way `/users` and `/tokens` name
@@ -188,7 +192,8 @@ export function shareRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     requireAccess<Env>(rt, PUBLISH),
     async (c) => {
       const id = idParam('id', c.req.param('id'))
-      if (!(await revokeShare(c.var.bindings().db, id))) {
+      const site = rt.sites ? (requestScope(c, rt) ?? '') : undefined
+      if (!(await revokeShare(c.var.bindings().db, id, site))) {
         throw new FolioError('not_found', 'Unknown or already-revoked preview link')
       }
       return c.json({ revoked: true })

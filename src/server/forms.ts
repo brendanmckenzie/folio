@@ -227,6 +227,20 @@ export async function formById(
   return row ? toForm(row, logger) : null
 }
 
+/**
+ * The scope that owns a form (`forms.site_id`), or null for no such form: what
+ * the id-loader fence compares against (`multi-site.md` decision 10). A column of
+ * its own rather than a field on `Form`, so no form payload changes shape, and read
+ * only on a deployment with `sites` (`routes/forms.ts`' `fenceForm`).
+ */
+export async function formSiteOf(db: FolioDb, id: string): Promise<string | null> {
+  const row = await db
+    .prepare('select site_id as site from forms where id = ?')
+    .bind(id)
+    .first<{ site: string }>()
+  return row?.site ?? null
+}
+
 export async function formByName(
   db: FolioDb,
   name: string,

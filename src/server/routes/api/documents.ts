@@ -23,7 +23,7 @@ import { isKnownLocale } from '../../../core/locales'
 import type { Mutation } from '../../../core/mutations'
 import { fieldShapeError, fromNested, type NestedDoc, toNested } from '../../../core/nested'
 import { type DocumentType, SINGLETON_PREFIX, typeByName } from '../../../core/schema'
-import { SINGLE_SITE_CHAIN } from '../../../core/sites'
+import { singletonTypeOf } from '../../../core/sites'
 import type { StoryMeta, StoryState } from '../../../core/story'
 import {
   actorName,
@@ -37,7 +37,17 @@ import {
 } from '../../auth/roles'
 import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from '../../documents'
 import { FolioError, rethrow } from '../../errors'
-import { ensureAccess, hookCtx, requireAccess } from '../../middleware'
+import {
+  ensureAccess,
+  fenceParent,
+  fenceStory,
+  hookCtx,
+  inFence,
+  type Reach,
+  requestChain,
+  requestScope,
+  requireAccess,
+} from '../../middleware'
 import { checkpoint, publish, unpublish } from '../../publish'
 import type { FolioRuntime } from '../../runtime'
 import {
@@ -152,13 +162,34 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * and predictable: only an id whose `sng_` prefix names a *declared* singleton
    * type can cause that write.
    */
-  const load = async (bindings: ReadBindings, id: string): Promise<StoryMeta> => {
+  const load = async (c: Context<FolioEnv<Env>>, id: string, reach: Reach): Promise<StoryMeta> => {
+    const bindings = c.var.bindings()
     if (id.startsWith(SINGLETON_PREFIX)) {
-      const type = typeByName(rt.types, id.slice(SINGLETON_PREFIX.length))
-      if (type?.kind === 'singleton') return ensureSingleton(bindings.db, type, rt.schemaId)
+      if (!rt.sites) {
+        const type = typeByName(rt.types, id.slice(SINGLETON_PREFIX.length))
+        if (type?.kind === 'singleton') return ensureSingleton(bindings.db, type, rt.schemaId)
+      } else {
+        /**
+         * **The layer's scope is checked before `ensureSingleton`** (`multi-site.md`
+         * decision 10), so asking for `sng_<type>:bravo` under `~alpha` is a 404 and
+         * never a row created in somebody else's scope. In the chain for a read, the
+         * request's own scope for a write, exactly as for any other row.
+         */
+        const layer = singletonTypeOf(id)
+        const type = layer ? typeByName(rt.types, layer.type) : undefined
+        if (layer && type?.kind === 'singleton') {
+          if (!(await inFence(c, rt, { site: layer.scope }, reach))) {
+            throw new FolioError('not_found', 'Unknown document')
+          }
+          return ensureSingleton(bindings.db, type, rt.schemaId, layer.scope)
+        }
+      }
     }
     const story = await storyById(bindings.db, id)
-    if (!story) throw new FolioError('not_found', 'Unknown document')
+    // Outside the fence is exactly absent: a 404, never a 403 that confirms the id.
+    if (!story || !(await inFence(c, rt, story, reach))) {
+      throw new FolioError('not_found', 'Unknown document')
+    }
     return story
   }
 
@@ -254,7 +285,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.get('/documents/:id', requireAccess<Env>(rt, READ), async (c) => {
     const bindings = c.var.bindings()
-    const story = await load(bindings, idParam('id', c.req.param('id')))
+    const story = await load(c, idParam('id', c.req.param('id')), 'read')
     const locale = askedLocale(c)
     const wantDraft = c.req.query('status') === 'draft'
 
@@ -279,7 +310,8 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const byPath = async (c: Context<FolioEnv<Env>>) => {
     const bindings = c.var.bindings()
     const path = storyPathParam(c.req.param('path'))
-    const story = await storyByPath(bindings.db, SINGLE_SITE_CHAIN, path)
+    const within = await requestChain(c, rt)
+    const story = within.length > 0 ? await storyByPath(bindings.db, within, path) : null
     if (!story || story.path === null) throw new FolioError('not_found', 'No document at that path')
     const locale = askedLocale(c)
     if (c.req.query('status') === 'draft') {
@@ -303,17 +335,21 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return doc
   }
 
-  app.get('/documents/:id/versions', requireAccess<Env>(rt, READ), async (c) =>
-    c.json({
-      // `.rows` rather than the envelope: this route's contract is a `versions`
-      // array, and v1 does not change shape. Paging it with numbers is its own
-      // change, and nobody has asked for a hundredth version of a document.
-      versions: (
-        await listVersions(c.var.bindings().db, idParam('id', c.req.param('id')), {
-          limit: limitParam(c.req.query('perPage'), 50, 200),
-        })
-      ).rows,
-    }),
+  app.get(
+    '/documents/:id/versions',
+    requireAccess<Env>(rt, READ),
+    fenceStory<Env>(rt, 'read', { absent: 'pass' }),
+    async (c) =>
+      c.json({
+        // `.rows` rather than the envelope: this route's contract is a `versions`
+        // array, and v1 does not change shape. Paging it with numbers is its own
+        // change, and nobody has asked for a hundredth version of a document.
+        versions: (
+          await listVersions(c.var.bindings().db, idParam('id', c.req.param('id')), {
+            limit: limitParam(c.req.query('perPage'), 50, 200),
+          })
+        ).rows,
+      }),
   )
 
   /* ------------------------------------------------------------- writing --- */
@@ -335,6 +371,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.post('/documents', requireAccess<Env>(rt, CREATE), async (c) => {
     const body = await parseBody(c.req, DocumentCreateBody)
+    await fenceParent(c, rt, body.parentId)
     const bindings = c.var.bindings()
     const type = requireType(body.type)
     if (type.kind === 'singleton') {
@@ -356,7 +393,13 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     let story: StoryMeta
     try {
-      story = await createStory(bindings.db, { ...body, type, schemaId: rt.schemaId }, rt.types)
+      // In the request's scope — the `~<scope>` segment or the token's binding
+      // (`multi-site.md` decision 14) — and `default` with no `sites`.
+      story = await createStory(
+        bindings.db,
+        { ...body, type, schemaId: rt.schemaId, site: requestScope(c, rt) ?? undefined },
+        rt.types,
+      )
     } catch (e) {
       rethrow(e)
     }
@@ -399,7 +442,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const body = await parseBody(c.req, ContentPutBody)
     const key = idempotencyKeyHeader(c.req.header('idempotency-key'))
     const bindings = c.var.bindings()
-    const story = await load(bindings, idParam('id', c.req.param('id')))
+    const story = await load(c, idParam('id', c.req.param('id')), 'write')
 
     try {
       return c.json(
@@ -435,7 +478,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const body = await parseBody(c.req, FieldsPatchBody)
     const key = idempotencyKeyHeader(c.req.header('idempotency-key'))
     const bindings = c.var.bindings()
-    const story = await load(bindings, idParam('id', c.req.param('id')))
+    const story = await load(c, idParam('id', c.req.param('id')), 'write')
 
     const locale = body.locale
     if (locale !== undefined && !isKnownLocale(rt.locales, locale)) {
@@ -489,21 +532,27 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * role table gives: all four of these change what URLs the site serves, which is
    * a publishing act even when nothing is published in the same breath.
    */
-  app.patch('/documents/:id', requireAccess<Env>(rt, MANAGE), async (c) => {
-    const id = idParam('id', c.req.param('id'))
-    const body = await parseBody(c.req, StoryPatchBody)
+  app.patch(
+    '/documents/:id',
+    requireAccess<Env>(rt, MANAGE),
+    fenceStory<Env>(rt, 'write'),
+    async (c) => {
+      const id = idParam('id', c.req.param('id'))
+      const body = await parseBody(c.req, StoryPatchBody)
+      await fenceParent(c, rt, body.parentId)
 
-    let next: StoryMeta
-    try {
-      // `moveDocument` fires both hooks the admin's own PATCH fires, which is what
-      // keeps a host hook from being able to tell which door a write came through.
-      next = (await moveDocument(documentDeps(c), id, body, actorString(c.var.actor))).next
-    } catch (e) {
-      rethrow(e)
-    }
+      let next: StoryMeta
+      try {
+        // `moveDocument` fires both hooks the admin's own PATCH fires, which is what
+        // keeps a host hook from being able to tell which door a write came through.
+        next = (await moveDocument(documentDeps(c), id, body, actorString(c.var.actor))).next
+      } catch (e) {
+        rethrow(e)
+      }
 
-    return c.json(meta(next))
-  })
+      return c.json(meta(next))
+    },
+  )
 
   /**
    * Delete a document, its descendants, their versions and their index rows.
@@ -512,28 +561,38 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * admin's delete uses, comments and all — see `routes/stories.ts`. Reimplementing
    * either would mean two orderings to keep right.
    */
-  app.delete('/documents/:id', requireAccess<Env>(rt, MANAGE), async (c) => {
-    const target = idParam('id', c.req.param('id'))
-    const redirect = c.req.query('redirect') !== 'false'
+  app.delete(
+    '/documents/:id',
+    requireAccess<Env>(rt, MANAGE),
+    fenceStory<Env>(rt, 'write'),
+    async (c) => {
+      const target = idParam('id', c.req.param('id'))
+      const redirect = c.req.query('redirect') !== 'false'
 
-    let found: Awaited<ReturnType<typeof deleteDocument>>
-    try {
-      found = await deleteDocument(documentDeps(c), target, { redirect }, actorString(c.var.actor))
-    } catch (e) {
-      rethrow(e)
-    }
-    // A 404 where the admin's route answers `{ deleted: [] }`, and the difference is
-    // deliberate: this is a contract with a script, and a script deleting an id that
-    // is not there has a bug worth surfacing.
-    if (!found) throw new FolioError('not_found', 'Unknown document')
+      let found: Awaited<ReturnType<typeof deleteDocument>>
+      try {
+        found = await deleteDocument(
+          documentDeps(c),
+          target,
+          { redirect },
+          actorString(c.var.actor),
+        )
+      } catch (e) {
+        rethrow(e)
+      }
+      // A 404 where the admin's route answers `{ deleted: [] }`, and the difference is
+      // deliberate: this is a contract with a script, and a script deleting an id that
+      // is not there has a bug worth surfacing.
+      if (!found) throw new FolioError('not_found', 'Unknown document')
 
-    return c.json({ deleted: found.deleted })
-  })
+      return c.json({ deleted: found.deleted })
+    },
+  )
 
   /** Publish the draft. `publish()` does the work; this only translates. */
   app.post('/documents/:id/publish', requireAccess<Env>(rt, PUBLISH), async (c) => {
     const bindings = c.var.bindings()
-    const story = await load(bindings, idParam('id', c.req.param('id')))
+    const story = await load(c, idParam('id', c.req.param('id')), 'write')
     const result = await publish(
       rt.publishDeps(bindings, hookCtx(c)),
       story,
@@ -554,7 +613,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.post('/documents/:id/versions', requireAccess<Env>(rt, PUBLISH), async (c) => {
     const bindings = c.var.bindings()
-    const story = await load(bindings, idParam('id', c.req.param('id')))
+    const story = await load(c, idParam('id', c.req.param('id')), 'write')
     const body = await parseOptionalBody(c.req, CheckpointBody)
     return c.json(
       await checkpoint(rt.publishDeps(bindings, hookCtx(c)), story, {
@@ -578,9 +637,9 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.post('/documents/:id/unpublish', requireAccess<Env>(rt, PUBLISH), async (c) => {
     const bindings = c.var.bindings()
     const id = idParam('id', c.req.param('id'))
-    const story = await load(bindings, id)
+    const story = await load(c, id, 'write')
     await unpublish(rt.publishDeps(bindings, hookCtx(c)), story, actorString(c.var.actor))
-    return c.json({ story: meta(await load(bindings, id)) })
+    return c.json({ story: meta(await load(c, id, 'write')) })
   })
 
   /**
@@ -593,9 +652,11 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * call — two requests, which is also what dragging a duplicated row is.
    */
   app.post('/documents/:id/duplicate', requireAccess<Env>(rt, CREATE), async (c) => {
-    const bindings = c.var.bindings()
-    const story = await load(bindings, idParam('id', c.req.param('id')))
+    // `'write'` until `duplicateDocument` lands the copy in the request's scope
+    // rather than its source's (spec 23 phase 7): see `routes/stories.ts`.
+    const story = await load(c, idParam('id', c.req.param('id')), 'write')
     const body = await parseOptionalBody(c.req, StoryDuplicateBody)
+    await fenceParent(c, rt, body.parentId)
 
     let created: StoryMeta
     try {
@@ -628,7 +689,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const body = await parseBody(c.req, RestoreBody)
     const key = idempotencyKeyHeader(c.req.header('idempotency-key'))
     const bindings = c.var.bindings()
-    const story = await load(bindings, id)
+    const story = await load(c, id, 'write')
 
     const found = await getVersion(bindings.db, body.versionId, {
       migrations: rt.migrations,

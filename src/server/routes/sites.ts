@@ -2,10 +2,10 @@
  * The site registry: sites and groups, their hostnames, preview origins and
  * status (`../../../docs/specs/foundation/multi-site.md` decision 1).
  *
- * `{base}/api/sites*`, unscoped and platform tier: a site's own admins edit its
- * *settings*, which are content, but never its registry row. Until spec 23's
- * phase 3 gives grants a tier, the gate is today's `ADMIN`, which only a `*`
- * grant can satisfy.
+ * `{base}/api/sites*`, unscoped and platform tier (`ADMIN`, whose `tier` is
+ * `'platform'`): `*` + `admin` for a person, the `admin` scope on an unbound token.
+ * A site's own admins edit its *settings*, which are content, but never its
+ * registry row, and a token bound to a site is refused here whatever it holds.
  *
  * Every write reads the registry fresh from the primary to validate against —
  * never the ten-second snapshot, or two writes a second apart could both claim
@@ -18,6 +18,7 @@
  */
 import { Hono } from 'hono'
 import * as v from 'valibot'
+import { validateSitesAuth } from '../auth/config'
 import { ADMIN } from '../auth/roles'
 import { FolioError } from '../errors'
 import { requireAccess, requireAuthConfigured } from '../middleware'
@@ -77,6 +78,10 @@ export function siteRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
   const sites = rt.sites
   if (!sites) return app
+  // Construction time, like every other config rule: `createFolio` builds this app,
+  // so a provider this deployment's grants cannot honour throws there, not at the
+  // first sign-in. (`validateSites` beside `resolveAuth` is where it belongs.)
+  validateSitesAuth(rt.auth)
 
   const ctx: RegistryWriteContext = { sites, route: rt.route }
   app.use('/sites', requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, ADMIN))

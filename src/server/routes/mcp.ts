@@ -50,8 +50,9 @@ import {
   toolByName,
   toolsFor,
 } from '../mcp/tools'
-import { ensureAccess } from '../middleware'
+import { ensureAccess, inFence } from '../middleware'
 import type { FolioRuntime } from '../runtime'
+import { SCOPE_HEADER } from '../sites'
 import type { FolioEnv } from '../types'
 import { API_VERSION } from './api'
 
@@ -208,6 +209,16 @@ export function mcpRoutes<Env>(
     }
 
     const headers = new Headers(credentialHeaders(c))
+    /**
+     * **The scope, from this request's own `c.var.scope`** (`multi-site.md`
+     * decision 11): the `~<scope>` segment `handle()` stripped, or the token's
+     * binding `withActor` filled in. Never from the client — `credentialHeaders`
+     * copies nothing else, and `handle()` deleted any internal header the client
+     * sent before this request reached the app. Below `handle()`, so the
+     * sub-request's `withScope` reads it as if `handle()` had set it. With no
+     * `sites` there is no scope and nothing is set.
+     */
+    if (c.var.scope !== null) headers.set(SCOPE_HEADER, c.var.scope)
 
     let body: BodyInit | undefined
     if (tool.body === 'json') {
@@ -302,6 +313,7 @@ export function mcpRoutes<Env>(
   const previewContext = (c: Context<FolioEnv<Env>>): PreviewDocumentContext => ({
     origin: c.req.url,
     headers: credentialHeaders(c),
+    visible: (story) => inFence(c, rt, story, 'read'),
   })
 
   /**

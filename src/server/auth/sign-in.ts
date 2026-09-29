@@ -24,14 +24,22 @@
  * The order is decision 3's, and each step depends on the one before it:
  * **domain, user, role, provisioning, one batch.**
  */
-import type { AuthProvider, Provisioning, ResolvedAuth, VerifiedIdentity } from './config'
+import type {
+  AuthProvider,
+  Provisioning,
+  ResolvedAuth,
+  RoleGrants,
+  VerifiedIdentity,
+} from './config'
 import { recordEventStatement } from './events'
 import { type Role, isRole } from './roles'
 import { type NewSession, newSession, sessionStatements } from './session'
 import {
   createUserStatement,
+  grantMap,
   grantStatement,
   normaliseEmail,
+  replaceGrantsStatements,
   type UserRow,
   userByEmail,
 } from './users'
@@ -115,6 +123,11 @@ export async function completeSignIn(
   /** A refusal, recorded. Batched even when it is the only statement: an event
    * nobody wrote is a refusal nobody can explain afterwards, and this is the
    * one path where the person being refused is told nothing specific. */
+  /** Scopes a mapper named that the registry does not hold, for the event rows. */
+  let dropped: string[] = []
+  const note = (): { dropped: string[] } | Record<string, never> =>
+    dropped.length > 0 ? { dropped } : {}
+
   const refuse = async (
     reason: SignInRefusal,
     why: RefusalDetail,
@@ -130,7 +143,7 @@ export async function completeSignIn(
         userId,
         actor: userId,
         provider: provider.id,
-        detail: { email, reason: why },
+        detail: { email, reason: why, ...note() },
         at: now,
       }),
     ])
@@ -155,7 +168,10 @@ export async function completeSignIn(
   // "this provider has no opinion" and is not the same as `null`, which is "this
   // identity holds no role here" — the interaction table below turns on exactly
   // that difference.
-  let mapped: Role | null | undefined
+  //
+  // Read as **a grant set** (`multi-site.md` decision 17): a bare role is
+  // `{ '*': role }`, which is all a deployment with no `sites` ever sees.
+  let mapped: RoleGrants | null | undefined
   if ('roleFrom' in provider && typeof provider.roleFrom === 'function') {
     let answer: unknown
     try {
@@ -167,13 +183,28 @@ export async function completeSignIn(
       logger.error(`folio: ${provider.id}'s roleFrom threw`, err)
       return refuse('provider', 'mapper', existing?.id ?? null)
     }
-    if (answer !== null && !isRole(answer)) {
+    const set = grantSetOf(answer)
+    if (set === undefined) {
       logger.error(
         `folio: ${provider.id}'s roleFrom answered '${String(answer)}', which is not a role`,
       )
       return refuse('provider', 'mapper', existing?.id ?? null)
     }
-    mapped = answer
+    mapped = set
+    // A scope the registry does not hold is dropped, not refused: a directory group
+    // still mapped to a retired site must not lock its members out of the others.
+    // If nothing remains, the mapper placed nothing (decision 17).
+    if (mapped !== null) {
+      const known = await knownScopes(db, Object.keys(mapped))
+      dropped = Object.keys(mapped).filter((scope) => !known.has(scope))
+      if (dropped.length > 0) {
+        logger.warn(
+          `folio: ${provider.id}'s roleFrom named ${dropped.map((d) => `'${d}'`).join(', ')}, which is not a site or group; ignored`,
+        )
+        const kept = Object.entries(mapped).filter(([scope]) => known.has(scope))
+        mapped = kept.length > 0 ? Object.fromEntries(kept) : null
+      }
+    }
   }
 
   const writes: D1PreparedStatement[] = []
@@ -192,6 +223,7 @@ export async function completeSignIn(
 
     let role: Role
     let roleFrom: string | null
+    let grants: RoleGrants | undefined
     if (mapped === undefined) {
       // No mapper: as before this spec.
       role = provision.role ?? 'editor'
@@ -205,13 +237,24 @@ export async function completeSignIn(
       role = provision.role
       roleFrom = null
     } else {
-      role = mapped
+      // A lone `*` grant is written exactly as a role always was; anything else
+      // is the set.
+      const star = starOnly(mapped)
+      role = star ?? 'viewer'
+      grants = star === null ? mapped : undefined
       roleFrom = provider.id
     }
 
     const created = createUserStatement(
       db,
-      { email, name: identity.name, role, provider: provider.id, roleFrom },
+      {
+        email,
+        name: identity.name,
+        role,
+        provider: provider.id,
+        roleFrom,
+        ...(grants ? { grants } : {}),
+      },
       now,
     )
     user = created.user
@@ -220,18 +263,40 @@ export async function completeSignIn(
     // Their group was removed. Refusing is checkpoint 3: this provider placed
     // the role, so keeping it would be stale privilege granted by a directory
     // that has since changed its mind. A role Folio placed is left alone —
-    // the provider was never the authority on it.
-    if (user.roleFrom === provider.id) return refuse('refused', 'role_removed', user.id)
-  } else if (mapped !== undefined && mapped !== user.role) {
+    // the provider was never the authority on it. Any grant it placed counts,
+    // not only `*` (decision 17).
+    if (user.grants.some((g) => g.roleFrom === provider.id) || user.roleFrom === provider.id) {
+      return refuse('refused', 'role_removed', user.id)
+    }
+  } else if (mapped !== undefined && !sameGrants(grantMap(user.grants), mapped, user.role)) {
     // The one write nobody clicked, which is why `auth_events` exists at all.
     roleChanged = true
-    const from = user.role
-    user = { ...user, role: mapped, roleFrom: provider.id }
+    const before = grantMap(user.grants)
+    const star = starOnly(mapped)
+    // A change of one role on `*` keeps the event's shape a role always had; a
+    // change of sets records both sets.
+    const detail =
+      star !== null && starOnly(before) !== null
+        ? { from: user.role, to: star }
+        : { from: before, to: mapped }
+    user = {
+      ...user,
+      role: mapped['*'] ?? 'viewer',
+      roleFrom: mapped['*'] === undefined ? null : provider.id,
+      grants: Object.entries(mapped).map(([scope, role]) => ({
+        scope,
+        role,
+        roleFrom: provider.id,
+      })),
+    }
     writes.push(
-      // The `*` grant, never `users.role` (`0011_sites.sql`). An upsert, so a
-      // user created by old code in the migrate-to-deploy window, who holds no
-      // grant yet, gets one here rather than an update that matches nothing.
-      grantStatement(db, user.id, mapped, provider.id, now),
+      // The grant set, never `users.role` (`0011_sites.sql`). A lone `*` is an
+      // upsert, so a user created by old code in the migrate-to-deploy window, who
+      // holds no grant yet, gets one here rather than an update that matches
+      // nothing; a set replaces every row the user holds (decision 17).
+      ...(star !== null && Object.keys(before).every((scope) => scope === '*')
+        ? [grantStatement(db, user.id, star, provider.id, now)]
+        : replaceGrantsStatements(db, user.id, mapped, provider.id, now)),
       // Every *other* browser, mirroring what `PATCH /users/:id` does for an
       // admin's edit: a downgrade must not sit in an open socket's attachment
       // for the window a revocation may. Before the insert below, so the session
@@ -244,7 +309,7 @@ export async function completeSignIn(
         // this, and it is the case the table was argued for.
         actor: `provider:${provider.id}`,
         provider: provider.id,
-        detail: { from, to: mapped },
+        detail,
         at: now,
       }),
     )
@@ -266,6 +331,9 @@ export async function completeSignIn(
       // Their own id: a sign-in is the one event whose actor is its subject.
       actor: user.id,
       provider: provider.id,
+      // The note decision 17 owes for a mapped scope that was dropped; nothing
+      // otherwise, so an ordinary sign-in's row is what it always was.
+      ...(dropped.length > 0 ? { detail: note() } : {}),
       at: now,
     }),
     // Last, after the session row exists: the caller's statements are about the
@@ -286,4 +354,53 @@ export async function completeSignIn(
  */
 function provisioningOf(provider: AuthProvider<unknown>): Provisioning {
   return 'provision' in provider ? (provider.provision ?? 'refuse') : 'refuse'
+}
+
+/**
+ * A mapper's answer as a grant set: `null` stays null, a bare role is `{ '*': role }`,
+ * a record whose every value is a role is itself, and `{}` placed nothing (null).
+ * `undefined` for anything else, which the caller treats as a configuration bug.
+ */
+function grantSetOf(answer: unknown): RoleGrants | null | undefined {
+  if (answer === null) return null
+  if (isRole(answer)) return { '*': answer }
+  if (typeof answer !== 'object' || Array.isArray(answer)) return undefined
+  const entries = Object.entries(answer as Record<string, unknown>)
+  if (!entries.every(([scope, role]) => scope !== '' && isRole(role))) return undefined
+  return entries.length > 0 ? (Object.fromEntries(entries) as RoleGrants) : null
+}
+
+/** The role when a set is exactly one `*` grant, else null. */
+function starOnly(set: RoleGrants): Role | null {
+  const keys = Object.keys(set)
+  return keys.length === 1 && keys[0] === '*' ? (set['*'] ?? null) : null
+}
+
+/**
+ * Whether the stored set already is the mapped one. Compared by role, never by
+ * who set it: a mapper agreeing with the role an admin chose writes nothing, as it
+ * always has. A user holding no grant at all reads as `viewer` on `*` (`toUser`),
+ * and a mapper answering exactly that is no change either.
+ */
+function sameGrants(held: RoleGrants, mapped: RoleGrants, role: Role): boolean {
+  const current = Object.keys(held).length === 0 ? { '*': role } : held
+  const a = Object.keys(current)
+  return a.length === Object.keys(mapped).length && a.every((s) => current[s] === mapped[s])
+}
+
+/**
+ * Which of these scope ids a grant may name: `*` and `shared` always, and every id
+ * the registry holds. One read, only when a mapper named a scope other than `*` —
+ * so a deployment with no `sites`, whose mappers answer a bare role, pays nothing.
+ */
+async function knownScopes(db: FolioDb, scopes: readonly string[]): Promise<Set<string>> {
+  const known = new Set<string>(scopes.filter((scope) => scope === '*' || scope === 'shared'))
+  const rest = scopes.filter((scope) => !known.has(scope))
+  if (rest.length === 0) return known
+  const { results } = await db
+    .prepare(`select id from sites where id in (${rest.map(() => '?').join(', ')})`)
+    .bind(...rest)
+    .all<{ id: string }>()
+  for (const row of results) known.add(row.id)
+  return known
 }

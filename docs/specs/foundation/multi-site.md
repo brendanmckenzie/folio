@@ -1940,6 +1940,105 @@ Where the spec was wrong or silent:
     `asset-bulk.ts` (all phase 7). `test/workers/query-plan.test.ts` pins the hot
     story and redirect readers on a one-scope and a three-scope chain.
 
+### Phase 3 (2026-09-29)
+
+Effective roles, the platform tier, token binding, the reach 403 with its one
+`reach: 'preview'` exemption, the id-loader fence, the socket's role and decision 17
+landed. `test/workers/scope-partition.test.ts` walks every route Hono has mounted
+(`app.routes`) three ways: platform refusals, `site_required`, and the 403 naming the
+scope. Where the spec was wrong or silent:
+
+- **`ADMIN` is the platform tier**, and the content acts it used to gate (a form's
+  delete, its responses, the CSV) moved to a new `SCOPE_ADMIN`. The spec suggests a new
+  platform constant beside an unchanged `ADMIN`. The reverse was chosen because an
+  unexamined use then fails closed. One use is stricter than intended:
+  MCP's `delete_document` declares `need: ADMIN` (`mcp/tools.ts`). A site admin
+  therefore no longer sees that tool, and has to delete through v1. That is phase 7's.
+- **Which routes are unscoped is a list in `middleware.ts`** (`UNSCOPED_API`,
+  `UNSCOPED_PAGES`, `PREVIEW_REACH`), enforced once in `withActor`. `requireScope` is
+  not mounted at each route. A new route is therefore scoped unless it is listed.
+  `site_required` answers only under `{base}/api`: a page or `/mcp` with no scope reaches
+  no row, because the fence has no scope to match. An unscoped route ignores a scope in
+  the URL, and the person's role there is their `*` grant, or `viewer` with none.
+- **`GrantActor` is defined, and `allows()` answers for it (`READ`, `READ_DRAFT`,
+  nothing else), but it is not in the `Actor` union.** `/me` (`routes/auth.ts:755`)
+  narrows `Actor` to two kinds and would not compile. Joining the union is phase 5's
+  edit, alongside the credential that produces the actor.
+- **On `site/start` a caller with no role on the site gets `viewer`**, because a
+  `Role` cannot be empty. The route itself (phase 5) checks `previewEligible`.
+- **A token bound to a scope that has since been deleted is a 403** at use.
+  `deleteSite` does not revoke tokens bound to the site.
+- **`readSession` keeps the `*` left join** for `role` and `role_from`. It adds the
+  other grants as a correlated `json_group_object`, so the statement count stays one.
+- **A write needs the row's scope to equal the request's**, not merely to be a scope
+  whose grant writes it. A north grant writes alpha's rows under `~alpha`, and under
+  `~north` those rows are not there.
+- **Narrower than the spec until phase 7:**
+  - duplicate (admin and v1) is write-fenced (source in the request's scope, not
+    only its chain), because `duplicateDocument` still lands the copy in the source's
+    scope;
+  - a bulk selection by filter (`all: true`) is `501` on a multi-site deployment,
+    because the filters read `default`;
+  - the share mint's loader is write-fenced, and decision 13's minting rule is phase 5's.
+- **Not fenced yet: the asset, folder, tag and form id loaders.** Their readers
+  (`assets.ts`, `asset-folders.ts`, `asset-tags.ts`, `forms.ts`) do not return
+  `site_id`, and those files belong to phase 7.
+- **`{base}/preview/global/:name` is a 404 on a multi-site deployment until phase 4**.
+  It would otherwise create `default`'s layer for anyone.
+- **Decision 17's registry check reads `sites` from D1 inside `completeSignIn`.** There
+  is one statement, and only when a mapper named a scope other than `*`: the sign-in
+  routes that call it are not phase 3's, so they could not pass a snapshot. `shared` is
+  always known. A dropped scope logs a warning and rides on the `sign_in` (or
+  `sign_in_refused`) event's `detail` as `dropped`. `role_changed` keeps `{ from, to }`
+  as roles when both sides are a lone `*` grant, and records both sets otherwise.
+- **`validateSitesAuth` runs where the registry routes are built** (`routes/sites.ts`),
+  which `createFolio` does at construction. Its place is beside `resolveAuth` in
+  `validateSites`, but `runtime.ts` belonged to phase 6 in this run.
+- **`/users` carries `grants`**, each entry with its `roleFrom`, sorted by scope.
+  `POST /users` and `PATCH /users/:id` accept `grants` (the whole set) on a
+  deployment with `sites`, and refuse them without one. A body naming both `role` and
+  `grants` is a 400. If any grant in the set was placed by a provider, a hand edit of
+  either field is a 409. `POST /tokens` takes `site`: it must name `shared` or a
+  registry row (never `*`), is refused with `admin`, and is refused on a single-site
+  deployment.
+- **`deleteSite`'s grant delete is proven by the rows alone.** No foreign key names
+  `site_roles.scope_id`, so there is no cascade that could hide a missing statement.
+- **Not exported from `folio/server` yet:** `SCOPE_ADMIN`, `Grants`, `GrantActor`,
+  `RoleGrants`, `RoleTarget` (`index.tsx` was outside the phase's files). `/me` does not
+  yet carry `scopes`, `previewable` or `platform` (the route table's `/me` row).
+
+- **After the phase 3 review (2026-09-29)**, six findings were fixed:
+  - **MCP is scoped.** A bare `{base}/mcp` with no scope and no binding is
+    `400 site_required`. Dispatch sets the internal scope header from its own
+    `c.var.scope`, never from the client. `preview_document`, MCP's one direct
+    loader, is fenced (read), so a story outside the chain is an unknown document.
+    `delete_document` is `SCOPE_ADMIN` (it was `ADMIN`, which is now platform tier).
+  - **The form id routes are fenced** (`fenceForm`, reading `forms.site_id`). A form
+    read up the chain is allowed. Its responses (list, CSV, one response, its file,
+    the deletes) need the form in the request's own scope, even to read: up the chain
+    they would be every site's submissions to a shared form. That is a narrowing
+    until phase 7 scopes responses by submitting site.
+  - **Shares follow their story's scope.** `GET /shares` lists the scope's own, and
+    `DELETE /shares/:id` refuses another scope's. `shares.site_id` is not used,
+    because it is the render site, which phase 5 sets.
+  - **A parent outside the chain is a 404** (`fenceParent`, on every create, move,
+    duplicate and bulk move). The request routes check it before `createStory` or
+    `updateStoryStatement` runs, so their 409 naming the parent only answers for a
+    parent the caller can read. Those two functions have no registry to tell the
+    two cases apart.
+  - **`POST /users` on a deployment with `sites` needs `role` or `grants`**. The old
+    default is an `*` editor, which there would be an editor on every site.
+  - **`scope-partition.test.ts` accounts for every mounted route with an id
+    parameter**: it is fence-tested, unscoped by design, fenced and tested
+    separately (the socket, the editor page), or on a deferred list. The deferred
+    list is the asset, folder and tag id routes, the redirect delete and the public
+    form submit (phase 7), and `/preview/global/:name` (phase 4). Fencing one fails
+    the test until it leaves the list.
+  - **Still open, and phase 7's:** the list readers the review named (schedules,
+    redirects, `/published`, the story and document lists, content, search), usage
+    counts naming other sites' pages, form creation and `/forms/resolved` (not in
+    scope), the space channel, and `roleFromClaim`'s `default` as a `*` grant.
+
 ### Phase 6 (2026-09-29)
 
 - **`cacheTags` reads `resolution.site` and `resolution.path`** and emits decision 15's

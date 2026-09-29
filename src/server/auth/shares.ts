@@ -217,7 +217,17 @@ export interface ListSharesOptions {
   count?: boolean
   /** For the `state` comparison. Injectable so a test can age a row rather than sleep. */
   now?: number
+  /**
+   * Only the links on documents this scope owns (`multi-site.md`'s route table:
+   * `/shares` is "scope's own rows"). By the story's scope rather than
+   * `shares.site_id`, the render site, which spec 23's phase 5 is what sets. Absent
+   * is every link, which is a deployment with no `sites`.
+   */
+  site?: string
 }
+
+/** A share's document is in `site`: the fence a share inherits from its story. */
+const IN_SITE = 'story_id in (select id from stories where site_id = ?)'
 
 /**
  * Links, newest first, paged.
@@ -244,6 +254,10 @@ export async function listShares(
   if (opts.storyId) {
     narrow.push('story_id = ?')
     narrowBinds.push(opts.storyId)
+  }
+  if (opts.site !== undefined) {
+    narrow.push(IN_SITE)
+    narrowBinds.push(opts.site)
   }
   if (opts.state === 'live') {
     narrow.push('revoked_at is null and expires_at > ?')
@@ -281,11 +295,23 @@ export async function listShares(
  * keeps the document and the date so "which link was that, and when did we turn it
  * off" stays answerable.
  */
-export async function revokeShare(db: FolioDb, id: string): Promise<boolean> {
-  const result = await db
-    .prepare('update shares set revoked_at = ? where id = ? and revoked_at is null')
-    .bind(Date.now(), id)
-    .run()
+export async function revokeShare(
+  db: FolioDb,
+  id: string,
+  /** Only a link on a document this scope owns; another scope's is not there. With
+   * no `sites`, absent, and the statement is what it always was. */
+  site?: string,
+): Promise<boolean> {
+  const result = await (site === undefined
+    ? db
+        .prepare('update shares set revoked_at = ? where id = ? and revoked_at is null')
+        .bind(Date.now(), id)
+    : db
+        .prepare(
+          `update shares set revoked_at = ? where id = ? and revoked_at is null and ${IN_SITE}`,
+        )
+        .bind(Date.now(), id, site)
+  ).run()
   return (result.meta.changes ?? 0) > 0
 }
 

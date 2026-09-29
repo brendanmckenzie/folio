@@ -27,7 +27,6 @@
 import {
   type Access,
   type Actor,
-  ADMIN,
   allows,
   ASSETS,
   CREATE,
@@ -36,6 +35,7 @@ import {
   PUBLISH,
   READ,
   READ_DRAFT,
+  SCOPE_ADMIN,
 } from '../auth/roles'
 import { FolioError } from '../errors'
 import { MAX_DIMENSION, MIN_DIMENSION } from './shot'
@@ -98,7 +98,7 @@ export interface McpTool {
    * Set where the dispatched route cannot be the one to refuse this call —
    * because there is no route (`preview_document`, which has none at all), or
    * because `need` is *stricter* than the one the route declares
-   * (`delete_document`, `admin` over the route's own `content:write`). Either
+   * (`delete_document`, `admin` on the scope over the route's own `content:write`). Either
    * way the MCP layer has to make the check itself, via `ensureAccess`, before
    * doing anything else.
    */
@@ -486,6 +486,10 @@ export const MCP_TOOLS: readonly McpTool[] = [
      * another tool call. A script that means to delete asks for `admin`; an
      * assistant helping with copy does not (owner checkpoint 3, which resolved
      * "no confirmation argument" by putting the tool behind `admin` instead).
+     * **`SCOPE_ADMIN`, `admin` on the request's scope** (`multi-site.md` decision
+     * 10): deleting a document is a content act, so a site's admin may on their
+     * own site. `ADMIN` is the platform tier, which would have made this tool
+     * stricter than any person who may delete the page by hand.
      *
      * This is the one place the MCP layer gates a call itself rather than
      * letting the route refuse it — hence `narrowed`. Everywhere else, a tool
@@ -510,7 +514,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
     method: 'DELETE',
     path: '/documents/:id',
     query: ['redirect'],
-    need: ADMIN,
+    need: SCOPE_ADMIN,
     narrowed: true,
   },
   {
