@@ -971,7 +971,23 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         ? gatedFrom.draft
         : req !== undefined &&
           (hasDraftCookie(req.headers.get('cookie')) ||
-            shareCookieTokens(req.headers.get('cookie')).length > 0)
+            shareCookieTokens(req.headers.get('cookie')).length > 0 ||
+            asksByCredential())
+
+    /**
+     * On a multi-site deployment **a credential is itself the ask** (decision 13,
+     * step 4): a preview origin exists only to show drafts, so a host route there
+     * calling `reader.page()` gets the chain's drafts for a grant — or a session or
+     * token — that `mayPreviewDrafts` admits, with no draft cookie. Still a
+     * presence test and still no binding read; `draftFor` refuses it off the
+     * preview surface. Single-site keeps the flag and the authority separate,
+     * because there an editor is signed in all day on the one origin.
+     */
+    const asksByCredential = (): boolean => {
+      if (!rt.sites || !req || rt.auth.mode !== 'session') return false
+      const presented = credentialOf(req)
+      return presented.grant !== null || presented.cookie !== null || presented.bearer !== null
+    }
 
     /**
      * May this request see `story`'s draft, and if so, what is it.
@@ -1000,7 +1016,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       const header = req.headers.get('cookie')
       const wants = hasDraftCookie(header)
 
-      if (wants && rt.auth.mode === 'session') {
+      if ((wants || asksByCredential()) && rt.auth.mode === 'session') {
         // There, the credential is a preview grant (decision 13, step 4): a host's
         // route calling `reader.page()` gets the chain's drafts by `pickEditing`.
         const preview =

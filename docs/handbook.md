@@ -2090,14 +2090,18 @@ keyed on `story.path`: that delete is per-colo, so the hook's own data centre st
 serving the old page and every other one carries on until its TTL. It reads as
 invalidation without being it.
 
-Twelve events, each after its write has already committed: `published`,
+Thirteen events, each after its write has already committed: `published`,
 `unpublished`, `pathsChanged` (a rename or move — the only one that knows both the
 old and the new path), `created`, `deleted`, `checkpointed`, `updated` (a row's
 title, slug, parent or position — a **title-only** patch changes every page that
 links to this one and fires no `pathsChanged`, by design), `migrated`, `reindexed`,
 `redirectsChanged`, and the two a form adds: `formChanged` (a structural save,
 which is also what purges the pages rendering it) and `submitted` (see
-[Forms](#forms)).
+[Forms](#forms)). The thirteenth, `siteChanged`, fires only on a deployment with
+`sites`, when a site or group is created, edited or deleted. Every payload carries
+`site` (the owning scope, `default` without `sites`) and, when the event purged
+anything, `purge` (exactly what Folio asked Workers Cache for), which a headless
+host forwards to its front end; see [Headless front ends](#headless-front-ends).
 There is no `before` hook and no way to
 veto or rewrite a publish: a hook that could reject one would have to run inside the
 atomic batch, which is exactly the failure that batch exists to prevent. A throwing
@@ -2313,6 +2317,11 @@ errors when wrong, and the failure — a purge into an empty namespace — looks
 exactly like a purge that worked. `scripts/cache-probe.mjs <url> --token …` is
 the only thing that will tell you, and it is worth running against a deployment
 after any change to how requests reach your entrypoints.
+On a deployment with `sites`, name the admin origin, the site and its preview
+origin as well (`--admin https://cms.example --site alpha --preview
+https://preview.alpha.example`): the writes then go through
+`<admin>/folio/~alpha/api/v1`, and it also checks that the preview origin is its own
+entry and that one publish purges both.
 
 **`folio.cacheKey(url)`** strips click identifiers — `utm_*`, `gclid`, `fbclid`,
 `msclkid` and the rest — and sorts what survives. This is not cosmetic:
@@ -2492,7 +2501,11 @@ or plain `folio_session` otherwise — both are read on the way in, so moving
 between `wrangler dev` on localhost and a deployed worker never leaves you
 holding a cookie the server will not accept.
 
-**Roles are global**, on the user row, and each route declares its own minimum:
+**Roles are grants**, held in `site_roles` and not on the user row. On a deployment
+with no `sites` (everything in this chapter) every person has one grant, on `*`,
+which is what "a global role" always meant; with `sites` a grant belongs to a scope
+(see [Many sites in one deployment](#many-sites-in-one-deployment)). Each route
+declares its own minimum:
 
 | | read drafts | edit | create | publish / checkpoint | delete / move | manage access |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -2797,6 +2810,505 @@ the host's route answers a paywall rather than a 500.
 No admin change: there is no lock glyph in the content tree, and the inspector
 already edits any root-block field under "Page settings" — the same place an
 editor already goes to change `title` or `noindex`.
+
+## Many sites in one deployment
+
+One Worker, one D1, one R2 and one admin, holding many sites: each with its own
+hostnames, its own pages and records, its own editors, and a **shared scope** above
+them that carries what every site inherits, such as default pages, a catalogue of
+shared records and the base layer of every global. Between the two sits an optional
+**group**, so a region can carry content and settings of its own and an editor can
+look after the region rather than one site.
+
+**It is off unless you say so.** `createFolio({ sites })` turns it on. Without that
+key a deployment is one implicit site called `default`, and no request, URL, cache
+tag, role or stored document is different from what this handbook describes
+everywhere else. Everything in this chapter is about a deployment that has the key.
+
+**Turning it on is the point of no return** (`UPGRADING.md`): once a second site
+exists, code with no site dimension would serve every site's rows as one. Read
+[the 0011 section](../UPGRADING.md#0011-roles-move-to-site_roles-2026-09-29) before
+you do.
+
+### Turning it on
+
+```ts
+const folio = createFolio<Env>({
+  blocks,
+  types: [
+    { name: 'page', label: 'Page', kind: 'page', root: 'page' },
+    { name: 'siteSettings', label: 'Site settings', kind: 'singleton', root: 'siteSettings' },
+  ],
+  globals: ['header', 'footer'],
+  sites: {
+    admin: 'https://cms.example',      // the one origin of the admin, sign-in and passkeys
+    settings: 'siteSettings',          // optional: the singleton holding site-level fields
+    // resolve: (req, registry) => id  // optional: replaces the host-to-site step only
+  },
+  // Required with `sites`. Given a site it answers an ABSOLUTE url on one of the
+  // site's live hosts, because the admin is on another origin and a relative url
+  // would resolve against it. Given none, it is the single-site relative path.
+  route: (path, locale, site) => {
+    const tail = path ? `/${path}` : '/'
+    return site?.hosts[0] ? `https://${site.hosts[0]}${tail}` : tail
+  },
+})
+```
+
+`sites` says only what must exist before the first row. Sites and groups themselves
+are **rows a platform admin creates in the admin**, not config: a site and every
+status change would otherwise be a deploy. Routing a new hostname to the Worker is
+still Cloudflare's act, and the registry then says which site owns it.
+
+`createFolio` refuses (at construction) an `admin` that is not an origin, a
+`settings` that is not a declared singleton, a missing `route`, a layered type name
+too long to fit its layer id in 64 characters, and the provisioning rules under
+[Signing in](#signing-in-directory-groups-to-grants).
+
+### Three hostnames per site
+
+Every site has up to three kinds of origin, and Folio answers a different set of
+paths on each. Anything else is `null` from `folio.handle()`, so the host's own 404
+answers.
+
+| Origin | Whose | Folio answers |
+| --- | --- | --- |
+| **The admin origin** (`sites.admin`, e.g. `https://cms.example`) | one per deployment | the admin, its API, sign-in, OIDC callbacks, passkeys, the registry, `{base}/mcp`, the v1 API, `site/start`. `rpId` is always this host. |
+| **A site's live hosts** (`alpha.example`) | the site | `{base}/asset/:key` and `POST {base}/f/:id`, nothing else. The published pages are the host's own routes. |
+| **A site's preview origin** (`https://preview.alpha.example`) | the site | `{base}/asset/:key`, `{base}/f/:id`, `{base}/share`, `{base}/site/enter`, `{base}/draft/enter` and `exit`, the `?_folio=` branch, and `GET {base}/~<site>/api/v1/*` (reads). Drafts are served **only** here. |
+
+Why the admin is on one origin: the session cookie is `__Host-`, which forbids a
+`Domain` attribute, and fifty registrable domains cannot share a cookie. Why drafts
+are only on the preview origin: a draft rendered on a live host is a draft in the
+public's cache. The preview origin must route `{base}/*` and `_folio=` requests to
+Folio, either in-process through `folio.handle()` or, for a separate front end,
+through a service binding.
+
+The admin origin comes first: a request on `sites.admin` is the admin's before any
+registry row is considered, so no row, whatever slipped past validation, can take
+sign-in offline. And **every hostname is unique** across live hosts, preview origins
+and the admin origin: no host may be two of those.
+
+### The registry
+
+`sites` holds one row per site and per group, and `site_hosts` maps each live
+hostname to one site. A platform admin manages both from the **Sites** screen, or
+over `{base}/api/sites` (platform tier): `GET`/`POST /sites`, `PATCH`/`DELETE
+/sites/:id`, `PUT /sites/:id/hosts`.
+
+| Field | Rule |
+| --- | --- |
+| `id` | `^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$`, unique across sites and groups, immutable. `shared`, `default` and `*` are reserved. |
+| `kind` | `site` or `group`. One level of groups, and a site is in at most one. |
+| `status` | `draft`, `preview` or `live` (sites only) |
+| hosts | lowercased, no port, unique across the deployment |
+| `preview_origin` | stored as `new URL(x).origin`; `https:`, or `http:` on `localhost` and `*.localhost` |
+
+The migration inserts the `default` site's row (`live`, no hosts, no preview origin),
+so an existing deployment that turns `sites` on finds its content under a site it can
+give hostnames to. It cannot be deleted. Deleting anything else is refused while it
+still owns content (stories, assets, folders, tags, forms, redirects, form
+responses) or, for a group, sites. Its grants, tokens, shares and preview grants go
+in the same batch.
+
+**Status is a gate on serving**, and it is Folio's, not the host's:
+
+| Surface | `draft` | `preview` | `live` |
+| --- | --- | --- | --- |
+| a live host | no site | no site | the site |
+| the preview origin | only `site/enter`, `draft/enter` and `exit`, `share`, `asset/:key`, a request whose grant verifies for this site, or a share that covers a story this site serves | the site | the site |
+
+"No site" is never `default` or another site. `handle()` returns `null`, and a reader
+answers as a site with no content, so **an unregistered hostname, a site's live hosts
+before it is live, and a draft site's preview origin without a grant or share are
+all the host's 404.** A share on a draft site is how a stakeholder sees a page
+before launch: the share cookie admits the request, and the share still limits it to
+its one story.
+
+Status governs serving: `handle()`, the reader, `folio.cacheProps` and the
+page-shaped v1 reads (`pages/{path}`, `documents/by-path/…`). It does not stop a
+credentialed script reading a document by id, by query or by search, exactly as it
+can read a draft today.
+
+**The registry is cached** in each isolate for 10 seconds, refreshed by the first
+request after that, read on a primary session so a lagging replica never hands out
+one older than the last write. The isolate that writes drops its copy at once. A
+registry edit therefore purges `site:<id>` twice, now and again 25 seconds later, so
+a page a stale isolate rendered inside its window cannot stay cached. Every write
+fires the `siteChanged` hook with the changed row (`null` once deleted).
+
+`sites.resolve(req, registry)` replaces only the first step, choosing a candidate
+site id from the request. Folio still gates whatever it answers: a group, `shared`
+or a site whose status keeps it closed is no site.
+
+### Scopes and chains
+
+Every story, asset, folder, tag, form and redirect belongs to exactly one **scope**:
+a site, a group, or the reserved `shared`. Reads walk a **chain**, nearest first:
+
+| Scope | Chain |
+| --- | --- |
+| site `alpha` in group `north` | `alpha`, `north`, `shared` |
+| site `bravo`, no group | `bravo`, `shared` |
+| group `north` | `north`, `shared` |
+| `shared` | `shared` |
+| `default`, with no `sites` | `default` |
+
+**References, links, collections, search, forms and assets resolve only within the
+chain of the site being rendered**, and the admin's pickers offer only the chain. An
+id outside it resolves exactly as a deleted one does. **Writes never flow up:** an
+editor on `alpha` reads a shared page and cannot change it.
+
+A site's blocks and document types are one set for the deployment. A shared page
+renders on every site in its chain, so every site must be able to render every block
+it holds; variation between sites belongs in the site's settings, not in a different
+block registry.
+
+### Fallback, forks and the root
+
+A site serves each path by walking its chain, nearest first:
+
+1. the scope's story at the path, if **live**: it serves;
+2. if it was live and has been **unpublished**: `gone`. This is how a site suppresses
+   an inherited page;
+3. a **redirect** of the scope's at the path: it redirects;
+4. otherwise the next scope.
+
+Within one scope a redirect beats an unpublished row, as it always did on a single
+site; across scopes the walk above holds. Collections, search, `reader.stories()` and
+the sitemap dedupe by the same walk, so a sitemap never advertises a URL that
+redirects on that site.
+
+**Overriding an inherited page is a fork.** *Fork into Alpha* (`POST {base}/~alpha/api/stories/:id/fork`)
+copies the page, as a draft, into the site at the same slug, taking the source's
+published document with fresh uids and recording `forked_from`. Publishing the fork
+shadows the source, unpublishing it suppresses the path, deleting it falls back to
+the inherited page. A fork needs the parent path to be the site's own, or top level:
+forking `info/parking` into a site that inherits `info` is refused with "fork Info
+first". Creating a page by hand at an inherited path is the same override.
+
+**Later edits to the shared page do not reach a fork.** That is the accepted cost of
+not patching by block id, where a shared edit that deleted or retyped a block would
+orphan every site's patch silently. A fork whose source has been published since
+reads "the shared version has changed since you forked it", with a link.
+
+A scope has at most one **root** (`path = ''`). A site gets one only by *Create home
+page* or by forking an inherited root, and a scope's root can be deleted exactly when
+a scope above it has one to take over.
+
+Deleting a page that shadows an inherited one does not write an auto-redirect at its
+path, so it falls back rather than redirecting away from the page that replaces it.
+A *rename's* redirect is a different thing and outlives its fork.
+
+### Layered globals and settings
+
+Each singleton in `globals`, and the settings type, has one **layer document per
+scope**: `sng_<type>:shared`, `sng_<type>:<group>`, `sng_<type>:<site>`, and plain
+`sng_<type>` for `default`, so every existing singleton id is untouched. `resolve()`
+merges the chain's layers, most general first, into `Resolution.globals[name]`.
+
+The merge is **per field of the layer's root block**:
+
+| In the more specific layer | Result |
+| --- | --- |
+| key absent (and, for a blocks field, no children in the slot) | inherited |
+| `null` | removed |
+| a `max: 1` blocks field whose child has the inherited child's type | one object, merged recursively |
+| a `max: 1` blocks field whose child has a different type | replaced by that child |
+| a blocks field with children | the array, replacing the inherited children |
+| any other value | replaced |
+
+Link and JSON values are replaced whole, never merged structurally; a link merged
+over a link is a value nobody wrote. In a layer's `i18n`, an absent key inherits the
+layer below for that locale, and `null` keeps its meaning (untranslated, fall back to
+the merged source value); it never means removed.
+
+Inheriting needs a way to delete a key, so the mutation log has `unset`
+(`{ t: 'unset', uid, field, locale? }`), and an undo of a `set` on an absent key is an
+`unset`. This is why `PROTOCOL_VERSION` is 5 and open tabs reload on the deploy.
+
+**The editor labels every field** *Inherited from Shared*, *Overridden here* or
+*Removed here*. *Override* writes the inherited value; for a `max: 1` blocks field it
+inserts a child of the inherited child's type with empty `data`, so its fields stay
+inherited one by one. *Reset to inherited* is `unset`. *Remove* is `set` to `null`.
+
+**A site or group layer starts bare** (`data: {}`, no preset, no title): a root
+seeded with defaults would override every inherited field. Only the `shared` layer,
+the bottom of every chain, seeds with the host's declared defaults. On a multi-site
+deployment `default` is an ordinary site, so its layer is bare too. **A preview never
+writes a layer into existence:** a layer with no row reads as absent, and a row is
+created only by an editor's first write.
+
+**Site settings** are the same thing under a name. `sites.settings` names a
+singleton type whose root block's fields are the site-level ones (a theme, feature
+flags, a logo, contact details, navigation). It is always loaded as a global and
+layers as every global does. A host reads the merged value with
+`folio.settings(resolution)`, a plain nested object in the resolution's locale, or
+`null` with no settings type; `resolution.site` carries the registry fields. The
+Sites screen's *Settings* tab lists a link into the ordinary editor for each scope's
+layer, which is a document with a draft, a preview, a publish and a history like any
+other. `folio.audit` reports, per site, every `required` field with no value in the
+merged settings; that is the only place `required` is read across layers, since one
+layer alone is partial by design.
+
+Records, and singletons not named in `globals`, do **not** layer. A store record
+merged over a national retailer record is a `reference` the host's block reads both
+ends of; folding it into Folio would put a second inheritance mechanism beside
+references.
+
+### Permissions: three tiers, stored as grants
+
+A person's role is not a column on the user. `site_roles (user_id, scope_id, role,
+role_from)` holds **grants**:
+
+| `scope_id` | Tier | Gives |
+| --- | --- | --- |
+| a site id | site role | the role on the site's own content |
+| a group id | site role, group-scoped | the role on the group's content and every site in it |
+| `shared` | shared-content role | the role on shared content |
+| `*` | platform | the role everywhere. **`*` with `admin` is a platform admin.** |
+
+A person's effective role on a scope is the highest of their grants on it, on `*`,
+and (for a site) on its group. **Reads flow up the chain and writes never do:** a
+role on a site implies `viewer` on its chain, and nothing flows down.
+
+**Platform-tier routes** are the registry, users, tokens, auth events, reindex,
+migrate, audit and bulk describe. They need `*` with `admin`. A site's own admin
+manages that site's content, forms and settings but not its registry row and not
+who else has access. The permission constants say which is which: `ADMIN` is the
+platform tier and `SCOPE_ADMIN` is admin on the request's scope, and `Access.tier`
+is `'platform'` or `'scope'`.
+
+With no `sites` every person has one grant, on `*`, and it means what it always did.
+
+**Grants that do not reach the scope of a request are a `403` naming it**, and a
+`404` for a row outside the fence. The one exception is `site/start`, which admits a
+caller who may preview a site with no role on it. A grant naming a scope that no
+longer exists is ignored and listed on the Access screen.
+
+On the Access screen, and over the API, a person's grants are edited as a **whole
+set**: `POST /users` and `PATCH /users/:id` take `grants` (a record of scope id to
+role, e.g. `{ "alpha": "editor", "north": "publisher" }`) on a deployment with
+`sites`, and refuse it without one. Naming both `role` and `grants` is a `400`, and
+inviting someone on a multi-site deployment needs one or the other. A bare `role`
+there means that role on every scope.
+
+### Signing in: directory groups to grants
+
+A `RoleMapper` may answer `Role | RoleGrants | null`, where `RoleGrants` is a record
+of scope id (or `*`) to role. A bare role is `{ '*': role }`. `roleFromClaim`'s map
+values become `Role | { scope, role } | array of those`, highest match **per scope**:
+
+```ts
+roleFrom: roleFromClaim({
+  claim: 'groups',
+  map: {
+    'cms-platform': 'admin',                                   // '*'
+    'cms-national': { scope: 'shared', role: 'publisher' },
+    'cms-north': [{ scope: 'north', role: 'publisher' }, { scope: 'alpha', role: 'admin' }],
+  },
+}),
+```
+
+`completeSignIn` treats the mapper's answer as **the whole grant set**, replacing
+what is stamped `role_from` this provider. A changed set revokes the person's other
+sessions and preview grants and records one `role_changed` event with before and
+after. `null` refuses the sign-in of a person who holds grants this provider placed.
+Provider-set grants cannot be edited by hand (`409`). An entry naming a scope that
+is not in the registry is dropped with a log line and an `auth_events` note, and if
+nothing remains, the answer is `null`.
+
+Two things are refused **at construction** on a deployment with `sites`, naming the
+provider: `provision.role` (one role for every stranger is a role on every site), and
+`roleFromClaim`'s bare `default` for the same reason. `provision.create` needs a
+`roleFrom`, because only the mapper can say where a created person may work.
+
+### The scope in the URL, and bound tokens
+
+The scope is a path segment: `{base}/~alpha/edit/:id`, `{base}/~alpha/api/stories`,
+`{base}/~shared/api/v1/documents`, `{base}/~north/mcp`,
+`{base}/~alpha/api/space/socket`. `handle()` strips it and passes it on in an
+internal header it first deletes from every inbound request, so one mechanism covers
+the admin, a WebSocket, an MCP client, a v1 script and a pasted link.
+
+A scoped route with no scope on a multi-site deployment is `400 site_required`.
+Unscoped routes ignore the segment: sign-in, `/api/me`, passkeys and sessions, the
+registry, users, tokens, auth events, reindex, migrate, audit, `/api/schema`, and v1
+`sites` and `sites/resolve`. With no `sites` a `~` segment is a `404`. Changing scope
+in the admin is a page load, which is also why a scope's open documents and sockets
+never outlive it.
+
+A **token** is bound to a scope or to none. `POST /tokens` takes `site` (`shared`, a
+group or a site, never `*`). A token bound to `alpha` writes `alpha` and reads its
+chain; bound to `north` it writes the group and every site in it; bound to `shared`
+it upserts the shared catalogue. It supplies its scope when the URL has none, and
+another scope is a `403` except a read up its chain. **A bound token can never hold
+`admin`** and is refused by every platform route. A token bound to a scope that has
+since been deleted is a `403` at use.
+
+The story socket carries the effective role on the story's scope, so a site editor
+on a shared page is a viewer. The space channel is per scope: `space` for `default`,
+`space:<scope>` otherwise.
+
+### Preview across origins, and the handoff
+
+The admin and a site's preview origin share no cookie, and for fifty registrable
+domains never could. A person signed in on the admin reaches drafts on a preview
+origin through a **one-time, site-bound handoff**:
+
+1. **Admin origin.** `GET {base}/~<site>/site/start?next=<path>`. The route checks
+   the caller may preview the site, screens `next` (a path, never an origin), inserts
+   a `site_grants` row with a 60-second code, and redirects to
+   `<preview origin>{base}/site/enter?code=…&next=…`.
+2. **Preview origin.** `site/enter` consumes the code in one statement, so two
+   redemptions cannot both win. It sets `__Host-folio_grant` (`folio_grant` on
+   `http:`), `Secure; HttpOnly; SameSite=None; Partitioned; Path=/`, expiring with the
+   grant (the earlier of 24 hours and the session's own expiry), and redirects to
+   itself with `check=1`.
+3. **`check=1`.** If the cookie came back, redirect to `next`. If not, render "your
+   browser refused the preview cookie" and, in an iframe, tell the admin
+   (`grant-blocked`), which offers *Open preview in a new tab*.
+4. **The page.** The grant authenticates reads on the preview origin and nothing
+   else.
+
+**Who may preview, and what they see.** A person may preview a site when their
+grants give `READ_DRAFT` on **any scope in the site's chain** (the site, its group,
+`shared` or `*`), and they then see the **whole chain's drafts**. So the national
+team previewing a shared draft on `alpha` also sees `alpha`'s drafts; the page is the
+site as it would look with everything published. **Preview is read-only:** a grant
+confers no write, reaches no admin route and no socket, and is not a role on the
+site.
+
+**A grant is re-checked against current roles on every read.** One statement
+requires the grant row, a live and unexpired session (or an unrevoked token), and a
+current `site_roles` row for its holder that still gives `READ_DRAFT` on the chain.
+Signing out, being removed, having a grant edited or losing one to an SSO change ends
+every preview it admitted on the next request. There is no revocation step to
+remember.
+
+`partitioned` because the pane is a cross-site iframe: a `SameSite=Lax` cookie is
+never sent there and Safari blocks unpartitioned ones. The cookie is keyed by the
+top-level site too, so the pane's grant is visible only inside the admin, and a
+top-level *Open preview* lands in the preview origin's own partition. It works in
+current Chrome, Firefox and Safari 26.2 or later.
+
+The pane previews a story `X` at path `P` as `P?_folio=preview&_folio_id=X`, so the
+national team previews the shared page itself on a site that forked it, not the fork,
+with a banner "Alpha overrides this page".
+
+Every response Folio gives on a preview origin carries
+`Content-Security-Policy: frame-ancestors <sites.admin>`, except the policy an asset
+route sets for itself, which is never replaced. On a preview origin a host's own
+`reader.page()` route answers the chain's drafts to any request whose grant, session or
+token may preview the site, with no draft cookie, and answers them `no-store`; a share
+still reads only its one story, and a live host never answers a draft. With `draftMode`,
+`{base}/draft/enter` on a preview origin accepts a grant in place of a session (and with
+neither redirects to `site/start` with `next` pointing back).
+
+`auth: 'open'` admits every preview origin without a grant and logs a warning at
+construction.
+
+### Shares
+
+A share is minted as `<preview origin>{base}/share?t=…`, targets the preview origin's
+copy of the page, records the site it renders on (`shares.site_id`) and redeems only
+there. Minting needs `PUBLISH` on the story's scope, and the render site names itself
+with `?site=` (defaulting to the request's scope when that is a site), which must be
+under the story's scope and have a preview origin, so the national team shares a
+shared page on any site. A share on a draft site admits the request for its one story
+only; the reader so admitted reads nothing else, though it still reads the site's
+published globals so the page has its header.
+
+### Caching: the key and the tags
+
+The Workers Cache key is path, entrypoint, `ctx.props` and version. **It is not the
+host.** So the site, and the **surface**, go into the props:
+
+```ts
+return this.ctx.exports
+  .CachedPages({ props: await folio.cacheProps(req, this.env) })
+  .fetch(req, { cf: { cacheKey: folio.cacheKey(req.url) } })
+```
+
+`folio.cacheProps(req, env)` answers `{ site, surface }` for a request a site serves,
+and `{}` for no site, the admin origin or a deployment with no `sites`. The surface
+is in the key so that headers a host sets only on its preview origin
+(`X-Robots-Tag: noindex`, Folio's `frame-ancestors`) can never be served on the live
+site, and a tag purge reaches every props variant. `cacheVerdict` treats the grant
+cookie as a Folio credential, so no draft request reaches the cached entrypoint.
+
+With `sites`, a render on `alpha` (in group `north`) emits:
+
+| Tag | Purged by |
+| --- | --- |
+| `site:alpha` | a registry edit touching `alpha`, twice; the degraded fallback |
+| `story:<id>` | as on a single site |
+| `global:<name>` | publishing the **shared** layer of the global or the settings type |
+| `global:<name>@north`, `global:<name>@alpha` | publishing that layer. Emitted **whether or not the layer exists**, so the first publish of a layer reaches pages that rendered without it |
+| `type:<name>@<scope>`, `type:*@<scope>` | a publish of that type (or any type) in that scope |
+| `path:alpha:<path>` | a publish, unpublish, delete, path change or redirect change at that path in any scope whose sites include `alpha` |
+| `form:<id>` | as on a single site |
+
+Path values are URI-encoded like every tag, so `stores/a` is `path:alpha:stores%2Fa`.
+`folio.cacheHeaders(resolution, { story })` still takes the resolution alone, because
+`resolution.site` and `resolution.path` carry what the new tags need. Reindex and
+migrate purge everything.
+
+A publish in the shared scope purges the `path:` tag on every site under it, which is
+how a shared page reaches fifty sites within a minute without a reverse index.
+
+Everything in this section is unobservable locally. `scripts/cache-probe.mjs` takes
+the new arguments for exactly this: `--admin <origin> --site <id> --preview <origin>`
+reports a MISS then a HIT on the live host, a MISS on the preview origin while the
+live entry is warm (the entries are separate), and both purged by one publish.
+
+### Headless front ends
+
+A front end that serves every hostname from one Worker needs three things, all
+under `{base}/api/v1` and so a promise:
+
+- **`GET {base}/api/v1/sites/resolve?host=<host>`** answers the gate's result for a
+  host as a first request would see it: `{ site: { id, name, group, status }, surface }`,
+  or `404` for no site. For a draft site's preview origin it adds `grantRequired:
+  true`, so the front end sends the visitor through `site/start` instead of treating
+  the host as unknown. Unscoped, `READ`.
+- **`GET {base}/api/v1/sites`** lists every `preview` and `live` site with its hosts
+  and preview origin, for a front end that keeps its own host map. A bound token sees
+  its scope's sites only. `siteChanged` payloads carry the changed row, so the map
+  refreshes on the event and not on a timer.
+- **`GET {base}/~<site>/api/v1/pages/{path}`** is `reader.page()` over HTTP:
+  `{ story, document, resolution, draft, access }`, with the tags in a
+  `folio-cache-tags` response header (absent for a draft and for a page the visitor
+  gate did not call public). The caller names the surface it serves with `?surface=live|preview`
+  (default `live`), and a site that surface would not serve is a `404`, unless the
+  caller holds `READ_DRAFT` on the site's chain or a grant for it. `?status=draft`
+  needs the same. A front end cannot see a draft by lying about the surface.
+  `documents/by-path/…` applies the same gate. A headless front end forwards the
+  visitor's `Cookie` on its service-binding call to the preview origin's
+  `{base}/~<site>/api/v1/…?status=draft`, and the grant authenticates that read.
+
+Fallback, shadowing and layering are Folio's rules; rebuilding them from document
+reads would be a second implementation that drifts.
+
+**Telling a front end what to purge.** A purge reaches only the entrypoint that
+issues it. Every hook payload that triggers one (`published`, `unpublished`,
+`pathsChanged`, `deleted`, `updated`, `migrated`, `reindexed`, `formChanged`,
+`redirectsChanged`, `siteChanged`) carries `purge: { tags: string[] } | { everything:
+true }`, exactly what Folio's own purger asked for, taken from the purger's return
+value so it cannot drift from what was issued. A headless host's hook forwards it to
+its front end's cached entrypoint. Every payload also gains `site`: the scope that
+owns what changed (`default` on a single-site deployment, `null` for `migrated` and
+`reindexed`, and the row's own id for `siteChanged`).
+
+### What a host does
+
+The host-side changes are short and are collected as a procedure in
+[`UPGRADING.md`](../UPGRADING.md#turning-sites-on-what-the-host-changes-2026-09-29) and as an
+integration checklist in [`AGENTS.md`](../AGENTS.md#a-multi-site-host): a `route` that
+answers absolute URLs, `folio.reader(env, req)` (or `{ site }`; with neither it
+throws) everywhere a reader is built, `folio.cacheProps(req, env)` on the cached loopback, a redirect from
+`{base}/*` on live hosts to the admin, and DNS and routes for the three kinds of
+hostname.
 
 ## Content migrations
 
@@ -3427,7 +3939,8 @@ not against real devices — `test/fixtures/webauthn/` is still empty, and a
 `todo` in `pnpm test` names the gap rather than hiding it. **Site-visitor
 access control has landed**, as spec 31 (`docs/specs/platform/visitor-access.md`) —
 see "Visitor access" above. Still deliberately out: per-story editor
-permissions, multi-tenant spaces (spec 23), passwords and TOTP. Sign-in link
+permissions, passwords and TOTP. **Multi-site is built**, as spec 23 — see
+"Many sites in one deployment" above. Sign-in link
 rate limiting is per address only; the IP dimension wants a Cloudflare
 rate-limiting rule at the zone.
 

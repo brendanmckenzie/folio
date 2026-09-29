@@ -148,6 +148,19 @@ describe('an editor in draft mode', () => {
     expect(await folio.draftAt(env, req(cookie), path)).toBeNull()
   })
 
+  /**
+   * The same rule through `reader.page()`, pinned because multi-site now answers a
+   * preview origin's credential alone with drafts (`multi-site.md` decision 13,
+   * step 4). A single-site deployment has no preview origin, so a session is
+   * still not an ask: the unpublished page is not there to read.
+   */
+  it('gives reader.page() no draft for a session without the draft cookie', async () => {
+    const { path } = await seedPage('about')
+    const { cookie } = await signIn('editor')
+    expect(await folio.reader(env, req(cookie)).page(path)).toBeNull()
+    expect((await folio.reader(env, req(`${cookie}; ${DRAFT}`)).page(path))?.draft).toBe(true)
+  })
+
   it('reads nothing with the draft cookie and no session', async () => {
     const { path } = await seedPage('about')
     expect(await folio.draftAt(env, req(DRAFT), path)).toBeNull()

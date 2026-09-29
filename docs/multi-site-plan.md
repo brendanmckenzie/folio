@@ -133,9 +133,11 @@ defect a reviewer proved in a draft; each will come back if an agent is not told
   insert on every fresh database, and on a rollback it minted `*` grants from any
   old-code patch (`updateUser` writes `role` on every patch). Decision 18 is the
   replacement; do not reintroduce one to close the migrate-to-deploy window.
-- **Foreign keys are not enforced here, by design.** Every cleanup is an explicit
-  `delete` in the same batch, and every revocation test runs with foreign keys off.
-  An `on delete cascade` in `0011` is documentation, not behaviour.
+- **Nothing relies on foreign-key enforcement, by design.** Every cleanup is an
+  explicit `delete` in the same batch. D1 in workerd pins `PRAGMA foreign_keys` at 1
+  (owner, 2026-09-29), so a test cannot turn it off and an `on delete cascade` in
+  `0011` does fire there: an explicit delete is proved by recording the batch through
+  a proxy, and revocation by expiring or revoking by `update`, so no cascade runs.
 - **A source-text grep does not prove a column is unread.** `users.role` is read today
   as `u.role` and inside a `COLUMNS` string, neither of which the obvious pattern
   matches. The proof is `users-contract.test.ts`: run the real code against a
@@ -270,10 +272,20 @@ approval for the next.
 ## Progress
 
 Updated as each phase lands: the commit, and a one-line note of where the spec was
-wrong. Nothing has landed yet.
+wrong. Each phase's own `## Implementation notes` entry in the spec has the detail.
 
 | Phase | Commit | Note |
 | --- | --- | --- |
+| 0 | — | Baseline at `5bd256c`: five gates green, 4433 tests, 22/22 e2e. Pins unchanged. Staging D1 at `0010`. Probe: 6 pass, 1 skip (no token). Ground truth: 105 claims OK, 6 moved lines, 1 contradicted — foreign keys cannot be turned off in workerd (owner: prove by proxy batch and by `update`) |
+| 1 | `cb51211` | Review: no roll-forward statement (a demotion made by old code came back), and the window rule missed tags and forms; both added to `UPGRADING.md`. Re-keyed indexes made every unbound lookup a scan; carried to 2 and 7 |
+| 2 | `49f9a38` | Within one scope a redirect still beats an unpublished row (today's `pathMiss`, pinned); index seeks reordered rows the single-site pin caught |
+| 6 | `df19d4a` | `checkpointed` purges nothing: a checkpoint publishes nothing |
+| 3 | `13c6866` | Review: MCP `preview_document`, the form routes and the share list reached across sites; fixed, and the partition test now derives every id route from Hono |
+| 4 | `49b85c4` | `default` seeds bare once `sites` is on (the chain rule); `diff` and `PUT /content` needed the `bare` option too |
+| 5 | `0dda0eb` | Review: two critical — every non-grant credential passed `allows()` alone on the render paths, and `frame-ancestors` replaced an SVG asset's sandbox CSP — plus a pre-existing `safeNext` tab bypass; all fixed and re-reviewed |
+| 7 | `3a8d561` | Review: no leak; deleting a fork wrote an auto-redirect that blocked fallback; fixed |
+| 8 | `d176235` | `/me` carries one `sites` object; the asset and form pickers cannot badge by scope yet |
+| 9 | (this commit) | A grant alone did not give a host's `reader.page()` drafts, against decision 13 step 4; fixed to the spec. Release gate green: 5091 tests, 22/22 e2e |
 
 ## The phases
 
@@ -330,8 +342,8 @@ reports why instead.
 - The index set before and after differs only by the intended re-keys: dump
   `select name, sql from sqlite_master where type = 'index'` on both and diff.
 
-**Break-it checks:** remove the explicit `delete from site_roles` in `deleteUser` (a
-test must go red with foreign keys off); put `asset-tags.ts`'s conflict target back to
+**Break-it checks:** remove the explicit `delete from site_roles` in `deleteUser` (the
+proxy-batch test must go red); put `asset-tags.ts`'s conflict target back to
 `(slug)` (red); reintroduce one `u.role` read in `readSession` (`users-contract` red);
 drop `stories_edited`'s coalesce (red, `migrations.test.ts`).
 
@@ -452,8 +464,8 @@ page on this machine; the deployment is the first place it can be seen. The cost
 accepted: a browser-level defect is found after release and is fixed forward. Record
 the move in the spec's Implementation notes.
 
-**Break-it checks:** remove the `sessions` join from `readGrant` (revocation test red,
-foreign keys off); remove the current-`site_roles` condition (the "grant removed on the
+**Break-it checks:** remove the `sessions` join from `readGrant` (the revocation test,
+with the session expired by `update`, red); remove the current-`site_roles` condition (the "grant removed on the
 Access screen while keeping a session" test red); consume the code with a select then
 an update (a double-redemption test red, or it is missing and owed); drop `safeNext` on
 the second hop (red); let a `GrantActor` reach one `{base}/api` admin route (red);

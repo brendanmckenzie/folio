@@ -185,10 +185,13 @@ Grouped roughly the way you meet them.
 - **Content migrations** — pure functions from a document to a list of
   mutations, applied through the same log the editor writes to, plus a drift
   audit that tells you which schema changes have stranded data.
+- **Many sites in one deployment** — opt-in, with `sites` in `createFolio`. A
+  registry of sites and groups, a shared scope every site inherits from, forks to
+  override an inherited page, globals that layer field by field, roles as grants
+  per site, and drafts previewed on each site's own origin. See below.
 
-Not built, deliberately or not yet: host-defined custom field types, multi-site
-in one deployment, collaborative richtext (a CRDT), and an admin surface for
-outbound webhooks. The handbook's "Not built yet" section is the honest list.
+Not built, deliberately or not yet: host-defined custom field types,
+collaborative richtext (a CRDT), and an admin surface for outbound webhooks. The handbook's "Not built yet" section is the honest list.
 
 ---
 
@@ -259,6 +262,44 @@ plugins: [react(), folio({ blocks: './src/blocks/index.ts' }), cloudflare()]
 
 ---
 
+## Many sites in one deployment
+
+One Worker, one D1, one R2 and one admin can hold many sites. Add `sites` and a
+platform admin creates sites and groups from the admin, each with its own hostnames:
+
+```tsx
+const folio = createFolio<Env>({
+  …,
+  sites: { admin: 'https://cms.example', settings: 'siteSettings' },
+  route: (path, _locale, site) =>
+    site?.hosts[0] ? `https://${site.hosts[0]}/${path}` : `/${path}`,
+})
+```
+
+- **A shared scope** above every site holds default pages, a catalogue of shared
+  records and the base layer of every global. A site reads its **chain**: itself, its
+  group if any, then `shared`. Writes never flow up.
+- **Overriding is a fork.** A site serves an inherited page until it forks it;
+  unpublishing the fork hides the page, deleting it falls back.
+- **Globals and site settings layer field by field**, with *Inherited*,
+  *Overridden* and *Removed* labels in the editor.
+- **Roles are grants per scope**, so a marketing manager edits one site and a
+  regional editor looks after a group. SSO groups map to grants.
+- **Drafts are served only on a site's preview origin**, reached through a one-time
+  handoff from the admin; a headless front end reads pages, resolves hostnames and is
+  told what to purge over `{base}/api/v1`.
+- **Cache entries are keyed by site and surface**, and tags are scoped, so a publish
+  in one place purges exactly the pages that rendered it.
+
+Without `sites` nothing about a deployment changes. **Turning it on is one-way**,
+and the host has a few changes to make (`route`, readers built from a request, the
+cached loopback's props, a redirect for the admin path on live hosts, and DNS); read
+[`AGENTS.md`](AGENTS.md#a-multi-site-host) for those, the handbook's
+[chapter](docs/handbook.md#many-sites-in-one-deployment) for the design, and
+[`UPGRADING.md`](UPGRADING.md#turning-sites-on-what-the-host-changes-2026-09-29) before you flip it.
+
+---
+
 ## Configuring it
 
 `createFolio()` takes one object. Two keys are required and the rest are
@@ -272,7 +313,7 @@ rather than a gap:
 | `bindings` | **required** | `env` → D1, Durable Objects, R2, Images |
 | `types` | | Document types: pages, records, singletons |
 | `basePath` | | Where the admin mounts. Default `/folio` |
-| `route` | | Story path → public URL. You own the URL shape |
+| `route` | | Story path → public URL. You own the URL shape (absolute per site, with `sites`) |
 | `locales` | | Languages. Absent is a single-locale site |
 | `globals` | | Singletons loaded into every page's resolution |
 | `hooks` | | After-commit callbacks: publish, delete, form submitted |
@@ -282,6 +323,7 @@ rather than a gap:
 | `migrations` | | Content migrations, in run order |
 | `draftMode` | | A promise that your route calls `reader.page()` |
 | `mcp` | | `false` removes `{base}/mcp`. Default on |
+| `sites` | | Many sites in one deployment. Absent is one implicit site. Turning it on is one-way |
 | `assets`, `previewWrap`, `adminCss`, `previewCss` | | Preview and admin wiring |
 
 **[`docs/configuration.md`](docs/configuration.md) is the full reference** —

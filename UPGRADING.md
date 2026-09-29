@@ -89,7 +89,7 @@ and whether it needs anything from you beyond applying it.
 | `0010_forms.sql` | Forms and responses | Nothing required. Add a `form()` field to a block to embed one, and a `submitted` hook to forward responses. |
 | `0011_sites.sql` | The site registry, a site column on stories, redirects, assets, folders, tags, forms, responses and shares, roles as grants in `site_roles`, preview grants; every global unique index re-keyed with the site leading | **Apply it, then deploy, within minutes, with no role changes or invitations in between**, then run the post-deploy grant statement. Read [the 0011 section](#0011-roles-move-to-site_roles-2026-09-29) first: it changes what a rollback can do. |
 
-Next free number is `0012`, which is claimed: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after `0011`'s. After it, `0013`.
+`0011` has landed. Next free number is `0013`; `0012` is claimed but is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`.
 
 **A note on `0001_init.sql`:** it is plain `create table`, not
 `create table if not exists`. Applying it over a database that already has those
@@ -189,9 +189,12 @@ Or `folio.audit(env)`. It is also the Model screen in the admin.
 
 ### The wire version
 
-`PROTOCOL_VERSION` (`src/core/protocol.ts`, currently **4**) is carried by every
+`PROTOCOL_VERSION` (`src/core/protocol.ts`, currently **5**) is carried by every
 socket frame and every admin↔preview message. A mismatch is refused rather than
-guessed at.
+guessed at. **The release that carries `0011` bumps it from 4 to 5** (three wire
+changes ride the one bump: the mutation log's `unset`, the preview bridge's
+cross-origin rule, and the space channel being per scope), so an editor with a tab
+open across that deploy is told to reload.
 
 **This is not a compatibility mechanism and needs nothing from you.** Both ends
 ship in the same deploy, so it is a guard against a stale browser tab, not
@@ -286,6 +289,98 @@ there is no rolling back past this release from there. Roll forward instead.
 before `0011`, it removes the column the still-running old Worker signs people in
 with, and takes sign-in down until the deploy finishes. Deploy the release that
 carries `0011` everywhere it will go, then take `0012` with the next one.
+
+### Turning `sites` on: what the host changes (2026-09-29)
+
+Applying `0011` and deploying this release changes nothing you can see. **Adding
+`sites` to `createFolio` is a separate act with its own costs**, and the point of no
+return: once a second site exists, code with no site dimension would serve every
+site's rows as one, so there is no rolling back past it (roll forward). Do it on
+staging first, and only after the post-deploy grant statement above has answered `0`.
+
+**1. Three kinds of hostname, and the admin moves.** Each site has live hosts
+(`alpha.example`), optionally a preview origin (`https://preview.alpha.example`), and
+the deployment has one admin origin (`sites.admin`, `https://cms.example`). Route all
+of them to the Worker. **The admin origin must not be any site's live host or preview
+origin**, and every hostname is unique across the deployment; the registry refuses a
+clash. If the admin was on a site's host until now, **it moves, and that has two
+costs for editors**: their session cookie belongs to the old host, so they sign in
+again, and passkeys bind to the admin host (`rpId`), so they **re-enrol each passkey**
+on the new one. Moving `sites.admin` later costs the same again.
+
+**2. `createFolio`.**
+
+```ts
+sites: { admin: 'https://cms.example', settings: 'siteSettings' },   // settings is optional
+route: (path, locale, site) => {          // required with `sites`; `site` is the third parameter
+  const tail = path ? `/${path}` : '/'
+  return site?.hosts[0] ? `https://${site.hosts[0]}${tail}` : tail   // absolute on a site's host
+},
+```
+
+`route` gained its third parameter and, with `sites`, must answer an **absolute** URL
+for a site, because the admin is on another origin. A host with no `sites` keeps
+`(path, locale)` and is not affected.
+
+**3. Every reader is built from a request.** `folio.reader(env, req)`, or
+`folio.reader(env, { site: 'alpha' })` for a caller with no request (a sitemap build,
+a cron), which reads that site's live surface. **`folio.reader(env)` throws** with
+`sites`, as does every top-level one-shot read (`folio.published(env, …)`), because
+answering as no site would give an empty sitemap and no error. Grep for `.reader(env)`
+and for `folio.published(`, `folio.storyAt(`, `folio.query(` in your own code.
+
+**4. The cached loopback passes props.**
+
+```ts
+this.ctx.exports.CachedPages({ props: await folio.cacheProps(req, this.env) })
+  .fetch(req, { cf: { cacheKey: folio.cacheKey(req.url) } })
+```
+
+Without it two sites at the same path share one cache entry, and a preview origin's
+`noindex` reaches the live site. `cacheProps` takes the environment because the
+registry read needs the binding. To check it against a deployment, run, from a checkout of the Folio repository (scripts
+are not in the package),
+`node scripts/cache-probe.mjs <live url> --admin <admin origin> --site <id> --preview <preview origin> --token …`
+(the script's `--help` has the rest): it reports that the preview origin is its own
+entry and that one publish purges both.
+
+**5. Live hosts answer only `{base}/asset/:key` and `POST {base}/f/:id`.** An editor's
+bookmark to `alpha.example/folio` would fall to your router's 404. Add, before
+`folio.handle`, a redirect for a `GET` or `HEAD` on any host that is not the admin
+origin, for `{base}` and `{base}/…` other than `{base}/asset/…` and `{base}/f/…`, to
+the same path and query on the admin origin.
+
+**6. Scripts and tokens.** Writes go to the admin origin under the site's segment:
+`https://cms.example/folio/~alpha/api/v1`. A route that needs a scope and gets none is
+`400 site_required`, and that includes a bare `{base}/mcp`; use `{base}/~alpha/mcp` or
+a token bound to the site. Existing tokens are unbound (`site` null) and keep working
+with the `~<site>` segment. Mint a bound one with `POST /tokens` and `site` (a bound
+token can never hold `admin`). Idempotent upserts are unchanged, scoped by the
+binding.
+
+**7. People.** Roles become grants per scope. Every existing person holds one grant on
+`*`, which on a deployment with `sites` means **that role on every site**: after you
+turn `sites` on, edit each person's grants on the Access screen (or
+`PATCH /users/:id` with `grants`) before you create the second site, or they are an
+editor of all of it. Sign-in providers: `provision.role`, `roleFromClaim`'s `default`,
+and `provision: { create: true }` with no `roleFrom` are **refused at construction**;
+map directory groups to scopes with `roleFromClaim({ map: { group: { scope, role } } })`
+or a `RoleMapper` answering `{ alpha: 'editor' }`. A person placed by a provider has
+their grants replaced at each sign-in and cannot be edited by hand.
+
+**8. Sites.** `0011` inserted the `default` site (`live`, no hosts). In the Sites
+screen (or `POST /api/sites`) give it its hosts and, if you want drafts previewed on
+their own origin, a preview origin. Until a site has a live host and status `live`, its
+host is your router's 404. Then create the others.
+
+**9. Hooks and the wire.** Every hook payload gains `site` and, when the event purged,
+`purge`; `siteChanged` is new. Both are additive. Open editor tabs reload once
+([the wire version](#the-wire-version)).
+
+**Getting it wrong is mostly loud**: the constructor throws for a missing `route`, a
+bad `sites.admin`, or a provisioning shape it cannot honour, and `reader(env)` throws
+where it would otherwise answer empty. What is silent is a cache with no props (two
+sites sharing an entry) and a purge issued from the wrong entrypoint, so run the probe.
 
 ### A title-only patch no longer moves the page (2026-09-06)
 
@@ -432,6 +527,10 @@ rewritten them, through the mutation log — so the recovery is the History tab
 | Editor loads but shows no other cursors and the tree never updates | The `space` binding is absent, or its migration tag was never added. |
 | Typecheck reports two incompatible `Plugin` types | Folio got installed by directory path or symlink instead of a SHA. It resolves `vite` from Folio's own tree. |
 | Scheduled publishes stopped firing | The cron trigger, or the `scheduled()` handler, did not survive the merge. |
+| `400 site_required` from a script or `{base}/mcp` | The deployment has `sites`, and the route needs a scope. Use `{base}/~<site>/…`, or a token bound to the site. |
+| `folio.reader` throws "a read must say which site it is for" | The deployment has `sites`. Pass the request, or `{ site }`. |
+| Editors can sign in but their passkey is gone | The admin origin moved, and passkeys bind to its host. Re-enrol. |
+| A site's pages are the host's 404 | The site is not `live`, or the hostname is not in the registry. Check `GET {base}/api/v1/sites/resolve?host=…`. |
 
 More of these, including the ones that are not upgrade-specific, are in
 [`AGENTS.md`](AGENTS.md) under "When something breaks".

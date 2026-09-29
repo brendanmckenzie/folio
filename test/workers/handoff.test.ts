@@ -487,6 +487,43 @@ describe('step 4: the page', () => {
     expect(onLive?.draft).toBe(false)
   })
 
+  /**
+   * **The grant alone is the ask** (decision 13, step 4): a host route on the
+   * preview origin gets the chain's drafts by `pickEditing` with no draft cookie,
+   * and answers them uncacheably — a draft under `cacheHeaders` is unpublished
+   * content on the edge under the page's real URL.
+   */
+  it('gives reader.page() the draft for a grant alone, uncacheable, on the preview origin', async () => {
+    const grant = await handoff(E, 'alpha', '/about')
+    const page = await folio
+      .reader(env, new Request(`${ALPHA}/about`, { headers: grantCookie(grant) }))
+      .page('about')
+    expect(page?.draft).toBe(true)
+    expect(JSON.stringify(page?.doc)).toContain('Alpha about draft')
+    expect(page?.headers['cache-control']).toContain('no-store')
+    expect(page?.headers['cache-tag']).toBeUndefined()
+  })
+
+  it('gives reader.page() nothing but the published page for that grant on the live host', async () => {
+    const grant = await handoff(E, 'alpha', '/about')
+    const page = await folio
+      .reader(env, new Request('https://alpha.example/about', { headers: grantCookie(grant) }))
+      .page('about')
+    expect(page?.draft).toBe(false)
+    expect(JSON.stringify(page?.doc)).not.toContain('Alpha about draft')
+  })
+
+  it('gives reader.page() only the published page for a session whose role is on another site', async () => {
+    const page = await folio
+      .reader(
+        env,
+        new Request(`${ALPHA}/about`, { headers: await sessionFor({ bravo: 'editor' }) }),
+      )
+      .page('about')
+    expect(page?.draft).toBe(false)
+    expect(JSON.stringify(page?.doc)).not.toContain('Alpha about draft')
+  })
+
   it('is not a grant for another site: a bravo preview with an alpha grant is no draft', async () => {
     const grant = await handoff(E, 'alpha', '/about?_folio=preview')
     expect(await pageAt(BRAVO, '/about?_folio=preview', grant)).toBeNull()

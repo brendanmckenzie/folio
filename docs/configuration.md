@@ -66,7 +66,14 @@ auth: {
 Each provider also takes `domains` (route `@acme.com` addresses to this
 provider and no other), `provision` (`'refuse'` — the default — or
 `{ create: true, role }`), and `roleFrom` (map an SSO claim to a Folio role
-with `roleFromClaim`).
+with `roleFromClaim`). A `RoleMapper` answers `Role | RoleGrants | null`, where
+`RoleGrants` is a record of scope id (or `*`) to role, and `roleFromClaim`'s map
+values may be a role, a `{ scope, role }` target, or an array of either, with the
+highest match per scope. The scoped forms mean something only with
+[`sites`](#sites-sitesconfig); **with `sites`, a provider may not set
+`provision.role` and `roleFromClaim` may not set `default`** (both would be a role
+on every site for anybody the directory admits), and `provision: { create: true }`
+needs a `roleFrom`.
 
 `provision: 'refuse'` means an address your IdP verified but Folio has never
 heard of is turned away: access is a list somebody maintains, not a consequence
@@ -181,7 +188,7 @@ chain is followed to its end.
 Where Folio's routes mount. Default `/folio`. Must match the Vite plugin's
 `basePath`.
 
-#### `route: (path: string, locale?: string) => string`
+#### `route: (path: string, locale?: string, site?: SiteRef) => string`
 
 Public URL for a story path. `''` is the site root.
 
@@ -198,11 +205,34 @@ the only place a locale reaches a URL; Folio needs the inverse only for its own
 preview route, and derives it by asking this function rather than assuming a
 convention.
 
-> **The URL this returns must resolve to the same origin the admin is served
-> from.** The preview URL is this URL with a flag appended, loaded into the
-> admin's iframe, and the admin↔preview bridge checks `event.origin` on every
-> frame in both directions. A `route` pointing at a different origin does not
-> degrade to a broken preview — the iframe simply never talks to the editor.
+`site` is the third parameter, and it is passed **only on a deployment with
+[`sites`](#sites-sitesconfig)**: the registry row (`id`, `name`, `group`, `status`,
+`hosts`, `preview`) of the site the URL is for. There `route` is **required** (it is
+refused at construction if absent) and must answer an **absolute URL** on one of
+the site's live hosts when it is given a site, because the admin is on another
+origin and a relative URL would resolve against it. It is still called without a
+site for a scope that is not one (`shared`, a group) and by Folio's own preview
+branch, so answer the relative path then, and for a site with no live host yet.
+
+```ts
+route: (path, locale, site) => {
+  const tail = path ? `/${path}` : '/'
+  return site?.hosts[0] ? `https://${site.hosts[0]}${tail}` : tail
+},
+```
+
+> **On a single-site deployment the URL this returns must resolve to the same
+> origin the admin is served from.** The preview URL is this URL with a flag
+> appended, loaded into the admin's iframe, and the admin↔preview bridge checks
+> `event.origin` on every frame in both directions. A `route` pointing at a
+> different origin does not degrade to a broken preview — the iframe simply never
+> talks to the editor.
+>
+> **With `sites` this is turned around.** The pane loads
+> `{base}/~<site>/site/start` on the admin origin, which hands the editor to the
+> site's preview origin (a one-time redirect that sets a cookie there), and the
+> bridge hears only that origin. Point `route` at the live host and let Folio put
+> the preview on the preview origin.
 
 #### `draftMode: boolean`
 
@@ -265,6 +295,46 @@ styled by imports.
 
 ---
 
+### Many sites in one deployment
+
+#### `sites: SitesConfig`
+
+Absent by default, and **absent is a complete behaviour**: the deployment is one
+implicit site called `default`, and nothing about any request, URL, cache tag or
+role changes. Its presence turns multi-site on. The sites and groups themselves are
+rows a platform admin creates in the admin, not config, so this says only what has
+to exist before the first row. **Turning it on is the point of no return**; read
+[`UPGRADING.md`](../UPGRADING.md#0011-roles-move-to-site_roles-2026-09-29) first, and
+[the handbook chapter](handbook.md#many-sites-in-one-deployment) for what it does.
+
+```ts
+sites: {
+  admin: 'https://cms.example',
+  settings: 'siteSettings',
+  resolve: (req, registry) => null,
+},
+```
+
+| Key | | What it is |
+| --- | --- | --- |
+| `admin` | **required** | The one origin of the admin, sign-in, OIDC callbacks, passkeys, the registry and MCP. An absolute origin with no path: `https:`, or `http:` on `localhost`. Config because somebody must sign in to create the first site, and passkeys bind to its host. A request on it is the admin's before any registry row is looked at, and no site's live host or preview origin may equal it. **Moving it invalidates every enrolled passkey**, which editors re-enrol. |
+| `settings` | optional | The name of a declared `singleton` type holding site-level fields (a theme, features, contact details). It is always loaded as a global and layers shared, group, site like every global. Read it with `folio.settings(resolution)`. Absent: `folio.settings` answers `null`. |
+| `resolve(req, registry)` | optional | Replaces the first step of host-to-site only, answering a site id or `null`. Folio still gates the answer by the site's status, and a group, `shared` or an unknown id is no site. Absent: the site whose live host, or whose preview origin, the URL is. |
+
+What changes elsewhere once it is set:
+
+- **`route`** is required and takes the site (above).
+- **`folio.reader(env, req)`** must be given the request (or `{ site }`, gated as that
+  site's live surface). With neither it **throws** on this deployment, though on a
+  single-site one `folio.reader(env)` is fine. The top-level one-shot reads
+  (`folio.published(env, …)`) throw too.
+- **`folio.cacheProps(req, env)`** goes in the cached loopback's props.
+- **`hooks`** gains `siteChanged`, and every payload gains `site` and `purge`.
+- **`auth`** grants are per scope, and two provisioning shapes are refused.
+- **The admin** mounts at `{base}/~<scope>/…` on the admin origin.
+
+---
+
 ### Behaviour
 
 #### `hooks: FolioHooks<Env>`
@@ -288,7 +358,16 @@ hook and no way to veto or rewrite a publish.
 | `redirectsChanged` | A manual redirect was added or removed |
 | `formChanged` | A form's shape changed |
 | `submitted` | Somebody filled in a form. **This is the entire programmatic surface for responses** — no API route, no MCP tool. Forward to a CRM here. |
+| `siteChanged` | A site or group was created, edited or deleted. Fires only on a deployment with [`sites`](#sites-sitesconfig); the payload carries the changed row (`null` once deleted). |
 | `await` | `readonly HookEvent[]` — the subset a write waits for before responding. Everything else rides `waitUntil`. |
+
+Every payload also carries `site`, the scope that owns what changed (`default`
+without `sites`; `null` for `migrated` and `reindexed`, which touch every scope),
+and `purge` — `{ tags: string[] }` or `{ everything: true }` — when the event made
+Folio purge anything. `purge` is exactly what Folio asked Workers Cache for, taken
+from the purger's own return value, so a headless host can forward it to a front
+end that caches on another entrypoint (a purge reaches only the entrypoint that
+issued it).
 
 Unknown keys throw at construction, naming the typo and listing the valid names.
 
@@ -523,13 +602,29 @@ empty namespace and keeps serving the stale page for its whole TTL, silently.
 Route writes — and `runSchedules` from `scheduled()` — through the cached
 entrypoint.
 
+**With `sites`, the loopback passes props.** The Workers Cache key is path,
+entrypoint, props and version, and *not the host*, so two sites at the same path
+would share an entry. `folio.cacheProps(req, env)` answers `{ site, surface }` (`{}`
+for the admin origin, an unknown host, or a deployment with no `sites`):
+
+```ts
+this.ctx.exports.CachedPages({ props: await folio.cacheProps(req, this.env) })
+  .fetch(req, { cf: { cacheKey: folio.cacheKey(req.url) } })
+```
+
+The surface is in the key so that headers you set only on a preview origin
+(`X-Robots-Tag: noindex`, Folio's `frame-ancestors`) are never served on the live
+site.
+
 ### D1 read replication
 
 Turn it on in the Cloudflare dashboard: **D1 → your database → Settings →
 Enable Read Replication.** Folio issues every read on a session, but without
 this flag every session still resolves to the primary.
 
-Then make sure every page read goes through `folio.reader(env, req)`. The
+Then make sure every page read goes through `folio.reader(env, req)` (on a
+deployment with `sites` that is not optional: the request's host decides the
+site, or pass `{ site }` when there is no request). The
 top-level calls (`folio.published`, `folio.storyAt`, …) each open their own
 session and are for one-shot use from a cron or a deploy script. A page render
 makes three or four reads; a reader runs them on one session, which is both what
@@ -646,6 +741,12 @@ you can recognise one:
 | An unknown key in `hooks` (or in `hooks.await`) | A typo means a hook that silently never fires |
 | `migrations` whose declared order and sort order disagree | Documents would migrate in an order depending on which comparison ran |
 | A `presets` entry naming a field the block does not declare | The preset would silently do nothing |
+| `sites.admin` that is not an origin (a path, a non-`https:` scheme off localhost) | Sign-in and passkeys bind to it; a wrong one is found by the first person to sign in |
+| `sites.settings` naming a type that is not a declared `singleton` | The settings layers would resolve to nothing, in silence |
+| `sites` without `route` | Every site's URLs are absolute, and a default relative `route` would resolve against the admin origin |
+| A layered global or settings type whose layer id (`sng_<name>:<scope>`) cannot fit 64 characters for a 32-character scope id | Creating a layer for a long-named scope would fail on whichever editor did it first |
+| With `sites`: a provider with `provision.role`, `provision: { create: true }` without `roleFrom`, or a `roleFromClaim` with `default` | Each is a role on every site for somebody the directory admits, or a created person with nowhere to work |
+| `sites` with `auth: 'open'` | Not refused: it logs a warning, because every scope is then editable and every preview origin shows drafts to anyone who reaches it |
 
 ---
 

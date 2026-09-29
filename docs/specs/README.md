@@ -287,8 +287,10 @@ Spec 32's drafted contents named an `asset_tag_links` table that was built as
 **`0009` is a permanent hole.** It was spec 23's `sites` migration, and 33 took `0010`
 rather than closing the gap. It cannot be filled now: wrangler applies migrations by
 numeric prefix, so a `0009` that alters `forms` would run before `0010` creates it on
-a fresh database. Spec 23 (rewritten 2026-09-29, still a draft) claims `0011_sites.sql`
-and `0012_users_role_contract.sql` instead, and its build plan is
+a fresh database. Spec 23 (rewritten 2026-09-29, built on the branch `multi-site` the
+same day, release pending) took `0011_sites.sql`, which has landed, and claims
+`0012_users_role_contract.sql` for the release after, which will drop the two `users`
+columns `0011` retires. Its build plan is
 [`../multi-site-plan.md`](../multi-site-plan.md). The next free number after those is
 `0013`.
 
@@ -298,8 +300,9 @@ the build order settled — 28 and 29 both moved when 30 went first, and 23 move
 make room for 32.
 
 **Landed on `main`: `0001`–`0008` and `0010`, and applied to All About Africa's
-staging and production databases on 2026-09-06. Claimed and not landed: `0011`
-and `0012` (23); `0009` is a permanent gap. The next free number after those is `0013`.** Do not derive a number by counting the
+staging and production databases on 2026-09-06. `0011` (23) is built and lands on `main`
+with spec 23's release; `0012` (23) is claimed for the release after that and does not
+exist yet; `0009` is a permanent gap. The next free number after those is `0013`.** Do not derive a number by counting the
 landed rows above; take the one your spec's header names, and if it is already on
 disk, stop rather than picking the next one yourself.
 
@@ -375,9 +378,11 @@ route went with `ui-architecture.md`'s port phase 3, so the index was a revision
 its own entry. Spec 25 (draft mode) is **done**, built 2026-08-30 — its `## Implementation notes`
 record four Ground-truth corrections and the surprise that `READ_DRAFT` is a
 *viewer*-level gate, so every signed-in account can enter draft mode. Spec 23
-(multi-site) is the last one still **draft** and unstarted; its three open questions
-were resolved in place on 2026-08-04 without starting it, and it was rewritten on
-2026-09-29 and is ready to build. Spec 26 (documentation that ships) is **done**, written and built on 2026-08-29 after
+(multi-site) is the last one not marked done: its three open questions were resolved in
+place on 2026-08-04, it was rewritten on 2026-09-29 and **built on the branch
+`multi-site` that day** (phases 1 to 9, with `## Implementation notes` per phase). It
+stays `draft` in its own header until it has been released and verified on staging
+(the plan's Phase V), at which point it is restamped like the others. Spec 26 (documentation that ships) is **done**, written and built on 2026-08-29 after
 the owner observed that building a host meant pointing an assistant at *this*
 workspace — which was the only channel there was, because the split published no prose
 at all. It shipped a structural answer rather than the editorial one it planned.

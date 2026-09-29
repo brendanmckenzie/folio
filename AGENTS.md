@@ -154,6 +154,107 @@ a header read before any query.
 **3. Add the Vite plugin.** `folio/vite` supplies the admin entry, the client
 build and the asset constants. Do not hand-roll them.
 
+## A multi-site host
+
+Skip this unless `createFolio` has a `sites` key. Without one, none of it applies
+and nothing above changes. With one, the deployment holds many sites (spec 23,
+`docs/specs/foundation/multi-site.md`; the feature is `docs/handbook.md` "Many sites
+in one deployment"), and the host does six things differently. **Turning `sites` on
+is the point of no return** (`UPGRADING.md`); do not do it to a production
+deployment on the strength of this file.
+
+**1. Three hostnames per site, and one admin.** A site has live hosts
+(`alpha.example`) and, if it previews drafts, a preview origin
+(`https://preview.alpha.example`). The whole deployment has one admin origin,
+`sites.admin` (`https://cms.example`). Route all of them to the Worker. Folio answers
+a different slice on each and returns `null` for the rest:
+
+| Origin | `folio.handle()` answers |
+| --- | --- |
+| admin | the admin, its API, sign-in, passkeys, the registry, `{base}/mcp` |
+| a live host | `{base}/asset/:key` and `POST {base}/f/:id` only. **Published pages are your route.** |
+| a preview origin | those two, plus `share`, `site/enter`, `draft/enter|exit`, `?_folio=` and `GET {base}/~<site>/api/v1/*`. **Drafts exist only here.** |
+
+**2. `sites.admin` and `route`.**
+
+```tsx
+const folio = createFolio<Env>({
+  …,
+  sites: { admin: 'https://cms.example', settings: 'siteSettings' },
+  // Absolute for a site: the admin is on another origin. `site` is undefined for
+  // a scope that is not a site, and for Folio's own preview branch.
+  route: (path, locale, site) => {
+    const tail = path ? `/${path}` : '/'
+    return site?.hosts[0] ? `https://${site.hosts[0]}${tail}` : tail
+  },
+})
+```
+
+The admin origin must not be any site's live host or preview origin.
+
+**3. A reader always says which site.** `folio.reader(env, req)` reads the request's
+host and gates it by the site's status. `folio.reader(env, { site: 'alpha' })` is for
+a caller with no request (a sitemap build, a cron) and reads that site's live surface.
+**`folio.reader(env)` with neither throws** on this deployment, as do the top-level
+one-shot reads. A host that is not any site's (an unknown hostname, a draft site's
+live host, a site not yet `live`) gets a reader that answers as a site with no content:
+`page()` is `null`, so your existing miss branch produces your 404. `await
+reader.site()` answers the registry row or `null`, and `folio.settings(page.resolution)`
+the merged site settings (`null` with no settings type):
+
+```tsx
+const r = folio.reader(env, req)
+const page = await r.page(path, { locale })
+const theme = page ? folio.settings(page.resolution) : null
+```
+
+Call `page.headers` as before; its tags now include `site:<id>` and `path:<id>:<path>`.
+
+**4. The cached loopback passes props.** The Workers Cache key is not the host, so
+the site and the surface have to be in the props or two sites at one path share an
+entry:
+
+```ts
+this.ctx.exports.CachedPages({ props: await folio.cacheProps(req, this.env) })
+  .fetch(req, { cf: { cacheKey: folio.cacheKey(req.url) } })
+```
+
+`cacheProps` takes `env` (it reads the registry). Everything else in "Caching goes on
+one entrypoint" stands, including routing writes through the cached entrypoint.
+
+**5. Redirect the admin path on live hosts.** `handle()` leaves `{base}/…` to you on a
+live host, so an editor's `alpha.example/folio` bookmark lands on your 404. Before
+`folio.handle`, for a `GET` or `HEAD` on any host that is not the admin origin whose
+path is `{base}` or `{base}/…` other than `{base}/asset/…` and `{base}/f/…`, answer a
+`302` to the same path and query on the admin origin.
+
+**6. A preview origin renders drafts through your route too.** There the credential
+is the ask: a request whose preview grant (or session, or token) may preview the site
+gets the chain's drafts from your `reader.page()` route, with no draft cookie. A
+share keeps to its one story, a live host never gets a draft whatever the request
+carries, and a single-site deployment still needs the draft cookie (as in "Draft mode
+comes with `page()`"). With `draftMode: true`, `{base}/draft/enter` on the preview
+origin accepts a preview grant in place of a session, and with neither redirects to
+`site/start`, which is how an editor arriving without a grant gets one. Cache none of it: `page.headers` is already
+`no-store`, and `folio.cacheVerdict` bypasses a request carrying the grant, draft or
+share cookie. A response header you set only on preview origins
+(`X-Robots-Tag: noindex`) is safe because the surface is in the cache key.
+
+**A headless front end** (a separate Worker or a service binding) does not link
+Folio's reader; it calls, with a token, `GET {base}/api/v1/sites/resolve?host=` (host
+to site and surface, `grantRequired: true` for a draft site's preview origin),
+`GET {base}/api/v1/sites` (every non-draft site, its hosts and preview origin) and
+`GET {base}/~<site>/api/v1/pages/{path}?surface=live|preview` (`{ story, document,
+resolution, draft, access }` plus a `folio-cache-tags` header). A `hooks` handler
+forwards each payload's `purge` (`{ tags }` or `{ everything: true }`) to the front
+end's cached entrypoint, because a purge reaches only the entrypoint that issued it,
+and `siteChanged` refreshes its host map.
+
+**Scripts, MCP and tokens** address a scope: `{base}/~<site>/api/v1/…`,
+`{base}/~<site>/mcp`. An unscoped call to a scoped route is `400 site_required`. A
+token can be bound to one site (`POST /tokens` with `site`), and then supplies the
+scope itself.
+
 ## Rules
 
 - **`folio.handle()` first, and it returns `null`.** If a Folio path 404s, your
@@ -199,6 +300,9 @@ build and the asset constants. Do not hand-roll them.
 | A referenced document's asset field is empty | A block's `render` gets no `Resolution`, so it cannot resolve an asset belonging to a *referenced* document. Only the `url` arm works today. Known limitation. |
 | Typecheck reports two incompatible `Plugin` types | Folio installed by directory path. Use a SHA or a tarball. |
 | A path Folio should own returns your 404 | Your router ran before `folio.handle()`. |
+| With `sites`: `folio.reader` throws "a read must say which site it is for" | Pass `req`, or `{ site }`. `reader(env)` is only valid on a single-site deployment. |
+| With `sites`: a page that renders on the live host is a 404 on its preview origin, or two sites serve each other's page | The site is `draft`, or the loopback passes no `cacheProps`. The first is the status gate; the second is a shared cache entry. |
+| With `sites`: `alpha.example/folio` is your 404 | Live hosts answer only assets and forms. Redirect the admin path to `sites.admin` (step 5). |
 | A page taken down reads as 404 instead of 410 | You did not call `reader.miss()` (or `folio.status()`). It exists to tell "unpublished on purpose" from "never existed". |
 | Pages are fast for you and slow for everyone else | Your D1 primary is far from your readers. Turn on read replication for the database (**Settings → Enable Read Replication**) and make sure every page read goes through `folio.reader(env, req)`. Folio issues every query on a session; without replication enabled they all still go to the primary. |
 | Login appears to do nothing | The `users` table is empty. The login route answers 200 identically whether or not an address is known, so it cannot enumerate accounts — an unknown email looks exactly like a successful one. |
@@ -224,9 +328,9 @@ build and the asset constants. Do not hand-roll them.
   that with `folio.cacheVerdict(req)`. Use Workers Caching and not the Cache API:
   they are separate stores and `cache.purge()` — what a publish calls — only
   reaches the former.
-- **One site per deployment.** There is no site dimension in the schema; several
-  brand sites in one Folio is specified (`docs/specs/foundation/multi-site.md`)
-  and not built.
+- **Many sites in one deployment is opt-in and one-way.** Without `sites` a deployment
+  is one site, as it always was. With it, see "A multi-site host" above; there is no
+  turning it off again once a second site exists.
 - **No host-defined custom field types.** The field set is what `folio/core`
   exports.
 

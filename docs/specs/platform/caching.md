@@ -954,3 +954,60 @@ first host hand-rolled `stale-while-revalidate` over `caches.default` anyway, an
 so had a cache no publish could ever invalidate. The decision was right; nothing
 made a host follow it. `cacheVerdict`/`cacheKey` and `reader.page()`'s headers
 are the answer to that: the guidance is now an API rather than a paragraph.
+
+### Addendum: multi-site (2026-09-29)
+
+Spec 23 (`foundation/multi-site.md`, decisions 4, 15 and 16) built the item the
+"Out of scope" list and "Deferred" above put off: multi-site cache partitioning.
+Nothing above is rewritten; on a deployment with `sites` these are the changes, and a
+single-site deployment's `Cache-Tag` and `Resolution` are byte-identical to what this
+spec describes (pinned by `test/workers/single-site-pin.test.ts`).
+
+**The key.** The Workers Cache key is path, entrypoint, `ctx.props` and version, and
+not the host. The gateway therefore passes `await folio.cacheProps(req, env)` as the
+loopback's props: `{ site, surface }` for a request a registered site serves, and `{}`
+for no site, the admin origin, or no `sites`. **The surface is in the key**, so a
+preview origin and the live hosts never share an entry and a header a host sets only
+on the preview origin (`X-Robots-Tag: noindex`, Folio's `frame-ancestors`) cannot be
+served on the live site. `cacheProps` takes `env` because it reads the registry;
+decision 15's first sketch omitted it, and that was a typo. A tag purge reaches every
+props variant, so one purge clears both surfaces. `cacheVerdictFor` treats the grant
+cookie as a Folio credential, so a request carrying one is a bypass like a session,
+draft or share cookie.
+
+**The tags**, with `sites` configured (builders exported from `core/cache-tags.ts`
+and the only spelling either end uses: `siteTag`, `scopedGlobalTag`, `scopedTypeTag`,
+`scopedAnyTypeTag`, `pathTag`):
+
+| Tag | Emitted by a render on `alpha` (group `north`) | Purged by |
+| --- | --- | --- |
+| `site:alpha` | always | a registry edit touching `alpha`, twice (now, and 25 seconds later under `waitUntil`, past any isolate's 10-second registry snapshot); the degraded fallback |
+| `story:<id>` | as before | as before |
+| `global:<name>` | every configured global and the settings type | publishing its **shared** layer |
+| `global:<name>@north`, `global:<name>@alpha` | every configured global and the settings type, per other scope in the chain, **whether or not that layer exists** | publishing that layer |
+| `type:<name>@<scope>`, `type:*@<scope>` | per collection, per scope in the chain | a publish of that type (or any type) in that scope |
+| `path:alpha:<path>` | the page's own path | a publish, unpublish, delete, path change or redirect change at that path in any scope whose sites include `alpha` |
+| `form:<id>` | as before | as before |
+
+`path:` values are URI-encoded like every other tag (`stores/a` is
+`path:alpha:stores%2Fa`). `cacheTags(resolution, opts)` keeps its signature: the
+chain and the layered names ride on `resolution.site`, and the rendered story's path
+on `resolution.path`. Decision 6's conclusion that the purge set cannot be computed
+from `content_refs` stands and is why these are render-time tags too. The purger takes
+the registry and the layered names as a fourth parameter; a registry it cannot read
+flushes (`purgeEverything`) rather than guess a fan-out. `checkpointed` still purges
+nothing. Reindex and migrate stay `purgeEverything`.
+
+**A purge is still scoped to the entrypoint that issued it**, so a headless front end
+that caches on its own entrypoint cannot rely on Folio's purge. Every hook payload
+that purged carries `purge: { tags } | { everything: true }`, taken from the purge
+hook's return value so it is the record of the act, for the host to forward.
+
+**Measured by `scripts/cache-probe.mjs --admin <origin> --site <id> --preview
+<origin>`**, which adds three checks to the run, and behaves as it always did without
+them: a MISS then a HIT on the live host; a MISS on the first preview-origin request
+while the live entry is warm; and, after a publish through the admin origin, both
+entries purged by the one tag purge. It republishes only a page that is already live
+with no newer draft, and never one the site merely inherits. What it cannot show is
+separation between two sites, which is covered by the workers tests; with one site on
+the deployment it shows the surfaces separate.

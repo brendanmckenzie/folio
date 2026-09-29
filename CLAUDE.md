@@ -13,8 +13,10 @@ integration guide. `examples/starter` is a real workspace package that
 `pnpm typecheck` gates and that `bin/folio.mjs init` copies — **change it and you
 change what every new project starts from.**
 
-**Working on multi-site (spec 23)? Start at `docs/multi-site-plan.md`**, the build plan for
-`foundation/multi-site.md`: read it, and the spec's Ground truth, before the first edit.
+**Multi-site (spec 23) is built** (2026-09-29, branch `multi-site`): read
+`foundation/multi-site.md`'s Implementation notes before touching anything with a
+scope, a chain, a grant or a preview origin — every phase records where the spec was
+wrong. `docs/multi-site-plan.md` is the build and staging-rollout plan that produced it.
 
 **Working towards 1.0? Start at `docs/1.0-plan.md`.** It is the execution plan for the
 twenty issues on the tracker — six ordered phases, the four constraints that fix the
@@ -159,8 +161,8 @@ rather than a compatibility mechanism — a mismatch is refused and the tab is t
 to reload, which is the whole feature. Semver governs the **package version**, not
 that number. This distinction is easy to lose and losing it would make people
 reluctant to bump the one version whose entire purpose is being bumped. It is at
-**4**. What made it expensive for a while was `folio/engine` re-exporting the
-frame types, so a host could in principle have built against them; #13 removed
+**5** (spec 23: `unset`, the cross-origin bridge, the space channel per scope).
+What made it expensive for a while was `folio/engine` re-exporting the frame types, so a host could in principle have built against them; #13 removed
 them (`605e62b`), and the wire is private again.
 
 **The schema row is the oldest of the three narrowings** and the most concrete:
@@ -185,14 +187,18 @@ than a scatter.
 
 ## The two ledgers
 
-**D1 migrations** (`migrations/`). **There are nine: `0001`–`0008` and `0010`.**
+**D1 migrations** (`migrations/`). **There are ten: `0001`–`0008`, `0010` and `0011`.**
 `0001_init.sql` holds the base schema — the ten that preceded it were collapsed into
 it (`docs/specs/README.md` keeps the record of what each added) — and `0002`–`0010`
 landed on top, five of them on 2026-09-06 with specs 28–33. **`0009` is a permanent
 gap**: nothing will ever take it, because a migration numbered below `0010` cannot
 alter the `forms` tables that `0010` creates on a fresh database (wrangler applies by
-numeric prefix, so it would run before they exist). Spec 23 claims `0011_sites.sql`
-and `0012_users_role_contract.sql`; next free after those is `0013`.
+numeric prefix, so it would run before they exist). `0011_sites.sql` (spec 23) landed
+2026-09-29; it is the first migration that is not purely additive, and `UPGRADING.md`
+says what that costs. **`0012_users_role_contract.sql` is claimed and is the release
+after**: it drops `users.role` and `users.role_from`, and must not be written or
+applied until the `0011` release is deployed everywhere it will go. Next free is
+`0013`.
 
 A new one is the next number and normally a plain `alter table`, but rebuilding a
 table — `stories` included — is fair game when the shape is wrong. **Editing a
@@ -217,7 +223,7 @@ that are easy to undo by accident, and both are pinned by
 
 **`PROTOCOL_VERSION`** (`src/core/protocol.ts`) is carried by every
 socket frame and every admin↔preview postMessage frame; a mismatch is refused, not
-guessed at. It is at **4**. Both ends ship in the same deploy, so a version is a
+guessed at. It is at **5**. Both ends ship in the same deploy, so a version is a
 guard against a stale tab, not a compatibility mechanism — bumping is cheap, and so
 is redesigning what the frames contain.
 
@@ -305,6 +311,34 @@ are free to go the next time that code is touched.
   Caching only, so anything a host puts in `caches.default` is unpurgeable by a
   publish. `caching.md` predates the split and says "Workers Cache" throughout;
   read it as Workers Caching.
+- **Every id-set read takes the chain** (spec 23). `storiesFor` and
+  `publishedDocsByIds` take it as a required argument, every path lookup takes it,
+  and `null` ("every scope") is spelled out and commented at the few readers that
+  genuinely span scopes. An id outside the chain resolves exactly like a deleted one.
+  With no `sites` the chain is `['default']` — and it must still be bound: `site_id`
+  leads every re-keyed index, so an unbound lookup is a table scan, which a query-plan
+  test catches. `scope-partition.test.ts` reads every mounted id route from Hono and
+  fails on one that is not fence-tested; there is no deferred list, keep it that way.
+- **The internal scope and site headers are deleted from every inbound request**
+  before `handle()` sets them (the `withIdentity` discipline), and MCP sets its scope
+  header from its own `c.var.scope`, never from the client.
+- **A preview never writes.** On a multi-site deployment, draft-mode `resolve()` reads
+  layers without `ensureSingleton`, and a `GrantActor` never reaches a write, an
+  `{base}/api` admin route or a socket. A layer row is created only by an editor's
+  first write, which is what keeps a draft site that was previewed deletable.
+- **A grant is re-checked against current roles on every read.** `readGrant` is one
+  statement joining the session (or token) and a current `site_roles` row reaching
+  the site. Do not replace it with "delete grants when a role changes": there are four
+  role writers and a fifth would forget. Draft authority on a preview origin is
+  decided by `mayPreviewDrafts` alone, for every credential kind — the phase 5 review
+  found `allows()` ignoring the scope on the render paths.
+- **`folio.reader` needs a request or a site on a multi-site deployment.**
+  `folio.reader(env)` with neither throws rather than answering as no site, which
+  would empty a sitemap with nothing to say why. `folio.cacheProps` is `(req, env)`.
+- **D1 in workerd pins `PRAGMA foreign_keys` at 1**, so "asserted with foreign keys
+  off" is not available. Prove an explicit delete by recording the batch through a
+  proxy (`auth-session.test.ts`), and revocation by expiring or revoking by `update`,
+  so no cascade runs and only the join can refuse.
 - **Build presence frames with `presenceOf()`. Never spread the attachment** — it
   carries `role`, `session` and `expiresAt`, and leaking a session id onto a broadcast
   is a security bug.
@@ -445,9 +479,9 @@ section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
 
-**Specs 1–22 and 24–33 are done. One is `draft`: 23 (`foundation/multi-site.md`,
-XL), rewritten 2026-09-29, reviewed and ready to build; its plan is
-`docs/multi-site-plan.md`.** (This said "two are `draft`" until 2026-09-29, with 33
+**Specs 1–22 and 24–33 are done. 23 (`foundation/multi-site.md`, XL) is built** on
+the branch `multi-site` (2026-09-29) and stamped `review` until its staging
+verification is recorded; its plan is `docs/multi-site-plan.md`. (This said "two are `draft`" until 2026-09-29, with 33
 among them, long after 33 landed as `0010_forms.sql`.) 28, 29, 30, 31 and 32 were all
 built on the branch `specs-31-30-28-29` on 2026-09-05/06 and merged to `main`; each
 carries an `## Implementation notes` section recording where its plan was wrong,

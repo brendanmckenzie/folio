@@ -3,7 +3,7 @@
 > **Group:** foundation
 > **Build order:** 23, per docs/specs/README.md
 > **Size:** XL
-> **Status:** draft
+> **Status:** review — built on the branch `multi-site` (phases 1 to 9); release and staging verification pending, so not `done`
 > **Wire version:** bumps PROTOCOL_VERSION to 5
 > **Migration:** `0011_sites.sql` (the site registry, a site dimension on nine tables,
 > grants, preview grants, every global unique index rebuilt with the site leading);
@@ -2283,6 +2283,14 @@ Where the spec was wrong, silent or split across files it did not name:
     one story and nothing else. `tree()`, `stories()` and `query()` stay empty for such a
     request, because a listing would enumerate a pre-launch site. `FolioReader`'s doc
     comment in `types.ts` says so.
+- **After phase 9 (2026-09-29)**, `reader.page()` / `draftAt()` on a preview origin treat
+  a presented credential as the ask, as step 4 says: a grant, session or token that
+  `mayPreviewDrafts` admits gets the chain's drafts by `pickEditing` with no draft cookie,
+  `no-store`. Until then a grant alone only authenticated and the host route still needed
+  `{base}/draft/enter`'s cookie. Live hosts and single-site are unchanged; a share keeps
+  its one-story restriction. `handoff.test.ts` "gives reader.page() the draft for a grant
+  alone" and its two neighbours, and `draft-mode.test.ts` "gives reader.page() no draft
+  for a session without the draft cookie", pin it.
 
 ### Phase 7 (2026-09-29)
 
@@ -2534,3 +2542,63 @@ the files it named:
   their list rows carry no `site`. The scope switcher is in the sidebar and so is hidden with it collapsed, which is
   the editor's default. `Shell.tsx`, `assets-model.ts` and `useAssets.ts` were touched
   beyond the files the plan names (a pass-through prop, and the pickers' `chain` flag).
+
+### Phase 9 (2026-09-29)
+
+The documentation and the probe. Files: `README.md` (a tour section and a config-table
+row), `AGENTS.md` ("A multi-site host", replacing the "not built" limitation),
+`docs/handbook.md` (the chapter "Many sites in one deployment", the hooks and Auth
+sections, the probe paragraph under Caching, "Not built yet"), `docs/configuration.md`
+(`sites`, `route`'s third parameter, the `roleFrom` grant forms, the hooks table and
+payload fields, `cacheProps` under the entrypoint rule, the construction refusals),
+`UPGRADING.md` (the wire version, the ledger, "Turning `sites` on: what the host
+changes", four troubleshooting rows), `docs/specs/README.md`, `docs/specs/platform/
+caching.md` (a dated addendum, nothing rewritten), this spec's header and this entry,
+and `scripts/cache-probe.mjs`. Where the docs follow the implementation notes rather
+than the spec's first plan:
+
+- **Everything documented is what landed.** In particular: `ADMIN` is the platform tier
+  and `SCOPE_ADMIN` the scope's (phase 3); `/me` carries one `sites` object (phase 8);
+  the pane goes through `site/start` (phase 5, wired in 8); `roleFromClaim`'s bare
+  `default` and `provision.role` are refused at construction with `sites` (phases 3
+  and 7); a share's render site is named with `?site=` (phase 5); a delete does not write
+  an auto-redirect where a scope above still serves the path (phase 7); `deleteSite` also
+  removes tokens and shares and is refused while responses name it (phase 7); default
+  seeds bare on a multi-site deployment (phase 4).
+- **`UPGRADING.md` already held the `0011` section from phase 1** (the window, the
+  post-deploy grant statement and its check, the rollback statement, the roll-forward
+  resync, the point of no return, `0012` never in the same step). It is extended rather
+  than repeated: a wire-version line (4 to 5), the ledger paragraph ("`0011` has landed;
+  next free `0013`; `0012` claimed"), and a new section for the host code and DNS changes
+  that turning `sites` on needs, including that the admin origin must not be a site host
+  and that moving it invalidates every passkey. It says plainly that every existing
+  person's `*` grant becomes a role on every site the moment a second site exists.
+- **`folio.cacheProps(req, env)`** is documented with `env`, as the plan resolved
+  (decision 15's snippet omits it). **`folio.reader(env)` with neither a request nor a
+  site throws** and every doc says so; a single-site deployment is unaffected.
+- **A preview grant does not, by itself, make a host's `reader.page()` return drafts.**
+  `wantsDraft` asks for the draft cookie or a share; the grant authenticates. The docs
+  therefore describe `{base}/draft/enter` on the preview origin (which accepts a grant)
+  as the way a host's own route comes to show drafts, and the `?_folio=` branch as the
+  one the pane uses.
+- **The probe** takes `--admin` and `--site` together (either alone is a usage error,
+  exit 2) and `--preview` on its own. With `--admin` the writes go to
+  `<admin>/folio/~<site>/api/v1`. It reports whether the preview origin answers, that it
+  is a separate entry from the live host's (a MISS while the live entry is HIT, and SKIP
+  rather than a false pass if the preview entry was already warm), a preview MISS then
+  HIT, and after a publish that both entries stop being HIT. The publish is of the page's
+  own document and only when it is `live` with no newer draft; a page the site inherits
+  from a scope above is not written at all. The global and type checks are skipped with
+  `--admin`, because their ids and tags carry the scope. Without the three flags the
+  output is line for line what it was: checked against the previous script by running
+  both over a local stand-in server, with and without a token. It was **not** run
+  against a deployment; that is the plan's Phase V.
+- **Exports.** `SitesConfig`, `SiteRef` (the type of `route`'s third parameter),
+  `GroupRef`, `Registry`, `SCOPE_ADMIN`, `Grants`, `GrantActor`, `RoleGrants`,
+  `RoleTarget`, `SiteChangedHookPayload` and `PurgeIssued` are not exported from
+  `folio/server`, and the scoped tag builders are not exported from `folio/core`
+  (`SITE_TAG` and the older builders are). The documents describe shapes in prose and
+  tables and never tell a host to import one of these. Exporting them is a decision for
+  the owner of `index.tsx`, and `docs/handbook.md`'s "The exported surface" is
+  unchanged until it is made.
+
