@@ -103,7 +103,8 @@ interface SessionJoin {
   email: string
   name: string
   colour: string | null
-  role: string
+  /** From the `*` grant; null when the user holds none. */
+  role: string | null
   provider: string | null
   /** `sessions.provider`, which is not `users.provider`: the first is which
    * provider minted *this* browser's session, the second is the one that signed
@@ -116,9 +117,12 @@ interface SessionJoin {
 /**
  * The actor behind a raw cookie token, or null.
  *
- * One indexed read joining `sessions` to `users`: the middleware needs the role
- * and the display name on every request, and two queries for one credential
- * would double the per-request D1 cost of being signed in at all.
+ * One indexed read joining `sessions` to `users`, and to the user's `*` grant in
+ * `site_roles` for the role: the middleware needs the role and the display name on
+ * every request, and two queries for one credential would double the per-request
+ * D1 cost of being signed in at all. A left join, so a user with no grant still
+ * resolves, as `viewer` (`0011_sites.sql`; nothing here reads `users.role`, which
+ * `0012` drops).
  *
  * An expired row answers null *and* is deleted, so an abandoned tab prunes its
  * own session on the request that discovers it — the periodic sweep
@@ -135,8 +139,9 @@ export async function readSession(
   const row = await db
     .prepare(
       `select s.id as session_id, s.expires_at, s.created_at, s.provider as session_provider,
-              u.id as user_id, u.email, u.name, u.colour, u.role, u.provider, u.role_from
+              u.id as user_id, u.email, u.name, u.colour, g.role, u.provider, g.role_from
          from sessions s join users u on u.id = s.user_id
+         left join site_roles g on g.user_id = u.id and g.scope_id = '*'
         where s.id = ?`,
     )
     .bind(id)

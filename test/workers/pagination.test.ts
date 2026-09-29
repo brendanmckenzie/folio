@@ -563,12 +563,19 @@ describe('GET /api/stories?ids= and ?paths=', () => {
  */
 describe('listUsers and listTokens', () => {
   it('pages users oldest first, which is roster order not feed order', async () => {
+    // The seed shape since 0011: the row without `role`, then its `*` grant.
     for (let i = 0; i < 5; i++) {
-      await env.DB.prepare(
-        'insert into users (id, email, name, role, created_at) values (?, ?, ?, ?, ?)',
-      )
-        .bind(`usr_p${i}`, `p${i}@x.test`, `P${i}`, 'editor', 1000 + i)
-        .run()
+      await env.DB.batch([
+        env.DB.prepare('insert into users (id, email, name, created_at) values (?, ?, ?, ?)').bind(
+          `usr_p${i}`,
+          `p${i}@x.test`,
+          `P${i}`,
+          1000 + i,
+        ),
+        env.DB.prepare(
+          "insert into site_roles (user_id, scope_id, role, created_at) values (?, '*', 'editor', ?)",
+        ).bind(`usr_p${i}`, 1000 + i),
+      ])
     }
 
     const first = await listUsers(env.DB, { limit: 2 })
@@ -586,7 +593,11 @@ describe('listUsers and listTokens', () => {
 
     expect((await listUsers(env.DB, { limit: 2 })).total).toBeUndefined()
     expect((await listUsers(env.DB, { limit: 2, count: true })).total).toBe(5)
-    await env.DB.prepare('delete from users').run()
+    expect(new Set(first.rows.map((u) => u.role))).toEqual(new Set(['editor']))
+    await env.DB.batch([
+      env.DB.prepare('delete from site_roles'),
+      env.DB.prepare('delete from users'),
+    ])
   })
 
   it('pages tokens newest first, revoked ones included', async () => {

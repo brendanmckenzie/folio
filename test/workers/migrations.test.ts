@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:test'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { compareMigrationFilenames, splitSqlStatements } from './sql-split'
 
 /**
  * What `migrations/` actually produced, asserted against the live database the
@@ -78,7 +79,18 @@ describe('stories', () => {
       'published_sync_id',
       'schema_id',
       'title_i18n',
+      // 0011: the owning scope, and fork provenance. Added by `alter`, so last.
+      'site_id',
+      'forked_from',
     ])
+  })
+
+  it('defaults `site_id` to the default site and leaves `forked_from` null', async () => {
+    const byName = new Map((await columns()).map((c) => [c.name, c]))
+    expect(byName.get('site_id')?.notnull).toBe(1)
+    expect(byName.get('site_id')?.dflt_value).toBe("'default'")
+    expect(byName.get('forked_from')?.notnull).toBe(0)
+    expect(byName.get('forked_from')?.dflt_value).toBeNull()
   })
 
   it('keeps `path` nullable, which is what takes an unrouted document out of the URL namespace', async () => {
@@ -172,6 +184,29 @@ describe('stories', () => {
     // distinct, so top-level siblings would never collide without it.
     expect(await indexSql('stories_parent_slug')).toMatch(/coalesce\(parent_id, ''\)/i)
   })
+
+  /**
+   * 0011 re-keyed every one of the seven with the site leading. Pinned by `sql`,
+   * column list and all: two sites can each have `about` only because the site is
+   * *in* the unique key, and a lookup filtered by site reaches the index only
+   * because it leads.
+   */
+  it('leads every index with `site_id`', async () => {
+    const shape = (sql: string) => sql.replace(/\s+/g, ' ').replace(/^.* on stories /i, '')
+    expect(shape(await indexSql('stories_path'))).toBe('(site_id, path) where path is not null')
+    expect(shape(await indexSql('stories_parent_slug'))).toBe(
+      "(site_id, coalesce(parent_id, ''), slug) where path is not null",
+    )
+    expect(shape(await indexSql('stories_type_slug'))).toBe(
+      '(site_id, type, slug) where path is null',
+    )
+    expect(shape(await indexSql('stories_parent_ord'))).toBe('(site_id, parent_id, ord)')
+    expect(shape(await indexSql('stories_type'))).toBe('(site_id, type, ord)')
+    expect(shape(await indexSql('stories_edited'))).toBe(
+      '(site_id, coalesce(draft_updated_at, updated_at) desc, id desc)',
+    )
+    expect(shape(await indexSql('stories_title'))).toBe('(site_id, title, id)')
+  })
 })
 
 /**
@@ -200,7 +235,8 @@ describe('stories_edited', () => {
 
   it('indexes the coalesce, not the bare column', async () => {
     const sql = await indexSql('stories_edited')
-    expect(sql).toMatch(/coalesce\(draft_updated_at,\s*updated_at\)/i)
+    // With the site leading since 0011, and still the coalesce after it.
+    expect(sql).toMatch(/\(\s*site_id\s*,\s*coalesce\(draft_updated_at,\s*updated_at\)\s+desc/i)
     // `id` is the tiebreak a keyset cursor over this order needs.
     expect(sql).toMatch(/id desc/i)
   })
@@ -283,6 +319,27 @@ describe('the three slug namespaces', () => {
       "select id from stories where slug = 'ada' order by id",
     ).all<{ id: string }>()
     expect(results.map((r) => r.id)).toEqual(['rec1', 'rec2'])
+  })
+
+  it('lets two sites each hold the same path, the same top-level slug and the same record slug', async () => {
+    // What 0011 is for. Each namespace is keyed by the site now, so all three
+    // collisions above are collisions *within* a site only.
+    const onSite = (id: string, site: string, type: string, slug: string, path: string | null) =>
+      env.DB.prepare(
+        `insert into stories (id, type, parent_id, slug, path, ord, title, site_id)
+         values (?, ?, null, ?, ?, 'a0', ?, ?)`,
+      )
+        .bind(id, type, slug, path, id, site)
+        .run()
+    await onSite('a_root', 'default', 'page', '', '')
+    await onSite('b_root', 'alpha', 'page', '', '')
+    await onSite('a_about', 'default', 'page', 'about', 'about')
+    await onSite('b_about', 'alpha', 'page', 'about', 'about')
+    await onSite('a_ada', 'default', 'person', 'ada', null)
+    await onSite('b_ada', 'alpha', 'person', 'ada', null)
+    await expect(onSite('b_about2', 'alpha', 'page', 'about', 'about')).rejects.toThrow(
+      /UNIQUE constraint failed/i,
+    )
   })
 
   it('lets many unrouted rows coexist with a null path, which a plain unique index would not', async () => {
@@ -379,8 +436,13 @@ describe('assets', () => {
       'description_auto',
       'described_at',
       'describe_error',
+      // 0011.
+      'site_id',
     ])
     expect(await indexesOf('assets')).toContain('assets_created')
+    expect(await indexSql('assets_created')).toMatch(/\(\s*site_id\s*,\s*created_at desc\s*\)/i)
+    expect(await indexSql('assets_filename')).toMatch(/\(\s*site_id\s*,\s*filename\s*,\s*id\s*\)/i)
+    expect(await indexSql('assets_size')).toMatch(/\(\s*site_id\s*,\s*size desc\s*,\s*id\s*\)/i)
 
     await env.DB.prepare(
       `insert into assets (id, key, filename, content_type, size, created_at)
@@ -404,6 +466,8 @@ describe('asset_folders', () => {
       'name',
       'path',
       'created_at',
+      // 0011's rebuild, which carried every column above and added this one.
+      'site_id',
     ])
     // Manual sibling ordering would break `path`'s depth-first-and-alphabetical
     // property (decision 3) and nobody orders folders by hand. Asserted as an
@@ -411,8 +475,22 @@ describe('asset_folders', () => {
     expect((await columnsOf('asset_folders')).map((c) => c.name)).not.toContain('ord')
   })
 
-  it('indexes only the tree render', async () => {
-    expect(await indexesOf('asset_folders')).toEqual(['asset_folders_parent'])
+  it('indexes the tree render and the path, with the site leading the path', async () => {
+    // `asset_folders_path` replaces the `unique` column constraint 0008 declared,
+    // which SQLite cannot re-key in place: hence 0011's rebuild.
+    expect(await indexesOf('asset_folders')).toEqual(['asset_folders_parent', 'asset_folders_path'])
+    expect(await indexSql('asset_folders_path')).toMatch(/unique index/i)
+    expect(await indexSql('asset_folders_path')).toMatch(/\(\s*site_id\s*,\s*path\s*\)/i)
+    expect(await indexSql('asset_folders_parent')).toMatch(/\(\s*parent_id\s*,\s*name\s*\)/i)
+  })
+
+  it('lets two sites each hold a folder at the same path', async () => {
+    await env.DB.prepare(
+      `insert into asset_folders (id, parent_id, name, path, created_at, site_id)
+       values ('fld_a', null, 'Clients', 'clients', 1, 'default'),
+              ('fld_b', null, 'Clients', 'clients', 1, 'alpha')`,
+    ).run()
+    await env.DB.prepare('delete from asset_folders').run()
   })
 
   it('refuses two siblings whose names slugify onto the same path', async () => {
@@ -437,11 +515,16 @@ describe('asset_tags', () => {
       'name',
       'slug',
       'created_at',
+      // 0011's rebuild.
+      'site_id',
     ])
-    // The vocabulary is hundreds of rows and the unique index the `unique`
-    // constraint on `slug` already creates serves lookup — decision 5's absence
-    // list.
-    expect(await indexesOf('asset_tags')).toEqual([])
+    // The vocabulary is hundreds of rows and the unique index on the slug serves
+    // lookup — decision 5's absence list. 0011's rebuild turned 0008's `unique`
+    // column constraint into this named index with the site leading, which is the
+    // exact target `ensureTag`'s `on conflict (site_id, slug)` must name.
+    expect(await indexesOf('asset_tags')).toEqual(['asset_tags_slug'])
+    expect(await indexSql('asset_tags_slug')).toMatch(/unique index/i)
+    expect(await indexSql('asset_tags_slug')).toMatch(/\(\s*site_id\s*,\s*slug\s*\)/i)
   })
 
   it('is unique on `slug`, the tag identity, not on `name`', async () => {
@@ -478,8 +561,16 @@ describe('redirects', () => {
       'source',
       'story_id',
       'created_at',
+      // 0011's rebuild.
+      'site_id',
     ])
     expect(await indexesOf('redirects')).toEqual(['redirects_to'])
+    expect(await indexSql('redirects_to')).toMatch(/\(\s*site_id\s*,\s*to_path\s*\)/i)
+    // The primary key is `(site_id, from_path)` since the rebuild: `pk` is the
+    // column's position in it, and a single-column key would read 1 and 0.
+    const byName = new Map((await columnsOf('redirects')).map((c) => [c.name, c]))
+    expect(byName.get('site_id')?.pk).toBe(1)
+    expect(byName.get('from_path')?.pk).toBe(2)
 
     await expect(
       env.DB.prepare(
@@ -613,7 +704,12 @@ describe('identity', () => {
       'expires_at',
       'last_used_at',
       'revoked_at',
+      // 0011: the scope a token is bound to, or null for none (decision 14).
+      'site_id',
     ])
+    const siteId = (await columnsOf('api_tokens')).find((c) => c.name === 'site_id')
+    expect(siteId?.notnull).toBe(0)
+    expect(siteId?.dflt_value).toBeNull()
     expect(await indexesOf('api_tokens')).toEqual(['api_tokens_created'])
   })
 
@@ -1039,8 +1135,12 @@ describe('shares', () => {
       'last_viewed_at',
       'views',
       'note',
+      // 0011: the site a share renders in. A site, not a role or a scope a caller
+      // acts under, so the absence test below still holds.
+      'site_id',
     ])
     const byName = new Map((await columnsOf('shares')).map((c) => [c.name, c]))
+    expect(byName.get('site_id')?.dflt_value).toBe("'default'")
     expect(byName.get('id')?.pk).toBe(1)
     expect(byName.get('views')?.dflt_value).toBe('0')
     expect(byName.get('revoked_at')?.notnull).toBe(0)
@@ -1181,6 +1281,8 @@ describe('forms', () => {
       'redirect_to',
       'created_at',
       'updated_at',
+      // 0011.
+      'site_id',
     ])
 
     const byName = new Map((await columnsOf('forms')).map((c) => [c.name, c]))
@@ -1217,8 +1319,22 @@ describe('forms', () => {
   it('has exactly two indexes: the slug lookup and the list screen ordering', async () => {
     expect(await indexesOf('forms')).toEqual(['forms_name', 'forms_updated'])
     expect(await indexSql('forms_name')).toMatch(/unique/i)
-    expect(await indexSql('forms_name')).toMatch(/\(\s*name\s*\)/i)
-    expect(await indexSql('forms_updated')).toMatch(/\(\s*updated_at\s+desc\s*,\s*id\s*\)/i)
+    // The site leads since 0011, and `createForm`'s `on conflict (site_id, name)`
+    // names exactly these columns: a target naming fewer matches no index.
+    expect(await indexSql('forms_name')).toMatch(/\(\s*site_id\s*,\s*name\s*\)/i)
+    expect(await indexSql('forms_updated')).toMatch(
+      /\(\s*site_id\s*,\s*updated_at\s+desc\s*,\s*id\s*\)/i,
+    )
+  })
+
+  it('lets two sites each hold a form with the same name', async () => {
+    await env.DB.prepare(
+      `insert into forms (id, name, label, created_at, updated_at, site_id)
+       values ('frm_a', 'contact', 'Contact', 1, 1, 'default'),
+              ('frm_b', 'contact', 'Contact', 1, 1, 'alpha')`,
+    ).run()
+    const row = await env.DB.prepare('select count(*) as n from forms').first<{ n: number }>()
+    expect(row?.n).toBe(2)
   })
 
   it('refuses two forms sharing a name, so the slug is a real lookup key', async () => {
@@ -1285,6 +1401,8 @@ describe('form_responses', () => {
       'ip_hash',
       'body_hash',
       'files',
+      // 0011: the site it was submitted on.
+      'site_id',
     ])
 
     const byName = new Map((await columnsOf('form_responses')).map((c) => [c.name, c]))
@@ -1307,12 +1425,16 @@ describe('form_responses', () => {
     expect(row).toEqual({ data: '{}', locale: '', page: '', files: '[]', ip_hash: null })
   })
 
-  it('has exactly three indexes: the keyset, the duplicate reader and the partial throttle', async () => {
+  it('has exactly four indexes: the keyset, the duplicate reader, the partial throttle and the site filter', async () => {
     expect(await indexesOf('form_responses')).toEqual([
       'form_responses_dupe',
       'form_responses_form',
+      'form_responses_site',
       'form_responses_throttle',
     ])
+    expect(await indexSql('form_responses_site')).toMatch(
+      /\(\s*form_id\s*,\s*site_id\s*,\s*created_at\s+desc\s*,\s*id\s*\)/i,
+    )
     expect(await indexSql('form_responses_form')).toMatch(
       /\(\s*form_id\s*,\s*created_at\s+desc\s*,\s*id\s*\)/i,
     )
@@ -1345,5 +1467,477 @@ describe('form_responses', () => {
     // reasoning to the export's own) -- asserted as an absence so adding one is
     // a deliberate act with a measurement behind it.
     expect(await indexesOf('form_responses')).not.toContain('form_responses_data')
+  })
+})
+
+/**
+ * `0011_sites.sql`'s new tables (`docs/specs/foundation/multi-site.md`, "D1
+ * migration `0011_sites.sql`"): the registry, grants, and preview grants.
+ */
+describe('sites', () => {
+  it('has every column, in order, and one row: the default site, live', async () => {
+    expect((await columnsOf('sites')).map((c) => c.name)).toEqual([
+      'id',
+      'kind',
+      'name',
+      'group_id',
+      'status',
+      'preview_origin',
+      'created_at',
+      'updated_at',
+    ])
+    const { results } = await env.DB.prepare(
+      'select id, kind, name, group_id, status, preview_origin from sites',
+    ).all()
+    // A deployment with no `sites` is this one row forever: every backfilled row
+    // names it, and it has no preview origin, so preview across origins is off.
+    expect(results).toEqual([
+      {
+        id: 'default',
+        kind: 'site',
+        name: 'Default',
+        group_id: null,
+        status: 'live',
+        preview_origin: null,
+      },
+    ])
+  })
+
+  it('constrains kind and status, and leaves status nullable for a group', async () => {
+    const insert = (id: string, kind: string, status: string | null) =>
+      env.DB.prepare(
+        `insert into sites (id, kind, name, status, created_at, updated_at) values (?, ?, ?, ?, 1, 1)`,
+      )
+        .bind(id, kind, id, status)
+        .run()
+    await expect(insert('x', 'region', 'live')).rejects.toThrow(/CHECK constraint failed/i)
+    await expect(insert('y', 'site', 'launched')).rejects.toThrow(/CHECK constraint failed/i)
+    await insert('emea', 'group', null)
+    await env.DB.prepare("delete from sites where id <> 'default'").run()
+  })
+
+  it('makes a preview origin unique among the sites that have one', async () => {
+    expect(await indexesOf('sites')).toEqual(['sites_group', 'sites_preview'])
+    expect(await indexSql('sites_preview')).toMatch(/unique index/i)
+    expect(await indexSql('sites_preview')).toMatch(/where preview_origin is not null/i)
+  })
+
+  it('maps a host to exactly one site', async () => {
+    expect((await columnsOf('site_hosts')).map((c) => c.name)).toEqual(['host', 'site_id'])
+    expect((await columnsOf('site_hosts')).find((c) => c.name === 'host')?.pk).toBe(1)
+    expect(await indexesOf('site_hosts')).toEqual(['site_hosts_site'])
+  })
+})
+
+describe('site_roles', () => {
+  it('has every column, keyed on (user, scope), with the role constrained', async () => {
+    expect((await columnsOf('site_roles')).map((c) => c.name)).toEqual([
+      'user_id',
+      'scope_id',
+      'role',
+      'role_from',
+      'created_at',
+    ])
+    const byName = new Map((await columnsOf('site_roles')).map((c) => [c.name, c]))
+    expect(byName.get('user_id')?.pk).toBe(1)
+    expect(byName.get('scope_id')?.pk).toBe(2)
+    expect(byName.get('role_from')?.notnull).toBe(0)
+    expect(await indexesOf('site_roles')).toEqual(['site_roles_scope'])
+    expect(await indexSql('site_roles_scope')).toMatch(/\(\s*scope_id\s*,\s*user_id\s*\)/i)
+
+    await env.DB.prepare(
+      "insert into users (id, email, name, created_at) values ('usr_g', 'g@x.com', 'G', 1)",
+    ).run()
+    await expect(
+      env.DB.prepare(
+        "insert into site_roles (user_id, scope_id, role, created_at) values ('usr_g', '*', 'owner', 1)",
+      ).run(),
+    ).rejects.toThrow(/CHECK constraint failed/i)
+    await env.DB.prepare(
+      "insert into site_roles (user_id, scope_id, role, created_at) values ('usr_g', '*', 'admin', 1)",
+    ).run()
+    await expect(
+      env.DB.prepare(
+        "insert into site_roles (user_id, scope_id, role, created_at) values ('usr_g', '*', 'viewer', 1)",
+      ).run(),
+    ).rejects.toThrow(/UNIQUE constraint failed/i)
+    await env.DB.batch([
+      env.DB.prepare('delete from site_roles'),
+      env.DB.prepare('delete from users'),
+    ])
+  })
+
+  it('declares its cascade as documentation; nothing relies on it', async () => {
+    // `deleteUser` deletes grants explicitly in its batch (auth-session.test.ts
+    // records the statement). The declaration is here so a reader of the schema
+    // sees the relationship, not so a pragma can do the work.
+    const { results } = await env.DB.prepare('select * from pragma_foreign_key_list(?)')
+      .bind('site_roles')
+      .all<{ table: string; from: string; on_delete: string }>()
+    expect(results.map((r) => [r.table, r.from, r.on_delete])).toEqual([
+      ['users', 'user_id', 'CASCADE'],
+    ])
+  })
+})
+
+describe('site_grants', () => {
+  it('has every column, and holds a session or a token, never both and never neither', async () => {
+    expect((await columnsOf('site_grants')).map((c) => c.name)).toEqual([
+      'id',
+      'session_id',
+      'token_id',
+      'site_id',
+      'code_hash',
+      'token_hash',
+      'created_at',
+      'expires_at',
+    ])
+    expect(await indexesOf('site_grants')).toEqual([
+      'site_grants_code',
+      'site_grants_expiry',
+      'site_grants_session',
+      'site_grants_token',
+    ])
+    const insert = (id: string, session: string | null, token: string | null) =>
+      env.DB.prepare(
+        `insert into site_grants (id, session_id, token_id, site_id, created_at, expires_at)
+         values (?, ?, ?, 'default', 1, 2)`,
+      )
+        .bind(id, session, token)
+        .run()
+    await expect(insert('g_both', 's', 't')).rejects.toThrow(/CHECK constraint failed/i)
+    await expect(insert('g_none', null, null)).rejects.toThrow(/CHECK constraint failed/i)
+    await insert('g_session', 's', null)
+    await insert('g_token', null, 't')
+    await env.DB.prepare('delete from site_grants').run()
+  })
+})
+
+describe('the ledger', () => {
+  const names = Object.keys(
+    import.meta.glob('../../migrations/*.sql', { query: '?raw', import: 'default' }),
+  )
+    .map((path) => path.split('/').at(-1) ?? path)
+    .sort(compareMigrationFilenames)
+
+  it('applies in this order, with 0009 a permanent gap and no 0012 yet', () => {
+    // The order wrangler and apply-schema.ts both apply in. This file's whole
+    // database was built by running exactly these, so every assertion above is
+    // a fresh-database run in filename order.
+    expect(names).toEqual([
+      '0001_init.sql',
+      '0002_asset_refs.sql',
+      '0003_schedules.sql',
+      '0004_shares.sql',
+      '0005_content_fts.sql',
+      '0006_auth.sql',
+      '0007_passkeys.sql',
+      '0008_asset_organisation.sql',
+      '0010_forms.sql',
+      '0011_sites.sql',
+    ])
+  })
+
+  it('creates no triggers', async () => {
+    // Decision 18: a trigger mirroring `users.role` into `site_roles` collided
+    // with the seeds' own grant insert and minted grants on a rollback.
+    const row = await env.DB.prepare(
+      "select count(*) as n from sqlite_master where type = 'trigger'",
+    ).first<{ n: number }>()
+    expect(row?.n).toBe(0)
+  })
+})
+
+/**
+ * `0011` over a database that already has rows in it, which is what four live
+ * databases are. The rest of this file sees the schema a fresh database gets;
+ * this block rebuilds that database from nothing — `0001`…`0010` in filename
+ * order, then a row in every table `0011` alters or rebuilds and a user at every
+ * role, then `0011` — and compares before with after.
+ *
+ * **Everything is captured in `beforeAll`**, because the file's `beforeEach`
+ * empties `stories` before every test. The block leaves the database with the
+ * same schema it found, so it is last only to keep a failure here from
+ * confusing the tests above.
+ */
+describe('0011 over a database with rows in it', () => {
+  const files = Object.entries(
+    import.meta.glob('../../migrations/*.sql', {
+      eager: true,
+      query: '?raw',
+      import: 'default',
+    }) as Record<string, string>,
+  )
+    .map(([path, sql]) => ({ name: path.split('/').at(-1) ?? path, sql }))
+    .sort((a, b) => compareMigrationFilenames(a.name, b.name))
+
+  const apply = async (sql: string) =>
+    env.DB.batch(splitSqlStatements(sql).map((q) => env.DB.prepare(q)))
+
+  /** Every index's identity: its `sql`, whitespace-collapsed, or for an index a
+   * constraint made (whose `sql` is null) the columns it covers. */
+  const indexShapes = async (): Promise<Record<string, string>> => {
+    const { results } = await env.DB.prepare(
+      "select name, sql from sqlite_master where type = 'index' order by name",
+    ).all<{ name: string; sql: string | null }>()
+    const out: Record<string, string> = {}
+    for (const { name, sql } of results) {
+      if (sql) {
+        out[name] = sql.replace(/\s+/g, ' ')
+        continue
+      }
+      const cols = await env.DB.prepare('select name from pragma_index_info(?) order by seqno')
+        .bind(name)
+        .all<{ name: string }>()
+      out[name] = `auto(${cols.results.map((c) => c.name).join(', ')})`
+    }
+    return out
+  }
+
+  const TABLES = [
+    'stories',
+    'redirects',
+    'assets',
+    'asset_folders',
+    'asset_tags',
+    'asset_taggings',
+    'forms',
+    'form_responses',
+    'shares',
+    'api_tokens',
+    'users',
+    'sessions',
+  ] as const
+  type Rows = Record<string, Record<string, unknown>[]>
+  const rowsOf = async (): Promise<Rows> => {
+    const out: Rows = {}
+    for (const table of TABLES) {
+      out[table] = (await env.DB.prepare(`select * from ${table} order by 1`).all()).results
+    }
+    return out
+  }
+  const columnNames = async (): Promise<Record<string, string[]>> => {
+    const out: Record<string, string[]> = {}
+    for (const table of TABLES) out[table] = (await columnsOf(table)).map((c) => c.name)
+    return out
+  }
+
+  let before: { indexes: Record<string, string>; rows: Rows; columns: Record<string, string[]> }
+  let after: typeof before
+  let grants: Record<string, unknown>[]
+  let siteRows: Record<string, unknown>[]
+
+  beforeAll(async () => {
+    // Drop everything the migrations made, newest first so no child outlives its
+    // parent; the FTS table first, which takes its shadow tables with it.
+    const tables = async () =>
+      (
+        await env.DB.prepare(
+          `select name, sql from sqlite_master
+            where type = 'table' and name not like 'sqlite_%' and substr(name, 1, 4) <> '_cf_'
+              and name <> 'd1_migrations'
+            order by rowid desc`,
+        ).all<{ name: string; sql: string }>()
+      ).results
+    for (const { name, sql } of await tables()) {
+      if (/^create virtual table/i.test(sql)) await env.DB.prepare(`drop table ${name}`).run()
+    }
+    for (const { name } of await tables()) await env.DB.prepare(`drop table ${name}`).run()
+    expect(await tables()).toEqual([])
+
+    for (const file of files) {
+      if (file.name === '0011_sites.sql') break
+      await apply(file.sql)
+    }
+
+    // A row in every table 0011 touches, and one user at every role, two of
+    // whose roles a provider placed.
+    await env.DB.batch(
+      [
+        `insert into users (id, email, name, role, role_from, created_at) values
+           ('usr_v', 'v@x.com', 'V', 'viewer', null, 11),
+           ('usr_e', 'e@x.com', 'E', 'editor', 'okta', 12),
+           ('usr_p', 'p@x.com', 'P', 'publisher', null, 13),
+           ('usr_a', 'a@x.com', 'A', 'admin', 'entra', 14)`,
+        `insert into sessions (id, user_id, created_at, expires_at) values ('ses_a', 'usr_a', 1, 9)`,
+        `insert into stories (id, type, parent_id, slug, path, ord, title, created_at, updated_at, draft_updated_at) values
+           ('sty_home', 'page', null, '', '', 'a0', 'Home', 1, 2, null),
+           ('sty_about', 'page', null, 'about', 'about', 'a1', 'About', 1, 3, 4),
+           ('sty_team', 'page', 'sty_about', 'team', 'about/team', 'a0', 'Team', 1, 5, null),
+           ('rec_ada', 'person', null, 'ada', null, 'a0', 'Ada', 1, 6, null)`,
+        `insert into redirects (from_path, to_path, status, source, story_id, created_at) values
+           ('old-about', 'about', 301, 'auto', 'sty_about', 7),
+           ('promo', 'https://example.com/', 302, 'manual', null, 8)`,
+        `insert into asset_folders (id, parent_id, name, path, created_at) values
+           ('fld_a', null, 'Clients', 'clients', 9),
+           ('fld_b', 'fld_a', 'Acme', 'clients/acme', 10)`,
+        `insert into asset_tags (id, name, slug, created_at) values
+           ('tag_a', 'Headshot', 'headshot', 11),
+           ('tag_b', 'Aerial', 'aerial', 12)`,
+        `insert into assets (id, key, filename, content_type, size, created_at, folder_id, description) values
+           ('ast_1', 'k/1.png', '1.png', 'image/png', 100, 13, 'fld_b', 'A photo')`,
+        `insert into asset_taggings (asset_id, tag_id) values ('ast_1', 'tag_a'), ('ast_1', 'tag_b')`,
+        `insert into forms (id, name, label, fields, created_at, updated_at) values
+           ('frm_a', 'contact', 'Contact', '[{"name":"email"}]', 14, 15)`,
+        `insert into form_responses (id, form_id, version, created_at, data, body_hash, ip_hash) values
+           ('res_a', 'frm_a', 1, 16, '{"email":"x@y.z"}', 'hash_a', 'ip_a')`,
+        `insert into shares (id, token_hash, story_id, created_by, created_at, expires_at) values
+           ('shr_a', 'th_a', 'sty_home', 'usr_a', 17, 99)`,
+        `insert into api_tokens (id, name, scopes, created_by, created_at) values
+           ('tok_a', 'ci', '["read"]', 'usr_a', 18)`,
+      ].map((sql) => env.DB.prepare(sql)),
+    )
+
+    before = { indexes: await indexShapes(), rows: await rowsOf(), columns: await columnNames() }
+    const last = files.at(-1)
+    expect(last?.name).toBe('0011_sites.sql')
+    await apply(last?.sql ?? '')
+    after = { indexes: await indexShapes(), rows: await rowsOf(), columns: await columnNames() }
+    grants = (
+      await env.DB.prepare(
+        'select user_id, scope_id, role, role_from, created_at from site_roles order by user_id',
+      ).all()
+    ).results
+    siteRows = (await env.DB.prepare('select id from sites').all()).results
+
+    // Leave the schema as found, and the rows gone.
+    await env.DB.batch(
+      [
+        'site_roles',
+        'sessions',
+        'shares',
+        'api_tokens',
+        'asset_taggings',
+        'assets',
+        'asset_tags',
+        'asset_folders',
+        'form_responses',
+        'forms',
+        'redirects',
+        'stories',
+        'users',
+      ].map((t) => env.DB.prepare(`delete from ${t}`)),
+    )
+  })
+
+  it('backfills exactly one `*` grant per user, at their role and with who decided it', () => {
+    expect(grants).toEqual([
+      { user_id: 'usr_a', scope_id: '*', role: 'admin', role_from: 'entra', created_at: 14 },
+      { user_id: 'usr_e', scope_id: '*', role: 'editor', role_from: 'okta', created_at: 12 },
+      { user_id: 'usr_p', scope_id: '*', role: 'publisher', role_from: null, created_at: 13 },
+      { user_id: 'usr_v', scope_id: '*', role: 'viewer', role_from: null, created_at: 11 },
+    ])
+    expect(siteRows).toEqual([{ id: 'default' }])
+  })
+
+  it('keeps every column of every table it rebuilds or alters, adding only its own', () => {
+    const added: Record<string, string[]> = {
+      stories: ['site_id', 'forked_from'],
+      redirects: ['site_id'],
+      assets: ['site_id'],
+      asset_folders: ['site_id'],
+      asset_tags: ['site_id'],
+      forms: ['site_id'],
+      form_responses: ['site_id'],
+      shares: ['site_id'],
+      api_tokens: ['site_id'],
+    }
+    for (const table of TABLES) {
+      expect(after.columns[table], table).toEqual([
+        ...(before.columns[table] ?? []),
+        ...(added[table] ?? []),
+      ])
+    }
+  })
+
+  it('keeps every row, each now on the default site', () => {
+    const stamped: Record<string, Record<string, unknown>> = {
+      stories: { site_id: 'default', forked_from: null },
+      redirects: { site_id: 'default' },
+      assets: { site_id: 'default' },
+      asset_folders: { site_id: 'default' },
+      asset_tags: { site_id: 'default' },
+      forms: { site_id: 'default' },
+      form_responses: { site_id: 'default' },
+      shares: { site_id: 'default' },
+      // A token is bound to no scope unless somebody binds it (decision 14).
+      api_tokens: { site_id: null },
+    }
+    for (const table of TABLES) {
+      expect(before.rows[table]?.length, table).toBeGreaterThan(0)
+      expect(after.rows[table], table).toEqual(
+        (before.rows[table] ?? []).map((row) => ({ ...row, ...stamped[table] })),
+      )
+    }
+  })
+
+  it('changes the index set only by the intended re-keys and the new tables', () => {
+    const b = before.indexes
+    const a = after.indexes
+    // Re-keyed in place: the same statement with the site leading its columns.
+    // `stories_edited` stays an expression index over the coalesce.
+    const reKeyed = [
+      'assets_created',
+      'assets_filename',
+      'assets_size',
+      'forms_name',
+      'forms_updated',
+      'redirects_to',
+      'stories_edited',
+      'stories_parent_ord',
+      'stories_parent_slug',
+      'stories_path',
+      'stories_title',
+      'stories_type',
+      'stories_type_slug',
+    ]
+    for (const name of reKeyed) {
+      expect(a[name], name).toBe(b[name]?.replace(/ on (\w+) \(/, ' on $1 (site_id, '))
+    }
+    expect(a.stories_edited).toMatch(/\(site_id, coalesce\(draft_updated_at, updated_at\) desc/)
+    // The primary key the redirects rebuild changed.
+    expect(b.sqlite_autoindex_redirects_1).toBe('auto(from_path)')
+    expect(a.sqlite_autoindex_redirects_1).toBe('auto(site_id, from_path)')
+
+    // The two column constraints the rebuilds replaced with named indexes.
+    const removed = ['sqlite_autoindex_asset_folders_2', 'sqlite_autoindex_asset_tags_2']
+    expect(b.sqlite_autoindex_asset_folders_2).toBe('auto(path)')
+    expect(b.sqlite_autoindex_asset_tags_2).toBe('auto(slug)')
+    const addedNames = [
+      'asset_folders_path',
+      'asset_tags_slug',
+      'form_responses_site',
+      'site_grants_code',
+      'site_grants_expiry',
+      'site_grants_session',
+      'site_grants_token',
+      'site_hosts_site',
+      'site_roles_scope',
+      'sites_group',
+      'sites_preview',
+      'sqlite_autoindex_site_grants_1',
+      'sqlite_autoindex_site_hosts_1',
+      'sqlite_autoindex_site_roles_1',
+      'sqlite_autoindex_sites_1',
+    ]
+    expect(
+      Object.keys(a)
+        .filter((n) => !(n in b))
+        .sort(),
+    ).toEqual(addedNames)
+    expect(
+      Object.keys(b)
+        .filter((n) => !(n in a))
+        .sort(),
+    ).toEqual(removed)
+
+    // And every other index is byte-for-byte what it was, `asset_folders_parent`
+    // and both rebuilt tables' primary keys included.
+    const untouched = Object.keys(b).filter(
+      (n) => !reKeyed.includes(n) && !removed.includes(n) && n !== 'sqlite_autoindex_redirects_1',
+    )
+    expect(untouched).toContain('asset_folders_parent')
+    expect(untouched).toContain('sqlite_autoindex_asset_folders_1')
+    for (const name of untouched) expect(a[name], name).toBe(b[name])
   })
 })

@@ -149,7 +149,7 @@ export async function listTags(db: FolioDb, opts: ListTagsOptions = {}): Promise
  * photographs in it. Matching on `name` instead would mint a second row, and the
  * two would then split every filter that used either.
  *
- * **`insert … on conflict (slug) do nothing`, then read back**, rather than
+ * **`insert … on conflict (site_id, slug) do nothing`, then read back**, rather than
  * read-then-insert. Two callers creating the same tag in the same instant is not
  * hypothetical — it is two editors typing into an autocomplete — and the
  * read-then-insert form answers one of them a `UNIQUE constraint failed` that
@@ -166,10 +166,13 @@ export async function ensureTag(
   const id = newTagId()
   await db
     .prepare(
-      `insert into asset_tags (id, name, slug, created_at) values (?, ?, ?, ?)
-         on conflict (slug) do nothing`,
+      `insert into asset_tags (id, name, slug, created_at, site_id) values (?, ?, ?, ?, ?)
+         on conflict (site_id, slug) do nothing`,
     )
-    .bind(id, name.trim(), slug, Date.now())
+    // The target is `asset_tags_slug`'s columns exactly (`0011_sites.sql`): a
+    // target naming fewer matches no unique index and D1 refuses the statement.
+    // Single-site until phase 7 scopes the library.
+    .bind(id, name.trim(), slug, Date.now(), 'default')
     .run()
 
   const tag = await tagBySlug(db, slug)

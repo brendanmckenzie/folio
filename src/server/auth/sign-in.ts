@@ -28,7 +28,13 @@ import type { AuthProvider, Provisioning, ResolvedAuth, VerifiedIdentity } from 
 import { recordEventStatement } from './events'
 import { type Role, isRole } from './roles'
 import { type NewSession, newSession, sessionStatements } from './session'
-import { createUserStatement, normaliseEmail, type UserRow, userByEmail } from './users'
+import {
+  createUserStatement,
+  grantStatement,
+  normaliseEmail,
+  type UserRow,
+  userByEmail,
+} from './users'
 import type { FolioDb } from '../db'
 import type { FolioLogger } from '../types'
 
@@ -67,10 +73,10 @@ type RefusalDetail = 'domain' | 'not_invited' | 'role_removed' | 'mapper'
 /**
  * Signs a verified identity in, or refuses.
  *
- * The write is **one `db.batch`**: an optional `insert into users` when the
- * provider provisions, an optional role update and session purge when the
- * provider's claims moved the role, the session row, the `users` touch that
- * stamps `last_seen_at` and `provider`, and the `auth_events` rows. One round
+ * The write is **one `db.batch`**: an optional `insert into users` and its `*`
+ * grant when the provider provisions, an optional grant update and session purge
+ * when the provider's claims moved the role, the session row, the `users` touch
+ * that stamps `last_seen_at` and `provider`, and the `auth_events` rows. One round
  * trip, and an event that cannot exist without the change it records.
  *
  * The raw session token comes back for the route to put in a cookie, exactly as
@@ -209,7 +215,7 @@ export async function completeSignIn(
       now,
     )
     user = created.user
-    writes.push(created.statement)
+    writes.push(...created.statements)
   } else if (mapped === null) {
     // Their group was removed. Refusing is checkpoint 3: this provider placed
     // the role, so keeping it would be stale privilege granted by a directory
@@ -222,9 +228,10 @@ export async function completeSignIn(
     const from = user.role
     user = { ...user, role: mapped, roleFrom: provider.id }
     writes.push(
-      db
-        .prepare('update users set role = ?, role_from = ? where id = ?')
-        .bind(mapped, provider.id, user.id),
+      // The `*` grant, never `users.role` (`0011_sites.sql`). An upsert, so a
+      // user created by old code in the migrate-to-deploy window, who holds no
+      // grant yet, gets one here rather than an update that matches nothing.
+      grantStatement(db, user.id, mapped, provider.id, now),
       // Every *other* browser, mirroring what `PATCH /users/:id` does for an
       // admin's edit: a downgrade must not sit in an open socket's attachment
       // for the window a revocation may. Before the insert below, so the session

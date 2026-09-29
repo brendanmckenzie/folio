@@ -43,11 +43,13 @@ npm run deploy
 ```
 
 Steps 4 and 7 are in that order on purpose: **apply migrations before the
-Worker that needs them goes live.** Every landed migration is additive
-(`create table` / `alter table add column`), so applying one ahead of the deploy
-that uses it is safe — the old code never looks at the new column. The reverse is
-not: a new Worker reading a column that does not exist yet is a 500 on every
-request until the migration lands.
+Worker that needs them goes live.** Every landed migration up to `0010` is
+additive (`create table` / `alter table add column`), so applying one ahead of the
+deploy that uses it is safe — the old code never looks at the new column. The
+reverse is not: a new Worker reading a column that does not exist yet is a 500 on
+every request until the migration lands. `0011` is the first that is not purely
+additive, and [its section](#0011-roles-move-to-site_roles-2026-09-29) says what
+that costs between the two steps.
 
 ### The trap that catches everybody
 
@@ -85,8 +87,9 @@ and whether it needs anything from you beyond applying it.
 | `0008_asset_organisation.sql` | Asset folders, tags, and six columns on `assets` | Nothing. Existing assets land at the root with no tags. |
 | `0009` | **Permanently absent.** Nothing will ever take it: a migration numbered below `0010` cannot alter the tables `0010` creates on a fresh database, so the number is unusable. | — |
 | `0010_forms.sql` | Forms and responses | Nothing required. Add a `form()` field to a block to embed one, and a `submitted` hook to forward responses. |
+| `0011_sites.sql` | The site registry, a site column on stories, redirects, assets, folders, tags, forms, responses and shares, roles as grants in `site_roles`, preview grants; every global unique index re-keyed with the site leading | **Apply it, then deploy, within minutes, with no role changes or invitations in between**, then run the post-deploy grant statement. Read [the 0011 section](#0011-roles-move-to-site_roles-2026-09-29) first: it changes what a rollback can do. |
 
-Next free number is `0011`; spec 23 (multi-site, still a draft) claims `0011` and `0012`, so after those it is `0013`.
+Next free number is `0012`, which is claimed: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after `0011`'s. After it, `0013`.
 
 **A note on `0001_init.sql`:** it is plain `create table`, not
 `create table if not exists`. Applying it over a database that already has those
@@ -195,6 +198,94 @@ ship in the same deploy, so it is a guard against a stale browser tab, not
 against a version skew you have to manage. The user-visible symptom of a bump is
 that an editor who left a tab open across your deploy has to reload. Bumps are
 cheap and are made freely.
+
+### 0011: roles move to `site_roles` (2026-09-29)
+
+`0011_sites.sql` gives every row a site (`default`, on a deployment that
+configures no `sites`) and moves each person's role off `users` into a grant in
+`site_roles` on the scope `*`. The migration backfills one `*` grant per user from
+`users.role` and `users.role_from`. **From this release on, Folio reads and writes
+roles only in `site_roles`.** `users.role` and `users.role_from` stay in place,
+unread, until `0012` drops them. With no `sites` configured nothing you can see
+changes: one site, one role per person, the same URLs and cache tags.
+
+**Apply `0011`, then deploy, within minutes, and change no roles and invite nobody
+in between.** Until the new Worker is serving, the old one is still reading and
+writing `users.role`: a role changed or a person invited through it in that window
+lands only in the old column and is not carried over. The old code also **cannot
+create an asset tag or a form** in the window: its `on conflict (slug)` and
+`on conflict (name)` no longer match a unique index, so both fail. Nothing closes the window
+for you, deliberately — a trigger mirroring the old column would collide with the
+seeds' own grant insert and, on a rollback, mint grants from every old-code edit.
+
+**When the deploy finishes, run this once.** It is idempotent. It gives anyone who
+signed in for the first time during the window (a provider that creates accounts
+cannot be told to wait) the `*` grant their row says, and touches nobody else:
+
+```sql
+insert into site_roles (user_id, scope_id, role, role_from, created_at)
+  select id, '*', role, role_from, created_at from users
+  where id not in (select user_id from site_roles);
+```
+
+Then check that it left nobody out, which should answer `0`:
+
+```sql
+select count(*) from users where id not in (select user_id from site_roles);
+```
+
+**Seeds and bootstrap SQL change shape.** A user is two inserts now, and neither
+names `users.role`, so the same statement works before and after `0012`:
+
+```sql
+insert into users (id, email, name, created_at) values ('usr_admin', 'admin@example.com', 'Admin', 0);
+insert into site_roles (user_id, scope_id, role, created_at) values ('usr_admin', '*', 'admin', 0);
+```
+
+A script of your own that inserts `users (…, role, …)` still runs against `0011`,
+but the role it names is ignored: the person signs in as `viewer` until they have
+a grant. Change it to the shape above.
+
+**Rolling back to a build before `0011`** works on a deployment that never turned
+`sites` on, with two costs. The old code reads `users.role`, which is each
+person's role as of the migration, so first restore the column from the grants,
+which are all `*` grants on such a deployment:
+
+```sql
+update users set
+  role = coalesce(
+    (select role from site_roles where site_roles.user_id = users.id and scope_id = '*'),
+    'viewer'),
+  role_from =
+    (select role_from from site_roles where site_roles.user_id = users.id and scope_id = '*');
+```
+
+And the old code **cannot create an asset tag or a form** against `0011`: its
+`on conflict (slug)` and `on conflict (name)` no longer match a unique index, so
+both inserts fail until you roll forward again. Everything else works.
+
+**Rolling forward again** after a rollback: the grants are as they were when you
+rolled back, and the old code wrote only to `users.role`, so a role it changed is
+stale in `site_roles` — a person it demoted would get their old role back. Deploy,
+then resync every `*` grant from the column once (instead of the post-deploy
+statement above, which fills only missing grants):
+
+```sql
+insert into site_roles (user_id, scope_id, role, role_from, created_at)
+  select id, '*', role, role_from, created_at from users where true
+  on conflict (user_id, scope_id) do update
+    set role = excluded.role, role_from = excluded.role_from;
+```
+
+**Turning `sites` on is the point of no return.** Once a deployment has a second
+site, code with no site dimension would serve every site's rows as one site, so
+there is no rolling back past this release from there. Roll forward instead.
+
+**`0012` comes in the release after, never in the same step.** It drops
+`users.role` and `users.role_from`. Applied together with `0011` from a build
+before `0011`, it removes the column the still-running old Worker signs people in
+with, and takes sign-in down until the deploy finishes. Deploy the release that
+carries `0011` everywhere it will go, then take `0012` with the next one.
 
 ### A title-only patch no longer moves the page (2026-09-06)
 
@@ -317,8 +408,11 @@ from a pushed ref, so an older pin is always installable.
 **The database does not roll back.** Content migrations have no `down`, and D1
 migrations are not reverted by pointing `migrations_dir` at an older package —
 `wrangler` will simply report fewer pending files than the database has already
-applied. Every landed migration is additive, so an older Worker against a newer
-schema works: it ignores the columns and tables it does not know about.
+applied. Every landed migration up to `0010` is additive, so an older Worker
+against a newer schema works: it ignores the columns and tables it does not know
+about. **`0011` is the exception**: rolling back past it needs one statement first
+and loses two writes, and is impossible once `sites` is on — see
+[its section](#0011-roles-move-to-site_roles-2026-09-29).
 
 The exception is content. A content migration that rewrote documents has already
 rewritten them, through the mutation log — so the recovery is the History tab

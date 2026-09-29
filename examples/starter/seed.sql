@@ -17,14 +17,19 @@ insert into stories (id, type, parent_id, slug, path, ord, title) values
 -- an admin is an endpoint that creates an admin. So the first row is a deploy
 -- step, and this is it.
 --
--- Roles are 'viewer', 'editor', 'publisher' or 'admin'. Email is matched
--- lowercased, so one account per address rather than one per spelling.
+-- Roles are 'viewer', 'editor', 'publisher' or 'admin', and a role is a grant on a
+-- scope in `site_roles`: `*` is every scope. Email is matched lowercased, so one
+-- account per address rather than one per spelling.
 --
--- On a real deployment, run the same insert against the remote database:
+-- On a real deployment, run the same two inserts against the remote database:
 --
 --   wrangler d1 execute folio --remote --command \
---     "insert into users (id, email, name, role, created_at) \
---      values ('usr_0000000000ad', 'you@example.com', 'You', 'admin', unixepoch() * 1000)"
+--     "insert into users (id, email, name, created_at) \
+--      values ('usr_0000000000ad', 'you@example.com', 'You', unixepoch() * 1000); \
+--      insert into site_roles (user_id, scope_id, role, created_at) \
+--      values ('usr_0000000000ad', '*', 'admin', unixepoch() * 1000)"
 --
-insert into users (id, email, name, role, created_at) values
-  ('usr_0000000000ad', 'you@example.com', 'You', 'admin', unixepoch() * 1000);
+insert into users (id, email, name, created_at) values
+  ('usr_0000000000ad', 'you@example.com', 'You', unixepoch() * 1000);
+insert into site_roles (user_id, scope_id, role, created_at) values
+  ('usr_0000000000ad', '*', 'admin', unixepoch() * 1000);

@@ -1786,3 +1786,59 @@ are the single-site regression gate, seeds included.
   (decision 4).
 - **Per-site theming of the admin.**
 - **Moving a site between deployments.**
+
+## Implementation notes
+
+### Phase 1 (2026-09-29)
+
+`0011_sites.sql` is the "D1 migration `0011_sites.sql`" block above, byte for byte,
+under a header comment. Where the spec was wrong or silent:
+
+- **"With foreign keys off" is not available.** D1 in workerd pins
+  `PRAGMA foreign_keys` at 1: the statement is accepted and changes nothing, so
+  `site_roles`' `on delete cascade` fires in every test whatever the batch does.
+  (Ground truth's "`auth-session.test.ts` asserts it with foreign keys off" was
+  already untrue at `133bb7f`; that file's passkeys test says so.) `deleteUser`'s
+  explicit `delete from site_roles` is proven the way the passkeys delete is: a
+  proxy records the batch's statements, the test asserts the delete is in it,
+  unnarrowed by scope and ahead of the row's own, and then that no grant is left on
+  either of two scopes. Removing the statement turns that test red and leaves
+  `users-contract.test.ts`' own "no grant is left" assertions green: the cascade
+  hides it everywhere a proxy is not watching. The same substitution governs
+  phase 5's grant-revocation tests: revoke by an `update` that expires the session
+  or token, so no cascade runs and only the join can refuse (owner, 2026-09-29).
+- **`StoryMeta.site` is optional on the type**, not the `site: string` of Core
+  types. Every row read from D1 carries it (`COLS` selects `site_id as site,
+  forked_from as forkedFrom`) and `createStory` sets it, but a required field
+  breaks the hand-built `StoryMeta` literals in eleven unit test files, which is
+  the reason `schemaId` is optional too. A later phase that reads `story.site`
+  reads it as `string | undefined` until those literals carry one.
+- **Two tests outside the phase's file list pin what 0011 moves**, and the
+  phase is not green without them: `test/workers/smoke.test.ts` lists every table
+  (0011 adds four), and `test/unit/server/pure.test.ts` pins
+  `redirectStatements`' bind list (it gains `site_id`). Ground truth's "Tests and
+  seeds that pin what this spec moves" names neither.
+- **`readSession` reads the `*` grant by a left join**, not decision 10's
+  correlated `json_group_array`, which is phase 3's when grants on other scopes
+  start to matter. A user with no `*` grant reads as `viewer`, the same
+  fail-closed answer an unknown role gets; the statement count does not move.
+- **`listUsers` reads the grant by correlated subqueries, not a join**: its keyset
+  resumes over bare `created_at` and `id`, which `site_roles` also has.
+- **`updateUser` writes the grant only when `role` is in the patch**, carrying
+  `role_from` through as the old `update users set role = ?` did. A rename writes
+  no grant. Every role write is an upsert on `(user_id, scope_id)`, so a user
+  created by old code in the migrate-to-deploy window gets a grant from the first
+  role change rather than an update that matches nothing.
+- `auth/events.ts` reads no role and needed no change.
+- **The index set before and after 0011 differs only by the intended re-keys**,
+  asserted in `migrations.test.ts` over a database rebuilt from nothing inside the
+  test (`0001`…`0010`, a row in every table 0011 alters or rebuilds and a user at
+  every role, then 0011): thirteen indexes gain `site_id` as their leading column
+  and are otherwise the same statement; `redirects`' primary key becomes
+  `(site_id, from_path)`; the `unique` column constraints on `asset_folders.path` and
+  `asset_tags.slug` (`sqlite_autoindex_asset_folders_2`, `_asset_tags_2`) become
+  the named `asset_folders_path` and `asset_tags_slug`; `form_responses` gains
+  `form_responses_site`; the four new tables bring eight named indexes and four
+  primary keys. Every other index is unchanged, and every
+  row of every touched table survives with `site_id = 'default'` (`api_tokens`
+  null).

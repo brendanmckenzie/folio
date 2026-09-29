@@ -121,8 +121,8 @@ export interface UserActor {
    */
   provider?: string | null
   /**
-   * `users.email` and `users.role_from`, both filled from the join `readSession`
-   * already runs, so neither costs a query.
+   * `users.email` and the `*` grant's `site_roles.role_from`, both filled from the
+   * statement `readSession` already runs, so neither costs a query.
    *
    * **Optional for the same reason `provider` is**: a `UserActor` built to ask a
    * permission question has no row behind it. `GET {base}/api/me` projects both so

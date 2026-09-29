@@ -48,6 +48,7 @@ beforeEach(async () => {
     // Before `users`, and explicitly rather than by cascade, for the same reason
     // `deleteUser` batches it: this file must not depend on a pragma to be clean.
     env.DB.prepare('delete from passkeys'),
+    env.DB.prepare('delete from site_roles'),
     env.DB.prepare('delete from users'),
   ])
 })
@@ -72,14 +73,39 @@ describe('users', () => {
 
   it('refuses an unknown role at the column, so it can never be stored at all', async () => {
     const user = await seedUser()
-    // 0007's CHECK constraint is the outer defence; `isRole`'s fall back to
-    // `viewer` inside `toUser` is the inner one, for a database written by a
+    // `site_roles.role`'s CHECK (0011) is the outer defence; `isRole`'s fall back
+    // to `viewer` inside `toUser` is the inner one, for a database written by a
     // deploy that knew a role this build does not. Neither may fail *open*, and
     // this is the one of the two that is observable from here.
     await expect(
-      env.DB.prepare('update users set role = ? where id = ?').bind('owner', user.id).run(),
+      env.DB.prepare("update site_roles set role = ? where user_id = ? and scope_id = '*'")
+        .bind('owner', user.id)
+        .run(),
     ).rejects.toThrow(/CHECK constraint failed/)
     expect((await userById(env.DB, user.id))?.role).toBe('editor')
+  })
+
+  it('keeps the role in the `*` grant, and a user with no grant reads as viewer', async () => {
+    const user = await seedUser()
+    const grants = () =>
+      env.DB.prepare('select scope_id, role, role_from from site_roles where user_id = ?')
+        .bind(user.id)
+        .all<{ scope_id: string; role: string; role_from: string | null }>()
+        .then((r) => r.results)
+    expect(await grants()).toEqual([{ scope_id: '*', role: 'editor', role_from: null }])
+
+    await updateUser(env.DB, user.id, { role: 'publisher' })
+    expect(await grants()).toEqual([{ scope_id: '*', role: 'publisher', role_from: null }])
+
+    // A rename writes no grant at all: the old `users.role` write on every patch
+    // is what made a mirroring trigger unsafe (multi-site.md decision 18).
+    await env.DB.prepare('delete from site_roles where user_id = ?').bind(user.id).run()
+    await updateUser(env.DB, user.id, { name: 'Annabel' })
+    expect(await grants()).toEqual([])
+    // Fails closed, like an unknown role: no grant is the weakest role, not a 500.
+    expect((await userById(env.DB, user.id))?.role).toBe('viewer')
+    const { token } = await createSession(env.DB, user.id)
+    expect(((await readSession(env.DB, token)) as UserActor).role).toBe('viewer')
   })
 
   it('changes a role without touching the name, and the other way round', async () => {
@@ -163,6 +189,49 @@ describe('users', () => {
 
     // Half two: nothing is left behind.
     const left = await env.DB.prepare('select count(*) as n from passkeys').first<{ n: number }>()
+    expect(left?.n).toBe(0)
+  })
+
+  /**
+   * The same two halves for `site_roles` (`0011_sites.sql`), whose `user_id`
+   * declares `on delete cascade` — which, as above, fires here whatever the batch
+   * does, so the recorded statement is the only thing that says the batch did it.
+   * Grants on two scopes, so a delete narrowed to `*` would leave one behind.
+   */
+  it('deleting a user removes every grant they hold from the batch, not from a cascade', async () => {
+    const user = await seedUser()
+    await env.DB.prepare(
+      `insert into site_roles (user_id, scope_id, role, created_at) values (?, 'alpha', 'publisher', 1)`,
+    )
+      .bind(user.id)
+      .run()
+
+    const prepared: string[] = []
+    const db = new Proxy(env.DB, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver)
+        if (prop !== 'prepare') return typeof value === 'function' ? value.bind(target) : value
+        return (sql: string) => {
+          prepared.push(sql)
+          return (value as D1Database['prepare']).call(target, sql)
+        }
+      },
+    })
+
+    expect(await deleteUser(db, user.id)).toBe(true)
+
+    // Half one: the delete is in the batch, unnarrowed by scope, before the row's.
+    const grantsAt = prepared.findIndex((sql) =>
+      /^delete from site_roles where user_id = \?$/.test(sql),
+    )
+    const usersAt = prepared.findIndex((sql) => sql.includes('delete from users'))
+    expect(grantsAt).toBeGreaterThan(-1)
+    expect(grantsAt).toBeLessThan(usersAt)
+
+    // Half two: nothing is left behind, on either scope.
+    const left = await env.DB.prepare('select count(*) as n from site_roles where user_id = ?')
+      .bind(user.id)
+      .first<{ n: number }>()
     expect(left?.n).toBe(0)
   })
 })

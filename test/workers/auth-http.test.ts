@@ -386,7 +386,11 @@ describe('role gates', () => {
 
     // And the row really did not change — a refusal that had already written it
     // would be the worst of both.
-    const row = await env.DB.prepare('select role from users where id = ?')
+    // The `*` grant, which is where a role lives since 0011; `users.role` is
+    // unread and `0012` drops it.
+    const row = await env.DB.prepare(
+      "select role from site_roles where user_id = ? and scope_id = '*'",
+    )
       .bind(target.id)
       .first<{ role: string }>()
     expect(row?.role).toBe('editor')

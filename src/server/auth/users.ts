@@ -1,6 +1,15 @@
 /**
  * The `users` table: editors, their global role, and their presence colour.
  *
+ * **The role lives in `site_roles`, not on the row** (`0011_sites.sql`,
+ * `../../../docs/specs/foundation/multi-site.md` decision 18). Every read here
+ * takes it from the `*` grant and every write puts it there; `users.role` and
+ * `users.role_from` are still columns until `0012` drops them, and nothing in
+ * this file names either. `test/workers/users-contract.test.ts` runs this module
+ * against a database with those columns gone, which is the only proof a column
+ * is unread: a grep for `users.role` matches neither `u.role` nor a `COLUMNS`
+ * string.
+ *
  * Pure over a `D1Database`, with no Request anywhere — the same discipline
  * stories.ts and versions.ts already keep, and for the same reason: the routes
  * are a translation layer, and a scheduled job or a Durable Object alarm has no
@@ -38,7 +47,8 @@ interface RawUser {
   email: string
   name: string
   colour: string | null
-  role: string
+  /** Null when the user holds no `*` grant. */
+  role: string | null
   provider: string | null
   role_from: string | null
   created_at: number
@@ -47,7 +57,8 @@ interface RawUser {
 
 /**
  * A row whose `role` is not one this build declares reads as `viewer`, the
- * weakest: a database written by a newer deploy must not fail *open*.
+ * weakest: a database written by a newer deploy must not fail *open*. So does a
+ * row with no `*` grant at all.
  */
 function toUser(row: RawUser): UserRow {
   return {
@@ -63,7 +74,38 @@ function toUser(row: RawUser): UserRow {
   }
 }
 
-const COLUMNS = 'id, email, name, colour, role, provider, role_from, created_at, last_seen_at'
+/**
+ * The row, with the role and who decided it read off the `*` grant.
+ *
+ * Correlated subqueries rather than a join: `listUsers` resumes a keyset over
+ * bare `created_at` and `id`, and `site_roles` has a `created_at` of its own, so
+ * a join would make the cursor's column ambiguous. Each subquery is one probe of
+ * `site_roles`' primary key. A user with no `*` grant reads a null role, which
+ * `toUser` answers as `viewer` — the same fail-closed reading an unknown role gets.
+ */
+const COLUMNS = `id, email, name, colour, provider, created_at, last_seen_at,
+  (select role from site_roles where user_id = users.id and scope_id = '*') as role,
+  (select role_from from site_roles where user_id = users.id and scope_id = '*') as role_from`
+
+/**
+ * The `*` grant, written or replaced. `role_from` is set by whoever decided the
+ * role: null for Folio, a provider id for claims.
+ */
+export function grantStatement(
+  db: FolioDb,
+  userId: string,
+  role: Role,
+  roleFrom: string | null,
+  at = Date.now(),
+): D1PreparedStatement {
+  return db
+    .prepare(
+      `insert into site_roles (user_id, scope_id, role, role_from, created_at)
+       values (?, '*', ?, ?, ?)
+       on conflict (user_id, scope_id) do update set role = excluded.role, role_from = excluded.role_from`,
+    )
+    .bind(userId, role, roleFrom, at)
+}
 
 /**
  * The colour presence shows for a user. `fallbackColour` is the same derivation
@@ -141,8 +183,8 @@ export interface UserInput {
  * overwrites it with the name the provider asserts.
  */
 export async function createUser(db: FolioDb, input: UserInput): Promise<UserRow> {
-  const { user, statement } = createUserStatement(db, input)
-  await statement.run()
+  const { user, statements } = createUserStatement(db, input)
+  await db.batch(statements)
   return user
 }
 
@@ -154,12 +196,16 @@ export async function createUser(db: FolioDb, input: UserInput): Promise<UserRow
  * the id before the write happens — which it does, because the id is minted here
  * rather than by the database. `createUser` above is the same thing for a caller
  * with nothing to batch it with.
+ *
+ * **Two statements, in this order**: the row, then its `*` grant, which names the
+ * row. The insert does not name `role`, so the column's default fills it while it
+ * exists and nothing breaks when `0012` drops it.
  */
 export function createUserStatement(
   db: FolioDb,
   input: UserInput,
   at = Date.now(),
-): { user: UserRow; statement: D1PreparedStatement } {
+): { user: UserRow; statements: D1PreparedStatement[] } {
   const email = normaliseEmail(input.email)
   const user: UserRow = {
     id: mintId('usr'),
@@ -172,27 +218,27 @@ export function createUserStatement(
     createdAt: at,
     lastSeenAt: null,
   }
-  const statement = db
-    .prepare(
-      `insert into users (id, email, name, colour, role, provider, role_from, created_at)
-       values (?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      user.id,
-      user.email,
-      user.name,
-      user.colour,
-      user.role,
-      user.provider,
-      user.roleFrom,
-      user.createdAt,
-    )
-  return { user, statement }
+  const statements = [
+    db
+      .prepare(
+        `insert into users (id, email, name, colour, provider, created_at)
+         values (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(user.id, user.email, user.name, user.colour, user.provider, user.createdAt),
+    grantStatement(db, user.id, user.role, user.roleFrom, at),
+  ]
+  return { user, statements }
 }
 
 /**
  * Renames a user or changes their role. Absent keys are left alone rather than
  * nulled, so a role change is one field and cannot silently rename anyone.
+ *
+ * The grant is written only when `role` is in the patch, carrying `role_from`
+ * through unchanged, as the old `update users set role = ?` did
+ * (`PATCH /api/users/:id` refuses a role a provider placed before it gets this
+ * far, so through the route it is null). The old column write on every patch is
+ * what made a mirroring trigger unsafe (decision 18).
  */
 export async function updateUser(
   db: FolioDb,
@@ -207,23 +253,30 @@ export async function updateUser(
     role: patch.role ?? current.role,
     colour: patch.colour === undefined ? current.colour : patch.colour,
   }
-  await db
-    .prepare('update users set name = ?, role = ?, colour = ? where id = ?')
-    .bind(next.name, next.role, next.colour, id)
-    .run()
+  const row = db
+    .prepare('update users set name = ?, colour = ? where id = ?')
+    .bind(next.name, next.colour, id)
+  if (patch.role === undefined) {
+    await row.run()
+    return next
+  }
+  await db.batch([row, grantStatement(db, id, next.role, next.roleFrom)])
   return next
 }
 
 /**
- * Removes an editor, every session they hold and every passkey they enrolled,
- * in one batch.
+ * Removes an editor, every session they hold, every passkey they enrolled and
+ * every grant they hold, in one batch.
  *
- * Both deletes are explicit rather than left to the `on delete cascade` their
- * columns declare: whether D1 enforces foreign keys is a property of the
+ * All three deletes are explicit rather than left to the `on delete cascade`
+ * their columns declare: whether D1 enforces foreign keys is a property of the
  * database, and "removing someone's access takes effect immediately" is the
  * entire point of this feature — too load-bearing to rest on a pragma.
- * `test/workers/auth-session.test.ts` asserts both **with foreign keys off**,
- * which is the only way to see that the batch and not the pragma did it.
+ * `test/workers/auth-session.test.ts` records the batch's statements through a
+ * proxy and asserts the passkeys and grants deletes are in it, ahead of the
+ * row's own, and that nothing is left behind. It cannot turn foreign keys off to watch the batch
+ * alone: D1 in workerd pins `PRAGMA foreign_keys` at 1, so the cascade would
+ * fire either way, and only the recorded statement says the batch did it.
  *
  * Their *history* is not touched: `versions.actor` and `auth_events.user_id`
  * store strings, not foreign keys, so an access change never rewrites the record
@@ -238,6 +291,9 @@ export async function deleteUser(db: FolioDb, id: string): Promise<boolean> {
     // an orphan row whose `user_id` no longer resolves, and `passkeyForAssertion`
     // would spend a round trip on it at every sign-in attempt.
     db.prepare('delete from passkeys where user_id = ?').bind(id),
+    // Every scope, not only `*`: a grant naming a removed user is an orphan the
+    // Access screen would list against nobody.
+    db.prepare('delete from site_roles where user_id = ?').bind(id),
     db.prepare('delete from users where id = ?').bind(id),
   ])
   return true

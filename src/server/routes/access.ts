@@ -118,13 +118,13 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     if (await userByEmail(db, body.email)) {
       throw new FolioError('conflict', 'Someone with that address already has access.')
     }
-    // The insert and its `auth_events` row in one batch, `createUserStatement`
-    // rather than `createUser` for exactly the reason `completeSignIn` uses it:
-    // the id has to exist before the write happens, which it does because it is
-    // minted here rather than by the database.
-    const { user, statement } = createUserStatement(db, body)
+    // The insert, its `*` grant and its `auth_events` row in one batch,
+    // `createUserStatement` rather than `createUser` for exactly the reason
+    // `completeSignIn` uses it: the id has to exist before the write happens,
+    // which it does because it is minted here rather than by the database.
+    const { user, statements } = createUserStatement(db, body)
     await db.batch([
-      statement,
+      ...statements,
       recordEventStatement(db, {
         kind: 'user_invited',
         userId: user.id,
@@ -182,7 +182,7 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     /**
      * **A role an identity provider placed is not Folio's to edit**
      * (`../../../docs/specs/foundation/auth-providers.md` decision 5,
-     * checkpoint 2). `users.role_from` records who decided it, and when a
+     * checkpoint 2). The `*` grant's `role_from` records who decided it, and when a
      * provider did, the remedy for a group change is in the directory — which is
      * where a tenant that delegated roles to it expects to find it.
      *
@@ -252,7 +252,7 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       throw new FolioError('not_found', 'Unknown user')
     }
     // After the delete, not in its batch: `deleteUser` runs its own (sessions,
-    // passkeys, the row), and `userId` here is informational rather than a
+    // passkeys, grants, the row), and `userId` here is informational rather than a
     // foreign key — this row is meant to outlive the account it is about, the
     // same as every other `auth_events` row naming a user who is later removed.
     await db.batch([

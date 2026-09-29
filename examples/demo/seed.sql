@@ -25,10 +25,18 @@ insert into stories (id, type, parent_id, slug, path, ord, title) values
 --
 -- Three roles, so scripts/auth-test.mjs can exercise the role table rather than
 -- describe it: `demo@example.com` is the admin the other e2e scripts sign in as.
-insert into users (id, email, name, role, created_at) values
-  ('usr_demoadmin1', 'demo@example.com',   'Demo Admin',  'admin',  unixepoch() * 1000),
-  ('usr_demoeditor', 'editor@example.com', 'Demo Editor', 'editor', unixepoch() * 1000),
-  ('usr_demoviewer', 'viewer@example.com', 'Demo Viewer', 'viewer', unixepoch() * 1000);
+--
+-- The role is a `*` grant in `site_roles`, not a column on the row
+-- (0011_sites.sql). `users.role` is deliberately not named, so its default fills
+-- it while the column exists and this file keeps working when 0012 drops it.
+insert into users (id, email, name, created_at) values
+  ('usr_demoadmin1', 'demo@example.com',   'Demo Admin',  unixepoch() * 1000),
+  ('usr_demoeditor', 'editor@example.com', 'Demo Editor', unixepoch() * 1000),
+  ('usr_demoviewer', 'viewer@example.com', 'Demo Viewer', unixepoch() * 1000);
+insert into site_roles (user_id, scope_id, role, created_at) values
+  ('usr_demoadmin1', '*', 'admin',  unixepoch() * 1000),
+  ('usr_demoeditor', '*', 'editor', unixepoch() * 1000),
+  ('usr_demoviewer', '*', 'viewer', unixepoch() * 1000);
 
 -- An API token, for platform/content-api.md. Same reasoning as the users above,
 -- one rung more so: the Content API is the surface you reach for with `curl`

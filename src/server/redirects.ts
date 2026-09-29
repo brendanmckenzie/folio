@@ -139,13 +139,15 @@ export function redirectStatements(db: FolioDb, input: RedirectWrite): D1Prepare
     // 2. Collapse every existing chain that pointed at the path just vacated.
     db.prepare('update redirects set to_path = ? where to_path = ?').bind(to, from),
     // 3. The redirect for the path just vacated. `or replace` because the same
-    //    path can be vacated more than once over a site's life.
+    //    path can be vacated more than once over a site's life. The key is
+    //    `(site_id, from_path)` since `0011_sites.sql`, so the site is bound
+    //    rather than left to the column default; single-site until phase 2.
     db
       .prepare(
-        `insert or replace into redirects (from_path, to_path, status, source, story_id, created_at)
-         values (?, ?, ?, ?, ?, ?)`,
+        `insert or replace into redirects (from_path, to_path, status, source, story_id, created_at, site_id)
+         values (?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(from, to, status, source, input.storyId, createdAt),
+      .bind(from, to, status, source, input.storyId, createdAt, 'default'),
   ]
 }
 
@@ -338,10 +340,11 @@ export async function upsertRedirect(db: FolioDb, input: UpsertRedirectInput): P
 
   await db
     .prepare(
-      `insert or replace into redirects (from_path, to_path, status, source, story_id, created_at)
-       values (?, ?, ?, 'manual', null, ?)`,
+      `insert or replace into redirects (from_path, to_path, status, source, story_id, created_at, site_id)
+       values (?, ?, ?, 'manual', null, ?, ?)`,
     )
-    .bind(from, to, status, createdAt)
+    // Bound, as `redirectStatements` binds it: the key is `(site_id, from_path)`.
+    .bind(from, to, status, createdAt, 'default')
     .run()
 
   return { from, to, status, source: 'manual', storyId: null, createdAt }

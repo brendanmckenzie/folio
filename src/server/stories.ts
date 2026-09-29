@@ -53,7 +53,7 @@ const COLS = `id, type, parent_id as parentId, slug, path, ord, title, title_i18
               published_at as publishedAt, unpublished_at as unpublishedAt,
               updated_at as updatedAt, draft_sync_id as draftSyncId,
               draft_updated_at as draftUpdatedAt, published_sync_id as publishedSyncId,
-              schema_id as schemaId`
+              schema_id as schemaId, site_id as site, forked_from as forkedFrom`
 
 /**
  * `StoryState`, in SQL — the same rule `core/story.ts`'s `draftState` states in
@@ -1510,6 +1510,10 @@ export async function createStory(
     draftUpdatedAt: null,
     publishedSyncId: 0,
     schemaId: input.schemaId ?? null,
+    // Every write names its scope (`0011_sites.sql`). Single-site until phase 2
+    // threads the request's scope through.
+    site: 'default',
+    forkedFrom: null,
     state: 'draft',
     hasUnpublishedChanges: false,
     updatedAt: Date.now(),
@@ -1522,8 +1526,8 @@ export async function createStory(
   // An unrouted document claims no path, so there is nothing to clear.
   const insert = db
     .prepare(
-      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, schema_id)
-       values (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, schema_id, site_id)
+       values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .bind(
       story.id,
@@ -1535,6 +1539,7 @@ export async function createStory(
       story.title,
       story.updatedAt,
       story.schemaId ?? null,
+      story.site,
     )
   await db.batch(
     story.path === null ? [insert] : [insert, clearRedirectAtStatement(db, story.path)],
@@ -1572,11 +1577,11 @@ export async function ensureSingleton(
   const now = Date.now()
   await db
     .prepare(
-      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, schema_id)
-       values (?, ?, null, ?, null, 'a0', ?, ?, ?)
+      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, schema_id, site_id)
+       values (?, ?, null, ?, null, 'a0', ?, ?, ?, ?)
        on conflict (id) do nothing`,
     )
-    .bind(id, type.name, type.name, type.label, now, schemaId)
+    .bind(id, type.name, type.name, type.label, now, schemaId, 'default')
     .run()
 
   const row = await storyById(db, id)

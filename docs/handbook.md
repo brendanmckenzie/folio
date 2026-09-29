@@ -2563,9 +2563,15 @@ could make would be worth more than:
 
 ```sh
 wrangler d1 execute folio --remote --command \
-  "insert into users (id, email, name, role, created_at)
-   values ('usr_first', 'you@example.com', 'You', 'admin', unixepoch() * 1000)"
+  "insert into users (id, email, name, created_at)
+   values ('usr_first', 'you@example.com', 'You', unixepoch() * 1000);
+   insert into site_roles (user_id, scope_id, role, created_at)
+   values ('usr_first', '*', 'admin', unixepoch() * 1000)"
 ```
+
+The role is a grant in `site_roles`, not a column on the user, and `*` is every
+scope. `users.role` is left unnamed on purpose: nothing reads it, and `0012` drops
+it.
 
 After that, an `admin` manages editors and tokens from the **Access** rail in the
 editor. Adding an editor sends no mail: the row *is* the invitation, and they

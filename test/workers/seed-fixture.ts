@@ -47,10 +47,12 @@ const statements = splitSqlStatements(seedSql)
  */
 export async function applySeedFixture(db: D1Database): Promise<void> {
   // `api_tokens.created_by` points at a `users` row, so it goes first; `shares` has
-  // no foreign key at all and could go anywhere.
+  // no foreign key at all and could go anywhere. `site_roles` is cleared explicitly
+  // rather than left to its `on delete cascade`, as `deleteUser` does.
   await db.batch([
     db.prepare('delete from shares'),
     db.prepare('delete from api_tokens'),
+    db.prepare('delete from site_roles'),
     db.prepare('delete from users'),
   ])
   await db.batch(statements.map((sql) => db.prepare(sql)))

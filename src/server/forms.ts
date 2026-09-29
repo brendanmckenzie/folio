@@ -622,7 +622,7 @@ export interface CreateFormInput {
 /**
  * A new, empty form.
  *
- * **`insert … on conflict (name) do nothing`, then read back**, rather than a
+ * **`insert … on conflict (site_id, name) do nothing`, then read back**, rather than a
  * bare insert: the `unique` index is the arbiter and a lost race must answer the
  * same 409 naming the same form as a lost pre-check, not D1's constraint text.
  * The pre-check exists as well, because it is what makes the message name the
@@ -637,11 +637,14 @@ export async function createForm(db: FolioDb, input: CreateFormInput): Promise<F
   const now = Date.now()
   const result = await db
     .prepare(
-      `insert into forms (id, name, label, fields, version, open, created_at, updated_at)
-       values (?, ?, ?, '[]', 1, 1, ?, ?)
-       on conflict (name) do nothing`,
+      `insert into forms (id, name, label, fields, version, open, created_at, updated_at, site_id)
+       values (?, ?, ?, '[]', 1, 1, ?, ?, ?)
+       on conflict (site_id, name) do nothing`,
     )
-    .bind(id, name, input.label, now, now)
+    // The target is `forms_name`'s columns exactly (`0011_sites.sql`): a target
+    // naming fewer matches no unique index and D1 refuses the statement.
+    // Single-site until phase 7 scopes forms.
+    .bind(id, name, input.label, now, now, 'default')
     .run()
 
   if ((result.meta.changes ?? 0) === 0) {

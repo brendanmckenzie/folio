@@ -68,6 +68,21 @@ export interface StoryMeta {
    * touching every hand-built `StoryMeta` literal in the tree for no gain.
    */
   titleI18n?: Record<string, string> | null
+  /**
+   * The scope that owns the document: a site id, a group id or `shared`
+   * (`../../docs/specs/foundation/multi-site.md` decision 3). `'default'` on
+   * a deployment with no `sites`, which is every row `0011_sites.sql` backfilled.
+   *
+   * Always present on a row read from D1 (`COLS` selects it). Optional on the type
+   * for the reason `schemaId` is: the spec's `site: string` would mean touching
+   * every hand-built `StoryMeta` literal in the tests, which phase 1 does not own.
+   */
+  site?: string
+  /**
+   * The inherited document this one was forked from, or null for one that was
+   * written here (decision 5). Nothing on a single-site deployment sets it.
+   */
+  forkedFrom?: string | null
   /** Derived, not stored — see `draftState`. */
   state: StoryState
   /** Derived, not stored: `state === 'changed'`, named for callers that only

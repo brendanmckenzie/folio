@@ -813,6 +813,7 @@ describe('redirectStatements', () => {
       'auto',
       'sty_about',
       expect.any(Number),
+      'default',
     ])
   })
 

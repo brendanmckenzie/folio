@@ -588,9 +588,15 @@ first admin — an endpoint that creates an admin is an endpoint that creates an
 admin. So it is a deploy step:
 
 ```bash
+ID="usr_$(openssl rand -hex 8)"
 wrangler d1 execute folio --remote \
-  --command "insert into users (id, email, name, role, created_at) values ('usr_$(openssl rand -hex 8)', 'you@example.com', 'You', 'admin', unixepoch() * 1000)"
+  --command "insert into users (id, email, name, created_at) values ('$ID', 'you@example.com', 'You', unixepoch() * 1000);
+             insert into site_roles (user_id, scope_id, role, created_at) values ('$ID', '*', 'admin', unixepoch() * 1000)"
 ```
+
+The role is a grant, not a column on the user: `*` is every scope, and `*` with
+`admin` is the platform admin. Leave `users.role` unnamed, as above; it is
+unread, and `0012` drops it.
 
 > If login "does nothing", this is almost always why. The login route answers
 > 200 identically whether or not an address is known — so it cannot be used to
