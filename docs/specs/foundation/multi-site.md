@@ -2607,3 +2607,36 @@ than the spec's first plan:
 
 - **`reader.page()`'s `headers` carry `frame-ancestors <sites.admin>` on the preview surface.** Decisions 13 and 15 expected it, but only Folio's own responses passed through `framedBy`; a page a host renders and answers with `page.headers` did not, so a preview-origin page was frameable by anyone. It is added in `page()` for a multi-site deployment's preview surface only, never live and never single-site, and no policy is replaced (`cacheHeaders` and `no-store` set none). `draftAt()` returns a document, not headers, so it needs nothing.
 - **A sign-in with no `next` lands on `{base}/` on a multi-site deployment, and an unscoped `{base}/edit` redirects there.** The default was `{base}/edit`, which has no root to open without a scope and 404s (decision 11), so the magic-link email ended on a 404. `editorUrl` in `routes/auth.ts` and the login redirect in `requireHtmlAccess` now default to the unscoped shell when `rt.sites` is set (single-site keeps `{base}/edit`), and `GET {base}/edit` with no scope is a 302 to `{base}/` for old bookmarks. `{base}/edit/:id` with no scope is unchanged. An explicit `next` still wins.
+
+### Staging (2026-09-30)
+
+- **What staging runs.** `staging.allaboutafrica.au` runs Folio
+  `11cfc71c9fa1097a9b5154030b7cc8a6f4fbd6f4` with `sites` on: the admin is
+  `staging-cms.allaboutafrica.au`, `staging.allaboutafrica.au` is the `default` site's
+  live host, and `staging-preview.allaboutafrica.au` its preview origin. `0011` is
+  applied to its D1; `0012` is applied nowhere and is not written. Production
+  `allaboutafrica.au` and `takeoffgo.com` stay on their earlier pins.
+- **Verified from the far side.** The `0011` read-back (one `*` grant per user, the
+  re-keyed `stories_path`, `site_id, forked_from` last); `sites/resolve` answering
+  `live` and `preview` for the two hosts; `cache-probe` with `--admin --site --preview`
+  13 passed, 0 failed: live MISS then HIT, the preview a separate entry, both purged by
+  one publish; `noindex` on every staging host, `frame-ancestors` naming the admin on
+  the preview origin and absent on the live host, `site:default` in the live page's
+  `Cache-Tag`.
+- **Browser pass 1, same-site** (Chrome, Firefox, Safari 26.2+): the pane showed the
+  draft, *Open preview in a new tab* showed it top-level, signing out ended it, and a
+  share opened its one page's draft in a private window and nothing else. **Pass 2,
+  cross-site**, with the preview origin pointed at the Worker's `workers.dev`
+  hostname for its duration: passed in all three, so the partitioned grant cookie
+  works where a same-site iframe could not prove it. The preview origin was switched
+  back afterwards and read back.
+- **What staging found that no test did**, each fixed and released before the passes
+  finished: a host's `reader.page()` on the preview origin carried no
+  `frame-ancestors`; a sign-in with no `next` landed on an unscoped `{base}/edit` that
+  404s; and the documented host redirect of `{base}/…` on every non-admin host bounced
+  the preview origin's handoff (the rule is live hosts only). `wrangler d1 export`
+  refuses a database with FTS5 tables, so the pre-`0011` rollback on staging is a Time
+  Travel bookmark plus a data-only export of the real tables.
+- **Next:** spec phase 10, `0012_users_role_contract.sql`, is the release after this
+  one, once this release is deployed everywhere it will go.
+

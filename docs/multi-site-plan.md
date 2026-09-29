@@ -286,6 +286,9 @@ wrong. Each phase's own `## Implementation notes` entry in the spec has the deta
 | 7 | `3a8d561` | Review: no leak; deleting a fork wrote an auto-redirect that blocked fallback; fixed |
 | 8 | `d176235` | `/me` carries one `sites` object; the asset and form pickers cannot badge by scope yet |
 | 9 | `a013f58` | A grant alone did not give a host's `reader.page()` drafts, against decision 13 step 4; fixed to the spec. Release gate green: 5091 tests, 22/22 e2e |
+| R | `e36000e`, then `45062ac`, `11cfc71` | Released three times, each through `release.mjs --tag`; the later two are fixes staging found (preview-page `frame-ancestors`; the post-sign-in 404) |
+| S | staging `9cd21fe9` | C2–C4 as planned. `d1 export` refuses FTS5 tables, so the rollback is the Time Travel bookmark plus a data-only export. The admin redirect had to skip the preview origin |
+| V | — | `0011` read back; probe 13 passed, 0 failed; headers as specified after the fix; browser passes 1 and 2 passed in Chrome, Firefox and Safari 26.2+ |
 
 ## The phases
 
