@@ -7,9 +7,10 @@
  * uses `loadStory`.
  */
 import { Hono } from 'hono'
+import { layerId } from '../../core/sites'
 import { type SocketIdentity, withIdentity } from '../auth/identity'
 import { READ_DRAFT } from '../auth/roles'
-import { inFence, requestChain, requireHtmlAccess, roleOnScope } from '../middleware'
+import { inFence, requestChain, requestScope, requireHtmlAccess, roleOnScope } from '../middleware'
 import { shellPage, previewPage } from '../pages'
 import type { FolioRuntime } from '../runtime'
 import { ensureSingleton, listStories, storyById, storyByPath } from '../stories'
@@ -200,12 +201,7 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const name = c.req.param('name')
     const type = rt.typeOf(name)
     if (type?.kind !== 'singleton') return c.notFound()
-    // Which layer a scope previews, and that a preview never writes one into
-    // existence, are spec 23's phase 4 (decision 8). Until then a deployment with
-    // `sites` answers nothing here rather than creating `default`'s row for anyone.
-    if (rt.sites) return c.notFound()
     const bindings = c.var.bindings()
-    const story = await ensureSingleton(bindings.db, type, rt.schemaId)
     /**
      * `?mode=draft`, for `preview_document`'s benefit
      * (`../../../docs/specs/platform/mcp-server.md` phase 5, decision 5a's
@@ -222,6 +218,20 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
      * this) is unchanged.
      */
     const mode = c.req.query('mode') === 'draft' ? 'draft' : 'preview'
+    if (rt.sites) {
+      /**
+       * **A preview never writes a layer into existence** (`multi-site.md`
+       * decision 8). The layer a scope previews is its own, `sng_<type>:<scope>`,
+       * and it is previewed only if an editor has already made it: no row is a
+       * 404, not an `ensureSingleton`, so a read-only grant on a draft site cannot
+       * leave it with rows and objects that make it undeletable.
+       */
+      const scope = requestScope(c, rt)
+      const layer = scope === null ? null : await storyById(bindings.db, layerId(name, scope))
+      if (!layer || !(await inFence(c, rt, layer, 'read'))) return c.notFound()
+      return previewPage(rt, bindings, layer, { bare: true, mode })
+    }
+    const story = await ensureSingleton(bindings.db, type, rt.schemaId)
     return previewPage(rt, bindings, story, { bare: true, mode })
   })
 

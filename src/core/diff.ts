@@ -24,8 +24,16 @@ export function deepEqual(a: Json, b: Json): boolean {
  *
  * Both documents must share a root uid. They always do for a given story, since
  * the root block is created once and never replaced.
+ *
+ * **`layer: 'bare'` reads a key that is absent as different from one holding
+ * `null`** (`multi-site.md` decision 8): in a layer with something below it the
+ * first is *inherited* and the second *removed*, so a key that disappears is an
+ * `unset` and one that appears holding `null` is a `set` of it. Without the option
+ * — every other document — the two are the same, and a vanished key is a `set` to
+ * `null`, as it always was.
  */
-export function diff(from: Doc, to: Doc): Mutation[] {
+export function diff(from: Doc, to: Doc, opts?: { layer?: 'bare' }): Mutation[] {
+  const bare = opts?.layer === 'bare'
   if (from.root !== to.root) {
     throw new Error('Cannot diff documents with different roots')
   }
@@ -81,7 +89,13 @@ export function diff(from: Doc, to: Doc): Mutation[] {
     for (const field of new Set([...Object.keys(prev.data), ...Object.keys(blok.data)])) {
       const before = prev.data[field] ?? null
       const after = blok.data[field] ?? null
-      if (!deepEqual(before, after)) {
+      if (bare && field in prev.data !== field in blok.data) {
+        sets.push(
+          field in blok.data
+            ? { t: 'set', uid: blok.uid, field, value: after }
+            : { t: 'unset', uid: blok.uid, field },
+        )
+      } else if (!deepEqual(before, after)) {
         sets.push({ t: 'set', uid: blok.uid, field, value: after })
       }
     }
@@ -93,8 +107,9 @@ export function diff(from: Doc, to: Doc): Mutation[] {
     //
     // A locale present on only one side contributes its whole map: an added
     // locale reads as translations to write, a removed one as translations to
-    // clear (to `null`, which `fieldValue` reads as untranslated — the vocabulary
-    // has no delete-key, and `''` would mean "deliberately empty" instead).
+    // clear: to `null`, which `fieldValue` reads as untranslated (`''` would mean
+    // "deliberately empty" instead), or, in a bare layer, an `unset`, which lets
+    // the layer below show through (`multi-site.md` decision 8).
     for (const locale of new Set([
       ...Object.keys(prev.i18n ?? {}),
       ...Object.keys(blok.i18n ?? {}),
@@ -104,7 +119,13 @@ export function diff(from: Doc, to: Doc): Mutation[] {
       for (const field of new Set([...Object.keys(wasMap), ...Object.keys(nowMap)])) {
         const before = wasMap[field] ?? null
         const after = nowMap[field] ?? null
-        if (!deepEqual(before, after)) {
+        if (bare && field in wasMap !== field in nowMap) {
+          sets.push(
+            field in nowMap
+              ? { t: 'set', uid: blok.uid, field, value: after, locale }
+              : { t: 'unset', uid: blok.uid, field, locale },
+          )
+        } else if (!deepEqual(before, after)) {
           sets.push({ t: 'set', uid: blok.uid, field, value: after, locale })
         }
       }

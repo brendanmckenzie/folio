@@ -105,15 +105,10 @@ export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.get('/audit', requireAccess<Env>(rt, ADMIN), async (c) => {
     const raw = c.req.query('continueFrom')
     return c.json(
-      await audit(
-        c.var.bindings().db,
-        rt.schema,
-        { locales: rt.locales, types: rt.types },
-        {
-          continueFrom: raw === undefined ? null : idParam('continueFrom', raw),
-          batch: limitParam(c.req.query('batch'), DEFAULT_AUDIT_BATCH, MAX_AUDIT_BATCH),
-        },
-      ),
+      await audit(c.var.bindings().db, rt.schema, await rt.auditContext(c.env), {
+        continueFrom: raw === undefined ? null : idParam('continueFrom', raw),
+        batch: limitParam(c.req.query('batch'), DEFAULT_AUDIT_BATCH, MAX_AUDIT_BATCH),
+      }),
     )
   })
 

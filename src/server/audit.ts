@@ -49,10 +49,12 @@
  */
 import type { Blok, Doc } from '../core/doc'
 import { isIndexableKind } from '../core/index-projection'
+import { isBareLayer, mergeLayers } from '../core/layers'
 import { isTranslatable, type LocaleConfig } from '../core/locales'
 import { docBytes, MAX_DOC_BYTES, utf8Bytes } from '../core/protocol'
 import { type BlockSchema, type DocumentType, type SchemaIndex, slotsOf } from '../core/schema'
-import { publishedDocsAfter } from './stories'
+import { chain, layerId, type Registry } from '../core/sites'
+import { publishedDocsAfter, publishedDocsByIds } from './stories'
 import type { FolioDb } from './db'
 
 /**
@@ -72,6 +74,14 @@ export interface AuditContext {
    * Absent means "cannot judge", not "no block is a root".
    */
   types?: readonly DocumentType[]
+  /**
+   * A deployment with `sites` (`multi-site.md` decision 2): the settings type and
+   * the registry snapshot. Present, the report gains `settings`, the one place a
+   * `required` field is read, and a **bare layer** stops being reported as missing
+   * every field it deliberately leaves inherited. Absent for a single-site
+   * deployment, whose report is exactly what it was.
+   */
+  sites?: { settings: string; registry: Registry }
 }
 
 const NO_CONTEXT: AuditContext = {}
@@ -199,6 +209,21 @@ export interface SchemaFinding extends Explained {
   field: string | null
 }
 
+/**
+ * A `required` field with no value in a site's **merged** settings
+ * (`multi-site.md` decision 2). Per site, because a layer on its own is partial by
+ * design and only the merge can be judged; `uid` is the blok of the merged
+ * document, which is only an identity within that site's answer.
+ */
+export interface SettingsFinding {
+  check: 'required-setting'
+  site: string
+  /** Block type the field is on. */
+  type: string
+  field: string
+  uid: string
+}
+
 export interface AuditReport {
   /** Published documents examined **by this call**, not by the whole walk. */
   documents: number
@@ -218,6 +243,12 @@ export interface AuditReport {
   orphanKeys: { type: string; field: string; documents: number }[]
   unknownTypes: { type: string; documents: number }[]
   missingFields: { type: string; field: string; documents: number }[]
+  /**
+   * Each site's settings that leave a `required` field empty, in registry order.
+   * Present only on a deployment with `sites` and a `settings` type; absent, not
+   * empty, everywhere else, so a single-site report keeps its shape.
+   */
+  settings?: SettingsFinding[]
   /**
    * The story id to resume after, or null when the sweep reached the end — the
    * same contract `MigrateReport.continueFrom` carries, deliberately, because it
@@ -259,8 +290,9 @@ export type DocumentCheck = (
  * it sits in the document indefinitely and is invisible in the editor. This is
  * what turns "something looks empty" into a migration somebody can write.
  *
- * A `null` value is not reported. Clearing a field is `set … null` (the
- * vocabulary has no delete-key), so a migrated-away field *is* a null orphan
+ * A `null` value is not reported. Clearing a field is `set … null` (`unset`
+ * deletes a key, but only a layer uses it, `multi-site.md` decision 8), so a
+ * migrated-away field leaves a null or absent
  * key, and reporting those would mean every completed rename left permanent
  * drift behind it. An orphan key matters when it holds content nobody can see;
  * null is not content.
@@ -791,17 +823,19 @@ export function auditStories(
  * finding's `sample`, which is what lets a tally still be opened.
  */
 export function auditDocuments(
-  docs: readonly { id?: string; doc: { bloks: Record<string, Blok> } }[],
+  docs: readonly { id?: string; doc: { bloks: Record<string, Blok> }; bare?: boolean }[],
   schema: SchemaIndex,
   ctx: AuditContext = NO_CONTEXT,
 ): ContentFinding[] {
   const tally = new Map<string, ContentFinding>()
 
-  for (const { id, doc } of docs) {
+  for (const { id, doc, bare } of docs) {
     const seenInDoc = new Set<string>()
     for (const blok of Object.values(doc.bloks)) {
       const def = schema[blok.type]
       for (const check of DOCUMENT_CHECKS) {
+        // A bare layer leaves fields out on purpose: absent means inherited.
+        if (bare && check === missingField) continue
         for (const finding of check(blok, def, ctx)) {
           const key = `${finding.check} ${finding.type} ${finding.field ?? ''}`
           const row = tally.get(key) ?? { ...finding, documents: 0, bloks: 0, sample: [] }
@@ -861,7 +895,11 @@ export async function audit(
 ): Promise<AuditReport> {
   const size = Math.min(Math.max(opts.batch ?? DEFAULT_AUDIT_BATCH, 1), MAX_AUDIT_BATCH)
   const docs = await publishedDocsAfter(db, opts.continueFrom ?? null, size)
-  const content = auditDocuments(docs, schema, ctx)
+  const content = auditDocuments(
+    ctx.sites ? docs.map((d) => ({ ...d, bare: isBareLayer(d.id) })) : docs,
+    schema,
+    ctx,
+  )
   const named = (check: string) => content.filter((f) => f.check === check)
 
   return {
@@ -883,5 +921,68 @@ export async function audit(
       field: f.field ?? '',
       documents: f.documents,
     })),
+    ...(ctx.sites ? { settings: await auditSettings(db, schema, ctx.sites, ctx.types) } : {}),
   }
+}
+
+/**
+ * Every site's merged settings, checked for `required` fields with no value.
+ *
+ * One read for every layer of every site (the published documents, like the rest
+ * of the audit), merged per site with `mergeLayers` — the merge a render does, so
+ * the report and the page cannot disagree about what a site's settings hold. A
+ * site whose chain has no layer at all is judged as a blank root of the settings
+ * type, which is every one of its required fields empty.
+ */
+export async function auditSettings(
+  db: FolioDb,
+  schema: SchemaIndex,
+  sites: { settings: string; registry: Registry },
+  types?: readonly DocumentType[],
+): Promise<SettingsFinding[]> {
+  const { settings, registry } = sites
+  const chains = registry.sites.map((site) => ({
+    site: site.id,
+    // Most general first, as `mergeLayers` wants them.
+    ids: [...chain(registry, site.id)].reverse().map((scope) => layerId(settings, scope)),
+  }))
+  const docs = await publishedDocsByIds(db, [...new Set(chains.flatMap((c) => c.ids))])
+  const rootType = types?.find((t) => t.name === settings)?.root
+
+  const out: SettingsFinding[] = []
+  for (const { site, ids } of chains) {
+    const merged = mergeLayers(
+      ids.map((id) => docs[id]),
+      schema,
+    )
+    if (merged) {
+      for (const blok of Object.values(merged.bloks)) {
+        for (const field of requiredEmpty(schema[blok.type], blok, merged)) {
+          out.push({ check: 'required-setting', site, type: blok.type, field, uid: blok.uid })
+        }
+      }
+    } else if (rootType) {
+      for (const [field, def] of Object.entries(schema[rootType]?.fields ?? {})) {
+        if (def.required) {
+          out.push({ check: 'required-setting', site, type: rootType, field, uid: '' })
+        }
+      }
+    }
+  }
+  return out
+}
+
+/** The `required` fields of `blok` that hold nothing: no key, `null`, `''`, or no children. */
+function requiredEmpty(def: BlockSchema | undefined, blok: Blok, doc: Doc): string[] {
+  if (!def) return []
+  return Object.entries(def.fields)
+    .filter(([name, field]) => {
+      if (!field.required) return false
+      if (field.kind === 'blocks') {
+        return !Object.values(doc.bloks).some((b) => b.parent === blok.uid && b.slot === name)
+      }
+      const value = blok.data[name]
+      return value === undefined || value === null || value === ''
+    })
+    .map(([name]) => name)
 }

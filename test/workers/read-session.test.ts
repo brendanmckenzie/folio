@@ -629,3 +629,100 @@ describe('resolve(): a document with more links than one statement can bind', ()
     expect(spy.prepares).toBe(2)
   })
 })
+
+/**
+ * Layers are loaded in the statements that load globals today (`multi-site.md`
+ * decision 8), so a site's render costs the same number of statements whether its
+ * chain holds no layer of a global or one in every scope — and the two passes are
+ * still sent together. The single-site counts above are unchanged; this is the
+ * multi-site row beside them.
+ */
+describe('resolve(): layers on a multi-site deployment', () => {
+  const headerRoot = defineBlock({
+    name: 'rsHeaderRoot',
+    label: 'Header',
+    fields: { title: text({ label: 'Title' }), cta: text({ label: 'CTA' }) },
+    render: () => null,
+  })
+
+  const layer = (scope: string, data: Record<string, string>) =>
+    env.DB.prepare(
+      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, site_id,
+                            published_doc, published_at)
+       values (?, 'rsHeader', null, 'rsHeader', null, 'a0', 'Header', 1, ?, ?, 2)`,
+    )
+      .bind(
+        `sng_rsHeader:${scope}`,
+        scope,
+        JSON.stringify({
+          root: `hdr_${scope}`,
+          bloks: {
+            [`hdr_${scope}`]: {
+              uid: `hdr_${scope}`,
+              type: 'rsHeaderRoot',
+              parent: null,
+              slot: null,
+              order: 'a0',
+              data,
+            },
+          },
+        }),
+      )
+      .run()
+
+  it('spends the same statements with a layer in every scope as with none', async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        `insert into sites (id, kind, name, group_id, status, preview_origin, created_at, updated_at) values
+           ('north', 'group', 'North', null, null, null, 0, 0),
+           ('alpha', 'site', 'Alpha', 'north', 'live', null, 0, 0)`,
+      ),
+      env.DB.prepare(`insert into site_hosts (host, site_id) values ('alpha.example', 'alpha')`),
+    ])
+    await insertPage('sty_rs_ms_ref', 'rs-ms-ref', 'Referenced', pageDoc('Referenced'))
+    await env.DB.prepare("update stories set site_id = 'shared' where id = 'sty_rs_ms_ref'").run()
+
+    const spy = spyOn(env.DB)
+    const folio = createFolio<Cloudflare.Env>({
+      blocks: [page, headerRoot],
+      types: [
+        { name: 'page', label: 'Page', kind: 'page', root: 'page' },
+        { name: 'rsHeader', label: 'Header', kind: 'singleton', root: 'rsHeaderRoot' },
+      ],
+      globals: ['rsHeader'],
+      bindings: (e) => ({ ...bindings(e), db: spy.db }),
+      basePath: '/folio',
+      assets: { admin: '/folio-admin.js', preview: '/folio-preview.js' },
+      auth: 'open',
+      route: (p, _l, site) => (site ? `https://alpha.example/${p}` : p ? `/${p}` : '/'),
+      sites: { admin: 'https://cms.example' },
+    })
+    const reader = () => folio.reader(env, new Request('https://alpha.example/'))
+    const measure = async () => {
+      spy.prepares = 0
+      spy.batches = 0
+      spy.order.length = 0
+      const resolution = await reader().resolve(referencingDoc('sty_rs_ms_ref'))
+      return { prepares: spy.prepares, order: spy.order.slice(0, 4), resolution }
+    }
+
+    // Warm the registry snapshot, so the measured renders read no registry.
+    await measure()
+    const bare = await measure()
+    expect(bare.resolution.globals).toEqual({})
+
+    await layer('shared', { title: 'A', cta: 'Visit' })
+    await layer('north', { cta: 'Hello' })
+    await layer('alpha', { title: 'Alpha' })
+    const layered = await measure()
+
+    expect(layered.prepares).toBe(bare.prepares)
+    expect(layered.order).toEqual(bare.order)
+    expect(bare.order).toEqual(['send', 'send', 'recv', 'recv'])
+    expect(layered.resolution.globals?.rsHeader?.bloks.hdr_alpha?.data).toEqual({
+      title: 'Alpha',
+      cta: 'Hello',
+    })
+    expect(spy.unsessioned).toBe(0)
+  })
+})

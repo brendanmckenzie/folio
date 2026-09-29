@@ -327,3 +327,55 @@ describe('construction: validateGlobals', () => {
     expect(() => makeFolio([pageType], ['page'])).toThrow(/not 'singleton'/)
   })
 })
+
+/**
+ * Layering (`multi-site.md` decision 8) must leave a deployment with no `sites` alone:
+ * its chain is `['default']`, so a global's layer id is the `sng_<type>` it always was
+ * and the "merge" of a chain of one is the stored document itself.
+ */
+describe('a global on a deployment with no sites', () => {
+  it('resolves to the stored document itself, null and all, and seeds with its defaults', async () => {
+    const name = 'gqlayerpin'
+    const folio = makeFolio(
+      [pageType, { name, label: 'Header', kind: 'singleton', root: 'headerRoot' }],
+      [name],
+    )
+    await insertPage('sty_gqlayerpinpage', 'gqlayerpinpage', 'Layer Pin')
+    // A stored `null` is kept as it is: only a multi-site chain reads it as removed.
+    const stored: Doc = {
+      root: 'hdr00001',
+      bloks: {
+        hdr00001: {
+          uid: 'hdr00001',
+          type: 'headerRoot',
+          parent: null,
+          slot: null,
+          order: 'a0',
+          data: { tagline: null },
+        },
+      },
+    }
+    await env.DB.prepare(
+      `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, published_doc, published_at)
+       values (?, ?, null, ?, null, 'a0', 'Header', ?, ?, ?)`,
+    )
+      .bind(`sng_${name}`, name, name, Date.now(), JSON.stringify(stored), Date.now())
+      .run()
+
+    const resolution = await folio.resolve(env, pageDoc())
+    expect(resolution.globals?.[name]).toEqual(stored)
+    expect(JSON.stringify(resolution.globals)).toBe(JSON.stringify({ [name]: stored }))
+    expect(await folio.global(env, name)).toEqual(stored)
+
+    // The first draft of a global that nobody has opened is seeded with the type's
+    // defaults, not bare: a single-site global has nothing below it.
+    const other = 'gqlayerseed'
+    const seeded = makeFolio(
+      [pageType, { name: other, label: 'Header', kind: 'singleton', root: 'headerRoot' }],
+      [other],
+    )
+    const draft = await seeded.resolve(env, pageDoc(), { draft: true })
+    const root = draft.globals?.[other]?.bloks[draft.globals[other]!.root]
+    expect(root?.data).toEqual({ tagline: '' })
+  })
+})

@@ -2,15 +2,20 @@ import { createExecutionContext, env } from 'cloudflare:test'
 import { Hono } from 'hono'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { blocks, collection, defineBlock, multilink, reference, text } from '../../src/core'
+import { toRegistry, toSchemaIndex } from '../../src/core/block'
 import type { Doc, Json } from '../../src/core/doc'
+import { layerStates } from '../../src/core/layers'
+import { fieldValue } from '../../src/core/locales'
+import type { Mutation } from '../../src/core/mutations'
 import type { Resolution } from '../../src/core/resolve'
 import type { DocumentType } from '../../src/core/schema'
 import type { FolioBindings, FolioConfig } from '../../src/server'
 import { createFolio, magicLink } from '../../src/server'
 import { createToken } from '../../src/server/auth/tokens'
+import { cachePurgeHooks } from '../../src/server/cache-purge'
 import { rethrow } from '../../src/server/errors'
 import { requireScope } from '../../src/server/middleware'
-import type { FolioRuntime } from '../../src/server/runtime'
+import { createRuntime, type FolioRuntime } from '../../src/server/runtime'
 import { createStory, deleteStoryStatement } from '../../src/server/stories'
 import type { FolioEnv } from '../../src/server/types'
 
@@ -794,6 +799,599 @@ describe('folio.settings', () => {
     expect(folio.settings(resolution())).toBeNull()
     const noSettings = build({ sites: { admin: ADMIN } })
     expect(noSettings.settings(resolution({ msSettings: settingsDoc }))).toBeNull()
+  })
+})
+
+/* ------------------------------------------------ layered globals (phase 4) --- */
+
+/**
+ * Decision 8: a global has one layer per scope, merged per field for the site that
+ * reads it. `lsHeader` is a configured global; `lsSettings` is the settings type.
+ *
+ * Two kinds of fixture, on purpose. The published layers of `lsHeader` are seeded by
+ * SQL, so the merge is read off exactly the documents the example names. Everything
+ * an editor would do — creating a layer, overriding, resetting — goes through the v1
+ * API and the Durable Object, because whether a layer starts bare is decided where
+ * the object is seeded and a row inserted by SQL never passes through it.
+ */
+const lsTheme = defineBlock({
+  name: 'lsTheme',
+  label: 'Theme',
+  fields: {
+    primary: text({ label: 'Primary' }),
+    radius: text({ label: 'Radius', default: 'rounded' }),
+  },
+  render: () => null,
+})
+
+const lsHeaderRoot = defineBlock({
+  name: 'lsHeaderRoot',
+  label: 'Header',
+  fields: {
+    title: text({ label: 'Title', default: 'Untitled', translatable: true }),
+    cta: text({ label: 'Call to action', translatable: true }),
+    theme: blocks({ label: 'Theme', allow: ['lsTheme'], max: 1 }),
+  },
+  presets: [
+    {
+      name: 'default',
+      label: 'Header',
+      data: { cta: 'Visit' },
+      children: [{ slot: 'theme', type: 'lsTheme' }],
+    },
+  ],
+  render: () => null,
+})
+
+const lsSettingsRoot = defineBlock({
+  name: 'lsSettingsRoot',
+  label: 'Settings',
+  fields: {
+    siteName: text({ label: 'Site name', required: true }),
+    theme: blocks({ label: 'Theme', allow: ['lsTheme'], max: 1 }),
+  },
+  presets: [{ name: 'default', label: 'Settings', children: [{ slot: 'theme', type: 'lsTheme' }] }],
+  render: () => null,
+})
+
+const lsTypes: DocumentType[] = [
+  ...types,
+  { name: 'lsHeader', label: 'Header', kind: 'singleton', root: 'lsHeaderRoot' },
+  { name: 'lsSettings', label: 'Settings', kind: 'singleton', root: 'lsSettingsRoot' },
+]
+
+/** Every Durable Object name asked for, so "no object was created" is observable. */
+const touched: string[] = []
+
+function watchedNamespace(ns: DurableObjectNamespace): DurableObjectNamespace {
+  return new Proxy(ns, {
+    get(target, prop, receiver) {
+      if (prop === 'idFromName') {
+        return (name: string) => {
+          touched.push(name)
+          return target.idFromName(name)
+        }
+      }
+      const value = Reflect.get(target, prop, receiver)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
+}
+
+const layeredConfig: FolioConfig<Cloudflare.Env> = {
+  blocks: [page, post, theme, link, settingsRoot, lsTheme, lsHeaderRoot, lsSettingsRoot],
+  types: lsTypes,
+  globals: ['lsHeader'],
+  bindings: (e): FolioBindings => ({
+    ...bindings(e),
+    story: watchedNamespace(e.STORY as unknown as DurableObjectNamespace) as typeof e.STORY,
+  }),
+  basePath: '/folio',
+  assets: { admin: '/folio-admin.js', preview: '/folio-preview.js' },
+  auth: { providers: [magicLink<Cloudflare.Env>({ send: () => {} })] },
+  locales: {
+    default: 'en',
+    available: [
+      { code: 'en', label: 'English' },
+      { code: 'fr', label: 'French' },
+    ],
+  },
+  route: (p, _locale, site) =>
+    site ? `https://${site.hosts[0] ?? `${site.id}.invalid`}/${p}` : p ? `/${p}` : '/',
+  sites: { admin: ADMIN, settings: 'lsSettings' },
+}
+
+const layered = createFolio<Cloudflare.Env>(layeredConfig)
+
+let nextUid = 0
+/** A layer document: a header or settings root, and optionally a theme child. */
+function layerDoc(
+  type: 'lsHeaderRoot' | 'lsSettingsRoot',
+  data: Record<string, Json>,
+  extra: { i18n?: Record<string, Record<string, Json>>; theme?: Record<string, Json> } = {},
+): Doc {
+  const root = `lr${++nextUid}`
+  const doc: Doc = {
+    root,
+    bloks: {
+      [root]: {
+        uid: root,
+        type,
+        parent: null,
+        slot: null,
+        order: 'a0',
+        data,
+        ...(extra.i18n ? { i18n: extra.i18n } : {}),
+      },
+    },
+  }
+  if (extra.theme) {
+    const child = `lc${++nextUid}`
+    doc.bloks[child] = {
+      uid: child,
+      type: 'lsTheme',
+      parent: root,
+      slot: 'theme',
+      order: 'a0',
+      data: extra.theme,
+    }
+  }
+  return doc
+}
+
+/** A published layer row, the way an editor's first publish leaves it. */
+async function publishedLayer(type: string, scope: string, id: string, doc: Doc) {
+  await env.DB.prepare(
+    `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, site_id,
+                          published_doc, published_at)
+     values (?, ?, null, ?, null, 'a0', ?, 1, ?, ?, 2)`,
+  )
+    .bind(id, type, type, type, scope, JSON.stringify(doc))
+    .run()
+}
+
+const rootOf = (doc: Doc | undefined) => doc?.bloks[doc.root]
+const childOf = (doc: Doc, slot: string) =>
+  Object.values(doc.bloks).find((b) => b.parent === doc.root && b.slot === slot)
+
+/** A resolution as `site` sees it, published. */
+const resolveOn = async (host: string, doc: Doc = rootDoc('msPage', { title: 'x' })) =>
+  layered.reader(env, new Request(`https://${host}/`)).resolve(doc)
+
+const countRows = async (like: string) =>
+  (
+    await env.DB.prepare('select count(*) as n from stories where id like ?')
+      .bind(like)
+      .first<{ n: number }>()
+  )?.n
+
+async function tokenFor(site: string): Promise<Record<string, string>> {
+  const { token } = await createToken(env.DB, {
+    name: `ls-${site}`,
+    scopes: ['content:read', 'content:read:draft', 'content:write', 'publish'],
+    site,
+  })
+  return { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
+}
+
+const api = (path: string, who: Record<string, string>, init: RequestInit = {}) =>
+  layered.handle(
+    new Request(`${ADMIN}/folio${path}`, { ...init, headers: { ...who, ...init.headers } }),
+    env,
+    createExecutionContext(),
+  ) as Promise<Response>
+
+const stubOf = (id: string) =>
+  env.STORY.get(env.STORY.idFromName(id)) as unknown as {
+    commit: (
+      m: Mutation[],
+      actor: { id: string; name: string },
+      txId?: string,
+    ) => Promise<{ syncId: number } | { rejected: string }>
+  }
+
+describe('a render on a multi-site deployment never writes a layer into existence', () => {
+  // First in the section, before any editor has made a `lsSettings` layer: the
+  // settings type is loaded on every render, so this reads all of them absent.
+  it('creates no row and no Durable Object for a layer nobody has written', async () => {
+    touched.length = 0
+    const reader = layered.reader(env, new Request('https://alpha.example/'))
+    const draft = await reader.resolve(rootDoc('msPage', { title: 'x' }), { draft: true })
+    expect(draft.globals?.lsSettings).toBeUndefined()
+    expect(await countRows('sng_lsSettings%')).toBe(0)
+    expect(touched.filter((name) => name.startsWith('sng_lsSettings'))).toEqual([])
+    // A layer with no row reads as absent: the published render agrees.
+    const published = await resolveOn('alpha.example')
+    expect(published.globals?.lsSettings).toBeUndefined()
+  })
+
+  it('answers /preview/global/:name from an existing layer only, and never makes one', async () => {
+    const platform = await adminToken()
+    const before = await countRows('sng_lsSettings%')
+    const missing = await api('/~alpha/preview/global/lsSettings', platform)
+    expect(missing.status).toBe(404)
+    expect(await countRows('sng_lsSettings%')).toBe(before)
+    expect(touched.filter((name) => name.startsWith('sng_lsSettings'))).toEqual([])
+    // No scope names no layer either.
+    expect((await api('/preview/global/lsSettings', platform)).status).toBe(404)
+  })
+})
+
+describe('Layered globals', () => {
+  beforeAll(async () => {
+    await publishedLayer(
+      'lsHeader',
+      'shared',
+      'sng_lsHeader:shared',
+      layerDoc(
+        'lsHeaderRoot',
+        { title: 'A', cta: 'Visit' },
+        { i18n: { fr: { cta: 'Visitez', title: 'Le A' } } },
+      ),
+    )
+    await publishedLayer(
+      'lsHeader',
+      'north',
+      'sng_lsHeader:north',
+      layerDoc('lsHeaderRoot', { cta: 'Hello' }),
+    )
+    await publishedLayer(
+      'lsHeader',
+      'alpha',
+      'sng_lsHeader:alpha',
+      layerDoc('lsHeaderRoot', { title: null }, { i18n: { fr: { cta: null } } }),
+    )
+  })
+
+  it('reads header on alpha as cta Hello and no title, and on bravo as the shared layer', async () => {
+    const alpha = rootOf((await resolveOn('alpha.example')).globals?.lsHeader)
+    expect(alpha?.data).toEqual({ cta: 'Hello' })
+    expect('title' in alpha!.data).toBe(false)
+    const bravo = rootOf((await resolveOn('bravo.example')).globals?.lsHeader)
+    expect(bravo?.data).toEqual({ title: 'A', cta: 'Visit' })
+  })
+
+  it('reads a bare chain member exactly as its one layer, byte for byte', async () => {
+    const shared = JSON.parse(
+      (
+        await env.DB.prepare('select published_doc from stories where id = ?')
+          .bind('sng_lsHeader:shared')
+          .first<{ published_doc: string }>()
+      )?.published_doc ?? 'null',
+    ) as Doc
+    expect((await resolveOn('bravo.example')).globals?.lsHeader).toEqual(shared)
+  })
+
+  it('serves the same merge through reader.global', async () => {
+    const alpha = await layered.reader(env, { site: 'alpha' }).global('lsHeader')
+    expect(rootOf(alpha ?? undefined)?.data).toEqual({ cta: 'Hello' })
+    const bravo = await layered.reader(env, { site: 'bravo' }).global('lsHeader')
+    expect(rootOf(bravo ?? undefined)?.data).toEqual({ title: 'A', cta: 'Visit' })
+    expect(await layered.reader(env, { site: 'alpha' }).global('msPage')).toBeNull()
+  })
+
+  it('keeps null as untranslated in a translation: French cta falls back to the merged source', async () => {
+    const alpha = rootOf((await resolveOn('alpha.example')).globals?.lsHeader)!
+    const fr = { code: 'fr', fallbacks: [] }
+    // Shared translated it and alpha untranslated it: north's source value, not
+    // shared's French, and not removed.
+    expect(fieldValue(alpha, 'cta', fr)).toBe('Hello')
+    expect(alpha.data.cta).toBe('Hello')
+    const bravo = rootOf((await resolveOn('bravo.example')).globals?.lsHeader)!
+    expect(fieldValue(bravo, 'cta', fr)).toBe('Visitez')
+    // Alpha removed the source title, and its French translation goes with it.
+    expect(fieldValue(alpha, 'title', fr)).toBeUndefined()
+  })
+
+  it('labels alpha: title removed here, cta inherited from north', async () => {
+    const docs = await Promise.all(
+      ['shared', 'north', 'alpha'].map(async (scope) =>
+        JSON.parse(
+          (await env.DB.prepare('select published_doc from stories where id = ?')
+            .bind(`sng_lsHeader:${scope}`)
+            .first<{ published_doc: string }>())!.published_doc,
+        ),
+      ),
+    )
+    const states = layerStates(
+      docs,
+      ['shared', 'north', 'alpha'],
+      toSchemaIndex(toRegistry(layeredConfig.blocks)),
+    )
+    expect(states.title).toEqual({ state: 'removed', from: 'alpha' })
+    expect(states.cta).toEqual({ state: 'inherited', from: 'north' })
+  })
+
+  describe('a layer an editor creates', () => {
+    const bravo = () => tokenFor('bravo')
+
+    it('starts bare, in the admin or by a v1 create: root data is {} and every field reads inherited', async () => {
+      const who = await bravo()
+      const res = await api('/api/v1/documents/sng_lsHeader:bravo?status=draft', who)
+      expect(res.status).toBe(200)
+      const doc = await layered.draft(env, 'sng_lsHeader:bravo')
+      expect(Object.keys(doc.bloks)).toHaveLength(1)
+      expect(rootOf(doc)?.data).toEqual({})
+      // The nested read shows no scalar at all, and no defaulted theme.
+      const body = (await res.json()) as { content: { fields: Record<string, unknown> } }
+      expect(Object.keys(body.content.fields)).toEqual(['theme'])
+      expect(body.content.fields.theme).toEqual([])
+    })
+
+    it('writes no defaults on a v1 write, and takes null as removed', async () => {
+      const who = await bravo()
+      const put = await api('/api/v1/documents/sng_lsHeader:bravo/content', who, {
+        method: 'PUT',
+        body: JSON.stringify({ content: { fields: { cta: 'Bravo cta', title: null } } }),
+      })
+      expect(put.status).toBe(200)
+      const doc = await layered.draft(env, 'sng_lsHeader:bravo')
+      expect(rootOf(doc)?.data).toEqual({ cta: 'Bravo cta', title: null })
+      expect(Object.keys(doc.bloks)).toHaveLength(1)
+    })
+
+    it('takes null for a blocks field only in a layer that has something below it', async () => {
+      const who = await bravo()
+      const removed = await api('/api/v1/documents/sng_lsHeader:bravo/content', who, {
+        method: 'PUT',
+        body: JSON.stringify({ content: { fields: { theme: null } } }),
+      })
+      expect(removed.status).toBe(200)
+      expect(rootOf(await layered.draft(env, 'sng_lsHeader:bravo'))?.data.theme).toBeNull()
+      // Read back, the removal survives a read-modify-write.
+      const read = (await (
+        await api('/api/v1/documents/sng_lsHeader:bravo?status=draft', who)
+      ).json()) as { content: { fields: Record<string, unknown> } }
+      expect(read.content.fields.theme).toBeNull()
+      // An array clears it again: children, or none, and inherited.
+      await api('/api/v1/documents/sng_lsHeader:bravo/content', who, {
+        method: 'PUT',
+        body: JSON.stringify({ content: { fields: { theme: [] } } }),
+      })
+      expect('theme' in rootOf(await layered.draft(env, 'sng_lsHeader:bravo'))!.data).toBe(false)
+      // The shared layer is an ordinary document: no null for a blocks field.
+      const shared = await tokenFor('shared')
+      const refused = await api('/api/v1/documents/sng_lsHeader:shared/content', shared, {
+        method: 'PUT',
+        body: JSON.stringify({ content: { fields: { theme: null } } }),
+      })
+      expect(refused.status).toBe(400)
+    })
+
+    it('resets a field with an unset, and the published render then reads it inherited', async () => {
+      const who = await bravo()
+      const doc = await layered.draft(env, 'sng_lsHeader:bravo')
+      const root = doc.root
+      const actor = { id: 'ls', name: 'Layers' }
+      // Removed here: title null in the layer, published.
+      await stubOf('sng_lsHeader:bravo').commit(
+        [{ t: 'set', uid: root, field: 'title', value: null }],
+        actor,
+        'ls-remove',
+      )
+      expect(
+        (await api('/api/v1/documents/sng_lsHeader:bravo/publish', who, { method: 'POST' })).status,
+      ).toBe(200)
+      const removed = rootOf((await resolveOn('bravo.example')).globals?.lsHeader)
+      expect(removed?.data).toEqual({ cta: 'Bravo cta' })
+      // Reset: an unset is written, and title reads 'A' again.
+      const committed = await stubOf('sng_lsHeader:bravo').commit(
+        [{ t: 'unset', uid: root, field: 'title' }],
+        actor,
+        'ls-reset',
+      )
+      expect(committed).toMatchObject({ syncId: expect.any(Number) })
+      const after = await layered.draft(env, 'sng_lsHeader:bravo')
+      expect('title' in rootOf(after)!.data).toBe(false)
+      expect(
+        (await api('/api/v1/documents/sng_lsHeader:bravo/publish', who, { method: 'POST' })).status,
+      ).toBe(200)
+      const reset = rootOf((await resolveOn('bravo.example')).globals?.lsHeader)
+      expect(reset?.data).toEqual({ title: 'A', cta: 'Bravo cta' })
+    })
+  })
+
+  it('carries the type’s defaults and preset when the shared layer is first created', async () => {
+    const who = await tokenFor('shared')
+    const res = await api('/~shared/api/v1/documents/sng_lsHeader:shared?status=draft', who)
+    expect(res.status).toBe(200)
+    // Shared already had a row from the seed above, so it is asked into a draft
+    // that was never opened: the Durable Object seeds from `seedFor`.
+    const doc = await layered.draft(env, 'sng_lsHeader:shared')
+    // The seed writes the row's title into the type's title field.
+    expect(rootOf(doc)?.data).toEqual({ title: 'lsHeader', cta: 'Visit' })
+    expect(childOf(doc, 'theme')?.data).toEqual({ primary: '', radius: 'rounded' })
+  })
+})
+
+describe('Site settings', () => {
+  const settings = async (host: string, opts?: { draft?: boolean }) => {
+    const reader = layered.reader(env, new Request(`https://${host}/`))
+    const resolution = await reader.resolve(rootDoc('msPage', { title: 'x' }), opts)
+    return { resolution, value: layered.settings(resolution) as Record<string, unknown> | null }
+  }
+
+  it('merges the theme child over the shared one and answers it through folio.settings', async () => {
+    const shared = await tokenFor('shared')
+    const alpha = await tokenFor('alpha')
+
+    // The shared layer, created on a multi-site deployment: defaults and preset.
+    expect((await api('/api/v1/documents/sng_lsSettings:shared?status=draft', shared)).status).toBe(
+      200,
+    )
+    const sharedDoc = await layered.draft(env, 'sng_lsSettings:shared')
+    expect(rootOf(sharedDoc)?.data).toEqual({ siteName: '' })
+    expect(childOf(sharedDoc, 'theme')?.data).toEqual({ primary: '', radius: 'rounded' })
+    await api('/api/v1/documents/sng_lsSettings:shared/publish', shared, { method: 'POST' })
+
+    // Alpha's layer starts bare, and overrides the theme child: primary only.
+    expect((await api('/api/v1/documents/sng_lsSettings:alpha?status=draft', alpha)).status).toBe(
+      200,
+    )
+    expect(rootOf(await layered.draft(env, 'sng_lsSettings:alpha'))?.data).toEqual({})
+    const put = await api('/api/v1/documents/sng_lsSettings:alpha/content', alpha, {
+      method: 'PUT',
+      body: JSON.stringify({
+        content: { fields: { theme: [{ type: 'lsTheme', fields: { primary: '#e00' } }] } },
+      }),
+    })
+    expect(put.status).toBe(200)
+    const alphaDoc = await layered.draft(env, 'sng_lsSettings:alpha')
+    // A child written into a bare layer carries no defaults of its own.
+    expect(childOf(alphaDoc, 'theme')?.data).toEqual({ primary: '#e00' })
+    await api('/api/v1/documents/sng_lsSettings:alpha/publish', alpha, { method: 'POST' })
+
+    const { value } = await settings('alpha.example')
+    expect(value?.theme).toEqual({ primary: '#e00', radius: 'rounded' })
+  })
+
+  it('reads a changed shared value through, while the site keeps what it overrode', async () => {
+    const shared = await tokenFor('shared')
+    const doc = await layered.draft(env, 'sng_lsSettings:shared')
+    const theme = childOf(doc, 'theme')!
+    const patch = await api('/api/v1/documents/sng_lsSettings:shared/fields', shared, {
+      method: 'PATCH',
+      body: JSON.stringify({ bloks: [{ uid: theme.uid, fields: { radius: 'square' } }] }),
+    })
+    expect(patch.status).toBe(200)
+    // Not published yet: alpha still reads the published shared value.
+    expect((await settings('alpha.example')).value?.theme).toEqual({
+      primary: '#e00',
+      radius: 'rounded',
+    })
+    await api('/api/v1/documents/sng_lsSettings:shared/publish', shared, { method: 'POST' })
+    expect((await settings('alpha.example')).value?.theme).toEqual({
+      primary: '#e00',
+      radius: 'square',
+    })
+    // Bravo has no layer of its own and reads shared's.
+    expect((await settings('bravo.example')).value?.theme).toEqual({
+      primary: '',
+      radius: 'square',
+    })
+  })
+
+  it('reads a draft the same way, from the layers’ drafts', async () => {
+    const alpha = await tokenFor('alpha')
+    const doc = await layered.draft(env, 'sng_lsSettings:alpha')
+    const theme = childOf(doc, 'theme')!
+    await api('/api/v1/documents/sng_lsSettings:alpha/fields', alpha, {
+      method: 'PATCH',
+      body: JSON.stringify({ bloks: [{ uid: theme.uid, fields: { primary: '#0f0' } }] }),
+    })
+    const draft = await settings('alpha.example', { draft: true })
+    expect(draft.value?.theme).toEqual({ primary: '#0f0', radius: 'square' })
+    expect((await settings('alpha.example')).value?.theme).toEqual({
+      primary: '#e00',
+      radius: 'square',
+    })
+  })
+
+  it('previews an existing layer on its own scope, and only that one', async () => {
+    const platform = await adminToken()
+    const res = await api('/~alpha/preview/global/lsSettings?mode=draft', platform)
+    expect(res.status).toBe(200)
+    const before = await countRows('sng_lsSettings%')
+    // Bravo has no layer: a preview does not make one.
+    expect((await api('/~bravo/preview/global/lsSettings', platform)).status).toBe(404)
+    expect(await countRows('sng_lsSettings%')).toBe(before)
+  })
+
+  it('puts a layer tag for every chain scope on a page, whether or not the layer exists', async () => {
+    const found = await layered
+      .reader(env, new Request('https://alpha.example/about'))
+      .page('about')
+    const tags = Object.entries(found!.headers)
+      .find(([key]) => key.toLowerCase() === 'cache-tag')?.[1]
+      .split(',')
+    // North has never published a settings layer, and its tag is on the page anyway.
+    expect(tags).toEqual(
+      expect.arrayContaining([
+        'global:lsSettings',
+        'global:lsSettings@north',
+        'global:lsSettings@alpha',
+      ]),
+    )
+    // A host calling cacheHeaders directly gets the same set.
+    const direct = layered.cacheHeaders(found!.resolution, { story: found!.story.id })
+    expect(direct['cache-tag']?.split(',')).toEqual(expect.arrayContaining(tags!))
+  })
+
+  it('purges the layer tag of the layer that published, through the settings type', async () => {
+    const rt = createRuntime(layeredConfig)
+    const calls: CachePurgeOptions[] = []
+    const hooks = cachePurgeHooks<Cloudflare.Env>(
+      rt.globals,
+      async () => async (options) => {
+        calls.push(options)
+        return { success: true, errors: [] }
+      },
+      undefined,
+      { registry: rt.sites!.registry, layered: rt.sites!.layered },
+    )
+    const published = (scope: string) =>
+      hooks.published!({
+        env,
+        waitUntil: () => {},
+        actor: null,
+        story: {
+          id: scope === 'default' ? 'sng_lsSettings' : `sng_lsSettings:${scope}`,
+          type: 'lsSettings',
+          site: scope,
+          path: null,
+        } as never,
+        doc: { root: 'r', bloks: {} },
+        version: { id: 'v' } as never,
+        publishedAt: 1,
+      })
+    await published('shared')
+    await published('north')
+    await published('alpha')
+    expect(calls.map((c) => c.tags)).toEqual([
+      expect.arrayContaining(['global:lsSettings']),
+      expect.arrayContaining(['global:lsSettings@north']),
+      expect.arrayContaining(['global:lsSettings@alpha']),
+    ])
+  })
+
+  it('reports a required field with no value in a site’s merged settings, per site', async () => {
+    const report = await layered.audit(env)
+    // `siteName` is required and empty in shared, which every site inherits.
+    const findings = report.settings ?? []
+    expect(findings.filter((f) => f.field === 'siteName').map((f) => f.site)).toEqual(
+      expect.arrayContaining(['alpha', 'bravo', 'default', 'gamma']),
+    )
+    // Give alpha a name in its own layer: only alpha stops being reported.
+    const alpha = await tokenFor('alpha')
+    await api('/api/v1/documents/sng_lsSettings:alpha/content', alpha, {
+      method: 'PUT',
+      body: JSON.stringify({ content: { fields: { siteName: 'Alpha' } } }),
+    })
+    await api('/api/v1/documents/sng_lsSettings:alpha/publish', alpha, { method: 'POST' })
+    const after = await layered.audit(env)
+    expect(
+      (after.settings ?? []).filter((f) => f.field === 'siteName').map((f) => f.site),
+    ).not.toContain('alpha')
+    expect(
+      (after.settings ?? []).filter((f) => f.field === 'siteName').map((f) => f.site),
+    ).toContain('bravo')
+    // A bare layer is not reported as missing every field it leaves inherited.
+    expect(
+      after.missingFields.filter((f) => f.type === 'lsSettingsRoot' && f.field === 'siteName'),
+    ).toEqual([])
+  })
+
+  it('reports nothing about settings on a deployment with no sites', async () => {
+    const single = createFolio<Cloudflare.Env>({
+      blocks: [page, post, theme, link, settingsRoot],
+      types,
+      bindings,
+      basePath: '/folio',
+      assets: { admin: '/folio-admin.js', preview: '/folio-preview.js' },
+      auth: 'open',
+      route: (p) => (p ? `/${p}` : '/'),
+    })
+    expect(await single.audit(env)).not.toHaveProperty('settings')
   })
 })
 

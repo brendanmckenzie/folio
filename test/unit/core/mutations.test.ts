@@ -315,11 +315,18 @@ describe('invert', () => {
     ])
   })
 
-  // PIN: a set on a field that was absent inverts to an explicit null rather than to a
-  // "delete the field" mutation. That normalisation is deliberate — the mutation vocabulary
-  // has no delete-field, and null is the schema's empty value.
-  it('inverts a set on an absent field to null', () => {
+  // PIN: a set on a field that was absent inverts to an `unset`, not to a null. Since
+  // v5 the vocabulary has a delete-key, and in a layered global absent (inherited) and
+  // null (removed) are different answers, so an undo must put back the one that was there.
+  it('inverts a set on an absent field to an unset', () => {
     const doc = makeDoc()
+    expect(invert(doc, { t: 'set', uid: 'text', field: 'align', value: 'left' })).toEqual([
+      { t: 'unset', uid: 'text', field: 'align' },
+    ])
+  })
+
+  it('inverts a set on a field that held null to a set of null, not an unset', () => {
+    const doc = apply(makeDoc(), { t: 'set', uid: 'text', field: 'align', value: null })
     expect(invert(doc, { t: 'set', uid: 'text', field: 'align', value: 'left' })).toEqual([
       { t: 'set', uid: 'text', field: 'align', value: null },
     ])
@@ -451,10 +458,10 @@ describe('invertAll round trip', () => {
     ]
     const applied = applyAll(doc, ms)
     expect(applied.bloks.hero!.type).toBe('quote')
-    // `heading` survives holding null, the same asymmetry a plain set has (see
-    // the pin below): the vocabulary has no delete-field.
+    // `quote` was absent, so its inverse deletes it: the document is exactly the
+    // one it started from, where before v5 it kept a `quote: null` behind.
     expect(roundTrip(doc, ms).bloks.hero).toEqual(
-      b('hero', 'hero', 'root', 'body', 'a0', { heading: 'Hello', quote: null }),
+      b('hero', 'hero', 'root', 'body', 'a0', { heading: 'Hello' }),
     )
   })
 
@@ -468,13 +475,13 @@ describe('invertAll round trip', () => {
     expect(roundTrip(doc, ms)).toEqual(makeDoc())
   })
 
-  // PIN: the one asymmetry in the round trip. A set that creates a field inverts to
-  // `null` rather than removing it, so the field survives the undo holding null.
-  it('leaves a field it created as null after a round trip', () => {
+  // The asymmetry the vocabulary used to have is gone: a set that creates a field inverts
+  // to an `unset`, so the round trip is exact.
+  it('removes a field it created after a round trip', () => {
     const doc = makeDoc()
     const out = roundTrip(doc, [{ t: 'set', uid: 'text', field: 'align', value: 'left' }])
-    expect(out.bloks.text!.data).toEqual({ body: 'one', align: null })
-    expect(out).not.toEqual(makeDoc())
+    expect(out.bloks.text!.data).toEqual({ body: 'one' })
+    expect(out).toEqual(makeDoc())
   })
 })
 
@@ -686,7 +693,7 @@ describe('invert — set with a locale', () => {
     ])
   })
 
-  it('undoes a first translation to null, which reads as untranslated again', () => {
+  it('undoes a first translation to an unset, which reads as untranslated again', () => {
     const back = invert(makeDoc(), {
       t: 'set',
       uid: 'hero',
@@ -694,7 +701,7 @@ describe('invert — set with a locale', () => {
       value: 'Bonjour',
       locale: 'fr',
     })
-    expect(back).toEqual([{ t: 'set', uid: 'hero', field: 'heading', value: null, locale: 'fr' }])
+    expect(back).toEqual([{ t: 'unset', uid: 'hero', field: 'heading', locale: 'fr' }])
   })
 
   it('omits the locale key entirely when inverting a source-locale write', () => {
@@ -704,9 +711,9 @@ describe('invert — set with a locale', () => {
   })
 
   it('does not read the source value for a locale write, however tempting', () => {
-    // `heading` has a source value; French has nothing. The inverse must be
-    // null (untranslated), never 'Hello' — undoing must not smuggle the English
-    // into the French map.
+    // `heading` has a source value; French has nothing. The inverse must delete the
+    // French key, never write 'Hello' — undoing must not smuggle the English into
+    // the French map.
     const back = invert(makeDoc(), {
       t: 'set',
       uid: 'hero',
@@ -714,7 +721,7 @@ describe('invert — set with a locale', () => {
       value: 'Bonjour',
       locale: 'fr',
     })
-    expect(back[0]).toMatchObject({ value: null })
+    expect(back[0]).toEqual({ t: 'unset', uid: 'hero', field: 'heading', locale: 'fr' })
   })
 
   it('round-trips a run of interleaved locale and source writes', () => {
@@ -728,10 +735,9 @@ describe('invert — set with a locale', () => {
     ]
     const back = applyAll(applyAll(doc, ms), invertAll(doc, ms))
 
-    // Observational, not structural: undoing the first translation of a field
-    // restores its *value* to null rather than removing the map that held it, and
-    // `fieldValue` reads a null translation and an absent one identically. `diff`
-    // agrees — see diff.test.ts's "a fully undone translation diffs as no change".
+    // Observational: `fieldValue` reads a null translation and an absent one
+    // identically, and `diff` agrees — see diff.test.ts's "a fully undone
+    // translation diffs as no change".
     for (const locale of [
       undefined,
       { code: 'fr', fallbacks: [] },
@@ -754,14 +760,13 @@ describe('invert — set with a locale', () => {
   })
 
   it('leaves i18n absent again after undoing the only translation ever written', () => {
-    // The one asymmetry worth naming: undo restores the *value* to null, not the
-    // shape to "no map at all". `fieldValue` reads both as untranslated, so this is
-    // observationally identical and much cheaper than pruning empty maps.
+    // The unset that undoes it drops the locale map it empties, and the `i18n` that
+    // has no locale left, so the document is the one it started from.
     const doc = makeDoc()
     const m: Mutation = { t: 'set', uid: 'hero', field: 'heading', value: 'Bonjour', locale: 'fr' }
     const back = applyAll(applyAll(doc, [m]), invertAll(doc, [m]))
-    expect(back.bloks.hero!.i18n).toEqual({ fr: { heading: null } })
-    expect(back.bloks.hero!.data).toEqual(doc.bloks.hero!.data)
+    expect(back).toEqual(doc)
+    expect(back.bloks.hero).not.toHaveProperty('i18n')
   })
 })
 
@@ -784,5 +789,102 @@ describe('a pre-v3 log replays unchanged', () => {
     expect(out.bloks.root!.data.title).toBe('Home v2')
     expect(out.bloks.new1!.data.body).toBe('four')
     expect(out.bloks.img).toBeUndefined()
+  })
+})
+
+/**
+ * `unset` (`multi-site.md` decision 8): a delete-key, the one edit a layered global
+ * needs and `set` cannot express. In a site's layer an absent key is *inherited*
+ * and `null` is *removed here*, so "reset to inherited" is not a write of anything.
+ */
+describe('unset', () => {
+  it('deletes a source key, leaving the rest of the blok alone', () => {
+    const doc = makeDoc()
+    const out = apply(doc, { t: 'unset', uid: 'hero', field: 'heading' })
+    expect(out.bloks.hero!.data).toEqual({})
+    expect(out.bloks.hero).toEqual(b('hero', 'hero', 'root', 'body', 'a0'))
+    expect(out.bloks.text).toBe(doc.bloks.text)
+  })
+
+  it('leaves a key holding null distinguishable from a key that is gone', () => {
+    const nulled = apply(makeDoc(), { t: 'set', uid: 'hero', field: 'heading', value: null })
+    const gone = apply(makeDoc(), { t: 'unset', uid: 'hero', field: 'heading' })
+    expect('heading' in nulled.bloks.hero!.data).toBe(true)
+    expect('heading' in gone.bloks.hero!.data).toBe(false)
+  })
+
+  it('deletes one locale key without touching the source or another locale', () => {
+    const doc = applyAll(makeDoc(), [
+      { t: 'set', uid: 'hero', field: 'heading', value: 'Bonjour', locale: 'fr' },
+      { t: 'set', uid: 'hero', field: 'heading', value: 'Hallo', locale: 'de' },
+    ])
+    const out = apply(doc, { t: 'unset', uid: 'hero', field: 'heading', locale: 'fr' })
+    expect(out.bloks.hero!.i18n).toEqual({ de: { heading: 'Hallo' } })
+    expect(out.bloks.hero!.data).toEqual({ heading: 'Hello' })
+  })
+
+  it('drops a locale map it empties, and the i18n it leaves without a locale', () => {
+    const doc = apply(makeDoc(), {
+      t: 'set',
+      uid: 'hero',
+      field: 'heading',
+      value: 'Bonjour',
+      locale: 'fr',
+    })
+    const out = apply(doc, { t: 'unset', uid: 'hero', field: 'heading', locale: 'fr' })
+    expect(out.bloks.hero).not.toHaveProperty('i18n')
+  })
+
+  it('is a no-op, returning the same document, for a key or a uid that is not there', () => {
+    const doc = makeDoc()
+    expect(apply(doc, { t: 'unset', uid: 'hero', field: 'nope' })).toBe(doc)
+    expect(apply(doc, { t: 'unset', uid: 'nope', field: 'heading' })).toBe(doc)
+    expect(apply(doc, { t: 'unset', uid: 'hero', field: 'heading', locale: 'fr' })).toBe(doc)
+    expect(mutationError(doc, { t: 'unset', uid: 'nope', field: 'x' })).toBeNull()
+  })
+
+  it('inverts to the set it undid, with its locale when it had one', () => {
+    const doc = makeDoc()
+    expect(invert(doc, { t: 'unset', uid: 'hero', field: 'heading' })).toEqual([
+      { t: 'set', uid: 'hero', field: 'heading', value: 'Hello' },
+    ])
+    const fr = apply(doc, {
+      t: 'set',
+      uid: 'hero',
+      field: 'heading',
+      value: 'Bonjour',
+      locale: 'fr',
+    })
+    expect(invert(fr, { t: 'unset', uid: 'hero', field: 'heading', locale: 'fr' })).toEqual([
+      { t: 'set', uid: 'hero', field: 'heading', value: 'Bonjour', locale: 'fr' },
+    ])
+  })
+
+  it('inverts a null-valued key to a set of null, and an absent key to nothing', () => {
+    const nulled = apply(makeDoc(), { t: 'set', uid: 'hero', field: 'heading', value: null })
+    expect(invert(nulled, { t: 'unset', uid: 'hero', field: 'heading' })).toEqual([
+      { t: 'set', uid: 'hero', field: 'heading', value: null },
+    ])
+    expect(invert(makeDoc(), { t: 'unset', uid: 'hero', field: 'nope' })).toEqual([])
+    expect(invert(makeDoc(), { t: 'unset', uid: 'nope', field: 'heading' })).toEqual([])
+  })
+
+  it('omits the locale key from an inverse when there is none, so it serialises as before', () => {
+    const back = invert(makeDoc(), { t: 'set', uid: 'hero', field: 'align', value: 'left' })
+    expect(back[0]).toEqual({ t: 'unset', uid: 'hero', field: 'align' })
+    expect(back[0]).not.toHaveProperty('locale')
+  })
+
+  it('round trips a mixed transaction exactly, unset included', () => {
+    const doc = makeDoc()
+    const ms: Mutation[] = [
+      { t: 'unset', uid: 'hero', field: 'heading' },
+      { t: 'set', uid: 'hero', field: 'heading', value: 'Back' },
+      { t: 'set', uid: 'hero', field: 'align', value: 'left' },
+      { t: 'unset', uid: 'hero', field: 'align' },
+      { t: 'set', uid: 'text', field: 'body', value: 'fr body', locale: 'fr' },
+      { t: 'unset', uid: 'text', field: 'body', locale: 'fr' },
+    ]
+    expect(applyAll(applyAll(doc, ms), invertAll(doc, ms))).toEqual(doc)
   })
 })

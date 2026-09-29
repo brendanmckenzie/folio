@@ -18,7 +18,6 @@
  */
 import { Hono } from 'hono'
 import * as v from 'valibot'
-import { validateSitesAuth } from '../auth/config'
 import { ADMIN } from '../auth/roles'
 import { FolioError } from '../errors'
 import { requireAccess, requireAuthConfigured } from '../middleware'
@@ -78,11 +77,6 @@ export function siteRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
   const sites = rt.sites
   if (!sites) return app
-  // Construction time, like every other config rule: `createFolio` builds this app,
-  // so a provider this deployment's grants cannot honour throws there, not at the
-  // first sign-in. (`validateSites` beside `resolveAuth` is where it belongs.)
-  validateSitesAuth(rt.auth)
-
   const ctx: RegistryWriteContext = { sites, route: rt.route }
   app.use('/sites', requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, ADMIN))
   app.use('/sites/*', requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, ADMIN))

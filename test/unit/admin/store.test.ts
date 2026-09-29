@@ -610,7 +610,7 @@ describe('admin sync store', () => {
       // change is not coalesced into the previous locale's edit.
       h.store.undo()
 
-      expect(translated(h.store, 'hero', 'heading', 'de')).toBeNull()
+      expect(translated(h.store, 'hero', 'heading', 'de')).toBeUndefined()
       expect(translated(h.store, 'hero', 'heading', 'fr')).toBe('Bonjour')
       expect(value(h.store, 'hero', 'heading')).toBe('Hi')
     })
@@ -643,7 +643,9 @@ describe('admin sync store', () => {
       h.store.tx([setIn('hero', 'heading', 'Bon', 'fr')])
       h.store.undo()
 
-      expect(translated(h.store, 'hero', 'heading', 'fr')).toBeNull()
+      // Undoing the first translation deletes the key (`unset`), so it is absent
+      // rather than `null`; both read as untranslated.
+      expect(translated(h.store, 'hero', 'heading', 'fr')).toBeUndefined()
     })
   })
 

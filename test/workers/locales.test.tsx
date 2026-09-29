@@ -572,10 +572,10 @@ describe('the audit reports what a translator cannot see', () => {
 /* ------------------------------------------------- the wire, end to end --- */
 
 describe('the wire', () => {
-  // Bumped to 4 by `../../docs/specs/editing/live-collaboration.md`: presence
-  // carries a field and a locale, and a space-level channel appears. Nothing in
-  // that bump touches a mutation, so v3's own guarantee below is unaffected.
-  it('is version 4', () => {
-    expect(PROTOCOL_VERSION).toBe(4)
+  // Bumped to 4 by `../../docs/specs/editing/live-collaboration.md` (presence
+  // carries a field and a locale) and to 5 by `foundation/multi-site.md` (`unset`).
+  // Neither changes what a `set` means, so v3's own guarantee below is unaffected.
+  it('is version 5', () => {
+    expect(PROTOCOL_VERSION).toBe(5)
   })
 })

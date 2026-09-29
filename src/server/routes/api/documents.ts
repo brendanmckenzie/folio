@@ -19,6 +19,7 @@ import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { deepEqual } from '../../../core/diff'
 import type { Doc, Json } from '../../../core/doc'
+import { isBareLayer } from '../../../core/layers'
 import { isKnownLocale } from '../../../core/locales'
 import type { Mutation } from '../../../core/mutations'
 import { fieldShapeError, fromNested, type NestedDoc, toNested } from '../../../core/nested'
@@ -139,6 +140,15 @@ function writeActor<Env>(c: Context<FolioEnv<Env>>): WriteActor {
   }
 }
 
+/**
+ * `{ layer: 'bare' }` for a layer document with something below it (`multi-site.md`
+ * decision 8), so the nested shape reads an absent key as inherited and `null` as
+ * removed. Nothing on a deployment with no `sites`, where nothing layers.
+ */
+function layerOption(rt: FolioRuntime, story: StoryMeta): { layer?: 'bare' } {
+  return rt.sites && isBareLayer(story.id) ? { layer: 'bare' } : {}
+}
+
 export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
 
@@ -212,7 +222,10 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     ...meta(story),
     source,
     ...(locale !== undefined ? { locale } : {}),
-    content: toNested(doc, rt.schema, { locale: rt.localeOf(locale) }),
+    content: toNested(doc, rt.schema, {
+      locale: rt.localeOf(locale),
+      ...layerOption(rt, story),
+    }),
   })
 
   /** `?locale=`, screened and checked against the declared set. */
@@ -448,9 +461,14 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       return c.json(
         await writeDocument(
           deps(bindings, story),
-          (current) => fromNested(body.content, rt.schema, current, { mode: body.mode ?? 'merge' }),
+          (current) =>
+            fromNested(body.content, rt.schema, current, {
+              mode: body.mode ?? 'merge',
+              ...layerOption(rt, story),
+            }),
           writeActor(c),
           key,
+          layerOption(rt, story).layer,
         ),
       )
     } catch (e) {

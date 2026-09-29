@@ -89,11 +89,10 @@ function client(name, storyId) {
   }
 }
 
-// v4 since editing/live-collaboration.md: presence carries a field and a locale,
-// and a space-level channel appeared. `retype`, this spec's own addition, is
-// unaffected — it was v2's, and neither of the two bumps since has touched a
-// mutation.
-check('the wire version is 4', PROTOCOL_VERSION === 4, String(PROTOCOL_VERSION))
+// v5 since foundation/multi-site.md: `unset`, a delete-key. `retype`, this spec's own
+// addition, is unaffected — it was v2's, and bumps 4 (presence) and 5 (`unset`) each
+// left it alone.
+check('the wire version is 5', PROTOCOL_VERSION === 5, String(PROTOCOL_VERSION))
 
 /* --- what the config declares -------------------------------------------- */
 

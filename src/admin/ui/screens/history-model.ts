@@ -223,6 +223,12 @@ export function describeEdit(
       phrase = `Changed ${labelFor(first.uid)} · ${field?.label ?? first.field}`
       break
     }
+    case 'unset': {
+      const blok = doc.bloks[first.uid]
+      const field = blok ? schema[blok.type]?.fields[first.field] : undefined
+      phrase = `Reset ${labelFor(first.uid)} · ${field?.label ?? first.field}`
+      break
+    }
     case 'insert':
       phrase = `Added ${schema[first.blok.type]?.label ?? first.blok.type}`
       break

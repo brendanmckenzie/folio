@@ -667,8 +667,7 @@ const UNSCOPED_IDS = [
  * phase 7 fences these (review finding 4): their rows' readers (`assets.ts`,
  * `asset-folders.ts`, `asset-tags.ts`, `redirects.ts`) do not yet select
  * `site_id`, and the public form submit is "a form in the submitting site's chain",
- * which needs the live host's site. `/preview/global/:name` is phase 4's (layers),
- * and 404s on a multi-site deployment until then.
+ * which needs the live host's site.
  */
 const DEFERRED_IDS = [
   'GET /api/assets/:id',
@@ -682,12 +681,13 @@ const DEFERRED_IDS = [
   'DELETE /api/assets/tags/:id',
   'DELETE /api/redirects/:from{.+}',
   'POST /f/:id',
-  'GET /preview/global/:name',
 ]
 
 /** Fenced, and tested by their own cases below rather than by the status walk:
- * the socket refuses with a close code and the editor page with a 404 page. */
-const FENCED_ELSEWHERE = ['GET /api/story/:id/socket', 'GET /edit/:id']
+ * the socket refuses with a close code, the editor page with a 404 page, and a
+ * global's bare preview has no id in its path at all — the layer it shows is the
+ * request's own scope's, so there is no other row for a URL to name. */
+const FENCED_ELSEWHERE = ['GET /api/story/:id/socket', 'GET /edit/:id', 'GET /preview/global/:name']
 
 describe('every id loader is a fence', () => {
   /**
@@ -873,6 +873,32 @@ describe('every id loader is a fence', () => {
       (await call('/~alpha/api/v1/documents/sng_spSettings:alpha?status=draft', U)).status,
     ).toBe(200)
     expect(await count('sng_spSettings:alpha')).toBe(1)
+  })
+})
+
+describe("a global's bare preview", () => {
+  const count = async (id: string) =>
+    (
+      await env.DB.prepare('select count(*) as n from stories where id = ?')
+        .bind(id)
+        .first<{ n: number }>()
+    )?.n
+
+  it("shows the request's own layer, and makes no layer that does not exist", async () => {
+    // Alpha's layer was asked into existence above; bravo's never was.
+    expect((await call('/~alpha/preview/global/spSettings', U)).status).toBe(200)
+    expect((await call('/~alpha/preview/global/spSettings?mode=draft', U)).status).toBe(200)
+    const missing = await call('/~bravo/preview/global/spSettings', P)
+    expect(missing.status).toBe(404)
+    expect(await count('sng_spSettings:bravo')).toBe(0)
+    // No scope names no layer, and `default` is not conjured for anyone.
+    expect((await call('/preview/global/spSettings', P)).status).toBe(404)
+    expect(await count('sng_spSettings')).toBe(0)
+  })
+
+  it('is refused to a caller with no role on the scope, as any scoped route is', async () => {
+    expect((await call('/~bravo/preview/global/spSettings', U)).status).toBe(403)
+    expect(await count('sng_spSettings:bravo')).toBe(0)
   })
 })
 

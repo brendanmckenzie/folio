@@ -139,6 +139,12 @@ const LOCALE_RE = /^[A-Za-z0-9_-]{1,32}$/
 
 export interface ToNestedOptions {
   /**
+   * A layer with something below it (`FromNestedOptions.layer`): a `blocks` field
+   * the layer removed reads `null`, where an empty slot reads `[]` (inherited), so
+   * a read-modify-write of a layer keeps what it removed.
+   */
+  layer?: 'bare'
+  /**
    * Read every field in this locale, through `fieldValue`'s fallback chain, and
    * omit `i18n` from the result. The **reading** shape: what a French mobile app
    * wants, and deliberately not round-trippable — writing it back would put
@@ -220,6 +226,15 @@ function nestOne(
     fields[name] = value
   }
   for (const name of new Set([...slots, ...(bySlot?.keys() ?? [])])) {
+    if (
+      opts?.layer === 'bare' &&
+      slots.has(name) &&
+      blok.data[name] === null &&
+      !bySlot?.get(name)?.length
+    ) {
+      fields[name] = null
+      continue
+    }
     fields[name] = (bySlot?.get(name) ?? [])
       .filter((child) => !visited.has(child.uid))
       .map((child, i) =>
@@ -263,6 +278,21 @@ export interface FromNestedOptions {
    * blok that actually has translations to lose — see `translationsAtRisk`.
    */
   mode?: 'merge' | 'replace'
+  /**
+   * **`'bare'`: the document is a layer with something below it** (`multi-site.md`
+   * decision 8), so a key it does not hold is *inherited* rather than empty.
+   *
+   * - No blok is created with the schema's defaults: a default written into a
+   *   layer would override the layer below it, field by field.
+   * - An absent key stays absent (inherited), and `null` is stored as it is
+   *   (removed), for any field — where an ordinary document refuses `null` for a
+   *   field whose kind does not take it.
+   * - `null` is accepted for a `blocks` field, and only here: it is stored as
+   *   `data[slot] = null` and means the layer removes the slot's children. Any
+   *   array, empty included, means the layer has children there or none (inherited)
+   *   and clears a stored `null`.
+   */
+  layer?: 'bare'
 }
 
 /**
@@ -299,6 +329,7 @@ export function fromNested(
     claimed: new Set(),
     carries: [],
     nodes: 0,
+    bare: opts?.layer === 'bare',
   }
 
   const node = requireNode(input, '')
@@ -352,6 +383,8 @@ interface BuildContext {
   /** Base uids whose subtrees survive verbatim because their slot was omitted. */
   carries: string[]
   nodes: number
+  /** `FromNestedOptions.layer === 'bare'`. */
+  bare: boolean
 }
 
 interface Placement {
@@ -418,6 +451,9 @@ function build(ctx: BuildContext, node: Record<string, unknown>, at: Placement):
 
   for (const slot of slotNames) {
     const raw = supplied[slot]
+    // A layer removing a slot's children: `scalarData` stored the `null`, and no
+    // child is placed, so a merge does not carry the old ones over either.
+    if (raw === null && ctx.bare) continue
     if (raw === undefined) {
       // Merge leaves an unmentioned slot alone; replace empties it, which is what
       // makes replace able to say "this document has no body".
@@ -560,7 +596,7 @@ function scalarData(
    * *replace* over an existing blok still starts from `{}` and still clears an
    * absent scalar, which is its documented job.
    */
-  if (!at.baseBlok && def) {
+  if (!at.baseBlok && def && !ctx.bare) {
     for (const [name, field] of Object.entries(def.fields)) {
       if (field.kind === 'blocks' || slots.has(name)) continue
       data[name] = field.default ?? defaultValue(field)
@@ -568,7 +604,15 @@ function scalarData(
   }
 
   for (const [name, value] of Object.entries(supplied)) {
-    if (slots.has(name)) continue
+    if (slots.has(name)) {
+      // A layer's own words about a slot: `null` removes its children, any array
+      // says there are some (or none) and so is not a removal.
+      if (ctx.bare) {
+        if (value === null) data[name] = null
+        else delete data[name]
+      }
+      continue
+    }
     const path = fieldPath(at.path, name)
     const field = def?.fields[name]
     if (!field) {
@@ -584,6 +628,11 @@ function scalarData(
     }
     if (field.kind === 'blocks') {
       throw new NestedError(path, 'is a blocks field, so its value must be an array of blocks')
+    }
+    // `null` in a layer is "removed here", whatever the field's kind.
+    if (ctx.bare && value === null) {
+      data[name] = null
+      continue
     }
     const shape = fieldShapeError(field, value)
     if (shape) throw new NestedError(path, shape)
@@ -837,8 +886,8 @@ function longestIncreasing(keys: readonly (string | undefined)[]): Set<number> {
  * laxness. It is the mutation vocabulary's "no value": `set(field, null)` is a
  * legal transaction for any field, `resolveValue` normalises it to the kind's own
  * empty value on the way out, and `fieldValue` reads it as *untranslated* in a
- * locale map — which makes it the only way to express "untranslate this", since
- * there is no delete-field mutation. Refusing it would mean a document holding a
+ * locale map. Deleting the key is a different act, `unset`, which only a layer
+ * uses (`multi-site.md` decision 8). Refusing null would mean a document holding a
  * nulled field could not be read and written back.
  */
 export function fieldShapeError(field: Field, value: unknown): string | null {

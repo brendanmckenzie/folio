@@ -2067,3 +2067,67 @@ scope. Where the spec was wrong or silent:
   purges. They still emit today's unscoped tags on a multi-site deployment: `story:<id>`
   is right, the unscoped `type:` and `global:` tags reach nothing a multi-site render
   carries, and the `path:` tags are missing.
+
+### Phase 4 (2026-09-29)
+
+`unset`, `PROTOCOL_VERSION = 5`, `core/layers.ts`, layered `resolve()` and
+`reader.global`, bare layer seeding, `opts.layer` on the nested shape, the per-site
+audit check and `/preview/global/:name` on multi-site landed as specified. Where the
+spec was wrong, silent or split across files it did not name:
+
+- **`layerSeed` and `layerId` were already in `core/sites.ts`** (phase 2), with the
+  registry as a parameter; `core/layers.ts` holds `mergeLayers`, `layerStates` and
+  `isBareLayer`. `isBareLayer(id)` is `layerSeed` answered without a registry, for the
+  callers that hold a story id and no snapshot (`draftFor` seeds the object): every
+  scope in a registry has `shared` below it except `shared` itself, so the two agree.
+- **`default` seeds bare on a multi-site deployment.** Decision 8 says `default`'s
+  `sng_<type>` seeds "exactly as today", but "the test is the chain, not the id", and
+  on a multi-site deployment `default` is an ordinary site row whose chain is
+  `default`, `shared`. The chain test wins: a `default` layer created there is bare and
+  inherits `shared`. A deployment with no `sites` seeds exactly as before.
+- **The seed is chosen in `draftFor`, not in `ensureSingleton`.** `ensureSingleton`
+  creates only the D1 row; how the layer's document starts is decided where its Durable
+  Object is first touched (`draftFor`, `draftForWithSyncId`, `draft`, through
+  `seedFor`), so every path that opens a layer agrees. `stories.ts` needed no change.
+- **`mergeLayers` of a chain of one returns that layer, the same object.** That is the
+  byte-identical single-site guarantee. A longer chain is always rebuilt, so a `null`
+  in the lowest existing layer reads as no value rather than as a stored `null`.
+  Merged `data` drops a removed key rather than storing `null`; the merged root keeps
+  the most specific layer's uid, and an inherited child is re-parented under it.
+- **A removed source field drops the lower layers' translations of it.** The spec is
+  silent; a translation of a field with no value has nothing to translate and would
+  otherwise render French for a field the site removed.
+- **`layerStates` keys nested fields as `slot.field`** for a `max: 1` child that merges
+  into the inherited one, and reports `from: null` for a field nothing below holds.
+- **`diff` needed a layer mode, and so did `writeDocument`.** `diff` reads an absent
+  key and `null` as the same thing, so `PUT /content` on a bare layer could neither
+  remove a field (`null` from absent produced no mutation) nor reset one (a vanished
+  key was written as `null`, i.e. removed, not inherited). `diff(from, to, { layer:
+  'bare' })` reads presence: a vanished key is an `unset`, an appeared one a `set`
+  even of `null`, in `data` and in every locale map. `writeDocument` takes the same
+  option. Beyond the spec's file list, and necessary for `opts.layer` to have any
+  effect over the API.
+- **`toNested` takes `layer: 'bare'` too**, reading a removed slot as `null` where an
+  inherited one reads `[]`, so a read-modify-write keeps what the layer removed.
+- **A v4 wire consequence:** `invert` of a `set` on an absent key is now an `unset`, so
+  an undo restores absent rather than leaving `null`. Two `store.test.ts` expectations
+  and five `mutations.test.ts` ones changed with it; `history-model.ts` describes an
+  `unset` ("Reset ...").
+- **`/preview/global/:name` lives in `routes/editor.ts`.** On a multi-site deployment
+  it shows the request's own scope's layer and only if its row exists: no row is a 404,
+  never an `ensureSingleton`, and no scope is a 404. It is listed in
+  `scope-partition.test.ts`' `FENCED_ELSEWHERE`, with its own cases, since it takes no
+  id a URL could point at another scope with.
+- **The settings type is loaded as a global on a multi-site deployment**, deduplicated
+  against `globals` (`sites.layered`), so `Resolution.globals` is `{}` rather than
+  absent when nothing is published.
+- **The audit's per-site check is `AuditReport.settings`**, present only on a
+  deployment with `sites` and a settings type: one entry per site per `required` field
+  with no value in the merged published settings (`auditSettings`), read in one
+  statement for every layer of every site. A bare layer is exempt from `missing-field`.
+  `rt.auditContext(env)` builds the context for both `folio.audit` and `GET /audit`.
+- **`validateSitesAuth` runs in `validateSites`**, beside `resolveAuth`, and no longer
+  where the registry routes are built.
+- **The purge lines are tested through `cachePurgeHooks` with the runtime's own
+  `sites.layered`**, not by a publish through the API: the publish hook's purge
+  capability is the platform's, which a test cannot observe.

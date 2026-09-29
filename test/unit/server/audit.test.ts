@@ -85,11 +85,11 @@ describe('auditDocuments: orphan keys', () => {
   })
 
   /**
-   * The one exclusion, and it matters: clearing a field is `set … null` (the
-   * vocabulary has no delete-key), so a *completed* rename leaves a null key
-   * behind. Reporting those would mean every successful migration left permanent
-   * drift in the report, and an orphan key only matters when it holds content
-   * nobody can see.
+   * The one exclusion, and it matters: clearing a field is `set … null` or via
+   * `unset` (multi-site.md decision 8), so a *completed* rename leaves a null
+   * or absent key behind. Reporting those would mean every successful migration
+   * left permanent drift in the report, and an orphan key only matters when it
+   * holds content nobody can see.
    */
   it('ignores a null orphan key: that is a field a migration already cleared', () => {
     const findings = auditDocuments([doc([b('a', 'hero', { title: 'A', heading: null })])], SCHEMA)

@@ -19,6 +19,17 @@ export type Mutation =
    * `''` stays deliberately empty.
    */
   | { t: 'set'; uid: string; field: string; value: Json; locale?: string }
+  /**
+   * Deletes one key, so the field reads as **absent** rather than as `null`
+   * (`multi-site.md` decision 8). Only a layered global can tell the two apart:
+   * in a site's layer an absent key is *inherited* from the layer below and
+   * `null` is *removed here*, so "reset to inherited" cannot be a `set` of
+   * anything. An absent `locale` is a source-locale delete, exactly as for `set`.
+   *
+   * Beat a sentinel such as `{ $inherit: true }`, which is data every reader
+   * would have to know is not data. A missing key or uid is a no-op.
+   */
+  | { t: 'unset'; uid: string; field: string; locale?: string }
   | { t: 'insert'; blok: Blok }
   | { t: 'move'; uid: string; parent: string; slot: string; order: string }
   | { t: 'remove'; uid: string }
@@ -50,6 +61,7 @@ export type Mutation =
 export function mutationError(doc: Doc, m: Mutation): string | null {
   switch (m.t) {
     case 'set':
+    case 'unset':
       return null
     case 'insert':
       return doc.bloks[m.blok.uid] ? `duplicate uid: ${m.blok.uid} already exists` : null
@@ -90,6 +102,12 @@ export function apply(doc: Doc, m: Mutation): Doc {
       const b = doc.bloks[m.uid]
       if (!b) return doc
       return { ...doc, bloks: { ...doc.bloks, [m.uid]: written(b, m.field, m.value, m.locale) } }
+    }
+    case 'unset': {
+      const b = doc.bloks[m.uid]
+      if (!b) return doc
+      const next = cleared(b, m.field, m.locale)
+      return next === b ? doc : { ...doc, bloks: { ...doc.bloks, [m.uid]: next } }
     }
     case 'insert': {
       return { ...doc, bloks: { ...doc.bloks, [m.blok.uid]: m.blok } }
@@ -144,6 +162,29 @@ function written(blok: Blok, field: string, value: Json, locale?: string): Blok 
 }
 
 /**
+ * `blok` with one key deleted, or `blok` itself when there was nothing to delete.
+ *
+ * A locale map that the delete empties is dropped, and so is an `i18n` that has
+ * no locale left, so `set` on an absent key followed by its inverse `unset`
+ * returns the document it started from rather than one that differs by an empty
+ * object.
+ */
+function cleared(blok: Blok, field: string, locale?: string): Blok {
+  if (locale === undefined) {
+    if (!(field in blok.data)) return blok
+    const { [field]: _gone, ...data } = blok.data
+    return { ...blok, data }
+  }
+  const map = blok.i18n?.[locale]
+  if (!map || !(field in map)) return blok
+  const { [field]: _gone, ...rest } = map
+  const { [locale]: _map, ...others } = blok.i18n!
+  const i18n = Object.keys(rest).length > 0 ? { ...others, [locale]: rest } : others
+  const { i18n: _i18n, ...bare } = blok
+  return Object.keys(i18n).length > 0 ? { ...bare, i18n } : bare
+}
+
+/**
  * A `set` for the same field and locale, carrying `value`. The locale key is
  * *omitted* rather than set to undefined when there is none, so a source-locale
  * inverse serialises exactly as a pre-v3 mutation did — `deepEqual` and the
@@ -153,6 +194,11 @@ function setMutation(uid: string, field: string, value: Json, locale?: string): 
   return locale === undefined
     ? { t: 'set', uid, field, value }
     : { t: 'set', uid, field, value, locale }
+}
+
+/** `unset`'s counterpart to `setMutation`: the locale key is omitted when there is none. */
+function unsetMutation(uid: string, field: string, locale?: string): Mutation {
+  return locale === undefined ? { t: 'unset', uid, field } : { t: 'unset', uid, field, locale }
 }
 
 export function applyAll(doc: Doc, ms: readonly Mutation[]): Doc {
@@ -175,7 +221,17 @@ export function invert(doc: Doc, m: Mutation): Mutation[] {
       // Read the prior value from wherever this `set` is about to write, so a
       // translator's Cmd+Z reverts their own language and nobody else's.
       const prior = m.locale === undefined ? b.data[m.field] : b.i18n?.[m.locale]?.[m.field]
-      return [setMutation(m.uid, m.field, prior ?? null, m.locale)]
+      // A key that was not there is put back by deleting it, not by writing
+      // `null`: in a layered global the two differ (inherited versus removed).
+      if (prior === undefined) return [unsetMutation(m.uid, m.field, m.locale)]
+      return [setMutation(m.uid, m.field, prior, m.locale)]
+    }
+    case 'unset': {
+      const b = doc.bloks[m.uid]
+      if (!b) return []
+      const prior = m.locale === undefined ? b.data[m.field] : b.i18n?.[m.locale]?.[m.field]
+      // Deleting an absent key changed nothing, so it undoes to nothing.
+      return prior === undefined ? [] : [setMutation(m.uid, m.field, prior, m.locale)]
     }
     case 'insert':
       return [{ t: 'remove', uid: m.blok.uid }]

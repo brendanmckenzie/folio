@@ -28,9 +28,9 @@ export interface Blok {
   /**
    * Per-locale overrides, by locale code then field name. An **absent key means
    * untranslated** and falls back; an explicit `''` means deliberately empty and
-   * does not (decision 5). `null` reads as untranslated, which is how
-   * "untranslate this field" is expressible at all — the mutation vocabulary has
-   * no delete-key.
+   * does not (decision 5). `null` reads as untranslated, or an absent key via
+   * `unset` (multi-site.md decision 8), which is how "untranslate this field"
+   * is expressible.
    *
    * Optional, so every document written before locales existed is already valid
    * and a single-locale site never grows the field. Read it through

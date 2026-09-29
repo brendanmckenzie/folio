@@ -35,8 +35,14 @@ import type { Resolution } from './resolve'
  *       `selection: { uid, field }` would fail its own shape guard and drop
  *       every presence frame silently — a peer dot that simply stops appearing
  *       is exactly the failure the handshake exists to make visible. |
+ * | 5 | `Mutation` gains `unset`, a delete-key (`multi-site.md` decision 8),
+ *       alongside a cross-origin bridge rule and a space channel per scope. A new
+ *       variant, so every `set` in a log still means what it meant. The bump is
+ *       needed because a v4 *client* handed an `unset` would fail `isMutation` and
+ *       drop the delta, leaving its copy of a layered global showing a value the
+ *       server has deleted. |
  */
-export const PROTOCOL_VERSION = 4
+export const PROTOCOL_VERSION = 5
 
 /**
  * Where a peer's caret is: which blok, and which field inside it (v4,
@@ -397,6 +403,9 @@ export function isMutation(x: unknown): x is Mutation {
         'value' in x &&
         (x.locale === undefined || isString(x.locale))
       )
+    case 'unset':
+      // No `value`: the key is deleted, not written. `locale` as for `set`.
+      return isString(x.uid) && isString(x.field) && (x.locale === undefined || isString(x.locale))
     case 'insert':
       return isBlok(x.blok)
     case 'move':

@@ -672,9 +672,9 @@ describe('diff over locale maps', () => {
   })
 
   /**
-   * Clearing rather than deleting: the vocabulary has no delete-key mutation, so
-   * a locale the target version did not have is nulled out. `fieldValue` reads null
-   * and absent identically, so the restored document renders as the target did.
+   * Clearing via `unset` (multi-site.md decision 8): a locale the target version
+   * did not have is deleted as a key. `fieldValue` reads null and absent
+   * identically, so the restored document renders as the target did.
    */
   it('clears a locale that disappears, to null rather than to empty string', () => {
     const from = mkDoc([rootBlk(), withI18n('a', { t: 'Hello' }, { fr: { t: 'Bonjour' } })])

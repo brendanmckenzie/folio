@@ -1,14 +1,15 @@
 import { cacheHeaders, cacheTags, NO_STORE } from '../core/cache-tags'
 import { type Blok, childrenOf, type Doc, type Json } from '../core/doc'
 import { gateValue, isUngated, type PageAccess, redactDoc } from '../core/gate'
+import { mergeLayers } from '../core/layers'
 import { dataOf, isKnownLocale, type LocaleContext } from '../core/locales'
 import type { Resolution } from '../core/resolve'
 import { buildTree, type StoryMeta } from '../core/story'
-import { singletonId } from '../core/schema'
 import {
   chain as chainOf,
   DEFAULT_SITE,
   gate as siteGate,
+  layerId,
   SINGLE_SITE_CHAIN,
   type SiteRef,
 } from '../core/sites'
@@ -993,9 +994,17 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       global: async (name) => {
         const type = rt.typeOf(name)
         if (type?.kind !== 'singleton') return null
-        const id = singletonId(type)
-        const docs = await publishedDocsByIds(db, [id], (await scopeOnce()).chain)
-        return docs[id] ?? null
+        // The chain's layers, merged (`multi-site.md` decision 8). With no `sites`
+        // the chain is `['default']` and this is the one `sng_<type>` read it was.
+        const { chain } = await scopeOnce()
+        const ids = [...chain].reverse().map((scope) => layerId(name, scope))
+        const docs = await publishedDocsByIds(db, ids, chain)
+        return (
+          mergeLayers(
+            ids.map((id) => docs[id]),
+            rt.schema,
+          ) ?? null
+        )
       },
       site: async () => (await scopeOnce()).render?.site ?? null,
       bookmark: () => db.getBookmark(),
@@ -1177,7 +1186,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         opts,
       )
     },
-    audit: (env, opts) =>
-      audit(config.bindings(env).db, rt.schema, { locales: rt.locales, types: rt.types }, opts),
+    audit: async (env, opts) =>
+      audit(config.bindings(env).db, rt.schema, await rt.auditContext(env), opts),
   }
 }

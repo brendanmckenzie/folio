@@ -73,9 +73,8 @@ describe('field.rename', () => {
   })
 
   /**
-   * Cleared, not deleted, and that is not a shortcut: the mutation vocabulary has
-   * no delete-key, and adding one would have been a second wire change this spec
-   * deliberately did not make. `null` is what `resolveValue` renders as empty,
+   * Cleared to `null`, not deleted via `unset` (multi-site.md decision 8, which
+   * applies to i18n and layers). `null` is what `resolveValue` renders as empty,
    * what `diff` already treats as equal to an absent key, and what the audit
    * ignores when counting orphan keys.
    */

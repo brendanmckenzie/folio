@@ -8,7 +8,8 @@
  * Durable Object alarm, which has no request to derive bindings from.
  */
 import { toManifest, toRegistry, toSchemaIndex, type Registry } from '../core/block'
-import type { Doc } from '../core/doc'
+import { type Doc, newUid } from '../core/doc'
+import { isBareLayer, mergeLayers } from '../core/layers'
 import { indexedFieldNames } from '../core/index-projection'
 import {
   dataOf,
@@ -33,7 +34,6 @@ import {
   type DocumentType,
   type Manifest,
   type SchemaIndex,
-  singletonId,
   titleFieldOf,
   titleOf,
   typeByName,
@@ -42,6 +42,7 @@ import {
   validateTypes,
 } from '../core/schema'
 import {
+  layerId,
   type Registry as SiteRegistry,
   SINGLE_SITE_CHAIN,
   type SiteContext,
@@ -49,8 +50,9 @@ import {
   type Surface,
 } from '../core/sites'
 import { ancestorPaths, type StoryMeta, type StoryNode } from '../core/story'
-import { type ResolvedAuth, resolveAuth } from './auth/config'
+import { type ResolvedAuth, resolveAuth, validateSitesAuth } from './auth/config'
 import { cachePurgeHooks, type PurgeCapability } from './cache-purge'
+import type { AuditContext } from './audit'
 import { type ContentProjection, contentProjection } from './content-index'
 import { type ResolvedDescribe, validateDescribe } from './describe'
 import { type ResolvedForms, validateForms } from './form-responses'
@@ -313,6 +315,13 @@ export interface FolioRuntime {
   base: string
   /** `FolioConfig.sites`, validated, or null for a deployment with no `sites`. */
   sites: SitesRuntime | null
+  /**
+   * What `audit` needs beyond the schema: the locales, the types, and on a
+   * deployment with `sites` the settings type and the registry. Both callers
+   * (`folio.audit` and `GET /audit`) build it here, so the method and the route
+   * cannot answer differently.
+   */
+  auditContext: (env: unknown) => Promise<AuditContext>
   /** The host's `route`, or the single-site default. */
   route: (path: string, locale?: string, site?: SiteRef) => string
   /** True when a Vite dev client is configured, so the pages ship the preamble. */
@@ -524,11 +533,15 @@ export function validateAssets(assets: FolioConfig<unknown>['assets']): void {
  *   default relative `route` would resolve against it.
  * - every layered type's layer id fits a story id (64 characters) for the longest
  *   scope id a registry write accepts (32).
+ * - the provisioning rules of decision 17 (`validateSitesAuth`), beside the
+ *   `resolveAuth` that produced `auth`: a provider this deployment's grants cannot
+ *   honour throws here, not at the first sign-in.
  */
 export function validateSites<Env>(
   config: FolioConfig<Env>,
   types: readonly DocumentType[],
   logger: FolioLogger,
+  auth: ResolvedAuth<unknown>,
 ): ResolvedSites | null {
   const sites = config.sites
   if (!sites) return null
@@ -565,6 +578,7 @@ export function validateSites<Env>(
       )
     }
   }
+  validateSitesAuth(auth)
   if (config.auth === 'open') {
     logger.warn(
       "folio: 'sites' with auth: 'open' — every scope is editable and every preview origin shows drafts to anyone who reaches it",
@@ -658,7 +672,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // that is not a singleton, is a deployment that serves nothing
   // (`../../docs/specs/foundation/multi-site.md`). Null with no `sites`, and then
   // no snapshot exists and nothing below ever reads the registry.
-  const resolvedSites = validateSites(config, types, logger)
+  const resolvedSites = validateSites(config, types, logger, auth)
   const sites: SitesRuntime | null = resolvedSites
     ? (() => {
         const snapshot = registrySnapshot()
@@ -668,7 +682,9 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
           registry: (env: unknown) => snapshot.get(rawDb(env)),
           fresh: (env: unknown) => readRegistry(rawDb(env)),
           drop: snapshot.drop,
-          layered: [...globals, ...(resolvedSites.settings ? [resolvedSites.settings] : [])],
+          layered: [
+            ...new Set([...globals, ...(resolvedSites.settings ? [resolvedSites.settings] : [])]),
+          ],
           rawDb,
         }
       })()
@@ -791,6 +807,32 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     return { root: root.uid, bloks: Object.fromEntries(bloks.map((b) => [b.uid, b])) }
   }
 
+  /**
+   * A layer that has something below it starts **bare** (`multi-site.md`
+   * decision 8): a root with `data: {}`, no preset and no title, so every field
+   * reads as inherited. A root seeded with defaults would override the whole
+   * chain below it on the first keystroke.
+   */
+  const bareSeed = (type: DocumentType | undefined): Doc => {
+    const t = type ?? fallbackType
+    const uid = newUid()
+    return {
+      root: uid,
+      bloks: { [uid]: { uid, type: t.root, parent: null, slot: null, order: 'a0', data: {} } },
+    }
+  }
+
+  /**
+   * How `story`'s draft starts if its object does not exist yet: bare for a
+   * layer with something below it, else `seed`. **Only a multi-site deployment
+   * layers**, so a single-site singleton (`sng_<type>`, the `default` layer of a
+   * chain of one) seeds exactly as it always did.
+   */
+  const seedFor = (story: { id: string; type: string; title: string }): Doc =>
+    sites && isBareLayer(story.id)
+      ? bareSeed(typeOf(story.type))
+      : seed(typeOf(story.type), story.title)
+
   const stub = ({ story }: ReadBindings, id: string): StoryStub =>
     story.get(story.idFromName(id)) as unknown as StoryStub
 
@@ -799,14 +841,14 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     ns ? (ns.get(ns.idFromName(SPACE_NAME)) as unknown as SpaceStub) : null
 
   const draftFor = (bindings: ReadBindings, story: StoryMeta) =>
-    stub(bindings, story.id).getOrInit(seed(typeOf(story.type), story.title))
+    stub(bindings, story.id).getOrInit(seedFor(story))
 
   const draftForWithSyncId = (bindings: ReadBindings, story: StoryMeta) =>
-    stub(bindings, story.id).getOrInitWithSyncId(seed(typeOf(story.type), story.title))
+    stub(bindings, story.id).getOrInitWithSyncId(seedFor(story))
 
   const draft = async (bindings: ReadBindings, id: string) => {
     const meta = await storyById(bindings.db, id)
-    return stub(bindings, id).getOrInit(seed(typeOf(meta?.type), meta?.title ?? 'Untitled'))
+    return stub(bindings, id).getOrInit(meta ? seedFor(meta) : seed(undefined, 'Untitled'))
   }
 
   /**
@@ -891,7 +933,16 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     const localeField = active ? { locale: active } : {}
     const pageField = opts?.page !== undefined ? { page: opts.page } : {}
     const searchField = opts?.search !== undefined ? { search: opts.search } : {}
-    const globalIds = globals.map((name) => singletonId(typeOf(name)!))
+    // The documents this render loads as globals, and each one's layer ids in the
+    // chain, most general first (`multi-site.md` decision 8). With no `sites` the
+    // chain is `['default']` and `layerId` is `sng_<type>`, so this is the list,
+    // the ids and the statements it always was; on a multi-site deployment the
+    // settings type is loaded too, and every chain scope contributes a layer.
+    const loaded = sites ? sites.layered : globals
+    const layerIds = new Map(
+      loaded.map((name) => [name, [...chain].reverse().map((scope) => layerId(name, scope))]),
+    )
+    const globalIds = [...layerIds.values()].flat()
 
     // A caller with no document at all wants the map and nothing else, so it gets
     // every story: there is no document to narrow to, and answering with an empty
@@ -973,27 +1024,33 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       // That is what keeps this branch sequential where the published one below
       // is not: the filter is load-bearing here and merely tidy there.
       const liveRefIds = refIds.filter((id) => known.has(id))
-      if (globals.length > 0 || liveRefIds.length > 0) {
+      if (loaded.length > 0 || liveRefIds.length > 0) {
         const [refEntries, globalEntries] = await Promise.all([
           Promise.all(liveRefIds.map(async (id) => [id, await draft(bindings, id)] as const)),
           Promise.all(
-            globals.map(async (name, i) => {
-              const type = typeOf(name)!
+            loaded.map(async (name) => {
               // **A render on a multi-site deployment never writes** (decision
-              // 8): a global with no row in the chain is absent rather than
-              // ensured into existence. Layers are spec 23's phase 4; until
-              // then a site reads only the rows its chain already holds.
+              // 8): a layer with no row in the chain is absent, which reads as
+              // every field inherited, rather than ensured into existence. A
+              // layer row and its object are made by an editor's first write, so
+              // a draft site that was only ever previewed stays deletable.
               if (sites) {
-                const meta = known.get(globalIds[i]!)
-                return meta ? ([name, await draftFor(bindings, meta)] as const) : null
+                const layers = await Promise.all(
+                  layerIds.get(name)!.map((id) => {
+                    const meta = known.get(id)
+                    return meta ? draftFor(bindings, meta) : undefined
+                  }),
+                )
+                const merged = mergeLayers(layers, schema)
+                return merged ? ([name, merged] as const) : null
               }
-              const meta = await ensureSingleton(db, type, schemaId)
+              const meta = await ensureSingleton(db, typeOf(name)!, schemaId)
               return [name, await draftFor(bindings, meta)] as const
             }),
           ),
         ])
         docs = Object.fromEntries(refEntries)
-        globalDocs = globals.length
+        globalDocs = loaded.length
           ? Object.fromEntries(
               globalEntries.filter((entry): entry is readonly [string, Doc] => entry !== null),
             )
@@ -1021,10 +1078,19 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
           .filter((id) => known.has(id) && combined[id])
           .map((id) => [id, combined[id]!] as const),
       )
-      globalDocs = globals.length
+      globalDocs = loaded.length
         ? Object.fromEntries(
-            globals
-              .map((name, i) => [name, combined[globalIds[i]!]] as const)
+            loaded
+              .map(
+                (name) =>
+                  [
+                    name,
+                    mergeLayers(
+                      layerIds.get(name)!.map((id) => combined[id]),
+                      schema,
+                    ),
+                  ] as const,
+              )
               .filter((entry): entry is [string, Doc] => Boolean(entry[1])),
           )
         : undefined
@@ -1264,6 +1330,14 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     }
   }
 
+  const auditContext = async (env: unknown): Promise<AuditContext> => ({
+    locales,
+    types,
+    ...(sites?.settings
+      ? { sites: { settings: sites.settings, registry: await sites.registry(env) } }
+      : {}),
+  })
+
   return {
     registry,
     previewWrap: config.previewWrap,
@@ -1294,6 +1368,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     forms,
     logger,
     formPurgeCapability,
+    auditContext,
     typeOf,
     defaultType: fallbackType,
     titleFor,

@@ -40,8 +40,8 @@ const send = (body: Record<string, unknown>) => JSON.stringify({ ...body, v: PRO
  * talking to a deployed worker.
  */
 describe('PROTOCOL_VERSION', () => {
-  it('is 4 — `presence` carries a field and a locale, and a space channel appears (live-collaboration.md)', () => {
-    expect(PROTOCOL_VERSION).toBe(4)
+  it('is 5 — `unset` is a mutation, and the space channel is per scope (multi-site.md)', () => {
+    expect(PROTOCOL_VERSION).toBe(5)
   })
 })
 
@@ -219,6 +219,29 @@ describe('parseClientFrame: tx', () => {
     { t: 'retype', uid: null, type: 'quote' },
   ])('rejects a malformed retype (%o)', (mutation) => {
     expect(parseClientFrame(send({ type: 'tx', txId: 'tx-r', mutations: [mutation] }))).toBeNull()
+  })
+
+  /** The v5 addition (`multi-site.md` decision 8): a delete-key, so no `value`. */
+  it('parses a tx carrying an unset, with and without a locale', () => {
+    const mutations = [
+      { t: 'unset', uid: 'blk00001', field: 'title' },
+      { t: 'unset', uid: 'blk00001', field: 'title', locale: 'fr' },
+    ]
+    expect(parseClientFrame(send({ type: 'tx', txId: 'tx-u', mutations }))).toEqual({
+      type: 'tx',
+      txId: 'tx-u',
+      mutations,
+      v: PROTOCOL_VERSION,
+    })
+  })
+
+  it.each([
+    { t: 'unset', uid: 'blk00001' },
+    { t: 'unset', field: 'title' },
+    { t: 'unset', uid: 'blk00001', field: 7 },
+    { t: 'unset', uid: 'blk00001', field: 'title', locale: 5 },
+  ])('rejects a malformed unset (%o)', (mutation) => {
+    expect(parseClientFrame(send({ type: 'tx', txId: 'tx-u', mutations: [mutation] }))).toBeNull()
   })
 
   /**
