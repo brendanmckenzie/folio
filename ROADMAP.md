@@ -877,6 +877,32 @@ more once there is state to manage. Repeating groups, save-and-resume, partial
 submissions and calculated values are named rather than planned.
 
 
+### 5. Share a preview from the editor
+
+**Raised 2026-09-30 by the owner** while verifying multi-site on staging: a share
+link is how someone outside the CMS sees a page's draft without it being
+published — no account, one page only, 7 days by default and 1–90 allowed,
+revocable, with a view count — and the only way to mint one today is
+`POST {base}/api/story/:id/share` by hand. The server side has been complete
+since spec 21 (`docs/specs/platform/draft-sharing.md`); the admin screen was
+deferred by arrangement, and nothing here said so, so an editor has no way to
+find the feature.
+
+**What the screen needs is already written down**, in that spec's
+Implementation notes under "No admin UI, by arrangement": a "Share a preview"
+button in the editor's top bar beside Publish, gated by `canShare(me)` =
+`canPublish(me)` in `admin/me.ts`; a dialog on the one focus trap with an
+optional note and a day count; the URL shown exactly once with a copy button
+(the same component as a new token on the Access screen); and the page's live
+shares listed in the same dialog from `GET {base}/api/shares?story=<id>&state=live`
+with views, last opened and a Revoke per row.
+
+**Multi-site changes two things.** The link lands on the rendering site's preview
+origin (`shareUrl` with `render.preview`), so the dialog says which site it
+previews; and minting needs `PUBLISH` on the story's own scope, so on a shared
+page the dialog offers a render site from `sitesUnder` of that scope
+(`multi-site.md` decision 13, "Shares").
+
 ## Uncovered from the reference project
 
 **Cookie-based draft mode. Done 2026-08-30, as spec 25** (`platform/draft-mode.md`),
