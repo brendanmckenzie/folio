@@ -285,7 +285,7 @@ wrong. Each phase's own `## Implementation notes` entry in the spec has the deta
 | 5 | `0dda0eb` | Review: two critical — every non-grant credential passed `allows()` alone on the render paths, and `frame-ancestors` replaced an SVG asset's sandbox CSP — plus a pre-existing `safeNext` tab bypass; all fixed and re-reviewed |
 | 7 | `3a8d561` | Review: no leak; deleting a fork wrote an auto-redirect that blocked fallback; fixed |
 | 8 | `d176235` | `/me` carries one `sites` object; the asset and form pickers cannot badge by scope yet |
-| 9 | (this commit) | A grant alone did not give a host's `reader.page()` drafts, against decision 13 step 4; fixed to the spec. Release gate green: 5091 tests, 22/22 e2e |
+| 9 | `a013f58` | A grant alone did not give a host's `reader.page()` drafts, against decision 13 step 4; fixed to the spec. Release gate green: 5091 tests, 22/22 e2e |
 
 ## The phases
 
