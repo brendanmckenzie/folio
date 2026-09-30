@@ -4,7 +4,7 @@ import type { Migration } from '../../../src/core/migrate'
 import type { DocumentType } from '../../../src/core/schema'
 import type { Registry as SiteRegistry, SiteRef } from '../../../src/core/sites'
 import type { FolioBindings, FolioBrand, FolioConfig } from '../../../src/server'
-import { BRAND_MEMBERS, BRAND_SITES_MEMBERS, createRuntime } from '../../../src/server/runtime'
+import { createRuntime } from '../../../src/server/runtime'
 
 /**
  * `createFolio({ brands })` at construction (`docs/specs/foundation/multi-brand.md`
@@ -308,26 +308,28 @@ describe('forScope: the brand of a scope, never a default', () => {
 })
 
 describe('the old rt.* members', () => {
-  it('throw on a branded runtime, every one, rather than answer the first brand', () => {
+  it('are absent from a branded runtime, requiring access through rt.brands', () => {
     const rt = createRuntime(brandedConfig())
-    for (const key of BRAND_MEMBERS) {
-      expect(() => (rt as unknown as Record<string, unknown>)[key], key).toThrow(
-        new RegExp(`rt\\.${key} has no brand`),
-      )
-    }
-    // `rt.sites.settings` too: "no settings type" would make `folio.settings` null.
-    for (const key of BRAND_SITES_MEMBERS) {
-      expect(() => (rt.sites as unknown as Record<string, unknown>)[key], key).toThrow(
-        new RegExp(`rt\\.sites\\.${key} has no brand`),
-      )
-    }
+    // The schema, types, registry and other brand-specific members are no longer
+    // on the runtime itself; they're accessed through rt.brands.
+    expect('schema' in rt).toBe(false)
+    expect('registry' in rt).toBe(false)
+    expect('types' in rt).toBe(false)
+    expect('manifest' in rt).toBe(false)
+    expect('globals' in rt).toBe(false)
+    expect('migrations' in rt).toBe(false)
+    expect('gate' in rt).toBe(false)
+    expect('describe' in rt).toBe(false)
+    expect('forms' in rt).toBe(false)
+    // rt.sites.settings is undefined on a branded runtime (one per brand)
+    expect(rt.sites?.settings).toBeUndefined()
     // Everything that is the deployment's still answers.
     expect(rt.base).toBe('/folio')
     expect(rt.sites?.brands).toEqual(['allaboutafrica', 'takeoffgo'])
     expect(rt.sites?.admin).toBe('https://cms.example')
   })
 
-  it('answer on a single-brand runtime from its one brand, exactly as before', () => {
+  it('answer on a single-brand runtime from its one brand through rt.brands', () => {
     const rt = createRuntime<Env>({
       blocks: [aaaRoot, aaaProse, aaaSettings],
       types: aaaTypes,
@@ -341,20 +343,17 @@ describe('the old rt.* members', () => {
     expect([...rt.brands.keys()]).toEqual([null])
     expect(one.brand).toBeNull()
     expect(rt.forScope({ sites: [], groups: [], shared: true }, 'anything')).toBe(one)
-    for (const key of BRAND_MEMBERS) {
-      expect(() => (rt as unknown as Record<string, unknown>)[key], key).not.toThrow()
-    }
-    expect(rt.schema).toBe(one.schema)
-    expect(rt.registry).toBe(one.registry)
-    expect(rt.types).toBe(one.types)
-    expect(rt.manifest).toBe(one.manifest)
-    expect(rt.manifest).toEqual({
+    // The brand-specific members are accessed through the brand, not on rt directly
+    expect(one.schema).toBeDefined()
+    expect(one.registry).toBeDefined()
+    expect(one.types).toBe(aaaTypes)
+    expect(one.manifest).toEqual({
       types: aaaTypes,
       blocks: one.manifest.blocks,
       root: 'pageRoot',
       globals: ['aaaSettings'],
     })
-    expect('brand' in rt.manifest).toBe(false)
+    expect('brand' in one.manifest).toBe(false)
     expect(rt.page('preview')).toEqual({
       entries: ['/folio-preview.js'],
       stylesheets: ['/host.css', '/p.css'],

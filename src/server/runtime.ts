@@ -268,51 +268,6 @@ export interface BrandRuntime {
   auditContext: (env: unknown) => Promise<AuditContext>
 }
 
-/**
- * The members that are one brand's (`BrandRuntime`), on `FolioRuntime` itself. On a
- * deployment with no `brands` they answer from the one brand exactly as they always
- * did; **on one with `brands` reading any of them throws** (decision 6), so a reader
- * that was not routed through `c.var.brand` or `rt.forScope` is a loud 500 rather
- * than an answer in the wrong brand. When they are deleted, the compiler finds
- * whatever is left.
- */
-export const BRAND_MEMBERS = [
-  'registry',
-  'previewWrap',
-  'schema',
-  'manifest',
-  'types',
-  'globals',
-  'migrations',
-  'schemaId',
-  'gate',
-  'describe',
-  'forms',
-  'typeOf',
-  'defaultType',
-  'titleFor',
-  'titlesFor',
-  'projection',
-  'seed',
-  'indexedFields',
-  // Not registry values, but bound to one: each reads a schema or a type when
-  // called, so on a branded runtime it is the brand's to answer.
-  'draftFor',
-  'draftForWithSyncId',
-  'draft',
-  'resolve',
-  'query',
-  'publishDeps',
-  'auditContext',
-] as const satisfies readonly (keyof FolioRuntime)[]
-
-/**
- * `BRAND_MEMBERS` for `rt.sites`: with `brands` the settings type is each brand's
- * (`BrandRuntime.settings`), so `rt.sites.settings` throws rather than read as "no
- * settings type", which would make every `folio.settings` quietly null.
- */
-export const BRAND_SITES_MEMBERS = ['settings'] as const satisfies readonly (keyof SitesRuntime)[]
-
 export interface FolioRuntime {
   /**
    * One `BrandRuntime` per brand, keyed by id; a deployment with no `brands` has
@@ -326,20 +281,6 @@ export interface FolioRuntime {
    * already fenced off. **Never a default brand.**
    */
   forScope: (registry: SiteRegistry, scope: string | null) => BrandRuntime | null
-  registry: Registry
-  /**
-   * `FolioConfig.previewWrap`, unchanged. See its doc comment, and the note at
-   * the render site in `server/pages.tsx`.
-   */
-  previewWrap: PreviewWrap | undefined
-  /** The block schemas, indexed by name. What a migration and the audit both walk. */
-  schema: SchemaIndex
-  /** What `GET {base}/schema` answers. Contains no functions. */
-  manifest: Manifest
-  /** Every declared document type, with `root` sugar already expanded. */
-  types: readonly DocumentType[]
-  /** `FolioConfig.globals`, validated. Every name is a declared `singleton`. */
-  globals: readonly string[]
   /**
    * `FolioConfig.locales`, validated, or undefined for a single-locale site
    * (`localisation.md`). Undefined is the case that must stay free: no locale
@@ -366,15 +307,6 @@ export interface FolioRuntime {
    * shape").
    */
   pathForLocale: (pathname: string, locale: string | undefined) => string
-  /** `FolioConfig.migrations`, validated, in run order (`schema-migrations.md`). */
-  migrations: readonly Migration[]
-  /**
-   * The id a fully-migrated document carries: the last configured migration, or
-   * null when there are none. Stamped on every document and version row created
-   * from now on, so a document born from the current schema is never reported
-   * behind it.
-   */
-  schemaId: string | null
   /**
    * `FolioConfig.auth`, resolved and validated
    * (`../../docs/specs/foundation/identity-and-access.md`). `mode: 'open'` is
@@ -386,34 +318,6 @@ export interface FolioRuntime {
    * saves threading a type parameter through every route module.
    */
   auth: ResolvedAuth<unknown>
-  /**
-   * `FolioConfig.gate`, validated, or **null for a site with no gate at all** —
-   * which is the case that must stay free (`../../docs/specs/platform/visitor-access.md`): no
-   * field is read, no host code runs, and every page keeps the cache headers it
-   * always had.
-   *
-   * Widened to `unknown` for the same reason `auth` is. Carries the two
-   * precomputed sets `validateGate` builds in one walk: `roots` for
-   * `reader.page()`, which holds a document and can only see its root block's
-   * name, and `types` for the search predicate, which sees `stories.type` and
-   * cannot see a root block's name at all.
-   */
-  gate: ResolvedGate | null
-  /**
-   * `FolioConfig.describe`, validated and defaulted, or **null for a host that
-   * configured none** — which is the whole of "this site does not do this": the
-   * describe routes answer `unsupported`, no machine column is ever written, and
-   * an upload behaves exactly as it did before the feature existed
-   * (`../../docs/specs/content-model/media-library.md` decision 8).
-   */
-  describe: ResolvedDescribe | null
-  /**
-   * `FolioConfig.forms`, validated and defaulted, or **null for a host that
-   * configured none** — which is not "forms are off": the honeypot still runs and
-   * the default rate limit still applies. What is null is the half only a host can
-   * supply, `verify` (`../../docs/specs/content-model/forms.md` decision 9).
-   */
-  forms: ResolvedForms | null
   /**
    * `FolioConfig.logger`, defaulted to `console` — never null, unlike `gate` and
    * `describe`. Every one of the roughly forty call sites this replaces used to
@@ -432,43 +336,10 @@ export interface FolioRuntime {
    * own default and therefore no behaviour change at all.
    */
   formPurgeCapability?: PurgeCapability
-  /** A declared type by name, or undefined — a row whose type was removed from
-   * the code still reads, it just has no schema to render ("Unknown type"). */
-  typeOf: (name: string | undefined) => DocumentType | undefined
-  /** The type a bare "New page" creates. */
-  defaultType: DocumentType
-  /** What a document is called, per its type's `titleField`. */
-  titleFor: (story: StoryMeta, doc: Doc) => string
-  /**
-   * The same title in every declared non-source locale, for `stories.title_i18n`
-   * (`localisation.md` architecture decision 7). Undefined — not an empty object
-   * — when there are no locales, which is what tells `publishStoryStatement` to
-   * leave the column alone rather than clear it.
-   */
-  titlesFor: (story: StoryMeta, doc: Doc) => Record<string, string> | undefined
-  /**
-   * The `content_index` / `content_refs` / `content_text` rows for one published
-   * document, as `publishDeps` already receives.
-   *
-   * Exposed on the runtime for the sake of `runMigrations`, which rewrites
-   * `published_doc` and must re-project the index in the same batch
-   * (`content-model/full-text-search.md` decision 8). Both of its call sites build
-   * `MigrateDeps` from a `FolioRuntime` rather than from inside `createRuntime`,
-   * and a migration that rewrites prose without this leaves the index describing
-   * text no document contains any more — silently, until somebody reindexes.
-   */
-  projection: (story: StoryMeta, doc: Doc) => ContentProjection
   /** Where the routes are mounted, with no trailing slash. */
   base: string
   /** `FolioConfig.sites`, validated, or null for a deployment with no `sites`. */
   sites: SitesRuntime | null
-  /**
-   * What `audit` needs beyond the schema: the locales, the types, and on a
-   * deployment with `sites` the settings type and the registry. Both callers
-   * (`folio.audit` and `GET /audit`) build it here, so the method and the route
-   * cannot answer differently.
-   */
-  auditContext: (env: unknown) => Promise<AuditContext>
   /** The host's `route`, or the single-site default. */
   route: (path: string, locale?: string, site?: SiteRef) => string
   /** True when a Vite dev client is configured, so the pages ship the preamble. */
@@ -490,19 +361,6 @@ export interface FolioRuntime {
   urlsFor: (site: SiteRef | undefined) => <T extends StoryMeta>(story: T) => T
   /** `withUrls` over a whole tree. */
   decorate: (nodes: StoryNode[], site?: SiteRef) => StoryNode[]
-  /**
-   * A starting document for one document type: its root block's `'default'`
-   * preset, with the title written into the type's own title field.
-   *
-   * Exposed because `../../docs/specs/platform/content-api.md`'s create is two writes across two
-   * stores and the order matters: it validates the caller's content against this
-   * seed *before* the D1 row exists, then seeds the object with the finished
-   * document in one `getOrInit` rather than seeding blank and committing after —
-   * so a refused payload writes nothing at all, and a created document's initial
-   * content lands with it rather than as a separate transaction. `duplicate`
-   * already does the same thing with `cloneDoc`.
-   */
-  seed: (type: DocumentType | undefined, title: string) => Doc
   stub: (bindings: ReadBindings, id: string) => StoryStub
   /**
    * The one space object (`../../docs/specs/editing/live-collaboration.md`), or null when the
@@ -516,56 +374,6 @@ export interface FolioRuntime {
    * `default`.
    */
   space: (bindings: ReadBindings, scope?: string | null) => SpaceStub | null
-  /**
-   * The live draft for a story whose row the caller already has. Preferred over
-   * `draft` wherever that is true: `draft` exists to look the row up.
-   */
-  draftFor: (bindings: ReadBindings, story: StoryMeta) => Promise<Doc>
-  draft: (bindings: ReadBindings, id: string) => Promise<Doc>
-  /** `draftFor` plus the syncId it was read at, atomically. See `PublishDeps.draftWithSyncId`. */
-  draftForWithSyncId: (
-    bindings: ReadBindings,
-    story: StoryMeta,
-  ) => Promise<{ doc: Doc; syncId: number }>
-  resolve: (bindings: ReadBindings, doc?: Doc, opts?: ResolveOptions) => Promise<Resolution>
-  /**
-   * `ContentQuery` over published content (`../../docs/specs/content-model/collections.md`),
-   * within a chain's served set. Absent is the single-site chain.
-   */
-  query: (
-    bindings: ReadBindings,
-    q: ContentQuery,
-    chain?: readonly string[],
-    site?: SiteRef,
-  ) => Promise<ContentPage>
-  /**
-   * Field names marked `indexed: true` on some declared type's root block — what a
-   * `where` or an `order` is checked against before it reaches SQL, and what the
-   * admin's collection input offers as filters.
-   */
-  indexedFields: ReadonlySet<string>
-  /**
-   * What the publish workflows need, assembled from bindings alone — the one
-   * place that assembly lives, for a route today and a Durable Object alarm next
-   * phase. `hookCtx` is `{ env, waitUntil }`: the host's own `env` and a way to
-   * run something after the response, built differently by an HTTP call site
-   * (`c.env`, `c.executionCtx.waitUntil`) and a Durable Object alarm
-   * (`alarmHookCtx`, this file) — `publish()` cannot tell the difference, which
-   * is the point (`../../docs/specs/platform/publish-hooks.md` decision 3). Every route that
-   * mutates a story reads `.hooks` off the result, not only the publish/
-   * unpublish/checkpoint routes that also want the rest of `PublishDeps`.
-   *
-   * **Carries `logger` too**, widened past `publish.ts`'s own `PublishDeps` —
-   * `scheduler.ts`'s `runSchedules` and `bulk.ts`'s `runBulk` both take
-   * `deps.logger` for their own "unreportable failure" lines, and every one of
-   * their real call sites builds its deps from this function (directly, or by
-   * spreading it), so the resolved logger reaches them with no change to those
-   * call sites at all.
-   */
-  publishDeps: (
-    bindings: ReadBindings,
-    hookCtx: HookRunnerCtx,
-  ) => PublishDeps & { logger: FolioLogger }
   /**
    * The hook runner on its own, for the two write paths that fire an event and
    * need none of the rest of `PublishDeps`: `runMigrations` and `reindex`
@@ -1067,17 +875,6 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
           layered: [...new Set(prepared.flatMap(layeredOf))],
           rawDb,
           brands: brandIds,
-        }
-        // As the old `rt.*` members below: read, not merely built, it throws.
-        if (branded) {
-          for (const key of BRAND_SITES_MEMBERS) {
-            Object.defineProperty(out, key, {
-              enumerable: true,
-              get: () => {
-                throw noBrand(`sites.${key}`)
-              },
-            })
-          }
         }
         return out
       })()
@@ -1980,49 +1777,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     page,
   }
 
-  if (only) {
-    return {
-      ...deployment,
-      registry: only.registry,
-      previewWrap: only.previewWrap,
-      schema: only.schema,
-      manifest: only.manifest,
-      types: only.types,
-      globals: only.globals,
-      migrations: only.migrations,
-      schemaId: only.schemaId,
-      gate: only.gate,
-      describe: only.describe,
-      forms: only.forms,
-      auditContext: only.auditContext,
-      typeOf: only.typeOf,
-      defaultType: only.defaultType,
-      titleFor: only.titleFor,
-      titlesFor: only.titlesFor,
-      projection: only.projection,
-      seed: only.seed,
-      draftFor: (bindings, story) => only.draftFor(bindings, story),
-      draftForWithSyncId: (bindings, story) => only.draftForWithSyncId(bindings, story),
-      draft: (bindings, id) => only.draft(bindings, id),
-      resolve: only.resolve,
-      query: only.query,
-      indexedFields: only.indexedFields,
-      publishDeps: only.publishDeps,
-    }
-  }
-
-  // Decision 6's throwing getters: every member a brand answers, on a runtime that
-  // has several, is an error at the read rather than the first brand's value.
-  const rt = { ...deployment } as FolioRuntime
-  for (const key of BRAND_MEMBERS) {
-    Object.defineProperty(rt, key, {
-      enumerable: true,
-      get: () => {
-        throw noBrand(key)
-      },
-    })
-  }
-  return rt
+  return { ...deployment } as FolioRuntime
 }
 
 /**

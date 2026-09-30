@@ -1338,8 +1338,10 @@ describe('Site settings', () => {
   it('purges the layer tag of the layer that published, through the settings type', async () => {
     const rt = createRuntime(layeredConfig)
     const calls: CachePurgeOptions[] = []
+    // On a single-brand runtime, globals are accessed through the brand
+    const brand = rt.brands.get(null)!
     const hooks = cachePurgeHooks<Cloudflare.Env>(
-      rt.globals,
+      brand.globals,
       async () => async (options) => {
         calls.push(options)
         return { success: true, errors: [] }

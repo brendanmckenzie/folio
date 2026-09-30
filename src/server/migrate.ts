@@ -29,7 +29,7 @@ import type { SchemaIndex } from '../core/schema'
 import type { StoryMeta } from '../core/story'
 import { type ContentProjection, indexStatements } from './content-index'
 import type { HookRunner } from './hooks'
-import type { FolioRuntime } from './runtime'
+import type { BrandRuntime } from './runtime'
 import { countBehind, stampSchemaStatement, storiesBehind } from './stories'
 import type { StoryStub } from './types'
 import type { FolioDb } from './db'
@@ -181,7 +181,7 @@ export interface MigrateDeps {
   db: FolioDb
   schema: SchemaIndex
   migrations: readonly Migration[]
-  typeOf: FolioRuntime['typeOf']
+  typeOf: BrandRuntime['typeOf']
   /** The story's live draft, created from its row on first touch. */
   draft: (story: StoryMeta) => Promise<Doc>
   /** The story's Durable Object, for `commit`. */

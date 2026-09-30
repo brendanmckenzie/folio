@@ -229,6 +229,8 @@ where the spec was wrong. Each phase's own entry under the spec's
 | 1 | `d8ffe82` | As specified; no registry in the demo, the starter or either consumer repeated a name. Pushed to `origin/main` |
 | 2 | `b27eee6` | The digest is a readable `name(field:kind,…)` string, not a hash, so the notice can name blocks; `diffBlocksDigest` adds `changed`. The brand types in decision 14's export list moved to phase 3 |
 | 3 | `4f6c618` | More members throw than decision 6 lists (`draftFor`, `resolve`, `query`, `publishDeps`, `auditContext`, `page('preview')`, `sites.settings`); `Registry.shared` is required. Review: `/me` offered `shared`, tokens could bind to unserved scopes, the 409 raced — all fixed |
+| 6 | `985963f` | As specified, plus refusals for an empty record and a brand key not shaped like a site id |
+| 4a+4b | `05fbd98` | One commit: the integration and review rounds threaded both lanes' files. `folio.registryFor` needed a `Folio` member in `types.ts`, which no lane owned. Review found six, all fixed; a v1 read of an unwritten layer is now a 404 rather than a row |
 
 ## The phases
 
