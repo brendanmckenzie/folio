@@ -107,9 +107,9 @@ error) narrows accepted config, which is free before the tag and a `2.0.0` item 
 so it goes to `main` before `../1.0-plan.md`'s phase 6. Its build and test-deployment
 plan is [`../multi-brand-plan.md`](../multi-brand-plan.md). **It is built** on the branch
 `multi-brand` (2026-09-30, phases 1 to 8, with an `## Implementation notes` subsection
-per phase recording where the spec was wrong): phase 1 is on `main`, the rest are on the
-branch, and its header reads `review` until it has been released and verified on staging
-(the plan's Phase V).
+per phase recording where the spec was wrong), released at `c097c70`, verified on a
+staging deployment serving both brands from one Worker, and **done** since the owner's
+browser pass on 2026-10-01.
 
 Spec 26 is **done**, and its own `## Implementation notes` records that it shipped a
 different answer from the one it planned: the package moved to the repository root and

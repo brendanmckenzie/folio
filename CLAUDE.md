@@ -13,7 +13,7 @@ integration guide. `examples/starter` is a real workspace package that
 `pnpm typecheck` gates and that `bin/folio.mjs init` copies — **change it and you
 change what every new project starts from.**
 
-**Multi-brand (spec 34) is built** (2026-09-30): many brands — each its own block
+**Multi-brand (spec 34) is done** (built 2026-09-30, verified on staging 2026-10-01): many brands — each its own block
 registry, types, globals, forms, migrations and preview bundle — in one deployment.
 Read `docs/specs/foundation/multi-brand.md`'s Implementation notes before touching
 anything that reads a registry; `docs/multi-brand-plan.md` is the build and rollout plan.
@@ -503,8 +503,8 @@ section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
 
-**Specs 1–22 and 24–33 are done. 34 (`foundation/multi-brand.md`) is built** and stamped
-`review` until its staging verification is recorded. **23 (`foundation/multi-site.md`, XL) is built** on
+**Specs 1–22 and 24–34 are done** — 34 (`foundation/multi-brand.md`) since the owner's
+browser pass on staging, 2026-10-01. **23 (`foundation/multi-site.md`, XL) is built** on
 the branch `multi-site` (2026-09-29) and stamped `review` until its staging
 verification is recorded; its plan is `docs/multi-site-plan.md`. (This said "two are `draft`" until 2026-09-29, with 33
 among them, long after 33 landed as `0010_forms.sql`.) 28, 29, 30, 31 and 32 were all

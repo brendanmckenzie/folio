@@ -3,10 +3,10 @@
 > **Group:** foundation
 > **Build order:** 34, per docs/specs/README.md — after 23, and its first phase before the `v1.0.0` tag
 > **Size:** L
-> **Status:** review — built (phases 1 to 8), released at `c097c70`, and verified on a staging deployment from the far side; the owner's browser pass is pending, so not `done`
+> **Status:** done — built (phases 1 to 8), released at `c097c70`, verified on a staging deployment from the far side, and passed the owner's browser pass (2026-10-01)
 > **Wire version:** none
 > **Migration:** `0013_site_brands.sql` (one nullable column on `sites`)
-> **Last updated:** 2026-09-30
+> **Last updated:** 2026-10-01
 
 ## Summary
 
@@ -1453,9 +1453,14 @@ caller the neutral one (401 on v1). `400 site_required` is what an unscoped *reg
 route answers, as the anonymous `GET {base}/api/v1/documents` showed. Also, both brands' page HTML
 preloads the host's shared client chunks, including JavaScript of the other brand, which
 is weight rather than a leak because every brand stylesheet is scoped and the host's
-build checks it. Left to the owner's browser pass: that a draft preview pane loads only
-its own `folio-preview-<brand>` files, that the sign-in mail names the brand, and the
-partitioned grant cookie across the three registrable domains.
+build checks it. The host has since moved to one React Router build per brand, so a
+brand's pages no longer preload the other's chunks either.
+
+The owner's browser pass (2026-10-01, current Chrome, Firefox and Safari) covered what
+could not be observed from outside: a draft preview pane loads only its own
+`folio-preview-<brand>` files, the sign-in mail names the brand, and the partitioned
+grant cookie holds across the three registrable domains, for the pane, a preview opened
+in a new tab and a shared preview link. Nothing failed.
 
 ### Deferred
 

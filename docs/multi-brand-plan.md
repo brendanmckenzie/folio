@@ -237,7 +237,7 @@ where the spec was wrong. Each phase's own entry under the spec's
 | R | `c097c70` | `release.mjs --tag --push`: gates, 22 e2e, consumer-install smoke. The host's pin |
 | H | host `effbb31` | The host is built and pinned. Jambo has no staging, so the shared client refuses every mutation off a brand's production host |
 | T | host `1ce1b74` | Staging env renamed from `test`. Content was imported from production (owner decision), and the importer strips fields the source schema no longer declares. The admin host needed an exception in its zone's catch-all redirect rule. T9 was replaced by reading the registry rows back from SQL |
-| V | — | No failures. Recorded in the spec's "Staging (2026-09-30)" notes. Both production read tokens and both staging import tokens are revoked. The owner's browser pass is pending |
+| V | — | No failures. Recorded in the spec's "Staging (2026-09-30)" notes. Both production read tokens and both staging import tokens are revoked. The owner's browser pass passed on 2026-10-01 |
 
 ## The phases
 
