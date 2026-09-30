@@ -82,8 +82,9 @@ import {
   requestUrls,
   requireAccess,
 } from '../middleware'
-import type { FolioRuntime } from '../runtime'
+import type { BrandRuntime, FolioRuntime } from '../runtime'
 import type { FolioEnv, FolioLogger } from '../types'
+import { brandOf } from './stories'
 import type { MiddlewareHandler } from 'hono'
 import {
   DOWNLOAD_CONTENT_TYPE,
@@ -860,7 +861,10 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       return replyTo({ ...reply, responseId: newResponseId(), ...successTarget(form, target) })
     }
 
-    if (!(await verified(rt, c.env, req, form, body))) {
+    // The brand of the site that received it: a form's chain lies inside one brand, so
+    // its `verify` and rate limit are that brand's, never another's.
+    const brand = brandOf(c)
+    if (!(await verified(rt, brand.forms, c.env, req, form, body))) {
       return replyTo({
         ...reply,
         status: 'verify',
@@ -870,7 +874,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       })
     }
 
-    const rate = rt.forms?.ratePerHour ?? DEFAULT_RATE_PER_HOUR
+    const rate = brand.forms?.ratePerHour ?? DEFAULT_RATE_PER_HOUR
     const ip = clientIp(req)
     let hash: string | null = null
     if (ip && rate > 0) {
@@ -1036,12 +1040,13 @@ function successTarget(form: Form, target: string): { target: string } {
  */
 async function verified<Env>(
   rt: FolioRuntime,
+  forms: BrandRuntime['forms'],
   env: Env,
   req: Request,
   form: Form,
   body: SubmissionBody,
 ): Promise<boolean> {
-  const verify = rt.forms?.config.verify
+  const verify = forms?.config.verify
   if (!verify) return true
   try {
     return (await verify({ req, body: rawBodyOf(body), form: formMeta(form) }, env)) === true

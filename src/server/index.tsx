@@ -4,6 +4,7 @@ import { gateValue, isUngated, type PageAccess, redactDoc } from '../core/gate'
 import { mergeLayers } from '../core/layers'
 import { dataOf, isKnownLocale, type LocaleContext } from '../core/locales'
 import type { Resolution } from '../core/resolve'
+import type { SchemaIndex } from '../core/schema'
 import { buildTree, type StoryMeta } from '../core/story'
 import {
   chain as chainOf,
@@ -30,12 +31,18 @@ import { claimShare, sharedStoriesAt } from './auth/shares'
 import { PRIMARY_FIRST, readBookmark, sessionFor } from './db'
 import { answerMiss, envelope, FolioError } from './errors'
 import type { ResolvedGate } from './gate'
-import { runMigrations } from './migrate'
+import { appliedMigrations, type MigrateReport, ownMigrations, runMigrations } from './migrate'
 import { previewPage } from './pages'
 import { lookupRedirect } from './redirects'
 import { reindex } from './reindex'
-import { alarmHookCtx, createRuntime, type FolioRuntime, type SiteRender } from './runtime'
-import { runSchedules } from './scheduler'
+import {
+  alarmHookCtx,
+  type BrandRuntime,
+  createRuntime,
+  type FolioRuntime,
+  type SiteRender,
+} from './runtime'
+import { runSchedules, scheduleDeps } from './scheduler'
 import {
   candidateFor,
   INTERNAL_HEADERS,
@@ -46,6 +53,7 @@ import {
   SURFACE_HEADER,
 } from './sites'
 import {
+  countBehind,
   listStories,
   pageAt,
   pathMiss,
@@ -368,6 +376,14 @@ const NEEDS_SITE =
   'folio: this deployment has `sites`, so a read must say which site it is for — use folio.reader(env, req | { site })'
 
 /**
+ * What a reader with no site throws on a deployment with `brands` when asked to
+ * resolve or query (`multi-brand.md` decision 6): with no site there is no brand,
+ * and so no registry to read with. Never the first brand's.
+ */
+const NO_BRAND =
+  "folio: this deployment has `brands`, and this reader has no site, so it has no brand's registry to read with"
+
+/**
  * The `~<scope>` segment (decision 11) at the front of a path below `{base}`: a
  * site, group or `shared` id, then the rest of the path.
  */
@@ -462,16 +478,16 @@ function scopeName(registry: Registry, scope: string): string {
 function plainBlok(
   doc: Doc,
   blok: Blok,
-  rt: FolioRuntime,
+  schema: SchemaIndex,
   locale: LocaleContext | undefined,
 ): Record<string, Json> {
-  const fields = rt.schema[blok.type]?.fields
+  const fields = schema[blok.type]?.fields
   const data = dataOf(blok, locale)
   if (!fields) return data
   const out: Record<string, Json> = {}
   for (const [name, field] of Object.entries(fields)) {
     if (field.kind === 'blocks') {
-      const kids = childrenOf(doc, blok.uid, name).map((kid) => plainBlok(doc, kid, rt, locale))
+      const kids = childrenOf(doc, blok.uid, name).map((kid) => plainBlok(doc, kid, schema, locale))
       out[name] = field.max === 1 ? (kids[0] ?? null) : kids
       continue
     }
@@ -526,6 +542,17 @@ function treeByPath(chain: readonly string[], rows: readonly StoryMeta[]) {
  */
 export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
   const rt = createRuntime(config)
+  /**
+   * The one brand of a deployment with no `brands`, and undefined on one with them
+   * (`multi-brand.md` decision 6). Every entry point below that is off a request
+   * reads its registry from `one ?? <the brand of the site it is serving>`, so a
+   * single-brand deployment makes exactly the reads it always made and a branded
+   * one never answers as a default brand.
+   */
+  const one = rt.brands.get(null)
+  /** The brand `scope` belongs to by `registry`: always `one` with no `brands`. */
+  const brandAt = (registry: Registry | null, scope: string | null): BrandRuntime | null =>
+    one ?? (registry ? rt.forScope(registry, scope) : null)
   // `readerWith` is defined below, after the app that will call it at request time.
   const app = createApp(config, rt, (env, from) => readerWith(env, from))
 
@@ -628,6 +655,11 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     // same three or four reads a published page does. An editor's bookmark
     // matters here more than anywhere: a preview opened straight after a save
     // is exactly the request that must not land on a replica behind it.
+    // The gated site's brand (`multi-brand.md` decision 10): its registry, its
+    // globals and its preview bundle. Read off the snapshot `on` already holds, so
+    // it costs nothing; a site the snapshot serves always has one.
+    const brand = brandAt(on?.registry ?? null, on?.render.site.id ?? null)
+    if (!brand) return null
     const bound = config.bindings(env)
     const bindings: ReadBindings = {
       ...bound,
@@ -736,6 +768,8 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
             : {}),
         }
       : {}
+    // The registry only on a deployment with `brands`, where a layer's seed needs it.
+    const branded = { brand, ...(!one && on ? { registry: on.registry } : {}) }
 
     // `as` previews a singleton in the context of this page (`globals.md`
     // decision 4). Naming anything that is not a configured global is the
@@ -759,12 +793,12 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      */
     if (as !== null && (shared.length > 0 || mode === 'draft')) return null
     if (as !== null) {
-      const type = rt.typeOf(as)
-      if (type?.kind !== 'singleton' || !rt.globals.includes(as)) return null
-      return previewPage(rt, bindings, story, { as, locale, mode, ...site })
+      const type = brand.typeOf(as)
+      if (type?.kind !== 'singleton' || !brand.globals.includes(as)) return null
+      return previewPage(rt, bindings, story, { as, locale, mode, ...site, ...branded })
     }
 
-    return previewPage(rt, bindings, story, { locale, mode, ...site })
+    return previewPage(rt, bindings, story, { locale, mode, ...site, ...branded })
   }
 
   const handle: Folio<Env>['handle'] = async (inbound, env, ctx) => {
@@ -934,13 +968,25 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       chain: readonly string[]
       registry: Registry | null
       shareOnly: ReadonlySet<string> | null
+      /**
+       * The site's brand (`multi-brand.md` decision 6), which every registry read
+       * below goes through. Always `one` with no `brands`; with them null only
+       * when there is no site, and then the chain is empty.
+       */
+      brand: BrandRuntime | null
     }
     let scoped: Promise<Scoped> | null = null
     const scopeOnce = (): Promise<Scoped> => {
       scoped ??= (async (): Promise<Scoped> => {
         const sites = rt.sites
         if (!sites) {
-          return { render: null, chain: SINGLE_SITE_CHAIN, registry: null, shareOnly: null }
+          return {
+            render: null,
+            chain: SINGLE_SITE_CHAIN,
+            registry: null,
+            shareOnly: null,
+            brand: one ?? null,
+          }
         }
         const registry = await sites.registry(env)
         let site: SiteRef | null = null
@@ -966,13 +1012,16 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
             { path: null, grantFor: null },
           )
         }
-        if (!site) return { render: null, chain: [], registry, shareOnly: null }
+        if (!site) {
+          return { render: null, chain: [], registry, shareOnly: null, brand: brandAt(null, null) }
+        }
         const chain = chainOf(registry, site.id)
         return {
           render: { site, surface, chain },
           chain: shareOnly ? [] : chain,
           registry,
           shareOnly,
+          brand: brandAt(registry, site.id),
         }
       })()
       return scoped
@@ -980,6 +1029,29 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     /** The single-site `resolve` option, or this reader's site — or, with `sites`
      * and no site, `null`, which `resolve` reads as an empty chain. */
     const siteOption = (s: Scoped) => (rt.sites ? { site: s.render } : {})
+
+    /**
+     * This reader's brand. With no `brands` it is `one`, answered before the site is
+     * looked up so a single-brand reader makes the reads it always made; with them
+     * it is the site's, and no site is no brand.
+     */
+    const brandNow = async (): Promise<BrandRuntime | null> => one ?? (await scopeOnce()).brand
+    const requireBrand = async (): Promise<BrandRuntime> => {
+      const brand = await brandNow()
+      if (!brand) throw new Error(NO_BRAND)
+      return brand
+    }
+    /**
+     * `story`'s draft under this reader's brand. Every story a reader reaches is in
+     * its chain, and a chain lies inside one brand (decision 5), so the site's brand
+     * is the story's.
+     */
+    const draftOf = async (story: StoryMeta): Promise<Doc> => {
+      if (one) return one.draftFor(bindings, story)
+      const within = await scopeOnce()
+      if (!within.brand) throw new Error(NO_BRAND)
+      return within.brand.draftFor(bindings, story, within.registry ?? undefined)
+    }
 
     /**
      * Is this request *asking* for a draft — the presence of a credential, not a
@@ -1030,8 +1102,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     const draftFor = async (story: StoryMeta): Promise<Doc | null> => {
       // The caller that gated the site also decided whether it may read drafts, with
       // `mayPreviewDrafts`; there is no cookie to ask about (`GatedReaderFrom`).
-      if (gatedFrom)
-        return gatedFrom.draft && story.path !== null ? rt.draftFor(bindings, story) : null
+      if (gatedFrom) return gatedFrom.draft && story.path !== null ? draftOf(story) : null
       if (!req || story.path === null) return null
       // On a multi-site deployment drafts are served only on a site's preview
       // origin (decision 13), so a live host never reads one whatever the cookie
@@ -1053,20 +1124,20 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
           within.render && within.registry
             ? mayPreviewDrafts(actor, within.registry, within.render.site.id)
             : allows(actor, READ_DRAFT)
-        if (mayDraft) return rt.draftFor(bindings, story)
+        if (mayDraft) return draftOf(story)
       }
       // `auth: 'open'` has no actor to resolve and no role to check, so the
       // draft cookie alone is the authority — the same authority `handle()`'s
       // preview branch grants there, on a site that has declared it has no
       // editors to distinguish.
-      if (wants && rt.auth.mode !== 'session') return rt.draftFor(bindings, story)
+      if (wants && rt.auth.mode !== 'session') return draftOf(story)
 
       const shared = shareCookieTokens(header)
       if (
         shared.length > 0 &&
         (await claimShare(db, shared, story.id, undefined, within.render?.site.id))
       ) {
-        return rt.draftFor(bindings, story)
+        return draftOf(story)
       }
       return null
     }
@@ -1115,12 +1186,13 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * 3. **Ask the host.** Only now, and only ever once per reader.
      */
     const accessFor = async (
+      brand: BrandRuntime,
       story: StoryMeta,
       doc: Doc,
       drafted: boolean,
       locale: string | undefined,
     ): Promise<PageAccess> => {
-      const gate = rt.gate
+      const gate = brand.gate
       if (!gate) return 'public'
 
       const root = doc.bloks[doc.root]
@@ -1225,10 +1297,14 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         // resolution must be built from the *redacted* document: resolving the
         // full one and swapping the doc afterwards would hand back the titles
         // and URLs of everything the withheld body points at.
-        const access = await accessFor(story, doc, drafted !== null, locale)
-        const shown = access === 'denied' ? redactDoc(doc, rt.schema) : doc
+        // The site's brand: `found` is in this reader's chain, so a site — and its
+        // brand — exists whenever anything was found.
+        const brand = one ?? within.brand
+        if (!brand) throw new Error(NO_BRAND)
+        const access = await accessFor(brand, story, doc, drafted !== null, locale)
+        const shown = access === 'denied' ? redactDoc(doc, brand.schema) : doc
 
-        const resolution = await rt.resolve(bindings, shown, {
+        const resolution = await brand.resolve(bindings, shown, {
           ...(locale !== undefined ? { locale } : {}),
           ...(opts?.page !== undefined ? { page: opts.page } : {}),
           story,
@@ -1280,7 +1356,10 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         }
       },
       resolve: async (doc, opts) =>
-        rt.resolve(bindings, doc, { ...opts, ...siteOption(await scopeOnce()) }),
+        (await requireBrand()).resolve(bindings, doc, {
+          ...opts,
+          ...siteOption(await scopeOnce()),
+        }),
       status: async (path) => storyStatus(db, (await scopeOnce()).chain, path),
       storyAt: async (path) => {
         const within = await scopeOnce()
@@ -1322,12 +1401,15 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         )
       },
       query: async (q) => {
+        const brand = await requireBrand()
         const within = await scopeOnce()
-        return rt.query(bindings, q, within.chain, within.render?.site)
+        return brand.query(bindings, q, within.chain, within.render?.site)
       },
       global: async (name) => {
-        const type = rt.typeOf(name)
-        if (type?.kind !== 'singleton') return null
+        // No site on a deployment with `brands` is no brand, and so no singleton.
+        const brand = await brandNow()
+        const type = brand?.typeOf(name)
+        if (!brand || type?.kind !== 'singleton') return null
         // The chain's layers, merged (`multi-site.md` decision 8). With no `sites`
         // the chain is `['default']` and this is the one `sng_<type>` read it was.
         // A request a share admitted to a draft site reads the gated site's whole
@@ -1341,7 +1423,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         return (
           mergeLayers(
             ids.map((id) => docs[id]),
-            rt.schema,
+            brand.schema,
           ) ?? null
         )
       },
@@ -1371,10 +1453,141 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
 
   /** `folio.settings` (decision 2): the settings type's merged root, as a plain value. */
   const settings: Folio<Env>['settings'] = (resolution: Resolution) => {
-    const name = rt.sites?.settings
+    // The resolution's brand (decision 21): `site.brand` is present only with
+    // `brands`, and absent there is no brand, so no settings type rather than the
+    // first brand's. With no `brands` it is `one`, whose settings type is
+    // `sites.settings`.
+    const brand = rt.brands.get(resolution.site?.brand ?? null)
+    const name = rt.sites ? brand?.settings : undefined
     const doc = name ? resolution.globals?.[name] : undefined
     const root = doc?.bloks[doc.root]
-    return doc && root ? plainBlok(doc, root, rt, resolution.locale) : null
+    return brand && doc && root ? plainBlok(doc, root, brand.schema, resolution.locale) : null
+  }
+
+  /**
+   * The block registry a render of `resolution` uses (decision 21): its site's
+   * brand's. With no `brands`, `one`'s, with or without a resolution. With them a
+   * resolution that names no site has no brand, and that throws.
+   */
+  const blocksFor = (resolution: Resolution | undefined, what: string) => {
+    const brand = rt.brands.get(resolution?.site?.brand ?? null)
+    if (!brand) {
+      throw new Error(
+        `folio: ${what} on a deployment with 'brands' needs a resolution that names a site, whose brand's blocks render it`,
+      )
+    }
+    return brand.registry
+  }
+
+  /**
+   * A story's brand and the registry snapshot that said so, off a request with
+   * only an id to go on (`folio.draft`, `folio.write`): the story's own scope is
+   * the only scope there is, and its chain lies inside one brand (decision 5).
+   * Null for a scope no configured brand serves.
+   */
+  const brandOfStory = async (
+    env: Env,
+    story: StoryMeta,
+  ): Promise<{ brand: BrandRuntime; registry: Registry } | null> => {
+    const registry = await rt.sites!.registry(env)
+    const brand = rt.forScope(registry, story.site ?? DEFAULT_SITE)
+    return brand ? { brand, registry } : null
+  }
+  /** `story`'s draft, created on first touch, under its own brand. */
+  const draftOfStory = async (env: Env, bindings: ReadBindings, story: StoryMeta) => {
+    if (one) return one.draftFor(bindings, story)
+    const found = await brandOfStory(env, story)
+    if (!found) {
+      throw new FolioError(
+        'not_found',
+        `No configured brand serves the scope '${story.site ?? DEFAULT_SITE}'`,
+      )
+    }
+    return found.brand.draftFor(bindings, story, found.registry)
+  }
+
+  /**
+   * A batch job run one brand at a time on a deployment with `brands`
+   * (`multi-brand.md` decision 16): `migrate`, `reindex` and `audit`, each over
+   * the brand's own scopes with the brand's own schema.
+   *
+   * **The cursor walks the brands.** `continueFrom` is `<brand>/<cursor>`, where
+   * the part after the first `/` is that brand's own sweep's cursor — empty for its
+   * first batch — and a brand id never holds one (it follows the site id rule). When
+   * a brand's sweep ends, the next call starts the next brand, in `brands`' order;
+   * null only after the last. One brand per call, because a report names types and
+   * two brands may both have a `page`.
+   *
+   * The scopes are read fresh from the primary, like every background job's reads:
+   * a site created a moment ago must not miss a migration its brand's ledger then
+   * claims is complete.
+   */
+  const perBrand = async <R extends { continueFrom: string | null }>(
+    env: Env,
+    continueFrom: string | null | undefined,
+    run: (
+      brand: BrandRuntime,
+      within: { id: string; scopes: readonly string[]; registry: Registry },
+      after: string | null,
+    ) => Promise<R>,
+  ): Promise<R & { brand: string }> => {
+    const ids = [...rt.brands.keys()].filter((id): id is string => id !== null)
+    let at = 0
+    let after: string | null = null
+    if (continueFrom) {
+      const cut = continueFrom.indexOf('/')
+      at = cut === -1 ? -1 : ids.indexOf(continueFrom.slice(0, cut))
+      if (at === -1) {
+        throw new FolioError(
+          'bad_request',
+          `continueFrom '${continueFrom}' names no brand: on a deployment with 'brands' it is '<brand>/<cursor>'`,
+        )
+      }
+      after = continueFrom.slice(cut + 1) || null
+    }
+    const id = ids[at]!
+    const registry = await rt.sites!.fresh(env)
+    const scopes = [...registry.sites, ...registry.groups]
+      .filter((row) => row.brand === id)
+      .map((row) => row.id)
+    const report = await run(rt.brands.get(id)!, { id, scopes, registry }, after)
+    const next =
+      report.continueFrom !== null
+        ? `${id}/${report.continueFrom}`
+        : at + 1 < ids.length
+          ? `${ids[at + 1]}/`
+          : null
+    return { ...report, continueFrom: next, brand: id }
+  }
+
+  /**
+   * `pending`, `behind` and `complete` across **every** brand, for a branded
+   * `migrate`'s report (decision 16). One call migrates one brand's batch, and a
+   * script looping on `continueFrom` reads the last report's `complete`: that
+   * must mean the deployment, not whichever brand came last.
+   */
+  const everyBrandBehind = async (
+    db: ReadBindings['db'],
+    report: MigrateReport & { brand: string },
+    registry: Registry,
+  ): Promise<Pick<MigrateReport, 'pending' | 'behind' | 'complete'>> => {
+    const applied = await appliedMigrations(db)
+    const pending: string[] = []
+    let behind = 0
+    for (const [id, brand] of rt.brands) {
+      if (id === null || brand.migrations.length === 0) continue
+      const done = new Set(ownMigrations(applied, id))
+      pending.push(...brand.migrations.filter((m) => !done.has(m.id)).map((m) => m.id))
+      if (id === report.brand) {
+        behind += report.behind
+        continue
+      }
+      const scopes = [...registry.sites, ...registry.groups]
+        .filter((row) => row.brand === id)
+        .map((row) => row.id)
+      behind += await countBehind(db, brand.migrations[brand.migrations.length - 1]!.id, scopes)
+    }
+    return { pending, behind, complete: behind === 0 }
   }
 
   return {
@@ -1394,7 +1607,15 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     storyAt: (env, path) => reader(env).storyAt(path),
     redirect: (env, path) => reader(env).redirect(path),
     miss: (env, path) => reader(env).miss(path),
-    draft: (env, id) => rt.draft(config.bindings(env), id),
+    draft: async (env, id) => {
+      if (one) return one.draft(config.bindings(env), id)
+      // With `brands` a seed is a brand's, so an id with no row has none to start
+      // from: refused, rather than seeded as the first brand's page.
+      const bindings = config.bindings(env)
+      const story = await storyById(bindings.db, id)
+      if (!story) throw new FolioError('not_found', 'Unknown document')
+      return draftOfStory(env, bindings, story)
+    },
     inDraftMode: (req) => hasDraftCookie(req.headers.get('cookie')),
     noStore: () => ({ 'cache-control': NO_STORE }),
     /** Draft mode's whole contract, implemented on `reader` — see `FolioReader.draftAt`. */
@@ -1416,7 +1637,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       // `commit` refuses an object that holds no document, and its job is not to
       // know what a seed looks like. Creating it here is what makes writing to a
       // story nobody has opened in the editor work.
-      await rt.draftFor(bindings, story)
+      await draftOfStory(env, bindings, story)
       return commitAll(
         rt.stub(bindings, id),
         mutations,
@@ -1433,7 +1654,30 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      */
     stories: (env, opts) => reader(env).stories(opts),
     tree: (env) => reader(env).tree(),
-    registry: rt.registry,
+    /**
+     * A getter, so a deployment with `brands` constructs (decision 21): there a
+     * block registry is a brand's, and reading this throws rather than answer the
+     * first brand's.
+     */
+    get registry() {
+      if (!one) {
+        throw new Error(
+          "folio: folio.registry has no brand on a deployment with 'brands': use folio.registryFor(brand)",
+        )
+      }
+      return one.registry
+    },
+    registryFor: (id) => {
+      const brand = one ? undefined : rt.brands.get(id)
+      if (!brand) {
+        throw new Error(
+          one
+            ? "folio: registryFor needs 'brands'; this deployment has one registry, folio.registry"
+            : `folio: registryFor('${id}') names no brand in 'brands'`,
+        )
+      }
+      return brand.registry
+    },
     resolve: (env, doc, opts) => reader(env).resolve(doc, opts),
     query: (env, q) => reader(env).query(q),
     /**
@@ -1444,17 +1688,19 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * `waitUntil` it was handed, and Folio's own internal hooks are awaited
      * either way, so a purge lands before this call returns.
      */
-    reindex: (env, opts) =>
-      reindex(
-        {
-          db: config.bindings(env).db,
-          schema: rt.schema,
-          typeOf: rt.typeOf,
-          locales: rt.locales,
-          hooks: rt.hookRunner(alarmHookCtx(env, rt.logger)),
-        },
-        opts,
-      ),
+    reindex: (env, opts) => {
+      const deps = (brand: BrandRuntime) => ({
+        db: config.bindings(env).db,
+        schema: brand.schema,
+        typeOf: brand.typeOf,
+        locales: rt.locales,
+        hooks: rt.hookRunner(alarmHookCtx(env, rt.logger)),
+      })
+      if (one) return reindex(deps(one), opts)
+      return perBrand(env, opts?.continueFrom, (brand, within, after) =>
+        reindex({ ...deps(brand), scopes: within.scopes }, { ...opts, continueFrom: after }),
+      )
+    },
     /**
      * The scheduler's sweep (`../../docs/specs/platform/scheduled-publishing.md`).
      *
@@ -1471,8 +1717,10 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
      * `content_index`, fires `published` and purges the cache without any of that
      * being restated here.
      */
+    // With `brands`, each due story is published with its scope's brand's deps
+    // (decision 6); `scheduleDeps` says how.
     runSchedules: (env, opts) =>
-      runSchedules(rt.publishDeps(config.bindings(env), alarmHookCtx(env, rt.logger)), opts),
+      runSchedules(scheduleDeps(rt, config.bindings(env), alarmHookCtx(env, rt.logger)), opts),
     /**
      * The auth housekeeping sweep (`../../docs/specs/foundation/
      * auth-providers.md` decision 8). Assembled from bindings alone, exactly as
@@ -1495,7 +1743,12 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
       return { sessions, challenges, events }
     },
     render: (doc, opts) => (
-      <FolioDoc doc={doc} registry={rt.registry} mode={opts?.mode} resolution={opts?.resolution} />
+      <FolioDoc
+        doc={doc}
+        registry={blocksFor(opts?.resolution, 'folio.render')}
+        mode={opts?.mode}
+        resolution={opts?.resolution}
+      />
     ),
     /**
      * Both are the pure functions from `core/cache-tags.ts`, re-exposed here
@@ -1508,31 +1761,56 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
     cacheVerdict: (req) => cacheVerdictFor(req, rt.base),
     cacheKey: (url) => cacheKeyFor(url),
     global: (env, name) => reader(env).global(name),
-    renderGlobal: (resolution, name, opts) => renderGlobalNode(rt.registry, resolution, name, opts),
+    renderGlobal: (resolution, name, opts) =>
+      renderGlobalNode(blocksFor(resolution, 'folio.renderGlobal'), resolution, name, opts),
     /**
      * Explicit, never automatic (`schema-migrations.md` checkpoint 5). Assembled
      * from bindings alone, exactly as `publishDeps` is, so a deploy script and
      * the `POST {base}/migrate` route reach the identical runner.
      */
-    migrate: (env, opts) => {
+    migrate: async (env, opts) => {
       const bindings = config.bindings(env)
-      return runMigrations(
-        {
-          db: bindings.db,
-          schema: rt.schema,
-          migrations: rt.migrations,
-          typeOf: rt.typeOf,
-          draft: (story) => rt.draftFor(bindings, story),
-          stub: (id) => rt.stub(bindings, id),
-          // Without this a migration that rewrites an indexed value or any prose
-          // leaves content_index and content_text describing the old document.
-          projection: rt.projection,
-          hooks: rt.hookRunner(alarmHookCtx(env, rt.logger)),
+      const deps = (brand: BrandRuntime, registry?: Registry) => ({
+        db: bindings.db,
+        schema: brand.schema,
+        migrations: brand.migrations,
+        typeOf: brand.typeOf,
+        draft: (story: StoryMeta) => brand.draftFor(bindings, story, registry),
+        stub: (id: string) => rt.stub(bindings, id),
+        // Without this a migration that rewrites an indexed value or any prose
+        // leaves content_index and content_text describing the old document.
+        projection: brand.projection,
+        hooks: rt.hookRunner(alarmHookCtx(env, rt.logger)),
+      })
+      if (one) return runMigrations(deps(one), opts)
+      // Each brand's list over that brand's scopes (decision 16), a brand per call.
+      let registry: Registry | undefined
+      const report: MigrateReport & { brand: string } = await perBrand(
+        env,
+        opts?.continueFrom,
+        (brand, within, after) => {
+          registry = within.registry
+          const own = { id: within.id, scopes: within.scopes }
+          return runMigrations(
+            { ...deps(brand, within.registry), brand: own },
+            { ...opts, continueFrom: after },
+          )
         },
-        opts,
+      )
+      return { ...report, ...(await everyBrandBehind(bindings.db, report, registry!)) }
+    },
+    audit: async (env, opts) => {
+      const db = config.bindings(env).db
+      if (one) return audit(db, one.schema, await one.auditContext(env), opts)
+      return perBrand(env, opts?.continueFrom, async (brand, within, after) =>
+        audit(
+          db,
+          brand.schema,
+          await brand.auditContext(env),
+          { ...opts, continueFrom: after },
+          within,
+        ),
       )
     },
-    audit: async (env, opts) =>
-      audit(config.bindings(env).db, rt.schema, await rt.auditContext(env), opts),
   }
 }

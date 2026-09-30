@@ -84,6 +84,7 @@ export function Shell({
   bodyClass,
   head,
   lang = 'en',
+  brand,
   children,
 }: {
   title: string
@@ -94,10 +95,14 @@ export function Shell({
    * before locales existed (`localisation.md`); a host rendering its own
    * document sets its own. */
   lang?: string
+  /** `<html data-folio-brand>` (`multi-brand.md` decision 10): the brand a
+   * branded deployment's preview renders as, so a brand's global stylesheet can be
+   * scoped under `[data-folio-brand="<id>"]`. Absent writes no attribute. */
+  brand?: string
   children: ReactNode
 }) {
   return (
-    <html lang={lang}>
+    <html lang={lang} data-folio-brand={brand}>
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

@@ -16,7 +16,7 @@
  * row `GET /stories` already returns to a viewer, and knowing that a draft is due
  * to go live discloses nothing the state chip beside it does not.
  */
-import { Hono } from 'hono'
+import { type Context, Hono } from 'hono'
 import { actorString, PUBLISH, READ } from '../auth/roles'
 import { fenceStory, hookCtx, loadStory, requestScope, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
@@ -26,8 +26,9 @@ import {
   listSchedules,
   setScheduleStatements,
 } from '../schedules'
-import { runSchedules } from '../scheduler'
+import { runSchedules, scheduleDeps } from '../scheduler'
 import type { FolioEnv } from '../types'
+import { brandOf, sweepOf } from './stories'
 import {
   idParam,
   limitParam,
@@ -43,6 +44,18 @@ import {
 
 export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
+
+  /**
+   * The run route's deps. With `brands`, the request brand's own `publishDeps`,
+   * bounded to its scopes: every schedule it can reach is a story of that brand.
+   * Without, `scheduleDeps`, the cron's.
+   */
+  const routeScheduleDeps = async (c: Context<FolioEnv<Env>>) => {
+    const bindings = c.var.bindings()
+    const sweep = await sweepOf(c, rt)
+    if (!sweep) return scheduleDeps(rt, bindings, hookCtx(c))
+    return { ...brandOf(c).publishDeps(bindings, hookCtx(c)), scopes: sweep.scopes }
+  }
 
   /**
    * What is scheduled: soonest first, paged, filterable by document, status and
@@ -180,7 +193,12 @@ export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       // `batch` is bounded twice and neither is redundant: `RunSchedulesBody`
       // bounds what reaches the D1 `limit`, and `runSchedules` clamps what one
       // call will actually attempt — the same pairing `POST /migrate` uses.
-      await runSchedules(rt.publishDeps(c.var.bindings(), hookCtx(c)), {
+      // On a deployment with `brands`, only the request brand's scopes' schedules,
+      // with that brand's deps: the permission is the scope's, so it fires nothing
+      // of another brand's (`multi-brand.md` decision 6). The cron's
+      // `folio.runSchedules` is what sweeps every brand. With no `brands`, every due
+      // row, as before.
+      await runSchedules(await routeScheduleDeps(c), {
         dryRun: body.dryRun,
         continueFrom: body.continueFrom,
         batch: body.batch,

@@ -39,9 +39,12 @@
  * button calls, so it gets the retained version, the `content_index` write, the
  * `published` hook and Folio's own cache purge without restating any of them.
  */
-import type { Schedule, ScheduleAction, ScheduleStatus } from '../core/story'
+import { DEFAULT_SITE, type Registry } from '../core/sites'
+import type { Schedule, ScheduleAction, ScheduleStatus, StoryMeta } from '../core/story'
+import type { HookRunnerCtx } from './hooks'
+import type { FolioRuntime } from './runtime'
 import { FolioError } from './errors'
-import { publish, type PublishDeps, unpublish } from './publish'
+import { publish, type PublishDeps, type StorySelector, unpublish } from './publish'
 import type { FolioDb } from './db'
 import {
   completeScheduleStatement,
@@ -49,7 +52,55 @@ import {
   dueSchedules,
   failScheduleStatement,
 } from './schedules'
-import type { FolioLogger } from './types'
+import { storyById } from './stories'
+import type { FolioLogger, ReadBindings } from './types'
+
+/**
+ * The sweep on a deployment with `brands` (`multi-brand.md` decision 6): one
+ * sweep over every due row, and each story published with **its scope's brand's**
+ * deps — its titles, its projection, its layer seeds. `depsFor` answers null for a
+ * story whose scope no configured brand serves, which is a failure rather than a
+ * guess (a null brand serves nothing, decision 4).
+ */
+export interface BrandedScheduleDeps {
+  db: FolioDb
+  logger?: FolioLogger
+  depsFor: (story: StoryMeta) => Promise<PublishDeps | null>
+}
+
+/**
+ * The deps one sweep runs on, for both of its doors: `folio.runSchedules` from a
+ * cron and `POST {base}/api/schedules/run`. With no `brands`, the one brand's
+ * `publishDeps`, exactly as before. With them, `BrandedScheduleDeps`: each story's
+ * deps are its scope's brand's, built once per brand per sweep, with the registry
+ * snapshot read once and only when something is due.
+ */
+export function scheduleDeps(
+  rt: FolioRuntime,
+  bindings: ReadBindings,
+  hookCtx: HookRunnerCtx,
+): (PublishDeps & { logger?: FolioLogger }) | BrandedScheduleDeps {
+  const one = rt.brands.get(null)
+  if (one) return one.publishDeps(bindings, hookCtx)
+  const sites = rt.sites!
+  let registry: Promise<Registry> | null = null
+  const built = new Map<string, PublishDeps>()
+  return {
+    db: bindings.db,
+    logger: rt.logger,
+    depsFor: async (story) => {
+      registry ??= sites.registry(hookCtx.env)
+      const brand = rt.forScope(await registry, story.site ?? DEFAULT_SITE)
+      if (!brand?.brand) return null
+      let deps = built.get(brand.brand.id)
+      if (!deps) {
+        deps = brand.publishDeps(bindings, hookCtx)
+        built.set(brand.brand.id, deps)
+      }
+      return deps
+    },
+  }
+}
 
 /** How many schedules one call fires before handing back a cursor. */
 export const DEFAULT_SCHEDULE_BATCH = 25
@@ -159,7 +210,16 @@ export interface ScheduleRunOptions {
  * `runMigrations` applies per document.
  */
 export async function runSchedules(
-  deps: PublishDeps & { logger?: FolioLogger },
+  deps: ((PublishDeps & { logger?: FolioLogger }) | BrandedScheduleDeps) & {
+    /**
+     * Only the schedules whose story one of these scopes owns, and `remaining`
+     * counted over them too: `POST {base}/~<scope>/api/schedules/run` on a
+     * deployment with `brands`, which is authorised on one scope and fires only
+     * its brand's (`multi-brand.md` decision 6). Absent is every schedule — the
+     * cron's sweep, which covers every brand.
+     */
+    scopes?: readonly string[]
+  },
   opts: ScheduleRunOptions = {},
 ): Promise<ScheduleRunReport> {
   const logger = deps.logger ?? console
@@ -171,7 +231,13 @@ export async function runSchedules(
   )
 
   const resuming = (opts.continueFrom ?? null) !== null
-  const { rows, next } = await dueSchedules(deps.db, now, opts.continueFrom ?? null, batch)
+  const { rows, next } = await dueSchedules(
+    deps.db,
+    now,
+    opts.continueFrom ?? null,
+    batch,
+    deps.scopes,
+  )
   if (rows.length === 0) {
     // **One read, and this branch is where that claim is paid.** The ordinary cron
     // tick on a site with nothing scheduled lands here, and `remaining` is 0 by
@@ -182,7 +248,10 @@ export async function runSchedules(
     // A *resumed* call is different and has to ask. Empty then means "nothing due
     // after the cursor", and a row that failed transiently earlier in this run is
     // behind the cursor, still pending and still due.
-    return { ...EMPTY(dryRun), remaining: resuming ? await countDue(deps.db, now) : 0 }
+    return {
+      ...EMPTY(dryRun),
+      remaining: resuming ? await countDue(deps.db, now, deps.scopes) : 0,
+    }
   }
 
   const report: ScheduleRunReport = { ...EMPTY(dryRun), due: rows.length, continueFrom: next }
@@ -197,11 +266,12 @@ export async function runSchedules(
     }
 
     try {
+      const [workflow, story] = await workflowFor(deps, row)
       if (row.action === 'publish') {
-        await publish(deps, row.storyId, row.actor)
+        await publish(workflow, story, row.actor)
         report.published.push(row.storyId)
       } else if (row.action === 'unpublish') {
-        await unpublish(deps, row.storyId, row.actor)
+        await unpublish(workflow, story, row.actor)
         report.unpublished.push(row.storyId)
       } else {
         // An action nothing declares. Reachable only from a hand-written row or a
@@ -230,8 +300,33 @@ export async function runSchedules(
     await clearRow(deps.db, row, logger)
   }
 
-  report.remaining = await countDue(deps.db, now)
+  report.remaining = await countDue(deps.db, now, deps.scopes)
   return report
+}
+
+/**
+ * The deps a row's story is published with, and how `publish` is to find it. With
+ * no `brands` that is the one set of deps and the id, exactly as before. With them
+ * the row is read here, once, and handed to `publish` as the row, so the brand
+ * lookup costs no second read: the story's own scope is the only scope a cron tick
+ * has, and its brand is its chain's (decision 5). A story that is gone is
+ * `not_found`, the same answer `publish` gives for it.
+ */
+async function workflowFor(
+  deps: (PublishDeps & { logger?: FolioLogger }) | BrandedScheduleDeps,
+  row: Schedule,
+): Promise<[PublishDeps, StorySelector]> {
+  if (!('depsFor' in deps)) return [deps, row.storyId]
+  const story = await storyById(deps.db, row.storyId)
+  if (!story) throw new FolioError('not_found', 'Unknown story')
+  const branded = await deps.depsFor(story)
+  if (!branded) {
+    throw new FolioError(
+      'bad_request',
+      `No configured brand serves the scope '${story.site ?? 'default'}' this story belongs to`,
+    )
+  }
+  return [branded, story]
 }
 
 /**

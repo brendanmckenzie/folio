@@ -51,9 +51,10 @@ import {
   toolsFor,
 } from '../mcp/tools'
 import { ensureAccess, inFence } from '../middleware'
-import type { FolioRuntime } from '../runtime'
+import type { BrandRuntime, FolioRuntime } from '../runtime'
 import { SCOPE_HEADER } from '../sites'
 import type { FolioEnv } from '../types'
+import { brandOf, draftOf } from './stories'
 import { API_VERSION } from './api'
 
 /**
@@ -291,13 +292,17 @@ export function mcpRoutes<Env>(
    * nothing because the manifest is derived at construction. **Phase 5 step 4
    * owns growing this**; it is the one seam a dynamic description needs.
    */
-  const described = (tool: McpTool): string => {
+  const described = (brand: BrandRuntime | null, tool: McpTool): string => {
+    // The scope's brand's names only (`multi-brand.md` decision 12). With none, a
+    // branded deployment asked with no scope, the row's own description: naming the
+    // types of a brand nobody named would advertise the wrong ones.
+    if (brand === null) return tool.description
     if (tool.manifest === 'types') {
-      const names = rt.types.map((type) => type.name).join(', ')
+      const names = brand.types.map((type) => type.name).join(', ')
       return `${tool.description} Declared document types: ${names}.`
     }
     if (tool.manifest === 'blocks') {
-      const names = Object.keys(rt.schema).join(', ')
+      const names = Object.keys(brand.schema).join(', ')
       return `${tool.description} Declared blocks: ${names}.`
     }
     return tool.description
@@ -314,6 +319,8 @@ export function mcpRoutes<Env>(
     origin: c.req.url,
     headers: credentialHeaders(c),
     visible: (story) => inFence(c, rt, story, 'read'),
+    brand: brandOf(c),
+    draft: draftOf(c, rt),
     // With `sites`, the tool forwards no credential and mints a grant instead
     // (`multi-site.md` decision 13), from the request's own scope and actor.
     ...(rt.sites
@@ -391,7 +398,7 @@ export function mcpRoutes<Env>(
       ...UNCACHED,
       tools: offered(c.var.actor).map((tool) => ({
         name: tool.name,
-        description: described(tool),
+        description: described(c.var.brand, tool),
         inputSchema: tool.inputSchema,
       })),
     }),

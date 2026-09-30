@@ -1547,6 +1547,17 @@ export interface BehindStory {
 const BEHIND = '(schema_id is null or schema_id < ?)'
 
 /**
+ * `and site_id in (…)` for a sweep over one brand's scopes (`multi-brand.md`
+ * decision 16), bound as one JSON array so a brand of any size is one parameter.
+ * Absent is every scope, the SQL every caller issued before brands, unchanged.
+ */
+function inScopes(scopes: readonly string[] | undefined): { sql: string; binds: string[] } {
+  return scopes === undefined
+    ? { sql: '', binds: [] }
+    : { sql: ' and site_id in (select value from json_each(?))', binds: [JSON.stringify(scopes)] }
+}
+
+/**
  * Documents behind `latestId`, in `id` order, starting after `after` — the
  * runner's batch (`schema-migrations.md` architecture decision 5).
  *
@@ -1559,13 +1570,15 @@ export async function storiesBehind(
   latestId: string,
   after: string | null,
   limit: number,
+  scopes?: readonly string[],
 ): Promise<BehindStory[]> {
+  const within = inScopes(scopes)
   const { results } = await db
     .prepare(
       `select ${COLS}, published_doc from stories
-       where ${BEHIND} and id > ? order by id limit ?`,
+       where ${BEHIND}${within.sql} and id > ? order by id limit ?`,
     )
-    .bind(latestId, after ?? '', limit)
+    .bind(latestId, ...within.binds, after ?? '', limit)
     .all<StoryRow & { published_doc: string | null }>()
 
   return results.map(({ published_doc, ...row }) => ({
@@ -1580,10 +1593,15 @@ export async function storiesBehind(
  * across batches, so it is right however many calls a run took and however many
  * runs there have been.
  */
-export async function countBehind(db: FolioDb, latestId: string): Promise<number> {
+export async function countBehind(
+  db: FolioDb,
+  latestId: string,
+  scopes?: readonly string[],
+): Promise<number> {
+  const within = inScopes(scopes)
   const row = await db
-    .prepare(`select count(*) as n from stories where ${BEHIND}`)
-    .bind(latestId)
+    .prepare(`select count(*) as n from stories where ${BEHIND}${within.sql}`)
+    .bind(latestId, ...within.binds)
     .first<{ n: number }>()
   return row?.n ?? 0
 }
@@ -1635,13 +1653,15 @@ export async function publishedDocsAfter(
   db: FolioDb,
   after: string | null,
   limit: number,
+  scopes?: readonly string[],
 ): Promise<PublishedDocRow[]> {
+  const within = inScopes(scopes)
   const { results } = await db
     .prepare(
       `select id, type, published_doc from stories
-       where published_doc is not null and id > ? order by id limit ?`,
+       where published_doc is not null${within.sql} and id > ? order by id limit ?`,
     )
-    .bind(after ?? '', limit)
+    .bind(...within.binds, after ?? '', limit)
     .all<{ id: string; type: string; published_doc: string }>()
   return results.map((row) => ({
     id: row.id,

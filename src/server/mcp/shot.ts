@@ -32,7 +32,7 @@
  * against `pnpm dev` this always takes the no-binding shape of the answer,
  * which is exactly `scripts/mcp-test.mjs`'s premise.
  */
-import type { Blok } from '../../core/doc'
+import type { Blok, Doc } from '../../core/doc'
 import type { DocumentKind } from '../../core/schema'
 import { chain, DEFAULT_SITE, type Registry, type SiteRef, sitesUnder } from '../../core/sites'
 import type { StoryMeta } from '../../core/story'
@@ -40,7 +40,7 @@ import { mintGrantCode } from '../auth/grants'
 import type { Actor } from '../auth/roles'
 import { FolioError } from '../errors'
 import { previewPage } from '../pages'
-import type { FolioRuntime, SiteRender } from '../runtime'
+import type { BrandRuntime, FolioRuntime, SiteRender } from '../runtime'
 import { storyById } from '../stories'
 import type { ReadBindings } from '../types'
 
@@ -249,6 +249,13 @@ export interface PreviewDocumentContext {
    */
   visible: (story: StoryMeta) => Promise<boolean>
   /**
+   * The request's brand, whose types say what a story renders as, and the story's
+   * draft under it (`multi-brand.md` decision 6): never `rt`'s, which has no brand
+   * on a deployment with `brands`.
+   */
+  brand: BrandRuntime
+  draft: (story: StoryMeta) => Promise<Doc>
+  /**
    * Present on a deployment with `sites` (`multi-site.md` decision 13): the
    * request's scope, its actor and the registry. **Then the browser is handed no
    * credential of the caller's at all** — `headers` is ignored — and reaches the
@@ -271,6 +278,7 @@ async function renderDraftHtml(
   bindings: ReadBindings,
   story: StoryMeta,
   target: PreviewTarget & { kind: 'page' | 'global' },
+  ctx: PreviewDocumentContext,
   site?: SiteRender,
 ): Promise<string> {
   const res = await previewPage(rt, bindings, story, {
@@ -278,6 +286,10 @@ async function renderDraftHtml(
     mode: 'draft',
     // On a deployment with `sites`, resolved on the site it renders for.
     ...(site ? { site } : {}),
+    // The request's brand renders it (`multi-brand.md` decision 10), and on a
+    // deployment with `brands` a layer's seed needs the registry.
+    brand: ctx.brand,
+    ...(ctx.brand.brand !== null && ctx.sites ? { registry: await ctx.sites.registry() } : {}),
   })
   return res.text()
 }
@@ -333,7 +345,7 @@ async function run(
   const on = ctx.sites ? await renderSiteFor(ctx.sites, story) : null
   if (typeof on === 'string') return { content: [text(on)] }
   const decorated = on ? rt.urlsFor(on)(story) : rt.withUrls(story)
-  const target = chooseTarget(rt.base, decorated, rt.typeOf(story.type)?.kind)
+  const target = chooseTarget(rt.base, decorated, ctx.brand.typeOf(story.type)?.kind)
 
   if (target.kind === 'none') {
     return {
@@ -377,7 +389,7 @@ async function run(
   // 5a, the edge cases) — the `Doc` is what tells them apart.
   let blokType: string | undefined
   if (args.blok !== undefined) {
-    const doc = await rt.draftFor(bindings, story)
+    const doc = await ctx.draft(story)
     const found: Blok | undefined = doc.bloks[args.blok]
     if (!found) {
       return {
@@ -402,6 +414,7 @@ async function run(
           bindings,
           story,
           target,
+          ctx,
           on ? { site: on, surface: 'preview', chain: on.chain } : undefined,
         ),
       ),

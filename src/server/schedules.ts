@@ -308,18 +308,35 @@ export async function dueSchedules(
   now: number,
   cursor: string | null,
   limit: number,
+  scopes?: readonly string[],
 ): Promise<{ rows: Schedule[]; next: string | null }> {
   const resume = keysetWhere(SOONEST_FIRST, cursor ? decodeCursor(cursor) : null)
+  const within = ownedBy(scopes)
   const { results } = await db
     .prepare(
       `select ${COLS} from schedules
-       ${whereOf("status = 'pending'", 'at <= ?', resume.sql)} ${orderBy(SOONEST_FIRST)} limit ?`,
+       ${whereOf("status = 'pending'", 'at <= ?', within.sql, resume.sql)} ${orderBy(SOONEST_FIRST)} limit ?`,
     )
-    .bind(now, ...resume.binds, limit + 1)
+    .bind(now, ...within.binds, ...resume.binds, limit + 1)
     .all<Schedule>()
 
   const page = paginate(results, limit, (row) => [row.at, row.id])
   return { rows: page.rows, next: page.cursor }
+}
+
+/**
+ * The schedules whose story is owned by one of `scopes`, for a sweep bounded to one
+ * brand (`multi-brand.md` decision 6): `POST {base}/~<scope>/api/schedules/run` is
+ * authorised per scope, so it fires only its brand's. The scopes are one JSON-array
+ * parameter. Absent is every schedule — no clause, the SQL as it always was.
+ */
+function ownedBy(scopes: readonly string[] | undefined): { sql: string | null; binds: string[] } {
+  return scopes === undefined
+    ? { sql: null, binds: [] }
+    : {
+        sql: 'story_id in (select id from stories where site_id in (select value from json_each(?)))',
+        binds: [JSON.stringify(scopes)],
+      }
 }
 
 /**
@@ -330,10 +347,17 @@ export async function dueSchedules(
  * two runs that overlapped. **A diagnostic, not a loop condition** — see
  * `ScheduleRunReport.remaining`.
  */
-export async function countDue(db: FolioDb, now: number): Promise<number> {
+export async function countDue(
+  db: FolioDb,
+  now: number,
+  scopes?: readonly string[],
+): Promise<number> {
+  const within = ownedBy(scopes)
   const row = await db
-    .prepare("select count(*) as n from schedules where status = 'pending' and at <= ?")
-    .bind(now)
+    .prepare(
+      `select count(*) as n from schedules ${whereOf("status = 'pending'", 'at <= ?', within.sql)}`,
+    )
+    .bind(now, ...within.binds)
     .first<{ n: number }>()
   return row?.n ?? 0
 }

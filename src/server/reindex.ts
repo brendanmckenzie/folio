@@ -58,6 +58,12 @@ export interface ReindexReport {
   /** Pass back as `continueFrom` to sweep the next batch. Null when done. */
   continueFrom: string | null
   dryRun: boolean
+  /**
+   * On a deployment with `brands` (`multi-brand.md` decision 16): the brand whose
+   * scopes this call's batch rebuilt, with that brand's schema. `folio.reindex`
+   * walks the brands through `continueFrom`. Absent with no `brands`.
+   */
+  brand?: string
 }
 
 export interface ReindexDeps {
@@ -73,6 +79,12 @@ export interface ReindexDeps {
    * pages hold a collection is precisely what nothing records.
    */
   hooks?: HookRunner<unknown>
+  /**
+   * The scopes of the one brand whose `schema` and `typeOf` these are
+   * (`multi-brand.md` decision 16). Absent is every scope, as before brands: a
+   * document projected with another brand's schema would index the wrong fields.
+   */
+  scopes?: readonly string[]
 }
 
 export async function reindex(
@@ -81,7 +93,7 @@ export async function reindex(
 ): Promise<ReindexReport> {
   const batch = Math.min(Math.max(Math.trunc(opts.batch ?? DEFAULT_BATCH), 1), MAX_BATCH)
   const dryRun = opts.dryRun === true
-  const docs = await publishedDocsAfter(deps.db, opts.continueFrom ?? null, batch)
+  const docs = await publishedDocsAfter(deps.db, opts.continueFrom ?? null, batch, deps.scopes)
 
   let indexRows = 0
   let refRows = 0

@@ -272,6 +272,11 @@ async function scopedActor<Env>(
   if (scope === null && bound !== null) {
     scope = bound
     c.set('scope', scope)
+    // `withScope` set the brand from the scope as it stood, which was none: on a
+    // deployment with `brands` it follows the binding now (`multi-brand.md`
+    // decisions 6 and 19), or every route below would read a bound token's
+    // request as brandless. With one brand it is already that brand.
+    if (!rt.brands.has(null)) c.set('brand', rt.forScope(await sites.registry(c.env), scope))
   }
   if (scope === null) {
     // `{base}/mcp` too: it is a scoped surface (`{base}/~<scope>/mcp`, decision 11),

@@ -13,6 +13,7 @@ import { storyById } from '../stories'
 import type { FolioEnv } from '../types'
 import { CheckpointBody, idParam, limitParam, parseOptionalBody, requireCursor } from '../validate'
 import { getVersion, listRecentPublishes, listVersions } from '../versions'
+import { brandOf } from './stories'
 
 export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
@@ -55,7 +56,7 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     loadStory<Env>(rt, 'write'),
     async (c) => {
       const body = await parseOptionalBody(c.req, CheckpointBody)
-      const deps = rt.publishDeps(c.var.bindings(), hookCtx(c))
+      const deps = brandOf(c).publishDeps(c.var.bindings(), hookCtx(c))
       // `actor` comes off the session, never off the body: the client used to
       // send its own display name here, which made "who checkpointed this" a
       // field anybody could type into.
@@ -78,10 +79,11 @@ export function historyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.get('/versions/:versionId', requireAccess<Env>(rt, READ_DRAFT), async (c) => {
     const db = c.var.bindings().db
+    const brand = brandOf(c)
     const found = await getVersion(db, idParam('versionId', c.req.param('versionId')), {
-      migrations: rt.migrations,
-      schema: rt.schema,
-      typeOf: rt.typeOf,
+      migrations: brand.migrations,
+      schema: brand.schema,
+      typeOf: brand.typeOf,
     })
     if (!found) throw new FolioError('not_found', 'Unknown version')
     // A version is its story's: outside the request's chain it is not there. The

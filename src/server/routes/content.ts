@@ -17,6 +17,7 @@ import { hookCtx, requestChain, requestSite, requireAccess } from '../middleware
 import { reindex } from '../reindex'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
+import { brandOf, sweepOf } from './stories'
 import { parseOptionalBody, ReindexBody, typeNameQuery } from '../validate'
 
 /** How many `where=` clauses one request may carry. Each is an index seek; a
@@ -176,7 +177,12 @@ export function contentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // Over the request's chain, deduped by decision 6's walk, with the site's own
     // URLs (`multi-site.md`'s route table: `GET /content` is "chain, deduped").
     return c.json(
-      await rt.query(c.var.bindings(), q, await requestChain(c, rt), await requestSite(c, rt)),
+      await brandOf(c).query(
+        c.var.bindings(),
+        q,
+        await requestChain(c, rt),
+        await requestSite(c, rt),
+      ),
     )
   })
 
@@ -192,20 +198,24 @@ export function contentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.post('/reindex', requireAccess<Env>(rt, ADMIN), async (c) => {
     const body = await parseOptionalBody(c.req, ReindexBody)
-    return c.json(
-      await reindex(
-        {
-          db: c.var.bindings().db,
-          schema: rt.schema,
-          typeOf: rt.typeOf,
-          locales: rt.locales,
-          hooks: rt.hookRunner(hookCtx(c)),
-        },
-        // `actor` off the session, never the body, exactly as `POST /migrate`
-        // takes it: the `reindexed` hook records who asked.
-        { ...body, actor: actorString(c.var.actor) },
-      ),
+    const brand = brandOf(c)
+    const sweep = await sweepOf(c, rt)
+    const report = await reindex(
+      {
+        db: c.var.bindings().db,
+        schema: brand.schema,
+        typeOf: brand.typeOf,
+        locales: rt.locales,
+        hooks: rt.hookRunner(hookCtx(c)),
+        // This brand's schema over this brand's scopes only.
+        ...(sweep ? { scopes: sweep.scopes } : {}),
+      },
+      // `actor` off the session, never the body, exactly as `POST /migrate`
+      // takes it: the `reindexed` hook records who asked.
+      { ...body, actor: actorString(c.var.actor) },
     )
+    // On a deployment with `brands`, the brand whose scopes this rebuilt.
+    return c.json(sweep ? { ...report, brand: sweep.id } : report)
   })
 
   return app

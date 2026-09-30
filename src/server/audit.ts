@@ -53,7 +53,7 @@ import { isBareLayer, mergeLayers } from '../core/layers'
 import { isTranslatable, type LocaleConfig } from '../core/locales'
 import { docBytes, MAX_DOC_BYTES, utf8Bytes } from '../core/protocol'
 import { type BlockSchema, type DocumentType, type SchemaIndex, slotsOf } from '../core/schema'
-import { chain, layerId, type Registry } from '../core/sites'
+import { chain, layerId, layerSeed, type Registry, singletonTypeOf } from '../core/sites'
 import { publishedDocsAfter, publishedDocsByIds } from './stories'
 import type { FolioDb } from './db'
 
@@ -260,6 +260,26 @@ export interface AuditReport {
    * so out loud rather than presenting one batch as the whole answer.
    */
   continueFrom: string | null
+  /**
+   * On a deployment with `brands` (`multi-brand.md` decision 16): the brand this
+   * call audited, over its own scopes and against its own schema. `folio.audit`
+   * walks the brands through `continueFrom`, one brand per report, because a
+   * finding names a type and two brands may each have a `page`. Absent with no
+   * `brands`.
+   */
+  brand?: string
+}
+
+/**
+ * One brand's audit (`multi-brand.md` decision 16): the scopes whose documents it
+ * reads, and the registry a layer's seed is decided by. With `brands` there is no
+ * `shared` below every scope, so a layer's id no longer says whether it is bare
+ * (`isBareLayer`); its chain does.
+ */
+export interface AuditBrand {
+  id: string
+  scopes: readonly string[]
+  registry: Registry
 }
 
 /** How many published documents one call reads. */
@@ -892,11 +912,18 @@ export async function audit(
   schema: SchemaIndex,
   ctx: AuditContext = NO_CONTEXT,
   opts: AuditOptions = {},
+  brand?: AuditBrand,
 ): Promise<AuditReport> {
   const size = Math.min(Math.max(opts.batch ?? DEFAULT_AUDIT_BATCH, 1), MAX_AUDIT_BATCH)
-  const docs = await publishedDocsAfter(db, opts.continueFrom ?? null, size)
+  const docs = await publishedDocsAfter(db, opts.continueFrom ?? null, size, brand?.scopes)
+  const bare = brand
+    ? (id: string) => {
+        const layer = singletonTypeOf(id)
+        return layer !== null && layerSeed(brand.registry, layer.scope) === 'bare'
+      }
+    : isBareLayer
   const content = auditDocuments(
-    ctx.sites ? docs.map((d) => ({ ...d, bare: isBareLayer(d.id) })) : docs,
+    ctx.sites || brand ? docs.map((d) => ({ ...d, bare: bare(d.id) })) : docs,
     schema,
     ctx,
   )
@@ -922,6 +949,7 @@ export async function audit(
       documents: f.documents,
     })),
     ...(ctx.sites ? { settings: await auditSettings(db, schema, ctx.sites, ctx.types) } : {}),
+    ...(brand ? { brand: brand.id } : {}),
   }
 }
 

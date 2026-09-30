@@ -982,6 +982,16 @@ const api = (path: string, who: Record<string, string>, init: RequestInit = {}) 
     createExecutionContext(),
   ) as Promise<Response>
 
+/**
+ * A layer's first write, one that sets nothing (`PATCH …/fields` with no fields):
+ * on a deployment with `sites` a read never creates a layer, a write does.
+ */
+const createLayer = (id: string, who: Record<string, string>) =>
+  api(`/api/v1/documents/${id}/fields`, who, {
+    method: 'PATCH',
+    body: JSON.stringify({ fields: {} }),
+  })
+
 const stubOf = (id: string) =>
   env.STORY.get(env.STORY.idFromName(id)) as unknown as {
     commit: (
@@ -1108,6 +1118,10 @@ describe('Layered globals', () => {
 
     it('starts bare, in the admin or by a v1 create: root data is {} and every field reads inherited', async () => {
       const who = await bravo()
+      // A read of a layer nobody has written is a 404 and makes no row (a preview
+      // never writes); the first write — here one that sets nothing — makes it.
+      expect((await api('/api/v1/documents/sng_lsHeader:bravo?status=draft', who)).status).toBe(404)
+      expect((await createLayer('sng_lsHeader:bravo', who)).status).toBe(200)
       const res = await api('/api/v1/documents/sng_lsHeader:bravo?status=draft', who)
       expect(res.status).toBe(200)
       const doc = await layered.draft(env, 'sng_lsHeader:bravo')
@@ -1216,7 +1230,9 @@ describe('Site settings', () => {
     const shared = await tokenFor('shared')
     const alpha = await tokenFor('alpha')
 
-    // The shared layer, created on a multi-site deployment: defaults and preset.
+    // The shared layer, created on a multi-site deployment by a first write: defaults
+    // and preset.
+    expect((await createLayer('sng_lsSettings:shared', shared)).status).toBe(200)
     expect((await api('/api/v1/documents/sng_lsSettings:shared?status=draft', shared)).status).toBe(
       200,
     )
@@ -1226,6 +1242,7 @@ describe('Site settings', () => {
     await api('/api/v1/documents/sng_lsSettings:shared/publish', shared, { method: 'POST' })
 
     // Alpha's layer starts bare, and overrides the theme child: primary only.
+    expect((await createLayer('sng_lsSettings:alpha', alpha)).status).toBe(200)
     expect((await api('/api/v1/documents/sng_lsSettings:alpha?status=draft', alpha)).status).toBe(
       200,
     )

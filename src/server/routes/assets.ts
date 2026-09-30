@@ -60,6 +60,7 @@ import {
 } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
+import { brandOf, sweepOf } from './stories'
 import {
   AssetBulkBody,
   AssetBulkMoveBody,
@@ -574,11 +575,12 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.get('/assets/describe', requireAccess<Env>(rt, READ), (c) => {
     const { images } = c.var.bindings()
-    if (!rt.describe) return c.json({ configured: false })
+    const { describe } = brandOf(c)
+    if (!describe) return c.json({ configured: false })
     return c.json({
       configured: true,
-      onUpload: rt.describe.onUpload,
-      concurrency: rt.describe.concurrency,
+      onUpload: describe.onUpload,
+      concurrency: describe.concurrency,
       batch: DEFAULT_DESCRIBE_BATCH,
       images: images !== undefined,
     })
@@ -612,13 +614,16 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.post('/assets/describe', requireAccess<Env>(rt, ADMIN), async (c) => {
     const { db, media, images } = c.var.bindings()
     if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
-    if (!rt.describe) {
+    const { describe } = brandOf(c)
+    if (!describe) {
       throw new FolioError('unsupported', 'No `describe` function is configured')
     }
 
     const body = await parseBody(c.req, AssetDescribeBody)
     requireCursor(body.continueFrom ?? undefined)
     const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
+    // With `brands`, this brand's scopes only: its `fn` describes its own assets.
+    const sweep = await sweepOf(c, rt)
     return answer(
       c,
       await runDescribe(
@@ -627,10 +632,11 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           media,
           images,
           assetBase,
-          describe: rt.describe,
+          describe,
           env: c.env,
           logger: rt.logger,
           scoped: rt.sites !== null,
+          ...(sweep ? { scopes: sweep.scopes } : {}),
         },
         body.selection,
         {
@@ -674,7 +680,8 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     async (c) => {
       const { db, media, images } = c.var.bindings()
       if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
-      if (!rt.describe) {
+      const { describe } = brandOf(c)
+      if (!describe) {
         throw new FolioError('unsupported', 'No `describe` function is configured')
       }
 
@@ -691,7 +698,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           media,
           images,
           assetBase,
-          describe: rt.describe,
+          describe,
           env: c.env,
           logger: rt.logger,
           scoped: rt.sites !== null,
@@ -762,7 +769,8 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     try {
       const bytes = await readCappedBody(c.req.raw.body, MAX_UPLOAD_BYTES)
       const row = await uploadAsset(db, media, { bytes, filename, site: scopeOf(c) })
-      if (rt.describe?.onUpload) {
+      const { describe } = brandOf(c)
+      if (describe?.onUpload) {
         const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
         c.executionCtx.waitUntil(
           describeOnUpload(
@@ -771,7 +779,7 @@ export function assetRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
               media,
               images,
               assetBase,
-              describe: rt.describe,
+              describe,
               env: c.env,
               logger: rt.logger,
               scoped: rt.sites !== null,

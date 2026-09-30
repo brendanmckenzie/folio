@@ -5,10 +5,11 @@
 import type { Context } from 'hono'
 import { Hono } from 'hono'
 import { cloneDoc } from '../../core/clone'
+import type { Doc } from '../../core/doc'
 import { isKnownLocale, translationStatus } from '../../core/locales'
 import type { Page } from '../../core/pagination'
 import type { DocumentType } from '../../core/schema'
-import { DEFAULT_SITE } from '../../core/sites'
+import { DEFAULT_SITE, type Registry as SiteRegistry } from '../../core/sites'
 import { ancestorPaths, type StoryMeta } from '../../core/story'
 import { actorString } from '../auth/roles'
 import { CREATE, EDIT, MANAGE, PUBLISH, READ, READ_DRAFT } from '../auth/roles'
@@ -27,7 +28,7 @@ import {
   requireAccess,
 } from '../middleware'
 import { publish, unpublish } from '../publish'
-import type { FolioRuntime } from '../runtime'
+import type { BrandRuntime, FolioRuntime } from '../runtime'
 import {
   countStories,
   createStory,
@@ -91,6 +92,62 @@ function decorated<T extends StoryMeta>(urls: FolioRuntime['withUrls'], page: Pa
   return { ...page, rows: page.rows.map((row) => urls(row)) }
 }
 
+/**
+ * The request's brand: the registry a route reads (`multi-brand.md` decision 6),
+ * never `rt.schema`. `withScope` set it, and it is null only on a deployment with
+ * `brands` when the request named neither a scope nor a site, which a scoped route
+ * has already answered `400 site_required`. Reached with none by a route that needs
+ * a registry, it is refused rather than answered from a brand nobody named.
+ */
+export function brandOf<Env>(c: Context<FolioEnv<Env>>): BrandRuntime {
+  const brand = c.var.brand
+  if (!brand) {
+    throw new FolioError(
+      'bad_request',
+      'This deployment has many brands: name the site, as ~<site>/… in the path',
+    )
+  }
+  return brand
+}
+
+/**
+ * `brand.draftFor` over this request. A layer's seed depends on its scope's chain on
+ * a deployment with `brands` (decision 5), so there the snapshot goes with it; with
+ * none it is ignored, and is not read.
+ */
+export function draftOf<Env>(
+  c: Context<FolioEnv<Env>>,
+  rt: FolioRuntime,
+): (story: StoryMeta) => Promise<Doc> {
+  const brand = brandOf(c)
+  const bindings = c.var.bindings()
+  return async (story) =>
+    brand.draftFor(
+      bindings,
+      story,
+      brand.brand !== null && rt.sites ? await rt.sites.registry(c.env) : undefined,
+    )
+}
+
+/**
+ * The request's brand and every scope it owns, for a sweep that reads documents
+ * across scopes (`migrate`, `reindex`, `audit`): one brand's schema over that
+ * brand's rows and no other's (`multi-brand.md` decision 16). Undefined with no
+ * `brands`, where a sweep reads every scope, as it always did.
+ */
+export async function sweepOf<Env>(
+  c: Context<FolioEnv<Env>>,
+  rt: FolioRuntime,
+): Promise<{ id: string; scopes: readonly string[]; registry: SiteRegistry } | undefined> {
+  const id = brandOf(c).brand?.id
+  if (id === undefined || !rt.sites) return undefined
+  const registry = await rt.sites.registry(c.env)
+  const scopes = [...registry.sites, ...registry.groups]
+    .filter((row) => row.brand === id)
+    .map((row) => row.id)
+  return { id, scopes, registry }
+}
+
 export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
 
@@ -105,9 +162,9 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const bindings = c.var.bindings()
     return {
       db: bindings.db,
-      types: rt.types,
+      types: brandOf(c).types,
       stub: (id: string) => rt.stub(bindings, id),
-      draft: (story: StoryMeta) => rt.draftFor(bindings, story),
+      draft: draftOf(c, rt),
       hooks: rt.hookRunner(hookCtx(c)),
       chainOf: chainResolver(c, rt),
     }
@@ -126,9 +183,10 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * declared (`document-types.md`). An absent name is the default page type, so
    * a client written before types existed keeps working.
    */
-  const requireType = (name: string | undefined): DocumentType => {
-    if (name === undefined) return rt.defaultType
-    const type = rt.typeOf(name)
+  const requireType = (c: Context<FolioEnv<Env>>, name: string | undefined): DocumentType => {
+    const brand = brandOf(c)
+    if (name === undefined) return brand.defaultType
+    const type = brand.typeOf(name)
     if (!type) throw new FolioError('unsupported', `Unknown document type: ${name}`)
     return type
   }
@@ -250,18 +308,19 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.get('/documents', requireAccess<Env>(rt, READ), async (c) => {
     const bindings = c.var.bindings()
+    const brand = brandOf(c)
 
     const scope = scopeOf(c)
     if (c.req.query('kind') === 'singleton') {
-      const rows = await listSingletons(bindings.db, rt.types, rt.schemaId, scope)
+      const rows = await listSingletons(bindings.db, brand.types, brand.schemaId, scope)
       const urls = await requestUrls(c, rt)
       return c.json({ rows: rows.map((row) => urls(row)) })
     }
 
     const raw = c.req.query('type')
-    const wanted = raw === undefined ? undefined : requireType(typeNameQuery(raw))
+    const wanted = raw === undefined ? undefined : requireType(c, typeNameQuery(raw))
     if (wanted?.kind === 'singleton') {
-      await ensureSingleton(bindings.db, wanted, rt.schemaId, scope)
+      await ensureSingleton(bindings.db, wanted, brand.schemaId, scope)
     }
 
     const cursor = c.req.query('cursor')
@@ -279,7 +338,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         dir: sortDirQuery(c.req.query('dir')),
         // Skipped on a site that marks nothing `indexed`, where the query would
         // be a round trip for an empty answer.
-        indexed: rt.indexedFields.size > 0,
+        indexed: brand.indexedFields.size > 0,
       },
     )
     return c.json(decorated(await requestUrls(c, rt), page))
@@ -311,16 +370,17 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.get('/counts', requireAccess<Env>(rt, READ), async (c) => {
     const db = c.var.bindings().db
+    const { types } = brandOf(c)
     // Sequential over a handful of declared types would be a round trip each, and
     // these are independent aggregates over one indexed table.
     const scope = scopeOf(c)
     const [pages, ...perType] = await Promise.all([
       countStories(db, { routed: true }, scope),
-      ...rt.types.map((type) => countStories(db, { type: type.name }, scope)),
+      ...types.map((type) => countStories(db, { type: type.name }, scope)),
     ])
     return c.json({
       pages,
-      types: Object.fromEntries(rt.types.map((type, at) => [type.name, perType[at] ?? 0])),
+      types: Object.fromEntries(types.map((type, at) => [type.name, perType[at] ?? 0])),
     })
   })
 
@@ -356,7 +416,13 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       decorated(
         await requestUrls(c, rt),
         await searchStories(c.var.bindings().db, {
-          ...(kind ? { types: rt.types.filter((t) => t.kind === kind).map((t) => t.name) } : {}),
+          ...(kind
+            ? {
+                types: brandOf(c)
+                  .types.filter((t) => t.kind === kind)
+                  .map((t) => t.name),
+              }
+            : {}),
           sort: searchSortQuery(c.req.query('sort')),
           limit: limitParam(c.req.query('limit'), 20, 100),
           cursor,
@@ -422,7 +488,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const body = await parseBody(c.req, StoryCreateBody)
     await fenceParent(c, rt, body.parentId)
     const bindings = c.var.bindings()
-    const type = requireType(body.type)
+    const type = requireType(c, body.type)
     // A singleton is created by first access, never by a request that asks for
     // one: there is exactly one, its id is derived, and `POST` has no way to
     // express "the" rather than "a".
@@ -443,8 +509,8 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       // A multi-site request with no scope never gets here (`site_required`).
       story = await createStory(
         bindings.db,
-        { ...body, type, schemaId: rt.schemaId, site: requestScope(c, rt) ?? undefined },
-        rt.types,
+        { ...body, type, schemaId: brandOf(c).schemaId, site: requestScope(c, rt) ?? undefined },
+        brandOf(c).types,
       )
     } catch (e) {
       // `Unknown parent` is the client's mistake; a path collision is a
@@ -453,7 +519,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     }
 
     const actor = actorFor(c)
-    await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('created', { story, actor })
+    await brandOf(c).publishDeps(bindings, hookCtx(c)).hooks?.run('created', { story, actor })
 
     return c.json((await requestUrls(c, rt))(story))
   })
@@ -573,7 +639,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       const actor = actorFor(c)
 
       const { publishedAt, publishedSyncId, version } = await publish(
-        rt.publishDeps(c.var.bindings(), hookCtx(c)),
+        brandOf(c).publishDeps(c.var.bindings(), hookCtx(c)),
         id,
         actor,
       )
@@ -593,7 +659,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     async (c) => {
       const actor = actorFor(c)
       const { unpublishedAt } = await unpublish(
-        rt.publishDeps(c.var.bindings(), hookCtx(c)),
+        brandOf(c).publishDeps(c.var.bindings(), hookCtx(c)),
         c.var.story,
         actor,
       )
@@ -612,7 +678,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     '/story/:id/document',
     requireAccess<Env>(rt, READ_DRAFT),
     loadStory<Env>(rt, 'read'),
-    async (c) => c.json({ doc: await rt.draftFor(c.var.bindings(), c.var.story) }),
+    async (c) => c.json({ doc: await draftOf(c, rt)(c.var.story) }),
   )
 
   /**
@@ -644,8 +710,8 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       if (!isKnownLocale(rt.locales, locale)) {
         throw new FolioError('unsupported', `Unknown locale: ${locale}`)
       }
-      const doc = await rt.draftFor(c.var.bindings(), c.var.story)
-      return c.json(translationStatus(doc, rt.schema, locale))
+      const doc = await draftOf(c, rt)(c.var.story)
+      return c.json(translationStatus(doc, brandOf(c).schema, locale))
     },
   )
 
@@ -679,8 +745,8 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           created = await forkStory(bindings.db, source, {
             site: scopeOf(c),
             chain: within,
-            types: rt.types,
-            schemaId: rt.schemaId,
+            types: brandOf(c).types,
+            schemaId: brandOf(c).schemaId,
           })
         } catch (e) {
           rethrow(e)
@@ -689,7 +755,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         await rt.hookRunner(hookCtx(c)).run('created', { story: created, actor: actorFor(c) })
 
         const published = (await publishedDocsByIds(bindings.db, [source.id], within))[source.id]
-        const doc = published ?? (await rt.draftFor(bindings, source))
+        const doc = published ?? (await draftOf(c, rt)(source))
         await rt.stub(bindings, created.id).getOrInit(cloneDoc(doc))
 
         return c.json({ story: (await requestUrls(c, rt))(created) }, 201)

@@ -1170,7 +1170,20 @@ export interface Folio<Env> {
     env: Env,
     opts?: { now?: number },
   ) => Promise<{ sessions: number; challenges: number; events: number }>
+  /**
+   * The block registry. **Throws on a deployment with `brands`**
+   * (`../../docs/specs/foundation/multi-brand.md` decision 21), where a registry
+   * is a brand's: read `registryFor(brand)` there, or let `render` pick it from
+   * the resolution.
+   */
   registry: Registry
+  /**
+   * One brand's block registry, on a deployment with `brands` (decision 21). A
+   * brand id `brands` does not configure throws, and so does every id on a
+   * deployment with no `brands`, which has no brand ids: `registry` is its one
+   * registry.
+   */
+  registryFor: (brand: string) => Registry
   /**
    * Context the document deliberately does not contain: story ids to their
    * current URLs, and so on. Await it before rendering.

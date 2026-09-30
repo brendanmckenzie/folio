@@ -193,6 +193,15 @@ export interface DescribeDeps {
    * extra is read.
    */
   scoped?: boolean
+  /**
+   * On a deployment with `brands` (`multi-brand.md` decision 16): the scopes of
+   * the brand whose `describe` this is. A run counts, walks and describes only
+   * their assets — an explicit id owned by another brand reads as absent, like an
+   * id with no row — so one brand's model never writes another brand's alt text,
+   * and the count an admin confirmed is the count acted on. Absent is every scope,
+   * the platform tier's run on a deployment with one brand.
+   */
+  scopes?: readonly string[]
 }
 
 /** What one asset's attempt did. Every field is aggregable, because phase 7's
@@ -675,8 +684,9 @@ export async function runDescribe(
   // as a value, with the new count, rather than thrown.
   if (selection.all && resume === null) {
     // Every scope's: this run is the platform tier's (`ADMIN`), deployment-wide by
-    // design, and the one reader that asks for `null` explicitly.
-    const actual = await countAssets(db, selection.filter, null)
+    // design, and the one reader that asks for `null` explicitly — bounded to the
+    // brand's scopes on a deployment with `brands`, where the `fn` is a brand's.
+    const actual = await countAssets(db, selection.filter, deps.scopes ?? null)
     if (actual !== selection.expected) {
       return { refused: 'count', expected: selection.expected, actual }
     }
@@ -701,8 +711,8 @@ export async function runDescribe(
   if (allowance <= 0) return report
 
   const { rows, consumed, exhausted, last } = selection.all
-    ? await filterBatch(db, selection, resume?.after ?? null, batch, allowance)
-    : await idBatch(db, selection.ids, seen, Math.min(batch, allowance))
+    ? await filterBatch(db, selection, resume?.after ?? null, batch, allowance, deps.scopes)
+    : await idBatch(db, selection.ids, seen, Math.min(batch, allowance), deps.scopes)
 
   /**
    * **Once per call, and passed into every `describeAsset`.** `describeAsset`
@@ -889,8 +899,9 @@ async function filterBatch(
   after: string | null,
   limit: number,
   allowance: number,
+  scopes: readonly string[] | undefined,
 ): Promise<Batch> {
-  const rows = await assetsMatching(db, selection.filter, { limit, after, scope: null })
+  const rows = await assetsMatching(db, selection.filter, { limit, after, scope: scopes ?? null })
   const excluded = new Set(selection.exclude ?? [])
   const kept = excluded.size === 0 ? rows : rows.filter((row) => !excluded.has(row.id))
   const acting = kept.length > allowance ? kept.slice(0, allowance) : kept
@@ -912,9 +923,10 @@ async function idBatch(
   ids: readonly string[],
   seen: number,
   limit: number,
+  scopes: readonly string[] | undefined,
 ): Promise<Batch> {
   const slice = ids.slice(seen, seen + limit)
-  const found = new Map((await assetsFor(db, slice, null)).map((row) => [row.id, row]))
+  const found = new Map((await assetsFor(db, slice, scopes ?? null)).map((row) => [row.id, row]))
   return {
     rows: slice.map((id) => found.get(id) ?? null),
     consumed: slice.length,

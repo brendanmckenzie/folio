@@ -10,12 +10,13 @@ import type { ReactElement } from 'react'
 import { renderToReadableStream } from 'react-dom/server.edge'
 import { NO_STORE } from '../core/cache-tags'
 import { wrapPreview } from '../core/render-wrap'
+import type { Registry as SiteRegistry } from '../core/sites'
 import type { StoryMeta } from '../core/story'
 import { FolioDoc, type RenderMode, renderGlobalNode } from '../preview/Render'
 import { computeBlocksDigest } from '../core/registry-digest'
 import { Bootstrap, ReactRefreshPreamble, Shell } from './Document'
 import { PROTOCOL_VERSION } from '../core/protocol'
-import type { FolioRuntime, SiteRender } from './runtime'
+import type { BrandRuntime, FolioRuntime, SiteRender } from './runtime'
 import type { ReadBindings, PreviewMode } from './types'
 
 /*
@@ -175,7 +176,7 @@ export async function previewPage(
   rt: FolioRuntime,
   bindings: ReadBindings,
   story: StoryMeta,
-  opts?: {
+  opts: {
     as?: string
     bare?: boolean
     locale?: string
@@ -184,9 +185,11 @@ export async function previewPage(
      * The site this preview renders on, on a deployment with `sites`
      * (`../../docs/specs/foundation/multi-site.md` decision 13): every read the
      * resolution makes takes its chain, and it fills `Resolution.site`. Absent is
-     * the single-site render, exactly as before.
+     * the single-site render, exactly as before. `null` is a render for no site —
+     * an empty chain — which a branded bare preview of a group's layer uses,
+     * because a branded resolve refuses to default to `default`'s chain.
      */
-    site?: SiteRender
+    site?: SiteRender | null
     /**
      * `sites.admin`, the one origin the preview may post to and hear from
      * (decision 13, "every surface"), written into the bootstrap for
@@ -200,21 +203,34 @@ export async function previewPage(
      * has forked). Drawn above the page, outside anything that hydrates.
      */
     overriddenBy?: string
+    /**
+     * The brand this preview renders as (`multi-brand.md` decisions 9 and 10): its
+     * registry, schema, globals, wrap and preview bundle, and `data-folio-brand`
+     * on the shell. Required, so every caller names it: a request's is
+     * `c.var.brand`, `handle()`'s is the gated site's, and there is no default.
+     */
+    brand: BrandRuntime
+    /**
+     * The registry snapshot the caller holds, for the draft's seed when `story` is
+     * a layer on a deployment with `brands` (`BrandRuntime.seedFor`).
+     */
+    registry?: SiteRegistry
   },
 ): Promise<Response> {
-  const draft = opts?.mode === 'draft'
-  const doc = await rt.draftFor(bindings, story)
+  const draft = opts.mode === 'draft'
+  const { brand } = opts
+  const doc = await brand.draftFor(bindings, story, opts.registry)
   // `story` is what lets the narrowed resolution reach this page's ancestors (a
   // breadcrumb still has to resolve) and what lets a collection listing this very
   // document show its **draft** title rather than its published one
   // (`../../docs/specs/content-model/collections.md` decision 3).
-  const resolution = await rt.resolve(bindings, doc, {
+  const resolution = await brand.resolve(bindings, doc, {
     draft: true,
     locale: opts?.locale,
     story,
-    ...(opts?.site ? { site: opts.site } : {}),
+    ...(opts.site !== undefined ? { site: opts.site } : {}),
   })
-  const { entries, stylesheets } = rt.page('preview')
+  const { entries, stylesheets } = brand.page('preview')
 
   const editingName = opts?.as
   const editingDoc = editingName ? resolution.globals?.[editingName] : undefined
@@ -249,14 +265,17 @@ export async function previewPage(
   // as capable of shifting a grid as one around a section.
   const contextGlobals = opts?.bare
     ? null
-    : rt.globals.map((name) =>
-        renderGlobalNode(rt.registry, resolution, name, { mode: draft ? 'mark' : 'edit' }),
+    : brand.globals.map((name) =>
+        renderGlobalNode(brand.registry, resolution, name, { mode: draft ? 'mark' : 'edit' }),
       )
 
   return html(
     <Shell
       title={`Preview · ${story.title}`}
       stylesheets={stylesheets}
+      // A brand's global stylesheet is scoped under this (decision 10). Only on a
+      // deployment with `brands`, so a single-brand preview's markup is unchanged.
+      brand={brand.brand?.id}
       bodyClass={draft ? undefined : 'folio-editing'}
       // The one piece of chrome Folio's own preview shell can get right about a
       // locale. A host's real page sets its own.
@@ -275,7 +294,7 @@ export async function previewPage(
                 // The server's blocks, for `mountPreview` to compare against the
                 // bundle it was built from (`multi-brand.md` decision 11). Not a
                 // frame, so no `PROTOCOL_VERSION`.
-                blocks: computeBlocksDigest(rt.schema),
+                blocks: computeBlocksDigest(brand.schema),
               }}
             />
           </>
@@ -306,8 +325,8 @@ export async function previewPage(
        */}
       <div id="folio-root">
         {wrapPreview(
-          rt.previewWrap,
-          <FolioDoc doc={doc} registry={rt.registry} mode={pageMode} resolution={resolution} />,
+          brand.previewWrap,
+          <FolioDoc doc={doc} registry={brand.registry} mode={pageMode} resolution={resolution} />,
         )}
       </div>
       {opts?.bare ? (

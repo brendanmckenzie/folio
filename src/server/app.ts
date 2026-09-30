@@ -25,7 +25,7 @@ import { scheduleRoutes } from './routes/schedules'
 import { shellRoutes } from './routes/shell'
 import { siteRoutes } from './routes/sites'
 import { spaceRoutes } from './routes/space'
-import { storyRoutes } from './routes/stories'
+import { brandOf, storyRoutes } from './routes/stories'
 import type { FolioRuntime } from './runtime'
 import type { FolioConfig, FolioEnv, GatedReaderFactory } from './types'
 
@@ -128,7 +128,10 @@ export function createApp<Env>(
    * So, before adding a field here: would you be content to see it in an
    * unauthenticated `curl`? If the answer needs a caveat, it goes on `/me`.
    */
-  app.get('/api/schema', (c) => c.json(rt.manifest))
+  // The scope's brand's manifest. A branded deployment asked with no scope has no
+  // brand to answer for, and is refused rather than answered with one; the neutral
+  // manifest the bare shell needs there is `multi-brand.md` phase 7's.
+  app.get('/api/schema', (c) => c.json(brandOf(c).manifest))
 
   // (2) Inside `/api`, `/login/verify` has no counterpart to be confused with, but
   // `/story/:id/...` patterns are still shadow-prone, so the specific ones go

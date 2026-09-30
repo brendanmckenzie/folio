@@ -942,7 +942,7 @@ describe('every id loader is a fence', () => {
     expect((await call('/~alpha/edit/sty_sp_shared', P)).status).toBe(200)
   })
 
-  it("checks a layer's scope is in the chain before ensureSingleton creates it", async () => {
+  it("checks a layer's scope is in the chain before ensureSingleton creates it, and only a write creates it", async () => {
     const count = async (id: string) =>
       (
         await env.DB.prepare('select count(*) as n from stories where id = ?')
@@ -961,9 +961,19 @@ describe('every id loader is a fence', () => {
     )
     expect(shared.status).toBe(404)
     expect(await count('sng_spSettings:shared')).toBe(0)
-    // Its own layer is asked into existence, as a singleton always has been.
+    // Its own layer is not made by a read (a preview never writes, `multi-site.md`
+    // decision 8): the first write makes it.
     expect(
       (await call('/~alpha/api/v1/documents/sng_spSettings:alpha?status=draft', U)).status,
+    ).toBe(404)
+    expect(await count('sng_spSettings:alpha')).toBe(0)
+    expect(
+      (
+        await call('/~alpha/api/v1/documents/sng_spSettings:alpha/fields', U, {
+          method: 'PATCH',
+          body: JSON.stringify({ fields: {} }),
+        })
+      ).status,
     ).toBe(200)
     expect(await count('sng_spSettings:alpha')).toBe(1)
   })
@@ -978,7 +988,7 @@ describe("a global's bare preview", () => {
     )?.n
 
   it("shows the request's own layer, and makes no layer that does not exist", async () => {
-    // Alpha's layer was asked into existence above; bravo's never was.
+    // Alpha's layer was written into existence above; bravo's never was.
     expect((await call('/~alpha/preview/global/spSettings', U)).status).toBe(200)
     expect((await call('/~alpha/preview/global/spSettings?mode=draft', U)).status).toBe(200)
     const missing = await call('/~bravo/preview/global/spSettings', P)

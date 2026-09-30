@@ -15,6 +15,7 @@ import { hookCtx, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
 import { idParam, limitParam, MigrateBody, parseOptionalBody } from '../validate'
+import { brandOf, draftOf, sweepOf } from './stories'
 
 export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
@@ -37,8 +38,9 @@ export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return c.json(
       await migrationStatus(
         c.var.bindings().db,
-        rt.migrations,
+        brandOf(c).migrations,
         raw === undefined ? undefined : idParam('story', raw),
+        (await sweepOf(c, rt))?.scopes,
       ),
     )
   })
@@ -56,30 +58,35 @@ export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   app.post('/migrate', requireAccess<Env>(rt, ADMIN), async (c) => {
     const body = await parseOptionalBody(c.req, MigrateBody)
     const bindings = c.var.bindings()
-    return c.json(
-      await runMigrations(
-        {
-          db: bindings.db,
-          schema: rt.schema,
-          migrations: rt.migrations,
-          typeOf: rt.typeOf,
-          draft: (story) => rt.draftFor(bindings, story),
-          stub: (id) => rt.stub(bindings, id),
-          // As in `folio.migrate`: re-project, or the index describes the
-          // document as it was before the migration rewrote it.
-          projection: rt.projection,
-          hooks: rt.hookRunner(hookCtx(c)),
-        },
-        {
-          dryRun: body.dryRun,
-          continueFrom: body.continueFrom,
-          batch: body.batch,
-          // Off the session, never the body: "who migrated this" is not a field
-          // anybody should be able to type into.
-          actor: actorString(c.var.actor),
-        },
-      ),
+    const brand = brandOf(c)
+    const sweep = await sweepOf(c, rt)
+    const report = await runMigrations(
+      {
+        db: bindings.db,
+        schema: brand.schema,
+        migrations: brand.migrations,
+        typeOf: brand.typeOf,
+        draft: draftOf(c, rt),
+        stub: (id) => rt.stub(bindings, id),
+        // As in `folio.migrate`: re-project, or the index describes the
+        // document as it was before the migration rewrote it.
+        projection: brand.projection,
+        hooks: rt.hookRunner(hookCtx(c)),
+        // This brand's list over this brand's scopes only.
+        ...(sweep ? { brand: { id: sweep.id, scopes: sweep.scopes } } : {}),
+      },
+      {
+        dryRun: body.dryRun,
+        continueFrom: body.continueFrom,
+        batch: body.batch,
+        // Off the session, never the body: "who migrated this" is not a field
+        // anybody should be able to type into.
+        actor: actorString(c.var.actor),
+      },
     )
+    // On a deployment with `brands` the report names the brand it migrated, and
+    // every count in it — `complete` included — is that brand's (`MigrateReport.brand`).
+    return c.json(sweep ? { ...report, brand: sweep.id } : report)
   })
 
   /**
@@ -104,11 +111,19 @@ export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.get('/audit', requireAccess<Env>(rt, ADMIN), async (c) => {
     const raw = c.req.query('continueFrom')
+    const brand = brandOf(c)
+    const sweep = await sweepOf(c, rt)
     return c.json(
-      await audit(c.var.bindings().db, rt.schema, await rt.auditContext(c.env), {
-        continueFrom: raw === undefined ? null : idParam('continueFrom', raw),
-        batch: limitParam(c.req.query('batch'), DEFAULT_AUDIT_BATCH, MAX_AUDIT_BATCH),
-      }),
+      await audit(
+        c.var.bindings().db,
+        brand.schema,
+        await brand.auditContext(c.env),
+        {
+          continueFrom: raw === undefined ? null : idParam('continueFrom', raw),
+          batch: limitParam(c.req.query('batch'), DEFAULT_AUDIT_BATCH, MAX_AUDIT_BATCH),
+        },
+        sweep,
+      ),
     )
   })
 

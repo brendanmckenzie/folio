@@ -40,6 +40,7 @@ import type { FolioRuntime } from '../runtime'
 import { storiesFor } from '../stories'
 import type { FolioEnv } from '../types'
 import { BulkBody, BulkDeleteBody, BulkMoveBody, parseBody, requireCursor } from '../validate'
+import { brandOf } from './stories'
 
 export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
@@ -52,9 +53,10 @@ export function bulkRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   const deps = (c: Context<FolioEnv<Env>>): BulkDeps => {
     const bindings = c.var.bindings()
+    const brand = brandOf(c)
     return {
-      ...rt.publishDeps(bindings, hookCtx(c)),
-      types: rt.types,
+      ...brand.publishDeps(bindings, hookCtx(c)),
+      types: brand.types,
       stub: (id: string) => rt.stub(bindings, id),
       chainOf: chainResolver(c, rt),
     }

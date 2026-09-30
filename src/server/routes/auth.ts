@@ -856,7 +856,9 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         sites: meSites(
           registry,
           actor?.kind === 'user' ? (actor.grants ?? { '*': actor.role }) : null,
-          rt.sites.settings,
+          // The scoped brand's settings type, and none with no scope on a deployment
+          // with `brands`: `rt.sites.settings` throws there (`multi-brand.md` decision 20).
+          c.var.brand?.settings,
         ),
       }
     }

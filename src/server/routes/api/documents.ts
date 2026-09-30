@@ -24,7 +24,7 @@ import { isKnownLocale } from '../../../core/locales'
 import type { Mutation } from '../../../core/mutations'
 import { fieldShapeError, fromNested, type NestedDoc, toNested } from '../../../core/nested'
 import { type DocumentType, SINGLETON_PREFIX, typeByName } from '../../../core/schema'
-import { DEFAULT_SITE, singletonTypeOf } from '../../../core/sites'
+import { DEFAULT_SITE, layerSeed, singletonTypeOf } from '../../../core/sites'
 import type { StoryMeta, StoryState } from '../../../core/story'
 import {
   actorName,
@@ -82,6 +82,7 @@ import {
 import { getVersion, listVersions } from '../../versions'
 import { commitAll, writeDocument, type WriteActor } from '../../write'
 import { queryFromParams } from '../content'
+import { brandOf, draftOf } from '../stories'
 import { servedSite } from './served'
 
 /** A document's row, as the API reports it. Every field is stable surface. */
@@ -163,17 +164,30 @@ function writeActor<Env>(c: Context<FolioEnv<Env>>): WriteActor {
  * `{ layer: 'bare' }` for a layer document with something below it (`multi-site.md`
  * decision 8), so the nested shape reads an absent key as inherited and `null` as
  * removed. Nothing on a deployment with no `sites`, where nothing layers.
+ *
+ * **With `brands` the layer's chain decides** (`multi-brand.md` decision 5), as it
+ * does for the seed: a group's layer, and a layer on a site with no group, are the
+ * bottom of their chains and are full, which the id alone cannot say.
  */
-function layerOption(rt: FolioRuntime, story: StoryMeta): { layer?: 'bare' } {
-  return rt.sites && isBareLayer(story.id) ? { layer: 'bare' } : {}
+async function layerOption<Env>(
+  c: Context<FolioEnv<Env>>,
+  rt: FolioRuntime,
+  story: StoryMeta,
+): Promise<{ layer?: 'bare' }> {
+  if (!rt.sites) return {}
+  if (brandOf(c).brand === null) return isBareLayer(story.id) ? { layer: 'bare' } : {}
+  const layer = singletonTypeOf(story.id)
+  if (!layer) return {}
+  return layerSeed(await rt.sites.registry(c.env), layer.scope) === 'bare' ? { layer: 'bare' } : {}
 }
 
 export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
 
-  const requireType = (name: string | undefined): DocumentType => {
-    if (name === undefined) return rt.defaultType
-    const type = rt.typeOf(name)
+  const requireType = (c: Context<FolioEnv<Env>>, name: string | undefined): DocumentType => {
+    const brand = brandOf(c)
+    if (name === undefined) return brand.defaultType
+    const type = brand.typeOf(name)
     if (!type) throw new FolioError('unsupported', `Unknown document type: ${name}`)
     return type
   }
@@ -186,17 +200,19 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * ordinary document with a derived id, and an API that could not read or write
    * site settings would be missing the case a deploy script most wants. Asking is
    * what creates a singleton (`document-types.md` decision 7) — an editor never
-   * does — so a first read of one that nothing has opened yet ensures the row, the
-   * same as `GET /folio/documents` already does at the same access level. Bounded
-   * and predictable: only an id whose `sng_` prefix names a *declared* singleton
-   * type can cause that write.
+   * does — so on a deployment with no `sites` a first read of one that nothing has
+   * opened yet ensures the row, the same as `GET /folio/documents` already does at
+   * the same access level. Bounded and predictable: only an id whose `sng_` prefix
+   * names a *declared* singleton type can cause that write. **With `sites` only a
+   * write creates a layer**; a read of one nobody has written is a 404.
    */
   const load = async (c: Context<FolioEnv<Env>>, id: string, reach: Reach): Promise<StoryMeta> => {
     const bindings = c.var.bindings()
+    const brand = brandOf(c)
     if (id.startsWith(SINGLETON_PREFIX)) {
       if (!rt.sites) {
-        const type = typeByName(rt.types, id.slice(SINGLETON_PREFIX.length))
-        if (type?.kind === 'singleton') return ensureSingleton(bindings.db, type, rt.schemaId)
+        const type = typeByName(brand.types, id.slice(SINGLETON_PREFIX.length))
+        if (type?.kind === 'singleton') return ensureSingleton(bindings.db, type, brand.schemaId)
       } else {
         /**
          * **The layer's scope is checked before `ensureSingleton`** (`multi-site.md`
@@ -205,12 +221,17 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
          * request's own scope for a write, exactly as for any other row.
          */
         const layer = singletonTypeOf(id)
-        const type = layer ? typeByName(rt.types, layer.type) : undefined
-        if (layer && type?.kind === 'singleton') {
+        const type = layer ? typeByName(brand.types, layer.type) : undefined
+        // **A read never creates a layer** (`multi-site.md` decision 8, "a preview
+        // never writes"): a layer row is made by an editor's first write, so a read
+        // of one nobody has written is the 404 below, exactly as the reader treats
+        // it as absent. A row created here would land in the scope's owned content
+        // and make a site that was only previewed undeletable and unrebrandable.
+        if (layer && type?.kind === 'singleton' && reach === 'write') {
           if (!(await inFence(c, rt, { site: layer.scope }, reach))) {
             throw new FolioError('not_found', 'Unknown document')
           }
-          return ensureSingleton(bindings.db, type, rt.schemaId, layer.scope)
+          return ensureSingleton(bindings.db, type, brand.schemaId, layer.scope)
         }
       }
     }
@@ -233,19 +254,20 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * authoring shape — source values plus translations alongside — and that is the
    * one that round-trips through `PUT`.
    */
-  const payload = (
+  const payload = async (
+    c: Context<FolioEnv<Env>>,
     urls: FolioRuntime['withUrls'],
     story: StoryMeta,
     doc: Doc,
     source: 'published' | 'draft',
     locale: string | undefined,
-  ): ApiDocument => ({
+  ): Promise<ApiDocument> => ({
     ...meta(urls, story),
     source,
     ...(locale !== undefined ? { locale } : {}),
-    content: toNested(doc, rt.schema, {
+    content: toNested(doc, brandOf(c).schema, {
       locale: rt.localeOf(locale),
-      ...layerOption(rt, story),
+      ...(await layerOption(c, rt, story)),
     }),
   })
 
@@ -260,8 +282,8 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     return code
   }
 
-  const deps = (bindings: ReadBindings, story: StoryMeta) => ({
-    draft: () => rt.draftFor(bindings, story),
+  const deps = (c: Context<FolioEnv<Env>>, bindings: ReadBindings, story: StoryMeta) => ({
+    draft: () => draftOf(c, rt)(story),
     stub: rt.stub(bindings, story.id),
   })
 
@@ -280,9 +302,9 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const bindings = c.var.bindings()
     return {
       db: bindings.db,
-      types: rt.types,
+      types: brandOf(c).types,
       stub: (id: string) => rt.stub(bindings, id),
-      draft: (story: StoryMeta) => rt.draftFor(bindings, story),
+      draft: draftOf(c, rt),
       hooks: rt.hookRunner(hookCtx(c)),
       chainOf: chainResolver(c, rt),
     }
@@ -313,7 +335,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // The request's chain, deduped by decision 6's walk, with its site's URLs — the
     // same call `GET /content` makes, so the two cannot answer differently.
     return c.json(
-      await rt.query(
+      await brandOf(c).query(
         c.var.bindings(),
         queryFromParams(url.searchParams),
         await requestChain(c, rt),
@@ -328,7 +350,6 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * request asked for.
    */
   app.get('/documents/:id', requireAccess<Env>(rt, READ), async (c) => {
-    const bindings = c.var.bindings()
     const story = await load(c, idParam('id', c.req.param('id')), 'read')
     const locale = askedLocale(c)
     const wantDraft = c.req.query('status') === 'draft'
@@ -336,10 +357,10 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
 
     if (wantDraft) {
       ensureAccess(rt, c.var.actor, READ_DRAFT)
-      return c.json(payload(urls, story, await rt.draftFor(bindings, story), 'draft', locale))
+      return c.json(await payload(c, urls, story, await draftOf(c, rt)(story), 'draft', locale))
     }
     const published = await publishedFor(c, story)
-    return c.json(payload(urls, story, published, 'published', locale))
+    return c.json(await payload(c, urls, story, published, 'published', locale))
   })
 
   /**
@@ -377,9 +398,9 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const urls = await requestUrls(c, rt)
     if (c.req.query('status') === 'draft') {
       ensureAccess(rt, c.var.actor, READ_DRAFT)
-      return c.json(payload(urls, story, await rt.draftFor(bindings, story), 'draft', locale))
+      return c.json(await payload(c, urls, story, await draftOf(c, rt)(story), 'draft', locale))
     }
-    return c.json(payload(urls, story, await publishedFor(c, story), 'published', locale))
+    return c.json(await payload(c, urls, story, await publishedFor(c, story), 'published', locale))
   }
   app.get('/documents/by-path', requireAccess<Env>(rt, READ), byPath)
   app.get('/documents/by-path/:path{.*}', requireAccess<Env>(rt, READ), byPath)
@@ -440,7 +461,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const body = await parseBody(c.req, DocumentCreateBody)
     await fenceParent(c, rt, body.parentId)
     const bindings = c.var.bindings()
-    const type = requireType(body.type)
+    const type = requireType(c, body.type)
     if (type.kind === 'singleton') {
       throw new FolioError(
         'conflict',
@@ -449,10 +470,11 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     }
 
     // Before any write, so a payload the schema refuses costs nothing.
-    let seeded = rt.seed(type, body.title)
+    const brand = brandOf(c)
+    let seeded = brand.seed(type, body.title)
     if (body.content !== undefined) {
       try {
-        seeded = fromNested(body.content, rt.schema, seeded, { mode: 'merge' })
+        seeded = fromNested(body.content, brand.schema, seeded, { mode: 'merge' })
       } catch (e) {
         rethrow(e)
       }
@@ -464,15 +486,15 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       // (`multi-site.md` decision 14) — and `default` with no `sites`.
       story = await createStory(
         bindings.db,
-        { ...body, type, schemaId: rt.schemaId, site: requestScope(c, rt) ?? undefined },
-        rt.types,
+        { ...body, type, schemaId: brand.schemaId, site: requestScope(c, rt) ?? undefined },
+        brand.types,
       )
     } catch (e) {
       rethrow(e)
     }
 
     const actor = actorString(c.var.actor)
-    await rt.publishDeps(bindings, hookCtx(c)).hooks?.run('created', { story, actor })
+    await brand.publishDeps(bindings, hookCtx(c)).hooks?.run('created', { story, actor })
 
     try {
       await rt.stub(bindings, story.id).getOrInit(seeded)
@@ -487,7 +509,10 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       )
     }
 
-    return c.json(payload(await requestUrls(c, rt), story, seeded, 'draft', undefined), 201)
+    return c.json(
+      await payload(c, await requestUrls(c, rt), story, seeded, 'draft', undefined),
+      201,
+    )
   })
 
   /**
@@ -510,19 +535,21 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const key = idempotencyKeyHeader(c.req.header('idempotency-key'))
     const bindings = c.var.bindings()
     const story = await load(c, idParam('id', c.req.param('id')), 'write')
+    const schema = brandOf(c).schema
+    const layer = await layerOption(c, rt, story)
 
     try {
       return c.json(
         await writeDocument(
-          deps(bindings, story),
+          deps(c, bindings, story),
           (current) =>
-            fromNested(body.content, rt.schema, current, {
+            fromNested(body.content, schema, current, {
               mode: body.mode ?? 'merge',
-              ...layerOption(rt, story),
+              ...layer,
             }),
           writeActor(c),
           key,
-          layerOption(rt, story).layer,
+          layer.layer,
         ),
       )
     } catch (e) {
@@ -557,12 +584,13 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       throw new FolioError('unsupported', `Unknown locale: ${locale}`)
     }
 
-    const draft = await rt.draftFor(bindings, story)
+    const draft = await draftOf(c, rt)(story)
+    const schema = brandOf(c).schema
     const mutations: Mutation[] = []
     const setsFor = (uid: string, fields: Record<string, unknown>, where: string) => {
       const blok = draft.bloks[uid]
       if (!blok) return
-      const def = rt.schema[blok.type]
+      const def = schema[blok.type]
       for (const [name, value] of Object.entries(fields)) {
         const field = def?.fields[name]
         if (!field) {
@@ -592,7 +620,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       setsFor(entry.uid, entry.fields, `bloks[${i}].fields`)
     }
 
-    return c.json(await commitAll(deps(bindings, story).stub, mutations, writeActor(c), key))
+    return c.json(await commitAll(deps(c, bindings, story).stub, mutations, writeActor(c), key))
   })
 
   /**
@@ -666,7 +694,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const bindings = c.var.bindings()
     const story = await load(c, idParam('id', c.req.param('id')), 'write')
     const result = await publish(
-      rt.publishDeps(bindings, hookCtx(c)),
+      brandOf(c).publishDeps(bindings, hookCtx(c)),
       story,
       actorString(c.var.actor),
     )
@@ -688,7 +716,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const story = await load(c, idParam('id', c.req.param('id')), 'write')
     const body = await parseOptionalBody(c.req, CheckpointBody)
     return c.json(
-      await checkpoint(rt.publishDeps(bindings, hookCtx(c)), story, {
+      await checkpoint(brandOf(c).publishDeps(bindings, hookCtx(c)), story, {
         label: body.label,
         actor: actorString(c.var.actor),
       }),
@@ -710,7 +738,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const bindings = c.var.bindings()
     const id = idParam('id', c.req.param('id'))
     const story = await load(c, id, 'write')
-    await unpublish(rt.publishDeps(bindings, hookCtx(c)), story, actorString(c.var.actor))
+    await unpublish(brandOf(c).publishDeps(bindings, hookCtx(c)), story, actorString(c.var.actor))
     return c.json({ story: meta(await requestUrls(c, rt), await load(c, id, 'write')) })
   })
 
@@ -768,10 +796,11 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const bindings = c.var.bindings()
     const story = await load(c, id, 'write')
 
+    const brand = brandOf(c)
     const found = await getVersion(bindings.db, body.versionId, {
-      migrations: rt.migrations,
-      schema: rt.schema,
-      typeOf: rt.typeOf,
+      migrations: brand.migrations,
+      schema: brand.schema,
+      typeOf: brand.typeOf,
     })
     if (!found) throw new FolioError('not_found', 'Unknown version')
     if (found.meta.storyId !== id) {
@@ -779,7 +808,9 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     }
 
     try {
-      return c.json(await writeDocument(deps(bindings, story), () => found.doc, writeActor(c), key))
+      return c.json(
+        await writeDocument(deps(c, bindings, story), () => found.doc, writeActor(c), key),
+      )
     } catch (e) {
       rethrow(e)
     }

@@ -7,15 +7,16 @@
  * uses `loadStory`.
  */
 import { Hono } from 'hono'
-import { layerId } from '../../core/sites'
+import { chain, layerId, type Registry } from '../../core/sites'
 import { type SocketIdentity, withIdentity } from '../auth/identity'
 import { READ_DRAFT } from '../auth/roles'
 import { inFence, requestChain, requestScope, requireHtmlAccess, roleOnScope } from '../middleware'
 import { shellPage, previewPage } from '../pages'
-import type { FolioRuntime } from '../runtime'
+import type { FolioRuntime, SiteRender } from '../runtime'
 import { ensureSingleton, listStories, storyById, storyByPath } from '../stories'
 import type { FolioEnv } from '../types'
 import { isId } from '../validate'
+import { brandOf, draftOf } from './stories'
 
 /**
  * Application close codes, mirroring story-do.ts's own (private) constants by
@@ -105,7 +106,7 @@ export function editorRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       }
     }
 
-    await rt.draftFor(bindings, story)
+    await draftOf(c, rt)(story)
     // `withIdentity` always sets or deletes the header, never leaves it: this
     // forwards the client's own request, so a conditional set would let a client
     // assert an identity by sending the header itself.
@@ -199,7 +200,8 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   app.get('/preview/global/:name', requireHtmlAccess<Env>(rt, READ_DRAFT), async (c) => {
     const name = c.req.param('name')
-    const type = rt.typeOf(name)
+    const brand = brandOf(c)
+    const type = brand.typeOf(name)
     if (type?.kind !== 'singleton') return c.notFound()
     const bindings = c.var.bindings()
     /**
@@ -229,11 +231,54 @@ export function editorPageRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       const scope = requestScope(c, rt)
       const layer = scope === null ? null : await storyById(bindings.db, layerId(name, scope))
       if (!layer || !(await inFence(c, rt, layer, 'read'))) return c.notFound()
-      return previewPage(rt, bindings, layer, { bare: true, mode })
+      // The request's brand renders it (`multi-brand.md` decision 10); with
+      // `brands` the layer's seed is its chain's, so the snapshot goes with it.
+      //
+      // A branded resolve must be told its site, never left to `default`'s chain,
+      // which may be another brand's. A site scope renders as itself, on its
+      // preview surface. A group has no site of its own, so it renders as a
+      // host-less stand-in for one, on **its own chain**: the references and links
+      // the group's layer carries are to the group's content, and resolve.
+      const registry = brand.brand !== null ? await rt.sites.registry(c.env) : undefined
+      const render = registry && scope !== null ? scopeRender(registry, scope) : null
+      return previewPage(rt, bindings, layer, {
+        bare: true,
+        mode,
+        brand,
+        ...(registry ? { registry, site: render } : {}),
+      })
     }
-    const story = await ensureSingleton(bindings.db, type, rt.schemaId)
-    return previewPage(rt, bindings, story, { bare: true, mode })
+    const story = await ensureSingleton(bindings.db, type, brand.schemaId)
+    return previewPage(rt, bindings, story, { bare: true, mode, brand })
   })
 
   return app
+}
+
+/**
+ * The render a scope's bare global preview resolves on, on a deployment with
+ * `brands`: a site as itself, and a group as a stand-in site — its id, name and
+ * brand, no hosts and no preview origin — whose chain is the group's own. The
+ * stand-in reaches no URL a visitor could; it exists so the group's layer
+ * resolves against the group's content rather than against none. Null for a
+ * scope the snapshot does not hold.
+ */
+function scopeRender(registry: Registry, scope: string): SiteRender | null {
+  const site = registry.sites.find((s) => s.id === scope)
+  if (site) return { site, surface: 'preview', chain: chain(registry, site.id) }
+  const group = registry.groups.find((g) => g.id === scope)
+  if (!group) return null
+  return {
+    site: {
+      id: group.id,
+      name: group.name,
+      group: null,
+      status: 'preview',
+      hosts: [],
+      preview: null,
+      brand: group.brand,
+    },
+    surface: 'preview',
+    chain: chain(registry, group.id),
+  }
 }

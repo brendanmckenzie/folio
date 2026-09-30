@@ -27,6 +27,7 @@ import { ASSETS, READ } from '../../auth/roles'
 import { describeOnUpload } from '../../describe'
 import { FolioError, rethrow } from '../../errors'
 import { requestScope, requireAccess } from '../../middleware'
+import { brandOf } from '../stories'
 import type { FolioRuntime } from '../../runtime'
 import type { FolioEnv, GatedReaderFactory } from '../../types'
 import {
@@ -59,7 +60,7 @@ export function apiRoutes<Env>(
    * `/api/v1` has that constraint, and a schema describes the shape of a private
    * site's content.
    */
-  app.get('/schema', requireAccess<Env>(rt, READ), (c) => c.json(rt.manifest))
+  app.get('/schema', requireAccess<Env>(rt, READ), (c) => c.json(brandOf(c).manifest))
 
   app.route('/', documentRoutes<Env>(rt))
   app.route('/', searchRoutes<Env>(rt))
@@ -139,7 +140,8 @@ export function apiRoutes<Env>(
         filename,
         site: requestScope(c, rt) ?? DEFAULT_SITE,
       })
-      if (rt.describe?.onUpload) {
+      const { describe } = brandOf(c)
+      if (describe?.onUpload) {
         const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
         c.executionCtx.waitUntil(
           describeOnUpload(
@@ -148,7 +150,7 @@ export function apiRoutes<Env>(
               media,
               images,
               assetBase,
-              describe: rt.describe,
+              describe,
               env: c.env,
               logger: rt.logger,
               scoped: rt.sites !== null,

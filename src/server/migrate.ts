@@ -100,6 +100,20 @@ export interface MigrateReport {
   behind: number
   /** True when nothing is behind: every document has had every migration. */
   complete: boolean
+  /**
+   * On a deployment with `brands` (`multi-brand.md` decision 16): the brand this
+   * call's batch migrated. Absent with no `brands`. What `pending`, `behind` and
+   * `complete` cover depends on the door, because the doors cover different sets:
+   *
+   * - `POST {base}/~<scope>/api/migrate` migrates the scope's brand and nothing
+   *   else, and its `pending`, `behind` and `complete` are that brand's — a
+   *   caller holding one brand is not told another's backlog.
+   * - `folio.migrate(env)` walks every brand through `continueFrom`, one brand's
+   *   batch per call, and its `pending`, `behind` and `complete` are the whole
+   *   deployment's, so a loop that stops at a null cursor reads "every brand is
+   *   done", not "the last brand is".
+   */
+  brand?: string
 }
 
 const EMPTY = (dryRun: boolean): MigrateReport => ({
@@ -201,6 +215,14 @@ export interface MigrateDeps {
    * outlive the schema change that rewrote it.
    */
   hooks?: HookRunner<unknown>
+  /**
+   * One brand's sweep (`multi-brand.md` decision 16): its id and every scope it
+   * owns. The batch, the behind count and the ledger's "already applied" read are
+   * all that brand's alone — `schema_migrations` is one table keyed by id, and ids
+   * carry their brand, so another brand's newest id must not make this brand's
+   * look inserted into the past. Absent is every scope and every id, as before.
+   */
+  brand?: { id: string; scopes: readonly string[] }
 }
 
 /**
@@ -216,7 +238,7 @@ export async function runMigrations(
   if (migrations.length === 0) return EMPTY(dryRun)
 
   const latestId = migrations[migrations.length - 1]!.id
-  const applied = await appliedMigrations(db)
+  const applied = ownMigrations(await appliedMigrations(db), deps.brand?.id)
   const outOfOrder = outOfOrderMigration(migrations, applied)
   if (outOfOrder) throw new Error(`folio: ${outOfOrder}`)
 
@@ -224,7 +246,8 @@ export async function runMigrations(
   const pending = migrations.filter((m) => !appliedSet.has(m.id)).map((m) => m.id)
 
   const size = Math.min(Math.max(opts.batch ?? DEFAULT_MIGRATE_BATCH, 1), MAX_MIGRATE_BATCH)
-  const rows = await storiesBehind(db, latestId, opts.continueFrom ?? null, size)
+  const scopes = deps.brand?.scopes
+  const rows = await storiesBehind(db, latestId, opts.continueFrom ?? null, size, scopes)
 
   const report: MigrateReport = { ...EMPTY(dryRun), pending, stories: rows.length }
   const actor = { id: opts.actor ?? `migration:${latestId}`, name: `Migration ${latestId}` }
@@ -353,7 +376,7 @@ export async function runMigrations(
   report.continueFrom = rows.length === size ? (rows[rows.length - 1]?.story.id ?? null) : null
   // Asked directly rather than accumulated: right however many calls this run
   // took, and right across two runs that overlapped.
-  report.behind = await countBehind(db, latestId)
+  report.behind = await countBehind(db, latestId, scopes)
   report.complete = report.behind === 0
 
   // The ledger is written when the sweep is done and nothing is behind, not
@@ -378,6 +401,15 @@ export async function runMigrations(
   }
 
   return report
+}
+
+/**
+ * The applied ids that are `brand`'s: `<brand>/…` (`multi-brand.md` decision 16).
+ * Every id with no brand. Kept in `appliedMigrations`' order, which a prefix
+ * filter cannot disturb.
+ */
+export function ownMigrations(applied: readonly string[], brand: string | undefined): string[] {
+  return brand === undefined ? [...applied] : applied.filter((id) => id.startsWith(`${brand}/`))
 }
 
 /** `insert or replace`, so a re-run refreshes the counts and clears `failed`. */
@@ -436,6 +468,8 @@ export async function migrationStatus(
   db: FolioDb,
   migrations: readonly Migration[],
   storyId?: string,
+  /** One brand's scopes (`MigrateDeps.brand`), for its `behind`. Absent: every scope. */
+  scopes?: readonly string[],
 ): Promise<MigrationStatus> {
   const applied = new Set(await appliedMigrations(db))
   const latestId = migrations.length > 0 ? migrations[migrations.length - 1]!.id : null
@@ -447,7 +481,7 @@ export async function migrationStatus(
       applied: applied.has(m.id),
     })),
     pending: migrations.filter((m) => !applied.has(m.id)).map((m) => m.id),
-    behind: latestId === null ? 0 : await countBehind(db, latestId),
+    behind: latestId === null ? 0 : await countBehind(db, latestId, scopes),
   }
 
   if (storyId !== undefined) {
