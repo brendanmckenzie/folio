@@ -27,12 +27,36 @@ const ENTRY_STYLESHEETS: ReadonlyArray<readonly [entry: string, stylesheet: stri
   ['folio-preview.js', 'folio-preview.css'],
 ]
 
+/**
+ * The entries and stylesheets for the record form: the admin, then one preview per
+ * brand. `folio-preview-<brand>` starts with `folio-`, so the existing
+ * `entryFileNames` / `assetFileNames` rule names it at a fixed path with no change.
+ */
+function brandEntryStylesheets(brands: readonly string[]): typeof ENTRY_STYLESHEETS {
+  return [
+    ['folio-admin.js', 'folio-admin.css'],
+    ...brands.map((b): readonly [string, string] => [
+      `folio-preview-${b}.js`,
+      `folio-preview-${b}.css`,
+    ]),
+  ]
+}
+
+/** The same rule a site id follows, which is what a brand id is (`multi-brand.md` decision 3). */
+const BRAND_ID = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/
+
 export interface FolioPluginOptions {
   /**
    * Module with a named `blocks` export listing the project's block
    * definitions. Resolved relative to the Vite root.
+   *
+   * A record keyed by brand id, each value such a module, builds one preview
+   * bundle per brand (`folio-preview-<brand>.js` and `.css`) and bakes
+   * `__FOLIO_ASSETS__` with an `assets.brands` for a `createFolio({ brands })`.
+   * It cannot be combined with `build.cssCodeSplit: false`: one stylesheet would
+   * carry every brand's CSS into every brand's preview.
    */
-  blocks: string
+  blocks: string | Readonly<Record<string, string>>
   /** Must match `basePath` passed to `createFolio`. Default `/folio`. */
   basePath?: string
 }
@@ -50,8 +74,22 @@ export function folio(options: FolioPluginOptions): Plugin[] {
   /** Set in `config()`, read again in `configResolved`. See `cssBundledIntoOne`. */
   let noSplit = false
 
-  const resolveBlocks = () =>
-    options.blocks.startsWith('.') ? path.resolve(root, options.blocks) : options.blocks
+  const brandBlocks = typeof options.blocks === 'string' ? null : options.blocks
+  const brandIds = brandBlocks ? Object.keys(brandBlocks) : []
+  if (brandBlocks) {
+    if (brandIds.length === 0) throw new Error('folio: `blocks` names no brands')
+    for (const id of brandIds) {
+      if (!BRAND_ID.test(id)) {
+        throw new Error(
+          `folio: '${id}' is not a brand id: lowercase letters, digits and hyphens, at most 32 characters`,
+        )
+      }
+    }
+  }
+  const entryPairs = brandBlocks ? brandEntryStylesheets(brandIds) : ENTRY_STYLESHEETS
+
+  const resolveModule = (blocks: string) =>
+    blocks.startsWith('.') ? path.resolve(root, blocks) : blocks
 
   const main: Plugin = {
     name: 'folio',
@@ -62,6 +100,39 @@ export function folio(options: FolioPluginOptions): Plugin[] {
       const admin = isDev ? `/@fs${adminEntry()}` : '/folio-admin.js'
       const preview = isDev ? `/@id/__x00__${VIRTUAL_PREVIEW}` : '/folio-preview.js'
       noSplit = cssBundledIntoOne(userConfig)
+      if (brandBlocks && noSplit) {
+        throw new Error(
+          'folio: `blocks` is a record of brands, which cannot be built with `cssCodeSplit: false`: ' +
+            "one stylesheet would carry every brand's CSS into every brand's preview. " +
+            'Remove `build.cssCodeSplit: false` (or `environments.client.build.cssCodeSplit: false`), ' +
+            'or pass one `blocks` module for a single brand.',
+        )
+      }
+      const previewInputs: Record<string, string> = brandBlocks
+        ? Object.fromEntries(brandIds.map((b) => [`folio-preview-${b}`, `${VIRTUAL_PREVIEW}/${b}`]))
+        : { 'folio-preview': VIRTUAL_PREVIEW }
+      const assets = brandBlocks
+        ? {
+            admin,
+            devClient: isDev ? '/@vite/client' : undefined,
+            adminCss: isDev ? [] : ['/folio-admin.css'],
+            brands: Object.fromEntries(
+              brandIds.map((b) => [
+                b,
+                {
+                  preview: isDev ? `/@id/__x00__${VIRTUAL_PREVIEW}/${b}` : `/folio-preview-${b}.js`,
+                  previewCss: isDev ? [] : [`/folio-preview-${b}.css`],
+                },
+              ]),
+            ),
+          }
+        : {
+            admin,
+            preview,
+            devClient: isDev ? '/@vite/client' : undefined,
+            adminCss: isDev ? [] : [noSplit ? `/${SINGLE_CSS_BUNDLE}` : '/folio-admin.css'],
+            previewCss: isDev ? [] : [noSplit ? `/${SINGLE_CSS_BUNDLE}` : '/folio-preview.css'],
+          }
       return {
         environments: {
           /**
@@ -169,7 +240,7 @@ export function folio(options: FolioPluginOptions): Plugin[] {
                   !Array.isArray(userConfig.build?.rollupOptions?.input)
                     ? userConfig.build.rollupOptions.input
                     : {}),
-                  'folio-preview': VIRTUAL_PREVIEW,
+                  ...previewInputs,
                   'folio-admin': adminEntry(),
                 },
                 output: {
@@ -205,13 +276,7 @@ export function folio(options: FolioPluginOptions): Plugin[] {
         define: {
           // Read by the host's Worker so asset URLs always match this build.
           // In dev Vite injects entry CSS from JS, so there is nothing to link.
-          __FOLIO_ASSETS__: JSON.stringify({
-            admin,
-            preview,
-            devClient: isDev ? '/@vite/client' : undefined,
-            adminCss: isDev ? [] : [noSplit ? `/${SINGLE_CSS_BUNDLE}` : '/folio-admin.css'],
-            previewCss: isDev ? [] : [noSplit ? `/${SINGLE_CSS_BUNDLE}` : '/folio-preview.css'],
-          }),
+          __FOLIO_ASSETS__: JSON.stringify(assets),
           __FOLIO_BASE__: JSON.stringify(base),
         },
       }
@@ -237,19 +302,22 @@ export function folio(options: FolioPluginOptions): Plugin[] {
       order: 'post',
       handler(_options, bundle) {
         if (noSplit) return
-        for (const [entry, stylesheet] of ENTRY_STYLESHEETS) {
+        for (const [entry, stylesheet] of entryPairs) {
           importHoistedCss(this, bundle as unknown as Bundle, entry, stylesheet)
         }
       },
     },
 
     resolveId(id) {
-      if (id === VIRTUAL_PREVIEW) return RESOLVED_PREVIEW
+      if (id === VIRTUAL_PREVIEW || id.startsWith(`${VIRTUAL_PREVIEW}/`)) return `\0${id}`
       return null
     },
 
     load(id) {
-      if (id !== RESOLVED_PREVIEW) return null
+      if (id !== RESOLVED_PREVIEW && !id.startsWith(`${RESOLVED_PREVIEW}/`)) return null
+      const brand = id === RESOLVED_PREVIEW ? null : id.slice(RESOLVED_PREVIEW.length + 1)
+      const blocks = brand === null ? options.blocks : brandBlocks?.[brand]
+      if (typeof blocks !== 'string') return null
       // Generated so the preview bundle contains the project's own components
       // while the entry itself stays owned by the library.
       //
@@ -260,7 +328,7 @@ export function folio(options: FolioPluginOptions): Plugin[] {
       // it, which is not exotic and had no expression at all before.
       return [
         `import { mountPreview } from 'folio/preview'`,
-        `import * as m from ${JSON.stringify(resolveBlocks())}`,
+        `import * as m from ${JSON.stringify(resolveModule(blocks))}`,
         `mountPreview(m.blocks, { wrap: m.wrap })`,
       ].join('\n')
     },

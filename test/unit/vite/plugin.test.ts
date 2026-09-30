@@ -300,3 +300,156 @@ describe('the Vite plugin, stylesheets Rollup hoisted out of an entry', () => {
     )
   })
 })
+
+/**
+ * The record form (`multi-brand.md` decision 9). `hook` drives `config()` with a
+ * `blocks` record; the string form above is driven by `runConfig`.
+ */
+describe('the Vite plugin, one preview bundle per brand', () => {
+  const brands = {
+    allaboutafrica: './app/brands/allaboutafrica/folio/blocks.ts',
+    takeoffgo: './app/brands/takeoffgo/folio/blocks.ts',
+  }
+
+  function brandPlugin(): Plugin {
+    return folio({ blocks: brands })[0] as Plugin
+  }
+
+  function brandConfig(userConfig: UserConfig = {}, command: 'build' | 'serve' = 'build') {
+    const plugin = brandPlugin()
+    const hook = plugin.config as unknown as ConfigHook
+    return hook.call(plugin, userConfig, { command, mode: 'production' }) as {
+      define: Record<string, string | undefined>
+      environments: {
+        client: { build: { rollupOptions: { input: Record<string, string> } } }
+      }
+    }
+  }
+
+  it('adds one preview entry per brand and no single preview entry', () => {
+    const input = brandConfig().environments.client.build.rollupOptions.input
+    expect(Object.keys(input).sort()).toEqual([
+      'folio-admin',
+      'folio-preview-allaboutafrica',
+      'folio-preview-takeoffgo',
+    ])
+    expect(input['folio-preview-allaboutafrica']).toBe('virtual:folio/preview/allaboutafrica')
+    expect(input['folio-preview-takeoffgo']).toBe('virtual:folio/preview/takeoffgo')
+  })
+
+  it('bakes assets.brands with a bundle and a stylesheet per brand', () => {
+    const assets = JSON.parse(brandConfig().define.__FOLIO_ASSETS__ as string)
+    expect(assets).toEqual({
+      admin: '/folio-admin.js',
+      adminCss: ['/folio-admin.css'],
+      brands: {
+        allaboutafrica: {
+          preview: '/folio-preview-allaboutafrica.js',
+          previewCss: ['/folio-preview-allaboutafrica.css'],
+        },
+        takeoffgo: {
+          preview: '/folio-preview-takeoffgo.js',
+          previewCss: ['/folio-preview-takeoffgo.css'],
+        },
+      },
+    })
+    expect(assets.preview).toBeUndefined()
+    expect(assets.previewCss).toBeUndefined()
+  })
+
+  it('serves each brand its own virtual entry in dev, with nothing to link', () => {
+    const assets = JSON.parse(brandConfig({}, 'serve').define.__FOLIO_ASSETS__ as string)
+    expect(assets.brands.takeoffgo).toEqual({
+      preview: '/@id/__x00__virtual:folio/preview/takeoffgo',
+      previewCss: [],
+    })
+    expect(assets.devClient).toBe('/@vite/client')
+  })
+
+  it("generates each brand's entry over that brand's blocks module only", () => {
+    const plugin = brandPlugin()
+    const resolveId = plugin.resolveId as unknown as (id: string) => string | null
+    const load = plugin.load as unknown as (id: string) => string | null
+    const id = resolveId('virtual:folio/preview/takeoffgo')
+    expect(id).toBe('\0virtual:folio/preview/takeoffgo')
+    const code = load(id as string) as string
+    expect(code).toContain('takeoffgo/folio/blocks.ts')
+    expect(code).not.toContain('allaboutafrica')
+    expect(load('\0virtual:folio/preview/unknown')).toBeNull()
+  })
+
+  it('runs the hoisted-stylesheet repair for every brand entry', () => {
+    const plugin = brandPlugin()
+    brandConfig()
+    const emitted: string[] = []
+    const bundle = {
+      'folio-preview-takeoffgo.js': {
+        type: 'chunk',
+        imports: ['assets/shared-abc.js'],
+        viteMetadata: { importedCss: new Set(['folio-preview-takeoffgo.css']) },
+      },
+      'assets/shared-abc.js': {
+        type: 'chunk',
+        viteMetadata: { importedCss: new Set(['assets/shared-abc.css']) },
+      },
+      'folio-preview-takeoffgo.css': { type: 'asset', source: '.a{}' },
+    }
+    const gen = plugin.generateBundle as unknown as {
+      handler: (this: unknown, o: unknown, b: unknown) => void
+    }
+    // The hook reads `noSplit` and the brand list set up in `config()`.
+    gen.handler.call(
+      { emitFile: (f: { fileName: string }) => emitted.push(f.fileName) },
+      {},
+      bundle,
+    )
+    expect((bundle['folio-preview-takeoffgo.css'] as { source: string }).source).toBe(
+      '@import url("/assets/shared-abc.css");\n.a{}',
+    )
+  })
+
+  it('refuses cssCodeSplit: false, at the top level or on the client environment', () => {
+    expect(() => brandConfig({ build: { cssCodeSplit: false } })).toThrow(/cssCodeSplit: false/)
+    expect(() =>
+      brandConfig({ environments: { client: { build: { cssCodeSplit: false } } } }),
+    ).toThrow(/every brand's CSS into every brand's preview/)
+  })
+
+  it('refuses an empty record and a brand id that is not a site id', () => {
+    expect(() => folio({ blocks: {} })).toThrow(/names no brands/)
+    expect(() => folio({ blocks: { 'Bad Id': './x.ts' } })).toThrow(/not a brand id/)
+  })
+})
+
+describe('the Vite plugin, the string form is what it was', () => {
+  // Captured from the plugin before the record form existed. Do not regenerate it:
+  // a change here is a change to every existing host's bundle.
+  const BUILD =
+    '{"admin":"/folio-admin.js","preview":"/folio-preview.js","adminCss":["/folio-admin.css"],"previewCss":["/folio-preview.css"]}'
+  const SPLIT_OFF =
+    '{"admin":"/folio-admin.js","preview":"/folio-preview.js","adminCss":["/folio-client.css"],"previewCss":["/folio-client.css"]}'
+  const SERVE = `{"admin":"/@fs${'ADMIN'}","preview":"/@id/__x00__virtual:folio/preview","devClient":"/@vite/client","adminCss":[],"previewCss":[]}`
+
+  it('defines __FOLIO_ASSETS__ byte for byte', () => {
+    expect(runConfig({}).define.__FOLIO_ASSETS__).toBe(BUILD)
+    expect(runConfig({ build: { cssCodeSplit: false } }).define.__FOLIO_ASSETS__).toBe(SPLIT_OFF)
+    const dev = runConfig({}, 'serve').define.__FOLIO_ASSETS__ as string
+    const admin = JSON.parse(dev).admin as string
+    expect(dev).toBe(SERVE.replace('/@fsADMIN', admin))
+  })
+
+  it('keeps the one preview entry', () => {
+    const plugin = folio({ blocks: './src/blocks/index.ts' })[0] as Plugin
+    const hook = plugin.config as unknown as ConfigHook
+    const r = hook.call(plugin, {}, { command: 'build', mode: 'production' }) as {
+      environments: { client: { build: { rollupOptions: { input: Record<string, string> } } } }
+    }
+    expect(r.environments.client.build.rollupOptions.input['folio-preview']).toBe(
+      'virtual:folio/preview',
+    )
+    expect(Object.keys(r.environments.client.build.rollupOptions.input).sort()).toEqual([
+      'folio-admin',
+      'folio-preview',
+    ])
+  })
+})
