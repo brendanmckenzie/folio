@@ -3344,6 +3344,15 @@ types, globals, preview shell, forms policy, describer and content migrations) t
 site belongs to. One Worker, one D1, one R2 bucket, one admin origin and one sign-in
 serve every brand.
 
+**A new brand only when the component code differs; a new site is always data.** Colour,
+type, spacing and logo belong in the site's settings document. A host's root loader
+writes them into the server-rendered HTML as CSS custom properties, so every site
+downloads the same stylesheet and uses all of it. The cached page carries its own site's
+tokens, and a settings change is a `siteChanged` purge. A typeface a site chooses is a URL
+in its settings, linked from the loader, not a bundled `@font-face` per site. Fifty sites
+that share components are one brand. A site that needs a different *component*, not a
+different value, is the point where a second brand pays for itself.
+
 **It is off unless you say so**, and it supersedes the "every site renders every block it
 holds" premise of the previous chapter only for a deployment that configures
 `createFolio({ brands })`. Without that key nothing in this handbook changes.
@@ -3466,6 +3475,16 @@ brand's, chosen by the site a submission arrives on.
   per brand over a shared D1) would keep each brand's code apart and cost a new mode
   that forwards HTTP and WebSocket requests between Workers, an exact-build lockstep
   and two cached entrypoints, permanent surface for one topology. It is not built.
+- **The host's public bundle is the host's to split.** Folio's preview bundles are per
+  brand, but React Router splits by route module and matches by path, not host. A route
+  tree that serves both brands' pages from one module (`/`, a CMS splat, any colliding
+  path) links both brands' CSS and JS on every page. Brand-scoped CSS keeps that from
+  rendering wrong, but not from being downloaded: on the first two-brand host each page
+  carried the other brand's stylesheets (17 KB gzip one way, 7 KB the other) and an
+  identical set of script preloads. The fix is one React Router build per brand behind
+  the one Worker, picked by the gateway from the host's brand. Lazy-loading a brand's
+  component inside a shared route is not a fix: its CSS misses the server-rendered head
+  and the page flashes unstyled.
 - **The admin origin belongs to no brand**, and passkeys bind to it, so it is chosen once.
 - **A brand's id is permanent once rows carry it**, and its content migrations cannot be
   converted from unprefixed ids. Both are in `UPGRADING.md`.
