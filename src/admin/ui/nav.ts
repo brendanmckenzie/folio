@@ -293,10 +293,10 @@ export interface ScopeOptionGroup {
  * itself is absent when `choices` is (`showsScopeSwitcher`), so this is never asked
  * on a single-site deployment.
  *
- * **On a deployment with `brands` it groups by brand instead**, and each option reads
- * `<name> · <brand label>` (`multi-brand.md` decision 20): a chain never crosses a
- * brand, so the brand is the one partition an editor needs to see. Groups of the
- * brand list before its sites, and the brands are by label. A
+ * **On a deployment with `brands` it groups by brand instead**, and each option is
+ * just its `<name>` (`multi-brand.md` decision 20): a chain never crosses a brand, so
+ * the brand is the one partition an editor needs to see, and the optgroup already
+ * names it. Groups of the brand list before its sites, and the brands are by label. A
  * scope that names no brand (there is none on such a deployment) falls to the kind
  * groups after them, so nothing is dropped. Decided by whether any choice carries a
  * brand, so a single-brand deployment groups exactly as it did.
@@ -323,7 +323,7 @@ export function scopeOptionGroups(
       group = { label: brand.label, options: [] }
       byBrand.push(group)
     }
-    group.options.push({ id: choice.id, name: `${choice.name} · ${brand.label}` })
+    group.options.push({ id: choice.id, name: choice.name })
   }
   byBrand.sort((a, b) => a.label.localeCompare(b.label))
   for (const group of byBrand) {

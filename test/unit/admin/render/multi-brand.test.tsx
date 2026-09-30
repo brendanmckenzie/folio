@@ -100,7 +100,7 @@ describe('the admin on a deployment with brands', () => {
       Array.from(select.querySelectorAll('optgroup')).map((g) => g.getAttribute('label')),
     ).toEqual(['All About Africa', 'Take Off Go'])
     expect(select.value).toBe('tog')
-    expect(within(select as HTMLElement).getByText('TOG · Take Off Go')).toBeTruthy()
+    expect(within(select as HTMLElement).getByText('TOG')).toBeTruthy()
   })
 
   it('draws stubs, not a crash, when the scoped manifest answers an error', async () => {

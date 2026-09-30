@@ -399,7 +399,7 @@ id out of the registry, and the repair is SQL (`UPGRADING.md`).
 
 | `FolioBrand` key | | What it is |
 | --- | --- | --- |
-| `label` | **required** | Shown to people and to models: the switcher (`<site> · <label>`), the sign-in mail's `scope.brand`, MCP's instructions. Not blank. |
+| `label` | **required** | Shown to people and to models: the switcher (the optgroup heading), the sign-in mail's `scope.brand`, MCP's instructions. Not blank. |
 | `blocks` | **required** | This brand's block registry. Same as the top-level key, and a repeated name throws. |
 | `root`, `types`, `globals` | optional | Same as the top-level keys, over this brand's blocks. |
 | `settings` | optional | The brand's site-settings singleton. It replaces `sites.settings`, which is refused beside `brands`. Each brand has its own type, so `/me`'s `sites.settings` is null on a branded deployment and the scoped manifest carries `settings`. |

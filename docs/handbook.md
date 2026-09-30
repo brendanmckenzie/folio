@@ -3436,7 +3436,7 @@ The admin fetches its manifest from the scope's own base, so the "New" menu, the
 Content screen's chips, the sidebar and the pickers list that brand's types and no admin
 code knows what a brand is. With no scope the manifest is neutral (no types, blocks or
 globals), which is all the bare shell needs before it redirects to the caller's first
-scope. The scope switcher reads `<site> · <brand label>` and groups by brand, the tab
+scope. The scope switcher lists each site or group by name under an optgroup for its brand, the tab
 title is `<crumb> · <site name> · Folio` on any multi-site deployment, and the Sites
 screen shows and sets each row's brand. The admin is not themed per brand.
 

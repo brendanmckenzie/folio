@@ -1011,14 +1011,14 @@ const BRANDED_ME: Me = {
 }
 
 describe('multi-brand: the switcher and the title', () => {
-  it('groups the switcher by brand, each option reading "<name> · <brand>", groups before sites', () => {
+  it('groups the switcher by brand, each option reading just "<name>", groups before sites', () => {
     const groups = scopeOptionGroups(scopeChoices(BRANDED_ME))
     expect(groups.map((g) => g.label)).toEqual(['All About Africa', 'Take Off Go'])
-    expect(groups[0]?.options).toEqual([{ id: 'aaa', name: 'AAA · All About Africa' }])
+    expect(groups[0]?.options).toEqual([{ id: 'aaa', name: 'AAA' }])
     expect(groups[1]?.options).toEqual([
-      { id: 'gtog', name: 'Take Off Go group · Take Off Go' },
-      { id: 'tog', name: 'TOG · Take Off Go' },
-      { id: 'tog2', name: 'TOG two · Take Off Go' },
+      { id: 'gtog', name: 'Take Off Go group' },
+      { id: 'tog', name: 'TOG' },
+      { id: 'tog2', name: 'TOG two' },
     ])
   })
 

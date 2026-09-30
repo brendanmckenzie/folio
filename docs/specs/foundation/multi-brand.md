@@ -1049,7 +1049,7 @@ THEN a notice names the missing and extra blocks, and the page still renders
 GIVEN an editor with roles on both sites
 WHEN they open ~takeoffgo
 THEN the New menu, chips and sidebar list takeoffgo's types only
-AND the switcher shows "<site> · Take Off Go" grouped under its brand
+AND the switcher shows "<site>" grouped under its "Take Off Go" optgroup
 AND the tab title ends "· <site name> · Folio"
 ```
 
@@ -1372,6 +1372,7 @@ the alternative; it leaves a type that promises members that throw.
 
 ### Phase 7: admin and agent surfaces (`5d478ff`)
 
+- **The switcher's option label dropped the brand suffix** after the staging review (2026-09-30): the optgroup already names the brand, and the closed control shows the site name. Decision 20's text stands as history.
 - **`/me` gained a brand list, not only `MeScope.brand`**: `sites.brands` (`BrandRef[]`,
   present only on a branded deployment), because the Sites screen must offer a brand with
   no site yet. `sites.scopes[].brand` is `null` on every scope of a single-brand `/me`.
