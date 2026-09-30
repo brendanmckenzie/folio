@@ -348,6 +348,12 @@ function statesOf(
  * every scope that can own a row. It is false for anything that is not a
  * singleton layer, and callers must not ask on a deployment with no `sites`,
  * where nothing layers and every singleton seeds as it always did.
+ *
+ * **Not on a deployment with `brands`**, which has no `shared`
+ * (`multi-brand.md` decision 5): there a group's layer and a layer on a site with
+ * no group are the bottom of their chains and seed full, which only the registry
+ * can say. The runtime asks `layerSeed` there (`runtime.ts`'s `seedFor`), and
+ * every other caller has to as well.
  */
 export function isBareLayer(id: string): boolean {
   const layer = singletonTypeOf(id)

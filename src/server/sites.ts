@@ -53,6 +53,7 @@ type SiteRow = {
   group_id: string | null
   status: SiteStatus | null
   preview_origin: string | null
+  brand: string | null
 }
 
 /**
@@ -63,12 +64,20 @@ type SiteRow = {
  * replica can hand an isolate a registry older than the write that just changed
  * it — a site that went live ten minutes ago still answering 404 for another
  * isolate's ten seconds, over and over, for as long as that replica lags.
+ *
+ * **Every row, whatever its brand**, with `shared` false when `branded`. This is
+ * what a registry write validates against and what `GET {base}/api/sites` lists;
+ * what a request is served from is `servingRegistry` of it (`core/sites.ts`),
+ * which the runtime's snapshot applies (`multi-brand.md` decision 4).
  */
-export async function readRegistry(db: D1Database): Promise<Registry> {
+export async function readRegistry(
+  db: D1Database,
+  opts: { branded?: boolean } = {},
+): Promise<Registry> {
   const session = db.withSession(PRIMARY_FIRST)
   const [siteRows, hostRows] = await session.batch([
     session.prepare(
-      'select id, kind, name, group_id, status, preview_origin from sites order by id',
+      'select id, kind, name, group_id, status, preview_origin, brand from sites order by id',
     ),
     session.prepare('select host, site_id from site_hosts order by host'),
   ])
@@ -82,7 +91,7 @@ export async function readRegistry(db: D1Database): Promise<Registry> {
   const groups: GroupRef[] = []
   for (const row of (siteRows?.results ?? []) as SiteRow[]) {
     if (row.kind === 'group') {
-      groups.push({ id: row.id, name: row.name })
+      groups.push({ id: row.id, name: row.name, brand: row.brand })
       continue
     }
     sites.push({
@@ -94,9 +103,10 @@ export async function readRegistry(db: D1Database): Promise<Registry> {
       status: row.status ?? 'draft',
       hosts: hosts.get(row.id) ?? [],
       preview: row.preview_origin,
+      brand: row.brand,
     })
   }
-  return { sites, groups }
+  return { sites, groups, shared: !opts.branded }
 }
 
 export interface RegistrySnapshot {
@@ -373,6 +383,7 @@ export interface SiteCreate {
   status?: SiteStatus
   preview?: string | null
   hosts?: readonly string[]
+  brand?: string | null
 }
 
 export interface SitePatch {
@@ -380,11 +391,14 @@ export interface SitePatch {
   group?: string | null
   status?: SiteStatus
   preview?: string | null
+  brand?: string | null
 }
 
 export interface RegistryWriteContext {
   sites: ResolvedSites
   route: (path: string, locale?: string, site?: SiteRef) => string
+  /** The configured brand ids, or null on a deployment with no `brands`. */
+  brands: readonly string[] | null
 }
 
 function assertGroup(registry: Registry, group: string | null | undefined): string | null {
@@ -395,10 +409,60 @@ function assertGroup(registry: Registry, group: string | null | undefined): stri
   return group
 }
 
+/**
+ * A written brand (`multi-brand.md` decision 4): one of the configured ids on a
+ * deployment with `brands`, and nothing at all on one without — where a brand
+ * would be a column nothing reads, and a claim nothing enforces. **Never a
+ * default**: a create that names none on a branded deployment is refused, not
+ * given the first brand.
+ */
+function assertBrand(
+  brands: readonly string[] | null,
+  brand: string | null | undefined,
+  required: boolean,
+): string | null | undefined {
+  if (brands === null) {
+    if (brand !== undefined && brand !== null) {
+      throw new FolioError('bad_request', 'This deployment has no brands: a row has none')
+    }
+    return brand === undefined ? undefined : null
+  }
+  if (brand === undefined && !required) return undefined
+  if (brand === undefined || brand === null) {
+    throw new FolioError('bad_request', `brand is required: one of ${brands.join(', ')}`)
+  }
+  if (!brands.includes(brand)) {
+    throw new FolioError('bad_request', `No brand '${brand}': one of ${brands.join(', ')}`)
+  }
+  return brand
+}
+
+/**
+ * A site and its group have one brand (decision 4), so a chain never crosses one
+ * (decision 5). Nothing to check with no `brands`, or for a site with no group.
+ */
+function assertGroupBrand(
+  registry: Registry,
+  brands: readonly string[] | null,
+  site: { group: string | null; brand: string | null },
+): void {
+  if (brands === null || site.group === null) return
+  const group = registry.groups.find((g) => g.id === site.group)
+  if (group && group.brand !== site.brand) {
+    throw new FolioError(
+      'bad_request',
+      `Group '${group.id}' is ${group.brand === null ? 'of no brand' : `brand '${group.brand}'`}: a site joins a group of its own brand`,
+    )
+  }
+}
+
 /** A write's `sites` row insert or conflict, turned into the refusal a caller reads. */
-async function batchOrConflict(db: FolioDb, statements: D1PreparedStatement[]): Promise<void> {
+async function batchOrConflict(
+  db: FolioDb,
+  statements: D1PreparedStatement[],
+): Promise<D1Result[]> {
   try {
-    await db.batch(statements)
+    return await db.batch(statements)
   } catch (err) {
     if (/UNIQUE constraint failed/i.test(String((err as Error)?.message ?? err))) {
       throw new FolioError('conflict', 'That id, host or preview origin is already claimed')
@@ -423,6 +487,7 @@ export async function createSite(
     throw new FolioError('conflict', `'${id}' already exists`)
   }
   const now = Date.now()
+  const brand = assertBrand(ctx.brands, input.brand, true) ?? null
 
   if (input.kind === 'group') {
     if (input.group || input.status || input.preview || input.hosts?.length) {
@@ -434,12 +499,12 @@ export async function createSite(
     await batchOrConflict(db, [
       db
         .prepare(
-          `insert into sites (id, kind, name, group_id, status, preview_origin, created_at, updated_at)
-           values (?, 'group', ?, null, null, null, ?, ?)`,
+          `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at)
+           values (?, 'group', ?, null, null, null, ?, ?, ?)`,
         )
-        .bind(id, input.name, now, now),
+        .bind(id, input.name, brand, now, now),
     ])
-    return { id, name: input.name }
+    return { id, name: input.name, brand }
   }
 
   const site: SiteRef = {
@@ -452,7 +517,9 @@ export async function createSite(
       input.preview === undefined || input.preview === null
         ? null
         : normalisePreviewOrigin(input.preview),
+    brand,
   }
+  assertGroupBrand(registry, ctx.brands, site)
   assertUnclaimed(registry, ctx.sites.adminHost, {
     site: id,
     hosts: site.hosts,
@@ -463,10 +530,10 @@ export async function createSite(
   await batchOrConflict(db, [
     db
       .prepare(
-        `insert into sites (id, kind, name, group_id, status, preview_origin, created_at, updated_at)
-         values (?, 'site', ?, ?, ?, ?, ?, ?)`,
+        `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at)
+         values (?, 'site', ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .bind(id, site.name, site.group, site.status, site.preview, now, now),
+      .bind(id, site.name, site.group, site.status, site.preview, site.brand, now, now),
     ...site.hosts.map((host) =>
       db.prepare('insert into site_hosts (host, site_id) values (?, ?)').bind(host, id),
     ),
@@ -483,17 +550,20 @@ export async function updateSite(
   ctx: RegistryWriteContext,
 ): Promise<SiteRef | GroupRef> {
   const now = Date.now()
+  const brand = assertBrand(ctx.brands, patch.brand, false)
   const group = registry.groups.find((g) => g.id === id)
   if (group) {
     if (patch.group !== undefined || patch.status !== undefined || patch.preview !== undefined) {
-      throw new FolioError('bad_request', 'A group has only a name')
+      throw new FolioError('bad_request', 'A group has a name and a brand only')
     }
-    const name = patch.name ?? group.name
-    await db
-      .prepare('update sites set name = ?, updated_at = ? where id = ?')
-      .bind(name, now, id)
+    const next: GroupRef = { id, name: patch.name ?? group.name, brand: brand ?? group.brand }
+    const guard = next.brand !== group.brand ? rebrandGuard(id) : NO_GUARD
+    const done = await db
+      .prepare(`update sites set name = ?, brand = ?, updated_at = ? where id = ?${guard.sql}`)
+      .bind(next.name, next.brand, now, id, ...guard.binds)
       .run()
-    return { id, name }
+    if (guard !== NO_GUARD && !done.meta.changes) await refuseRebrand(db, id, 'group')
+    return next
   }
 
   const current = registry.sites.find((s) => s.id === id)
@@ -509,18 +579,22 @@ export async function updateSite(
         : patch.preview === null
           ? null
           : normalisePreviewOrigin(patch.preview),
+    brand: brand ?? current.brand,
   }
+  assertGroupBrand(registry, ctx.brands, next)
   assertUnclaimed(registry, ctx.sites.adminHost, { site: id, preview: next.preview })
   assertAbsoluteRoute(ctx.route, next)
+  const guard = next.brand !== current.brand ? rebrandGuard(id) : NO_GUARD
 
-  await batchOrConflict(db, [
+  const [done] = await batchOrConflict(db, [
     db
       .prepare(
-        `update sites set name = ?, group_id = ?, status = ?, preview_origin = ?, updated_at = ?
-         where id = ?`,
+        `update sites set name = ?, group_id = ?, status = ?, preview_origin = ?, brand = ?,
+                updated_at = ? where id = ?${guard.sql}`,
       )
-      .bind(next.name, next.group, next.status, next.preview, now, id),
+      .bind(next.name, next.group, next.status, next.preview, next.brand, now, id, ...guard.binds),
   ])
+  if (guard !== NO_GUARD && !done?.meta.changes) await refuseRebrand(db, id, 'site')
   return next
 }
 
@@ -566,6 +640,63 @@ const OWNED = [
 ] as const
 
 /**
+ * Whether anything a scope owns, or (for a group) any site in it, is in the way:
+ * the first table that holds a row, else null. One batch, shared by the delete and
+ * by a brand change.
+ */
+async function ownedBy(db: FolioDb, id: string): Promise<string | null> {
+  const probes = await db.batch([
+    ...OWNED.map((table) =>
+      db.prepare(`select exists (select 1 from ${table} where site_id = ?) as n`).bind(id),
+    ),
+    db.prepare('select exists (select 1 from sites where group_id = ?) as n').bind(id),
+  ])
+  const holding = probes.findIndex((r) => ((r.results[0] as { n: number } | undefined)?.n ?? 0) > 0)
+  return holding === -1 ? null : (OWNED[holding] ?? 'sites')
+}
+
+/**
+ * A brand change (`multi-brand.md` decision 4) — refused (409) while the scope
+ * owns content, which was written against the old brand's registry and would be
+ * rendered by the new one's, and on a group that has sites, whose brand would
+ * then differ from theirs. The same list that refuses a delete.
+ *
+ * **The check is part of the `update`**, a `not exists` per table, so a story
+ * created between a probe and the write cannot slip through: the row changes only
+ * if the scope is empty at the moment it does. No row changed is the refusal, and
+ * `refuseRebrand` reads what was in the way only to say so.
+ *
+ * What this cannot close: another isolate's registry snapshot still answers the
+ * old brand for up to `SNAPSHOT_TTL_MS`, so a first page created there in that
+ * window is written against the old brand's registry. A rebrand is safe on a
+ * scope nobody is editing.
+ */
+function rebrandGuard(id: string): { sql: string; binds: string[] } {
+  const probes = [
+    ...OWNED.map((table) => `select 1 from ${table} where site_id = ?`),
+    'select 1 from sites where group_id = ?',
+  ]
+  return {
+    sql: probes.map((probe) => ` and not exists (${probe})`).join(''),
+    binds: probes.map(() => id),
+  }
+}
+
+const NO_GUARD = { sql: '', binds: [] as string[] }
+
+async function refuseRebrand(db: FolioDb, id: string, kind: 'site' | 'group'): Promise<never> {
+  const what = await ownedBy(db, id)
+  throw new FolioError(
+    'conflict',
+    what === null
+      ? `The ${kind} '${id}' changed while its brand was being set; try again`
+      : what === 'sites'
+        ? `Group '${id}' still has sites; a group and its sites have one brand`
+        : `The ${kind} '${id}' still owns ${what}; its brand can change only while it holds no content`,
+  )
+}
+
+/**
  * Deletes a site or group — refused (409) while it owns content or, for a group,
  * while any site is in it (decision 1). **`default` is never deletable**: it is
  * the migration's own row, its id is reserved against re-creation, and a
@@ -576,15 +707,8 @@ export async function deleteSite(db: FolioDb, registry: Registry, id: string): P
   if (!known) throw new FolioError('not_found', `No site or group '${id}'`)
   if (id === DEFAULT_SITE) throw new FolioError('conflict', 'The default site cannot be deleted')
 
-  const probes = await db.batch([
-    ...OWNED.map((table) =>
-      db.prepare(`select exists (select 1 from ${table} where site_id = ?) as n`).bind(id),
-    ),
-    db.prepare('select exists (select 1 from sites where group_id = ?) as n').bind(id),
-  ])
-  const holding = probes.findIndex((r) => ((r.results[0] as { n: number } | undefined)?.n ?? 0) > 0)
-  if (holding !== -1) {
-    const what = OWNED[holding] ?? 'sites'
+  const what = await ownedBy(db, id)
+  if (what !== null) {
     throw new FolioError('conflict', `'${id}' still owns ${what}; move or delete them first`)
   }
 

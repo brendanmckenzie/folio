@@ -196,7 +196,13 @@ export type {
   SiteStatus,
   Surface,
 } from '../core/sites'
-export type { SitesConfig } from './types'
+export type {
+  BrandRef,
+  FolioBrand,
+  FolioBrandedConfig,
+  FolioSingleConfig,
+  SitesConfig,
+} from './types'
 export type { PurgeIssued } from './cache-purge'
 export { FolioError } from './errors'
 export type { ErrorEnvelope, FolioErrorCode } from './errors'

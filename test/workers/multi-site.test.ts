@@ -9,7 +9,7 @@ import { fieldValue } from '../../src/core/locales'
 import type { Mutation } from '../../src/core/mutations'
 import type { Resolution } from '../../src/core/resolve'
 import type { DocumentType } from '../../src/core/schema'
-import type { FolioBindings, FolioConfig } from '../../src/server'
+import type { FolioBindings, FolioConfig, FolioSingleConfig } from '../../src/server'
 import { createFolio, magicLink } from '../../src/server'
 import { createToken } from '../../src/server/auth/tokens'
 import { cachePurgeHooks } from '../../src/server/cache-purge'
@@ -99,7 +99,7 @@ const bindings = (e: Cloudflare.Env): FolioBindings => ({
 
 const ADMIN = 'https://cms.example'
 
-function build(over: Partial<FolioConfig<Cloudflare.Env>> = {}) {
+function build(over: Partial<FolioSingleConfig<Cloudflare.Env>> = {}) {
   return createFolio<Cloudflare.Env>({
     blocks: [page, post, theme, link, settingsRoot],
     types,
@@ -425,6 +425,7 @@ describe('the registry routes', () => {
         status: 'draft',
         hosts: ['india.example', 'www.india.example'],
         preview: 'https://preview.india.example',
+        brand: null,
       },
     })
     const listed = await send('GET', '/sites')

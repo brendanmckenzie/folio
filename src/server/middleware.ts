@@ -101,26 +101,43 @@ export function withBindings<Env>(config: FolioConfig<Env>): MiddlewareHandler<F
  * only for a request that named one. On a deployment with no `sites` there is no
  * scope and no site, and nothing is read: `handle()` answers a `~` segment there
  * with a 404 before the app is reached.
+ *
+ * It also sets `c.var.brand` (`multi-brand.md` decision 6), the registry every route
+ * below reads. On a deployment with `brands`, `~shared` and a row of no configured
+ * brand have empty chains, so they are this same 404.
  */
 export function withScope<Env>(rt: FolioRuntime): MiddlewareHandler<FolioEnv<Env>> {
+  // The one brand of a deployment with no `brands`: every request's, with no read.
+  const only = rt.brands.get(null) ?? null
   return async (c, next) => {
     if (!rt.sites) {
       c.set('scope', null)
       c.set('site', null)
+      c.set('brand', only)
       await next()
       return
     }
     const scope = c.req.raw.headers.get(SCOPE_HEADER)
-    if (scope !== null && chain(await rt.sites.registry(c.env), scope).length === 0) {
+    // Read only for a request that named a scope, or (with `brands`) one that
+    // arrived on a site's host: a bare admin request costs nothing, as it did.
+    const site = c.req.raw.headers.get(SITE_HEADER)
+    const registry =
+      scope !== null || (!only && site !== null) ? await rt.sites.registry(c.env) : null
+    if (scope !== null && chain(registry!, scope).length === 0) {
       throw new FolioError('not_found', `No site or group '${scope}'`)
     }
-    const site = c.req.raw.headers.get(SITE_HEADER)
     const surface = c.req.raw.headers.get(SURFACE_HEADER)
     c.set('scope', scope)
     c.set(
       'site',
       site !== null && (surface === 'live' || surface === 'preview') ? { id: site, surface } : null,
     )
+    // The request's brand (`multi-brand.md` decision 6), looked up once: the scope's,
+    // else the gated site's. With `brands` a scope or site the snapshot holds always
+    // has one (a row of no configured brand is not in it, so it 404'd above), and no
+    // scope and no site is null — never the first brand.
+    const at = scope ?? c.var.site?.id ?? null
+    c.set('brand', only ?? (registry && at !== null ? rt.forScope(registry, at) : null))
     await next()
   }
 }

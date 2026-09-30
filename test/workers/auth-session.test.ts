@@ -528,10 +528,27 @@ describe('auth_events', () => {
 /** Alpha in group north, and bravo in none: enough chain for every case. */
 const REGISTRY: Registry = {
   sites: [
-    { id: 'alpha', name: 'Alpha', group: 'north', status: 'live', hosts: [], preview: null },
-    { id: 'bravo', name: 'Bravo', group: null, status: 'live', hosts: [], preview: null },
+    {
+      id: 'alpha',
+      name: 'Alpha',
+      group: 'north',
+      status: 'live',
+      hosts: [],
+      preview: null,
+      brand: null,
+    },
+    {
+      id: 'bravo',
+      name: 'Bravo',
+      group: null,
+      status: 'live',
+      hosts: [],
+      preview: null,
+      brand: null,
+    },
   ],
-  groups: [{ id: 'north', name: 'North' }],
+  groups: [{ id: 'north', name: 'North', brand: null }],
+  shared: true,
 }
 const ALPHA = { id: 'alpha', registry: REGISTRY }
 

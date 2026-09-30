@@ -153,6 +153,20 @@ export interface Manifest {
    * adding a field to this interface.
    */
   hooks?: ManifestHooks
+  /**
+   * The brand this manifest describes (`multi-brand.md` decision 12), as
+   * `folio/server`'s `BrandRef`. **Present only on a deployment with `brands`**,
+   * whose manifest is a brand's; absent everywhere else, so a single-brand
+   * manifest is byte-identical to one from before brands.
+   */
+  brand?: { id: string; label: string }
+  /**
+   * The brand's site-settings singleton (`FolioBrand.settings`), which is what the
+   * Settings tab reads on a deployment with `brands` (decision 20). Present only
+   * there, and only when the brand declares one: without `brands` the settings
+   * type is deployment-wide and `/me` carries it.
+   */
+  settings?: string
 }
 
 export function indexManifest(manifest: Manifest): SchemaIndex {

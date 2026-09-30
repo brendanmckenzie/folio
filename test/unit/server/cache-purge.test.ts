@@ -471,7 +471,7 @@ describe('cachePurgeHooks', () => {
 
 describe('multi-site purges (decisions 4 and 15)', () => {
   const registry: Registry = {
-    groups: [{ id: 'north', name: 'North' }],
+    groups: [{ id: 'north', name: 'North', brand: null }],
     sites: ['default', 'alpha', 'gamma', 'bravo'].map((id) => ({
       id,
       name: id,
@@ -479,7 +479,9 @@ describe('multi-site purges (decisions 4 and 15)', () => {
       status: 'live' as const,
       hosts: [],
       preview: null,
+      brand: null,
     })),
+    shared: true,
   }
   const hooksFor = (capability: PurgeCapability) =>
     cachePurgeHooks<Env>(['header'], capability, undefined, {
@@ -646,7 +648,9 @@ describe('multi-site purges (decisions 4 and 15)', () => {
         status: 'live' as const,
         hosts: [],
         preview: null,
+        brand: null,
       })),
+      shared: true,
     }
     const { calls, capability } = recorder()
     const hooks = cachePurgeHooks<Env>([], capability, undefined, {

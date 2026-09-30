@@ -444,7 +444,7 @@ function bodyFor(url: string): unknown {
 
 /** The registry the Sites screen reads: one group, two sites, one with no preview origin. */
 export const REGISTRY = {
-  groups: [{ id: 'north', name: 'North' }],
+  groups: [{ id: 'north', name: 'North', brand: null }],
   sites: [
     {
       id: 'alpha',
@@ -453,9 +453,20 @@ export const REGISTRY = {
       status: 'live',
       hosts: ['alpha.example'],
       preview: 'https://preview.alpha.example',
+      brand: null,
     },
-    { id: 'bravo', name: 'Bravo', group: null, status: 'draft', hosts: [], preview: null },
+    {
+      id: 'bravo',
+      name: 'Bravo',
+      group: null,
+      status: 'draft',
+      hosts: [],
+      preview: null,
+      brand: null,
+    },
   ],
+  // What `GET {base}/api/sites` answers since `0013`: no `brands`, so `shared` exists.
+  shared: true,
 }
 
 let currentMe: Me = ADMIN

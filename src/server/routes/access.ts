@@ -14,7 +14,7 @@
  */
 import { Hono } from 'hono'
 import * as v from 'valibot'
-import { ALL_SCOPES, type Registry, SHARED_SCOPE } from '../../core/sites'
+import { ALL_SCOPES, type Registry, SHARED_SCOPE, servingRegistry } from '../../core/sites'
 import type { Grants, Scope } from '../auth/roles'
 import { ADMIN, actorString, ROLES } from '../auth/roles'
 import { roleSetByReason } from '../auth/roles-from'
@@ -66,11 +66,26 @@ const UserEditBody = v.object({ ...UserPatchBody.entries, grants: v.optional(GRA
  * A scope a grant or a binding may name: `*`, `shared`, or a site or group the
  * registry holds. Anything else is a 400 at the write — a grant nobody could ever
  * exercise is a typo, not a permission.
+ *
+ * `registry` is what requests are served from (`servedFresh`): on a deployment
+ * with `brands` there is no `shared`, and a row of no configured brand is not in
+ * it (`multi-brand.md` decisions 4 and 5), so neither can be granted or bound —
+ * `withActor` would refuse every use of the credential.
  */
 function knownScope(registry: Registry, scope: string, star: boolean): boolean {
   if (scope === ALL_SCOPES) return star
-  if (scope === SHARED_SCOPE) return true
+  if (scope === SHARED_SCOPE) return registry.shared
   return registry.sites.some((s) => s.id === scope) || registry.groups.some((g) => g.id === scope)
+}
+
+/**
+ * The registry fresh from the primary (never the snapshot: a site deleted a second
+ * ago must not be granted), narrowed to what the snapshot would serve.
+ */
+async function servedFresh(rt: FolioRuntime, env: unknown): Promise<Registry> {
+  const fresh = await rt.sites!.fresh(env)
+  const brands = rt.sites!.brands
+  return brands ? servingRegistry(fresh, brands) : fresh
 }
 
 /** What a user looks like over the wire. `email` is included — an admin managing
@@ -112,7 +127,7 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     if (!rt.sites) {
       throw new FolioError('bad_request', 'This deployment has one site: set `role` instead.')
     }
-    const registry = await rt.sites.fresh(c.env)
+    const registry = await servedFresh(rt, c.env)
     for (const scope of Object.keys(grants)) {
       if (!knownScope(registry, scope, true)) {
         throw new FolioError('bad_request', `grants names '${scope}', which is not a site or group`)
@@ -443,7 +458,7 @@ export function accessRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       if (body.scopes.includes('admin')) {
         throw new FolioError('bad_request', 'A token bound to a site cannot hold the admin scope.')
       }
-      if (!knownScope(await rt.sites.fresh(c.env), site, false)) {
+      if (!knownScope(await servedFresh(rt, c.env), site, false)) {
         throw new FolioError('bad_request', `site names '${site}', which is not a site or group`)
       }
     }

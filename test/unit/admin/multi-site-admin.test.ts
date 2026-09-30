@@ -108,7 +108,7 @@ import type { InheritedRow } from '../../../src/server/stories'
  */
 
 const REGISTRY: Registry = {
-  groups: [{ id: 'north', name: 'North' }],
+  groups: [{ id: 'north', name: 'North', brand: null }],
   sites: [
     {
       id: 'alpha',
@@ -117,6 +117,7 @@ const REGISTRY: Registry = {
       status: 'live',
       hosts: ['alpha.example'],
       preview: 'https://preview.alpha.example',
+      brand: null,
     },
     {
       id: 'bravo',
@@ -125,8 +126,10 @@ const REGISTRY: Registry = {
       status: 'draft',
       hosts: [],
       preview: null,
+      brand: null,
     },
   ],
+  shared: true,
 }
 
 /** A signed-in person on a multi-site deployment, built by the server's own function. */

@@ -35,7 +35,7 @@ import type { FolioForms } from './form-responses'
 import type { FolioDb } from './db'
 import type { MigrateOptions, MigrateReport } from './migrate'
 import type { ReindexOptions, ReindexReport } from './reindex'
-import type { ResolveOptions } from './runtime'
+import type { BrandRuntime, ResolveOptions } from './runtime'
 import type { ScheduleRunOptions, ScheduleRunReport } from './scheduler'
 import type { PreviewWrap } from '../core/render-wrap'
 import type { SpaceDO } from './space-do'
@@ -572,7 +572,98 @@ export interface FolioLogger {
   warn(message: string, ...detail: unknown[]): void
 }
 
-export interface FolioConfig<Env> {
+/**
+ * `createFolio`'s config: one brand, as every deployment before
+ * `../../docs/specs/foundation/multi-brand.md` had, or many (`brands`).
+ *
+ * A union rather than one interface with optional keys, so a config that mixes
+ * the two — `brands` beside a top-level `blocks` — is a type error before it is a
+ * construction error. Every config that existed before brands is a
+ * `FolioSingleConfig` unchanged.
+ */
+export type FolioConfig<Env> = FolioSingleConfig<Env> | FolioBrandedConfig<Env>
+
+/** A brand as people and models see it: the switcher, the tab title, the sign-in mail. */
+export interface BrandRef {
+  id: string
+  label: string
+}
+
+/**
+ * One brand of a deployment with `brands` (`multi-brand.md` decision 3): a block
+ * registry and everything validated against it or rendered with it, plus the two
+ * per-brand policies the owner named, `forms` and `describe`. Each key means
+ * exactly what the same key means on `FolioSingleConfig`, for this brand's sites.
+ */
+export interface FolioBrand<Env> {
+  /** Shown to people and to models: the switcher, the tab title, the sign-in
+   * mail, MCP's instructions. */
+  label: string
+  blocks: readonly AnyBlockDef[] | Registry
+  root?: string
+  types?: readonly DocumentType[]
+  globals?: readonly string[]
+  /** This brand's site-settings singleton (`multi-site.md` decision 2). */
+  settings?: string
+  previewCss?: string[]
+  previewWrap?: PreviewWrap
+  gate?: FolioGate<Env>
+  forms?: FolioForms<Env>
+  describe?: FolioDescribe<Env>
+  /** Ids carry the brand: `takeoffgo/0001-fifty-fifty-to-feature`. */
+  migrations?: readonly Migration[]
+}
+
+/**
+ * Many brands in one deployment (`multi-brand.md` decision 3). Everything about
+ * people, requests and the deployment stays at the top; every key that is
+ * validated against a block registry or rendered with one moves into a brand, and
+ * is refused here, by type and again at construction.
+ */
+export interface FolioBrandedConfig<Env>
+  extends Omit<
+    FolioSingleConfig<Env>,
+    | 'blocks'
+    | 'root'
+    | 'types'
+    | 'globals'
+    | 'previewCss'
+    | 'previewWrap'
+    | 'gate'
+    | 'forms'
+    | 'describe'
+    | 'migrations'
+    | 'sites'
+    | 'assets'
+    | 'brands'
+  > {
+  /** Keyed by brand id, which follows the site id rule and is what `sites.brand` holds. */
+  brands: Readonly<Record<string, FolioBrand<Env>>>
+  /** Required: a brand is a property of a site row. `settings` moves into the brand. */
+  sites: Omit<SitesConfig, 'settings'> & { settings?: never }
+  assets?: {
+    admin: string
+    devClient?: string
+    adminCss?: string[]
+    /** One preview bundle per brand, keyed like `brands` (decision 9). */
+    brands: Readonly<Record<string, { preview: string; previewCss?: string[] }>>
+    preview?: never
+    previewCss?: never
+  }
+  blocks?: never
+  root?: never
+  types?: never
+  globals?: never
+  previewCss?: never
+  previewWrap?: never
+  gate?: never
+  forms?: never
+  describe?: never
+  migrations?: never
+}
+
+/** One brand's config, which is every deployment's before `brands` existed. */
+export interface FolioSingleConfig<Env> {
   blocks: readonly AnyBlockDef[] | Registry
   /**
    * Sugar for a single routable page type, and the only shape that existed
@@ -818,6 +909,8 @@ export interface FolioConfig<Env> {
    * dimension would serve every site's rows as one.
    */
   sites?: SitesConfig
+  /** Many brands (`multi-brand.md`): `FolioBrandedConfig`. Never on this shape. */
+  brands?: never
 }
 
 /**
@@ -834,7 +927,8 @@ export interface SitesConfig {
   admin: string
   /**
    * A `singleton` type holding site-level fields (decision 2): always loaded as a
-   * global, layered shared → group → site, and read with `folio.settings`.
+   * global, layered shared → group → site, and read with `folio.settings`. With
+   * `brands` it is each brand's (`FolioBrand.settings`), and refused here.
    */
   settings?: string
   /**
@@ -1304,6 +1398,16 @@ export interface FolioVars {
    * surface it arrived on. Null on the admin origin and with no `sites`.
    */
   site: { id: string; surface: Surface } | null
+  /**
+   * The brand of the request's scope, or of its gated site when it named none,
+   * set by `withScope` (`multi-brand.md` decision 6) — **the one place a route
+   * reads a registry from**: `c.var.brand.schema`, never `rt.schema`. Always the
+   * one brand on a deployment with no `brands`. On one with them it is null only
+   * for a request with neither a scope nor a site, which a scoped route has
+   * already answered `400 site_required`; an unscoped route that needs a brand
+   * says so itself (decision 12), and never picks one.
+   */
+  brand: BrandRuntime | null
   story: StoryMeta
   /**
    * Who is making this request, resolved by `withActor` (middleware.ts) from the

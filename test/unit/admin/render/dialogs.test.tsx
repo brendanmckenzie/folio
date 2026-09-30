@@ -137,7 +137,7 @@ const SURFACES: [name: string, mount: () => React.ReactElement][] = [
       <SiteDialog
         mode="create"
         initial={emptyForm('site')}
-        groups={[{ id: 'north', name: 'North' }]}
+        groups={[{ id: 'north', name: 'North', brand: null }]}
         onClose={noop}
         onSave={asyncNoop}
       />

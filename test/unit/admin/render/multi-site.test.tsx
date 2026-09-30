@@ -203,7 +203,7 @@ describe('the site dialog', () => {
       <SiteDialog
         mode="create"
         initial={emptyForm('site')}
-        groups={[{ id: 'north', name: 'North' }]}
+        groups={[{ id: 'north', name: 'North', brand: null }]}
         onClose={() => {}}
         onSave={async () => {}}
       />,

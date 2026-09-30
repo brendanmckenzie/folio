@@ -1485,6 +1485,8 @@ describe('sites', () => {
       'preview_origin',
       'created_at',
       'updated_at',
+      // 0013.
+      'brand',
     ])
     const { results } = await env.DB.prepare(
       'select id, kind, name, group_id, status, preview_origin from sites',
@@ -1526,6 +1528,26 @@ describe('sites', () => {
     expect((await columnsOf('site_hosts')).map((c) => c.name)).toEqual(['host', 'site_id'])
     expect((await columnsOf('site_hosts')).find((c) => c.name === 'host')?.pk).toBe(1)
     expect(await indexesOf('site_hosts')).toEqual(['site_hosts_site'])
+  })
+})
+
+/**
+ * `0013_site_brands.sql` (`docs/specs/foundation/multi-brand.md` decision 4): one
+ * nullable column, last, and null on every row until a deployment with `brands`
+ * sets it.
+ */
+describe('sites.brand', () => {
+  it('is the last column, nullable, with no default, and null on the default row', async () => {
+    const column = (await columnsOf('sites')).at(-1)
+    expect(column?.name).toBe('brand')
+    expect(column?.notnull).toBe(0)
+    expect(column?.dflt_value ?? null).toBeNull()
+    const row = await env.DB.prepare("select brand from sites where id = 'default'").first()
+    expect(row).toEqual({ brand: null })
+  })
+
+  it('adds no index: the registry snapshot reads every row', async () => {
+    expect(await indexesOf('sites')).toEqual(['sites_group', 'sites_preview'])
   })
 })
 
@@ -1620,7 +1642,7 @@ describe('the ledger', () => {
     .map((path) => path.split('/').at(-1) ?? path)
     .sort(compareMigrationFilenames)
 
-  it('applies in this order, with 0009 a permanent gap and no 0012 yet', () => {
+  it('applies in this order, with 0009 a permanent gap and 0012 claimed but unwritten', () => {
     // The order wrangler and apply-schema.ts both apply in. This file's whole
     // database was built by running exactly these, so every assertion above is
     // a fresh-database run in filename order.
@@ -1635,6 +1657,7 @@ describe('the ledger', () => {
       '0008_asset_organisation.sql',
       '0010_forms.sql',
       '0011_sites.sql',
+      '0013_site_brands.sql',
     ])
   })
 
@@ -1789,9 +1812,8 @@ describe('0011 over a database with rows in it', () => {
     )
 
     before = { indexes: await indexShapes(), rows: await rowsOf(), columns: await columnNames() }
-    const last = files.at(-1)
-    expect(last?.name).toBe('0011_sites.sql')
-    await apply(last?.sql ?? '')
+    const at = files.findIndex((file) => file.name === '0011_sites.sql')
+    await apply(files[at]?.sql ?? '')
     after = { indexes: await indexShapes(), rows: await rowsOf(), columns: await columnNames() }
     grants = (
       await env.DB.prepare(
@@ -1799,6 +1821,9 @@ describe('0011 over a database with rows in it', () => {
       ).all()
     ).results
     siteRows = (await env.DB.prepare('select id from sites').all()).results
+    // Whatever landed after 0011 (0013's `sites.brand`), so the schema is the one
+    // this file found.
+    for (const file of files.slice(at + 1)) await apply(file.sql)
 
     // Leave the schema as found, and the rows gone.
     await env.DB.batch(

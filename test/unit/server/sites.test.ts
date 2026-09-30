@@ -28,6 +28,7 @@ const site = (id: string, over: Partial<SiteRef> = {}): SiteRef => ({
   status: 'live',
   hosts: [],
   preview: null,
+  brand: null,
   ...over,
 })
 
@@ -44,7 +45,8 @@ const registry: Registry = {
       preview: 'https://p.gamma.example',
     }),
   ],
-  groups: [{ id: 'north', name: 'North' }],
+  groups: [{ id: 'north', name: 'North', brand: null }],
+  shared: true,
 }
 
 const sites: ResolvedSites = {
@@ -105,6 +107,7 @@ describe('readRegistry', () => {
           group_id: 'north',
           status: 'live',
           preview_origin: 'https://preview.alpha.example',
+          brand: 'aaa',
         },
         {
           id: 'north',
@@ -113,6 +116,7 @@ describe('readRegistry', () => {
           group_id: null,
           status: null,
           preview_origin: null,
+          brand: 'aaa',
         },
         {
           id: 'odd',
@@ -121,6 +125,7 @@ describe('readRegistry', () => {
           group_id: null,
           status: null,
           preview_origin: null,
+          brand: null,
         },
       ],
       hosts: [
@@ -137,12 +142,44 @@ describe('readRegistry', () => {
           status: 'live',
           hosts: ['alpha.example', 'www.alpha.example'],
           preview: 'https://preview.alpha.example',
+          brand: 'aaa',
         },
         // A site row with no status reads as the most closed state, never as live.
-        { id: 'odd', name: 'Odd', group: null, status: 'draft', hosts: [], preview: null },
+        {
+          id: 'odd',
+          name: 'Odd',
+          group: null,
+          status: 'draft',
+          hosts: [],
+          preview: null,
+          brand: null,
+        },
       ],
-      groups: [{ id: 'north', name: 'North' }],
+      groups: [{ id: 'north', name: 'North', brand: 'aaa' }],
+      shared: true,
     })
+  })
+
+  it('reads every row whatever its brand, with no shared scope on a branded deployment', async () => {
+    // The snapshot filters (`servingRegistry`); the read does not, because a write
+    // validates against every row and `GET /api/sites` lists them.
+    const fake = fakeD1({
+      sites: [
+        {
+          id: 'odd',
+          kind: 'site',
+          name: 'Odd',
+          group_id: null,
+          status: 'live',
+          preview_origin: null,
+          brand: null,
+        },
+      ],
+      hosts: [],
+    })
+    const read = await readRegistry(fake.db, { branded: true })
+    expect(read.shared).toBe(false)
+    expect(read.sites.map((s) => [s.id, s.brand])).toEqual([['odd', null]])
   })
 })
 
@@ -379,6 +416,7 @@ describe('assertUnclaimed: every hostname is unique across both columns', () => 
     const r: Registry = {
       sites: [site('one', { preview: normalisePreviewOrigin('https://p.example:443') })],
       groups: [],
+      shared: true,
     }
     expect(
       refusal(() =>
@@ -388,7 +426,11 @@ describe('assertUnclaimed: every hostname is unique across both columns', () => 
   })
 
   it('refuses a preview origin whose host is another site’s live host', () => {
-    const r: Registry = { sites: [site('one', { hosts: ['p.example'] })], groups: [] }
+    const r: Registry = {
+      sites: [site('one', { hosts: ['p.example'] })],
+      groups: [],
+      shared: true,
+    }
     expect(
       refusal(() =>
         assertUnclaimed(r, 'cms.example', { site: 'two', preview: 'https://p.example' }),
@@ -400,6 +442,7 @@ describe('assertUnclaimed: every hostname is unique across both columns', () => 
     const r: Registry = {
       sites: [site('one', { hosts: ['one.example'], preview: 'https://p1.example' })],
       groups: [],
+      shared: true,
     }
     expect(
       refusal(() => assertUnclaimed(r, 'cms.example', { site: 'two', hosts: ['one.example'] })),

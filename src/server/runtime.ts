@@ -43,10 +43,14 @@ import {
 } from '../core/schema'
 import {
   layerId,
+  layerSeed,
   type Registry as SiteRegistry,
+  servingRegistry,
+  SHARED_SCOPE,
   SINGLE_SITE_CHAIN,
   type SiteContext,
   type SiteRef,
+  singletonTypeOf,
   type Surface,
 } from '../core/sites'
 import { ancestorPaths, type StoryMeta, type StoryNode } from '../core/story'
@@ -69,7 +73,7 @@ import type { PublishDeps } from './publish'
 import { type QueryDeps, runQuery } from './query'
 import { spaceBroadcastHooks, spaceNameFor } from './space-events'
 import { redirectsAtPaths } from './redirects'
-import { readRegistry, registrySnapshot, type ResolvedSites } from './sites'
+import { readRegistry, registrySnapshot, type ResolvedSites, SITE_ID } from './sites'
 import {
   ensureSingleton,
   listStories,
@@ -79,10 +83,14 @@ import {
   storyById,
 } from './stories'
 import type {
-  FolioLogger,
-  ReadBindings,
+  BrandRef,
+  FolioBrand,
+  FolioBrandedConfig,
   FolioConfig,
+  FolioLogger,
+  FolioSingleConfig,
   PreviewMode,
+  ReadBindings,
   SpaceStub,
   StoryStub,
 } from './types'
@@ -148,7 +156,10 @@ export interface ResolveOptions {
    *
    * Absent is the single-site chain, and a resolution with neither field — which
    * is what keeps a deployment with no `sites` byte-identical. `null` is a
-   * multi-site render for no site: an empty chain, which resolves nothing.
+   * multi-site render for no site: an empty chain, which resolves nothing. On a
+   * deployment with `brands` it is required, and must be the resolving brand's
+   * own site (`BrandRuntime.resolve`): absent would be `default`'s chain, whatever
+   * brand that is.
    */
   site?: SiteRender | null
 }
@@ -172,13 +183,149 @@ export interface SitesRuntime extends ResolvedSites {
   fresh: (env: unknown) => Promise<SiteRegistry>
   /** Drop the snapshot, after this isolate wrote a registry change. */
   drop: () => void
-  /** The configured globals and the settings type: every document that layers. */
+  /**
+   * The configured globals and the settings type: every document that layers. On a
+   * deployment with `brands`, every brand's, which is what the one purge and space
+   * broadcast hook set is built over; a render reads its own brand's `layered`.
+   */
   layered: readonly string[]
   /** The raw binding, for the reads that must be `first-primary`: the registry and preview grants. */
   rawDb: (env: unknown) => D1Database
+  /**
+   * The configured brand ids (`multi-brand.md` decision 4), or null with no
+   * `brands`. `registry` is served from the rows of these brands only; `fresh`
+   * holds every row, for the registry writes that validate against all of them.
+   */
+  brands: readonly string[] | null
 }
 
+/**
+ * Everything a block registry decides, for one brand (`multi-brand.md` decision
+ * 6). A deployment with no `brands` has exactly one, whose `brand` is null, and
+ * `FolioRuntime`'s old members of the same names answer from it; one with
+ * `brands` has one per brand, and those members throw.
+ *
+ * **A request finds its brand once**, in `withScope` (`c.var.brand`); off a
+ * request, from the gated site (`rt.forScope`). Nothing picks a brand by default.
+ */
+export interface BrandRuntime {
+  /** `{ id, label }`, or null for the one brand of a deployment with no `brands`. */
+  brand: BrandRef | null
+  registry: Registry
+  /** The block schemas, indexed by name. What a migration and the audit both walk. */
+  schema: SchemaIndex
+  /** Every declared document type, with `root` sugar already expanded. */
+  types: readonly DocumentType[]
+  typeOf: (name: string | undefined) => DocumentType | undefined
+  defaultType: DocumentType
+  /** What `GET {base}/schema` answers for this brand. Contains no functions. */
+  manifest: Manifest
+  globals: readonly string[]
+  /** The globals and the settings type: the documents that layer, on a deployment with `sites`. */
+  layered: readonly string[]
+  /** The site-settings singleton, or undefined. */
+  settings: string | undefined
+  migrations: readonly Migration[]
+  schemaId: string | null
+  indexedFields: ReadonlySet<string>
+  gate: ResolvedGate | null
+  forms: ResolvedForms | null
+  describe: ResolvedDescribe | null
+  previewWrap: PreviewWrap | undefined
+  /** This brand's preview entry and stylesheets (decision 9). */
+  page: (which: 'preview') => PageAssets
+  seed: (type: DocumentType | undefined, title: string) => Doc
+  /**
+   * How `story`'s draft starts if its object does not exist yet. On a deployment
+   * with `brands` a layer's seed depends on its scope's chain (decision 5), so a
+   * layer needs `registry` and throws without one rather than guess.
+   */
+  seedFor: (story: { id: string; type: string; title: string }, registry?: SiteRegistry) => Doc
+  draftFor: (bindings: ReadBindings, story: StoryMeta, registry?: SiteRegistry) => Promise<Doc>
+  draftForWithSyncId: (
+    bindings: ReadBindings,
+    story: StoryMeta,
+    registry?: SiteRegistry,
+  ) => Promise<{ doc: Doc; syncId: number }>
+  draft: (bindings: ReadBindings, id: string, registry?: SiteRegistry) => Promise<Doc>
+  titleFor: (story: StoryMeta, doc: Doc) => string
+  titlesFor: (story: StoryMeta, doc: Doc) => Record<string, string> | undefined
+  projection: (story: StoryMeta, doc: Doc) => ContentProjection
+  /** `FolioRuntime.resolve`, with this brand's schema. On a branded runtime `opts.site` is required and must be this brand's. */
+  resolve: (bindings: ReadBindings, doc?: Doc, opts?: ResolveOptions) => Promise<Resolution>
+  /** `FolioRuntime.query`, with this brand's indexed fields and gate. Branded: `site` is required and must be this brand's. */
+  query: (
+    bindings: ReadBindings,
+    q: ContentQuery,
+    chain?: readonly string[],
+    site?: SiteRef,
+  ) => Promise<ContentPage>
+  publishDeps: (
+    bindings: ReadBindings,
+    hookCtx: HookRunnerCtx,
+  ) => PublishDeps & { logger: FolioLogger }
+  /** `FolioRuntime.auditContext` for this brand: its types, its settings type, its own rows. */
+  auditContext: (env: unknown) => Promise<AuditContext>
+}
+
+/**
+ * The members that are one brand's (`BrandRuntime`), on `FolioRuntime` itself. On a
+ * deployment with no `brands` they answer from the one brand exactly as they always
+ * did; **on one with `brands` reading any of them throws** (decision 6), so a reader
+ * that was not routed through `c.var.brand` or `rt.forScope` is a loud 500 rather
+ * than an answer in the wrong brand. When they are deleted, the compiler finds
+ * whatever is left.
+ */
+export const BRAND_MEMBERS = [
+  'registry',
+  'previewWrap',
+  'schema',
+  'manifest',
+  'types',
+  'globals',
+  'migrations',
+  'schemaId',
+  'gate',
+  'describe',
+  'forms',
+  'typeOf',
+  'defaultType',
+  'titleFor',
+  'titlesFor',
+  'projection',
+  'seed',
+  'indexedFields',
+  // Not registry values, but bound to one: each reads a schema or a type when
+  // called, so on a branded runtime it is the brand's to answer.
+  'draftFor',
+  'draftForWithSyncId',
+  'draft',
+  'resolve',
+  'query',
+  'publishDeps',
+  'auditContext',
+] as const satisfies readonly (keyof FolioRuntime)[]
+
+/**
+ * `BRAND_MEMBERS` for `rt.sites`: with `brands` the settings type is each brand's
+ * (`BrandRuntime.settings`), so `rt.sites.settings` throws rather than read as "no
+ * settings type", which would make every `folio.settings` quietly null.
+ */
+export const BRAND_SITES_MEMBERS = ['settings'] as const satisfies readonly (keyof SitesRuntime)[]
+
 export interface FolioRuntime {
+  /**
+   * One `BrandRuntime` per brand, keyed by id; a deployment with no `brands` has
+   * one, keyed `null` (`multi-brand.md` decision 6).
+   */
+  brands: ReadonlyMap<string | null, BrandRuntime>
+  /**
+   * The brand of a scope or site, by the registry snapshot the caller already
+   * holds. With no `brands`: always the one. With them: null for `shared`, for no
+   * scope, and for a scope the snapshot does not hold — which decision 4 has
+   * already fenced off. **Never a default brand.**
+   */
+  forScope: (registry: SiteRegistry, scope: string | null) => BrandRuntime | null
   registry: Registry
   /**
    * `FolioConfig.previewWrap`, unchanged. See its doc comment, and the note at
@@ -437,7 +584,9 @@ export interface FolioRuntime {
  * config mistake that throws here rather than turning into a 500 on whichever
  * route reaches it first.
  */
-export function documentTypes<Env>(config: FolioConfig<Env>): readonly DocumentType[] {
+export function documentTypes<Env>(
+  config: Pick<FolioSingleConfig<Env>, 'types' | 'root'>,
+): readonly DocumentType[] {
   if (config.types && config.root !== undefined) {
     throw new Error(
       "folio: pass either `types` or `root`, not both — `root` is sugar for one 'page' type",
@@ -504,7 +653,7 @@ export function manifestHooks<Env>(hooks: FolioHooks<Env> | undefined): Pick<Man
  * matter are the two a host is likely to fumble when hand-rolling the object
  * instead of passing the global straight through.
  */
-export function validateAssets(assets: FolioConfig<unknown>['assets']): void {
+export function validateAssets(assets: FolioSingleConfig<unknown>['assets']): void {
   const fix =
     "pass the plugin's global: `assets: __FOLIO_ASSETS__` in the same file as `createFolio`"
   if (!assets) {
@@ -518,6 +667,42 @@ export function validateAssets(assets: FolioConfig<unknown>['assets']): void {
     }
   }
 }
+
+/**
+ * `validateAssets` for a deployment with `brands`, at the same moment and for the
+ * same reason: the admin entry, and for a preview the brand's own bundle, which the
+ * plugin's record form bakes into `assets.brands` (`multi-brand.md` decision 9).
+ * Construction has already checked that `assets.brands` names exactly the brands.
+ * `brand` null checks the admin half only and answers nothing useful.
+ */
+export function validateBrandedAssets(
+  assets: FolioBrandedConfig<unknown>['assets'],
+  brand: string | null,
+): { preview: string; previewCss?: string[] } {
+  const fix =
+    "pass the plugin's global, built with a `blocks` record: `assets: __FOLIO_ASSETS__` in the same file as `createFolio`"
+  if (!assets) {
+    throw new Error(
+      `folio: 'assets' is required — without it the admin page renders no script tag and shows a blank screen. ${fix}`,
+    )
+  }
+  if (typeof assets.admin !== 'string' || !assets.admin) {
+    throw new Error(`folio: 'assets.admin' must be a non-empty string. ${fix}`)
+  }
+  if (brand === null) return { preview: '' }
+  const bundle = assets.brands?.[brand]
+  if (typeof bundle?.preview !== 'string' || !bundle.preview) {
+    throw new Error(`folio: 'assets.brands.${brand}.preview' must be a non-empty string. ${fix}`)
+  }
+  return bundle
+}
+
+/** A registry's rows of one brand. */
+const ownRows = (registry: SiteRegistry, brand: string): SiteRegistry => ({
+  sites: registry.sites.filter((s) => s.brand === brand),
+  groups: registry.groups.filter((g) => g.brand === brand),
+  shared: registry.shared,
+})
 
 /**
  * `FolioConfig.sites`, checked at construction (`multi-site.md`, "Construction-time
@@ -541,7 +726,7 @@ export function validateAssets(assets: FolioConfig<unknown>['assets']): void {
  */
 export function validateSites<Env>(
   config: FolioConfig<Env>,
-  types: readonly DocumentType[],
+  brands: readonly Pick<PreparedBrand, 'types' | 'globals' | 'settings'>[],
   logger: FolioLogger,
   auth: ResolvedAuth<unknown>,
 ): ResolvedSites | null {
@@ -561,7 +746,13 @@ export function validateSites<Env>(
   if (sites.admin.replace(/\/+$/, '') !== admin.origin) {
     throw new Error(`folio: 'sites.admin' must be an origin with no path, like '${admin.origin}'`)
   }
-  if (sites.settings !== undefined && typeByName(types, sites.settings)?.kind !== 'singleton') {
+  // With `brands` a brand's own `settings` is checked with the rest of the brand
+  // (`prepareBrand`), and `sites.settings` is refused outright (`validateBrands`).
+  if (
+    !config.brands &&
+    sites.settings !== undefined &&
+    typeByName(brands[0]?.types ?? [], sites.settings)?.kind !== 'singleton'
+  ) {
     throw new Error(
       `folio: 'sites.settings' names '${sites.settings}', which is not a singleton type`,
     )
@@ -572,12 +763,14 @@ export function validateSites<Env>(
     )
   }
   // `sng_` + type + `:` + a 32-character scope id, within `validate.ts`'s 64.
-  const layered = [...(config.globals ?? []), ...(sites.settings ? [sites.settings] : [])]
-  for (const name of layered) {
-    if (`sng_${name}:`.length + 32 > 64) {
-      throw new Error(
-        `folio: '${name}' is too long to layer: its layer ids would exceed 64 characters`,
-      )
+  for (const brand of brands) {
+    const layered = [...brand.globals, ...(brand.settings ? [brand.settings] : [])]
+    for (const name of layered) {
+      if (`sng_${name}:`.length + 32 > 64) {
+        throw new Error(
+          `folio: '${name}' is too long to layer: its layer ids would exceed 64 characters`,
+        )
+      }
     }
   }
   validateSitesAuth(auth)
@@ -589,52 +782,233 @@ export function validateSites<Env>(
   return {
     admin: admin.origin,
     adminHost: admin.hostname,
-    settings: sites.settings,
+    settings: config.brands ? undefined : sites.settings,
     resolve: sites.resolve,
   }
 }
 
+/** The keys that move into a brand (`multi-brand.md` decision 3), refused beside `brands`. */
+const BRAND_KEYS = [
+  'blocks',
+  'root',
+  'types',
+  'globals',
+  'previewCss',
+  'previewWrap',
+  'gate',
+  'forms',
+  'describe',
+  'migrations',
+] as const
+
+/**
+ * `FolioConfig.brands`, checked at construction (`multi-brand.md` decision 3), before
+ * any brand's own checks run: each refusal a throw naming the key. Null for a
+ * config with no `brands`, which is every config that existed before them.
+ *
+ * `assets` may be absent, as it may on a single-brand config: it is checked where
+ * the admin or a preview page is built (`validateAssets`). When present, its
+ * `brands` must name exactly the configured brands, because a preview for a brand
+ * with no bundle is a blank page and a bundle for a brand nobody configured is a
+ * key pointing at the wrong module.
+ */
+export function validateBrands<Env>(
+  config: FolioConfig<Env>,
+): readonly (readonly [string, FolioBrand<Env>])[] | null {
+  if (config.brands === undefined) return null
+  const brands = config.brands
+  // A JS host, or a cast, can reach these; the union type already refuses them.
+  const loose = config as unknown as Record<string, unknown>
+  if (typeof brands !== 'object' || brands === null) {
+    throw new Error("folio: 'brands' must be an object keyed by brand id")
+  }
+  if (!config.sites) {
+    throw new Error(
+      "folio: 'brands' needs 'sites': a brand is a property of a site row, and a deployment with no sites has one",
+    )
+  }
+  const entries = Object.entries(brands)
+  if (entries.length === 0) {
+    throw new Error("folio: 'brands' is empty: name at least one, or leave 'brands' out")
+  }
+  for (const [id, brand] of entries) {
+    if (!SITE_ID.test(id)) {
+      throw new Error(
+        `folio: brand id '${id}' must be 1–32 lowercase letters, digits or inner hyphens, like a site id`,
+      )
+    }
+    if (typeof brand?.label !== 'string' || !brand.label.trim()) {
+      throw new Error(`folio: 'brands.${id}.label' must be a non-empty string`)
+    }
+  }
+  for (const key of BRAND_KEYS) {
+    if (loose[key] !== undefined) {
+      throw new Error(
+        `folio: '${key}' belongs to a brand beside 'brands': set 'brands.<id>.${key}'`,
+      )
+    }
+  }
+  if ((config.sites as { settings?: unknown }).settings !== undefined) {
+    throw new Error(
+      "folio: 'sites.settings' belongs to a brand beside 'brands': set 'brands.<id>.settings'",
+    )
+  }
+  const assets = loose.assets as Record<string, unknown> | undefined
+  if (assets !== undefined) {
+    for (const key of ['preview', 'previewCss'] as const) {
+      if (assets[key] !== undefined) {
+        throw new Error(
+          `folio: 'assets.${key}' belongs to a brand beside 'brands': pass the plugin's 'assets.brands'`,
+        )
+      }
+    }
+    const bundles = assets.brands
+    const named = bundles && typeof bundles === 'object' ? Object.keys(bundles).sort() : []
+    const configured = entries.map(([id]) => id).sort()
+    if (named.join('\n') !== configured.join('\n')) {
+      throw new Error(
+        `folio: 'assets.brands' must name exactly the brands in 'brands' (${configured.join(', ')}); it names ${named.length ? named.join(', ') : 'none'}`,
+      )
+    }
+  }
+  return entries
+}
+
+/** One brand's config, validated: what `createRuntime` builds a `BrandRuntime` from. */
+interface PreparedBrand {
+  id: string | null
+  label: string | null
+  registry: Registry
+  schema: SchemaIndex
+  types: readonly DocumentType[]
+  globals: readonly string[]
+  settings: string | undefined
+  migrations: readonly Migration[]
+  gate: ResolvedGate | null
+  describe: ResolvedDescribe | null
+  forms: ResolvedForms | null
+  previewCss: readonly string[]
+  previewWrap: PreviewWrap | undefined
+}
+
+/**
+ * Every check a single-brand config gets, for one brand, in the order it always ran
+ * them. A branded deployment's refusals name the brand; a single-brand one's messages
+ * are exactly what they were.
+ */
+function prepareBrand<Env>(
+  id: string | null,
+  brand: FolioBrand<Env> | FolioSingleConfig<Env>,
+  settings: string | undefined,
+): PreparedBrand {
+  try {
+    const registry = toRegistry(brand.blocks)
+    const schema = toSchemaIndex(registry)
+    // Construction-time, before any request is served: an invalid preset (an
+    // unknown type or slot, a disallowed child, a cycle) is a config mistake,
+    // not a runtime surprise a caller discovers three requests later.
+    validatePresets(schema)
+    // Same timing, same reason, and the same for `types`: an unknown root block,
+    // two defaults, a duplicate name or an `under` chain that never reaches the
+    // top level all throw here (`../../docs/specs/foundation/document-types.md`).
+    const types = documentTypes(brand)
+    validateTypes(types, schema)
+    // Same timing, same reason, and after `validateTypes` because it needs both
+    // `types` and `schema`: a `gate` whose field is translatable, unindexed, the
+    // wrong kind, or declared on no `page` root is a gate the editor believes in
+    // and nothing enforces (`../../docs/specs/platform/visitor-access.md` decision 8).
+    const gate = validateGate(brand.gate, types, schema)
+    // Same timing, same reason: `describe.fn` that is not a function, an unknown
+    // key, or a `concurrency` outside 1–8 is a config mistake, and the request
+    // that would otherwise discover it is a background `waitUntil` after an
+    // upload — where nobody is looking and the only symptom is alt text that
+    // never appears (`../../docs/specs/content-model/media-library.md` decision 8).
+    const describe = validateDescribe(brand.describe)
+    // Same timing, same reason, one rung more insistent than `describe`: the
+    // request that would otherwise discover a `verify` that is not a function is an
+    // anonymous POST from the public internet, and `verify` fails closed — so the
+    // symptom is a contact form that silently collects nothing, on the one route in
+    // this library a stranger can reach (`../../docs/specs/content-model/forms.md` decision 11).
+    const forms = validateForms(brand.forms)
+    // Same timing, same reason: `globals` naming an unknown type or a non-
+    // singleton one is a config mistake, not a runtime surprise the first page
+    // render discovers (`../../docs/specs/content-model/globals.md`).
+    validateGlobals(brand.globals, types)
+    // Same timing, same reason: a duplicate migration id, or a set whose declared
+    // order and lexicographic order disagree, would migrate documents in an order
+    // that depends on which comparison happened to be used
+    // (`../../docs/specs/foundation/schema-migrations.md`). **A brand's ids carry
+    // the brand** (`multi-brand.md` decision 16), because `schema_migrations` is
+    // one table keyed by id; the rules below the prefix are the single-brand ones.
+    const migrations = brand.migrations ?? []
+    if (id !== null) {
+      for (const m of migrations) {
+        if (typeof m.id !== 'string' || !m.id.startsWith(`${id}/`)) {
+          throw new Error(
+            `folio: migration id '${m.id}' must start with its brand, '${id}/' (like '${id}/0001-…'): schema_migrations is keyed by id alone`,
+          )
+        }
+      }
+      validateMigrations(migrations.map((m) => ({ ...m, id: m.id.slice(id.length + 1) })))
+    } else {
+      validateMigrations(migrations)
+    }
+    if (
+      id !== null &&
+      settings !== undefined &&
+      typeByName(types, settings)?.kind !== 'singleton'
+    ) {
+      throw new Error(`folio: 'settings' names '${settings}', which is not a singleton type`)
+    }
+    return {
+      id,
+      label: 'label' in brand ? brand.label : null,
+      registry,
+      schema,
+      types,
+      globals: brand.globals ?? [],
+      settings,
+      migrations,
+      gate,
+      describe,
+      forms,
+      previewCss: brand.previewCss ?? [],
+      previewWrap: brand.previewWrap,
+    }
+  } catch (err) {
+    if (id === null || !(err instanceof Error)) throw err
+    throw new Error(`folio: brand '${id}': ${err.message.replace(/^folio: /, '')}`, { cause: err })
+  }
+}
+
+/** The error every old `rt.*` member answers on a branded runtime (`BRAND_MEMBERS`). */
+function noBrand(key: string): Error {
+  return new Error(
+    `folio: rt.${key} has no brand on a deployment with 'brands': read it from c.var.brand, or from rt.forScope(registry, scope)`,
+  )
+}
+
 export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
-  const registry = toRegistry(config.blocks)
-  const schema = toSchemaIndex(registry)
-  // Construction-time, before any request is served: an invalid preset (an
-  // unknown type or slot, a disallowed child, a cycle) is a config mistake,
-  // not a runtime surprise a caller discovers three requests later.
-  validatePresets(schema)
-  // Same timing, same reason, and the same for `types`: an unknown root block,
-  // two defaults, a duplicate name or an `under` chain that never reaches the
-  // top level all throw here (`../../docs/specs/foundation/document-types.md`).
-  const types = documentTypes(config)
-  validateTypes(types, schema)
+  // `brands`' own refusals first (`multi-brand.md` decision 3): a moved key at the
+  // top level, `brands` without `sites`, an `assets.brands` naming other brands.
+  // Null with no `brands`, and then everything below is one brand, as it always was.
+  const brandEntries = validateBrands(config)
+  const branded = brandEntries !== null
+  // Every check a single-brand config gets, per brand (`prepareBrand`), in the order
+  // they always ran among themselves; a branded deployment's refusals name the
+  // brand. The deployment's own checks — hooks, locales, auth, sites — follow.
+  const prepared: readonly PreparedBrand[] = brandEntries
+    ? brandEntries.map(([id, brand]) => prepareBrand(id, brand, brand.settings))
+    : [
+        prepareBrand(
+          null,
+          config as FolioSingleConfig<Env>,
+          (config as FolioSingleConfig<Env>).sites?.settings,
+        ),
+      ]
   // Same timing, same reason: a typo in `hooks` (or in `await`) should fail
   // loudly once, not silently never fire (`../../docs/specs/platform/publish-hooks.md`).
   validateHooks(config.hooks)
-  // Same timing, same reason, and after `validateTypes` because it needs both
-  // `types` and `schema`: a `gate` whose field is translatable, unindexed, the
-  // wrong kind, or declared on no `page` root is a gate the editor believes in
-  // and nothing enforces (`../../docs/specs/platform/visitor-access.md` decision 8).
-  const gate = validateGate(config.gate, types, schema)
-  // Same timing, same reason: `describe.fn` that is not a function, an unknown
-  // key, or a `concurrency` outside 1–8 is a config mistake, and the request
-  // that would otherwise discover it is a background `waitUntil` after an
-  // upload — where nobody is looking and the only symptom is alt text that
-  // never appears (`../../docs/specs/content-model/media-library.md` decision 8).
-  const describe = validateDescribe(config.describe)
-  // Same timing, same reason, one rung more insistent than `describe`: the
-  // request that would otherwise discover a `verify` that is not a function is an
-  // anonymous POST from the public internet, and `verify` fails closed — so the
-  // symptom is a contact form that silently collects nothing, on the one route in
-  // this library a stranger can reach (`../../docs/specs/content-model/forms.md` decision 11).
-  const forms = validateForms(config.forms)
-  // Same timing, same reason: `globals` naming an unknown type or a non-
-  // singleton one is a config mistake, not a runtime surprise the first page
-  // render discovers (`../../docs/specs/content-model/globals.md`).
-  validateGlobals(config.globals, types)
-  // Same timing, same reason: a duplicate migration id, or a set whose declared
-  // order and lexicographic order disagree, would migrate documents in an order
-  // that depends on which comparison happened to be used
-  // (`../../docs/specs/foundation/schema-migrations.md`).
-  validateMigrations(config.migrations)
   // Same timing, same reason: a default locale that is not available, a duplicate
   // code, a fallback that does not exist or one that cycles would each turn into
   // a page rendered in the wrong language rather than an error
@@ -655,17 +1029,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const formPurgeCapability = (
     config as FolioConfig<Env> & { formPurgeCapability?: PurgeCapability }
   ).formPurgeCapability
-  const globals = config.globals ?? []
   const locales = config.locales
-  const migrations = config.migrations ?? []
-  const schemaId = latestMigrationId(migrations)
-  const typeOf = (name: string | undefined) => typeByName(types, name)
-  const fallbackType = defaultType(types)
-  // Root blocks only (`../../docs/specs/content-model/collections.md` decision 2): the index is
-  // a *fixed* projection of a document, so which fields it holds cannot depend on
-  // which blocks happen to be inside it. `/folio/audit` reports an `indexed` flag
-  // on a block that is no type's root, which would otherwise do nothing silently.
-  const indexed = indexedFieldNames(schema, types)
   const base = config.basePath ?? DEFAULT_BASE
   const route: FolioRuntime['route'] = config.route ?? ((path: string) => `/${path}`)
   const assetBase = `${base}/asset`
@@ -674,21 +1038,48 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   // that is not a singleton, is a deployment that serves nothing
   // (`../../docs/specs/foundation/multi-site.md`). Null with no `sites`, and then
   // no snapshot exists and nothing below ever reads the registry.
-  const resolvedSites = validateSites(config, types, logger, auth)
+  const resolvedSites = validateSites(config, prepared, logger, auth)
+  /** A brand's layered documents: its globals and its settings type, once each. */
+  const layeredOf = (b: PreparedBrand): readonly string[] => [
+    ...new Set([...b.globals, ...(b.settings ? [b.settings] : [])]),
+  ]
+  // Every brand's, for the one internal hook set; a single brand's is its own.
+  const allGlobals = [...new Set(prepared.flatMap((b) => b.globals))]
+  const brandIds = brandEntries ? brandEntries.map(([id]) => id) : null
   const sites: SitesRuntime | null = resolvedSites
     ? (() => {
-        const snapshot = registrySnapshot()
         const rawDb = (env: unknown) => config.bindings(env as Env).db
-        return {
+        // With `brands`, the snapshot is served from the configured brands' rows
+        // only (`servingRegistry`, decision 4): a row of no configured brand is no
+        // candidate and has no chain. `fresh` is every row, for the writes.
+        const fresh = (env: unknown) => readRegistry(rawDb(env), { branded })
+        const snapshot = registrySnapshot({
+          read: (db) =>
+            readRegistry(db, { branded }).then((registry) =>
+              brandIds ? servingRegistry(registry, brandIds) : registry,
+            ),
+        })
+        const out: SitesRuntime = {
           ...resolvedSites,
           registry: (env: unknown) => snapshot.get(rawDb(env)),
-          fresh: (env: unknown) => readRegistry(rawDb(env)),
+          fresh,
           drop: snapshot.drop,
-          layered: [
-            ...new Set([...globals, ...(resolvedSites.settings ? [resolvedSites.settings] : [])]),
-          ],
+          layered: [...new Set(prepared.flatMap(layeredOf))],
           rawDb,
+          brands: brandIds,
         }
+        // As the old `rt.*` members below: read, not merely built, it throws.
+        if (branded) {
+          for (const key of BRAND_SITES_MEMBERS) {
+            Object.defineProperty(out, key, {
+              enumerable: true,
+              get: () => {
+                throw noBrand(`sites.${key}`)
+              },
+            })
+          }
+        }
+        return out
       })()
     : null
 
@@ -788,477 +1179,12 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
   const decorate = (nodes: StoryNode[], site?: SiteRef): StoryNode[] =>
     nodes.map((n) => ({ ...urlsFor(site)(n), children: decorate(n.children, site) }))
 
-  /**
-   * A starting document for one document type: its root block's own 'default'
-   * preset (field-defaults-and-presets.md, decision 3) — no template config key
-   * of its own. A root with no such preset seeds a bare root, exactly as before
-   * that spec.
-   *
-   * The title is written into the *type's* title field rather than always
-   * `title`, so a `person` record whose root has `fullName` and no `title` gets
-   * its name where the schema actually keeps it (`titleFieldOf`).
-   */
-  const seed = (type: DocumentType | undefined, title: string): Doc => {
-    const t = type ?? fallbackType
-    const def = schema[t.root]
-    const preset = def?.presets?.some((p) => p.name === 'default') ? 'default' : undefined
-    const bloks = blankSubtree(schema, t.root, null, null, 'a0', preset)
-    const root = bloks[0]!
-    const field = titleFieldOf(t, def)
-    if (field && field in root.data) root.data[field] = title
-    return { root: root.uid, bloks: Object.fromEntries(bloks.map((b) => [b.uid, b])) }
-  }
-
-  /**
-   * A layer that has something below it starts **bare** (`multi-site.md`
-   * decision 8): a root with `data: {}`, no preset and no title, so every field
-   * reads as inherited. A root seeded with defaults would override the whole
-   * chain below it on the first keystroke.
-   */
-  const bareSeed = (type: DocumentType | undefined): Doc => {
-    const t = type ?? fallbackType
-    const uid = newUid()
-    return {
-      root: uid,
-      bloks: { [uid]: { uid, type: t.root, parent: null, slot: null, order: 'a0', data: {} } },
-    }
-  }
-
-  /**
-   * How `story`'s draft starts if its object does not exist yet: bare for a
-   * layer with something below it, else `seed`. **Only a multi-site deployment
-   * layers**, so a single-site singleton (`sng_<type>`, the `default` layer of a
-   * chain of one) seeds exactly as it always did.
-   */
-  const seedFor = (story: { id: string; type: string; title: string }): Doc =>
-    sites && isBareLayer(story.id)
-      ? bareSeed(typeOf(story.type))
-      : seed(typeOf(story.type), story.title)
-
   const stub = ({ story }: ReadBindings, id: string): StoryStub =>
     story.get(story.idFromName(id)) as unknown as StoryStub
 
   /** The scope's space instance, or null for a host without the binding. */
   const space = ({ space: ns }: ReadBindings, scope: string | null = null): SpaceStub | null =>
     ns ? (ns.get(ns.idFromName(spaceNameFor(scope))) as unknown as SpaceStub) : null
-
-  const draftFor = (bindings: ReadBindings, story: StoryMeta) =>
-    stub(bindings, story.id).getOrInit(seedFor(story))
-
-  const draftForWithSyncId = (bindings: ReadBindings, story: StoryMeta) =>
-    stub(bindings, story.id).getOrInitWithSyncId(seedFor(story))
-
-  const draft = async (bindings: ReadBindings, id: string) => {
-    const meta = await storyById(bindings.db, id)
-    return stub(bindings, id).getOrInit(meta ? seedFor(meta) : seed(undefined, 'Untitled'))
-  }
-
-  /**
-   * What a document is called, from its own type's title field, falling back to
-   * the row's cached title rather than to the literal `'Untitled'`: the row is
-   * the better answer for a root block that offers no title field at all.
-   */
-  const titleFor = (story: StoryMeta, doc: Doc) =>
-    titleOf(doc, typeOf(story.type), schema, story.title)
-
-  /**
-   * The title in every non-source locale, for the tree's per-locale label cache.
-   *
-   * A locale whose title field is untranslated is **omitted** rather than
-   * recorded with the source value: the admin falls back to `title` for a missing
-   * entry anyway, and storing the English under `fr` would make a stale cache
-   * indistinguishable from a real translation the moment somebody added one.
-   */
-  const titlesFor = (story: StoryMeta, doc: Doc): Record<string, string> | undefined => {
-    if (!locales) return undefined
-    const source = titleFor(story, doc)
-    const out: Record<string, string> = {}
-    for (const code of otherLocales) {
-      const translated = titleOf(doc, typeOf(story.type), schema, source, localeOf(code))
-      if (translated !== source) out[code] = translated
-    }
-    return out
-  }
-
-  /**
-   * The context a document needs that the document itself cannot hold.
-   *
-   * **This used to load every story in the site, on every page render**
-   * (`../../docs/specs/content-model/collections.md` decision 6). Invisible at 40 pages and
-   * fatal at 800, and collections are what made it urgent — an insights index is
-   * exactly the site that has 800 rows. It now loads the ids the document actually
-   * needs:
-   *
-   *   - the targets of its `multilink` fields **and of the link marks inside its
-   *     richtext**. The second half is not optional and is the trap: a Folio-native
-   *     link mark stores a structured `attrs.link` and has no `href` at all,
-   *     because the href is derived from the resolution at render time. Miss those
-   *     ids and every internal link inside prose renders as unstyled text with no
-   *     `<a>` around it (see `core/refs.ts`).
-   *   - the targets of its `reference` fields, across every locale.
-   *   - the same two sets again for each document it pulls in — a referenced person
-   *     card and a global header both contain links of their own, and `RenderBlok`
-   *     empties `docs` on the way down but never `stories`.
-   *   - its own ancestors, by path, for a breadcrumb (`opts.story`).
-   *
-   * `opts.stories: 'all'` is the escape hatch: every story, exactly as before, for
-   * a host that wants the full map (a navigation built from the tree). A sitemap
-   * should call `folio.stories(env)` or `folio.query(env, …)` instead.
-   *
-   * `draft` is what the preview passes: an editor looking at a page that
-   * references a form should see the form as they just edited it, not the last
-   * published copy. A live page always resolves published content. The same
-   * split applies to globals — but only in draft mode is a global's row
-   * ensured into existence (`ensureSingleton`): that write is fine for an
-   * editor's preview, rare and never on the hot path, while a live page must
-   * cost nothing extra for a global nobody has ever opened in the admin, so
-   * the published branch below only *reads* the derived id and lets a missing
-   * row mean exactly what a missing published_doc already means — nothing to
-   * show, no error thrown.
-   */
-  const resolve = async (
-    bindings: ReadBindings,
-    doc?: Doc,
-    opts?: ResolveOptions,
-  ): Promise<Resolution> => {
-    const db = bindings.db
-    // The rendering site's chain, or the one scope of a deployment with no
-    // `sites`. Bound on every id-set read below either way (`stories.ts`'s
-    // `chainClause`).
-    const render = opts?.site ?? undefined
-    const chain = opts?.site === null ? [] : (render?.chain ?? SINGLE_SITE_CHAIN)
-    const urlsOf = urlsFor(render?.site)
-    const active = localeOf(opts?.locale)
-    // Absent for the source locale, so a default-locale resolution is byte-
-    // identical to a pre-localisation one (`localisation.md` decision 5). Every
-    // read in `RenderBlok` goes through this one value.
-    const localeField = active ? { locale: active } : {}
-    const pageField = opts?.page !== undefined ? { page: opts.page } : {}
-    const searchField = opts?.search !== undefined ? { search: opts.search } : {}
-    // The documents this render loads as globals, and each one's layer ids in the
-    // chain, most general first (`multi-site.md` decision 8). With no `sites` the
-    // chain is `['default']` and `layerId` is `sng_<type>`, so this is the list,
-    // the ids and the statements it always was; on a multi-site deployment the
-    // settings type is loaded too, and every chain scope contributes a layer.
-    const loaded = sites ? sites.layered : globals
-    const layerIds = new Map(
-      loaded.map((name) => [name, [...chain].reverse().map((scope) => layerId(name, scope))]),
-    )
-    const globalIds = [...layerIds.values()].flat()
-
-    // A caller with no document at all wants the map and nothing else, so it gets
-    // every story: there is no document to narrow to, and answering with an empty
-    // map would be a silent behaviour change for `folio.resolve(env)`.
-    const wantAll = opts?.stories === 'all' || !doc
-
-    /** Pass one: what `doc` itself points at, plus the ancestors of its story. */
-    const directIds = doc
-      ? [...linkedIds(doc, schema), ...referencedIdsAllLocales(doc, schema)]
-      : []
-    const refIds = doc ? referencedIdsAllLocales(doc, schema) : []
-
-    const known = new Map<string, StoryMeta>()
-    const remember = (rows: readonly StoryMeta[]) => {
-      for (const row of rows) known.set(row.id, row)
-    }
-    const requested = [...new Set([...directIds, ...globalIds])]
-    const ancestors = wantAll ? [] : ancestorPaths(opts?.story?.path ?? null)
-    const pass1 = wantAll
-      ? listStories(db, undefined, chain)
-      : storiesFor(db, requested, ancestors, chain)
-    /**
-     * **Breadcrumb ancestors follow decision 5** (`multi-site.md`): pass one reads
-     * every scope's row at each ancestor path, and keeps per path only the row
-     * `pickServing` would serve there — so a site that forked `info` shows its own
-     * Info in the breadcrumb of an inherited `info/parking`, and a nearer redirect
-     * leaves the crumb out rather than linking to a page the site does not serve.
-     *
-     * The redirects at those paths are a second statement, sent alongside pass
-     * one, and only on a chain of more than one scope: with one scope there is no
-     * shadowing to decide, which is why a single-site render's statement count
-     * does not move (`read-session.test.ts`).
-     */
-    const ancestorRedirects =
-      chain.length > 1 && ancestors.length > 0
-        ? redirectsAtPaths(db, chain, ancestors)
-        : Promise.resolve([])
-    const served = async (rows: readonly StoryMeta[]): Promise<StoryMeta[]> => {
-      if (chain.length <= 1 || ancestors.length === 0) return [...rows]
-      const redirects = await ancestorRedirects
-      // A row asked for by id stays whatever it is — a link to the shared `info`
-      // still resolves to it — and a row that is only here as a crumb stays only
-      // if it is the one this site serves at its path.
-      const byId = new Set(requested)
-      const crumb = (row: StoryMeta) => row.path !== null && ancestors.includes(row.path)
-      const out = rows.filter((row) => byId.has(row.id) || !crumb(row))
-      for (const path of ancestors) {
-        const here = rows.filter((row) => row.path === path)
-        const at = redirects.filter((r) => r.path === path)
-        const pick = pickServing(chain, here, at)
-        if (pick?.kind === 'story' && !byId.has(pick.story.id)) out.push(pick.story)
-      }
-      return out
-    }
-
-    /**
-     * The forms this document embeds (`../../docs/specs/content-model/forms.md` decision 4),
-     * **issued here rather than awaited later**: the ids come straight off the
-     * document walk and depend on nothing pass one returns, so the read goes out
-     * alongside it and both branches below wait once instead of twice. Serialising
-     * it would cost a whole round trip per page render for nothing — the mistake
-     * the published branch's comment below records having already made once.
-     *
-     * A document with no `form` field issues no query at all: `formIds` answers
-     * an empty array and this never touches D1.
-     */
-    // Within the render's chain like every other id-set read here (`multi-site.md`
-    // decision 3): a form owned by a scope outside it resolves exactly like a deleted
-    // one, so its questions and its `action` are never handed to a page that is not
-    // entitled to them.
-    const formRows = formsByIds(db, doc ? formIds(doc, schema) : [], logger, chain)
-
-    /** Pass two: the documents this one pulls in — references, and every global. */
-    let docs: Record<string, Doc> = {}
-    let globalDocs: Record<string, Doc> | undefined
-
-    if (opts?.draft) {
-      remember(await served(await pass1))
-      // A reference to an id with no story row is unresolvable, and in draft mode
-      // asking for its draft would *create* a Durable Object for a deleted story.
-      // That is what keeps this branch sequential where the published one below
-      // is not: the filter is load-bearing here and merely tidy there.
-      const liveRefIds = refIds.filter((id) => known.has(id))
-      if (loaded.length > 0 || liveRefIds.length > 0) {
-        const [refEntries, globalEntries] = await Promise.all([
-          Promise.all(liveRefIds.map(async (id) => [id, await draft(bindings, id)] as const)),
-          Promise.all(
-            loaded.map(async (name) => {
-              // **A render on a multi-site deployment never writes** (decision
-              // 8): a layer with no row in the chain is absent, which reads as
-              // every field inherited, rather than ensured into existence. A
-              // layer row and its object are made by an editor's first write, so
-              // a draft site that was only ever previewed stays deletable.
-              if (sites) {
-                const layers = await Promise.all(
-                  layerIds.get(name)!.map((id) => {
-                    const meta = known.get(id)
-                    return meta ? draftFor(bindings, meta) : undefined
-                  }),
-                )
-                const merged = mergeLayers(layers, schema)
-                return merged ? ([name, merged] as const) : null
-              }
-              const meta = await ensureSingleton(db, typeOf(name)!, schemaId)
-              return [name, await draftFor(bindings, meta)] as const
-            }),
-          ),
-        ])
-        docs = Object.fromEntries(refEntries)
-        globalDocs = loaded.length
-          ? Object.fromEntries(
-              globalEntries.filter((entry): entry is readonly [string, Doc] => entry !== null),
-            )
-          : undefined
-      }
-    } else {
-      /**
-       * The published branch runs both passes at once, because on this branch
-       * pass two does not actually need pass one's answer: `publishedDocsByIds`
-       * returns nothing for an id with no row, and the `known.has` screen below
-       * drops the same ids the pre-filter used to. Waiting was costing a whole
-       * network round trip per page render for a filter that changes nothing —
-       * ~280ms of it on a host whose primary is a continent away.
-       */
-      const wanted = [...new Set([...refIds, ...globalIds])]
-      const [rows, combined] = await Promise.all([
-        pass1.then(served),
-        wanted.length > 0
-          ? publishedDocsByIds(db, wanted, chain)
-          : Promise.resolve<Record<string, Doc>>({}),
-      ])
-      remember(rows)
-      docs = Object.fromEntries(
-        refIds
-          .filter((id) => known.has(id) && combined[id])
-          .map((id) => [id, combined[id]!] as const),
-      )
-      globalDocs = loaded.length
-        ? Object.fromEntries(
-            loaded
-              .map(
-                (name) =>
-                  [
-                    name,
-                    mergeLayers(
-                      layerIds.get(name)!.map((id) => combined[id]),
-                      schema,
-                    ),
-                  ] as const,
-              )
-              .filter((entry): entry is [string, Doc] => Boolean(entry[1])),
-          )
-        : undefined
-    }
-
-    /**
-     * Pass three: the ids those documents point at. One level, matching the bound
-     * `RenderBlok` already enforces on `docs` — but `stories` survives that
-     * emptying, so a link inside a global's navigation or inside a referenced card
-     * has to resolve. Skipped entirely when the whole map is already loaded, and
-     * when nothing new turned up, which is the ordinary case.
-     */
-    if (!wantAll) {
-      const nested = new Set<string>()
-      for (const pulled of [...Object.values(docs), ...Object.values(globalDocs ?? {})]) {
-        for (const id of linkedIds(pulled, schema)) if (!known.has(id)) nested.add(id)
-        for (const id of referencedIdsAllLocales(pulled, schema)) {
-          if (!known.has(id)) nested.add(id)
-        }
-      }
-      if (nested.size > 0) remember(await storiesFor(db, [...nested], [], chain))
-    }
-
-    /**
-     * The descriptors, compiled from the rows the read above fetched. The action URL
-     * is built from this runtime's `base` and the `_folio_page` hidden input from
-     * the story's own URL through the host's `route` — so a submission comes back
-     * to the page it was made on, in the locale it was rendered in.
-     *
-     * A form the document points at that has since been deleted is simply absent
-     * from the map, and `resolveValue` answers `null` for it: the same posture a
-     * `reference` to a deleted document takes.
-     */
-    const formPage =
-      opts?.story?.path != null ? route(opts.story.path, active?.code, render?.site) : undefined
-    const forms = Object.fromEntries(
-      (await formRows).map((form) => [
-        form.id,
-        compileForm(form, {
-          base,
-          ...(active ? { locale: active } : {}),
-          ...(formPage !== undefined ? { page: formPage } : {}),
-        }),
-      ]),
-    )
-
-    const resolution: Resolution = {
-      ...buildResolution([...known.values()].map(urlsOf), assetBase),
-      ...localeField,
-      ...pageField,
-      ...searchField,
-      // Absent rather than `{}` when there is nothing to pull in, so a document
-      // with no references bootstraps the byte-identical payload it always did.
-      ...(Object.keys(docs).length > 0 ? { docs } : {}),
-      ...(globalDocs ? { globals: globalDocs } : {}),
-      ...(Object.keys(forms).length > 0 ? { forms } : {}),
-      // Multi-site only, and last, so a single-site resolution has neither key
-      // and serialises byte for byte as it always did (decision 15).
-      ...(render ? { site: siteContext(render) } : {}),
-      ...(render && opts?.story?.path != null ? { path: opts.story.path } : {}),
-    }
-
-    /** Pass four: the collection queries this document contains, run once each. */
-    const queries = doc
-      ? collectionQueries(doc, schema, opts?.page, active, opts?.search)
-      : new Map<string, ContentQuery>()
-    if (queries.size === 0) return resolution
-
-    const answers = await Promise.all(
-      [...queries].map(
-        async ([key, q]) =>
-          [key, await runQuery(queryDeps(db, chain, render?.site), q, { locale: active })] as const,
-      ),
-    )
-    const collections: Record<string, ResolvedCollection> = Object.fromEntries(answers)
-
-    // Decision 3: a preview resolves collections against **published** content.
-    // Querying drafts would mean opening every candidate Durable Object on every
-    // keystroke. So the list is marked `stale` — a block can say "this list shows
-    // published items" — and the open story's own draft is patched over its
-    // published row where it is a member, which is the one difference an editor
-    // looking at an index page actually notices.
-    if (opts?.draft) {
-      const open = opts.story
-      const root = doc?.bloks[doc.root]
-      for (const key of Object.keys(collections)) {
-        const answer = collections[key]!
-        collections[key] = {
-          ...answer,
-          stale: true,
-          items:
-            doc && open && root
-              ? answer.items.map((item) =>
-                  item.id === open.id
-                    ? {
-                        ...item,
-                        // Patched only where the answer carries documents at all
-                        // (`core/query.ts`'s `ContentQuery.withDoc`). Adding one
-                        // unconditionally would put the open draft's whole body
-                        // into a card rail that asked for none — and give the
-                        // editor an item shaped unlike its ten neighbours.
-                        ...(item.doc ? { doc } : {}),
-                        data: dataOf(root, active),
-                        title: titleOf(doc, typeOf(open.type), schema, item.title, active),
-                      }
-                    : item,
-                )
-              : answer.items,
-        }
-      }
-    }
-
-    return { ...resolution, collections }
-  }
-
-  /** What `runQuery` needs, assembled from this runtime. */
-  const queryDeps = (
-    db: FolioDb,
-    chain: readonly string[] = SINGLE_SITE_CHAIN,
-    site?: SiteRef,
-  ): QueryDeps => ({
-    db,
-    indexed,
-    // `''` for the source locale, an undeclared code, or a site with no locales —
-    // exactly what `indexRowsFor` writes for the same three cases.
-    localeKey: (code) => localeOf(code)?.code ?? '',
-    withUrls: urlsFor(site),
-    chain,
-    // `ResolvedGate` narrowed to the three things a SQL predicate can use
-    // (`../../docs/specs/content-model/full-text-search.md` decision 11). `types`, not
-    // `roots`: SQL sees `stories.type` and cannot see a root block's name.
-    // Absent on a deployment with no gate, and then `contentSql` emits nothing.
-    ...(gate
-      ? { gate: { field: gate.config.field, public: gate.config.public, types: gate.types } }
-      : {}),
-  })
-
-  const query = (
-    bindings: ReadBindings,
-    q: ContentQuery,
-    chain: readonly string[] = SINGLE_SITE_CHAIN,
-    site?: SiteRef,
-  ): Promise<ContentPage> =>
-    runQuery(queryDeps(bindings.db, chain, site), q, { locale: localeOf(q.locale) })
-
-  /** `Resolution.site` for a render (`multi-site.md` decision 15). */
-  const siteContext = (render: SiteRender): SiteContext => ({
-    id: render.site.id,
-    name: render.site.name,
-    group: render.site.group,
-    status: render.site.status,
-    surface: render.surface,
-    chain: render.chain,
-    layered: sites?.layered ?? globals,
-  })
-
-  /**
-   * The `content_index` / `content_refs` rows a publish writes
-   * (`../../docs/specs/content-model/collections.md`). Here rather than inside `publish()` for
-   * the same reason `titleFor` is: the projection needs the schema, the document
-   * type and the locale config, which only this factory has.
-   */
-  const projection = (story: StoryMeta, doc: Doc): ContentProjection =>
-    contentProjection(story.id, doc, typeOf(story.type), schema, locales)
 
   /**
    * Hooks Folio registers on itself, run before any host hook for the same
@@ -1275,15 +1201,19 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
    * The purge is second on purpose. Both are after-commit and neither depends
    * on the other, but telling the open editors is the one whose latency a
    * person is watching, and the purge is the one that awaits a network call.
+   *
+   * **One set for the deployment, over every brand's globals and layered types**
+   * (`multi-brand.md` decision 15): the runner, `await` and every purge are
+   * deployment-level, and a type that is a global in any brand is purged as one.
    */
   const internalHooks: FolioHooks<Env>[] = [
-    spaceBroadcastHooks<Env>(config, globals, logger),
+    spaceBroadcastHooks<Env>(config, allGlobals, logger),
     // `undefined` for the capability, not omitted: a positional default only
     // applies when the argument itself is `undefined`, and skipping past it
     // to reach `logger` would mean naming the third parameter, which JS has
     // no syntax for.
     cachePurgeHooks<Env>(
-      globals,
+      allGlobals,
       undefined,
       logger,
       sites ? { registry: sites.registry, layered: sites.layered } : undefined,
@@ -1298,86 +1228,744 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       logger,
     )
 
-  const publishDeps = (
-    bindings: ReadBindings,
-    hookCtx: HookRunnerCtx,
-  ): PublishDeps & { logger: FolioLogger } => ({
-    db: bindings.db,
-    draft: (story) => draftFor(bindings, story),
-    draftWithSyncId: (story) => draftForWithSyncId(bindings, story),
-    titleFor,
-    titlesFor,
-    projection,
-    hooks: hookRunner(hookCtx),
-    logger,
-  })
-
   /**
-   * The two orders below are not the same, and are as configured today: the admin
-   * page puts the plugin's stylesheets before the host's, the preview the other
-   * way around.
+   * One brand's half of the runtime (`multi-brand.md` decision 6): every closure
+   * below reads this brand's registry, types and policy, and nothing else's. A
+   * deployment with no `brands` builds exactly one, from the top-level config, and
+   * it is the runtime it always was.
    */
-  const page = (which: 'admin' | 'preview'): PageAssets => {
-    const assets = config.assets
-    // Throws rather than serving a scriptless page. See `validateAssets`.
-    validateAssets(assets)
+  const buildBrand = (b: PreparedBrand): BrandRuntime => {
+    const { registry, schema, types, globals, migrations, gate, describe, forms } = b
+    const schemaId = latestMigrationId(migrations)
+    const typeOf = (name: string | undefined) => typeByName(types, name)
+    const fallbackType = defaultType(types)
+    // Root blocks only (`../../docs/specs/content-model/collections.md` decision 2): the index is
+    // a *fixed* projection of a document, so which fields it holds cannot depend on
+    // which blocks happen to be inside it. `/folio/audit` reports an `indexed` flag
+    // on a block that is no type's root, which would otherwise do nothing silently.
+    const indexed = indexedFieldNames(schema, types)
+    const layered = layeredOf(b)
+
+    /**
+     * A render or query for a site of another brand, or for none, is refused
+     * rather than answered with this brand's schema (decision 6's "never a
+     * default brand").
+     */
+    const assertOwnSite = (site: SiteRef | undefined, what: string) => {
+      if (site?.brand !== b.id) {
+        throw new Error(
+          `folio: brand '${b.id}' cannot ${what} ${site ? `site '${site.id}' (brand '${site.brand}')` : 'with no site'}: a chain never crosses a brand`,
+        )
+      }
+    }
+
+    /**
+     * A starting document for one document type: its root block's own 'default'
+     * preset (field-defaults-and-presets.md, decision 3) — no template config key
+     * of its own. A root with no such preset seeds a bare root, exactly as before
+     * that spec.
+     *
+     * The title is written into the *type's* title field rather than always
+     * `title`, so a `person` record whose root has `fullName` and no `title` gets
+     * its name where the schema actually keeps it (`titleFieldOf`).
+     */
+    const seed = (type: DocumentType | undefined, title: string): Doc => {
+      const t = type ?? fallbackType
+      const def = schema[t.root]
+      const preset = def?.presets?.some((p) => p.name === 'default') ? 'default' : undefined
+      const bloks = blankSubtree(schema, t.root, null, null, 'a0', preset)
+      const root = bloks[0]!
+      const field = titleFieldOf(t, def)
+      if (field && field in root.data) root.data[field] = title
+      return { root: root.uid, bloks: Object.fromEntries(bloks.map((b) => [b.uid, b])) }
+    }
+
+    /**
+     * A layer that has something below it starts **bare** (`multi-site.md`
+     * decision 8): a root with `data: {}`, no preset and no title, so every field
+     * reads as inherited. A root seeded with defaults would override the whole
+     * chain below it on the first keystroke.
+     */
+    const bareSeed = (type: DocumentType | undefined): Doc => {
+      const t = type ?? fallbackType
+      const uid = newUid()
+      return {
+        root: uid,
+        bloks: { [uid]: { uid, type: t.root, parent: null, slot: null, order: 'a0', data: {} } },
+      }
+    }
+
+    /** `seedFor` once the layer question is answered: `'bare'`, or anything else is `seed`. */
+    const seedAs = (story: { type: string; title: string }, layer: 'bare' | 'full' | null): Doc =>
+      layer === 'bare' ? bareSeed(typeOf(story.type)) : seed(typeOf(story.type), story.title)
+
+    /**
+     * How `story`'s draft starts if its object does not exist yet: bare for a
+     * layer with something below it, else `seed`. **Only a multi-site deployment
+     * layers**, so a single-site singleton (`sng_<type>`, the `default` layer of a
+     * chain of one) seeds exactly as it always did.
+     *
+     * **With `brands` the layer's chain decides** (`multi-brand.md` decision 5):
+     * there is no `shared` below every scope, so a group's layer and a layer on a
+     * site with no group are the bottom of their chains and seed full. That needs the
+     * registry, and a layer asked for without one throws rather than guess bare.
+     * Without `brands` the id alone answers (`isBareLayer`), exactly as before.
+     */
+    const seedFor = (
+      story: { id: string; type: string; title: string },
+      registry?: SiteRegistry,
+    ): Doc => {
+      if (!sites) return seedAs(story, null)
+      if (!branded) return seedAs(story, isBareLayer(story.id) ? 'bare' : 'full')
+      const layer = singletonTypeOf(story.id)
+      if (!layer) return seedAs(story, null)
+      if (!registry) {
+        throw new Error(
+          `folio: the layer '${story.id}' seeds by its chain on a deployment with 'brands': pass the registry`,
+        )
+      }
+      return seedAs(story, layerSeed(registry, layer.scope))
+    }
+
+    const draftFor = (bindings: ReadBindings, story: StoryMeta, registry?: SiteRegistry) =>
+      stub(bindings, story.id).getOrInit(seedFor(story, registry))
+
+    const draftForWithSyncId = (
+      bindings: ReadBindings,
+      story: StoryMeta,
+      registry?: SiteRegistry,
+    ) => stub(bindings, story.id).getOrInitWithSyncId(seedFor(story, registry))
+
+    const draft = async (bindings: ReadBindings, id: string, registry?: SiteRegistry) => {
+      const meta = await storyById(bindings.db, id)
+      return stub(bindings, id).getOrInit(
+        meta ? seedFor(meta, registry) : seed(undefined, 'Untitled'),
+      )
+    }
+
+    /**
+     * The seed of a layer read inside a render's chain, on a deployment with `brands`:
+     * the chain a render holds is the registry's answer already, and a layer's own
+     * chain is its tail from the layer's scope (a site's is itself, its group; a
+     * group's is itself), so the layer is bare exactly when a scope sits below it.
+     */
+    const seedInChain = (story: StoryMeta, chain: readonly string[]): Doc => {
+      const layer = singletonTypeOf(story.id)
+      if (!layer) return seedAs(story, null)
+      const at = chain.indexOf(layer.scope)
+      return seedAs(story, at !== -1 && at < chain.length - 1 ? 'bare' : 'full')
+    }
+
+    /**
+     * What a document is called, from its own type's title field, falling back to
+     * the row's cached title rather than to the literal `'Untitled'`: the row is
+     * the better answer for a root block that offers no title field at all.
+     */
+    const titleFor = (story: StoryMeta, doc: Doc) =>
+      titleOf(doc, typeOf(story.type), schema, story.title)
+
+    /**
+     * The title in every non-source locale, for the tree's per-locale label cache.
+     *
+     * A locale whose title field is untranslated is **omitted** rather than
+     * recorded with the source value: the admin falls back to `title` for a missing
+     * entry anyway, and storing the English under `fr` would make a stale cache
+     * indistinguishable from a real translation the moment somebody added one.
+     */
+    const titlesFor = (story: StoryMeta, doc: Doc): Record<string, string> | undefined => {
+      if (!locales) return undefined
+      const source = titleFor(story, doc)
+      const out: Record<string, string> = {}
+      for (const code of otherLocales) {
+        const translated = titleOf(doc, typeOf(story.type), schema, source, localeOf(code))
+        if (translated !== source) out[code] = translated
+      }
+      return out
+    }
+
+    /**
+     * The context a document needs that the document itself cannot hold.
+     *
+     * **This used to load every story in the site, on every page render**
+     * (`../../docs/specs/content-model/collections.md` decision 6). Invisible at 40 pages and
+     * fatal at 800, and collections are what made it urgent — an insights index is
+     * exactly the site that has 800 rows. It now loads the ids the document actually
+     * needs:
+     *
+     *   - the targets of its `multilink` fields **and of the link marks inside its
+     *     richtext**. The second half is not optional and is the trap: a Folio-native
+     *     link mark stores a structured `attrs.link` and has no `href` at all,
+     *     because the href is derived from the resolution at render time. Miss those
+     *     ids and every internal link inside prose renders as unstyled text with no
+     *     `<a>` around it (see `core/refs.ts`).
+     *   - the targets of its `reference` fields, across every locale.
+     *   - the same two sets again for each document it pulls in — a referenced person
+     *     card and a global header both contain links of their own, and `RenderBlok`
+     *     empties `docs` on the way down but never `stories`.
+     *   - its own ancestors, by path, for a breadcrumb (`opts.story`).
+     *
+     * `opts.stories: 'all'` is the escape hatch: every story, exactly as before, for
+     * a host that wants the full map (a navigation built from the tree). A sitemap
+     * should call `folio.stories(env)` or `folio.query(env, …)` instead.
+     *
+     * `draft` is what the preview passes: an editor looking at a page that
+     * references a form should see the form as they just edited it, not the last
+     * published copy. A live page always resolves published content. The same
+     * split applies to globals — but only in draft mode is a global's row
+     * ensured into existence (`ensureSingleton`): that write is fine for an
+     * editor's preview, rare and never on the hot path, while a live page must
+     * cost nothing extra for a global nobody has ever opened in the admin, so
+     * the published branch below only *reads* the derived id and lets a missing
+     * row mean exactly what a missing published_doc already means — nothing to
+     * show, no error thrown.
+     */
+    const resolve = async (
+      bindings: ReadBindings,
+      doc?: Doc,
+      opts?: ResolveOptions,
+    ): Promise<Resolution> => {
+      const db = bindings.db
+      // **A brand renders only its own sites** (`multi-brand.md` decision 6): with
+      // `brands` a render names its site, and the site is this brand's, or it is not
+      // a render this brand may make. Absent would be the `default` chain, which may
+      // belong to another brand; `null` is still "no site", an empty chain.
+      if (branded && opts?.site !== null) assertOwnSite(opts?.site?.site, 'resolve')
+      // The rendering site's chain, or the one scope of a deployment with no
+      // `sites`. Bound on every id-set read below either way (`stories.ts`'s
+      // `chainClause`).
+      const render = opts?.site ?? undefined
+      const chain = opts?.site === null ? [] : (render?.chain ?? SINGLE_SITE_CHAIN)
+      const urlsOf = urlsFor(render?.site)
+      const active = localeOf(opts?.locale)
+      // Absent for the source locale, so a default-locale resolution is byte-
+      // identical to a pre-localisation one (`localisation.md` decision 5). Every
+      // read in `RenderBlok` goes through this one value.
+      const localeField = active ? { locale: active } : {}
+      const pageField = opts?.page !== undefined ? { page: opts.page } : {}
+      const searchField = opts?.search !== undefined ? { search: opts.search } : {}
+      // The documents this render loads as globals, and each one's layer ids in the
+      // chain, most general first (`multi-site.md` decision 8). With no `sites` the
+      // chain is `['default']` and `layerId` is `sng_<type>`, so this is the list,
+      // the ids and the statements it always was; on a multi-site deployment the
+      // settings type is loaded too, and every chain scope contributes a layer.
+      const loaded = sites ? layered : globals
+      const layerIds = new Map(
+        loaded.map((name) => [name, [...chain].reverse().map((scope) => layerId(name, scope))]),
+      )
+      const globalIds = [...layerIds.values()].flat()
+
+      // A caller with no document at all wants the map and nothing else, so it gets
+      // every story: there is no document to narrow to, and answering with an empty
+      // map would be a silent behaviour change for `folio.resolve(env)`.
+      const wantAll = opts?.stories === 'all' || !doc
+
+      /** Pass one: what `doc` itself points at, plus the ancestors of its story. */
+      const directIds = doc
+        ? [...linkedIds(doc, schema), ...referencedIdsAllLocales(doc, schema)]
+        : []
+      const refIds = doc ? referencedIdsAllLocales(doc, schema) : []
+
+      const known = new Map<string, StoryMeta>()
+      const remember = (rows: readonly StoryMeta[]) => {
+        for (const row of rows) known.set(row.id, row)
+      }
+      const requested = [...new Set([...directIds, ...globalIds])]
+      const ancestors = wantAll ? [] : ancestorPaths(opts?.story?.path ?? null)
+      const pass1 = wantAll
+        ? listStories(db, undefined, chain)
+        : storiesFor(db, requested, ancestors, chain)
+      /**
+       * **Breadcrumb ancestors follow decision 5** (`multi-site.md`): pass one reads
+       * every scope's row at each ancestor path, and keeps per path only the row
+       * `pickServing` would serve there — so a site that forked `info` shows its own
+       * Info in the breadcrumb of an inherited `info/parking`, and a nearer redirect
+       * leaves the crumb out rather than linking to a page the site does not serve.
+       *
+       * The redirects at those paths are a second statement, sent alongside pass
+       * one, and only on a chain of more than one scope: with one scope there is no
+       * shadowing to decide, which is why a single-site render's statement count
+       * does not move (`read-session.test.ts`).
+       */
+      const ancestorRedirects =
+        chain.length > 1 && ancestors.length > 0
+          ? redirectsAtPaths(db, chain, ancestors)
+          : Promise.resolve([])
+      const served = async (rows: readonly StoryMeta[]): Promise<StoryMeta[]> => {
+        if (chain.length <= 1 || ancestors.length === 0) return [...rows]
+        const redirects = await ancestorRedirects
+        // A row asked for by id stays whatever it is — a link to the shared `info`
+        // still resolves to it — and a row that is only here as a crumb stays only
+        // if it is the one this site serves at its path.
+        const byId = new Set(requested)
+        const crumb = (row: StoryMeta) => row.path !== null && ancestors.includes(row.path)
+        const out = rows.filter((row) => byId.has(row.id) || !crumb(row))
+        for (const path of ancestors) {
+          const here = rows.filter((row) => row.path === path)
+          const at = redirects.filter((r) => r.path === path)
+          const pick = pickServing(chain, here, at)
+          if (pick?.kind === 'story' && !byId.has(pick.story.id)) out.push(pick.story)
+        }
+        return out
+      }
+
+      /**
+       * The forms this document embeds (`../../docs/specs/content-model/forms.md` decision 4),
+       * **issued here rather than awaited later**: the ids come straight off the
+       * document walk and depend on nothing pass one returns, so the read goes out
+       * alongside it and both branches below wait once instead of twice. Serialising
+       * it would cost a whole round trip per page render for nothing — the mistake
+       * the published branch's comment below records having already made once.
+       *
+       * A document with no `form` field issues no query at all: `formIds` answers
+       * an empty array and this never touches D1.
+       */
+      // Within the render's chain like every other id-set read here (`multi-site.md`
+      // decision 3): a form owned by a scope outside it resolves exactly like a deleted
+      // one, so its questions and its `action` are never handed to a page that is not
+      // entitled to them.
+      const formRows = formsByIds(db, doc ? formIds(doc, schema) : [], logger, chain)
+
+      /** Pass two: the documents this one pulls in — references, and every global. */
+      let docs: Record<string, Doc> = {}
+      let globalDocs: Record<string, Doc> | undefined
+
+      if (opts?.draft) {
+        remember(await served(await pass1))
+        // A reference to an id with no story row is unresolvable, and in draft mode
+        // asking for its draft would *create* a Durable Object for a deleted story.
+        // That is what keeps this branch sequential where the published one below
+        // is not: the filter is load-bearing here and merely tidy there.
+        const liveRefIds = refIds.filter((id) => known.has(id))
+        if (loaded.length > 0 || liveRefIds.length > 0) {
+          const [refEntries, globalEntries] = await Promise.all([
+            Promise.all(
+              liveRefIds.map(
+                async (id) =>
+                  [
+                    id,
+                    branded
+                      ? await stub(bindings, id).getOrInit(seedInChain(known.get(id)!, chain))
+                      : await draft(bindings, id),
+                  ] as const,
+              ),
+            ),
+            Promise.all(
+              loaded.map(async (name) => {
+                // **A render on a multi-site deployment never writes** (decision
+                // 8): a layer with no row in the chain is absent, which reads as
+                // every field inherited, rather than ensured into existence. A
+                // layer row and its object are made by an editor's first write, so
+                // a draft site that was only ever previewed stays deletable.
+                if (sites) {
+                  const layers = await Promise.all(
+                    layerIds.get(name)!.map((id) => {
+                      const meta = known.get(id)
+                      if (!meta) return undefined
+                      return branded
+                        ? stub(bindings, meta.id).getOrInit(seedInChain(meta, chain))
+                        : draftFor(bindings, meta)
+                    }),
+                  )
+                  const merged = mergeLayers(layers, schema)
+                  return merged ? ([name, merged] as const) : null
+                }
+                const meta = await ensureSingleton(db, typeOf(name)!, schemaId)
+                return [name, await draftFor(bindings, meta)] as const
+              }),
+            ),
+          ])
+          docs = Object.fromEntries(refEntries)
+          globalDocs = loaded.length
+            ? Object.fromEntries(
+                globalEntries.filter((entry): entry is readonly [string, Doc] => entry !== null),
+              )
+            : undefined
+        }
+      } else {
+        /**
+         * The published branch runs both passes at once, because on this branch
+         * pass two does not actually need pass one's answer: `publishedDocsByIds`
+         * returns nothing for an id with no row, and the `known.has` screen below
+         * drops the same ids the pre-filter used to. Waiting was costing a whole
+         * network round trip per page render for a filter that changes nothing —
+         * ~280ms of it on a host whose primary is a continent away.
+         */
+        const wanted = [...new Set([...refIds, ...globalIds])]
+        const [rows, combined] = await Promise.all([
+          pass1.then(served),
+          wanted.length > 0
+            ? publishedDocsByIds(db, wanted, chain)
+            : Promise.resolve<Record<string, Doc>>({}),
+        ])
+        remember(rows)
+        docs = Object.fromEntries(
+          refIds
+            .filter((id) => known.has(id) && combined[id])
+            .map((id) => [id, combined[id]!] as const),
+        )
+        globalDocs = loaded.length
+          ? Object.fromEntries(
+              loaded
+                .map(
+                  (name) =>
+                    [
+                      name,
+                      mergeLayers(
+                        layerIds.get(name)!.map((id) => combined[id]),
+                        schema,
+                      ),
+                    ] as const,
+                )
+                .filter((entry): entry is [string, Doc] => Boolean(entry[1])),
+            )
+          : undefined
+      }
+
+      /**
+       * Pass three: the ids those documents point at. One level, matching the bound
+       * `RenderBlok` already enforces on `docs` — but `stories` survives that
+       * emptying, so a link inside a global's navigation or inside a referenced card
+       * has to resolve. Skipped entirely when the whole map is already loaded, and
+       * when nothing new turned up, which is the ordinary case.
+       */
+      if (!wantAll) {
+        const nested = new Set<string>()
+        for (const pulled of [...Object.values(docs), ...Object.values(globalDocs ?? {})]) {
+          for (const id of linkedIds(pulled, schema)) if (!known.has(id)) nested.add(id)
+          for (const id of referencedIdsAllLocales(pulled, schema)) {
+            if (!known.has(id)) nested.add(id)
+          }
+        }
+        if (nested.size > 0) remember(await storiesFor(db, [...nested], [], chain))
+      }
+
+      /**
+       * The descriptors, compiled from the rows the read above fetched. The action URL
+       * is built from this runtime's `base` and the `_folio_page` hidden input from
+       * the story's own URL through the host's `route` — so a submission comes back
+       * to the page it was made on, in the locale it was rendered in.
+       *
+       * A form the document points at that has since been deleted is simply absent
+       * from the map, and `resolveValue` answers `null` for it: the same posture a
+       * `reference` to a deleted document takes.
+       */
+      const formPage =
+        opts?.story?.path != null ? route(opts.story.path, active?.code, render?.site) : undefined
+      const forms = Object.fromEntries(
+        (await formRows).map((form) => [
+          form.id,
+          compileForm(form, {
+            base,
+            ...(active ? { locale: active } : {}),
+            ...(formPage !== undefined ? { page: formPage } : {}),
+          }),
+        ]),
+      )
+
+      const resolution: Resolution = {
+        ...buildResolution([...known.values()].map(urlsOf), assetBase),
+        ...localeField,
+        ...pageField,
+        ...searchField,
+        // Absent rather than `{}` when there is nothing to pull in, so a document
+        // with no references bootstraps the byte-identical payload it always did.
+        ...(Object.keys(docs).length > 0 ? { docs } : {}),
+        ...(globalDocs ? { globals: globalDocs } : {}),
+        ...(Object.keys(forms).length > 0 ? { forms } : {}),
+        // Multi-site only, and last, so a single-site resolution has neither key
+        // and serialises byte for byte as it always did (decision 15).
+        ...(render ? { site: siteContext(render) } : {}),
+        ...(render && opts?.story?.path != null ? { path: opts.story.path } : {}),
+      }
+
+      /** Pass four: the collection queries this document contains, run once each. */
+      const queries = doc
+        ? collectionQueries(doc, schema, opts?.page, active, opts?.search)
+        : new Map<string, ContentQuery>()
+      if (queries.size === 0) return resolution
+
+      const answers = await Promise.all(
+        [...queries].map(
+          async ([key, q]) =>
+            [
+              key,
+              await runQuery(queryDeps(db, chain, render?.site), q, { locale: active }),
+            ] as const,
+        ),
+      )
+      const collections: Record<string, ResolvedCollection> = Object.fromEntries(answers)
+
+      // Decision 3: a preview resolves collections against **published** content.
+      // Querying drafts would mean opening every candidate Durable Object on every
+      // keystroke. So the list is marked `stale` — a block can say "this list shows
+      // published items" — and the open story's own draft is patched over its
+      // published row where it is a member, which is the one difference an editor
+      // looking at an index page actually notices.
+      if (opts?.draft) {
+        const open = opts.story
+        const root = doc?.bloks[doc.root]
+        for (const key of Object.keys(collections)) {
+          const answer = collections[key]!
+          collections[key] = {
+            ...answer,
+            stale: true,
+            items:
+              doc && open && root
+                ? answer.items.map((item) =>
+                    item.id === open.id
+                      ? {
+                          ...item,
+                          // Patched only where the answer carries documents at all
+                          // (`core/query.ts`'s `ContentQuery.withDoc`). Adding one
+                          // unconditionally would put the open draft's whole body
+                          // into a card rail that asked for none — and give the
+                          // editor an item shaped unlike its ten neighbours.
+                          ...(item.doc ? { doc } : {}),
+                          data: dataOf(root, active),
+                          title: titleOf(doc, typeOf(open.type), schema, item.title, active),
+                        }
+                      : item,
+                  )
+                : answer.items,
+          }
+        }
+      }
+
+      return { ...resolution, collections }
+    }
+
+    /** What `runQuery` needs, assembled from this runtime. */
+    const queryDeps = (
+      db: FolioDb,
+      chain: readonly string[] = SINGLE_SITE_CHAIN,
+      site?: SiteRef,
+    ): QueryDeps => ({
+      db,
+      indexed,
+      // `''` for the source locale, an undeclared code, or a site with no locales —
+      // exactly what `indexRowsFor` writes for the same three cases.
+      localeKey: (code) => localeOf(code)?.code ?? '',
+      withUrls: urlsFor(site),
+      chain,
+      // `ResolvedGate` narrowed to the three things a SQL predicate can use
+      // (`../../docs/specs/content-model/full-text-search.md` decision 11). `types`, not
+      // `roots`: SQL sees `stories.type` and cannot see a root block's name.
+      // Absent on a deployment with no gate, and then `contentSql` emits nothing.
+      ...(gate
+        ? { gate: { field: gate.config.field, public: gate.config.public, types: gate.types } }
+        : {}),
+    })
+
+    const query = (
+      bindings: ReadBindings,
+      q: ContentQuery,
+      chain: readonly string[] = SINGLE_SITE_CHAIN,
+      site?: SiteRef,
+    ): Promise<ContentPage> => {
+      // As `resolve`: with `brands` a query is for one of this brand's sites. A
+      // rejection rather than a throw, so a caller sees what `runQuery` would give.
+      if (branded) {
+        try {
+          assertOwnSite(site, 'query')
+        } catch (err) {
+          return Promise.reject(err)
+        }
+      }
+      return runQuery(queryDeps(bindings.db, chain, site), q, { locale: localeOf(q.locale) })
+    }
+
+    /** `Resolution.site` for a render (`multi-site.md` decision 15). */
+    const siteContext = (render: SiteRender): SiteContext => ({
+      id: render.site.id,
+      name: render.site.name,
+      group: render.site.group,
+      status: render.site.status,
+      surface: render.surface,
+      chain: render.chain,
+      layered: sites ? layered : globals,
+      // Only with `brands`, and last, so a single-brand resolution serialises byte
+      // for byte as it did (`multi-site-pin.test.ts`).
+      ...(b.id !== null ? { brand: b.id } : {}),
+    })
+
+    /**
+     * The `content_index` / `content_refs` rows a publish writes
+     * (`../../docs/specs/content-model/collections.md`). Here rather than inside `publish()` for
+     * the same reason `titleFor` is: the projection needs the schema, the document
+     * type and the locale config, which only this factory has.
+     */
+    const projection = (story: StoryMeta, doc: Doc): ContentProjection =>
+      contentProjection(story.id, doc, typeOf(story.type), schema, locales)
+
+    /**
+     * With `brands` a layer's seed needs the registry (`seedFor`), and a publish is
+     * handed only its bindings and hook context — whose `env` is the host's, so the
+     * snapshot is one read away, and only for a layer.
+     */
+    const registryFor = async (story: StoryMeta, env: unknown) =>
+      branded && sites && singletonTypeOf(story.id) ? sites.registry(env) : undefined
+
+    const publishDeps = (
+      bindings: ReadBindings,
+      hookCtx: HookRunnerCtx,
+    ): PublishDeps & { logger: FolioLogger } => ({
+      db: bindings.db,
+      draft: async (story) => draftFor(bindings, story, await registryFor(story, hookCtx.env)),
+      draftWithSyncId: async (story) =>
+        draftForWithSyncId(bindings, story, await registryFor(story, hookCtx.env)),
+      titleFor,
+      titlesFor,
+      projection,
+      hooks: hookRunner(hookCtx),
+      logger,
+    })
+
+    /**
+     * The two orders are not the same, and are as configured today: the admin page
+     * puts the plugin's stylesheets before the host's, the preview the other way
+     * around (`page`, below).
+     */
+    const previewPage = (): PageAssets => {
+      if (b.id === null) {
+        const assets = (config as FolioSingleConfig<Env>).assets
+        // Throws rather than serving a scriptless page. See `validateAssets`.
+        validateAssets(assets)
+        return {
+          entries: assets
+            ? assets.devClient
+              ? [assets.devClient, assets.preview]
+              : [assets.preview]
+            : [],
+          stylesheets: [...b.previewCss, ...(assets?.previewCss ?? [])],
+        }
+      }
+      const assets = (config as FolioBrandedConfig<Env>).assets
+      const bundle = validateBrandedAssets(assets, b.id)
+      return {
+        entries: assets?.devClient ? [assets.devClient, bundle.preview] : [bundle.preview],
+        stylesheets: [...b.previewCss, ...(bundle.previewCss ?? [])],
+      }
+    }
+
+    const auditContext = async (env: unknown): Promise<AuditContext> => ({
+      locales,
+      types,
+      ...(sites && b.settings
+        ? {
+            sites: {
+              settings: b.settings,
+              registry:
+                b.id === null
+                  ? await sites.registry(env)
+                  : ownRows(await sites.registry(env), b.id),
+            },
+          }
+        : {}),
+    })
+
     return {
-      entries: assets
-        ? assets.devClient
-          ? [assets.devClient, assets[which]]
-          : [assets[which]]
-        : [],
-      stylesheets:
-        which === 'admin'
-          ? [...(assets?.adminCss ?? []), ...(config.adminCss ?? [])]
-          : [...(config.previewCss ?? []), ...(assets?.previewCss ?? [])],
+      brand: b.id !== null && b.label !== null ? { id: b.id, label: b.label } : null,
+      registry,
+      schema,
+      types,
+      typeOf,
+      defaultType: fallbackType,
+      /**
+       * The manifest, plus the one thing `toManifest` cannot know.
+       *
+       * Spread here rather than by widening `toManifest`'s signature: that function
+       * lives in `core/block.ts` and takes a registry, the types, the globals and
+       * the locales — all four of which are *content model*. `hooks` is server
+       * configuration, so making `core` take it would have meant `core/block.ts`
+       * importing `server/hooks.ts`. With `brands`, the brand and its settings
+       * type ride last (decision 12); without, neither key exists.
+       */
+      manifest: {
+        ...toManifest(registry, types, globals, locales),
+        ...manifestHooks(config.hooks),
+        ...(b.id !== null && b.label !== null ? { brand: { id: b.id, label: b.label } } : {}),
+        ...(b.id !== null && b.settings ? { settings: b.settings } : {}),
+      },
+      globals,
+      layered,
+      settings: b.settings,
+      migrations,
+      schemaId,
+      indexedFields: indexed,
+      gate,
+      forms,
+      describe,
+      previewWrap: b.previewWrap,
+      page: () => previewPage(),
+      seed,
+      seedFor,
+      draftFor,
+      draftForWithSyncId,
+      draft,
+      titleFor,
+      titlesFor,
+      projection,
+      resolve,
+      query,
+      publishDeps,
+      auditContext,
     }
   }
 
-  const auditContext = async (env: unknown): Promise<AuditContext> => ({
-    locales,
-    types,
-    ...(sites?.settings
-      ? { sites: { settings: sites.settings, registry: await sites.registry(env) } }
-      : {}),
-  })
+  const brands: ReadonlyMap<string | null, BrandRuntime> = new Map(
+    prepared.map((b) => [b.id, buildBrand(b)] as const),
+  )
+  // The one brand of a deployment with no `brands`; undefined on one with them.
+  const only = branded ? undefined : brands.get(null)
 
-  return {
-    registry,
-    previewWrap: config.previewWrap,
-    schema,
-    /**
-     * The manifest, plus the one thing `toManifest` cannot know.
-     *
-     * Spread here rather than by widening `toManifest`'s signature: that function
-     * lives in `core/block.ts` and takes a registry, the types, the globals and
-     * the locales — all four of which are *content model*. `hooks` is server
-     * configuration, so making `core` take it would have meant `core/block.ts`
-     * importing `server/hooks.ts`.
-     */
-    manifest: {
-      ...toManifest(registry, types, globals, locales),
-      ...manifestHooks(config.hooks),
-    },
-    types,
-    globals,
+  const forScope = (registry: SiteRegistry, scope: string | null): BrandRuntime | null => {
+    if (only) return only
+    if (scope === null || scope === SHARED_SCOPE) return null
+    const row =
+      registry.sites.find((s) => s.id === scope) ?? registry.groups.find((g) => g.id === scope)
+    return row?.brand ? (brands.get(row.brand) ?? null) : null
+  }
+
+  /**
+   * Folio's two HTML pages' assets. The admin page is the deployment's; a preview is
+   * a brand's (`BrandRuntime.page`), so with `brands` asking the runtime for one
+   * throws rather than answer the first brand's bundle.
+   */
+  const page = (which: 'admin' | 'preview'): PageAssets => {
+    if (which === 'preview') {
+      if (!only) throw noBrand("page('preview')")
+      return only.page('preview')
+    }
+    if (!branded) {
+      const assets = (config as FolioSingleConfig<Env>).assets
+      // Throws rather than serving a scriptless page. See `validateAssets`.
+      validateAssets(assets)
+      return {
+        entries: assets
+          ? assets.devClient
+            ? [assets.devClient, assets.admin]
+            : [assets.admin]
+          : [],
+        stylesheets: [...(assets?.adminCss ?? []), ...(config.adminCss ?? [])],
+      }
+    }
+    const assets = (config as FolioBrandedConfig<Env>).assets
+    validateBrandedAssets(assets, null)
+    return {
+      entries: assets?.devClient ? [assets.devClient, assets.admin] : [assets!.admin],
+      stylesheets: [...(assets?.adminCss ?? []), ...(config.adminCss ?? [])],
+    }
+  }
+
+  const deployment = {
+    brands,
+    forScope,
     locales,
     localeOf,
     pathForLocale,
-    migrations,
-    schemaId,
     auth,
-    gate,
-    describe,
-    forms,
     logger,
     formPurgeCapability,
-    auditContext,
-    typeOf,
-    defaultType: fallbackType,
-    titleFor,
-    titlesFor,
-    projection,
     base,
     sites,
     route,
@@ -1386,19 +1974,55 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     withUrls,
     urlsFor,
     decorate,
-    seed,
     stub,
     space,
-    draftFor,
-    draftForWithSyncId,
-    draft,
-    resolve,
-    query,
-    indexedFields: indexed,
-    publishDeps,
     hookRunner,
     page,
   }
+
+  if (only) {
+    return {
+      ...deployment,
+      registry: only.registry,
+      previewWrap: only.previewWrap,
+      schema: only.schema,
+      manifest: only.manifest,
+      types: only.types,
+      globals: only.globals,
+      migrations: only.migrations,
+      schemaId: only.schemaId,
+      gate: only.gate,
+      describe: only.describe,
+      forms: only.forms,
+      auditContext: only.auditContext,
+      typeOf: only.typeOf,
+      defaultType: only.defaultType,
+      titleFor: only.titleFor,
+      titlesFor: only.titlesFor,
+      projection: only.projection,
+      seed: only.seed,
+      draftFor: (bindings, story) => only.draftFor(bindings, story),
+      draftForWithSyncId: (bindings, story) => only.draftForWithSyncId(bindings, story),
+      draft: (bindings, id) => only.draft(bindings, id),
+      resolve: only.resolve,
+      query: only.query,
+      indexedFields: only.indexedFields,
+      publishDeps: only.publishDeps,
+    }
+  }
+
+  // Decision 6's throwing getters: every member a brand answers, on a runtime that
+  // has several, is an error at the read rather than the first brand's value.
+  const rt = { ...deployment } as FolioRuntime
+  for (const key of BRAND_MEMBERS) {
+    Object.defineProperty(rt, key, {
+      enumerable: true,
+      get: () => {
+        throw noBrand(key)
+      },
+    })
+  }
+  return rt
 }
 
 /**

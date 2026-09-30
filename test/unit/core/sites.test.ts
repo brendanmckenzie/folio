@@ -8,6 +8,7 @@ import {
   layerSeed,
   type Registry,
   SHARED_SCOPE,
+  servingRegistry,
   type SiteRef,
   type SiteStatus,
   singletonTypeOf,
@@ -18,7 +19,9 @@ import {
  * `core/sites.ts` (`docs/specs/foundation/multi-site.md` decisions 3, 4 and 8):
  * the chain, the reach of a scope, the layer ids, and the candidate and gate
  * steps that turn a URL into the site that serves it — every cell of decision 4's
- * table included.
+ * table included — and the same questions on a registry with `brands`
+ * (`docs/specs/foundation/multi-brand.md` decisions 4 and 5), where there is no
+ * `shared` and a chain never leaves a brand.
  */
 
 const site = (id: string, over: Partial<SiteRef> = {}): SiteRef => ({
@@ -28,6 +31,7 @@ const site = (id: string, over: Partial<SiteRef> = {}): SiteRef => ({
   status: 'live',
   hosts: [],
   preview: null,
+  brand: null,
   ...over,
 })
 
@@ -45,9 +49,10 @@ const registry: Registry = {
     site('delta', { group: 'gone' }),
   ],
   groups: [
-    { id: 'north', name: 'North' },
-    { id: 'south', name: 'South' },
+    { id: 'north', name: 'North', brand: null },
+    { id: 'south', name: 'South', brand: null },
   ],
+  shared: true,
 }
 
 describe('chain: the scopes a scope reads from, nearest first', () => {
@@ -173,7 +178,8 @@ describe('gate: decision 4’s table, every cell', () => {
     sites: [
       site('gamma', { status, hosts: ['gamma.example'], preview: 'https://p.gamma.example' }),
     ],
-    groups: [{ id: 'north', name: 'North' }],
+    groups: [{ id: 'north', name: 'North', brand: null }],
+    shared: true,
   })
   const anon = { path: null, grantFor: null }
 
@@ -230,5 +236,89 @@ describe('gate: decision 4’s table, every cell', () => {
         gate(r, { site: id, surface: 'preview' }, { path: '/site/enter', grantFor: id }),
       ).toBeNull()
     }
+  })
+})
+
+/**
+ * A registry with `brands` (`multi-brand.md` decisions 4 and 5): brand `aaa` has
+ * group `north` holding `alpha`, and `bravo` with no group; brand `tgo` has
+ * `tango`, and `mixed`, which names aaa's `north` — a row only SQL could write,
+ * since the registry routes refuse it.
+ */
+const branded: Registry = {
+  sites: [
+    site('alpha', { group: 'north', brand: 'aaa' }),
+    site('bravo', { brand: 'aaa' }),
+    site('tango', { brand: 'tgo' }),
+    site('mixed', { group: 'north', brand: 'tgo' }),
+  ],
+  groups: [{ id: 'north', name: 'North', brand: 'aaa' }],
+  shared: false,
+}
+
+describe('with brands: a chain never leaves a brand, and there is no shared', () => {
+  it('stops a site in a group at the group, and a site with no group at itself', () => {
+    expect(chain(branded, 'alpha')).toEqual(['alpha', 'north'])
+    expect(chain(branded, 'bravo')).toEqual(['bravo'])
+    expect(chain(branded, 'north')).toEqual(['north'])
+  })
+
+  it('has no shared scope: its chain is empty, so ~shared is a 404', () => {
+    expect(chain(branded, SHARED_SCOPE)).toEqual([])
+    expect(sitesUnder(branded, SHARED_SCOPE)).toEqual([])
+  })
+
+  it('skips a group of another brand, as it skips one that has gone', () => {
+    expect(chain(branded, 'mixed')).toEqual(['mixed'])
+    expect(sitesUnder(branded, 'north')).toEqual(['alpha'])
+  })
+
+  it('seeds the bottom of every chain in full: a group, and a site with no group', () => {
+    expect(layerSeed(branded, 'north')).toBe('full')
+    expect(layerSeed(branded, 'bravo')).toBe('full')
+    expect(layerSeed(branded, 'tango')).toBe('full')
+    // Only a site with its group below it inherits.
+    expect(layerSeed(branded, 'alpha')).toBe('bare')
+  })
+
+  it('leaves an unbranded registry exactly as it was', () => {
+    expect(chain(registry, 'alpha')).toEqual(['alpha', 'north', SHARED_SCOPE])
+    expect(layerSeed(registry, 'bravo')).toBe('bare')
+    expect(sitesUnder(registry, SHARED_SCOPE)).toHaveLength(5)
+  })
+})
+
+describe('servingRegistry: what a deployment with brands serves from', () => {
+  const rows: Registry = {
+    sites: [
+      site('alpha', { group: 'north', brand: 'aaa' }),
+      site('default'),
+      site('ghost', { brand: 'retired' }),
+      site('tango', { brand: 'tgo' }),
+    ],
+    groups: [
+      { id: 'north', name: 'North', brand: 'aaa' },
+      { id: 'orphans', name: 'Orphans', brand: null },
+    ],
+    shared: false,
+  }
+  const served = servingRegistry(rows, ['aaa', 'tgo'])
+
+  it('keeps the rows of configured brands, and has no shared scope', () => {
+    expect(served.sites.map((s) => s.id)).toEqual(['alpha', 'tango'])
+    expect(served.groups.map((g) => g.id)).toEqual(['north'])
+    expect(served.shared).toBe(false)
+  })
+
+  it('leaves out a null brand and an unconfigured one: no chain, no candidate', () => {
+    for (const id of ['default', 'ghost', 'orphans']) expect(chain(served, id)).toEqual([])
+    expect(gate(served, { site: 'default', surface: 'live' }, { path: null, grantFor: null })).toBe(
+      null,
+    )
+  })
+
+  it('is neither the first brand nor every brand for a null row', () => {
+    expect(served.sites.some((s) => s.brand === null)).toBe(false)
+    expect(sitesUnder(served, 'north')).toEqual(['alpha'])
   })
 })

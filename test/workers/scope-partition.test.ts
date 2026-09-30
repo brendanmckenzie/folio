@@ -1020,10 +1020,27 @@ describe('the story socket', () => {
 describe('effective roles', () => {
   const registry: Registry = {
     sites: [
-      { id: 'alpha', name: 'Alpha', group: 'north', status: 'live', hosts: [], preview: null },
-      { id: 'bravo', name: 'Bravo', group: null, status: 'live', hosts: [], preview: null },
+      {
+        id: 'alpha',
+        name: 'Alpha',
+        group: 'north',
+        status: 'live',
+        hosts: [],
+        preview: null,
+        brand: null,
+      },
+      {
+        id: 'bravo',
+        name: 'Bravo',
+        group: null,
+        status: 'live',
+        hosts: [],
+        preview: null,
+        brand: null,
+      },
     ],
-    groups: [{ id: 'north', name: 'North' }],
+    groups: [{ id: 'north', name: 'North', brand: null }],
+    shared: true,
   }
 
   it('takes the highest of the scope, its group and *, and at least viewer up any chain', () => {

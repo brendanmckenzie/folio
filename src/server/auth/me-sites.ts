@@ -68,15 +68,22 @@ export function meSites(
     grants === null ? 'admin' : effectiveRole(grants, registry, scope)
 
   const candidates: Omit<MeScope, 'role'>[] = [
-    {
-      id: SHARED_SCOPE,
-      name: 'Shared',
-      kind: 'shared',
-      group: null,
-      chain: chain(registry, SHARED_SCOPE),
-      status: null,
-      preview: null,
-    },
+    // No `shared` on a deployment with `brands` (`multi-brand.md` decision 5):
+    // offered anyway, it would be a scope every platform admin could pick and that
+    // answers 404 to every call.
+    ...(registry.shared
+      ? [
+          {
+            id: SHARED_SCOPE,
+            name: 'Shared',
+            kind: 'shared' as const,
+            group: null,
+            chain: chain(registry, SHARED_SCOPE),
+            status: null,
+            preview: null,
+          },
+        ]
+      : []),
     ...registry.groups.map((g) => ({
       id: g.id,
       name: g.name,

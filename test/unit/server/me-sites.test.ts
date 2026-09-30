@@ -9,7 +9,7 @@ import { meSites } from '../../../src/server/auth/me-sites'
  */
 
 const REGISTRY: Registry = {
-  groups: [{ id: 'north', name: 'North' }],
+  groups: [{ id: 'north', name: 'North', brand: null }],
   sites: [
     {
       id: 'alpha',
@@ -18,9 +18,19 @@ const REGISTRY: Registry = {
       status: 'live',
       hosts: [],
       preview: 'https://p.alpha.example',
+      brand: null,
     },
-    { id: 'bravo', name: 'Bravo', group: null, status: 'draft', hosts: [], preview: null },
+    {
+      id: 'bravo',
+      name: 'Bravo',
+      group: null,
+      status: 'draft',
+      hosts: [],
+      preview: null,
+      brand: null,
+    },
   ],
+  shared: true,
 }
 
 const ids = (scopes: { id: string }[]) => scopes.map((s) => s.id)
@@ -93,5 +103,34 @@ describe('meSites', () => {
     expect(me.scopes.every((s) => s.role === 'admin')).toBe(true)
     expect(ids(me.previewable)).toEqual(['alpha', 'bravo'])
     expect(me.grants).toEqual({})
+  })
+})
+
+describe('meSites on a deployment with brands', () => {
+  // `multi-brand.md` decision 5: no `shared` scope, so none is offered, even to a
+  // platform admin or under `auth: 'open'`, for whom every scope reads as `admin`.
+  const BRANDED: Registry = {
+    groups: [{ id: 'north', name: 'North', brand: 'aaa' }],
+    sites: [
+      {
+        id: 'alpha',
+        name: 'Alpha',
+        group: 'north',
+        status: 'live',
+        hosts: [],
+        preview: null,
+        brand: 'aaa',
+      },
+    ],
+    shared: false,
+  }
+
+  it('offers no shared scope, to a platform admin or under open auth', () => {
+    expect(ids(meSites(BRANDED, { '*': 'admin' }, undefined).scopes)).toEqual(['north', 'alpha'])
+    expect(ids(meSites(BRANDED, null, undefined).scopes)).toEqual(['north', 'alpha'])
+  })
+
+  it('still offers shared on a registry that has it', () => {
+    expect(ids(meSites(REGISTRY, { '*': 'admin' }, undefined).scopes)).toContain('shared')
   })
 })

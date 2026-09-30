@@ -1,6 +1,7 @@
 /**
  * Sites, groups and the shared scope, as pure functions over a registry
- * snapshot (`../../docs/specs/foundation/multi-site.md` decisions 3 and 4).
+ * snapshot (`../../docs/specs/foundation/multi-site.md` decisions 3 and 4, and
+ * `multi-brand.md` decisions 4 and 5 for a deployment with `brands`).
  *
  * Nothing here reads D1 or knows about a `Request` beyond its URL: the snapshot
  * is read and cached in `server/sites.ts`, and every question a render or a route
@@ -15,7 +16,8 @@
 import { SINGLETON_PREFIX } from './schema'
 
 /** The scope above every site and group: default pages, a shared catalogue, the
- * base layer of every global. Reserved; never a registry row. */
+ * base layer of every global. Reserved; never a registry row. Absent on a
+ * deployment with `brands` (`Registry.shared`). */
 export const SHARED_SCOPE = 'shared'
 
 /**
@@ -56,20 +58,36 @@ export interface SiteRef {
   hosts: readonly string[]
   /** The preview origin (`new URL(x).origin`), or null when none is set. */
   preview: string | null
+  /**
+   * The brand this site belongs to (`multi-brand.md` decision 4), or null. Null on
+   * every row of a deployment with no `brands`, where nothing reads it; on one with
+   * `brands` a row whose brand is null or not configured is left out of the
+   * snapshot, so it serves nothing.
+   */
+  brand: string | null
 }
 
 export interface GroupRef {
   id: string
   name: string
+  /** As `SiteRef.brand`. A group and its sites have one brand. */
+  brand: string | null
 }
 
 /** `sites` and `site_hosts`, as one isolate's snapshot of them. */
 export interface Registry {
   sites: readonly SiteRef[]
   groups: readonly GroupRef[]
+  /**
+   * Whether the `shared` scope exists (`multi-brand.md` decision 5): true on every
+   * deployment with no `brands`, false on one with them, where a chain never
+   * leaves a brand and so has nothing above a group. `chain`, `sitesUnder` and
+   * `layerSeed` read it.
+   */
+  shared: boolean
 }
 
-export const EMPTY_REGISTRY: Registry = { sites: [], groups: [] }
+export const EMPTY_REGISTRY: Registry = { sites: [], groups: [], shared: true }
 
 /**
  * The rendering site, as it rides on a `Resolution` (`multi-site.md` decision 15).
@@ -90,6 +108,13 @@ export interface SiteContext {
   chain: readonly string[]
   /** The configured globals and the settings type: the documents that layer. */
   layered: readonly string[]
+  /**
+   * The site's brand (`multi-brand.md` decision 21): what `folio.render` and
+   * `renderGlobal` pick a registry by. **Present only on a deployment with
+   * `brands`**, so a single-brand resolution serialises byte for byte as it did
+   * before brands (`multi-site-pin.test.ts`).
+   */
+  brand?: string
 }
 
 const siteOf = (registry: Registry, id: string) => registry.sites.find((s) => s.id === id)
@@ -98,43 +123,81 @@ const groupOf = (registry: Registry, id: string) => registry.groups.find((g) => 
 /**
  * The scopes a scope reads from, nearest first (decision 3's table).
  *
- * | Scope | Chain |
- * | --- | --- |
- * | site `alpha` in group `north` | `alpha`, `north`, `shared` |
- * | site `bravo`, no group | `bravo`, `shared` |
- * | group `north` | `north`, `shared` |
- * | `shared` | `shared` |
+ * | Scope | Chain | Chain with `brands` |
+ * | --- | --- | --- |
+ * | site `alpha` in group `north` | `alpha`, `north`, `shared` | `alpha`, `north` |
+ * | site `bravo`, no group | `bravo`, `shared` | `bravo` |
+ * | group `north` | `north`, `shared` | `north` |
+ * | `shared` | `shared` | none |
  *
  * **An unknown scope has an empty chain**, and every chain-taking reader answers
  * an empty chain with nothing: a scope that is not in the registry owns no
  * content anyone can see, which is decision 4's "a reader answers as a site with
  * no content". A site naming a group that has since gone skips it rather than
  * failing, for the same reason a grant naming a deleted scope is ignored.
+ *
+ * **A chain never crosses a brand** (`multi-brand.md` decision 5). On a registry
+ * with no `shared` the chain stops at the group, so `~shared` is empty — a 404 at
+ * `withScope`, and nothing can be written there — and a site whose group carries
+ * another brand skips the group exactly as it skips one that has gone. The
+ * registry routes refuse to write that pairing; this is the fence for a row
+ * written by SQL.
  */
 export function chain(registry: Registry, scope: string): readonly string[] {
-  if (scope === SHARED_SCOPE) return [SHARED_SCOPE]
+  const top = registry.shared ? [SHARED_SCOPE] : []
+  if (scope === SHARED_SCOPE) return top
   const site = siteOf(registry, scope)
   if (site) {
-    return site.group && groupOf(registry, site.group)
-      ? [site.id, site.group, SHARED_SCOPE]
-      : [site.id, SHARED_SCOPE]
+    const group = site.group ? groupOf(registry, site.group) : undefined
+    return group && sameBrand(registry, site, group)
+      ? [site.id, group.id, ...top]
+      : [site.id, ...top]
   }
-  if (groupOf(registry, scope)) return [scope, SHARED_SCOPE]
+  if (groupOf(registry, scope)) return [scope, ...top]
   return []
 }
+
+/** Whether a site may read its group: always with no `brands`, else only within one brand. */
+const sameBrand = (registry: Registry, site: SiteRef, group: GroupRef) =>
+  registry.shared || site.brand === group.brand
 
 /**
  * The sites a scope's content reaches: a site is itself, a group its sites, and
  * `shared` every site. What a purge fans out over (`path:<site>:<path>` per site)
- * and what a share's render site must be one of. Unknown is none.
+ * and what a share's render site must be one of. Unknown is none, and so is
+ * `shared` on a registry without it; a group reaches only the sites whose chain
+ * holds it.
  */
 export function sitesUnder(registry: Registry, scope: string): readonly string[] {
-  if (scope === SHARED_SCOPE) return registry.sites.map((s) => s.id)
+  if (scope === SHARED_SCOPE) return registry.shared ? registry.sites.map((s) => s.id) : []
   if (siteOf(registry, scope)) return [scope]
-  if (groupOf(registry, scope)) {
-    return registry.sites.filter((s) => s.group === scope).map((s) => s.id)
+  const group = groupOf(registry, scope)
+  if (group) {
+    return registry.sites
+      .filter((s) => s.group === scope && sameBrand(registry, s, group))
+      .map((s) => s.id)
   }
   return []
+}
+
+/**
+ * The registry a deployment with `brands` serves from (`multi-brand.md` decision
+ * 4): every row whose brand is one of `brands`, and `shared: false`. **A row whose
+ * brand is null or not configured is left out**, so it is no candidate, has an
+ * empty chain and answers `404 No site or group` at every `~<scope>` — the same
+ * fence as an unknown scope. It is neither the first brand nor every brand.
+ *
+ * Only the snapshot is filtered. A registry write validates against every row —
+ * a host an unbranded row holds is still claimed — and `GET {base}/api/sites`
+ * lists them, so a platform admin can see what to repair.
+ */
+export function servingRegistry(registry: Registry, brands: readonly string[]): Registry {
+  const known = (brand: string | null) => brand !== null && brands.includes(brand)
+  return {
+    sites: registry.sites.filter((s) => known(s.brand)),
+    groups: registry.groups.filter((g) => known(g.brand)),
+    shared: false,
+  }
 }
 
 /**
@@ -167,7 +230,9 @@ export function singletonTypeOf(id: string): { type: string; scope: string } | n
  * so every field is inherited — only when there is a layer below it to inherit
  * from. The bottom of a chain seeds exactly as a single-site singleton does,
  * defaults and preset included, so a host's declared defaults are what every
- * site inherits. The test is the chain, not the id.
+ * site inherits. The test is the chain, not the id: with `brands` the bottom is a
+ * group, or a site with no group, which therefore seeds `'full'`
+ * (`multi-brand.md` decision 5).
  */
 export function layerSeed(registry: Registry, scope: string): 'bare' | 'full' {
   return chain(registry, scope).length > 1 ? 'bare' : 'full'

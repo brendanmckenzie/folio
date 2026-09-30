@@ -19,6 +19,13 @@
  * payload carries the changed row and exactly what was purged, so a headless front
  * end that keeps its own host map refreshes that one entry on the event.
  *
+ * **On a deployment with `brands` every row carries one** (`multi-brand.md`
+ * decision 4): a create names it, a site joins only a group of its own brand (400),
+ * a brand nobody configured is refused (400), and a brand changes only on a scope
+ * that holds no content and, for a group, has no sites (409). `GET` lists every row,
+ * a row of no configured brand included, since that is where a platform admin
+ * repairs one: the snapshot a request is served from leaves it out.
+ *
  * Mounted only on a deployment with `sites`: with none there is no registry, and
  * these paths fall through to the `/api/*` 404 like any other unknown route.
  */
@@ -61,6 +68,7 @@ const SiteCreateBody = v.object(
     status: v.optional(STATUS),
     preview: v.optional(v.nullable(SHORT)),
     hosts: v.optional(HOSTS),
+    brand: v.optional(v.nullable(SHORT)),
   },
   OBJECT,
 )
@@ -75,6 +83,7 @@ const SitePatchBody = v.object(
     group: v.optional(v.nullable(SHORT)),
     status: v.optional(STATUS),
     preview: v.optional(v.nullable(SHORT)),
+    brand: v.optional(v.nullable(SHORT)),
   },
   OBJECT,
 )
@@ -85,7 +94,7 @@ export function siteRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
   const sites = rt.sites
   if (!sites) return app
-  const ctx: RegistryWriteContext = { sites, route: rt.route }
+  const ctx: RegistryWriteContext = { sites, route: rt.route, brands: sites.brands }
   app.use('/sites', requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, ADMIN))
   app.use('/sites/*', requireAuthConfigured<Env>(rt), requireAccess<Env>(rt, ADMIN))
 
