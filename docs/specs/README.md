@@ -77,6 +77,7 @@ sequence because the dependency graph is the same one.
 | 31 | [Visitor access](platform/visitor-access.md) | platform | M | — | — | owner, 2026-09-05 |
 | 32 | [Media library organisation](content-model/media-library.md) | content model | L | — | `0008` | owner, 2026-09-05 |
 | 33 | [Forms and responses](content-model/forms.md) | content model | L | — | `0010` | owner, 2026-09-05 |
+| 34 | [Many brands in one deployment](foundation/multi-brand.md) | foundation | L | — | `0013` | owner, 2026-09-30 |
 
 **28–31 build in the order 31 → 30 → 28 → 29** (owner, 2026-09-05), which is not the
 order they are numbered in. The numbers are identities, assigned when the four were
@@ -94,6 +95,17 @@ before 23**, so it takes `0008` and 23 restamps to `0009` (later `0011` and `001
 every list route, so 23 scopes the new asset tables in the same pass rather than
 retrofitting them. **`0005` has landed** — the column
 above now reads the decided number rather than the drafted one for all three.
+
+**Spec 34 (multi-brand) builds after 23, with its first phase ahead of the
+`v1.0.0` tag.** It adds the brand — a block registry, its types, its preview shell
+and its per-brand policy — that a site belongs to, and it **supersedes 23's decision
+7 on a deployment that configures `brands`**: 23 assumed one design per deployment,
+and two brands that collide on `pageRoot`, `prose` and `page` share nothing but the
+agency. It needs 23's registry, scopes, chains and preview origins, so it cannot
+start before 23 has landed; its phase 1 (a repeated block name becomes a construction
+error) narrows accepted config, which is free before the tag and a `2.0.0` item after,
+so it goes to `main` before `../1.0-plan.md`'s phase 6. Its build and test-deployment
+plan is [`../multi-brand-plan.md`](../multi-brand-plan.md).
 
 Spec 26 is **done**, and its own `## Implementation notes` records that it shipped a
 different answer from the one it planned: the package moved to the repository root and
@@ -291,8 +303,9 @@ a fresh database. Spec 23 (rewritten 2026-09-29, built on the branch `multi-site
 same day, release pending) took `0011_sites.sql`, which has landed, and claims
 `0012_users_role_contract.sql` for the release after, which will drop the two `users`
 columns `0011` retires. Its build plan is
-[`../multi-site-plan.md`](../multi-site-plan.md). The next free number after those is
-`0013`.
+[`../multi-site-plan.md`](../multi-site-plan.md). Spec 34 (multi-brand) claims
+`0013_site_brands.sql`, one nullable `sites.brand` column; it is additive and may be
+applied before `0012` exists. The next free number after those is `0014`.
 
 That is the standing rule having run its course rather than an exception to it: a
 claim is a stamp, not a landing, and every one of these restamped at least once as
@@ -302,7 +315,7 @@ make room for 32.
 **Landed on `main`: `0001`–`0008` and `0010`, and applied to All About Africa's
 staging and production databases on 2026-09-06. `0011` (23) is built and lands on `main`
 with spec 23's release; `0012` (23) is claimed for the release after that and does not
-exist yet; `0009` is a permanent gap. The next free number after those is `0013`.** Do not derive a number by counting the
+exist yet; `0013` is claimed by 34; `0009` is a permanent gap. The next free number after those is `0014`.** Do not derive a number by counting the
 landed rows above; take the one your spec's header names, and if it is already on
 disk, stop rather than picking the next one yourself.
 
