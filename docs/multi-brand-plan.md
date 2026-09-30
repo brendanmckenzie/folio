@@ -225,6 +225,7 @@ where the spec was wrong. Each phase's own entry under the spec's
 
 | Phase | Commit | Note |
 | --- | --- | --- |
+| 0 | `8d9849a` | Gates green, 5098 tests; e2e 22/22; 197 Ground truth citations checked, 4 moved by 1–4 lines, none contradicted. The run renames `test` to `staging` (`env.staging`, `sites-staging`, `sites-folio-staging`) and imports from production, both owner decisions made on 2026-09-30 |
 
 ## The phases
 

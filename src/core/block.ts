@@ -72,10 +72,25 @@ export type AnyBlockDef = BlockDef<any>
 
 export type Registry = Record<string, AnyBlockDef>
 
-/** Accepts the array form authors naturally write, or a pre-keyed object. */
+/**
+ * Accepts the array form authors naturally write, or a pre-keyed object. A repeated
+ * name (array) or a key that is not its block's name (object) is a construction
+ * error: last-wins would silently drop a block.
+ */
 export function toRegistry(blocks: readonly AnyBlockDef[] | Registry): Registry {
-  if (!Array.isArray(blocks)) return blocks as Registry
-  return Object.fromEntries((blocks as readonly AnyBlockDef[]).map((b) => [b.name, b]))
+  if (!Array.isArray(blocks)) {
+    for (const [key, def] of Object.entries(blocks as Registry)) {
+      if (def.name !== key)
+        throw new Error(`folio: registry key '${key}' names block '${def.name}'`)
+    }
+    return blocks as Registry
+  }
+  const out: Registry = {}
+  for (const b of blocks as readonly AnyBlockDef[]) {
+    if (Object.hasOwn(out, b.name)) throw new Error(`folio: duplicate block '${b.name}'`)
+    out[b.name] = b
+  }
+  return out
 }
 
 export function toSchemaIndex(registry: Registry): SchemaIndex {
