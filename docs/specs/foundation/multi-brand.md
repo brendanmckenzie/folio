@@ -3,7 +3,7 @@
 > **Group:** foundation
 > **Build order:** 34, per docs/specs/README.md — after 23, and its first phase before the `v1.0.0` tag
 > **Size:** L
-> **Status:** review — built on the branch `multi-brand` (phases 1 to 8); release and staging verification pending, so not `done`
+> **Status:** review — built (phases 1 to 8), released at `c097c70`, and verified on a staging deployment from the far side; the owner's browser pass is pending, so not `done`
 > **Wire version:** none
 > **Migration:** `0013_site_brands.sql` (one nullable column on `sites`)
 > **Last updated:** 2026-09-30
@@ -1416,6 +1416,46 @@ host" and one sentence in the paste block `bin/folio.mjs agents` copies), `UPGRA
 and `docs/specs/README.md`, plus the acceptance line and route table above, reworded to
 what shipped.
 
+### Staging (2026-09-30)
+
+A new host repository serves allaboutafrica and takeoffgo from one Worker on
+`next-staging.allaboutafrica.au` and `next-staging.takeoffgo.com`, each with a
+`next-staging-preview.` origin, and the admin on a brand-neutral host. It pins `c097c70`,
+starts from a fresh D1 (`0001`–`0008`, `0010`, `0011`, `0013`), R2 bucket and Durable
+Object namespace, and holds both brands' published production content, copied by the
+host's import script over v1: 32 documents, 66 assets and 1 form for allaboutafrica, and
+12 documents, 1 asset and 2 forms for takeoffgo. All 44 documents were compared with
+their sources field by field through the import's id maps, and none differs. The target
+carries default-valued fields a stored source document omits, and takeoffgo lost four
+fields its own schema no longer declares (`feature.buttonLabel`, `feature.buttonTarget`
+on two pages), which production does not render either.
+
+Verified from the far side, with nothing failing:
+
+- The registry resolves each of the four brand hosts to its site and surface.
+- `scripts/cache-probe.mjs --admin --site --preview` passes 13, skips 2 and fails none
+  per brand. A takeoffgo republish sent that page to MISS while three allaboutafrica
+  pages stayed HIT.
+- Each brand's live and preview HTML carries its own `data-folio-brand`. `~<site>/api/schema` lists only its
+  brand's blocks (35 and 10, sharing only `pageRoot` and `prose`), `~shared` is 404, and
+  a token bound to one site is 403 on the other's scope.
+- MCP `server/discover` names the site and the brand per scope, and `tools/list`
+  describes only that brand's types.
+- Each brand's form accepts a submission with its own captcha's test keys and is 404
+  from the other brand's host or a preview origin.
+- The four existing Workers kept their pre-run version ids, and both consumers'
+  `origin/main` still pin their earlier SHAs.
+
+Where this plan was wrong in practice. Unscoped `/schema` and `/v1/schema` are in
+`UNSCOPED_API` by design, so a bound token gets its own site's schema and an anonymous
+caller the neutral one (401 on v1). `400 site_required` is what an unscoped *registry*
+route answers, as the anonymous `GET {base}/api/v1/documents` showed. Also, both brands' page HTML
+preloads the host's shared client chunks, including JavaScript of the other brand, which
+is weight rather than a leak because every brand stylesheet is scoped and the host's
+build checks it. Left to the owner's browser pass: that a draft preview pane loads only
+its own `folio-preview-<brand>` files, that the sign-in mail names the brand, and the
+partitioned grant cookie across the three registrable domains.
+
 ### Deferred
 
 - **Converting an existing deployment's unprefixed content-migration stamps.** Turning
@@ -1431,4 +1471,3 @@ what shipped.
   base of a branded admin.
 - **`DocumentType.sites`, federation, per-brand `auth`, `hooks`, `locales` or `route`**,
   as the Out of scope section says.
-- **Staging verification** (the plan's Phase V): nothing here has run on a deployment.
