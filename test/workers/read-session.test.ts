@@ -331,7 +331,7 @@ describe('folio.miss(): one round trip for a path with no live page', () => {
   })
 
   it('answers not-found for a path that never existed', async () => {
-    await expect(makeFolio().miss(env, 'rs-never')).resolves.toEqual({ kind: 'not-found' })
+    await expect(makeFolio().miss(env, 'rs-never')).resolves.toMatchObject({ kind: 'not-found' })
   })
 
   it('answers gone for a story that was live and was taken down', async () => {
@@ -343,7 +343,7 @@ describe('folio.miss(): one round trip for a path with no live page', () => {
       .bind(Date.now(), Date.now())
       .run()
 
-    await expect(makeFolio().miss(env, 'rs-gone')).resolves.toEqual({ kind: 'gone' })
+    await expect(makeFolio().miss(env, 'rs-gone')).resolves.toMatchObject({ kind: 'gone' })
   })
 
   it('prefers a redirect over the state, because a rename records both', async () => {
@@ -361,7 +361,7 @@ describe('folio.miss(): one round trip for a path with no live page', () => {
       .bind(Date.now())
       .run()
 
-    await expect(makeFolio().miss(env, 'rs-moved')).resolves.toEqual({
+    await expect(makeFolio().miss(env, 'rs-moved')).resolves.toMatchObject({
       kind: 'redirect',
       to: '/rs-here-now',
       status: 301,
@@ -388,7 +388,7 @@ describe('folio.miss(): one round trip for a path with no live page', () => {
       .bind(Date.now())
       .run()
 
-    await expect(makeFolio().miss(env, 'rs-bare')).resolves.toEqual({
+    await expect(makeFolio().miss(env, 'rs-bare')).resolves.toMatchObject({
       kind: 'redirect',
       to: '/guides/new-home',
       status: 301,
@@ -403,7 +403,7 @@ describe('folio.miss(): one round trip for a path with no live page', () => {
       .bind(Date.now())
       .run()
 
-    await expect(makeFolio().miss(env, 'rs-offsite')).resolves.toEqual({
+    await expect(makeFolio().miss(env, 'rs-offsite')).resolves.toMatchObject({
       kind: 'redirect',
       to: 'https://example.com/Elsewhere',
       status: 301,
@@ -418,7 +418,7 @@ describe('folio.miss(): one round trip for a path with no live page', () => {
       .bind(Date.now())
       .run()
 
-    await expect(makeFolio().miss(env, 'rs-unsafe')).resolves.toEqual({ kind: 'not-found' })
+    await expect(makeFolio().miss(env, 'rs-unsafe')).resolves.toMatchObject({ kind: 'not-found' })
     await expect(makeFolio().redirect(env, 'rs-unsafe')).resolves.toBeNull()
   })
 })

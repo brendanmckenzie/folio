@@ -147,7 +147,7 @@ export type ReadBindings = Omit<FolioBindings, 'db'> & { db: FolioDb }
  * never existed (404). The distinction is `unpublish.md`'s and every host was
  * reimplementing it as two sequential calls to `redirect` then `status`.
  */
-export type FolioMiss =
+export type MissArm =
   /**
    * `to` is **rooted** — `/guides/new`, not the bare `guides/new` Folio stores
    * and matches paths by. It is the one path-shaped value in this API that
@@ -157,6 +157,18 @@ export type FolioMiss =
    * the barer `redirect(miss.to)` now answer the same thing.
    */
   { kind: 'redirect'; to: string; status: number } | { kind: 'gone' } | { kind: 'not-found' }
+
+/**
+ * `MissArm` and the headers a host answers it with (`reader.miss`,
+ * `../../docs/specs/foundation/multi-brand.md` decision 13).
+ *
+ * `headers` are `cache-control` from `cacheHeaders`' policy and a `cache-tag` that a
+ * later publish at the path purges: `path:<site>:<path>` and `site:<site>` on a
+ * deployment with `sites`, `site` and `type:*` on a single-site one (the tags a
+ * single-site publish purges). A host answering a cached 404, 410 or redirect sets
+ * them as given and never spells a tag.
+ */
+export type FolioMiss = MissArm & { headers: { 'cache-control': string; 'cache-tag': string } }
 
 /**
  * One request's worth of reads, on one D1 session.

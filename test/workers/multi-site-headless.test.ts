@@ -442,6 +442,78 @@ describe('a page over HTTP', () => {
   })
 })
 
+/* ------------------------------------------------------------- a miss --- */
+
+describe('a miss over HTTP', () => {
+  beforeAll(async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        `insert into redirects (from_path, to_path, status, source, created_at, site_id) values
+           ('old', 'about', 301, 'manual', 0, 'alpha')`,
+      ),
+      env.DB.prepare(
+        `insert into stories (id, type, slug, path, ord, title, updated_at, site_id,
+                              published_at, unpublished_at)
+         values ('sty_hl_retired', 'hlPage', 'retired', 'retired', 'a0', 'Retired', 1, 'alpha', null, 3)`,
+      ),
+    ])
+  })
+
+  const miss = async (path: string) => {
+    const res = await admin(path, tRead)
+    expect(res.status).toBe(404)
+    const envelope = await json(res)
+    expect(envelope.error.code).toBe('not_found')
+    return envelope.error.miss
+  }
+
+  it('says redirect, gone or not-found from /pages/{path}, each tagged for a later publish', async () => {
+    const tags = (path: string) => [`path:alpha:${path}`, 'site:alpha'].join(',')
+    const control = 'public, max-age=0, s-maxage=604800, must-revalidate'
+
+    expect(await miss('/~alpha/api/v1/pages/old')).toEqual({
+      kind: 'redirect',
+      to: '/about',
+      status: 301,
+      headers: { 'cache-control': control, 'cache-tag': tags('old') },
+    })
+    expect(await miss('/~alpha/api/v1/pages/retired')).toEqual({
+      kind: 'gone',
+      headers: { 'cache-control': control, 'cache-tag': tags('retired') },
+    })
+    expect(await miss('/~alpha/api/v1/pages/never')).toEqual({
+      kind: 'not-found',
+      headers: { 'cache-control': control, 'cache-tag': tags('never') },
+    })
+  })
+
+  it('answers the same from /documents/by-path/{path}', async () => {
+    expect(await miss('/~alpha/api/v1/documents/by-path/old')).toMatchObject({
+      kind: 'redirect',
+      to: '/about',
+      headers: { 'cache-tag': 'path:alpha:old,site:alpha' },
+    })
+    expect(await miss('/~alpha/api/v1/documents/by-path/never')).toMatchObject({
+      kind: 'not-found',
+      headers: { 'cache-tag': 'path:alpha:never,site:alpha' },
+    })
+  })
+
+  it('leaves a redirect in another site alone', async () => {
+    expect(await miss('/~bravo/api/v1/pages/old')).toMatchObject({ kind: 'not-found' })
+  })
+
+  it('tags a single-site miss with the tags a single-site publish purges', async () => {
+    const single = createFolio<Cloudflare.Env>({
+      ...base,
+      auth: 'open',
+    } as FolioConfig<Cloudflare.Env>)
+    const miss = await single.miss(env, 'no-such-page')
+    expect(miss.kind).toBe('not-found')
+    expect(miss.headers['cache-tag']).toBe('site,type:*')
+  })
+})
+
 /* ------------------------------------------------------------ the cache --- */
 
 describe('the cache', () => {

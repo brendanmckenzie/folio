@@ -28,6 +28,14 @@ export interface MagicLinkMail {
   url: string
   /** When the link stops working, epoch ms. */
   expiresAt: number
+  /**
+   * The scope the sign-in was for, parsed from `next` when it names a `~<scope>` the
+   * sites registry holds, so the mail can say "Sign in to Take Off Go" while being
+   * sent from the admin origin's domain. Absent with no scope in `next`, and always
+   * absent on a deployment with no `sites`. `brand` is null until a deployment can
+   * configure brands (`../../../docs/specs/foundation/multi-brand.md` decision 16).
+   */
+  scope?: { id: string; name: string; brand: { id: string; label: string } | null }
 }
 
 export interface VerifiedIdentity {

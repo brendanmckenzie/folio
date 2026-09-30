@@ -9,6 +9,9 @@
 export { defineBlock, defineRecord, toRegistry, toSchemaIndex, toManifest } from './block'
 export type { AnyBlockDef, BlockDef, Registry } from './block'
 
+export { computeBlocksDigest, diffBlocksDigest } from './registry-digest'
+export type { BlocksDigestDiff } from './registry-digest'
+
 export { matches } from './conditions'
 export type { FieldCondition } from './conditions'
 
@@ -25,7 +28,12 @@ export {
   formTag,
   globalTag,
   NO_STORE,
+  pathTag,
+  scopedAnyTypeTag,
+  scopedGlobalTag,
+  scopedTypeTag,
   SITE_TAG,
+  siteTag,
   storyTag,
   typeTag,
 } from './cache-tags'

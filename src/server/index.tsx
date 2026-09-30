@@ -28,7 +28,7 @@ import { allows, mayPreviewDrafts, READ_DRAFT } from './auth/roles'
 import { deleteExpiredSessions } from './auth/session'
 import { claimShare, sharedStoriesAt } from './auth/shares'
 import { PRIMARY_FIRST, readBookmark, sessionFor } from './db'
-import { envelope, FolioError } from './errors'
+import { answerMiss, envelope, FolioError } from './errors'
 import type { ResolvedGate } from './gate'
 import { runMigrations } from './migrate'
 import { previewPage } from './pages'
@@ -169,16 +169,35 @@ export type {
   CreatedHookPayload,
   DeletedHookPayload,
   FolioHooks,
+  FormChangedHookPayload,
+  HookBase,
   HookEvent,
   MigratedHookPayload,
   PathsChangedHookPayload,
   PublishedHookPayload,
   RedirectsChangedHookPayload,
   ReindexedHookPayload,
+  SiteChangedHookPayload,
   StoryChange,
+  SubmittedHookPayload,
   UnpublishedHookPayload,
   UpdatedHookPayload,
 } from './hooks'
+/**
+ * The multi-site surface (`../../docs/specs/foundation/multi-brand.md` decision 14).
+ * The sites registry is exported **as `SiteRegistry`**, the alias `types.ts` already
+ * uses, so it never shadows `folio/core`'s block `Registry`.
+ */
+export type {
+  GroupRef,
+  Registry as SiteRegistry,
+  SiteContext,
+  SiteRef,
+  SiteStatus,
+  Surface,
+} from '../core/sites'
+export type { SitesConfig } from './types'
+export type { PurgeIssued } from './cache-purge'
 export { FolioError } from './errors'
 export type { ErrorEnvelope, FolioErrorCode } from './errors'
 export { magicLink } from './auth/magic-link'
@@ -1271,7 +1290,14 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         const miss = await pathMiss(db, within.chain, path)
         return miss.kind === 'redirect' ? { to: miss.to, status: miss.status } : null
       },
-      miss: async (path) => pathMiss(db, (await scopeOnce()).chain, path),
+      miss: async (path) => {
+        const within = await scopeOnce()
+        return answerMiss(
+          await pathMiss(db, within.chain, path),
+          within.render?.site?.id ?? null,
+          path,
+        )
+      },
       stories: async (opts) => {
         const within = await scopeOnce()
         const page = Math.max(Math.trunc(opts?.page ?? 1), 1)

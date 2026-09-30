@@ -78,7 +78,12 @@ export function pageRoutes<Env>(
       draft: wantDraft,
     })
     const page = await reader.page(path, locale === undefined ? undefined : { locale })
-    if (!page) throw new FolioError('not_found', 'No page at that path')
+    // A miss says what it was (`multi-brand.md` decision 13): a client that treats any
+    // 404 as a miss is unchanged, and one that reads `error.miss` can answer a redirect
+    // or a 410 without a second request.
+    if (!page) {
+      throw new FolioError('not_found', 'No page at that path', await reader.miss(path))
+    }
 
     const site = await requestSite(c, rt)
     const tags = page.headers['cache-tag']

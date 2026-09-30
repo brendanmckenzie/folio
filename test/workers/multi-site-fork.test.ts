@@ -349,7 +349,7 @@ describe('the fork route', () => {
     expect(
       (await call(`/~alpha/api/story/${forkId}/unpublish`, U, { method: 'POST' })).status,
     ).toBe(200)
-    expect(await readerAt('alpha', 'our-stores').miss('our-stores')).toEqual({ kind: 'gone' })
+    expect(await readerAt('alpha', 'our-stores').miss('our-stores')).toMatchObject({ kind: 'gone' })
 
     const removed = await call(`/~alpha/api/stories/${forkId}`, U, {
       method: 'DELETE',

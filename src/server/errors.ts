@@ -7,7 +7,9 @@
  * constraints, and an internal `Error` message is written for whoever reads the
  * logs, not for whoever made the request.
  */
+import { ANY_TYPE_TAG, cacheControl, pathTag, SITE_TAG, siteTag } from '../core/cache-tags'
 import { NestedError } from '../core/nested'
+import type { FolioMiss, MissArm } from './types'
 
 export type FolioErrorCode =
   | 'bad_request'
@@ -53,21 +55,41 @@ const STATUS: Record<FolioErrorCode, FolioErrorStatus> = {
 export class FolioError extends Error {
   readonly code: FolioErrorCode
   readonly status: FolioErrorStatus
+  /**
+   * What a v1 by-path read found at the path: the 404 envelope's `error.miss`
+   * (`multi-brand.md` decision 13). Only the two by-path routes set it.
+   */
+  readonly miss?: FolioMiss
 
-  constructor(code: FolioErrorCode, message: string) {
+  constructor(code: FolioErrorCode, message: string, miss?: FolioMiss) {
     super(message)
     this.name = 'FolioError'
     this.code = code
     this.status = STATUS[code]
+    if (miss) this.miss = miss
   }
 }
 
 export interface ErrorEnvelope {
-  error: { code: string; message: string }
+  /** `miss` is present only on the by-path 404s, and a client that treats any 404 as
+   * a miss never reads it. */
+  error: { code: string; message: string; miss?: FolioMiss }
 }
 
 export function envelope(err: FolioError): ErrorEnvelope {
-  return { error: { code: err.code, message: err.message } }
+  return {
+    error: { code: err.code, message: err.message, ...(err.miss ? { miss: err.miss } : {}) },
+  }
+}
+
+/**
+ * A miss with the headers a host answers it under: the one place they are spelled, for
+ * `reader.miss()` and the v1 by-path routes alike. `site` is the rendering site's id on
+ * a deployment with `sites` and null on a single-site one.
+ */
+export function answerMiss(arm: MissArm, site: string | null, path: string): FolioMiss {
+  const tags = site === null ? [SITE_TAG, ANY_TYPE_TAG] : [pathTag(site, path), siteTag(site)]
+  return { ...arm, headers: { 'cache-control': cacheControl(), 'cache-tag': tags.join(',') } }
 }
 
 /**

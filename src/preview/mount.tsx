@@ -1,9 +1,10 @@
 import './preview.css'
 import { useEffect, useState } from 'react'
 import { hydrateRoot } from 'react-dom/client'
-import { toRegistry, type AnyBlockDef, type Registry } from '../core/block'
+import { toRegistry, toSchemaIndex, type AnyBlockDef, type Registry } from '../core/block'
 import type { Doc } from '../core/doc'
 import { applyAll } from '../core/mutations'
+import { computeBlocksDigest, diffBlocksDigest } from '../core/registry-digest'
 import {
   isPreviewMsg,
   PROTOCOL_VERSION,
@@ -36,6 +37,13 @@ declare global {
        * frame. Absent, the admin is this preview's own origin, as it always was.
        */
       admin?: string
+      /**
+       * A digest of the server's blocks for this brand
+       * (`../../docs/specs/foundation/multi-brand.md` decision 11), compared with the
+       * one computed from the registry this bundle was built with. Absent from an
+       * older server, which skips the comparison.
+       */
+      blocks?: string
     }
   }
 }
@@ -178,6 +186,33 @@ function attachBridge() {
 }
 
 /**
+ * The wording of the mismatch notice, naming what differs. Exported for its test.
+ */
+export function blocksNotice(diff: ReturnType<typeof diffBlocksDigest>): string {
+  const parts = [
+    diff.missing.length > 0 ? `missing ${diff.missing.join(', ')}` : '',
+    diff.extra.length > 0 ? `extra ${diff.extra.join(', ')}` : '',
+    diff.changed.length > 0 ? `different fields in ${diff.changed.join(', ')}` : '',
+  ].filter(Boolean)
+  return `This preview's blocks differ from the server's: ${parts.join('; ')}. Rebuild the preview bundle from the same blocks module.`
+}
+
+/**
+ * An in-page notice above the page, first in the body, outside any React root:
+ * a preview with one stale block is still useful, and a blank one is not, so the page
+ * renders on (`multi-brand.md` decision 11).
+ */
+function drawBlocksNotice(text: string) {
+  const note = document.createElement('p')
+  note.setAttribute('role', 'note')
+  note.setAttribute('data-folio-blocks-notice', '')
+  note.textContent = text
+  note.style.cssText =
+    'margin:0;padding:8px 12px;font:13px/1.4 system-ui,sans-serif;background:#fff7e0;border-bottom:1px solid #e6cf8a;color:#5c4a00'
+  document.body.insertBefore(note, document.body.firstChild)
+}
+
+/**
  * Called by the preview entry that `folio/vite` generates, with the project's
  * own blocks. This is the one client bundle that needs your components.
  */
@@ -194,12 +229,20 @@ export function mountPreview(
     ? document.querySelector(boot.editing.mount)
     : document.getElementById('folio-root')
   if (!root) return
+  const registry = toRegistry(blocks)
+  // Every mounted preview is edit mode: the chrome-free draft page ships no entry.
+  if (boot.blocks !== undefined) {
+    const diff = diffBlocksDigest(boot.blocks, computeBlocksDigest(toSchemaIndex(registry)))
+    if (diff.missing.length + diff.extra.length + diff.changed.length > 0) {
+      drawBlocksNotice(blocksNotice(diff))
+    }
+  }
   hydrateRoot(
     root,
     <PreviewApp
       initial={boot.doc}
       initialResolution={boot.resolution ?? EMPTY_RESOLUTION}
-      registry={toRegistry(blocks)}
+      registry={registry}
       wrap={opts?.wrap}
     />,
   )

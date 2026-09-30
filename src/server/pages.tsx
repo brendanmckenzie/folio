@@ -12,6 +12,7 @@ import { NO_STORE } from '../core/cache-tags'
 import { wrapPreview } from '../core/render-wrap'
 import type { StoryMeta } from '../core/story'
 import { FolioDoc, type RenderMode, renderGlobalNode } from '../preview/Render'
+import { computeBlocksDigest } from '../core/registry-digest'
 import { Bootstrap, ReactRefreshPreamble, Shell } from './Document'
 import { PROTOCOL_VERSION } from '../core/protocol'
 import type { FolioRuntime, SiteRender } from './runtime'
@@ -271,6 +272,10 @@ export async function previewPage(
               value={{
                 ...(editing ? { doc: editingDoc, resolution, editing } : { doc, resolution }),
                 ...(opts?.admin ? { admin: opts.admin } : {}),
+                // The server's blocks, for `mountPreview` to compare against the
+                // bundle it was built from (`multi-brand.md` decision 11). Not a
+                // frame, so no `PROTOCOL_VERSION`.
+                blocks: computeBlocksDigest(rt.schema),
               }}
             />
           </>

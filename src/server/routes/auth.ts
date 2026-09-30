@@ -120,6 +120,33 @@ async function loginBody(req: Request): Promise<{ email: string; next?: string }
   return parseOrThrow(LoginEmailBody, raw, 'body')
 }
 
+/**
+ * The `~<scope>` a sign-in's `next` names, when the registry holds it (a site or a
+ * group): what the mail says the sign-in is for
+ * (`../../../docs/specs/foundation/multi-brand.md` decision 16). `next` has been
+ * screened same-origin by `safeNext`, and only its path is read. `brand` is null until
+ * a deployment can configure brands.
+ */
+async function scopeOfNext<Env>(
+  rt: FolioRuntime,
+  env: Env,
+  next: string,
+): Promise<{ id: string; name: string; brand: null } | null> {
+  if (!rt.sites) return null
+  const path = new URL(next, 'http://folio.invalid').pathname
+  const prefix = `${rt.base}/~`
+  if (!path.startsWith(prefix)) return null
+  let id: string
+  try {
+    id = decodeURIComponent(path.slice(prefix.length).split('/')[0] ?? '')
+  } catch {
+    return null
+  }
+  const registry = await rt.sites.registry(env)
+  const held = registry.sites.find((s) => s.id === id) ?? registry.groups.find((g) => g.id === id)
+  return held ? { id: held.id, name: held.name, brand: null } : null
+}
+
 export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
   const app = new Hono<FolioEnv<Env>>()
   // A deployment with `sites` has no unscoped editor: the shell at `{base}/` sends the
@@ -303,10 +330,12 @@ export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         url.searchParams.set('t', challenge.token)
         url.searchParams.set('next', next)
         try {
+          const scope = await scopeOfNext(rt, c.env, next)
           await provider.send(c.env, {
             email: body.email,
             url: url.toString(),
             expiresAt: challenge.expiresAt,
+            ...(scope ? { scope } : {}),
           })
         } catch (err) {
           // A failed send is the host's problem to see in its logs, never the

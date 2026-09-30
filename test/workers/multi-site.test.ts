@@ -609,7 +609,7 @@ describe('Fallback', () => {
 
     expect(await at('alpha').page('stores')).toBeNull()
     expect(await at('alpha').published('stores')).toBeNull()
-    expect(await at('alpha').miss('stores')).toEqual({
+    expect(await at('alpha').miss('stores')).toMatchObject({
       kind: 'redirect',
       to: '/our-stores',
       status: 301,
@@ -634,7 +634,7 @@ describe('Fallback', () => {
       `update stories set published_doc = null, published_at = null, unpublished_at = 3
        where id = 'sty_ms_alpha_stores'`,
     ).run()
-    expect(await at('alpha').miss('our-stores')).toEqual({ kind: 'gone' })
+    expect(await at('alpha').miss('our-stores')).toMatchObject({ kind: 'gone' })
     expect(await at('alpha').status('our-stores')).toBe('unpublished')
 
     await env.DB.batch([

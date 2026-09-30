@@ -37,7 +37,7 @@ import {
   READ_DRAFT,
 } from '../../auth/roles'
 import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from '../../documents'
-import { FolioError, rethrow } from '../../errors'
+import { answerMiss, FolioError, rethrow } from '../../errors'
 import {
   chainResolver,
   ensureAccess,
@@ -57,6 +57,7 @@ import type { FolioRuntime } from '../../runtime'
 import {
   createStory,
   ensureSingleton,
+  pathMiss,
   publishedDocsByIds,
   storyByPath,
   storyById,
@@ -362,7 +363,16 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     await servedSite(c, rt)
     const within = await requestChain(c, rt)
     const story = within.length > 0 ? await storyByPath(bindings.db, within, path) : null
-    if (!story || story.path === null) throw new FolioError('not_found', 'No document at that path')
+    if (!story || story.path === null) {
+      // The reader's `miss()` for the same site, without a reader: `pathMiss` over the
+      // request's chain, headers from `answerMiss`, so this and `/pages/{path}` agree.
+      const miss = answerMiss(
+        within.length > 0 ? await pathMiss(bindings.db, within, path) : { kind: 'not-found' },
+        rt.sites ? c.var.scope : null,
+        path,
+      )
+      throw new FolioError('not_found', 'No document at that path', miss)
+    }
     const locale = askedLocale(c)
     const urls = await requestUrls(c, rt)
     if (c.req.query('status') === 'draft') {

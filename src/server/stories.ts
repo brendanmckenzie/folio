@@ -47,7 +47,7 @@ import {
   redirectStatements,
   rootedTarget,
 } from './redirects'
-import type { FolioMiss } from './types'
+import type { MissArm } from './types'
 import { clearSchedulesStatements } from './schedules'
 import { BIND_BUDGET, bindChunks, type FolioDb } from './db'
 
@@ -1395,7 +1395,7 @@ export async function pathMiss(
   db: FolioDb,
   chain: readonly string[],
   path: string,
-): Promise<FolioMiss> {
+): Promise<MissArm> {
   const rows = await rowsAt(db, chain, path, { redirects: true })
   const served = pickServing(chain, rows.stories, rows.redirects)
   // Screened exactly as `lookupRedirect` screens a row, so a stored

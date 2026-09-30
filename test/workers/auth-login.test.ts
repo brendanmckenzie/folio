@@ -1,5 +1,5 @@
 import { createExecutionContext, env } from 'cloudflare:test'
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { defineBlock, text } from '../../src/core'
 import type { AuthConfig, MagicLinkMail, Role, RoleMapper } from '../../src/server'
 import {
@@ -285,6 +285,69 @@ async function requestLink(folio: Folio, email: string): Promise<Response> {
     body: JSON.stringify({ email }),
   })
 }
+
+describe('the scope a sign-in mail is told about', () => {
+  const multiSite = () =>
+    createFolio<Cloudflare.Env>({
+      blocks: [page],
+      root: 'page',
+      bindings,
+      basePath: '/folio',
+      auth: magicAuth,
+      route: (p) => (p ? `/${p}` : '/'),
+      sites: { admin: ORIGIN },
+    })
+
+  const mailFor = async (folio: Folio, next?: string) => {
+    await seedEditor()
+    const res = await call(folio, '/folio/login/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ email: 'ann@example.com', ...(next ? { next } : {}) }),
+    })
+    expect(res.status).toBe(200)
+    expect(outbox).toHaveLength(1)
+    return outbox[0]!
+  }
+
+  beforeEach(async () => {
+    await env.DB.batch([
+      env.DB.prepare('delete from sites'),
+      env.DB.prepare(
+        `insert into sites (id, kind, name, group_id, status, preview_origin, created_at, updated_at) values
+           ('north', 'group', 'North Group', null, null, null, 0, 0),
+           ('alpha', 'site', 'Alpha Safaris', 'north', 'live', null, 0, 0)`,
+      ),
+    ])
+  })
+
+  afterAll(async () => {
+    await env.DB.prepare('delete from sites').run()
+  })
+
+  it('names the site a next points at, with no brand yet', async () => {
+    const mail = await mailFor(multiSite(), '/folio/~alpha/edit')
+    expect(mail.scope).toEqual({ id: 'alpha', name: 'Alpha Safaris', brand: null })
+  })
+
+  it('names a group too', async () => {
+    const mail = await mailFor(multiSite(), '/folio/~north/')
+    expect(mail.scope).toEqual({ id: 'north', name: 'North Group', brand: null })
+  })
+
+  it('leaves it off with no scope in next', async () => {
+    expect('scope' in (await mailFor(multiSite()))).toBe(false)
+  })
+
+  it('leaves it off for a scope the registry does not hold', async () => {
+    expect('scope' in (await mailFor(multiSite(), '/folio/~nowhere/edit'))).toBe(false)
+  })
+
+  it('leaves it off on a single-site deployment', async () => {
+    const mail = await mailFor(folioWith(magicAuth), '/folio/~alpha/edit')
+    expect('scope' in mail).toBe(false)
+  })
+})
 
 describe('POST /folio/login/email', () => {
   it('mails a link to a known address', async () => {
