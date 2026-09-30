@@ -57,6 +57,13 @@ Querying section for the parameter and the response shape. On a deployment with 
 configured, a `search` is scoped to the gate's public value unless the call's own `where`
 already names that field.
 
+**On a multi-site deployment the endpoint is `{base}/~<site>/mcp`** (or a token bound to
+the site on `{base}/mcp`), and a bare `{base}/mcp` is `400 site_required`. A scoped
+session's `instructions` end with a sentence naming the site. **On a deployment with
+`brands` it also names the brand**, says that other brands' documents, types and blocks
+are not visible and that `get_schema` describes this brand only, and every tool
+description lists that brand's types and blocks and no other's.
+
 ## 2. Connect a client
 
 ### Claude Code

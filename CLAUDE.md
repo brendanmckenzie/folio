@@ -13,6 +13,11 @@ integration guide. `examples/starter` is a real workspace package that
 `pnpm typecheck` gates and that `bin/folio.mjs init` copies — **change it and you
 change what every new project starts from.**
 
+**Multi-brand (spec 34) is built** (2026-09-30): many brands — each its own block
+registry, types, globals, forms, migrations and preview bundle — in one deployment.
+Read `docs/specs/foundation/multi-brand.md`'s Implementation notes before touching
+anything that reads a registry; `docs/multi-brand-plan.md` is the build and rollout plan.
+
 **Multi-site (spec 23) is built** (2026-09-29, branch `multi-site`): read
 `foundation/multi-site.md`'s Implementation notes before touching anything with a
 scope, a chain, a grant or a preview origin — every phase records where the spec was
@@ -187,7 +192,7 @@ than a scatter.
 
 ## The two ledgers
 
-**D1 migrations** (`migrations/`). **There are ten: `0001`–`0008`, `0010` and `0011`.**
+**D1 migrations** (`migrations/`). **There are eleven: `0001`–`0008`, `0010`, `0011` and `0013`.**
 `0001_init.sql` holds the base schema — the ten that preceded it were collapsed into
 it (`docs/specs/README.md` keeps the record of what each added) — and `0002`–`0010`
 landed on top, five of them on 2026-09-06 with specs 28–33. **`0009` is a permanent
@@ -197,8 +202,10 @@ numeric prefix, so it would run before they exist). `0011_sites.sql` (spec 23) l
 2026-09-29; it is the first migration that is not purely additive, and `UPGRADING.md`
 says what that costs. **`0012_users_role_contract.sql` is claimed and is the release
 after**: it drops `users.role` and `users.role_from`, and must not be written or
-applied until the `0011` release is deployed everywhere it will go. Next free is
-`0013`.
+applied until the `0011` release is deployed everywhere it will go.
+`0013_site_brands.sql` (spec 34) landed 2026-09-30 ahead of the unwritten `0012` — a
+stand-in `0012` applied after it on a local database, so the order costs nothing.
+Next free is `0014`.
 
 A new one is the next number and normally a plain `alter table`, but rebuilding a
 table — `stories` included — is fair game when the shape is wrong. **Editing a
@@ -311,6 +318,23 @@ are free to go the next time that code is touched.
   Caching only, so anything a host puts in `caches.default` is unpurgeable by a
   publish. `caching.md` predates the split and says "Workers Cache" throughout;
   read it as Workers Caching.
+- **Every registry read goes through the scope's brand** (spec 34). `FolioRuntime`
+  has no `schema`, `types`, `registry`, `globals`, `forms`, `resolve` or `page` of its
+  own: a route reads `c.var.brand`, an entry point off a request reaches
+  `rt.forScope` / `rt.brands`, and a single-brand runtime is one `BrandRuntime` like any
+  other. A registry read with no scope on a branded deployment is `400 site_required`,
+  never the first brand — a default brand compiles, passes every single-brand test and
+  answers the wrong schema to every request of the other brand.
+- **A chain never crosses a brand.** On a branded deployment `chain()` omits `shared`,
+  and `chain` / `sitesUnder` skip a group of another brand even when SQL paired them.
+  If a fix needs a story's own site to pick its brand, a chain has crossed; the one
+  sanctioned exception is the cron, which has no request scope.
+- **A null brand serves nothing.** A row with no configured brand leaves the serving
+  snapshot (`servingRegistry`); it is neither the first brand nor every brand. Token
+  bindings and grants refuse it the way they refuse an unknown scope.
+- **Brand migration ids carry their brand** (`takeoffgo/0001-…`), refused at
+  construction otherwise, because `schema_migrations` is keyed by id alone. A brand id
+  is permanent once rows carry it.
 - **Every id-set read takes the chain** (spec 23). `storiesFor` and
   `publishedDocsByIds` take it as a required argument, every path lookup takes it,
   and `null` ("every scope") is spelled out and commented at the few readers that
@@ -479,7 +503,8 @@ section recording what actually landed, where the spec was wrong, and what was
 deferred. Read the notes, not just the plan: several specs' Ground truth was accurate
 when written and stale by the time it was built.
 
-**Specs 1–22 and 24–33 are done. 23 (`foundation/multi-site.md`, XL) is built** on
+**Specs 1–22 and 24–33 are done. 34 (`foundation/multi-brand.md`) is built** and stamped
+`review` until its staging verification is recorded. **23 (`foundation/multi-site.md`, XL) is built** on
 the branch `multi-site` (2026-09-29) and stamped `review` until its staging
 verification is recorded; its plan is `docs/multi-site-plan.md`. (This said "two are `draft`" until 2026-09-29, with 33
 among them, long after 33 landed as `0010_forms.sql`.) 28, 29, 30, 31 and 32 were all

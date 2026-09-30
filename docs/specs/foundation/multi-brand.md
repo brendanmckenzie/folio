@@ -3,7 +3,7 @@
 > **Group:** foundation
 > **Build order:** 34, per docs/specs/README.md — after 23, and its first phase before the `v1.0.0` tag
 > **Size:** L
-> **Status:** ready
+> **Status:** review — built on the branch `multi-brand` (phases 1 to 8); release and staging verification pending, so not `done`
 > **Wire version:** none
 > **Migration:** `0013_site_brands.sql` (one nullable column on `sites`)
 > **Last updated:** 2026-09-30
@@ -971,7 +971,7 @@ is unapplied, which the plan's phase 3 proves on a local database.
 | `GET {base}/api/sites` | Rows carry `brand` |
 | `GET {base}/api/me` | Each `sites.scopes[]` entry carries `brand: BrandRef | null` |
 | `GET {base}/api/assets/describe` | Answers for the scope's brand; unscoped on a branded deployment, `400 site_required` |
-| `POST {base}/api/migrate`, `/reindex`, `GET /audit`, `GET /migrations` | Per brand, over each brand's scopes; reports grouped by brand on a branded deployment |
+| `POST {base}/api/migrate`, `/reindex`, `GET /audit`, `GET /migrations` | On a branded deployment unscoped is `400 site_required`; under `~<scope>` each runs that scope's brand over that brand's scopes and its report carries `brand`. `folio.migrate`, `reindex` and `audit` off a request iterate the brands |
 | MCP `initialize` | `instructions` gain the scoped sentence on a multi-site deployment |
 
 ## Acceptance criteria
@@ -981,8 +981,12 @@ is unapplied, which the plan's phase 3 proves on a local database.
 ```
 GIVEN a deployment with no `brands`, single-site or multi-site
 WHEN it upgrades and applies 0013
-THEN every response, tag, manifest and preview page is what it was
-AND single-site-pin.test.ts passes unchanged
+THEN every stored document, cache tag, manifest and rendered page is what it was, and each
+     response differs only by the additive fields the ledger names: `brand: null` on
+     `GET /api/sites` rows, on `/me` scopes and on every hook payload, `scope` on a scoped
+     v1 `/schema` of a multi-site deployment, `miss` on a v1 404, `headers` on a `FolioMiss`
+     and one more sentence in a scoped MCP session's instructions
+AND single-site-pin.test.ts and multi-site-pin.test.ts pass unchanged
 AND the Vite plugin with a string `blocks` emits folio-preview.js and the same __FOLIO_ASSETS__
 ```
 
@@ -1209,3 +1213,222 @@ Phase V.
 - **Moving a site between deployments inside Folio** (decision 22).
 - **Changing a site's brand while it holds content** (decision 4): empty it, or
   create a new site.
+
+## Implementation notes
+
+Built on the branch `multi-brand` on 2026-09-30, one commit per phase (`d8ffe82`
+phase 1 on `main`, `b27eee6` 2, `4f6c618` 3, `985963f` 6, `05fbd98` 4, `8e727cd` 5,
+`5d478ff` 7, phase 8 with this text). **Staged for review, not `done`: nothing here
+has run on a deployment.** The workers suite proves the two-brand behaviour in
+workerd with colliding names, and the staging deployment the plan calls Phase V is
+what remains. `docs/multi-brand-plan.md` is the build order and the review record.
+
+### Phase 1: duplicate block names throw (`d8ffe82`)
+
+`toRegistry` throws `folio: duplicate block '<name>'` for the array form and
+`folio: registry key '<key>' names block '<def.name>'` for the object form, as
+specified. Neither consumer, the demo nor the starter repeated a name. It went to
+`main` ahead of the `v1.0.0` tag, as the ledger requires.
+
+### Phase 2: the additive surface (`b27eee6`)
+
+- **`FolioMiss.headers` split the type.** `pathMiss` has no site to build tags from, so
+  its arm is the internal `MissArm` and `FolioMiss = MissArm & { headers }`. One helper,
+  `answerMiss` (`src/server/errors.ts`), spells the headers for `reader.miss()` and both
+  by-path routes. Nine `toEqual` assertions on `miss()` became `toMatchObject`.
+- **The by-path documents route has no reader**, so it calls `pathMiss` over the
+  request's chain and `answerMiss`. A group or `shared` scope uses the scope id as the
+  site in the tags.
+- **The digest is a readable `name(field:kind,…)` string, not a hash**, because the
+  banner has to say which blocks differ. `diffBlocksDigest` also reports `changed`, so a
+  field-only mismatch is not silent (the spec named only missing and extra).
+- **`MagicLinkMail.scope` landed with `brand: null`** and phase 7 filled it.
+- The brand types in decision 14's export list waited for phase 3, which defined them.
+
+### Phase 3: the brand core (`4f6c618`)
+
+- **`SiteContext.brand` is `brand?: string`, present only with `brands`**, not
+  `string | null`: the Resolution carries `site` on every multi-site render, so a
+  `brand: null` key would have changed its bytes. `Manifest.brand` follows the same
+  rule. `SiteRef.brand` and `GroupRef.brand` are `string | null` as specified, and
+  appear as `brand: null` on `GET {base}/api/sites` rows of a single-brand deployment.
+- **`Registry.shared` is required, not optional.** An optional flag would default to
+  true, which fails open: a registry literal that forgot it would have a `shared` scope
+  on a branded deployment. Eight test files gained `brand: null, shared: true`.
+- **Only the snapshot is filtered.** `servingRegistry` drops rows whose brand is null or
+  unconfigured; `rt.sites.fresh` stays unfiltered because registry writes, `GET
+  /api/sites` and credential checks need every row. Grants and token bindings still
+  refuse a scope the snapshot does not serve (`400 … which is not a site or group`).
+- **`chain()` also skips a group of another brand**, so the fence is structural and not
+  a matter of write discipline for a row written by SQL.
+- **The brand-change conflict list is the delete's `OWNED` list**, which includes
+  `form_responses`. It is part of the `update` itself, one `not exists` per table, so a
+  story landing between a probe and the write cannot slip through. Any change is
+  refused while the scope holds content, `null` to a brand included; an explicit
+  `brand: null` on a branded deployment is `400`; any non-null brand on an unbranded
+  one is `400`. Group creation requires a brand.
+- **A layer's seed needs the registry on a branded deployment.** `isBareLayer` is wrong
+  where `shared` is absent: the bottom of a chain seeds `'full'`. `seedFor`, `draftFor`
+  and `draft` take an optional registry; a branded runtime asked for a layer without one
+  throws.
+- **More members threw than decision 6 listed**: `draftFor`, `draftForWithSyncId`,
+  `draft`, `resolve`, `query`, `publishDeps`, `auditContext` and `page('preview')`, plus
+  `sites.settings`. Phase 5 removed all of them.
+- **A brand's `resolve` and `query` refuse another brand's site and refuse no site**,
+  because an absent site is the `default` chain and `default` may be another brand's.
+- **The internal hook set is one set over every brand's globals**, since purge hooks are
+  deployment-level. A type that is a global in one brand and a plain singleton in another
+  purges the second as a layer plus `story:<id>`; nothing goes stale.
+- **`withScope` sets `c.var.brand` as `BrandRuntime | null`**, null only on a branded
+  deployment with neither scope nor site, so an unscoped route has to say what it does
+  with no brand.
+- **Construction refusals** also cover `assets.previewCss` at the top, an `assets` with no
+  `brands` key, and a blank `label`. Per-brand refusals are the single-brand messages
+  rethrown as `folio: brand '<id>': …`. Migration ids are checked for the `<brand>/`
+  prefix and then validated with the prefix stripped, because `/^\d*/` reads width 0 for
+  every prefixed id and the same-width rule would stop applying.
+- **`FolioConfig` is a union, so `Partial<FolioConfig>` no longer spreads.** Use
+  `Partial<FolioSingleConfig>`.
+- **`0013` proven out of order**: applied after `0011` and before a stand-in `0012` on a
+  fresh local database, wrangler applied by filename, and the stand-in ran after it.
+- **`readRegistry` selects `sites.brand` on every multi-site deployment, branded or
+  not.** Code that predates `0013` never reads the column (true), but code from this
+  release on a database without it fails every registry read, so `0013` is applied
+  before the deploy on every multi-site deployment. The spec's "with no `brands`,
+  nothing reads it" was true of behaviour and not of the query.
+- **Left open on purpose:** another isolate's registry snapshot answers the old brand for
+  up to ten seconds after a rebrand. A first page created there in that window is written
+  against the old brand's registry. Closing it means checking a story's own site brand
+  against the request's, which decision 6 rules out. A rebrand is safe on a scope nobody
+  is editing.
+
+### Phase 4: every reader through its brand (`05fbd98`)
+
+- **`/migrate`, `/reindex`, `/audit` and `/migrations` are unscoped routes and answer
+  `400 site_required` on a branded deployment.** The route table said per brand, grouped
+  by brand. Under `~<scope>` each runs that scope's brand over that brand's scopes and
+  reports `brand`. Reports grouped by brand are `folio.migrate`, `folio.reindex` and
+  `folio.audit`, which iterate the brands. `site_required` became a `FolioErrorCode` in
+  phase 7 so a route can throw it.
+- **The off-request sweeps walk brands with a prefixed cursor.** `continueFrom` on a
+  branded deployment is `<brand>/<inner>`; each call covers one brand, in `brands`
+  order, because an audit finding names a type and both brands have a `page`. A cursor
+  naming no brand is `400`. In a branded `migrate` report `pending`, `behind` and
+  `complete` cover the whole deployment and the per-batch counts cover this call's
+  brand, so a loop that reads the last report's `complete` means every brand. The route
+  reports only its own brand.
+- **The out-of-order check is per brand.** `schema_migrations` holds every brand's ids,
+  so once `takeoffgo/0001` is applied every unapplied `allaboutafrica/…` id sorts before
+  it and the next run would throw "inserted into the past". `ownMigrations` filters to
+  the brand's ids first.
+- **Scheduled publishes use the story's own scope.** A cron tick has no request; the due
+  row's `site_id` is the only scope there is, and its brand is its chain's. Deps are
+  memoised per brand per run. A story whose scope no configured brand serves is recorded
+  as a failure, not published under a guess. `folio.draft` and `folio.write` do the same
+  from the id, and `folio.draft` of an id with no row throws `not_found` on a branded
+  deployment.
+- **A branded reader with no site** answers nothing from `page`, `stories` and `tree`,
+  `null` from `global`, and throws from `resolve` and `query`, rather than pick a registry.
+- **`perBrand` reads the brand's scopes from the fresh registry**, not the snapshot, so a
+  site created a moment ago cannot miss a migration its brand's ledger then records as
+  complete.
+- **`folio.registryFor(brand)` was added to the `Folio` interface** (answers a
+  configured brand's block registry, throws for any other id, and for every id on a
+  single-brand deployment). `previewPage`'s `opts.brand` is required so the compiler
+  finds every caller. The editor's bare global preview never passed a site; branded, a
+  site renders as itself and a group as a stand-in site on its own chain.
+- **The review found six and all were fixed:** a bulk describe crossed brands
+  (`DescribeDeps.scopes`); a bound token at an unscoped URL was brandless; a v1 read of
+  a layer created its row; a group's bare preview resolved on an empty chain; route
+  reports lacked `brand`; and the scoped schedules run crossed brands.
+- **A v1 read of an unwritten layer is now `404` and creates no row**, on every
+  deployment with `sites`, single-brand included. A layer is created by its first write.
+  A single-site deployment keeps "asking creates a singleton". The alternative, keeping
+  the create, made a previewed draft site undeletable.
+- **`HookBase.brand`, and `brand` on the `migrated` and `reindexed` payloads,** waited for
+  phase 7: the fire sites in `hooks.ts` were in no phase 4 lane.
+
+### Phase 5: the old members go (`8e727cd`)
+
+The twenty-seven registry-derived members of `FolioRuntime` and `sites.settings` are
+deleted, with the throwing getters and the arrays that listed them. The proof is
+`pnpm typecheck` exiting 0 with them gone. Keeping the getters as a permanent guard was
+the alternative; it leaves a type that promises members that throw.
+
+### Phase 6: per-brand preview bundles (`985963f`)
+
+- **The record form's define has no top-level `preview` or `previewCss`**:
+  `{ admin, devClient, adminCss, brands: { <brand>: { preview, previewCss } } }`.
+- **Virtual ids are `virtual:folio/preview/<brand>`.** In dev a brand's preview is
+  `/@id/__x00__virtual:folio/preview/<brand>`. The bare id resolves for the string form
+  only.
+- **Two refusals beyond the spec:** an empty record, and a key that is not shaped like a
+  site id, throw at plugin construction. The site-id rule is duplicated in
+  `src/vite/index.ts` (`BRAND_ID`) because the plugin must not import server code.
+- **The `cssCodeSplit: false` refusal is in `config()`** and covers both
+  `build.cssCodeSplit` and `environments.client.build.cssCodeSplit`.
+- A real Vite build of two brand modules put each brand's rule only in its own
+  stylesheet. The string form is pinned byte-identical to the pre-change plugin.
+
+### Phase 7: admin and agent surfaces (`5d478ff`)
+
+- **`/me` gained a brand list, not only `MeScope.brand`**: `sites.brands` (`BrandRef[]`,
+  present only on a branded deployment), because the Sites screen must offer a brand with
+  no site yet. `sites.scopes[].brand` is `null` on every scope of a single-brand `/me`.
+- **`/me`'s `sites.settings` is null on any branded deployment.** Each brand has its own
+  settings type, so the Sites screen's Settings tab reads `me.sites.settings ??
+  manifest.settings` and exists only under a scope (`~<scope>/sites`), listing that
+  brand's scopes. At the bare base a branded deployment's Sites screen has no Settings
+  tab; the settings singleton also appears in each scope's Globals group.
+- **The neutral manifest** is `{ types: [], blocks: [], root: '', globals: [], locales?,
+  hooks? }`, with `locales` and `hooks` read off the first brand's manifest because both
+  are deployment-wide.
+- **v1 `scope` on a multi-site deployment without brands** is `{ id, name, kind, brand:
+  null }` (`name: 'Shared'` for `shared`). v1 `/schema` unscoped on a branded deployment
+  is `400 site_required`.
+- **MCP has no `initialize`** on the revision it speaks: the instructions are built at
+  `server/discover`. On a scoped multi-site session without brands the fourth sentence is
+  `This session is scoped to site 'N' (`id`).` (`group` or `scope` for those kinds); only
+  the branded form has the brand clause.
+- **`HookBase.brand` is set by the runner from its own brand**, not from the payload:
+  `rt.hookRunner(ctx, brand)` takes it as a required argument so the compiler found all
+  eleven call sites, and a payload that tries to stamp another brand is overwritten. Every
+  single-brand payload now carries `brand: null`, including on single-site deployments.
+- **`MagicLinkMail.scope.brand`** is the row's `{ id, label }` on a branded deployment and
+  `null` otherwise. It is parsed from a same-origin `next`; `safeNext` fallbacks give none.
+- **`isBareLayer` is out of the admin.** `inspector-model.ts` decides a layer by the
+  `/me` chain of its own scope, which is `layerSeed`'s rule.
+- **The switcher groups by brand** when any choice carries one, ordered by label, so a
+  single-brand `/me` groups Shared, Groups, Sites as before. The token-binding picker uses
+  the same function. The Sites dialog offers no impossible control: a group holding sites
+  has a fixed brand and a new site is never offered a group of no brand.
+- **The review found five, all fixed:** an unscoped route with a scope in the URL picked a
+  brand without checking the caller reached it (403 now, branded deployments only);
+  the Sites dialog offered a brand change the server always refuses, and groups with no
+  brand; and the Settings blurb told a bottom-of-chain scope it inherited.
+  A failed scoped manifest fetch now throws so the shell draws stubs.
+
+### Phase 8: documentation
+
+`README.md`, `docs/handbook.md` ("Many brands in one deployment"),
+`docs/configuration.md`, `docs/api.md`, `docs/mcp.md`, `AGENTS.md` ("A multi-brand
+host" and one sentence in the paste block `bin/folio.mjs agents` copies), `UPGRADING.md`
+and `docs/specs/README.md`, plus the acceptance line and route table above, reworded to
+what shipped.
+
+### Deferred
+
+- **Converting an existing deployment's unprefixed content-migration stamps.** Turning
+  `brands` on for a deployment with content migrations means renaming its ids to
+  `<brand>/…`, and `stories.schema_id` and `schema_migrations.id` carry the old ones, so
+  every document reads as behind and the next `migrate` runs them again. Out of scope:
+  the test deployment starts from scratch. A conversion would prefix both in the same SQL
+  as the `default` brand update.
+- **Renaming or removing a brand id once rows carry it.** The repair is SQL,
+  `update sites set brand = '<new>' where brand = '<old>'`, applied with the deploy.
+  `PATCH { brand }` is `409` on any scope that holds content.
+- **Grouped-by-brand reports on the routes**, and a per-brand Settings tab at the bare
+  base of a branded admin.
+- **`DocumentType.sites`, federation, per-brand `auth`, `hooks`, `locales` or `route`**,
+  as the Out of scope section says.
+- **Staging verification** (the plan's Phase V): nothing here has run on a deployment.

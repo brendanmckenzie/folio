@@ -232,6 +232,8 @@ where the spec was wrong. Each phase's own entry under the spec's
 | 6 | `985963f` | As specified, plus refusals for an empty record and a brand key not shaped like a site id |
 | 4a+4b | `05fbd98` | One commit: the integration and review rounds threaded both lanes' files. `folio.registryFor` needed a `Folio` member in `types.ts`, which no lane owned. Review found six, all fixed; a v1 read of an unwritten layer is now a 404 rather than a row |
 | 5 | `8e727cd` | Twenty-seven members and `sites.settings` deleted; typecheck named no reader |
+| 7 | `5d478ff` | `/me` gained a `brands` list; `hookRunner` takes the brand as a required argument. Review found five low, all fixed, the worst a caller reaching another brand's labelled schema by naming its `~scope` |
+| 8 | this commit | Docs, spec Implementation notes, `CLAUDE.md`. Full e2e 22/22, 5277 tests. `bin/folio.mjs` needed no change: its note ships from `AGENTS.md`'s block |
 
 ## The phases
 

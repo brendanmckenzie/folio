@@ -65,6 +65,10 @@ The three rules broken most often:
   `blok.data[name]`, or translations silently fall back to the source locale.
 
 After bumping the pinned SHA, `rm -rf node_modules/folio` before installing.
+
+If `createFolio` has `brands`, check the brand map in this file and in each
+`app/brands/<brand>/CLAUDE.md` before you edit a block, type or route, and never import
+from one brand's directory into another's.
 <!-- folio:end -->
 ```
 
@@ -261,6 +265,76 @@ and `siteChanged` refreshes its host map.
 token can be bound to one site (`POST /tokens` with `site`), and then supplies the
 scope itself.
 
+## A multi-brand host
+
+Skip this unless `createFolio` has a `brands` key. Without one, none of it applies. With
+one, the deployment holds sites of more than one **brand**, each its own registry of
+blocks, types, preview and policy (spec 34, `docs/specs/foundation/multi-brand.md`; the
+feature is `docs/handbook.md` "Many brands in one deployment", the keys are in
+`docs/configuration.md`). It builds on "A multi-site host" above, and everything there
+still applies. **Do not turn `brands` on for a deployment on the strength of this file**:
+read the `UPGRADING.md` section first, because a site with no brand serves nothing.
+
+**What Folio does for you.** Per-brand `blocks`, `types`, `globals`, `settings`,
+`previewCss`, `previewWrap`, `gate`, `forms`, `describe` and `migrations` live in
+`brands.<id>`, and each is looked up through the brand of the scope. `folio.registry`
+throws: use `folio.registryFor(brand)`, or hand `render` a resolution and it finds the
+brand itself. A chain never crosses a brand and there is no `shared` scope. Migration ids
+start `<brand>/`. A hook tells brands apart by its payload's
+`brand`, and `magicLink`'s `send` gets `mail.scope.brand`.
+
+**The route tree.** One React Router app serves every brand, and this is host code. It is
+made safe by structure, not by care. Six rules:
+
+1. **One brand resolver.** `brandOf(request, env)` answers `(await folio.reader(env,
+   request).site())?.brand ?? null`. Nothing else reads a hostname to decide a brand. The
+   root loader calls it once and puts it on the loader context.
+2. **Brand directories.** `app/brands/<brand>/` holds that brand's Folio blocks and
+   `FolioBrand`, components, styles, route modules and queries. `app/shared/` holds only
+   code neither brand styles (an API client, a payment-key picker, the resolver). A lint
+   rule forbids an import from one brand's directory into another's.
+3. **Colliding paths are dispatch modules.** `/`, `*`, `sitemap.xml`, `robots.txt` and
+   every path both brands serve is one route module whose loader and action call the
+   brand's own module (`brands/<brand>/routes/<name>.ts`) and whose component renders the
+   brand's component from the loader data. A path only one brand has is guarded: another
+   brand's host answers 404.
+4. **Per-brand root layout and CSS scoping.** The root sets `<html
+   data-folio-brand="<brand>">` and renders the brand's layout. Every brand stylesheet is
+   authored under `[data-folio-brand="<brand>"]`, resets included, and a build check
+   fails on any rule in a brand's compiled CSS outside that scope except `@font-face` and
+   `@keyframes`. Folio's own preview and draft pages carry the same attribute, so the same
+   selector holds there.
+5. **`public/` holds only brand-neutral files**, because Workers Assets serve it before
+   the Worker runs. `robots.txt`, favicons and each brand's `_headers` rules become routes
+   or one merged `_headers`.
+6. **One client per upstream service.** One codegen config reading its token from the
+   environment, one generated client, every brand's query documents, and call shapes that
+   differ by brand reconciled at their call sites.
+
+**How an agent knows which brand it is editing.** Four independent signals, so no single
+one is load-bearing:
+
+1. **The repository.** The host's root `CLAUDE.md` or `AGENTS.md` holds the brand map:
+   brand id, sites, hosts, preview origins and the MCP URL per site. Each
+   `app/brands/<brand>/CLAUDE.md` says which brand the directory is and that nothing in it
+   may import from another brand's directory.
+2. **The credential.** Mint tokens for scripts and MCP **bound to a site**
+   (`POST /tokens` with `site`), so a token for one brand cannot write another's even at
+   an unscoped URL.
+3. **MCP names it.** A scoped session's instructions say "This session is scoped to site
+   '<name>' (`<id>`) of brand '<label>'; documents, types and blocks of other brands are
+   not visible, and get_schema describes this brand only." Tool descriptions list that
+   brand's types and blocks.
+4. **The schema says it.** `GET {base}/~<site>/api/v1/schema` carries `scope` with the
+   brand, and with no scope on a branded deployment it is `400 site_required`.
+
+If the brand map and the schema disagree, trust the schema and stop.
+
+**Scripts and tooling** address a scope, as on any multi-site deployment. Unscoped
+`POST /migrate`, `/reindex`, `GET /audit`, `/migrations` and `/assets/describe` are `400
+site_required` on a branded deployment: call them under `{base}/~<site>/…`, and each runs
+that site's brand.
+
 ## Rules
 
 - **`folio.handle()` first, and it returns `null`.** If a Folio path 404s, your
@@ -337,6 +411,10 @@ scope itself.
 - **Many sites in one deployment is opt-in and one-way.** Without `sites` a deployment
   is one site, as it always was. With it, see "A multi-site host" above; there is no
   turning it off again once a second site exists.
+- **Many brands in one deployment is opt-in.** Without `brands` a deployment has one
+  registry, as it always did. With it, see "A multi-brand host" above. A site with no
+  brand, or one the config does not name, serves nothing, and a brand id is permanent
+  once rows carry it.
 - **No host-defined custom field types.** The field set is what `folio/core`
   exports.
 

@@ -1693,6 +1693,14 @@ of the two on its own.
 to hand straight to a `Location` header. Reattaching `url.search` is the host's
 job; only the host knows what it did with the rest of the URL.
 
+**Each arm also carries `headers`**: a `Cache-Control` from the same policy as
+`cacheHeaders` and a `Cache-Tag` that a later publish at the path purges. On a
+multi-site deployment the tags are `path:<site>:<path>` and `site:<site>`; on a
+single-site one, `site` and `type:*`, the tags a single-site publish purges. A host
+answers a cached 404, 410 or redirect with them as given and never spells a tag, so
+a host that used to hand-write a set of miss headers (and a purge hook to go with
+it) can drop both.
+
 ## Forms
 
 A page can ask a question and Folio has somewhere to put the answer. An editor
@@ -2825,6 +2833,10 @@ key a deployment is one implicit site called `default`, and no request, URL, cac
 tag, role or stored document is different from what this handbook describes
 everywhere else. Everything in this chapter is about a deployment that has the key.
 
+**Every site in this chapter shares one design**: one block registry, one set of types.
+Sites that do not are [brands](#many-brands-in-one-deployment), which also removes the
+`shared` scope described here.
+
 **Turning it on is the point of no return** (`UPGRADING.md`): once a second site
 exists, code with no site dimension would serve every site's rows as one. Read
 [the 0011 section](../UPGRADING.md#0011-roles-move-to-site_roles-2026-09-29) before
@@ -3291,6 +3303,11 @@ under `{base}/api/v1` and so a promise:
   `documents/by-path/…` applies the same gate. A headless front end forwards the
   visitor's `Cookie` on its service-binding call to the preview origin's
   `{base}/~<site>/api/v1/…?status=draft`, and the grant authenticates that read.
+  A miss on `pages/{path}` or `documents/by-path/{path}` is still a `404` with the
+  usual envelope, and now says why: `error.miss` is the same `FolioMiss` that
+  `reader.miss()` answers (`redirect` with `to` and `status`, `gone`, or `not-found`,
+  with `headers`), computed in one batch. A client that treats any 404 as a miss is
+  unchanged, and one that wants to answer 301 or 410 needs no second request.
 
 Fallback, shadowing and layering are Folio's rules; rebuilding them from document
 reads would be a second implementation that drifts.
@@ -3314,6 +3331,151 @@ answers absolute URLs, `folio.reader(env, req)` (or `{ site }`; with neither it
 throws) everywhere a reader is built, `folio.cacheProps(req, env)` on the cached loopback, a redirect from
 `{base}/*` on live hosts to the admin, and DNS and routes for the three kinds of
 hostname.
+
+## Many brands in one deployment
+
+Many sites share a design by default: one block registry, one set of document types,
+one preview, and variation as a per-site settings document. That is right for a
+portfolio of sites that differ by theme, and wrong for two brands that share nothing but
+an agency. Two brands may each have a block called `pageRoot` and a type called `page`
+with incompatible fields, and one of them may import a global stylesheet that would
+restyle the other's editor. A **brand** is the unit of design: a named registry (blocks,
+types, globals, preview shell, forms policy, describer and content migrations) that a
+site belongs to. One Worker, one D1, one R2 bucket, one admin origin and one sign-in
+serve every brand.
+
+**It is off unless you say so**, and it supersedes the "every site renders every block it
+holds" premise of the previous chapter only for a deployment that configures
+`createFolio({ brands })`. Without that key nothing in this handbook changes.
+[The configuration reference](configuration.md#many-brands-in-one-deployment) has every
+key. Turning it on is the point of the checklist in
+[`UPGRADING.md`](../UPGRADING.md#0013-and-turning-brands-on-2026-09-30), and
+[`AGENTS.md`](../AGENTS.md#a-multi-brand-host) is the host-side integration guide.
+
+### A site belongs to one brand
+
+`0013` adds a nullable `sites.brand`. The platform admin sets it when creating a site or
+group (the Sites screen has a brand field), and it is fixed once the scope holds
+content: a group and its sites share one brand, and a site cannot join a group of
+another. A row with no brand, or a brand the config does not name, is **left out of the
+registry**. It has no chain, its hosts are your router's 404 and every `~<scope>` answers
+`404 No site or group`, the same fence as an unknown scope. `GET {base}/api/sites` still
+lists it, with `brand: null`, so a platform admin can repair it.
+
+**A chain never crosses a brand, and a branded deployment has no `shared` scope.** A
+site's chain is itself and its group, a group's is itself, and `~shared` is a `404` with
+nothing to write to. So every row a request can reach (through a reference, a
+collection, a search, a form, an asset picker, a fork or a global layer) was written
+against the registry that renders it. The layers seed accordingly: the bottom of a chain
+is a group, or a site with no group, and a brand's declared defaults are what its sites
+start from.
+
+### Every read goes through the scope's brand
+
+A request's scope decides its brand once, in `withScope`, and every route reads its
+schema, types, globals, forms policy and describer from that brand. Creating a `guide`
+under a scope whose brand declares no such type is `Unknown document type`. Off a
+request each entry point finds its brand from what it holds:
+
+| Entry point | Its brand |
+| --- | --- |
+| `folio.reader(env, req)`, the `?_folio=` preview branch | The gated site's |
+| `folio.render`, `folio.renderGlobal`, `folio.settings` | `resolution.site.brand`; without a resolution that names a site, `render` throws |
+| `folio.runSchedules`, `folio.draft`, `folio.write` | The story's own scope's, because a cron tick or an id carries no request |
+| `folio.migrate`, `folio.reindex`, `folio.audit` | Each brand in turn |
+
+`folio.registry` throws on a branded deployment. `folio.registryFor(brand)` answers a
+brand's block registry, and `(await folio.reader(env, req).site())?.brand` is how a host
+learns the brand of a request. **That one lookup is the only place a host should decide
+a brand**: nothing else should read a hostname to guess.
+
+The sweeps walk the brands. `continueFrom` on a branded deployment is
+`<brand>/<inner>`, each call covers one brand in `brands` order, and in a migrate report
+`complete` means every brand's backlog, so a loop that reads the last report ends
+correctly. A brand's migrations run over that brand's scopes only, and ids carry the
+brand (`takeoffgo/0001-…`) because `schema_migrations` is one table keyed by id. The
+routes (`POST /migrate`, `/reindex`, `GET /audit`, `/migrations`) are unscoped, so on a
+branded deployment they are `400 site_required`; under `~<scope>` each covers that
+scope's brand and reports `brand`.
+
+**Indexed fields, singletons and search need nothing new.** Indexed names are checked
+per brand, `content_index` is keyed by story and a query binds the chain, so a field
+name both brands index is two disjoint row sets. Two brands declaring one singleton name
+get distinct rows per scope.
+
+### One preview bundle per brand
+
+The Vite plugin's `blocks` option is a record, and each key becomes its own client entry
+(`folio-preview-<brand>.js` and `.css`) that mounts only that brand's blocks module. The
+server's preview page for a scope links its brand's bundle and stylesheets, wraps with
+its brand's `previewWrap` and draws only its brand's globals. Folio's shell writes
+`<html data-folio-brand="<id>">`, so a brand's stylesheet can be authored under
+`[data-folio-brand="<id>"]` and hold on Folio's shell and on your own layout, which sets
+the same attribute. **A record cannot be built with `cssCodeSplit: false`**: one
+stylesheet would carry both brands' CSS into both previews.
+
+The one mistake per-brand bundles make likely is a plugin key pointing at the wrong
+brand's module. The preview's bootstrap carries a digest of the server's blocks
+(`name(field:kind,…)`, sorted), and `mountPreview` compares it with the registry it was
+handed. On a mismatch in edit mode it draws a notice above the page naming the blocks
+that are missing, extra or changed, and renders on: a preview with one stale block is
+still useful. No protocol version changes, because the digest is bootstrap data.
+
+### What an author sees
+
+The admin fetches its manifest from the scope's own base, so the "New" menu, the
+Content screen's chips, the sidebar and the pickers list that brand's types and no admin
+code knows what a brand is. With no scope the manifest is neutral (no types, blocks or
+globals), which is all the bare shell needs before it redirects to the caller's first
+scope. The scope switcher reads `<site> · <brand label>` and groups by brand, the tab
+title is `<crumb> · <site name> · Folio` on any multi-site deployment, and the Sites
+screen shows and sets each row's brand. The admin is not themed per brand.
+
+`/me` carries a `brand` per scope and, on a branded deployment, a `brands` list (so the
+Sites screen can offer a brand with no site yet). Its `sites.settings` is null, because
+each brand has its own settings type; the Sites screen's Settings tab lives under a scope
+(`~<scope>/sites`) and lists that brand's scopes. The settings singleton also appears in
+every scope's Globals group.
+
+### Agents and scripts
+
+`GET {base}/~<site>/api/v1/schema` answers the brand's manifest plus `scope: { id, name,
+kind, brand }`, and without a scope on a branded deployment is `400 site_required`,
+naming the `~<site>` form: a script that asked without a scope has to be told which
+brand it meant. A scoped MCP session's `instructions` gain a sentence, "This session is
+scoped to site '<name>' (`<id>`) of brand '<label>'; documents, types and blocks of
+other brands are not visible, and get_schema describes this brand only.", and every tool
+description lists that brand's types and blocks. A token bound to a site (`POST /tokens`
+with `site`) carries its brand with it, so a token for one brand cannot write another's
+even at an unscoped URL. An unscoped route that picks a brand from a `~<scope>` in the
+URL checks the caller reaches that scope first, and answers `403` otherwise.
+
+### What a hook or a mail is told
+
+Every hook payload carries `brand`: the brand of its `site`, `null` on a deployment with
+no `brands`. `hooks` stays deployment-wide because the runner, `await` and every purge
+are deployment-level, so a handler tells brands apart by the field. `submitted` is the
+usual case, one brand forwarding to its own CRM. `MagicLinkMail.scope` is `{ id, name,
+brand }`, parsed from the sign-in's same-origin `next`, so one sender on the brand-neutral
+admin origin can write "Sign in to Take Off Go". `forms.verify` and `ratePerHour` are the
+brand's, chosen by the site a submission arrives on.
+
+### What it costs, and what it leaves out
+
+- **One deploy carries every brand's code**, including its routes. Federation (a Worker
+  per brand over a shared D1) would keep each brand's code apart and cost a new mode
+  that forwards HTTP and WebSocket requests between Workers, an exact-build lockstep
+  and two cached entrypoints, permanent surface for one topology. It is not built.
+- **The admin origin belongs to no brand**, and passkeys bind to it, so it is chosen once.
+- **A brand's id is permanent once rows carry it**, and its content migrations cannot be
+  converted from unprefixed ids. Both are in `UPGRADING.md`.
+- **There is no per-type site allowlist.** It is the right tool the first time one brand's
+  own sites need different type sets, and until then it is a second partition beside the
+  brand.
+- **Auth, `hooks`, `locales` and `route` are per deployment**, and so is admin theming.
+- **A brand change is refused while the scope holds content**, and is safe only on a
+  scope nobody is editing: another Worker isolate answers the old brand for up to ten
+  seconds.
 
 ## Content migrations
 
@@ -3945,7 +4107,8 @@ not against real devices — `test/fixtures/webauthn/` is still empty, and a
 access control has landed**, as spec 31 (`docs/specs/platform/visitor-access.md`) —
 see "Visitor access" above. Still deliberately out: per-story editor
 permissions, passwords and TOTP. **Multi-site is built**, as spec 23 — see
-"Many sites in one deployment" above. Sign-in link
+"Many sites in one deployment" above — **and so are many brands**, as spec 34: see
+"Many brands in one deployment" above. Sign-in link
 rate limiting is per address only; the IP dimension wants a Cloudflare
 rate-limiting rule at the zone.
 

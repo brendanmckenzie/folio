@@ -298,6 +298,41 @@ cached loopback's props, a redirect for the admin path on live hosts, and DNS); 
 [chapter](docs/handbook.md#many-sites-in-one-deployment) for the design, and
 [`UPGRADING.md`](UPGRADING.md#turning-sites-on-what-the-host-changes-2026-09-29) before you flip it.
 
+### Many brands in one deployment
+
+Sites share one design by default. When they must not (two brands whose block names
+collide with different fields, or whose global stylesheets would restyle each other's
+editor) add `brands`, and a site belongs to a **brand**: a named registry of blocks,
+types, globals, preview shell, forms policy, describer and content migrations. One
+Worker, one D1, one R2 bucket, one admin origin and one sign-in serve them all.
+
+```tsx
+const folio = createFolio<Env>({
+  …,
+  brands: {
+    allaboutafrica: { label: 'All About Africa', blocks: aaaBlocks, types: aaaTypes },
+    takeoffgo: { label: 'Take Off Go', blocks: tgoBlocks, types: tgoTypes },
+  },
+  sites: { admin: 'https://cms.example' },
+})
+```
+
+- **Every read goes through the scope's brand.** The New menu, sidebar, pickers, MCP's
+  tool descriptions and the v1 schema list that brand's types and blocks and no other's,
+  and both brands keep their own `pageRoot` and `page`.
+- **A chain never crosses a brand, and there is no `shared` scope.** A site with no brand
+  serves nothing.
+- **One preview bundle per brand.** The Vite plugin's `blocks` is a record, and each
+  brand's stylesheet stays out of the others' previews.
+- **A hook payload and a sign-in mail say which brand they are for.**
+
+Without `brands` nothing about a deployment changes beyond a few additive fields
+(`brand: null` on hook payloads and `/me` scopes). The host has its own changes to make,
+and a route tree that serves several brands has rules of its own; read
+[`AGENTS.md`](AGENTS.md#a-multi-brand-host) for those, the handbook's
+[chapter](docs/handbook.md#many-brands-in-one-deployment) for the design, and
+[`UPGRADING.md`](UPGRADING.md#0013-and-turning-brands-on-2026-09-30) before you flip it.
+
 ---
 
 ## Configuring it
@@ -308,7 +343,7 @@ rather than a gap:
 
 | Key | | What it turns on |
 | --- | --- | --- |
-| `blocks` | **required** | Your block definitions |
+| `blocks` | **required** | Your block definitions (per brand, under `brands`) |
 | `auth` | **required** | Sign-in providers, or `'open'` said deliberately |
 | `bindings` | **required** | `env` → D1, Durable Objects, R2, Images |
 | `types` | | Document types: pages, records, singletons |
@@ -324,6 +359,7 @@ rather than a gap:
 | `draftMode` | | A promise that your route calls `reader.page()` |
 | `mcp` | | `false` removes `{base}/mcp`. Default on |
 | `sites` | | Many sites in one deployment. Absent is one implicit site. Turning it on is one-way |
+| `brands` | | Many brands in one deployment: a registry per brand. Needs `sites`, and moves `blocks`, `types` and the keys that follow them into each brand |
 | `assets`, `previewWrap`, `adminCss`, `previewCss` | | Preview and admin wiring |
 
 **[`docs/configuration.md`](docs/configuration.md) is the full reference** —

@@ -53,7 +53,7 @@ implies nothing at all beyond itself.
 
 | Method | Path | Scope | Answers |
 | --- | --- | --- | --- |
-| `GET` | `/api/v1/schema` | `content:read` | `Manifest` — types, blocks, locales |
+| `GET` | `/api/v1/schema` | `content:read` | `Manifest` — types, blocks, locales. Under `~<site>` on a multi-site deployment it adds `scope: { id, name, kind, brand }`; on a deployment with `brands` it is that brand's manifest, and with no scope it is `400 site_required` |
 | `GET` | `/api/v1/search` | `content:read` | `Page<DocumentMeta>` — keyset, **reaches drafts** |
 | `GET` | `/api/v1/documents` | `content:read` | `ContentPage` — a query over published content |
 | `GET` | `/api/v1/documents/:id` | `content:read` (+`:draft`) | `Document` |
@@ -430,7 +430,7 @@ rather than being a database error that escaped:
 | `bad_request` | 400 | The payload. Schema refusals name the failing path |
 | `unauthorized` | 401 | No usable credential: absent, expired, or revoked |
 | `forbidden` | 403 | A credential this server recognises, lacking the scope. Retrying will not help |
-| `not_found` | 404 | No such document, path, or version |
+| `not_found` | 404 | No such document, path, or version. `GET ~<site>/api/v1/pages/{path}` and `documents/by-path/{path}` add `error.miss`, a `FolioMiss` (`{ kind: 'redirect', to, status }`, `{ kind: 'gone' }` or `{ kind: 'not-found' }`, each with `headers`), so a front end answers 301, 410 or 404 without a second request |
 | `conflict` | 409 | Legible and refused: a slug collision, a singleton, a structurally invalid transaction |
 | `too_large` | 413 | Over a document or upload cap. The message carries the numbers |
 | `unsupported` | 501 | Well-formed, but this server has no such type, locale, or capability |

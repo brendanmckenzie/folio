@@ -36,6 +36,12 @@ block a document can contain, including the root blocks named by `types`.
 Nothing distinguishes a root block from any other; it is a root because a
 document type names it.
 
+**Every block needs a distinct name.** An array that repeats a name throws
+`folio: duplicate block '<name>'`, and an object registry whose key is not its
+block's `name` throws `folio: registry key '<key>' names block '<name>'`. With
+[`brands`](#brands-recordstring-foliobrandenv) this key moves into each brand
+and is absent at the top.
+
 #### `auth: AuthConfig<Env> | 'open'`
 
 **No default, on purpose.** Either name your sign-in providers, or write
@@ -57,7 +63,7 @@ auth: {
 
 | Provider | From `folio/server` | What it is |
 | --- | --- | --- |
-| `magicLink({ send })` | ✔ | Emailed sign-in link. Folio renders the URL and owns the session; **you** send the mail, because only you have the binding and the from-address. |
+| `magicLink({ send })` | ✔ | Emailed sign-in link. Folio renders the URL and owns the session; **you** send the mail, because only you have the binding and the from-address. `send` receives `{ email, url, expiresAt }` and, on a deployment with `sites`, a `scope` of `{ id, name, brand }` when the sign-in's `next` names a `~<scope>` in the registry (`brand` is `{ id, label }` on a branded deployment, else `null`), so one sender can word the mail per brand. |
 | `oidc({ … })` | ✔ | Any OIDC provider: Google, Okta, Entra. Redirect kind. |
 | `cloudflareAccess({ … })` | ✔ | Trusted-identity provider that **verifies** the Access JWT against your team's published keys. |
 | `trusted({ resolve })` | ✔ | You verify an identity however you like and hand it back. The verification is the whole of the security. |
@@ -281,6 +287,11 @@ adminCss: ['/admin-tweaks.css'],
 `assets` is not something you author — pass the plugin's global through, in the
 same file as `createFolio`.
 
+On a deployment with [`brands`](#brands-recordstring-foliobrandenv) the
+global's shape is `{ admin, devClient?, adminCss?, brands: { <brand>: { preview,
+previewCss? } } }`, `previewCss` moves into each brand, and `assets.brands` must
+name exactly the brands `brands` does.
+
 **These two lists are for stylesheets Vite does not bundle**: a hand-written
 `public/site.css`, a font provider's URL, a CDN link. CSS that reaches your
 blocks through an `import` — a CSS module beside a component, a `.scss` your
@@ -332,6 +343,134 @@ What changes elsewhere once it is set:
 - **`hooks`** gains `siteChanged`, and every payload gains `site` and `purge`.
 - **`auth`** grants are per scope, and two provisioning shapes are refused.
 - **The admin** mounts at `{base}/~<scope>/…` on the admin origin.
+- **`brands`**, if you also set it, is the next section.
+
+---
+
+### Many brands in one deployment
+
+#### `brands: Record<string, FolioBrand<Env>>`
+
+Absent by default, and absent is a complete behaviour: the deployment has one registry
+of blocks and types, exactly as every section above describes. Set it when the sites in
+one deployment do **not** share a design, not even a theme's worth: two agencies' sites
+whose block names collide with different fields, whose preview needs a different global
+stylesheet. A **brand** is a named registry (blocks, types, globals, preview shell,
+forms policy, describer and content migrations) that a site belongs to. It needs
+[`sites`](#sites-sitesconfig). One Worker, one D1, one R2 bucket, one admin origin and
+one sign-in serve every brand; what makes a brand look and behave like itself is looked
+up through the brand of the scope a request is for. Read
+[the handbook chapter](handbook.md#many-brands-in-one-deployment) for what that means,
+and [`UPGRADING.md`](../UPGRADING.md#0013-and-turning-brands-on-2026-09-30) before you
+turn it on.
+
+```ts
+createFolio<Env>({
+  brands: {
+    allaboutafrica: {
+      label: 'All About Africa',
+      blocks: aaaBlocks,
+      types: aaaTypes,
+      settings: 'siteSettings',
+      previewCss: ['/aaa.css'],
+      previewWrap: AaaPreviewWrap,
+      forms: { verify: verifyTurnstile, ratePerHour: 10 },
+      describe: aaaDescribe,
+    },
+    takeoffgo: {
+      label: 'Take Off Go',
+      blocks: tgoBlocks,
+      types: tgoTypes,
+      forms: { verify: verifyHCaptcha, ratePerHour: 20 },
+      migrations: [fiftyFiftyToFeature], // id 'takeoffgo/0001-fifty-fifty-to-feature'
+    },
+  },
+  sites: { admin: 'https://cms.example' },
+  assets: __FOLIO_ASSETS__,
+  auth: [magicLink({ send: sendSignIn }), passkeys({ rpName })],
+  hooks, route, bindings, basePath: '/folio', draftMode: true,
+})
+```
+
+**The brand's id** is its key. It follows the site id rule (lowercase letters, digits and
+hyphens, up to 32 characters) and is what `sites.brand` holds on each row. **It is
+permanent once a row carries it**: renaming or removing a key takes every row with the old
+id out of the registry, and the repair is SQL (`UPGRADING.md`).
+
+| `FolioBrand` key | | What it is |
+| --- | --- | --- |
+| `label` | **required** | Shown to people and to models: the switcher (`<site> · <label>`), the sign-in mail's `scope.brand`, MCP's instructions. Not blank. |
+| `blocks` | **required** | This brand's block registry. Same as the top-level key, and a repeated name throws. |
+| `root`, `types`, `globals` | optional | Same as the top-level keys, over this brand's blocks. |
+| `settings` | optional | The brand's site-settings singleton. It replaces `sites.settings`, which is refused beside `brands`. Each brand has its own type, so `/me`'s `sites.settings` is null on a branded deployment and the scoped manifest carries `settings`. |
+| `previewCss`, `previewWrap` | optional | This brand's preview stylesheets and wrap. The wrap's client half is a `wrap` export of the brand's own blocks module. |
+| `gate` | optional | This brand's visitor gate, validated against this brand's root blocks. |
+| `forms` | optional | `verify` and `ratePerHour` for a submission on this brand's live hosts. |
+| `describe` | optional | This brand's describer, `onUpload` and `concurrency`. |
+| `migrations` | optional | This brand's content migrations. **Each id starts `<brand>/`.** `migrate` runs a brand's list over that brand's sites only. |
+
+Each key means what the same key means at the top of a single-brand config, for this
+brand's sites.
+
+**What stays at the top**: `bindings`, `auth`, `basePath`, `route`, `locales`, `adminCss`,
+`assets.admin`, `hooks`, `logger`, `mcp`, `draftMode`, `sites.admin` and `sites.resolve`.
+Everything about people, requests and the deployment is one thing, whatever the brand.
+The rule for what moved is that a key moves into a brand when it is validated against the
+block registry or the types, or is rendered with them, or is a per-brand policy.
+
+**The type is a union.** `FolioConfig<Env>` is `FolioSingleConfig<Env> | FolioBrandedConfig<Env>`,
+so a key that belongs in a brand and is set at the top is a type error before it is a
+construction error. `FolioBrand`, `BrandRef` (`{ id, label }`), `FolioSingleConfig` and
+`FolioBrandedConfig` are exported from `folio/server`.
+
+**`sites` is required**, because a brand is a property of a site row. Sites and groups
+are still rows an admin creates, and a create on a branded deployment must name `brand`
+(one of the configured ids). A site and its group must have the same brand, and a
+brand can change only while the scope holds no content.
+
+**What a branded deployment does differently:**
+
+- **A row with no brand, or one `brands` does not name, serves nothing.** It is out of
+  the registry, so it has no chain, its hosts are the host's 404 and every `~<scope>`
+  answers `404 No site or group`. `GET {base}/api/sites` still lists it, with its brand,
+  so a platform admin can repair it.
+- **There is no `shared` scope.** A chain is a site and its group, and never leaves the
+  brand. `~shared` is a `404`, and `/me` offers no Shared scope to anyone.
+- **Every route reads its registry through the scope's brand.** `GET {base}/api/schema`
+  answers the scope's brand's manifest (with `brand`, and `settings` if declared) and,
+  with no scope, a neutral manifest with no types or blocks. `GET {base}/api/v1/schema`
+  adds `scope: { id, name, kind, brand }`, and with no scope is `400 site_required`.
+- **Unscoped registry-wide routes are `400 site_required`**: `POST /migrate`,
+  `POST /reindex`, `GET /audit`, `GET /migrations` and `/assets/describe`. Under
+  `~<scope>` each runs that scope's brand over that brand's sites, and its report names
+  the brand. `folio.migrate`, `folio.reindex` and `folio.audit` off a request iterate the
+  brands: `continueFrom` is `<brand>/<inner>`, each call covers one brand in `brands`
+  order, and in a migrate report `complete` means every brand.
+- **`folio.registry` throws.** `folio.registryFor(brand)` answers a brand's block
+  registry (and throws for an id `brands` does not name). `folio.render(doc, { resolution })`
+  and `folio.renderGlobal(resolution, name)` use `resolution.site.brand` and throw without
+  a resolution that names a site. `folio.settings(resolution)` is `null` for one that
+  names none.
+- **A preview page carries `<html data-folio-brand="<id>">`**, so a brand's global
+  stylesheet can be authored under `[data-folio-brand="<id>"]`. The preview's bootstrap
+  carries a digest of the brand's blocks; a preview bundle built from another brand's
+  module draws a notice naming the missing and extra blocks in edit mode and still renders.
+- **MCP** names the site and the brand in a scoped session's instructions, and every
+  tool description lists that brand's types and blocks only.
+
+**Refused at construction** (each throw names the key): `brands` without `sites`;
+`brands` empty or not an object; a brand id that is not shaped like a site id; a blank
+`label`; any moved key at the top level beside `brands`; `sites.settings` beside `brands`;
+`assets` whose `brands` keys differ from `brands`' keys, or an `assets.preview` or
+`assets.previewCss` at the top; a brand migration id that does not start with `<brand>/`;
+and every check a single-brand config gets, run per brand and rethrown as `folio: brand
+'<id>': …`.
+
+**The migration prefix and an existing deployment.** Turning `brands` on for a deployment
+that already runs content migrations means renaming its ids to `<brand>/…`, and its
+documents carry the old ids in `stories.schema_id`. Folio does not convert them: every
+document then reads as behind, and the next `migrate` runs the whole list again. The
+built-in `field.*` helpers are idempotent, and an `up` of your own may not be.
 
 ---
 
@@ -363,11 +502,19 @@ hook and no way to veto or rewrite a publish.
 
 Every payload also carries `site`, the scope that owns what changed (`default`
 without `sites`; `null` for `migrated` and `reindexed`, which touch every scope),
-and `purge` — `{ tags: string[] }` or `{ everything: true }` — when the event made
+`brand` (below), and `purge` — `{ tags: string[] }` or `{ everything: true }` — when the event made
 Folio purge anything. `purge` is exactly what Folio asked Workers Cache for, taken
 from the purger's own return value, so a headless host can forward it to a front
 end that caches on another entrypoint (a purge reaches only the entrypoint that
 issued it).
+
+**`brand` is the brand of the payload's `site`**: `null` on a deployment with no
+`brands`, and on an event that touches no brand. `migrated` and `reindexed` carry the
+brand being swept on a branded deployment. Folio sets it, and
+a payload cannot carry another. `hooks` stays deployment-wide, so a handler that
+behaves differently per brand branches on it (`submitted` is the usual case: one
+brand's enquiry email, another's CRM forward). A host that forwards a payload
+verbatim or compares it for equality now sees the key on every deployment.
 
 Unknown keys throw at construction, naming the typo and listing the valid names.
 
@@ -671,6 +818,27 @@ Two things it does that you can undo by accident:
   `configResolved` naming the cause — because by then the asset paths are baked
   and refusing to ship is all that is left.
 
+**With [`brands`](#brands-recordstring-foliobrandenv), `blocks` is a record**
+of brand id to blocks module, and the plugin builds one preview bundle each:
+
+```ts
+folio({
+  blocks: {
+    allaboutafrica: './app/brands/allaboutafrica/folio/blocks.ts',
+    takeoffgo: './app/brands/takeoffgo/folio/blocks.ts',
+  },
+})
+```
+
+Each key gets `folio-preview-<brand>.js` and `folio-preview-<brand>.css`, and
+`__FOLIO_ASSETS__` becomes `{ admin, devClient, adminCss, brands: { <brand>: {
+preview, previewCss } } }`, which `createFolio`'s `assets` takes unchanged. A key
+must be shaped like a site id, and an empty record throws. **A record cannot be built
+with `cssCodeSplit: false`** (set at the top level or on the client environment): one
+stylesheet would carry every brand's CSS into every brand's preview, so the build
+fails. That is the reverse of the single-brand rule above, which needs the flag. A
+string `blocks` is unchanged, byte for byte.
+
 ---
 
 ## Deploy-time obligations
@@ -746,6 +914,10 @@ you can recognise one:
 | `sites` without `route` | Every site's URLs are absolute, and a default relative `route` would resolve against the admin origin |
 | A layered global or settings type whose layer id (`sng_<name>:<scope>`) cannot fit 64 characters for a 32-character scope id | Creating a layer for a long-named scope would fail on whichever editor did it first |
 | With `sites`: a provider with `provision.role`, `provision: { create: true }` without `roleFrom`, or a `roleFromClaim` with `default` | Each is a role on every site for somebody the directory admits, or a created person with nowhere to work |
+| `brands` without `sites`, empty, or a brand id not shaped like a site id (lowercase letters, digits, hyphens, at most 32 characters) | A brand is a property of a site row, and the id is what the row stores and what a preview bundle is named after |
+| A key that belongs in a brand (`blocks`, `types`, `globals`, `previewCss`, `previewWrap`, `gate`, `forms`, `describe`, `migrations`, `root`) at the top beside `brands`, or `sites.settings` | It would be validated against no registry, or an arbitrary one |
+| `assets.brands` whose keys differ from `brands`', or `assets.preview` at the top with `brands` | A brand with no preview bundle, or a bundle for a brand that does not exist |
+| A brand migration id without its `<brand>/` prefix | `schema_migrations` is keyed by id alone, so two brands' `0001` would collide |
 | `sites` with `auth: 'open'` | Not refused: it logs a warning, because every scope is then editable and every preview origin shows drafts to anyone who reaches it |
 
 ---

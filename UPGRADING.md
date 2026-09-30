@@ -88,8 +88,9 @@ and whether it needs anything from you beyond applying it.
 | `0009` | **Permanently absent.** Nothing will ever take it: a migration numbered below `0010` cannot alter the tables `0010` creates on a fresh database, so the number is unusable. | — |
 | `0010_forms.sql` | Forms and responses | Nothing required. Add a `form()` field to a block to embed one, and a `submitted` hook to forward responses. |
 | `0011_sites.sql` | The site registry, a site column on stories, redirects, assets, folders, tags, forms, responses and shares, roles as grants in `site_roles`, preview grants; every global unique index re-keyed with the site leading | **Apply it, then deploy, within minutes, with no role changes or invitations in between**, then run the post-deploy grant statement. Read [the 0011 section](#0011-roles-move-to-site_roles-2026-09-29) first: it changes what a rollback can do. |
+| `0013_site_brands.sql` | One nullable `sites.brand` column | **Apply it before you deploy, on every deployment with `sites`**: this release's registry read selects the column, so a Worker deployed first fails every registry read with `no such column`. It is additive and safe ahead of the deploy. It changes nothing until you configure `brands`; read [the brands section](#0013-and-turning-brands-on-2026-09-30) before you do. |
 
-`0011` has landed. Next free number is `0013`; `0012` is claimed but is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`.
+`0011` and `0013` have landed. `0012` is still claimed and is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`. Next free number is `0014`. `0013` is numbered after a file that does not exist yet, which is fine: wrangler applies whatever is unapplied by filename, so a database that takes `0013` first takes `0012` later.
 
 **A note on `0001_init.sql`:** it is plain `create table`, not
 `create table if not exists`. Applying it over a database that already has those
@@ -382,6 +383,124 @@ bad `sites.admin`, or a provisioning shape it cannot honour, and `reader(env)` t
 where it would otherwise answer empty. What is silent is a cache with no props (two
 sites sharing an entry) and a purge issued from the wrong entrypoint, so run the probe.
 
+### 0013 and turning `brands` on (2026-09-30)
+
+`0013_site_brands.sql` adds one nullable column, `sites.brand`. **Applying it and
+deploying this release changes nothing you can see beyond the additive fields
+below.** Apply it before the deploy on a deployment with `sites`, because the new
+Worker selects the column on every registry read. A deployment with no `sites` never
+reads the table.
+
+**What every deployment sees, `brands` or not.** All additive, all new keys:
+
+- **Every hook payload carries `brand`**, `null` without `brands`, on single-site
+  deployments too. A host that forwards a payload verbatim, or compares one for exact
+  equality, now sees the key.
+- **`GET {base}/api/sites` rows and `/me`'s `sites.scopes[]` carry `brand: null`**, and
+  `GET {base}/api/sites` answers `shared: true` at the top.
+- **`GET {base}/~<site>/api/v1/schema` gains `scope`** on a multi-site deployment, and a
+  scoped MCP session's `instructions` gain one sentence naming the site.
+- **A v1 404 from `pages/{path}` and `documents/by-path/{path}` carries `error.miss`**
+  (`redirect`, `gone` or `not-found`), and `reader.miss()` answers `headers` (`Cache-Control`
+  and the `Cache-Tag` a later publish at the path purges). A client that treats any 404 as
+  a miss is unchanged.
+- **`MagicLinkMail` gains `scope?`** on a deployment with `sites`, parsed from the
+  sign-in's `next`.
+- **`folio/server` and `folio/core` export the multi-site types and the scoped tag
+  builders** (`SitesConfig`, `SiteRef`, `HookBase`, `siteTag`, `pathTag`, and the rest).
+- **A block registry that repeats a name now throws at construction**, and so does an
+  object registry whose key is not its block's name. Both used to keep the last block
+  and drop the first without a word.
+- **A v1 read of a layer nobody has written is now `404`, and a layer is created by its
+  first write.** Before, reading a layer created the row. It
+  applies to every deployment with `sites`; a deployment with no `sites` still creates a
+  singleton by asking for it. A script that read a layer to create it writes first
+  (`PATCH …/fields` with `{ fields: {} }`).
+- **`FolioConfig` is a union**, `FolioSingleConfig | FolioBrandedConfig`. Every config
+  literal still type-checks; `Partial<FolioConfig>` no longer spreads over a base config, so
+  write `Partial<FolioSingleConfig>`.
+
+**Turning `brands` on is its own change**, for a deployment whose sites do not share a
+design. Each brand has its own blocks, types, preview and policy, and a site belongs to
+one. Do it on staging first.
+
+**1. Set every existing row's brand, right after `0013` and before the deploy that
+configures `brands`.** A site or group with no brand, or a brand `brands` does not name,
+is left out of the registry: it has no chain and answers `404 No site or group` at every
+`~<scope>` and its hosts serve nothing. `0011` inserted `default` with no brand, so on
+its own the deploy serves every `default` page as a 404:
+
+```sql
+update sites set brand = 'allaboutafrica' where id = 'default';
+```
+
+Use your own brand id, and repeat for every other site and group you already have. The
+column is unread until `brands` is configured, so this is safe to run ahead of the
+deploy. Groups take their sites' brand, and a site and its group must agree.
+
+**2. There is no `shared` scope.** A branded deployment's chain is a site and its group,
+and `~shared` is a `404` whose rows nothing can read or write. If you keep content in
+`shared`, copy it into each brand's own scope first.
+
+**3. Config moves.** `blocks`, `root`, `types`, `globals`, `previewCss`, `previewWrap`,
+`gate`, `forms`, `describe` and `migrations` move into `brands.<id>`, and `sites.settings`
+becomes `brands.<id>.settings`. Everything about people and requests stays at the top.
+[The configuration reference](docs/configuration.md#many-brands-in-one-deployment) has the
+shape and the construction refusals, which name the key.
+
+**4. The Vite plugin takes a record.** `folio({ blocks: { allaboutafrica: './…', takeoffgo:
+'./…' } })` builds `folio-preview-<brand>.js` and `.css` per brand and defines
+`__FOLIO_ASSETS__` with a `brands` map, which you pass to `createFolio`'s `assets`
+unchanged. **A record with `cssCodeSplit: false` fails the build**, at the top level or on
+the client environment, because one stylesheet would carry every brand's CSS into every
+brand's preview. Remove the flag. A string `blocks` is unchanged, byte for byte, and keeps
+`cssCodeSplit: false`.
+
+**5. Content migration ids carry the brand.** Every id starts `<brand>/`
+(`takeoffgo/0001-fifty-fifty-to-feature`), refused at construction otherwise, because
+`schema_migrations` is keyed by id alone. **Converting an existing deployment is not
+supported.** Its documents carry the old unprefixed ids in `stories.schema_id`, and
+`schema_migrations` records them, so after the rename every document reads as behind and
+the next `migrate` runs every migration again. The built-in `field.*` helpers are
+idempotent; an `up` of your own may not be. A brand that has no migrations is unaffected.
+
+**6. Hosts read through a brand.** `folio.registry` throws on a branded deployment;
+`folio.registryFor(brand)` answers a brand's block registry, and `folio.render(doc,
+{ resolution })` takes its brand from `resolution.site`, throwing without one.
+`folio.reader(env, req)` reads the request's site as before, and `(await
+reader.site())?.brand` is the brand. A hook tells brands apart by the payload's `brand`.
+
+**7. Scripts and tokens name a scope.** On a branded deployment `{base}/api/v1/schema`
+with no scope is `400 site_required`, as are unscoped `POST /migrate`, `/reindex`, `GET
+/audit`, `/migrations` and `/assets/describe`. Call them under `{base}/~<site>/…` (the
+route runs that site's brand over that brand's sites), or bind the token to a site. A
+bound token cannot reach a site of another brand.
+
+**8. The brand id is permanent once rows carry it.** Renaming or removing a key in
+`brands` takes every row holding the old id out of the registry, so its hosts stop
+routing and every `~scope` is a `404`, and `PATCH { brand }` is `409` on a scope that
+holds content even where the registry is the same. Repair it with SQL, applied with the
+deploy that renames the key:
+
+```sql
+update sites set brand = '<new>' where brand = '<old>';
+```
+
+Changing a site's brand through the admin works only while the scope holds no content
+(stories, assets, folders, tags, forms, responses or redirects), and never on a group
+that has sites. Do it on a scope nobody is editing: another Worker isolate answers the
+old brand for up to ten seconds after the change.
+
+**9. The admin origin is brand-neutral and moving it costs every passkey.** A branded
+deployment has one sign-in, so `sites.admin` belongs to no brand, and sign-in mail is
+sent from one address. `MagicLinkMail.scope.brand` lets `send` word the mail per brand.
+Passkeys bind to the admin host; see [step 1 of turning `sites` on](#turning-sites-on-what-the-host-changes-2026-09-29).
+
+**Going back** is a config change: remove `brands` and restore the single-registry keys.
+The brand column is then unread, `shared` is a scope again, and nothing stored changes.
+Brand-prefixed migration ids stay in `schema_migrations` and in `stories.schema_id`, so a
+deployment that goes back renames its list to the old ids by hand.
+
 ### A title-only patch no longer moves the page (2026-09-06)
 
 **Two bugs, one upgrade, and both were silent.** Read this one even if you skip
@@ -528,6 +647,9 @@ rewritten them, through the mutation log — so the recovery is the History tab
 | Typecheck reports two incompatible `Plugin` types | Folio got installed by directory path or symlink instead of a SHA. It resolves `vite` from Folio's own tree. |
 | Scheduled publishes stopped firing | The cron trigger, or the `scheduled()` handler, did not survive the merge. |
 | `400 site_required` from a script or `{base}/mcp` | The deployment has `sites`, and the route needs a scope. Use `{base}/~<site>/…`, or a token bound to the site. |
+| Every page of a site is a `404` and `~<site>` answers `No site or group`, on a deployment with `brands` | The row's `brand` is null or is not a key of `brands`. `GET {base}/api/sites` lists it; set the column (see [turning `brands` on](#0013-and-turning-brands-on-2026-09-30)). |
+| `createFolio` throws `folio: 'blocks' belongs to a brand beside 'brands'` (or another moved key) | The config has `brands` and one of the keys that moved into a brand. Move it. |
+| The build fails with `blocks` is a record of brands, which cannot be built with `cssCodeSplit: false` | Remove `build.cssCodeSplit: false`. |
 | `folio.reader` throws "a read must say which site it is for" | The deployment has `sites`. Pass the request, or `{ site }`. |
 | Editors can sign in but their passkey is gone | The admin origin moved, and passkeys bind to its host. Re-enrol. |
 | A site's pages are the host's 404 | The site is not `live`, or the hostname is not in the registry. Check `GET {base}/api/v1/sites/resolve?host=…`. |
