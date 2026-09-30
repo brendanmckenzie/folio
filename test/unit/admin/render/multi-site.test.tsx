@@ -90,13 +90,17 @@ describe('the scoped API', () => {
     const { asked } = await mountAt('/folio/~alpha/content', PLATFORM)
     expect(asked.some((u) => u.includes('/folio/~alpha/api/documents?kind=singleton'))).toBe(true)
     expect(asked.some((u) => u.endsWith('/folio/api/me'))).toBe(true)
-    expect(asked.some((u) => u.endsWith('/folio/api/schema'))).toBe(true)
+    // The manifest too: at the scope's own base, so a brand's is the scope's brand's
+    // (`multi-brand.md` decision 12). The bare one is asked only with no scope chosen.
+    expect(asked.some((u) => u.endsWith('/folio/~alpha/api/schema'))).toBe(true)
+    expect(asked.some((u) => u.endsWith('/folio/api/schema'))).toBe(false)
   })
 
-  it('asks the unscoped routes only, on a single-site deployment', async () => {
+  it('asks the bare manifest with no scope chosen, and the unscoped routes only, on a single-site deployment', async () => {
     const { asked } = await mountAt('/folio/content', ADMIN)
     expect(asked.length).toBeGreaterThan(0)
     expect(asked.filter((u) => u.includes('~'))).toEqual([])
+    expect(asked.some((u) => u.endsWith('/folio/api/schema'))).toBe(true)
   })
 
   it('says so, rather than 403ing, for a scope the caller does not reach', async () => {
@@ -165,6 +169,18 @@ describe('the Sites screen', () => {
       expect(screen.queryByRole('button', { name: 'New site' })).toBeNull()
       expect(asked.some((u) => u.endsWith('/sites'))).toBe(false)
     }
+  })
+
+  it('has no brand column and no brand field on a single-brand deployment', async () => {
+    await mountAt('/folio/sites', PLATFORM)
+    const table = screen.getByRole('table', { name: 'Sites and groups' })
+    expect(within(table).queryByRole('columnheader', { name: 'Brand' })).toBeNull()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'New site' }))
+    })
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).queryByLabelText(/Brand/)).toBeNull()
+    expect(within(dialog).getByLabelText('Preview origin')).toBeTruthy()
   })
 
   it('opens the Settings tab onto a scope’s layer, under that scope', async () => {

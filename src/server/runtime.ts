@@ -380,9 +380,10 @@ export interface FolioRuntime {
    * (`../../docs/specs/platform/caching.md`). Same host hooks, same internal list, same
    * ordering — `publishDeps` builds its own `hooks` from this, so there is one
    * place a runner is assembled rather than two that could register different
-   * internal consumers.
+   * internal consumers. **`brand` is required**, so a new call site has to say which
+   * brand its payloads carry (`HookBase.brand`): the request's, or null with no `brands`.
    */
-  hookRunner: (hookCtx: HookRunnerCtx) => HookRunner<unknown>
+  hookRunner: (hookCtx: HookRunnerCtx, brand: string | null) => HookRunner<unknown>
   page: (which: 'admin' | 'preview') => PageAssets
 }
 
@@ -1017,12 +1018,13 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
     ),
   ]
 
-  const hookRunner = (hookCtx: HookRunnerCtx): HookRunner<unknown> =>
+  const hookRunner = (hookCtx: HookRunnerCtx, brand: string | null): HookRunner<unknown> =>
     createHookRunner<Env>(
       config.hooks,
       { env: hookCtx.env as Env, waitUntil: hookCtx.waitUntil },
       internalHooks,
       logger,
+      brand,
     )
 
   /**
@@ -1613,7 +1615,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       titleFor,
       titlesFor,
       projection,
-      hooks: hookRunner(hookCtx),
+      hooks: hookRunner(hookCtx, b.id),
       logger,
     })
 

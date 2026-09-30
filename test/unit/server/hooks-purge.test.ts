@@ -100,7 +100,7 @@ const STORY: StoryMeta = {
 const DOC: Doc = { root: 'r', bloks: {} }
 const VERSION = { id: 'ver_1' } as VersionMeta
 
-const CTX = { env: {} as Env, waitUntil: () => {} }
+const CTX = { env: {} as Env, waitUntil: () => {}, brand: null }
 const silent = { error: () => {}, warn: () => {} }
 
 /** Fires one event through the real runner with Folio's own purge hook first. */

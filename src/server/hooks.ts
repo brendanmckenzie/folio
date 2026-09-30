@@ -78,6 +78,17 @@ export interface HookBase<Env> {
    */
   site: string | null
   /**
+   * The brand of `site` (`../../docs/specs/foundation/multi-brand.md` decision 16):
+   * what lets `hooks.submitted` send one brand's enquiry email and another's Jambo
+   * forward. **Null on a deployment with no `brands`**, and for an event about the
+   * whole deployment. `migrated` and `reindexed` run per brand, so each carries the
+   * brand it ran for.
+   *
+   * Set by the runner from the brand it was made for, never from the payload, so an
+   * emitter cannot leave it out or name another brand's.
+   */
+  brand: string | null
+  /**
    * Exactly what Folio's own purger asked Workers Cache for, when this event made
    * it purge anything (decision 16): the tags, or a flush. A purge reaches only the
    * entrypoint that issues it, so a headless host whose front end caches on its own
@@ -342,7 +353,7 @@ export function validateHooks<Env>(hooks: FolioHooks<Env> | undefined): void {
  */
 export type HookExtra<Env, E extends HookEvent> = Omit<
   HookPayloadMap<Env>[E],
-  'env' | 'waitUntil' | 'site' | 'purge'
+  'env' | 'waitUntil' | 'site' | 'brand' | 'purge'
 > & { site?: string | null; purge?: PurgeIssued }
 
 export interface HookRunner<Env> {
@@ -422,6 +433,8 @@ export function createHookRunner<Env>(
   ctx: HookRunnerCtx<Env>,
   internal: InternalHooks<Env> = [],
   logger: FolioLogger = console,
+  /** The brand every payload this runner builds carries; null with no `brands`. */
+  brand: string | null = null,
 ): HookRunner<Env> {
   const awaited = new Set(hooks?.await ?? [])
 
@@ -438,6 +451,7 @@ export function createHookRunner<Env>(
         env: ctx.env,
         waitUntil: ctx.waitUntil,
         site: siteOf(extra as { site?: string | null; story?: { site?: string } }),
+        brand,
       } as HookBase<Env>
 
       // Internal hooks always run first, and are **always awaited**, whatever

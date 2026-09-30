@@ -83,13 +83,14 @@ const META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo'
  * `instructions` is the one place a server can address the model in prose rather
  * than through a tool description, so it carries the two things that are true of
  * every tool here and are not visible from any single one: the list is filtered by
- * what the credential may do, and a write is a real edit that people see.
+ * what the credential may do, and a write is a real edit that people see. On a
+ * deployment with `sites` a scoped session gains a fourth (`instructionsFor`).
  */
 const INSTRUCTIONS = [
   'Folio is a block-based CMS. Documents are trees of typed blocks; call get_schema first to learn the site’s block and field shapes before writing.',
   'The tools offered are already filtered to what this credential may do, so anything listed is permitted and nothing else exists to try.',
   'Writes go through the same log a human editor’s keystrokes do: an edit appears live in any open editor, is attributed to this token in the activity trail, and is undoable. Publishing is a separate, explicit step.',
-].join(' ')
+]
 
 export function mcpRoutes<Env>(
   rt: FolioRuntime,
@@ -352,6 +353,31 @@ export function mcpRoutes<Env>(
    */
   const UNCACHED = { ttlMs: 0, cacheScope: 'private' } as const
 
+  /**
+   * The instructions, plus one sentence on a session scoped to a site or group
+   * (`multi-brand.md` decision 19, signal 3): which one, and on a deployment with
+   * `brands` whose brand, so an agent that connected to the wrong URL is told before
+   * its first write. The name comes from the registry snapshot, which the mount has
+   * already read to resolve the scope.
+   */
+  const instructionsFor = async (c: Context<FolioEnv<Env>>): Promise<string> => {
+    const scope = c.var.scope
+    if (!rt.sites || scope === null) return INSTRUCTIONS.join(' ')
+    const registry = await rt.sites.registry(c.env)
+    const site = registry.sites.find((s) => s.id === scope)
+    const group = site ? undefined : registry.groups.find((g) => g.id === scope)
+    const noun = site ? 'site' : group ? 'group' : 'scope'
+    const name = (site ?? group)?.name ?? 'Shared'
+    const brand = c.var.brand?.brand
+    const named = `This session is scoped to ${noun} '${name}' (\`${scope}\`)`
+    return [
+      ...INSTRUCTIONS,
+      brand
+        ? `${named} of brand '${brand.label}'; documents, types and blocks of other brands are not visible, and get_schema describes this brand only.`
+        : `${named}.`,
+    ].join(' ')
+  }
+
   const methodsFor = (c: Context<FolioEnv<Env>>): Record<string, RpcMethod> => ({
     /**
      * **Mandatory in `2026-07-28`** (`server/discover` is a MUST), and the whole
@@ -371,11 +397,11 @@ export function mcpRoutes<Env>(
      *
      * **`ttlMs: 0` and `cacheScope: 'private'`: see `UNCACHED`.**
      */
-    'server/discover': () => ({
+    'server/discover': async () => ({
       ...UNCACHED,
       supportedVersions: SUPPORTED_VERSIONS,
       capabilities: { tools: {} },
-      instructions: INSTRUCTIONS,
+      instructions: await instructionsFor(c),
       _meta: { [META_SERVER_INFO]: SERVER_INFO },
     }),
 

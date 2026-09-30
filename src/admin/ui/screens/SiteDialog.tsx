@@ -1,10 +1,21 @@
 import { useState } from 'react'
 import type { GroupRef } from '../../../core/sites'
+import type { BrandRef } from '../../../server/types'
 import { Button } from '../Button'
 import { Dialog } from '../Dialog'
 import { Field, Input, Select, Textarea } from '../Field'
 import css from './Sites.module.css'
-import { formRefusal, ROUTING_NOTE, STATUS_OPTIONS, type SiteForm } from './sites-model'
+import {
+  brandField,
+  brandLabel,
+  formRefusal,
+  groupChoices,
+  ROUTING_NOTE,
+  STATUS_OPTIONS,
+  type SiteForm,
+  withBrand,
+  withGroup,
+} from './sites-model'
 
 /**
  * Creating or editing one registry row: a site or a group
@@ -19,11 +30,18 @@ import { formRefusal, ROUTING_NOTE, STATUS_OPTIONS, type SiteForm } from './site
  * An id is fixed once written (the server refuses a change), so it is a field on
  * create and a fact on edit. A group has no status, preview origin or hostnames —
  * it is never served — so those fields are absent for one rather than disabled.
+ *
+ * **The brand** (`multi-brand.md` decision 20) is a field only on a deployment with
+ * `brands`, a fact for a site in a group (it is the group's), and a choice otherwise
+ * (`brandField`). The server refuses to change it once the scope holds content, and
+ * says so in its own sentence.
  */
 export function SiteDialog({
   mode,
   initial,
   groups,
+  brands = [],
+  hasSites = false,
   onClose,
   onSave,
 }: {
@@ -31,6 +49,10 @@ export function SiteDialog({
   initial: SiteForm
   /** The groups a site may join. */
   groups: readonly GroupRef[]
+  /** The configured brands; empty on a deployment with none. */
+  brands?: readonly BrandRef[]
+  /** The group being edited has sites, so its brand cannot change. */
+  hasSites?: boolean
   onClose: () => void
   onSave: (form: SiteForm) => Promise<void>
 }) {
@@ -39,7 +61,8 @@ export function SiteDialog({
   const set = <K extends keyof SiteForm>(key: K, value: SiteForm[K]) =>
     setForm((prev) => ({ ...prev, [key]: value }))
 
-  const refusal = formRefusal(form, mode)
+  const refusal = formRefusal(form, mode, brands)
+  const brandMode = brandField(form, brands, hasSites)
   const noun = form.kind === 'group' ? 'group' : 'site'
 
   const submit = async () => {
@@ -105,13 +128,52 @@ export function SiteDialog({
           )}
         </Field>
 
+        {brandMode === 'choose' ? (
+          <Field
+            label="Brand"
+            help="Which brand's types and blocks this content is written against."
+            required
+          >
+            {(id) => (
+              <Select
+                id={id}
+                value={form.brand}
+                onChange={(e) => setForm((prev) => withBrand(prev, e.target.value, groups))}
+              >
+                {form.brand === '' ? <option value="">Choose a brand</option> : null}
+                {brands.map((brand) => (
+                  <option key={brand.id} value={brand.id}>
+                    {brand.label}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </Field>
+        ) : null}
+        {brandMode === 'fixed' ? (
+          <Field
+            label="Brand"
+            help={
+              form.kind === 'group'
+                ? 'A group with sites keeps its brand.'
+                : 'A site has its group’s brand.'
+            }
+          >
+            {() => <span>{brandLabel(brands, form.brand)}</span>}
+          </Field>
+        ) : null}
+
         {form.kind === 'site' ? (
           <>
             <Field label="Group" help="Optional. A site inherits its group’s pages and settings.">
               {(id) => (
-                <Select id={id} value={form.group} onChange={(e) => set('group', e.target.value)}>
+                <Select
+                  id={id}
+                  value={form.group}
+                  onChange={(e) => setForm((prev) => withGroup(prev, e.target.value, groups))}
+                >
                   <option value="">No group</option>
-                  {groups.map((group) => (
+                  {groupChoices(form, groups, brands).map((group) => (
                     <option key={group.id} value={group.id}>
                       {group.name}
                     </option>

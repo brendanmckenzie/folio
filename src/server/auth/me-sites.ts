@@ -13,6 +13,7 @@
  * Absent on a deployment with no `sites`: that is how the admin knows it is one.
  */
 import { ALL_SCOPES, chain, type Registry, SHARED_SCOPE, type SiteStatus } from '../../core/sites'
+import type { BrandRef } from '../types'
 import { effectiveRole, type Grants, previewEligible, type Role } from './roles'
 
 /** One scope the caller reaches, with their role there. */
@@ -30,6 +31,11 @@ export interface MeScope {
   status: SiteStatus | null
   /** A site's preview origin, or null. */
   preview: string | null
+  /**
+   * The scope's brand (`multi-brand.md` decision 20), which the switcher groups by.
+   * Null for `shared` and on a deployment with no `brands`.
+   */
+  brand: BrandRef | null
 }
 
 /** A site the caller may preview, and where its preview origin is. */
@@ -44,8 +50,18 @@ export interface MePreview {
 }
 
 export interface MeSites {
-  /** The singleton type that holds site-level fields, or null. */
+  /**
+   * The singleton type that holds site-level fields, or null. **Always null on a
+   * deployment with `brands`**, where the settings type is the brand's and rides on
+   * the scoped manifest (`multi-brand.md` decision 20).
+   */
   settings: string | null
+  /**
+   * The configured brands, for the Sites screen's brand field: a brand with no site
+   * yet is in no scope's `brand`. **Present only on a deployment with `brands`**, so
+   * a single-brand `/me` has no such key.
+   */
+  brands?: BrandRef[]
   /** `*` + `admin`: the registry, users and tokens are theirs. */
   platform: boolean
   /** The caller's own grants, by scope. Empty under `auth: 'open'`. */
@@ -63,7 +79,11 @@ export function meSites(
   registry: Registry,
   grants: Grants | null,
   settings: string | undefined,
+  brands?: readonly BrandRef[],
 ): MeSites {
+  const brandOf = (id: string | null): BrandRef | null =>
+    id === null ? null : (brands?.find((b) => b.id === id) ?? null)
+
   const roleOn = (scope: string): Role | null =>
     grants === null ? 'admin' : effectiveRole(grants, registry, scope)
 
@@ -81,6 +101,7 @@ export function meSites(
             chain: chain(registry, SHARED_SCOPE),
             status: null,
             preview: null,
+            brand: null,
           },
         ]
       : []),
@@ -92,6 +113,7 @@ export function meSites(
       chain: chain(registry, g.id),
       status: null,
       preview: null,
+      brand: brandOf(g.brand),
     })),
     ...registry.sites.map((s) => ({
       id: s.id,
@@ -101,6 +123,7 @@ export function meSites(
       chain: chain(registry, s.id),
       status: s.status,
       preview: s.preview,
+      brand: brandOf(s.brand),
     })),
   ]
 
@@ -122,6 +145,7 @@ export function meSites(
 
   return {
     settings: settings ?? null,
+    ...(brands ? { brands: [...brands] } : {}),
     platform: grants === null || grants[ALL_SCOPES] === 'admin',
     grants: grants ?? {},
     scopes,

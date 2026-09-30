@@ -73,6 +73,7 @@ import {
   updateForm,
 } from '../forms'
 import {
+  brandIdOf,
   hookCtx,
   inFence,
   type Reach,
@@ -290,7 +291,7 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     if (!result) throw new FolioError('not_found', 'Unknown form')
 
     if (result.structural) {
-      await rt.hookRunner(hookCtx(c)).run('formChanged', {
+      await rt.hookRunner(hookCtx(c), brandIdOf(c)).run('formChanged', {
         form: formMeta(result.form),
         version: result.form.version,
         actor: actorString(c.var.actor),
@@ -969,7 +970,7 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     if (!inserted.stored) await compensate(media, uploads.files, rt.logger)
 
     if (inserted.stored) {
-      await rt.hookRunner(hookCtx(c)).run('submitted', {
+      await rt.hookRunner(hookCtx(c), brandIdOf(c)).run('submitted', {
         form: formMeta(form),
         response: inserted.response,
         files: storedFilesOf(uploads.files),

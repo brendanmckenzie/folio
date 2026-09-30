@@ -304,6 +304,7 @@ const FORM = {
  * would hang or reject depending on which one it got.
  */
 function bodyFor(url: string): unknown {
+  const scopeInUrl = /\/folio\/~([a-z0-9-]+)\//.exec(url.replace(/^https?:\/\/[^/]+/, ''))?.[1]
   // A scoped URL (`{base}/~alpha/api/…`) is answered as the unscoped one: the fixture's
   // rows do not differ by scope, and the tests that care assert the URL that was asked.
   const withoutOrigin = url
@@ -389,7 +390,7 @@ function bodyFor(url: string): unknown {
   }
 
   // The registry, for the Sites screen, and one inherited page for Home's block.
-  if (path === `${API}/sites`) return REGISTRY
+  if (path === `${API}/sites`) return served.registry ?? REGISTRY
   if (path === `${API}/inherited`) {
     return {
       rows: [
@@ -407,7 +408,9 @@ function bodyFor(url: string): unknown {
     }
   }
 
-  if (path === `${API}/schema`) return MANIFEST
+  // One manifest, unless a test says the scope decides (a deployment with `brands`).
+  if (path === `${API}/schema`)
+    return served.schemaAt ? served.schemaAt(scopeInUrl ?? null) : MANIFEST
   if (path === `${API}/me`) return currentMe
   if (path === `${API}/counts`) return { pages: 0, types: {} }
   if (path === `${API}/migrations`) return { migrations: [], pending: [], behind: 0 }
@@ -472,6 +475,27 @@ export const REGISTRY = {
 let currentMe: Me = ADMIN
 
 /**
+ * What a test overrides about the server's answers, and `resetServed` puts back. Empty
+ * is the fixture as it always was: one manifest for every scope, one registry.
+ * `multi-brand.test.tsx` sets both, because there the scope decides what the manifest is.
+ */
+const served: {
+  schemaAt?: (scope: string | null) => Manifest
+  registry?: unknown
+  schemaStatus?: number
+} = {}
+
+export function serve(over: typeof served): void {
+  Object.assign(served, over)
+}
+
+export function resetServed(): void {
+  delete served.schemaAt
+  delete served.registry
+  delete served.schemaStatus
+}
+
+/**
  * Installs the stub and returns the URLs it was asked for, which is worth having
  * even in a smoke test: a screen that mounts *because* its fetch never happened
  * is a green test proving nothing, and the list says which is which.
@@ -482,11 +506,17 @@ export function stubFetch(me: Me = ADMIN): string[] {
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     asked.push(`${init?.method ?? 'GET'} ${url}`)
+    const failing = served.schemaStatus !== undefined && url.endsWith('/schema')
     return Promise.resolve(
-      new Response(JSON.stringify(bodyFor(url)), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify(
+          failing ? { error: { code: 'not_found', message: 'No site' } } : bodyFor(url),
+        ),
+        {
+          status: failing ? served.schemaStatus : 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
     )
   }) as typeof fetch
   return asked

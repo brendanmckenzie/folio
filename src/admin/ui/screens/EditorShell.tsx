@@ -408,13 +408,11 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
    * is a layer with something under it (`isLayerDocument`), so a single-site editor
    * fetches nothing and labels nothing.
    */
-  const layerIds = useMemo(
-    () => (isLayerDocument(story.id, multi) ? layerOf(story.id) : null),
-    [story.id, multi],
-  )
-  const ownChain = layerIds
-    ? props.me.sites?.scopes.find((scope) => scope.id === layerIds.scope)?.chain
+  const layer = useMemo(() => layerOf(story.id), [story.id])
+  const ownChain = layer
+    ? props.me.sites?.scopes.find((scope) => scope.id === layer.scope)?.chain
     : undefined
+  const layerIds = layer && isLayerDocument(story.id, ownChain) ? layer : null
   const below = useMemo(
     () => (layerIds && ownChain ? scopesBelow(ownChain, layerIds.scope) : []),
     [layerIds, ownChain],

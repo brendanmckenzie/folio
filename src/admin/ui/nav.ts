@@ -292,15 +292,46 @@ export interface ScopeOptionGroup {
  * dropped. Pure so the grouping is a test rather than a screenshot; the switcher
  * itself is absent when `choices` is (`showsScopeSwitcher`), so this is never asked
  * on a single-site deployment.
+ *
+ * **On a deployment with `brands` it groups by brand instead**, and each option reads
+ * `<name> · <brand label>` (`multi-brand.md` decision 20): a chain never crosses a
+ * brand, so the brand is the one partition an editor needs to see. Groups of the
+ * brand list before its sites, and the brands are by label. A
+ * scope that names no brand (there is none on such a deployment) falls to the kind
+ * groups after them, so nothing is dropped. Decided by whether any choice carries a
+ * brand, so a single-brand deployment groups exactly as it did.
  */
 export function scopeOptionGroups(
-  choices: readonly { id: string; name: string; kind: 'site' | 'group' | 'shared' }[],
+  choices: readonly {
+    id: string
+    name: string
+    kind: 'site' | 'group' | 'shared'
+    brand?: { id: string; label: string } | null
+  }[],
 ): ScopeOptionGroup[] {
+  const branded = choices.filter((c) => c.brand)
+  const rest = branded.length > 0 ? choices.filter((c) => !c.brand) : choices
   const of = (kind: 'site' | 'group' | 'shared', label: string): ScopeOptionGroup => ({
     label,
-    options: choices.filter((c) => c.kind === kind).map(({ id, name }) => ({ id, name })),
+    options: rest.filter((c) => c.kind === kind).map(({ id, name }) => ({ id, name })),
   })
-  return [of('shared', 'Shared'), of('group', 'Groups'), of('site', 'Sites')].filter(
+  const byBrand: ScopeOptionGroup[] = []
+  for (const choice of branded) {
+    const brand = choice.brand as { id: string; label: string }
+    let group = byBrand.find((g) => g.label === brand.label)
+    if (!group) {
+      group = { label: brand.label, options: [] }
+      byBrand.push(group)
+    }
+    group.options.push({ id: choice.id, name: `${choice.name} · ${brand.label}` })
+  }
+  byBrand.sort((a, b) => a.label.localeCompare(b.label))
+  for (const group of byBrand) {
+    // Groups first, then sites, whatever order `/me` listed them in.
+    const kindOf = (id: string) => (branded.find((c) => c.id === id)?.kind === 'group' ? 0 : 1)
+    group.options.sort((a, b) => kindOf(a.id) - kindOf(b.id))
+  }
+  return [...byBrand, of('shared', 'Shared'), of('group', 'Groups'), of('site', 'Sites')].filter(
     (group) => group.options.length > 0,
   )
 }

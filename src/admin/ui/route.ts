@@ -325,6 +325,13 @@ export interface Crumb {
 }
 
 export interface CrumbContext {
+  /**
+   * The scope being shown, by display name, on a deployment with `sites`: the tab
+   * title names it, so two tabs on two sites are told apart
+   * (`multi-brand.md` decision 20). Absent with no `sites` and on a page with no
+   * scope, and the title is then what it always was. Not a crumb: `crumbs` ignores it.
+   */
+  site?: string
   /** A document type's label, by name. */
   label?: (type: string) => string | undefined
   /**
@@ -418,9 +425,10 @@ export function crumbs(route: Route, ctx: CrumbContext = {}): Crumb[] {
 }
 
 /** `document.title`. Deepest crumb first, because a tab strip truncates from the
- * right and "Our team" is what tells two tabs apart. */
+ * right and "Our team" is what tells two tabs apart. On a deployment with `sites` the
+ * scope's name follows it: `<crumb> · <site name> · Folio`. */
 export function documentTitle(route: Route, ctx: CrumbContext = {}): string {
   const trail = crumbs(route, ctx)
   const last = trail[trail.length - 1]
-  return `${last ? `${last.text} · ` : ''}Folio`
+  return `${last ? `${last.text} · ` : ''}${ctx.site ? `${ctx.site} · ` : ''}Folio`
 }

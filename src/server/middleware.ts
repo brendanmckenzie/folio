@@ -287,12 +287,19 @@ async function scopedActor<Env>(
     }
     return actor
   }
-  if (!actor || kind === 'unscoped') return actor
+  if (!actor) return actor
+  // An unscoped route ignores the scope, except that on a deployment with `brands` the
+  // scope picks the brand a few of them answer for (`/schema`, `/v1/schema`,
+  // `/migrations`, `/assets/describe`), so the caller has to reach it. The check below
+  // then runs, and what an unscoped route sees of the actor is left exactly as it was.
+  const unscoped = kind === 'unscoped'
+  if (unscoped && rt.brands.has(null)) return actor
 
   const registry = await sites.registry(c.env)
   // A preview grant reads its site's chain and nothing else (decision 13); on any
   // other scope it is a caller with no role there.
   if (actor.kind === 'grant') {
+    if (unscoped) return actor
     if (!chain(registry, actor.site).includes(scope)) {
       throw new FolioError('forbidden', `A preview of '${actor.site}' cannot read '${scope}'.`)
     }
@@ -309,14 +316,14 @@ async function scopedActor<Env>(
         `This token is bound to '${bound}' and cannot reach '${scope}'.`,
       )
     }
-    return { ...actor, scopes: scopes ?? [] }
+    return unscoped ? actor : { ...actor, scopes: scopes ?? [] }
   }
   const role = effectiveRole(actor.grants ?? { [ALL_SCOPES]: actor.role }, registry, scope)
   if (role === null && kind !== 'preview') {
     throw new FolioError('forbidden', `You have no role on '${scope}'.`)
   }
   // The one route with no role to give: it checks preview eligibility itself.
-  return { ...actor, role: role ?? 'viewer' }
+  return unscoped ? actor : { ...actor, role: role ?? 'viewer' }
 }
 
 /**
@@ -765,4 +772,13 @@ export async function roleOnScope<Env>(
  */
 export function hookCtx<Env>(c: Context<FolioEnv<Env>>): HookRunnerCtx {
   return { env: c.env, waitUntil: (p) => c.executionCtx.waitUntil(p) }
+}
+
+/**
+ * The brand id a hook payload from this request carries (`HookBase.brand`): the
+ * request's brand, null with no `brands` and on the one request a branded deployment
+ * answers with no brand.
+ */
+export function brandIdOf<Env>(c: Context<FolioEnv<Env>>): string | null {
+  return c.var.brand?.brand?.id ?? null
 }

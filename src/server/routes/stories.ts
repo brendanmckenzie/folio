@@ -19,6 +19,7 @@ import {
   chainResolver,
   fenceParent,
   fenceStory,
+  brandIdOf,
   hookCtx,
   loadStory,
   readableScopes,
@@ -103,7 +104,7 @@ export function brandOf<Env>(c: Context<FolioEnv<Env>>): BrandRuntime {
   const brand = c.var.brand
   if (!brand) {
     throw new FolioError(
-      'bad_request',
+      'site_required',
       'This deployment has many brands: name the site, as ~<site>/… in the path',
     )
   }
@@ -165,7 +166,7 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       types: brandOf(c).types,
       stub: (id: string) => rt.stub(bindings, id),
       draft: draftOf(c, rt),
-      hooks: rt.hookRunner(hookCtx(c)),
+      hooks: rt.hookRunner(hookCtx(c), brandIdOf(c)),
       chainOf: chainResolver(c, rt),
     }
   }
@@ -752,7 +753,9 @@ export function storyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           rethrow(e)
         }
 
-        await rt.hookRunner(hookCtx(c)).run('created', { story: created, actor: actorFor(c) })
+        await rt
+          .hookRunner(hookCtx(c), brandIdOf(c))
+          .run('created', { story: created, actor: actorFor(c) })
 
         const published = (await publishedDocsByIds(bindings.db, [source.id], within))[source.id]
         const doc = published ?? (await draftOf(c, rt)(source))

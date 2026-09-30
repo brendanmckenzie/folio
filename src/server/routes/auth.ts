@@ -54,7 +54,7 @@ import { FolioError } from '../errors'
 import { requireAccess, requireAuthConfigured } from '../middleware'
 import { loginPage } from '../pages'
 import type { FolioRuntime } from '../runtime'
-import type { FolioEnv } from '../types'
+import type { BrandRef, FolioEnv } from '../types'
 import {
   LoginEmailBody,
   PasskeyAssertionBody,
@@ -124,14 +124,14 @@ async function loginBody(req: Request): Promise<{ email: string; next?: string }
  * The `~<scope>` a sign-in's `next` names, when the registry holds it (a site or a
  * group): what the mail says the sign-in is for
  * (`../../../docs/specs/foundation/multi-brand.md` decision 16). `next` has been
- * screened same-origin by `safeNext`, and only its path is read. `brand` is null until
- * a deployment can configure brands.
+ * screened same-origin by `safeNext`, and only its path is read. `brand` is the row's
+ * brand ref on a deployment with `brands`, null otherwise.
  */
 async function scopeOfNext<Env>(
   rt: FolioRuntime,
   env: Env,
   next: string,
-): Promise<{ id: string; name: string; brand: null } | null> {
+): Promise<{ id: string; name: string; brand: BrandRef | null } | null> {
   if (!rt.sites) return null
   const path = new URL(next, 'http://folio.invalid').pathname
   const prefix = `${rt.base}/~`
@@ -144,7 +144,12 @@ async function scopeOfNext<Env>(
   }
   const registry = await rt.sites.registry(env)
   const held = registry.sites.find((s) => s.id === id) ?? registry.groups.find((g) => g.id === id)
-  return held ? { id: held.id, name: held.name, brand: null } : null
+  if (!held) return null
+  const brand =
+    held.brand === null
+      ? null
+      : ([...rt.brands.values()].find((b) => b.brand?.id === held.brand)?.brand ?? null)
+  return { id: held.id, name: held.name, brand }
 }
 
 export function authRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
@@ -852,13 +857,17 @@ export function sessionRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     let multi: { sites?: ReturnType<typeof meSites> } = {}
     if (rt.sites && (rt.auth.mode === 'open' || actor?.kind === 'user')) {
       const registry = await rt.sites.registry(c.env)
+      const brandRefs = rt.sites.brands
+        ? [...rt.brands.values()].flatMap((b) => (b.brand ? [b.brand] : []))
+        : undefined
       multi = {
         sites: meSites(
           registry,
           actor?.kind === 'user' ? (actor.grants ?? { '*': actor.role }) : null,
-          // The scoped brand's settings type, and none with no scope on a deployment
-          // with `brands`: `rt.sites.settings` throws there (`multi-brand.md` decision 20).
-          c.var.brand?.settings,
+          // On a deployment with `brands` the settings type is the brand's and rides on
+          // the scoped manifest, so `/me` names none (`multi-brand.md` decision 20).
+          rt.sites.brands ? undefined : c.var.brand?.settings,
+          brandRefs,
         ),
       }
     }

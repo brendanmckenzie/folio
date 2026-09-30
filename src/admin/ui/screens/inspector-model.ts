@@ -34,7 +34,6 @@ import { asRichtext, isRichtextEmpty, richtextToText } from '../../../core/richt
 import type { SchemaIndex } from '../../../core/schema'
 import { asAsset, asAssets, asStoryIds } from '../../../core/values'
 import { singletonTypeOf } from '../../../core/sites'
-import { isBareLayer } from '../../../core/layers'
 
 /* ------------------------------------------------------------ which fields --- */
 
@@ -402,11 +401,20 @@ export interface LayerInfo {
 
 /**
  * Whether the open document is a layer that has something below it to inherit
- * from: a singleton layer of any scope but `shared` (`isBareLayer`). The only place
- * the labels exist — a global in the shared scope is an ordinary document.
+ * from: a singleton layer whose own scope's chain is longer than itself. The only
+ * place the labels exist — a global in the bottom scope of a chain is an ordinary
+ * document.
+ *
+ * **Decided by the chain, not the id** (`multi-brand.md` decision 5), the way the
+ * server seeds and writes a layer (`layerSeed`). With `brands` a group's layer, and a
+ * layer on a site with no group, are the bottom of their chains; the id alone
+ * (`isBareLayer`) calls them bare and the editor would label fields "Inherited" that
+ * inherit from nothing. `ownChain` is `/me`'s chain for the layer's scope, undefined
+ * when the deployment has no `sites` or the caller does not reach it, and either way
+ * there is nothing to label.
  */
-export function isLayerDocument(id: string, multiSite: boolean): boolean {
-  return multiSite && isBareLayer(id)
+export function isLayerDocument(id: string, ownChain: readonly string[] | undefined): boolean {
+  return singletonTypeOf(id) !== null && ownChain !== undefined && ownChain.length > 1
 }
 
 /** A layer's type name and own scope, or null for anything that is not one. */

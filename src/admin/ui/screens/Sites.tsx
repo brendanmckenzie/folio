@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import type { Me } from '../../me'
+import { type Me, brandsOf } from '../../me'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
 import { Dialog } from '../Dialog'
@@ -9,9 +9,11 @@ import { type Column, Table } from '../Table'
 import { SiteDialog } from './SiteDialog'
 import css from './Sites.module.css'
 import {
+  brandLabel,
   createBody,
   emptyForm,
   formOf,
+  groupHasSites,
   hostsChanged,
   patchBody,
   previewNote,
@@ -39,6 +41,10 @@ interface Props {
   /** The singleton type that holds site-level fields, or null when the host declared
    * none — and then the Settings tab does not exist. */
   settings: string | null
+  /** The brand whose settings type `settings` is, from a scoped manifest on a
+   * deployment with `brands`; null otherwise. It narrows the Settings tab to that
+   * brand's scopes. */
+  settingsBrand?: string | null
   query: Readonly<Record<string, string>>
   onQuery: (next: Record<string, string | undefined>) => void
   onNotice: (message: string) => void
@@ -72,6 +78,7 @@ export function Sites({
   me,
   loading = false,
   settings,
+  settingsBrand = null,
   query,
   onQuery,
   onNotice,
@@ -80,6 +87,9 @@ export function Sites({
   const data = useSites(apiBase, gate.kind === 'ok')
   const [dialogue, setDialogue] = useState<Dialogue | null>(null)
   const [busy, setBusy] = useState(false)
+  // Empty on a deployment with no `brands`, and everything brand-shaped below keys off
+  // that: no column, no field, no brand in a request.
+  const brands = brandsOf(me)
 
   const tab = settings !== null && query.tab === 'settings' ? 'settings' : 'registry'
 
@@ -161,6 +171,22 @@ export function Sites({
         </span>
       ),
     },
+    ...(brands.length > 0
+      ? [
+          {
+            key: 'brand',
+            label: 'Brand',
+            cell: (row: SiteRow) =>
+              row.brand === null ? (
+                <span className={css.blank} title="No brand: this row serves nothing">
+                  none
+                </span>
+              ) : (
+                <Badge>{brandLabel(brands, row.brand)}</Badge>
+              ),
+          },
+        ]
+      : []),
     {
       key: 'status',
       label: 'Status',
@@ -265,7 +291,7 @@ export function Sites({
                   size="sm"
                   disabled={busy}
                   reason="A write is in flight"
-                  onClick={() => setDialogue({ kind: 'create', form: emptyForm('group') })}
+                  onClick={() => setDialogue({ kind: 'create', form: emptyForm('group', brands) })}
                 >
                   New group
                 </Button>
@@ -274,7 +300,7 @@ export function Sites({
                   variant="primary"
                   disabled={busy}
                   reason="A write is in flight"
-                  onClick={() => setDialogue({ kind: 'create', form: emptyForm('site') })}
+                  onClick={() => setDialogue({ kind: 'create', form: emptyForm('site', brands) })}
                 >
                   New site
                 </Button>
@@ -312,7 +338,12 @@ export function Sites({
           )}
         </section>
       ) : (
-        <SettingsTab base={base} type={settings ?? ''} registry={data.registry} />
+        <SettingsTab
+          base={base}
+          type={settings ?? ''}
+          registry={data.registry}
+          brand={settingsBrand}
+        />
       )}
 
       {dialogue?.kind === 'create' ? (
@@ -320,6 +351,7 @@ export function Sites({
           mode="create"
           initial={dialogue.form}
           groups={data.registry.groups}
+          brands={brands}
           onClose={() => setDialogue(null)}
           onSave={save}
         />
@@ -329,6 +361,8 @@ export function Sites({
           mode="edit"
           initial={formOf(dialogue.row)}
           groups={data.registry.groups}
+          hasSites={dialogue.row.kind === 'group' && groupHasSites(data.registry, dialogue.row.id)}
+          brands={brands}
           onClose={() => setDialogue(null)}
           onSave={save}
         />
@@ -377,12 +411,14 @@ function SettingsTab({
   base,
   type,
   registry,
+  brand,
 }: {
   base: string
   type: string
   registry: ReturnType<typeof useSites>['registry']
+  brand: string | null
 }) {
-  const scopes = settingsScopes(registry)
+  const scopes = settingsScopes(registry, brand)
   return (
     <section className={css.section} aria-label="Settings by scope">
       <ListHeader>Settings</ListHeader>
@@ -392,7 +428,7 @@ function SettingsTab({
             <a href={settingsHref(base, type, scope.id)}>
               {scope.name} <Badge mono>{scope.id}</Badge>
             </a>
-            <p className={css.note}>{settingsBlurb(scope.id)}</p>
+            <p className={css.note}>{settingsBlurb(scope.id, scope.bottom)}</p>
           </li>
         ))}
       </ul>

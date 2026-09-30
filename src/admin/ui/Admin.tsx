@@ -19,9 +19,11 @@ import {
   type Me,
   OPEN,
   scopeChoices,
+  scopeName,
   showsScopeSwitcher,
 } from '../me'
 import type { MenuItem } from './Menu'
+import { messageOf } from './screens/useContent'
 import { activeItem, nav, scopeOptionGroups } from './nav'
 import { Palette, type PaletteAction } from './Palette'
 import {
@@ -171,9 +173,20 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
   useEffect(() => {
     let live = true
     Promise.all([
-      // Both unscoped routes, so they are asked at the bare base: they answer the
-      // same under any scope, and a page with no scope has no other to ask.
-      fetch(`${bare.apiBase}/schema`).then((r) => r.json() as Promise<Manifest>),
+      // The manifest is asked **at the scope's own base** once a scope is chosen, so on
+      // a deployment with `brands` it is that scope's brand's, and every type list below
+      // is the brand's with no admin code that knows what a brand is
+      // (`multi-brand.md` decision 12). With no scope `boot.apiBase` *is* the bare base,
+      // so a single-site page asks exactly what it always did, and a branded one is
+      // answered the neutral manifest until it redirects into its first scope.
+      fetch(`${boot.apiBase}/schema`).then(async (r) => {
+        // A scope taken away between the shell page and this fetch answers an error
+        // envelope, which is not a manifest (`indexManifest` would throw on it).
+        if (!r.ok) throw new Error(await messageOf(r))
+        return (await r.json()) as Manifest
+      }),
+      // `/me` is unscoped and answers the same under any scope, so it is asked at the
+      // bare base.
       fetchMe(bare.apiBase, bare.base),
       /**
        * The **singletons**, which are not in the tree: `storyTree` drops every
@@ -459,8 +472,10 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
   }, [first, bare.base])
 
   const label = (name: string) => types.find((t) => t.name === name)?.label
+  const siteName = isMultiSite(me) && scope !== null ? scopeName(me, scope) : undefined
   const crumbContext = useMemo(
     (): CrumbContext => ({
+      ...(siteName !== undefined ? { site: siteName } : {}),
       label: (name) => types.find((t) => t.name === name)?.label,
       // Matches only the form currently open, so there is nothing to reset on
       // navigation: leaving the builder for a different form simply stops
@@ -479,7 +494,7 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
           }
         : {}),
     }),
-    [types, open, local, fetched.chain, formTitle],
+    [siteName, types, open, local, fetched.chain, formTitle],
   )
   const trail = crumbs(route, crumbContext)
 
@@ -1083,7 +1098,8 @@ function screenFor(a: ScreenArgs) {
           base={a.bareBase}
           me={a.me}
           loading={a.loading}
-          settings={a.me.sites?.settings ?? null}
+          settings={a.me.sites?.settings ?? a.manifest?.settings ?? null}
+          settingsBrand={a.manifest?.brand?.id ?? null}
           query={route.query}
           onQuery={(next) => a.replace({ name: 'sites' }, { ...route.query, ...next })}
           onNotice={a.notify}

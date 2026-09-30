@@ -11,7 +11,7 @@ import { Hono } from 'hono'
 import { actorString, ADMIN, READ_DRAFT } from '../auth/roles'
 import { audit, DEFAULT_AUDIT_BATCH, MAX_AUDIT_BATCH } from '../audit'
 import { migrationStatus, runMigrations } from '../migrate'
-import { hookCtx, requireAccess } from '../middleware'
+import { brandIdOf, hookCtx, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
 import { idParam, limitParam, MigrateBody, parseOptionalBody } from '../validate'
@@ -71,7 +71,7 @@ export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         // As in `folio.migrate`: re-project, or the index describes the
         // document as it was before the migration rewrote it.
         projection: brand.projection,
-        hooks: rt.hookRunner(hookCtx(c)),
+        hooks: rt.hookRunner(hookCtx(c), brandIdOf(c)),
         // This brand's list over this brand's scopes only.
         ...(sweep ? { brand: { id: sweep.id, scopes: sweep.scopes } } : {}),
       },

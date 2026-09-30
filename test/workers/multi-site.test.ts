@@ -1355,6 +1355,7 @@ describe('Site settings', () => {
         waitUntil: () => {},
         actor: null,
         site: scope,
+        brand: null,
         story: {
           id: scope === 'default' ? 'sng_lsSettings' : `sng_lsSettings:${scope}`,
           type: 'lsSettings',

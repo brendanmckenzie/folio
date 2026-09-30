@@ -10,6 +10,7 @@
 import type { AuthPolicy } from '../server/auth/config'
 import type { MePreview, MeScope, MeSites } from '../server/auth/me-sites'
 import { atLeast, type Role, type Scope } from '../server/auth/roles'
+import type { BrandRef } from '../server/types'
 
 export type { MePreview, MeScope, MeSites }
 
@@ -201,6 +202,15 @@ export function canEditIn(me: Me, owner: string | undefined): boolean {
  * no `sites`, which is what keeps the switcher out of a single-site admin. */
 export function scopeChoices(me: Me): readonly MeScope[] {
   return me.sites?.scopes ?? []
+}
+
+/**
+ * The configured brands, on a deployment with `brands`; empty everywhere else. Empty
+ * is how the Sites screen knows there is no brand field to draw
+ * (`multi-brand.md` decision 20).
+ */
+export function brandsOf(me: Me): readonly BrandRef[] {
+  return me.sites?.brands ?? []
 }
 
 /** Whether the scope switcher exists at all. */

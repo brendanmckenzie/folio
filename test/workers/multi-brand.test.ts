@@ -2,7 +2,7 @@ import { createExecutionContext, env } from 'cloudflare:test'
 import { Hono } from 'hono'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { defineBlock, text } from '../../src/core'
-import { defineMigration } from '../../src/core/migrate'
+import { defineMigration, field } from '../../src/core/migrate'
 import type { Doc } from '../../src/core/doc'
 import type { DocumentType } from '../../src/core/schema'
 import { chain, layerSeed, type SiteRef } from '../../src/core/sites'
@@ -775,5 +775,385 @@ describe('the routes read the scope’s brand (decision 6)', () => {
       )?.s
     expect(await stamp('sty_r_aaa')).toBe('allaboutafrica/0001-noop')
     expect(await stamp('sty_r_tgo')).toBeNull()
+  })
+})
+
+/* --------------------------------------- the admin and agent surfaces (phase 7) --- */
+
+describe('the admin and agent surfaces (decisions 12, 16, 19, 20)', () => {
+  const P_AAA = 'p7-aaa'
+  const P_TGO = 'p7-tgo'
+
+  /** Every hook payload, by event, in the order fired. `await` so a route has fired them by its answer. */
+  const fired: { event: string; payload: Record<string, unknown> }[] = []
+  const record =
+    (event: string) =>
+    (payload: unknown): void => {
+      fired.push({ event, payload: payload as Record<string, unknown> })
+    }
+
+  const p7Brands: Record<string, FolioBrand<Cloudflare.Env>> = {
+    allaboutafrica: {
+      ...brands.allaboutafrica!,
+      settings: 'header',
+      migrations: [
+        defineMigration({
+          id: 'allaboutafrica/0002-p7-title',
+          description: 'title defaults',
+          up: (_doc, ctx) => ctx.each('pageRoot', (b) => field.default(b, 'title', 'Untitled')),
+        }),
+      ],
+    },
+    takeoffgo: {
+      ...brands.takeoffgo!,
+      migrations: [
+        defineMigration({
+          id: 'takeoffgo/0002-p7-heading',
+          description: 'heading defaults',
+          up: (_doc, ctx) => ctx.each('pageRoot', (b) => field.default(b, 'heading', 'Untitled')),
+        }),
+      ],
+    },
+  }
+  const p7Config: FolioConfig<Cloudflare.Env> = {
+    ...config,
+    brands: p7Brands,
+    // No `sites.settings`: with brands it belongs to a brand.
+    hooks: {
+      await: ['created', 'migrated', 'reindexed', 'siteChanged'],
+      created: record('created'),
+      migrated: record('migrated'),
+      reindexed: record('reindexed'),
+      siteChanged: record('siteChanged'),
+    },
+  }
+  const p7Rt = createRuntime(p7Config)
+  const p7App = createApp(p7Config, p7Rt)
+  const openConfig: FolioConfig<Cloudflare.Env> = { ...p7Config, auth: 'open', hooks: undefined }
+  const openApp = createApp(openConfig, createRuntime(openConfig))
+
+  async function api(
+    path: string,
+    init: { method?: string; body?: unknown; scope?: string; on?: typeof p7App } = {},
+  ) {
+    const headers = new Headers({ 'content-type': 'application/json', ...(await auth()) })
+    if (init.scope) headers.set(SCOPE_HEADER, init.scope)
+    const res = await (init.on ?? p7App).request(
+      `${ADMIN}/folio${path}`,
+      {
+        method: init.method ?? 'GET',
+        headers,
+        ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+      },
+      env,
+      createExecutionContext(),
+    )
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+  }
+
+  beforeAll(async () => {
+    await env.DB.batch([
+      env.DB.prepare(
+        `insert into sites (id, kind, name, group_id, status, preview_origin, brand, created_at, updated_at) values
+           ('${P_AAA}', 'site', 'P7 AAA', null, 'live', null, 'allaboutafrica', 0, 0),
+           ('${P_TGO}', 'site', 'P7 TGO', null, 'live', null, 'takeoffgo', 0, 0)`,
+      ),
+      // One published document each, for the sweeps whose hooks fire only when a
+      // published snapshot was rewritten or reindexed.
+      env.DB.prepare(
+        `insert into stories (id, type, parent_id, slug, path, ord, title, updated_at, site_id,
+                              published_doc, published_at)
+         values ('sty_p7_aaa', 'page', null, 'home', 'home', 'a0', 'Home', 1, '${P_AAA}', ?, 2),
+                ('sty_p7_tgo', 'page', null, 'home', 'home', 'a0', 'Home', 1, '${P_TGO}', ?, 2)`,
+      ).bind(
+        JSON.stringify({
+          root: 'r0',
+          bloks: {
+            r0: { uid: 'r0', type: 'pageRoot', parent: null, slot: null, order: 'a0', data: {} },
+          },
+        }),
+        JSON.stringify({
+          root: 'r0',
+          bloks: {
+            r0: { uid: 'r0', type: 'pageRoot', parent: null, slot: null, order: 'a0', data: {} },
+          },
+        }),
+      ),
+    ])
+    p7Rt.sites?.drop()
+  })
+
+  describe('the manifest (decision 12)', () => {
+    it('is the scope’s brand’s, with the brand and its settings type', async () => {
+      const aaa = await api('/api/schema', { scope: P_AAA })
+      const tgo = await api('/api/schema', { scope: P_TGO })
+      expect(aaa.body.brand).toEqual({ id: 'allaboutafrica', label: 'All About Africa' })
+      expect(aaa.body.settings).toBe('header')
+      expect(tgo.body.brand).toEqual({ id: 'takeoffgo', label: 'Take Off Go' })
+      // A brand that declares no settings type carries no key.
+      expect('settings' in tgo.body).toBe(false)
+    })
+
+    it('is neutral with no scope: no types, blocks or globals, and the deployment’s own hooks', async () => {
+      const bare = await api('/api/schema')
+      expect(bare.status).toBe(200)
+      expect(bare.body).toMatchObject({ types: [], blocks: [], globals: [] })
+      expect('brand' in bare.body).toBe(false)
+      expect('settings' in bare.body).toBe(false)
+      // Same as every brand's: `hooks` is the deployment's, not a brand's.
+      const scoped = await api('/api/schema', { scope: P_TGO })
+      expect(bare.body.hooks).toEqual(scoped.body.hooks)
+      expect((bare.body.hooks as { declared: string[] }).declared).toContain('created')
+    })
+
+    it('carries no brand or settings on a deployment without brands', async () => {
+      const single: FolioConfig<Cloudflare.Env> = {
+        blocks: [aaaRoot, aaaProse, aaaHeader],
+        types: aaaTypes,
+        sites: { admin: ADMIN, settings: 'header' },
+        bindings,
+        basePath: '/folio',
+        auth: config.auth,
+        route: config.route,
+      }
+      const on = createApp(single, createRuntime(single))
+      const res = await api('/api/schema', { on })
+      expect(res.status).toBe(200)
+      expect('brand' in res.body).toBe(false)
+      expect('settings' in res.body).toBe(false)
+      expect((res.body.types as unknown[]).length).toBeGreaterThan(0)
+    })
+  })
+
+  describe('the versioned schema (decisions 12 and 19)', () => {
+    it('adds the scope and its brand when scoped', async () => {
+      const res = await api('/api/v1/schema', { scope: P_TGO })
+      expect(res.status).toBe(200)
+      expect(res.body.scope).toEqual({
+        id: P_TGO,
+        name: 'P7 TGO',
+        kind: 'site',
+        brand: { id: 'takeoffgo', label: 'Take Off Go' },
+      })
+    })
+
+    it('is 400 site_required unscoped, and names no brand’s types or blocks', async () => {
+      const res = await api('/api/v1/schema')
+      expect(res.status).toBe(400)
+      expect(errorOf(res.body)?.code).toBe('site_required')
+      expect(res.body.types).toBeUndefined()
+      expect(res.body.blocks).toBeUndefined()
+    })
+
+    it('is 400 site_required for the other unscoped routes that need a registry', async () => {
+      for (const path of ['/api/migrations', '/api/audit']) {
+        const res = await api(path)
+        expect(res.status, path).toBe(400)
+        expect(errorOf(res.body)?.code, path).toBe('site_required')
+      }
+    })
+
+    it('adds a scope with brand null on a single-brand multi-site deployment', async () => {
+      const single: FolioConfig<Cloudflare.Env> = {
+        blocks: [aaaRoot, aaaProse, aaaHeader],
+        types: aaaTypes,
+        sites: { admin: ADMIN },
+        bindings,
+        basePath: '/folio',
+        auth: config.auth,
+        route: config.route,
+      }
+      const on = createApp(single, createRuntime(single))
+      const res = await api('/api/v1/schema', { on, scope: 'shared' })
+      expect(res.status).toBe(200)
+      expect(res.body.scope).toEqual({ id: 'shared', name: 'Shared', kind: 'shared', brand: null })
+    })
+  })
+
+  describe('an unscoped route that picks a brand needs the caller to reach the scope', () => {
+    const bearer = async (site: string | null) => ({
+      authorization: `Bearer ${(await createToken(env.DB, { name: `l1-${site}`, scopes: ['content:read'], site })).token}`,
+    })
+    const get = async (path: string, scope: string, headers: Record<string, string>) => {
+      const res = await p7App.request(
+        `${ADMIN}/folio${path}`,
+        { headers: { ...headers, [SCOPE_HEADER]: scope } },
+        env,
+        createExecutionContext(),
+      )
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+    }
+    const PATHS = ['/api/v1/schema', '/api/migrations', '/api/assets/describe']
+
+    it('refuses a token bound to one brand’s site on another brand’s scope', async () => {
+      const bound = await bearer(P_AAA)
+      for (const path of PATHS) {
+        const res = await get(path, P_TGO, bound)
+        expect(res.status, path).toBe(403)
+        expect(res.body.types, path).toBeUndefined()
+      }
+    })
+
+    it('still answers that token on its own scope, and an unbound one on either', async () => {
+      const bound = await bearer(P_AAA)
+      expect((await get('/api/v1/schema', P_AAA, bound)).status).toBe(200)
+      const unbound = await bearer(null)
+      expect((await get('/api/v1/schema', P_TGO, unbound)).status).toBe(200)
+      expect((await get('/api/v1/schema', P_AAA, unbound)).status).toBe(200)
+    })
+  })
+
+  describe('/me (decision 20)', () => {
+    it('carries each scope’s brand and the brand list, no shared, and no settings type', async () => {
+      const me = (await api('/api/me', { on: openApp, scope: P_TGO })).body as {
+        sites: {
+          settings: string | null
+          brands: { id: string; label: string }[]
+          scopes: { id: string; kind: string; brand: { id: string; label: string } | null }[]
+        }
+      }
+      expect(me.sites.settings).toBeNull()
+      expect(me.sites.brands).toEqual([
+        { id: 'allaboutafrica', label: 'All About Africa' },
+        { id: 'takeoffgo', label: 'Take Off Go' },
+      ])
+      expect(me.sites.scopes.some((s) => s.kind === 'shared')).toBe(false)
+      expect(me.sites.scopes.find((s) => s.id === P_TGO)?.brand).toEqual({
+        id: 'takeoffgo',
+        label: 'Take Off Go',
+      })
+      expect(me.sites.scopes.find((s) => s.id === P_AAA)?.brand?.id).toBe('allaboutafrica')
+    })
+
+    it('answers with no scope too', async () => {
+      const res = await api('/api/me', { on: openApp })
+      expect(res.status).toBe(200)
+      expect((res.body.sites as { settings: string | null }).settings).toBeNull()
+    })
+  })
+
+  describe('the MCP instructions (decision 19)', () => {
+    const discover = async (scope: string | undefined) => {
+      const headers: Record<string, string> = {
+        'content-type': 'application/json',
+        'mcp-protocol-version': MCP_PROTOCOL_VERSION,
+        'mcp-method': 'server/discover',
+        ...(await auth()),
+      }
+      if (scope) headers[SCOPE_HEADER] = scope
+      const res = await p7App.request(
+        `${ADMIN}/folio/mcp`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: {} }),
+        },
+        env,
+        createExecutionContext(),
+      )
+      return { status: res.status, body: (await res.json()) as Record<string, unknown> }
+    }
+    const instructions = async (scope: string) =>
+      ((await discover(scope)).body.result as { instructions: string }).instructions
+
+    it('names the site and the brand, and says other brands are not visible', async () => {
+      const text = await instructions(P_TGO)
+      expect(text).toContain(
+        `This session is scoped to site 'P7 TGO' (\`${P_TGO}\`) of brand 'Take Off Go'`,
+      )
+      expect(text).toContain('documents, types and blocks of other brands are not visible')
+      expect(text).toContain('get_schema describes this brand only')
+      expect(await instructions(P_AAA)).toContain("of brand 'All About Africa'")
+    })
+
+    it('names the site alone on a multi-site deployment without brands', async () => {
+      const single: FolioConfig<Cloudflare.Env> = {
+        blocks: [aaaRoot, aaaProse, aaaHeader],
+        types: aaaTypes,
+        sites: { admin: ADMIN },
+        bindings,
+        basePath: '/folio',
+        auth: config.auth,
+        route: config.route,
+      }
+      const on = createApp(single, createRuntime(single))
+      const res = await on.request(
+        `${ADMIN}/folio/mcp`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'mcp-protocol-version': MCP_PROTOCOL_VERSION,
+            'mcp-method': 'server/discover',
+            ...(await auth()),
+            [SCOPE_HEADER]: P_TGO,
+          },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: {} }),
+        },
+        env,
+        createExecutionContext(),
+      )
+      const text = ((await res.json()) as { result: { instructions: string } }).result.instructions
+      expect(text).toContain(`This session is scoped to site 'P7 TGO' (\`${P_TGO}\`).`)
+      expect(text).not.toContain('brand')
+    })
+
+    it('keeps the three sentences every session gets', async () => {
+      const text = await instructions(P_TGO)
+      expect(text).toContain('call get_schema first')
+      expect(text).toContain('undoable')
+    })
+  })
+
+  describe('hooks are told the brand (decision 16)', () => {
+    it('created carries the brand of the scope it happened in', async () => {
+      fired.length = 0
+      expect(
+        (await api('/api/stories', { method: 'POST', scope: P_TGO, body: { title: 'Made' } }))
+          .status,
+      ).toBe(200)
+      expect(
+        (await api('/api/stories', { method: 'POST', scope: P_AAA, body: { title: 'Made' } }))
+          .status,
+      ).toBe(200)
+      const created = fired.filter((f) => f.event === 'created')
+      expect(created.map((f) => [f.payload.site, f.payload.brand])).toEqual([
+        [P_TGO, 'takeoffgo'],
+        [P_AAA, 'allaboutafrica'],
+      ])
+    })
+
+    it('migrated and reindexed carry the brand they ran for', async () => {
+      fired.length = 0
+      expect((await api('/api/migrate', { method: 'POST', scope: P_TGO, body: {} })).status).toBe(
+        200,
+      )
+      expect((await api('/api/reindex', { method: 'POST', scope: P_AAA, body: {} })).status).toBe(
+        200,
+      )
+      const brandsOf = (event: string) =>
+        fired.filter((f) => f.event === event).map((f) => f.payload.brand)
+      expect(brandsOf('migrated')).toEqual(['takeoffgo'])
+      expect(brandsOf('reindexed')).toEqual(['allaboutafrica'])
+    })
+
+    it('siteChanged carries the row’s brand, including on a delete', async () => {
+      fired.length = 0
+      const made = await api('/api/sites', {
+        method: 'POST',
+        body: { id: 'p7-new', kind: 'site', name: 'New', brand: 'takeoffgo' },
+      })
+      expect(made.status).toBe(201)
+      expect(made.body.brand).toBe('takeoffgo')
+      expect((await api('/api/sites/p7-new', { method: 'DELETE' })).status).toBe(200)
+      expect(
+        fired
+          .filter((f) => f.event === 'siteChanged')
+          .map((f) => [f.payload.change, f.payload.brand]),
+      ).toEqual([
+        ['created', 'takeoffgo'],
+        ['deleted', 'takeoffgo'],
+      ])
+    })
   })
 })

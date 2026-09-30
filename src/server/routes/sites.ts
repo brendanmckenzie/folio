@@ -102,6 +102,7 @@ export function siteRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * After a write that has already committed and dropped this isolate's snapshot:
    * tell the internal hooks (the purge of `site:<id>`, twice) and then the host's.
    * `row` is what the registry now holds under the id, or null once it is deleted.
+   * `brand` is the row's own (`HookBase.brand`): for a delete, the one it had.
    */
   const changed = async (
     c: Context<FolioEnv<Env>>,
@@ -109,8 +110,9 @@ export function siteRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     kind: 'site' | 'group',
     change: 'created' | 'updated' | 'deleted',
     row: SiteRef | GroupRef | null,
+    brand: string | null,
   ): Promise<void> => {
-    await rt.hookRunner(hookCtx(c)).run('siteChanged', {
+    await rt.hookRunner(hookCtx(c), brand).run('siteChanged', {
       site: id,
       kind,
       change,
@@ -129,7 +131,7 @@ export function siteRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const body = await parseBody(c.req, SiteCreateBody)
     const row = await createSite(c.var.bindings().db, await sites.fresh(c.env), body, ctx)
     sites.drop()
-    await changed(c, row.id, body.kind, 'created', row)
+    await changed(c, row.id, body.kind, 'created', row, row.brand)
     return c.json(row, 201)
   })
 
@@ -142,7 +144,7 @@ export function siteRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const registry = await sites.fresh(c.env)
     const row = await updateSite(c.var.bindings().db, registry, id, patch, ctx)
     sites.drop()
-    await changed(c, id, kindIn(registry, id), 'updated', row)
+    await changed(c, id, kindIn(registry, id), 'updated', row, row.brand)
     return c.json(row)
   })
 
@@ -152,7 +154,7 @@ export function siteRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const registry = await sites.fresh(c.env)
     const row = await replaceHosts(c.var.bindings().db, registry, id, hosts, ctx)
     sites.drop()
-    await changed(c, id, kindIn(registry, id), 'updated', row)
+    await changed(c, id, kindIn(registry, id), 'updated', row, row.brand)
     return c.json(row)
   })
 
@@ -160,11 +162,12 @@ export function siteRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const id = idParam('id', c.req.param('id'))
     const registry = await sites.fresh(c.env)
     const kind = kindIn(registry, id)
+    const brand = [...registry.sites, ...registry.groups].find((r) => r.id === id)?.brand ?? null
     await deleteSite(c.var.bindings().db, registry, id)
     sites.drop()
     // Its pages are cached under `site:<id>` and the host it answered on is now nobody's:
     // the purge is the same, and a front end's host map drops the entry on `deleted`.
-    await changed(c, id, kind, 'deleted', null)
+    await changed(c, id, kind, 'deleted', null, brand)
     return c.json({ deleted: id })
   })
 

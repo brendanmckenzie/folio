@@ -1694,7 +1694,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         schema: brand.schema,
         typeOf: brand.typeOf,
         locales: rt.locales,
-        hooks: rt.hookRunner(alarmHookCtx(env, rt.logger)),
+        hooks: rt.hookRunner(alarmHookCtx(env, rt.logger), brand.brand?.id ?? null),
       })
       if (one) return reindex(deps(one), opts)
       return perBrand(env, opts?.continueFrom, (brand, within, after) =>
@@ -1780,7 +1780,7 @@ export function createFolio<Env>(config: FolioConfig<Env>): Folio<Env> {
         // Without this a migration that rewrites an indexed value or any prose
         // leaves content_index and content_text describing the old document.
         projection: brand.projection,
-        hooks: rt.hookRunner(alarmHookCtx(env, rt.logger)),
+        hooks: rt.hookRunner(alarmHookCtx(env, rt.logger), brand.brand?.id ?? null),
       })
       if (one) return runMigrations(deps(one), opts)
       // Each brand's list over that brand's scopes (decision 16), a brand per call.

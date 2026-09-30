@@ -15,12 +15,14 @@
  * history.
  */
 import {
+  chain,
   type GroupRef,
   layerId,
   type Registry,
   type SiteRef,
   type SiteStatus,
 } from '../../../core/sites'
+import type { BrandRef } from '../../../server/types'
 import { canManageSites, type Me } from '../../me'
 import type { BadgeTone } from '../Badge'
 import { href, scopedMount } from '../route'
@@ -73,6 +75,9 @@ export interface SiteRow {
   status: SiteStatus | null
   hosts: readonly string[]
   preview: string | null
+  /** The brand's id, or null: on a deployment with no `brands`, and for a row a
+   * branded deployment does not serve (`GET /api/sites` still lists it). */
+  brand: string | null
 }
 
 /** Groups first, then sites, each by id — the order the registry reads in. */
@@ -86,6 +91,7 @@ export function siteRows(registry: Registry): SiteRow[] {
     status: null,
     hosts: [],
     preview: null,
+    brand: g.brand,
   }))
   const sites: SiteRow[] = [...registry.sites].sort(byId).map((s: SiteRef) => ({
     id: s.id,
@@ -95,6 +101,7 @@ export function siteRows(registry: Registry): SiteRow[] {
     status: s.status,
     hosts: s.hosts,
     preview: s.preview,
+    brand: s.brand,
   }))
   return [...groups, ...sites]
 }
@@ -145,10 +152,22 @@ export interface SiteForm {
   status: SiteStatus
   preview: string
   hosts: string
+  /** A brand id, or '' when none is chosen (and always on a deployment with no `brands`). */
+  brand: string
 }
 
-export function emptyForm(kind: 'site' | 'group'): SiteForm {
-  return { kind, id: '', name: '', group: '', status: 'draft', preview: '', hosts: '' }
+/** A lone configured brand is the only choice, so it starts chosen. */
+export function emptyForm(kind: 'site' | 'group', brands: readonly BrandRef[] = []): SiteForm {
+  return {
+    kind,
+    id: '',
+    name: '',
+    group: '',
+    status: 'draft',
+    preview: '',
+    hosts: '',
+    brand: brands.length === 1 ? (brands[0]?.id ?? '') : '',
+  }
 }
 
 export function formOf(row: SiteRow): SiteForm {
@@ -160,6 +179,7 @@ export function formOf(row: SiteRow): SiteForm {
     status: row.status ?? 'draft',
     preview: row.preview ?? '',
     hosts: row.hosts.join('\n'),
+    brand: row.brand ?? '',
   }
 }
 
@@ -181,7 +201,11 @@ export const RESERVED_IDS: readonly string[] = ['shared', 'default', '*']
  * reason arrives before the click; the server stays the authority (uniqueness of an
  * id or a hostname is only knowable there).
  */
-export function formRefusal(form: SiteForm, mode: 'create' | 'edit'): string | undefined {
+export function formRefusal(
+  form: SiteForm,
+  mode: 'create' | 'edit',
+  brands: readonly BrandRef[] = [],
+): string | undefined {
   if (mode === 'create') {
     if (!form.id) return 'Give it an id first'
     if (!ID_PATTERN.test(form.id)) {
@@ -190,12 +214,19 @@ export function formRefusal(form: SiteForm, mode: 'create' | 'edit'): string | u
     if (RESERVED_IDS.includes(form.id)) return `“${form.id}” is reserved`
   }
   if (!form.name.trim()) return 'Give it a name first'
+  if (brands.length > 0 && !form.brand) return 'Choose a brand first'
   return undefined
 }
 
 /** `POST {base}/api/sites`. A group carries only what a group has. */
 export function createBody(form: SiteForm): Record<string, unknown> {
-  const base = { id: form.id, kind: form.kind, name: form.name.trim() }
+  // No `brand` key at all on a deployment with no `brands`, where the server refuses one.
+  const base = {
+    id: form.id,
+    kind: form.kind,
+    name: form.name.trim(),
+    ...(form.brand ? { brand: form.brand } : {}),
+  }
   if (form.kind === 'group') return base
   return {
     ...base,
@@ -213,6 +244,8 @@ export function createBody(form: SiteForm): Record<string, unknown> {
 export function patchBody(form: SiteForm, before: SiteRow): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   if (form.name.trim() !== before.name) out.name = form.name.trim()
+  // Never `null`: the server refuses to un-brand a row, so an empty choice sends nothing.
+  if (form.brand !== '' && form.brand !== (before.brand ?? '')) out.brand = form.brand
   if (before.kind === 'site') {
     if ((form.group || null) !== before.group) out.group = form.group || null
     if (form.status !== before.status) out.status = form.status
@@ -229,14 +262,100 @@ export function hostsChanged(form: SiteForm, before: SiteRow): boolean {
   return next.length !== prior.length || next.some((host, i) => host !== prior[i])
 }
 
+/* ------------------------------------------------------------------ brands --- */
+
+/**
+ * How the dialog draws the brand (`multi-brand.md` decision 20), decided here so the
+ * control is absent rather than disabled when it cannot apply:
+ *
+ * - `absent`: a deployment with no `brands`, which is every deployment that has never
+ *   heard of them, and whose dialog is what it always was.
+ * - `fixed`: a site in a group, whose brand is its group's (a site cannot join another
+ *   brand's group, and its brand cannot differ), and a group that has sites, whose brand
+ *   the server refuses to change (409). Both are shown as a fact.
+ * - `choose`: everything else.
+ *
+ * `hasSites` is whether the group being edited has member sites, which the registry the
+ * screen already holds answers (`groupHasSites`).
+ */
+export function brandField(
+  form: SiteForm,
+  brands: readonly BrandRef[],
+  hasSites = false,
+): 'absent' | 'fixed' | 'choose' {
+  if (brands.length === 0) return 'absent'
+  if (form.kind === 'group') return hasSites ? 'fixed' : 'choose'
+  return form.group !== '' ? 'fixed' : 'choose'
+}
+
+/** Whether any site is in this group, from the registry the screen holds. */
+export function groupHasSites(registry: Registry, id: string): boolean {
+  return registry.sites.some((site) => site.group === id)
+}
+
+/** A brand's label, or its id when the deployment no longer configures it, or a dash
+ * for a row of no brand. */
+export function brandLabel(brands: readonly BrandRef[], id: string | null): string {
+  if (id === null) return '—'
+  return brands.find((brand) => brand.id === id)?.label ?? id
+}
+
+/** The groups a site may join: a site cannot join a group of another brand (400), so
+ * once a brand is chosen only its groups are offered. A group of no brand, or of one the
+ * deployment no longer configures, serves nothing and is never offered (with no brands
+ * configured there is nothing to check against). */
+export function groupChoices<G extends { brand: string | null }>(
+  form: SiteForm,
+  groups: readonly G[],
+  brands: readonly BrandRef[] = [],
+): G[] {
+  const served =
+    brands.length === 0 ? groups : groups.filter((g) => brands.some((b) => b.id === g.brand))
+  return form.brand === '' ? [...served] : served.filter((group) => group.brand === form.brand)
+}
+
+/** Joining a group takes its brand with it. */
+export function withGroup(
+  form: SiteForm,
+  group: string,
+  groups: readonly { id: string; brand: string | null }[],
+): SiteForm {
+  const brand = groups.find((g) => g.id === group)?.brand
+  return { ...form, group, ...(group !== '' && brand ? { brand } : {}) }
+}
+
+/** Choosing a brand drops a group that belongs to another. */
+export function withBrand(
+  form: SiteForm,
+  brand: string,
+  groups: readonly { id: string; brand: string | null }[],
+): SiteForm {
+  const held = groups.find((g) => g.id === form.group)
+  return { ...form, brand, group: held && held.brand !== brand ? '' : form.group }
+}
+
 /* ---------------------------------------------------------------- settings --- */
 
-/** The scopes whose settings layer exists to be edited: `shared`, groups and sites. */
-export function settingsScopes(registry: Registry): { id: string; name: string }[] {
+/**
+ * The scopes whose settings layer exists to be edited: `shared`, groups and sites.
+ *
+ * With `brand` (a scoped manifest on a deployment with `brands`, whose settings type
+ * is that brand's) only that brand's rows, and no `shared`, which such a deployment
+ * does not have.
+ */
+export function settingsScopes(
+  registry: Registry,
+  brand: string | null = null,
+): { id: string; name: string; bottom: boolean }[] {
+  const mine = (row: { brand: string | null }) => brand === null || row.brand === brand
   return [
-    { id: 'shared', name: 'Shared' },
-    ...registry.groups.map((g) => ({ id: g.id, name: g.name })),
-    ...registry.sites.map((s) => ({ id: s.id, name: s.name })),
+    ...(registry.shared && brand === null ? [{ id: 'shared', name: 'Shared', bottom: true }] : []),
+    ...registry.groups
+      .filter(mine)
+      .map((g) => ({ id: g.id, name: g.name, bottom: chain(registry, g.id).length <= 1 })),
+    ...registry.sites
+      .filter(mine)
+      .map((s) => ({ id: s.id, name: s.name, bottom: chain(registry, s.id).length <= 1 })),
   ]
 }
 
@@ -250,9 +369,14 @@ export function settingsHref(base: string, settingsType: string, scope: string):
   return href({ name: 'edit', id: layerId(settingsType, scope) }, scopedMount(base, scope))
 }
 
-/** How the tab explains a scope's layer, by what sits below it. */
-export function settingsBlurb(scope: string): string {
-  return scope === 'shared'
-    ? 'The base layer. Every site inherits these values until a group or a site overrides them.'
+/** How the tab explains a scope's layer, by what sits below it. `bottom` is a scope
+ * with nothing below it in its chain (`settingsScopes`): the editor draws no
+ * Inherited labels there, so the tab must not promise them. */
+export function settingsBlurb(scope: string, bottom = scope === 'shared'): string {
+  if (scope === 'shared') {
+    return 'The base layer. Every site inherits these values until a group or a site overrides them.'
+  }
+  return bottom
+    ? 'The base layer of its chain: nothing sits below it, so every field is set here.'
     : 'Each field reads Inherited, Overridden here or Removed here. Only what is overridden is stored on this scope.'
 }

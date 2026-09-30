@@ -941,6 +941,35 @@ function fakeCtx(): { ctx: HookRunnerCtx<Env>; tasks: Promise<unknown>[] } {
   return { ctx, tasks }
 }
 
+describe('createHookRunner brand', () => {
+  const STORY = { id: 'sty_1', site: 'tog' } as never
+
+  it('stamps every payload with the brand the runner was made for, whatever the emitter says', async () => {
+    const seen: (string | null)[] = []
+    const ctx = { env: {}, waitUntil: () => {} }
+    const runner = createHookRunner(
+      { await: ['created'], created: (e) => void seen.push(e.brand) },
+      ctx,
+      [],
+      console,
+      'takeoffgo',
+    )
+    // An extra `brand` in the emitter's own object is overwritten, not trusted.
+    await runner.run('created', { story: STORY, actor: null, brand: 'other' } as never)
+    expect(seen).toEqual(['takeoffgo'])
+  })
+
+  it('is null for a runner made with no brand', async () => {
+    const seen: (string | null)[] = []
+    const runner = createHookRunner(
+      { await: ['created'], created: (e) => void seen.push(e.brand) },
+      { env: {}, waitUntil: () => {} },
+    )
+    await runner.run('created', { story: STORY, actor: null })
+    expect(seen).toEqual([null])
+  })
+})
+
 describe('createHookRunner', () => {
   it('fires the hook exactly once, with env and waitUntil injected alongside the caller-supplied fields', async () => {
     const calls: unknown[] = []
@@ -957,7 +986,14 @@ describe('createHookRunner', () => {
 
     // `site` is the runner's own (`HookBase.site`): the story's scope, `default` here.
     expect(calls).toEqual([
-      { story: STORY, actor: 'alice', env: ctx.env, waitUntil: ctx.waitUntil, site: 'default' },
+      {
+        story: STORY,
+        actor: 'alice',
+        env: ctx.env,
+        waitUntil: ctx.waitUntil,
+        site: 'default',
+        brand: null,
+      },
     ])
   })
 
@@ -1212,6 +1248,7 @@ describe('alarmHookCtx', () => {
         env: { marker: 'env' },
         waitUntil: ctx.waitUntil,
         site: 'default',
+        brand: null,
       },
     ])
   })

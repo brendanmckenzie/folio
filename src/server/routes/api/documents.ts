@@ -43,6 +43,7 @@ import {
   ensureAccess,
   fenceParent,
   fenceStory,
+  brandIdOf,
   hookCtx,
   inFence,
   type Reach,
@@ -305,7 +306,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       types: brandOf(c).types,
       stub: (id: string) => rt.stub(bindings, id),
       draft: draftOf(c, rt),
-      hooks: rt.hookRunner(hookCtx(c)),
+      hooks: rt.hookRunner(hookCtx(c), brandIdOf(c)),
       chainOf: chainResolver(c, rt),
     }
   }

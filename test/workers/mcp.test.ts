@@ -309,6 +309,19 @@ describe('server/discover', () => {
   })
 
   /**
+   * A deployment with no `sites` has one scope and nothing to say about it: the
+   * scoped-session sentence (`multi-brand.md` decision 19) is a multi-site addition,
+   * so the text ends where it always did.
+   */
+  it('adds no scope sentence on a deployment with no sites', async () => {
+    const answer = await rpc<{ instructions: string }>('server/discover')
+    expect(answer.result?.instructions).not.toContain('scoped to')
+    expect(answer.result?.instructions.endsWith('Publishing is a separate, explicit step.')).toBe(
+      true,
+    )
+  })
+
+  /**
    * **The cache hints are required, and promise nothing.** `DiscoverResult` and
    * `ListToolsResult` are both `CacheableResult` in the `2026-07-28` schema, and a
    * strict client refused `tools/list` while they were omitted. `0` is

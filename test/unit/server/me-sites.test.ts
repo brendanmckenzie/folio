@@ -133,4 +133,28 @@ describe('meSites on a deployment with brands', () => {
   it('still offers shared on a registry that has it', () => {
     expect(ids(meSites(REGISTRY, { '*': 'admin' }, undefined).scopes)).toContain('shared')
   })
+
+  it('gives each scope its brand ref and lists the brands, only when told them', () => {
+    const brands = [
+      { id: 'aaa', label: 'All About Africa' },
+      { id: 'tgo', label: 'Take Off Go' },
+    ]
+    const me = meSites(BRANDED, null, undefined, brands)
+    expect(me.scopes.map((s) => [s.id, s.brand])).toEqual([
+      ['north', brands[0]],
+      ['alpha', brands[0]],
+    ])
+    expect(me.brands).toEqual(brands)
+    // A brand nobody configured has no label to give, so the ref is null.
+    expect(meSites(BRANDED, null, undefined, [brands[1]!]).scopes.map((s) => s.brand)).toEqual([
+      null,
+      null,
+    ])
+  })
+
+  it('carries no brand key and a null brand on every scope of a deployment without brands', () => {
+    const me = meSites(REGISTRY, { '*': 'admin' }, 'siteSettings')
+    expect('brands' in me).toBe(false)
+    expect(me.scopes.every((s) => s.brand === null)).toBe(true)
+  })
 })

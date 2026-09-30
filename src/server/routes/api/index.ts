@@ -15,7 +15,7 @@
  */
 import { Hono } from 'hono'
 import type { AssetFilter } from '../../../core/assets'
-import { DEFAULT_SITE } from '../../../core/sites'
+import { DEFAULT_SITE, SHARED_SCOPE } from '../../../core/sites'
 import {
   listAssetsByPage,
   MAX_UPLOAD_BYTES,
@@ -60,7 +60,30 @@ export function apiRoutes<Env>(
    * `/api/v1` has that constraint, and a schema describes the shape of a private
    * site's content.
    */
-  app.get('/schema', requireAccess<Env>(rt, READ), (c) => c.json(brandOf(c).manifest))
+  app.get('/schema', requireAccess<Env>(rt, READ), async (c) => {
+    // Refused, not answered neutral, on a deployment with `brands` and no scope: a
+    // script or agent that asked without one has to be told which brand it meant
+    // (`multi-brand.md` decision 12).
+    const brand = brandOf(c)
+    const scope = c.var.scope
+    if (!rt.sites || scope === null) return c.json(brand.manifest)
+    // On a deployment with `sites`, the answer says which scope it is for, and so which
+    // brand's registry it describes (decision 19, signal 4).
+    const registry = await rt.sites.registry(c.env)
+    const site = registry.sites.find((s) => s.id === scope)
+    const group = site ? undefined : registry.groups.find((g) => g.id === scope)
+    const row = site ?? group
+    if (!row && scope !== SHARED_SCOPE) return c.json(brand.manifest)
+    return c.json({
+      ...brand.manifest,
+      scope: {
+        id: scope,
+        name: row?.name ?? 'Shared',
+        kind: site ? 'site' : group ? 'group' : 'shared',
+        brand: brand.brand,
+      },
+    })
+  })
 
   app.route('/', documentRoutes<Env>(rt))
   app.route('/', searchRoutes<Env>(rt))

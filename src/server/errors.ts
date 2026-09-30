@@ -13,6 +13,13 @@ import type { FolioMiss, MissArm } from './types'
 
 export type FolioErrorCode =
   | 'bad_request'
+  /**
+   * A route that needs a brand was asked with no site to name one, on a deployment
+   * with `brands` (`multi-brand.md` decision 12). The same code `middleware.ts`
+   * answers a scoped route with; here it is a `FolioError` because the route has
+   * already been reached, and a script can tell it from every other 400.
+   */
+  | 'site_required'
   /** No usable credential at all: absent, expired, or revoked. Never "the right
    * credential lacking permission" — that is `forbidden`, and telling the two
    * apart is what lets the admin turn exactly one of them into a sign-in
@@ -43,6 +50,7 @@ export type FolioErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 501 | 502
 
 const STATUS: Record<FolioErrorCode, FolioErrorStatus> = {
   bad_request: 400,
+  site_required: 400,
   unauthorized: 401,
   forbidden: 403,
   not_found: 404,

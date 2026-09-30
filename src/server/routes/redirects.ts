@@ -10,7 +10,7 @@ import { decodeCursor } from '../../core/pagination'
 import { DEFAULT_SITE } from '../../core/sites'
 import { actorString, MANAGE, READ } from '../auth/roles'
 import { FolioError } from '../errors'
-import { hookCtx, requestChain, requestScope, requireAccess } from '../middleware'
+import { brandIdOf, hookCtx, requestChain, requestScope, requireAccess } from '../middleware'
 import type { FolioRuntime } from '../runtime'
 import {
   deleteRedirect,
@@ -151,7 +151,7 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // but a host that caches its 404s has to hear about it, and this is the
     // only moment that knows which path changed meaning.
     await rt
-      .hookRunner(hookCtx(c))
+      .hookRunner(hookCtx(c), brandIdOf(c))
       .run('redirectsChanged', { from: [from], actor: actorString(c.var.actor), site: scope })
     return c.json(redirect, 201)
   })
@@ -164,7 +164,7 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // Only when a row actually went: deleting a redirect that was never there
     // changes nothing, and an event for it would be a purge for nothing.
     if (removed) {
-      await rt.hookRunner(hookCtx(c)).run('redirectsChanged', {
+      await rt.hookRunner(hookCtx(c), brandIdOf(c)).run('redirectsChanged', {
         from: [normalisePath(from)],
         actor: actorString(c.var.actor),
         site: scopeOf(c),

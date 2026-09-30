@@ -13,7 +13,7 @@ import type { ContentQuery, ContentWhere, TextOp } from '../../core/query'
 import { isRangeOp, isTextOp, MAX_PER_PAGE, WHERE_OPS } from '../../core/query'
 import { actorString, ADMIN, READ } from '../auth/roles'
 import { FolioError } from '../errors'
-import { hookCtx, requestChain, requestSite, requireAccess } from '../middleware'
+import { brandIdOf, hookCtx, requestChain, requestSite, requireAccess } from '../middleware'
 import { reindex } from '../reindex'
 import type { FolioRuntime } from '../runtime'
 import type { FolioEnv } from '../types'
@@ -206,7 +206,7 @@ export function contentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         schema: brand.schema,
         typeOf: brand.typeOf,
         locales: rt.locales,
-        hooks: rt.hookRunner(hookCtx(c)),
+        hooks: rt.hookRunner(hookCtx(c), brandIdOf(c)),
         // This brand's schema over this brand's scopes only.
         ...(sweep ? { scopes: sweep.scopes } : {}),
       },

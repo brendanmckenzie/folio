@@ -25,9 +25,29 @@ import { scheduleRoutes } from './routes/schedules'
 import { shellRoutes } from './routes/shell'
 import { siteRoutes } from './routes/sites'
 import { spaceRoutes } from './routes/space'
-import { brandOf, storyRoutes } from './routes/stories'
+import { storyRoutes } from './routes/stories'
+import type { Manifest } from '../core/schema'
 import type { FolioRuntime } from './runtime'
 import type { FolioConfig, FolioEnv, GatedReaderFactory } from './types'
+
+/**
+ * What `GET {base}/api/schema` answers on a deployment with `brands` when the request
+ * names no scope (`multi-brand.md` decision 12): no types, blocks or globals, because
+ * none of them belongs to a brand nobody named. `locales` and `hooks` are the
+ * deployment's, the same under every brand, so they ride as they always did. Built
+ * from the first brand's manifest only to read those two.
+ */
+export function neutralManifest(rt: FolioRuntime): Manifest {
+  const { locales, hooks } = [...rt.brands.values()][0]?.manifest ?? {}
+  return {
+    types: [],
+    blocks: [],
+    root: '',
+    globals: [],
+    ...(locales ? { locales } : {}),
+    ...(hooks ? { hooks } : {}),
+  }
+}
 
 export function createApp<Env>(
   config: FolioConfig<Env>,
@@ -129,9 +149,9 @@ export function createApp<Env>(
    * unauthenticated `curl`? If the answer needs a caveat, it goes on `/me`.
    */
   // The scope's brand's manifest. A branded deployment asked with no scope has no
-  // brand to answer for, and is refused rather than answered with one; the neutral
-  // manifest the bare shell needs there is `multi-brand.md` phase 7's.
-  app.get('/api/schema', (c) => c.json(brandOf(c).manifest))
+  // brand to answer for, and answers the neutral manifest the bare shell needs before
+  // it redirects to the caller's first scope (`multi-brand.md` decision 12).
+  app.get('/api/schema', (c) => c.json(c.var.brand?.manifest ?? neutralManifest(rt)))
 
   // (2) Inside `/api`, `/login/verify` has no counterpart to be confused with, but
   // `/story/:id/...` patterns are still shadow-prone, so the specific ones go
