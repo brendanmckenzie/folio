@@ -2640,3 +2640,23 @@ than the spec's first plan:
 - **Next:** spec phase 10, `0012_users_role_contract.sql`, is the release after this
   one, once this release is deployed everywhere it will go.
 
+
+### The pane's asset URLs (2026-10-01)
+
+- **Staging found it again, in the editor pane only.** On a scoped admin mount
+  (`{base}/~takeoffgo`) `useEditor` built the `Resolution` it posts to the iframe with
+  `assetBase` `${base}/asset`, `base` being the scoped mount, so a draft's images were
+  `{base}/~takeoffgo/asset/<key>`. The iframe is a page on a site's preview origin,
+  which serves `{base}/asset/:key` and nothing under a `~scope` (`servesOnSite`), so
+  every image 404ed; the server-rendered first paint was right and the first
+  `resolve` frame replaced it. The inspector looked fine because it fetches from the
+  admin origin, which does serve the scoped form.
+- **Fix: the pane emits what a published render emits**, `bareMount(base)/asset`.
+  The alternative, teaching live and preview hosts to answer `{base}/~scope/asset/:key`,
+  was rejected: assets are public by key and carry no scope check, so a scoped form
+  would add nothing but a second address, and `servesOnSite` deliberately refuses
+  every scope on a live host. `cache-request.ts` is unchanged: the unscoped path is
+  the public-asset one it already knows.
+- Every other URL the admin puts in that resolution (form actions, story hrefs,
+  `srcset` via `assetBase`) comes from the server or from `assetBase`, and is unscoped.
+  Pinned by `hands the pane the unscoped asset route` in `test/unit/admin/render/multi-site.test.tsx`.

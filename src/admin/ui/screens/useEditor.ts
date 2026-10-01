@@ -24,6 +24,7 @@ import { useUndoShortcut } from '../../hooks/useUndoShortcut'
 import { useVersions, useVersionsList } from '../../hooks/useVersions'
 import { canEditIn, type Me } from '../../me'
 import { StoryStore, useStoreState } from '../../store'
+import { bareMount } from '../route'
 import { type PaneChoice, paneSource, previewFrame } from './editor-model'
 
 /**
@@ -48,7 +49,7 @@ export interface EditorOptions {
   /** The story row, or undefined while it is in flight. */
   story: StoryMeta | undefined
   apiBase: string
-  /** The bare mount, for asset URLs and a global's preview page. */
+  /** The mount the admin is on, `~scope` included on a multi-site deployment. */
   base: string
   schema: SchemaIndex
   types: readonly DocumentType[]
@@ -238,7 +239,14 @@ export function useEditor(opts: EditorOptions): EditorApi {
       // The open story is always in the map, whether or not anything links to it:
       // a page that links to itself, and a host template reading the current
       // page's own ref, both want it there.
-      ...buildResolution(story ? [story, ...refStories] : refStories, `${base}/asset`),
+      ...buildResolution(
+        story ? [story, ...refStories] : refStories,
+        // The *bare* mount: the iframe is a host's page on a preview origin, and a
+        // site's host serves `{base}/asset/:key` and not `{base}/~scope/asset/:key`
+        // (`servesOnSite`). It is also what the server-rendered page emitted before
+        // this resolution replaced it, so the two agree.
+        `${bareMount(base)}/asset`,
+      ),
       docs,
       globals: globalDocs.docs,
       collections,

@@ -499,6 +499,28 @@ describe('the preview pane', () => {
     expect(open.getAttribute('target')).toBe('_blank')
   })
 
+  it('hands the pane the unscoped asset route, which is the only one a preview origin serves', async () => {
+    await mountAt('/folio/~alpha/edit/sty_home', PLATFORM)
+    const win = frame()?.contentWindow as Window
+    // happy-dom refuses a cross-origin target, so the spy swallows the call.
+    const post = vi.spyOn(win, 'postMessage').mockImplementation(() => {})
+    await act(async () => {
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          data: { source: 'folio-preview', type: 'ready' },
+          origin: 'https://preview.alpha.example',
+          source: win,
+        }),
+      )
+    })
+    const resolved = post.mock.calls
+      .map(([m]) => m as { type?: string; resolution?: { assetBase: string } })
+      .filter((m) => m.type === 'resolve')
+    expect(resolved.length).toBeGreaterThan(0)
+    // `{base}/~alpha/asset/<key>` is a 404 on a site's host (`servesOnSite`).
+    for (const m of resolved) expect(m.resolution?.assetBase).toBe('/folio/asset')
+  })
+
   it('ignores the same message from any other origin', async () => {
     await mountAt('/folio/~alpha/edit/sty_home', PLATFORM)
     await act(async () => {
