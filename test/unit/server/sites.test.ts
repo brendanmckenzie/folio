@@ -236,15 +236,38 @@ describe('registrySnapshot', () => {
     expect(reads).toBe(2)
   })
 
-  it('shares one read between requests that arrive during a refresh', async () => {
-    const c = counting()
-    const snap = registrySnapshot({ now: () => 0, read: c.read })
+  it('gives each concurrent request its own read and its own promise', async () => {
+    let reads = 0
+    const snap = registrySnapshot({
+      now: () => 0,
+      read: async () => {
+        reads++
+        return registry
+      },
+    })
     const a = snap.get(db)
     const b = snap.get(db)
-    c.settle(registry)
+    // No promise is handed to two requests: each belongs to the one that asked.
+    expect(a).not.toBe(b)
     expect(await a).toBe(registry)
     expect(await b).toBe(registry)
-    expect(c.reads()).toBe(1)
+    expect(reads).toBe(2)
+  })
+
+  it('reuses a settled registry within the ttl', async () => {
+    let reads = 0
+    const snap = registrySnapshot({
+      now: () => 0,
+      read: async () => {
+        reads++
+        return registry
+      },
+    })
+    await Promise.all([snap.get(db), snap.get(db)])
+    expect(reads).toBe(2)
+    await snap.get(db)
+    await snap.get(db)
+    expect(reads).toBe(2)
   })
 
   it('does not keep a read that was in flight when a write dropped the snapshot', async () => {
@@ -253,7 +276,8 @@ describe('registrySnapshot', () => {
     const stale = snap.get(db)
     snap.drop()
     c.settle(registry)
-    await stale
+    // The read still answers the request that issued it.
+    expect(await stale).toBe(registry)
     // The read that predates the write is not held: the next request reads again.
     const next = snap.get(db)
     c.settle(registry)

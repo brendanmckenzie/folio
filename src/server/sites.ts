@@ -126,10 +126,16 @@ export interface RegistrySnapshot {
  * front of every page. **Beat a version row read per request**: the same round
  * trip under another name.
  *
- * Concurrent requests during a refresh share the one read rather than each
- * issuing their own. A `drop()` that lands while a read is in flight wins: that
- * read's answer may predate the write, so it is handed to the requests that were
- * already waiting and not kept.
+ * **Reads are not deduplicated, on purpose.** Two requests that arrive during a
+ * refresh each issue their own read. Sharing the one in-flight promise would be
+ * cheaper and is wrong in a Worker: a promise created by one request is tied to that
+ * request's I/O context, and a second request that awaits it is waiting on another
+ * request's I/O. Workers refuse that ("Cannot perform I/O on behalf of a different
+ * request"), and under `@cloudflare/vite-plugin`'s dev runner it surfaces as an
+ * `I/O type: SpanParent` error on the waiter's next `ctx.exports.*` call. Only the
+ * settled `Registry`, a plain value, is held for later requests. A `drop()` that
+ * lands while a read is in flight wins: that read's answer may predate the write, so
+ * it goes to the request that issued it and is not kept.
  */
 export function registrySnapshot(
   opts: { ttl?: number; now?: () => number; read?: (db: D1Database) => Promise<Registry> } = {},
@@ -138,33 +144,21 @@ export function registrySnapshot(
   const now = opts.now ?? Date.now
   const read = opts.read ?? readRegistry
   let held: { registry: Registry; at: number } | null = null
-  let inflight: Promise<Registry> | null = null
   let generation = 0
 
   return {
     get: (db) => {
       if (held && now() - held.at < ttl) return Promise.resolve(held.registry)
-      if (inflight) return inflight
       const started = generation
       const at = now()
-      const reading: Promise<Registry> = read(db).then(
-        (registry) => {
-          if (inflight === reading) inflight = null
-          if (generation === started) held = { registry, at }
-          return registry
-        },
-        (err) => {
-          if (inflight === reading) inflight = null
-          throw err
-        },
-      )
-      inflight = reading
-      return reading
+      return read(db).then((registry) => {
+        if (generation === started) held = { registry, at }
+        return registry
+      })
     },
     drop: () => {
       generation++
       held = null
-      inflight = null
     },
   }
 }

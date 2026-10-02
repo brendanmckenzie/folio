@@ -2660,3 +2660,22 @@ than the spec's first plan:
 - Every other URL the admin puts in that resolution (form actions, story hrefs,
   `srcset` via `assetBase`) comes from the server or from `assetBase`, and is unscoped.
   Pinned by `hands the pane the unscoped asset route` in `test/unit/admin/render/multi-site.test.tsx`.
+
+### The snapshot shares no read between requests (2026-10-02)
+
+- **A consumer's dev gateway threw `Cannot perform I/O on behalf of a different request
+  (I/O type: SpanParent)`** when a request made a `ctx.exports.*` call after waiting on
+  the registry. `registrySnapshot().get` handed every request that arrived during a
+  refresh the one in-flight read; in a Worker a promise belongs to the request that
+  created it, so the waiter was tied to another request's I/O context.
+- **Fix: each `get` with a stale or empty snapshot issues its own read** and returns its
+  own promise. Only the settled `Registry` is held, for the TTL. The `generation` guard
+  stays: a read that began before a `drop()` answers its own caller and is not held.
+  The alternative, keeping the shared promise and accepting the failure in dev only, was
+  rejected: the rule is the runtime's, not the dev runner's, and a refresh stampede costs
+  at most one extra primary read per concurrent request, once per ten seconds per isolate.
+- Pinned in `test/unit/server/sites.test.ts` (`gives each concurrent request its own read
+  and its own promise`, `reuses a settled registry within the ttl`). Decision 4 is
+  otherwise unchanged. The other module-held promises (`scopeOnce`, `visitorOnce`,
+  `scheduleDeps`' `registry`) are per reader or per call, not per isolate, and are not
+  affected.
