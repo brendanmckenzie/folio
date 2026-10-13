@@ -10,6 +10,7 @@ import {
   canManageContent,
   canPublish,
   canReadResponses,
+  canShare,
   type Me,
   OPEN,
   whyNot,
@@ -136,6 +137,27 @@ describe('whyNot', () => {
     // version of a permissions system.
     expect(whyNot(user('publisher'), 'publish')).toBeUndefined()
     expect(whyNot(signedOut, 'edit')).toBe('Sign in to make changes')
+  })
+})
+
+describe('canShare', () => {
+  // `PUBLISH` on the server: a share link puts a draft in front of a stranger, so it
+  // is gated like publishing and not like editing.
+  it('is canPublish for every role, a token and nobody', () => {
+    const roles: Role[] = ['viewer', 'editor', 'publisher', 'admin']
+    for (const role of roles) expect(canShare(user(role))).toBe(canPublish(user(role)))
+    expect(canShare(user('editor'))).toBe(false)
+    expect(canShare(user('publisher'))).toBe(true)
+    expect(canShare(OPEN)).toBe(true)
+    expect(canShare(token)).toBe(false)
+    expect(canShare(signedOut)).toBe(false)
+  })
+
+  it("has a 'share' reason that matches the route's 403 wording", () => {
+    expect(whyNot(user('editor'), 'share')).toBe('Your role (editor) may not publish')
+    expect(whyNot(user('viewer'), 'share')).toContain('may not publish')
+    expect(whyNot(user('publisher'), 'share')).toBeUndefined()
+    expect(whyNot(OPEN, 'share')).toBeUndefined()
   })
 })
 

@@ -497,6 +497,30 @@ describe('a link that no longer works', () => {
 /* -------------------------------------------------------------- the list --- */
 
 describe('listing links', () => {
+  it('names a user creator, and leaves a token or a deleted account null', async () => {
+    const page = await seedPage('list-names')
+    const byUser = await share(page.id)
+    const byToken = await share(page.id)
+    const orphan = await share(page.id)
+    await env.DB.prepare('update shares set created_by = ? where id = ?')
+      .bind('token:ci', byToken.row.id)
+      .run()
+    await env.DB.prepare('update shares set created_by = ? where id = ?')
+      .bind('usr_deleted', orphan.row.id)
+      .run()
+    const { cookie } = await signIn('publisher', 'pub-names@example.com')
+    const res = await call(`/folio/api/shares?story=${page.id}&count=1`, { headers: { cookie } })
+    const body = await res.json<{ shares: ShareRow[]; total?: number }>()
+    const named = (id: string) => body.shares.find((s) => s.id === id)
+    // The lookup must not change what is counted or paged.
+    expect(body.total).toBe(3)
+    expect(body.shares).toHaveLength(3)
+    expect(named(byUser.row.id)?.createdByName).toBe('publisher')
+    expect(named(byToken.row.id)?.createdByName).toBeNull()
+    expect(named(byToken.row.id)?.createdBy).toBe('token:ci')
+    expect(named(orphan.row.id)?.createdByName).toBeNull()
+  })
+
   it('is the receipt: newest first, filterable, never carrying a token', async () => {
     const a = await seedPage('list-a')
     const b = await seedPage('list-b')
@@ -511,6 +535,8 @@ describe('listing links', () => {
     expect(all.shares.map((s) => s.id)).toEqual([second.row.id, first.row.id])
     expect(all.total).toBe(2)
     expect(all.shares[0]?.createdBy).toMatch(/^usr_/)
+    // The display name rides along, so the admin need not read the admin-only users list.
+    expect(all.shares[0]?.createdByName).toBe('publisher')
     expect(all.shares.find((s) => s.id === first.row.id)?.note).toBe('for Rachel')
     expect(JSON.stringify(all)).not.toContain(first.token)
     expect(JSON.stringify(all)).not.toContain(second.token)

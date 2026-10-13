@@ -70,11 +70,13 @@ export function useAccess(apiBase: string, enabled: boolean): AccessData {
  * misleading error in the console and, worse, would report the 404 as if it were the
  * screen's problem.
  */
-function usePaged<T>(
+export function usePaged<T>(
   apiBase: string,
   path: string,
-  key: 'users' | 'tokens',
+  key: 'users' | 'tokens' | 'shares',
   enabled: boolean,
+  /** Extra query parameters, for a list the route filters (`/shares?story=…`). */
+  filter: Readonly<Record<string, string>> = {},
 ): PagedList<T> {
   const [page, setPage] = useState<PagedList<T>['page']>({
     rows: [],
@@ -85,6 +87,7 @@ function usePaged<T>(
   const [history, setHistory] = useState<readonly (string | null)[]>([])
 
   const params = new URLSearchParams({ limit: String(PAGE), count: '1' })
+  for (const [name, value] of Object.entries(filter)) params.set(name, value)
   if (cursor) params.set('cursor', cursor)
   const query = params.toString()
 

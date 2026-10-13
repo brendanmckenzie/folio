@@ -679,7 +679,7 @@ above it rather than placed as the host would place them.
 93 files, 2798 tests, all passing. `./scripts/e2e.sh scripts/preview-share-test.mjs`
 47/47. `./scripts/e2e.sh scripts/auth-test.mjs` 44/44, unchanged by this work.
 
-**No admin UI, by arrangement.** What a screen needs, precisely:
+**No admin UI, by arrangement** (built since, 2026-10-13: see "Amended by issue #22" below). What a screen needs, precisely:
 
 - **Where it belongs: the editor's top bar**, beside Publish — "Share a preview". It is
   a publish-shaped act and `PUBLISH` is its gate, so it sits with the other one.
@@ -706,6 +706,41 @@ above it rather than placed as the host would place them.
   natural home is a rail on the Access screen beside Tokens, where the other
   outstanding credentials are.
 
+
+### Amended by issue #22 (the admin UI), 2026-10-13
+
+**The admin UI now exists**, and it is the screen the note above specified. "Share a
+preview" sits beside Publish in the editor's top bar (`EditorShell.tsx`) and opens
+`SharePreview.tsx`: an optional note (200 characters), a day count that defaults to 7 and
+refuses anything outside 1 to 90 before the request is sent, and a Create button for
+`POST {base}/api/story/:id/share`. Below the form it lists the story's live links from
+`GET {base}/api/shares?story=<id>&state=live`, each with its note, who made it, when it
+expires and `opened 3 times, last yesterday`, and a Revoke button that hides the row at
+once and re-reads the list.
+
+- **`canShare(me)` is `canPublish(me)`** in `admin/me.ts`, and `whyNot(me, 'share')`
+  reads "may not publish". The button is disabled, not hidden, with that reason on
+  hover; for a document with `path === null` it is disabled with "no page" as the reason
+  (`share-model.ts`'s `shareRefusal`, role first).
+- **The one-time display is shared with the Access screen.** The link appears once, in
+  `OneTimeSecretDialog.tsx`, extracted from the token dialog so a change to the Copy
+  button or to the "shown once" treatment lands in both. It replaces the form rather
+  than stacking on it, and Done discards the value.
+- **Multi-site comes for free** because both calls go through the scoped `apiBase` the
+  Access screen uses, so the `~<site>` segment is carried and the route's `?site=`
+  defaults to the scope being shown. Nothing hard-codes an unscoped `{base}/api` path.
+- **"Who made it" is a real name.** `listShares` selects the creator's `users.name` as
+  `createdByName` (a scalar subquery, so the paging and count statements are untouched),
+  the same name presence and history show. The dialog says "You" for the caller's own
+  link, the name for another editor's, the token's name for a `token:<name>` creator,
+  and "A removed account" when the user row is gone. This is a read-only display field
+  on `ShareRow`; the grant, cookie and expiry are unchanged.
+- **Still not built:** the site-wide list of every outstanding link, which stays a rail
+  on the Access screen beside Tokens.
+
+The only server change is that display field. Tests: `test/workers/shares.test.ts`, `test/unit/admin/share-model.test.ts`,
+`test/unit/admin/me.test.ts` (the `canShare` block) and
+`test/unit/admin/render/share-preview.test.tsx`.
 
 ### Amended again by spec 25 (draft mode), 2026-08-30
 

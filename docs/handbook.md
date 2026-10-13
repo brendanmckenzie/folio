@@ -1645,6 +1645,12 @@ cookie, which drafts exactly the story that link granted and no other. The flag 
 the authority are separate on purpose: an editor is signed in all day and should
 not see drafts of every page they visit until they ask.
 
+An editor with publish rights makes a share link from **Share a preview**, beside
+Publish in the editor's top bar: a note, a lifetime of 1 to 90 days (7 by default),
+and the link shown once with a copy button. The same dialog lists the page's live
+links with how often each was opened, and revokes them. A record or singleton has no
+page, so the button is disabled there.
+
 `READ_DRAFT` is a **viewer**-level gate, so every signed-in account can enter draft
 mode. That matches the admin, where a viewer can already open any draft in preview.
 

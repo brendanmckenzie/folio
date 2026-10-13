@@ -79,6 +79,13 @@ export interface ShareRow {
   storyId: string
   /** `users.id`, `token:<name>`, or null. */
   createdBy: string | null
+  /**
+   * The creator's display name (`users.name`, the same one presence and history
+   * show), for the admin's share list. Null for a `token:<name>` creator, a creator
+   * whose account was deleted, and the row `createShare` hands back (the minter is
+   * the caller, who already knows their own name).
+   */
+  createdByName: string | null
   createdAt: number
   expiresAt: number
   revokedAt: number | null
@@ -92,6 +99,8 @@ interface RawShare {
   id: string
   story_id: string
   created_by: string | null
+  /** Only selected by `listShares`. */
+  created_by_name?: string | null
   created_at: number
   expires_at: number
   revoked_at: number | null
@@ -108,6 +117,7 @@ function toShare(row: RawShare): ShareRow {
     id: row.id,
     storyId: row.story_id,
     createdBy: row.created_by,
+    createdByName: row.created_by_name ?? null,
     createdAt: row.created_at,
     expiresAt: row.expires_at,
     revokedAt: row.revoked_at,
@@ -188,6 +198,7 @@ export async function createShare(
     id: mintId('shr'),
     storyId: input.storyId,
     createdBy: input.createdBy ?? null,
+    createdByName: null,
     createdAt: Date.now(),
     expiresAt: input.expiresAt,
     revokedAt: null,
@@ -285,7 +296,9 @@ export async function listShares(
   const [rows, total] = await Promise.all([
     db
       .prepare(
-        `select ${COLUMNS} from shares
+        `select ${COLUMNS},
+                (select name from users where users.id = shares.created_by) as created_by_name
+         from shares
          ${whereOf(...narrow, resume.sql)} ${orderBy(NEWEST_FIRST)} limit ?`,
       )
       .bind(...narrowBinds, ...resume.binds, limit + 1)

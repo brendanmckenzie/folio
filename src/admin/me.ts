@@ -278,6 +278,16 @@ export function canPublish(me: Me): boolean {
 }
 
 /**
+ * May they share a draft preview link? `PUBLISH`, matching `POST
+ * {base}/api/story/:id/share` and the two share-list routes: a link puts an
+ * unpublished page in front of someone with no account, which is a publish-shaped act
+ * (`platform/draft-sharing.md`'s "No admin UI" note).
+ */
+export function canShare(me: Me): boolean {
+  return canPublish(me)
+}
+
+/**
  * May they create a document, including by duplicating one?
  *
  * `editor`, matching `CREATE` on the server. A new document is an unpublished
@@ -390,7 +400,10 @@ export function actorLabel(me: Me): string | null {
 /** The reason an affordance is disabled, for a `title`, or undefined when it is
  * not. Worth its own function: "why is this greyed out" with no answer is the
  * most annoying possible version of a permissions system. */
-export function whyNot(me: Me, need: 'edit' | 'create' | 'publish' | 'manage'): string | undefined {
+export function whyNot(
+  me: Me,
+  need: 'edit' | 'create' | 'publish' | 'share' | 'manage',
+): string | undefined {
   const user = asUser(me)
   if (me.mode === 'open') return undefined
   if (!user) return 'Sign in to make changes'
@@ -401,7 +414,8 @@ export function whyNot(me: Me, need: 'edit' | 'create' | 'publish' | 'manage'): 
   const allowed = need === 'edit' || need === 'create' ? canEdit(me) : canPublish(me)
   if (allowed) return undefined
   if (need === 'edit' || need === 'create') return `Your role (${role}) is read-only`
-  return need === 'publish'
+  // A share is `PUBLISH`'s, and the route answers 403 with this very wording.
+  return need === 'publish' || need === 'share'
     ? `Your role (${role}) may not publish`
     : `Your role (${role}) may not move or delete documents`
 }

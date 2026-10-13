@@ -6,6 +6,7 @@ import { Button } from '../Button'
 import { Dialog } from '../Dialog'
 import { Field, Input, Select } from '../Field'
 import css from './Access.module.css'
+import { OneTimeSecretDialog } from './OneTimeSecretDialog'
 import {
   CUSTOM_PRESET,
   DEFAULT_PRESET,
@@ -310,42 +311,13 @@ export function AccessTokenDialog({
  * scrolled.
  */
 export function MintedTokenDialog({ minted, onClose }: { minted: Minted; onClose: () => void }) {
-  const [copied, setCopied] = useState(false)
-
-  const copy = () => {
-    // Guarded: `navigator.clipboard` is absent over plain HTTP on anything but
-    // localhost, and a Copy button that throws is worse than one that says it could
-    // not — the value is on screen and selectable either way.
-    navigator.clipboard
-      ?.writeText(minted.token)
-      .then(() => setCopied(true))
-      .catch(() => setCopied(false))
-  }
-
   return (
-    <Dialog
-      title="Copy this token now"
-      description="This is the only time it is shown."
-      size="wide"
-      onClose={onClose}
-      actions={
-        <>
-          <Button onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button>
-          <Button variant="primary" onClick={onClose}>
-            Done
-          </Button>
-        </>
-      }
-    >
+    <OneTimeSecretDialog title="Copy this token now" secret={minted.token} onClose={onClose}>
       <p className={css.dialogNote}>
         <b>{minted.name}</b> is ready to use as{' '}
         <code className={css.inlineCode}>Authorization: Bearer …</code>. Only its SHA-256 is stored,
         so closing this is the last chance to copy it — mint a new one if it is lost.
       </p>
-      {/* Selectable and wrapping, because the fallback when clipboard access is
-          unavailable is a person selecting it by hand, and a 71-character secret
-          truncated to one line cannot be selected in full. */}
-      <code className={css.secret}>{minted.token}</code>
-    </Dialog>
+    </OneTimeSecretDialog>
   )
 }

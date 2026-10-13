@@ -1,12 +1,12 @@
 /**
- * The fifteen components under `ui/screens/` that **no route reaches**: the
+ * The seventeen components under `ui/screens/` that **no route reaches**: the
  * dialogs, the two pickers and the shortcut sheet, each opened by an interaction
  * rather than by a URL.
  *
  * `screens.test.tsx` mounts the shell at twenty URLs, which covers nineteen of
- * the thirty-six files there, and `ui-scope-render.test.tsx` covers two more
+ * the thirty-eight files there, and `ui-scope-render.test.tsx` covers two more
  * through their portals. Without this file the answer to "every screen renders"
- * would be twenty-one of thirty-six, with the missing fifteen being exactly the
+ * would be twenty-one of thirty-eight, with the missing seventeen being exactly the
  * surfaces that appear at the moment somebody is about to destroy something.
  *
  * Mounted directly rather than driven to through a click, deliberately. Whether
@@ -49,6 +49,8 @@ import { DeleteDialog } from '../../../../src/admin/ui/screens/DeleteDialog'
 import { FormDeleteDialog } from '../../../../src/admin/ui/screens/FormDeleteDialog'
 import { Keys } from '../../../../src/admin/ui/screens/Keys'
 import { MoveDialog } from '../../../../src/admin/ui/screens/MoveDialog'
+import { OneTimeSecretDialog } from '../../../../src/admin/ui/screens/OneTimeSecretDialog'
+import { SharePreview } from '../../../../src/admin/ui/screens/SharePreview'
 import { SiteDialog } from '../../../../src/admin/ui/screens/SiteDialog'
 import { emptyForm } from '../../../../src/admin/ui/screens/sites-model'
 import { ADMIN, API, MANIFEST, MOUNT, stubFetch } from './fixture'
@@ -126,6 +128,22 @@ const SURFACES: [name: string, mount: () => React.ReactElement][] = [
         }}
         onClose={noop}
         onSave={asyncNoop}
+      />
+    ),
+  ],
+  [
+    'OneTimeSecretDialog',
+    () => <OneTimeSecretDialog title="Copy this now" secret="s3cret" onClose={noop} />,
+  ],
+  [
+    'SharePreview',
+    () => (
+      <SharePreview
+        apiBase={API}
+        story={{ id: 'sty_home', title: 'Home' }}
+        selfId={null}
+        onClose={noop}
+        onNotice={noop}
       />
     ),
   ],
@@ -254,11 +272,11 @@ describe('every interaction-only surface mounts', () => {
  *
  * Every `.tsx` directly under `ui/screens/` is in exactly one of three sets — the
  * nineteen the route sweep reaches, the two the portal test reaches, and the
- * fifteen above — so a thirty-seventh file fails here until it is classified.
+ * seventeen above — so a thirty-ninth file fails here until it is classified.
  * `fields/` is deliberately excluded: those render inside `Inspector`, which the
  * `edit` routes mount, and they have no props of their own to give.
  */
-describe('the thirty-six screens are all accounted for', () => {
+describe('the thirty-eight screens are all accounted for', () => {
   /** Reached by `screens.test.tsx`'s nineteen URLs, directly or nested. */
   const BY_ROUTE = [
     'Access',
@@ -297,7 +315,7 @@ describe('the thirty-six screens are all accounted for', () => {
 
     const covered = [...BY_ROUTE, ...BY_PORTAL, ...SURFACES.map(([name]) => name)].sort()
 
-    expect(files.length).toBe(36)
+    expect(files.length).toBe(38)
     expect(covered).toEqual(files)
   })
 })

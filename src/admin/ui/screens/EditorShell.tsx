@@ -8,7 +8,7 @@ import { type DocumentType, type SchemaIndex, singletonId } from '../../../core/
 import { layerId } from '../../../core/sites'
 import { isLive, type StoryMeta } from '../../../core/story'
 import type { Blocks } from '../../hooks/useBlocks'
-import { atScope, canPublish, type Me, scopeName, whyNot } from '../../me'
+import { atScope, canPublish, canShare, type Me, scopeName, whyNot } from '../../me'
 import type { StoryStore } from '../../store'
 import { Badge } from '../Badge'
 import { Button } from '../Button'
@@ -43,6 +43,8 @@ import {
 } from './editor-model'
 import { historyWhen } from './history-model'
 import { bareMount } from '../route'
+import { shareRefusal } from './share-model'
+import { SharePreview } from './SharePreview'
 import { useEditor } from './useEditor'
 import { isLayerDocument, layerInfo, type LayerInfo, layerOf, scopesBelow } from './inspector-model'
 import { useForkStatus, useLayerDocs, useOverride } from './useSiteContext'
@@ -253,6 +255,7 @@ type Confirm = 'publish' | 'unpublish' | 'discard'
 function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
   const [viewport, setViewport] = useState<Viewport>('Desktop')
   const [confirm, setConfirm] = useState<Confirm | null>(null)
+  const [sharing, setSharing] = useState(false)
   /**
    * Which slot the picker is open for. Held here rather than in the rail because
    * `⌘⇧A` can open it too and the rail may be collapsed at the time — the same
@@ -323,6 +326,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
   // Publishing is a role on the scope that **owns** the page, not the one being shown.
   const owner = story.site ? atScope(props.me, story.site) : props.me
   const mayPublish = canPublish(owner)
+  const mayShare = canShare(owner)
   /*
    * **A live page whose draft is identical to it, still flagged `changed`.**
    *
@@ -674,6 +678,16 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
           >
             {editor.publish.publishing ? 'Publishing…' : 'Publish'}
           </Button>
+          {/* Beside Publish because it is the same kind of act and the same gate
+              (`platform/draft-sharing.md`). Unrouted documents have no page to show. */}
+          <Button
+            size="sm"
+            disabled={!mayShare || !routed}
+            reason={shareRefusal(owner, story)}
+            onClick={() => setSharing(true)}
+          >
+            Share a preview
+          </Button>
           <Menu
             align="end"
             label="More publishing actions"
@@ -856,6 +870,16 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
 
       {props.history?.(slot)}
       {props.picker?.(slot)}
+
+      {sharing ? (
+        <SharePreview
+          apiBase={props.apiBase}
+          story={story}
+          selfId={props.me.actor?.kind === 'user' ? props.me.actor.id : null}
+          onClose={() => setSharing(false)}
+          onNotice={props.onNotice}
+        />
+      ) : null}
 
       {confirm === 'publish' ? (
         <Dialog
