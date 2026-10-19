@@ -22,6 +22,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Reads the pnpm version from package.json "packageManager".
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -64,6 +66,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
@@ -88,6 +92,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Fetch a pinned release into the job's temp dir and check it against its
       # published sha256 first.
@@ -113,6 +119,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # The CLI, not gitleaks-action, which needs a paid licence for organisations.
       - name: install gitleaks
@@ -132,10 +139,37 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: gitleaks detect --redact --verbose --log-opts="$PR_BASE..$PR_HEAD"
 
+  # Static analysis of the workflows themselves. Online audits (impostor commits,
+  # known-vulnerable actions) call the API, so the step gets the job's read-only
+  # token and nothing else.
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: install zizmor
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/zizmor"
+          mkdir -p "$d"
+          curl -fsSL -o "$d/zizmor.tar.gz" "https://github.com/zizmorcore/zizmor/releases/download/v1.31.1/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          echo "d185f726bdaf92df78273217dfdd24ebcd6b0ef48cf3ce776ff5762b6e138c99  $d/zizmor.tar.gz" | sha256sum -c -
+          tar -xzf "$d/zizmor.tar.gz" -C "$d" zizmor
+          echo "$d" >> "$GITHUB_PATH"
+
+      - name: zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: zizmor --no-progress .github/workflows
+
   # The one status a ruleset requires. Every job above must pass.
   gate:
     if: always()
-    needs: [check, pr-title, workflows, secrets]
+    needs: [check, pr-title, workflows, zizmor, secrets]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

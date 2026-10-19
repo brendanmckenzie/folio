@@ -1,0 +1,40 @@
+name: revisit
+
+# A deferred issue carries the `deferred` label and a `Revisit: YYYY-MM-DD` line.
+# Daily, scripts/github/revisit.mjs puts the ones that are due back into triage.
+# Hosted runner, no checkout credentials, and issues: write is the only extra
+# permission.
+on:
+  schedule:
+    - cron: "0 20 * * *"
+  workflow_dispatch:
+    inputs:
+      today:
+        description: "Treat this YYYY-MM-DD as today (default: today in Australia/Melbourne)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  revisit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - run: node scripts/github/revisit.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TODAY: ${{ inputs.today }}
