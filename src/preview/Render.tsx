@@ -152,7 +152,7 @@ export function RenderBlok({
     ));
   }
 
-  const el = def.render(props as never);
+  const el = def.render(props as never, resolution);
   if (mode === "off") return el;
 
   // Storyblok makes each block author remember to spread {...storyblokEditable(blok)}.
