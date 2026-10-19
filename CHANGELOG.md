@@ -8,6 +8,42 @@ version is a removal or narrowing of the `exports` surface or of a `createFolio(
 config key. D1 migrations arrive in minor versions and are listed in
 [the schema ledger](UPGRADING.md#the-schema-ledger).
 
+## Unreleased
+
+On `main`, not yet tagged. The next tag is a minor (`1.1.0`): it adds a migration
+and new form keys, and removes nothing.
+
+### Behaviour changes to know about
+
+- **`ResolvedFormField.required` means "required unconditionally".** A question
+  whose requiredness depends on a `requireIf` reads `false` here, so a host
+  rendering the `required` attribute without the engine never blocks a
+  no-JavaScript submission; the server still enforces it. Forms with no conditions
+  read exactly as before.
+- **A form's `version` bumps on `min`, `max`, `pattern`, `accept` and `maxBytes`
+  edits,** because the server enforces them.
+- **A cold draft opens with its real content.** A story whose D1 row exists but
+  whose Durable Object holds nothing (a database copied between environments) now
+  seeds from its published document, else its newest version, instead of opening
+  blank under a fresh root. Objects that already hold state are untouched.
+
+### Added
+
+- **Conditional form logic** (spec 35): `showIf` and `requireIf` on questions,
+  sections that can be hidden as one, `hold`, and `prefill: 'query'`. `formState`
+  in `folio/core` decides what is asked and required, and the submit route re-runs
+  it: an unasked required question never blocks, and an answer or file posted for
+  one is dropped. Responses record unasked questions, shown as "not asked".
+  **Apply `0014_form_logic.sql` before deploying**
+  ([UPGRADING](UPGRADING.md#conditional-questions-sections-and-prefill-2026-10-19-v110)).
+
+### Fixed
+
+- **A restore across differing roots works.** `restoreVersion` re-roots a version
+  onto the live root, so a document that opened blank after a database copy is
+  repaired by restoring its newest publish. A version whose root is another block
+  type is refused with 409.
+
 ## 1.0.0
 
 The first tagged release. Before it, Folio had no version number and consumers pinned
