@@ -13,3 +13,5 @@ allowBuilds:
 minimumReleaseAgeExclude:
   # Renovate security update: vitest@4.1.11
   - vitest@4.1.11
+  # Renovate security update: @tiptap/core@3.30.5
+  - "@tiptap/core@3.30.5"
