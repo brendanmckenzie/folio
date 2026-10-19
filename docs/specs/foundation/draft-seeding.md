@@ -303,10 +303,10 @@ THEN it is refused 409 and nothing is written
 
 - **`unpublish` clears `published_doc`** (and sets `unpublished_at`), so an
   unpublished story falls to the version branch, not to blank.
-- **A version under an older `schema_id`** is migrated on read by `getVersion`. If the
-  row's `schema_id` lags the newest migration the runner later re-applies the gap to
-  the draft; migrations are required to be value-idempotent, so that produces no
-  mutations.
+- **A version under an older `schema_id`** is migrated on seed only up to the *row's*
+  `schema_id`, not to the newest migration. `runMigrations` computes what is due from
+  that column and applies it to the draft, so seeding past it would apply the gap
+  twice and corrupt a non-idempotent `up`. The normal migrate path finishes the job.
 - **A record or singleton** (no path) is treated identically.
 - **A purged object whose sequence is already higher than the baseline** seeds at the
   higher position, which is a deleted story and harmless.

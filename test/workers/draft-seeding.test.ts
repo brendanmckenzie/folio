@@ -44,6 +44,19 @@ const types: DocumentType[] = [
   { name: "sdHeaderType", label: "Header", kind: "singleton", root: "sdHeader" },
 ];
 
+/** Not idempotent: running it twice over the same document gives a different answer. */
+const APPEND = defineMigration({
+  id: "sdPage-zz-append",
+  description: "sdPage.title gets a suffix",
+  up: (_doc, ctx) =>
+    ctx.each("sdPage", (b) => {
+      const t = b.data.title;
+      return typeof t === "string"
+        ? [{ t: "set", uid: b.uid, field: "title", value: `${t}!` }]
+        : [];
+    }),
+});
+
 const RENAME = defineMigration({
   id: "sdPage-titleOld-to-title",
   description: "sdPage.titleOld -> sdPage.title",
@@ -62,7 +75,7 @@ function build(db?: D1Database) {
     blocks: [page, headerRoot],
     types,
     globals: ["sdHeaderType"],
-    migrations: [RENAME],
+    migrations: [RENAME, APPEND],
     bindings: (e) => ({ ...bindings(e), ...(db ? { db } : {}) }),
     basePath: "/folio",
     assets: { admin: "/folio-admin.js", preview: "/folio-preview.js" },
@@ -201,6 +214,7 @@ describe("a story whose object has no state", () => {
 
   it("migrates a version through the brand's migrations on the way in", async () => {
     const id = await insertRow();
+    await env.DB.prepare("update stories set schema_id = ? where id = ?").bind(RENAME.id, id).run();
     await insertVersion(id, docOf("vermig01", "", { titleOld: "Old shape" }), { schemaId: null });
 
     const draft = await folio.draft(env, id);
@@ -208,6 +222,23 @@ describe("a story whose object has no state", () => {
     // A rename empties the old key rather than deleting it; what matters is that
     // the old value no longer lives there.
     expect(draft.bloks.vermig01!.data.titleOld ?? null).toBeNull();
+  });
+
+  it("seeds a version only up to the row's schema, so migrate applies the rest once", async () => {
+    const id = await insertRow({ unpublished: true });
+    await env.DB.prepare("update stories set schema_id = ? where id = ?").bind(RENAME.id, id).run();
+    await insertVersion(id, docOf("vernon01", "Once"), { schemaId: RENAME.id });
+
+    // The row is at RENAME, so APPEND is still due and has not been applied to the seed.
+    expect((await folio.draft(env, id)).bloks.vernon01!.data.title).toBe("Once");
+
+    const res = await folio.handle(
+      new Request(`${ORIGIN}/folio/api/migrate`, { method: "POST" }),
+      env,
+      createExecutionContext(),
+    );
+    expect(res?.status).toBeLessThan(300);
+    expect((await folio.draft(env, id)).bloks.vernon01!.data.title).toBe("Once!");
   });
 
   it("seeds blank at position 0 when the row has neither a publish nor a version", async () => {
