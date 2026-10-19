@@ -355,9 +355,9 @@ describe("draft mode on a branded preview origin", () => {
     });
     const page = await folio.reader(env, req).page("home");
     expect(page?.draft).toBe(true);
-    // The seed of `sty_aaa_home`'s draft, under allaboutafrica's blocks: its title
-    // field carries the story's title.
-    expect(page?.doc.bloks[page.doc.root]?.data.title).toBe("Home");
+    // `sty_aaa_home`'s object was never opened, so its draft is seeded from the
+    // row's published document (#28), not from a blank under allaboutafrica's blocks.
+    expect(page?.doc.bloks[page.doc.root]?.data.title).toBe("Karibu Kenya");
     expect(await count()).toBe(before);
     // No `sng_header` (the `default` layer ensureSingleton would make), nor kenya's.
     const header = await env.DB.prepare("select id from stories where id like 'sng_header%'").all();

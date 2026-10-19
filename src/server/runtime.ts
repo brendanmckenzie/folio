@@ -73,6 +73,7 @@ import type { PublishDeps } from "./publish";
 import { type QueryDeps, runQuery } from "./query";
 import { spaceBroadcastHooks, spaceNameFor } from "./space-events";
 import { redirectsAtPaths } from "./redirects";
+import { draftSeedSource } from "./versions";
 import { readRegistry, registrySnapshot, type ResolvedSites, SITE_ID } from "./sites";
 import {
   ensureSingleton,
@@ -1126,20 +1127,39 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
       return seedAs(story, layerSeed(registry, layer.scope));
     };
 
-    const draftFor = (bindings: ReadBindings, story: StoryMeta, registry?: SiteRegistry) =>
-      stub(bindings, story.id).getOrInit(seedFor(story, registry));
+    /**
+     * **Every draft read of an existing id goes through here** (#28). A warm object
+     * answers `peek` and nothing else happens. A cold one (no document: a row that
+     * arrived by copying D1, whose Durable Object did not) seeds from D1 instead of
+     * blank, so the editor opens with the story's real content: its published copy,
+     * else its newest version, else `fallback`. The cold path only reads; it
+     * schedules no alarm and writes nothing to D1, so a preview may take it.
+     * `fallback` stays eagerly computed by each caller so a layer with no registry
+     * throws on every call, not only on a cold one. A direct `stub.getOrInit(content)`
+     * is for an id created in the same request, never for an existing one.
+     */
+    const initDraft = async (bindings: ReadBindings, id: string, fallback: Doc) => {
+      const s = stub(bindings, id);
+      const held = await s.peek();
+      if (held) return held;
+      const source = await draftSeedSource(bindings.db, id, { migrations, schema, typeOf });
+      return s.getOrInitWithSyncId(source?.doc ?? fallback, source?.baseline ?? 0);
+    };
+
+    const draftFor = async (bindings: ReadBindings, story: StoryMeta, registry?: SiteRegistry) =>
+      (await initDraft(bindings, story.id, seedFor(story, registry))).doc;
 
     const draftForWithSyncId = (
       bindings: ReadBindings,
       story: StoryMeta,
       registry?: SiteRegistry,
-    ) => stub(bindings, story.id).getOrInitWithSyncId(seedFor(story, registry));
+    ) => initDraft(bindings, story.id, seedFor(story, registry));
 
     const draft = async (bindings: ReadBindings, id: string, registry?: SiteRegistry) => {
       const meta = await storyById(bindings.db, id);
-      return stub(bindings, id).getOrInit(
-        meta ? seedFor(meta, registry) : seed(undefined, "Untitled"),
-      );
+      return (
+        await initDraft(bindings, id, meta ? seedFor(meta, registry) : seed(undefined, "Untitled"))
+      ).doc;
     };
 
     /**
@@ -1343,7 +1363,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
                   [
                     id,
                     branded
-                      ? await stub(bindings, id).getOrInit(seedInChain(known.get(id)!, chain))
+                      ? (await initDraft(bindings, id, seedInChain(known.get(id)!, chain))).doc
                       : await draft(bindings, id),
                   ] as const,
               ),
@@ -1361,7 +1381,7 @@ export function createRuntime<Env>(config: FolioConfig<Env>): FolioRuntime {
                       const meta = known.get(id);
                       if (!meta) return undefined;
                       return branded
-                        ? stub(bindings, meta.id).getOrInit(seedInChain(meta, chain))
+                        ? initDraft(bindings, meta.id, seedInChain(meta, chain)).then((r) => r.doc)
                         : draftFor(bindings, meta);
                     }),
                   );

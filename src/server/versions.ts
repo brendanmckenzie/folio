@@ -362,3 +362,47 @@ export async function listRecentPublishes(
     }),
   };
 }
+
+/**
+ * Where a draft starts when its Durable Object holds no state but its D1 row
+ * exists (#28: a copied database, whose objects do not come with it).
+ *
+ * `published_doc` first: it is at the row's schema already and is what the site
+ * serves. Failing that, the newest version (the History rail's own order),
+ * migrated on read like a restore. `baseline` is the row's own log position, so
+ * the object's next transaction lands above both copied watermarks and the
+ * badge keeps reading right. `null` means there is no `stories` row at all (a
+ * deleted story: orphaned versions cannot resurrect it, the query is anchored
+ * on `stories`). Reads only; takes `FolioDb` so a session can be threaded.
+ */
+export async function draftSeedSource(
+  db: FolioDb,
+  storyId: string,
+  migrate: VersionMigrations,
+): Promise<{ doc: Doc | null; from: "published" | "version" | null; baseline: number } | null> {
+  const row = await db
+    .prepare(
+      `select s.published_doc as publishedDoc,
+              s.draft_sync_id as draftSyncId, s.published_sync_id as publishedSyncId,
+              (select v.id from versions v where v.story_id = s.id
+                order by v.created_at desc, v.id desc limit 1) as latestVersionId
+       from stories s where s.id = ?`,
+    )
+    .bind(storyId)
+    .first<{
+      publishedDoc: string | null;
+      draftSyncId: number | null;
+      publishedSyncId: number | null;
+      latestVersionId: string | null;
+    }>();
+  if (!row) return null;
+  const baseline = Math.max(row.draftSyncId ?? 0, row.publishedSyncId ?? 0);
+  if (row.publishedDoc) {
+    return { doc: JSON.parse(row.publishedDoc) as Doc, from: "published", baseline };
+  }
+  if (row.latestVersionId) {
+    const found = await getVersion(db, row.latestVersionId, migrate);
+    if (found) return { doc: found.doc, from: "version", baseline };
+  }
+  return { doc: null, from: null, baseline };
+}

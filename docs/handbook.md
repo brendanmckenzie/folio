@@ -659,6 +659,17 @@ every Durable Object; the document is the source of truth.
 
 Sibling order is a fractional index, the same primitive used for blocks.
 
+**Copying a database between environments.** D1 copies; Durable Object storage does
+not, and the draft lives in the object. A story whose row exists but whose object
+holds nothing is seeded the first time anything reads its draft: from its published
+copy, else its newest version (migrated through the brand's migrations, as a
+restore would), else a blank document. Unpublished edits that never left the source
+object are not recoverable from D1. The object's log starts at the row's own
+`draft_sync_id`/`published_sync_id`, so a row that arrived `changed` reads `changed`
+until its next publish, even though its draft now equals its publish. Only a draft
+read of an existing story seeds this way; creating a story still seeds it with the
+caller's content.
+
 Slug and parent are edited in the **Address** panel that appears at the top of
 the inspector when "Page settings" is selected. Pages can also be reparented and
 reordered by dragging in the Content tree, subject to `under`. Switching pages is
@@ -1638,6 +1649,14 @@ an editor, or a token with `content:write`, writes a checkpoint row and fires th
 unacknowledged edits to reach the server, so they are in the snapshot, and sends an
 `Idempotency-Key` so a retried restore does not save a second one. Reverting a title change plus one added block
 produces exactly two mutations.
+
+**Restore re-roots the version onto the live draft.** A version copied in from
+another environment carries that environment's root block uid, and `diff` refuses
+two documents with different roots. The restore rewrites the version's root uid (and
+its direct children's `parent`) to the live root before diffing, so a restore works
+across environments. A version whose root block is a different document type from
+the live one is refused with a 409: the object does not know schemas, and would
+otherwise accept one type's fields onto another's root.
 
 ## Draft mode
 

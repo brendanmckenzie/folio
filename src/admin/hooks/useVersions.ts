@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { diff, summariseDiff } from "../../core/diff";
+import { diff, rerootOnto, summariseDiff } from "../../core/diff";
 import type { Doc } from "../../core/doc";
 import type { Page } from "../../core/pagination";
 import type { ActivityEntry } from "../../core/protocol";
@@ -447,7 +447,7 @@ export function useVersions({
   const delta = useMemo(() => {
     if (!viewing || !liveDoc) return null;
     try {
-      return summariseDiff(diff(liveDoc, viewing.doc));
+      return summariseDiff(diff(liveDoc, rerootOnto(viewing.doc, liveDoc.root)));
     } catch {
       return null;
     }

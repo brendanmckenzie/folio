@@ -536,7 +536,15 @@ export interface FolioReader {
  */
 export type StoryStub = Pick<
   StoryDO,
-  "getOrInit" | "getOrInitWithSyncId" | "head" | "recent" | "purge" | "commit" | "hasTx" | "fetch"
+  | "getOrInit"
+  | "getOrInitWithSyncId"
+  | "peek"
+  | "head"
+  | "recent"
+  | "purge"
+  | "commit"
+  | "hasTx"
+  | "fetch"
 >;
 
 /**

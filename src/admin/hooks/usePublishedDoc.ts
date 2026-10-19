@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { diff, summariseDiff } from "../../core/diff";
+import { diff, rerootOnto, summariseDiff } from "../../core/diff";
 import type { Doc } from "../../core/doc";
 import type { VersionMeta } from "../../server/versions";
 
@@ -50,7 +50,7 @@ export function publishedDelta(
 ): ReturnType<typeof summariseDiff> | null {
   if (!published || !liveDoc) return null;
   try {
-    return summariseDiff(diff(published, liveDoc));
+    return summariseDiff(diff(rerootOnto(published, liveDoc.root), liveDoc));
   } catch {
     return null;
   }

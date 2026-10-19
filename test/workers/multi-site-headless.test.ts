@@ -148,6 +148,25 @@ async function row(
       } as unknown as Json),
     )
     .run();
+  // A cold object seeds from the published document (#28); this fixture's draft
+  // title is the row's, so say so.
+  await (
+    env.STORY.get(env.STORY.idFromName(id)) as unknown as {
+      getOrInit: (d: Doc) => Promise<Doc>;
+    }
+  ).getOrInit({
+    root: "r0",
+    bloks: {
+      r0: {
+        uid: "r0",
+        type,
+        parent: null,
+        slot: null,
+        order: "a0",
+        data: { title: `${opts.title ?? id} draft` },
+      },
+    },
+  });
 }
 
 async function person(email: string, grants: Grants): Promise<Record<string, string>> {

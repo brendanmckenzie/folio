@@ -204,6 +204,26 @@ Or `folio.audit(env)`. It is also the Model screen in the admin.
 
 ## Things that need an eye on upgrade
 
+### A story with no Durable Object opens with its content (2026-10-19)
+
+**No action for a deployment that has never copied a database between
+environments.** A Durable Object that already holds a draft is untouched, so every
+document an editor has opened is as it was. There is no migration, no wire bump and
+no config key.
+
+What changed: a `stories` row whose Durable Object holds nothing (the usual cause is
+copying D1 from production to staging, which does not copy object storage) used to
+open **blank**, and the blank document was then frozen into the object. It now seeds
+from the row's published copy, else its newest version, else blank, the first time
+its draft is read. Restore also now works across differing root uids, where it used
+to fail with "Cannot diff documents with different roots".
+
+**Documents already seeded blank are not healed automatically**, because their
+objects hold state. If an editor shows a **blank** page that renders fine on the live
+site: open it, History, and restore the newest publish. That now succeeds. It saves
+the blank draft first as a "before restore" version, so undoing it is restoring that
+version.
+
 ### The wire version
 
 `PROTOCOL_VERSION` (`src/core/protocol.ts`, currently **5**) is carried by every

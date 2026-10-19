@@ -423,7 +423,9 @@ across the ~265 literal paths pagination already touches.
 **Spec 27 is a bug fix with a spec**, written because the fix is a lifecycle change
 rather than a patch: it moves when a draft's seed is built so it can be built from
 something other than blank. Found by a real environment where every document was
-unrecoverable. No ordering constraint — it touches the seed path and nothing else.
+unrecoverable. **Done (2026-10-19, issue #28)**: a cold object seeds from D1 and restore
+re-roots its target; the reseed route the first draft proposed was dropped. No ordering
+constraint — it touches the seed path and nothing else.
 
 **Specs 28–31 were drafted together on 2026-09-05** from an owner list — passkeys,
 bring-your-own auth, SSO, full-text search, member-gated content — and each was
