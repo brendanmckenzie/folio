@@ -18,6 +18,7 @@
  * does in the browser, and the submission is refused for it anyway.
  */
 import { type FieldCondition, matches } from "./conditions";
+import { isClickId } from "./click-ids";
 import type { Json } from "./doc";
 import type { FormFieldKind, ResolvedForm } from "./forms";
 
@@ -120,6 +121,10 @@ const isStringArray = (x: unknown): x is string[] =>
 /** One host-supplied value, normalised: strings and string arrays through
  *  `answerOf`, booleans and numbers as they are, everything else absent. */
 function normalise(field: LogicField, value: unknown): Json | undefined {
+  // Absent means what `answersFrom` means by it: an unticked checkbox is `false` and
+  // an empty `checkboxes` is `[]`, so a host's own answers map and the server's read
+  // of the same body can never disagree about `showIf: { eq: false }`.
+  if (value === undefined || value === null) return answerOf(field, []);
   if (typeof value === "string") return answerOf(field, [value]);
   if (isStringArray(value)) return answerOf(field, value);
   if (typeof value === "boolean") return field.kind === "checkbox" ? value : String(value);
@@ -215,7 +220,9 @@ export function prefillAnswers(
     let value: Json | undefined;
     if (supplied !== undefined) {
       value = normalise(field, supplied);
-    } else if (field.prefill === "query") {
+    } else if (field.prefill === "query" && !isClickId(field.name)) {
+      // Never for a name `cacheKeyFor` strips (`utm_*`, click ids): a render seeded
+      // from one would be cached under a key that ignores it.
       const raw = query.getAll(field.name);
       if (raw.length > 0) value = answerOf(field, raw);
     }

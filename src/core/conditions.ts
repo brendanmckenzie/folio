@@ -136,28 +136,36 @@ export function conditionRefusal(raw: unknown): string | null {
   return walk(raw, 1);
 }
 
-/** A node `matches` answers `false` for, whatever it is wrapped in. */
+/** A condition `matches` answers `false` for. */
 const NEVER: FieldCondition = { any: [] };
 
 /**
  * Total: rebuilds a stored or posted condition key by key and never throws, for
  * `readFields`' sake (a throw there is a live form with no questions). A leaf this
- * build does not recognise, or anything past the depth or size bound, becomes
- * `{ any: [] }`, which is what `matches` answers `false` for anyway. Anything that
+ * build does not recognise, or anything past the depth or size bound, makes the whole
+ * condition `{ any: [] }` (never true, even under a `not`). Anything that
  * is not an object at all answers `undefined`; the caller decides what absence
  * means (a `showIf` becomes never-asked, a `requireIf` is dropped).
  */
 export function readCondition(raw: unknown): FieldCondition | undefined {
   if (!isRecord(raw)) return undefined;
   let nodes = 0;
+  // Any unreadable node makes the **whole** condition never-true. Substituting per
+  // node would turn an unreadable leaf under `not` into always-true and expose (and
+  // require) a question the rule was meant to hide.
+  let unreadable = false;
+  const bad = (): FieldCondition => {
+    unreadable = true;
+    return NEVER;
+  };
   const walk = (node: unknown, depth: number): FieldCondition => {
     if (depth > MAX_CONDITION_DEPTH || ++nodes > MAX_CONDITION_NODES || !isRecord(node)) {
-      return NEVER;
+      return bad();
     }
     if (Array.isArray(node.all)) return { all: node.all.map((c) => walk(c, depth + 1)) };
     if (Array.isArray(node.any)) return { any: node.any.map((c) => walk(c, depth + 1)) };
     if ("not" in node) return { not: walk(node.not, depth + 1) };
-    if (typeof node.field !== "string" || node.field === "") return NEVER;
+    if (typeof node.field !== "string" || node.field === "") return bad();
     const field = node.field;
     if ("eq" in node && isScalar(node.eq)) return { field, eq: node.eq };
     if ("ne" in node && isScalar(node.ne)) return { field, ne: node.ne };
@@ -166,7 +174,8 @@ export function readCondition(raw: unknown): FieldCondition | undefined {
     }
     if (typeof node.isSet === "boolean") return { field, isSet: node.isSet };
     if ("includes" in node && isScalar(node.includes)) return { field, includes: node.includes };
-    return NEVER;
+    return bad();
   };
-  return walk(raw, 1);
+  const out = walk(raw, 1);
+  return unreadable ? NEVER : out;
 }

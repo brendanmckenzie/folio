@@ -34,6 +34,10 @@ and new form keys, and removes nothing.
   in `folio/core` decides what is asked and required, and the submit route re-runs
   it: an unasked required question never blocks, and an answer or file posted for
   one is dropped. Responses record unasked questions, shown as "not asked".
+  `prefillAnswers` ignores `utm_*` and click-id parameters, which the cache key strips.
+  The exported output types `ResolvedForm`, `LayoutCell`, `FormResponse` and
+  `NewResponse` gain required members (`sections`, `required`, `unasked`), which only
+  breaks a host that builds one by hand.
   **Apply `0014_form_logic.sql` before deploying**
   ([UPGRADING](UPGRADING.md#conditional-questions-sections-and-prefill-2026-10-19-v110)).
 

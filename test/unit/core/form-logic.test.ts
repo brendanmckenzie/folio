@@ -304,3 +304,57 @@ describe("prefillAnswers", () => {
     );
   });
 });
+
+describe("round 2: parity, unreadable rules, cache-stripped prefill", () => {
+  const optout = { name: "optout", kind: "checkbox" as const };
+  const reason = {
+    name: "reason",
+    kind: "text" as const,
+    required: true,
+    showIf: { field: "optout", eq: false },
+  };
+  const form = { fields: [optout, reason] };
+
+  it("an unticked checkbox reads false through every entry point", () => {
+    const server = formState(form, answersFrom(form, { getAll: () => [] }));
+    const hostMap = formState(form, {});
+    expect([...server.asked]).toEqual(["optout", "reason"]);
+    expect([...hostMap.asked]).toEqual([...server.asked]);
+    expect([...hostMap.required]).toEqual([...server.required]);
+
+    const resolved = {
+      ...form,
+      fields: form.fields.map((f) => ({ ...f, label: f.name, row: 0, grow: 1 })),
+    } as unknown as ResolvedForm;
+    const seeded = prefillAnswers(resolved, { query: "" });
+    expect([...formState(resolved, seeded).asked]).toEqual(["optout", "reason"]);
+  });
+
+  it("an absent checkboxes answer is [] on both sides", () => {
+    const f = {
+      fields: [
+        { name: "w", kind: "checkboxes" as const, options: [{ value: "a" }] },
+        { name: "x", kind: "text" as const, showIf: { field: "w", isSet: false } },
+      ],
+    };
+    expect([...formState(f, {}).asked]).toEqual([
+      ...formState(f, answersFrom(f, { getAll: () => [] })).asked,
+    ]);
+  });
+
+  it("never prefills from a parameter the cache key strips", () => {
+    const resolved = {
+      fields: ["utm_campaign", "gclid", "area"].map((name) => ({
+        name,
+        kind: "text",
+        prefill: "query",
+      })),
+    } as unknown as ResolvedForm;
+    expect(prefillAnswers(resolved, { query: "?utm_campaign=x&gclid=y&area=z" })).toEqual({
+      area: "z",
+    });
+    expect(prefillAnswers(resolved, { values: { utm_campaign: "mine" } })).toEqual({
+      utm_campaign: "mine",
+    });
+  });
+});

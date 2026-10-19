@@ -1989,8 +1989,10 @@ A value that is not a declared option, not a number, or not a real day is droppe
 to any question because you chose it. `file` and `statement` are never prefilled.
 Seed each input's default value from the result; do not pass prefill to `formLayout`
 on a no-JavaScript render. A prefilled page is its own cache entry per query string
-(`cacheKeyFor`). `utm_*` parameters are stripped from the cache key but not from the
-page URL, so read `utm_*` prefill on the client rather than in a cached server render.
+(`cacheKeyFor`). **`prefillAnswers` never seeds from a parameter `cacheKeyFor` strips**
+(`utm_*` and the click identifiers such as `gclid`): a render seeded from one would be
+cached under a key that ignores it, and the next visitor would get the first one's
+value. Read those on the client. The `values` map is not affected, because you chose it.
 
 ### The two hidden inputs, which nothing else will tell you about
 

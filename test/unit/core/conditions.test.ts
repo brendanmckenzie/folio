@@ -280,3 +280,27 @@ describe("readCondition", () => {
     }
   });
 });
+
+describe("readCondition: an unreadable node never inverts", () => {
+  it("makes the whole condition never-true when a leaf under not is unreadable", () => {
+    const read = readCondition({ not: { field: "age", gt: 18 } }) as FieldCondition;
+    expect(read).toEqual({ any: [] });
+    expect(matches(read, { age: 5 })).toBe(false);
+  });
+
+  it("does the same for an unreadable branch among readable ones, and past the bounds", () => {
+    expect(
+      readCondition({
+        all: [
+          { field: "a", eq: 1 },
+          { field: "b", gt: 1 },
+        ],
+      }),
+    ).toEqual({
+      any: [],
+    });
+    let deep: unknown = { field: "a", eq: 1 };
+    for (let i = 0; i < 6; i++) deep = { not: deep };
+    expect(matches(readCondition(deep) as FieldCondition, {})).toBe(false);
+  });
+});
