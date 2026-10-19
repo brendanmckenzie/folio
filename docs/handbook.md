@@ -1514,7 +1514,7 @@ scripts/         gates, end-to-end scripts, release  (not shipped)
 ```
 
 The package is the repository root: `package.json` sits beside `src/`, which is
-what makes `github:brendanmckenzie/folio#<sha>` installable. `files` ships
+what makes `github:brendanmckenzie/folio#vX.Y.Z` installable. `files` ships
 `dist`, `src`, `migrations`, `bin`, `examples/starter`, and the consumer-facing
 documents — `README.md`, `AGENTS.md`, `UPGRADING.md`, and `docs/`'s
 `configuration.md`, `handbook.md`, `api.md` and `mcp.md`.
@@ -2877,7 +2877,7 @@ Sites that do not are [brands](#many-brands-in-one-deployment), which also remov
 
 **Turning it on is the point of no return** (`UPGRADING.md`): once a second site
 exists, code with no site dimension would serve every site's rows as one. Read
-[the 0011 section](../UPGRADING.md#0011-roles-move-to-site_roles-2026-09-29) before
+[the 0011 section](../UPGRADING.md#0011-roles-move-to-site_roles-2026-09-29-v100) before
 you do.
 
 ### Turning it on
@@ -3363,7 +3363,7 @@ owns what changed (`default` on a single-site deployment, `null` for `migrated` 
 ### What a host does
 
 The host-side changes are short and are collected as a procedure in
-[`UPGRADING.md`](../UPGRADING.md#turning-sites-on-what-the-host-changes-2026-09-29) and as an
+[`UPGRADING.md`](../UPGRADING.md#turning-sites-on-what-the-host-changes-2026-09-29-v100) and as an
 integration checklist in [`AGENTS.md`](../AGENTS.md#a-multi-site-host): a `route` that
 answers absolute URLs, `folio.reader(env, req)` (or `{ site }`; with neither it
 throws) everywhere a reader is built, `folio.cacheProps(req, env)` on the cached loopback, a redirect from
@@ -3396,7 +3396,7 @@ holds" premise of the previous chapter only for a deployment that configures
 `createFolio({ brands })`. Without that key nothing in this handbook changes.
 [The configuration reference](configuration.md#many-brands-in-one-deployment) has every
 key. Turning it on is the point of the checklist in
-[`UPGRADING.md`](../UPGRADING.md#0013-and-turning-brands-on-2026-09-30), and
+[`UPGRADING.md`](../UPGRADING.md#0013-and-turning-brands-on-2026-09-30-v100), and
 [`AGENTS.md`](../AGENTS.md#a-multi-brand-host) is the host-side integration guide.
 
 ### A site belongs to one brand
@@ -4018,14 +4018,38 @@ a compatibility surface), and the writer internals behind `folio.write`.
 
 ### `folio/core`
 
+**Registries.** `toRegistry(blocks)` turns the array of `defineBlock` results you
+naturally write into the name-keyed `Registry` object that `createFolio({ blocks })`
+and the schema helpers read. It also accepts an object that is already keyed. It
+throws on a repeated block name, or on an object key that is not its block's
+`name`, because a last-wins registry would drop a block with nothing to say so. A
+host that builds a registry itself, to share one between its Worker and its render
+code, calls it once and passes the result to both.
+
 **Caching.** `cacheHeaders(resolution, opts)` and `cacheTags(resolution, opts)`
 take `CacheHeaderOptions` and `CacheTagOptions`; both answer the matching
-`CacheHeaders` / `CacheTags`. See [Caching](#caching).
+`CacheHeaders` / `CacheTags`. `cacheControl(maxAge = 0)` is the `Cache-Control`
+half of `cacheHeaders` on its own, for a host assembling the headers itself: a
+shared-cache `s-maxage` of a week, `must-revalidate`, and a browser `max-age` of
+`maxAge` seconds (0 unless you pass a positive number, on purpose, since a purge
+cannot reach a browser's copy). Pair it with a `Cache-Tag` from `cacheTags`, never
+alone: a response with `Cache-Control` and no tag is cached for a week with no way
+to purge it. `SITE_TAG` (`"site"`) is on every tagged response, so a page over the
+tag budget is still reachable by a whole-site purge, and `ANY_TYPE_TAG`
+(`"type:*"`) is on a page whose collection query has no `type` filter and so
+cannot name the types it lists. A host purging by tag by hand purges both of them
+alongside the `storyTag` / `typeTag` it computed. See [Caching](#caching).
 
 **Assets.** `AssetTransform` is the width/height/fit/format/quality set
 `ResolvedAsset` carries, and `FocalPoint` is the `{ x, y }` an `asset` field
 records per *use* rather than per file. `asAssets` and `resolveAssets` are the
 plural readers a `multiasset()` field needs, beside the documented singulars.
+`asAsset(value)` is the tolerant reader for one stored asset value: it answers an
+`AssetValue`, or `null` when the value is absent or has no usable location. It
+accepts the URL string an older `asset()` field stored as well as the object
+form, and it refuses a `url` that fails the link allow-list, which is what makes
+it safe to put the result straight into an `src` or `href`. Read a raw field
+through it rather than casting `fieldValue(...)`.
 `EMPTY_RESOLUTION` is the correct `Resolution` for resolving a bare asset value
 that has no references to resolve — a card image, a favicon — rather than a
 convenient one: `resolveAsset` reads only `assetBase` from it. See
@@ -4054,6 +4078,14 @@ or date. See [Collections](#collections).
 field and its label, so a report can say "hero → heading" without holding the
 schema. See [Localisation](#localisation).
 
+**Forms.** A block that renders a form receives a `ResolvedForm` whose `fields` are
+`ResolvedFormField`: the question already resolved through the locale chain (so a
+host writes no locale code), with `name`, `kind`, `label`, `required`, the
+optional `help`, `placeholder`, limits and `options`, and two fields that are
+always present, `row` and `grow`, so a host can lay questions out on a grid
+without calling `formLayout`. Import the type when a field component takes one as
+a prop. See [Forms](#forms).
+
 **The publish projection.** `indexRowsFor(...)` answers `IndexRow[]` — a locale, a
 field, and the text or number written into `content_index`. A host importer that
 writes `published_doc` directly has to write the same rows a publish would, which
@@ -4066,6 +4098,12 @@ of a `StoryMeta` or a `DocumentType` it was handed. See
 [Document types](#document-types).
 
 ### `folio/engine`
+
+**Identifiers.** `newUid()` is the uid Folio allocates for a new blok: 16 hex
+characters (64 bits) from `crypto.getRandomValues`. An importer that builds
+bloks by hand rather than through `fromNested` should use it, so its uids have the
+same entropy as the editor's. Nothing parses a uid and everything compares one, so
+older, shorter uids stay valid.
 
 **The nested document shape**, which is what a bulk import builds rather than
 allocating uids and fractional orders by hand. `NestedInput` is one node on the
@@ -4126,7 +4164,9 @@ object needs one import. `documentUsage(db, id)` answers a `DocumentUsage` of
 `TranslationStatus` is core's, re-exported for the same reason.
 
 **Caching.** `CacheHeaderOptions` and `CacheTagOptions`, as in core, plus
-`CacheVerdict` — `'cache'`, `'bypass'` or `null`, the decision
+the tag vocabulary a host purging by hand needs next to `storyTag`, `typeTag` and
+`globalTag`: `SITE_TAG` and `ANY_TYPE_TAG`, the same constants `folio/core`
+exports, described there. And `CacheVerdict` — `'cache'`, `'bypass'` or `null`, the decision
 `cacheVerdictFor` reaches for one request. Its `'bypass'` rules are the
 load-bearing half: caching is per-*entrypoint* and never Worker-wide, because a
 request cookie is not a bypass condition and a Worker-wide rule would put admin

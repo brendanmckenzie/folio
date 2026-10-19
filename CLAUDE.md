@@ -155,7 +155,7 @@ three different things depending on what you are breaking:
 | What | Licence |
 | --- | --- |
 | **Stored documents, the mutation log** | **Break freely.** Unchanged. Both are per-Durable-Object state, `scripts/e2e.sh` wipes them on every run, and neither is part of the published contract. |
-| **The wire (`PROTOCOL_VERSION`), the `exports` surface, `createFolio`'s config keys** | **Breaking is a major bump.** From `1.0.0` this repo honours semver (#1), so removing or narrowing any of them is `2.0.0`, not a line in a commit. |
+| **The `exports` surface, `createFolio`'s config keys** | **Breaking is a major bump.** (Not `PROTOCOL_VERSION`, below.) From `1.0.0` this repo honours semver (#1), so removing or narrowing any of them is `2.0.0`, not a line in a commit. |
 | **The D1 schema** | **A new migration, only.** Never edit a landed one. |
 
 Two things about the middle row, because it is the one that is easy to
@@ -448,7 +448,7 @@ are free to go the next time that code is touched.
 
 **This repository is the package.** `package.json` is at the root, `src/`,
 `test/` and `migrations/` beside it, and `docs/`, `examples/` and `scripts/` are
-siblings that `files` does not ship. `github:brendanmckenzie/folio#<sha>` finds
+siblings that `files` does not ship. `github:brendanmckenzie/folio#vX.Y.Z` finds
 the `package.json` where npm expects it, so **`git push` is the whole of
 publishing** and `origin/main` is what consumers install.
 
@@ -465,18 +465,27 @@ What survives from it, because it was never about the split:
 - **The gates run twice.** `ci.yml` runs them on every pull request and `gate` is
   required to merge; `release.mjs` runs them again, locally, before it publishes
   and again in `release.yml` for a tag. It refuses to publish if any fails.
-- **A pinned SHA keeps resolving** as long as it stays reachable from a pushed
-  ref, so a release is additive for everyone who has not bumped. Consumers pin a
-  full 40-character SHA; today that is two private sites.
+- **A pinned tag or SHA keeps resolving** as long as it stays reachable from a
+  pushed ref, so a release is additive for everyone who has not bumped. Consumers
+  pin an exact `vX.Y.Z` tag from 1.0.0 (`#semver:` ranges are unsupported on purpose,
+  see `UPGRADING.md`), and their lockfile records the commit it resolved to; today
+  that is two private sites.
+- **A tag is never moved or deleted.** A repository ruleset blocks update and
+  delete of `v*` tags, which is the real protection, and `release.mjs` backs it up
+  by refusing a tag whose remote copy points at a different commit than the one
+  it is releasing (`--tag` locally, always in `--ci`, where it reads the remote's
+  current answer rather than the ref the run started from). A mistake in a pushed
+  tag is a new patch version, not a retag.
 - **A non-fast-forward push is refused**, because it would orphan those pins.
 
 Changes reach `main` only through a squash-merged pull request that passed `gate`.
 A release is a tag on a commit that has merged:
 
 1. Bump `package.json` `version` to `X.Y.Z` in a PR and merge it.
-2. `git tag vX.Y.Z <sha-on-main> && git push origin vX.Y.Z`.
+2. `git tag -a vX.Y.Z <sha-on-main> -m vX.Y.Z && git push origin vX.Y.Z` (annotated, so
+   it is a permanent ref).
 3. `release.yml` runs `node scripts/release.mjs --tag --ci` (tag matches
-   `package.json` and sits on `main`, the gates, the end-to-end sweep, the
+   `package.json`, sits on `main` and is not a moved tag, the gates, the end-to-end sweep, the
    consumer smoke test), then creates the GitHub Release. Its notes are the
    `UPGRADING.md` `###` entries whose heading names the tag (for example
    `### Roles move (v1.0.0)`), then the generated commit list.
@@ -494,7 +503,8 @@ node scripts/release.mjs --tag     # …and the end-to-end sweep
 It refuses a dirty tree or a branch other than `main`, runs the three gates by
 exit code, then **installs this repo the way a consumer does** — `git+file:`
 against itself, so it runs before the push — and checks that every `exports`
-subpath resolves and that the consumer-facing documents are in the installed
+subpath resolves, that the built entries still export the names a host cannot do
+without (`anchors` in `smokeTest`: add to it when a name joins the contract), and that the consumer-facing documents are in the installed
 package. That is the only check that exercises the package's own `prepare`
 build: the three gates run against the workspace, and nobody installs the
 workspace.
@@ -612,7 +622,7 @@ Work happens on a `type/short-description` branch and merges through a pull requ
 Merging squashes, and **the squash commit subject is the PR title**, so the title is
 the commit message that `git log` and a consumer's `git log <pin>..<new>` will show.
 Write it as a Conventional Commit. The PR body links the issue with `Fixes #N`,
-because merging to `main` is what releases to consumers who pin a SHA.
+because merging to `main` is what releases to consumers who pin it.
 
 The body argues the decision and names the alternative it beat, and says plainly when
 there is a sanctioned behaviour change. Prose and em-dashes are welcome in commit

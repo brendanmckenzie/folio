@@ -73,7 +73,7 @@ it. Another editor, in another window, watches it change.
 ## Quick start
 
 ```bash
-npx github:brendanmckenzie/folio init my-site
+npx github:brendanmckenzie/folio#v1.0.0 init my-site
 cd my-site
 npm install
 npm run db:local && npm run db:seed
@@ -92,8 +92,8 @@ Open the editor in a second window to watch multiplayer.
 `init` scaffolds a complete, working Cloudflare project: a Worker that mounts
 Folio and renders published pages, three example blocks, a `wrangler.jsonc` with
 every binding wired up, and the D1 migrations pointed at the package's copy. It
-pins the current `main` as a full SHA — see [Versioning](#versioning) for why
-that is the version number.
+pins the release tag the scaffolder itself came from (`#v1.0.0` above) — see
+[Versioning](#versioning).
 
 > Two things about that first command. It is `npx github:…` rather than
 > `npm create folio`, because `npm create` needs a package on the npm registry
@@ -296,7 +296,7 @@ and the host has a few changes to make (`route`, readers built from a request, t
 cached loopback's props, a redirect for the admin path on live hosts, and DNS); read
 [`AGENTS.md`](AGENTS.md#a-multi-site-host) for those, the handbook's
 [chapter](docs/handbook.md#many-sites-in-one-deployment) for the design, and
-[`UPGRADING.md`](UPGRADING.md#turning-sites-on-what-the-host-changes-2026-09-29) before you flip it.
+[`UPGRADING.md`](UPGRADING.md#turning-sites-on-what-the-host-changes-2026-09-29-v100) before you flip it.
 
 ### Many brands in one deployment
 
@@ -331,7 +331,7 @@ Without `brands` nothing about a deployment changes beyond a few additive fields
 and a route tree that serves several brands has rules of its own; read
 [`AGENTS.md`](AGENTS.md#a-multi-brand-host) for those, the handbook's
 [chapter](docs/handbook.md#many-brands-in-one-deployment) for the design, and
-[`UPGRADING.md`](UPGRADING.md#0013-and-turning-brands-on-2026-09-30) before you flip it.
+[`UPGRADING.md`](UPGRADING.md#0013-and-turning-brands-on-2026-09-30-v100) before you flip it.
 
 ---
 
@@ -383,15 +383,16 @@ become a 500 on whichever code path reaches it first.
 | [`docs/handbook.md`](docs/handbook.md) | **Every feature**, what it is for and why it is shaped that way. The long one. |
 | [`docs/configuration.md`](docs/configuration.md) | Every `createFolio()` key, binding, and Vite option. |
 | [`AGENTS.md`](AGENTS.md) | Adding Folio to a project: order of operations, and the traps that read as library bugs. Written for a coding agent. |
-| [`UPGRADING.md`](UPGRADING.md) | Bumping the pin, applying schema migrations, and what each one needs. |
+| [`UPGRADING.md`](UPGRADING.md) | Bumping the tag, applying schema migrations, and what each one needs. |
+| [`CHANGELOG.md`](CHANGELOG.md) | What changed in each release, with the breaking changes listed separately. |
 | [`docs/api.md`](docs/api.md) | The `{base}/api/v1` contract. |
 | [`docs/mcp.md`](docs/mcp.md) | Pointing an assistant at a running site. |
 | [`examples/starter`](examples/starter) | The project `folio init` scaffolds. Small and real. |
-| [`examples/demo`](examples/demo) | Everything at once: locales, records, gating, forms, search. |
-| [`docs/specs/`](docs/specs) | One spec per feature, each recording the alternative its design beat. |
-| [`ROADMAP.md`](ROADMAP.md) | What is deferred, and why. |
+| [`examples/demo`](https://github.com/brendanmckenzie/folio/tree/v1.0.0/examples/demo) | Everything at once: locales, records, gating, forms, search. |
+| [`docs/specs/`](https://github.com/brendanmckenzie/folio/tree/v1.0.0/docs/specs) | One spec per feature, each recording the alternative its design beat. |
+| [`ROADMAP.md`](https://github.com/brendanmckenzie/folio/blob/v1.0.0/ROADMAP.md) | What is deferred, and why. |
 
-Working **on** Folio rather than with it? [`CLAUDE.md`](CLAUDE.md) is the
+Working **on** Folio rather than with it? [`CLAUDE.md`](https://github.com/brendanmckenzie/folio/blob/v1.0.0/CLAUDE.md) is the
 contributor's guide: the gates, the end-to-end scripts, and the invariants that
 are easy to break by accident.
 
@@ -399,15 +400,39 @@ are easy to break by accident.
 
 ## Versioning
 
-There is no npm package and no tag. **A full 40-character SHA is the version:**
+Folio follows [semver](https://semver.org/) from `1.0.0`. A release is an annotated
+git tag, `vX.Y.Z`, on a commit that has merged to `main`:
 
 ```
-npm install github:brendanmckenzie/folio#<full-sha>
+npm install github:brendanmckenzie/folio#v1.0.0
 ```
 
-A pinned SHA keeps resolving as long as it stays reachable from a pushed ref, so
-an upgrade is something you opt into rather than something that happens to you.
-Never pin a branch or a short SHA — both resolve differently later.
+There is no npm package: `folio` is taken on the registry by an unrelated project,
+and Folio installs from git. `package.json` is `private`, which stops
+`npm publish` and does nothing to a git install.
+
+What the version number promises:
+
+- **Major**: removes or narrows the `exports` surface or a `createFolio()` config
+  key: anything a host's own code can import or configure.
+- **Minor**: adds to either. D1 migrations arrive in minors and are listed in
+  [`UPGRADING.md`](UPGRADING.md).
+- **Patch**: fixes only.
+
+Stored documents and the mutation log are not part of the contract, and a release
+tag is never moved or deleted once pushed.
+
+**Pin an exact tag, never a range.** `github:brendanmckenzie/folio#semver:^1.0.0`
+is valid npm syntax and is deliberately unsupported: it resolves against whatever
+tags exist at install time, which turns an upgrade into something that happens to
+you on the next fresh install, and here every upgrade is a decision. Pin
+`#v1.0.0`, and move it by editing the tag. Never pin a branch or a short SHA
+either; both resolve differently later.
+
+**Your lockfile still pins a commit.** npm resolves the tag to a SHA and records
+it in `package-lock.json`, so `npm ci` installs byte-identical code whatever
+happens to the tag later. The tag is what you read and bump; the lockfile is what
+guarantees it.
 
 [`UPGRADING.md`](UPGRADING.md) is the procedure, including the one step that
 bites everybody: `rm -rf node_modules/folio` before reinstalling, or npm skips
@@ -415,12 +440,13 @@ the package's build and leaves you with no `dist/`.
 
 ## Status
 
-One site runs on Folio in production today — plus its staging deployment —
-pinned to a SHA, with real editors and real content. It is not on npm, has no
-version number, and the name is still a placeholder, so read "production" as
-"the author's own client work" rather than "battle-tested by strangers".
+Two sites run on Folio in production, each with a staging deployment, pinned to
+a release tag, with real editors and real content. Both are the author's own
+client work, so read "production" as that rather than "battle-tested by
+strangers". The release history is in [`CHANGELOG.md`](CHANGELOG.md).
 
-Breaking changes are made when a design turns out to be wrong, and land as a
-line in a consumer's upgrade commit rather than a deprecation cycle.
+Breaking changes are made when a design turns out to be wrong, and from 1.0.0 they
+are a major version bump rather than a deprecation cycle: no `1.x` branch is
+maintained and no shim keeps a removed name alive.
 
 MIT licensed.

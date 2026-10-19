@@ -58,9 +58,14 @@ jobs:
       - name: generate Worker types
         run: pnpm --filter demo cf-typegen
 
-      # Tag matches package.json and sits on main; biome, tests, typecheck, the
+      # Tag matches package.json, sits on main and still points at this commit on
+      # the remote (a moved tag is refused); biome, tests, typecheck, the
       # end-to-end sweep, then the packed-install smoke test in a temp directory.
+      # GH_TOKEN authenticates the one `git ls-remote` that reads the remote tag,
+      # since checkout does not persist credentials.
       - name: release gates
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: node scripts/release.mjs --tag --ci
 
       - name: create the GitHub Release

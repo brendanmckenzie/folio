@@ -13,18 +13,20 @@ render. Everything below follows from that.
 ## Install
 
 ```
-npm install github:brendanmckenzie/folio#<full-sha>
+npm install github:brendanmckenzie/folio#v1.0.0
 ```
 
 **Starting a project from nothing?** Scaffold it instead — you get a working
-Worker, a `wrangler.jsonc` with every binding, and a pinned SHA:
+Worker, a `wrangler.jsonc` with every binding, and the release tag pinned:
 
 ```
-npx github:brendanmckenzie/folio init my-site
+npx github:brendanmckenzie/folio#v1.0.0 init my-site
 ```
 
-Pin a **full 40-character SHA**, never a branch. There is no npm package and no
-tag; a SHA is the version. `npm install` runs the package's `prepare`, which
+Pin an exact release tag (`#vX.Y.Z`), never a branch, a short SHA or a
+`#semver:` range (unsupported on purpose: an upgrade must be a decision, not
+something a fresh install does to you). There is no npm package; the tag is the
+version, and `package-lock.json` still records the commit it resolved to. `npm install` runs the package's `prepare`, which
 builds `dist/` on your machine — expect the install to take a few seconds and to
 need `esbuild` and `typescript` to succeed.
 
@@ -64,7 +66,7 @@ The three rules broken most often:
 - Read fields with `fieldValue()` / `dataOf()` from `folio/core`, never
   `blok.data[name]`, or translations silently fall back to the source locale.
 
-After bumping the pinned SHA, `rm -rf node_modules/folio` before installing.
+After bumping the pinned tag, `rm -rf node_modules/folio` before installing.
 
 If `createFolio` has `brands`, check the brand map in this file and in each
 `app/brands/<brand>/CLAUDE.md` before you edit a block, type or route, and never import
@@ -350,7 +352,7 @@ that site's brand.
   run against content someone might have open.
 - **A block's `render` is a pure function of its own fields.** It receives
   `PropsOf<fields> & { uid: string }` and nothing else.
-- **Pin a full SHA.** A short SHA or a branch will resolve differently later.
+- **Pin an exact tag.** A branch, a short SHA or a `#semver:` range will resolve differently later.
 
 ## Do not
 
@@ -387,7 +389,7 @@ that site's brand.
 | Pages are fast for you and slow for everyone else | Your D1 primary is far from your readers. Turn on read replication for the database (**Settings → Enable Read Replication**) and make sure every page read goes through `folio.reader(env, req)`. Folio issues every query on a session; without replication enabled they all still go to the primary. |
 | Login appears to do nothing | The `users` table is empty. The login route answers 200 identically whether or not an address is known, so it cannot enumerate accounts — an unknown email looks exactly like a successful one. |
 | Editor loads but shows no other cursors and the tree never updates | The optional `space` binding is absent. Nothing else depends on it. |
-| After bumping the pinned SHA, imports fail or `dist/` is missing from `node_modules/folio` | npm skipped the package's `prepare` build because a `node_modules/folio` directory was already there. `rm -rf node_modules/folio` and install again. A clean install has never had this problem, which is why it survives so long unnoticed. |
+| After bumping the pinned tag, imports fail or `dist/` is missing from `node_modules/folio` | npm skipped the package's `prepare` build because a `node_modules/folio` directory was already there. `rm -rf node_modules/folio` and install again. A clean install has never had this problem, which is why it survives so long unnoticed. |
 
 ## Limitations worth knowing before you design around them
 
@@ -424,7 +426,7 @@ that site's brand.
   Vite option, each with its default and its failure mode. Start here for
   "what does this setting do".
 - `docs/handbook.md` — every feature, with worked examples and the reasoning.
-- `UPGRADING.md` — bumping the pinned SHA, and which D1 migrations need more
+- `UPGRADING.md` — bumping the pinned tag, and which D1 migrations need more
   than applying.
 - `docs/api.md` — the `{base}/api/v1` contract.
 - `docs/mcp.md` — pointing an assistant at a running site.

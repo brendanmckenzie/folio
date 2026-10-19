@@ -1,13 +1,14 @@
 # Upgrading Folio
 
-Folio is installed from a git SHA, so an upgrade is deliberate: nothing changes
-under you until you move the pin. What follows is the procedure, then the
+Folio is installed from a release tag (`#vX.Y.Z`), so an upgrade is deliberate:
+nothing changes under you until you move the tag. What follows is the procedure, then the
 per-migration ledger of what each schema change needs, then the things that are
 silent when you skip them.
 
-**Backwards compatibility is not a design constraint here.** There are a handful
-of consumers, each pinned to a SHA, and each upgrades on purpose. A wrong design
-gets replaced rather than deprecated, and the breaking change lands as a line in
+**Folio honours semver from 1.0.0.** A breaking change to the `exports` surface or
+a `createFolio()` config key is a major version, and the CHANGELOG lists it
+separately. There is no deprecation cycle and no maintained `1.x` branch: a wrong
+design is replaced, the major version is bumped, and the break lands as a line in
 your upgrade commit. Read [the ledger](#the-schema-ledger) before you bump, not
 after.
 
@@ -16,16 +17,17 @@ after.
 ## The procedure
 
 ```bash
-# 1. Find the SHA you want. A full 40 characters — never a branch, never a short SHA.
-git ls-remote https://github.com/brendanmckenzie/folio main
+# 1. Find the tag you want: an exact vX.Y.Z, never a branch, never a short SHA,
+#    never a #semver: range (see below).
+git ls-remote --tags https://github.com/brendanmckenzie/folio 'v*'
 
-# 2. Read what changed between your pin and it.
-#    (Commit subjects here are statements of what is now true, so this reads well.)
-git log --oneline <your-current-sha>..<new-sha>
+# 2. Read what changed between your tag and it: CHANGELOG.md, then the entries
+#    below whose heading names the new tag.
+git log --oneline <your-current-tag>..<new-tag>   # in a clone of the repository
 
-# 3. Bump the pin, and delete the installed copy FIRST. See the trap below.
+# 3. Bump the tag, and delete the installed copy FIRST. See the trap below.
 rm -rf node_modules/folio
-npm install github:brendanmckenzie/folio#<new-sha>
+npm install github:brendanmckenzie/folio#<new-tag>
 
 # 4. Apply any new D1 migrations — local first, then staging, then production.
 wrangler d1 migrations list  folio --local
@@ -48,8 +50,22 @@ additive (`create table` / `alter table add column`), so applying one ahead of t
 deploy that uses it is safe — the old code never looks at the new column. The
 reverse is not: a new Worker reading a column that does not exist yet is a 500 on
 every request until the migration lands. `0011` is the first that is not purely
-additive, and [its section](#0011-roles-move-to-site_roles-2026-09-29) says what
+additive, and [its section](#0011-roles-move-to-site_roles-2026-09-29-v100) says what
 that costs between the two steps.
+
+### Tags, ranges and the lockfile
+
+**Pin an exact tag.** `github:brendanmckenzie/folio#semver:^1.0.0` is valid npm
+syntax and is deliberately unsupported. npm would resolve it against whatever tags
+exist at install time, so the next fresh install (a new machine, a build with no
+lockfile) could take a release you have not read, and a major version is a
+migration you have to choose. Write `#v1.0.0`, and move it by editing that tag.
+
+**The lockfile still pins a commit.** npm resolves the tag to a SHA and records it
+as `resolved: git+ssh://.../folio.git#<sha>` in `package-lock.json`, so `npm ci`
+installs byte-identical code even if a tag were ever moved. The tag is what you
+read and bump; the lockfile is what guarantees what you get. Release tags are
+protected against update and deletion on the repository, so the two agree.
 
 ### The trap that catches everybody
 
@@ -87,8 +103,8 @@ and whether it needs anything from you beyond applying it.
 | `0008_asset_organisation.sql` | Asset folders, tags, and six columns on `assets` | Nothing. Existing assets land at the root with no tags. |
 | `0009` | **Permanently absent.** Nothing will ever take it: a migration numbered below `0010` cannot alter the tables `0010` creates on a fresh database, so the number is unusable. | — |
 | `0010_forms.sql` | Forms and responses | Nothing required. Add a `form()` field to a block to embed one, and a `submitted` hook to forward responses. |
-| `0011_sites.sql` | The site registry, a site column on stories, redirects, assets, folders, tags, forms, responses and shares, roles as grants in `site_roles`, preview grants; every global unique index re-keyed with the site leading | **Apply it, then deploy, within minutes, with no role changes or invitations in between**, then run the post-deploy grant statement. Read [the 0011 section](#0011-roles-move-to-site_roles-2026-09-29) first: it changes what a rollback can do. |
-| `0013_site_brands.sql` | One nullable `sites.brand` column | **Apply it before you deploy, on every deployment with `sites`**: this release's registry read selects the column, so a Worker deployed first fails every registry read with `no such column`. It is additive and safe ahead of the deploy. It changes nothing until you configure `brands`; read [the brands section](#0013-and-turning-brands-on-2026-09-30) before you do. |
+| `0011_sites.sql` | The site registry, a site column on stories, redirects, assets, folders, tags, forms, responses and shares, roles as grants in `site_roles`, preview grants; every global unique index re-keyed with the site leading | **Apply it, then deploy, within minutes, with no role changes or invitations in between**, then run the post-deploy grant statement. Read [the 0011 section](#0011-roles-move-to-site_roles-2026-09-29-v100) first: it changes what a rollback can do. |
+| `0013_site_brands.sql` | One nullable `sites.brand` column | **Apply it before you deploy, on every deployment with `sites`**: this release's registry read selects the column, so a Worker deployed first fails every registry read with `no such column`. It is additive and safe ahead of the deploy. It changes nothing until you configure `brands`; read [the brands section](#0013-and-turning-brands-on-2026-09-30-v100) before you do. |
 
 `0011` and `0013` have landed. `0012` is still claimed and is **not in the package yet**: `0012_users_role_contract.sql` drops the two `users` columns `0011` retires, in the release after the one that carries `0011`, and its entry will repeat that it must never be applied in the same step as `0011`. Next free number is `0014`. `0013` is numbered after a file that does not exist yet, which is fine: wrangler applies whatever is unapplied by filename, so a database that takes `0013` first takes `0012` later.
 
@@ -203,7 +219,7 @@ against a version skew you have to manage. The user-visible symptom of a bump is
 that an editor who left a tab open across your deploy has to reload. Bumps are
 cheap and are made freely.
 
-### 0011: roles move to `site_roles` (2026-09-29)
+### 0011: roles move to `site_roles` (2026-09-29) (v1.0.0)
 
 `0011_sites.sql` gives every row a site (`default`, on a deployment that
 configures no `sites`) and moves each person's role off `users` into a grant in
@@ -291,7 +307,7 @@ before `0011`, it removes the column the still-running old Worker signs people i
 with, and takes sign-in down until the deploy finishes. Deploy the release that
 carries `0011` everywhere it will go, then take `0012` with the next one.
 
-### Turning `sites` on: what the host changes (2026-09-29)
+### Turning `sites` on: what the host changes (2026-09-29) (v1.0.0)
 
 Applying `0011` and deploying this release changes nothing you can see. **Adding
 `sites` to `createFolio` is a separate act with its own costs**, and the point of no
@@ -383,7 +399,7 @@ bad `sites.admin`, or a provisioning shape it cannot honour, and `reader(env)` t
 where it would otherwise answer empty. What is silent is a cache with no props (two
 sites sharing an entry) and a purge issued from the wrong entrypoint, so run the probe.
 
-### 0013 and turning `brands` on (2026-09-30)
+### 0013 and turning `brands` on (2026-09-30) (v1.0.0)
 
 `0013_site_brands.sql` adds one nullable column, `sites.brand`. **Applying it and
 deploying this release changes nothing you can see beyond the additive fields
@@ -494,14 +510,14 @@ old brand for up to ten seconds after the change.
 **9. The admin origin is brand-neutral and moving it costs every passkey.** A branded
 deployment has one sign-in, so `sites.admin` belongs to no brand, and sign-in mail is
 sent from one address. `MagicLinkMail.scope.brand` lets `send` word the mail per brand.
-Passkeys bind to the admin host; see [step 1 of turning `sites` on](#turning-sites-on-what-the-host-changes-2026-09-29).
+Passkeys bind to the admin host; see [step 1 of turning `sites` on](#turning-sites-on-what-the-host-changes-2026-09-29-v100).
 
 **Going back** is a config change: remove `brands` and restore the single-registry keys.
 The brand column is then unread, `shared` is a scope again, and nothing stored changes.
 Brand-prefixed migration ids stay in `schema_migrations` and in `stories.schema_id`, so a
 deployment that goes back renames its list to the old ids by hand.
 
-### A title-only patch no longer moves the page (2026-09-06)
+### A title-only patch no longer moves the page (2026-09-06) (v1.0.0)
 
 **Two bugs, one upgrade, and both were silent.** Read this one even if you skip
 the rest.
@@ -536,7 +552,7 @@ spelling from the handbook or either example (`new URL(miss.to, url.origin)`),
 nothing changes for you: that answers the same URL either way. An absolute
 off-site target is untouched.
 
-### Collection items no longer carry each document (2026-09-06)
+### Collection items no longer carry each document (2026-09-06) (v1.0.0)
 
 `item.doc` on a `collection` field and on a `folio.query` result is now
 **absent unless the query asks for it**. `item.data` — the root block's fields,
@@ -607,7 +623,7 @@ refresh yourself. No error, no retry loop.
 so an upgrade can replace it wholesale without disturbing what surrounds it:
 
 ```bash
-npx github:brendanmckenzie/folio#<new-sha> agents
+npx github:brendanmckenzie/folio#<new-tag> agents
 ```
 
 Or copy it by hand out of `node_modules/folio/AGENTS.md`.
@@ -626,7 +642,7 @@ applied. Every landed migration up to `0010` is additive, so an older Worker
 against a newer schema works: it ignores the columns and tables it does not know
 about. **`0011` is the exception**: rolling back past it needs one statement first
 and loses two writes, and is impossible once `sites` is on — see
-[its section](#0011-roles-move-to-site_roles-2026-09-29).
+[its section](#0011-roles-move-to-site_roles-2026-09-29-v100).
 
 The exception is content. A content migration that rewrote documents has already
 rewritten them, through the mutation log — so the recovery is the History tab
@@ -647,7 +663,7 @@ rewritten them, through the mutation log — so the recovery is the History tab
 | Typecheck reports two incompatible `Plugin` types | Folio got installed by directory path or symlink instead of a SHA. It resolves `vite` from Folio's own tree. |
 | Scheduled publishes stopped firing | The cron trigger, or the `scheduled()` handler, did not survive the merge. |
 | `400 site_required` from a script or `{base}/mcp` | The deployment has `sites`, and the route needs a scope. Use `{base}/~<site>/…`, or a token bound to the site. |
-| Every page of a site is a `404` and `~<site>` answers `No site or group`, on a deployment with `brands` | The row's `brand` is null or is not a key of `brands`. `GET {base}/api/sites` lists it; set the column (see [turning `brands` on](#0013-and-turning-brands-on-2026-09-30)). |
+| Every page of a site is a `404` and `~<site>` answers `No site or group`, on a deployment with `brands` | The row's `brand` is null or is not a key of `brands`. `GET {base}/api/sites` lists it; set the column (see [turning `brands` on](#0013-and-turning-brands-on-2026-09-30-v100)). |
 | `createFolio` throws `folio: 'blocks' belongs to a brand beside 'brands'` (or another moved key) | The config has `brands` and one of the keys that moved into a brand. Move it. |
 | The build fails with `blocks` is a record of brands, which cannot be built with `cssCodeSplit: false` | Remove `build.cssCodeSplit: false`. |
 | `folio.reader` throws "a read must say which site it is for" | The deployment has `sites`. Pass the request, or `{ site }`. |
