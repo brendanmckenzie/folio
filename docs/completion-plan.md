@@ -1,6 +1,8 @@
+> **History, not current (stopped being current 2026-08-05).** This was the run plan for taking Folio from the admin port and its gap list to a deliverable product, written after port phase 3. Four of its five delivery gaps shipped as specs 19 to 22 (scheduled publishing, bulk writes, draft sharing and build artifacts), and the last of those to land, the scheduled-publishing admin screen, landed 2026-08-05. The fifth, outbound webhooks, was not built. The live version is the spec index in [docs/specs/README.md](specs/README.md).
+
 # The run to a deliverable product
 
-> **Status:** in progress
+> **Status:** history, not current
 > **Started:** 2026-07-31, after port phase 3 landed (`4a27656`).
 > **Why this file exists:** the owner's instruction is to get Folio to the point
 > where a site can be built and delivered with it as readily as with Storyblok,

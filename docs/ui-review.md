@@ -1,3 +1,5 @@
+> **History, not current (stopped being current 2026-07-31).** This was a review of the admin as it stood at commit `aefdf99` on 2026-07-30, the input to the admin rebuild. The rebuild replaced the single-screen admin this review describes, and its port completed on 2026-07-31, so the findings are superseded. The live version is [docs/ui-architecture.md](ui-architecture.md).
+
 # The admin as it stands: a UI review
 
 > **Status:** done (this document is the review, not a plan)
