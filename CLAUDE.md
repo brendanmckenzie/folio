@@ -18,7 +18,7 @@ registry, types, globals, forms, migrations and preview bundle — in one deploy
 Read `docs/specs/foundation/multi-brand.md`'s Implementation notes before touching
 anything that reads a registry; `docs/multi-brand-plan.md` is the build and rollout plan.
 
-**Multi-site (spec 23) is built** (2026-09-29, branch `multi-site`): read
+**Multi-site (spec 23) is built** (2026-09-29, merged to `main`): read
 `foundation/multi-site.md`'s Implementation notes before touching anything with a
 scope, a chain, a grant or a preview origin — every phase records where the spec was
 wrong. `docs/multi-site-plan.md` is the build and staging-rollout plan that produced it.
@@ -527,8 +527,8 @@ deferred. Read the notes, not just the plan: several specs' Ground truth was acc
 when written and stale by the time it was built.
 
 **Specs 1–22 and 24–34 are done** — 34 (`foundation/multi-brand.md`) since the owner's
-browser pass on staging, 2026-10-01. **23 (`foundation/multi-site.md`, XL) is built** on
-the branch `multi-site` (2026-09-29) and stamped `review` until its staging
+browser pass on staging, 2026-10-01. **23 (`foundation/multi-site.md`, XL) is built** and
+merged to `main` (2026-09-29) and stamped `review` until its staging
 verification is recorded; its plan is `docs/multi-site-plan.md`. (This said "two are `draft`" until 2026-09-29, with 33
 among them, long after 33 landed as `0010_forms.sql`.) 28, 29, 30, 31 and 32 were all
 built on the branch `specs-31-30-28-29` on 2026-09-05/06 and merged to `main`; each
