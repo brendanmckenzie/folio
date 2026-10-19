@@ -1,0 +1,22 @@
+pre-commit:
+  commands:
+    biome:
+      run: ./node_modules/.bin/biome check --staged --no-errors-on-unmatched
+    gitleaks:
+      run: |
+        if command -v gitleaks >/dev/null 2>&1; then
+          gitleaks protect --staged
+        else
+          echo "gitleaks not installed; install with 'brew install gitleaks' to enable staged secret scanning"
+        fi
+
+commit-msg:
+  commands:
+    commitlint:
+      run: ./node_modules/.bin/commitlint --edit {1}
+
+pre-push:
+  commands:
+    no-push-to-main:
+      use_stdin: true
+      run: sh scripts/git/pre-push.sh
