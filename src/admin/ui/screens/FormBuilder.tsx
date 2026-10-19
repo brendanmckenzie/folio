@@ -3,7 +3,10 @@ import {
   FILE_ACCEPT,
   type FormField,
   type FormFieldKind,
+  type FormLayout,
+  type FormSection,
   MAX_FORM_FIELDS,
+  MAX_FORM_SECTIONS,
   shapeOf,
 } from "../../../core/forms";
 import type { LocaleConfig } from "../../../core/locales";
@@ -15,11 +18,22 @@ import { EmptyState } from "../EmptyState";
 import { Field, Input, Select, Textarea } from "../Field";
 import { ListHeader } from "../List";
 import { Menu, type MenuItem } from "../Menu";
+import { ConditionEditor } from "./ConditionEditor";
 import { FormDeleteDialog } from "./FormDeleteDialog";
 import css from "./FormBuilder.module.css";
+import { blankCondition, formConditionText, sourcesFor } from "./condition-model";
 import {
   addField,
   addOption,
+  endSectionAfter,
+  logicRefusal,
+  optionRefusal,
+  pruneSections,
+  removeRefusal,
+  removeSection,
+  renameField,
+  startSection,
+  updateSection,
   MAX_FIELDS_REACHED,
   canJoinPrevious,
   canMoveField,
@@ -93,6 +107,7 @@ export function FormBuilder({
   const data = useForm(apiBase, id);
   const [draft, setDraft] = useState<Form | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedSection, setSelectedSection] = useState<string | null>(null);
   const [selectedInitialName, setSelectedInitialName] = useState<string | null>(null);
   const [locale, setLocale] = useState(locales?.default ?? "");
   const [saving, setSaving] = useState(false);
@@ -152,7 +167,13 @@ export function FormBuilder({
   // removed or retyped — never on a label, help, translation or layout edit.
   // `shapeOf` is the one function that says which, shared with the server so
   // this can never disagree with what actually triggers `formChanged`.
-  const structural = data.form ? shapeOf(draft.fields) !== shapeOf(data.form.fields) : false;
+  const structural = data.form
+    ? shapeOf(draft.fields, draft.layout) !== shapeOf(data.form.fields, data.form.layout)
+    : false;
+  // The same refusal the server would send (`checkFormLogic`), shown before Save
+  // rather than after a round trip, and Save is disabled while there is one.
+  const logicProblem = logicRefusal(draft.fields, draft.layout);
+  const selectedSectionDef = draft.layout.sections?.find((s) => s.name === selectedSection) ?? null;
   // The list's own row grouping (`form-model.ts`'s `fieldRows`), and whether
   // `beside` on the selected question could do anything at all — the first
   // question in the form, and the one right after a statement, always start a
@@ -166,7 +187,14 @@ export function FormBuilder({
 
   const select = (name: string | null) => {
     setSelected(name);
+    setSelectedSection(null);
     setSelectedInitialName(name);
+  };
+
+  const selectSection = (name: string) => {
+    setSelected(null);
+    setSelectedInitialName(null);
+    setSelectedSection(name);
   };
 
   const onAddField = (kind: FormFieldKind) => {
@@ -176,18 +204,32 @@ export function FormBuilder({
   };
 
   const onFieldChange = (name: string, next: FormField) => {
-    setDraft({ ...draft, fields: updateField(draft.fields, name, next) });
+    // A rename goes through `renameField`, which also repoints every rule that
+    // names the question; the rest of the edit is then applied on top of it.
+    const renamed =
+      next.name === name
+        ? { fields: draft.fields, layout: draft.layout }
+        : renameField(draft.fields, draft.layout, name, next.name);
+    setDraft({
+      ...draft,
+      fields: updateField(renamed.fields, next.name, next),
+      layout: renamed.layout,
+    });
     if (selected === name) setSelected(next.name);
   };
 
   const onRemoveField = (name: string) => {
-    setDraft({ ...draft, fields: removeField(draft.fields, name) });
+    const fields = removeField(draft.fields, name, draft.layout);
+    setDraft({ ...draft, fields, layout: pruneSections(fields, draft.layout) });
     if (selected === name) select(null);
   };
 
   const onMoveField = (index: number, direction: -1 | 1) => {
-    setDraft({ ...draft, fields: moveFieldStep(draft.fields, index, direction) });
+    setDraft({ ...draft, fields: moveFieldStep(draft.fields, index, direction, draft.layout) });
   };
+
+  const onLayout = (next: { fields: FormField[]; layout: FormLayout }) =>
+    setDraft({ ...draft, ...next });
 
   const save = async () => {
     if (!draft) return;
@@ -196,6 +238,7 @@ export function FormBuilder({
       label: draft.label,
       name: draft.name,
       fields: draft.fields,
+      layout: draft.layout,
       open: draft.open,
       closesAt: draft.closesAt,
       successMessage: draft.successMessage,
@@ -265,8 +308,8 @@ export function FormBuilder({
             <Button
               size="sm"
               variant="primary"
-              disabled={!editable || saving}
-              reason={!editable ? "Your role may not edit forms" : undefined}
+              disabled={!editable || saving || logicProblem !== null}
+              reason={!editable ? "Your role may not edit forms" : (logicProblem ?? undefined)}
               onClick={() => void save()}
             >
               {saving ? "Saving…" : "Save"}
@@ -300,72 +343,109 @@ export function FormBuilder({
       {structural ? (
         <p className={css.structuralNote}>
           Saving will change this form's shape — a question added, removed, renamed, retyped, made
-          required, or an option changed — which bumps its version as well as purging every cached
-          page that renders it. A label, help-text or layout-only change purges the same cache
-          without bumping the version.
+          required or conditional, an option, length limit, pattern or accepted file type changed,
+          or a section given a condition — which bumps its version as well as purging every cached
+          page that renders it. A label, help-text, layout, prefill or section-heading change purges
+          the same cache without bumping the version.
+        </p>
+      ) : null}
+      {logicProblem ? (
+        <p className={css.structuralNote} role="alert">
+          {logicProblem}
         </p>
       ) : null}
 
       <div className={css.body}>
         <div className={css.fields}>
           <ol className={css.fieldList}>
-            {draft.fields.map((field, i) => (
-              <li
-                key={field.name}
-                className={joinedIndices.has(i) ? css.fieldRowJoined : undefined}
-              >
-                <button
-                  type="button"
-                  className={`${css.fieldRow} ${selected === field.name ? css.fieldRowSelected : ""}`}
-                  onClick={() => select(field.name)}
+            {draft.fields.flatMap((field, i) => {
+              const section = draft.layout.sections?.find((s) => s.name === field.section);
+              const opensSection =
+                section !== undefined && draft.fields[i - 1]?.section !== field.section;
+              const removal = removeRefusal(draft.fields, draft.layout, field.name);
+              const shownWhen = field.showIf ? formConditionText(field.showIf, draft.fields) : null;
+              const requiredWhen = field.requireIf
+                ? formConditionText(field.requireIf, draft.fields)
+                : null;
+              return [
+                opensSection ? (
+                  <li key={`section:${section.name}`} className={css.sectionRow}>
+                    <button
+                      type="button"
+                      className={`${css.fieldRow} ${selectedSection === section.name ? css.fieldRowSelected : ""}`}
+                      onClick={() => selectSection(section.name)}
+                    >
+                      <span className={css.fieldRowKind}>Section</span>
+                      <span className={css.fieldRowLabel}>{section.label || section.name}</span>
+                      {section.showIf ? <Badge>Conditional</Badge> : null}
+                    </button>
+                  </li>
+                ) : null,
+                <li
+                  key={field.name}
+                  className={joinedIndices.has(i) ? css.fieldRowJoined : undefined}
                 >
-                  <span className={css.fieldRowKind}>
-                    {fieldKindLabel(field.kind)}
-                    {/* Which row this question draws in — `hidden` has none,
+                  <button
+                    type="button"
+                    className={`${css.fieldRow} ${selected === field.name ? css.fieldRowSelected : ""}`}
+                    onClick={() => select(field.name)}
+                  >
+                    <span className={css.fieldRowKind}>
+                      {fieldKindLabel(field.kind)}
+                      {/* Which row this question draws in — `hidden` has none,
                         being position-free on the live page. */}
-                    {field.kind !== "hidden"
-                      ? ` · Row ${(rowOfField.get(field.name) ?? 0) + 1}`
-                      : ""}
+                      {field.kind !== "hidden"
+                        ? ` · Row ${(rowOfField.get(field.name) ?? 0) + 1}`
+                        : ""}
+                    </span>
+                    <span className={css.fieldRowLabel}>{field.label || field.name}</span>
+                    {field.required ? <Badge tone="accent">Required</Badge> : null}
+                    {shownWhen || requiredWhen ? (
+                      <span className={css.fieldRowLogic}>
+                        {shownWhen ? `Shown when ${shownWhen}` : ""}
+                        {shownWhen && requiredWhen ? ". " : ""}
+                        {requiredWhen ? `Required when ${requiredWhen}` : ""}
+                      </span>
+                    ) : null}
+                  </button>
+                  <span className={css.fieldRowActions}>
+                    <Button
+                      size="sm"
+                      variant="subtle"
+                      // Row-aware, not `i === 0`: the first member of a
+                      // multi-question row can still detach from its row-mates
+                      // without leaving position 0 (`canMoveField`).
+                      disabled={!editable || !canMoveField(draft.fields, i, -1, draft.layout)}
+                      reason="Already first"
+                      aria-label={`Move ${field.label || field.name} up`}
+                      onClick={() => onMoveField(i, -1)}
+                    >
+                      ↑
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="subtle"
+                      disabled={!editable || !canMoveField(draft.fields, i, 1, draft.layout)}
+                      reason="Already last"
+                      aria-label={`Move ${field.label || field.name} down`}
+                      onClick={() => onMoveField(i, 1)}
+                    >
+                      ↓
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      disabled={!editable || removal !== null}
+                      reason={removal ?? undefined}
+                      aria-label={`Remove ${field.label || field.name}`}
+                      onClick={() => onRemoveField(field.name)}
+                    >
+                      ×
+                    </Button>
                   </span>
-                  <span className={css.fieldRowLabel}>{field.label || field.name}</span>
-                  {field.required ? <Badge tone="accent">Required</Badge> : null}
-                </button>
-                <span className={css.fieldRowActions}>
-                  <Button
-                    size="sm"
-                    variant="subtle"
-                    // Row-aware, not `i === 0`: the first member of a
-                    // multi-question row can still detach from its row-mates
-                    // without leaving position 0 (`canMoveField`).
-                    disabled={!editable || !canMoveField(draft.fields, i, -1)}
-                    reason="Already first"
-                    aria-label={`Move ${field.label || field.name} up`}
-                    onClick={() => onMoveField(i, -1)}
-                  >
-                    ↑
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="subtle"
-                    disabled={!editable || !canMoveField(draft.fields, i, 1)}
-                    reason="Already last"
-                    aria-label={`Move ${field.label || field.name} down`}
-                    onClick={() => onMoveField(i, 1)}
-                  >
-                    ↓
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    disabled={!editable}
-                    aria-label={`Remove ${field.label || field.name}`}
-                    onClick={() => onRemoveField(field.name)}
-                  >
-                    ×
-                  </Button>
-                </span>
-              </li>
-            ))}
+                </li>,
+              ];
+            })}
           </ol>
           {draft.fields.length === 0 ? (
             <p className={css.note}>No questions yet. Add the first one below.</p>
@@ -385,10 +465,44 @@ export function FormBuilder({
         </div>
 
         <div className={css.panel}>
-          {selectedField ? (
+          {selectedSectionDef ? (
+            <SectionPanel
+              key={selectedSectionDef.name}
+              section={selectedSectionDef}
+              fields={draft.fields}
+              locale={locale || source}
+              source={source}
+              editable={editable}
+              onChange={(next) =>
+                setDraft({ ...draft, layout: updateSection(draft.layout, next.name, next) })
+              }
+              onRemove={() => {
+                onLayout(removeSection(draft.fields, draft.layout, selectedSectionDef.name));
+                setSelectedSection(null);
+              }}
+            />
+          ) : selectedField ? (
             <FieldPanel
               key={selectedInitialName ?? selectedField.name}
               field={selectedField}
+              fields={draft.fields}
+              layout={draft.layout}
+              index={draft.fields.findIndex((f) => f.name === selectedField.name)}
+              rowSize={
+                rows.find((row) => row.some((i) => draft.fields[i]?.name === selectedField.name))
+                  ?.length ?? 1
+              }
+              sectionCount={draft.layout.sections?.length ?? 0}
+              onStartSection={() => {
+                const started = startSection(draft.fields, draft.layout, selectedField.name);
+                if (started) {
+                  onLayout(started);
+                  selectSection(started.section);
+                }
+              }}
+              onEndSection={() =>
+                setDraft({ ...draft, fields: endSectionAfter(draft.fields, selectedField.name) })
+              }
               formId={draft.id}
               otherNames={draft.fields
                 .filter((f) => f.name !== selectedField.name)
@@ -430,6 +544,13 @@ export function FormBuilder({
 
 function FieldPanel({
   field,
+  fields,
+  layout,
+  index,
+  rowSize,
+  sectionCount,
+  onStartSection,
+  onEndSection,
   formId,
   otherNames,
   locale,
@@ -440,6 +561,15 @@ function FieldPanel({
   onChange,
 }: {
   field: FormField;
+  /** Every question and the layout, for the rule editors and the section actions. */
+  fields: readonly FormField[];
+  layout: FormLayout;
+  index: number;
+  /** How many questions share this one's row: `hold` only matters above one. */
+  rowSize: number;
+  sectionCount: number;
+  onStartSection: () => void;
+  onEndSection: () => void;
   formId: string;
   otherNames: readonly string[];
   locale: string;
@@ -453,6 +583,15 @@ function FieldPanel({
 }) {
   const [nameDraft, setNameDraft] = useState(field.name);
   useEffect(() => setNameDraft(field.name), [field.name]);
+
+  // What the rule editors may name (`sourcesFor`), and whether this question is
+  // conditionally asked at all (its own `showIf` or its section's), which is what
+  // makes "Required" read "Whenever it is shown".
+  const showSources = sourcesFor(fields, index, "show");
+  const requireSources = sourcesFor(fields, index, "require");
+  const sectionRule = layout.sections?.find((sec) => sec.name === field.section)?.showIf;
+  const conditional = field.showIf !== undefined || sectionRule !== undefined;
+  const requirement = field.requireIf ? "when" : field.required ? "always" : "no";
 
   const text = (key: TranslatableKey) => fieldText(field, key, locale, source);
   const setText = (key: TranslatableKey, value: string) =>
@@ -550,18 +689,148 @@ function FieldPanel({
         </Field>
       ) : null}
 
+      {locale === source ? (
+        <Field
+          label="Show this question"
+          help={
+            field.showIf
+              ? "Revealing one question works well for screen reader users; to reveal several, put them in a section."
+              : undefined
+          }
+        >
+          {(id) => (
+            <Select
+              id={id}
+              value={field.showIf ? "when" : "always"}
+              disabled={!editable || (!field.showIf && showSources.length === 0)}
+              onChange={(e) => {
+                if (e.target.value === "always") {
+                  const next = { ...field };
+                  delete next.showIf;
+                  delete next.hold;
+                  onChange(next);
+                } else if (showSources[0]) {
+                  onChange({ ...field, showIf: blankCondition(showSources[0]) });
+                }
+              }}
+            >
+              <option value="always">Always</option>
+              <option value="when" disabled={showSources.length === 0}>
+                Only when…
+              </option>
+            </Select>
+          )}
+        </Field>
+      ) : null}
+      {locale === source && field.showIf ? (
+        <ConditionEditor
+          condition={field.showIf}
+          sources={showSources}
+          fields={fields}
+          editable={editable}
+          onChange={(showIf) => onChange({ ...field, showIf })}
+        />
+      ) : null}
+
       {locale === source && field.kind !== "hidden" && field.kind !== "statement" ? (
-        <Field label="Required" inline>
+        <Field label="Required">
+          {(id) => (
+            <Select
+              id={id}
+              value={requirement}
+              disabled={!editable}
+              onChange={(e) => {
+                const next = { ...field };
+                delete next.required;
+                delete next.requireIf;
+                if (e.target.value === "always") next.required = true;
+                else if (e.target.value === "when" && requireSources[0]) {
+                  next.requireIf = blankCondition(requireSources[0]);
+                }
+                onChange(next);
+              }}
+            >
+              <option value="no">No</option>
+              <option value="always">{conditional ? "Whenever it is shown" : "Always"}</option>
+              <option value="when" disabled={requireSources.length === 0}>
+                Only when…
+              </option>
+            </Select>
+          )}
+        </Field>
+      ) : null}
+      {locale === source && field.requireIf ? (
+        <ConditionEditor
+          condition={field.requireIf}
+          sources={requireSources}
+          fields={fields}
+          editable={editable}
+          onChange={(requireIf) => onChange({ ...field, requireIf })}
+        />
+      ) : null}
+
+      {locale === source && conditional && rowSize > 1 ? (
+        <Field
+          label="Keep its space when hidden"
+          inline
+          help="Its row-mates stay the same width instead of stretching to fill the gap."
+        >
           {(id) => (
             <input
               id={id}
               type="checkbox"
-              checked={field.required === true}
+              checked={field.hold === true}
               disabled={!editable}
-              onChange={(e) => onChange({ ...field, required: e.target.checked })}
+              onChange={(e) => {
+                const next = { ...field };
+                if (e.target.checked) next.hold = true;
+                else delete next.hold;
+                onChange(next);
+              }}
             />
           )}
         </Field>
+      ) : null}
+
+      {locale === source && field.kind !== "file" && field.kind !== "statement" ? (
+        <Field
+          label="Fill from the page address"
+          inline
+          help={`A link to this page ending ?${field.name}=… fills this question in.`}
+        >
+          {(id) => (
+            <input
+              id={id}
+              type="checkbox"
+              checked={field.prefill === "query"}
+              disabled={!editable}
+              onChange={(e) => {
+                const next = { ...field };
+                if (e.target.checked) next.prefill = "query";
+                else delete next.prefill;
+                onChange(next);
+              }}
+            />
+          )}
+        </Field>
+      ) : null}
+
+      {locale === source ? (
+        <div className={css.sectionActions}>
+          <Button
+            size="sm"
+            disabled={!editable || sectionCount >= MAX_FORM_SECTIONS}
+            reason={`A form may hold at most ${MAX_FORM_SECTIONS} sections.`}
+            onClick={onStartSection}
+          >
+            Start a section here
+          </Button>
+          {field.section !== undefined ? (
+            <Button size="sm" disabled={!editable} onClick={onEndSection}>
+              End the section after this question
+            </Button>
+          ) : null}
+        </div>
       ) : null}
 
       {/* Layout, not shape (`docs/form-layout-approach.md` decision 2): neither
@@ -671,6 +940,8 @@ function FieldPanel({
       {needsOptions(field.kind) ? (
         <OptionsEditor
           field={field}
+          fields={fields}
+          layout={layout}
           locale={locale}
           source={source}
           editable={editable}
@@ -763,12 +1034,16 @@ function FieldPanel({
 
 function OptionsEditor({
   field,
+  fields,
+  layout,
   locale,
   source,
   editable,
   onChange,
 }: {
   field: FormField;
+  fields: readonly FormField[];
+  layout: FormLayout;
   locale: string;
   source: string;
   editable: boolean;
@@ -813,10 +1088,18 @@ function OptionsEditor({
               <Button
                 size="sm"
                 variant="danger"
-                disabled={!editable || options.length <= 1}
-                reason={options.length <= 1 ? "At least one option is required" : undefined}
+                disabled={
+                  !editable ||
+                  options.length <= 1 ||
+                  optionRefusal(fields, layout, field.name, option.value) !== null
+                }
+                reason={
+                  options.length <= 1
+                    ? "At least one option is required"
+                    : (optionRefusal(fields, layout, field.name, option.value) ?? undefined)
+                }
                 aria-label={`Remove ${option.label || option.value}`}
-                onClick={() => onChange(removeOption(field, index))}
+                onClick={() => onChange(removeOption(field, index, { fields, layout }))}
               >
                 ×
               </Button>
@@ -828,6 +1111,129 @@ function OptionsEditor({
         <Button size="sm" disabled={!editable} onClick={() => onChange(addOption(field))}>
           Add option
         </Button>
+      ) : null}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ section panel --- */
+
+/** A section's heading, its translations and the rule that shows the group. */
+function SectionPanel({
+  section,
+  fields,
+  locale,
+  source,
+  editable,
+  onChange,
+  onRemove,
+}: {
+  section: FormSection;
+  fields: readonly FormField[];
+  locale: string;
+  source: string;
+  editable: boolean;
+  onChange: (next: FormSection) => void;
+  onRemove: () => void;
+}) {
+  const translating = locale !== source;
+  const text = (key: "label" | "help") =>
+    translating ? (section.i18n?.[locale]?.[key] ?? "") : (section[key] ?? "");
+  const setText = (key: "label" | "help", value: string) => {
+    if (!translating) {
+      const next = { ...section, [key]: value };
+      if (key === "help" && value === "") delete next.help;
+      onChange(next);
+      return;
+    }
+    const entry = { ...section.i18n?.[locale] };
+    if (value === "") delete entry[key];
+    else entry[key] = value;
+    const i18n = { ...section.i18n };
+    if (Object.keys(entry).length > 0) i18n[locale] = entry;
+    else delete i18n[locale];
+    const next = { ...section };
+    if (Object.keys(i18n).length > 0) next.i18n = i18n;
+    else delete next.i18n;
+    onChange(next);
+  };
+
+  // A section's rule may name only questions above its first member.
+  const firstMember = fields.findIndex((f) => f.section === section.name);
+  const sources = sourcesFor(fields, firstMember === -1 ? fields.length : firstMember, "show");
+
+  return (
+    <div className={css.fieldPanel}>
+      <div className={css.panelHead}>
+        <Badge>Section</Badge>
+      </div>
+      <Field label="Heading" required={!translating}>
+        {(id) => (
+          <Input
+            id={id}
+            value={text("label")}
+            placeholder={translating ? section.label : undefined}
+            disabled={!editable}
+            onChange={(e) => setText("label", e.target.value)}
+          />
+        )}
+      </Field>
+      <Field label="Help text">
+        {(id) => (
+          <Input
+            id={id}
+            value={text("help")}
+            placeholder={translating ? section.help : undefined}
+            disabled={!editable}
+            onChange={(e) => setText("help", e.target.value)}
+          />
+        )}
+      </Field>
+      {!translating ? (
+        <>
+          <Field
+            label="Show this section"
+            help={
+              section.showIf
+                ? "Revealing one question works well for screen reader users; to reveal several, put them in a section."
+                : undefined
+            }
+          >
+            {(id) => (
+              <Select
+                id={id}
+                value={section.showIf ? "when" : "always"}
+                disabled={!editable || (!section.showIf && sources.length === 0)}
+                onChange={(e) => {
+                  if (e.target.value === "always") {
+                    const next = { ...section };
+                    delete next.showIf;
+                    onChange(next);
+                  } else if (sources[0]) {
+                    onChange({ ...section, showIf: blankCondition(sources[0]) });
+                  }
+                }}
+              >
+                <option value="always">Always</option>
+                <option value="when" disabled={sources.length === 0}>
+                  Only when…
+                </option>
+              </Select>
+            )}
+          </Field>
+          {section.showIf ? (
+            <ConditionEditor
+              condition={section.showIf}
+              sources={sources}
+              fields={fields}
+              editable={editable}
+              onChange={(showIf) => onChange({ ...section, showIf })}
+            />
+          ) : null}
+          <Button size="sm" variant="danger" disabled={!editable} onClick={onRemove}>
+            Remove section (keeps its questions)
+          </Button>
+        </>
       ) : null}
     </div>
   );

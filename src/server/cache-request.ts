@@ -19,6 +19,7 @@
  * the only honest way to cover a cache miniflare does not simulate — the
  * decidable part is unit-tested and the wiring is three lines in the host.
  */
+import { isClickId } from "../core/click-ids";
 import {
   hasDraftCookie,
   readGrantCookie,
@@ -47,40 +48,6 @@ export type CacheVerdict = "cache" | "bypass" | null;
  * hosts genuinely read. Anything not named here stays in the key, which is the
  * safe direction to be wrong in: a cache miss, not a wrong answer.
  */
-const CLICK_IDS = new Set([
-  // Google Ads / Analytics
-  "gclid",
-  "gclsrc",
-  "gbraid",
-  "wbraid",
-  "dclid",
-  // Meta
-  "fbclid",
-  // Microsoft / Bing
-  "msclkid",
-  // TikTok, X, LinkedIn, Instagram, Pinterest, Yandex, Snapchat
-  "ttclid",
-  "twclid",
-  "li_fat_id",
-  "igshid",
-  "epik",
-  "yclid",
-  "sc_cid",
-  // Mailchimp
-  "mc_cid",
-  "mc_eid",
-  // HubSpot
-  "_hsenc",
-  "_hsmi",
-  "hsctatracking",
-  // Adobe
-  "s_kwcid",
-]);
-
-function isClickId(name: string): boolean {
-  const key = name.toLowerCase();
-  return key.startsWith("utm_") || CLICK_IDS.has(key);
-}
 
 /**
  * The URL this request should be cached under: the same URL with click

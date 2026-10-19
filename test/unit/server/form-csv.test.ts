@@ -39,6 +39,7 @@ const response = (over: Partial<ResponseRow> = {}): ResponseRow => ({
   locale: "",
   page: "",
   files: [],
+  unasked: [],
   ...over,
 });
 
@@ -188,5 +189,38 @@ describe("csvValue", () => {
     expect(csvValue(at("_version"), row)).toBe("3");
     expect(csvValue(at("_locale"), row)).toBe("fr");
     expect(csvValue(at("_page"), row)).toBe("/contact");
+  });
+});
+
+describe("csvValue: not asked (spec 35)", () => {
+  const current = { key: "heard_other", source: "field" as const };
+  const retired = { key: "old_one", source: "retired" as const };
+
+  it("writes (not asked) for a current column the response was never asked", () => {
+    expect(csvValue(current, response({ unasked: ["heard_other"] }))).toBe("(not asked)");
+  });
+
+  it("writes (not asked) for a retired column too", () => {
+    expect(csvValue(retired, response({ unasked: ["old_one"] }))).toBe("(not asked)");
+  });
+
+  it("lets a file win over unasked", () => {
+    const file = {
+      field: "heard_other",
+      key: "sub_x",
+      filename: "cv.pdf",
+      size: 1,
+      contentType: "application/pdf",
+    };
+    expect(csvValue(current, response({ unasked: ["heard_other"], files: [file] }))).toBe("cv.pdf");
+  });
+
+  it("leaves an em dash for a blank that was asked, and for a response from before 0014", () => {
+    expect(csvValue(current, response())).toBe("—");
+    expect(csvValue(current, response({ unasked: ["something_else"] }))).toBe("—");
+  });
+
+  it("still writes the answer when the key is present", () => {
+    expect(csvValue(current, response({ data: { heard_other: "hi" } }))).toBe("hi");
   });
 });

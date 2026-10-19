@@ -1596,6 +1596,13 @@ liability, and reversing it is one column, one statement and one host call).
 
 ## Implementation notes
 
+**Decision 16's "did not exist yet" versus "they left it blank" holds only for the two
+tick-box kinds**, which store `false` and `[]`. Every other kind stores no key for a
+blank answer, so both render `—` (`CSV_ABSENT`, `ABSENT`). Spec 35
+(`form-logic.md`, decision 9) records that rather than changing it: `—` now reads
+"no answer recorded", and a question the visitor was never shown is a third state,
+`not asked` (`form_responses.unasked`).
+
 **Done. Eight phases, all landed 2026-09-06.** This section is the consolidated
 record; the per-phase sections that follow it are what each phase wrote as it
 landed and are kept for their detail. Where this document's plan and these notes

@@ -210,6 +210,7 @@ describe("listResponses", () => {
       "id",
       "locale",
       "page",
+      "unasked",
       "version",
     ]);
   });

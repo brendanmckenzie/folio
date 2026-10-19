@@ -1,10 +1,11 @@
 import { createExecutionContext, env, SELF, waitOnExecutionContext } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import { defineBlock, text } from "../../src/core";
+import { answersFrom, formState } from "../../src/core/form-logic";
 import { honeypotName } from "../../src/core/forms";
 import { createFolio } from "../../src/server";
 import { type FolioForms, ipHash, RATE_WINDOW_MS } from "../../src/server/form-responses";
-import type { Form } from "../../src/server/forms";
+import { compileForm, type Form } from "../../src/server/forms";
 import type { FolioHooks, SubmittedHookPayload } from "../../src/server/hooks";
 
 /**
@@ -624,6 +625,7 @@ describe("the submitted hook", () => {
       "id",
       "locale",
       "page",
+      "unasked",
       "version",
     ]);
   });
@@ -645,5 +647,244 @@ describe("the submitted hook", () => {
     await through(folio, `/folio/f/${form.id}`, nativePost({ email: "a@b.co" }));
     expect(calls).toHaveLength(1);
     expect(await rows(form.id)).toHaveLength(1);
+  });
+});
+
+/* ------------------------------------- conditional questions (spec 35) --- */
+
+/**
+ * What the engine decides on the one route a stranger may write through
+ * (`docs/specs/content-model/form-logic.md` decisions 2, 5 and 10). Each property
+ * is silent when it breaks: a required question that was never shown blocks a real
+ * visitor with nothing on the page to explain it, and an answer stored for a
+ * question that was never shown is a field a crafted POST wrote.
+ */
+describe("conditional questions", () => {
+  const HEARD = {
+    name: "heard",
+    kind: "radio",
+    label: "Heard",
+    required: true,
+    options: [
+      { value: "friend", label: "A friend" },
+      { value: "other", label: "Other" },
+    ],
+  };
+  const HEARD_OTHER = {
+    name: "heard_other",
+    kind: "text",
+    label: "Tell us more",
+    required: true,
+    showIf: { field: "heard", eq: "other" },
+  };
+
+  const stored = async (formId: string) => {
+    const [row] = await rows(formId);
+    return {
+      data: JSON.parse(row?.data ?? "{}") as Record<string, unknown>,
+      unasked: JSON.parse((row as { unasked?: string } | undefined)?.unasked ?? "[]") as string[],
+    };
+  };
+
+  describe("a required question that does not apply never blocks", () => {
+    it("over a native POST", async () => {
+      const form = await makeForm("Heard", [HEARD, HEARD_OTHER]);
+      const ok = await submit(form.id, { heard: "friend", _folio_page: "/contact" });
+      expect(locationOf(ok).searchParams.get("folio_status")).toBe("ok");
+      expect(await stored(form.id)).toEqual({
+        data: { heard: "friend" },
+        unasked: ["heard_other"],
+      });
+    });
+
+    it("over a JSON POST", async () => {
+      const form = await makeForm("HeardJson", [HEARD, HEARD_OTHER]);
+      const res = await submitJson(form.id, { heard: "friend" });
+      expect(res.status).toBe(200);
+      expect(await stored(form.id)).toEqual({
+        data: { heard: "friend" },
+        unasked: ["heard_other"],
+      });
+    });
+
+    it("and refuses it once it applies", async () => {
+      const form = await makeForm("HeardRefused", [HEARD, HEARD_OTHER]);
+      const native = await submit(form.id, { heard: "other", _folio_page: "/contact" });
+      const url = locationOf(native);
+      expect(url.searchParams.get("folio_status")).toBe("invalid");
+      expect(url.searchParams.get("folio_invalid")).toBe("heard_other");
+
+      const json = await submitJson(form.id, { heard: "other" });
+      expect(json.status).toBe(422);
+      expect(Object.keys((await json.json<{ fields: object }>()).fields)).toEqual(["heard_other"]);
+      expect(await rows(form.id)).toHaveLength(0);
+    });
+
+    it("never names an unasked question in folio_invalid, whatever else is wrong", async () => {
+      const form = await makeForm("HeardMixed", [HEARD, HEARD_OTHER]);
+      // `heard` is missing (required), so the answer is refused, and `heard_other`
+      // was not asked: only the first is named.
+      const res = await submit(form.id, { _folio_page: "/contact" });
+      expect(locationOf(res).searchParams.get("folio_invalid")).toBe("heard");
+    });
+  });
+
+  describe("an answer to an excluded question is dropped", () => {
+    it("over a native POST, and the hook never sees it", async () => {
+      const form = await makeForm("Crafted", [HEARD, HEARD_OTHER]);
+      const calls: SubmittedHookPayload<Cloudflare.Env>[] = [];
+      const folio = folioWith({ hooks: { submitted: (e) => calls.push(e), await: ["submitted"] } });
+      await through(
+        folio,
+        `/folio/f/${form.id}`,
+        nativePost({ heard: "friend", heard_other: "anything", _folio_page: "/contact" }),
+      );
+
+      expect(await stored(form.id)).toEqual({
+        data: { heard: "friend" },
+        unasked: ["heard_other"],
+      });
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.response.data).toEqual({ heard: "friend" });
+      expect(calls[0]?.response.unasked).toEqual(["heard_other"]);
+    });
+
+    it("over a JSON POST", async () => {
+      const form = await makeForm("CraftedJson", [HEARD, HEARD_OTHER]);
+      const res = await submitJson(form.id, { heard: "friend", heard_other: "anything" });
+      expect(res.status).toBe(200);
+      expect((await stored(form.id)).data).toEqual({ heard: "friend" });
+    });
+  });
+
+  describe("conditional requiredness", () => {
+    const EITHER = [
+      { name: "email", kind: "email", label: "Email", requireIf: { field: "phone", isSet: false } },
+      { name: "phone", kind: "tel", label: "Phone", requireIf: { field: "email", isSet: false } },
+    ];
+
+    it("refuses both when neither is answered, and stores when either is", async () => {
+      const form = await makeForm("Either", EITHER);
+      const none = await submitJson(form.id, {});
+      expect(none.status).toBe(422);
+      expect(Object.keys((await none.json<{ fields: object }>()).fields).sort()).toEqual([
+        "email",
+        "phone",
+      ]);
+
+      expect((await submitJson(form.id, { email: "a@b.co" })).status).toBe(200);
+      expect((await submitJson(form.id, { phone: "0400 000 000" })).status).toBe(200);
+      expect(await rows(form.id)).toHaveLength(2);
+    });
+
+    it("over a native POST", async () => {
+      const form = await makeForm("EitherNative", EITHER);
+      expect(
+        locationOf(await submit(form.id, { _folio_page: "/c" })).searchParams.get("folio_status"),
+      ).toBe("invalid");
+      expect(
+        locationOf(
+          await submit(form.id, { phone: "0400 000 000", _folio_page: "/c" }),
+        ).searchParams.get("folio_status"),
+      ).toBe("ok");
+    });
+  });
+
+  describe("a section hides as one", () => {
+    const fields = [
+      { name: "differs", kind: "checkbox", label: "Postal address differs" },
+      ...["street", "city", "state", "postcode"].map((name) => ({
+        name,
+        kind: "text",
+        label: name,
+        required: true,
+        section: "postal",
+      })),
+    ];
+    const layout = {
+      sections: [{ name: "postal", label: "Postal", showIf: { field: "differs", eq: true } }],
+    };
+
+    it("requires and stores none of it while the condition fails", async () => {
+      const form = await makeForm("Postal", fields, { layout });
+      const res = await submit(form.id, {
+        _folio_page: "/c",
+        // A crafted POST sending the hidden block anyway.
+        street: "1 Main St",
+        city: "Hobart",
+      });
+      expect(locationOf(res).searchParams.get("folio_status")).toBe("ok");
+      expect(await stored(form.id)).toEqual({
+        data: { differs: false },
+        unasked: ["street", "city", "state", "postcode"],
+      });
+    });
+
+    it("requires all four once the box is ticked", async () => {
+      const form = await makeForm("PostalOn", fields, { layout });
+      const res = await submitJson(form.id, { differs: true });
+      expect(res.status).toBe(422);
+      expect(Object.keys((await res.json<{ fields: object }>()).fields).sort()).toEqual([
+        "city",
+        "postcode",
+        "state",
+        "street",
+      ]);
+    });
+  });
+
+  it("collapses two bodies that differ only in an unasked answer", async () => {
+    const form = await makeForm("Dupes", [HEARD, HEARD_OTHER]);
+    await submitJson(form.id, { heard: "friend", heard_other: "one" });
+    await submitJson(form.id, { heard: "friend", heard_other: "two" });
+    expect(await rows(form.id)).toHaveLength(1);
+  });
+
+  it("asks and requires exactly what formState says of the compiled form", async () => {
+    const fields = [
+      HEARD,
+      HEARD_OTHER,
+      { name: "differs", kind: "checkbox", label: "Differs" },
+      { name: "street", kind: "text", label: "Street", required: true, section: "postal" },
+      { name: "email", kind: "email", label: "Email", requireIf: { field: "phone", isSet: false } },
+      { name: "phone", kind: "tel", label: "Phone", requireIf: { field: "email", isSet: false } },
+    ];
+    const layout = {
+      sections: [{ name: "postal", label: "Postal", showIf: { field: "differs", eq: true } }],
+    };
+    const form = await makeForm("Parity", fields, { layout });
+    const compiled = compileForm(form, { base: "/folio" });
+    const names = form.fields.map((f) => f.name);
+
+    const bodies: Record<string, string>[] = [
+      {},
+      { heard: "friend" },
+      { heard: "other" },
+      { heard: "other", heard_other: "x", email: "a@b.co" },
+      { heard: "friend", differs: "1", street: "1 Main St", phone: "0400 000 000" },
+      { heard: "friend", differs: "1" },
+      { heard: "friend", heard_other: "stray", street: "stray" },
+    ];
+    for (const body of bodies) {
+      const state = formState(
+        compiled,
+        answersFrom(form, { getAll: (n) => (n in body ? [body[n]] : []) }),
+      );
+      const expectedUnasked = names.filter((n) => !state.asked.has(n));
+      // Refusals: every required question that is asked and blank.
+      const expectedInvalid = [...state.required].filter((n) => !(n in state.answers)).sort();
+
+      await env.DB.prepare("delete from form_responses").run();
+      const res = await submitJson(form.id, body);
+      if (expectedInvalid.length > 0) {
+        expect(res.status, JSON.stringify(body)).toBe(422);
+        expect(Object.keys((await res.json<{ fields: object }>()).fields).sort()).toEqual(
+          expectedInvalid,
+        );
+      } else {
+        expect(res.status, JSON.stringify(body)).toBe(200);
+        expect((await stored(form.id)).unasked, JSON.stringify(body)).toEqual(expectedUnasked);
+      }
+    }
   });
 });

@@ -42,11 +42,13 @@ import {
   readBulkCursor,
   writeBulkCursor,
 } from "../core/bulk";
+import { answersFrom, DATE_ANSWER, formState, NUMBER_ANSWER } from "../core/form-logic";
 import {
   type FileAccept,
   FILE_ACCEPT,
   type FormField,
   type FormFieldKind,
+  type FormSection,
   RESERVED_PREFIX,
 } from "../core/forms";
 import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
@@ -336,16 +338,14 @@ export interface SubmissionResult {
   values: Record<string, ResponseValue>;
   /** Field name → why. Empty means the submission is good. */
   errors: Record<string, AnswerRefusal>;
+  /** Value-bearing questions the engine did not ask (`statement` never appears):
+   *  the third state beside answered and no answer (spec 35 decision 9). */
+  unasked: string[];
 }
 
 /** Loose on purpose: the strict test is a delivery attempt, and a form that
  *  refuses `a@b` refuses a real address somebody has. */
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-/** A calendar date as `<input type="date">` submits one. */
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
-/** A number as a person types one. `Number('12abc')` is `NaN` and `parseInt` is
- *  `12`; neither is what the visitor meant, so the shape is screened first. */
-const NUMBER = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
 
 /** The kinds whose answer may legitimately contain a line break. */
 const MULTILINE: ReadonlySet<FormFieldKind> = new Set(["textarea"]);
@@ -452,7 +452,8 @@ function validateAnswer(field: FormField, raw: readonly string[], uploaded: bool
     case "number": {
       const text = first.trim();
       if (text === "") return field.required ? { error: "required" } : {};
-      if (text.length > SCALAR_ANSWER_CHARS || !NUMBER.test(text)) return { error: "invalid" };
+      if (text.length > SCALAR_ANSWER_CHARS || !NUMBER_ANSWER.test(text))
+        return { error: "invalid" };
       const value = Number(text);
       if (!Number.isFinite(value)) return { error: "invalid" };
       if (field.min !== undefined && value < field.min) return { error: "out_of_range" };
@@ -463,7 +464,7 @@ function validateAnswer(field: FormField, raw: readonly string[], uploaded: bool
     case "date": {
       const text = first.trim();
       if (text === "") return field.required ? { error: "required" } : {};
-      if (!DATE.test(text)) return { error: "invalid" };
+      if (!DATE_ANSWER.test(text)) return { error: "invalid" };
       // `2026-02-31` matches the shape and is not a day. `Date.parse` of an
       // ISO date is UTC midnight, so the round trip is exact.
       const parsed = new Date(`${text}T00:00:00Z`);
@@ -533,19 +534,35 @@ function validateAnswer(field: FormField, raw: readonly string[], uploaded: bool
  * `uploaded` is the set of field names `prepareUploads` accepted a file for, and
  * it is the only thing this function knows about bytes. Defaulted to empty so
  * every text-only caller — and every test of one — reads unchanged.
+ *
+ * **The engine decides what was asked** (`core/form-logic.ts`, spec 35 decisions 2,
+ * 5 and 10): `formState` runs over the *normalised* body, not over the values
+ * validated below, so a readable-but-invalid answer drives conditions exactly as it
+ * does in the browser. A question that was not asked is skipped: no value, no
+ * refusal, its name in `unasked`. A question that was is validated with the
+ * engine's `required`, which is the stored flag or its `requireIf`.
  */
 export function validateSubmission(
   fields: readonly FormField[],
   body: SubmissionBody,
   uploaded: ReadonlySet<string> = new Set(),
+  sections: readonly FormSection[] = [],
 ): SubmissionResult {
   const values: Record<string, ResponseValue> = {};
   const errors: Record<string, AnswerRefusal> = {};
+  const unasked: string[] = [];
+
+  const form = { fields, sections };
+  const state = formState(form, answersFrom(form, { getAll: (name) => body.get(name) ?? [] }));
 
   for (const field of fields) {
     if (field.name.startsWith("_")) continue;
+    if (!state.asked.has(field.name)) {
+      if (field.kind !== "statement") unasked.push(field.name);
+      continue;
+    }
     const { value, error } = validateAnswer(
-      field,
+      { ...field, required: state.required.has(field.name) },
       body.get(field.name) ?? [],
       uploaded.has(field.name),
     );
@@ -553,7 +570,7 @@ export function validateSubmission(
     else if (value !== undefined) values[field.name] = value;
   }
 
-  return { values, errors };
+  return { values, errors, unasked };
 }
 
 /* -------------------------------------------------------------- hashing --- */
@@ -1008,6 +1025,9 @@ export interface FormResponse {
   version: number;
   createdAt: number;
   data: Record<string, ResponseValue>;
+  /** Questions this response was never asked. Always present: `[]` for a form with
+   *  no logic. */
+  unasked: readonly string[];
   locale: string;
   page: string;
 }
@@ -1022,6 +1042,9 @@ export interface NewResponse {
   ipHash: string | null;
   bodyHash: string;
   files: readonly SubmittedFile[];
+  /** Names of the questions the engine did not ask (`validateSubmission`'s
+   *  `unasked`). Stored beside `data`, which holds no key for them. */
+  unasked: readonly string[];
   now?: number;
   /**
    * The site the submission arrived on — the live host that served the page the form
@@ -1072,7 +1095,7 @@ export function newResponseId(): string {
  * page claimed: a page cached for a week submits against the live form, and the
  * stored stamp has to say which shape actually validated it (decision 7).
  *
- * Fifteen binds, fixed. Nothing here is sized by the submitter.
+ * Sixteen binds, fixed. Nothing here is sized by the submitter.
  *
  * The duplicate window is **per submitting site**: the same answers arriving on two
  * sites within a minute are two submissions, and collapsing the second into the first
@@ -1086,6 +1109,7 @@ export async function insertResponse(db: FolioDb, input: NewResponse): Promise<I
     version: input.form.version,
     createdAt: now,
     data: input.data,
+    unasked: input.unasked,
     locale: input.locale,
     page: input.page,
   };
@@ -1093,8 +1117,8 @@ export async function insertResponse(db: FolioDb, input: NewResponse): Promise<I
   const result = await db
     .prepare(
       `insert into form_responses
-         (id, form_id, version, created_at, data, locale, page, ip_hash, body_hash, files, site_id)
-       select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         (id, form_id, version, created_at, data, locale, page, ip_hash, body_hash, files, site_id, unasked)
+       select ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        where not exists (
          select 1 from form_responses
          where form_id = ? and body_hash = ? and created_at > ? and site_id = ?
@@ -1112,6 +1136,7 @@ export async function insertResponse(db: FolioDb, input: NewResponse): Promise<I
       input.bodyHash,
       JSON.stringify(input.files),
       input.site ?? DEFAULT_SITE,
+      JSON.stringify(response.unasked),
       response.formId,
       input.bodyHash,
       now - DUPLICATE_WINDOW_MS,
@@ -1242,13 +1267,15 @@ export interface ResponseRow {
   locale: string;
   page: string;
   files: SubmittedFile[];
+  /** Screened on read: `[]` for every row written before `0014`. */
+  unasked: string[];
 }
 
 /** The columns every reader here projects. `ip_hash` and `body_hash` are absent
  *  from the *statement*, not filtered afterwards — the narrower read is the one
  *  that cannot leak. */
 const RESPONSE_COLS = `id, form_id as formId, version, created_at as createdAt,
-  data, locale, page, files`;
+  data, locale, page, files, unasked`;
 
 interface ResponseDbRow {
   id: string;
@@ -1259,6 +1286,7 @@ interface ResponseDbRow {
   locale: string;
   page: string;
   files: string;
+  unasked: string;
 }
 
 /** One answer, or nothing. Arrays are screened element by element, because a
@@ -1321,6 +1349,20 @@ function readFiles(raw: string): SubmittedFile[] {
   return files;
 }
 
+/** The `unasked` column: an array of `NAME`-shaped strings, anything else dropped. */
+function readUnasked(raw: string): string[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(
+    (n): n is string => typeof n === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(n),
+  );
+}
+
 function toResponse(row: ResponseDbRow): ResponseRow {
   return {
     id: row.id,
@@ -1331,6 +1373,7 @@ function toResponse(row: ResponseDbRow): ResponseRow {
     locale: row.locale,
     page: row.page,
     files: readFiles(row.files),
+    unasked: readUnasked(row.unasked),
   };
 }
 
@@ -1925,10 +1968,15 @@ const BOM = "\ufeff";
  *  ceiling, and a page holds answers rather than ids, so it is a memory bound. */
 const CSV_PAGE = 200;
 
-/** What a current field asks for and a response never answered — decision 16's
- *  rule that *"this did not exist yet"* and *"they left it blank"* are different
- *  facts and must not both render as an empty cell. */
+/** No answer recorded: the question was blank, or was not on the form when this
+ *  response was made. Spec 33 decision 16 wanted those two told apart, and they are
+ *  only for the two tick-box kinds (`false` and `[]` are stored); every other blank
+ *  stores no key. A question the visitor was never *shown* is `CSV_NOT_ASKED`. */
 const CSV_ABSENT = "—";
+
+/** The question had a condition and it did not hold (`ResponseRow.unasked`, spec 35
+ *  decision 9). Not a cell a stranger can type: it is written by this file alone. */
+const CSV_NOT_ASKED = "(not asked)";
 
 /**
  * The five columns that are not answers.
@@ -2015,6 +2063,7 @@ export function csvValue(column: CsvColumn, response: ResponseRow): string {
   // reading `data` first would render an attachment somebody sent as `—`.
   const file = response.files.find((one) => one.field === column.key);
   if (file) return file.filename;
+  if (response.unasked.includes(column.key)) return CSV_NOT_ASKED;
   if (column.file) return CSV_ABSENT;
   const value = response.data[column.key];
   if (value === undefined) return CSV_ABSENT;

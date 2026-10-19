@@ -267,7 +267,38 @@ const FORM = {
   id: "frm_one",
   name: "contact",
   label: "Contact",
-  fields: [],
+  // A conditional question and a section with a condition of its own, so the
+  // builder's rule editors, section header and "Shown when" line are mounted by
+  // the smoke layer rather than only by their models' unit tests.
+  fields: [
+    {
+      name: "heard",
+      kind: "radio",
+      label: "How did you hear about us?",
+      options: [
+        { value: "friend", label: "A friend" },
+        { value: "other", label: "Other" },
+      ],
+    },
+    {
+      name: "heard_other",
+      kind: "text",
+      label: "Tell us more",
+      required: true,
+      showIf: { field: "heard", eq: "other" },
+    },
+    { name: "postal_differs", kind: "checkbox", label: "Postal address differs" },
+    { name: "street", kind: "text", label: "Street", section: "postal" },
+  ],
+  layout: {
+    sections: [
+      {
+        name: "postal",
+        label: "Postal address",
+        showIf: { field: "postal_differs", eq: true },
+      },
+    ],
+  },
   // The two aggregates the list route only computes when asked, and `useForms`
   // always asks (`?count=1&counts=1`). Without them the row reads "undefined
   // questions", which is the fixture lying rather than the screen being wrong.

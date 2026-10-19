@@ -8,7 +8,8 @@
  * a replacement in this file rather than a gap:
  *
  * - **Draft versus live.** There is none: a save is live at once (decision 7).
- * - **Version history.** `forms.version`, bumped only when `shapeOf` changes and
+ * - **Version history.** `forms.version`, bumped only when `shapeOf` changes (which
+ *   covers everything the server enforces, conditions included) and
  *   stamped on every response, so a two-year-old response stays readable after
  *   the form has moved on.
  * - **Concurrent editing.** `updateForm` takes an `expectedUpdatedAt` and the
@@ -27,17 +28,24 @@
  * per statement, which is the ceiling and not a soft limit, so `bindChunks`
  * sizes both rather than a comment promising nobody will pass more than ninety.
  */
+import type { FieldCondition } from "../core/conditions";
 import {
+  checkFormLogic,
   FILE_ACCEPT,
   type FormField,
   type FormFieldOption,
+  type FormLayout,
+  type FormSection,
   formSlug,
   honeypotName,
+  readFormLayout,
   type ResolvedForm,
   type ResolvedFormField,
+  type ResolvedFormSection,
   rowsOf,
   shapeOf,
   validateFormFields,
+  validateFormLayout,
 } from "../core/forms";
 import type { LocaleContext } from "../core/locales";
 import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
@@ -60,6 +68,9 @@ export interface Form {
   name: string;
   label: string;
   fields: FormField[];
+  /** Sections (`forms.layout`): the home for slice 3's steps too. `{}` for a form
+   *  with none. Screened on read by `readFormLayout`. */
+  layout: FormLayout;
   version: number;
   /** The editor's switch. The *effective* state is this and the clock together —
    *  see `isOpen`, which is the one place the two are combined. */
@@ -148,7 +159,7 @@ function newFormId(): string {
   return `frm_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
-const COLS = `id, name, label, fields, version, open, closes_at as closesAt,
+const COLS = `id, name, label, fields, layout, version, open, closes_at as closesAt,
   closed_message as closedMessage, success_message as successMessage,
   submit_label as submitLabel, redirect_to as redirectTo,
   created_at as createdAt, updated_at as updatedAt`;
@@ -157,8 +168,9 @@ const SUMMARY_COLS = `id, name, label, version, open, closes_at as closesAt,
   created_at as createdAt, updated_at as updatedAt,
   json_array_length(fields) as questions`;
 
-interface FormRow extends Omit<Form, "fields" | "open"> {
+interface FormRow extends Omit<Form, "fields" | "layout" | "open"> {
   fields: string;
+  layout: string;
   open: number;
 }
 
@@ -209,8 +221,42 @@ function fieldsFromInput(input: unknown): FormField[] {
   }
 }
 
+/**
+ * `forms.layout`, parsed and narrowed. A column that is not JSON reads as `{}` and
+ * logs one line: a layout mistake drops layout, it can never empty a form's
+ * questions (`readFormLayout` also clears a membership that names no section, which
+ * is why it returns the fields).
+ */
+function readLayout(
+  id: string,
+  raw: string,
+  fields: FormField[],
+  logger: FolioLogger,
+): { layout: FormLayout; fields: FormField[] } {
+  let parsed: unknown = {};
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    logger.error(`folio: form ${id} has an unreadable layout`, err);
+  }
+  return readFormLayout(parsed, fields);
+}
+
+/** `validateFormLayout` and `checkFormLogic` on the way *in*, refusals as the one
+ *  error envelope, for the reason `fieldsFromInput` gives. */
+function layoutFromInput(input: unknown, fields: readonly FormField[]): FormLayout {
+  try {
+    const layout = validateFormLayout(input, fields);
+    checkFormLogic(fields, layout);
+    return layout;
+  } catch (err) {
+    throw new FolioError("bad_request", err instanceof Error ? err.message : "Invalid form layout");
+  }
+}
+
 function toForm(row: FormRow, logger: FolioLogger = console): Form {
-  return { ...row, open: row.open !== 0, fields: readFields(row.id, row.fields, logger) };
+  const read = readLayout(row.id, row.layout, readFields(row.id, row.fields, logger), logger);
+  return { ...row, open: row.open !== 0, fields: read.fields, layout: read.layout };
 }
 
 function toSummary(row: SummaryRow): FormSummary {
@@ -397,14 +443,24 @@ function compileField(
   field: FormField,
   locale: LocaleContext | undefined,
   row: number,
+  sectionShowIf: FieldCondition | undefined,
 ): ResolvedFormField {
+  // Spec 35 decision 6: `required` on the descriptor is "required unconditionally".
+  // A question stored as required that may not be asked (its own or its section's
+  // `showIf`), or that carries a `requireIf`, compiles to `false` plus
+  // `requireIf: { all: [] }`, so a host with no engine never puts a browser
+  // `required` on something that might not apply, and `formState` reads the same
+  // answer off the descriptor that it reads off the stored row.
+  const conditional =
+    field.showIf !== undefined || sectionShowIf !== undefined || field.requireIf !== undefined;
+  const always = field.required === true && !conditional;
   const out: ResolvedFormField = {
     name: field.name,
     kind: field.kind,
     label: translate(field, "label", locale) ?? field.label,
     // Always a boolean: a host writes `required={f.required}` and an absent key
     // would render `required` as present-and-false in some frameworks.
-    required: field.required === true,
+    required: always,
     row,
     // Always a number, never absent — a host writes `` `${grow}fr` `` with no
     // fallback of its own to remember (`core/forms.ts`'s `ResolvedFormField`).
@@ -428,6 +484,34 @@ function compileField(
   if (field.maxBytes !== undefined) out.maxBytes = fileCap(field);
   if (field.value !== undefined) out.value = field.value;
   if (field.text !== undefined) out.text = field.text;
+  if (field.section !== undefined) out.section = field.section;
+  if (field.showIf !== undefined) out.showIf = field.showIf;
+  if (field.required === true && conditional) out.requireIf = { all: [] };
+  else if (field.requireIf !== undefined) out.requireIf = field.requireIf;
+  if (field.hold) out.hold = true;
+  if (field.prefill !== undefined) out.prefill = field.prefill;
+  return out;
+}
+
+/** A section as a host renders it: label and help through the locale chain (the
+ *  `translate` rule one level up), the condition verbatim, `i18n` never shipped. */
+function compileSection(
+  section: FormSection,
+  locale: LocaleContext | undefined,
+): ResolvedFormSection {
+  const pick = (key: "label" | "help"): string | undefined => {
+    if (locale) {
+      for (const code of [locale.code, ...locale.fallbacks]) {
+        const candidate = section.i18n?.[code]?.[key];
+        if (candidate !== undefined) return candidate;
+      }
+    }
+    return section[key];
+  };
+  const out: ResolvedFormSection = { name: section.name, label: pick("label") ?? section.label };
+  const help = pick("help");
+  if (help !== undefined) out.help = help;
+  if (section.showIf !== undefined) out.showIf = section.showIf;
   return out;
 }
 
@@ -470,7 +554,15 @@ export const LOCALE_INPUT = "_folio_locale";
  */
 export function compileForm(form: Form, ctx: FormRenderContext): ResolvedForm {
   const rows = rowsOf(form.fields);
-  const fields = form.fields.map((field, i) => compileField(field, ctx.locale, rows[i] ?? 0));
+  const sectionRules = new Map((form.layout.sections ?? []).map((s) => [s.name, s.showIf]));
+  const fields = form.fields.map((field, i) =>
+    compileField(
+      field,
+      ctx.locale,
+      rows[i] ?? 0,
+      field.section === undefined ? undefined : sectionRules.get(field.section),
+    ),
+  );
   return {
     id: form.id,
     name: form.name,
@@ -482,6 +574,7 @@ export function compileForm(form: Form, ctx: FormRenderContext): ResolvedForm {
     version: form.version,
     open: isOpen(form, ctx.now ?? Date.now()),
     fields,
+    sections: (form.layout.sections ?? []).map((s) => compileSection(s, ctx.locale)),
     hidden: [
       ...(ctx.page ? [{ name: PAGE_INPUT, value: ctx.page }] : []),
       ...(ctx.locale ? [{ name: LOCALE_INPUT, value: ctx.locale.code }] : []),
@@ -769,6 +862,9 @@ export interface UpdateFormInput {
   name?: string;
   /** Unparsed JSON — `validateFormFields` is what turns it into questions. */
   fields?: unknown;
+  /** Unparsed JSON — `validateFormLayout` turns it into sections, and
+   *  `checkFormLogic` checks it against the questions. Absent keeps the current one. */
+  layout?: unknown;
   open?: boolean;
   closesAt?: number | null;
   successMessage?: string;
@@ -826,14 +922,24 @@ export async function updateForm(
   if (!current) return null;
 
   const fields = input.fields === undefined ? current.fields : fieldsFromInput(input.fields);
-  const structural = shapeOf(fields) !== shapeOf(current.fields);
+  // Logic is checked whenever the questions or the layout are in the save, against
+  // the pair that will be stored (a PATCH of `fields` alone is judged against the
+  // current layout). A save of a label or a message skips it, so a form whose
+  // stored logic a rollback left dangling can still be renamed.
+  const layout =
+    input.fields === undefined && input.layout === undefined
+      ? current.layout
+      : layoutFromInput(input.layout === undefined ? current.layout : input.layout, fields);
+  const structural = shapeOf(fields, layout) !== shapeOf(current.fields, current.layout);
   const version = structural ? current.version + 1 : current.version;
   // Every field a save can touch is already reduced to `FormField[]` by the
   // point it reaches here (`validateOneField`'s fixed key order, both for what
   // was just parsed and for what `readFields` reconstructed off the row this
   // read), so a full-array compare needs no key list of its own to fall out of
   // sync with `ResolvedFormField` the way a hand-maintained one would.
-  const fieldsChanged = JSON.stringify(fields) !== JSON.stringify(current.fields);
+  const fieldsChanged =
+    JSON.stringify(fields) !== JSON.stringify(current.fields) ||
+    JSON.stringify(layout) !== JSON.stringify(current.layout);
 
   const name = input.name === undefined ? current.name : formSlug(input.name);
   if (name !== current.name) {
@@ -846,6 +952,7 @@ export async function updateForm(
     name,
     label: input.label ?? current.label,
     fields,
+    layout,
     version,
     open: input.open ?? current.open,
     closesAt: input.closesAt === undefined ? current.closesAt : input.closesAt,
@@ -858,7 +965,7 @@ export async function updateForm(
 
   const result = await db
     .prepare(
-      `update forms set name = ?, label = ?, fields = ?, version = ?, open = ?, closes_at = ?,
+      `update forms set name = ?, label = ?, fields = ?, layout = ?, version = ?, open = ?, closes_at = ?,
          closed_message = ?, success_message = ?, submit_label = ?, redirect_to = ?, updated_at = ?
        where id = ? and updated_at = ? and site_id = ?`,
     )
@@ -866,6 +973,7 @@ export async function updateForm(
       next.name,
       next.label,
       JSON.stringify(next.fields),
+      JSON.stringify(next.layout),
       next.version,
       next.open ? 1 : 0,
       next.closesAt,

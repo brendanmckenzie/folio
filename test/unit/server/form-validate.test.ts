@@ -67,6 +67,7 @@ function makeForm(fields: FormField[]): Form {
     name: "contact",
     label: "Contact us",
     fields,
+    layout: {},
     version: 1,
     open: true,
     closesAt: null,
@@ -410,5 +411,123 @@ describe("validateForms", () => {
     for (const rate of [-1, 101, 1.5]) {
       expect(() => validateForms({ ratePerHour: rate }), String(rate)).toThrow(/ratePerHour/);
     }
+  });
+});
+
+describe("validateSubmission: conditions (spec 35)", () => {
+  const heard: FormField = {
+    name: "heard",
+    kind: "radio",
+    label: "Heard",
+    required: true,
+    options: [
+      { value: "friend", label: "Friend" },
+      { value: "other", label: "Other" },
+    ],
+  };
+  const more: FormField = {
+    name: "heard_other",
+    kind: "text",
+    label: "Tell us more",
+    required: true,
+    showIf: { field: "heard", eq: "other" },
+  };
+
+  it("does not refuse a required question that was not asked, and lists it as unasked", () => {
+    const { values, errors, unasked } = validateSubmission(
+      [heard, more],
+      body({ heard: "friend" }),
+    );
+    expect(errors).toEqual({});
+    expect(values).toEqual({ heard: "friend" });
+    expect(unasked).toEqual(["heard_other"]);
+  });
+
+  it("refuses the same question once it is asked", () => {
+    const { errors, unasked } = validateSubmission([heard, more], body({ heard: "other" }));
+    expect(errors).toEqual({ heard_other: "required" });
+    expect(unasked).toEqual([]);
+  });
+
+  it("drops an answer to a question that was not asked", () => {
+    const { values, unasked } = validateSubmission(
+      [heard, more],
+      body({ heard: "friend", heard_other: "crafted" }),
+    );
+    expect(values).toEqual({ heard: "friend" });
+    expect(unasked).toEqual(["heard_other"]);
+  });
+
+  it("never lists a statement as unasked", () => {
+    const prose: FormField = {
+      name: "prose",
+      kind: "statement",
+      label: "p",
+      text: "hi",
+      showIf: { field: "heard", eq: "other" },
+    };
+    expect(validateSubmission([heard, prose], body({ heard: "friend" })).unasked).toEqual([]);
+  });
+
+  it("applies requireIf: email or phone, at least one", () => {
+    const email: FormField = {
+      name: "email",
+      kind: "email",
+      label: "Email",
+      requireIf: { field: "phone", isSet: false },
+    };
+    const phone: FormField = {
+      name: "phone",
+      kind: "tel",
+      label: "Phone",
+      requireIf: { field: "email", isSet: false },
+    };
+    expect(validateSubmission([email, phone], body({})).errors).toEqual({
+      email: "required",
+      phone: "required",
+    });
+    expect(validateSubmission([email, phone], body({ email: "a@b.co" })).errors).toEqual({});
+    expect(validateSubmission([email, phone], body({ phone: "0400 000 000" })).errors).toEqual({});
+  });
+
+  it("hides a whole section as one, and none of its required members block", () => {
+    const differs: FormField = { name: "differs", kind: "checkbox", label: "Differs" };
+    const street: FormField = {
+      name: "street",
+      kind: "text",
+      label: "Street",
+      required: true,
+      section: "postal",
+    };
+    const city: FormField = { ...street, name: "city", label: "City" };
+    const sections = [
+      { name: "postal", label: "Postal", showIf: { field: "differs", eq: true } } as const,
+    ];
+    const off = validateSubmission([differs, street, city], body({}), new Set(), sections);
+    expect(off.errors).toEqual({});
+    expect(off.unasked).toEqual(["street", "city"]);
+    const on = validateSubmission(
+      [differs, street, city],
+      body({ differs: "1" }),
+      new Set(),
+      sections,
+    );
+    expect(on.errors).toEqual({ street: "required", city: "required" });
+  });
+
+  it("evaluates on what was posted, so an invalid answer still drives a condition", () => {
+    const name: FormField = { name: "name", kind: "text", label: "Name", max: 3 };
+    const follow: FormField = {
+      name: "follow",
+      kind: "text",
+      label: "Follow",
+      showIf: { field: "name", isSet: true },
+    };
+    const { errors, unasked } = validateSubmission(
+      [name, follow],
+      body({ name: "far too long", follow: "x" }),
+    );
+    expect(errors).toEqual({ name: "too_long" });
+    expect(unasked).toEqual([]);
   });
 });

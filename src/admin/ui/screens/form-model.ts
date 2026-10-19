@@ -18,15 +18,19 @@
  * refusal the server does not need a round trip to give.
  */
 import {
+  checkFormLogic,
   type FormField,
   type FormFieldI18n,
   type FormFieldKind,
   type FormFieldOption,
+  type FormLayout,
+  type FormSection,
   honeypotName,
   MAX_ROW_CELLS,
   RESERVED_PREFIX,
 } from "../../../core/forms";
 import type { LocaleConfig } from "../../../core/locales";
+import { comparesValue, referencedNames, renameInCondition } from "./condition-model";
 
 /* -------------------------------------------------------------- locales --- */
 
@@ -256,7 +260,40 @@ function detachFirstRealAt(fields: FormField[], at: number): void {
   }
 }
 
-export function removeField(fields: readonly FormField[], name: string): FormField[] {
+/**
+ * Why `name` cannot be removed, or null. A question another question's rule (or a
+ * section's) names is not removable: the rule would dangle, and `checkFormLogic`
+ * would refuse the save. The builder disables the button with this as the reason.
+ */
+export function removeRefusal(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  name: string,
+): string | null {
+  const label = fields.find((f) => f.name === name)?.label || name;
+  for (const f of fields) {
+    if (f.name === name) continue;
+    if (referencedNames(f.showIf).includes(name) || referencedNames(f.requireIf).includes(name)) {
+      return `"${f.label || f.name}" has a rule that depends on "${label}". Change that rule first.`;
+    }
+  }
+  for (const s of layout.sections ?? []) {
+    if (referencedNames(s.showIf).includes(name)) {
+      return `Section "${s.label}" has a rule that depends on "${label}". Change that rule first.`;
+    }
+  }
+  return null;
+}
+
+/** Removes `name`, **unless a rule depends on it** (`removeRefusal`): then the list
+ *  comes back unchanged. `layout` is only read for that check; `pruneSections`
+ *  drops a section the removal emptied. */
+export function removeField(
+  fields: readonly FormField[],
+  name: string,
+  layout: FormLayout = {},
+): FormField[] {
+  if (removeRefusal(fields, layout, name) !== null) return [...fields];
   const index = fields.findIndex((f) => f.name === name);
   if (index === -1) return [...fields];
   // A removed `hidden` question was never anyone's predecessor (`rowsOf`
@@ -317,6 +354,7 @@ function rowBlocks(fields: readonly FormField[]): RowBlock[] {
   let current: RowBlock | null = null;
   let cellsInRow = 0;
   let breaksNext = true; // the start of the form breaks a row
+  let prevSection: string | undefined;
   for (let i = 0; i < fields.length; i++) {
     const field = fields[i]!;
     if (field.kind === "hidden") {
@@ -328,7 +366,12 @@ function rowBlocks(fields: readonly FormField[]): RowBlock[] {
       continue;
     }
     const isStatement = field.kind === "statement";
-    const joins = !isStatement && !breaksNext && field.beside && cellsInRow < MAX_ROW_CELLS;
+    const joins =
+      !isStatement &&
+      !breaksNext &&
+      field.beside &&
+      cellsInRow < MAX_ROW_CELLS &&
+      field.section === prevSection;
     if (joins && current) {
       current.end = i;
       cellsInRow += 1;
@@ -338,6 +381,7 @@ function rowBlocks(fields: readonly FormField[]): RowBlock[] {
       cellsInRow = 1;
     }
     breaksNext = isStatement;
+    prevSection = field.section;
   }
   return blocks;
 }
@@ -377,7 +421,13 @@ export function canMoveField(
   fields: readonly FormField[],
   index: number,
   direction: -1 | 1,
+  layout: FormLayout = {},
 ): boolean {
+  if (!canStep(fields, index, direction)) return false;
+  return !spoilsOrder(fields, stepFields(fields, index, direction), layout);
+}
+
+function canStep(fields: readonly FormField[], index: number, direction: -1 | 1): boolean {
   if (index < 0 || index >= fields.length) return false;
   if (fields[index]!.kind === "hidden") {
     const target = index + direction;
@@ -419,7 +469,47 @@ export function moveFieldStep(
   fields: readonly FormField[],
   index: number,
   direction: -1 | 1,
+  layout: FormLayout = {},
 ): FormField[] {
+  const moved = stepFields(fields, index, direction);
+  return spoilsOrder(fields, moved, layout) ? [...fields] : moved;
+}
+
+/** True when `after` has an ordering fault (a rule naming a later question, a
+ *  section that is no longer contiguous) that `before` did not: a move that would
+ *  introduce one is refused, while a form that is already faulty can still be
+ *  rearranged towards health. */
+function spoilsOrder(
+  before: readonly FormField[],
+  after: readonly FormField[],
+  layout: FormLayout,
+): boolean {
+  return orderFaulty(after, layout) && !orderFaulty(before, layout);
+}
+
+function orderFaulty(fields: readonly FormField[], layout: FormLayout): boolean {
+  const at = new Map(fields.map((f, i) => [f.name, i]));
+  for (const [i, f] of fields.entries()) {
+    for (const ref of referencedNames(f.showIf)) {
+      const j = at.get(ref);
+      if (j !== undefined && j >= i) return true;
+    }
+  }
+  for (const s of layout.sections ?? []) {
+    const members = fields.flatMap((f, i) => (f.section === s.name ? [i] : []));
+    const first = members[0];
+    const last = members[members.length - 1];
+    if (first === undefined || last === undefined) continue;
+    if (last - first + 1 !== members.length) return true;
+    for (const ref of referencedNames(s.showIf)) {
+      const j = at.get(ref);
+      if (j !== undefined && j >= first) return true;
+    }
+  }
+  return false;
+}
+
+function stepFields(fields: readonly FormField[], index: number, direction: -1 | 1): FormField[] {
   if (index < 0 || index >= fields.length) return [...fields];
 
   if (fields[index]!.kind === "hidden") {
@@ -548,6 +638,7 @@ export function fieldRows(fields: readonly FormField[]): number[][] {
   const rows: number[][] = [];
   let lastReal: number[] | null = null;
   let breaksNext = true; // the start of the form breaks a row
+  let prevSection: string | undefined;
   for (let i = 0; i < fields.length; i++) {
     const field = fields[i]!;
     if (field.kind === "hidden") {
@@ -560,7 +651,8 @@ export function fieldRows(fields: readonly FormField[]): number[][] {
       !breaksNext &&
       field.beside &&
       lastReal &&
-      lastReal.length < MAX_ROW_CELLS
+      lastReal.length < MAX_ROW_CELLS &&
+      field.section === prevSection
     ) {
       lastReal.push(i);
     } else {
@@ -569,8 +661,126 @@ export function fieldRows(fields: readonly FormField[]): number[][] {
       lastReal = row;
     }
     breaksNext = isStatement;
+    prevSection = field.section;
   }
   return rows;
+}
+
+/* ---------------------------------------------------- rename, sections, logic --- */
+
+/**
+ * Renames a question **and every rule that names it**: every `showIf` and
+ * `requireIf`, and every section's `showIf`. The builder's name input goes through
+ * this rather than `updateField`, because a plain rename would leave each
+ * dependent rule pointing at nothing, which `checkFormLogic` then refuses.
+ */
+export function renameField(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  from: string,
+  to: string,
+): { fields: FormField[]; layout: FormLayout } {
+  if (from === to) return { fields: [...fields], layout };
+  const rewrite = (field: FormField): FormField => {
+    const next: FormField = field.name === from ? { ...field, name: to } : { ...field };
+    if (field.showIf) next.showIf = renameInCondition(field.showIf, from, to);
+    if (field.requireIf) next.requireIf = renameInCondition(field.requireIf, from, to);
+    return next;
+  };
+  const sections = layout.sections?.map((s) =>
+    s.showIf ? { ...s, showIf: renameInCondition(s.showIf, from, to) } : s,
+  );
+  return {
+    fields: fields.map(rewrite),
+    layout: sections ? { ...layout, sections } : layout,
+  };
+}
+
+/** Sections with no members dropped: what is left after a removal emptied one. */
+export function pruneSections(fields: readonly FormField[], layout: FormLayout): FormLayout {
+  const used = new Set(fields.flatMap((f) => (f.section === undefined ? [] : [f.section])));
+  const sections = (layout.sections ?? []).filter((s) => used.has(s.name));
+  return sections.length > 0 ? { sections } : {};
+}
+
+function withoutSection(field: FormField): FormField {
+  const next = { ...field };
+  delete next.section;
+  return next;
+}
+
+/** The index range `[first, last]` of the run of questions sharing `fields[at]`'s
+ *  section (or lack of one), extending both ways from `at`. */
+function runAround(fields: readonly FormField[], at: number): [number, number] {
+  const section = fields[at]?.section;
+  let first = at;
+  let last = at;
+  while (first > 0 && fields[first - 1]?.section === section) first -= 1;
+  while (last < fields.length - 1 && fields[last + 1]?.section === section) last += 1;
+  return [first, last];
+}
+
+/**
+ * A new section starting at the question `name`, running to the end of whatever
+ * run that question is in. Membership stays contiguous by construction: the earlier
+ * part of the run keeps its section (or none), the rest joins the new one. A section
+ * this empties is dropped.
+ */
+export function startSection(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  name: string,
+  label = "New section",
+): { fields: FormField[]; layout: FormLayout; section: string } | null {
+  const at = fields.findIndex((f) => f.name === name);
+  if (at === -1) return null;
+  const [, last] = runAround(fields, at);
+  const taken = (layout.sections ?? []).map((s) => s.name);
+  const section = uniqueFieldName("section", taken);
+  const next = fields.map((f, i) => (i >= at && i <= last ? { ...f, section } : f));
+  const created: FormSection = { name: section, label };
+  return {
+    fields: next,
+    layout: pruneSections(next, { sections: [...(layout.sections ?? []), created] }),
+    section,
+  };
+}
+
+/** Ends the section the question `name` is in **after** it: the questions below it
+ *  in the same run lose their membership. */
+export function endSectionAfter(fields: readonly FormField[], name: string): FormField[] {
+  const at = fields.findIndex((f) => f.name === name);
+  const section = fields[at]?.section;
+  if (at === -1 || section === undefined) return [...fields];
+  const [, last] = runAround(fields, at);
+  return fields.map((f, i) => (i > at && i <= last ? withoutSection(f) : f));
+}
+
+/** Removes a section; its questions keep their place and lose their membership. */
+export function removeSection(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  name: string,
+): { fields: FormField[]; layout: FormLayout } {
+  const next = fields.map((f) => (f.section === name ? withoutSection(f) : f));
+  const sections = (layout.sections ?? []).filter((s) => s.name !== name);
+  return { fields: next, layout: sections.length > 0 ? { sections } : {} };
+}
+
+/** Replaces the section named `name` with `next`. */
+export function updateSection(layout: FormLayout, name: string, next: FormSection): FormLayout {
+  return { sections: (layout.sections ?? []).map((s) => (s.name === name ? next : s)) };
+}
+
+/** The refusal `checkFormLogic` would give this form, as a string, or null. The
+ *  builder shows exactly the message the server would send, and disables Save. */
+export function logicRefusal(fields: readonly FormField[], layout: FormLayout): string | null {
+  try {
+    checkFormLogic(fields, layout);
+    return null;
+  } catch (err) {
+    return err instanceof Error ? err.message : "These rules cannot be saved.";
+  }
 }
 
 /* ------------------------------------------------------------ options --- */
@@ -587,8 +797,39 @@ export function addOption(field: FormField): FormField {
  * editor is changing, and mid-edit it can collide with a sibling's (typing
  * `b2` passes through `b`), at which point a value match edits both rows.
  */
-export function removeOption(field: FormField, index: number): FormField {
+export function removeOption(
+  field: FormField,
+  index: number,
+  /** The form the option is in. Given, a rule that compares against this option's
+   *  value refuses the removal (`optionRefusal`) and the field comes back as it was. */
+  ctx?: { fields: readonly FormField[]; layout: FormLayout },
+): FormField {
+  const value = field.options?.[index]?.value;
+  if (ctx && value !== undefined && optionRefusal(ctx.fields, ctx.layout, field.name, value)) {
+    return field;
+  }
   return { ...field, options: (field.options ?? []).filter((_, i) => i !== index) };
+}
+
+/** Why the option `value` of question `name` cannot be removed, or null: a rule
+ *  somewhere compares against it. */
+export function optionRefusal(
+  fields: readonly FormField[],
+  layout: FormLayout,
+  name: string,
+  value: string,
+): string | null {
+  const holders = [
+    ...fields.filter(
+      (f) => comparesValue(f.showIf, name, value) || comparesValue(f.requireIf, name, value),
+    ),
+  ].map((f) => `"${f.label || f.name}"`);
+  for (const s of layout.sections ?? []) {
+    if (comparesValue(s.showIf, name, value)) holders.push(`section "${s.label}"`);
+  }
+  return holders.length === 0
+    ? null
+    : `A rule on ${holders.join(", ")} compares against this option. Change that rule first.`;
 }
 
 export function updateOption(field: FormField, index: number, next: FormFieldOption): FormField {

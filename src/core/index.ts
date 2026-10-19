@@ -102,12 +102,15 @@ export type { OutboundRef } from "./refs";
 // the vocabulary and its one validator are shared by the PATCH route, the admin
 // builder and the submit route, none of which should each carry their own
 // reading of what a valid `FormField` is.
+export { answersFrom, formState, prefillAnswers } from "./form-logic";
+export type { FormState } from "./form-logic";
 export {
   FILE_ACCEPT,
   formLayout,
   formSlug,
   honeypotName,
   MAX_FORM_FIELDS,
+  MAX_FORM_SECTIONS,
   MAX_ROW_CELLS,
   RESERVED_PREFIX,
   rowsOf,
@@ -120,7 +123,9 @@ export type {
   FormFieldI18n,
   FormFieldKind,
   FormFieldOption,
+  FormLayout,
   FormLayoutView,
+  FormSection,
   LayoutCell,
   LayoutRow,
   LayoutSection,

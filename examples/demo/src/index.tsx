@@ -473,7 +473,7 @@ export default {
         doc={page.doc}
         resolution={page.resolution}
         locale={locale}
-        {...(submitted ? { submitted } : {})}
+        submitted={submitted}
         // `page.doc` is already the redacted document on a denial
         // (`visitor-access.md` decision 4) — root kept, body nulled — so this
         // render is otherwise unchanged. `paywall` is the one thing the host
@@ -574,20 +574,24 @@ function parseLocale(pathname: string): { locale: string; path: string } {
 /** Page metadata comes off the document's root block. */
 /**
  * The three query parameters a form's 303 carries, and nothing else exists to
- * read (`content-model/forms.md` decision 6). Null when this page was not
- * arrived at from a submission, which is every other request.
+ * read (`content-model/forms.md` decision 6), plus the page's own query string
+ * for prefill (`form-logic.md`). `status` is `''` when this page was not arrived
+ * at from a submission, which is every other request.
  *
  * Reading them is the host's job by design: Folio ships no markup, so nothing in
  * the library is in a position to render "thanks" — and because none of these
  * three names anybody, the resulting URL is still an ordinary cacheable page.
  */
-function submission(url: URL): SubmissionState | null {
-  const status = url.searchParams.get("folio_status");
-  if (!status) return null;
+function submission(url: URL): SubmissionState {
   return {
-    status,
+    // Empty when this page was not arrived at from a submission, which is every
+    // other request: `Notice` compares `form` against the descriptor's name and
+    // so still answers nothing for it. The state is provided on every render,
+    // because the form block also reads `search` to prefill from the query string.
+    status: url.searchParams.get("folio_status") ?? "",
     form: url.searchParams.get("folio_form") ?? "",
     invalid: (url.searchParams.get("folio_invalid") ?? "").split(",").filter(Boolean),
+    search: url.search,
   };
 }
 

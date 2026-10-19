@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FormField } from "../../../src/core/forms";
 import {
   ABSENT,
+  NOT_ASKED,
   ageLabel,
   answerLines,
   answerText,
@@ -64,6 +65,7 @@ const row = (over: Partial<ResponseRow> = {}): ResponseRow => ({
   locale: "",
   page: "",
   files: [],
+  unasked: [],
   ...over,
 });
 
@@ -414,5 +416,23 @@ describe("the retention line", () => {
     expect(retentionNote(now - 400 * DAY, now)).toBe(
       "The oldest response here is 13 months old. Folio never deletes one for you.",
     );
+  });
+});
+
+describe("not asked (spec 35 decision 9)", () => {
+  it("reads 'not asked' for a question the response was never asked, ahead of the dash", () => {
+    expect(cellText(field("a"), row({ unasked: ["a"] }))).toBe(NOT_ASKED);
+    expect(cellText(field("a"), row({ unasked: ["b"] }))).toBe(ABSENT);
+    expect(cellText(field("a"), row())).toBe(ABSENT);
+  });
+
+  it("flags the drawer's line, and only for a current question", () => {
+    const lines = answerLines(row({ unasked: ["a"], data: { zip: "1" } }), [
+      field("a"),
+      field("b"),
+    ]);
+    expect(lines.find((l) => l.name === "a")).toMatchObject({ value: NOT_ASKED, notAsked: true });
+    expect(lines.find((l) => l.name === "b")).toMatchObject({ value: ABSENT, notAsked: false });
+    expect(lines.find((l) => l.name === "zip")).toMatchObject({ retired: true, notAsked: false });
   });
 });

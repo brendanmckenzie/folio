@@ -151,10 +151,15 @@ export function tableColumns(fields: readonly FormField[]): FormField[] {
   return fields.filter((field) => field.kind !== "statement");
 }
 
-/** What a current field asks for and this response never answered. The same `—`
- *  the export writes, and for decision 16's reason: "this did not exist yet" and
- *  "they left it blank" are different facts. */
+/** No answer recorded: the question was blank, or was not on the form when this
+ *  response was made. The same `—` the export writes. Spec 33 decision 16 wanted
+ *  those two told apart and they are only for the two tick-box kinds, which store
+ *  `false` and `[]`; every other blank stores no key at all. */
 export const ABSENT = "—";
+
+/** The question had a condition and it did not hold, so the visitor was never shown
+ *  it (`ResponseRow.unasked`, spec 35 decision 9). */
+export const NOT_ASKED = "not asked";
 
 /**
  * One answer as text.
@@ -164,6 +169,7 @@ export const ABSENT = "—";
  * only part of an upload a table can show.
  */
 export function cellText(field: FormField, response: ResponseRow): string {
+  if (response.unasked.includes(field.name)) return NOT_ASKED;
   if (field.kind === "file") {
     return response.files.find((file) => file.field === field.name)?.filename ?? ABSENT;
   }
@@ -259,6 +265,8 @@ export interface AnswerLine {
   label: string;
   value: string;
   retired: boolean;
+  /** The visitor was never shown this question (`value` reads `NOT_ASKED`). */
+  notAsked: boolean;
   /** Present for a `file` question the response actually carries — the field
    *  name the gated download route is addressed by. */
   file?: { filename: string; size: number };
@@ -284,6 +292,7 @@ export function answerLines(response: ResponseRow, fields: readonly FormField[])
       label: field.label || field.name,
       value: cellText(field, response),
       retired: false,
+      notAsked: response.unasked.includes(field.name),
       ...(file ? { file: { filename: file.filename, size: file.size } } : {}),
     });
   }
@@ -302,6 +311,7 @@ export function answerLines(response: ResponseRow, fields: readonly FormField[])
       label: key,
       value: file ? file.filename : answerText(response.data[key]),
       retired: true,
+      notAsked: false,
       ...(file ? { file: { filename: file.filename, size: file.size } } : {}),
     });
   }

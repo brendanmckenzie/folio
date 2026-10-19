@@ -718,6 +718,8 @@ schedule cleanup.
 
 ### 4. A form has no logic, and the market says whose renderer that is
 
+**Slice 1 built 2026-10-19** as spec 35 (`docs/specs/content-model/form-logic.md`): conditional visibility and requiredness, sections, `hold` and prefill. Content-sourced options are #54; steps and the `folio/form` hook are #55. The analysis below is the record that produced them.
+
 **Raised 2026-09-07 by the second host** (`takeoffgo/takeoffgo-website`) as the
 smallest possible complaint: `/contact` used to wrap first and last name in a
 `<div className="basic-columns">`, an editor rebuilt the form on the Forms screen,
@@ -1169,7 +1171,7 @@ an unsorted flat list, which stops working somewhere around 15.
   says which field, which document and that `POST /folio/migrate` is the fix — it
   currently says only the first of the three.
 
-- **A story whose D1 row arrives without its Durable Object is unrecoverable through
+- **Fixed 2026-10-19 (issue #28).** A cold object seeds from `published_doc`, else the newest version, and restore re-roots onto the live root (spec 27, "Durable Object reseed"). What this entry recorded: **A story whose D1 row arrives without its Durable Object is unrecoverable through
   any supported write.** Found 2026-08-30 on a real staging environment, and it is the
   predictable consequence of copying a database between environments: `stories` and
   `versions` copy, Durable Object storage cannot. The first editor open then calls

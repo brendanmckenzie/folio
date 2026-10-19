@@ -271,12 +271,13 @@ describe("every interaction-only surface mounts", () => {
  * message: "every screen renders" is only true until somebody adds a screen.
  *
  * Every `.tsx` directly under `ui/screens/` is in exactly one of three sets — the
- * nineteen the route sweep reaches, the two the portal test reaches, and the
- * seventeen above — so a thirty-ninth file fails here until it is classified.
+ * twenty the route sweep reaches (`ConditionEditor` nested in `FormBuilder`), the
+ * two the portal test reaches, and the seventeen above — so a fortieth file fails
+ * here until it is classified.
  * `fields/` is deliberately excluded: those render inside `Inspector`, which the
  * `edit` routes mount, and they have no props of their own to give.
  */
-describe("the thirty-eight screens are all accounted for", () => {
+describe("the thirty-nine screens are all accounted for", () => {
   /** Reached by `screens.test.tsx`'s nineteen URLs, directly or nested. */
   const BY_ROUTE = [
     "Access",
@@ -285,6 +286,7 @@ describe("the thirty-eight screens are all accounted for", () => {
     "Assets",
     "BlockRail",
     "Content",
+    "ConditionEditor",
     "Documents",
     "EditorShell",
     "FormBuilder",
@@ -315,7 +317,7 @@ describe("the thirty-eight screens are all accounted for", () => {
 
     const covered = [...BY_ROUTE, ...BY_PORTAL, ...SURFACES.map(([name]) => name)].sort();
 
-    expect(files.length).toBe(38);
+    expect(files.length).toBe(39);
     expect(covered).toEqual(files);
   });
 });

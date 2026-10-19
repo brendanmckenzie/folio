@@ -1286,9 +1286,13 @@ describe("forms", () => {
       "updated_at",
       // 0011.
       "site_id",
+      // 0014: sections, as JSON.
+      "layout",
     ]);
 
     const byName = new Map((await columnsOf("forms")).map((c) => [c.name, c]));
+    expect(byName.get("layout")?.dflt_value).toBe("'{}'");
+    expect(byName.get("layout")?.notnull).toBe(1);
     expect(byName.get("id")?.pk).toBe(1);
     expect(byName.get("fields")?.dflt_value).toBe("'[]'");
     expect(byName.get("version")?.dflt_value).toBe("1");
@@ -1301,7 +1305,7 @@ describe("forms", () => {
 
     await insert("frm_defaults", "contact", "Contact us");
     const row = await env.DB.prepare(
-      `select fields, version, open, closes_at, closed_message, success_message,
+      `select fields, layout, version, open, closes_at, closed_message, success_message,
               submit_label, redirect_to
        from forms where id = ?`,
     )
@@ -1309,6 +1313,7 @@ describe("forms", () => {
       .first<Record<string, unknown>>();
     expect(row).toEqual({
       fields: "[]",
+      layout: "{}",
       version: 1,
       open: 1,
       closes_at: null,
@@ -1406,9 +1411,13 @@ describe("form_responses", () => {
       "files",
       // 0011: the site it was submitted on.
       "site_id",
+      // 0014: the questions this response was never asked, as JSON.
+      "unasked",
     ]);
 
     const byName = new Map((await columnsOf("form_responses")).map((c) => [c.name, c]));
+    expect(byName.get("unasked")?.dflt_value).toBe("'[]'");
+    expect(byName.get("unasked")?.notnull).toBe(1);
     expect(byName.get("id")?.pk).toBe(1);
     expect(byName.get("data")?.dflt_value).toBe("'{}'");
     expect(byName.get("locale")?.dflt_value).toBe("''");
@@ -1421,11 +1430,18 @@ describe("form_responses", () => {
 
     await insert("res_defaults", "frm_x", "hash_defaults");
     const row = await env.DB.prepare(
-      "select data, locale, page, files, ip_hash from form_responses where id = ?",
+      "select data, locale, page, files, ip_hash, unasked from form_responses where id = ?",
     )
       .bind("res_defaults")
       .first<Record<string, unknown>>();
-    expect(row).toEqual({ data: "{}", locale: "", page: "", files: "[]", ip_hash: null });
+    expect(row).toEqual({
+      data: "{}",
+      locale: "",
+      page: "",
+      files: "[]",
+      ip_hash: null,
+      unasked: "[]",
+    });
   });
 
   it("has exactly four indexes: the keyset, the duplicate reader, the partial throttle and the site filter", async () => {
@@ -1661,6 +1677,7 @@ describe("the ledger", () => {
       "0010_forms.sql",
       "0011_sites.sql",
       "0013_site_brands.sql",
+      "0014_form_logic.sql",
     ]);
   });
 
