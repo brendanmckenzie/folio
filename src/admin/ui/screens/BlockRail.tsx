@@ -1,13 +1,13 @@
-import type { CSSProperties, KeyboardEvent } from 'react'
-import { useCallback, useMemo, useState } from 'react'
-import type { Doc } from '../../../core/doc'
-import type { LocaleContext } from '../../../core/locales'
-import type { Presence } from '../../../core/protocol'
-import type { SchemaIndex } from '../../../core/schema'
-import { Button } from '../Button'
-import { List, Row } from '../List'
-import { Menu, type MenuItem } from '../Menu'
-import css from './BlockRail.module.css'
+import type { CSSProperties, KeyboardEvent } from "react";
+import { useCallback, useMemo, useState } from "react";
+import type { Doc } from "../../../core/doc";
+import type { LocaleContext } from "../../../core/locales";
+import type { Presence } from "../../../core/protocol";
+import type { SchemaIndex } from "../../../core/schema";
+import { Button } from "../Button";
+import { List, Row } from "../List";
+import { Menu, type MenuItem } from "../Menu";
+import css from "./BlockRail.module.css";
 import {
   type AddTarget,
   addTargetOf,
@@ -19,53 +19,53 @@ import {
   type RailBlokRow,
   type RailRootRow,
   railRows,
-} from './editor-model'
+} from "./editor-model";
 
 interface Props {
   /** What is on screen: the live draft, or the version being viewed. Null while
    * the store bootstraps. */
-  doc: Doc | null
-  schema: SchemaIndex
-  localeCtx: LocaleContext | undefined
-  selection: string | null
+  doc: Doc | null;
+  schema: SchemaIndex;
+  localeCtx: LocaleContext | undefined;
+  selection: string | null;
   /** Per-story presence. One dot per block whoever has focus in it — the tree's
    * grain is the block, and the per-field ring lives in the inspector. */
-  peers: readonly Presence[]
+  peers: readonly Presence[];
   /** Viewing a past version, or a role that may not edit: every control that
    * would write is absent rather than disabled. */
-  readOnly: boolean
-  onSelect: (uid: string) => void
-  onAdd: (parent: string, slot: string, type: string, index: number, preset?: string) => void
-  onMove: (move: BlockMove) => void
-  onDuplicate: (uid: string) => void
-  onCopy: (uid: string) => void
-  onNotice: (message: string) => void
+  readOnly: boolean;
+  onSelect: (uid: string) => void;
+  onAdd: (parent: string, slot: string, type: string, index: number, preset?: string) => void;
+  onMove: (move: BlockMove) => void;
+  onDuplicate: (uid: string) => void;
+  onCopy: (uid: string) => void;
+  onNotice: (message: string) => void;
   /**
    * Port phase 7c's seam. Present, and `+ Add` opens the searchable picker instead
    * of the grouped menu below — same slot, same `onAdd`, a different affordance in
    * front of it. Absent keeps the menu, which is what makes the rail complete on
    * its own rather than waiting on another phase.
    */
-  onRequestAdd?: (target: AddTarget) => void
+  onRequestAdd?: (target: AddTarget) => void;
   /** `⌘\`, and the `«` in the header. Held above this component so the shortcut
    * and the button drive the same value. */
-  onCollapse: () => void
+  onCollapse: () => void;
 }
 
 /** Six placeholder rows while the document is in flight. Named rather than
  * indexed, matching Content's and Documents'. */
-const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
+const SKELETON = ["s1", "s2", "s3", "s4", "s5", "s6"];
 
 /**
  * Which gesture an ⌥-arrow means. A table rather than a nested ternary, for the
  * reason `Content.tsx` gives: four two-word branches read as four rules.
  */
 const GESTURES: Record<string, BlockGesture | undefined> = {
-  ArrowUp: 'up',
-  ArrowDown: 'down',
-  ArrowLeft: 'out',
-  ArrowRight: 'in',
-}
+  ArrowUp: "up",
+  ArrowDown: "down",
+  ArrowLeft: "out",
+  ArrowRight: "in",
+};
 
 /**
  * The block tree, and **nothing else** — seven rail tabs become zero
@@ -101,7 +101,7 @@ const GESTURES: Record<string, BlockGesture | undefined> = {
  * needs exactly the `onAdd` this already calls.
  */
 export function BlockRail(props: Props) {
-  const { doc, schema, localeCtx, selection, readOnly, onNotice, onMove } = props
+  const { doc, schema, localeCtx, selection, readOnly, onNotice, onMove } = props;
   /**
    * Which blocks have their children hidden.
    *
@@ -110,12 +110,12 @@ export function BlockRail(props: Props) {
    * costs a request; a block tree is shallow and already in memory, so hiding it
    * by default would be hiding the thing the rail exists to show.
    */
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   const rows = useMemo(
     () => (doc ? railRows(doc, schema, collapsed, localeCtx) : []),
     [doc, schema, collapsed, localeCtx],
-  )
+  );
 
   /**
    * The rows `List` counts, which is not all of them: an add row is a `<div>` with
@@ -125,30 +125,30 @@ export function BlockRail(props: Props) {
    * rather than the rendered one.
    */
   const focusable = useMemo(
-    () => rows.filter((row): row is RailRootRow | RailBlokRow => row.kind !== 'add'),
+    () => rows.filter((row): row is RailRootRow | RailBlokRow => row.kind !== "add"),
     [rows],
-  )
+  );
 
   const toggle = useCallback((uid: string) => {
     setCollapsed((prev) => {
-      const next = new Set(prev)
-      if (!next.delete(uid)) next.add(uid)
-      return next
-    })
-  }, [])
+      const next = new Set(prev);
+      if (!next.delete(uid)) next.add(uid);
+      return next;
+    });
+  }, []);
 
   const gesture = useCallback(
     (which: BlockGesture, at: RailBlokRow) => {
-      if (!doc) return
-      const outcome = blockGesture(which, at, rows, doc, schema)
-      if ('refusal' in outcome) {
-        onNotice(outcome.refusal)
-        return
+      if (!doc) return;
+      const outcome = blockGesture(which, at, rows, doc, schema);
+      if ("refusal" in outcome) {
+        onNotice(outcome.refusal);
+        return;
       }
-      onMove(outcome.move)
+      onMove(outcome.move);
     },
     [doc, rows, schema, onNotice, onMove],
-  )
+  );
 
   /**
    * `→ ←` and the four `⌥` gestures, for whichever row has focus.
@@ -162,43 +162,43 @@ export function BlockRail(props: Props) {
     index: number,
     focus: (i: number) => void,
   ) => {
-    const at = focusable[index]
-    if (!at) return
+    const at = focusable[index];
+    if (!at) return;
 
     if (e.altKey) {
-      const which = GESTURES[e.key]
+      const which = GESTURES[e.key];
       // An ⌥ chord that is not one of the four is the browser's, so it keeps its
       // default — which is why the guard is before `preventDefault` and not after.
-      if (!which) return
-      e.preventDefault()
+      if (!which) return;
+      e.preventDefault();
       // Read-only for either reason (a past version on screen, a role that may not
       // edit): the row's own ↑ ↓ controls are absent too, so silence here is
       // consistent rather than a swallowed gesture.
-      if (readOnly) return
+      if (readOnly) return;
       // The root block *is* the document: it has no siblings to move among and no
       // parent to move out of, and saying so beats a gesture that looks broken.
-      if (at.kind === 'root') {
-        onNotice('The document itself cannot be moved')
-        return
+      if (at.kind === "root") {
+        onNotice("The document itself cannot be moved");
+        return;
       }
-      gesture(which, at)
-      return
+      gesture(which, at);
+      return;
     }
-    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
-    e.preventDefault()
-    const open = at.kind === 'blok' && at.expandable && at.expanded
-    if (e.key === 'ArrowRight') {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const open = at.kind === "blok" && at.expandable && at.expanded;
+    if (e.key === "ArrowRight") {
       // → on a closed parent opens it; on an open one it steps to the first child,
       // which is the row physically below. Leaving that to ↓ would mean → doing
       // nothing at all on an already-open node.
-      if (at.kind === 'blok' && at.expandable && !at.expanded) toggle(at.uid)
-      else focus(index + 1)
-      return
+      if (at.kind === "blok" && at.expandable && !at.expanded) toggle(at.uid);
+      else focus(index + 1);
+      return;
     }
     // ← collapses an open node, and steps out to the parent otherwise.
-    if (open) toggle(at.uid)
-    else if (at.kind === 'blok') focus(focusable.findIndex((row) => row.uid === at.parent))
-  }
+    if (open) toggle(at.uid);
+    else if (at.kind === "blok") focus(focusable.findIndex((row) => row.uid === at.parent));
+  };
 
   return (
     <aside className={css.rail} aria-label="Blocks">
@@ -219,7 +219,7 @@ export function BlockRail(props: Props) {
         <div className={css.body}>
           <List label="Blocks" tree onUnhandledKey={onRowKey}>
             {rows.map((row) =>
-              row.kind === 'add' ? (
+              row.kind === "add" ? (
                 readOnly ? null : (
                   <AddRow
                     key={`add:${row.parent}:${row.slot}`}
@@ -250,7 +250,7 @@ export function BlockRail(props: Props) {
         </div>
       )}
     </aside>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------- a row --- */
@@ -266,19 +266,19 @@ function BlockRow({
   onDuplicate,
   onCopy,
 }: {
-  row: RailRootRow | RailBlokRow
-  current: boolean
-  peers: readonly Presence[]
-  readOnly: boolean
-  onSelect: (uid: string) => void
-  onToggle: (uid: string) => void
-  onGesture: (which: BlockGesture, at: RailBlokRow) => void
-  onDuplicate: (uid: string) => void
-  onCopy: (uid: string) => void
+  row: RailRootRow | RailBlokRow;
+  current: boolean;
+  peers: readonly Presence[];
+  readOnly: boolean;
+  onSelect: (uid: string) => void;
+  onToggle: (uid: string) => void;
+  onGesture: (which: BlockGesture, at: RailBlokRow) => void;
+  onDuplicate: (uid: string) => void;
+  onCopy: (uid: string) => void;
 }) {
-  const watchers = peers.filter((peer) => peer.selection?.uid === row.uid)
-  const blok = row.kind === 'blok' ? row : null
-  const expandable = blok?.expandable ?? false
+  const watchers = peers.filter((peer) => peer.selection?.uid === row.uid);
+  const blok = row.kind === "blok" ? row : null;
+  const expandable = blok?.expandable ?? false;
 
   return (
     <Row
@@ -293,14 +293,14 @@ function BlockRow({
           <button
             type="button"
             className={css.twisty}
-            data-open={blok.expanded ? '' : undefined}
-            aria-label={`${blok.expanded ? 'Collapse' : 'Expand'} ${blok.label}`}
+            data-open={blok.expanded ? "" : undefined}
+            aria-label={`${blok.expanded ? "Collapse" : "Expand"} ${blok.label}`}
             // No `aria-expanded` here: the treeitem around it already carries it,
             // and two elements announcing the same state is one of them lying as
             // soon as they disagree.
             onClick={(e) => {
-              e.stopPropagation()
-              onToggle(row.uid)
+              e.stopPropagation();
+              onToggle(row.uid);
             }}
           >
             ›
@@ -334,10 +334,10 @@ function BlockRow({
               drop target that was 4px tall and silent. Both call the same
               `blockGesture` the ⌥ arrows do.
             */}
-            <Glyph label={`Move ${blok.label} up`} onClick={() => onGesture('up', blok)}>
+            <Glyph label={`Move ${blok.label} up`} onClick={() => onGesture("up", blok)}>
               ↑
             </Glyph>
-            <Glyph label={`Move ${blok.label} down`} onClick={() => onGesture('down', blok)}>
+            <Glyph label={`Move ${blok.label} down`} onClick={() => onGesture("down", blok)}>
               ↓
             </Glyph>
             <Glyph
@@ -345,7 +345,7 @@ function BlockRow({
               disabled={blok.full}
               reason={
                 blok.max === 1
-                  ? 'This slot holds one block'
+                  ? "This slot holds one block"
                   : `This slot holds at most ${blok.max} blocks`
               }
               onClick={() => onDuplicate(blok.uid)}
@@ -361,7 +361,7 @@ function BlockRow({
     >
       <span className={css.label}>{row.label}</span>
     </Row>
-  )
+  );
 }
 
 /** A row action: one glyph, one accessible name, and a refusal that explains
@@ -374,11 +374,11 @@ function Glyph({
   onClick,
   children,
 }: {
-  label: string
-  disabled?: boolean
-  reason?: string
-  onClick: () => void
-  children: string
+  label: string;
+  disabled?: boolean;
+  reason?: string;
+  onClick: () => void;
+  children: string;
 }) {
   return (
     <Button
@@ -390,13 +390,13 @@ function Glyph({
       onClick={(e) => {
         // The row's own click selects the block. An action inside it must not do
         // both.
-        e.stopPropagation()
-        onClick()
+        e.stopPropagation();
+        onClick();
       }}
     >
       {children}
     </Button>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ adding --- */
@@ -415,23 +415,23 @@ function AddRow({
   onAdd,
   onRequest,
 }: {
-  row: RailAddRow
-  schema: SchemaIndex
-  onAdd: (parent: string, slot: string, type: string, index: number, preset?: string) => void
+  row: RailAddRow;
+  schema: SchemaIndex;
+  onAdd: (parent: string, slot: string, type: string, index: number, preset?: string) => void;
   /** Opens the picker instead of the menu. See `Props.onRequestAdd`. */
-  onRequest?: () => void
+  onRequest?: () => void;
 }) {
-  const label = row.slotLabel ? `+ ${row.slotLabel}` : '+ Add block'
+  const label = row.slotLabel ? `+ ${row.slotLabel}` : "+ Add block";
 
   if (onRequest) {
     return (
-      <div className={css.addRow} style={{ '--depth': row.depth } as CSSProperties}>
+      <div className={css.addRow} style={{ "--depth": row.depth } as CSSProperties}>
         <span className={css.addIndent} />
         <Button size="sm" variant="subtle" onClick={onRequest}>
           {label}
         </Button>
       </div>
-    )
+    );
   }
 
   const items: MenuItem[] = menuGroups(schema, row.allow).flatMap((group) => [
@@ -449,12 +449,12 @@ function AddRow({
       label: preset.label,
       run: () => onAdd(row.parent, row.slot, group.type, row.index, preset.name),
     })),
-  ])
+  ]);
 
   return (
-    <div className={css.addRow} style={{ '--depth': row.depth } as CSSProperties}>
+    <div className={css.addRow} style={{ "--depth": row.depth } as CSSProperties}>
       <span className={css.addIndent} />
       <Menu align="start" trigger={label} items={items} />
     </div>
-  )
+  );
 }

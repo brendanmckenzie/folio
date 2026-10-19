@@ -1,5 +1,5 @@
-import { env } from 'cloudflare:test'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { env } from "cloudflare:test";
+import { beforeEach, describe, expect, it } from "vitest";
 
 /**
  * The phase 1 gate for full-text search
@@ -34,20 +34,20 @@ const clear = async () => {
       `insert into content_fts(content_fts, rowid, title, body)
        select 'delete', id, title, body from content_text`,
     ),
-    env.DB.prepare('delete from content_text'),
-  ])
-}
+    env.DB.prepare("delete from content_text"),
+  ]);
+};
 
 const insertRow = (storyId: string, locale: string, title: string, body: string) =>
   env.DB.prepare(
-    'insert into content_text (story_id, locale, title, body) values (?, ?, ?, ?)',
-  ).bind(storyId, locale, title, body)
+    "insert into content_text (story_id, locale, title, body) values (?, ?, ?, ?)",
+  ).bind(storyId, locale, title, body);
 
 const indexRows = (storyId: string) =>
   env.DB.prepare(
     `insert into content_fts(rowid, title, body)
      select id, title, body from content_text where story_id = ?`,
-  ).bind(storyId)
+  ).bind(storyId);
 
 /**
  * Two stories, one of them in two locales, indexed the way a publish batch will
@@ -56,13 +56,13 @@ const indexRows = (storyId: string) =>
  */
 const seed = async () => {
   await env.DB.batch([
-    insertRow('sty_a', '', 'Harbour Sunset', 'The harbour at sunset was very quiet indeed.'),
-    insertRow('sty_a', 'fr', 'Coucher de soleil', 'Le port au coucher de soleil était calme.'),
-    insertRow('sty_b', '', 'Fishing Notes', 'A note about the harbour and the boats moored in it.'),
-    indexRows('sty_a'),
-    indexRows('sty_b'),
-  ])
-}
+    insertRow("sty_a", "", "Harbour Sunset", "The harbour at sunset was very quiet indeed."),
+    insertRow("sty_a", "fr", "Coucher de soleil", "Le port au coucher de soleil était calme."),
+    insertRow("sty_b", "", "Fishing Notes", "A note about the harbour and the boats moored in it."),
+    indexRows("sty_a"),
+    indexRows("sty_b"),
+  ]);
+};
 
 const matched = async (query: string): Promise<string[]> => {
   const { results } = await env.DB.prepare(
@@ -73,37 +73,37 @@ const matched = async (query: string): Promise<string[]> => {
      order by t.story_id, t.locale`,
   )
     .bind(query)
-    .all<{ story_id: string; locale: string }>()
-  return results.map((r) => `${r.story_id}:${r.locale || '-'}`)
-}
+    .all<{ story_id: string; locale: string }>();
+  return results.map((r) => `${r.story_id}:${r.locale || "-"}`);
+};
 
-describe('FTS5 in workerd', () => {
+describe("FTS5 in workerd", () => {
   beforeEach(async () => {
-    await clear()
-    await seed()
-  })
+    await clear();
+    await seed();
+  });
 
-  it('matches on a word in either column, across locales', async () => {
-    expect(await matched('harbour')).toEqual(['sty_a:-', 'sty_b:-'])
-    expect(await matched('sunset')).toEqual(['sty_a:-'])
+  it("matches on a word in either column, across locales", async () => {
+    expect(await matched("harbour")).toEqual(["sty_a:-", "sty_b:-"]);
+    expect(await matched("sunset")).toEqual(["sty_a:-"]);
     // The French row is a row like any other; the tokenizer is not locale-aware
     // and does not need to be.
-    expect(await matched('coucher')).toEqual(['sty_a:fr'])
-    expect(await matched('nothingatallliketh1s')).toEqual([])
-  })
+    expect(await matched("coucher")).toEqual(["sty_a:fr"]);
+    expect(await matched("nothingatallliketh1s")).toEqual([]);
+  });
 
-  it('folds diacritics, which is what makes one tokenizer serve every locale', async () => {
+  it("folds diacritics, which is what makes one tokenizer serve every locale", async () => {
     // `remove_diacritics 2` in the DDL. "était" indexed, "etait" typed.
-    expect(await matched('etait')).toEqual(['sty_a:fr'])
-    expect(await matched('était')).toEqual(['sty_a:fr'])
-  })
+    expect(await matched("etait")).toEqual(["sty_a:fr"]);
+    expect(await matched("était")).toEqual(["sty_a:fr"]);
+  });
 
   it("answers a prefix query as a seek, which is what `prefix='2 3'` buys", async () => {
     // The query compiler appends `*` to a visitor's last token (decision 3).
-    expect(await matched('harb*')).toEqual(['sty_a:-', 'sty_b:-'])
-  })
+    expect(await matched("harb*")).toEqual(["sty_a:-", "sty_b:-"]);
+  });
 
-  it('returns a bm25 score, and title weighting puts the titled document first', async () => {
+  it("returns a bm25 score, and title weighting puts the titled document first", async () => {
     const { results } = await env.DB.prepare(
       `select t.story_id as story_id, -bm25(content_fts, 10.0, 1.0) as score
        from content_fts f
@@ -111,19 +111,19 @@ describe('FTS5 in workerd', () => {
        where content_fts match ?
        order by score desc`,
     )
-      .bind('harbour')
-      .all<{ story_id: string; score: number }>()
+      .bind("harbour")
+      .all<{ story_id: string; score: number }>();
 
-    expect(results.map((r) => r.story_id)).toEqual(['sty_a', 'sty_b'])
+    expect(results.map((r) => r.story_id)).toEqual(["sty_a", "sty_b"]);
     // Negated in the SQL so higher is better and `relevance` sorts `desc` like
     // every other "best first" order (decision 2).
-    for (const row of results) expect(row.score).toBeGreaterThan(0)
+    for (const row of results) expect(row.score).toBeGreaterThan(0);
     expect((results[0] as { score: number }).score).toBeGreaterThan(
       (results[1] as { score: number }).score,
-    )
-  })
+    );
+  });
 
-  it('returns a snippet marked with char(1)/char(2), from the external content table', async () => {
+  it("returns a snippet marked with char(1)/char(2), from the external content table", async () => {
     // `snippet()` reads the matched columns out of `content_text`, which is the
     // half of external content that `contentless_delete=1` would have cost.
     //
@@ -136,17 +136,17 @@ describe('FTS5 in workerd', () => {
        from content_fts
        where content_fts match ? and rowid = (select id from content_text where story_id = 'sty_a' and locale = '')`,
     )
-      .bind('sunset')
-      .first<{ s: string }>()
+      .bind("sunset")
+      .first<{ s: string }>();
 
-    expect(row?.s).toContain('\u0001sunset\u0002')
+    expect(row?.s).toContain("\u0001sunset\u0002");
     // `replaceAll` on the two literals rather than a character class: a regex
     // holding a C0 control is `lint/suspicious/noControlCharactersInRegex`, and
     // the rule is right, an invisible character inside a `[...]` is exactly the
     // thing nobody reviewing this would see.
-    const plain = (row?.s ?? '').replaceAll('\u0001', '').replaceAll('\u0002', '')
-    expect(plain).toContain('The harbour at sunset')
-  })
+    const plain = (row?.s ?? "").replaceAll("\u0001", "").replaceAll("\u0002", "");
+    expect(plain).toContain("The harbour at sunset");
+  });
 
   it("de-indexes a whole story with one multi-row `'delete'` … select — THE GATE", async () => {
     // The exact two statements `indexStatements` will emit for the replace half of
@@ -157,26 +157,26 @@ describe('FTS5 in workerd', () => {
       env.DB.prepare(
         `insert into content_fts(content_fts, rowid, title, body)
          select 'delete', id, title, body from content_text where story_id = ?`,
-      ).bind('sty_a'),
-      env.DB.prepare('delete from content_text where story_id = ?').bind('sty_a'),
-    ])
+      ).bind("sty_a"),
+      env.DB.prepare("delete from content_text where story_id = ?").bind("sty_a"),
+    ]);
 
     // Both of `sty_a`'s locales are gone from the index, and `sty_b` is untouched.
-    expect(await matched('harbour')).toEqual(['sty_b:-'])
-    expect(await matched('sunset')).toEqual([])
-    expect(await matched('coucher')).toEqual([])
-    expect(await matched('etait')).toEqual([])
+    expect(await matched("harbour")).toEqual(["sty_b:-"]);
+    expect(await matched("sunset")).toEqual([]);
+    expect(await matched("coucher")).toEqual([]);
+    expect(await matched("etait")).toEqual([]);
 
     // `matched` joins back to `content_text`, so it would also report an empty set
     // for tokens FTS5 still held. Ask the index on its own terms as well: a
     // lingering token entry would answer a rowid here.
     const orphan = await env.DB.prepare(
-      'select count(*) as n from content_fts where content_fts match ?',
+      "select count(*) as n from content_fts where content_fts match ?",
     )
-      .bind('sunset OR coucher')
-      .first<{ n: number }>()
-    expect(orphan?.n).toBe(0)
-  })
+      .bind("sunset OR coucher")
+      .first<{ n: number }>();
+    expect(orphan?.n).toBe(0);
+  });
 
   it("passes FTS5's own integrity-check after that delete", async () => {
     // The only assertion that can see a *partial* de-index: `integrity-check`
@@ -187,30 +187,30 @@ describe('FTS5 in workerd', () => {
       env.DB.prepare(
         `insert into content_fts(content_fts, rowid, title, body)
          select 'delete', id, title, body from content_text where story_id = ?`,
-      ).bind('sty_a'),
-      env.DB.prepare('delete from content_text where story_id = ?').bind('sty_a'),
-    ])
+      ).bind("sty_a"),
+      env.DB.prepare("delete from content_text where story_id = ?").bind("sty_a"),
+    ]);
 
     await expect(
       env.DB.prepare("insert into content_fts(content_fts) values('integrity-check')").run(),
-    ).resolves.toBeTruthy()
+    ).resolves.toBeTruthy();
 
     // And the surviving story is still fully indexed, not merely still matching.
-    expect(await matched('boats')).toEqual(['sty_b:-'])
-  })
+    expect(await matched("boats")).toEqual(["sty_b:-"]);
+  });
 
-  it('round-trips a 64 kB body through one bound parameter', async () => {
+  it("round-trips a 64 kB body through one bound parameter", async () => {
     // `MAX_SEARCH_BODY` is 65_536, and the body is one bind of the four-bind
     // insert. D1's documented maximum string size is 2 MB, so this is well inside
     // it — asserted because the cap was chosen on that basis.
-    const needle = 'zqxjubilant'
-    const body = `${'lorem ipsum dolor sit amet '.repeat(2400)}${needle}`
-    expect(body.length).toBeGreaterThan(64_000)
+    const needle = "zqxjubilant";
+    const body = `${"lorem ipsum dolor sit amet ".repeat(2400)}${needle}`;
+    expect(body.length).toBeGreaterThan(64_000);
 
-    await env.DB.batch([insertRow('sty_big', '', 'Big', body), indexRows('sty_big')])
-    expect(await matched(needle)).toEqual(['sty_big:-'])
-  })
-})
+    await env.DB.batch([insertRow("sty_big", "", "Big", body), indexRows("sty_big")]);
+    expect(await matched(needle)).toEqual(["sty_big:-"]);
+  });
+});
 
 /**
  * **D1 binds at most 100 parameters per statement.** Measured here rather than
@@ -230,90 +230,90 @@ describe('FTS5 in workerd', () => {
  * therefore fail the *whole publish batch* today. `MAX_ROWS` was sized against a
  * ceiling that does not exist. Spec 30 phase 3 chunks both.
  */
-describe('D1 bound-parameter cap', () => {
+describe("D1 bound-parameter cap", () => {
   const bindN = async (n: number): Promise<string | null> => {
-    const holes = Array.from({ length: n }, () => '?').join(', ')
+    const holes = Array.from({ length: n }, () => "?").join(", ");
     try {
       await env.DB.prepare(`select count(*) as n from stories where id in (${holes})`)
         .bind(...Array.from({ length: n }, (_, i) => `sty_${i}`))
-        .first()
-      return null
+        .first();
+      return null;
     } catch (err) {
-      return err instanceof Error ? err.message : String(err)
+      return err instanceof Error ? err.message : String(err);
     }
-  }
+  };
 
-  it('accepts exactly 100 and refuses 101', async () => {
-    expect(await bindN(1)).toBeNull()
-    expect(await bindN(99)).toBeNull()
-    expect(await bindN(100)).toBeNull()
-    expect(await bindN(101)).toMatch(/too many SQL variables/)
-  })
+  it("accepts exactly 100 and refuses 101", async () => {
+    expect(await bindN(1)).toBeNull();
+    expect(await bindN(99)).toBeNull();
+    expect(await bindN(100)).toBeNull();
+    expect(await bindN(101)).toMatch(/too many SQL variables/);
+  });
 
-  it('refuses 150, 500 and 2000 the same way, so nothing about it is a soft limit', async () => {
+  it("refuses 150, 500 and 2000 the same way, so nothing about it is a soft limit", async () => {
     // The three the spec asked for. There is no degradation and no truncation:
     // one error, at the same offset, for every size above the cap.
     for (const n of [150, 500, 2000]) {
-      expect(await bindN(n)).toMatch(/too many SQL variables/)
+      expect(await bindN(n)).toMatch(/too many SQL variables/);
     }
-  })
+  });
 
   it("is what breaks `content_index`'s multi-row insert above twenty rows", async () => {
     // Exactly the statement `indexStatements` emits, at five binds a row.
     const insertIndex = (rows: number) => {
-      const values = Array.from({ length: rows }, () => '(?, ?, ?, ?, ?)').join(', ')
+      const values = Array.from({ length: rows }, () => "(?, ?, ?, ?, ?)").join(", ");
       const binds = Array.from({ length: rows }, (_, i) => [
-        'sty_cap',
-        '',
+        "sty_cap",
+        "",
         `field_${i}`,
-        'value',
+        "value",
         null,
-      ]).flat()
+      ]).flat();
       return env.DB.prepare(
         `insert into content_index (story_id, locale, field, text_value, num_value) values ${values}`,
       )
         .bind(...binds)
-        .run()
-    }
+        .run();
+    };
 
-    await expect(insertIndex(20)).resolves.toBeTruthy()
-    await expect(insertIndex(21)).rejects.toThrow(/too many SQL variables/)
-    await env.DB.prepare('delete from content_index').run()
-  })
+    await expect(insertIndex(20)).resolves.toBeTruthy();
+    await expect(insertIndex(21)).rejects.toThrow(/too many SQL variables/);
+    await env.DB.prepare("delete from content_index").run();
+  });
 
   it("is what breaks `content_refs`' multi-row insert above thirty-three rows", async () => {
     // Three binds a row, so the reachable limit is lower: a page with thirty-four
     // internal links, which `pagination.md`'s edge cases call legitimate.
     const insertRefs = (rows: number) => {
-      const values = Array.from({ length: rows }, () => '(?, ?, ?)').join(', ')
+      const values = Array.from({ length: rows }, () => "(?, ?, ?)").join(", ");
       const binds = Array.from({ length: rows }, (_, i) => [
-        'sty_cap',
+        "sty_cap",
         `sty_target_${i}`,
-        'link',
-      ]).flat()
+        "link",
+      ]).flat();
       return env.DB.prepare(
         `insert or ignore into content_refs (from_story, to_id, kind) values ${values}`,
       )
         .bind(...binds)
-        .run()
-    }
+        .run();
+    };
 
-    await expect(insertRefs(33)).resolves.toBeTruthy()
-    await expect(insertRefs(34)).rejects.toThrow(/too many SQL variables/)
-    await env.DB.prepare('delete from content_refs').run()
-  })
+    await expect(insertRefs(33)).resolves.toBeTruthy();
+    await expect(insertRefs(34)).rejects.toThrow(/too many SQL variables/);
+    await env.DB.prepare("delete from content_refs").run();
+  });
 
-  it('applies per statement, not per batch, so chunking is the whole fix', async () => {
+  it("applies per statement, not per batch, so chunking is the whole fix", async () => {
     // Four statements of a hundred binds each in one transaction is fine. That is
     // what makes "split the insert into chunks and batch them" a fix rather than a
     // trade: a publish stays one transaction.
     const hundred = () => {
-      const holes = Array.from({ length: 100 }, () => '?').join(', ')
+      const holes = Array.from({ length: 100 }, () => "?").join(", ");
       return env.DB.prepare(`select count(*) as n from stories where id in (${holes})`).bind(
         ...Array.from({ length: 100 }, (_, i) => `sty_${i}`),
-      )
-    }
-    const out = await env.DB.batch([hundred(), hundred(), hundred(), hundred()])
-    expect(out).toHaveLength(4)
-  })
-})
+      );
+    };
+    const out = await env.DB.batch([hundred(), hundred(), hundred(), hundred()]);
+    expect(out).toHaveLength(4);
+  });
+});

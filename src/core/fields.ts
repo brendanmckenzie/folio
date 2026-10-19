@@ -1,24 +1,24 @@
-import type { ReactNode } from 'react'
-import type { FieldCondition } from './conditions'
-import type { Json } from './doc'
-import type { ResolvedForm } from './forms'
-import type { ResolvedCollection } from './query'
-import type { ResolvedAsset, ResolvedLink, ResolvedReference } from './resolve'
-import type { RichtextMarkName, RichtextNodeName } from './richtext'
-import type { LinkKind } from './values'
+import type { ReactNode } from "react";
+import type { FieldCondition } from "./conditions";
+import type { Json } from "./doc";
+import type { ResolvedForm } from "./forms";
+import type { ResolvedCollection } from "./query";
+import type { ResolvedAsset, ResolvedLink, ResolvedReference } from "./resolve";
+import type { RichtextMarkName, RichtextNodeName } from "./richtext";
+import type { LinkKind } from "./values";
 
 interface Common {
-  label?: string
-  help?: string
-  required?: boolean
+  label?: string;
+  help?: string;
+  required?: boolean;
   /**
    * Admin-only: hides the input when it does not match the same blok's own
    * data. The value is untouched — hiding a field hides the input, not the
    * value (`conditional-fields.md`, checkpoint 3).
    */
-  showIf?: FieldCondition
+  showIf?: FieldCondition;
   /** Admin-only. Never draw this input; its stored value is untouched. */
-  hidden?: boolean
+  hidden?: boolean;
   /**
    * Written into a blok's data at creation (`blankSubtree`/`blankBlok`) only.
    * Never consulted at render (`resolveValue`): a schema edit must not change
@@ -26,7 +26,7 @@ interface Common {
    * decision 4). The retroactive case is a content migration
    * (`field.default(blok, name, value)`), not this key.
    */
-  default?: Json
+  default?: Json;
   /**
    * This field may hold a different value per locale
    * (`../../docs/specs/content-model/localisation.md` checkpoint 2).
@@ -46,7 +46,7 @@ interface Common {
    * Not available on `blocks`: children are separate bloks, not a value, and
    * per-locale structure is exactly what decision 1 trades away.
    */
-  translatable?: boolean
+  translatable?: boolean;
 }
 
 /**
@@ -71,7 +71,7 @@ interface Common {
  * rather than silently doing nothing.
  */
 interface Indexable {
-  indexed?: boolean
+  indexed?: boolean;
 }
 
 /**
@@ -95,23 +95,23 @@ interface Indexable {
  * their values are never prose.
  */
 interface Searchable {
-  searchable?: boolean
+  searchable?: boolean;
 }
 
 export interface SelectOption {
-  label: string
-  value: string
+  label: string;
+  value: string;
 }
 
 export type Field =
-  | ({ kind: 'text'; placeholder?: string } & Common & Indexable & Searchable)
-  | ({ kind: 'textarea'; rows?: number; placeholder?: string } & Common & Indexable & Searchable)
-  | ({ kind: 'number'; min?: number; max?: number } & Common & Indexable)
-  | ({ kind: 'boolean' } & Common & Indexable)
-  | ({ kind: 'select'; options: readonly SelectOption[] } & Common & Indexable)
+  | ({ kind: "text"; placeholder?: string } & Common & Indexable & Searchable)
+  | ({ kind: "textarea"; rows?: number; placeholder?: string } & Common & Indexable & Searchable)
+  | ({ kind: "number"; min?: number; max?: number } & Common & Indexable)
+  | ({ kind: "boolean" } & Common & Indexable)
+  | ({ kind: "select"; options: readonly SelectOption[] } & Common & Indexable)
   /** `accept` is passed to the file picker, e.g. `'image/*'` or `'.pdf'`. */
-  | ({ kind: 'asset'; accept?: string } & Common)
-  | ({ kind: 'multiasset'; accept?: string; max?: number } & Common)
+  | ({ kind: "asset"; accept?: string } & Common)
+  | ({ kind: "multiasset"; accept?: string; max?: number } & Common)
   /**
    * `allow` narrows which kinds of target the editor offers, so a "Read more"
    * button can be restricted to internal pages while a footer link is not.
@@ -119,17 +119,17 @@ export type Field =
    * Omitting it permits every type — but never an unrouted document, which has
    * no URL to link to and always resolves `broken`.
    */
-  | ({ kind: 'multilink'; allow?: readonly LinkKind[]; types?: readonly string[] } & Common)
+  | ({ kind: "multilink"; allow?: readonly LinkKind[]; types?: readonly string[] } & Common)
   /**
    * `marks` and `nodes` constrain what the editor offers *and* what the renderer
    * will emit, so a caption can permit bold and links and nothing else. Omitting
    * either permits everything.
    */
   | ({
-      kind: 'richtext'
-      marks?: readonly RichtextMarkName[]
-      nodes?: readonly RichtextNodeName[]
-      headingLevels?: readonly number[]
+      kind: "richtext";
+      marks?: readonly RichtextMarkName[];
+      nodes?: readonly RichtextNodeName[];
+      headingLevels?: readonly number[];
     } & Common &
       Searchable)
   /**
@@ -141,7 +141,7 @@ export type Field =
    * because content can also arrive from an importer or over the API
    * (`document-types.md` architecture decision 5).
    */
-  | ({ kind: 'reference'; types?: readonly string[] } & Common)
+  | ({ kind: "reference"; types?: readonly string[] } & Common)
   /**
    * A hand-picked, **ordered** list of documents
    * (`../../docs/specs/content-model/data-documents.md` architecture
@@ -160,10 +160,10 @@ export type Field =
    * enforced by the input, which is the only place a pick can be refused.
    */
   | ({
-      kind: 'references'
-      types?: readonly string[]
-      min?: number
-      max?: number
+      kind: "references";
+      types?: readonly string[];
+      min?: number;
+      max?: number;
     } & Common)
   // Children are separate bloks, not a value on the parent, so `blocks` is the
   // one kind that cannot carry a `default` — a preset's `children` is the
@@ -171,9 +171,9 @@ export type Field =
   // reason, cannot be `translatable`: per-locale structure is the trade
   // `localisation.md`'s decision 1 makes, so `blocks({ translatable: true })`
   // must not compile.
-  | ({ kind: 'blocks'; allow: readonly string[]; max?: number } & Omit<
+  | ({ kind: "blocks"; allow: readonly string[]; max?: number } & Omit<
       Common,
-      'default' | 'translatable'
+      "default" | "translatable"
     >)
   /**
    * A list of published documents, described as a query the editor narrows
@@ -195,14 +195,14 @@ export type Field =
    * with no new knowledge.
    */
   | ({
-      kind: 'collection'
+      kind: "collection";
       /** Document type(s) to list. Absent lists every type. */
-      type?: string | readonly string[]
+      type?: string | readonly string[];
       /** Fields the editor may narrow by. Each must be `indexed` on a root block. */
-      filterable?: readonly string[]
+      filterable?: readonly string[];
       /** Ceiling on the editor's count, itself capped at 100. */
-      maxPerPage?: number
-      defaultOrder?: { field: string; dir: 'asc' | 'desc' }
+      maxPerPage?: number;
+      defaultOrder?: { field: string; dir: "asc" | "desc" };
       /**
        * Accepts a full-text `search` term — from the editor's own Search input,
        * or from a render-time `Resolution.search`, which wins over the stored
@@ -217,7 +217,7 @@ export type Field =
        * render-time term are dropped on the way out, the same double
        * enforcement `filterable` already has.
        */
-      searchable?: boolean
+      searchable?: boolean;
       /**
        * Carry each item's whole document, not just its root block's `data`
        * (`./query.ts`'s `ContentQuery.withDoc`).
@@ -232,8 +232,8 @@ export type Field =
        * in full" rail — and render `item.doc` yourself, because the renderer
        * builds `content` for a `reference` and not for a collection item.
        */
-      withDoc?: boolean
-    } & Omit<Common, 'translatable'>)
+      withDoc?: boolean;
+    } & Omit<Common, "translatable">)
   /**
    * Points at a form, built and stored entirely outside the document
    * (`../../docs/specs/content-model/forms.md` architecture decisions 1 and 4):
@@ -245,45 +245,45 @@ export type Field =
    * and no prose of its own to index — both live on the *responses*, which
    * never enter `content_index` or `content_text` at all.
    */
-  | ({ kind: 'form' } & Common)
+  | ({ kind: "form" } & Common);
 
-type Opts<K extends Field['kind']> = Omit<Extract<Field, { kind: K }>, 'kind'>
+type Opts<K extends Field["kind"]> = Omit<Extract<Field, { kind: K }>, "kind">;
 
 /** `default`, when given, is typed to the field's own value, not just `Json`. */
-type Defaulted<K extends Field['kind'], V> = Omit<Opts<K>, 'default'> & { default?: V }
+type Defaulted<K extends Field["kind"], V> = Omit<Opts<K>, "default"> & { default?: V };
 
-export const text = (o: Defaulted<'text', string> = {}) => ({ kind: 'text' as const, ...o })
-export const textarea = (o: Opts<'textarea'> = {}) => ({ kind: 'textarea' as const, ...o })
-export const number = (o: Defaulted<'number', number> = {}) => ({ kind: 'number' as const, ...o })
-export const boolean = (o: Defaulted<'boolean', boolean> = {}) => ({
-  kind: 'boolean' as const,
+export const text = (o: Defaulted<"text", string> = {}) => ({ kind: "text" as const, ...o });
+export const textarea = (o: Opts<"textarea"> = {}) => ({ kind: "textarea" as const, ...o });
+export const number = (o: Defaulted<"number", number> = {}) => ({ kind: "number" as const, ...o });
+export const boolean = (o: Defaulted<"boolean", boolean> = {}) => ({
+  kind: "boolean" as const,
   ...o,
-})
-export const asset = (o: Opts<'asset'> = {}) => ({ kind: 'asset' as const, ...o })
-export const multiasset = (o: Opts<'multiasset'> = {}) => ({ kind: 'multiasset' as const, ...o })
+});
+export const asset = (o: Opts<"asset"> = {}) => ({ kind: "asset" as const, ...o });
+export const multiasset = (o: Opts<"multiasset"> = {}) => ({ kind: "multiasset" as const, ...o });
 
 export const multilink = <const T extends readonly LinkKind[]>(
-  o: Omit<Opts<'multilink'>, 'allow'> & { allow?: T } = {},
-) => ({ kind: 'multilink' as const, ...o })
+  o: Omit<Opts<"multilink">, "allow"> & { allow?: T } = {},
+) => ({ kind: "multilink" as const, ...o });
 
-export const richtext = (o: Opts<'richtext'> = {}) => ({ kind: 'richtext' as const, ...o })
-export const reference = (o: Opts<'reference'> = {}) => ({ kind: 'reference' as const, ...o })
-export const references = (o: Defaulted<'references', string[]> = {}) => ({
-  kind: 'references' as const,
+export const richtext = (o: Opts<"richtext"> = {}) => ({ kind: "richtext" as const, ...o });
+export const reference = (o: Opts<"reference"> = {}) => ({ kind: "reference" as const, ...o });
+export const references = (o: Defaulted<"references", string[]> = {}) => ({
+  kind: "references" as const,
   ...o,
-})
+});
 
 export const select = <const T extends readonly SelectOption[]>(
-  o: Omit<Opts<'select'>, 'options' | 'default'> & { options: T; default?: T[number]['value'] },
-) => ({ kind: 'select' as const, ...o })
+  o: Omit<Opts<"select">, "options" | "default"> & { options: T; default?: T[number]["value"] },
+) => ({ kind: "select" as const, ...o });
 
 export const blocks = <const T extends readonly string[]>(
-  o: Omit<Opts<'blocks'>, 'allow'> & { allow: T },
-) => ({ kind: 'blocks' as const, ...o })
+  o: Omit<Opts<"blocks">, "allow"> & { allow: T },
+) => ({ kind: "blocks" as const, ...o });
 
-export const collection = (o: Opts<'collection'> = {}) => ({ kind: 'collection' as const, ...o })
+export const collection = (o: Opts<"collection"> = {}) => ({ kind: "collection" as const, ...o });
 
-export const form = (o: Opts<'form'> = {}) => ({ kind: 'form' as const, ...o })
+export const form = (o: Opts<"form"> = {}) => ({ kind: "form" as const, ...o });
 
 /**
  * What a field hands to `render`. A `blocks` field arrives already rendered, so
@@ -293,67 +293,67 @@ export const form = (o: Opts<'form'> = {}) => ({ kind: 'form' as const, ...o })
  * Fields whose value can be absent resolve to `null` rather than to an empty
  * object, so `{link ? … : null}` is the natural way to write a block.
  */
-export type ValueOf<F extends Field> = F extends { kind: 'blocks' | 'richtext' }
+export type ValueOf<F extends Field> = F extends { kind: "blocks" | "richtext" }
   ? ReactNode
-  : F extends { kind: 'number' }
+  : F extends { kind: "number" }
     ? number
-    : F extends { kind: 'boolean' }
+    : F extends { kind: "boolean" }
       ? boolean
-      : F extends { kind: 'multilink' }
+      : F extends { kind: "multilink" }
         ? ResolvedLink | null
-        : F extends { kind: 'asset' }
+        : F extends { kind: "asset" }
           ? ResolvedAsset | null
-          : F extends { kind: 'multiasset' }
+          : F extends { kind: "multiasset" }
             ? ResolvedAsset[]
-            : F extends { kind: 'reference' }
+            : F extends { kind: "reference" }
               ? ResolvedReference | null
               : // Never null, and never with a hole in it: an unresolvable entry
                 // is dropped, so a block writes `team.map(…)` without guarding
                 // each item (`data-documents.md` decision 3).
-                F extends { kind: 'references' }
+                F extends { kind: "references" }
                 ? ResolvedReference[]
                 : // Never null: an empty page is a page, so a block writes
                   // `list.items.map(…)` without a guard and an empty collection
                   // renders its own empty state rather than crashing.
-                  F extends { kind: 'collection' }
+                  F extends { kind: "collection" }
                   ? ResolvedCollection
-                  : F extends { kind: 'form' }
+                  : F extends { kind: "form" }
                     ? ResolvedForm | null
-                    : F extends { kind: 'select'; options: readonly (infer O)[] }
+                    : F extends { kind: "select"; options: readonly (infer O)[] }
                       ? O extends SelectOption
-                        ? O['value']
+                        ? O["value"]
                         : string
-                      : string
+                      : string;
 
-export type PropsOf<F extends Record<string, Field>> = { [K in keyof F]: ValueOf<F[K]> }
+export type PropsOf<F extends Record<string, Field>> = { [K in keyof F]: ValueOf<F[K]> };
 
 export function defaultValue(f: Field): Json {
   switch (f.kind) {
-    case 'number':
-      return 0
-    case 'boolean':
-      return false
-    case 'select':
-      return f.options[0]?.value ?? ''
-    case 'blocks':
+    case "number":
+      return 0;
+    case "boolean":
+      return false;
+    case "select":
+      return f.options[0]?.value ?? "";
+    case "blocks":
       // Children are separate bloks, not a value on the parent.
-      return null
-    case 'collection':
+      return null;
+    case "collection":
       // An empty object, not null: the value is the editor's choices, and `{}`
       // means "the field's own defaults", which is what a fresh block wants.
-      return {}
-    case 'multilink':
-    case 'asset':
-    case 'richtext':
-    case 'reference':
-    case 'form':
-      return null
+      return {};
+    case "multilink":
+    case "asset":
+    case "richtext":
+    case "reference":
+    case "form":
+      return null;
     // Both plural, both empty rather than null, so a fresh block's stored value
     // already has the shape its input and its renderer expect.
-    case 'multiasset':
-    case 'references':
-      return []
+    case "multiasset":
+    case "references":
+      return [];
     default:
-      return ''
+      return "";
   }
 }

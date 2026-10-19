@@ -27,28 +27,33 @@
  *     property — a derived description cannot drift from the block it describes,
  *     which a hand-written one does the first time a field is renamed.
  */
-import { childrenOf, type Doc } from '../../../core/doc'
-import type { Field } from '../../../core/fields'
-import { type BlockPreset, type BlockSchema, type SchemaIndex, slotsOf } from '../../../core/schema'
-import { fullSlotMessage } from '../../hooks/useBlocks'
-import type { Ranked } from '../rank'
+import { childrenOf, type Doc } from "../../../core/doc";
+import type { Field } from "../../../core/fields";
+import {
+  type BlockPreset,
+  type BlockSchema,
+  type SchemaIndex,
+  slotsOf,
+} from "../../../core/schema";
+import { fullSlotMessage } from "../../hooks/useBlocks";
+import type { Ranked } from "../rank";
 
 /* ----------------------------------------------------------------- entries --- */
 
 /** One thing the picker can insert: a plain block type, or one of its presets. */
 export interface PickerEntry {
   /** `type`, or `type/preset`. Stable, and what a keyed list needs. */
-  id: string
-  type: string
+  id: string;
+  type: string;
   /** Absent for the plain block. Passed straight to `useBlocks.add`. */
-  preset?: string
-  label: string
+  preset?: string;
+  label: string;
   /** What you get, derived from the schema. See the file header. */
-  description: string
+  description: string;
   /** The block type this entry belongs to — the group's heading. */
-  group: string
+  group: string;
   /** True for the plain block rather than a preset of it. */
-  bare: boolean
+  bare: boolean;
   /**
    * Searched by `rank` and never highlighted: the block's own name, the preset's
    * name, and every field's name and label.
@@ -59,7 +64,7 @@ export interface PickerEntry {
    * means typing `alt` finds Image, and typing `caption` finds the two blocks that
    * have one, without anybody maintaining a synonym list.
    */
-  keywords: string
+  keywords: string;
 }
 
 /**
@@ -71,11 +76,11 @@ export interface PickerEntry {
  */
 export interface SlotOffer {
   /** The slot's own label, for the picker's title. */
-  slotLabel: string
+  slotLabel: string;
   /** Why nothing can be added here, or null. */
-  refusal: string | null
+  refusal: string | null;
   /** Empty whenever `refusal` is set. */
-  entries: PickerEntry[]
+  entries: PickerEntry[];
 }
 
 /**
@@ -99,26 +104,26 @@ export function slotOffer(
   /** How many blocks the slot already holds, for `max`. */
   filled: number,
 ): SlotOffer {
-  const parentDef = schema[parentType]
-  const field: Field | undefined = parentDef?.fields[slot]
-  const slotLabel = field?.label ?? slot
+  const parentDef = schema[parentType];
+  const field: Field | undefined = parentDef?.fields[slot];
+  const slotLabel = field?.label ?? slot;
 
   if (!parentDef) {
     return {
       slotLabel,
       refusal: `‘${parentType}’ is not in the schema, so its slots are unknown.`,
       entries: [],
-    }
+    };
   }
-  if (field?.kind !== 'blocks') {
+  if (field?.kind !== "blocks") {
     return {
       slotLabel,
       refusal: `‘${slot}’ is not a slot on ${parentDef.label}.`,
       entries: [],
-    }
+    };
   }
   if (field.allow.length === 0) {
-    return { slotLabel, refusal: `${slotLabel} allows no block types.`, entries: [] }
+    return { slotLabel, refusal: `${slotLabel} allows no block types.`, entries: [] };
   }
   if (field.max !== undefined && filled >= field.max) {
     // `fullSlotMessage` rather than a fifth wording of the same cap: duplicate and
@@ -128,10 +133,10 @@ export function slotOffer(
       slotLabel,
       refusal: `${slotLabel} is full — ${fullSlotMessage(field.max)}.`,
       entries: [],
-    }
+    };
   }
 
-  return { slotLabel, refusal: null, entries: entriesFor(schema, field.allow) }
+  return { slotLabel, refusal: null, entries: entriesFor(schema, field.allow) };
 }
 
 /**
@@ -145,11 +150,11 @@ export function slotOffer(
  * and it survives an empty query, exactly as the palette's action list does.
  */
 export function entriesFor(schema: SchemaIndex, allow: readonly string[]): PickerEntry[] {
-  const entries: PickerEntry[] = []
+  const entries: PickerEntry[] = [];
   for (const type of allow) {
-    const def = schema[type]
-    const label = def?.label ?? type
-    const fieldTerms = def ? fieldTermsOf(def) : ''
+    const def = schema[type];
+    const label = def?.label ?? type;
+    const fieldTerms = def ? fieldTermsOf(def) : "";
     if (!def?.presetsOnly) {
       entries.push({
         id: type,
@@ -159,7 +164,7 @@ export function entriesFor(schema: SchemaIndex, allow: readonly string[]): Picke
         group: label,
         bare: true,
         keywords: `${type} ${fieldTerms}`,
-      })
+      });
     }
     for (const preset of def?.presets ?? []) {
       entries.push({
@@ -171,10 +176,10 @@ export function entriesFor(schema: SchemaIndex, allow: readonly string[]): Picke
         group: label,
         bare: false,
         keywords: `${type} ${preset.name} ${label} ${fieldTerms}`,
-      })
+      });
     }
   }
-  return entries
+  return entries;
 }
 
 /* ------------------------------------------------------------ descriptions --- */
@@ -182,27 +187,27 @@ export function entriesFor(schema: SchemaIndex, allow: readonly string[]): Picke
 /** How many names a description lists before it starts counting them. Four is what
  * fits a picker row at a readable measure; past that the count is more use than the
  * names. */
-const NAMED = 4
+const NAMED = 4;
 
 function listOf(items: readonly string[]): string {
-  if (items.length <= NAMED) return items.join(', ')
-  return `${items.slice(0, NAMED).join(', ')} +${items.length - NAMED} more`
+  if (items.length <= NAMED) return items.join(", ");
+  return `${items.slice(0, NAMED).join(", ")} +${items.length - NAMED} more`;
 }
 
 /** A block's own field labels, slots excluded — a `blocks` field is structure
  * rather than a value, the same split `blockCards` makes in `settings-model.ts`. */
 function valueFields(def: BlockSchema): string[] {
   return Object.entries(def.fields)
-    .filter(([, field]) => field.kind !== 'blocks')
-    .map(([name, field]) => field.label ?? name)
+    .filter(([, field]) => field.kind !== "blocks")
+    .map(([name, field]) => field.label ?? name);
 }
 
 /** Every searchable word about a block's fields: each field's name *and* its
  * label, slots included, since a slot is a thing somebody looks for by name. */
 function fieldTermsOf(def: BlockSchema): string {
   return Object.entries(def.fields)
-    .flatMap(([name, field]) => [name, field.label ?? ''])
-    .join(' ')
+    .flatMap(([name, field]) => [name, field.label ?? ""])
+    .join(" ");
 }
 
 /**
@@ -213,14 +218,14 @@ function fieldTermsOf(def: BlockSchema): string {
  * say about it and is also what somebody is choosing it for.
  */
 export function bareDescription(schema: SchemaIndex, def: BlockSchema | undefined): string {
-  if (!def) return 'Not in the schema.'
-  const fields = valueFields(def)
+  if (!def) return "Not in the schema.";
+  const fields = valueFields(def);
   const takes = [...new Set(slotsOf(def).flatMap(([, slot]) => slot.allow))].map(
     (type) => schema[type]?.label ?? type,
-  )
-  const parts = [listOf(fields), takes.length > 0 ? `holds ${listOf(takes)}` : '']
-  const phrase = parts.filter(Boolean).join(' · ')
-  return phrase || 'No fields of its own.'
+  );
+  const parts = [listOf(fields), takes.length > 0 ? `holds ${listOf(takes)}` : ""];
+  const phrase = parts.filter(Boolean).join(" · ");
+  return phrase || "No fields of its own.";
 }
 
 /**
@@ -238,44 +243,44 @@ export function presetDescription(
   typeLabel: string,
   preset: BlockPreset,
 ): string {
-  const sets = Object.keys(preset.data ?? {}).map((name) => def?.fields[name]?.label ?? name)
-  const counts = new Map<string, number>()
+  const sets = Object.keys(preset.data ?? {}).map((name) => def?.fields[name]?.label ?? name);
+  const counts = new Map<string, number>();
   for (const child of preset.children ?? []) {
-    counts.set(child.type, (counts.get(child.type) ?? 0) + 1)
+    counts.set(child.type, (counts.get(child.type) ?? 0) + 1);
   }
   // `Button ×2` rather than a pluralised label: a label is the author's noun and
   // this has no business turning "Person" into "Persons".
   const kids = [...counts].map(([type, n]) => {
-    const label = schema[type]?.label ?? type
-    return n === 1 ? label : `${label} ×${n}`
-  })
+    const label = schema[type]?.label ?? type;
+    return n === 1 ? label : `${label} ×${n}`;
+  });
   const parts = [
-    sets.length > 0 ? `${listOf(sets)} set` : '',
-    kids.length > 0 ? `${listOf(kids)} inside` : '',
-  ].filter(Boolean)
-  return parts.length > 0 ? `${typeLabel} with ${parts.join(', and ')}` : typeLabel
+    sets.length > 0 ? `${listOf(sets)} set` : "",
+    kids.length > 0 ? `${listOf(kids)} inside` : "",
+  ].filter(Boolean);
+  return parts.length > 0 ? `${typeLabel} with ${parts.join(", and ")}` : typeLabel;
 }
 
 /* ---------------------------------------------------------------- grouping --- */
 
 export interface PickerRow {
   /** Position in the flat ranked list, which is what the active index counts in. */
-  at: number
-  entry: PickerEntry
+  at: number;
+  entry: PickerEntry;
   /** The matched runs of `entry.label`, for highlighting. */
-  spans: readonly [number, number][]
+  spans: readonly [number, number][];
 }
 
 export interface PickerGroup {
-  label: string
+  label: string;
   /**
    * No heading is drawn: the group has exactly one visible row and it is the plain
    * block, so the heading would repeat the row's own label. `AddMenu` reached the
    * same conclusion from the other direction and made the heading double as the
    * button; a palette cannot do that, so it drops the heading instead.
    */
-  solo: boolean
-  rows: PickerRow[]
+  solo: boolean;
+  rows: PickerRow[];
 }
 
 /**
@@ -284,19 +289,19 @@ export interface PickerGroup {
  * through an empty query and the best match leads once there is one.
  */
 export function groupRanked(ranked: readonly Ranked<PickerEntry>[]): PickerGroup[] {
-  const groups: PickerGroup[] = []
+  const groups: PickerGroup[] = [];
   for (const [at, { item, match }] of ranked.entries()) {
-    let group = groups.find((g) => g.label === item.group)
+    let group = groups.find((g) => g.label === item.group);
     if (!group) {
-      group = { label: item.group, solo: false, rows: [] }
-      groups.push(group)
+      group = { label: item.group, solo: false, rows: [] };
+      groups.push(group);
     }
-    group.rows.push({ at, entry: item, spans: match.spans })
+    group.rows.push({ at, entry: item, spans: match.spans });
   }
   for (const group of groups) {
-    group.solo = group.rows.length === 1 && group.rows[0]!.entry.bare
+    group.solo = group.rows.length === 1 && group.rows[0]!.entry.bare;
   }
-  return groups
+  return groups;
 }
 
 /* ------------------------------------------------------------------ target --- */
@@ -304,9 +309,9 @@ export function groupRanked(ranked: readonly Ranked<PickerEntry>[]): PickerGroup
 /** Where a block goes: the slot, its owner, and the ordinal position within it.
  * The same three arguments `useBlocks.add` takes. */
 export interface AddTarget {
-  parent: string
-  slot: string
-  index: number
+  parent: string;
+  slot: string;
+  index: number;
 }
 
 /**
@@ -341,40 +346,40 @@ export function addTarget(
   schema: SchemaIndex,
   selection: string | null,
 ): AddTarget | { error: string } {
-  const root = doc.bloks[doc.root]
-  const target = (selection === null ? undefined : doc.bloks[selection]) ?? root
+  const root = doc.bloks[doc.root];
+  const target = (selection === null ? undefined : doc.bloks[selection]) ?? root;
   // A document with no root block is not a document. Nothing reachable produces
   // one, and the alternative to saying so is a target pointing at nothing.
-  if (!target || !root) return { error: 'This document has no root block.' }
+  if (!target || !root) return { error: "This document has no root block." };
 
   if (target.uid === doc.root) {
-    const slots = slotsOf(schema[root.type])
+    const slots = slotsOf(schema[root.type]);
     if (slots.length === 0) {
-      return { error: `${schema[root.type]?.label ?? root.type} has no slots to add to.` }
+      return { error: `${schema[root.type]?.label ?? root.type} has no slots to add to.` };
     }
     for (const [slot, field] of slots) {
-      if (field.allow.length === 0) continue
-      const filled = childrenOf(doc, doc.root, slot).length
-      if (field.max !== undefined && filled >= field.max) continue
-      return { parent: doc.root, slot, index: filled }
+      if (field.allow.length === 0) continue;
+      const filled = childrenOf(doc, doc.root, slot).length;
+      if (field.max !== undefined && filled >= field.max) continue;
+      return { parent: doc.root, slot, index: filled };
     }
-    return { error: 'Every slot on this page is full or accepts nothing.' }
+    return { error: "Every slot on this page is full or accepts nothing." };
   }
 
   if (target.parent === null || target.slot === null) {
     // A non-root blok with no parent is a document that failed to hold together;
     // `mutationError` refuses the mutations that would produce one.
-    return { error: 'That block is not in a slot.' }
+    return { error: "That block is not in a slot." };
   }
-  const siblings = childrenOf(doc, target.parent, target.slot)
-  const field = schema[doc.bloks[target.parent]?.type ?? '']?.fields[target.slot]
-  if (field?.kind !== 'blocks') return { error: 'That block is not in a slot.' }
+  const siblings = childrenOf(doc, target.parent, target.slot);
+  const field = schema[doc.bloks[target.parent]?.type ?? ""]?.fields[target.slot];
+  if (field?.kind !== "blocks") return { error: "That block is not in a slot." };
   if (field.max !== undefined && siblings.length >= field.max) {
-    return { error: `Cannot add another: ${fullSlotMessage(field.max)}.` }
+    return { error: `Cannot add another: ${fullSlotMessage(field.max)}.` };
   }
   return {
     parent: target.parent,
     slot: target.slot,
     index: siblings.findIndex((b) => b.uid === target.uid) + 1,
-  }
+  };
 }

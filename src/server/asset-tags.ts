@@ -29,12 +29,12 @@
  *    `bindChunks`. That shape has been a live bug in this repo twice; it is
  *    chunked here so no call site has to remember.
  */
-import { type AssetTag, tagSlug } from '../core/assets'
-import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
-import { DEFAULT_SITE } from '../core/sites'
-import { bindChunks, type FolioDb } from './db'
-import { FolioError } from './errors'
-import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
+import { type AssetTag, tagSlug } from "../core/assets";
+import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
+import { DEFAULT_SITE } from "../core/sites";
+import { bindChunks, type FolioDb } from "./db";
+import { FolioError } from "./errors";
+import { type Keyset, keysetWhere, orderBy, whereOf } from "./keyset";
 
 /**
  * How many tags one filter may AND together.
@@ -46,7 +46,7 @@ import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
  * the filter room to grow without the cap becoming a surprise later. Raising it
  * is an arithmetic exercise against `BIND_BUDGET`, not a debate.
  */
-export const MAX_TAG_FILTER = 8
+export const MAX_TAG_FILTER = 8;
 
 /**
  * How many tags one asset may carry through a single `PATCH`.
@@ -56,7 +56,7 @@ export const MAX_TAG_FILTER = 8
  * exists so an unbounded array cannot be parsed and turned into statements. Fifty
  * is far past what anybody tags a photograph with.
  */
-export const MAX_ASSET_TAGS = 50
+export const MAX_ASSET_TAGS = 50;
 
 /**
  * The one ordering, and — like `asset-folders.ts`'s `path` — the only kind of
@@ -68,15 +68,18 @@ export const MAX_ASSET_TAGS = 50
  * resume comparison and the `order by` from disagreeing about which list they
  * are paging.
  */
-const TAG_ORDER: Keyset = { columns: ['t.slug'], direction: 'asc' }
+const TAG_ORDER: Keyset = { columns: ["t.slug"], direction: "asc" };
 
 /** `tag_<12 hex>`, minted exactly the way `uploadAsset` mints an asset id. */
 export function newTagId(): string {
-  return `tag_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
+  return `tag_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
 export async function tagById(db: FolioDb, id: string): Promise<AssetTag | null> {
-  return db.prepare('select id, name, slug from asset_tags where id = ?').bind(id).first<AssetTag>()
+  return db
+    .prepare("select id, name, slug from asset_tags where id = ?")
+    .bind(id)
+    .first<AssetTag>();
 }
 
 /**
@@ -86,10 +89,10 @@ export async function tagById(db: FolioDb, id: string): Promise<AssetTag | null>
  */
 export async function tagSiteOf(db: FolioDb, id: string): Promise<string | null> {
   const row = await db
-    .prepare('select site_id as site from asset_tags where id = ?')
+    .prepare("select site_id as site from asset_tags where id = ?")
     .bind(id)
-    .first<{ site: string }>()
-  return row?.site ?? null
+    .first<{ site: string }>();
+  return row?.site ?? null;
 }
 
 /**
@@ -103,17 +106,17 @@ export async function tagBySlug(
   site: string = DEFAULT_SITE,
 ): Promise<AssetTag | null> {
   return db
-    .prepare('select id, name, slug from asset_tags where site_id = ? and slug = ?')
+    .prepare("select id, name, slug from asset_tags where site_id = ? and slug = ?")
     .bind(site, slug)
-    .first<AssetTag>()
+    .first<AssetTag>();
 }
 
 /** A tag by id **that the scope owns**, or null: another scope's is an absent one. */
 async function ownTag(db: FolioDb, id: string, site: string): Promise<AssetTag | null> {
   return db
-    .prepare('select id, name, slug from asset_tags where id = ? and site_id = ?')
+    .prepare("select id, name, slug from asset_tags where id = ? and site_id = ?")
     .bind(id, site)
-    .first<AssetTag>()
+    .first<AssetTag>();
 }
 
 export interface ListTagsOptions {
@@ -123,9 +126,9 @@ export interface ListTagsOptions {
    * Defaults to `default`; bound either way, because `asset_tags_slug` leads with
    * `site_id`.
    */
-  site?: string
-  limit?: number
-  cursor?: string
+  site?: string;
+  limit?: number;
+  cursor?: string;
   /**
    * Adds `count` — how many assets carry each tag — to every row on the page.
    *
@@ -140,7 +143,7 @@ export interface ListTagsOptions {
    * `{base}/api/assets` trap written into an options object. The vocabulary is
    * hundreds of rows and a caller that wants its size pages it.
    */
-  counts?: boolean
+  counts?: boolean;
 }
 
 /**
@@ -157,26 +160,26 @@ export interface ListTagsOptions {
  * this is a sidebar that wants its whole list, not a table of user-uploaded rows.
  */
 export async function listTags(db: FolioDb, opts: ListTagsOptions = {}): Promise<Page<AssetTag>> {
-  const limit = clampLimit(opts.limit, 100, 500)
-  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null
-  const resume = keysetWhere(TAG_ORDER, cursor)
+  const limit = clampLimit(opts.limit, 100, 500);
+  const cursor = opts.cursor ? decodeCursor(opts.cursor) : null;
+  const resume = keysetWhere(TAG_ORDER, cursor);
 
   // `"count"` is quoted because it is also a function name; SQLite reads a
   // double-quoted token as an identifier, so the alias cannot be mistaken.
   const select = opts.counts
     ? `select t.id, t.name, t.slug, count(g.asset_id) as "count"
          from asset_tags t left join asset_taggings g on g.tag_id = t.id`
-    : 'select t.id, t.name, t.slug from asset_tags t'
-  const group = opts.counts ? 'group by t.id' : ''
+    : "select t.id, t.name, t.slug from asset_tags t";
+  const group = opts.counts ? "group by t.id" : "";
 
   const { results } = await db
     .prepare(
-      `${select} ${whereOf('t.site_id = ?', resume.sql)} ${group} ${orderBy(TAG_ORDER)} limit ?`,
+      `${select} ${whereOf("t.site_id = ?", resume.sql)} ${group} ${orderBy(TAG_ORDER)} limit ?`,
     )
     .bind(opts.site ?? DEFAULT_SITE, ...resume.binds, limit + 1)
-    .all<AssetTag>()
+    .all<AssetTag>();
 
-  return paginate(results, limit, (row) => [row.slug])
+  return paginate(results, limit, (row) => [row.slug]);
 }
 
 /**
@@ -201,10 +204,10 @@ export async function ensureTag(
   /** The scope the tag is created or found in: the slug is unique within it. */
   site: string = DEFAULT_SITE,
 ): Promise<{ tag: AssetTag; created: boolean }> {
-  const slug = tagSlug(name)
-  if (slug === '') throw new FolioError('bad_request', 'A tag name cannot be blank')
+  const slug = tagSlug(name);
+  if (slug === "") throw new FolioError("bad_request", "A tag name cannot be blank");
 
-  const id = newTagId()
+  const id = newTagId();
   await db
     .prepare(
       `insert into asset_tags (id, name, slug, created_at, site_id) values (?, ?, ?, ?, ?)
@@ -213,12 +216,12 @@ export async function ensureTag(
     // The target is `asset_tags_slug`'s columns exactly (`0011_sites.sql`): a
     // target naming fewer matches no unique index and D1 refuses the statement.
     .bind(id, name.trim(), slug, Date.now(), site)
-    .run()
+    .run();
 
-  const tag = await tagBySlug(db, slug, site)
+  const tag = await tagBySlug(db, slug, site);
   // Unreachable: the insert either wrote this row or lost to one that is there.
-  if (!tag) throw new FolioError('conflict', `Could not create the tag '${slug}'`)
-  return { tag, created: tag.id === id }
+  if (!tag) throw new FolioError("conflict", `Could not create the tag '${slug}'`);
+  return { tag, created: tag.id === id };
 }
 
 /**
@@ -238,29 +241,29 @@ export async function renameTag(
   /** The scope the tag must be in: another scope's is absent (null). */
   site: string = DEFAULT_SITE,
 ): Promise<AssetTag | null> {
-  const row = await ownTag(db, id, site)
-  if (!row) return null
+  const row = await ownTag(db, id, site);
+  if (!row) return null;
 
-  const slug = tagSlug(name)
-  if (slug === '') throw new FolioError('bad_request', 'A tag name cannot be blank')
+  const slug = tagSlug(name);
+  if (slug === "") throw new FolioError("bad_request", "A tag name cannot be blank");
   if (slug !== row.slug) {
-    const clash = await tagBySlug(db, slug, site)
+    const clash = await tagBySlug(db, slug, site);
     if (clash) {
-      throw new FolioError('conflict', `A tag named '${clash.name}' already occupies '${slug}'`)
+      throw new FolioError("conflict", `A tag named '${clash.name}' already occupies '${slug}'`);
     }
   }
 
-  const renamed = { ...row, name: name.trim(), slug }
+  const renamed = { ...row, name: name.trim(), slug };
   await db
-    .prepare('update asset_tags set name = ?, slug = ? where id = ? and site_id = ?')
+    .prepare("update asset_tags set name = ?, slug = ? where id = ? and site_id = ?")
     .bind(renamed.name, renamed.slug, id, site)
-    .run()
-  return renamed
+    .run();
+  return renamed;
 }
 
 export interface TagDeletion {
   /** Assets that carried this tag and no longer do. **None of them was deleted.** */
-  removedFrom: number
+  removedFrom: number;
 }
 
 /**
@@ -280,20 +283,20 @@ export async function deleteTag(
   /** The scope the tag must be in: another scope's is absent (null). */
   site: string = DEFAULT_SITE,
 ): Promise<TagDeletion | null> {
-  const row = await ownTag(db, id, site)
-  if (!row) return null
+  const row = await ownTag(db, id, site);
+  if (!row) return null;
 
   const used = await db
-    .prepare('select count(*) as n from asset_taggings where tag_id = ?')
+    .prepare("select count(*) as n from asset_taggings where tag_id = ?")
     .bind(id)
-    .first<{ n: number }>()
+    .first<{ n: number }>();
 
   await db.batch([
-    db.prepare('delete from asset_taggings where tag_id = ?').bind(id),
-    db.prepare('delete from asset_tags where id = ? and site_id = ?').bind(id, site),
-  ])
+    db.prepare("delete from asset_taggings where tag_id = ?").bind(id),
+    db.prepare("delete from asset_tags where id = ? and site_id = ?").bind(id, site),
+  ]);
 
-  return { removedFrom: used?.n ?? 0 }
+  return { removedFrom: used?.n ?? 0 };
 }
 
 /**
@@ -321,15 +324,15 @@ export async function tagsByIds(
       const { results } = await db
         .prepare(
           `select id, name, slug from asset_tags
-            where id in (${chunk.map(() => '?').join(', ')})${site === undefined ? '' : ' and site_id = ?'}
+            where id in (${chunk.map(() => "?").join(", ")})${site === undefined ? "" : " and site_id = ?"}
             order by slug asc`,
         )
         .bind(...chunk, ...(site === undefined ? [] : [site]))
-        .all<AssetTag>()
-      return results
+        .all<AssetTag>();
+      return results;
     }),
-  )
-  return pages.flat()
+  );
+  return pages.flat();
 }
 
 /**
@@ -345,8 +348,8 @@ export async function tagsForAssets(
   db: FolioDb,
   ids: readonly string[],
 ): Promise<Map<string, AssetTag[]>> {
-  const out = new Map<string, AssetTag[]>()
-  if (ids.length === 0) return out
+  const out = new Map<string, AssetTag[]>();
+  if (ids.length === 0) return out;
 
   const pages = await Promise.all(
     bindChunks([...new Set(ids)], 1).map(async (chunk) => {
@@ -354,23 +357,23 @@ export async function tagsForAssets(
         .prepare(
           `select g.asset_id as assetId, t.id, t.name, t.slug
              from asset_taggings g join asset_tags t on t.id = g.tag_id
-            where g.asset_id in (${chunk.map(() => '?').join(', ')})
+            where g.asset_id in (${chunk.map(() => "?").join(", ")})
             order by t.slug asc`,
         )
         .bind(...chunk)
-        .all<AssetTag & { assetId: string }>()
-      return results
+        .all<AssetTag & { assetId: string }>();
+      return results;
     }),
-  )
+  );
 
   for (const rows of pages) {
     for (const { assetId, ...tag } of rows) {
-      const carried = out.get(assetId)
-      if (carried) carried.push(tag)
-      else out.set(assetId, [tag])
+      const carried = out.get(assetId);
+      if (carried) carried.push(tag);
+      else out.set(assetId, [tag]);
     }
   }
-  return out
+  return out;
 }
 
 /**
@@ -398,25 +401,25 @@ export async function setAssetTags(
   /** The asset's scope: a tag from any other is an unknown tag. */
   site: string = DEFAULT_SITE,
 ): Promise<AssetTag[]> {
-  const wanted = [...new Set(tagIds)]
-  const tags = wanted.length === 0 ? [] : await tagsByIds(db, wanted, site)
+  const wanted = [...new Set(tagIds)];
+  const tags = wanted.length === 0 ? [] : await tagsByIds(db, wanted, site);
   if (tags.length !== wanted.length) {
-    const known = new Set(tags.map((tag) => tag.id))
-    const missing = wanted.find((id) => !known.has(id))
-    throw new FolioError('bad_request', `Unknown tag '${missing}'`)
+    const known = new Set(tags.map((tag) => tag.id));
+    const missing = wanted.find((id) => !known.has(id));
+    throw new FolioError("bad_request", `Unknown tag '${missing}'`);
   }
 
-  const statements = [db.prepare('delete from asset_taggings where asset_id = ?').bind(assetId)]
+  const statements = [db.prepare("delete from asset_taggings where asset_id = ?").bind(assetId)];
   for (const chunk of bindChunks(tags, 2)) {
     statements.push(
       db
         .prepare(
           `insert into asset_taggings (asset_id, tag_id)
-             values ${chunk.map(() => '(?, ?)').join(', ')}`,
+             values ${chunk.map(() => "(?, ?)").join(", ")}`,
         )
         .bind(...chunk.flatMap((tag) => [assetId, tag.id])),
-    )
+    );
   }
-  await db.batch(statements)
-  return tags
+  await db.batch(statements);
+  return tags;
 }

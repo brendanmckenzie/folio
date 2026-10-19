@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
-import type { Doc } from '../../core/doc'
-import type { ResolvedForm } from '../../core/forms'
-import { formIds } from '../../core/refs'
-import type { SchemaIndex } from '../../core/schema'
+import { useEffect, useMemo, useState } from "react";
+import type { Doc } from "../../core/doc";
+import type { ResolvedForm } from "../../core/forms";
+import { formIds } from "../../core/refs";
+import type { SchemaIndex } from "../../core/schema";
 
 /**
  * The compiled descriptors for the `form` fields the open document contains —
@@ -30,7 +30,7 @@ import type { SchemaIndex } from '../../core/schema'
 
 /** Stable identity for "nothing to show", so a document with no form field
  *  re-renders nothing when the effect settles. */
-const NO_FORMS: Readonly<Record<string, ResolvedForm>> = {}
+const NO_FORMS: Readonly<Record<string, ResolvedForm>> = {};
 
 /**
  * The form ids the document embeds, sorted and joined — so an unchanged set is
@@ -40,20 +40,20 @@ const NO_FORMS: Readonly<Record<string, ResolvedForm>> = {}
  * resolve does, so a form only a translation points at is still fetched.
  */
 export function wantedFormIds(doc: Doc | null, schema: SchemaIndex): string {
-  return doc ? formIds(doc, schema).sort().join(',') : ''
+  return doc ? formIds(doc, schema).sort().join(",") : "";
 }
 
 /** The request one set of ids makes, as a path relative to the admin's JSON
  *  base. Pure and exported so the query string is pinned by a Node test rather
  *  than by reading a network tab. */
 export function formsRequest(ids: readonly string[], locale?: string, page?: string): string {
-  const params = new URLSearchParams({ ids: ids.join(',') })
+  const params = new URLSearchParams({ ids: ids.join(",") });
   // Only when they are actually known: the route defaults both, and a `page=`
   // with nothing after it would put an empty `_folio_page` on the descriptor
   // where the server render puts no hidden input at all.
-  if (locale) params.set('locale', locale)
-  if (page) params.set('page', page)
-  return `/forms/resolved?${params.toString()}`
+  if (locale) params.set("locale", locale);
+  if (page) params.set("page", page);
+  return `/forms/resolved?${params.toString()}`;
 }
 
 /**
@@ -73,15 +73,15 @@ export async function loadResolvedForms(
   page?: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<Record<string, ResolvedForm> | null> {
-  let res: Response
+  let res: Response;
   try {
-    res = await fetchImpl(`${apiBase}${formsRequest(ids, locale, page)}`)
+    res = await fetchImpl(`${apiBase}${formsRequest(ids, locale, page)}`);
   } catch {
-    return null
+    return null;
   }
-  if (!res.ok) return null
-  const body = (await res.json().catch(() => null)) as Record<string, ResolvedForm> | null
-  return body && typeof body === 'object' ? body : null
+  if (!res.ok) return null;
+  const body = (await res.json().catch(() => null)) as Record<string, ResolvedForm> | null;
+  return body && typeof body === "object" ? body : null;
 }
 
 /**
@@ -99,27 +99,27 @@ export function useResolvedForms(
   locale?: string,
   page?: string,
 ): Readonly<Record<string, ResolvedForm>> {
-  const [forms, setForms] = useState<Readonly<Record<string, ResolvedForm>>>(NO_FORMS)
+  const [forms, setForms] = useState<Readonly<Record<string, ResolvedForm>>>(NO_FORMS);
 
-  const wanted = useMemo(() => wantedFormIds(doc, schema), [doc, schema])
+  const wanted = useMemo(() => wantedFormIds(doc, schema), [doc, schema]);
 
   useEffect(() => {
-    const ids = wanted ? wanted.split(',') : []
+    const ids = wanted ? wanted.split(",") : [];
     // The constant, not a fresh `{}`: React bails out of a re-render for an
     // identical value, and this branch runs for every document that has no form
     // field at all — which is most of them.
     if (ids.length === 0) {
-      setForms(NO_FORMS)
-      return
+      setForms(NO_FORMS);
+      return;
     }
-    let live = true
+    let live = true;
     void loadResolvedForms(apiBase, ids, locale, page).then((answer) => {
-      if (live && answer) setForms(answer)
-    })
+      if (live && answer) setForms(answer);
+    });
     return () => {
-      live = false
-    }
-  }, [apiBase, wanted, locale, page])
+      live = false;
+    };
+  }, [apiBase, wanted, locale, page]);
 
-  return forms
+  return forms;
 }

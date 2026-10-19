@@ -27,15 +27,15 @@
  * singleton's preview, and `{base}/edit/:id`, which the working single-screen
  * editor keeps until port phase 7 replaces it.
  */
-import { Hono } from 'hono'
-import { READ_DRAFT } from '../auth/roles'
-import { requireHtmlAccess } from '../middleware'
-import { shellPage } from '../pages'
-import type { FolioRuntime } from '../runtime'
-import type { FolioEnv } from '../types'
+import { Hono } from "hono";
+import { READ_DRAFT } from "../auth/roles";
+import { requireHtmlAccess } from "../middleware";
+import { shellPage } from "../pages";
+import type { FolioRuntime } from "../runtime";
+import type { FolioEnv } from "../types";
 
 export function shellRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * Gated exactly like the editor page (`READ_DRAFT`), and for the same reason:
@@ -72,8 +72,8 @@ export function shellRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * the session. `shellPage` takes no bindings at all now, and this route and the
    * editor's render the identical shell.
    */
-  app.get('/', requireHtmlAccess<Env>(rt, READ_DRAFT), () => shellPage(rt))
-  app.get('/*', requireHtmlAccess<Env>(rt, READ_DRAFT), () => shellPage(rt))
+  app.get("/", requireHtmlAccess<Env>(rt, READ_DRAFT), () => shellPage(rt));
+  app.get("/*", requireHtmlAccess<Env>(rt, READ_DRAFT), () => shellPage(rt));
 
-  return app
+  return app;
 }

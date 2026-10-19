@@ -1,28 +1,28 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
-import type { Doc } from '../../core/doc'
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import type { Doc } from "../../core/doc";
 import {
   type AdminToPreviewMsg,
   isPreviewMsg,
   PROTOCOL_VERSION,
   type PreviewFrame,
-} from '../../core/protocol'
-import type { Resolution } from '../../core/resolve'
-import type { StoryStore } from '../store'
-import type { Blocks } from './useBlocks'
-import type { PreviewSource } from './useVersions'
+} from "../../core/protocol";
+import type { Resolution } from "../../core/resolve";
+import type { StoryStore } from "../store";
+import type { Blocks } from "./useBlocks";
+import type { PreviewSource } from "./useVersions";
 
 interface Options {
-  store: StoryStore
+  store: StoryStore;
   /** Story and asset links, so the preview resolves them without a server render. */
-  resolution: Resolution
+  resolution: Resolution;
   /** What the iframe must be showing. Owned by useVersions. */
-  source: PreviewSource
-  selection: string | null
+  source: PreviewSource;
+  selection: string | null;
   /** The document's root blok uid, which is never outlined in the preview. */
-  root: string | undefined
-  blocks: Blocks
+  root: string | undefined;
+  blocks: Blocks;
   /** Brings the Blocks rail forward when a block is picked in the preview. */
-  onPick: () => void
+  onPick: () => void;
   /**
    * A block belonging to a global was clicked while previewing something else
    * (`../../../docs/specs/content-model/globals.md` checkpoint 3): the editor
@@ -30,7 +30,7 @@ interface Options {
    * one editable document at a time. Absent gets today's behaviour — every
    * click selects, which is correct wherever `resolution.globals` is empty.
    */
-  onGlobalClick?: (name: string) => void
+  onGlobalClick?: (name: string) => void;
   /**
    * The origin the pane's document is on: the site's preview origin on a
    * deployment with `sites` (`../../../docs/specs/foundation/multi-site.md`
@@ -39,14 +39,14 @@ interface Options {
    * this window's own origin — the same-origin preview a single-site deployment
    * has always had.
    */
-  origin?: string
+  origin?: string;
   /**
    * The pane's `site/enter?check=1` step found that the browser refused the
    * partitioned grant cookie, so the pane would show the published page as though
    * it were the draft. The admin offers *Open preview in a new tab* instead, whose
    * top-level navigation keeps a first-party cookie (the spec's edge cases).
    */
-  onGrantBlocked?: () => void
+  onGrantBlocked?: () => void;
 }
 
 /**
@@ -59,17 +59,17 @@ export function paneSrc(base: string, site: string, previewUrl: string): string 
   // Only the path and the query survive (`safeNext` on the server refuses anything
   // else), so the base a relative URL is resolved against is irrelevant — and a fixed
   // one keeps this pure, callable from a Node test with no `window`.
-  const url = new URL(previewUrl, 'https://preview.invalid')
-  const next = `${url.pathname}${url.search}`
-  return `${base}/~${encodeURIComponent(site)}/site/start?next=${encodeURIComponent(next)}`
+  const url = new URL(previewUrl, "https://preview.invalid");
+  const next = `${url.pathname}${url.search}`;
+  return `${base}/~${encodeURIComponent(site)}/site/start?next=${encodeURIComponent(next)}`;
 }
 
 /** Whether a message is the handoff's `grant-blocked` notice. Not a `PreviewMsg`:
  * the page that sends it is Folio's server page, not the preview client, and it
  * carries nothing but its type. */
 function isGrantBlocked(data: unknown): boolean {
-  const frame = data as { source?: unknown; type?: unknown } | null
-  return frame?.source === 'folio-preview' && frame.type === 'grant-blocked'
+  const frame = data as { source?: unknown; type?: unknown } | null;
+  return frame?.source === "folio-preview" && frame.type === "grant-blocked";
 }
 
 /**
@@ -84,30 +84,30 @@ export function globalOwning(
   doc: Doc | null,
   globals: Record<string, Doc> | undefined,
 ): string | null {
-  if (!uid) return null
-  if (doc?.bloks[uid]) return null
-  if (!globals) return null
+  if (!uid) return null;
+  if (doc?.bloks[uid]) return null;
+  if (!globals) return null;
   for (const [name, globalDoc] of Object.entries(globals)) {
-    if (globalDoc.bloks[uid]) return name
+    if (globalDoc.bloks[uid]) return name;
   }
-  return null
+  return null;
 }
 
 /** The one method this seam needs from `HTMLIFrameElement['contentWindow']`. */
 export interface PostableWindow {
-  postMessage(message: unknown, targetOrigin: string): void
+  postMessage(message: unknown, targetOrigin: string): void;
 }
 
 function post(win: PostableWindow | null | undefined, origin: string, msg: AdminToPreviewMsg) {
-  win?.postMessage({ source: 'folio-admin', v: PROTOCOL_VERSION, ...msg }, origin)
+  win?.postMessage({ source: "folio-admin", v: PROTOCOL_VERSION, ...msg }, origin);
 }
 
 /** What a preview must be told the instant it completes (or repeats) its `ready` handshake. */
 export interface ReadyFrames {
-  resolve: Extract<AdminToPreviewMsg, { type: 'resolve' }>
+  resolve: Extract<AdminToPreviewMsg, { type: "resolve" }>;
   /** Null when there is no document to show yet — e.g. the store has not bootstrapped. */
-  replace: Extract<AdminToPreviewMsg, { type: 'replace' }> | null
-  select: Extract<AdminToPreviewMsg, { type: 'select' }>
+  replace: Extract<AdminToPreviewMsg, { type: "replace" }> | null;
+  select: Extract<AdminToPreviewMsg, { type: "select" }>;
 }
 
 /**
@@ -117,20 +117,20 @@ export interface ReadyFrames {
  * shapes it into a frame.
  */
 export function readyFrames(opts: {
-  doc: Doc | null
-  resolution: Resolution
-  selection: string | null
-  root: string | undefined
+  doc: Doc | null;
+  resolution: Resolution;
+  selection: string | null;
+  root: string | undefined;
 }): ReadyFrames {
-  const { doc, resolution, selection, root } = opts
+  const { doc, resolution, selection, root } = opts;
   return {
-    resolve: { type: 'resolve', resolution },
-    replace: doc ? { type: 'replace', doc } : null,
+    resolve: { type: "resolve", resolution },
+    replace: doc ? { type: "replace", doc } : null,
     // The root block wraps the whole page, so outlining it in the preview
     // would just frame everything. Select it in the inspector without
     // highlighting it there.
-    select: { type: 'select', uid: selection === root ? null : selection },
-  }
+    select: { type: "select", uid: selection === root ? null : selection },
+  };
 }
 
 /**
@@ -150,7 +150,7 @@ export function readyFrames(opts: {
  * of trusting history to still be true.
  */
 export class PreviewBridge {
-  private ready = false
+  private ready = false;
 
   /**
    * A new iframe node is a preview that remembers nothing: the previous one's
@@ -160,7 +160,7 @@ export class PreviewBridge {
    * story id in Editor).
    */
   reset(): void {
-    this.ready = false
+    this.ready = false;
   }
 
   /**
@@ -170,8 +170,8 @@ export class PreviewBridge {
    * what was sent here.
    */
   send(win: PostableWindow | null | undefined, origin: string, msg: AdminToPreviewMsg): void {
-    if (!this.ready) return
-    post(win, origin, msg)
+    if (!this.ready) return;
+    post(win, origin, msg);
   }
 
   /**
@@ -185,10 +185,10 @@ export class PreviewBridge {
    * re-seed a brand new frame would.
    */
   onReady(win: PostableWindow | null | undefined, origin: string, frames: ReadyFrames): void {
-    this.ready = true
-    post(win, origin, frames.resolve)
-    if (frames.replace) post(win, origin, frames.replace)
-    post(win, origin, frames.select)
+    this.ready = true;
+    post(win, origin, frames.resolve);
+    if (frames.replace) post(win, origin, frames.replace);
+    post(win, origin, frames.select);
   }
 }
 
@@ -213,10 +213,10 @@ export function usePreviewBridge({
   origin,
   onGrantBlocked,
 }: Options): (node: HTMLIFrameElement | null) => void {
-  const frame = useRef<HTMLIFrameElement | null>(null)
+  const frame = useRef<HTMLIFrameElement | null>(null);
   // The pane's origin: the preview origin on a multi-site deployment, else ours.
-  const paneOrigin = origin ?? window.location.origin
-  const bridge = useMemo(() => new PreviewBridge(), [])
+  const paneOrigin = origin ?? window.location.origin;
+  const bridge = useMemo(() => new PreviewBridge(), []);
 
   /**
    * The seam's copy of what is on screen.
@@ -226,8 +226,8 @@ export function usePreviewBridge({
    * connect effect below closes the socket on cleanup — re-running it every
    * time someone opens a version preview would drop and reopen the WebSocket.
    */
-  const showing = useRef(source)
-  showing.current = source
+  const showing = useRef(source);
+  showing.current = source;
 
   /**
    * The seam's copy of the props `readyFrames` re-derives from at handshake
@@ -236,15 +236,15 @@ export function usePreviewBridge({
    * the listener that often is pure churn when only the values it reads need
    * to be current, not the closure itself.
    */
-  const latest = useRef({ resolution, selection, root })
-  latest.current = { resolution, selection, root }
+  const latest = useRef({ resolution, selection, root });
+  latest.current = { resolution, selection, root };
 
   const toFrame = useCallback(
     (msg: AdminToPreviewMsg) => {
-      bridge.send(frame.current?.contentWindow, paneOrigin, msg)
+      bridge.send(frame.current?.contentWindow, paneOrigin, msg);
     },
     [bridge, paneOrigin],
-  )
+  );
 
   /**
    * The ref callback React attaches the iframe through. A story switch
@@ -257,49 +257,49 @@ export function usePreviewBridge({
    */
   const setFrame = useCallback(
     (node: HTMLIFrameElement | null) => {
-      frame.current = node
-      bridge.reset()
+      frame.current = node;
+      bridge.reset();
     },
     [bridge],
-  )
+  );
 
   useEffect(() => {
     store.onMutations = (mutations) => {
       // While previewing a version the iframe is showing something other than
       // the live document, so live edits must not be applied to it.
-      if (showing.current.mode === 'viewing') return
-      toFrame({ type: 'apply', mutations })
-    }
+      if (showing.current.mode === "viewing") return;
+      toFrame({ type: "apply", mutations });
+    };
     store.onReset = (doc) => {
-      if (showing.current.mode === 'viewing') return
-      toFrame({ type: 'replace', doc })
-    }
-    store.connect()
-    return () => store.disconnect()
-  }, [store, toFrame])
+      if (showing.current.mode === "viewing") return;
+      toFrame({ type: "replace", doc });
+    };
+    store.connect();
+    return () => store.disconnect();
+  }, [store, toFrame]);
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
-      if (e.origin !== paneOrigin) return
+      if (e.origin !== paneOrigin) return;
       // Not just the pane's origin: the frame this bridge actually owns. Origin
       // alone would also admit a second preview instance, or a stale one still
       // finishing its own teardown mid-swap.
-      if (e.source !== frame.current?.contentWindow) return
+      if (e.source !== frame.current?.contentWindow) return;
       if (isGrantBlocked(e.data)) {
-        onGrantBlocked?.()
-        return
+        onGrantBlocked?.();
+        return;
       }
-      const data = e.data as Partial<PreviewFrame> | null
-      if (data?.source !== 'folio-preview') return
-      if (!isPreviewMsg(data)) return
-      const msg = data
+      const data = e.data as Partial<PreviewFrame> | null;
+      if (data?.source !== "folio-preview") return;
+      if (!isPreviewMsg(data)) return;
+      const msg = data;
 
-      if (msg.type === 'ready') {
+      if (msg.type === "ready") {
         // Re-derived fresh, not replayed: covers first load (nothing to
         // replay yet, but the live values are already real), a story switch,
         // and a repeat `ready` from the same frame (reload, or a navigation
         // from a changed `previewUrl`) alike. See `PreviewBridge` doc.
-        const { resolution, selection, root } = latest.current
+        const { resolution, selection, root } = latest.current;
         bridge.onReady(
           frame.current?.contentWindow,
           paneOrigin,
@@ -309,8 +309,8 @@ export function usePreviewBridge({
             selection,
             root,
           }),
-        )
-      } else if (msg.type === 'select') {
+        );
+      } else if (msg.type === "select") {
         // A click inside a global while something else is open offers "Edit
         // `<name>` →" rather than selecting a block that is not part of the
         // document on screen (`globals.md` checkpoint 3).
@@ -318,21 +318,21 @@ export function usePreviewBridge({
           msg.uid,
           store.getSnapshot().doc,
           latest.current.resolution.globals,
-        )
+        );
         if (owner) {
-          onGlobalClick?.(owner)
+          onGlobalClick?.(owner);
         } else {
-          store.select(msg.uid)
-          if (showing.current.mode === 'live') onPick()
+          store.select(msg.uid);
+          if (showing.current.mode === "live") onPick();
         }
-      } else if (msg.type === 'add') {
-        if (showing.current.mode === 'viewing') return
-        blocks.addFirst(msg.parent, msg.slot)
+      } else if (msg.type === "add") {
+        if (showing.current.mode === "viewing") return;
+        blocks.addFirst(msg.parent, msg.slot);
       }
-    }
-    window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
-  }, [blocks, bridge, onGlobalClick, onGrantBlocked, onPick, paneOrigin, store])
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [blocks, bridge, onGlobalClick, onGrantBlocked, onPick, paneOrigin, store]);
 
   /**
    * Entering or leaving a version preview swaps the document wholesale: no
@@ -342,21 +342,21 @@ export function usePreviewBridge({
    * exactly what the incremental `apply` path above exists to avoid.
    */
   useEffect(() => {
-    const doc = source.doc ?? store.getSnapshot().doc
-    if (doc) toFrame({ type: 'replace', doc })
-  }, [source, store, toFrame])
+    const doc = source.doc ?? store.getSnapshot().doc;
+    if (doc) toFrame({ type: "replace", doc });
+  }, [source, store, toFrame]);
 
   useEffect(() => {
     // The root block wraps the whole page, so outlining it in the preview would
     // just frame everything. Select it in the inspector without highlighting.
-    toFrame({ type: 'select', uid: selection === root ? null : selection })
-  }, [root, selection, toFrame])
+    toFrame({ type: "select", uid: selection === root ? null : selection });
+  }, [root, selection, toFrame]);
 
   // Renaming or moving a page changes what a story link resolves to, so the
   // preview needs the new mapping without re-rendering from the server.
   useEffect(() => {
-    toFrame({ type: 'resolve', resolution })
-  }, [resolution, toFrame])
+    toFrame({ type: "resolve", resolution });
+  }, [resolution, toFrame]);
 
-  return setFrame
+  return setFrame;
 }

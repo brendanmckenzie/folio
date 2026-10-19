@@ -7,22 +7,22 @@
  * (`identity-and-access.md` architecture decision 5).
  */
 
-import { ALL_SCOPES, chain, type Registry, SHARED_SCOPE } from '../../core/sites'
+import { ALL_SCOPES, chain, type Registry, SHARED_SCOPE } from "../../core/sites";
 
 /* ------------------------------------------------------------------ roles --- */
 
 /** Ordered weakest to strongest; `RANK` below is derived from this order. */
-export const ROLES = ['viewer', 'editor', 'publisher', 'admin'] as const
+export const ROLES = ["viewer", "editor", "publisher", "admin"] as const;
 
-export type Role = (typeof ROLES)[number]
+export type Role = (typeof ROLES)[number];
 
 const RANK: Record<Role, number> = Object.fromEntries(ROLES.map((r, i) => [r, i])) as Record<
   Role,
   number
->
+>;
 
 export function isRole(x: unknown): x is Role {
-  return typeof x === 'string' && (ROLES as readonly string[]).includes(x)
+  return typeof x === "string" && (ROLES as readonly string[]).includes(x);
 }
 
 /**
@@ -31,7 +31,7 @@ export function isRole(x: unknown): x is Role {
  * declare a single minimum rather than a set.
  */
 export function atLeast(role: Role, min: Role): boolean {
-  return RANK[role] >= RANK[min]
+  return RANK[role] >= RANK[min];
 }
 
 /* ----------------------------------------------------------------- scopes --- */
@@ -43,19 +43,19 @@ export function atLeast(role: Role, min: Role): boolean {
  * into by being promoted.
  */
 export const SCOPES = [
-  'content:read',
-  'content:read:draft',
-  'content:write',
-  'publish',
-  'assets:write',
-  'forms:read',
-  'admin',
-] as const
+  "content:read",
+  "content:read:draft",
+  "content:write",
+  "publish",
+  "assets:write",
+  "forms:read",
+  "admin",
+] as const;
 
-export type Scope = (typeof SCOPES)[number]
+export type Scope = (typeof SCOPES)[number];
 
 export function isScope(x: unknown): x is Scope {
-  return typeof x === 'string' && (SCOPES as readonly string[]).includes(x)
+  return typeof x === "string" && (SCOPES as readonly string[]).includes(x);
 }
 
 /**
@@ -66,21 +66,21 @@ export function isScope(x: unknown): x is Scope {
  */
 const IMPLIES: Record<Scope, readonly Scope[]> = {
   admin: [...SCOPES],
-  'content:write': ['content:read', 'content:read:draft', 'content:write'],
-  publish: ['content:read', 'content:read:draft', 'publish'],
-  'content:read:draft': ['content:read', 'content:read:draft'],
-  'content:read': ['content:read'],
-  'assets:write': ['assets:write'],
+  "content:write": ["content:read", "content:read:draft", "content:write"],
+  publish: ["content:read", "content:read:draft", "publish"],
+  "content:read:draft": ["content:read", "content:read:draft"],
+  "content:read": ["content:read"],
+  "assets:write": ["assets:write"],
   // Reading what strangers typed about themselves is implied by nothing but
   // `admin` (`../../../docs/specs/content-model/forms.md` decision 8): a token
   // that may write content has no business reading a form's responses, and a
   // token minted to push responses into a CRM has no business writing pages.
-  'forms:read': ['forms:read'],
-}
+  "forms:read": ["forms:read"],
+};
 
 /** True when any granted scope implies `need`. Total: an unknown grant is ignored. */
 export function hasScope(granted: readonly Scope[], need: Scope): boolean {
-  return granted.some((s) => IMPLIES[s]?.includes(need) ?? false)
+  return granted.some((s) => IMPLIES[s]?.includes(need) ?? false);
 }
 
 /**
@@ -89,13 +89,13 @@ export function hasScope(granted: readonly Scope[], need: Scope): boolean {
  * narrows every token that held it instead of throwing on read.
  */
 export function parseScopes(json: string): Scope[] {
-  let value: unknown
+  let value: unknown;
   try {
-    value = JSON.parse(json)
+    value = JSON.parse(json);
   } catch {
-    return []
+    return [];
   }
-  return Array.isArray(value) ? value.filter(isScope) : []
+  return Array.isArray(value) ? value.filter(isScope) : [];
 }
 
 /* ----------------------------------------------------------------- grants --- */
@@ -106,7 +106,7 @@ export function parseScopes(json: string): Scope[] {
  * `shared`, or `*` for every scope. With no `sites` configured there is exactly one
  * entry, on `*`, which is today's role one table over.
  */
-export type Grants = Readonly<Record<string, Role>>
+export type Grants = Readonly<Record<string, Role>>;
 
 /**
  * The scopes whose grant *writes* scope X: X itself, its group when X is a site in
@@ -114,7 +114,7 @@ export type Grants = Readonly<Record<string, Role>>
  * on shared content and nothing below it, and nothing flows down for editing.
  */
 function writersOf(registry: Registry, scope: string): string[] {
-  return [...chain(registry, scope).filter((s) => s !== SHARED_SCOPE || s === scope), ALL_SCOPES]
+  return [...chain(registry, scope).filter((s) => s !== SHARED_SCOPE || s === scope), ALL_SCOPES];
 }
 
 /**
@@ -127,16 +127,16 @@ function writersOf(registry: Registry, scope: string): string[] {
  * `withScope` has already 404'd a scope nobody registered before this is asked.
  */
 export function effectiveRole(grants: Grants, registry: Registry, scope: string): Role | null {
-  let best: Role | null = null
+  let best: Role | null = null;
   for (const writer of writersOf(registry, scope)) {
-    const role = grants[writer]
-    if (role !== undefined && (best === null || RANK[role] > RANK[best])) best = role
+    const role = grants[writer];
+    if (role !== undefined && (best === null || RANK[role] > RANK[best])) best = role;
   }
-  if (best !== null) return best
+  if (best !== null) return best;
   for (const held of Object.keys(grants)) {
-    if (held !== ALL_SCOPES && chain(registry, held).includes(scope)) return 'viewer'
+    if (held !== ALL_SCOPES && chain(registry, held).includes(scope)) return "viewer";
   }
-  return null
+  return null;
 }
 
 /**
@@ -149,11 +149,11 @@ export function previewEligible(grants: Grants, siteChain: readonly string[]): b
   return Object.entries(grants).some(
     ([scope, role]) =>
       (scope === ALL_SCOPES || siteChain.includes(scope)) && atLeast(role, READ_DRAFT.role),
-  )
+  );
 }
 
 /** The scopes that are reads, which is all a token keeps up its binding's chain. */
-const READ_SCOPES: readonly Scope[] = ['content:read', 'content:read:draft']
+const READ_SCOPES: readonly Scope[] = ["content:read", "content:read:draft"];
 
 /**
  * What a token's scopes are worth on scope X (decisions 11 and 14), or null when its
@@ -170,25 +170,25 @@ export function tokenScopesOn(
   registry: Registry,
   scope: string,
 ): Scope[] | null {
-  if (site === null) return [...scopes]
-  if (writersOf(registry, scope).includes(site)) return [...scopes]
-  if (chain(registry, site).includes(scope)) return READ_SCOPES.filter((s) => hasScope(scopes, s))
-  return null
+  if (site === null) return [...scopes];
+  if (writersOf(registry, scope).includes(site)) return [...scopes];
+  if (chain(registry, site).includes(scope)) return READ_SCOPES.filter((s) => hasScope(scopes, s));
+  return null;
 }
 
 /* ------------------------------------------------------------------ actor --- */
 
 export interface UserActor {
-  kind: 'user'
+  kind: "user";
   /** `users.id`. This is what lands in `versions.actor` and the DO's log. */
-  id: string
-  name: string
-  colour: string
-  role: Role
+  id: string;
+  name: string;
+  colour: string;
+  role: Role;
   /** `sessions.id` — the SHA-256 of the cookie's token, for revocation checks. */
-  session: string
+  session: string;
   /** Session expiry, epoch ms. Rides in the socket attachment (checkpoint 5). */
-  expiresAt: number
+  expiresAt: number;
   /**
    * `sessions.provider`: which provider minted *this* session, for `/me` to
    * answer and for `foundation/passkeys.md`'s account screen to draw beside each
@@ -199,7 +199,7 @@ export interface UserActor {
    * "which provider" has no answer there. `readSession` fills it from the join
    * it already runs, so the honest answer costs no extra query.
    */
-  provider?: string | null
+  provider?: string | null;
   /**
    * `users.email` and the `*` grant's `site_roles.role_from`, both filled from the
    * statement `readSession` already runs, so neither costs a query.
@@ -211,8 +211,8 @@ export interface UserActor {
    * decision 6). Neither is a new disclosure: it is the caller's own row, answered
    * to the caller.
    */
-  email?: string
-  roleFrom?: string | null
+  email?: string;
+  roleFrom?: string | null;
   /**
    * Every grant the person holds, `*` included (`multi-site.md` decision 10), read
    * in the statement `readSession` already runs. `role` above is the **effective**
@@ -224,24 +224,24 @@ export interface UserActor {
    * permission question has no rows behind it, and then its `role` is the whole
    * answer, platform tier included — exactly what `allows()` answered before grants.
    */
-  grants?: Grants
+  grants?: Grants;
 }
 
 export interface TokenActor {
-  kind: 'token'
+  kind: "token";
   /** `api_tokens.id`. */
-  id: string
-  name: string
+  id: string;
+  name: string;
   /** On a scoped request, what the token's scopes are worth *there*
    * (`tokenScopesOn`): a read up its binding's chain keeps only the read scopes. */
-  scopes: readonly Scope[]
+  scopes: readonly Scope[];
   /**
    * `api_tokens.site_id`: the scope the token is bound to, or null for a token
    * bound to none (decision 14). **A bound token is refused by every platform-tier
    * route**, whatever its scopes, and can never be minted with `admin`. Optional on
    * the type, like `UserActor.grants`: absent is unbound, today's token.
    */
-  site?: string | null
+  site?: string | null;
 }
 
 /**
@@ -253,15 +253,15 @@ export interface TokenActor {
  * against `site`. `readGrant` (`grants.ts`) resolves a grant cookie to one.
  */
 export interface GrantActor {
-  kind: 'grant'
+  kind: "grant";
   /** `site_grants.id`. */
-  id: string
-  userId: string | null
-  tokenId: string | null
-  name: string
+  id: string;
+  userId: string | null;
+  tokenId: string | null;
+  name: string;
   /** The site the grant was minted for, whose chain it reads. */
-  site: string
-  expiresAt: number
+  site: string;
+  expiresAt: number;
 }
 
 /**
@@ -269,7 +269,7 @@ export interface GrantActor {
  * a read (`withActor`), so a route on the admin origin never meets one; `allows()`
  * refuses it everything but `READ` and `READ_DRAFT` wherever it does.
  */
-export type Actor = UserActor | TokenActor | GrantActor
+export type Actor = UserActor | TokenActor | GrantActor;
 
 /**
  * **The one rule for who may see a site's drafts on its preview origin**
@@ -288,15 +288,15 @@ export type Actor = UserActor | TokenActor | GrantActor
  * bravo editor's session and a bravo-bound token once read alpha's drafts here.
  */
 export function mayPreviewDrafts(actor: Actor | null, registry: Registry, site: string): boolean {
-  if (!actor) return false
-  if (actor.kind === 'grant') return actor.site === site
-  const siteChain = chain(registry, site)
-  if (siteChain.length === 0) return false
-  if (actor.kind === 'user') {
-    return previewEligible(actor.grants ?? { [ALL_SCOPES]: actor.role }, siteChain)
+  if (!actor) return false;
+  if (actor.kind === "grant") return actor.site === site;
+  const siteChain = chain(registry, site);
+  if (siteChain.length === 0) return false;
+  if (actor.kind === "user") {
+    return previewEligible(actor.grants ?? { [ALL_SCOPES]: actor.role }, siteChain);
   }
-  const scopes = tokenScopesOn(actor.scopes, actor.site ?? null, registry, site)
-  return scopes !== null && hasScope(scopes, READ_DRAFT.scope)
+  const scopes = tokenScopesOn(actor.scopes, actor.site ?? null, registry, site);
+  return scopes !== null && hasScope(scopes, READ_DRAFT.scope);
 }
 
 /**
@@ -304,14 +304,14 @@ export function mayPreviewDrafts(actor: Actor | null, registry: Registry, site: 
  * `token:import-script` rather than naming a person who was not there.
  */
 export function actorString(actor: Actor | null): string | null {
-  if (!actor) return null
-  if (actor.kind === 'grant') return actor.userId ?? `token:${actor.name}`
-  return actor.kind === 'user' ? actor.id : `token:${actor.name}`
+  if (!actor) return null;
+  if (actor.kind === "grant") return actor.userId ?? `token:${actor.name}`;
+  return actor.kind === "user" ? actor.id : `token:${actor.name}`;
 }
 
 /** The display name for presence and history, or null with no actor. */
 export function actorName(actor: Actor | null): string | null {
-  return actor ? actor.name : null
+  return actor ? actor.name : null;
 }
 
 /* ----------------------------------------------------------------- access --- */
@@ -322,8 +322,8 @@ export function actorName(actor: Actor | null): string | null {
  * requirement expressed twice, and separating them is how the two drift.
  */
 export interface Access {
-  role: Role
-  scope: Scope
+  role: Role;
+  scope: Scope;
   /**
    * Which role the check reads (`multi-site.md` decision 10). `'scope'` is the
    * effective role on the request's scope — every content act. `'platform'` is the
@@ -331,17 +331,17 @@ export interface Access {
    * migrate, audit, bulk describe — and reads the `*` grant alone for a person and,
    * for a token, requires it to be bound to nothing.
    */
-  tier: 'platform' | 'scope'
+  tier: "platform" | "scope";
 }
 
 /** Reading published structure: the tree, the version list, the media library. */
-export const READ: Access = { role: 'viewer', scope: 'content:read', tier: 'scope' }
+export const READ: Access = { role: "viewer", scope: "content:read", tier: "scope" };
 
 /** Reading a live draft — the editor's own content, before it is published. */
-export const READ_DRAFT: Access = { role: 'viewer', scope: 'content:read:draft', tier: 'scope' }
+export const READ_DRAFT: Access = { role: "viewer", scope: "content:read:draft", tier: "scope" };
 
 /** Editing a document's contents. The socket's `tx` is the other half of this. */
-export const EDIT: Access = { role: 'editor', scope: 'content:write', tier: 'scope' }
+export const EDIT: Access = { role: "editor", scope: "content:write", tier: "scope" };
 
 /**
  * Creating a document, including by duplicating one.
@@ -356,7 +356,7 @@ export const EDIT: Access = { role: 'editor', scope: 'content:write', tier: 'sco
  * only — a token that could create before still can, and one that could not still
  * cannot.
  */
-export const CREATE: Access = { role: 'editor', scope: 'content:write', tier: 'scope' }
+export const CREATE: Access = { role: "editor", scope: "content:write", tier: "scope" };
 
 /**
  * Deleting, moving or renaming a document, and adding a manual redirect.
@@ -364,13 +364,13 @@ export const CREATE: Access = { role: 'editor', scope: 'content:write', tier: 's
  * the site already serves, which is a publishing act even when nothing is
  * published in the same breath. Creating is `CREATE` — see there for why it split.
  */
-export const MANAGE: Access = { role: 'publisher', scope: 'content:write', tier: 'scope' }
+export const MANAGE: Access = { role: "publisher", scope: "content:write", tier: "scope" };
 
 /** Publishing, unpublishing and checkpointing. */
-export const PUBLISH: Access = { role: 'publisher', scope: 'publish', tier: 'scope' }
+export const PUBLISH: Access = { role: "publisher", scope: "publish", tier: "scope" };
 
 /** Uploading, renaming or deleting an asset. */
-export const ASSETS: Access = { role: 'editor', scope: 'assets:write', tier: 'scope' }
+export const ASSETS: Access = { role: "editor", scope: "assets:write", tier: "scope" };
 
 /**
  * Reading submitted form responses, and downloading the files that came with
@@ -381,7 +381,7 @@ export const ASSETS: Access = { role: 'editor', scope: 'assets:write', tier: 'sc
  * what strangers typed about themselves — a name, an address, a CV. An editor
  * who may write a page is not thereby somebody who may read the enquiries.
  */
-export const FORMS: Access = { role: 'publisher', scope: 'forms:read', tier: 'scope' }
+export const FORMS: Access = { role: "publisher", scope: "forms:read", tier: "scope" };
 
 /**
  * The deployment-wide acts: editors, tokens, auth events, the site registry,
@@ -391,19 +391,19 @@ export const FORMS: Access = { role: 'publisher', scope: 'forms:read', tier: 'sc
  * Platform rather than a new name, so that a use of `ADMIN` nobody re-examined
  * fails closed — a site admin is refused it — rather than open.
  */
-export const ADMIN: Access = { role: 'admin', scope: 'admin', tier: 'platform' }
+export const ADMIN: Access = { role: "admin", scope: "admin", tier: "platform" };
 
 /**
  * `admin` on the request's scope: the content acts that were `ADMIN` before the
  * tiers split — deleting a form, its responses, the CSV. A site's own admin may do
  * these on its own site; they reach no other.
  */
-export const SCOPE_ADMIN: Access = { role: 'admin', scope: 'admin', tier: 'scope' }
+export const SCOPE_ADMIN: Access = { role: "admin", scope: "admin", tier: "scope" };
 
 /** The `*` grant a person holds, or null. An actor with no `grants` — one built to
  * ask a permission question — has only `role`, and that is its answer. */
 function platformRole(actor: UserActor): Role | null {
-  return actor.grants ? (actor.grants[ALL_SCOPES] ?? null) : actor.role
+  return actor.grants ? (actor.grants[ALL_SCOPES] ?? null) : actor.role;
 }
 
 /**
@@ -412,21 +412,23 @@ function platformRole(actor: UserActor): Role | null {
  * file cannot be the reason an unauthenticated request got through.
  */
 export function allows(actor: Actor | null, access: Access): boolean {
-  if (!actor) return false
+  if (!actor) return false;
   // A preview grant reads, published and draft, and does nothing else — no tier,
   // no role, no scope beyond those two answers it (decision 13).
-  if (actor.kind === 'grant') {
-    return access.tier === 'scope' && READ_SCOPES.includes(access.scope) && access.role === 'viewer'
+  if (actor.kind === "grant") {
+    return (
+      access.tier === "scope" && READ_SCOPES.includes(access.scope) && access.role === "viewer"
+    );
   }
-  if (access.tier === 'platform') {
-    if (actor.kind === 'token')
-      return (actor.site ?? null) === null && hasScope(actor.scopes, access.scope)
-    const role = platformRole(actor)
-    return role !== null && atLeast(role, access.role)
+  if (access.tier === "platform") {
+    if (actor.kind === "token")
+      return (actor.site ?? null) === null && hasScope(actor.scopes, access.scope);
+    const role = platformRole(actor);
+    return role !== null && atLeast(role, access.role);
   }
-  return actor.kind === 'user'
+  return actor.kind === "user"
     ? atLeast(actor.role, access.role)
-    : hasScope(actor.scopes, access.scope)
+    : hasScope(actor.scopes, access.scope);
 }
 
 /**
@@ -435,19 +437,19 @@ export function allows(actor: Actor | null, access: Access): boolean {
  * person, since neither is guessable from the other end.
  */
 export function refusalOf(actor: Actor, access: Access): string {
-  if (actor.kind === 'grant') return 'A preview grant may read this site and do nothing else.'
-  if (access.tier === 'platform') {
-    if (actor.kind === 'token' && (actor.site ?? null) !== null) {
-      return `This token is bound to '${actor.site}'; only an unbound token may do that.`
+  if (actor.kind === "grant") return "A preview grant may read this site and do nothing else.";
+  if (access.tier === "platform") {
+    if (actor.kind === "token" && (actor.site ?? null) !== null) {
+      return `This token is bound to '${actor.site}'; only an unbound token may do that.`;
     }
     // Only for a person holding grants beyond `*`, whose role on some site says
     // nothing about this: "admin is required" to a site's admin would explain
     // nothing. With no `sites` every grant is on `*`, so this never fires there.
-    if (actor.kind === 'user' && Object.keys(actor.grants ?? {}).some((s) => s !== ALL_SCOPES)) {
-      return `That needs the ${access.role} role on every site; your role everywhere is ${platformRole(actor) ?? 'none'}.`
+    if (actor.kind === "user" && Object.keys(actor.grants ?? {}).some((s) => s !== ALL_SCOPES)) {
+      return `That needs the ${access.role} role on every site; your role everywhere is ${platformRole(actor) ?? "none"}.`;
     }
   }
-  return actor.kind === 'token'
+  return actor.kind === "token"
     ? `This token is missing the '${access.scope}' scope.`
-    : `Your role (${actor.role}) may not do that; ${access.role} is required.`
+    : `Your role (${actor.role}) may not do that; ${access.role} is required.`;
 }

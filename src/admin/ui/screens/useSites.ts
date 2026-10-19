@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import { EMPTY_REGISTRY, type Registry } from '../../../core/sites'
-import { messageOf } from './useContent'
+import { useCallback, useEffect, useState } from "react";
+import { EMPTY_REGISTRY, type Registry } from "../../../core/sites";
+import { messageOf } from "./useContent";
 
 /**
  * The registry, off `GET {base}/api/sites` (`multi-site.md` decision 1).
@@ -12,43 +12,43 @@ import { messageOf } from './useContent'
  * `ok` (`useAccess` makes the same choice).
  */
 export interface SitesData {
-  registry: Registry
-  loading: boolean
-  error: string | null
-  reload: () => void
+  registry: Registry;
+  loading: boolean;
+  error: string | null;
+  reload: () => void;
 }
 
 export function useSites(apiBase: string, enabled: boolean): SitesData {
-  const [registry, setRegistry] = useState<Registry>(EMPTY_REGISTRY)
-  const [loading, setLoading] = useState(enabled)
-  const [error, setError] = useState<string | null>(null)
-  const [epoch, setEpoch] = useState(0)
+  const [registry, setRegistry] = useState<Registry>(EMPTY_REGISTRY);
+  const [loading, setLoading] = useState(enabled);
+  const [error, setError] = useState<string | null>(null);
+  const [epoch, setEpoch] = useState(0);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: epoch is the reload trigger, not a value the body reads
   useEffect(() => {
-    if (!enabled) return
-    let live = true
-    setLoading(true)
+    if (!enabled) return;
+    let live = true;
+    setLoading(true);
     void (async () => {
       try {
-        const res = await fetch(`${apiBase}/sites`)
-        if (!res.ok) throw new Error(await messageOf(res))
-        const body = (await res.json()) as Registry
+        const res = await fetch(`${apiBase}/sites`);
+        if (!res.ok) throw new Error(await messageOf(res));
+        const body = (await res.json()) as Registry;
         if (live) {
-          setRegistry(body)
-          setError(null)
+          setRegistry(body);
+          setError(null);
         }
       } catch (e) {
-        if (live) setError((e as Error).message)
+        if (live) setError((e as Error).message);
       } finally {
-        if (live) setLoading(false)
+        if (live) setLoading(false);
       }
-    })()
+    })();
     return () => {
-      live = false
-    }
-  }, [apiBase, enabled, epoch])
+      live = false;
+    };
+  }, [apiBase, enabled, epoch]);
 
-  const reload = useCallback(() => setEpoch((n) => n + 1), [])
-  return { registry, loading, error, reload }
+  const reload = useCallback(() => setEpoch((n) => n + 1), []);
+  return { registry, loading, error, reload };
 }

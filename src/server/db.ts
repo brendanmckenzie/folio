@@ -29,7 +29,7 @@
  * converted: `StoryDO` reads what it just wrote, and staying off sessions keeps
  * it on the primary by construction rather than by argument.
  */
-import { isSecure, readCookie, serialiseCookie } from './auth/cookie'
+import { isSecure, readCookie, serialiseCookie } from "./auth/cookie";
 
 /**
  * What a query needs of D1. Satisfied by both `D1Database` and
@@ -38,7 +38,7 @@ import { isSecure, readCookie, serialiseCookie } from './auth/cookie'
  * `Pick` rather than a hand-written interface so it tracks the platform types:
  * if `prepare` ever changes shape this fails to compile instead of drifting.
  */
-export type FolioDb = Pick<D1Database, 'prepare' | 'batch'>
+export type FolioDb = Pick<D1Database, "prepare" | "batch">;
 
 /**
  * Start anywhere — the nearest replica, or the primary if that is nearer.
@@ -49,7 +49,7 @@ export type FolioDb = Pick<D1Database, 'prepare' | 'batch'>
  * with the first, so a render never sees a document newer than the references it
  * resolves.
  */
-export const REPLICA_FIRST = 'first-unconstrained'
+export const REPLICA_FIRST = "first-unconstrained";
 
 /**
  * Start at the primary.
@@ -59,13 +59,13 @@ export const REPLICA_FIRST = 'first-unconstrained'
  * reindex, then answer with the row — must not have opened on a replica that is
  * behind its own write.
  */
-export const PRIMARY_FIRST = 'first-primary'
+export const PRIMARY_FIRST = "first-primary";
 
 /** A `D1DatabaseSession`, named for what it is used for. */
-export type DbSession = ReturnType<D1Database['withSession']>
+export type DbSession = ReturnType<D1Database["withSession"]>;
 
-export const SECURE_BOOKMARK_COOKIE = '__Host-folio_bookmark'
-export const PLAIN_BOOKMARK_COOKIE = 'folio_bookmark'
+export const SECURE_BOOKMARK_COOKIE = "__Host-folio_bookmark";
+export const PLAIN_BOOKMARK_COOKIE = "folio_bookmark";
 
 /**
  * How long a bookmark stays useful. Ten minutes: long enough to cover an
@@ -73,7 +73,7 @@ export const PLAIN_BOOKMARK_COOKIE = 'folio_bookmark'
  * parked overnight does not open tomorrow's first read against a bookmark from
  * a database that has since been restored from a backup.
  */
-export const BOOKMARK_MAX_AGE = 600
+export const BOOKMARK_MAX_AGE = 600;
 
 /**
  * A conservative screen on a value that came off a request.
@@ -85,19 +85,19 @@ export const BOOKMARK_MAX_AGE = 600
  * could not be a bookmark under any format: control characters, separators, and
  * anything long enough to be an attack on the header.
  */
-const BOOKMARK = /^[0-9A-Za-z_-]{1,128}$/
+const BOOKMARK = /^[0-9A-Za-z_-]{1,128}$/;
 
 /** The bookmark this request carries, or null if it carries nothing usable. */
 export function readBookmark(header: string | null | undefined): string | null {
   const raw =
-    readCookie(header, SECURE_BOOKMARK_COOKIE) ?? readCookie(header, PLAIN_BOOKMARK_COOKIE)
-  return raw && BOOKMARK.test(raw) ? raw : null
+    readCookie(header, SECURE_BOOKMARK_COOKIE) ?? readCookie(header, PLAIN_BOOKMARK_COOKIE);
+  return raw && BOOKMARK.test(raw) ? raw : null;
 }
 
 /** The `Set-Cookie` value carrying `bookmark` forward to this browser's next request. */
 export function bookmarkCookie(url: URL | string, bookmark: string): string {
-  const name = isSecure(url) ? SECURE_BOOKMARK_COOKIE : PLAIN_BOOKMARK_COOKIE
-  return serialiseCookie(url, name, bookmark, { maxAge: BOOKMARK_MAX_AGE })
+  const name = isSecure(url) ? SECURE_BOOKMARK_COOKIE : PLAIN_BOOKMARK_COOKIE;
+  return serialiseCookie(url, name, bookmark, { maxAge: BOOKMARK_MAX_AGE });
 }
 
 /**
@@ -113,8 +113,8 @@ export function sessionFor(
   db: D1Database,
   opts: { bookmark?: string | null; write?: boolean } = {},
 ): DbSession {
-  if (opts.write) return db.withSession(PRIMARY_FIRST)
-  return db.withSession(opts.bookmark ?? REPLICA_FIRST)
+  if (opts.write) return db.withSession(PRIMARY_FIRST);
+  return db.withSession(opts.bookmark ?? REPLICA_FIRST);
 }
 
 /* ------------------------------------------------------ bound parameters --- */
@@ -143,7 +143,7 @@ export function sessionFor(
  * `publishedDocsByIds` chunk internally so a call site cannot forget; anything
  * new binding `n` values should do the same rather than document a limit.
  */
-export const D1_BIND_CAP = 100
+export const D1_BIND_CAP = 100;
 
 /**
  * What a statement in this library is *planned* against — the cap less a margin.
@@ -158,7 +158,7 @@ export const D1_BIND_CAP = 100
  * Derived from the cap rather than written as `90`, so the two cannot drift if
  * Cloudflare ever raises the ceiling.
  */
-export const BIND_BUDGET = D1_BIND_CAP - 10
+export const BIND_BUDGET = D1_BIND_CAP - 10;
 
 /**
  * How many rows of `bindsPerRow` parameters fit in one statement.
@@ -169,7 +169,7 @@ export const BIND_BUDGET = D1_BIND_CAP - 10
  * written, one row per statement, and a chunk size of 0 would loop forever.
  */
 export function rowsPerStatement(bindsPerRow: number): number {
-  return Math.max(1, Math.floor(BIND_BUDGET / Math.max(1, bindsPerRow)))
+  return Math.max(1, Math.floor(BIND_BUDGET / Math.max(1, bindsPerRow)));
 }
 
 /**
@@ -179,8 +179,8 @@ export function rowsPerStatement(bindsPerRow: number): number {
  * without a length check first.
  */
 export function bindChunks<T>(rows: readonly T[], bindsPerRow: number): T[][] {
-  const size = rowsPerStatement(bindsPerRow)
-  const out: T[][] = []
-  for (let at = 0; at < rows.length; at += size) out.push(rows.slice(at, at + size))
-  return out
+  const size = rowsPerStatement(bindsPerRow);
+  const out: T[][] = [];
+  for (let at = 0; at < rows.length; at += size) out.push(rows.slice(at, at + size));
+  return out;
 }

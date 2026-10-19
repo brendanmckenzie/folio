@@ -12,29 +12,29 @@
  * rule: a Durable Object alarm (no `ExecutionContext`) has to be able to fire
  * these too (see `runtime.ts`'s `alarmHookCtx`).
  */
-import type { Doc } from '../core/doc'
-import { DEFAULT_SITE, type GroupRef, type SiteRef } from '../core/sites'
-import type { StoryMeta } from '../core/story'
-import type { PurgeIssued } from './cache-purge'
-import type { FormResponse, SubmittedFile } from './form-responses'
-import type { FormMeta } from './forms'
-import type { FolioLogger } from './types'
-import type { VersionMeta } from './versions'
+import type { Doc } from "../core/doc";
+import { DEFAULT_SITE, type GroupRef, type SiteRef } from "../core/sites";
+import type { StoryMeta } from "../core/story";
+import type { PurgeIssued } from "./cache-purge";
+import type { FormResponse, SubmittedFile } from "./form-responses";
+import type { FormMeta } from "./forms";
+import type { FolioLogger } from "./types";
+import type { VersionMeta } from "./versions";
 
 export type HookEvent =
-  | 'published'
-  | 'unpublished'
-  | 'pathsChanged'
-  | 'created'
-  | 'deleted'
-  | 'checkpointed'
-  | 'updated'
-  | 'migrated'
-  | 'reindexed'
-  | 'redirectsChanged'
-  | 'formChanged'
-  | 'submitted'
-  | 'siteChanged'
+  | "published"
+  | "unpublished"
+  | "pathsChanged"
+  | "created"
+  | "deleted"
+  | "checkpointed"
+  | "updated"
+  | "migrated"
+  | "reindexed"
+  | "redirectsChanged"
+  | "formChanged"
+  | "submitted"
+  | "siteChanged";
 
 /**
  * The same list at runtime, for `validateHooks`. A name must appear in both or
@@ -44,28 +44,28 @@ export type HookEvent =
  * `test/unit/server/pure.test.ts`.
  */
 const HOOK_EVENTS: readonly HookEvent[] = [
-  'published',
-  'unpublished',
-  'pathsChanged',
-  'created',
-  'deleted',
-  'checkpointed',
-  'updated',
-  'migrated',
-  'reindexed',
-  'redirectsChanged',
-  'formChanged',
-  'submitted',
-  'siteChanged',
-]
+  "published",
+  "unpublished",
+  "pathsChanged",
+  "created",
+  "deleted",
+  "checkpointed",
+  "updated",
+  "migrated",
+  "reindexed",
+  "redirectsChanged",
+  "formChanged",
+  "submitted",
+  "siteChanged",
+];
 
 /** Every hook payload's common shape. Nothing else is injected: a hook that
  * wants D1 or R2 uses `config.bindings(env)`, the same accessor the host
  * already wrote for every other route. */
 export interface HookBase<Env> {
-  env: Env
-  waitUntil: (p: Promise<unknown>) => void
-  actor: string | null
+  env: Env;
+  waitUntil: (p: Promise<unknown>) => void;
+  actor: string | null;
   /**
    * The scope that owns what changed (`../../docs/specs/foundation/multi-site.md`
    * decision 16): the site, group or `shared` a story, form or redirect belongs to,
@@ -76,7 +76,7 @@ export interface HookBase<Env> {
    * Set by the runner from the payload it is given, so an emitter that omits it
    * cannot leave it out: a story's own `site`, else `default`.
    */
-  site: string | null
+  site: string | null;
   /**
    * The brand of `site` (`../../docs/specs/foundation/multi-brand.md` decision 16):
    * what lets `hooks.submitted` send one brand's enquiry email and another's Jambo
@@ -87,7 +87,7 @@ export interface HookBase<Env> {
    * Set by the runner from the brand it was made for, never from the payload, so an
    * emitter cannot leave it out or name another brand's.
    */
-  brand: string | null
+  brand: string | null;
   /**
    * Exactly what Folio's own purger asked Workers Cache for, when this event made
    * it purge anything (decision 16): the tags, or a flush. A purge reaches only the
@@ -100,33 +100,33 @@ export interface HookBase<Env> {
    * non-title `updated`). Set before a host hook runs, never before an internal
    * one.
    */
-  purge?: PurgeIssued
+  purge?: PurgeIssued;
 }
 
 export interface PublishedHookPayload<Env> extends HookBase<Env> {
-  story: StoryMeta
-  doc: Doc
-  version: VersionMeta
-  publishedAt: number
+  story: StoryMeta;
+  doc: Doc;
+  version: VersionMeta;
+  publishedAt: number;
 }
 
 export interface UnpublishedHookPayload<Env> extends HookBase<Env> {
-  story: StoryMeta
+  story: StoryMeta;
 }
 
 export interface PathsChangedHookPayload<Env> extends HookBase<Env> {
-  changes: { id: string; from: string; to: string }[]
+  changes: { id: string; from: string; to: string }[];
 }
 
 export interface CreatedHookPayload<Env> extends HookBase<Env> {
-  story: StoryMeta
+  story: StoryMeta;
 }
 
 export interface DeletedHookPayload<Env> extends HookBase<Env> {
-  ids: string[]
+  ids: string[];
   /** `ids`' own paths, same order. `null` for an unrouted document
    * (`document-types.md`), which never had a URL for a cache to hold. */
-  paths: (string | null)[]
+  paths: (string | null)[];
   /**
    * `ids`' own document types, same order. Here for the same reason `paths` is:
    * the rows are gone by the time anything could look them up again, and a
@@ -134,12 +134,12 @@ export interface DeletedHookPayload<Env> extends HookBase<Env> {
    * (`../../docs/specs/platform/caching.md`) — so a consumer that has to invalidate an index
    * page needs the type and has no second chance to read it.
    */
-  types: string[]
+  types: string[];
 }
 
 export interface CheckpointedHookPayload<Env> extends HookBase<Env> {
-  story: StoryMeta
-  version: VersionMeta
+  story: StoryMeta;
+  version: VersionMeta;
 }
 
 /**
@@ -147,10 +147,10 @@ export interface CheckpointedHookPayload<Env> extends HookBase<Env> {
  * patch actually changed. Not content: a page's own title lives on its root
  * block and travels through the mutation log.
  */
-export type StoryChange = 'title' | 'slug' | 'parent' | 'ord'
+export type StoryChange = "title" | "slug" | "parent" | "ord";
 
 export interface UpdatedHookPayload<Env> extends HookBase<Env> {
-  story: StoryMeta
+  story: StoryMeta;
   /**
    * What the patch changed, at least one entry — `updated` does not fire for a
    * patch that changed nothing.
@@ -162,7 +162,7 @@ export interface UpdatedHookPayload<Env> extends HookBase<Env> {
    * with a `pathsChanged` as well; on an unrouted document (no path to move)
    * they arrive here alone.
    */
-  changed: StoryChange[]
+  changed: StoryChange[];
 }
 
 export interface MigratedHookPayload<Env> extends HookBase<Env> {
@@ -172,19 +172,19 @@ export interface MigratedHookPayload<Env> extends HookBase<Env> {
    * see. `runMigrations` is batched and resumable, so this fires once per call
    * with that call's ids, not once for the whole run.
    */
-  ids: string[]
+  ids: string[];
   /** The migration ids the run is applying, in run order. */
-  migrations: string[]
+  migrations: string[];
 }
 
 export interface ReindexedHookPayload<Env> extends HookBase<Env> {
   /** Documents reindexed in this batch. */
-  count: number
+  count: number;
 }
 
 export interface RedirectsChangedHookPayload<Env> extends HookBase<Env> {
   /** The source paths added or removed, normalised (no leading slash). */
-  from: string[]
+  from: string[];
 }
 
 /**
@@ -201,10 +201,10 @@ export interface RedirectsChangedHookPayload<Env> extends HookBase<Env> {
  * every one of them would submit something the live form now refuses.
  */
 export interface FormChangedHookPayload<Env> extends HookBase<Env> {
-  form: FormMeta
+  form: FormMeta;
   /** The version this save bumped to. Always present: the event does not fire
    *  for a save that did not bump one. */
-  version: number
+  version: number;
 }
 
 /**
@@ -231,12 +231,12 @@ export interface FormChangedHookPayload<Env> extends HookBase<Env> {
  * where a refusal belongs (decision 11).
  */
 export interface SubmittedHookPayload<Env> extends HookBase<Env> {
-  form: FormMeta
-  response: FormResponse
+  form: FormMeta;
+  response: FormResponse;
   /** The files that came with it. Metadata only — a host that wants the bytes
    *  reads them back through `GET {base}/api/forms/:id/responses/:rid/file/:name`
    *  or holds the `media` binding. */
-  files: readonly SubmittedFile[]
+  files: readonly SubmittedFile[];
 }
 
 /**
@@ -249,29 +249,29 @@ export interface SubmittedHookPayload<Env> extends HookBase<Env> {
  * (decision 4), is the same tag by construction and is not a separate event.
  */
 export interface SiteChangedHookPayload<Env> extends HookBase<Env> {
-  site: string
-  kind: 'site' | 'group'
-  change: 'created' | 'updated' | 'deleted'
+  site: string;
+  kind: "site" | "group";
+  change: "created" | "updated" | "deleted";
   /** The row as it stands after the change, or null once it is deleted. */
-  row: SiteRef | GroupRef | null
+  row: SiteRef | GroupRef | null;
 }
 
 /** Every event's full payload, keyed by name — what `FolioHooks` hands a
  * handler and what `HookRunner.run` builds before calling one. */
 export interface HookPayloadMap<Env> {
-  published: PublishedHookPayload<Env>
-  unpublished: UnpublishedHookPayload<Env>
-  pathsChanged: PathsChangedHookPayload<Env>
-  created: CreatedHookPayload<Env>
-  deleted: DeletedHookPayload<Env>
-  checkpointed: CheckpointedHookPayload<Env>
-  updated: UpdatedHookPayload<Env>
-  migrated: MigratedHookPayload<Env>
-  reindexed: ReindexedHookPayload<Env>
-  redirectsChanged: RedirectsChangedHookPayload<Env>
-  formChanged: FormChangedHookPayload<Env>
-  submitted: SubmittedHookPayload<Env>
-  siteChanged: SiteChangedHookPayload<Env>
+  published: PublishedHookPayload<Env>;
+  unpublished: UnpublishedHookPayload<Env>;
+  pathsChanged: PathsChangedHookPayload<Env>;
+  created: CreatedHookPayload<Env>;
+  deleted: DeletedHookPayload<Env>;
+  checkpointed: CheckpointedHookPayload<Env>;
+  updated: UpdatedHookPayload<Env>;
+  migrated: MigratedHookPayload<Env>;
+  reindexed: ReindexedHookPayload<Env>;
+  redirectsChanged: RedirectsChangedHookPayload<Env>;
+  formChanged: FormChangedHookPayload<Env>;
+  submitted: SubmittedHookPayload<Env>;
+  siteChanged: SiteChangedHookPayload<Env>;
 }
 
 /**
@@ -281,12 +281,12 @@ export interface HookPayloadMap<Env> {
  * decision 1).
  */
 export interface FolioHooks<Env> {
-  published?: (e: PublishedHookPayload<Env>) => unknown
-  unpublished?: (e: UnpublishedHookPayload<Env>) => unknown
-  pathsChanged?: (e: PathsChangedHookPayload<Env>) => unknown
-  created?: (e: CreatedHookPayload<Env>) => unknown
-  deleted?: (e: DeletedHookPayload<Env>) => unknown
-  checkpointed?: (e: CheckpointedHookPayload<Env>) => unknown
+  published?: (e: PublishedHookPayload<Env>) => unknown;
+  unpublished?: (e: UnpublishedHookPayload<Env>) => unknown;
+  pathsChanged?: (e: PathsChangedHookPayload<Env>) => unknown;
+  created?: (e: CreatedHookPayload<Env>) => unknown;
+  deleted?: (e: DeletedHookPayload<Env>) => unknown;
+  checkpointed?: (e: CheckpointedHookPayload<Env>) => unknown;
   /**
    * The four events `../../docs/specs/platform/caching.md` added, for write paths that change
    * published bytes and used to fire nothing at all. Each one is a way a cached
@@ -297,17 +297,17 @@ export interface FolioHooks<Env> {
    * - `reindexed` — `POST {base}/reindex` changes what every collection answers
    * - `redirectsChanged` — a manual redirect added or removed
    */
-  updated?: (e: UpdatedHookPayload<Env>) => unknown
-  migrated?: (e: MigratedHookPayload<Env>) => unknown
-  reindexed?: (e: ReindexedHookPayload<Env>) => unknown
-  redirectsChanged?: (e: RedirectsChangedHookPayload<Env>) => unknown
+  updated?: (e: UpdatedHookPayload<Env>) => unknown;
+  migrated?: (e: MigratedHookPayload<Env>) => unknown;
+  reindexed?: (e: ReindexedHookPayload<Env>) => unknown;
+  redirectsChanged?: (e: RedirectsChangedHookPayload<Env>) => unknown;
   /**
    * A form's *shape* changed (`../../docs/specs/content-model/forms.md`). Folio's
    * own internal hook already purges `form:<id>`; this is for a host with its own
    * work to hang off one — regenerating a static form, telling a CRM the columns
    * moved.
    */
-  formChanged?: (e: FormChangedHookPayload<Env>) => unknown
+  formChanged?: (e: FormChangedHookPayload<Env>) => unknown;
   /**
    * A response arrived (`../../docs/specs/content-model/forms.md` checkpoint 4).
    * Folio always stores it; this is the sink a host forwards it to — a CRM, a
@@ -317,15 +317,15 @@ export interface FolioHooks<Env> {
    * for this file's stated reason: the row has already committed, and a host that
    * needs durable delivery has a Queue binding and a row in D1 to read from.
    */
-  submitted?: (e: SubmittedHookPayload<Env>) => unknown
+  submitted?: (e: SubmittedHookPayload<Env>) => unknown;
   /**
    * A site or group in the registry was created, edited or deleted. Folio purges
    * `site:<id>` itself, now and again 25 seconds later; this is for a host that
    * keeps a front end's host map or cache of its own.
    */
-  siteChanged?: (e: SiteChangedHookPayload<Env>) => unknown
+  siteChanged?: (e: SiteChangedHookPayload<Env>) => unknown;
   /** Events to await before responding. Everything else rides `waitUntil`. */
-  await?: readonly HookEvent[]
+  await?: readonly HookEvent[];
 }
 
 /**
@@ -335,11 +335,11 @@ export interface FolioHooks<Env> {
  * surface once, not a handler that silently never fires for six months.
  */
 export function validateHooks<Env>(hooks: FolioHooks<Env> | undefined): void {
-  if (!hooks) return
-  const known = new Set<string>([...HOOK_EVENTS, 'await'])
+  if (!hooks) return;
+  const known = new Set<string>([...HOOK_EVENTS, "await"]);
   for (const key of Object.keys(hooks)) {
     if (!known.has(key)) {
-      throw new Error(`folio: unknown hook "${key}" (valid: ${[...known].sort().join(', ')})`)
+      throw new Error(`folio: unknown hook "${key}" (valid: ${[...known].sort().join(", ")})`);
     }
   }
 }
@@ -353,19 +353,19 @@ export function validateHooks<Env>(hooks: FolioHooks<Env> | undefined): void {
  */
 export type HookExtra<Env, E extends HookEvent> = Omit<
   HookPayloadMap<Env>[E],
-  'env' | 'waitUntil' | 'site' | 'brand' | 'purge'
-> & { site?: string | null; purge?: PurgeIssued }
+  "env" | "waitUntil" | "site" | "brand" | "purge"
+> & { site?: string | null; purge?: PurgeIssued };
 
 export interface HookRunner<Env> {
-  run<E extends HookEvent>(name: E, extra: HookExtra<Env, E>): Promise<void>
+  run<E extends HookEvent>(name: E, extra: HookExtra<Env, E>): Promise<void>;
 }
 
 /** `env` plus the one thing every call site can offer, however differently
  * they offer it: `waitUntil`, native from `c.executionCtx` at an HTTP call
  * site, or the fallback `alarmHookCtx` builds for a Durable Object alarm. */
 export interface HookRunnerCtx<Env = unknown> {
-  env: Env
-  waitUntil: (p: Promise<unknown>) => void
+  env: Env;
+  waitUntil: (p: Promise<unknown>) => void;
 }
 
 /**
@@ -377,7 +377,7 @@ export interface HookRunnerCtx<Env = unknown> {
  * exactly as a host does, with no merge logic of its own to maintain. Empty
  * today — `createRuntime` (`runtime.ts`) owns the one array that exists.
  */
-export type InternalHooks<Env> = readonly FolioHooks<Env>[]
+export type InternalHooks<Env> = readonly FolioHooks<Env>[];
 
 /**
  * A hook function dispatched by event name rather than called directly: `E`
@@ -394,33 +394,33 @@ async function runOne(
   logger: FolioLogger = console,
 ): Promise<unknown> {
   try {
-    return await fn(payload)
+    return await fn(payload);
   } catch (err) {
     // The library's second observability hook after `app.onError`'s route
     // logging (errors.ts): one line, naming the event, and nothing else — a
     // Slack outage or a broken search index must never make publishing
     // impossible (decision 2). This swallow is correct and does not change;
     // only where the line goes does (`FolioConfig.logger`).
-    logger.error(`folio: hook ${name} failed`, err)
-    return undefined
+    logger.error(`folio: hook ${name} failed`, err);
+    return undefined;
   }
 }
 
 /** A return value that is a purge's record (`cache-purge.ts`'s `PurgeIssued`). */
 function isPurgeIssued(value: unknown): value is PurgeIssued {
-  if (typeof value !== 'object' || value === null) return false
-  const v = value as { tags?: unknown; everything?: unknown }
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as { tags?: unknown; everything?: unknown };
   return (
-    v.everything === true || (Array.isArray(v.tags) && v.tags.every((t) => typeof t === 'string'))
-  )
+    v.everything === true || (Array.isArray(v.tags) && v.tags.every((t) => typeof t === "string"))
+  );
 }
 
 /** The scope the payload's own row belongs to: `extra.site` when the emitter named
  * one (`null` included), else the story's, else the one scope a single-site
  * deployment has. */
 function siteOf(extra: { site?: string | null; story?: { site?: string } }): string | null {
-  if (extra.site !== undefined) return extra.site
-  return extra.story?.site ?? DEFAULT_SITE
+  if (extra.site !== undefined) return extra.site;
+  return extra.story?.site ?? DEFAULT_SITE;
 }
 
 /**
@@ -436,15 +436,15 @@ export function createHookRunner<Env>(
   /** The brand every payload this runner builds carries; null with no `brands`. */
   brand: string | null = null,
 ): HookRunner<Env> {
-  const awaited = new Set(hooks?.await ?? [])
+  const awaited = new Set(hooks?.await ?? []);
 
   return {
     async run(name, extra) {
-      const hostFn = hooks?.[name] as ((payload: unknown) => unknown) | undefined
+      const hostFn = hooks?.[name] as ((payload: unknown) => unknown) | undefined;
       const internalFns = internal.length
         ? (internal.map((h) => h[name]).filter(Boolean) as ((payload: unknown) => unknown)[])
-        : []
-      if (!hostFn && internalFns.length === 0) return // no hook, no cost, no allocation
+        : [];
+      if (!hostFn && internalFns.length === 0) return; // no hook, no cost, no allocation
 
       const payload = {
         ...(extra as object),
@@ -452,7 +452,7 @@ export function createHookRunner<Env>(
         waitUntil: ctx.waitUntil,
         site: siteOf(extra as { site?: string | null; story?: { site?: string } }),
         brand,
-      } as HookBase<Env>
+      } as HookBase<Env>;
 
       // Internal hooks always run first, and are **always awaited**, whatever
       // the host's `await` list says. That is not a courtesy to the host: the
@@ -469,14 +469,14 @@ export function createHookRunner<Env>(
       // it — so a host's hook sees exactly what was issued, not a second
       // computation of it (`multi-site.md` decision 16).
       for (const fn of internalFns) {
-        const out = await runOne(name, fn, payload, logger)
-        if (payload.purge === undefined && isPurgeIssued(out)) payload.purge = out
+        const out = await runOne(name, fn, payload, logger);
+        if (payload.purge === undefined && isPurgeIssued(out)) payload.purge = out;
       }
-      if (!hostFn) return
+      if (!hostFn) return;
 
-      const task = runOne(name, hostFn, payload, logger)
-      if (awaited.has(name)) await task
-      else ctx.waitUntil(task)
+      const task = runOne(name, hostFn, payload, logger);
+      if (awaited.has(name)) await task;
+      else ctx.waitUntil(task);
     },
-  }
+  };
 }

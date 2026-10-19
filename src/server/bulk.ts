@@ -44,17 +44,17 @@ import {
   type FilterSelection,
   readBulkCursor,
   writeBulkCursor,
-} from '../core/bulk'
-import type { StoryBulkAction, StoryFilter, StoryMeta } from '../core/story'
-import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from './documents'
-import { FolioError, rethrow } from './errors'
-import { publish, type PublishDeps, unpublish } from './publish'
-import { countStories, storiesFor, storiesMatching } from './stories'
-import type { FolioDb } from './db'
-import type { FolioLogger } from './types'
+} from "../core/bulk";
+import type { StoryBulkAction, StoryFilter, StoryMeta } from "../core/story";
+import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from "./documents";
+import { FolioError, rethrow } from "./errors";
+import { publish, type PublishDeps, unpublish } from "./publish";
+import { countStories, storiesFor, storiesMatching } from "./stories";
+import type { FolioDb } from "./db";
+import type { FolioLogger } from "./types";
 
 /** How many documents one call acts on before handing back a cursor. */
-export const DEFAULT_BULK_BATCH = 25
+export const DEFAULT_BULK_BATCH = 25;
 
 /**
  * Ceiling on `batch`, so a caller cannot ask for a run that outlives the request.
@@ -66,7 +66,7 @@ export const DEFAULT_BULK_BATCH = 25
  * will not finish, which is why the *default* is 25 and why the spec names that read
  * as the next thing worth narrowing.
  */
-export const MAX_BULK_BATCH = 200
+export const MAX_BULK_BATCH = 200;
 
 /**
  * The report, the refusal and the failure shapes live in `core/bulk.ts` — the
@@ -74,18 +74,18 @@ export const MAX_BULK_BATCH = 200
  * runner that writes it share one vocabulary. Instantiated here at
  * `StoryBulkAction`, which is the only thing about them that is story-shaped.
  */
-export type StoryBulkReport = BulkReport<StoryBulkAction>
-export type StoryBulkOutcome = BulkOutcome<StoryBulkAction>
+export type StoryBulkReport = BulkReport<StoryBulkAction>;
+export type StoryBulkOutcome = BulkOutcome<StoryBulkAction>;
 
 export interface BulkOptions {
-  batch?: number
+  batch?: number;
   /** The previous call's `continueFrom`. An opaque `(id, seen)` pair, not an id. */
-  continueFrom?: string | null
+  continueFrom?: string | null;
   /** Computes everything, writes nothing, and answers the same shape. */
-  dryRun?: boolean
+  dryRun?: boolean;
   /** Who asked, for every version row and hook the run fires. Off the session,
    * never the body. */
-  actor?: string | null
+  actor?: string | null;
   /**
    * `move`'s destination, and required for it. `parentId: null` is the top level.
    *
@@ -94,7 +94,7 @@ export interface BulkOptions {
    * walked it. The admin's per-item client loop passed `index: 0` for every
    * document, which silently *reversed* the set.
    */
-  destination?: { parentId: string | null; index?: number }
+  destination?: { parentId: string | null; index?: number };
   /**
    * The scope the run acts in (`multi-site.md`: "`/bulk/*`: every id in scope"), and
    * the one thing a captured filter is read against: a filter selection walks and
@@ -102,13 +102,13 @@ export interface BulkOptions {
    * here. Absent is `default`, the one scope of a deployment with no `sites`. Off the
    * request, never the body.
    */
-  scope?: string
+  scope?: string;
   /**
    * `delete`'s redirect switch, defaulting to **true** exactly as
    * `DELETE {base}/api/stories/:id` does (`../../docs/specs/platform/redirects.md` decision 4): a
    * bulk delete has to leave the redirects a hundred single deletes would.
    */
-  redirect?: boolean
+  redirect?: boolean;
 }
 
 /**
@@ -125,7 +125,7 @@ export interface BulkOptions {
  * falls back to `console` for a test fixture that builds a bare `PublishDeps`.
  */
 export interface BulkDeps<Env = unknown> extends PublishDeps<Env>, DocumentDeps<Env> {
-  logger?: FolioLogger
+  logger?: FolioLogger;
 }
 
 /**
@@ -148,13 +148,13 @@ export async function runBulk<Env>(
   selection: BulkSelection<StoryFilter>,
   opts: BulkOptions = {},
 ): Promise<StoryBulkOutcome> {
-  const dryRun = opts.dryRun === true
-  const actor = opts.actor ?? null
-  const batch = Math.min(Math.max(Math.trunc(opts.batch ?? DEFAULT_BULK_BATCH), 1), MAX_BULK_BATCH)
-  const resume = opts.continueFrom ? readCursor(opts.continueFrom) : null
+  const dryRun = opts.dryRun === true;
+  const actor = opts.actor ?? null;
+  const batch = Math.min(Math.max(Math.trunc(opts.batch ?? DEFAULT_BULK_BATCH), 1), MAX_BULK_BATCH);
+  const resume = opts.continueFrom ? readCursor(opts.continueFrom) : null;
 
-  if (action === 'move' && !opts.destination) {
-    throw new FolioError('bad_request', 'A bulk move needs a destination')
+  if (action === "move" && !opts.destination) {
+    throw new FolioError("bad_request", "A bulk move needs a destination");
   }
   // Refused here rather than at the route, so a direct caller cannot route around
   // it — the same placement `duplicateStory`'s singleton refusal has. A duplicate
@@ -163,33 +163,33 @@ export async function runBulk<Env>(
   // whose answer changes while it is being answered. Excluding what the job created
   // would mean remembering the ids it created, which is materialising the id list
   // this whole shape exists to avoid.
-  if (action === 'duplicate' && selection.all) {
+  if (action === "duplicate" && selection.all) {
     throw new FolioError(
-      'bad_request',
-      'Duplicate needs an explicit list of documents: duplicating everything matching a filter would add to that filter as it ran.',
-    )
+      "bad_request",
+      "Duplicate needs an explicit list of documents: duplicating everything matching a filter would add to that filter as it ran.",
+    );
   }
   // Before the ceiling check below, deliberately: a cursor that disagrees with the
   // list it was issued against is a client bug whatever the arithmetic says, and an
   // exhausted allowance would otherwise report a placid "nothing left to do" for it.
   if (!selection.all && resume !== null && selection.ids[resume.seen - 1] !== resume.after) {
     throw new FolioError(
-      'bad_request',
-      'The selection changed between batches. Start the operation again.',
-    )
+      "bad_request",
+      "The selection changed between batches. Start the operation again.",
+    );
   }
 
   const total = selection.all
     ? Math.max(selection.expected - (selection.exclude?.length ?? 0), 0)
-    : selection.ids.length
-  const seen = resume?.seen ?? 0
+    : selection.ids.length;
+  const seen = resume?.seen ?? 0;
 
   // The guard, once, at the start of the job — never on a resumed call. See the
   // module header; the spec's decision 3 records what re-checking would cost.
   if (selection.all && resume === null) {
-    const actual = await countStories(deps.db, selection.filter, opts.scope)
+    const actual = await countStories(deps.db, selection.filter, opts.scope);
     if (actual !== selection.expected) {
-      return { refused: 'count', expected: selection.expected, actual }
+      return { refused: "count", expected: selection.expected, actual };
     }
   }
 
@@ -201,46 +201,46 @@ export async function runBulk<Env>(
     seen,
     continueFrom: null,
     dryRun,
-  }
+  };
   // The ceiling. A job that has consumed everything it agreed to is finished, even
   // if the filter still matches rows — those are documents nobody agreed to touch.
-  const allowance = total - seen
-  if (allowance <= 0) return report
+  const allowance = total - seen;
+  if (allowance <= 0) return report;
 
-  const limit = Math.min(batch, allowance)
+  const limit = Math.min(batch, allowance);
   const { rows, consumed, last } = selection.all
     ? await filterBatch(deps.db, selection, resume?.after ?? null, limit, opts.scope)
-    : await idBatch(deps.db, selection.ids, seen, limit)
+    : await idBatch(deps.db, selection.ids, seen, limit);
 
   for (const [at, row] of rows.entries()) {
     if (row === null) {
       // An id in an explicit selection with no row behind it. A delete has already
       // got what it asked for; anything else genuinely cannot happen.
-      if (action === 'delete') report.done++
+      if (action === "delete") report.done++;
       else {
         report.failed.push({
           id: idAt(selection, seen + at),
-          title: '',
-          message: 'No such document',
-        })
+          title: "",
+          message: "No such document",
+        });
       }
-      continue
+      continue;
     }
     if (dryRun) {
       // Tallied as if it had worked, like `runSchedules`' dry run: reporting
       // whether each write *would* succeed means performing it.
-      report.done++
-      continue
+      report.done++;
+      continue;
     }
     try {
-      await one(deps, action, row, { ...opts, actor, index: indexFor(opts, seen + at) })
-      report.done++
+      await one(deps, action, row, { ...opts, actor, index: indexFor(opts, seen + at) });
+      report.done++;
     } catch (err) {
-      report.failed.push({ id: row.id, title: row.title, message: reasonOf(err, deps.logger) })
+      report.failed.push({ id: row.id, title: row.title, message: reasonOf(err, deps.logger) });
     }
   }
 
-  report.seen = seen + consumed
+  report.seen = seen + consumed;
   // A short read means the walk reached the end of what matches; reaching the
   // ceiling means the end of what was agreed. Either way there is nothing to
   // resume, and a null cursor is what says so — a non-null one on a finished job
@@ -248,8 +248,8 @@ export async function runBulk<Env>(
   report.continueFrom =
     consumed < limit || report.seen >= total || last === null
       ? null
-      : writeBulkCursor(last, report.seen)
-  return report
+      : writeBulkCursor(last, report.seen);
+  return report;
 }
 
 /** One document, one action. Every branch is the same call the single-document
@@ -261,42 +261,42 @@ async function one<Env>(
   opts: BulkOptions & { actor: string | null; index: number },
 ): Promise<void> {
   switch (action) {
-    case 'publish':
+    case "publish":
       // The row rather than the id: the reader has just loaded it, and `publish`
       // takes a `StorySelector` precisely so a caller that already has the row is
       // not charged a second lookup for it.
-      await publish(deps, story, opts.actor)
-      return
-    case 'unpublish':
-      await unpublish(deps, story, opts.actor)
-      return
-    case 'duplicate':
+      await publish(deps, story, opts.actor);
+      return;
+    case "unpublish":
+      await unpublish(deps, story, opts.actor);
+      return;
+    case "duplicate":
       // Into the run's scope: the source may be anywhere in the chain, the copy is
       // this scope's own (`documents.ts`).
-      await duplicateDocument(deps, story, opts.scope ? { site: opts.scope } : {}, opts.actor)
-      return
-    case 'move':
+      await duplicateDocument(deps, story, opts.scope ? { site: opts.scope } : {}, opts.actor);
+      return;
+    case "move":
       await moveDocument(
         deps,
         story.id,
         { parentId: opts.destination?.parentId ?? null, index: opts.index },
         opts.actor,
-      )
-      return
-    case 'delete':
+      );
+      return;
+    case "delete":
       // `null` is a document that is already gone, and for a delete that is
       // success: the ordinary way it happens is a selection holding both a page and
       // one of its own descendants, where deleting the ancestor took the descendant
       // with it. Reporting it as a failure would make correct behaviour look broken.
-      await deleteDocument(deps, story.id, { redirect: opts.redirect ?? true }, opts.actor)
-      return
+      await deleteDocument(deps, story.id, { redirect: opts.redirect ?? true }, opts.actor);
+      return;
   }
 }
 
 /** Where the document at `position` in the job lands among its new siblings. See
  * `BulkOptions.destination`. */
 function indexFor(opts: BulkOptions, position: number): number {
-  return (opts.destination?.index ?? 0) + position
+  return (opts.destination?.index ?? 0) + position;
 }
 
 /**
@@ -306,12 +306,12 @@ function indexFor(opts: BulkOptions, position: number): number {
  * filter batch produces none, because it reads what it found.
  */
 interface Batch {
-  rows: (StoryMeta | null)[]
+  rows: (StoryMeta | null)[];
   /** How much of the ceiling this batch used, which is **not** `rows.length` for an
    * explicit list — see `idBatch`. */
-  consumed: number
+  consumed: number;
   /** The id to resume after, or null when there is nothing left. */
-  last: string | null
+  last: string | null;
 }
 
 /**
@@ -332,8 +332,8 @@ async function filterBatch(
     after,
     ...(scope === undefined ? {} : { scope }),
     ...(selection.exclude ? { exclude: selection.exclude } : {}),
-  })
-  return { rows, consumed: rows.length, last: rows.at(-1)?.id ?? null }
+  });
+  return { rows, consumed: rows.length, last: rows.at(-1)?.id ?? null };
 }
 
 /**
@@ -355,29 +355,29 @@ async function idBatch(
   seen: number,
   limit: number,
 ): Promise<Batch> {
-  const slice = ids.slice(seen, seen + limit)
+  const slice = ids.slice(seen, seen + limit);
   // By id, unscoped: `routes/bulk.ts` has fenced every id in the selection against
   // the request's scope (or chain, for a duplicate) before a batch runs, on every
   // call including a resumed one, so a batch never holds a row it was not cleared to.
-  const found = new Map((await storiesFor(db, slice, [], null)).map((row) => [row.id, row]))
+  const found = new Map((await storiesFor(db, slice, [], null)).map((row) => [row.id, row]));
   return {
     rows: slice.map((id) => found.get(id) ?? null),
     consumed: slice.length,
     last: slice.at(-1) ?? null,
-  }
+  };
 }
 
 /** The id at a job position, for a failure that has no row to name itself with. */
 function idAt(selection: BulkSelection<StoryFilter>, position: number): string {
-  return selection.all ? '' : (selection.ids[position] ?? '')
+  return selection.all ? "" : (selection.ids[position] ?? "");
 }
 
 /** `core/bulk.ts`'s codec, with this module's refusal for a cursor that is not
  * one of ours. */
 function readCursor(raw: string): { after: string; seen: number } {
-  const at = readBulkCursor(raw)
-  if (!at) throw new FolioError('bad_request', 'Malformed pagination cursor')
-  return at
+  const at = readBulkCursor(raw);
+  if (!at) throw new FolioError("bad_request", "Malformed pagination cursor");
+  return at;
 }
 
 /**
@@ -392,10 +392,10 @@ function readCursor(raw: string): { after: string; seen: number } {
  */
 function reasonOf(err: unknown, logger: FolioLogger = console): string {
   try {
-    rethrow(err)
+    rethrow(err);
   } catch (translated) {
-    if (translated instanceof FolioError) return translated.message
+    if (translated instanceof FolioError) return translated.message;
   }
-  logger.error('folio: unreportable failure during a bulk write', err)
-  return 'Something went wrong.'
+  logger.error("folio: unreportable failure during a bulk write", err);
+  return "Something went wrong.";
 }

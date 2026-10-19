@@ -14,10 +14,10 @@
  * `passkeyForAssertion` is safe to call on whatever a browser sent, and the
  * route's uniform refusal is what stops the *answer* from being an oracle.
  */
-import type { FolioDb } from '../db'
-import { base64url, fromBase64url } from './jwt'
-import type { RegisteredCredential } from './webauthn'
-import { type UserRow, userById } from './users'
+import type { FolioDb } from "../db";
+import { base64url, fromBase64url } from "./jwt";
+import type { RegisteredCredential } from "./webauthn";
+import { type UserRow, userById } from "./users";
 
 /**
  * Ten per person.
@@ -28,11 +28,11 @@ import { type UserRow, userById } from './users'
  * cannot grow without limit, and so an authenticated write loop cannot fill a
  * table. `passkeys_user` indexes the read either way.
  */
-export const MAX_PASSKEYS_PER_USER = 10
+export const MAX_PASSKEYS_PER_USER = 10;
 
 /** The longest name the account screen accepts. Bounded here rather than at the
  * column so the refusal is a 400 with a message rather than a D1 error. */
-export const MAX_PASSKEY_NAME = 60
+export const MAX_PASSKEY_NAME = 60;
 
 /**
  * A passkey as every list route answers it. **No `publicKey`** — deliberately,
@@ -41,58 +41,58 @@ export const MAX_PASSKEY_NAME = 60
  * of the key.
  */
 export interface PasskeyRow {
-  id: string
-  userId: string
-  alg: number
-  transports: string[] | null
-  aaguid: string | null
-  name: string
-  backedUp: boolean
-  createdAt: number
-  lastUsedAt: number | null
+  id: string;
+  userId: string;
+  alg: number;
+  transports: string[] | null;
+  aaguid: string | null;
+  name: string;
+  backedUp: boolean;
+  createdAt: number;
+  lastUsedAt: number | null;
 }
 
 /** The row plus the key, for the one path that verifies a signature. */
 export interface PasskeyCredential extends PasskeyRow {
-  publicKey: Uint8Array<ArrayBuffer>
-  counter: number
+  publicKey: Uint8Array<ArrayBuffer>;
+  counter: number;
 }
 
 interface RawPasskey {
-  id: string
-  user_id: string
-  public_key: string
-  alg: number
-  counter: number
-  transports: string | null
-  aaguid: string | null
-  name: string
-  backed_up: number
-  created_at: number
-  last_used_at: number | null
+  id: string;
+  user_id: string;
+  public_key: string;
+  alg: number;
+  counter: number;
+  transports: string | null;
+  aaguid: string | null;
+  name: string;
+  backed_up: number;
+  created_at: number;
+  last_used_at: number | null;
 }
 
 /** Everything but `public_key` and `counter`: the list projection, spelled out
  * field by field for the reason `authPolicy()` spells its own out — so the day
  * somebody adds a column, handing it to a screen is a decision rather than a
  * consequence of `select *`. */
-const COLUMNS = 'id, user_id, alg, transports, aaguid, name, backed_up, created_at, last_used_at'
+const COLUMNS = "id, user_id, alg, transports, aaguid, name, backed_up, created_at, last_used_at";
 
 /** The list projection plus the two the assertion path needs. */
 const ALL_COLUMNS =
-  'id, user_id, public_key, alg, counter, transports, aaguid, name, backed_up, created_at, last_used_at'
+  "id, user_id, public_key, alg, counter, transports, aaguid, name, backed_up, created_at, last_used_at";
 
 /** `transports` is advisory and browser-written; a row that does not parse reads
  * as "the browser did not say", which is what null already means. */
 function parseTransports(value: string | null): string[] | null {
-  if (!value) return null
+  if (!value) return null;
   try {
-    const parsed: unknown = JSON.parse(value)
-    if (!Array.isArray(parsed)) return null
-    const out = parsed.filter((t): t is string => typeof t === 'string')
-    return out.length > 0 ? out : null
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return null;
+    const out = parsed.filter((t): t is string => typeof t === "string");
+    return out.length > 0 ? out : null;
   } catch {
-    return null
+    return null;
   }
 }
 
@@ -107,7 +107,7 @@ function toPasskey(row: RawPasskey): PasskeyRow {
     backedUp: row.backed_up !== 0,
     createdAt: row.created_at,
     lastUsedAt: row.last_used_at,
-  }
+  };
 }
 
 /** Oldest first, which is `passkeys_user`'s own order and the order the account
@@ -117,8 +117,8 @@ export async function listPasskeys(db: FolioDb, userId: string): Promise<Passkey
   const { results } = await db
     .prepare(`select ${COLUMNS} from passkeys where user_id = ? order by created_at, id`)
     .bind(userId)
-    .all<RawPasskey>()
-  return results.map(toPasskey)
+    .all<RawPasskey>();
+  return results.map(toPasskey);
 }
 
 /**
@@ -146,7 +146,7 @@ export async function createPasskey(
     backedUp: registered.backedUp,
     createdAt: at,
     lastUsedAt: null,
-  }
+  };
   const result = await db
     .prepare(
       `insert into passkeys
@@ -168,8 +168,8 @@ export async function createPasskey(
       row.backedUp ? 1 : 0,
       row.createdAt,
     )
-    .run()
-  return (result.meta.changes ?? 0) > 0 ? row : null
+    .run();
+  return (result.meta.changes ?? 0) > 0 ? row : null;
 }
 
 /** `user_id` is in the `where`, not checked after the read: an id belonging to
@@ -181,34 +181,34 @@ export async function renamePasskey(
   id: string,
   name: string,
 ): Promise<PasskeyRow | null> {
-  const trimmed = name.trim().slice(0, MAX_PASSKEY_NAME)
+  const trimmed = name.trim().slice(0, MAX_PASSKEY_NAME);
   const result = await db
-    .prepare('update passkeys set name = ? where id = ? and user_id = ?')
+    .prepare("update passkeys set name = ? where id = ? and user_id = ?")
     .bind(trimmed, id, userId)
-    .run()
-  if ((result.meta.changes ?? 0) === 0) return null
+    .run();
+  if ((result.meta.changes ?? 0) === 0) return null;
   const row = await db
     .prepare(`select ${COLUMNS} from passkeys where id = ?`)
     .bind(id)
-    .first<RawPasskey>()
-  return row ? toPasskey(row) : null
+    .first<RawPasskey>();
+  return row ? toPasskey(row) : null;
 }
 
 /** Own only, for the reason `renamePasskey` gives. */
 export async function deletePasskey(db: FolioDb, userId: string, id: string): Promise<boolean> {
   const result = await db
-    .prepare('delete from passkeys where id = ? and user_id = ?')
+    .prepare("delete from passkeys where id = ? and user_id = ?")
     .bind(id, userId)
-    .run()
-  return (result.meta.changes ?? 0) > 0
+    .run();
+  return (result.meta.changes ?? 0) > 0;
 }
 
 /** The admin's "remove all passkeys": one incident, one action. How many went is
  * what the route reports, so an admin can see whether there was anything to
  * remove at all. */
 export async function deleteUserPasskeys(db: FolioDb, userId: string): Promise<number> {
-  const result = await db.prepare('delete from passkeys where user_id = ?').bind(userId).run()
-  return result.meta.changes ?? 0
+  const result = await db.prepare("delete from passkeys where user_id = ?").bind(userId).run();
+  return result.meta.changes ?? 0;
 }
 
 /**
@@ -226,10 +226,10 @@ export async function passkeyForAssertion(
   const row = await db
     .prepare(`select ${ALL_COLUMNS} from passkeys where id = ?`)
     .bind(credentialId)
-    .first<RawPasskey>()
-  if (!row) return null
-  const user = await userById(db, row.user_id)
-  if (!user) return null
+    .first<RawPasskey>();
+  if (!row) return null;
+  const user = await userById(db, row.user_id);
+  if (!user) return null;
   return {
     passkey: {
       ...toPasskey(row),
@@ -237,7 +237,7 @@ export async function passkeyForAssertion(
       publicKey: fromBase64url(row.public_key),
     },
     user,
-  }
+  };
 }
 
 /**
@@ -256,8 +256,8 @@ export function usePasskeyStatement(
   at = Date.now(),
 ): D1PreparedStatement {
   return db
-    .prepare('update passkeys set counter = ?, backed_up = ?, last_used_at = ? where id = ?')
-    .bind(counter, backedUp ? 1 : 0, at, id)
+    .prepare("update passkeys set counter = ?, backed_up = ?, last_used_at = ? where id = ?")
+    .bind(counter, backedUp ? 1 : 0, at, id);
 }
 
 /**
@@ -272,14 +272,14 @@ export async function countPasskeysByUser(
   db: FolioDb,
   userIds: readonly string[],
 ): Promise<Map<string, number>> {
-  if (userIds.length === 0) return new Map()
-  const placeholders = userIds.map(() => '?').join(', ')
+  if (userIds.length === 0) return new Map();
+  const placeholders = userIds.map(() => "?").join(", ");
   const { results } = await db
     .prepare(
       `select user_id, count(*) as n from passkeys
        where user_id in (${placeholders}) group by user_id`,
     )
     .bind(...userIds)
-    .all<{ user_id: string; n: number }>()
-  return new Map(results.map((r) => [r.user_id, r.n]))
+    .all<{ user_id: string; n: number }>();
+  return new Map(results.map((r) => [r.user_id, r.n]));
 }

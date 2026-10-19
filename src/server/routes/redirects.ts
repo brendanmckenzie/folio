@@ -4,14 +4,14 @@
  * through here — see redirects.ts's module comment for why the two paths
  * stay distinct.
  */
-import type { Context } from 'hono'
-import { Hono } from 'hono'
-import { decodeCursor } from '../../core/pagination'
-import { DEFAULT_SITE } from '../../core/sites'
-import { actorString, MANAGE, READ } from '../auth/roles'
-import { FolioError } from '../errors'
-import { brandIdOf, hookCtx, requestChain, requestScope, requireAccess } from '../middleware'
-import type { FolioRuntime } from '../runtime'
+import type { Context } from "hono";
+import { Hono } from "hono";
+import { decodeCursor } from "../../core/pagination";
+import { DEFAULT_SITE } from "../../core/sites";
+import { actorString, MANAGE, READ } from "../auth/roles";
+import { FolioError } from "../errors";
+import { brandIdOf, hookCtx, requestChain, requestScope, requireAccess } from "../middleware";
+import type { FolioRuntime } from "../runtime";
 import {
   deleteRedirect,
   listRedirects,
@@ -20,11 +20,11 @@ import {
   normaliseTarget,
   type Redirect,
   upsertRedirect,
-} from '../redirects'
-import { storyByPath } from '../stories'
-import type { FolioEnv } from '../types'
-import { limitParam, parseBody, RedirectCreateBody } from '../validate'
-import type { FolioDb } from '../db'
+} from "../redirects";
+import { storyByPath } from "../stories";
+import type { FolioEnv } from "../types";
+import { limitParam, parseBody, RedirectCreateBody } from "../validate";
+import type { FolioDb } from "../db";
 
 /** True when `to` already redirects straight back to `from` — the one loop a
  * manual add can create that decision 3's write-time collapse never sees,
@@ -36,25 +36,25 @@ async function pointsBackAt(
   chain: readonly string[],
   to: string,
   from: string,
-): Promise<Redirect['to'] | null> {
-  const back = await lookupRedirect(db, chain, to)
-  return back && normalisePath(back.to) === from ? back.to : null
+): Promise<Redirect["to"] | null> {
+  const back = await lookupRedirect(db, chain, to);
+  return back && normalisePath(back.to) === from ? back.to : null;
 }
 
 export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   // The scope whose own redirects these are (`multi-site.md`: "scope's own rows"),
   // and `default` with no `sites`. A redirect is one scope's routing: it is listed,
   // added and removed there, and never touches another's.
-  const scopeOf = (c: Context<FolioEnv<Env>>): string => requestScope(c, rt) ?? DEFAULT_SITE
+  const scopeOf = (c: Context<FolioEnv<Env>>): string => requestScope(c, rt) ?? DEFAULT_SITE;
 
-  app.get('/redirects', requireAccess<Env>(rt, READ), async (c) => {
-    const db = c.var.bindings().db
-    const limit = limitParam(c.req.query('limit'), 50, 200)
-    const cursor = c.req.query('cursor')
-    const source = c.req.query('source')
-    const q = c.req.query('q')
+  app.get("/redirects", requireAccess<Env>(rt, READ), async (c) => {
+    const db = c.var.bindings().db;
+    const limit = limitParam(c.req.query("limit"), 50, 200);
+    const cursor = c.req.query("cursor");
+    const source = c.req.query("source");
+    const q = c.req.query("q");
     // A malformed cursor is a 400, not a silent first page
     // (`../../../docs/specs/foundation/pagination.md`, edge cases). The cursor is
     // opaque, so a client that sent a bad one has a bug, and quietly restarting
@@ -64,14 +64,14 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // out-of-range limit is a stale bookmark and still has an obvious right
     // answer, whereas "resume after ???" has none.
     if (cursor !== undefined && decodeCursor(cursor) === null) {
-      throw new FolioError('bad_request', 'Malformed pagination cursor')
+      throw new FolioError("bad_request", "Malformed pagination cursor");
     }
     return c.json(
       await listRedirects(db, {
         scope: scopeOf(c),
         limit,
         cursor,
-        source: source === 'auto' || source === 'manual' ? source : undefined,
+        source: source === "auto" || source === "manual" ? source : undefined,
         // Trimmed and bounded rather than refused, on the `limit` side of the
         // asymmetry above: a 300-character search term is a paste accident with an
         // obvious right answer, and there is no state a client can be left in by
@@ -83,10 +83,10 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         // (`../../../docs/specs/foundation/pagination.md` decision 5), and this
         // route is the one that predates it — hence opt-in, so a cursor walk that
         // only wants rows does not drag an aggregate behind every page.
-        count: c.req.query('count') === '1',
+        count: c.req.query("count") === "1",
       }),
-    )
-  })
+    );
+  });
 
   /**
    * A redirect that can never fire is a trap, not a row, so three things are
@@ -108,43 +108,43 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * sees. Refusing those needs a bounded walk at write time, which is a design
    * call for `redirects.md` rather than something to slip in here.
    */
-  app.post('/redirects', requireAccess<Env>(rt, MANAGE), async (c) => {
-    const db = c.var.bindings().db
-    const body = await parseBody(c.req, RedirectCreateBody)
-    const from = normalisePath(body.from)
+  app.post("/redirects", requireAccess<Env>(rt, MANAGE), async (c) => {
+    const db = c.var.bindings().db;
+    const body = await parseBody(c.req, RedirectCreateBody);
+    const from = normalisePath(body.from);
 
     if (from === normaliseTarget(body.to)) {
       throw new FolioError(
-        'conflict',
-        `/${from || ''} cannot redirect to itself; a browser would follow it forever.`,
-      )
+        "conflict",
+        `/${from || ""} cannot redirect to itself; a browser would follow it forever.`,
+      );
     }
 
     // Only the scope's **own** page is a trap: a page it merely inherits is exactly
     // what a redirect here is for overriding (decision 5: a site's own redirect beats
     // an inherited page).
-    const scope = scopeOf(c)
-    const occupied = await storyByPath(db, [scope], from)
+    const scope = scopeOf(c);
+    const occupied = await storyByPath(db, [scope], from);
     if (occupied) {
       throw new FolioError(
-        'conflict',
+        "conflict",
         `"${occupied.title}" already lives at /${from}. Rename or move it first.`,
-      )
+      );
     }
 
-    const loopsBackTo = await pointsBackAt(db, await requestChain(c, rt), body.to, from)
+    const loopsBackTo = await pointsBackAt(db, await requestChain(c, rt), body.to, from);
     if (loopsBackTo !== null) {
       throw new FolioError(
-        'conflict',
-        `That target already redirects back to /${from || '/'}; adding this row would loop.`,
-      )
+        "conflict",
+        `That target already redirects back to /${from || "/"}; adding this row would loop.`,
+      );
     }
 
     const redirect = await upsertRedirect(
       db,
       { from: body.from, to: body.to, status: body.status },
       scope,
-    )
+    );
     // A path that used to answer the host's own 404 now answers a redirect
     // (`../../../docs/specs/platform/caching.md`). Folio's own purge hook has
     // nothing to do with this — its tags describe rendered pages, not paths —
@@ -152,26 +152,26 @@ export function redirectRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // only moment that knows which path changed meaning.
     await rt
       .hookRunner(hookCtx(c), brandIdOf(c))
-      .run('redirectsChanged', { from: [from], actor: actorString(c.var.actor), site: scope })
-    return c.json(redirect, 201)
-  })
+      .run("redirectsChanged", { from: [from], actor: actorString(c.var.actor), site: scope });
+    return c.json(redirect, 201);
+  });
 
   // `{.+}` so a multi-segment path (`services/strategy`) arrives whole rather
   // than being cut at the first slash, the way a bare `:from` would.
-  app.delete('/redirects/:from{.+}', requireAccess<Env>(rt, MANAGE), async (c) => {
-    const from = c.req.param('from')
-    const removed = await deleteRedirect(c.var.bindings().db, from, scopeOf(c))
+  app.delete("/redirects/:from{.+}", requireAccess<Env>(rt, MANAGE), async (c) => {
+    const from = c.req.param("from");
+    const removed = await deleteRedirect(c.var.bindings().db, from, scopeOf(c));
     // Only when a row actually went: deleting a redirect that was never there
     // changes nothing, and an event for it would be a purge for nothing.
     if (removed) {
-      await rt.hookRunner(hookCtx(c), brandIdOf(c)).run('redirectsChanged', {
+      await rt.hookRunner(hookCtx(c), brandIdOf(c)).run("redirectsChanged", {
         from: [normalisePath(from)],
         actor: actorString(c.var.actor),
         site: scopeOf(c),
-      })
+      });
     }
-    return c.json({ deleted: removed })
-  })
+    return c.json({ deleted: removed });
+  });
 
-  return app
+  return app;
 }

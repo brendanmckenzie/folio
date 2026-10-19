@@ -20,8 +20,8 @@
  *     visitor is handed is a teaser, and a teaser is exactly the set of values
  *     a `collection` card already renders from.
  */
-import type { Blok, Doc, Json } from './doc'
-import type { SchemaIndex } from './schema'
+import type { Blok, Doc, Json } from "./doc";
+import type { SchemaIndex } from "./schema";
 
 /**
  * What `reader.page()` decided about this render.
@@ -33,7 +33,7 @@ import type { SchemaIndex } from './schema'
  * `private, no-store` (decision 5) — a cached teaser would be served from the
  * edge to a member who signed in a second later.
  */
-export type PageAccess = 'public' | 'granted' | 'denied'
+export type PageAccess = "public" | "granted" | "denied";
 
 /**
  * The gate field's stored value on a document's root block, or `undefined` when
@@ -50,7 +50,7 @@ export type PageAccess = 'public' | 'granted' | 'denied'
  * there anyway is ignored here and reported by `/folio/audit`.
  */
 export function gateValue(doc: Doc, field: string): Json | undefined {
-  return doc.bloks[doc.root]?.data[field]
+  return doc.bloks[doc.root]?.data[field];
 }
 
 /**
@@ -64,7 +64,7 @@ export function isUngated(
   value: Json | undefined,
   publicValue: string | number | boolean,
 ): boolean {
-  return value === publicValue
+  return value === publicValue;
 }
 
 /**
@@ -87,30 +87,30 @@ export function isUngated(
  * being the default.
  */
 export function redactDoc(doc: Doc, schema: SchemaIndex): Doc {
-  const root = doc.bloks[doc.root]
+  const root = doc.bloks[doc.root];
   // A document whose root blok is missing has no metadata to show either. Answer
   // the same empty shape rather than `doc`, so a corrupt document cannot be the
   // one input that hands a stranger the body.
-  if (!root) return { root: doc.root, bloks: {} }
+  if (!root) return { root: doc.root, bloks: {} };
 
   const prose = Object.entries(schema[root.type]?.fields ?? {})
-    .filter(([, field]) => field.kind === 'richtext')
-    .map(([name]) => name)
+    .filter(([, field]) => field.kind === "richtext")
+    .map(([name]) => name);
 
-  const data = { ...root.data }
-  for (const name of prose) data[name] = null
+  const data = { ...root.data };
+  for (const name of prose) data[name] = null;
 
-  let i18n = root.i18n
+  let i18n = root.i18n;
   if (i18n && prose.length > 0) {
-    const nulled: Record<string, Record<string, Json>> = {}
+    const nulled: Record<string, Record<string, Json>> = {};
     for (const [code, map] of Object.entries(i18n)) {
-      const next = { ...map }
-      for (const name of prose) next[name] = null
-      nulled[code] = next
+      const next = { ...map };
+      for (const name of prose) next[name] = null;
+      nulled[code] = next;
     }
-    i18n = nulled
+    i18n = nulled;
   }
 
-  const redacted: Blok = { ...root, data, ...(i18n ? { i18n } : {}) }
-  return { root: doc.root, bloks: { [doc.root]: redacted } }
+  const redacted: Blok = { ...root, data, ...(i18n ? { i18n } : {}) };
+  return { root: doc.root, bloks: { [doc.root]: redacted } };
 }

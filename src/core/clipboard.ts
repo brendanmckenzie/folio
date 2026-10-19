@@ -1,6 +1,6 @@
-import type { Blok } from './doc'
-import { isBlok, MAX_FRAME_BYTES } from './protocol'
-import type { SchemaIndex } from './schema'
+import type { Blok } from "./doc";
+import { isBlok, MAX_FRAME_BYTES } from "./protocol";
+import type { SchemaIndex } from "./schema";
 
 /** What `Cmd+C` writes to the system clipboard, self-describing so a paste —
  * possibly on another page, another day, another Folio install — can be
@@ -10,19 +10,19 @@ import type { SchemaIndex } from './schema'
  * not a socket frame, so it has no business tracking the sync protocol's
  * version at all. */
 export interface ClipboardPayload {
-  folio: 1
-  bloks: Blok[]
+  folio: 1;
+  bloks: Blok[];
   /** Diagnostic only, never trusted: lets the admin say "3 blocks copied from
    * /about" without the paste side re-deriving it. */
-  from?: { storyId: string; path: string }
+  from?: { storyId: string; path: string };
 }
 
-export type ParsedClipboard = { bloks: Blok[]; from?: { storyId: string; path: string } }
+export type ParsedClipboard = { bloks: Blok[]; from?: { storyId: string; path: string } };
 
 const isRecord = (x: unknown): x is Record<string, unknown> =>
-  typeof x === 'object' && x !== null && !Array.isArray(x)
+  typeof x === "object" && x !== null && !Array.isArray(x);
 
-const isString = (x: unknown): x is string => typeof x === 'string'
+const isString = (x: unknown): x is string => typeof x === "string";
 
 /**
  * Validates clipboard `text` against `schema`, in the order
@@ -44,39 +44,39 @@ export function parseClipboard(
   text: string,
   schema: SchemaIndex,
 ): ParsedClipboard | { error: string } {
-  const bytes = new TextEncoder().encode(text).byteLength
+  const bytes = new TextEncoder().encode(text).byteLength;
   if (bytes > MAX_FRAME_BYTES) {
-    return { error: `too large to paste: ${bytes} bytes exceeds the ${MAX_FRAME_BYTES} byte cap` }
+    return { error: `too large to paste: ${bytes} bytes exceeds the ${MAX_FRAME_BYTES} byte cap` };
   }
 
-  let parsed: unknown
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(text)
+    parsed = JSON.parse(text);
   } catch {
-    return { error: 'Clipboard does not contain valid JSON.' }
+    return { error: "Clipboard does not contain valid JSON." };
   }
 
   if (!isRecord(parsed)) {
-    return { error: 'Clipboard does not contain a Folio block payload.' }
+    return { error: "Clipboard does not contain a Folio block payload." };
   }
   if (parsed.folio !== 1) {
     return {
-      error: 'Clipboard content is not from Folio, or is from a version this editor does not read.',
-    }
+      error: "Clipboard content is not from Folio, or is from a version this editor does not read.",
+    };
   }
   if (!Array.isArray(parsed.bloks) || parsed.bloks.length === 0) {
-    return { error: 'Clipboard holds no blocks.' }
+    return { error: "Clipboard holds no blocks." };
   }
   if (!parsed.bloks.every(isBlok)) {
-    return { error: 'Clipboard does not contain a valid set of blocks.' }
+    return { error: "Clipboard does not contain a valid set of blocks." };
   }
-  const bloks = parsed.bloks as Blok[]
+  const bloks = parsed.bloks as Blok[];
 
-  const unknownTypes = [...new Set(bloks.map((b) => b.type).filter((t) => !schema[t]))]
+  const unknownTypes = [...new Set(bloks.map((b) => b.type).filter((t) => !schema[t]))];
   if (unknownTypes.length > 0) {
     return {
-      error: `This site does not define: ${unknownTypes.join(', ')}.`,
-    }
+      error: `This site does not define: ${unknownTypes.join(", ")}.`,
+    };
   }
 
   // Every child's type must be permitted by its actual parent's declared
@@ -84,25 +84,25 @@ export function parseClipboard(
   // hand-edited clipboard needs (edge case: "a child violates its parent's
   // allow"). The top blok is exempt: its placement is checked against the
   // *destination*, by `pasteInsert`, once the paste target is known.
-  const byUid = new Map(bloks.map((b) => [b.uid, b]))
-  const top = bloks[0]!
+  const byUid = new Map(bloks.map((b) => [b.uid, b]));
+  const top = bloks[0]!;
   for (const b of bloks) {
-    if (b.uid === top.uid) continue
-    const parent = b.parent ? byUid.get(b.parent) : undefined
+    if (b.uid === top.uid) continue;
+    const parent = b.parent ? byUid.get(b.parent) : undefined;
     if (!parent || b.slot === null) {
-      return { error: `'${b.type}' has no valid parent within the copied blocks.` }
+      return { error: `'${b.type}' has no valid parent within the copied blocks.` };
     }
-    const field = schema[parent.type]?.fields[b.slot]
-    if (field?.kind !== 'blocks' || !field.allow.includes(b.type)) {
-      const parentLabel = schema[parent.type]?.label ?? parent.type
-      return { error: `'${b.type}' is not allowed in ${parentLabel}'s '${b.slot}'.` }
+    const field = schema[parent.type]?.fields[b.slot];
+    if (field?.kind !== "blocks" || !field.allow.includes(b.type)) {
+      const parentLabel = schema[parent.type]?.label ?? parent.type;
+      return { error: `'${b.type}' is not allowed in ${parentLabel}'s '${b.slot}'.` };
     }
   }
 
   const from =
     isRecord(parsed.from) && isString(parsed.from.storyId) && isString(parsed.from.path)
       ? { storyId: parsed.from.storyId, path: parsed.from.path }
-      : undefined
+      : undefined;
 
-  return from ? { bloks, from } : { bloks }
+  return from ? { bloks, from } : { bloks };
 }

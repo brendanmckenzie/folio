@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { Page } from '../../../core/pagination'
-import type { StoryMeta } from '../../../core/story'
+import { useCallback, useEffect, useState } from "react";
+import type { Page } from "../../../core/pagination";
+import type { StoryMeta } from "../../../core/story";
 import {
   type ResolvedSchedule,
   type ScheduleRow,
   type SchedulesUrl,
   schedulesParams,
-} from './schedules-model'
-import { messageOf } from './useContent'
+} from "./schedules-model";
+import { messageOf } from "./useContent";
 
 /**
  * The Schedules screen's data: one page of the `schedules` table, with each row's
@@ -28,43 +28,43 @@ import { messageOf } from './useContent'
  */
 
 /** Rows per request. The route defaults to 50 and clamps at 200. */
-const PAGE = 50
+const PAGE = 50;
 
 export interface SchedulesData {
-  page: Page<ResolvedSchedule> & { loading: boolean; error?: string }
-  canGoBack: boolean
-  nextPage: () => void
-  prevPage: () => void
-  reload: () => void
+  page: Page<ResolvedSchedule> & { loading: boolean; error?: string };
+  canGoBack: boolean;
+  nextPage: () => void;
+  prevPage: () => void;
+  reload: () => void;
 }
 
 export function useSchedules(apiBase: string, url: SchedulesUrl): SchedulesData {
-  const [page, setPage] = useState<SchedulesData['page']>({
+  const [page, setPage] = useState<SchedulesData["page"]>({
     rows: [],
     cursor: null,
     loading: true,
-  })
-  const [cursor, setCursor] = useState<string | null>(null)
-  const [history, setHistory] = useState<readonly (string | null)[]>([])
+  });
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [history, setHistory] = useState<readonly (string | null)[]>([]);
 
   // Serialised, because a fresh object every render would restart the effect. The
   // string is also exactly what goes on the wire, so there is no second
   // representation to keep in step.
-  const params = schedulesParams(url, { limit: PAGE, cursor, count: true }).toString()
+  const params = schedulesParams(url, { limit: PAGE, cursor, count: true }).toString();
 
   const fetchPage = useCallback(async () => {
-    setPage((prev) => ({ ...prev, loading: true }))
+    setPage((prev) => ({ ...prev, loading: true }));
     try {
-      const res = await fetch(`${apiBase}/schedules?${params}`)
-      if (!res.ok) throw new Error(await messageOf(res))
-      const answer = (await res.json()) as Page<ScheduleRow>
+      const res = await fetch(`${apiBase}/schedules?${params}`);
+      if (!res.ok) throw new Error(await messageOf(res));
+      const answer = (await res.json()) as Page<ScheduleRow>;
       // Shown without titles, then again with them. See the header comment.
-      setPage({ ...answer, loading: false })
-      const titles = await resolveTitles(apiBase, answer.rows)
+      setPage({ ...answer, loading: false });
+      const titles = await resolveTitles(apiBase, answer.rows);
       // `null` is a *failed* lookup, and merging it would mark every row on the
       // screen as a deleted document. Leaving the titles unresolved shows the story
       // ids instead, which is what the rows actually contain.
-      if (titles === null) return
+      if (titles === null) return;
       setPage((prev) => ({
         ...prev,
         rows: prev.rows.map((row) => ({
@@ -72,15 +72,15 @@ export function useSchedules(apiBase: string, url: SchedulesUrl): SchedulesData 
           title: titles.get(row.storyId),
           missing: !titles.has(row.storyId),
         })),
-      }))
+      }));
     } catch (e) {
-      setPage({ rows: [], cursor: null, loading: false, error: (e as Error).message })
+      setPage({ rows: [], cursor: null, loading: false, error: (e as Error).message });
     }
-  }, [apiBase, params])
+  }, [apiBase, params]);
 
   useEffect(() => {
-    void fetchPage()
-  }, [fetchPage])
+    void fetchPage();
+  }, [fetchPage]);
 
   /**
    * A filter change invalidates the cursor stack: it is a different set, so a cursor
@@ -88,28 +88,28 @@ export function useSchedules(apiBase: string, url: SchedulesUrl): SchedulesData 
    * request minus the cursor, deriving it rather than listing the filters, which is
    * what stops a third filter being added without a reset.
    */
-  const identity = schedulesParams(url, { limit: PAGE, count: true }).toString()
+  const identity = schedulesParams(url, { limit: PAGE, count: true }).toString();
   // biome-ignore lint/correctness/useExhaustiveDependencies: `identity` is the trigger, not a value the body reads — it only clears. Naming it is the point; reading it to satisfy the rule would misstate what this depends on
   useEffect(() => {
-    setCursor(null)
-    setHistory([])
-  }, [identity])
+    setCursor(null);
+    setHistory([]);
+  }, [identity]);
 
   const nextPage = useCallback(() => {
-    if (!page.cursor) return
-    setHistory((prev) => [...prev, cursor])
-    setCursor(page.cursor)
-  }, [page.cursor, cursor])
+    if (!page.cursor) return;
+    setHistory((prev) => [...prev, cursor]);
+    setCursor(page.cursor);
+  }, [page.cursor, cursor]);
 
   const prevPage = useCallback(() => {
     setHistory((prev) => {
-      if (prev.length === 0) return prev
-      setCursor(prev[prev.length - 1] ?? null)
-      return prev.slice(0, -1)
-    })
-  }, [])
+      if (prev.length === 0) return prev;
+      setCursor(prev[prev.length - 1] ?? null);
+      return prev.slice(0, -1);
+    });
+  }, []);
 
-  return { page, canGoBack: history.length > 0, nextPage, prevPage, reload: fetchPage }
+  return { page, canGoBack: history.length > 0, nextPage, prevPage, reload: fetchPage };
 }
 
 /**
@@ -134,16 +134,16 @@ async function resolveTitles(
   apiBase: string,
   rows: readonly ScheduleRow[],
 ): Promise<Map<string, string> | null> {
-  const ids = [...new Set(rows.map((row) => row.storyId))]
-  if (ids.length === 0) return new Map()
+  const ids = [...new Set(rows.map((row) => row.storyId))];
+  if (ids.length === 0) return new Map();
   try {
-    const res = await fetch(`${apiBase}/stories?ids=${ids.map(encodeURIComponent).join(',')}`)
-    if (!res.ok) return null
+    const res = await fetch(`${apiBase}/stories?ids=${ids.map(encodeURIComponent).join(",")}`);
+    if (!res.ok) return null;
     // `{ rows }`, not a bare array: the `?ids=` branch merges an optional ancestor
     // chain into the same envelope, so it has a key rather than being one.
-    const { rows: stories } = (await res.json()) as { rows: StoryMeta[] }
-    return new Map(stories.map((story) => [story.id, story.title]))
+    const { rows: stories } = (await res.json()) as { rows: StoryMeta[] };
+    return new Map(stories.map((story) => [story.id, story.title]));
   } catch {
-    return null
+    return null;
   }
 }

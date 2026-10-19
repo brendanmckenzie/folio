@@ -1,6 +1,6 @@
-import { DurableObject } from 'cloudflare:workers'
-import type { Doc } from '../core/doc'
-import { apply, type Mutation, mutationError } from '../core/mutations'
+import { DurableObject } from "cloudflare:workers";
+import type { Doc } from "../core/doc";
+import { apply, type Mutation, mutationError } from "../core/mutations";
 import {
   type ActivityEntry,
   type Delta,
@@ -12,28 +12,28 @@ import {
   PROTOCOL_VERSION,
   type ServerMsg,
   txCapError,
-} from '../core/protocol'
-import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
-import { decodeIdentity, IDENTITY_HEADER, type SocketIdentity } from './auth/identity'
-import type { Role } from './auth/roles'
-import { type Keyset, keysetWhere, orderBy, whereOf } from './keyset'
+} from "../core/protocol";
+import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
+import { decodeIdentity, IDENTITY_HEADER, type SocketIdentity } from "./auth/identity";
+import type { Role } from "./auth/roles";
+import { type Keyset, keysetWhere, orderBy, whereOf } from "./keyset";
 import {
   CLOSE_PURGED,
   CLOSE_VERSION,
   frameSizeError,
   liveSession,
   type SocketSession,
-} from './sockets'
+} from "./sockets";
 
 /** Beyond this many missed deltas it is cheaper to re-send the whole document. */
-const MAX_CATCHUP = 200
+const MAX_CATCHUP = 200;
 
 /**
  * The activity trail's order: newest first, over the log's own monotonic
  * `sync_id`. One column, because that is the case a unique primary allows — see
  * `Keyset`.
  */
-const ACTIVITY_ORDER: Keyset = { columns: ['sync_id'], direction: 'desc' }
+const ACTIVITY_ORDER: Keyset = { columns: ["sync_id"], direction: "desc" };
 
 /**
  * How long after the last logged transaction the debounced watermark alarm
@@ -41,7 +41,7 @@ const ACTIVITY_ORDER: Keyset = { columns: ['sync_id'], direction: 'desc' }
  * architecture decision 4). A minute of typing costs one D1 write, not one per
  * keystroke.
  */
-const WATERMARK_DEBOUNCE_MS = 2000
+const WATERMARK_DEBOUNCE_MS = 2000;
 
 /**
  * What one socket carries, for the life of the connection, across hibernation.
@@ -52,11 +52,11 @@ const WATERMARK_DEBOUNCE_MS = 2000
  * (what `hello` asserted, which is all there is under `auth: 'open'`).
  */
 interface Attachment extends SocketSession {
-  actor: string
-  name: string
-  colour: string
+  actor: string;
+  name: string;
+  colour: string;
   /** Global role, or null when there is no session (`auth: 'open'`). */
-  role: Role | null
+  role: Role | null;
   /**
    * Has said hello.
    *
@@ -68,19 +68,19 @@ interface Attachment extends SocketSession {
    * silently broken that test — a correctness regression in the sync engine
    * dressed up as a login change. Hence an explicit flag.
    */
-  joined: boolean
+  joined: boolean;
   /** Which blok, and which field inside it (v4). See `PresenceSelection`. */
-  selection: PresenceSelection | null
+  selection: PresenceSelection | null;
   /** Which locale this socket is editing in; null on the source locale. */
-  locale: string | null
+  locale: string | null;
 }
 
 /** A fresh attachment for a socket that has just upgraded, before any frame. */
 function attach(identity: SocketIdentity | null): Attachment {
   return {
-    actor: identity?.actor ?? '',
-    name: identity?.name ?? '',
-    colour: identity?.colour ?? '',
+    actor: identity?.actor ?? "",
+    name: identity?.name ?? "",
+    colour: identity?.colour ?? "",
     verified: identity !== null,
     role: identity?.role ?? null,
     session: identity?.session ?? null,
@@ -89,7 +89,7 @@ function attach(identity: SocketIdentity | null): Attachment {
     joined: false,
     selection: null,
     locale: null,
-  }
+  };
 }
 
 /**
@@ -101,17 +101,17 @@ function attach(identity: SocketIdentity | null): Attachment {
  * broadcast to every other editor.
  */
 function presenceOf(a: Attachment): Presence {
-  const actor = a.actor || 'unknown'
+  const actor = a.actor || "unknown";
   return {
     actor,
-    name: a.name || 'Anonymous',
+    name: a.name || "Anonymous",
     colour: a.colour || fallbackColour(actor),
     selection: a.selection,
     locale: a.locale,
-  }
+  };
 }
 
-const encode = (msg: ServerMsg): string => JSON.stringify({ ...msg, v: PROTOCOL_VERSION })
+const encode = (msg: ServerMsg): string => JSON.stringify({ ...msg, v: PROTOCOL_VERSION });
 
 /**
  * What `commit` answers — the second door into the log
@@ -123,24 +123,26 @@ const encode = (msg: ServerMsg): string => JSON.stringify({ ...msg, v: PROTOCOL_
  */
 export type CommitResult =
   | {
-      syncId: number
-      txId: string
+      syncId: number;
+      txId: string;
       /**
        * True when this txId was already in the log, so nothing new was written
        * and nothing was broadcast. The idempotent ack the socket path already
        * gives a resend, in the shape an RPC caller can read.
        */
-      replay?: true
+      replay?: true;
     }
-  | { rejected: string }
+  | { rejected: string };
 
 /** A commit's own txId when the caller does not supply one. */
 function newTxId(): string {
-  return `tx_${crypto.randomUUID().replace(/-/g, '').slice(0, 20)}`
+  return `tx_${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
 }
 
 /** What `applyTransaction` hands back: the delta it logged, or why it refused. */
-type TransactionResult = { ok: true; delta: Delta; replay: boolean } | { ok: false; reason: string }
+type TransactionResult =
+  | { ok: true; delta: Delta; replay: boolean }
+  | { ok: false; reason: string };
 
 export interface StoryDOConfig<Env> {
   /**
@@ -150,14 +152,14 @@ export interface StoryDOConfig<Env> {
    * the seam: the host's own worker calls `createStoryDO` once, the way it
    * already declares every other binding.
    */
-  db: (env: Env) => D1Database
+  db: (env: Env) => D1Database;
 }
 
 /** The host env shape `export { StoryDO }` below assumes: a D1 binding named
  * `DB`, matching every example and migration doc in this package. Call
  * `createStoryDO` directly for a differently named binding. */
 interface DefaultStoryEnv {
-  DB: D1Database
+  DB: D1Database;
 }
 
 /**
@@ -177,18 +179,18 @@ interface DefaultStoryEnv {
  * point the mistake is detectable, with the fix in the message.
  */
 export function requireDb<Env>(config: StoryDOConfig<Env>, env: Env): void {
-  const db = config.db(env) as D1Database | undefined
-  if (db && typeof db.prepare === 'function') return
+  const db = config.db(env) as D1Database | undefined;
+  if (db && typeof db.prepare === "function") return;
   const names = Object.keys(env as object)
     .sort()
-    .join(', ')
+    .join(", ");
   throw new Error(
     "folio: StoryDO's `db` did not resolve to a D1 binding. " +
       "`export { StoryDO } from 'folio/server'` assumes a binding named `DB`; " +
-      'for any other name build your own: ' +
-      '`export const StoryDO = createStoryDO<Env>({ db: (env) => env.MY_D1 })`. ' +
-      `Bindings on this env: ${names || '(none)'}`,
-  )
+      "for any other name build your own: " +
+      "`export const StoryDO = createStoryDO<Env>({ db: (env) => env.MY_D1 })`. " +
+      `Bindings on this env: ${names || "(none)"}`,
+  );
 }
 
 /**
@@ -213,22 +215,22 @@ export function requireDb<Env>(config: StoryDOConfig<Env>, env: Env): void {
  * is optional and `StoryStub` (`server/types.ts`) picks it.
  */
 export interface StoryDOInstance<Env> extends DurableObject<Env> {
-  getOrInit(seed: Doc): Promise<Doc>
-  getOrInitWithSyncId(seed: Doc): Promise<{ doc: Doc; syncId: number }>
-  head(): Promise<{ syncId: number }>
-  purge(): Promise<void>
-  alarm(): Promise<void>
-  fetch(req: Request): Promise<Response>
+  getOrInit(seed: Doc): Promise<Doc>;
+  getOrInitWithSyncId(seed: Doc): Promise<{ doc: Doc; syncId: number }>;
+  head(): Promise<{ syncId: number }>;
+  purge(): Promise<void>;
+  alarm(): Promise<void>;
+  fetch(req: Request): Promise<Response>;
   commit(
     mutations: Mutation[],
     actor: { id: string; name: string },
     txId?: string,
-  ): Promise<CommitResult>
-  webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void>
-  webSocketClose(ws: WebSocket): Promise<void>
-  webSocketError(ws: WebSocket): Promise<void>
-  recent(limit?: number, cursor?: string): Promise<Page<ActivityEntry>>
-  hasTx(txId: string): Promise<{ syncId: number; mutations: number } | null>
+  ): Promise<CommitResult>;
+  webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void>;
+  webSocketClose(ws: WebSocket): Promise<void>;
+  webSocketError(ws: WebSocket): Promise<void>;
+  recent(limit?: number, cursor?: string): Promise<Page<ActivityEntry>>;
+  hasTx(txId: string): Promise<{ syncId: number; mutations: number } | null>;
 }
 
 /**
@@ -248,12 +250,12 @@ export function createStoryDO<Env>(
   env: Env,
 ) => StoryDOInstance<Env> {
   return class StoryDOImpl extends DurableObject<Env> {
-    private sql: SqlStorage
+    private sql: SqlStorage;
 
     constructor(ctx: DurableObjectState, env: Env) {
-      super(ctx, env)
-      requireDb(config, env)
-      this.sql = ctx.storage.sql
+      super(ctx, env);
+      requireDb(config, env);
+      this.sql = ctx.storage.sql;
       this.sql.exec(`
       create table if not exists doc (
         id      integer primary key check (id = 1),
@@ -268,17 +270,17 @@ export function createStoryDO<Env>(
         mutations  text not null,
         at         integer not null
       );
-    `)
+    `);
       // Objects created before actor_name existed.
       try {
-        this.sql.exec('alter table log add column actor_name text')
+        this.sql.exec("alter table log add column actor_name text");
       } catch {
         // Column already present.
       }
       // Dedupe key: a resent transaction must find the row it already produced,
       // and must be unable to write a second one.
       try {
-        this.sql.exec('create unique index if not exists log_tx_id on log (tx_id)')
+        this.sql.exec("create unique index if not exists log_tx_id on log (tx_id)");
       } catch {
         // An object that logged a duplicate txId before this index existed keeps
         // its log; the lookup below still answers a resend with the first row.
@@ -287,7 +289,7 @@ export function createStoryDO<Env>(
 
     /** Creates the document on first touch. Returns the current draft. */
     async getOrInit(seed: Doc): Promise<Doc> {
-      return (await this.getOrInitWithSyncId(seed)).doc
+      return (await this.getOrInitWithSyncId(seed)).doc;
     }
 
     /**
@@ -301,10 +303,10 @@ export function createStoryDO<Env>(
      * caller and is implemented in terms of this one.
      */
     async getOrInitWithSyncId(seed: Doc): Promise<{ doc: Doc; syncId: number }> {
-      const row = this.read()
-      if (row) return row
-      this.sql.exec('insert into doc (id, json, sync_id) values (1, ?, 0)', JSON.stringify(seed))
-      return { doc: seed, syncId: 0 }
+      const row = this.read();
+      if (row) return row;
+      this.sql.exec("insert into doc (id, json, sync_id) values (1, ?, 0)", JSON.stringify(seed));
+      return { doc: seed, syncId: 0 };
     }
 
     /**
@@ -314,7 +316,7 @@ export function createStoryDO<Env>(
      * `default 0` on `stories.draft_sync_id` (migrations/0001_init.sql).
      */
     async head(): Promise<{ syncId: number }> {
-      return { syncId: this.read()?.syncId ?? 0 }
+      return { syncId: this.read()?.syncId ?? 0 };
     }
 
     /**
@@ -328,13 +330,13 @@ export function createStoryDO<Env>(
     async purge(): Promise<void> {
       for (const socket of this.ctx.getWebSockets()) {
         try {
-          socket.close(CLOSE_PURGED, 'story deleted')
+          socket.close(CLOSE_PURGED, "story deleted");
         } catch {
           // Already closing.
         }
       }
-      this.sql.exec('delete from log')
-      this.sql.exec('delete from doc')
+      this.sql.exec("delete from log");
+      this.sql.exec("delete from doc");
     }
 
     /**
@@ -352,25 +354,25 @@ export function createStoryDO<Env>(
      * here.
      */
     async alarm(): Promise<void> {
-      const row = this.read()
-      if (!row) return
-      const name = this.ctx.id.name
-      if (!name) return
+      const row = this.read();
+      if (!row) return;
+      const name = this.ctx.id.name;
+      if (!name) return;
       try {
         await config
           .db(this.env)
-          .prepare('update stories set draft_sync_id = ?, draft_updated_at = ? where id = ?')
+          .prepare("update stories set draft_sync_id = ?, draft_updated_at = ? where id = ?")
           .bind(row.syncId, Date.now(), name)
-          .run()
+          .run();
       } catch (err) {
         // Stays on `console`, deliberately (`FolioConfig.logger`, #16): this
         // object is constructed by the platform from `StoryDOConfig`, which
         // carries only `db(env)` — there is no path back to `createFolio`'s
         // config from inside a Durable Object, and inventing one to smuggle a
         // logger in is a bigger change than this issue asks for.
-        console.error(`story-do: failed to write the draft watermark for ${name}`, err)
+        console.error(`story-do: failed to write the draft watermark for ${name}`, err);
         try {
-          await this.ctx.storage.setAlarm(Date.now() + WATERMARK_DEBOUNCE_MS)
+          await this.ctx.storage.setAlarm(Date.now() + WATERMARK_DEBOUNCE_MS);
         } catch {
           // Best-effort; the next transaction reschedules anyway.
         }
@@ -379,30 +381,30 @@ export function createStoryDO<Env>(
 
     private read(): { doc: Doc; syncId: number } | null {
       const row = this.sql
-        .exec<{ json: string; sync_id: number }>('select json, sync_id from doc where id = 1')
-        .toArray()[0]
-      return row ? { doc: JSON.parse(row.json) as Doc, syncId: row.sync_id } : null
+        .exec<{ json: string; sync_id: number }>("select json, sync_id from doc where id = 1")
+        .toArray()[0];
+      return row ? { doc: JSON.parse(row.json) as Doc, syncId: row.sync_id } : null;
     }
 
     async fetch(req: Request): Promise<Response> {
-      if (req.headers.get('Upgrade') !== 'websocket') {
-        return new Response('Expected websocket', { status: 426 })
+      if (req.headers.get("Upgrade") !== "websocket") {
+        return new Response("Expected websocket", { status: 426 });
       }
       // A Durable Object namespace is not publicly addressable: the only way to
       // reach this object is through the Worker that set this header, which is
       // what makes it trustworthy in a way the `hello` frame never was
       // (identity-and-access.md architecture decision 3). Absent means
       // `auth: 'open'`, where `hello`'s self-report is the only identity going.
-      const identity = decodeIdentity(req.headers.get(IDENTITY_HEADER))
-      const pair = new WebSocketPair()
+      const identity = decodeIdentity(req.headers.get(IDENTITY_HEADER));
+      const pair = new WebSocketPair();
       // Hibernation: the object can be evicted between edits without dropping
       // connections, so an idle editing session costs nothing.
-      this.ctx.acceptWebSocket(pair[1]!)
+      this.ctx.acceptWebSocket(pair[1]!);
       // Attached immediately, so the identity exists before the first frame is
       // parsed. `joined: false` keeps this socket out of the fan-out until it
       // says hello — see `Attachment.joined`.
-      pair[1]!.serializeAttachment(attach(identity))
-      return new Response(null, { status: 101, webSocket: pair[0] })
+      pair[1]!.serializeAttachment(attach(identity));
+      return new Response(null, { status: 101, webSocket: pair[0] });
     }
 
     /**
@@ -427,22 +429,22 @@ export function createStoryDO<Env>(
       // That idempotent ack is what makes a client's resend after a dropped
       // acknowledgement safe, and it is checked first so a resend never gets as
       // far as re-validating against a document that has since moved.
-      const logged = this.logged(txId)
-      if (logged) return { ok: true, delta: logged, replay: true }
+      const logged = this.logged(txId);
+      if (logged) return { ok: true, delta: logged, replay: true };
 
-      const capError = txCapError(mutations as Mutation[])
-      if (capError) return { ok: false, reason: capError }
+      const capError = txCapError(mutations as Mutation[]);
+      if (capError) return { ok: false, reason: capError };
 
       // Atomic at the door: one violation refuses the whole transaction, since
       // a half-applied tx cannot be undone. Each mutation is checked against
       // the document the ones before it produced, so a tx that inserts a
       // parent and moves an existing blok into it is legal — which the restore
       // path (diff(live, target)) depends on.
-      let next = current.doc
+      let next = current.doc;
       for (const m of mutations) {
-        const reason = mutationError(next, m)
-        if (reason) return { ok: false, reason }
-        next = apply(next, m)
+        const reason = mutationError(next, m);
+        if (reason) return { ok: false, reason };
+        next = apply(next, m);
       }
 
       // Bounds what an unbounded run of individually-legal txs can grow the
@@ -450,22 +452,22 @@ export function createStoryDO<Env>(
       // so this is checked once against the tx's net effect rather than per
       // mutation. `nextJson` is reused below for the doc row instead of
       // serialising the document twice.
-      const nextJson = JSON.stringify(next)
-      const docReason = docCapError(next, nextJson)
-      if (docReason) return { ok: false, reason: docReason }
+      const nextJson = JSON.stringify(next);
+      const docReason = docCapError(next, nextJson);
+      if (docReason) return { ok: false, reason: docReason };
 
       this.sql.exec(
-        'insert into log (tx_id, actor, actor_name, mutations, at) values (?, ?, ?, ?, ?)',
+        "insert into log (tx_id, actor, actor_name, mutations, at) values (?, ?, ?, ?, ?)",
         txId,
         who.actor,
         who.name,
         JSON.stringify(mutations),
         Date.now(),
-      )
+      );
       const syncId = Number(
-        this.sql.exec<{ id: number }>('select last_insert_rowid() as id').toArray()[0]?.id ?? 0,
-      )
-      this.sql.exec('update doc set json = ?, sync_id = ? where id = 1', nextJson, syncId)
+        this.sql.exec<{ id: number }>("select last_insert_rowid() as id").toArray()[0]?.id ?? 0,
+      );
+      this.sql.exec("update doc set json = ?, sync_id = ? where id = 1", nextJson, syncId);
       // Debounced watermark: mirror this log position into D1 a couple of
       // seconds after the last logged tx, so the tree can show which pages
       // have unpublished changes without opening every object
@@ -474,7 +476,7 @@ export function createStoryDO<Env>(
       // check.
       try {
         if ((await this.ctx.storage.getAlarm()) === null) {
-          await this.ctx.storage.setAlarm(Date.now() + WATERMARK_DEBOUNCE_MS)
+          await this.ctx.storage.setAlarm(Date.now() + WATERMARK_DEBOUNCE_MS);
         }
       } catch {
         // Scheduling failure is not fatal to the transaction that triggered
@@ -485,7 +487,7 @@ export function createStoryDO<Env>(
         ok: true,
         delta: { syncId, txId, actor: who.actor, mutations: mutations as Mutation[] },
         replay: false,
-      }
+      };
     }
 
     /**
@@ -515,9 +517,9 @@ export function createStoryDO<Env>(
       actor: { id: string; name: string },
       txId: string = newTxId(),
     ): Promise<CommitResult> {
-      const current = this.read()
+      const current = this.read();
       if (!current) {
-        return { rejected: 'no document: this story has never been opened' }
+        return { rejected: "no document: this story has never been opened" };
       }
 
       const result = await this.applyTransaction(
@@ -525,13 +527,13 @@ export function createStoryDO<Env>(
         mutations,
         { actor: actor.id, name: actor.name || null },
         txId,
-      )
-      if (!result.ok) return { rejected: result.reason }
+      );
+      if (!result.ok) return { rejected: result.reason };
 
-      if (!result.replay) this.broadcast({ type: 'delta', ...result.delta })
+      if (!result.replay) this.broadcast({ type: "delta", ...result.delta });
 
-      const { syncId, txId: logged } = result.delta
-      return result.replay ? { syncId, txId: logged, replay: true } : { syncId, txId: logged }
+      const { syncId, txId: logged } = result.delta;
+      return result.replay ? { syncId, txId: logged, replay: true } : { syncId, txId: logged };
     }
 
     /**
@@ -544,16 +546,16 @@ export function createStoryDO<Env>(
       // Ahead of parsing, and shared with SpaceDO (`sockets.ts`): a frame this
       // large would cost a JSON.parse over attacker-controlled input before
       // anything else got a chance to refuse it.
-      const tooBig = frameSizeError(raw)
+      const tooBig = frameSizeError(raw);
       if (tooBig) {
-        this.sendTo(ws, { type: 'error', reason: tooBig })
-        return
+        this.sendTo(ws, { type: "error", reason: tooBig });
+        return;
       }
 
-      const msg = parseClientFrame(raw)
+      const msg = parseClientFrame(raw);
       if (!msg) {
-        this.sendTo(ws, { type: 'error', reason: 'unreadable frame' })
-        return
+        this.sendTo(ws, { type: "error", reason: "unreadable frame" });
+        return;
       }
       // Version discipline covers every frame, not only the handshake: a peer that
       // claims a version this object does not implement, or claims none at all, is
@@ -566,36 +568,36 @@ export function createStoryDO<Env>(
       // through unversioned, attributed to whatever actor its socket happens to
       // have attached (or `unknown`, if none) — the exact hole versioning exists to
       // close, one omitted field away.
-      const mismatch = msg.v !== PROTOCOL_VERSION
+      const mismatch = msg.v !== PROTOCOL_VERSION;
       if (mismatch) {
         this.sendTo(ws, {
-          type: 'error',
-          reason: `protocol version ${msg.v ?? 'unset'}, this object speaks ${PROTOCOL_VERSION}`,
-        })
-        ws.close(CLOSE_VERSION, 'unsupported protocol version')
-        return
+          type: "error",
+          reason: `protocol version ${msg.v ?? "unset"}, this object speaks ${PROTOCOL_VERSION}`,
+        });
+        ws.close(CLOSE_VERSION, "unsupported protocol version");
+        return;
       }
 
       // Every frame, whatever its type: a socket whose session has ended must
       // stop being able to write, and the check has to happen before the frame is
       // dispatched rather than inside the one case that mutates.
-      const held = ws.deserializeAttachment() as Attachment | null
-      const who = held ? await liveSession(config.db(this.env), ws, held, 'story-do') : null
-      if (held && !who) return
+      const held = ws.deserializeAttachment() as Attachment | null;
+      const who = held ? await liveSession(config.db(this.env), ws, held, "story-do") : null;
+      if (held && !who) return;
 
-      const current = this.read()
-      if (!current) return
+      const current = this.read();
+      if (!current) return;
 
       switch (msg.type) {
-        case 'hello': {
+        case "hello": {
           // A verified identity is not overwritable, and at v3 the frame says so
           // structurally: `hello.identity` is optional and nested
           // (`localisation.md`), and it is read in exactly one situation —
           // `auth: 'open'`, where there are no accounts and a client's self-report
           // is the only thing that tells two anonymous tabs apart. A socket the
           // Worker vouched for never reaches the second branch, whatever it sent.
-          const base = who ?? attach(null)
-          const asserted = msg.identity
+          const base = who ?? attach(null);
+          const asserted = msg.identity;
           const attachment: Attachment =
             base.verified || !asserted
               ? { ...base, joined: true }
@@ -605,28 +607,28 @@ export function createStoryDO<Env>(
                   name: asserted.name,
                   colour: asserted.colour,
                   joined: true,
-                }
-          ws.serializeAttachment(attachment)
+                };
+          ws.serializeAttachment(attachment);
 
-          const behind = current.syncId - msg.lastSyncId
-          const peers = this.peers(ws)
+          const behind = current.syncId - msg.lastSyncId;
+          const peers = this.peers(ws);
 
           if (msg.lastSyncId > 0 && behind >= 0 && behind <= MAX_CATCHUP) {
             this.sendTo(ws, {
-              type: 'catchup',
+              type: "catchup",
               deltas: this.since(msg.lastSyncId),
               syncId: current.syncId,
               peers,
-            })
+            });
           } else {
-            this.sendTo(ws, { type: 'bootstrap', doc: current.doc, syncId: current.syncId, peers })
+            this.sendTo(ws, { type: "bootstrap", doc: current.doc, syncId: current.syncId, peers });
           }
-          this.broadcast({ type: 'presence', peer: presenceOf(attachment) }, ws)
-          break
+          this.broadcast({ type: "presence", peer: presenceOf(attachment) }, ws);
+          break;
         }
 
-        case 'tx': {
-          const actor = who?.actor || 'unknown'
+        case "tx": {
+          const actor = who?.actor || "unknown";
 
           // The role gate, and the only place in the object that has one
           // (architecture decision 5). A viewer is answered with the existing
@@ -639,13 +641,13 @@ export function createStoryDO<Env>(
           // Deliberately outside `applyTransaction`: it is a property of *this
           // door*, not of the log. `commit` has no role to check — the route
           // that reaches it is gated on `admin` before the RPC is made.
-          if (who?.role === 'viewer') {
+          if (who?.role === "viewer") {
             this.sendTo(ws, {
-              type: 'reject',
+              type: "reject",
               txId: msg.txId,
-              reason: 'read-only: your role may not edit',
-            })
-            return
+              reason: "read-only: your role may not edit",
+            });
+            return;
           }
 
           const result = await this.applyTransaction(
@@ -653,64 +655,64 @@ export function createStoryDO<Env>(
             msg.mutations,
             { actor, name: who?.name || null },
             msg.txId,
-          )
+          );
           if (!result.ok) {
             // Same envelope for every refusal — oversized, malformed, or over
             // the document cap — and the sender always gets its txId back so it
             // can drop the tx from `pending` rather than wait for a delta that
             // will never come.
-            this.sendTo(ws, { type: 'reject', txId: msg.txId, reason: result.reason })
-            return
+            this.sendTo(ws, { type: "reject", txId: msg.txId, reason: result.reason });
+            return;
           }
           if (result.replay) {
             // Sender only, no re-apply, no new syncId. Flagged as a replay
             // because its syncId is old: a client that has already drained this
             // tx must recognise the frame instead of applying stale mutations
             // over a newer base.
-            this.sendTo(ws, { type: 'delta', ...result.delta, replay: true })
-            return
+            this.sendTo(ws, { type: "delta", ...result.delta, replay: true });
+            return;
           }
-          const delta: ServerMsg = { type: 'delta', ...result.delta }
+          const delta: ServerMsg = { type: "delta", ...result.delta };
           // The sender's echo is its acknowledgement, so it is sent directly rather
           // than through the fan-out: the pre-hello quarantine withholds edits a
           // socket did not ask for, never the answer to one it did.
-          this.sendTo(ws, delta)
-          this.broadcast(delta, ws)
-          break
+          this.sendTo(ws, delta);
+          this.broadcast(delta, ws);
+          break;
         }
 
-        case 'presence': {
+        case "presence": {
           // `joined`, not merely "has an attachment": a socket that has not said
           // hello has no identity to announce, and announcing one under
           // `auth: 'open'` would mean broadcasting an empty peer.
-          if (!who?.joined) return
+          if (!who?.joined) return;
           // `locale` is normalised to null by `parseClientFrame` when absent, so
           // a client that never sends one reads as "the source locale" rather
           // than as "unknown".
-          const next: Attachment = { ...who, selection: msg.selection, locale: msg.locale ?? null }
-          ws.serializeAttachment(next)
-          this.broadcast({ type: 'presence', peer: presenceOf(next) }, ws)
-          break
+          const next: Attachment = { ...who, selection: msg.selection, locale: msg.locale ?? null };
+          ws.serializeAttachment(next);
+          this.broadcast({ type: "presence", peer: presenceOf(next) }, ws);
+          break;
         }
       }
     }
 
     async webSocketClose(ws: WebSocket) {
-      this.departed(ws)
+      this.departed(ws);
     }
 
     /** A socket that fails is gone just as thoroughly as one that closes cleanly. */
     async webSocketError(ws: WebSocket) {
-      this.departed(ws)
+      this.departed(ws);
     }
 
     private departed(ws: WebSocket) {
-      const attachment = ws.deserializeAttachment() as Attachment | null
+      const attachment = ws.deserializeAttachment() as Attachment | null;
       // Only a socket that joined was ever announced as arriving, so only one
       // that joined has a departure to announce. Every socket has an attachment
       // now, so this is `joined` rather than a presence check.
       if (attachment?.joined) {
-        this.broadcast({ type: 'presence', peer: presenceOf(attachment), gone: true }, ws)
+        this.broadcast({ type: "presence", peer: presenceOf(attachment), gone: true }, ws);
       }
     }
 
@@ -734,15 +736,15 @@ export function createStoryDO<Env>(
      * with no way to reach the rest.
      */
     async recent(limit = 80, cursor?: string): Promise<Page<ActivityEntry>> {
-      const size = clampLimit(limit, 80, 500)
-      const resume = keysetWhere(ACTIVITY_ORDER, cursor ? decodeCursor(cursor) : null)
+      const size = clampLimit(limit, 80, 500);
+      const resume = keysetWhere(ACTIVITY_ORDER, cursor ? decodeCursor(cursor) : null);
       const rows = this.sql
         .exec<{
-          sync_id: number
-          actor: string
-          actor_name: string | null
-          mutations: string
-          at: number
+          sync_id: number;
+          actor: string;
+          actor_name: string | null;
+          mutations: string;
+          at: number;
         }>(
           `select sync_id, actor, actor_name, mutations, at from log
            ${whereOf(resume.sql)} ${orderBy(ACTIVITY_ORDER)} limit ?`,
@@ -757,9 +759,9 @@ export function createStoryDO<Env>(
           actor: r.actor,
           actorName: r.actor_name,
           at: r.at,
-          mutations: JSON.parse(r.mutations) as ActivityEntry['mutations'],
-        }))
-      return paginate(rows, size, (row) => [row.syncId])
+          mutations: JSON.parse(r.mutations) as ActivityEntry["mutations"],
+        }));
+      return paginate(rows, size, (row) => [row.syncId]);
     }
 
     /**
@@ -775,31 +777,31 @@ export function createStoryDO<Env>(
      * changes. So the question is asked instead of guessed at.
      */
     async hasTx(txId: string): Promise<{ syncId: number; mutations: number } | null> {
-      const delta = this.logged(txId)
-      return delta ? { syncId: delta.syncId, mutations: delta.mutations.length } : null
+      const delta = this.logged(txId);
+      return delta ? { syncId: delta.syncId, mutations: delta.mutations.length } : null;
     }
 
     /** The delta a txId already produced, or null if this transaction is new. */
     private logged(txId: string): Delta | null {
       const row = this.sql
         .exec<{ sync_id: number; tx_id: string; actor: string; mutations: string }>(
-          'select sync_id, tx_id, actor, mutations from log where tx_id = ? order by sync_id limit 1',
+          "select sync_id, tx_id, actor, mutations from log where tx_id = ? order by sync_id limit 1",
           txId,
         )
-        .toArray()[0]
-      if (!row) return null
+        .toArray()[0];
+      if (!row) return null;
       return {
         syncId: row.sync_id,
         txId: row.tx_id,
         actor: row.actor,
         mutations: JSON.parse(row.mutations),
-      }
+      };
     }
 
     private since(syncId: number): Delta[] {
       return this.sql
         .exec<{ sync_id: number; tx_id: string; actor: string; mutations: string }>(
-          'select sync_id, tx_id, actor, mutations from log where sync_id > ? order by sync_id',
+          "select sync_id, tx_id, actor, mutations from log where sync_id > ? order by sync_id",
           syncId,
         )
         .toArray()
@@ -808,21 +810,21 @@ export function createStoryDO<Env>(
           txId: r.tx_id,
           actor: r.actor,
           mutations: JSON.parse(r.mutations),
-        }))
+        }));
     }
 
     private peers(exclude?: WebSocket): Presence[] {
-      const out: Presence[] = []
+      const out: Presence[] = [];
       for (const socket of this.ctx.getWebSockets()) {
-        if (socket === exclude) continue
-        const a = socket.deserializeAttachment() as Attachment | null
-        if (a?.joined) out.push(presenceOf(a))
+        if (socket === exclude) continue;
+        const a = socket.deserializeAttachment() as Attachment | null;
+        if (a?.joined) out.push(presenceOf(a));
       }
-      return out
+      return out;
     }
 
     private sendTo(ws: WebSocket, msg: ServerMsg) {
-      ws.send(encode(msg))
+      ws.send(encode(msg));
     }
 
     /**
@@ -838,18 +840,18 @@ export function createStoryDO<Env>(
      * See `Attachment.joined`.
      */
     private broadcast(msg: ServerMsg, exclude?: WebSocket) {
-      const payload = encode(msg)
+      const payload = encode(msg);
       for (const socket of this.ctx.getWebSockets()) {
-        if (socket === exclude) continue
-        if (!(socket.deserializeAttachment() as Attachment | null)?.joined) continue
+        if (socket === exclude) continue;
+        if (!(socket.deserializeAttachment() as Attachment | null)?.joined) continue;
         try {
-          socket.send(payload)
+          socket.send(payload);
         } catch {
           // Socket is going away; close handling will clean up.
         }
       }
     }
-  }
+  };
 }
 
 /**
@@ -858,5 +860,5 @@ export function createStoryDO<Env>(
  * host that already names its D1 binding `DB` (examples/demo included). A host
  * with a differently named binding calls `createStoryDO` directly instead.
  */
-export const StoryDO = createStoryDO<DefaultStoryEnv>({ db: (env) => env.DB })
-export type StoryDO = InstanceType<typeof StoryDO>
+export const StoryDO = createStoryDO<DefaultStoryEnv>({ db: (env) => env.DB });
+export type StoryDO = InstanceType<typeof StoryDO>;

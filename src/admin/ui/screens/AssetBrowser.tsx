@@ -1,19 +1,19 @@
-import type { KeyboardEvent, ReactNode, RefObject } from 'react'
-import { useRef, useState } from 'react'
+import type { KeyboardEvent, ReactNode, RefObject } from "react";
+import { useRef, useState } from "react";
 import type {
   AssetBulkAction,
   AssetFilter,
   AssetFolder,
   AssetSort,
   AssetTag,
-} from '../../../core/assets'
-import type { BulkFailure, BulkRefusal, BulkReport } from '../../../core/bulk'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { EmptyState } from '../EmptyState'
-import { Field, Input, Select } from '../Field'
-import { columnsOf } from '../fit'
-import { type Column, Table } from '../Table'
+} from "../../../core/assets";
+import type { BulkFailure, BulkRefusal, BulkReport } from "../../../core/bulk";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { EmptyState } from "../EmptyState";
+import { Field, Input, Select } from "../Field";
+import { columnsOf } from "../fit";
+import { type Column, Table } from "../Table";
 import {
   addedAgo,
   ASSET_COLUMNS,
@@ -50,13 +50,13 @@ import {
   tickAllShown,
   tickCount,
   toggleTick,
-} from './assets-model'
-import css from './Assets.module.css'
-import type { AssetsData, Uploads } from './useAssets'
-import { messageOf } from './useContent'
-import { useDescribe } from './useDescribe'
-import { type FoldersData, useFolders } from './useFolders'
-import { type TagsData, useTags } from './useTags'
+} from "./assets-model";
+import css from "./Assets.module.css";
+import type { AssetsData, Uploads } from "./useAssets";
+import { messageOf } from "./useContent";
+import { useDescribe } from "./useDescribe";
+import { type FoldersData, useFolders } from "./useFolders";
+import { type TagsData, useTags } from "./useTags";
 
 /**
  * The width asked of the transform route, per surface. Three values and no more:
@@ -65,8 +65,8 @@ import { type TagsData, useTags } from './useTags'
  * number of breakpoints. These are generous enough to stay sharp on a 2× display at
  * the CSS sizes in `Assets.module.css`, and the browser downscales.
  */
-const TILE_WIDTH = 320
-const CELL_WIDTH = 96
+const TILE_WIDTH = 320;
+const CELL_WIDTH = 96;
 
 /**
  * Placeholder tiles and rows. Named rather than indexed, matching Content's and
@@ -82,29 +82,29 @@ const CELL_WIDTH = 96
  * It also simply looks more like a grid while it loads, which twelve stopped doing
  * once a row held thirteen.
  */
-const SKELETONS = Array.from({ length: 24 }, (_, i) => `s${i + 1}`)
+const SKELETONS = Array.from({ length: 24 }, (_, i) => `s${i + 1}`);
 
 const SORTS: readonly { value: AssetSort; label: string }[] = [
-  { value: 'created', label: 'Date added' },
-  { value: 'filename', label: 'Filename' },
-  { value: 'size', label: 'Size' },
-]
+  { value: "created", label: "Date added" },
+  { value: "filename", label: "Filename" },
+  { value: "size", label: "Size" },
+];
 
 export interface AssetBrowserProps {
   /** The admin's internal JSON base — `{base}/api`. The sidebar's own reads and
    * writes (`useFolders`, `useTags`, and the *New folder* dialog) go through it,
    * same as everything else in this admin. */
-  apiBase: string
+  apiBase: string;
   /**
    * Where Folio is mounted — **not** `apiBase`. `/asset/:key` serves bytes into an
    * `<img>` and stays on the bare mount, because its URL is baked into published
    * HTML through `Resolution.assetBase`.
    */
-  mount: string
-  url: AssetsUrl
-  onUrl: (next: AssetsUrl) => void
-  data: AssetsData
-  upload: Uploads
+  mount: string;
+  url: AssetsUrl;
+  onUrl: (next: AssetsUrl) => void;
+  data: AssetsData;
+  upload: Uploads;
   /**
    * The results scroller, handed up so the mount can measure it.
    *
@@ -114,23 +114,23 @@ export interface AssetBrowserProps {
    * measuring in each mount, which is how the screen and the picker start disagreeing
    * about what a page holds.
    */
-  resultsRef?: RefObject<HTMLDivElement | null>
+  resultsRef?: RefObject<HTMLDivElement | null>;
   /** The row this surface is pointing at. What that *means* is the mount's business
    * — see the header. */
-  selected: string | undefined
-  onSelect: (id: string) => void
+  selected: string | undefined;
+  onSelect: (id: string) => void;
   /** The list's accessible name, which differs by mount: the screen's subject is
    * the library, the picker's is a choice. */
-  label: string
+  label: string;
   /**
    * Whether the type chips are offered. Absent (false) when the mount has imposed a
    * kind of its own — a field whose `accept` is `image/*` — because widening it
    * would offer a file the field cannot store. Impossible controls are absent.
    */
-  kinds?: boolean
+  kinds?: boolean;
   /** Passed to the file input only. The *listing* is narrowed server-side through
    * `?kind=`; see `kindForAccept`. */
-  accept?: string
+  accept?: string;
   /**
    * The dialog mount: tighter tiles, one column fewer, and no *New folder* dialog —
    * a second `useFocusTrap` inside the picker's own is the bug that guard exists for.
@@ -140,7 +140,7 @@ export interface AssetBrowserProps {
    * business and is settled in CSS (`Dialog`'s `.fill` body, or `.screen`'s own
    * height above 1100px). See the chain's note in `Assets.module.css`.
    */
-  compact?: boolean
+  compact?: boolean;
   /**
    * Whether the **selection layer** is offered: a checkbox per tile and per row,
    * a bar over the grid, *select all matching*, and the four bulk actions.
@@ -160,13 +160,13 @@ export interface AssetBrowserProps {
    * than growing a role, so this component still knows nothing about who is
    * signed in.
    */
-  bulk?: boolean
+  bulk?: boolean;
   /**
    * How a completed bulk run reports itself. Screen-only, like `bulk` — and
    * absent for the picker deliberately, which is `AssetPicker.tsx`'s own rule
    * (it takes no `onNotice`, because a dialog has nowhere to put a toast).
    */
-  onNotice?: (message: string) => void
+  onNotice?: (message: string) => void;
   /**
    * Whether this person may write to the library at all — `ASSETS` (editor+) on
    * the server, which is every write in `server/routes/assets.ts` bar one. False
@@ -183,7 +183,7 @@ export interface AssetBrowserProps {
    * chain to re-derive a fact the editor already enforces buys nothing. The
    * default keeps that mount exactly as it was.
    */
-  mayWrite?: boolean
+  mayWrite?: boolean;
   /**
    * Whether this person may start the bulk **describe** run: `ADMIN`, and the one
    * route in this feature that is (`POST {base}/api/assets/describe`, decision
@@ -194,7 +194,7 @@ export interface AssetBrowserProps {
    * implies editor, so this being true implies `mayWrite`. Defaults to true for
    * the picker's sake, which never passes `bulk` and so never draws the control.
    */
-  mayDescribe?: boolean
+  mayDescribe?: boolean;
 }
 
 /**
@@ -226,12 +226,12 @@ export interface AssetBrowserProps {
  */
 export function AssetBrowser(props: AssetBrowserProps) {
   const { apiBase, mount, url, onUrl, data, upload, selected, label, kinds, accept, compact } =
-    props
-  const { bulk, onNotice } = props
-  const mayWrite = props.mayWrite ?? true
-  const mayDescribe = props.mayDescribe ?? true
-  const grid = useRef<HTMLDivElement>(null)
-  const file = useRef<HTMLInputElement>(null)
+    props;
+  const { bulk, onNotice } = props;
+  const mayWrite = props.mayWrite ?? true;
+  const mayDescribe = props.mayDescribe ?? true;
+  const grid = useRef<HTMLDivElement>(null);
+  const file = useRef<HTMLInputElement>(null);
 
   /**
    * **One instance of each per mount**, held here rather than in `Sidebar`.
@@ -245,22 +245,22 @@ export function AssetBrowser(props: AssetBrowserProps) {
    * `Assets.tsx`, not by this one, and threading a hook's value through a
    * screen to a sibling is a bigger change than this phase owes.
    */
-  const folders = useFolders(apiBase)
-  const tags = useTags(apiBase)
+  const folders = useFolders(apiBase);
+  const tags = useTags(apiBase);
   /** Whether this deployment describes anything. Absent config draws no control
    * at all rather than one that answers `unsupported` when it is pressed. */
-  const describe = useDescribe(apiBase)
+  const describe = useDescribe(apiBase);
 
   /**
    * The bulk selection. `NOTHING` unless `bulk` is set, in which case the
    * checkbox layer writes to it — a captured *select all* included, which is
    * why this is a discriminated union rather than a `Set`.
    */
-  const [ticked, setTicked] = useState<Ticked>(NOTHING)
+  const [ticked, setTicked] = useState<Ticked>(NOTHING);
   /** Which bulk dialog is open, or null. One at a time by construction: the
    * state is a single value, not four booleans. */
-  const [job, setJob] = useState<AssetBulkAction | null>(null)
-  const [running, setRunning] = useState(false)
+  const [job, setJob] = useState<AssetBulkAction | null>(null);
+  const [running, setRunning] = useState(false);
   /**
    * What the delete confirmation's dry run found — `usedOnPublished`, or the
    * reason it could not be asked.
@@ -273,7 +273,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
   const [probe, setProbe] = useState<{ used: number | null; error: string | null }>({
     used: null,
     error: null,
-  })
+  });
 
   /**
    * The describe run, or null when its panel is closed.
@@ -287,18 +287,18 @@ export function AssetBrowser(props: AssetBrowserProps) {
    * because decision 10 put the cursor in the caller's hand: stopping is not
    * cancelling a job, it is declining to ask for the next batch.
    */
-  const [describeRun, setDescribeRun] = useState<DescribeRunState | null>(null)
+  const [describeRun, setDescribeRun] = useState<DescribeRunState | null>(null);
   /** Read between batches. A ref rather than state because the loop below reads
    * it after an `await` and would otherwise close over the value it started
    * with — the classic version of this bug is a *Stop* that does nothing. */
-  const stopping = useRef(false)
+  const stopping = useRef(false);
 
-  const rows = data.page.rows
-  const firstLoad = data.page.loading && rows.length === 0
-  const narrowed = isNarrowed(url)
+  const rows = data.page.rows;
+  const firstLoad = data.page.loading && rows.length === 0;
+  const narrowed = isNarrowed(url);
   const columns = compact
-    ? ASSET_COLUMNS.filter((column) => column.kind !== 'dimensions')
-    : ASSET_COLUMNS
+    ? ASSET_COLUMNS.filter((column) => column.kind !== "dimensions")
+    : ASSET_COLUMNS;
 
   /**
    * Which tile carries the tab stop. Roving tabindex, the same property `List.tsx`
@@ -308,7 +308,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
    *
    * The first tile when nothing is selected, so tabbing in always lands somewhere.
    */
-  const focusable = selected && rows.some((row) => row.id === selected) ? selected : rows[0]?.id
+  const focusable = selected && rows.some((row) => row.id === selected) ? selected : rows[0]?.id;
 
   /**
    * Arrow keys across the grid. The arithmetic is `gridStep` in the model — pure and
@@ -321,16 +321,16 @@ export function AssetBrowser(props: AssetBrowserProps) {
    * follows.
    */
   const onGridKey = (e: KeyboardEvent<HTMLDivElement>) => {
-    const box = grid.current
-    if (!box) return
-    const tiles = [...box.querySelectorAll<HTMLElement>('[data-tile]')]
-    const active = document.activeElement
-    const current = active instanceof HTMLElement ? tiles.indexOf(active) : -1
-    const next = gridStep(e.key, current, tiles.length, columnsOf(tiles))
-    if (next === null) return
-    e.preventDefault()
-    tiles[next]?.focus()
-  }
+    const box = grid.current;
+    if (!box) return;
+    const tiles = [...box.querySelectorAll<HTMLElement>("[data-tile]")];
+    const active = document.activeElement;
+    const current = active instanceof HTMLElement ? tiles.indexOf(active) : -1;
+    const next = gridStep(e.key, current, tiles.length, columnsOf(tiles));
+    if (next === null) return;
+    e.preventDefault();
+    tiles[next]?.focus();
+  };
 
   /**
    * A finished run: say what happened, drop the selection, and re-read.
@@ -345,61 +345,61 @@ export function AssetBrowser(props: AssetBrowserProps) {
     action: AssetBulkAction,
     outcome: { done: number; failed: BulkFailure[] } | { refused: BulkRefusal },
   ) => {
-    setJob(null)
-    if ('refused' in outcome) {
+    setJob(null);
+    if ("refused" in outcome) {
       // A door, not a wall: the refusal carries the *new* count, so the
       // selection is re-captured at it and pressing the same button again is
       // the whole recovery.
-      setTicked((prev) => (prev.all ? { ...prev, expected: outcome.refused.actual } : prev))
+      setTicked((prev) => (prev.all ? { ...prev, expected: outcome.refused.actual } : prev));
       onNotice?.(
         `The library changed while you were choosing: ${outcome.refused.actual} files match now, not ${outcome.refused.expected}. Check the number and try again.`,
-      )
-      return
+      );
+      return;
     }
-    setTicked(NOTHING)
-    data.reload()
+    setTicked(NOTHING);
+    data.reload();
     // The vocabulary's counts moved, and a tag can have been left carrying
     // nothing at all.
-    if (action === 'tag' || action === 'untag') tags.reload()
-    onNotice?.(runSummary(action, outcome.done, outcome.failed))
-  }
+    if (action === "tag" || action === "untag") tags.reload();
+    onNotice?.(runSummary(action, outcome.done, outcome.failed));
+  };
 
   const run = async (action: AssetBulkAction, extra: Record<string, unknown> = {}) => {
-    setRunning(true)
+    setRunning(true);
     try {
       finished(
         action,
         await runAssetJob(apiBase, action, { selection: selectionBody(ticked), ...extra }),
-      )
+      );
     } catch (e) {
-      setJob(null)
-      onNotice?.((e as Error).message)
+      setJob(null);
+      onNotice?.((e as Error).message);
     } finally {
-      setRunning(false)
+      setRunning(false);
     }
-  }
+  };
 
   /** Opens the delete confirmation and asks, in that order: the dialog paints
    * immediately and fills its warning in, rather than the button hanging for a
    * round trip with nothing on screen. */
   const askDelete = async () => {
-    setProbe({ used: null, error: null })
-    setJob('delete')
+    setProbe({ used: null, error: null });
+    setJob("delete");
     try {
-      const outcome = await runAssetJob(apiBase, 'delete', {
+      const outcome = await runAssetJob(apiBase, "delete", {
         selection: selectionBody(ticked),
         dryRun: true,
-      })
-      if ('refused' in outcome) {
+      });
+      if ("refused" in outcome) {
         setProbe({
           used: null,
           error: `${outcome.refused.actual} files match now, not ${outcome.refused.expected}. Close this and choose again.`,
-        })
-      } else setProbe({ used: outcome.usedOnPublished ?? 0, error: null })
+        });
+      } else setProbe({ used: outcome.usedOnPublished ?? 0, error: null });
     } catch (e) {
-      setProbe({ used: null, error: (e as Error).message })
+      setProbe({ used: null, error: (e as Error).message });
     }
-  }
+  };
 
   /**
    * The selection a describe run walks, built **once** and used by both the dry
@@ -412,12 +412,12 @@ export function AssetBrowser(props: AssetBrowserProps) {
    * over or the guard refuses every time. Everything else is `assets-model.ts`'s.
    */
   const describeSelection = async (backlogOnly: boolean): Promise<Record<string, unknown>> => {
-    if (!ticked.all || !backlogOnly) return selectionBody(ticked)
+    if (!ticked.all || !backlogOnly) return selectionBody(ticked);
     return backlogSelection(
       ticked,
       await countMatching(apiBase, { ...ticked.filter, undescribed: true }),
-    )
-  }
+    );
+  };
 
   /** Opens the panel and asks what the run would do — `dryRun`, which calls the
    * host's function zero times and answers the job's total. */
@@ -430,22 +430,22 @@ export function AssetBrowser(props: AssetBrowserProps) {
       running: false,
       progress: null,
       finished: false,
-    })
+    });
     try {
-      const selection = await describeSelection(backlogOnly)
-      const body = describeBody(ticked, { backlog: selection, dryRun: true })
-      const outcome = await postDescribe(apiBase, body)
+      const selection = await describeSelection(backlogOnly);
+      const body = describeBody(ticked, { backlog: selection, dryRun: true });
+      const outcome = await postDescribe(apiBase, body);
       setDescribeRun((prev) =>
         prev === null
           ? prev
-          : 'refused' in outcome
+          : "refused" in outcome
             ? { ...prev, error: refusedText(outcome.refused) }
             : { ...prev, body: selection, total: outcome.total },
-      )
+      );
     } catch (e) {
-      setDescribeRun((prev) => (prev === null ? prev : { ...prev, error: (e as Error).message }))
+      setDescribeRun((prev) => (prev === null ? prev : { ...prev, error: (e as Error).message }));
     }
-  }
+  };
 
   /**
    * The run itself: post, read the report, post again with its cursor.
@@ -455,43 +455,45 @@ export function AssetBrowser(props: AssetBrowserProps) {
    * a spin costs a model call per iteration rather than a D1 read.
    */
   const startDescribe = async () => {
-    const body = describeRun?.body
-    if (!body) return
-    stopping.current = false
+    const body = describeRun?.body;
+    if (!body) return;
+    stopping.current = false;
     setDescribeRun((prev) =>
       prev === null ? prev : { ...prev, running: true, progress: emptyRun() },
-    )
+    );
 
-    let continueFrom: string | null = null
-    const totals = emptyRun()
+    let continueFrom: string | null = null;
+    const totals = emptyRun();
     try {
       for (;;) {
         const outcome = await postDescribe(
           apiBase,
           describeBody(ticked, { backlog: body, continueFrom }),
-        )
-        if ('refused' in outcome) {
+        );
+        if ("refused" in outcome) {
           setDescribeRun((prev) =>
             prev === null ? prev : { ...prev, error: refusedText(outcome.refused) },
-          )
-          break
+          );
+          break;
         }
-        totals.seen = outcome.seen
-        totals.done += outcome.done
-        totals.skipped += outcome.skipped
-        totals.tagsIgnored += outcome.tagsIgnored
-        totals.failed = [...totals.failed, ...outcome.failed]
-        setDescribeRun((prev) => (prev === null ? prev : { ...prev, progress: { ...totals } }))
-        if (outcome.continueFrom === null || outcome.continueFrom === continueFrom) break
-        continueFrom = outcome.continueFrom
+        totals.seen = outcome.seen;
+        totals.done += outcome.done;
+        totals.skipped += outcome.skipped;
+        totals.tagsIgnored += outcome.tagsIgnored;
+        totals.failed = [...totals.failed, ...outcome.failed];
+        setDescribeRun((prev) => (prev === null ? prev : { ...prev, progress: { ...totals } }));
+        if (outcome.continueFrom === null || outcome.continueFrom === continueFrom) break;
+        continueFrom = outcome.continueFrom;
         // Between batches, never mid-batch: the ten calls already in flight are
         // paid for either way, and abandoning their answers would waste them.
-        if (stopping.current) break
+        if (stopping.current) break;
       }
     } catch (e) {
-      setDescribeRun((prev) => (prev === null ? prev : { ...prev, error: (e as Error).message }))
+      setDescribeRun((prev) => (prev === null ? prev : { ...prev, error: (e as Error).message }));
     } finally {
-      setDescribeRun((prev) => (prev === null ? prev : { ...prev, running: false, finished: true }))
+      setDescribeRun((prev) =>
+        prev === null ? prev : { ...prev, running: false, finished: true },
+      );
       // Only when a batch actually ran. A refusal on the first call — the count
       // guard, before a single model call — is reported in the panel, and a
       // toast reading "Described 0 files" beside it would be the same event told
@@ -499,18 +501,18 @@ export function AssetBrowser(props: AssetBrowserProps) {
       if (totals.seen > 0) {
         // The rows carry machine text now, and the vocabulary's counts moved
         // with whatever the model chose from it.
-        data.reload()
-        tags.reload()
-        onNotice?.(describeRunSummary(totals))
+        data.reload();
+        tags.reload();
+        onNotice?.(describeRunSummary(totals));
       }
     }
-  }
+  };
 
-  const count = tickCount(ticked)
-  const allShown = rows.length > 0 && rows.every((row) => isTicked(ticked, row.id))
-  const tick = (id: string) => setTicked((prev) => toggleTick(prev, id))
+  const count = tickCount(ticked);
+  const allShown = rows.length > 0 && rows.every((row) => isTicked(ticked, row.id));
+  const tick = (id: string) => setTicked((prev) => toggleTick(prev, id));
 
-  const report = uploadSummary(upload.entries)
+  const report = uploadSummary(upload.entries);
 
   /**
    * *Upload*, or nothing at all without `ASSETS`.
@@ -530,7 +532,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
     >
       Upload
     </Button>
-  ) : null
+  ) : null;
 
   return (
     <div className={css.browser}>
@@ -550,10 +552,10 @@ export function AssetBrowser(props: AssetBrowserProps) {
           className={css.srOnly}
           aria-label="Upload files"
           onChange={(e) => {
-            upload.add(e.target.files)
+            upload.add(e.target.files);
             // Cleared so choosing the same file twice in a row is two uploads rather
             // than one and then silence.
-            e.target.value = ''
+            e.target.value = "";
           }}
         />
       ) : null}
@@ -595,15 +597,15 @@ export function AssetBrowser(props: AssetBrowserProps) {
         */}
             <fieldset className={css.toggle}>
               <legend className={css.srOnly}>View</legend>
-              {(['grid', 'table'] as AssetView[]).map((mode) => (
+              {(["grid", "table"] as AssetView[]).map((mode) => (
                 <button
                   key={mode}
                   type="button"
-                  className={`${css.segment} ${url.view === mode ? css.segmentOn : ''}`}
+                  className={`${css.segment} ${url.view === mode ? css.segmentOn : ""}`}
                   aria-pressed={url.view === mode}
                   onClick={() => onUrl(withView(url, mode))}
                 >
-                  {mode === 'grid' ? 'Grid' : 'Table'}
+                  {mode === "grid" ? "Grid" : "Table"}
                 </button>
               ))}
             </fieldset>
@@ -615,7 +617,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
                   <button
                     key={kind.value}
                     type="button"
-                    className={`${css.chip} ${url.kind === kind.value ? css.chipOn : ''}`}
+                    className={`${css.chip} ${url.kind === kind.value ? css.chipOn : ""}`}
                     aria-pressed={url.kind === kind.value}
                     onClick={() => onUrl(withFilter(url, { kind: kind.value }))}
                   >
@@ -651,7 +653,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
                 <legend className={css.srOnly}>Filter by description</legend>
                 <button
                   type="button"
-                  className={`${css.chip} ${url.undescribed ? css.chipOn : ''}`}
+                  className={`${css.chip} ${url.undescribed ? css.chipOn : ""}`}
                   aria-pressed={url.undescribed}
                   onClick={() => onUrl(withFilter(url, { undescribed: !url.undescribed }))}
                 >
@@ -659,7 +661,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
                 </button>
                 <button
                   type="button"
-                  className={`${css.chip} ${url.failed ? css.chipOn : ''}`}
+                  className={`${css.chip} ${url.failed ? css.chipOn : ""}`}
                   aria-pressed={url.failed}
                   onClick={() => onUrl(withFilter(url, { failed: !url.failed }))}
                 >
@@ -673,7 +675,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
           facts — which column and which direction — and offering both at once is how
           two controls over one piece of state start disagreeing about it.
         */}
-            {url.view === 'grid' ? (
+            {url.view === "grid" ? (
               <fieldset className={css.sortGroup}>
                 <legend className={css.srOnly}>Sort</legend>
                 <label className={css.sortLabel}>
@@ -696,13 +698,13 @@ export function AssetBrowser(props: AssetBrowserProps) {
                   // Names the state and the effect together, because a bare ↑ is the
                   // unlabelled glyph `docs/ui-review.md` found twice in the old top bar.
                   aria-label={
-                    dirOf(url) === 'asc'
-                      ? 'Ascending. Reverse to descending'
-                      : 'Descending. Reverse to ascending'
+                    dirOf(url) === "asc"
+                      ? "Ascending. Reverse to descending"
+                      : "Descending. Reverse to ascending"
                   }
                   onClick={() => onUrl(withSort(url, url.sort))}
                 >
-                  <span aria-hidden="true">{dirOf(url) === 'asc' ? '↑' : '↓'}</span>
+                  <span aria-hidden="true">{dirOf(url) === "asc" ? "↑" : "↓"}</span>
                 </button>
               </fieldset>
             ) : null}
@@ -724,7 +726,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
                 disabled={rows.length === 0}
                 onClick={() => setTicked((prev) => tickAllShown(prev, rows))}
               >
-                {allShown ? 'Deselect all shown' : 'Select all shown'}
+                {allShown ? "Deselect all shown" : "Select all shown"}
               </button>
               {/*
                 Select-all-matching, offered only when the list has been asked
@@ -746,7 +748,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
                     })
                   }
                 >
-                  {`Select all ${data.page.total.toLocaleString('en-US')} matching`}
+                  {`Select all ${data.page.total.toLocaleString("en-US")} matching`}
                 </button>
               ) : null}
               {/* Announced: the count changes without the focus moving, so a
@@ -758,24 +760,24 @@ export function AssetBrowser(props: AssetBrowserProps) {
                 <Button
                   size="sm"
                   disabled={count === 0 || running}
-                  reason={running ? 'Working…' : 'Select some files first'}
-                  onClick={() => setJob('tag')}
+                  reason={running ? "Working…" : "Select some files first"}
+                  onClick={() => setJob("tag")}
                 >
                   Tag
                 </Button>
                 <Button
                   size="sm"
                   disabled={count === 0 || running}
-                  reason={running ? 'Working…' : 'Select some files first'}
-                  onClick={() => setJob('untag')}
+                  reason={running ? "Working…" : "Select some files first"}
+                  onClick={() => setJob("untag")}
                 >
                   Untag
                 </Button>
                 <Button
                   size="sm"
                   disabled={count === 0 || running}
-                  reason={running ? 'Working…' : 'Select some files first'}
-                  onClick={() => setJob('move')}
+                  reason={running ? "Working…" : "Select some files first"}
+                  onClick={() => setJob("move")}
                 >
                   Move
                 </Button>
@@ -798,7 +800,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
                   <Button
                     size="sm"
                     disabled={count === 0 || running}
-                    reason={running ? 'Working…' : 'Select some files first'}
+                    reason={running ? "Working…" : "Select some files first"}
                     onClick={() => void previewDescribe(false)}
                   >
                     Describe
@@ -808,7 +810,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
                   size="sm"
                   variant="danger"
                   disabled={count === 0 || running}
-                  reason={running ? 'Working…' : 'Select some files first'}
+                  reason={running ? "Working…" : "Select some files first"}
                   onClick={() => void askDelete()}
                 >
                   Delete
@@ -846,11 +848,11 @@ export function AssetBrowser(props: AssetBrowserProps) {
                   <li key={entry.id} className={css.uploadRow} data-status={entry.status}>
                     <span className={css.uploadName}>{entry.filename}</span>
                     <span className={css.uploadState}>
-                      {entry.status === 'uploading'
-                        ? 'Uploading…'
-                        : entry.status === 'done'
-                          ? 'Uploaded'
-                          : (entry.error ?? 'Failed')}
+                      {entry.status === "uploading"
+                        ? "Uploading…"
+                        : entry.status === "done"
+                          ? "Uploaded"
+                          : (entry.error ?? "Failed")}
                     </span>
                   </li>
                 ))}
@@ -875,19 +877,19 @@ export function AssetBrowser(props: AssetBrowserProps) {
                 // the tiles will — including the picker's narrower columns, which a
                 // `.skeletonGrid` of its own had quietly stopped matching.
                 className={
-                  url.view === 'grid'
-                    ? `${css.grid} ${compact ? css.gridCompact : ''}`
+                  url.view === "grid"
+                    ? `${css.grid} ${compact ? css.gridCompact : ""}`
                     : css.skeletonRows
                 }
                 aria-hidden="true"
               >
-                {SKELETONS.slice(0, url.view === 'grid' ? 24 : 8).map((key) =>
+                {SKELETONS.slice(0, url.view === "grid" ? 24 : 8).map((key) =>
                   // `data-fit` on each: the first page's size is decided from what is
                   // on screen, and this is what is on screen. Which is also why the
                   // grid's skeleton is assembled from `.tile`'s own parts rather than
                   // from one box approximating them — a skeleton that is not the
                   // shape of a tile makes a page that is not the shape of the screen.
-                  url.view === 'grid' ? (
+                  url.view === "grid" ? (
                     <div className={css.tile} data-fit="" key={key}>
                       <div className={css.tileFrame} />
                       <div className={`${css.tileName} ${css.skeletonText}`} />
@@ -906,10 +908,10 @@ export function AssetBrowser(props: AssetBrowserProps) {
               >
                 {uploadButton}
               </Empty>
-            ) : url.view === 'grid' ? (
+            ) : url.view === "grid" ? (
               <div
                 ref={grid}
-                className={`${css.grid} ${compact ? css.gridCompact : ''}`}
+                className={`${css.grid} ${compact ? css.gridCompact : ""}`}
                 role="listbox"
                 aria-label={label}
                 onKeyDown={onGridKey}
@@ -962,8 +964,8 @@ export function AssetBrowser(props: AssetBrowserProps) {
                 currentKey={selected ?? null}
                 sort={{ key: sortColumnKey(url), dir: dirOf(url) }}
                 onSort={(key) => {
-                  const sort = ASSET_COLUMNS.find((column) => column.key === key)?.sort
-                  if (sort) onUrl(withSort(url, sort))
+                  const sort = ASSET_COLUMNS.find((column) => column.key === key)?.sort;
+                  if (sort) onUrl(withSort(url, sort));
                 }}
                 onOpen={(row) => props.onSelect(row.id)}
               />
@@ -979,7 +981,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
             <span className={css.count}>
               {data.page.total === undefined
                 ? `${rows.length} shown`
-                : `${rows.length} of ${data.page.total} ${data.page.total === 1 ? 'file' : 'files'}`}
+                : `${rows.length} of ${data.page.total} ${data.page.total === 1 ? "file" : "files"}`}
             </span>
             <span className={css.pager}>
               <Button
@@ -1009,7 +1011,7 @@ export function AssetBrowser(props: AssetBrowserProps) {
         from inside `AssetPicker.tsx`'s own would mount a second `useFocusTrap`
         and take every Tab press away from itself.
       */}
-      {job === 'tag' || job === 'untag' ? (
+      {job === "tag" || job === "untag" ? (
         <BulkTagDialog
           action={job}
           count={count}
@@ -1018,22 +1020,22 @@ export function AssetBrowser(props: AssetBrowserProps) {
           onClose={() => setJob(null)}
           onRun={(tagIds) => void run(job, { tagIds })}
         />
-      ) : job === 'move' ? (
+      ) : job === "move" ? (
         <BulkMoveDialog
           count={count}
           folders={folders.folders}
           busy={running}
           onClose={() => setJob(null)}
-          onRun={(folderId) => void run('move', { folderId })}
+          onRun={(folderId) => void run("move", { folderId })}
         />
-      ) : job === 'delete' ? (
+      ) : job === "delete" ? (
         <BulkDeleteDialog
           count={count}
           used={probe.used}
           error={probe.error}
           busy={running}
           onClose={() => setJob(null)}
-          onRun={() => void run('delete')}
+          onRun={() => void run("delete")}
         />
       ) : null}
 
@@ -1046,20 +1048,20 @@ export function AssetBrowser(props: AssetBrowserProps) {
           {...(ticked.all ? { onBacklogOnly: (only: boolean) => void previewDescribe(only) } : {})}
           onRun={() => void startDescribe()}
           onStop={() => {
-            stopping.current = true
+            stopping.current = true;
           }}
           onClose={() => {
-            stopping.current = true
-            setDescribeRun(null)
+            stopping.current = true;
+            setDescribeRun(null);
             // A finished run leaves the selection where a bulk write does not:
             // the files are still there, still selected, and running again over
             // the ones that failed is a reasonable next gesture.
-            if (describeRun.finished) setTicked(NOTHING)
+            if (describeRun.finished) setTicked(NOTHING);
           }}
         />
       )}
     </div>
-  )
+  );
 }
 
 /* --------------------------------------------------------------- selection --- */
@@ -1072,20 +1074,20 @@ export function AssetBrowser(props: AssetBrowserProps) {
  * over a grid with nothing ticked reads as broken software.
  */
 function summarise(ticked: Ticked, rows: readonly AssetRow[]): string {
-  const count = tickCount(ticked)
-  if (count === 0) return 'Nothing selected'
-  const shown = rows.filter((row) => isTicked(ticked, row.id)).length
-  const hidden = Math.max(count - shown, 0)
-  const split = hidden === 0 ? '' : shown === 0 ? ', none shown here' : ` · ${shown} shown here`
-  const files = `${count.toLocaleString('en-US')} ${count === 1 ? 'file' : 'files'}`
-  if (!ticked.all) return `${files} selected${split}`
-  const off = ticked.exclude.size === 0 ? '' : `, except the ${ticked.exclude.size} you ticked off`
-  return `All ${ticked.expected.toLocaleString('en-US')} matching${off}${split}`
+  const count = tickCount(ticked);
+  if (count === 0) return "Nothing selected";
+  const shown = rows.filter((row) => isTicked(ticked, row.id)).length;
+  const hidden = Math.max(count - shown, 0);
+  const split = hidden === 0 ? "" : shown === 0 ? ", none shown here" : ` · ${shown} shown here`;
+  const files = `${count.toLocaleString("en-US")} ${count === 1 ? "file" : "files"}`;
+  if (!ticked.all) return `${files} selected${split}`;
+  const off = ticked.exclude.size === 0 ? "" : `, except the ${ticked.exclude.size} you ticked off`;
+  return `All ${ticked.expected.toLocaleString("en-US")} matching${off}${split}`;
 }
 
 /** What a bulk answer looks like on the wire: the report, plus the delete's one
  * extra field (decision 15). */
-type AssetBulkAnswer = BulkReport<AssetBulkAction> & { usedOnPublished?: number }
+type AssetBulkAnswer = BulkReport<AssetBulkAction> & { usedOnPublished?: number };
 
 /**
  * A whole bulk job: post, read the report, post again with its cursor.
@@ -1103,50 +1105,50 @@ async function runAssetJob(
 ): Promise<
   { done: number; failed: BulkFailure[]; usedOnPublished?: number } | { refused: BulkRefusal }
 > {
-  let continueFrom: string | null = null
-  let done = 0
-  let usedOnPublished: number | undefined
-  const failed: BulkFailure[] = []
+  let continueFrom: string | null = null;
+  let done = 0;
+  let usedOnPublished: number | undefined;
+  const failed: BulkFailure[] = [];
   for (;;) {
     const res = await fetch(`${apiBase}/assets/bulk/${action}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...body, ...(continueFrom === null ? {} : { continueFrom }) }),
-    })
+    });
     // The guard runs once, at the start of a job, so a refusal can only arrive
     // on the first call — and it arrives before anything is written.
-    if (res.status === 409) return { refused: (await res.json()) as BulkRefusal }
-    if (!res.ok) throw new Error(await messageOf(res))
-    const report = (await res.json()) as AssetBulkAnswer
-    done += report.done
-    failed.push(...report.failed)
-    if (usedOnPublished === undefined) usedOnPublished = report.usedOnPublished
+    if (res.status === 409) return { refused: (await res.json()) as BulkRefusal };
+    if (!res.ok) throw new Error(await messageOf(res));
+    const report = (await res.json()) as AssetBulkAnswer;
+    done += report.done;
+    failed.push(...report.failed);
+    if (usedOnPublished === undefined) usedOnPublished = report.usedOnPublished;
     if (report.continueFrom === null || report.continueFrom === continueFrom) {
-      return { done, failed, ...(usedOnPublished === undefined ? {} : { usedOnPublished }) }
+      return { done, failed, ...(usedOnPublished === undefined ? {} : { usedOnPublished }) };
     }
-    continueFrom = report.continueFrom
+    continueFrom = report.continueFrom;
   }
 }
 
 const PAST_TENSE: Record<AssetBulkAction, string> = {
-  tag: 'Tagged',
-  untag: 'Untagged',
-  move: 'Filed',
-  delete: 'Deleted',
-}
+  tag: "Tagged",
+  untag: "Untagged",
+  move: "Filed",
+  delete: "Deleted",
+};
 
 /** One sentence for a finished run. **Never atomic and never implied to be**:
  * each file is its own write, so the successes are counted and the failures are
  * named. */
 function runSummary(action: AssetBulkAction, done: number, failed: readonly BulkFailure[]): string {
-  const files = `${done.toLocaleString('en-US')} ${done === 1 ? 'file' : 'files'}`
-  if (failed.length === 0) return `${PAST_TENSE[action]} ${files}`
+  const files = `${done.toLocaleString("en-US")} ${done === 1 ? "file" : "files"}`;
+  if (failed.length === 0) return `${PAST_TENSE[action]} ${files}`;
   const named = failed
     .slice(0, 2)
     .map((one) => one.title || one.id)
-    .join(', ')
-  const rest = failed.length > 2 ? ` and ${failed.length - 2} more` : ''
-  return `${PAST_TENSE[action]} ${files}. Could not: ${named}${rest}`
+    .join(", ");
+  const rest = failed.length > 2 ? ` and ${failed.length - 2} more` : "";
+  return `${PAST_TENSE[action]} ${files}. Could not: ${named}${rest}`;
 }
 
 /* ---------------------------------------------------------------- describe --- */
@@ -1160,29 +1162,29 @@ function runSummary(action: AssetBulkAction, done: number, failed: readonly Bulk
 interface DescribeRunState {
   /** Narrowed to files that have never been described. Offered for a captured
    * *select all* only; a ticked list of ids has nothing to narrow. */
-  backlogOnly: boolean
+  backlogOnly: boolean;
   /** The **selection** the dry run was previewed over, reused verbatim by the
    * real run — so the number somebody read and the set that is walked cannot be
    * two different things. `describeBody` wraps it for the wire; keeping the
    * selection rather than the whole body is what lets the run add its cursor
    * without reaching inside a nested object. Null while the preview is in flight. */
-  body: Record<string, unknown> | null
+  body: Record<string, unknown> | null;
   /** The job's ceiling, as the dry run reported it. */
-  total: number | null
-  error: string | null
-  running: boolean
+  total: number | null;
+  error: string | null;
+  running: boolean;
   /** Cumulative across the batches so far, or null before the first lands. */
-  progress: DescribeTotals | null
+  progress: DescribeTotals | null;
   /** Whether the loop has ended — by finishing, by stopping, or by failing. */
-  finished: boolean
+  finished: boolean;
 }
 
 interface DescribeTotals {
-  seen: number
-  done: number
-  skipped: number
-  tagsIgnored: number
-  failed: BulkFailure[]
+  seen: number;
+  done: number;
+  skipped: number;
+  tagsIgnored: number;
+  failed: BulkFailure[];
 }
 
 /** A fresh zero, as a factory rather than a shared constant: `failed` is an
@@ -1194,26 +1196,26 @@ const emptyRun = (): DescribeTotals => ({
   skipped: 0,
   tagsIgnored: 0,
   failed: [],
-})
+});
 
 /** What a describe batch answers: `BulkReport` plus the two numbers only this
  * run has (`server/describe.ts`'s `DescribeRunReport`). */
-type DescribeAnswer = BulkReport<'describe'> & { skipped: number; tagsIgnored: number }
+type DescribeAnswer = BulkReport<"describe"> & { skipped: number; tagsIgnored: number };
 
 async function postDescribe(
   apiBase: string,
   body: Record<string, unknown>,
 ): Promise<DescribeAnswer | { refused: BulkRefusal }> {
   const res = await fetch(`${apiBase}/assets/describe`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    method: "POST",
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
-  })
+  });
   // The guard runs once at the start of a job, so a refusal can only arrive on
   // the first call — and it arrives before a single model call is made.
-  if (res.status === 409) return { refused: (await res.json()) as BulkRefusal }
-  if (!res.ok) throw new Error(await messageOf(res))
-  return (await res.json()) as DescribeAnswer
+  if (res.status === 409) return { refused: (await res.json()) as BulkRefusal };
+  if (!res.ok) throw new Error(await messageOf(res));
+  return (await res.json()) as DescribeAnswer;
 }
 
 /**
@@ -1227,48 +1229,48 @@ async function postDescribe(
  * the run will walk.
  */
 async function countMatching(apiBase: string, filter: AssetFilter): Promise<number> {
-  const params = new URLSearchParams({ limit: '1', count: '1' })
-  if (filter.q) params.set('q', filter.q)
-  if (filter.kind) params.set('kind', filter.kind)
-  if (filter.folder) params.set('folder', filter.folder)
-  if (filter.unfiled) params.set('unfiled', '1')
+  const params = new URLSearchParams({ limit: "1", count: "1" });
+  if (filter.q) params.set("q", filter.q);
+  if (filter.kind) params.set("kind", filter.kind);
+  if (filter.folder) params.set("folder", filter.folder);
+  if (filter.unfiled) params.set("unfiled", "1");
   // Repeated, not comma-joined: `c.req.queries('tags')` is what the route
   // parses, exactly as `assetsParams` does it.
-  for (const slug of filter.tags ?? []) params.append('tags', slug)
-  if (filter.untagged) params.set('untagged', '1')
-  if (filter.undescribed) params.set('undescribed', '1')
-  if (filter.failed) params.set('failed', '1')
-  const res = await fetch(`${apiBase}/assets?${params.toString()}`)
-  if (!res.ok) throw new Error(await messageOf(res))
-  const page = (await res.json()) as { total?: number }
-  return page.total ?? 0
+  for (const slug of filter.tags ?? []) params.append("tags", slug);
+  if (filter.untagged) params.set("untagged", "1");
+  if (filter.undescribed) params.set("undescribed", "1");
+  if (filter.failed) params.set("failed", "1");
+  const res = await fetch(`${apiBase}/assets?${params.toString()}`);
+  if (!res.ok) throw new Error(await messageOf(res));
+  const page = (await res.json()) as { total?: number };
+  return page.total ?? 0;
 }
 
 function refusedText(refusal: BulkRefusal): string {
-  return `${refusal.actual.toLocaleString('en-US')} files match now, not ${refusal.expected.toLocaleString('en-US')}. Close this and choose again.`
+  return `${refusal.actual.toLocaleString("en-US")} files match now, not ${refusal.expected.toLocaleString("en-US")}. Close this and choose again.`;
 }
 
 /** One sentence for a finished run — the successes counted, the failures named,
  * and the drops reported rather than swallowed, so a prompt that keeps proposing
  * a tag nobody created is visible. */
 function describeRunSummary(totals: DescribeTotals): string {
-  const files = `${totals.done.toLocaleString('en-US')} ${totals.done === 1 ? 'file' : 'files'}`
-  const parts = [`Described ${files}`]
-  if (totals.skipped > 0) parts.push(`${totals.skipped} skipped as not images`)
+  const files = `${totals.done.toLocaleString("en-US")} ${totals.done === 1 ? "file" : "files"}`;
+  const parts = [`Described ${files}`];
+  if (totals.skipped > 0) parts.push(`${totals.skipped} skipped as not images`);
   if (totals.tagsIgnored > 0) {
     parts.push(
-      `${totals.tagsIgnored} suggested ${totals.tagsIgnored === 1 ? 'tag' : 'tags'} ignored`,
-    )
+      `${totals.tagsIgnored} suggested ${totals.tagsIgnored === 1 ? "tag" : "tags"} ignored`,
+    );
   }
   if (totals.failed.length > 0) {
     const named = totals.failed
       .slice(0, 2)
       .map((one) => one.title || one.id)
-      .join(', ')
-    const rest = totals.failed.length > 2 ? ` and ${totals.failed.length - 2} more` : ''
-    parts.push(`could not: ${named}${rest}`)
+      .join(", ");
+    const rest = totals.failed.length > 2 ? ` and ${totals.failed.length - 2} more` : "";
+    parts.push(`could not: ${named}${rest}`);
   }
-  return `${parts.join('. ')}.`
+  return `${parts.join(". ")}.`;
 }
 
 /**
@@ -1295,20 +1297,20 @@ function DescribeRunDialog({
   onStop,
   onClose,
 }: {
-  state: DescribeRunState
-  count: number
+  state: DescribeRunState;
+  count: number;
   /** Whether the Images binding is bound. It changes what a run *costs*, not
    * what it does, which is why it is said once here rather than as a warning. */
-  images: boolean
-  onUpload: boolean
+  images: boolean;
+  onUpload: boolean;
   /** Absent for a ticked list of ids: there is no backlog to narrow to. */
-  onBacklogOnly?: (only: boolean) => void
-  onRun: () => void
-  onStop: () => void
-  onClose: () => void
+  onBacklogOnly?: (only: boolean) => void;
+  onRun: () => void;
+  onStop: () => void;
+  onClose: () => void;
 }) {
-  const { total, progress, running, finished, error } = state
-  const files = `${count.toLocaleString('en-US')} ${count === 1 ? 'file' : 'files'}`
+  const { total, progress, running, finished, error } = state;
+  const files = `${count.toLocaleString("en-US")} ${count === 1 ? "file" : "files"}`;
 
   return (
     <Dialog
@@ -1317,7 +1319,7 @@ function DescribeRunDialog({
       onClose={onClose}
       actions={
         <>
-          <Button onClick={onClose}>{finished ? 'Close' : 'Cancel'}</Button>
+          <Button onClick={onClose}>{finished ? "Close" : "Cancel"}</Button>
           {running ? (
             <Button variant="primary" onClick={onStop}>
               Stop
@@ -1326,10 +1328,10 @@ function DescribeRunDialog({
             <Button
               variant="primary"
               disabled={total === null || finished || error !== null}
-              reason={error ?? (finished ? 'This run has finished' : 'Working out how many…')}
+              reason={error ?? (finished ? "This run has finished" : "Working out how many…")}
               onClick={onRun}
             >
-              {total === null ? 'Describe' : `Describe ${total.toLocaleString('en-US')}`}
+              {total === null ? "Describe" : `Describe ${total.toLocaleString("en-US")}`}
             </Button>
           )}
         </>
@@ -1355,9 +1357,9 @@ function DescribeRunDialog({
         ) : (
           <p className={css.note}>
             {total === 0
-              ? 'Nothing to do: no file in this selection needs describing.'
-              : `${total.toLocaleString('en-US')} ${total === 1 ? 'file' : 'files'} will be sent, one model call each. Files that are not images are skipped and cost nothing.`}
-            {onUpload ? ' New uploads are described on their own as they arrive.' : ''}
+              ? "Nothing to do: no file in this selection needs describing."
+              : `${total.toLocaleString("en-US")} ${total === 1 ? "file" : "files"} will be sent, one model call each. Files that are not images are skipped and cost nothing.`}
+            {onUpload ? " New uploads are described on their own as they arrive." : ""}
           </p>
         )
       ) : (
@@ -1366,8 +1368,8 @@ function DescribeRunDialog({
               reader user is otherwise never told the run is progressing. */}
           <p className={css.note} role="status">
             {running
-              ? `Working… ${progress.seen.toLocaleString('en-US')} of ${(total ?? progress.seen).toLocaleString('en-US')}`
-              : `Finished ${progress.seen.toLocaleString('en-US')} of ${(total ?? progress.seen).toLocaleString('en-US')}`}
+              ? `Working… ${progress.seen.toLocaleString("en-US")} of ${(total ?? progress.seen).toLocaleString("en-US")}`
+              : `Finished ${progress.seen.toLocaleString("en-US")} of ${(total ?? progress.seen).toLocaleString("en-US")}`}
           </p>
           <dl className={css.runStats}>
             <RunStat label="Described" value={progress.done} />
@@ -1403,16 +1405,16 @@ function DescribeRunDialog({
         </p>
       ) : null}
     </Dialog>
-  )
+  );
 }
 
 function RunStat({ label, value }: { label: string; value: number }) {
   return (
     <>
       <dt className={css.runStatLabel}>{label}</dt>
-      <dd className={css.runStatValue}>{value.toLocaleString('en-US')}</dd>
+      <dd className={css.runStatValue}>{value.toLocaleString("en-US")}</dd>
     </>
-  )
+  );
 }
 
 /* ----------------------------------------------------------------- sidebar --- */
@@ -1445,29 +1447,29 @@ function Sidebar({
 }: {
   /** Held by `AssetBrowser` and passed down, so the sidebar, the bulk *Tag*
    * dialog and the bulk *Move* dialog read one fetch rather than three. */
-  folders: FoldersData
-  tags: TagsData
-  url: AssetsUrl
-  onUrl: (next: AssetsUrl) => void
+  folders: FoldersData;
+  tags: TagsData;
+  url: AssetsUrl;
+  onUrl: (next: AssetsUrl) => void;
   /** Whether this mount is already inside a `Dialog` — the picker's, at `wide`.
    * Suppresses every affordance that opens a second one: creating a folder,
    * editing a folder, and managing the tag vocabulary. See `NewFolderDialog`'s
    * own header for why a `Dialog` cannot be opened from on top of one. */
-  compact: boolean | undefined
+  compact: boolean | undefined;
   /** Whether this person may write to the library — `ASSETS`. Suppresses the same
    * three affordances `compact` does, for a different reason: `compact` is "a
    * second `Dialog` cannot open from inside the picker's", this is "a viewer's
    * folder rename can never succeed". See `AssetBrowser`'s own prop. */
-  mayWrite: boolean
-  onNotice?: (message: string) => void
+  mayWrite: boolean;
+  onNotice?: (message: string) => void;
 }) {
-  const [creating, setCreating] = useState(false)
+  const [creating, setCreating] = useState(false);
   /** The folder being edited, or null. One at a time, and the same single-value
    * rule the bulk dialogs follow rather than a boolean per dialog. */
-  const [editing, setEditing] = useState<AssetFolder | null>(null)
-  const [managingTags, setManagingTags] = useState(false)
+  const [editing, setEditing] = useState<AssetFolder | null>(null);
+  const [managingTags, setManagingTags] = useState(false);
 
-  const atRoot = url.folder === undefined && !url.unfiled
+  const atRoot = url.folder === undefined && !url.unfiled;
 
   return (
     <div className={css.sidebar}>
@@ -1477,7 +1479,7 @@ function Sidebar({
           <legend className={css.srOnly}>Filter by folder</legend>
           <button
             type="button"
-            className={`${css.folderRow} ${atRoot ? css.folderRowOn : ''}`}
+            className={`${css.folderRow} ${atRoot ? css.folderRowOn : ""}`}
             aria-pressed={atRoot}
             onClick={() => onUrl(withFilter(url, { folder: undefined, unfiled: false }))}
           >
@@ -1496,7 +1498,7 @@ function Sidebar({
             <div key={folder.id} className={css.folderRowWrap}>
               <button
                 type="button"
-                className={`${css.folderRow} ${url.folder === folder.path ? css.folderRowOn : ''}`}
+                className={`${css.folderRow} ${url.folder === folder.path ? css.folderRowOn : ""}`}
                 style={{ paddingLeft: `calc(var(--space-2) + ${folderDepth(folder) * 14}px)` }}
                 aria-pressed={url.folder === folder.path}
                 onClick={() => onUrl(withFilter(url, { folder: folder.path }))}
@@ -1519,7 +1521,7 @@ function Sidebar({
           ))}
           <button
             type="button"
-            className={`${css.folderRow} ${url.unfiled ? css.folderRowOn : ''}`}
+            className={`${css.folderRow} ${url.unfiled ? css.folderRowOn : ""}`}
             aria-pressed={url.unfiled}
             onClick={() => onUrl(withFilter(url, { unfiled: true }))}
           >
@@ -1542,7 +1544,7 @@ function Sidebar({
             <legend className={css.srOnly}>Filter by tag</legend>
             <button
               type="button"
-              className={`${css.chip} ${url.untagged ? css.chipOn : ''}`}
+              className={`${css.chip} ${url.untagged ? css.chipOn : ""}`}
               aria-pressed={url.untagged}
               onClick={() => onUrl(withFilter(url, { untagged: !url.untagged }))}
             >
@@ -1552,7 +1554,7 @@ function Sidebar({
               <button
                 key={tag.id}
                 type="button"
-                className={`${css.chip} ${url.tags.includes(tag.slug) ? css.chipOn : ''}`}
+                className={`${css.chip} ${url.tags.includes(tag.slug) ? css.chipOn : ""}`}
                 aria-pressed={url.tags.includes(tag.slug)}
                 onClick={() =>
                   onUrl(withFilter(url, { tags: toggleTagFilter(url.tags, tag.slug) }))
@@ -1584,9 +1586,9 @@ function Sidebar({
           folders={folders.folders}
           onClose={() => setCreating(false)}
           onCreate={async (input) => {
-            const folder = await folders.create(input)
-            setCreating(false)
-            onUrl(withFilter(url, { folder: folder.path }))
+            const folder = await folders.create(input);
+            setCreating(false);
+            onUrl(withFilter(url, { folder: folder.path }));
           }}
         />
       ) : editing ? (
@@ -1595,19 +1597,19 @@ function Sidebar({
           folders={folders.folders}
           onClose={() => setEditing(null)}
           onSave={async (patch) => {
-            const folder = await folders.update(editing.id, patch)
-            setEditing(null)
+            const folder = await folders.update(editing.id, patch);
+            setEditing(null);
             // The path moved, so a filter pointing at the old one now matches
             // nothing. Following it is what makes a rename feel like a rename
             // rather than like the folder disappearing.
-            if (url.folder !== undefined) onUrl(withFilter(url, { folder: folder.path }))
-            onNotice?.(`Renamed to ${folder.name}`)
+            if (url.folder !== undefined) onUrl(withFilter(url, { folder: folder.path }));
+            onNotice?.(`Renamed to ${folder.name}`);
           }}
           onDelete={async () => {
-            const report = await folders.remove(editing.id)
-            setEditing(null)
-            if (url.folder !== undefined) onUrl(withFilter(url, { folder: undefined }))
-            onNotice?.(deletedFolderSummary(editing.name, report))
+            const report = await folders.remove(editing.id);
+            setEditing(null);
+            if (url.folder !== undefined) onUrl(withFilter(url, { folder: undefined }));
+            onNotice?.(deletedFolderSummary(editing.name, report));
           }}
         />
       ) : managingTags ? (
@@ -1615,24 +1617,24 @@ function Sidebar({
           tags={tags.tags}
           onClose={() => setManagingTags(false)}
           onRename={async (id, name) => {
-            const tag = await tags.rename(id, name)
-            onNotice?.(`Renamed to ${tag.name}`)
+            const tag = await tags.rename(id, name);
+            onNotice?.(`Renamed to ${tag.name}`);
           }}
           onDelete={async (tag) => {
-            const report = await tags.remove(tag.id)
+            const report = await tags.remove(tag.id);
             // The chip may be in the filter, and a filter naming a slug nothing
             // has is a grid that renders nothing for no visible reason.
             if (url.tags.includes(tag.slug)) {
-              onUrl(withFilter(url, { tags: url.tags.filter((slug) => slug !== tag.slug) }))
+              onUrl(withFilter(url, { tags: url.tags.filter((slug) => slug !== tag.slug) }));
             }
             onNotice?.(
-              `Deleted the tag ${tag.name}. ${report.removedFrom === 1 ? '1 file' : `${report.removedFrom.toLocaleString('en-US')} files`} no longer carry it. No file was deleted.`,
-            )
+              `Deleted the tag ${tag.name}. ${report.removedFrom === 1 ? "1 file" : `${report.removedFrom.toLocaleString("en-US")} files`} no longer carry it. No file was deleted.`,
+            );
           }}
         />
       ) : null}
     </div>
-  )
+  );
 }
 
 /** What a folder delete actually did, in one sentence — the counts come back
@@ -1644,17 +1646,17 @@ function deletedFolderSummary(
 ): string {
   const files =
     report.unfiled === 0
-      ? 'No files were in it'
+      ? "No files were in it"
       : report.unfiled === 1
-        ? '1 file is now unfiled'
-        : `${report.unfiled.toLocaleString('en-US')} files are now unfiled`
+        ? "1 file is now unfiled"
+        : `${report.unfiled.toLocaleString("en-US")} files are now unfiled`;
   const kids =
     report.reparented === 0
-      ? ''
+      ? ""
       : report.reparented === 1
-        ? ', and 1 subfolder moved up a level'
-        : `, and ${report.reparented} subfolders moved up a level`
-  return `Deleted ${name}. ${files}${kids}. No file was deleted.`
+        ? ", and 1 subfolder moved up a level"
+        : `, and ${report.reparented} subfolders moved up a level`;
+  return `Deleted ${name}. ${files}${kids}. No file was deleted.`;
 }
 
 /**
@@ -1687,28 +1689,28 @@ function NewFolderDialog({
   onClose,
   onCreate,
 }: {
-  folders: readonly AssetFolder[]
-  onClose: () => void
-  onCreate: (input: { name: string; parentId: string | null }) => Promise<void>
+  folders: readonly AssetFolder[];
+  onClose: () => void;
+  onCreate: (input: { name: string; parentId: string | null }) => Promise<void>;
 }) {
-  const [name, setName] = useState('')
-  const [parentId, setParentId] = useState('')
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [name, setName] = useState("");
+  const [parentId, setParentId] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
-    const trimmed = name.trim()
-    if (!trimmed) return
-    setPending(true)
-    setError(null)
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setPending(true);
+    setError(null);
     try {
-      await onCreate({ name: trimmed, parentId: parentId || null })
+      await onCreate({ name: trimmed, parentId: parentId || null });
     } catch (e) {
-      setError((e as Error).message)
+      setError((e as Error).message);
     } finally {
-      setPending(false)
+      setPending(false);
     }
-  }
+  };
 
   return (
     <Dialog
@@ -1720,8 +1722,8 @@ function NewFolderDialog({
           <Button onClick={onClose}>Cancel</Button>
           <Button
             variant="primary"
-            disabled={pending || name.trim() === ''}
-            reason={pending ? 'Creating…' : 'Name a folder first'}
+            disabled={pending || name.trim() === ""}
+            reason={pending ? "Creating…" : "Name a folder first"}
             onClick={() => void submit()}
           >
             Create
@@ -1734,8 +1736,8 @@ function NewFolderDialog({
       <form
         className={css.folderForm}
         onSubmit={(e) => {
-          e.preventDefault()
-          if (!pending) void submit()
+          e.preventDefault();
+          if (!pending) void submit();
         }}
       >
         <Field label="Name" required error={error}>
@@ -1768,7 +1770,7 @@ function NewFolderDialog({
         </Field>
       </form>
     </Dialog>
-  )
+  );
 }
 
 /**
@@ -1795,31 +1797,31 @@ function FolderEditDialog({
   onSave,
   onDelete,
 }: {
-  folder: AssetFolder
-  folders: readonly AssetFolder[]
-  onClose: () => void
-  onSave: (patch: { name?: string; parentId?: string | null }) => Promise<void>
-  onDelete: () => Promise<void>
+  folder: AssetFolder;
+  folders: readonly AssetFolder[];
+  onClose: () => void;
+  onSave: (patch: { name?: string; parentId?: string | null }) => Promise<void>;
+  onDelete: () => Promise<void>;
 }) {
-  const [name, setName] = useState(folder.name)
-  const [parentId, setParentId] = useState(folder.parentId ?? '')
-  const [confirming, setConfirming] = useState(false)
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [name, setName] = useState(folder.name);
+  const [parentId, setParentId] = useState(folder.parentId ?? "");
+  const [confirming, setConfirming] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const attempt = async (what: () => Promise<void>) => {
-    setPending(true)
-    setError(null)
+    setPending(true);
+    setError(null);
     try {
-      await what()
+      await what();
     } catch (e) {
-      setError((e as Error).message)
+      setError((e as Error).message);
     } finally {
-      setPending(false)
+      setPending(false);
     }
-  }
+  };
 
-  const changed = name.trim() !== folder.name || (parentId || null) !== folder.parentId
+  const changed = name.trim() !== folder.name || (parentId || null) !== folder.parentId;
 
   return (
     <Dialog
@@ -1827,8 +1829,8 @@ function FolderEditDialog({
       title={confirming ? `Delete ${folder.name}?` : `Edit ${folder.name}`}
       description={
         confirming
-          ? 'No file is deleted. This only removes the folder.'
-          : 'Renaming or moving a folder rewrites the paths beneath it.'
+          ? "No file is deleted. This only removes the folder."
+          : "Renaming or moving a folder rewrites the paths beneath it."
       }
       onClose={onClose}
       actions={
@@ -1849,8 +1851,8 @@ function FolderEditDialog({
             <Button onClick={onClose}>Cancel</Button>
             <Button
               variant="primary"
-              disabled={pending || !changed || name.trim() === ''}
-              reason={pending ? 'Saving…' : 'Change something first'}
+              disabled={pending || !changed || name.trim() === ""}
+              reason={pending ? "Saving…" : "Change something first"}
               onClick={() =>
                 void attempt(() =>
                   onSave({
@@ -1880,7 +1882,7 @@ function FolderEditDialog({
         <form
           className={css.folderForm}
           onSubmit={(e) => {
-            e.preventDefault()
+            e.preventDefault();
           }}
         >
           <Field label="Name" required error={error}>
@@ -1925,7 +1927,7 @@ function FolderEditDialog({
         </form>
       )}
     </Dialog>
-  )
+  );
 }
 
 /**
@@ -1947,30 +1949,30 @@ function TagManagerDialog({
   onRename,
   onDelete,
 }: {
-  tags: readonly AssetTag[]
-  onClose: () => void
-  onRename: (id: string, name: string) => Promise<void>
-  onDelete: (tag: AssetTag) => Promise<void>
+  tags: readonly AssetTag[];
+  onClose: () => void;
+  onRename: (id: string, name: string) => Promise<void>;
+  onDelete: (tag: AssetTag) => Promise<void>;
 }) {
-  const [renaming, setRenaming] = useState<string | null>(null)
-  const [confirming, setConfirming] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const attempt = async (what: () => Promise<void>) => {
-    setPending(true)
-    setError(null)
+    setPending(true);
+    setError(null);
     try {
-      await what()
-      setRenaming(null)
-      setConfirming(null)
+      await what();
+      setRenaming(null);
+      setConfirming(null);
     } catch (e) {
-      setError((e as Error).message)
+      setError((e as Error).message);
     } finally {
-      setPending(false)
+      setPending(false);
     }
-  }
+  };
 
   return (
     <Dialog
@@ -1997,8 +1999,8 @@ function TagManagerDialog({
                 <Button
                   size="sm"
                   variant="primary"
-                  disabled={pending || draft.trim() === ''}
-                  reason={pending ? 'Saving…' : 'Name it first'}
+                  disabled={pending || draft.trim() === ""}
+                  reason={pending ? "Saving…" : "Name it first"}
                   onClick={() => void attempt(() => onRename(tag.id, draft.trim()))}
                 >
                   Save
@@ -2009,7 +2011,7 @@ function TagManagerDialog({
                 <span className={css.manageName}>
                   {tag.count === undefined
                     ? `Delete ${tag.name}? No file is deleted.`
-                    : `Delete ${tag.name}? It comes off ${tag.count === 1 ? '1 file' : `${tag.count.toLocaleString('en-US')} files`}. No file is deleted.`}
+                    : `Delete ${tag.name}? It comes off ${tag.count === 1 ? "1 file" : `${tag.count.toLocaleString("en-US")} files`}. No file is deleted.`}
                 </span>
                 <Button size="sm" onClick={() => setConfirming(null)}>
                   Cancel
@@ -2031,8 +2033,8 @@ function TagManagerDialog({
                   size="sm"
                   variant="subtle"
                   onClick={() => {
-                    setDraft(tag.name)
-                    setRenaming(tag.id)
+                    setDraft(tag.name);
+                    setRenaming(tag.id);
                   }}
                 >
                   Rename
@@ -2046,7 +2048,7 @@ function TagManagerDialog({
         ))}
       </ul>
     </Dialog>
-  )
+  );
 }
 
 /* --------------------------------------------------------- bulk dialogs --- */
@@ -2071,23 +2073,23 @@ function BulkTagDialog({
   onClose,
   onRun,
 }: {
-  action: 'tag' | 'untag'
-  count: number
-  tags: readonly AssetTag[]
-  busy: boolean
-  onClose: () => void
-  onRun: (tagIds: string[]) => void
+  action: "tag" | "untag";
+  count: number;
+  tags: readonly AssetTag[];
+  busy: boolean;
+  onClose: () => void;
+  onRun: (tagIds: string[]) => void;
 }) {
-  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set())
-  const files = `${count.toLocaleString('en-US')} ${count === 1 ? 'file' : 'files'}`
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(new Set());
+  const files = `${count.toLocaleString("en-US")} ${count === 1 ? "file" : "files"}`;
 
   return (
     <Dialog
-      title={action === 'tag' ? `Tag ${files}` : `Untag ${files}`}
+      title={action === "tag" ? `Tag ${files}` : `Untag ${files}`}
       description={
-        action === 'tag'
-          ? 'Adds these tags. Tags already on a file stay.'
-          : 'Removes these tags. Other tags on a file stay.'
+        action === "tag"
+          ? "Adds these tags. Tags already on a file stay."
+          : "Removes these tags. Other tags on a file stay."
       }
       onClose={onClose}
       actions={
@@ -2096,10 +2098,10 @@ function BulkTagDialog({
           <Button
             variant="primary"
             disabled={busy || chosen.size === 0}
-            reason={busy ? 'Working…' : 'Choose a tag first'}
+            reason={busy ? "Working…" : "Choose a tag first"}
             onClick={() => onRun([...chosen])}
           >
-            {action === 'tag' ? 'Add tags' : 'Remove tags'}
+            {action === "tag" ? "Add tags" : "Remove tags"}
           </Button>
         </>
       }
@@ -2118,9 +2120,9 @@ function BulkTagDialog({
                 checked={chosen.has(tag.id)}
                 onChange={() =>
                   setChosen((prev) => {
-                    const next = new Set(prev)
-                    if (!next.delete(tag.id)) next.add(tag.id)
-                    return next
+                    const next = new Set(prev);
+                    if (!next.delete(tag.id)) next.add(tag.id);
+                    return next;
                   })
                 }
               />
@@ -2130,7 +2132,7 @@ function BulkTagDialog({
         </fieldset>
       )}
     </Dialog>
-  )
+  );
 }
 
 /** Where a selection is filed. *Unfiled* is a real destination rather than a
@@ -2142,14 +2144,14 @@ function BulkMoveDialog({
   onClose,
   onRun,
 }: {
-  count: number
-  folders: readonly AssetFolder[]
-  busy: boolean
-  onClose: () => void
-  onRun: (folderId: string | null) => void
+  count: number;
+  folders: readonly AssetFolder[];
+  busy: boolean;
+  onClose: () => void;
+  onRun: (folderId: string | null) => void;
 }) {
-  const [folderId, setFolderId] = useState('')
-  const files = `${count.toLocaleString('en-US')} ${count === 1 ? 'file' : 'files'}`
+  const [folderId, setFolderId] = useState("");
+  const files = `${count.toLocaleString("en-US")} ${count === 1 ? "file" : "files"}`;
 
   return (
     <Dialog
@@ -2188,7 +2190,7 @@ function BulkMoveDialog({
         )}
       </Field>
     </Dialog>
-  )
+  );
 }
 
 /**
@@ -2215,16 +2217,16 @@ function BulkDeleteDialog({
   onClose,
   onRun,
 }: {
-  count: number
+  count: number;
   /** How many of the selected files a published page points at, or null while
    * the dry run is still in flight. */
-  used: number | null
-  error: string | null
-  busy: boolean
-  onClose: () => void
-  onRun: () => void
+  used: number | null;
+  error: string | null;
+  busy: boolean;
+  onClose: () => void;
+  onRun: () => void;
 }) {
-  const files = `${count.toLocaleString('en-US')} ${count === 1 ? 'file' : 'files'}`
+  const files = `${count.toLocaleString("en-US")} ${count === 1 ? "file" : "files"}`;
 
   return (
     <Dialog
@@ -2238,7 +2240,7 @@ function BulkDeleteDialog({
           <Button
             variant="danger"
             disabled={busy || used === null}
-            reason={busy ? 'Deleting…' : (error ?? 'Checking what uses these files…')}
+            reason={busy ? "Deleting…" : (error ?? "Checking what uses these files…")}
             onClick={onRun}
           >
             Delete
@@ -2258,13 +2260,13 @@ function BulkDeleteDialog({
       ) : (
         <p className={css.warn}>
           {used === 1
-            ? '1 of these files is used on a published page and will stop loading there.'
-            : `${used.toLocaleString('en-US')} of these files are used on published pages and will stop loading there.`}{' '}
+            ? "1 of these files is used on a published page and will stop loading there."
+            : `${used.toLocaleString("en-US")} of these files are used on published pages and will stop loading there.`}{" "}
           Deleting does not edit those pages.
         </p>
       )}
     </Dialog>
-  )
+  );
 }
 
 /* -------------------------------------------------------------------- tile --- */
@@ -2278,14 +2280,14 @@ function Tile({
   ticked,
   onTick,
 }: {
-  row: AssetRow
-  mount: string
-  selected: boolean
-  focusable: boolean
-  onSelect: () => void
+  row: AssetRow;
+  mount: string;
+  selected: boolean;
+  focusable: boolean;
+  onSelect: () => void;
   /** Absent on a mount with no selection layer — the picker's. */
-  ticked?: boolean
-  onTick?: () => void
+  ticked?: boolean;
+  onTick?: () => void;
 }) {
   return (
     // A real `option` inside the grid's `listbox`, focusable and named by its own
@@ -2302,19 +2304,19 @@ function Tile({
       role="option"
       aria-selected={selected}
       tabIndex={focusable ? 0 : -1}
-      className={`${css.tile} ${selected ? css.tileOn : ''}`}
-      data-ticked={ticked ? '' : undefined}
+      className={`${css.tile} ${selected ? css.tileOn : ""}`}
+      data-ticked={ticked ? "" : undefined}
       onClick={onSelect}
       onKeyDown={(e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return
-        e.preventDefault()
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
         // **Space ticks and Enter opens**, the Finder and Gmail convention, and
         // the same split `List.tsx`'s `Row` makes — it is the only way a keyboard
         // reaches a checkbox inside a roving-tabindex grid without the checkbox
         // becoming its own tab stop and costing the grid its "one stop in the tab
         // order" property. With no selection layer, both keys select.
-        if (e.key === ' ' && onTick) onTick()
-        else onSelect()
+        if (e.key === " " && onTick) onTick();
+        else onSelect();
       }}
     >
       {onTick ? (
@@ -2347,10 +2349,10 @@ function Tile({
       </span>
       <span className={css.tileName}>{row.filename}</span>
       <span className={css.tileMeta}>
-        {[dimensionsOf(row), humanSize(row.size)].filter(Boolean).join(' · ')}
+        {[dimensionsOf(row), humanSize(row.size)].filter(Boolean).join(" · ")}
       </span>
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------- table --- */
@@ -2362,12 +2364,12 @@ function tableColumn(column: AssetColumn, mount: string): Column<AssetRow> {
     ...(column.numeric ? { numeric: true } : {}),
     ...(column.sort ? { sortable: true } : {}),
     cell: (row) => <Cell row={row} column={column} mount={mount} />,
-  }
+  };
 }
 
 function Cell({ row, column, mount }: { row: AssetRow; column: AssetColumn; mount: string }) {
   switch (column.kind) {
-    case 'filename':
+    case "filename":
       return (
         <span className={css.cellFile}>
           {/* A thumbnail even in the table. The filename is what sorts and what you
@@ -2385,10 +2387,10 @@ function Cell({ row, column, mount }: { row: AssetRow; column: AssetColumn; moun
           )}
           <span className={css.cellName}>{row.filename}</span>
         </span>
-      )
-    case 'type':
-      return <span className={css.cellMuted}>{typeLabel(row)}</span>
-    case 'dimensions':
+      );
+    case "type":
+      return <span className={css.cellMuted}>{typeLabel(row)}</span>;
+    case "dimensions":
       // A dash rather than nothing, so an empty cell reads as deliberate: a file
       // whose header `imageSize` cannot read has no dimensions to show, and every
       // non-image is one of those.
@@ -2396,11 +2398,11 @@ function Cell({ row, column, mount }: { row: AssetRow; column: AssetColumn; moun
         <span className={css.cellNum}>{dimensionsOf(row)}</span>
       ) : (
         <span className={css.cellBlank}>—</span>
-      )
-    case 'size':
-      return <span className={css.cellNum}>{humanSize(row.size)}</span>
-    case 'created':
-      return <span className={css.cellNum}>{addedAgo(row.createdAt)}</span>
+      );
+    case "size":
+      return <span className={css.cellNum}>{humanSize(row.size)}</span>;
+    case "created":
+      return <span className={css.cellNum}>{addedAgo(row.createdAt)}</span>;
   }
 }
 
@@ -2425,14 +2427,14 @@ function Empty({
   onClear,
   children,
 }: {
-  narrowed: boolean
+  narrowed: boolean;
   /** Whether this person may upload — `ASSETS`. Changes the body as well as the
    * action, because "drop files anywhere here" is an instruction a viewer cannot
    * follow, and an empty state whose next step is impossible is worse than one
    * with no next step at all. */
-  mayWrite: boolean
-  onClear: () => void
-  children: ReactNode
+  mayWrite: boolean;
+  onClear: () => void;
+  children: ReactNode;
 }) {
   if (narrowed) {
     return (
@@ -2445,17 +2447,17 @@ function Empty({
           </Button>
         }
       />
-    )
+    );
   }
   return (
     <EmptyState
       title="Nothing uploaded yet"
       body={
         mayWrite
-          ? 'Drop files anywhere here, or choose them. Images get their dimensions read on the way in, and are resized on the way out.'
-          : 'Nothing has been added to this library. Files that editors upload here are what a document’s image and file fields point at.'
+          ? "Drop files anywhere here, or choose them. Images get their dimensions read on the way in, and are resized on the way out."
+          : "Nothing has been added to this library. Files that editors upload here are what a document’s image and file fields point at."
       }
       action={children}
     />
-  )
+  );
 }

@@ -1,23 +1,23 @@
-import { useState } from 'react'
-import { base64url, fromBase64url } from '../../../server/auth/jwt'
-import { MAX_PASSKEY_NAME } from '../../../server/auth/passkeys'
+import { useState } from "react";
+import { base64url, fromBase64url } from "../../../server/auth/jwt";
+import { MAX_PASSKEY_NAME } from "../../../server/auth/passkeys";
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   RegistrationResponseJSON,
-} from '../../../server/auth/webauthn'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { Field, Input } from '../Field'
-import css from './Account.module.css'
-import { messageOf } from './useContent'
+} from "../../../server/auth/webauthn";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { Field, Input } from "../Field";
+import css from "./Account.module.css";
+import { messageOf } from "./useContent";
 
 interface Props {
-  apiBase: string
-  onClose: () => void
+  apiBase: string;
+  onClose: () => void;
   /** Fires once the credential is stored, with the row the route answered — the
    * caller reloads the list from it rather than this dialog holding a second
    * copy of the passkeys state. */
-  onEnrolled: () => void
+  onEnrolled: () => void;
 }
 
 /**
@@ -39,22 +39,22 @@ interface Props {
  * discipline the login script keeps.
  */
 export function AccountPasskeyDialog({ apiBase, onClose, onEnrolled }: Props) {
-  const [name, setName] = useState(() => `Passkey · ${window.location.hostname}`)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [name, setName] = useState(() => `Passkey · ${window.location.hostname}`);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const enrol = async () => {
-    setBusy(true)
-    setError(null)
+    setBusy(true);
+    setError(null);
     try {
       // No body: the route derives everything from the session. See the login
       // script's own call for what an unread body costs across an entrypoint
       // boundary.
-      const optionsRes = await fetch(`${apiBase}/me/passkeys/options`, { method: 'POST' })
-      if (!optionsRes.ok) throw new Error(await messageOf(optionsRes))
+      const optionsRes = await fetch(`${apiBase}/me/passkeys/options`, { method: "POST" });
+      if (!optionsRes.ok) throw new Error(await messageOf(optionsRes));
       const { publicKey } = (await optionsRes.json()) as {
-        publicKey: PublicKeyCredentialCreationOptionsJSON
-      }
+        publicKey: PublicKeyCredentialCreationOptionsJSON;
+      };
 
       const created = await navigator.credentials.create({
         publicKey: {
@@ -76,10 +76,10 @@ export function AccountPasskeyDialog({ apiBase, onClose, onEnrolled }: Props) {
             transports: cred.transports as AuthenticatorTransport[] | undefined,
           })),
         },
-      })
-      if (!created) throw new Error('No passkey was created.')
-      const credential = created as PublicKeyCredential
-      const response = credential.response as AuthenticatorAttestationResponse
+      });
+      if (!created) throw new Error("No passkey was created.");
+      const credential = created as PublicKeyCredential;
+      const response = credential.response as AuthenticatorAttestationResponse;
 
       const body: RegistrationResponseJSON = {
         id: credential.id,
@@ -90,27 +90,27 @@ export function AccountPasskeyDialog({ apiBase, onClose, onEnrolled }: Props) {
           attestationObject: base64url(new Uint8Array(response.attestationObject)),
           ...(response.getTransports ? { transports: response.getTransports() } : {}),
         },
-      }
+      };
 
       const createRes = await fetch(`${apiBase}/me/passkeys`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        method: "POST",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ credential: body, name: name.trim() || undefined }),
-      })
-      if (!createRes.ok) throw new Error(await messageOf(createRes))
-      onEnrolled()
+      });
+      if (!createRes.ok) throw new Error(await messageOf(createRes));
+      onEnrolled();
     } catch (e) {
       // `NotAllowedError` covers both a person cancelling the prompt and the
       // browser refusing outright (an excluded credential, no available
       // authenticator) — WebAuthn does not distinguish them, on purpose, so
       // this dialog does not invent a distinction the platform declined to
       // make.
-      const err = e as Error
-      setError(err.name === 'NotAllowedError' ? 'Cancelled.' : err.message)
+      const err = e as Error;
+      setError(err.name === "NotAllowedError" ? "Cancelled." : err.message);
     } finally {
-      setBusy(false)
+      setBusy(false);
     }
-  }
+  };
 
   return (
     <Dialog
@@ -123,7 +123,7 @@ export function AccountPasskeyDialog({ apiBase, onClose, onEnrolled }: Props) {
             Cancel
           </Button>
           <Button variant="primary" onClick={() => void enrol()} disabled={busy}>
-            {busy ? 'Waiting for your device…' : 'Continue'}
+            {busy ? "Waiting for your device…" : "Continue"}
           </Button>
         </>
       }
@@ -141,5 +141,5 @@ export function AccountPasskeyDialog({ apiBase, onClose, onEnrolled }: Props) {
       </Field>
       {error ? <p className={css.dialogError}>{error}</p> : null}
     </Dialog>
-  )
+  );
 }

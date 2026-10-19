@@ -39,7 +39,7 @@
  * delete does: a broken image reference degrades visibly and fixably, and a
  * delete that refuses leaves an editor unable to remove a file at all.
  */
-import type { AssetBulkAction, AssetFilter, AssetTag } from '../core/assets'
+import type { AssetBulkAction, AssetFilter, AssetTag } from "../core/assets";
 import {
   type BulkFailure,
   type BulkRefusal,
@@ -48,10 +48,10 @@ import {
   type FilterSelection,
   readBulkCursor,
   writeBulkCursor,
-} from '../core/bulk'
-import { DEFAULT_SITE } from '../core/sites'
-import { folderSiteOf } from './asset-folders'
-import { tagsByIds } from './asset-tags'
+} from "../core/bulk";
+import { DEFAULT_SITE } from "../core/sites";
+import { folderSiteOf } from "./asset-folders";
+import { tagsByIds } from "./asset-tags";
 import {
   type AssetRow,
   assetsFor,
@@ -59,21 +59,21 @@ import {
   countAssets,
   deleteAsset,
   scopedAssetFilter,
-} from './assets'
-import { bindChunks, type FolioDb } from './db'
-import { FolioError, rethrow } from './errors'
-import { whereOf } from './keyset'
-import type { FolioLogger } from './types'
+} from "./assets";
+import { bindChunks, type FolioDb } from "./db";
+import { FolioError, rethrow } from "./errors";
+import { whereOf } from "./keyset";
+import type { FolioLogger } from "./types";
 
 /** How many rows one call acts on before handing back a cursor. The same 25
  * `runBulk` defaults to, and for the same reason: `delete` issues a D1 batch and
  * an R2 delete per row. */
-export const DEFAULT_ASSET_BULK_BATCH = 25
+export const DEFAULT_ASSET_BULK_BATCH = 25;
 
 /** Ceiling on `batch`, so a caller cannot ask for a run that outlives the
  * request. `MAX_BULK_BATCH`'s 200, shared with `migrate`, `reindex` and the
  * schedule sweep. */
-export const MAX_ASSET_BULK_BATCH = 200
+export const MAX_ASSET_BULK_BATCH = 200;
 
 /**
  * What a bulk run needs. Two bindings and no runtime: nothing here resolves a
@@ -93,9 +93,9 @@ export const MAX_ASSET_BULK_BATCH = 200
  * building deps by hand should not have to supply a sink to get it.
  */
 export interface AssetBulkDeps {
-  db: FolioDb
-  media?: R2Bucket | undefined
-  logger?: FolioLogger
+  db: FolioDb;
+  media?: R2Bucket | undefined;
+  logger?: FolioLogger;
 }
 
 export interface AssetBulkOptions {
@@ -106,22 +106,22 @@ export interface AssetBulkOptions {
    * Off the request, never the body. Absent is `default`, the one scope of a
    * deployment with no `sites`.
    */
-  scope?: string
-  batch?: number
+  scope?: string;
+  batch?: number;
   /** The previous call's `continueFrom`. An opaque `(id, seen)` pair, not an id. */
-  continueFrom?: string | null
+  continueFrom?: string | null;
   /** Computes everything, writes nothing, and answers the same shape — which is
    * how the delete confirmation reads `usedOnPublished` before it acts. */
-  dryRun?: boolean
+  dryRun?: boolean;
   /** `tag` and `untag`: which tags to add or remove. Required for both, and
    * every id is checked against a real tag before a row is touched. */
-  tagIds?: readonly string[]
+  tagIds?: readonly string[];
   /**
    * `move`'s destination. `null` is *Unfiled*, which is a real destination
    * rather than an absence — so this is read with `in` rather than for
    * truthiness, and a `move` that omits it entirely is refused.
    */
-  folderId?: string | null
+  folderId?: string | null;
 }
 
 /**
@@ -135,10 +135,10 @@ export interface AssetBulkOptions {
  * zero, because zero is a claim.
  */
 export interface AssetBulkReport extends BulkReport<AssetBulkAction> {
-  usedOnPublished?: number
+  usedOnPublished?: number;
 }
 
-export type AssetBulkOutcome = AssetBulkReport | BulkRefusal
+export type AssetBulkOutcome = AssetBulkReport | BulkRefusal;
 
 /**
  * One batch of a bulk write over the library.
@@ -154,33 +154,33 @@ export async function runAssetBulk(
   selection: BulkSelection<AssetFilter>,
   opts: AssetBulkOptions = {},
 ): Promise<AssetBulkOutcome> {
-  const { db } = deps
-  const scope = opts.scope ?? DEFAULT_SITE
-  const dryRun = opts.dryRun === true
+  const { db } = deps;
+  const scope = opts.scope ?? DEFAULT_SITE;
+  const dryRun = opts.dryRun === true;
   const batch = Math.min(
     Math.max(Math.trunc(opts.batch ?? DEFAULT_ASSET_BULK_BATCH), 1),
     MAX_ASSET_BULK_BATCH,
-  )
-  const resume = opts.continueFrom ? readCursor(opts.continueFrom) : null
+  );
+  const resume = opts.continueFrom ? readCursor(opts.continueFrom) : null;
 
   // Every argument is checked **once, before the walk starts**, and refused as a
   // request error rather than as N identical per-row failures. An unknown tag id
   // in a bulk tag is a client bug, not twenty-five separate accidents, and a
   // report naming it twenty-five times is a report nobody reads.
   const tags =
-    action === 'tag' || action === 'untag' ? await requiredTags(db, opts.tagIds, scope) : []
-  if (action === 'move') {
-    if (!('folderId' in opts)) {
-      throw new FolioError('bad_request', 'A bulk move needs a destination folder, or null')
+    action === "tag" || action === "untag" ? await requiredTags(db, opts.tagIds, scope) : [];
+  if (action === "move") {
+    if (!("folderId" in opts)) {
+      throw new FolioError("bad_request", "A bulk move needs a destination folder, or null");
     }
     // In the run's scope: filing across scopes is refused (`multi-site.md`'s table),
     // and a folder in another is exactly an unknown one.
     if (opts.folderId && (await folderSiteOf(db, opts.folderId)) !== scope) {
-      throw new FolioError('bad_request', 'Unknown folder')
+      throw new FolioError("bad_request", "Unknown folder");
     }
   }
-  if (action === 'delete' && !deps.media) {
-    throw new FolioError('unsupported', 'No media bucket is configured')
+  if (action === "delete" && !deps.media) {
+    throw new FolioError("unsupported", "No media bucket is configured");
   }
   // Before the ceiling check below, deliberately: a cursor that disagrees with
   // the list it was issued against is a client bug whatever the arithmetic says,
@@ -188,24 +188,24 @@ export async function runAssetBulk(
   // do" for it.
   if (!selection.all && resume !== null && selection.ids[resume.seen - 1] !== resume.after) {
     throw new FolioError(
-      'bad_request',
-      'The selection changed between batches. Start the operation again.',
-    )
+      "bad_request",
+      "The selection changed between batches. Start the operation again.",
+    );
   }
 
   const total = selection.all
     ? Math.max(selection.expected - (selection.exclude?.length ?? 0), 0)
-    : selection.ids.length
-  const seen = resume?.seen ?? 0
+    : selection.ids.length;
+  const seen = resume?.seen ?? 0;
 
   // The guard, once, at the start of the job — never on a resumed call. Decision
   // 3 of `bulk-writes.md` records what re-checking every batch would cost: a long
   // job on a site with live editors would become un-completable, and the guard
   // confirms *intent* rather than freezing the table.
   if (selection.all && resume === null) {
-    const actual = await countAssets(db, selection.filter, [scope])
+    const actual = await countAssets(db, selection.filter, [scope]);
     if (actual !== selection.expected) {
-      return { refused: 'count', expected: selection.expected, actual }
+      return { refused: "count", expected: selection.expected, actual };
     }
   }
 
@@ -217,17 +217,17 @@ export async function runAssetBulk(
     seen,
     continueFrom: null,
     dryRun,
-  }
+  };
   // The one aggregate, before anything is written and only on the first call.
   // See `AssetBulkReport.usedOnPublished`.
-  if (action === 'delete' && resume === null) {
-    report.usedOnPublished = await countUsedOnPublished(db, selection, scope)
+  if (action === "delete" && resume === null) {
+    report.usedOnPublished = await countUsedOnPublished(db, selection, scope);
   }
 
   // The ceiling. A job that has consumed everything it agreed to is finished even
   // if the filter still matches rows — those are files nobody agreed to touch.
-  const allowance = total - seen
-  if (allowance <= 0) return report
+  const allowance = total - seen;
+  if (allowance <= 0) return report;
 
   // **The two branches are asked for different amounts, deliberately.** An
   // explicit id list consumes the ceiling one row per id, so it is clamped to the
@@ -238,32 +238,32 @@ export async function runAssetBulk(
   // what survives.
   const { rows, consumed, exhausted, last } = selection.all
     ? await filterBatch(db, selection, resume?.after ?? null, batch, allowance, scope)
-    : await idBatch(db, selection.ids, seen, Math.min(batch, allowance), scope)
+    : await idBatch(db, selection.ids, seen, Math.min(batch, allowance), scope);
 
   for (const [at, row] of rows.entries()) {
     if (row === null) {
       // An id in an explicit selection with no row behind it. A delete has
       // already got what it asked for; the other three genuinely cannot act.
-      if (action === 'delete') report.done++
+      if (action === "delete") report.done++;
       else
-        report.failed.push({ id: idAt(selection, seen + at), title: '', message: 'No such file' })
-      continue
+        report.failed.push({ id: idAt(selection, seen + at), title: "", message: "No such file" });
+      continue;
     }
     if (dryRun) {
       // Tallied as if it had worked, like `runSchedules`' dry run: reporting
       // whether each write *would* succeed means performing it.
-      report.done++
-      continue
+      report.done++;
+      continue;
     }
     try {
-      await one(deps, action, row, tags, opts, scope)
-      report.done++
+      await one(deps, action, row, tags, opts, scope);
+      report.done++;
     } catch (err) {
-      report.failed.push({ id: row.id, title: row.filename, message: reasonOf(err, deps.logger) })
+      report.failed.push({ id: row.id, title: row.filename, message: reasonOf(err, deps.logger) });
     }
   }
 
-  report.seen = seen + consumed
+  report.seen = seen + consumed;
   // **`exhausted`, not `consumed < limit`.** A filter batch drops the rows a
   // select-all ticked off *after* the read, so a batch can act on fewer rows than
   // it read and still have the whole rest of the table in front of it — ending
@@ -271,8 +271,8 @@ export async function runAssetBulk(
   // first excluded row. What says "the walk is over" is a short *read*, which is
   // what each batch reports for itself.
   report.continueFrom =
-    exhausted || report.seen >= total || last === null ? null : writeBulkCursor(last, report.seen)
-  return report
+    exhausted || report.seen >= total || last === null ? null : writeBulkCursor(last, report.seen);
+  return report;
 }
 
 /** One asset, one action. Each branch is the same write the single-asset route
@@ -285,9 +285,9 @@ async function one(
   opts: AssetBulkOptions,
   scope: string,
 ): Promise<void> {
-  const { db } = deps
+  const { db } = deps;
   switch (action) {
-    case 'tag':
+    case "tag":
       // **Add, never replace** — the difference between this and
       // `setAssetTags`, and the reason the bulk route is not "PATCH each row
       // with the tag list". `or ignore` because an asset already carrying the
@@ -298,40 +298,40 @@ async function one(
           db
             .prepare(
               `insert or ignore into asset_taggings (asset_id, tag_id)
-                 values ${chunk.map(() => '(?, ?)').join(', ')}`,
+                 values ${chunk.map(() => "(?, ?)").join(", ")}`,
             )
             .bind(...chunk.flatMap((tag) => [row.id, tag.id])),
         ),
-      )
-      return
-    case 'untag':
+      );
+      return;
+    case "untag":
       await db.batch(
         bindChunks(tags, 1).map((chunk) =>
           db
             .prepare(
               `delete from asset_taggings
-                where asset_id = ? and tag_id in (${chunk.map(() => '?').join(', ')})`,
+                where asset_id = ? and tag_id in (${chunk.map(() => "?").join(", ")})`,
             )
             .bind(row.id, ...chunk.map((tag) => tag.id)),
         ),
-      )
-      return
-    case 'move':
+      );
+      return;
+    case "move":
       // One column on one row, and **no R2 operation of any kind** — decision 1:
       // a folder is metadata, never part of the key, so filing a file that is
       // used on a published page cannot change a byte of that page.
       await db
-        .prepare('update assets set folder_id = ? where id = ? and site_id = ?')
+        .prepare("update assets set folder_id = ? where id = ? and site_id = ?")
         .bind(opts.folderId ?? null, row.id, scope)
-        .run()
-      return
-    case 'delete':
+        .run();
+      return;
+    case "delete":
       // The identical call `DELETE {base}/api/assets/:id` makes: the row and its
       // inbound edges in one D1 batch, then the object. Documents are left alone
       // on purpose.
-      if (!deps.media) throw new FolioError('unsupported', 'No media bucket is configured')
-      await deleteAsset(db, deps.media, row.id, scope)
-      return
+      if (!deps.media) throw new FolioError("unsupported", "No media bucket is configured");
+      await deleteAsset(db, deps.media, row.id, scope);
+      return;
   }
 }
 
@@ -349,18 +349,18 @@ async function requiredTags(
   ids: readonly string[] | undefined,
   scope: string,
 ): Promise<AssetTag[]> {
-  const wanted = [...new Set(ids ?? [])]
+  const wanted = [...new Set(ids ?? [])];
   if (wanted.length === 0) {
-    throw new FolioError('bad_request', 'Name at least one tag')
+    throw new FolioError("bad_request", "Name at least one tag");
   }
   // In the run's scope: tagging across scopes is refused, so a tag from another is an
   // unknown one.
-  const tags = await tagsByIds(db, wanted, scope)
+  const tags = await tagsByIds(db, wanted, scope);
   if (tags.length !== wanted.length) {
-    const known = new Set(tags.map((tag) => tag.id))
-    throw new FolioError('bad_request', `Unknown tag '${wanted.find((id) => !known.has(id))}'`)
+    const known = new Set(tags.map((tag) => tag.id));
+    throw new FolioError("bad_request", `Unknown tag '${wanted.find((id) => !known.has(id))}'`);
   }
-  return tags
+  return tags;
 }
 
 /**
@@ -386,14 +386,14 @@ async function countUsedOnPublished(
   selection: BulkSelection<AssetFilter>,
   scope: string,
 ): Promise<number> {
-  const used = `exists (select 1 from content_refs r where r.kind = 'asset' and r.to_id = assets.key)`
+  const used = `exists (select 1 from content_refs r where r.kind = 'asset' and r.to_id = assets.key)`;
   if (selection.all) {
-    const { clauses, binds } = scopedAssetFilter(selection.filter, [scope])
+    const { clauses, binds } = scopedAssetFilter(selection.filter, [scope]);
     const row = await db
       .prepare(`select count(*) as n from assets ${whereOf(...clauses, used)}`)
       .bind(...binds)
-      .first<{ n: number }>()
-    return row?.n ?? 0
+      .first<{ n: number }>();
+    return row?.n ?? 0;
   }
   // Chunked, because an id list is caller-sized. The chunks are disjoint by id,
   // so the counts add up exactly rather than approximately.
@@ -402,14 +402,14 @@ async function countUsedOnPublished(
       const row = await db
         .prepare(
           `select count(*) as n from assets
-            where id in (${chunk.map(() => '?').join(', ')}) and site_id = ? and ${used}`,
+            where id in (${chunk.map(() => "?").join(", ")}) and site_id = ? and ${used}`,
         )
         .bind(...chunk, scope)
-        .first<{ n: number }>()
-      return row?.n ?? 0
+        .first<{ n: number }>();
+      return row?.n ?? 0;
     }),
-  )
-  return counts.reduce((sum, n) => sum + n, 0)
+  );
+  return counts.reduce((sum, n) => sum + n, 0);
 }
 
 /**
@@ -419,11 +419,11 @@ async function countUsedOnPublished(
  * filter batch produces none, because it reads what it found.
  */
 interface Batch {
-  rows: (AssetRow | null)[]
+  rows: (AssetRow | null)[];
   /** How much of the ceiling this batch used. Not `rows.length` for an explicit
    * list — see `idBatch` — and not the number of rows read, for a filter batch
    * that dropped exclusions. */
-  consumed: number
+  consumed: number;
   /**
    * Whether the walk has reached the end of what it can read.
    *
@@ -431,9 +431,9 @@ interface Batch {
    * `consumed < limit`, because the two branches are asked for different limits
    * and only they know what they asked for.
    */
-  exhausted: boolean
+  exhausted: boolean;
   /** The id to resume after, or null when there is nothing left. */
-  last: string | null
+  last: string | null;
 }
 
 /**
@@ -458,20 +458,20 @@ async function filterBatch(
   allowance: number,
   scope: string,
 ): Promise<Batch> {
-  const rows = await assetsMatching(db, selection.filter, { limit, after, scope: [scope] })
-  const excluded = new Set(selection.exclude ?? [])
-  const kept = excluded.size === 0 ? rows : rows.filter((row) => !excluded.has(row.id))
+  const rows = await assetsMatching(db, selection.filter, { limit, after, scope: [scope] });
+  const excluded = new Set(selection.exclude ?? []);
+  const kept = excluded.size === 0 ? rows : rows.filter((row) => !excluded.has(row.id));
   // Trimmed to the ceiling *after* the exclusions, which is the only order that
   // can be right: a batch that read 25 rows, dropped 20 and is allowed 3 acts on
   // 3. Trimming past the allowance loses nothing, because consuming the last of
   // it ends the job — `seen >= total` on the very next line of `runAssetBulk`.
-  const acting = kept.length > allowance ? kept.slice(0, allowance) : kept
+  const acting = kept.length > allowance ? kept.slice(0, allowance) : kept;
   return {
     rows: acting,
     consumed: acting.length,
     exhausted: rows.length < limit,
     last: rows.at(-1)?.id ?? null,
-  }
+  };
 }
 
 /**
@@ -493,27 +493,27 @@ async function idBatch(
   limit: number,
   scope: string,
 ): Promise<Batch> {
-  const slice = ids.slice(seen, seen + limit)
-  const found = new Map((await assetsFor(db, slice, [scope])).map((row) => [row.id, row]))
+  const slice = ids.slice(seen, seen + limit);
+  const found = new Map((await assetsFor(db, slice, [scope])).map((row) => [row.id, row]));
   return {
     rows: slice.map((id) => found.get(id) ?? null),
     consumed: slice.length,
     exhausted: slice.length < limit,
     last: slice.at(-1) ?? null,
-  }
+  };
 }
 
 /** The id at a job position, for a failure that has no row to name itself with. */
 function idAt(selection: BulkSelection<AssetFilter>, position: number): string {
-  return selection.all ? '' : (selection.ids[position] ?? '')
+  return selection.all ? "" : (selection.ids[position] ?? "");
 }
 
 /** `core/bulk.ts`'s codec, with this module's refusal for a cursor that is not
  * one of ours. */
 function readCursor(raw: string): { after: string; seen: number } {
-  const at = readBulkCursor(raw)
-  if (!at) throw new FolioError('bad_request', 'Malformed pagination cursor')
-  return at
+  const at = readBulkCursor(raw);
+  if (!at) throw new FolioError("bad_request", "Malformed pagination cursor");
+  return at;
 }
 
 /**
@@ -525,14 +525,14 @@ function readCursor(raw: string): { after: string; seen: number } {
  */
 function reasonOf(err: unknown, logger: FolioLogger = console): string {
   try {
-    rethrow(err)
+    rethrow(err);
   } catch (translated) {
-    if (translated instanceof FolioError) return translated.message
+    if (translated instanceof FolioError) return translated.message;
   }
-  logger.error('folio: unreportable failure during a bulk asset write', err)
-  return 'Something went wrong.'
+  logger.error("folio: unreportable failure during a bulk asset write", err);
+  return "Something went wrong.";
 }
 
 /** Re-exported for the report a caller reads. `BulkFailure` is `core/bulk.ts`'s
  * and means the same thing here: an id, a name, and prose. */
-export type { BulkFailure }
+export type { BulkFailure };

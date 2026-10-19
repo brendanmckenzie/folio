@@ -1,14 +1,14 @@
-import { useCallback, useState } from 'react'
-import { MAX_PASSKEYS_PER_USER } from '../../../server/auth/passkeys'
-import type { Me } from '../../me'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { EmptyState } from '../EmptyState'
-import { Field, Input } from '../Field'
-import { ListHeader } from '../List'
-import { type Column, Table } from '../Table'
-import css from './Account.module.css'
+import { useCallback, useState } from "react";
+import { MAX_PASSKEYS_PER_USER } from "../../../server/auth/passkeys";
+import type { Me } from "../../me";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { EmptyState } from "../EmptyState";
+import { Field, Input } from "../Field";
+import { ListHeader } from "../List";
+import { type Column, Table } from "../Table";
+import css from "./Account.module.css";
 import {
   aaguidVendor,
   accountGate,
@@ -23,25 +23,25 @@ import {
   type SessionRow,
   since,
   userAgentLabel,
-} from './account-model'
-import { AccountPasskeyDialog } from './AccountPasskeyDialog'
-import { messageOf } from './useContent'
-import { useAccount } from './useAccount'
+} from "./account-model";
+import { AccountPasskeyDialog } from "./AccountPasskeyDialog";
+import { messageOf } from "./useContent";
+import { useAccount } from "./useAccount";
 
 interface Props {
-  apiBase: string
-  me: Me
-  onNotice: (message: string) => void
+  apiBase: string;
+  me: Me;
+  onNotice: (message: string) => void;
   /**
    * The shell's boot is still in flight, so `me` is still the optimistic `OPEN`
    * guess — see `Access.tsx`'s identical prop for the fuller argument. Here the
    * false statement it would otherwise render is "you have no account", which
    * is exactly as wrong as Access's "this deployment has no accounts".
    */
-  loading?: boolean
+  loading?: boolean;
 }
 
-const SKELETON = ['s1', 's2', 's3']
+const SKELETON = ["s1", "s2", "s3"];
 
 /**
  * "Your account" — `docs/specs/foundation/passkeys.md` decision 6. Reached from
@@ -71,86 +71,86 @@ const SKELETON = ['s1', 's2', 's3']
  *    read-only.
  */
 export function Account({ apiBase, me, onNotice, loading }: Props) {
-  const gate = accountGate(me)
-  const availability = passkeyAvailability(me)
+  const gate = accountGate(me);
+  const availability = passkeyAvailability(me);
   const data = useAccount(
     apiBase,
-    !loading && gate.kind === 'ok' && availability.kind !== 'unavailable',
-  )
+    !loading && gate.kind === "ok" && availability.kind !== "unavailable",
+  );
 
-  const [busy, setBusy] = useState(false)
-  const [adding, setAdding] = useState(false)
-  const [renaming, setRenaming] = useState<PasskeyRow | null>(null)
-  const [draftName, setDraftName] = useState('')
-  const [removing, setRemoving] = useState<PasskeyRow | null>(null)
+  const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [renaming, setRenaming] = useState<PasskeyRow | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const [removing, setRemoving] = useState<PasskeyRow | null>(null);
 
   const send = useCallback(
-    async (path: string, method: 'POST' | 'PATCH' | 'DELETE', body?: unknown) => {
+    async (path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown) => {
       const res = await fetch(`${apiBase}${path}`, {
         method,
         ...(body === undefined
           ? {}
-          : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
-      return res
+          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      return res;
     },
     [apiBase],
-  )
+  );
 
   /** One write: busy, a toast either way, a reload of the list it touched — the
    * same shape `Access.tsx`'s `run` takes, for the same reason. */
   const run = useCallback(
     async (work: () => Promise<string>, reload: () => void) => {
-      setBusy(true)
+      setBusy(true);
       try {
-        onNotice(await work())
-        reload()
+        onNotice(await work());
+        reload();
       } catch (e) {
-        onNotice((e as Error).message)
+        onNotice((e as Error).message);
       } finally {
-        setBusy(false)
+        setBusy(false);
       }
     },
     [onNotice],
-  )
+  );
 
   const startRename = (row: PasskeyRow) => {
-    setRenaming(row)
-    setDraftName(row.name)
-  }
+    setRenaming(row);
+    setDraftName(row.name);
+  };
 
   const confirmRename = () =>
     void run(async () => {
-      const target = renaming
-      if (!target) return 'Nothing to rename.'
-      const name = draftName.trim()
-      await send(`/me/passkeys/${encodeURIComponent(target.id)}`, 'PATCH', { name })
-      setRenaming(null)
-      return `Renamed to "${name}".`
-    }, data.passkeys.reload)
+      const target = renaming;
+      if (!target) return "Nothing to rename.";
+      const name = draftName.trim();
+      await send(`/me/passkeys/${encodeURIComponent(target.id)}`, "PATCH", { name });
+      setRenaming(null);
+      return `Renamed to "${name}".`;
+    }, data.passkeys.reload);
 
   const confirmRemove = () =>
     void run(async () => {
-      const target = removing
-      if (!target) return 'Nothing to remove.'
-      await send(`/me/passkeys/${encodeURIComponent(target.id)}`, 'DELETE')
-      setRemoving(null)
-      return `Removed "${target.name}". Anything signed in with it stops working now.`
-    }, data.passkeys.reload)
+      const target = removing;
+      if (!target) return "Nothing to remove.";
+      await send(`/me/passkeys/${encodeURIComponent(target.id)}`, "DELETE");
+      setRemoving(null);
+      return `Removed "${target.name}". Anything signed in with it stops working now.`;
+    }, data.passkeys.reload);
 
   const signOutOthers = () =>
     void run(async () => {
-      const res = await send('/me/sessions/others', 'DELETE')
-      const body = (await res.json()) as { revoked: number }
+      const res = await send("/me/sessions/others", "DELETE");
+      const body = (await res.json()) as { revoked: number };
       return body.revoked > 0
-        ? `Signed out ${body.revoked} other ${body.revoked === 1 ? 'browser' : 'browsers'}.`
-        : 'No other browsers were signed in.'
-    }, data.sessions.reload)
+        ? `Signed out ${body.revoked} other ${body.revoked === 1 ? "browser" : "browsers"}.`
+        : "No other browsers were signed in.";
+    }, data.sessions.reload);
 
-  if (loading) return <Booting />
+  if (loading) return <Booting />;
 
-  if (gate.kind === 'open') {
+  if (gate.kind === "open") {
     return (
       <div className={css.screen}>
         <EmptyState
@@ -158,9 +158,9 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
           body="`auth` is not configured on the host Worker, so there is nobody signed in and nothing here to show."
         />
       </div>
-    )
+    );
   }
-  if (gate.kind === 'anonymous') {
+  if (gate.kind === "anonymous") {
     return (
       <div className={css.screen}>
         <EmptyState
@@ -173,9 +173,9 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
           }
         />
       </div>
-    )
+    );
   }
-  if (gate.kind === 'token') {
+  if (gate.kind === "token") {
     return (
       <div className={css.screen}>
         <EmptyState
@@ -183,38 +183,38 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
           body="This session is authenticated by an API token, which has no passkeys and no browser of its own to sign out."
         />
       </div>
-    )
+    );
   }
 
-  const self = gate.self
+  const self = gate.self;
 
   const passkeyColumns: Column<PasskeyRow>[] = [
     {
-      key: 'name',
-      label: 'Name',
+      key: "name",
+      label: "Name",
       cell: (row) => {
-        const vendor = aaguidVendor(row.aaguid)
+        const vendor = aaguidVendor(row.aaguid);
         return (
           <span className={css.who}>
             <span className={css.name}>{row.name}</span>
             {vendor ? <span className={css.muted}>{vendor}</span> : null}
           </span>
-        )
+        );
       },
     },
     {
-      key: 'added',
-      label: 'Added',
+      key: "added",
+      label: "Added",
       cell: (row) => <span className={css.stamp}>{since(row.createdAt)}</span>,
     },
     {
-      key: 'used',
-      label: 'Last used',
+      key: "used",
+      label: "Last used",
       cell: (row) => <span className={css.stamp}>{since(row.lastUsedAt)}</span>,
     },
     {
-      key: 'synced',
-      label: 'Synced',
+      key: "synced",
+      label: "Synced",
       cell: (row) =>
         row.backedUp ? (
           <Badge title={`${algLabel(row.alg)} — backed up to a cloud keychain`}>synced</Badge>
@@ -223,8 +223,8 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
         ),
     },
     {
-      key: 'act',
-      label: 'Actions',
+      key: "act",
+      label: "Actions",
       cell: (row) => (
         <span className={css.rowActions}>
           <Button
@@ -247,12 +247,12 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
         </span>
       ),
     },
-  ]
+  ];
 
   const sessionColumns: Column<SessionRow>[] = [
     {
-      key: 'created',
-      label: 'Created',
+      key: "created",
+      label: "Created",
       cell: (row) => (
         <span className={css.who}>
           <span className={css.stamp}>{since(row.createdAt)}</span>
@@ -261,41 +261,41 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
       ),
     },
     {
-      key: 'expires',
-      label: 'Expires',
+      key: "expires",
+      label: "Expires",
       cell: (row) => <span className={css.stamp}>{since(row.expiresAt)}</span>,
     },
     {
-      key: 'provider',
-      label: 'Signed in with',
+      key: "provider",
+      label: "Signed in with",
       cell: (row) => <Badge mono>{providerLabel(row.provider)}</Badge>,
     },
     {
-      key: 'agent',
-      label: 'Browser',
+      key: "agent",
+      label: "Browser",
       cell: (row) => <span className={css.muted}>{userAgentLabel(row.userAgent)}</span>,
     },
-  ]
+  ];
 
   const eventColumns: Column<EventRow>[] = [
     {
-      key: 'at',
-      label: 'When',
+      key: "at",
+      label: "When",
       cell: (row) => <span className={css.stamp}>{since(row.at)}</span>,
     },
     {
-      key: 'event',
-      label: 'Event',
+      key: "event",
+      label: "Event",
       cell: (row) => eventLabel(row),
     },
     {
-      key: 'provider',
-      label: 'Provider',
+      key: "provider",
+      label: "Provider",
       cell: (row) => (row.provider ? <Badge mono>{providerLabel(row.provider)}</Badge> : null),
     },
-  ]
+  ];
 
-  const others = data.sessions.rows.filter((row) => !row.current).length
+  const others = data.sessions.rows.filter((row) => !row.current).length;
 
   return (
     <div className={css.screen}>
@@ -340,7 +340,7 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
                 }
                 reason={
                   passkeyCapReason(data.passkeys.rows.length, MAX_PASSKEYS_PER_USER) ??
-                  'A write is in flight'
+                  "A write is in flight"
                 }
                 onClick={() => setAdding(true)}
               >
@@ -352,14 +352,14 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
           Passkeys
         </ListHeader>
 
-        {availability.kind === 'unavailable' ? (
+        {availability.kind === "unavailable" ? (
           <EmptyState
             title="Passkeys are not offered here"
             body="This deployment has not listed a passkey provider, so there is nothing to enrol."
           />
         ) : (
           <>
-            {availability.kind === 'forbidden' ? (
+            {availability.kind === "forbidden" ? (
               <p className={css.notice}>{availability.reason}</p>
             ) : null}
             {data.passkeys.loading && data.passkeys.rows.length === 0 ? (
@@ -398,7 +398,7 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
             <Button
               size="sm"
               disabled={busy || others === 0}
-              reason={others === 0 ? 'There is nothing else signed in' : 'A write is in flight'}
+              reason={others === 0 ? "There is nothing else signed in" : "A write is in flight"}
               onClick={signOutOthers}
             >
               Sign out other browsers
@@ -460,9 +460,9 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
           apiBase={apiBase}
           onClose={() => setAdding(false)}
           onEnrolled={() => {
-            setAdding(false)
-            onNotice('Passkey added.')
-            data.passkeys.reload()
+            setAdding(false);
+            onNotice("Passkey added.");
+            data.passkeys.reload();
           }}
         />
       ) : null}
@@ -514,7 +514,7 @@ export function Account({ apiBase, me, onNotice, loading }: Props) {
         </Dialog>
       ) : null}
     </div>
-  )
+  );
 }
 
 /* --------------------------------------------------------------- states --- */
@@ -526,7 +526,7 @@ function Skeleton() {
         <div className={css.skeleton} key={key} />
       ))}
     </div>
-  )
+  );
 }
 
 /** The screen before `/me` has answered. Mirrors `Access.tsx`'s `Booting`: the
@@ -535,12 +535,12 @@ function Skeleton() {
 function Booting() {
   return (
     <div className={css.screen}>
-      {(['Identity', 'Passkeys', 'Sessions', 'Recent sign-ins'] as const).map((label) => (
+      {(["Identity", "Passkeys", "Sessions", "Recent sign-ins"] as const).map((label) => (
         <section className={css.section} key={label} aria-label={label}>
           <ListHeader>{label}</ListHeader>
           <Skeleton />
         </section>
       ))}
     </div>
-  )
+  );
 }

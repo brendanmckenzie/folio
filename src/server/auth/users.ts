@@ -15,62 +15,62 @@
  * are a translation layer, and a scheduled job or a Durable Object alarm has no
  * request to derive anything from.
  */
-import { fallbackColour } from '../../core/protocol'
-import { userGrantsDelete } from './grants'
-import { type Grants, type Role, isRole } from './roles'
-import { mintId } from './secrets'
-import { clampLimit, decodeCursor, type Page, paginate } from '../../core/pagination'
-import { keysetWhere, OLDEST_FIRST, orderBy, whereOf } from '../keyset'
-import type { FolioDb } from '../db'
+import { fallbackColour } from "../../core/protocol";
+import { userGrantsDelete } from "./grants";
+import { type Grants, type Role, isRole } from "./roles";
+import { mintId } from "./secrets";
+import { clampLimit, decodeCursor, type Page, paginate } from "../../core/pagination";
+import { keysetWhere, OLDEST_FIRST, orderBy, whereOf } from "../keyset";
+import type { FolioDb } from "../db";
 
 export interface UserRow {
-  id: string
-  email: string
-  name: string
+  id: string;
+  email: string;
+  name: string;
   /** Null in the database; `userColour` derives one deterministically. */
-  colour: string | null
-  role: Role
+  colour: string | null;
+  role: Role;
   /** How they last signed in: a provider id, or null for an invited user who
    * never has. Stamped inside `completeSignIn`'s batch, by every kind. */
-  provider: string | null
+  provider: string | null;
   /**
    * Who decided their role: null for Folio — an admin invited or edited them —
    * or the id of the provider whose claims placed it
    * (`../../../docs/specs/foundation/auth-providers.md` decision 5).
    */
-  roleFrom: string | null
+  roleFrom: string | null;
   /**
    * Every grant they hold, `*` included, each with who set it
    * (`../../../docs/specs/foundation/multi-site.md` decision 10). `role` and
    * `roleFrom` above are the `*` entry's, which is all there is with no `sites`.
    * Ordered by scope id, so a list of them compares by value.
    */
-  grants: readonly UserGrant[]
-  createdAt: number
-  lastSeenAt: number | null
+  grants: readonly UserGrant[];
+  createdAt: number;
+  lastSeenAt: number | null;
 }
 
 /** One `site_roles` row, as the Access screen shows it. */
 export interface UserGrant {
-  scope: string
-  role: Role
+  scope: string;
+  role: Role;
   /** Null for a grant Folio placed; a provider id for one a sign-in's claims set. */
-  roleFrom: string | null
+  roleFrom: string | null;
 }
 
 interface RawUser {
-  id: string
-  email: string
-  name: string
-  colour: string | null
+  id: string;
+  email: string;
+  name: string;
+  colour: string | null;
   /** Null when the user holds no `*` grant. */
-  role: string | null
-  provider: string | null
-  role_from: string | null
+  role: string | null;
+  provider: string | null;
+  role_from: string | null;
   /** `json_group_array` of `{ scope, role, from }`. */
-  grants: string | null
-  created_at: number
-  last_seen_at: number | null
+  grants: string | null;
+  created_at: number;
+  last_seen_at: number | null;
 }
 
 /**
@@ -84,36 +84,36 @@ function toUser(row: RawUser): UserRow {
     email: row.email,
     name: row.name,
     colour: row.colour,
-    role: isRole(row.role) ? row.role : 'viewer',
+    role: isRole(row.role) ? row.role : "viewer",
     provider: row.provider,
     roleFrom: row.role_from,
     grants: parseGrantRows(row.grants),
     createdAt: row.created_at,
     lastSeenAt: row.last_seen_at,
-  }
+  };
 }
 
 /** The grant rows `COLUMNS` aggregates, screened like `role`: an undeclared role
  * is dropped. Sorted by scope, `*` first, so two sets compare by value. */
 function parseGrantRows(json: string | null): UserGrant[] {
-  let value: unknown
+  let value: unknown;
   try {
-    value = JSON.parse(json ?? '[]')
+    value = JSON.parse(json ?? "[]");
   } catch {
-    return []
+    return [];
   }
-  if (!Array.isArray(value)) return []
-  const out: UserGrant[] = []
+  if (!Array.isArray(value)) return [];
+  const out: UserGrant[] = [];
   for (const entry of value) {
     const { scope, role, from } = (entry ?? {}) as {
-      scope?: unknown
-      role?: unknown
-      from?: unknown
-    }
-    if (typeof scope !== 'string' || !isRole(role)) continue
-    out.push({ scope, role, roleFrom: typeof from === 'string' ? from : null })
+      scope?: unknown;
+      role?: unknown;
+      from?: unknown;
+    };
+    if (typeof scope !== "string" || !isRole(role)) continue;
+    out.push({ scope, role, roleFrom: typeof from === "string" ? from : null });
   }
-  return out.sort((a, b) => (a.scope < b.scope ? -1 : a.scope > b.scope ? 1 : 0))
+  return out.sort((a, b) => (a.scope < b.scope ? -1 : a.scope > b.scope ? 1 : 0));
 }
 
 /**
@@ -129,7 +129,7 @@ const COLUMNS = `id, email, name, colour, provider, created_at, last_seen_at,
   (select role from site_roles where user_id = users.id and scope_id = '*') as role,
   (select role_from from site_roles where user_id = users.id and scope_id = '*') as role_from,
   (select json_group_array(json_object('scope', scope_id, 'role', role, 'from', role_from))
-     from site_roles where user_id = users.id) as grants`
+     from site_roles where user_id = users.id) as grants`;
 
 /**
  * A user's whole grant set, replaced: every row goes, then one per entry, each
@@ -146,7 +146,7 @@ export function replaceGrantsStatements(
   at = Date.now(),
 ): D1PreparedStatement[] {
   return [
-    db.prepare('delete from site_roles where user_id = ?').bind(userId),
+    db.prepare("delete from site_roles where user_id = ?").bind(userId),
     ...Object.entries(grants).map(([scope, role]) =>
       db
         .prepare(
@@ -155,12 +155,12 @@ export function replaceGrantsStatements(
         )
         .bind(userId, scope, role, roleFrom, at),
     ),
-  ]
+  ];
 }
 
 /** The set as a plain `Grants` map, for comparing and for `effectiveRole`. */
 export function grantMap(grants: readonly UserGrant[]): Grants {
-  return Object.fromEntries(grants.map((g) => [g.scope, g.role]))
+  return Object.fromEntries(grants.map((g) => [g.scope, g.role]));
 }
 
 /**
@@ -180,7 +180,7 @@ export function grantStatement(
        values (?, '*', ?, ?, ?)
        on conflict (user_id, scope_id) do update set role = excluded.role, role_from = excluded.role_from`,
     )
-    .bind(userId, role, roleFrom, at)
+    .bind(userId, role, roleFrom, at);
 }
 
 /**
@@ -190,17 +190,17 @@ export function grantStatement(
  * grants at all.
  */
 export function parseGrantMap(json: string | null): Grants {
-  if (!json) return {}
-  let value: unknown
+  if (!json) return {};
+  let value: unknown;
   try {
-    value = JSON.parse(json)
+    value = JSON.parse(json);
   } catch {
-    return {}
+    return {};
   }
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
-  const out: Record<string, Role> = {}
-  for (const [scope, role] of Object.entries(value)) if (isRole(role)) out[scope] = role
-  return out
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const out: Record<string, Role> = {};
+  for (const [scope, role] of Object.entries(value)) if (isRole(role)) out[scope] = role;
+  return out;
 }
 
 /**
@@ -209,29 +209,29 @@ export function parseGrantMap(json: string | null): Grants {
  * a user row with no colour and a socket with no colour land on the same value.
  */
 export function userColour(user: UserRow): string {
-  return user.colour ?? fallbackColour(user.id)
+  return user.colour ?? fallbackColour(user.id);
 }
 
 /** Addresses are compared and stored lowercased: one account per address, not
  * one per spelling of it. */
 export function normaliseEmail(email: string): string {
-  return email.trim().toLowerCase()
+  return email.trim().toLowerCase();
 }
 
 export async function userById(db: FolioDb, id: string): Promise<UserRow | null> {
   const row = await db
     .prepare(`select ${COLUMNS} from users where id = ?`)
     .bind(id)
-    .first<RawUser>()
-  return row ? toUser(row) : null
+    .first<RawUser>();
+  return row ? toUser(row) : null;
 }
 
 export async function userByEmail(db: FolioDb, email: string): Promise<UserRow | null> {
   const row = await db
     .prepare(`select ${COLUMNS} from users where email = ?`)
     .bind(normaliseEmail(email))
-    .first<RawUser>()
-  return row ? toUser(row) : null
+    .first<RawUser>();
+  return row ? toUser(row) : null;
 }
 
 /**
@@ -248,8 +248,8 @@ export async function listUsers(
   db: FolioDb,
   opts: { limit?: number; cursor?: string; count?: boolean } = {},
 ): Promise<Page<UserRow>> {
-  const limit = clampLimit(opts.limit, 50, 200)
-  const resume = keysetWhere(OLDEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null)
+  const limit = clampLimit(opts.limit, 50, 200);
+  const resume = keysetWhere(OLDEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null);
   const [rows, total] = await Promise.all([
     db
       .prepare(
@@ -257,26 +257,26 @@ export async function listUsers(
       )
       .bind(...resume.binds, limit + 1)
       .all<RawUser>(),
-    opts.count ? db.prepare('select count(*) as n from users').first<{ n: number }>() : null,
-  ])
-  const page = paginate(rows.results.map(toUser), limit, (row) => [row.createdAt, row.id])
-  return total ? { ...page, total: total.n } : page
+    opts.count ? db.prepare("select count(*) as n from users").first<{ n: number }>() : null,
+  ]);
+  const page = paginate(rows.results.map(toUser), limit, (row) => [row.createdAt, row.id]);
+  return total ? { ...page, total: total.n } : page;
 }
 
 export interface UserInput {
-  email: string
-  name?: string
-  role?: Role
-  colour?: string | null
-  provider?: string | null
+  email: string;
+  name?: string;
+  role?: Role;
+  colour?: string | null;
+  provider?: string | null;
   /** The provider whose claims placed `role`, when one did. */
-  roleFrom?: string | null
+  roleFrom?: string | null;
   /**
    * A whole grant set in place of `role` (`multi-site.md` decisions 10 and 17):
    * the invitation of a site editor, or a sign-in whose mapper placed scopes. Every
    * entry is stamped `roleFrom`. Absent, the user gets the one `*` grant at `role`.
    */
-  grants?: Grants
+  grants?: Grants;
 }
 
 /**
@@ -285,9 +285,9 @@ export interface UserInput {
  * overwrites it with the name the provider asserts.
  */
 export async function createUser(db: FolioDb, input: UserInput): Promise<UserRow> {
-  const { user, statements } = createUserStatement(db, input)
-  await db.batch(statements)
-  return user
+  const { user, statements } = createUserStatement(db, input);
+  await db.batch(statements);
+  return user;
 }
 
 /**
@@ -308,17 +308,17 @@ export function createUserStatement(
   input: UserInput,
   at = Date.now(),
 ): { user: UserRow; statements: D1PreparedStatement[] } {
-  const email = normaliseEmail(input.email)
-  const roleFrom = input.roleFrom ?? null
-  const set: Grants = input.grants ?? { '*': input.role ?? 'editor' }
-  const star = set['*']
+  const email = normaliseEmail(input.email);
+  const roleFrom = input.roleFrom ?? null;
+  const set: Grants = input.grants ?? { "*": input.role ?? "editor" };
+  const star = set["*"];
   const user: UserRow = {
-    id: mintId('usr'),
+    id: mintId("usr"),
     email,
-    name: input.name?.trim() || email.split('@')[0] || email,
+    name: input.name?.trim() || email.split("@")[0] || email,
     colour: input.colour ?? null,
     // A set with no `*` entry reads `viewer` there, as `toUser` answers it.
-    role: star ?? 'viewer',
+    role: star ?? "viewer",
     provider: input.provider ?? null,
     roleFrom: star === undefined ? null : roleFrom,
     grants: Object.entries(set)
@@ -326,7 +326,7 @@ export function createUserStatement(
       .sort((a, b) => (a.scope < b.scope ? -1 : a.scope > b.scope ? 1 : 0)),
     createdAt: at,
     lastSeenAt: null,
-  }
+  };
   const statements = [
     db
       .prepare(
@@ -336,9 +336,9 @@ export function createUserStatement(
       .bind(user.id, user.email, user.name, user.colour, user.provider, user.createdAt),
     ...(input.grants
       ? replaceGrantsStatements(db, user.id, set, roleFrom, at).slice(1)
-      : [grantStatement(db, user.id, star ?? 'editor', roleFrom, at)]),
-  ]
-  return { user, statements }
+      : [grantStatement(db, user.id, star ?? "editor", roleFrom, at)]),
+  ];
+  return { user, statements };
 }
 
 /**
@@ -356,8 +356,8 @@ export async function updateUser(
   id: string,
   patch: { name?: string; role?: Role; colour?: string | null },
 ): Promise<UserRow | null> {
-  const current = await userById(db, id)
-  if (!current) return null
+  const current = await userById(db, id);
+  if (!current) return null;
   const next: UserRow = {
     ...current,
     name: patch.name?.trim() || current.name,
@@ -367,19 +367,19 @@ export async function updateUser(
       patch.role === undefined
         ? current.grants
         : [
-            { scope: '*', role: patch.role, roleFrom: current.roleFrom },
-            ...current.grants.filter((g) => g.scope !== '*'),
+            { scope: "*", role: patch.role, roleFrom: current.roleFrom },
+            ...current.grants.filter((g) => g.scope !== "*"),
           ],
-  }
+  };
   const row = db
-    .prepare('update users set name = ?, colour = ? where id = ?')
-    .bind(next.name, next.colour, id)
+    .prepare("update users set name = ?, colour = ? where id = ?")
+    .bind(next.name, next.colour, id);
   if (patch.role === undefined) {
-    await row.run()
-    return next
+    await row.run();
+    return next;
   }
-  await db.batch([row, grantStatement(db, id, next.role, next.roleFrom)])
-  return next
+  await db.batch([row, grantStatement(db, id, next.role, next.roleFrom)]);
+  return next;
 }
 
 /**
@@ -401,24 +401,24 @@ export async function updateUser(
  * of who changed what.
  */
 export async function deleteUser(db: FolioDb, id: string): Promise<boolean> {
-  const existing = await userById(db, id)
-  if (!existing) return false
+  const existing = await userById(db, id);
+  if (!existing) return false;
   await db.batch([
     // Every preview grant their sessions held (`grants.ts`), ahead of the sessions
     // its subquery finds them through. Spelled out rather than `session.ts`'s
     // `userSessionsDelete`, which would make the two files import each other.
     userGrantsDelete(db, id),
-    db.prepare('delete from sessions where user_id = ?').bind(id),
+    db.prepare("delete from sessions where user_id = ?").bind(id),
     // `foundation/passkeys.md`: a credential that outlived its account would be
     // an orphan row whose `user_id` no longer resolves, and `passkeyForAssertion`
     // would spend a round trip on it at every sign-in attempt.
-    db.prepare('delete from passkeys where user_id = ?').bind(id),
+    db.prepare("delete from passkeys where user_id = ?").bind(id),
     // Every scope, not only `*`: a grant naming a removed user is an orphan the
     // Access screen would list against nobody.
-    db.prepare('delete from site_roles where user_id = ?').bind(id),
-    db.prepare('delete from users where id = ?').bind(id),
-  ])
-  return true
+    db.prepare("delete from site_roles where user_id = ?").bind(id),
+    db.prepare("delete from users where id = ?").bind(id),
+  ]);
+  return true;
 }
 
 /**
@@ -442,9 +442,9 @@ export function touchUserStatement(
   provider?: string | null,
 ): D1PreparedStatement {
   if (provider === undefined) {
-    return db.prepare('update users set last_seen_at = ? where id = ?').bind(at, id)
+    return db.prepare("update users set last_seen_at = ? where id = ?").bind(at, id);
   }
   return db
-    .prepare('update users set last_seen_at = ?, provider = ? where id = ?')
-    .bind(at, provider, id)
+    .prepare("update users set last_seen_at = ?, provider = ? where id = ?")
+    .bind(at, provider, id);
 }

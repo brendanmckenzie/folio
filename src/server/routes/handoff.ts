@@ -27,21 +27,21 @@
  * Mounts nothing on a deployment with no `sites`: there is no preview origin to
  * hand anything to, and the single-site preview keeps the session it always used.
  */
-import { Hono } from 'hono'
-import { NO_STORE } from '../../core/cache-tags'
-import { ALL_SCOPES, chain } from '../../core/sites'
-import { readGrantCookie, serialiseGrantCookie } from '../auth/cookie'
-import { consumeGrantCode, mintGrantCode } from '../auth/grants'
-import { previewEligible } from '../auth/roles'
-import { FolioError } from '../errors'
-import { requireAuthConfigured } from '../middleware'
-import { expiredLinkPage, grantBlockedPage } from '../pages'
-import type { FolioRuntime } from '../runtime'
-import type { FolioEnv } from '../types'
-import { safeNext } from '../validate'
+import { Hono } from "hono";
+import { NO_STORE } from "../../core/cache-tags";
+import { ALL_SCOPES, chain } from "../../core/sites";
+import { readGrantCookie, serialiseGrantCookie } from "../auth/cookie";
+import { consumeGrantCode, mintGrantCode } from "../auth/grants";
+import { previewEligible } from "../auth/roles";
+import { FolioError } from "../errors";
+import { requireAuthConfigured } from "../middleware";
+import { expiredLinkPage, grantBlockedPage } from "../pages";
+import type { FolioRuntime } from "../runtime";
+import type { FolioEnv } from "../types";
+import { safeNext } from "../validate";
 
 /** Where a `next` that fails `safeNext` lands: the preview origin's own root. */
-const FALLBACK = '/'
+const FALLBACK = "/";
 
 /**
  * Headers every hop answers with. `no-store` because each carries or sets a
@@ -49,65 +49,65 @@ const FALLBACK = '/'
  * code, and neither a redirect nor the page it lands on may repeat it to anybody.
  */
 function hopHeaders(location?: string): Headers {
-  const headers = new Headers({ 'cache-control': NO_STORE, 'referrer-policy': 'no-referrer' })
-  if (location) headers.set('location', location)
-  return headers
+  const headers = new Headers({ "cache-control": NO_STORE, "referrer-policy": "no-referrer" });
+  if (location) headers.set("location", location);
+  return headers;
 }
 
 /** A response of Folio's own with the hop headers added, whatever built it. */
 async function withHopHeaders(res: Promise<Response>): Promise<Response> {
-  const out = await res
-  out.headers.set('referrer-policy', 'no-referrer')
-  return out
+  const out = await res;
+  out.headers.set("referrer-policy", "no-referrer");
+  return out;
 }
 
 export function handoffRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
-  const sites = rt.sites
-  if (!sites) return app
+  const app = new Hono<FolioEnv<Env>>();
+  const sites = rt.sites;
+  if (!sites) return app;
 
   /**
    * Step 1, on the admin origin (decision 13). `handle()` stripped `~<site>` into
    * the scope header and answered this from the admin origin, so `c.var.site` is
    * null here; on a site's own host it is not, and this is not a route there.
    */
-  app.get('/site/start', async (c) => {
-    if (c.var.site !== null) throw new FolioError('not_found', 'No such route')
-    const scope = c.var.scope
+  app.get("/site/start", async (c) => {
+    if (c.var.site !== null) throw new FolioError("not_found", "No such route");
+    const scope = c.var.scope;
     if (scope === null) {
-      throw new FolioError('bad_request', `Name the site: ${rt.base}/~<site>/site/start`)
+      throw new FolioError("bad_request", `Name the site: ${rt.base}/~<site>/site/start`);
     }
-    const registry = await sites.registry(c.env)
-    const site = registry.sites.find((s) => s.id === scope)
+    const registry = await sites.registry(c.env);
+    const site = registry.sites.find((s) => s.id === scope);
     // A group or `shared` has no pages of its own to serve and no preview origin:
     // a shared page is previewed *on* a site (`/me`'s `previewable`).
-    if (!site) throw new FolioError('not_found', `'${scope}' is not a site`)
-    const next = safeNext(c.req.query('next'), FALLBACK)
+    if (!site) throw new FolioError("not_found", `'${scope}' is not a site`);
+    const next = safeNext(c.req.query("next"), FALLBACK);
     // After the eligibility check below, so a caller who may not preview the site
     // learns nothing about how it is set up.
     const previewOrigin = (): string => {
-      if (site.preview) return site.preview
+      if (site.preview) return site.preview;
       throw new FolioError(
-        'conflict',
+        "conflict",
         `${site.name} has no preview origin yet, so its drafts cannot be shown anywhere. A platform admin sets one on the Sites screen.`,
-      )
-    }
+      );
+    };
 
     // `auth: 'open'`: every preview origin shows drafts to anyone (the spec's edge
     // cases), and there is no session to hang a grant on.
-    if (rt.auth.mode !== 'session') {
-      return new Response(null, { status: 302, headers: hopHeaders(`${previewOrigin()}${next}`) })
+    if (rt.auth.mode !== "session") {
+      return new Response(null, { status: 302, headers: hopHeaders(`${previewOrigin()}${next}`) });
     }
 
-    const actor = c.var.actor
+    const actor = c.var.actor;
     if (!actor) {
       // A browser navigation, so a sign-in page rather than a JSON 401, and back
       // here afterwards — with the scope segment `handle()` took off the path.
-      const back = `${rt.base}/~${scope}/site/start?next=${encodeURIComponent(next)}`
-      return c.redirect(`${rt.base}/login?next=${encodeURIComponent(back)}`)
+      const back = `${rt.base}/~${scope}/site/start?next=${encodeURIComponent(next)}`;
+      return c.redirect(`${rt.base}/login?next=${encodeURIComponent(back)}`);
     }
-    if (actor.kind !== 'user') {
-      throw new FolioError('forbidden', 'Previewing a site needs a signed-in browser.')
+    if (actor.kind !== "user") {
+      throw new FolioError("forbidden", "Previewing a site needs a signed-in browser.");
     }
     // The route's own check, because `withActor` deliberately made none (decision
     // 10's `reach: 'preview'`). Worded without the site's id in quotes: this is not
@@ -115,18 +115,18 @@ export function handoffRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // apart by exactly that.
     if (!previewEligible(actor.grants ?? { [ALL_SCOPES]: actor.role }, chain(registry, site.id))) {
       throw new FolioError(
-        'forbidden',
+        "forbidden",
         `Previewing ${site.name} needs a role on it, its group, or shared content.`,
-      )
+      );
     }
 
-    const origin = previewOrigin()
-    const minted = await mintGrantCode(c.var.bindings().db, { sessionId: actor.session }, site.id)
-    const target = new URL(`${origin}${rt.base}/site/enter`)
-    target.searchParams.set('code', minted.code)
-    target.searchParams.set('next', next)
-    return new Response(null, { status: 302, headers: hopHeaders(target.toString()) })
-  })
+    const origin = previewOrigin();
+    const minted = await mintGrantCode(c.var.bindings().db, { sessionId: actor.session }, site.id);
+    const target = new URL(`${origin}${rt.base}/site/enter`);
+    target.searchParams.set("code", minted.code);
+    target.searchParams.set("next", next);
+    return new Response(null, { status: 302, headers: hopHeaders(target.toString()) });
+  });
 
   /**
    * Steps 2 and 3, on the preview origin. The status gate admits this path in
@@ -135,39 +135,39 @@ export function handoffRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   // `requireAuthConfigured`: with `auth: 'open'` there are no grants to redeem, and
   // every preview origin already shows drafts.
-  app.get('/site/enter', requireAuthConfigured<Env>(rt), async (c) => {
-    const here = c.var.site
-    if (here?.surface !== 'preview') throw new FolioError('not_found', 'No such route')
-    const next = safeNext(c.req.query('next'), FALLBACK)
+  app.get("/site/enter", requireAuthConfigured<Env>(rt), async (c) => {
+    const here = c.var.site;
+    if (here?.surface !== "preview") throw new FolioError("not_found", "No such route");
+    const next = safeNext(c.req.query("next"), FALLBACK);
 
-    if (c.req.query('check') === '1') {
+    if (c.req.query("check") === "1") {
       // Presence, not validity: this asks whether the browser kept the cookie, and
       // what the grant is worth is `readGrant`'s, on the page itself.
-      if (readGrantCookie(c.req.header('cookie'))) {
-        return new Response(null, { status: 302, headers: hopHeaders(next) })
+      if (readGrantCookie(c.req.header("cookie"))) {
+        return new Response(null, { status: 302, headers: hopHeaders(next) });
       }
-      return withHopHeaders(grantBlockedPage(sites.admin))
+      return withHopHeaders(grantBlockedPage(sites.admin));
     }
 
-    const code = c.req.query('code')
-    if (!code) return c.notFound()
-    const grant = await consumeGrantCode(c.var.bindings().db, code, here.id)
+    const code = c.req.query("code");
+    if (!code) return c.notFound();
+    const grant = await consumeGrantCode(c.var.bindings().db, code, here.id);
     // Spent, expired, unknown, or another site's: the lapsed page, the same one a
     // dead share link gets, and the same reasoning — the reader's next move is to
     // go back to the editor, whichever it was.
-    if (!grant) return withHopHeaders(expiredLinkPage())
+    if (!grant) return withHopHeaders(expiredLinkPage());
 
-    const url = new URL(c.req.url)
-    const self = new URL(`${url.origin}${rt.base}/site/enter`)
-    self.searchParams.set('check', '1')
-    self.searchParams.set('next', next)
-    const headers = hopHeaders(self.toString())
+    const url = new URL(c.req.url);
+    const self = new URL(`${url.origin}${rt.base}/site/enter`);
+    self.searchParams.set("check", "1");
+    self.searchParams.set("next", next);
+    const headers = hopHeaders(self.toString());
     headers.set(
-      'set-cookie',
+      "set-cookie",
       serialiseGrantCookie(url, grant.token, (grant.expiresAt - Date.now()) / 1000),
-    )
-    return new Response(null, { status: 302, headers })
-  })
+    );
+    return new Response(null, { status: 302, headers });
+  });
 
-  return app
+  return app;
 }

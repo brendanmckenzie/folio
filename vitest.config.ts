@@ -1,5 +1,5 @@
-import { cloudflareTest } from '@cloudflare/vitest-pool-workers'
-import { defineConfig } from 'vitest/config'
+import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
+import { defineConfig } from "vitest/config";
 
 // Three test trees:
 //   test/unit/**            — pure logic, runs in Node (core/, admin models, preview render)
@@ -62,33 +62,33 @@ export default defineConfig({
     projects: [
       {
         test: {
-          name: 'unit',
-          environment: 'node',
-          include: ['test/unit/**/*.test.{ts,tsx}'],
-          exclude: ['test/unit/admin/render/**'],
+          name: "unit",
+          environment: "node",
+          include: ["test/unit/**/*.test.{ts,tsx}"],
+          exclude: ["test/unit/admin/render/**"],
         },
       },
       {
         test: {
-          name: 'render',
-          environment: 'happy-dom',
-          include: ['test/unit/admin/render/**/*.test.{ts,tsx}'],
-          setupFiles: ['./test/unit/admin/render/setup.ts'],
+          name: "render",
+          environment: "happy-dom",
+          include: ["test/unit/admin/render/**/*.test.{ts,tsx}"],
+          setupFiles: ["./test/unit/admin/render/setup.ts"],
         },
       },
       {
         plugins: [
           cloudflareTest({
-            main: './test/workers/worker.ts',
-            wrangler: { configPath: './test/workers/wrangler.jsonc' },
+            main: "./test/workers/worker.ts",
+            wrangler: { configPath: "./test/workers/wrangler.jsonc" },
           }),
         ],
         test: {
-          name: 'workers',
-          include: ['test/workers/**/*.test.{ts,tsx}'],
-          setupFiles: ['./test/workers/apply-schema.ts'],
+          name: "workers",
+          include: ["test/workers/**/*.test.{ts,tsx}"],
+          setupFiles: ["./test/workers/apply-schema.ts"],
         },
       },
     ],
   },
-})
+});

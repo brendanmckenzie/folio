@@ -32,7 +32,7 @@
  *    message and `described_at` is set either way, which is what stops a
  *    permanently failing asset being retried forever by a backlog walk.
  */
-import { type AssetFilter, type AssetTag, tagSlug } from '../core/assets'
+import { type AssetFilter, type AssetTag, tagSlug } from "../core/assets";
 import {
   type BulkFailure,
   type BulkRefusal,
@@ -41,9 +41,9 @@ import {
   type FilterSelection,
   readBulkCursor,
   writeBulkCursor,
-} from '../core/bulk'
-import { DEFAULT_SITE } from '../core/sites'
-import { isImageAsset } from '../core/values'
+} from "../core/bulk";
+import { DEFAULT_SITE } from "../core/sites";
+import { isImageAsset } from "../core/values";
 import {
   type AssetRow,
   assetById,
@@ -52,31 +52,31 @@ import {
   assetsMatching,
   countAssets,
   toAssetValue,
-} from './assets'
-import { listTags } from './asset-tags'
-import { bindChunks, type FolioDb } from './db'
-import { FolioError, rethrow } from './errors'
-import { clampText, SERVED_CONTENT_TYPES } from './validate'
-import type { DescribeInput, DescribeResult, FolioDescribe, FolioLogger } from './types'
+} from "./assets";
+import { listTags } from "./asset-tags";
+import { bindChunks, type FolioDb } from "./db";
+import { FolioError, rethrow } from "./errors";
+import { clampText, SERVED_CONTENT_TYPES } from "./validate";
+import type { DescribeInput, DescribeResult, FolioDescribe, FolioLogger } from "./types";
 
 /** In-flight model calls per batch when a host names none. */
-export const DEFAULT_DESCRIBE_CONCURRENCY = 4
+export const DEFAULT_DESCRIBE_CONCURRENCY = 4;
 
 /** The range `concurrency` is refused outside. A batch is *N model calls*, not
  * N D1 writes, and a Worker has a wall-clock budget; past eight, a batch is more
  * likely to run out of it than to finish sooner. */
-export const MIN_DESCRIBE_CONCURRENCY = 1
-export const MAX_DESCRIBE_CONCURRENCY = 8
+export const MIN_DESCRIBE_CONCURRENCY = 1;
+export const MAX_DESCRIBE_CONCURRENCY = 8;
 
 /** `DescribeResult.alt`, matching `AssetPatchBody.alt`. */
-export const MAX_DESCRIBE_ALT = 500
+export const MAX_DESCRIBE_ALT = 500;
 /** `DescribeResult.description`, matching `AssetPatchBody.description`. */
-export const MAX_DESCRIBE_DESCRIPTION = 2000
+export const MAX_DESCRIBE_DESCRIPTION = 2000;
 
 /** How many tags one result may apply. `MAX_ASSET_TAGS`'s fifty, and for its
  * reason: `addAssetTags` chunks its binds, so this bounds what a model can turn
  * into statements rather than the statements themselves. */
-export const MAX_DESCRIBE_TAGS = 50
+export const MAX_DESCRIBE_TAGS = 50;
 
 /**
  * How much of the vocabulary a prompt is handed.
@@ -85,11 +85,11 @@ export const MAX_DESCRIBE_TAGS = 50
  * 5,000 tags has a taxonomy problem no truncation here would fix. Five hundred
  * is `listTags`' own ceiling and far past what an editor curates by hand.
  */
-export const MAX_PROMPT_TAGS = 500
+export const MAX_PROMPT_TAGS = 500;
 
 /** How much of a failure is kept. Long enough to name a provider's own error,
  * short enough that a stack trace cannot become the column. */
-export const MAX_DESCRIBE_ERROR = 500
+export const MAX_DESCRIBE_ERROR = 500;
 
 /**
  * `FolioConfig.describe`, validated, with the two defaults applied — or null for
@@ -101,14 +101,14 @@ export const MAX_DESCRIBE_ERROR = 500
  * the host's own `bindings` accessor gets.
  */
 export interface ResolvedDescribe {
-  config: FolioDescribe<unknown>
+  config: FolioDescribe<unknown>;
   /** `config.concurrency`, defaulted. */
-  concurrency: number
+  concurrency: number;
   /** `config.onUpload`, defaulted to true. */
-  onUpload: boolean
+  onUpload: boolean;
 }
 
-const KEYS = ['fn', 'onUpload', 'concurrency']
+const KEYS = ["fn", "onUpload", "concurrency"];
 
 /**
  * Construction-time validation, alongside `validateGate` and `validateHooks` and
@@ -123,21 +123,21 @@ const KEYS = ['fn', 'onUpload', 'concurrency']
 export function validateDescribe<Env>(
   describe: FolioDescribe<Env> | undefined,
 ): ResolvedDescribe | null {
-  if (!describe) return null
+  if (!describe) return null;
 
   for (const key of Object.keys(describe)) {
     if (!KEYS.includes(key)) {
-      throw new Error(`folio: unknown \`describe\` key "${key}" (valid: ${KEYS.join(', ')})`)
+      throw new Error(`folio: unknown \`describe\` key "${key}" (valid: ${KEYS.join(", ")})`);
     }
   }
-  if (typeof describe.fn !== 'function') {
-    throw new Error('folio: `describe.fn` must be a function — the host makes the model call')
+  if (typeof describe.fn !== "function") {
+    throw new Error("folio: `describe.fn` must be a function — the host makes the model call");
   }
-  if (describe.onUpload !== undefined && typeof describe.onUpload !== 'boolean') {
-    throw new Error('folio: `describe.onUpload` must be true or false')
+  if (describe.onUpload !== undefined && typeof describe.onUpload !== "boolean") {
+    throw new Error("folio: `describe.onUpload` must be true or false");
   }
 
-  const concurrency = describe.concurrency ?? DEFAULT_DESCRIBE_CONCURRENCY
+  const concurrency = describe.concurrency ?? DEFAULT_DESCRIBE_CONCURRENCY;
   if (
     !Number.isInteger(concurrency) ||
     concurrency < MIN_DESCRIBE_CONCURRENCY ||
@@ -145,14 +145,14 @@ export function validateDescribe<Env>(
   ) {
     throw new Error(
       `folio: \`describe.concurrency\` is ${JSON.stringify(describe.concurrency)}; it must be a whole number from ${MIN_DESCRIBE_CONCURRENCY} to ${MAX_DESCRIBE_CONCURRENCY}`,
-    )
+    );
   }
 
   return {
     config: describe as FolioDescribe<unknown>,
     concurrency,
     onUpload: describe.onUpload !== false,
-  }
+  };
 }
 
 /**
@@ -170,12 +170,12 @@ export function validateDescribe<Env>(
  * original is described and it costs more (`media-library.md`'s edge cases).
  */
 export interface DescribeDeps {
-  db: FolioDb
-  media: R2Bucket
-  images?: ImagesBinding | undefined
-  assetBase: string
-  describe: ResolvedDescribe
-  env: unknown
+  db: FolioDb;
+  media: R2Bucket;
+  images?: ImagesBinding | undefined;
+  assetBase: string;
+  describe: ResolvedDescribe;
+  env: unknown;
   /**
    * Optional, and unlike `bulk.ts`'s `BulkDeps` it gets no free ride from
    * `rt.publishDeps`: every call site (`routes/assets.ts`, `routes/api/index.ts`)
@@ -184,7 +184,7 @@ export interface DescribeDeps {
    * pre-`logger` behaviour, and a test assembling deps by hand should not have
    * to supply a sink to get it.
    */
-  logger?: FolioLogger
+  logger?: FolioLogger;
   /**
    * The deployment has `sites` (`multi-site.md` decision 3): a tag is one scope's, an
    * asset may only carry its own scope's, and so the vocabulary a model is offered is
@@ -192,7 +192,7 @@ export interface DescribeDeps {
    * Absent on a single-site deployment, where there is one vocabulary and nothing
    * extra is read.
    */
-  scoped?: boolean
+  scoped?: boolean;
   /**
    * On a deployment with `brands` (`multi-brand.md` decision 16): the scopes of
    * the brand whose `describe` this is. A run counts, walks and describes only
@@ -201,7 +201,7 @@ export interface DescribeDeps {
    * and the count an admin confirmed is the count acted on. Absent is every scope,
    * the platform tier's run on a deployment with one brand.
    */
-  scopes?: readonly string[]
+  scopes?: readonly string[];
 }
 
 /** What one asset's attempt did. Every field is aggregable, because phase 7's
@@ -209,17 +209,17 @@ export interface DescribeDeps {
 export interface DescribeOutcome {
   /** The row as stored afterwards — machine columns, `describedAt` and
    * `describeError` all as a re-read would find them. */
-  row: AssetRow
+  row: AssetRow;
   /** Skipped without calling `fn`, and therefore without cost: a non-image.
    * `describedAt` is still set, so it leaves the backlog rather than being
    * offered forever. */
-  skipped: boolean
+  skipped: boolean;
   /** Tag slugs the model chose that existed, and are now on the asset. */
-  tagged: string[]
+  tagged: string[];
   /** Answers that matched no existing slug and were dropped (decision 11). */
-  tagsIgnored: number
+  tagsIgnored: number;
   /** A bounded failure message, or null. Stored, not thrown. */
-  error: string | null
+  error: string | null;
 }
 
 /**
@@ -234,8 +234,8 @@ export async function describeVocabulary(db: FolioDb, site?: string): Promise<As
   const page = await listTags(db, {
     limit: MAX_PROMPT_TAGS,
     ...(site === undefined ? {} : { site }),
-  })
-  return page.rows
+  });
+  return page.rows;
 }
 
 /**
@@ -256,13 +256,13 @@ export function describeUrl(
   row: AssetRow,
   images: ImagesBinding | undefined,
 ): string {
-  const key = row.key.split('/').map(encodeURIComponent).join('/')
-  const src = `${assetBase.replace(/\/$/, '')}/${key}`
-  return images ? `${src}?w=${DESCRIBE_WIDTH}&f=webp` : src
+  const key = row.key.split("/").map(encodeURIComponent).join("/");
+  const src = `${assetBase.replace(/\/$/, "")}/${key}`;
+  return images ? `${src}?w=${DESCRIBE_WIDTH}&f=webp` : src;
 }
 
 /** One number, so the URL and the rendition `inline()` builds cannot disagree. */
-export const DESCRIBE_WIDTH = 512
+export const DESCRIBE_WIDTH = 512;
 
 /**
  * The bytes a provider is sent: a 512px WebP where `images` is bound, the stored
@@ -303,8 +303,8 @@ async function renditionOf(
   deps: DescribeDeps,
   row: AssetRow,
 ): Promise<{ media: string; bytes: ArrayBuffer }> {
-  const object = await deps.media.get(row.key)
-  if (!object) return { media: row.contentType, bytes: new ArrayBuffer(0) }
+  const object = await deps.media.get(row.key);
+  if (!object) return { media: row.contentType, bytes: new ArrayBuffer(0) };
 
   // SVG is deliberately absent from `SERVED_CONTENT_TYPES`: vector, so a resize
   // means nothing, and the Images binding has no business parsing it.
@@ -313,36 +313,36 @@ async function renditionOf(
       const result = await deps.images
         .input(object.body)
         .transform({ width: DESCRIBE_WIDTH })
-        .output({ format: 'image/webp' })
-      const bytes = await result.response().arrayBuffer()
+        .output({ format: "image/webp" });
+      const bytes = await result.response().arrayBuffer();
       // An empty result still arrives as a 200 — the same trap `serveAsset`
       // buffers to catch, and here it would be an image with no pixels in it.
-      if (bytes.byteLength === 0) throw new Error('Transform produced no output')
-      return { media: result.contentType(), bytes }
+      if (bytes.byteLength === 0) throw new Error("Transform produced no output");
+      return { media: result.contentType(), bytes };
     } catch (e) {
       // Both halves, because they reach different readers: the log keeps the
       // exception whole for whoever is tailing the Worker, and the throw carries
       // a bounded version of it to `describe_error` on the row. The size is
       // included because the binding's own message rarely names it, and 20MB is
       // the number that explains the failure.
-      const logger = deps.logger ?? console
-      logger.error(`folio: describe transform failed for ${row.key}`, e)
-      const detail = e instanceof Error ? e.message : String(e)
+      const logger = deps.logger ?? console;
+      logger.error(`folio: describe transform failed for ${row.key}`, e);
+      const detail = e instanceof Error ? e.message : String(e);
       throw new Error(
         `folio: the Images binding could not resize ${row.key} (${megabytes(row.size)}MB): ${detail}`,
-      )
+      );
     }
   }
 
   // The original: no binding to resize with, or a type there is no sense
   // resizing. Never a transform that failed — that throws above.
-  return { media: row.contentType, bytes: await object.arrayBuffer() }
+  return { media: row.contentType, bytes: await object.arrayBuffer() };
 }
 
 /** One decimal, because `Math.round` turns 5.4MB into "5MB, over the 5MB
  * limit" — a true sentence that reads like a bug. */
 function megabytes(bytes: number): string {
-  return (bytes / 1024 / 1024).toFixed(1)
+  return (bytes / 1024 / 1024).toFixed(1);
 }
 
 /**
@@ -362,30 +362,30 @@ function megabytes(bytes: number): string {
  * was not usable.
  */
 export function matchTags(
-  answered: DescribeResult['tags'],
+  answered: DescribeResult["tags"],
   vocabulary: readonly AssetTag[],
 ): { tags: AssetTag[]; ignored: number } {
-  if (!Array.isArray(answered)) return { tags: [], ignored: 0 }
+  if (!Array.isArray(answered)) return { tags: [], ignored: 0 };
 
-  const bySlug = new Map(vocabulary.map((tag) => [tag.slug, tag]))
-  const matched = new Map<string, AssetTag>()
-  const missed = new Set<string>()
+  const bySlug = new Map(vocabulary.map((tag) => [tag.slug, tag]));
+  const matched = new Map<string, AssetTag>();
+  const missed = new Set<string>();
 
   for (const raw of answered) {
-    const slug = typeof raw === 'string' ? tagSlug(raw) : ''
+    const slug = typeof raw === "string" ? tagSlug(raw) : "";
     // A non-string, or a string of punctuation: the model answered and it was
     // not usable, which is a drop rather than a silence. Keyed by what it
     // actually said so two spellings of one nonsense answer count once.
-    if (slug === '') {
-      missed.add(typeof raw === 'string' ? raw : JSON.stringify(raw))
-      continue
+    if (slug === "") {
+      missed.add(typeof raw === "string" ? raw : JSON.stringify(raw));
+      continue;
     }
-    const tag = bySlug.get(slug)
-    if (tag) matched.set(tag.id, tag)
-    else missed.add(slug)
+    const tag = bySlug.get(slug);
+    if (tag) matched.set(tag.id, tag);
+    else missed.add(slug);
   }
 
-  return { tags: [...matched.values()].slice(0, MAX_DESCRIBE_TAGS), ignored: missed.size }
+  return { tags: [...matched.values()].slice(0, MAX_DESCRIBE_TAGS), ignored: missed.size };
 }
 
 /**
@@ -411,16 +411,16 @@ export async function describeAsset(
   row: AssetRow,
   vocabulary?: readonly AssetTag[],
 ): Promise<DescribeOutcome> {
-  const { db } = deps
-  const now = Date.now()
+  const { db } = deps;
+  const now = Date.now();
 
   // A non-image costs nothing and is skipped before `fn` is reached: there is
   // nothing to look at, and a model asked to describe a PDF invents. It still
   // leaves the backlog, because "tried and there was nothing to do" and "never
   // tried" should not look the same to the walk that offers the next batch.
   if (!isImageAsset(toAssetValue(row))) {
-    await stamp(db, row.id, {}, now, null)
-    return { row: await reread(db, row), skipped: true, tagged: [], tagsIgnored: 0, error: null }
+    await stamp(db, row.id, {}, now, null);
+    return { row: await reread(db, row), skipped: true, tagged: [], tagsIgnored: 0, error: null };
   }
 
   // The asset's own scope's vocabulary on a deployment with `sites`: another scope's
@@ -431,7 +431,7 @@ export async function describeAsset(
     (await describeVocabulary(
       db,
       deps.scoped ? ((await assetSiteOf(db, row.id)) ?? undefined) : undefined,
-    ))
+    ));
   const input: DescribeInput = {
     id: row.id,
     filename: row.filename,
@@ -445,34 +445,34 @@ export async function describeAsset(
     // belongs and it is recorded either way.
     inline: () => renditionOf(deps, row),
     tags: tags.map((tag) => ({ id: tag.id, name: tag.name })),
-  }
+  };
 
-  let result: DescribeResult
+  let result: DescribeResult;
   try {
-    result = await deps.describe.config.fn(input, deps.env)
+    result = await deps.describe.config.fn(input, deps.env);
   } catch (e) {
-    const message = clampText(e instanceof Error ? e.message : String(e), MAX_DESCRIBE_ERROR)
-    const error = message || 'The describe function failed'
-    await stamp(db, row.id, {}, now, error)
-    return { row: await reread(db, row), skipped: false, tagged: [], tagsIgnored: 0, error }
+    const message = clampText(e instanceof Error ? e.message : String(e), MAX_DESCRIBE_ERROR);
+    const error = message || "The describe function failed";
+    await stamp(db, row.id, {}, now, error);
+    return { row: await reread(db, row), skipped: false, tagged: [], tagsIgnored: 0, error };
   }
 
   // Junk that did not throw. `fn`'s type says `DescribeResult`; a host's own
   // adapter forwarding a provider's JSON straight through does not, and a
   // `null` here would otherwise be a `TypeError` two lines below with a message
   // about property access rather than about the model.
-  if (!result || typeof result !== 'object') {
-    const error = 'The describe function did not return a result object'
-    await stamp(db, row.id, {}, now, error)
-    return { row: await reread(db, row), skipped: false, tagged: [], tagsIgnored: 0, error }
+  if (!result || typeof result !== "object") {
+    const error = "The describe function did not return a result object";
+    await stamp(db, row.id, {}, now, error);
+    return { row: await reread(db, row), skipped: false, tagged: [], tagsIgnored: 0, error };
   }
 
-  const alt = clampText(result.alt, MAX_DESCRIBE_ALT)
-  const description = clampText(result.description, MAX_DESCRIBE_DESCRIPTION)
-  const { tags: chosen, ignored } = matchTags(result.tags, tags)
+  const alt = clampText(result.alt, MAX_DESCRIBE_ALT);
+  const description = clampText(result.description, MAX_DESCRIBE_DESCRIPTION);
+  const { tags: chosen, ignored } = matchTags(result.tags, tags);
 
-  await stamp(db, row.id, { alt, description }, now, null)
-  if (chosen.length > 0) await addAssetTags(db, row.id, chosen)
+  await stamp(db, row.id, { alt, description }, now, null);
+  if (chosen.length > 0) await addAssetTags(db, row.id, chosen);
 
   return {
     row: await reread(db, row),
@@ -480,7 +480,7 @@ export async function describeAsset(
     tagged: chosen.map((tag) => tag.slug),
     tagsIgnored: ignored,
     error: null,
-  }
+  };
 }
 
 /**
@@ -498,22 +498,22 @@ async function stamp(
   at: number,
   error: string | null,
 ): Promise<void> {
-  const sets = ['described_at = ?', 'describe_error = ?']
-  const binds: unknown[] = [at, error]
+  const sets = ["described_at = ?", "describe_error = ?"];
+  const binds: unknown[] = [at, error];
   // Absent is *leave it alone*, not empty: a re-run answering only a description
   // must not clear the alt text the previous one produced.
   if (text.alt !== undefined) {
-    sets.push('alt_auto = ?')
-    binds.push(text.alt)
+    sets.push("alt_auto = ?");
+    binds.push(text.alt);
   }
   if (text.description !== undefined) {
-    sets.push('description_auto = ?')
-    binds.push(text.description)
+    sets.push("description_auto = ?");
+    binds.push(text.description);
   }
   await db
-    .prepare(`update assets set ${sets.join(', ')} where id = ?`)
+    .prepare(`update assets set ${sets.join(", ")} where id = ?`)
     .bind(...binds, id)
-    .run()
+    .run();
 }
 
 /**
@@ -538,18 +538,18 @@ async function addAssetTags(
         .prepare(
           `insert or ignore into asset_taggings (asset_id, tag_id)
            select a.id, t.id from assets a join asset_tags t on t.site_id = a.site_id
-            where a.id = ? and t.id in (${chunk.map(() => '?').join(', ')})`,
+            where a.id = ? and t.id in (${chunk.map(() => "?").join(", ")})`,
         )
         .bind(assetId, ...chunk.map((tag) => tag.id)),
     ),
-  )
+  );
 }
 
 /** The row after the write. Falls back to what was passed in only if the asset
  * was deleted mid-describe, which is a real race and not worth a 404 for: the
  * caller asked what happened, and what happened is recorded. */
 async function reread(db: FolioDb, row: AssetRow): Promise<AssetRow> {
-  return (await assetById(db, row.id)) ?? row
+  return (await assetById(db, row.id)) ?? row;
 }
 
 /* -------------------------------------------------------------------- run --- */
@@ -565,8 +565,8 @@ async function reread(db: FolioDb, row: AssetRow): Promise<AssetRow> {
  * at all — the caller cannot even tell how far it got, because the cursor rides
  * on the response.
  */
-export const DEFAULT_DESCRIBE_BATCH = 10
-export const MAX_DESCRIBE_BATCH = 25
+export const DEFAULT_DESCRIBE_BATCH = 10;
+export const MAX_DESCRIBE_BATCH = 25;
 
 /**
  * What one call of a run did.
@@ -584,24 +584,24 @@ export const MAX_DESCRIBE_BATCH = 25
  * path too, which is what stops a permanently failing asset being offered
  * forever.
  */
-export interface DescribeRunReport extends BulkReport<'describe'> {
+export interface DescribeRunReport extends BulkReport<"describe"> {
   /** Rows that **cost nothing**: a non-image is skipped before `fn` is reached.
    * Counted in `done` as well, because the run did account for them. */
-  skipped: number
+  skipped: number;
   /** Tag answers that matched no existing slug, summed over this call
    * (decision 11). A host whose prompt keeps proposing `product-shot` finds out
    * here rather than by wondering why the filter never has it. */
-  tagsIgnored: number
+  tagsIgnored: number;
 }
 
-export type DescribeRunOutcome = DescribeRunReport | BulkRefusal
+export type DescribeRunOutcome = DescribeRunReport | BulkRefusal;
 
 export interface DescribeRunOptions {
   /** Rows per call. Defaulted and clamped to `MAX_DESCRIBE_BATCH`, which is
    * much lower than a bulk write's for the reason above. */
-  batch?: number
+  batch?: number;
   /** The previous call's `continueFrom`. An opaque `(id, seen)` pair, not an id. */
-  continueFrom?: string | null
+  continueFrom?: string | null;
   /**
    * Answers what the run *would* do and **calls `fn` exactly zero times**.
    *
@@ -610,7 +610,7 @@ export interface DescribeRunOptions {
    * out would be answering it by spending it. It reads rows, counts the
    * non-images that would be free, and writes nothing.
    */
-  dryRun?: boolean
+  dryRun?: boolean;
 }
 
 /**
@@ -654,13 +654,13 @@ export async function runDescribe(
   selection: BulkSelection<AssetFilter>,
   opts: DescribeRunOptions = {},
 ): Promise<DescribeRunOutcome> {
-  const { db } = deps
-  const dryRun = opts.dryRun === true
+  const { db } = deps;
+  const dryRun = opts.dryRun === true;
   const batch = Math.min(
     Math.max(Math.trunc(opts.batch ?? DEFAULT_DESCRIBE_BATCH), 1),
     MAX_DESCRIBE_BATCH,
-  )
-  const resume = opts.continueFrom ? readCursor(opts.continueFrom) : null
+  );
+  const resume = opts.continueFrom ? readCursor(opts.continueFrom) : null;
 
   // Before the ceiling check, matching `runAssetBulk`: a cursor that disagrees
   // with the list it was issued against is a client bug whatever the arithmetic
@@ -668,15 +668,15 @@ export async function runDescribe(
   // left to do" for it.
   if (!selection.all && resume !== null && selection.ids[resume.seen - 1] !== resume.after) {
     throw new FolioError(
-      'bad_request',
-      'The selection changed between batches. Start the run again.',
-    )
+      "bad_request",
+      "The selection changed between batches. Start the run again.",
+    );
   }
 
   const total = selection.all
     ? Math.max(selection.expected - (selection.exclude?.length ?? 0), 0)
-    : selection.ids.length
-  const seen = resume?.seen ?? 0
+    : selection.ids.length;
+  const seen = resume?.seen ?? 0;
 
   // Once, at the start of the job — never on a resumed call (`bulk-writes.md`
   // decision 3). It confirms *intent* over a set somebody read a number for; a
@@ -686,14 +686,14 @@ export async function runDescribe(
     // Every scope's: this run is the platform tier's (`ADMIN`), deployment-wide by
     // design, and the one reader that asks for `null` explicitly — bounded to the
     // brand's scopes on a deployment with `brands`, where the `fn` is a brand's.
-    const actual = await countAssets(db, selection.filter, deps.scopes ?? null)
+    const actual = await countAssets(db, selection.filter, deps.scopes ?? null);
     if (actual !== selection.expected) {
-      return { refused: 'count', expected: selection.expected, actual }
+      return { refused: "count", expected: selection.expected, actual };
     }
   }
 
   const report: DescribeRunReport = {
-    action: 'describe',
+    action: "describe",
     done: 0,
     failed: [],
     total,
@@ -702,17 +702,17 @@ export async function runDescribe(
     dryRun,
     skipped: 0,
     tagsIgnored: 0,
-  }
+  };
 
   // The ceiling. A job that has consumed everything it agreed to is finished
   // even if the filter still matches rows: those are files nobody agreed to
   // spend money on.
-  const allowance = total - seen
-  if (allowance <= 0) return report
+  const allowance = total - seen;
+  if (allowance <= 0) return report;
 
   const { rows, consumed, exhausted, last } = selection.all
     ? await filterBatch(db, selection, resume?.after ?? null, batch, allowance, deps.scopes)
-    : await idBatch(db, selection.ids, seen, Math.min(batch, allowance), deps.scopes)
+    : await idBatch(db, selection.ids, seen, Math.min(batch, allowance), deps.scopes);
 
   /**
    * **Once per call, and passed into every `describeAsset`.** `describeAsset`
@@ -722,69 +722,69 @@ export async function runDescribe(
    * Not read at all on a dry run: nothing consumes it, and a dry run is the
    * call that is meant to be free.
    */
-  const single = dryRun || deps.scoped ? [] : await describeVocabulary(db)
+  const single = dryRun || deps.scoped ? [] : await describeVocabulary(db);
   // With `sites`, one read per scope the batch touches, each memoised as a promise so
   // concurrent rows of one scope share it.
-  const perScope = new Map<string, Promise<AssetTag[]>>()
+  const perScope = new Map<string, Promise<AssetTag[]>>();
   const vocabularyOf = async (row: AssetRow): Promise<readonly AssetTag[]> => {
-    if (!deps.scoped) return single
-    const site = (await assetSiteOf(db, row.id)) ?? DEFAULT_SITE
-    let read = perScope.get(site)
+    if (!deps.scoped) return single;
+    const site = (await assetSiteOf(db, row.id)) ?? DEFAULT_SITE;
+    let read = perScope.get(site);
     if (!read) {
-      read = describeVocabulary(db, site)
-      perScope.set(site, read)
+      read = describeVocabulary(db, site);
+      perScope.set(site, read);
     }
-    return read
-  }
+    return read;
+  };
 
-  const slots: (Slot | null)[] = new Array(rows.length).fill(null)
+  const slots: (Slot | null)[] = new Array(rows.length).fill(null);
   await inFlight(rows.length, deps.describe.concurrency, async (at) => {
-    const row = rows[at] ?? null
+    const row = rows[at] ?? null;
     if (row === null) {
       // An id an explicit selection named and D1 no longer has. Unlike a bulk
       // delete, there is no reading of this under which the job got what it
       // asked for.
       slots[at] = {
-        kind: 'failed',
-        failure: { id: idAt(selection, seen + at), title: '', message: 'No such file' },
-      }
-      return
+        kind: "failed",
+        failure: { id: idAt(selection, seen + at), title: "", message: "No such file" },
+      };
+      return;
     }
     if (dryRun) {
       // `fn` is not reached, and the only question asked of the row is the free
       // one: would this have cost anything?
-      slots[at] = { kind: 'dry', skipped: !isImageAsset(toAssetValue(row)) }
-      return
+      slots[at] = { kind: "dry", skipped: !isImageAsset(toAssetValue(row)) };
+      return;
     }
     try {
       slots[at] = {
-        kind: 'done',
+        kind: "done",
         outcome: await describeAsset(deps, row, await vocabularyOf(row)),
-      }
+      };
     } catch (err) {
       // `describeAsset` records a model failure rather than throwing, so what
       // reaches here is D1 or R2 itself — and even that must not take the other
       // nine calls of the batch down with it.
       slots[at] = {
-        kind: 'failed',
+        kind: "failed",
         failure: { id: row.id, title: row.filename, message: reasonOf(err, deps.logger) },
-      }
+      };
     }
-  })
+  });
 
   for (const slot of slots) {
-    if (slot === null) continue
-    if (slot.kind === 'failed') {
-      report.failed.push(slot.failure)
-      continue
+    if (slot === null) continue;
+    if (slot.kind === "failed") {
+      report.failed.push(slot.failure);
+      continue;
     }
-    if (slot.kind === 'dry') {
-      report.done++
-      if (slot.skipped) report.skipped++
-      continue
+    if (slot.kind === "dry") {
+      report.done++;
+      if (slot.skipped) report.skipped++;
+      continue;
     }
-    const { outcome } = slot
-    report.tagsIgnored += outcome.tagsIgnored
+    const { outcome } = slot;
+    report.tagsIgnored += outcome.tagsIgnored;
     if (outcome.error !== null) {
       // Recorded on the row *and* named in the report. The asset has left the
       // backlog either way — `described_at` is stamped — so a retry is an
@@ -793,28 +793,28 @@ export async function runDescribe(
         id: outcome.row.id,
         title: outcome.row.filename,
         message: outcome.error,
-      })
-      continue
+      });
+      continue;
     }
-    report.done++
-    if (outcome.skipped) report.skipped++
+    report.done++;
+    if (outcome.skipped) report.skipped++;
   }
 
-  report.seen = seen + consumed
+  report.seen = seen + consumed;
   // `exhausted`, not `consumed < batch`: a filter batch drops the rows a
   // select-all ticked off *after* the read, so it can act on fewer rows than it
   // read and still have the whole rest of the table in front of it.
   report.continueFrom =
-    exhausted || report.seen >= total || last === null ? null : writeBulkCursor(last, report.seen)
-  return report
+    exhausted || report.seen >= total || last === null ? null : writeBulkCursor(last, report.seen);
+  return report;
 }
 
 /** One row's result, held by position so the report can be assembled in list
  * order however the concurrent calls actually finished. */
 type Slot =
-  | { kind: 'done'; outcome: DescribeOutcome }
-  | { kind: 'dry'; skipped: boolean }
-  | { kind: 'failed'; failure: BulkFailure }
+  | { kind: "done"; outcome: DescribeOutcome }
+  | { kind: "dry"; skipped: boolean }
+  | { kind: "failed"; failure: BulkFailure };
 
 /**
  * `count` positions, at most `limit` of them in flight.
@@ -835,15 +835,15 @@ async function inFlight(
   limit: number,
   job: (at: number) => Promise<void>,
 ): Promise<void> {
-  let next = 0
+  let next = 0;
   const workers = Array.from({ length: Math.max(Math.min(limit, count), 0) }, async () => {
     for (;;) {
-      const at = next++
-      if (at >= count) return
-      await job(at)
+      const at = next++;
+      if (at >= count) return;
+      await job(at);
     }
-  })
-  await Promise.all(workers)
+  });
+  await Promise.all(workers);
 }
 
 /**
@@ -859,10 +859,10 @@ async function inFlight(
  */
 export async function describeOnUpload(deps: DescribeDeps, row: AssetRow): Promise<void> {
   try {
-    await describeAsset(deps, row)
+    await describeAsset(deps, row);
   } catch (e) {
-    const logger = deps.logger ?? console
-    logger.error('folio: describing an upload failed', e)
+    const logger = deps.logger ?? console;
+    logger.error("folio: describing an upload failed", e);
   }
 }
 
@@ -873,16 +873,16 @@ export async function describeOnUpload(deps: DescribeDeps, row: AssetRow): Promi
  * `asset-bulk.ts`'s `Batch`, and it means the same thing here.
  */
 interface Batch {
-  rows: (AssetRow | null)[]
+  rows: (AssetRow | null)[];
   /** How much of the ceiling this batch used. Not the number of rows read, for
    * a filter batch that dropped exclusions. */
-  consumed: number
+  consumed: number;
   /** Whether the walk has reached the end of what it can read. Reported by the
    * batch rather than inferred, because the two branches are asked for
    * different limits and only they know what they asked for. */
-  exhausted: boolean
+  exhausted: boolean;
   /** The id to resume after, or null when there is nothing left. */
-  last: string | null
+  last: string | null;
 }
 
 /**
@@ -901,16 +901,16 @@ async function filterBatch(
   allowance: number,
   scopes: readonly string[] | undefined,
 ): Promise<Batch> {
-  const rows = await assetsMatching(db, selection.filter, { limit, after, scope: scopes ?? null })
-  const excluded = new Set(selection.exclude ?? [])
-  const kept = excluded.size === 0 ? rows : rows.filter((row) => !excluded.has(row.id))
-  const acting = kept.length > allowance ? kept.slice(0, allowance) : kept
+  const rows = await assetsMatching(db, selection.filter, { limit, after, scope: scopes ?? null });
+  const excluded = new Set(selection.exclude ?? []);
+  const kept = excluded.size === 0 ? rows : rows.filter((row) => !excluded.has(row.id));
+  const acting = kept.length > allowance ? kept.slice(0, allowance) : kept;
   return {
     rows: acting,
     consumed: acting.length,
     exhausted: rows.length < limit,
     last: rows.at(-1)?.id ?? null,
-  }
+  };
 }
 
 /**
@@ -925,27 +925,27 @@ async function idBatch(
   limit: number,
   scopes: readonly string[] | undefined,
 ): Promise<Batch> {
-  const slice = ids.slice(seen, seen + limit)
-  const found = new Map((await assetsFor(db, slice, scopes ?? null)).map((row) => [row.id, row]))
+  const slice = ids.slice(seen, seen + limit);
+  const found = new Map((await assetsFor(db, slice, scopes ?? null)).map((row) => [row.id, row]));
   return {
     rows: slice.map((id) => found.get(id) ?? null),
     consumed: slice.length,
     exhausted: slice.length < limit,
     last: slice.at(-1) ?? null,
-  }
+  };
 }
 
 /** The id at a job position, for a failure that has no row to name itself with. */
 function idAt(selection: BulkSelection<AssetFilter>, position: number): string {
-  return selection.all ? '' : (selection.ids[position] ?? '')
+  return selection.all ? "" : (selection.ids[position] ?? "");
 }
 
 /** `core/bulk.ts`'s codec, with this module's refusal for a cursor that is not
  * one of ours. */
 function readCursor(raw: string): { after: string; seen: number } {
-  const at = readBulkCursor(raw)
-  if (!at) throw new FolioError('bad_request', 'Malformed pagination cursor')
-  return at
+  const at = readBulkCursor(raw);
+  if (!at) throw new FolioError("bad_request", "Malformed pagination cursor");
+  return at;
 }
 
 /** Why one file could not be described, as text that may travel — `runBulk`'s
@@ -955,10 +955,10 @@ function readCursor(raw: string): { after: string; seen: number } {
  * one in the log. */
 function reasonOf(err: unknown, logger: FolioLogger = console): string {
   try {
-    rethrow(err)
+    rethrow(err);
   } catch (translated) {
-    if (translated instanceof FolioError) return translated.message
+    if (translated instanceof FolioError) return translated.message;
   }
-  logger.error('folio: unreportable failure during a describe run', err)
-  return 'Something went wrong.'
+  logger.error("folio: unreportable failure during a describe run", err);
+  return "Something went wrong.";
 }

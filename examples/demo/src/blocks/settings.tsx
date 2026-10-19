@@ -1,4 +1,4 @@
-import { blocks, defineBlock, text, textarea } from 'folio/core'
+import { blocks, defineBlock, text, textarea } from "folio/core";
 
 /**
  * Root block for the `settings` **singleton** (`document-types.md` architecture
@@ -15,14 +15,14 @@ import { blocks, defineBlock, text, textarea } from 'folio/core'
  * (`ensureSingleton`).
  */
 export const settingsRoot = defineBlock({
-  name: 'settingsRoot',
-  label: 'Site settings',
-  summary: 'siteName',
+  name: "settingsRoot",
+  label: "Site settings",
+  summary: "siteName",
   fields: {
-    siteName: text({ label: 'Site name', default: 'Folio demo' }),
-    tagline: text({ label: 'Tagline', translatable: true }),
-    footerNote: textarea({ label: 'Footer note', rows: 2, translatable: true }),
-    footerLinks: blocks({ label: 'Footer links', allow: ['button'], max: 4 }),
+    siteName: text({ label: "Site name", default: "Folio demo" }),
+    tagline: text({ label: "Tagline", translatable: true }),
+    footerNote: textarea({ label: "Footer note", rows: 2, translatable: true }),
+    footerLinks: blocks({ label: "Footer links", allow: ["button"], max: 4 }),
   },
   render: ({ siteName, tagline, footerNote, footerLinks }) => (
     <footer className="settings">
@@ -32,4 +32,4 @@ export const settingsRoot = defineBlock({
       <nav className="settings__links">{footerLinks}</nav>
     </footer>
   ),
-})
+});

@@ -17,21 +17,21 @@
  * else as types only, so `core/schema.ts` can import `fieldValue` from here without
  * a cycle.
  */
-import type { Blok, Doc, Json } from './doc'
-import type { Field } from './fields'
-import { asRichtext, isRichtextEmpty } from './richtext'
-import type { BlockSchema, SchemaIndex } from './schema'
+import type { Blok, Doc, Json } from "./doc";
+import type { Field } from "./fields";
+import { asRichtext, isRichtextEmpty } from "./richtext";
+import type { BlockSchema, SchemaIndex } from "./schema";
 
 /** One language a site is available in. */
 export interface LocaleDef {
-  code: string
-  label: string
+  code: string;
+  label: string;
   /**
    * Which locale an untranslated field tries *before* the source. Absent means
    * straight to the source. A chain is followed to its end (see `localeChain`);
    * a cycle is refused at construction.
    */
-  fallback?: string
+  fallback?: string;
 }
 
 /**
@@ -46,8 +46,8 @@ export interface LocaleConfig {
    * migration (swap `data` with `i18n[new]`), not a config edit: nothing here
    * rewrites documents.
    */
-  default: string
-  available: readonly LocaleDef[]
+  default: string;
+  available: readonly LocaleDef[];
 }
 
 /**
@@ -60,8 +60,8 @@ export interface LocaleConfig {
  * locales at all.
  */
 export interface LocaleContext {
-  code: string
-  fallbacks: readonly string[]
+  code: string;
+  fallbacks: readonly string[];
 }
 
 /**
@@ -80,14 +80,14 @@ export interface LocaleContext {
  */
 export function fieldValue(blok: Blok, field: string, locale?: LocaleContext): Json | undefined {
   if (locale) {
-    const translated = blok.i18n?.[locale.code]?.[field]
-    if (translated !== undefined && translated !== null) return translated
+    const translated = blok.i18n?.[locale.code]?.[field];
+    if (translated !== undefined && translated !== null) return translated;
     for (const code of locale.fallbacks) {
-      const candidate = blok.i18n?.[code]?.[field]
-      if (candidate !== undefined && candidate !== null) return candidate
+      const candidate = blok.i18n?.[code]?.[field];
+      if (candidate !== undefined && candidate !== null) return candidate;
     }
   }
-  return blok.data[field]
+  return blok.data[field];
 }
 
 /**
@@ -101,20 +101,20 @@ export function fieldValue(blok: Blok, field: string, locale?: LocaleContext): J
  * single-locale site allocates nothing.
  */
 export function dataOf(blok: Blok, locale?: LocaleContext): Record<string, Json> {
-  if (!locale || !blok.i18n) return blok.data
-  const out: Record<string, Json> = { ...blok.data }
+  if (!locale || !blok.i18n) return blok.data;
+  const out: Record<string, Json> = { ...blok.data };
   // Weakest fallback first, so the nearest one and then the active locale win.
   for (let i = locale.fallbacks.length - 1; i >= 0; i--) {
-    layer(out, blok.i18n[locale.fallbacks[i]!])
+    layer(out, blok.i18n[locale.fallbacks[i]!]);
   }
-  layer(out, blok.i18n[locale.code])
-  return out
+  layer(out, blok.i18n[locale.code]);
+  return out;
 }
 
 function layer(out: Record<string, Json>, map: Record<string, Json> | undefined): void {
-  if (!map) return
+  if (!map) return;
   for (const [key, value] of Object.entries(map)) {
-    if (value !== null && value !== undefined) out[key] = value
+    if (value !== null && value !== undefined) out[key] = value;
   }
 }
 
@@ -128,22 +128,22 @@ function layer(out: Record<string, Json>, map: Record<string, Json> | undefined)
  * it unconditionally.
  */
 export function localeChain(config: LocaleConfig | undefined, code: string): string[] {
-  if (!config) return []
-  const out: string[] = []
-  const seen = new Set<string>([code])
-  let cursor = config.available.find((l) => l.code === code)?.fallback
+  if (!config) return [];
+  const out: string[] = [];
+  const seen = new Set<string>([code]);
+  let cursor = config.available.find((l) => l.code === code)?.fallback;
   while (cursor !== undefined && !seen.has(cursor)) {
-    seen.add(cursor)
-    out.push(cursor)
-    if (cursor === config.default) break
-    cursor = config.available.find((l) => l.code === cursor)?.fallback
+    seen.add(cursor);
+    out.push(cursor);
+    if (cursor === config.default) break;
+    cursor = config.available.find((l) => l.code === cursor)?.fallback;
   }
-  return out
+  return out;
 }
 
 /** True when `code` is one of the declared locales. */
 export function isKnownLocale(config: LocaleConfig | undefined, code: string | undefined): boolean {
-  return Boolean(config && code !== undefined && config.available.some((l) => l.code === code))
+  return Boolean(config && code !== undefined && config.available.some((l) => l.code === code));
 }
 
 /**
@@ -158,9 +158,9 @@ export function localeContext(
   config: LocaleConfig | undefined,
   code: string | undefined,
 ): LocaleContext | undefined {
-  if (!config || code === undefined || code === config.default) return undefined
-  if (!isKnownLocale(config, code)) return undefined
-  return { code, fallbacks: localeChain(config, code) }
+  if (!config || code === undefined || code === config.default) return undefined;
+  if (!isKnownLocale(config, code)) return undefined;
+  return { code, fallbacks: localeChain(config, code) };
 }
 
 /**
@@ -172,47 +172,47 @@ export function localeContext(
  * the wrong language.
  */
 export function validateLocales(locales: LocaleConfig | undefined): void {
-  if (!locales) return
-  const available = locales.available
+  if (!locales) return;
+  const available = locales.available;
   if (!Array.isArray(available) || available.length === 0) {
-    throw new Error('folio: `locales.available` is empty; declare at least one locale')
+    throw new Error("folio: `locales.available` is empty; declare at least one locale");
   }
 
-  const codes = new Set<string>()
+  const codes = new Set<string>();
   for (const locale of available) {
-    if (!locale.code) throw new Error('folio: a locale has no `code`')
-    if (codes.has(locale.code)) throw new Error(`folio: duplicate locale '${locale.code}'`)
-    codes.add(locale.code)
+    if (!locale.code) throw new Error("folio: a locale has no `code`");
+    if (codes.has(locale.code)) throw new Error(`folio: duplicate locale '${locale.code}'`);
+    codes.add(locale.code);
   }
   if (!codes.has(locales.default)) {
     throw new Error(
       `folio: locales.default '${locales.default}' is not one of the available locales`,
-    )
+    );
   }
 
   for (const locale of available) {
-    if (locale.fallback === undefined) continue
+    if (locale.fallback === undefined) continue;
     if (locale.fallback === locale.code) {
-      throw new Error(`folio: locale '${locale.code}' falls back to itself`)
+      throw new Error(`folio: locale '${locale.code}' falls back to itself`);
     }
     if (!codes.has(locale.fallback)) {
       throw new Error(
         `folio: locale '${locale.code}' falls back to '${locale.fallback}', which is not declared`,
-      )
+      );
     }
   }
 
   // Walks the config, never a document — the same shape `validatePresets`' and
   // `validateTypes`' cycle checks have.
   for (const locale of available) {
-    const path = [locale.code]
-    let cursor = locale.fallback
+    const path = [locale.code];
+    let cursor = locale.fallback;
     while (cursor !== undefined) {
       if (path.includes(cursor)) {
-        throw new Error(`folio: locale fallback cycle: ${[...path, cursor].join(' -> ')}`)
+        throw new Error(`folio: locale fallback cycle: ${[...path, cursor].join(" -> ")}`);
       }
-      path.push(cursor)
-      cursor = available.find((l) => l.code === cursor)?.fallback
+      path.push(cursor);
+      cursor = available.find((l) => l.code === cursor)?.fallback;
     }
   }
 }
@@ -233,24 +233,24 @@ export function validateLocales(locales: LocaleConfig | undefined): void {
  * compiles.
  */
 export function isTranslatable(field: Field): boolean {
-  if (field.kind === 'blocks' || field.kind === 'collection') return false
-  return field.translatable === true
+  if (field.kind === "blocks" || field.kind === "collection") return false;
+  return field.translatable === true;
 }
 
 /** A block's translatable fields, in declaration order. */
 export function translatableFields(def: BlockSchema | undefined): [string, Field][] {
-  if (!def) return []
-  return Object.entries(def.fields).filter(([, field]) => isTranslatable(field))
+  if (!def) return [];
+  return Object.entries(def.fields).filter(([, field]) => isTranslatable(field));
 }
 
 /** One field of one blok with nothing in `locale`. */
 export interface TranslationGap {
-  uid: string
+  uid: string;
   /** Block type, so a report can say "hero → heading" without the schema. */
-  type: string
-  field: string
+  type: string;
+  field: string;
   /** The field's own label, or its name when it declares none. */
-  label: string
+  label: string;
 }
 
 /**
@@ -265,10 +265,10 @@ export interface TranslationGap {
  * which is decision 5 again.
  */
 export interface TranslationStatus {
-  locale: string
-  total: number
-  translated: number
-  missing: TranslationGap[]
+  locale: string;
+  total: number;
+  translated: number;
+  missing: TranslationGap[];
 }
 
 export function translationStatus(
@@ -276,22 +276,23 @@ export function translationStatus(
   schema: SchemaIndex,
   locale: string,
 ): TranslationStatus {
-  let total = 0
-  let translated = 0
-  const missing: TranslationGap[] = []
+  let total = 0;
+  let translated = 0;
+  const missing: TranslationGap[] = [];
 
   for (const blok of Object.values(doc.bloks)) {
-    const def = schema[blok.type]
+    const def = schema[blok.type];
     for (const [name, field] of translatableFields(def)) {
-      if (isEmptySource(field, blok.data[name])) continue
-      total++
-      const value = blok.i18n?.[locale]?.[name]
-      if (value !== undefined && value !== null) translated++
-      else missing.push({ uid: blok.uid, type: blok.type, field: name, label: field.label ?? name })
+      if (isEmptySource(field, blok.data[name])) continue;
+      total++;
+      const value = blok.i18n?.[locale]?.[name];
+      if (value !== undefined && value !== null) translated++;
+      else
+        missing.push({ uid: blok.uid, type: blok.type, field: name, label: field.label ?? name });
     }
   }
 
-  return { locale, total, translated, missing }
+  return { locale, total, translated, missing };
 }
 
 /**
@@ -304,12 +305,12 @@ export function translationGaps(
   schema: SchemaIndex,
   config: LocaleConfig | undefined,
 ): TranslationStatus[] {
-  if (!config) return []
+  if (!config) return [];
   return config.available
     .filter((l) => l.code !== config.default)
     .map((l) => translationStatus(doc, schema, l.code))
     .filter((s) => s.missing.length > 0)
-    .sort((a, b) => b.missing.length - a.missing.length || a.locale.localeCompare(b.locale))
+    .sort((a, b) => b.missing.length - a.missing.length || a.locale.localeCompare(b.locale));
 }
 
 /**
@@ -318,9 +319,9 @@ export function translationGaps(
  * (including `false` and `0`) is real content.
  */
 function isEmptySource(field: Field, value: Json | undefined): boolean {
-  if (value === undefined || value === null) return true
-  if (field.kind === 'richtext') return isRichtextEmpty(asRichtext(value))
-  if (typeof value === 'string') return value.trim() === ''
-  if (Array.isArray(value)) return value.length === 0
-  return false
+  if (value === undefined || value === null) return true;
+  if (field.kind === "richtext") return isRichtextEmpty(asRichtext(value));
+  if (typeof value === "string") return value.trim() === "";
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
 }

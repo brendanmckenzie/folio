@@ -1,9 +1,9 @@
-import { useState } from 'react'
-import type { DocumentType, SchemaIndex } from '../../../core/schema'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { Field, Input } from '../Field'
-import css from './CreateDialog.module.css'
+import { useState } from "react";
+import type { DocumentType, SchemaIndex } from "../../../core/schema";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { Field, Input } from "../Field";
+import css from "./CreateDialog.module.css";
 import {
   type CreateBody,
   createBody,
@@ -14,7 +14,7 @@ import {
   refusalOf,
   slugFieldValue,
   slugOf,
-} from './create-model'
+} from "./create-model";
 
 /**
  * The name a document is created with — **collected before anything is written**.
@@ -53,43 +53,43 @@ export function CreateDialog({
   onClose,
   onCreate,
 }: {
-  type: DocumentType
+  type: DocumentType;
   /**
    * The block schema, for the title field's label. Optional because Content is
    * not currently handed one — its dialog then labels the field `Title`, which is
    * right for a page type and a guess for anything else.
    */
-  schema?: SchemaIndex
+  schema?: SchemaIndex;
   /** The page this is created under, when the caller knows one. Ignored for an
    * unrouted type, which cannot have a parent. */
-  parentId?: string | null
+  parentId?: string | null;
   /** That parent's stored path, for the path preview. Absent is the top level. */
-  parentPath?: string
+  parentPath?: string;
   /** The POST is in flight. Owned by the caller, which owns the fetch. */
-  pending: boolean
-  onClose: () => void
+  pending: boolean;
+  onClose: () => void;
   /** The finished body. The caller posts it and closes this on success — a failed
    * write leaves the dialog open with what was typed still in it. */
-  onCreate: (body: CreateBody) => void
+  onCreate: (body: CreateBody) => void;
 }) {
-  const form = createForm(type, schema)
-  const [draft, setDraft] = useState(EMPTY_DRAFT)
+  const form = createForm(type, schema);
+  const [draft, setDraft] = useState(EMPTY_DRAFT);
 
-  const refusal = refusalOf(form, draft)
+  const refusal = refusalOf(form, draft);
   const submit = () => {
-    const body = createBody(form, draft, parentId)
-    if (body) onCreate(body)
-  }
+    const body = createBody(form, draft, parentId);
+    if (body) onCreate(body);
+  };
 
-  const noun = type.label.toLowerCase()
+  const noun = type.label.toLowerCase();
 
   return (
     <Dialog
       title={`New ${noun}`}
       description={
         form.routed
-          ? 'Nothing is created until you press Create. The slug follows the name, and can be changed.'
-          : 'Nothing is created until you press Create.'
+          ? "Nothing is created until you press Create. The slug follows the name, and can be changed."
+          : "Nothing is created until you press Create."
       }
       onClose={onClose}
       actions={
@@ -98,7 +98,7 @@ export function CreateDialog({
           <Button
             variant="primary"
             disabled={pending || refusal !== undefined}
-            reason={pending ? 'Creating…' : refusal}
+            reason={pending ? "Creating…" : refusal}
             onClick={submit}
           >
             Create
@@ -112,8 +112,8 @@ export function CreateDialog({
       <form
         className={css.form}
         onSubmit={(e) => {
-          e.preventDefault()
-          if (!pending) submit()
+          e.preventDefault();
+          if (!pending) submit();
         }}
       >
         <Field label={form.nameLabel} required help={nameHelp(form, type, noun)}>
@@ -141,7 +141,7 @@ export function CreateDialog({
               <Input
                 id={id}
                 value={slugFieldValue(draft)}
-                placeholder={slugOf(draft) || 'page-slug'}
+                placeholder={slugOf(draft) || "page-slug"}
                 disabled={pending}
                 // `slugEdited` latches on the first keystroke here and never
                 // unlatches: a slug somebody chose must not be silently rewritten
@@ -155,7 +155,7 @@ export function CreateDialog({
         ) : null}
       </form>
     </Dialog>
-  )
+  );
 }
 
 /**
@@ -181,8 +181,8 @@ export function CreateDialog({
  */
 function nameHelp(form: CreateForm, type: DocumentType, noun: string): string | undefined {
   if (form.titleField) {
-    return `Saved as this ${noun}'s ${form.nameLabel.toLowerCase()}, and editable there afterwards.`
+    return `Saved as this ${noun}'s ${form.nameLabel.toLowerCase()}, and editable there afterwards.`;
   }
-  if (!form.titleFieldKnown) return undefined
-  return `${type.label} has no title field, so this names the row only.`
+  if (!form.titleFieldKnown) return undefined;
+  return `${type.label} has no title field, so this names the row only.`;
 }

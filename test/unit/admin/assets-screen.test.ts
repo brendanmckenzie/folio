@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest'
-import type { AssetSort } from '../../../src/core/assets'
-import { MAX_TAG_FILTER as SERVER_MAX_TAG_FILTER } from '../../../src/server/asset-tags'
-import { toAssetValue } from '../../../src/server/assets'
+import { describe, expect, it } from "vitest";
+import type { AssetSort } from "../../../src/core/assets";
+import { MAX_TAG_FILTER as SERVER_MAX_TAG_FILTER } from "../../../src/server/asset-tags";
+import { toAssetValue } from "../../../src/server/assets";
 import {
   addedAgo,
   ASSET_COLUMNS,
@@ -41,7 +41,7 @@ import {
   withFilter,
   withSort,
   withView,
-} from '../../../src/admin/ui/screens/assets-model'
+} from "../../../src/admin/ui/screens/assets-model";
 
 /**
  * The Assets screen's arithmetic, in Node with nothing mounted — the admin's
@@ -72,31 +72,31 @@ import {
  */
 
 const row = (extra: Partial<AssetRow> = {}): AssetRow => ({
-  id: 'ast_abc123',
-  key: 'ast_abc123-photo.jpg',
-  filename: 'photo.jpg',
-  contentType: 'image/jpeg',
+  id: "ast_abc123",
+  key: "ast_abc123-photo.jpg",
+  filename: "photo.jpg",
+  contentType: "image/jpeg",
   size: 204_800,
   width: 1200,
   height: 800,
-  alt: 'A photo',
+  alt: "A photo",
   createdAt: 1_700_000_000_000,
   folderId: null,
-  description: '',
-  altAuto: '',
-  descriptionAuto: '',
+  description: "",
+  altAuto: "",
+  descriptionAuto: "",
   describedAt: null,
   describeError: null,
   tags: [],
   ...extra,
-})
+});
 
 const url = (extra: Partial<AssetsUrl> = {}): AssetsUrl => ({
-  view: 'grid',
-  sort: 'created',
+  view: "grid",
+  sort: "created",
   dir: undefined,
-  kind: 'all',
-  q: '',
+  kind: "all",
+  q: "",
   folder: undefined,
   unfiled: false,
   tags: [],
@@ -105,142 +105,142 @@ const url = (extra: Partial<AssetsUrl> = {}): AssetsUrl => ({
   failed: false,
   asset: undefined,
   ...extra,
-})
+});
 
 /**
  * The three things that were reported broken on 2026-09-07, all of which were
  * unreachable from a test because they lived in `AssetBrowser.tsx` — the component
  * file no unit test mounts. They live in the model now, which is what these pin.
  */
-describe('the selection, as the wire carries it', () => {
-  const ticked = { all: false as const, ids: new Set(['ast_a', 'ast_b']) }
+describe("the selection, as the wire carries it", () => {
+  const ticked = { all: false as const, ids: new Set(["ast_a", "ast_b"]) };
   const captured = {
     all: true as const,
-    filter: { kind: 'image' as const },
+    filter: { kind: "image" as const },
     expected: 82,
     exclude: new Set<string>(),
-  }
+  };
 
-  it('sends ids for a ticked list, and conditions for a captured select-all', () => {
-    expect(selectionBody(ticked)).toEqual({ ids: ['ast_a', 'ast_b'] })
+  it("sends ids for a ticked list, and conditions for a captured select-all", () => {
+    expect(selectionBody(ticked)).toEqual({ ids: ["ast_a", "ast_b"] });
     expect(selectionBody(captured)).toEqual({
       all: true,
-      filter: { kind: 'image' },
+      filter: { kind: "image" },
       expected: 82,
-    })
-  })
+    });
+  });
 
   /** Omitted rather than sent as `[]`: the route's options are `v.strictObject`. */
-  it('omits an empty exclude', () => {
-    expect(selectionBody(captured)).not.toHaveProperty('exclude')
-    expect(selectionBody({ ...captured, exclude: new Set(['ast_c']) })).toMatchObject({
-      exclude: ['ast_c'],
-    })
-  })
+  it("omits an empty exclude", () => {
+    expect(selectionBody(captured)).not.toHaveProperty("exclude");
+    expect(selectionBody({ ...captured, exclude: new Set(["ast_c"]) })).toMatchObject({
+      exclude: ["ast_c"],
+    });
+  });
 
   /**
    * **The bug.** Every batched *Describe* answered `selection must be a JSON
    * object`, because the component posted the selection's own keys at the top level
    * and `AssetDescribeBody` reads `body.selection`. Nesting is the whole contract.
    */
-  it('nests the selection under `selection`, which is what the route parses', () => {
-    const body = describeBody(ticked, { dryRun: true })
-    expect(body).toEqual({ selection: { ids: ['ast_a', 'ast_b'] }, dryRun: true })
-    expect(body).not.toHaveProperty('ids')
-  })
+  it("nests the selection under `selection`, which is what the route parses", () => {
+    const body = describeBody(ticked, { dryRun: true });
+    expect(body).toEqual({ selection: { ids: ["ast_a", "ast_b"] }, dryRun: true });
+    expect(body).not.toHaveProperty("ids");
+  });
 
-  it('carries a cursor when the run has one, and nothing when it does not', () => {
-    expect(describeBody(ticked)).toEqual({ selection: { ids: ['ast_a', 'ast_b'] } })
-    expect(describeBody(ticked, { continueFrom: null })).not.toHaveProperty('continueFrom')
-    expect(describeBody(ticked, { continueFrom: 'cur_1' })).toMatchObject({
-      continueFrom: 'cur_1',
-    })
-  })
+  it("carries a cursor when the run has one, and nothing when it does not", () => {
+    expect(describeBody(ticked)).toEqual({ selection: { ids: ["ast_a", "ast_b"] } });
+    expect(describeBody(ticked, { continueFrom: null })).not.toHaveProperty("continueFrom");
+    expect(describeBody(ticked, { continueFrom: "cur_1" })).toMatchObject({
+      continueFrom: "cur_1",
+    });
+  });
 
   /** The backlog run narrows the *selection* and nothing else, and the count comes
    * in from the caller because it has to be recounted for the narrowed filter. */
-  it('narrows a captured select-all to the backlog, keeping what was ticked off', () => {
-    const backlog = backlogSelection({ ...captured, exclude: new Set(['ast_c']) }, 41)
+  it("narrows a captured select-all to the backlog, keeping what was ticked off", () => {
+    const backlog = backlogSelection({ ...captured, exclude: new Set(["ast_c"]) }, 41);
     expect(backlog).toEqual({
       all: true,
-      filter: { kind: 'image', undescribed: true },
+      filter: { kind: "image", undescribed: true },
       expected: 41,
-      exclude: ['ast_c'],
-    })
+      exclude: ["ast_c"],
+    });
     expect(describeBody(captured, { backlog, dryRun: true })).toEqual({
       selection: backlog,
       dryRun: true,
-    })
-  })
-})
+    });
+  });
+});
 
 /**
  * *Clear filters* used to be a patch written out by hand in the empty state, and it
  * was missing `failed` — so with the *Failed* chip on it cleared six things, left
  * the seventh, and answered the same empty list.
  */
-describe('NO_FILTERS', () => {
-  it('un-narrows a URL narrowed by any single filter', () => {
+describe("NO_FILTERS", () => {
+  it("un-narrows a URL narrowed by any single filter", () => {
     const narrowings: Partial<AssetsUrl>[] = [
-      { kind: 'image' },
-      { q: 'logo' },
-      { folder: 'clients/acme' },
+      { kind: "image" },
+      { q: "logo" },
+      { folder: "clients/acme" },
       { unfiled: true },
-      { tags: ['headshot'] },
+      { tags: ["headshot"] },
       { untagged: true },
       { undescribed: true },
       { failed: true },
-    ]
+    ];
     for (const narrowing of narrowings) {
-      const narrowed = url(narrowing)
-      expect(isNarrowed(narrowed)).toBe(true)
-      expect(isNarrowed(withFilter(narrowed, NO_FILTERS))).toBe(false)
+      const narrowed = url(narrowing);
+      expect(isNarrowed(narrowed)).toBe(true);
+      expect(isNarrowed(withFilter(narrowed, NO_FILTERS))).toBe(false);
     }
-  })
+  });
 
-  it('un-narrows a URL narrowed by all of them at once', () => {
+  it("un-narrows a URL narrowed by all of them at once", () => {
     const narrowed = url({
-      kind: 'image',
-      q: 'logo',
-      folder: 'clients/acme',
-      tags: ['headshot'],
+      kind: "image",
+      q: "logo",
+      folder: "clients/acme",
+      tags: ["headshot"],
       undescribed: true,
       failed: true,
-    })
-    expect(isNarrowed(withFilter(narrowed, NO_FILTERS))).toBe(false)
-  })
+    });
+    expect(isNarrowed(withFilter(narrowed, NO_FILTERS))).toBe(false);
+  });
 
   /** A filter is about the list; the open file is not part of it. */
-  it('leaves the open asset and the view alone', () => {
-    const cleared = withFilter(url({ q: 'logo', asset: 'ast_x', view: 'table' }), NO_FILTERS)
-    expect(cleared.asset).toBe('ast_x')
-    expect(cleared.view).toBe('table')
-  })
-})
+  it("leaves the open asset and the view alone", () => {
+    const cleared = withFilter(url({ q: "logo", asset: "ast_x", view: "table" }), NO_FILTERS);
+    expect(cleared.asset).toBe("ast_x");
+    expect(cleared.view).toBe("table");
+  });
+});
 
-describe('the URL model', () => {
-  it('falls back to the remembered view when the URL names none', () => {
-    expect(parseAssetsUrl({}, { view: 'table' }).view).toBe('table')
-    expect(parseAssetsUrl({ view: 'grid' }, { view: 'table' }).view).toBe('grid')
-  })
+describe("the URL model", () => {
+  it("falls back to the remembered view when the URL names none", () => {
+    expect(parseAssetsUrl({}, { view: "table" }).view).toBe("table");
+    expect(parseAssetsUrl({ view: "grid" }, { view: "table" }).view).toBe("grid");
+  });
 
-  it('ignores a view, sort, direction or kind it does not recognise', () => {
+  it("ignores a view, sort, direction or kind it does not recognise", () => {
     // The guard that matters: a remembered or hand-typed value must never be able to
     // assemble a request the route answers 400 to, which no amount of clicking would
     // then clear.
     const parsed = parseAssetsUrl(
-      { view: 'masonry', sort: 'colour', dir: 'sideways', kind: 'video' },
-      { view: 'grid' },
-    )
-    expect(parsed).toEqual(url())
-  })
+      { view: "masonry", sort: "colour", dir: "sideways", kind: "video" },
+      { view: "grid" },
+    );
+    expect(parsed).toEqual(url());
+  });
 
-  it('reads the open asset out of the query, and an empty one as none', () => {
-    expect(parseAssetsUrl({ asset: 'ast_x' }, { view: 'grid' }).asset).toBe('ast_x')
-    expect(parseAssetsUrl({ asset: '' }, { view: 'grid' }).asset).toBeUndefined()
-  })
+  it("reads the open asset out of the query, and an empty one as none", () => {
+    expect(parseAssetsUrl({ asset: "ast_x" }, { view: "grid" }).asset).toBe("ast_x");
+    expect(parseAssetsUrl({ asset: "" }, { view: "grid" }).asset).toBeUndefined();
+  });
 
-  it('leaves every default out of the URL', () => {
+  it("leaves every default out of the URL", () => {
     // `?view=grid&sort=created&dir=desc&kind=all` and the bare path are the same
     // screen, and only one of them is a link worth sending.
     expect(assetsQuery(url())).toEqual({
@@ -256,606 +256,606 @@ describe('the URL model', () => {
       undescribed: undefined,
       failed: undefined,
       asset: undefined,
-    })
-  })
+    });
+  });
 
-  it('writes what is not a default', () => {
+  it("writes what is not a default", () => {
     expect(
       assetsQuery(
         url({
-          view: 'table',
-          sort: 'size',
-          kind: 'image',
-          q: 'logo',
-          folder: 'clients/acme',
-          tags: ['headshot', 'archive'],
+          view: "table",
+          sort: "size",
+          kind: "image",
+          q: "logo",
+          folder: "clients/acme",
+          tags: ["headshot", "archive"],
         }),
       ),
     ).toEqual({
-      view: 'table',
-      sort: 'size',
+      view: "table",
+      sort: "size",
       // `size`'s own direction is descending, so it stays out even here.
       dir: undefined,
-      kind: 'image',
-      q: 'logo',
-      folder: 'clients/acme',
+      kind: "image",
+      q: "logo",
+      folder: "clients/acme",
       unfiled: undefined,
       // Comma-joined — the screen's own address bar cannot carry a repeated key
       // (`route.ts`'s `parseQuery`), unlike the request `assetsParams` builds.
-      tags: 'headshot,archive',
+      tags: "headshot,archive",
       untagged: undefined,
       undescribed: undefined,
       failed: undefined,
       asset: undefined,
-    })
-    expect(assetsQuery(url({ unfiled: true }))).toMatchObject({ folder: undefined, unfiled: '1' })
-    expect(assetsQuery(url({ untagged: true }))).toMatchObject({ tags: undefined, untagged: '1' })
-    expect(assetsQuery(url({ undescribed: true }))).toMatchObject({ undescribed: '1' })
-    expect(assetsQuery(url({ failed: true }))).toMatchObject({ failed: '1' })
-  })
+    });
+    expect(assetsQuery(url({ unfiled: true }))).toMatchObject({ folder: undefined, unfiled: "1" });
+    expect(assetsQuery(url({ untagged: true }))).toMatchObject({ tags: undefined, untagged: "1" });
+    expect(assetsQuery(url({ undescribed: true }))).toMatchObject({ undescribed: "1" });
+    expect(assetsQuery(url({ failed: true }))).toMatchObject({ failed: "1" });
+  });
 
-  it('round trips every screen state', () => {
+  it("round trips every screen state", () => {
     const states: AssetsUrl[] = [
       url(),
-      url({ view: 'table' }),
-      url({ sort: 'filename' }),
-      url({ sort: 'filename', dir: 'desc' }),
-      url({ sort: 'size', dir: 'asc' }),
-      url({ kind: 'application', q: 'invoice' }),
-      url({ asset: 'ast_x' }),
-      url({ folder: 'clients/acme' }),
+      url({ view: "table" }),
+      url({ sort: "filename" }),
+      url({ sort: "filename", dir: "desc" }),
+      url({ sort: "size", dir: "asc" }),
+      url({ kind: "application", q: "invoice" }),
+      url({ asset: "ast_x" }),
+      url({ folder: "clients/acme" }),
       url({ unfiled: true }),
-      url({ tags: ['headshot', 'archive'] }),
+      url({ tags: ["headshot", "archive"] }),
       url({ untagged: true }),
       url({ undescribed: true }),
       url({ failed: true }),
       // Both halves of the backlog split are exclusive with nothing, so every
       // combination has to survive the round trip — a folder's backlog, a
       // tag's failures, and the two halves together (an honest empty grid).
-      url({ undescribed: true, folder: 'clients/acme', kind: 'image', q: 'logo' }),
-      url({ undescribed: true, tags: ['headshot'] }),
-      url({ failed: true, folder: 'clients/acme', kind: 'image', q: 'logo' }),
-      url({ failed: true, tags: ['headshot'] }),
+      url({ undescribed: true, folder: "clients/acme", kind: "image", q: "logo" }),
+      url({ undescribed: true, tags: ["headshot"] }),
+      url({ failed: true, folder: "clients/acme", kind: "image", q: "logo" }),
+      url({ failed: true, tags: ["headshot"] }),
       url({ undescribed: true, failed: true }),
-    ]
+    ];
     for (const state of states) {
-      const written = assetsQuery(state)
-      const query: Record<string, string> = {}
+      const written = assetsQuery(state);
+      const query: Record<string, string> = {};
       for (const [key, value] of Object.entries(written))
-        if (value !== undefined) query[key] = value
-      expect(parseAssetsUrl(query, { view: DEFAULT_ASSET_VIEW })).toEqual(state)
+        if (value !== undefined) query[key] = value;
+      expect(parseAssetsUrl(query, { view: DEFAULT_ASSET_VIEW })).toEqual(state);
     }
-  })
+  });
 
-  it('knows a view name', () => {
-    expect(isAssetView('grid')).toBe(true)
-    expect(isAssetView('table')).toBe(true)
-    expect(isAssetView('list')).toBe(false)
-  })
-})
+  it("knows a view name", () => {
+    expect(isAssetView("grid")).toBe(true);
+    expect(isAssetView("table")).toBe(true);
+    expect(isAssetView("list")).toBe(false);
+  });
+});
 
-describe('sorting', () => {
-  it('gives each ordering the direction server/assets.ts gives it', () => {
+describe("sorting", () => {
+  it("gives each ordering the direction server/assets.ts gives it", () => {
     // `ORDERS` there is `created: NEWEST_FIRST`, `filename: asc`, `size: desc`. Two
     // statements of one fact, and this is the one that catches them drifting.
-    expect(naturalDir('created')).toBe('desc')
-    expect(naturalDir('filename')).toBe('asc')
-    expect(naturalDir('size')).toBe('desc')
-  })
+    expect(naturalDir("created")).toBe("desc");
+    expect(naturalDir("filename")).toBe("asc");
+    expect(naturalDir("size")).toBe("desc");
+  });
 
-  it('resolves the absent direction to the natural one', () => {
-    expect(dirOf(url({ sort: 'filename' }))).toBe('asc')
-    expect(dirOf(url({ sort: 'filename', dir: 'desc' }))).toBe('desc')
-  })
+  it("resolves the absent direction to the natural one", () => {
+    expect(dirOf(url({ sort: "filename" }))).toBe("asc");
+    expect(dirOf(url({ sort: "filename", dir: "desc" }))).toBe("desc");
+  });
 
-  it('flips the direction when the same ordering is chosen again', () => {
-    expect(withSort(url({ sort: 'filename' }), 'filename').dir).toBe('desc')
-    expect(withSort(url({ sort: 'filename', dir: 'desc' }), 'filename').dir).toBe('asc')
-  })
+  it("flips the direction when the same ordering is chosen again", () => {
+    expect(withSort(url({ sort: "filename" }), "filename").dir).toBe("desc");
+    expect(withSort(url({ sort: "filename", dir: "desc" }), "filename").dir).toBe("asc");
+  });
 
-  it('starts a different ordering at its own natural direction', () => {
+  it("starts a different ordering at its own natural direction", () => {
     // Reversed to Z→A, then asked for size: descending, which is largest first — not
     // the ascending the previous column was left on.
-    const reversed = url({ sort: 'filename', dir: 'desc' })
-    expect(withSort(reversed, 'size')).toMatchObject({ sort: 'size', dir: 'desc' })
-    const ascending = url({ sort: 'size', dir: 'asc' })
-    expect(withSort(ascending, 'filename')).toMatchObject({ sort: 'filename', dir: 'asc' })
-  })
+    const reversed = url({ sort: "filename", dir: "desc" });
+    expect(withSort(reversed, "size")).toMatchObject({ sort: "size", dir: "desc" });
+    const ascending = url({ sort: "size", dir: "asc" });
+    expect(withSort(ascending, "filename")).toMatchObject({ sort: "filename", dir: "asc" });
+  });
 
-  it('has a column for every ordering, and names which one is sorted', () => {
-    const sorts: AssetSort[] = ['created', 'filename', 'size']
+  it("has a column for every ordering, and names which one is sorted", () => {
+    const sorts: AssetSort[] = ["created", "filename", "size"];
     for (const sort of sorts) {
-      const column = ASSET_COLUMNS.find((c) => c.sort === sort)
-      expect(column, `no column sorts by ${sort}`).toBeDefined()
-      expect(sortColumnKey(url({ sort }))).toBe(column?.key)
+      const column = ASSET_COLUMNS.find((c) => c.sort === sort);
+      expect(column, `no column sorts by ${sort}`).toBeDefined();
+      expect(sortColumnKey(url({ sort }))).toBe(column?.key);
     }
-  })
-})
+  });
+});
 
-describe('the view toggle and the filters', () => {
-  it('keeps the filters across a view change', () => {
+describe("the view toggle and the filters", () => {
+  it("keeps the filters across a view change", () => {
     // The one place this toggle differs from Content's `[ Tree | Flat ]`, which clears
     // them: a grid and a table are two arrangements of one query, so a filter means
     // exactly the same thing in both.
-    const filtered = url({ kind: 'image', q: 'hero', asset: 'ast_x' })
-    expect(withView(filtered, 'table')).toEqual({ ...filtered, view: 'table' })
-  })
+    const filtered = url({ kind: "image", q: "hero", asset: "ast_x" });
+    expect(withView(filtered, "table")).toEqual({ ...filtered, view: "table" });
+  });
 
-  it('keeps the open asset across a filter change', () => {
+  it("keeps the open asset across a filter change", () => {
     // A filter is about the list; `asset` names a file. Closing the panel because
     // somebody typed in the search box throws away what they were reading.
-    const open = url({ asset: 'ast_x' })
-    expect(withFilter(open, { q: 'logo' })).toEqual({ ...open, q: 'logo' })
-    expect(withFilter(open, { kind: 'image' })).toEqual({ ...open, kind: 'image' })
-  })
+    const open = url({ asset: "ast_x" });
+    expect(withFilter(open, { q: "logo" })).toEqual({ ...open, q: "logo" });
+    expect(withFilter(open, { kind: "image" })).toEqual({ ...open, kind: "image" });
+  });
 
-  it('lets a folder win over unfiled, and unfiled win over a folder', () => {
+  it("lets a folder win over unfiled, and unfiled win over a folder", () => {
     // The pair the route refuses together (`assetFolderFilter`) — this screen must
     // never be able to write both, or the request the pager builds is the one that
     // 400s.
-    const filed = withFilter(url({ unfiled: true }), { folder: 'clients/acme' })
-    expect(filed).toMatchObject({ folder: 'clients/acme', unfiled: false })
-    const unfiled = withFilter(url({ folder: 'clients/acme' }), { unfiled: true })
-    expect(unfiled).toMatchObject({ folder: undefined, unfiled: true })
-  })
+    const filed = withFilter(url({ unfiled: true }), { folder: "clients/acme" });
+    expect(filed).toMatchObject({ folder: "clients/acme", unfiled: false });
+    const unfiled = withFilter(url({ folder: "clients/acme" }), { unfiled: true });
+    expect(unfiled).toMatchObject({ folder: undefined, unfiled: true });
+  });
 
-  it('lets tags win over untagged, and untagged win over tags', () => {
-    const tagged = withFilter(url({ untagged: true }), { tags: ['headshot'] })
-    expect(tagged).toMatchObject({ tags: ['headshot'], untagged: false })
-    const untagged = withFilter(url({ tags: ['headshot'] }), { untagged: true })
-    expect(untagged).toMatchObject({ tags: [], untagged: true })
-  })
+  it("lets tags win over untagged, and untagged win over tags", () => {
+    const tagged = withFilter(url({ untagged: true }), { tags: ["headshot"] });
+    expect(tagged).toMatchObject({ tags: ["headshot"], untagged: false });
+    const untagged = withFilter(url({ tags: ["headshot"] }), { untagged: true });
+    expect(untagged).toMatchObject({ tags: [], untagged: true });
+  });
 
-  it('clears nothing when the backlog is turned on, and is cleared by nothing', () => {
+  it("clears nothing when the backlog is turned on, and is cleared by nothing", () => {
     // The two exclusive pairs are exclusive because the route refuses them
     // together. `undescribed` is a clause the route composes with every other
     // one, so "the undescribed files in this folder carrying this tag" has to
     // survive being asked for — and turning a folder on must not silently drop
     // the backlog somebody was already looking at.
-    const narrowed = withFilter(url({ folder: 'clients/acme', tags: ['headshot'] }), {
+    const narrowed = withFilter(url({ folder: "clients/acme", tags: ["headshot"] }), {
       undescribed: true,
-    })
+    });
     expect(narrowed).toMatchObject({
-      folder: 'clients/acme',
-      tags: ['headshot'],
+      folder: "clients/acme",
+      tags: ["headshot"],
       undescribed: true,
-    })
-    expect(withFilter(url({ undescribed: true }), { folder: 'clients/acme' })).toMatchObject({
-      folder: 'clients/acme',
+    });
+    expect(withFilter(url({ undescribed: true }), { folder: "clients/acme" })).toMatchObject({
+      folder: "clients/acme",
       undescribed: true,
-    })
+    });
     expect(withFilter(url({ undescribed: true }), { untagged: true })).toMatchObject({
       untagged: true,
       undescribed: true,
-    })
-  })
+    });
+  });
 
-  it('clears nothing when `failed` is turned on, including `undescribed` — the two never contradict a route refusal, only each other', () => {
+  it("clears nothing when `failed` is turned on, including `undescribed` — the two never contradict a route refusal, only each other", () => {
     // `failed` is `undescribed`'s other half and gets the identical treatment:
     // exclusive with nothing the route refuses, so a folder, a tag or the
     // backlog chip all survive turning it on. It composes with `undescribed`
     // too — the pair can only ever match nothing (a row cannot be both never
     // attempted and attempted-and-failed), which is an honest empty answer
     // rather than one `withFilter` needs to prevent.
-    const narrowed = withFilter(url({ folder: 'clients/acme', tags: ['headshot'] }), {
+    const narrowed = withFilter(url({ folder: "clients/acme", tags: ["headshot"] }), {
       failed: true,
-    })
-    expect(narrowed).toMatchObject({ folder: 'clients/acme', tags: ['headshot'], failed: true })
-    expect(withFilter(url({ failed: true }), { folder: 'clients/acme' })).toMatchObject({
-      folder: 'clients/acme',
+    });
+    expect(narrowed).toMatchObject({ folder: "clients/acme", tags: ["headshot"], failed: true });
+    expect(withFilter(url({ failed: true }), { folder: "clients/acme" })).toMatchObject({
+      folder: "clients/acme",
       failed: true,
-    })
+    });
     expect(withFilter(url({ failed: true }), { undescribed: true })).toMatchObject({
       undescribed: true,
       failed: true,
-    })
-  })
+    });
+  });
 
-  it('tells an empty library from a filter that matches nothing', () => {
-    expect(isNarrowed(url())).toBe(false)
-    expect(isNarrowed(url({ q: '  ' }))).toBe(false)
-    expect(isNarrowed(url({ q: 'logo' }))).toBe(true)
-    expect(isNarrowed(url({ kind: 'image' }))).toBe(true)
-    expect(isNarrowed(url({ folder: 'clients/acme' }))).toBe(true)
-    expect(isNarrowed(url({ unfiled: true }))).toBe(true)
-    expect(isNarrowed(url({ tags: ['headshot'] }))).toBe(true)
-    expect(isNarrowed(url({ untagged: true }))).toBe(true)
-    expect(isNarrowed(url({ undescribed: true }))).toBe(true)
-    expect(isNarrowed(url({ failed: true }))).toBe(true)
-  })
-})
+  it("tells an empty library from a filter that matches nothing", () => {
+    expect(isNarrowed(url())).toBe(false);
+    expect(isNarrowed(url({ q: "  " }))).toBe(false);
+    expect(isNarrowed(url({ q: "logo" }))).toBe(true);
+    expect(isNarrowed(url({ kind: "image" }))).toBe(true);
+    expect(isNarrowed(url({ folder: "clients/acme" }))).toBe(true);
+    expect(isNarrowed(url({ unfiled: true }))).toBe(true);
+    expect(isNarrowed(url({ tags: ["headshot"] }))).toBe(true);
+    expect(isNarrowed(url({ untagged: true }))).toBe(true);
+    expect(isNarrowed(url({ undescribed: true }))).toBe(true);
+    expect(isNarrowed(url({ failed: true }))).toBe(true);
+  });
+});
 
-describe('the request', () => {
-  it('always states the ordering, and omits a filter that is not set', () => {
-    const params = assetsParams(url(), { limit: 48 })
-    expect(params.get('sort')).toBe('created')
-    expect(params.get('dir')).toBe('desc')
-    expect(params.get('limit')).toBe('48')
-    expect(params.get('kind')).toBeNull()
-    expect(params.get('q')).toBeNull()
-    expect(params.get('count')).toBeNull()
-    expect(params.get('cursor')).toBeNull()
-  })
+describe("the request", () => {
+  it("always states the ordering, and omits a filter that is not set", () => {
+    const params = assetsParams(url(), { limit: 48 });
+    expect(params.get("sort")).toBe("created");
+    expect(params.get("dir")).toBe("desc");
+    expect(params.get("limit")).toBe("48");
+    expect(params.get("kind")).toBeNull();
+    expect(params.get("q")).toBeNull();
+    expect(params.get("count")).toBeNull();
+    expect(params.get("cursor")).toBeNull();
+  });
 
-  it('carries the filter, the count and the cursor when asked', () => {
-    const params = assetsParams(url({ kind: 'image', q: ' logo ' }), {
+  it("carries the filter, the count and the cursor when asked", () => {
+    const params = assetsParams(url({ kind: "image", q: " logo " }), {
       limit: 48,
-      cursor: 'abc',
+      cursor: "abc",
       count: true,
-    })
-    expect(params.get('kind')).toBe('image')
+    });
+    expect(params.get("kind")).toBe("image");
     // Trimmed, so a trailing space from a paste is not a different query — and so the
     // cursor-resetting identity string does not change on a keystroke that changed
     // nothing.
-    expect(params.get('q')).toBe('logo')
-    expect(params.get('count')).toBe('1')
-    expect(params.get('cursor')).toBe('abc')
-  })
+    expect(params.get("q")).toBe("logo");
+    expect(params.get("count")).toBe("1");
+    expect(params.get("cursor")).toBe("abc");
+  });
 
-  it('never sends the open asset', () => {
+  it("never sends the open asset", () => {
     // It is a place on the screen, not a narrowing of the list.
-    expect(assetsParams(url({ asset: 'ast_x' }), { limit: 48 }).get('asset')).toBeNull()
-  })
+    expect(assetsParams(url({ asset: "ast_x" }), { limit: 48 }).get("asset")).toBeNull();
+  });
 
-  it('sends a folder or unfiled, never both', () => {
-    expect(assetsParams(url({ folder: 'clients/acme' }), { limit: 48 }).get('folder')).toBe(
-      'clients/acme',
-    )
-    expect(assetsParams(url({ unfiled: true }), { limit: 48 }).get('unfiled')).toBe('1')
-  })
+  it("sends a folder or unfiled, never both", () => {
+    expect(assetsParams(url({ folder: "clients/acme" }), { limit: 48 }).get("folder")).toBe(
+      "clients/acme",
+    );
+    expect(assetsParams(url({ unfiled: true }), { limit: 48 }).get("unfiled")).toBe("1");
+  });
 
   it("sends every tag repeated, not comma-joined — the route parses `queries('tags')`", () => {
-    const params = assetsParams(url({ tags: ['headshot', 'archive'] }), { limit: 48 })
-    expect(params.getAll('tags')).toEqual(['headshot', 'archive'])
-    expect(assetsParams(url({ untagged: true }), { limit: 48 }).get('untagged')).toBe('1')
-  })
+    const params = assetsParams(url({ tags: ["headshot", "archive"] }), { limit: 48 });
+    expect(params.getAll("tags")).toEqual(["headshot", "archive"]);
+    expect(assetsParams(url({ untagged: true }), { limit: 48 }).get("untagged")).toBe("1");
+  });
 
-  it('sends the backlog narrowing the list route parses', () => {
+  it("sends the backlog narrowing the list route parses", () => {
     // `?undescribed=1` has been parsed by `GET {base}/api/assets` since phase 7
     // and nothing on this screen could ask for it. The request and the address
     // bar are written by two functions, so both are asserted.
-    expect(assetsParams(url(), { limit: 48 }).get('undescribed')).toBeNull()
-    expect(assetsParams(url({ undescribed: true }), { limit: 48 }).get('undescribed')).toBe('1')
-  })
+    expect(assetsParams(url(), { limit: 48 }).get("undescribed")).toBeNull();
+    expect(assetsParams(url({ undescribed: true }), { limit: 48 }).get("undescribed")).toBe("1");
+  });
 
-  it('sends the failed narrowing the list route parses', () => {
+  it("sends the failed narrowing the list route parses", () => {
     // The other half of the same split, wired identically.
-    expect(assetsParams(url(), { limit: 48 }).get('failed')).toBeNull()
-    expect(assetsParams(url({ failed: true }), { limit: 48 }).get('failed')).toBe('1')
-  })
+    expect(assetsParams(url(), { limit: 48 }).get("failed")).toBeNull();
+    expect(assetsParams(url({ failed: true }), { limit: 48 }).get("failed")).toBe("1");
+  });
 
-  it('is identical with and without a cursor apart from the cursor', () => {
+  it("is identical with and without a cursor apart from the cursor", () => {
     // The property `useAssets` leans on: the request minus the cursor is the identity
     // that resets paging, so anything else changing has to change that string too.
-    const state = url({ kind: 'image', q: 'logo', sort: 'size' })
-    const withCursor = assetsParams(state, { limit: 48, cursor: 'abc', count: true })
-    withCursor.delete('cursor')
-    expect(withCursor.toString()).toBe(assetsParams(state, { limit: 48, count: true }).toString())
-  })
-})
+    const state = url({ kind: "image", q: "logo", sort: "size" });
+    const withCursor = assetsParams(state, { limit: 48, cursor: "abc", count: true });
+    withCursor.delete("cursor");
+    expect(withCursor.toString()).toBe(assetsParams(state, { limit: 48, count: true }).toString());
+  });
+});
 
-describe('the kind a field imposes', () => {
-  it('reads a single prefix out of an accept', () => {
-    expect(kindForAccept('image/*')).toBe('image')
-    expect(kindForAccept('image/png,image/webp')).toBe('image')
-    expect(kindForAccept(' IMAGE/PNG ')).toBe('image')
-    expect(kindForAccept('application/pdf')).toBe('application')
-  })
+describe("the kind a field imposes", () => {
+  it("reads a single prefix out of an accept", () => {
+    expect(kindForAccept("image/*")).toBe("image");
+    expect(kindForAccept("image/png,image/webp")).toBe("image");
+    expect(kindForAccept(" IMAGE/PNG ")).toBe("image");
+    expect(kindForAccept("application/pdf")).toBe("application");
+  });
 
-  it('imposes nothing when the accept is absent, mixed or unrepresentable', () => {
+  it("imposes nothing when the accept is absent, mixed or unrepresentable", () => {
     // `?kind=` is one content-type prefix, so a mixed accept is not expressible as
     // one — and imposing half of it would hide files the field can store.
-    expect(kindForAccept(undefined)).toBeUndefined()
-    expect(kindForAccept('')).toBeUndefined()
-    expect(kindForAccept('image/png,application/pdf')).toBeUndefined()
+    expect(kindForAccept(undefined)).toBeUndefined();
+    expect(kindForAccept("")).toBeUndefined();
+    expect(kindForAccept("image/png,application/pdf")).toBeUndefined();
     // `video` is a real prefix and no stored row can ever have it: `uploadAsset`
     // stores an allowlisted image type or `application/octet-stream`.
-    expect(kindForAccept('video/mp4')).toBeUndefined()
-  })
-})
+    expect(kindForAccept("video/mp4")).toBeUndefined();
+  });
+});
 
-describe('the organisation filters', () => {
-  it('agrees with the server bind budget it mirrors', () => {
+describe("the organisation filters", () => {
+  it("agrees with the server bind budget it mirrors", () => {
     // Duplicated rather than imported (`assetValue`'s reason: that module's
     // neighbour is a Worker module), so the agreement is asserted instead of
     // assumed — the same insurance `assetValue`'s own test buys.
-    expect(MAX_TAG_FILTER).toBe(SERVER_MAX_TAG_FILTER)
-  })
+    expect(MAX_TAG_FILTER).toBe(SERVER_MAX_TAG_FILTER);
+  });
 
-  it('toggles a tag slug on and off', () => {
-    expect(toggleTagFilter([], 'headshot')).toEqual(['headshot'])
-    expect(toggleTagFilter(['headshot'], 'headshot')).toEqual([])
-    expect(toggleTagFilter(['headshot'], 'archive')).toEqual(['headshot', 'archive'])
-  })
+  it("toggles a tag slug on and off", () => {
+    expect(toggleTagFilter([], "headshot")).toEqual(["headshot"]);
+    expect(toggleTagFilter(["headshot"], "headshot")).toEqual([]);
+    expect(toggleTagFilter(["headshot"], "archive")).toEqual(["headshot", "archive"]);
+  });
 
-  it('refuses a ninth tag rather than building a request the route would 400', () => {
-    const eight = Array.from({ length: MAX_TAG_FILTER }, (_, i) => `tag-${i}`)
-    expect(toggleTagFilter(eight, 'one-too-many')).toEqual(eight)
+  it("refuses a ninth tag rather than building a request the route would 400", () => {
+    const eight = Array.from({ length: MAX_TAG_FILTER }, (_, i) => `tag-${i}`);
+    expect(toggleTagFilter(eight, "one-too-many")).toEqual(eight);
     // Removing still works at the cap — the cap bounds growth, not the set itself.
-    expect(toggleTagFilter(eight, 'tag-0')).toEqual(eight.slice(1))
-  })
+    expect(toggleTagFilter(eight, "tag-0")).toEqual(eight.slice(1));
+  });
 
-  it('labels a tag with its count only when the list carries one', () => {
-    expect(tagChipLabel({ name: 'Headshot' })).toBe('Headshot')
-    expect(tagChipLabel({ name: 'Headshot', count: 0 })).toBe('Headshot (0)')
-    expect(tagChipLabel({ name: 'Headshot', count: 12 })).toBe('Headshot (12)')
-  })
+  it("labels a tag with its count only when the list carries one", () => {
+    expect(tagChipLabel({ name: "Headshot" })).toBe("Headshot");
+    expect(tagChipLabel({ name: "Headshot", count: 0 })).toBe("Headshot (0)");
+    expect(tagChipLabel({ name: "Headshot", count: 12 })).toBe("Headshot (12)");
+  });
 
   it("reads a folder's depth off its path, root at zero", () => {
-    expect(folderDepth({ path: 'clients' })).toBe(0)
-    expect(folderDepth({ path: 'clients/acme' })).toBe(1)
-    expect(folderDepth({ path: 'clients/acme/2026' })).toBe(2)
-  })
+    expect(folderDepth({ path: "clients" })).toBe(0);
+    expect(folderDepth({ path: "clients/acme" })).toBe(1);
+    expect(folderDepth({ path: "clients/acme/2026" })).toBe(2);
+  });
 
-  it('indents a folder name for an <option>, two non-breaking spaces per level', () => {
+  it("indents a folder name for an <option>, two non-breaking spaces per level", () => {
     // A regular space collapses in option text, which is the whole reason
     // `indentedFolderName` uses `\u00A0` rather than `' '` -- written as an
     // explicit escape here so this assertion does not depend on an invisible
     // character surviving a copy-paste.
-    const nbsp = '\u00A0'
-    expect(indentedFolderName({ path: 'clients', name: 'Clients' })).toBe('Clients')
-    expect(indentedFolderName({ path: 'clients/acme', name: 'Acme' })).toBe(`${nbsp}${nbsp}Acme`)
-    expect(indentedFolderName({ path: 'clients/acme/2026', name: '2026' })).toBe(
+    const nbsp = "\u00A0";
+    expect(indentedFolderName({ path: "clients", name: "Clients" })).toBe("Clients");
+    expect(indentedFolderName({ path: "clients/acme", name: "Acme" })).toBe(`${nbsp}${nbsp}Acme`);
+    expect(indentedFolderName({ path: "clients/acme/2026", name: "2026" })).toBe(
       `${nbsp}${nbsp}${nbsp}${nbsp}2026`,
-    )
-  })
-})
+    );
+  });
+});
 
-describe('what a tile and a cell read', () => {
-  it('shows bytes at a scale somebody reads', () => {
-    expect(humanSize(0)).toBe('0 B')
-    expect(humanSize(300)).toBe('300 B')
+describe("what a tile and a cell read", () => {
+  it("shows bytes at a scale somebody reads", () => {
+    expect(humanSize(0)).toBe("0 B");
+    expect(humanSize(300)).toBe("300 B");
     // The floor that matters: a 1KB-ish file must not read as taking no space.
-    expect(humanSize(1024)).toBe('1 kB')
-    expect(humanSize(204_800)).toBe('200 kB')
-    expect(humanSize(4 * 1024 * 1024)).toBe('4.0 MB')
-  })
+    expect(humanSize(1024)).toBe("1 kB");
+    expect(humanSize(204_800)).toBe("200 kB");
+    expect(humanSize(4 * 1024 * 1024)).toBe("4.0 MB");
+  });
 
-  it('has no dimensions for a file whose header could not be read', () => {
-    expect(dimensionsOf(row())).toBe('1200×800')
-    expect(dimensionsOf(row({ width: null, height: null }))).toBe('')
-    expect(dimensionsOf(row({ width: 1200, height: null }))).toBe('')
-  })
+  it("has no dimensions for a file whose header could not be read", () => {
+    expect(dimensionsOf(row())).toBe("1200×800");
+    expect(dimensionsOf(row({ width: null, height: null }))).toBe("");
+    expect(dimensionsOf(row({ width: 1200, height: null }))).toBe("");
+  });
 
-  it('labels a type by its extension, because the stored type is lossy', () => {
+  it("labels a type by its extension, because the stored type is lossy", () => {
     // A PDF, a zip and a font are all `application/octet-stream`, and `PDF` is what
     // somebody is scanning the column for.
-    expect(typeLabel(row({ filename: 'terms.pdf', contentType: 'application/octet-stream' }))).toBe(
-      'PDF',
-    )
-    expect(typeLabel(row())).toBe('JPG')
-    expect(typeLabel(row({ filename: 'noext', contentType: 'application/octet-stream' }))).toBe(
-      'octet-stream',
-    )
-  })
+    expect(typeLabel(row({ filename: "terms.pdf", contentType: "application/octet-stream" }))).toBe(
+      "PDF",
+    );
+    expect(typeLabel(row())).toBe("JPG");
+    expect(typeLabel(row({ filename: "noext", contentType: "application/octet-stream" }))).toBe(
+      "octet-stream",
+    );
+  });
 
-  it('reads an extension without mistaking a dotfile for one', () => {
-    expect(extensionOf('photo.jpg')).toBe('jpg')
-    expect(extensionOf('archive.tar.gz')).toBe('gz')
-    expect(extensionOf('.gitignore')).toBe('')
-    expect(extensionOf('noext')).toBe('')
-  })
+  it("reads an extension without mistaking a dotfile for one", () => {
+    expect(extensionOf("photo.jpg")).toBe("jpg");
+    expect(extensionOf("archive.tar.gz")).toBe("gz");
+    expect(extensionOf(".gitignore")).toBe("");
+    expect(extensionOf("noext")).toBe("");
+  });
 
-  it('calls an image renderable only when the stored type says so', () => {
-    expect(isRenderableImage(row())).toBe(true)
+  it("calls an image renderable only when the stored type says so", () => {
+    expect(isRenderableImage(row())).toBe(true);
     // An SVG that passed the upload sniff is stored as `image/svg+xml`, served
     // inline behind the sandbox CSP, and renders here.
-    expect(isRenderableImage(row({ filename: 'logo.svg', contentType: 'image/svg+xml' }))).toBe(
+    expect(isRenderableImage(row({ filename: "logo.svg", contentType: "image/svg+xml" }))).toBe(
       true,
-    )
+    );
     // The trap, which the filename cannot tell apart from the line above. This
     // `.svg` failed the sniff — HTML wearing the extension, say — so it is stored
     // as `application/octet-stream` and comes back as an attachment. It passes
     // `core/values.ts`'s `isImageAsset` on its filename alone, and an `<img>`
     // pointing at it renders nothing.
     expect(
-      isRenderableImage(row({ filename: 'logo.svg', contentType: 'application/octet-stream' })),
-    ).toBe(false)
+      isRenderableImage(row({ filename: "logo.svg", contentType: "application/octet-stream" })),
+    ).toBe(false);
     expect(
-      isRenderableImage(row({ filename: 'terms.pdf', contentType: 'application/octet-stream' })),
-    ).toBe(false)
-  })
+      isRenderableImage(row({ filename: "terms.pdf", contentType: "application/octet-stream" })),
+    ).toBe(false);
+  });
 
-  it('points every image through the transform route', () => {
+  it("points every image through the transform route", () => {
     // Never the original: a 4MB PNG must not be the 160px tile.
-    expect(thumbUrl('/folio', row(), 320)).toBe('/folio/asset/ast_abc123-photo.jpg?w=320&f=webp')
+    expect(thumbUrl("/folio", row(), 320)).toBe("/folio/asset/ast_abc123-photo.jpg?w=320&f=webp");
     // And the download link is the original, untransformed.
-    expect(originalUrl('/folio', row())).toBe('/folio/asset/ast_abc123-photo.jpg')
-  })
+    expect(originalUrl("/folio", row())).toBe("/folio/asset/ast_abc123-photo.jpg");
+  });
 
-  it('shows a relative stamp, coarsening as it ages', () => {
-    const now = 1_700_000_000_000
-    expect(addedAgo(now, now)).toBe('just now')
-    expect(addedAgo(now - 5 * 60_000, now)).toBe('5m ago')
-    expect(addedAgo(now - 3 * 3_600_000, now)).toBe('3h ago')
-    expect(addedAgo(now - 4 * 86_400_000, now)).toBe('4d ago')
+  it("shows a relative stamp, coarsening as it ages", () => {
+    const now = 1_700_000_000_000;
+    expect(addedAgo(now, now)).toBe("just now");
+    expect(addedAgo(now - 5 * 60_000, now)).toBe("5m ago");
+    expect(addedAgo(now - 3 * 3_600_000, now)).toBe("3h ago");
+    expect(addedAgo(now - 4 * 86_400_000, now)).toBe("4d ago");
     // Past a month a date beats a number of days nobody counts in.
-    expect(addedAgo(now - 200 * 86_400_000, now)).not.toMatch(/ago/)
-  })
-})
+    expect(addedAgo(now - 200 * 86_400_000, now)).not.toMatch(/ago/);
+  });
+});
 
-describe('the field value', () => {
-  it('agrees with the server toAssetValue it is a copy of', () => {
+describe("the field value", () => {
+  it("agrees with the server toAssetValue it is a copy of", () => {
     // The whole reason a copy is acceptable: `server/assets.ts` is a Worker module and
     // importing it into the admin bundle to reuse eight assignments is the wrong
     // trade, so the agreement is asserted instead of assumed.
     for (const subject of [
       row(),
       row({ width: null, height: null }),
-      row({ alt: '' }),
+      row({ alt: "" }),
       // Machine alt text, and a human's beating it: `toAssetValue` reads
       // `alt || altAuto` (media-library.md decision 9), and a copy that kept
       // only `alt` would drop every described asset's text at pick time — which
       // is invisible until somebody wonders why the run did nothing.
-      row({ alt: '', altAuto: 'A cyclist by a red brick wall' }),
-      row({ alt: 'Typed by hand', altAuto: 'Written by a model' }),
+      row({ alt: "", altAuto: "A cyclist by a red brick wall" }),
+      row({ alt: "Typed by hand", altAuto: "Written by a model" }),
       row({
-        filename: 'terms.pdf',
-        contentType: 'application/octet-stream',
+        filename: "terms.pdf",
+        contentType: "application/octet-stream",
         width: null,
         height: null,
       }),
     ]) {
-      expect(assetValue(subject)).toEqual(toAssetValue(subject))
+      expect(assetValue(subject)).toEqual(toAssetValue(subject));
     }
-  })
+  });
 
-  it('carries no focal point, because a row has none', () => {
+  it("carries no focal point, because a row has none", () => {
     // A focal point belongs to a *use* of a file: it answers "what stays in frame when
     // this block crops it", which differs per placement. There is no column for it.
-    expect(assetValue(row())).not.toHaveProperty('focal')
-  })
+    expect(assetValue(row())).not.toHaveProperty("focal");
+  });
 
-  it('omits absent dimensions rather than writing nulls into a document', () => {
+  it("omits absent dimensions rather than writing nulls into a document", () => {
     expect(assetValue(row({ width: null, height: null }))).toEqual({
-      key: 'ast_abc123-photo.jpg',
-      filename: 'photo.jpg',
-      contentType: 'image/jpeg',
+      key: "ast_abc123-photo.jpg",
+      filename: "photo.jpg",
+      contentType: "image/jpeg",
       size: 204_800,
-      alt: 'A photo',
-    })
-  })
-})
+      alt: "A photo",
+    });
+  });
+});
 
-describe('what the detail panel is showing', () => {
-  const idle = { row: null, gone: false, error: null, loading: false }
+describe("what the detail panel is showing", () => {
+  const idle = { row: null, gone: false, error: null, loading: false };
 
-  it('shows nothing when the URL names no asset', () => {
-    expect(panelSubject(undefined, null, idle)).toEqual({ state: 'none' })
+  it("shows nothing when the URL names no asset", () => {
+    expect(panelSubject(undefined, null, idle)).toEqual({ state: "none" });
     // Even with a row lying around from a previous selection.
-    expect(panelSubject(undefined, row(), idle)).toEqual({ state: 'none' })
-  })
+    expect(panelSubject(undefined, row(), idle)).toEqual({ state: "none" });
+  });
 
-  it('prefers a row already in hand over any lookup state', () => {
+  it("prefers a row already in hand over any lookup state", () => {
     // The property that stops the panel flickering to a skeleton every time the list is
     // re-read after a PATCH or a delete.
-    const inHand = row()
+    const inHand = row();
     expect(panelSubject(inHand.id, inHand, { ...idle, loading: true })).toEqual({
-      state: 'row',
+      state: "row",
       row: inHand,
-    })
+    });
     expect(panelSubject(inHand.id, inHand, { ...idle, gone: true })).toEqual({
-      state: 'row',
+      state: "row",
       row: inHand,
-    })
-  })
+    });
+  });
 
-  it('uses a resolved row when nothing was in hand', () => {
-    const resolved = row()
+  it("uses a resolved row when nothing was in hand", () => {
+    const resolved = row();
     expect(panelSubject(resolved.id, null, { ...idle, row: resolved })).toEqual({
-      state: 'row',
+      state: "row",
       row: resolved,
-    })
-  })
+    });
+  });
 
-  it('ignores a row that is not the one asked for', () => {
+  it("ignores a row that is not the one asked for", () => {
     // Both directions: a stale `inHand` from the previous selection, and a lookup that
     // has not caught up with a newer id. Either one rendered would put the wrong file's
     // alt text in front of somebody.
-    const other = row({ id: 'ast_other' })
-    expect(panelSubject('ast_wanted', other, idle).state).toBe('loading')
-    expect(panelSubject('ast_wanted', null, { ...idle, row: other }).state).toBe('loading')
-  })
+    const other = row({ id: "ast_other" });
+    expect(panelSubject("ast_wanted", other, idle).state).toBe("loading");
+    expect(panelSubject("ast_wanted", null, { ...idle, row: other }).state).toBe("loading");
+  });
 
-  it('tells a deleted file from a failed request', () => {
+  it("tells a deleted file from a failed request", () => {
     // The distinction the whole type exists for. Saying "could not load" about a 404
     // sends somebody hunting a network problem that is not there; saying "that file is
     // gone" about a dropped connection tells them to go looking for a backup.
-    expect(panelSubject('ast_x', null, { ...idle, gone: true })).toEqual({ state: 'gone' })
-    expect(panelSubject('ast_x', null, { ...idle, error: 'Failed to fetch' })).toEqual({
-      state: 'error',
-      message: 'Failed to fetch',
-    })
-  })
+    expect(panelSubject("ast_x", null, { ...idle, gone: true })).toEqual({ state: "gone" });
+    expect(panelSubject("ast_x", null, { ...idle, error: "Failed to fetch" })).toEqual({
+      state: "error",
+      message: "Failed to fetch",
+    });
+  });
 
-  it('is loading on the render before the request has even started', () => {
+  it("is loading on the render before the request has even started", () => {
     // `useAsset`'s state is idle until its effect runs, so the first render of a cold
     // link arrives here with nothing set. It must not read as an error.
-    expect(panelSubject('ast_x', null, idle)).toEqual({ state: 'loading' })
-    expect(panelSubject('ast_x', null, { ...idle, loading: true })).toEqual({ state: 'loading' })
-  })
-})
+    expect(panelSubject("ast_x", null, idle)).toEqual({ state: "loading" });
+    expect(panelSubject("ast_x", null, { ...idle, loading: true })).toEqual({ state: "loading" });
+  });
+});
 
-describe('keyboard traversal across the grid', () => {
+describe("keyboard traversal across the grid", () => {
   // 10 tiles, 4 columns:  0 1 2 3 / 4 5 6 7 / 8 9
-  const COUNT = 10
-  const COLS = 4
+  const COUNT = 10;
+  const COLS = 4;
 
-  it('lands on the first tile from the container, whichever key it was', () => {
-    for (const key of ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight']) {
-      expect(gridStep(key, -1, COUNT, COLS)).toBe(0)
+  it("lands on the first tile from the container, whichever key it was", () => {
+    for (const key of ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"]) {
+      expect(gridStep(key, -1, COUNT, COLS)).toBe(0);
     }
-  })
+  });
 
-  it('moves by one across and by a row down', () => {
-    expect(gridStep('ArrowRight', 0, COUNT, COLS)).toBe(1)
-    expect(gridStep('ArrowLeft', 1, COUNT, COLS)).toBe(0)
-    expect(gridStep('ArrowDown', 1, COUNT, COLS)).toBe(5)
-    expect(gridStep('ArrowUp', 5, COUNT, COLS)).toBe(1)
-  })
+  it("moves by one across and by a row down", () => {
+    expect(gridStep("ArrowRight", 0, COUNT, COLS)).toBe(1);
+    expect(gridStep("ArrowLeft", 1, COUNT, COLS)).toBe(0);
+    expect(gridStep("ArrowDown", 1, COUNT, COLS)).toBe(5);
+    expect(gridStep("ArrowUp", 5, COUNT, COLS)).toBe(1);
+  });
 
-  it('clamps at both ends rather than wrapping', () => {
+  it("clamps at both ends rather than wrapping", () => {
     // `rank.ts`'s `nextIndex` is modulo, which in a grid is a jump from bottom-right
     // to top-left — two axes at once, and it reads as focus having been lost.
-    expect(gridStep('ArrowRight', COUNT - 1, COUNT, COLS)).toBe(COUNT - 1)
-    expect(gridStep('ArrowLeft', 0, COUNT, COLS)).toBe(0)
-    expect(gridStep('ArrowUp', 2, COUNT, COLS)).toBe(0)
+    expect(gridStep("ArrowRight", COUNT - 1, COUNT, COLS)).toBe(COUNT - 1);
+    expect(gridStep("ArrowLeft", 0, COUNT, COLS)).toBe(0);
+    expect(gridStep("ArrowUp", 2, COUNT, COLS)).toBe(0);
     // Down from the last full row has no row below it, so it stops on the last tile
     // rather than off the end.
-    expect(gridStep('ArrowDown', 7, COUNT, COLS)).toBe(9)
-    expect(gridStep('ArrowDown', 9, COUNT, COLS)).toBe(9)
-  })
+    expect(gridStep("ArrowDown", 7, COUNT, COLS)).toBe(9);
+    expect(gridStep("ArrowDown", 9, COUNT, COLS)).toBe(9);
+  });
 
-  it('crosses the whole set with Home and End, and pages by three rows', () => {
-    expect(gridStep('Home', 9, COUNT, COLS)).toBe(0)
-    expect(gridStep('End', 0, COUNT, COLS)).toBe(9)
-    expect(gridStep('PageDown', 0, 100, COLS)).toBe(12)
-    expect(gridStep('PageUp', 40, 100, COLS)).toBe(28)
-  })
+  it("crosses the whole set with Home and End, and pages by three rows", () => {
+    expect(gridStep("Home", 9, COUNT, COLS)).toBe(0);
+    expect(gridStep("End", 0, COUNT, COLS)).toBe(9);
+    expect(gridStep("PageDown", 0, 100, COLS)).toBe(12);
+    expect(gridStep("PageUp", 40, 100, COLS)).toBe(28);
+  });
 
-  it('claims nothing else, and nothing at all in an empty grid', () => {
-    expect(gridStep('Enter', 0, COUNT, COLS)).toBeNull()
-    expect(gridStep('a', 0, COUNT, COLS)).toBeNull()
-    expect(gridStep('ArrowDown', 0, 0, COLS)).toBeNull()
-  })
+  it("claims nothing else, and nothing at all in an empty grid", () => {
+    expect(gridStep("Enter", 0, COUNT, COLS)).toBeNull();
+    expect(gridStep("a", 0, COUNT, COLS)).toBeNull();
+    expect(gridStep("ArrowDown", 0, 0, COLS)).toBeNull();
+  });
 
-  it('survives a column count of zero', () => {
+  it("survives a column count of zero", () => {
     // `columnsOf` measures the DOM and can answer 0 for a grid that has not laid out
     // yet; a step of 0 would make ArrowDown do nothing forever.
-    expect(gridStep('ArrowDown', 0, COUNT, 0)).toBe(1)
-  })
-})
+    expect(gridStep("ArrowDown", 0, COUNT, 0)).toBe(1);
+  });
+});
 
-describe('the upload report', () => {
-  const entry = (id: string, status: 'uploading' | 'done' | 'failed', error?: string) => ({
+describe("the upload report", () => {
+  const entry = (id: string, status: "uploading" | "done" | "failed", error?: string) => ({
     id,
     filename: `${id}.png`,
     status,
     ...(error ? { error } : {}),
-  })
+  });
 
-  it('counts what has settled while a batch runs', () => {
+  it("counts what has settled while a batch runs", () => {
     expect(
-      uploadSummary([entry('a', 'done'), entry('b', 'uploading'), entry('c', 'uploading')]),
-    ).toMatchObject({ busy: true, text: 'Uploading 2 of 3…' })
-  })
+      uploadSummary([entry("a", "done"), entry("b", "uploading"), entry("c", "uploading")]),
+    ).toMatchObject({ busy: true, text: "Uploading 2 of 3…" });
+  });
 
-  it('names the split rather than rounding it', () => {
+  it("names the split rather than rounding it", () => {
     // The reason the per-file list exists: `MAX_UPLOAD_BYTES` and the content-length
     // check refuse per request, so nine of ten landing is the normal partial outcome.
     expect(
-      uploadSummary([entry('a', 'done'), entry('b', 'failed', 'File is larger than 20MB')]),
-    ).toMatchObject({ busy: false, done: 1, failed: 1, text: '1 uploaded · 1 failed' })
-    expect(uploadSummary([entry('a', 'failed', 'Empty upload')])).toMatchObject({
-      text: '1 failed',
-    })
-  })
+      uploadSummary([entry("a", "done"), entry("b", "failed", "File is larger than 20MB")]),
+    ).toMatchObject({ busy: false, done: 1, failed: 1, text: "1 uploaded · 1 failed" });
+    expect(uploadSummary([entry("a", "failed", "Empty upload")])).toMatchObject({
+      text: "1 failed",
+    });
+  });
 
-  it('reads as a plain success when nothing failed', () => {
-    expect(uploadSummary([entry('a', 'done')]).text).toBe('Uploaded 1 file')
-    expect(uploadSummary([entry('a', 'done'), entry('b', 'done')]).text).toBe('Uploaded 2 files')
-  })
-})
+  it("reads as a plain success when nothing failed", () => {
+    expect(uploadSummary([entry("a", "done")]).text).toBe("Uploaded 1 file");
+    expect(uploadSummary([entry("a", "done"), entry("b", "done")]).text).toBe("Uploaded 2 files");
+  });
+});
 
 /**
  * `folderNameFor` — the read-only register's answer for "which folder is this in"
@@ -868,37 +868,37 @@ describe('the upload report', () => {
  * fallback passes there — verified by breaking it. This is the only place the
  * loading and deleted cases are observable at all.
  */
-describe('folderNameFor', () => {
-  const loaded = (...rows: { id: string; name: string }[]) => ({ folders: rows, loading: false })
+describe("folderNameFor", () => {
+  const loaded = (...rows: { id: string; name: string }[]) => ({ folders: rows, loading: false });
 
-  it('calls a null folder Unfiled, with no regard for the fetch', () => {
+  it("calls a null folder Unfiled, with no regard for the fetch", () => {
     // The state every row starts in (`0008_asset_organisation.sql`), and the one
     // case that is a claim rather than an absence — so it needs no folder list.
-    expect(folderNameFor(null, { folders: [], loading: true })).toBe('Unfiled')
-    expect(folderNameFor(null, loaded())).toBe('Unfiled')
-  })
+    expect(folderNameFor(null, { folders: [], loading: true })).toBe("Unfiled");
+    expect(folderNameFor(null, loaded())).toBe("Unfiled");
+  });
 
-  it('names the folder once the list has arrived', () => {
+  it("names the folder once the list has arrived", () => {
     expect(
       folderNameFor(
-        'afl_b',
-        loaded({ id: 'afl_a', name: 'Press' }, { id: 'afl_b', name: 'Brand' }),
+        "afl_b",
+        loaded({ id: "afl_a", name: "Press" }, { id: "afl_b", name: "Brand" }),
       ),
-    ).toBe('Brand')
-  })
+    ).toBe("Brand");
+  });
 
   it('says "not known yet" rather than Unfiled while the list is in flight', () => {
     // The defect this function was extracted to make impossible: an asset filed
     // under Brand read as *Unfiled* for the length of a round trip, which is a
     // false statement about the row rather than a slow one.
-    expect(folderNameFor('afl_b', { folders: [], loading: true })).toBe('…')
-  })
+    expect(folderNameFor("afl_b", { folders: [], loading: true })).toBe("…");
+  });
 
   it('says "absent" for a folder that is gone, not Unfiled', () => {
     // Loaded, and the id matches nothing: the folder was deleted out from under
     // this row. An absence, which is a third answer again — and it is also what a
     // *failed* fetch produces, since `useFolders` puts the failure in `error` and
     // leaves `folders` empty with `loading` false.
-    expect(folderNameFor('afl_gone', loaded({ id: 'afl_a', name: 'Press' }))).toBe('—')
-  })
-})
+    expect(folderNameFor("afl_gone", loaded({ id: "afl_a", name: "Press" }))).toBe("—");
+  });
+});

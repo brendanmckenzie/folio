@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from "vitest";
 import {
   asset,
   blocks,
@@ -13,8 +13,8 @@ import {
   select,
   text,
   textarea,
-} from '../../../src/core/fields'
-import { asRichtext } from '../../../src/core/richtext'
+} from "../../../src/core/fields";
+import { asRichtext } from "../../../src/core/richtext";
 import {
   asAsset,
   asAssets,
@@ -23,503 +23,505 @@ import {
   isLinkEmpty,
   isSafeHref,
   LINK_KINDS,
-} from '../../../src/core/values'
+} from "../../../src/core/values";
 
-describe('isSafeHref', () => {
-  it('accepts the safe schemes and everything with no scheme at all', () => {
+describe("isSafeHref", () => {
+  it("accepts the safe schemes and everything with no scheme at all", () => {
     for (const url of [
-      'https://example.com/path?x=1',
-      'http://example.com',
-      'HTTPS://example.com',
-      'mailto:person@example.com',
-      'tel:+61400000000',
-      '/relative/path',
-      '//cdn.example.com/asset.js',
-      '#section-2',
-      'page/child',
+      "https://example.com/path?x=1",
+      "http://example.com",
+      "HTTPS://example.com",
+      "mailto:person@example.com",
+      "tel:+61400000000",
+      "/relative/path",
+      "//cdn.example.com/asset.js",
+      "#section-2",
+      "page/child",
     ]) {
-      expect(isSafeHref(url)).toBe(true)
+      expect(isSafeHref(url)).toBe(true);
     }
-  })
+  });
 
-  it('rejects executable schemes whatever their case', () => {
-    for (const url of ['javascript:alert(1)', 'jAvAsCrIpT:alert(1)', 'DATA:text/html,x']) {
-      expect(isSafeHref(url)).toBe(false)
+  it("rejects executable schemes whatever their case", () => {
+    for (const url of ["javascript:alert(1)", "jAvAsCrIpT:alert(1)", "DATA:text/html,x"]) {
+      expect(isSafeHref(url)).toBe(false);
     }
-  })
+  });
 
-  it('rejects an empty href, and one made only of ignorable characters', () => {
-    expect(isSafeHref('')).toBe(false)
-    expect(isSafeHref('  \t\n')).toBe(false)
-  })
+  it("rejects an empty href, and one made only of ignorable characters", () => {
+    expect(isSafeHref("")).toBe(false);
+    expect(isSafeHref("  \t\n")).toBe(false);
+  });
 
-  it('rejects a scheme hidden behind control characters or whitespace, as a browser would', () => {
+  it("rejects a scheme hidden behind control characters or whitespace, as a browser would", () => {
     // Browsers strip these before reading the scheme, so a check that does not strip
     // them first sees a relative URL where the DOM sees `javascript:`.
     for (const url of [
-      ' javascript:alert(1)',
-      '\njavascript:alert(1)',
-      'java\tscript:alert(1)',
-      'java\0script:alert(1)',
-      'JAVA\tSCRIPT:alert(1)',
-      'java\x7fscript:alert(1)',
+      " javascript:alert(1)",
+      "\njavascript:alert(1)",
+      "java\tscript:alert(1)",
+      "java\0script:alert(1)",
+      "JAVA\tSCRIPT:alert(1)",
+      "java\x7fscript:alert(1)",
     ]) {
-      expect(isSafeHref(url)).toBe(false)
+      expect(isSafeHref(url)).toBe(false);
     }
-  })
+  });
 
-  it('treats a colon as a scheme only when everything before it is a scheme token', () => {
+  it("treats a colon as a scheme only when everything before it is a scheme token", () => {
     // Nothing here is a scheme, so nothing here needs to be on the allow-list.
-    expect(isSafeHref('#a:b')).toBe(true)
-    expect(isSafeHref('page/a:b')).toBe(true)
-    expect(isSafeHref('?q=a:b')).toBe(true)
-    expect(isSafeHref('1abc:x')).toBe(true)
-  })
-})
+    expect(isSafeHref("#a:b")).toBe(true);
+    expect(isSafeHref("page/a:b")).toBe(true);
+    expect(isSafeHref("?q=a:b")).toBe(true);
+    expect(isSafeHref("1abc:x")).toBe(true);
+  });
+});
 
-describe('asLink', () => {
-  it('rejects anything that is not a plain object', () => {
-    expect(asLink(null)).toBeNull()
-    expect(asLink(undefined)).toBeNull()
-    expect(asLink('a string')).toBeNull()
-    expect(asLink(42)).toBeNull()
-    expect(asLink([])).toBeNull()
-    expect(asLink({})).toBeNull()
-  })
+describe("asLink", () => {
+  it("rejects anything that is not a plain object", () => {
+    expect(asLink(null)).toBeNull();
+    expect(asLink(undefined)).toBeNull();
+    expect(asLink("a string")).toBeNull();
+    expect(asLink(42)).toBeNull();
+    expect(asLink([])).toBeNull();
+    expect(asLink({})).toBeNull();
+  });
 
-  it('rejects a kind that is not one of the known link kinds', () => {
-    expect(asLink({ kind: 'bogus', id: 'x' })).toBeNull()
-    expect(asLink({ id: 'x' })).toBeNull()
-    expect(asLink({ kind: 42 })).toBeNull()
-  })
+  it("rejects a kind that is not one of the known link kinds", () => {
+    expect(asLink({ kind: "bogus", id: "x" })).toBeNull();
+    expect(asLink({ id: "x" })).toBeNull();
+    expect(asLink({ kind: 42 })).toBeNull();
+  });
 
-  it('lists the five known link kinds', () => {
-    expect(LINK_KINDS).toEqual(['story', 'url', 'email', 'anchor', 'asset'])
-  })
+  it("lists the five known link kinds", () => {
+    expect(LINK_KINDS).toEqual(["story", "url", "email", "anchor", "asset"]);
+  });
 
-  describe('kind: story', () => {
-    it('round-trips the minimal shape', () => {
-      expect(asLink({ kind: 'story', id: 'home' })).toEqual({ kind: 'story', id: 'home' })
-    })
+  describe("kind: story", () => {
+    it("round-trips the minimal shape", () => {
+      expect(asLink({ kind: "story", id: "home" })).toEqual({ kind: "story", id: "home" });
+    });
 
-    it('carries an anchor and a _blank target when present', () => {
-      expect(asLink({ kind: 'story', id: 'home', anchor: 'top', target: '_blank' })).toEqual({
-        kind: 'story',
-        id: 'home',
-        anchor: 'top',
-        target: '_blank',
-      })
-    })
+    it("carries an anchor and a _blank target when present", () => {
+      expect(asLink({ kind: "story", id: "home", anchor: "top", target: "_blank" })).toEqual({
+        kind: "story",
+        id: "home",
+        anchor: "top",
+        target: "_blank",
+      });
+    });
 
-    it('drops a non-string anchor and a target that is not exactly _blank', () => {
-      expect(asLink({ kind: 'story', id: 'home', anchor: 42, target: 'other' })).toEqual({
-        kind: 'story',
-        id: 'home',
-      })
-    })
+    it("drops a non-string anchor and a target that is not exactly _blank", () => {
+      expect(asLink({ kind: "story", id: "home", anchor: 42, target: "other" })).toEqual({
+        kind: "story",
+        id: "home",
+      });
+    });
 
-    it('rejects a missing, empty, or non-string id', () => {
-      expect(asLink({ kind: 'story' })).toBeNull()
-      expect(asLink({ kind: 'story', id: '' })).toBeNull()
-      expect(asLink({ kind: 'story', id: 42 })).toBeNull()
-    })
-  })
+    it("rejects a missing, empty, or non-string id", () => {
+      expect(asLink({ kind: "story" })).toBeNull();
+      expect(asLink({ kind: "story", id: "" })).toBeNull();
+      expect(asLink({ kind: "story", id: 42 })).toBeNull();
+    });
+  });
 
-  describe('kind: url', () => {
-    it('round-trips the minimal shape', () => {
-      expect(asLink({ kind: 'url', url: 'https://example.com' })).toEqual({
-        kind: 'url',
-        url: 'https://example.com',
-      })
-    })
+  describe("kind: url", () => {
+    it("round-trips the minimal shape", () => {
+      expect(asLink({ kind: "url", url: "https://example.com" })).toEqual({
+        kind: "url",
+        url: "https://example.com",
+      });
+    });
 
-    it('carries rel and a _blank target when present', () => {
+    it("carries rel and a _blank target when present", () => {
       expect(
-        asLink({ kind: 'url', url: 'https://example.com', rel: 'nofollow', target: '_blank' }),
+        asLink({ kind: "url", url: "https://example.com", rel: "nofollow", target: "_blank" }),
       ).toEqual({
-        kind: 'url',
-        url: 'https://example.com',
-        rel: 'nofollow',
-        target: '_blank',
-      })
-    })
+        kind: "url",
+        url: "https://example.com",
+        rel: "nofollow",
+        target: "_blank",
+      });
+    });
 
-    it('rejects a missing or empty url', () => {
-      expect(asLink({ kind: 'url' })).toBeNull()
-      expect(asLink({ kind: 'url', url: '' })).toBeNull()
-    })
+    it("rejects a missing or empty url", () => {
+      expect(asLink({ kind: "url" })).toBeNull();
+      expect(asLink({ kind: "url", url: "" })).toBeNull();
+    });
 
-    it('accepts safe schemes: http(s), mailto, tel, relative, protocol-relative, anchor', () => {
+    it("accepts safe schemes: http(s), mailto, tel, relative, protocol-relative, anchor", () => {
       const urls = [
-        'https://example.com/path?x=1',
-        'http://example.com',
-        'mailto:person@example.com',
-        'tel:+61400000000',
-        '/relative/path',
-        '//cdn.example.com/asset.js',
-        '#section-2',
-        'page/child',
-      ]
+        "https://example.com/path?x=1",
+        "http://example.com",
+        "mailto:person@example.com",
+        "tel:+61400000000",
+        "/relative/path",
+        "//cdn.example.com/asset.js",
+        "#section-2",
+        "page/child",
+      ];
       for (const url of urls) {
-        expect(asLink({ kind: 'url', url })).toEqual({ kind: 'url', url })
+        expect(asLink({ kind: "url", url })).toEqual({ kind: "url", url });
       }
-    })
+    });
 
     // SPEC(url-scheme): a stored `url` is trusted straight into an href, so kind 'url'
     // passes a scheme allow-list: javascript:, data: and vbscript: are refused outright.
-    it('rejects javascript:, data:, and vbscript: schemes', () => {
-      expect(asLink({ kind: 'url', url: 'javascript:alert(1)' })).toBeNull()
-      expect(asLink({ kind: 'url', url: 'JAVASCRIPT:alert(1)' })).toBeNull()
-      expect(asLink({ kind: 'url', url: 'data:text/html,<script>alert(1)</script>' })).toBeNull()
-      expect(asLink({ kind: 'url', url: 'vbscript:msgbox(1)' })).toBeNull()
-    })
-  })
+    it("rejects javascript:, data:, and vbscript: schemes", () => {
+      expect(asLink({ kind: "url", url: "javascript:alert(1)" })).toBeNull();
+      expect(asLink({ kind: "url", url: "JAVASCRIPT:alert(1)" })).toBeNull();
+      expect(asLink({ kind: "url", url: "data:text/html,<script>alert(1)</script>" })).toBeNull();
+      expect(asLink({ kind: "url", url: "vbscript:msgbox(1)" })).toBeNull();
+    });
+  });
 
-  describe('kind: email', () => {
-    it('round-trips the minimal shape', () => {
-      expect(asLink({ kind: 'email', email: 'a@b.com' })).toEqual({
-        kind: 'email',
-        email: 'a@b.com',
-      })
-    })
+  describe("kind: email", () => {
+    it("round-trips the minimal shape", () => {
+      expect(asLink({ kind: "email", email: "a@b.com" })).toEqual({
+        kind: "email",
+        email: "a@b.com",
+      });
+    });
 
-    it('carries a subject when present', () => {
-      expect(asLink({ kind: 'email', email: 'a@b.com', subject: 'Hello' })).toEqual({
-        kind: 'email',
-        email: 'a@b.com',
-        subject: 'Hello',
-      })
-    })
+    it("carries a subject when present", () => {
+      expect(asLink({ kind: "email", email: "a@b.com", subject: "Hello" })).toEqual({
+        kind: "email",
+        email: "a@b.com",
+        subject: "Hello",
+      });
+    });
 
-    it('drops target even when _blank, since email links do not support it', () => {
-      expect(asLink({ kind: 'email', email: 'a@b.com', target: '_blank' })).toEqual({
-        kind: 'email',
-        email: 'a@b.com',
-      })
-    })
+    it("drops target even when _blank, since email links do not support it", () => {
+      expect(asLink({ kind: "email", email: "a@b.com", target: "_blank" })).toEqual({
+        kind: "email",
+        email: "a@b.com",
+      });
+    });
 
-    it('rejects a missing or empty email', () => {
-      expect(asLink({ kind: 'email' })).toBeNull()
-      expect(asLink({ kind: 'email', email: '' })).toBeNull()
-    })
-  })
+    it("rejects a missing or empty email", () => {
+      expect(asLink({ kind: "email" })).toBeNull();
+      expect(asLink({ kind: "email", email: "" })).toBeNull();
+    });
+  });
 
-  describe('kind: anchor', () => {
-    it('round-trips the minimal shape', () => {
-      expect(asLink({ kind: 'anchor', anchor: 'top' })).toEqual({ kind: 'anchor', anchor: 'top' })
-    })
+  describe("kind: anchor", () => {
+    it("round-trips the minimal shape", () => {
+      expect(asLink({ kind: "anchor", anchor: "top" })).toEqual({ kind: "anchor", anchor: "top" });
+    });
 
-    it('drops target even when _blank, since anchor links do not support it', () => {
-      expect(asLink({ kind: 'anchor', anchor: 'top', target: '_blank' })).toEqual({
-        kind: 'anchor',
-        anchor: 'top',
-      })
-    })
+    it("drops target even when _blank, since anchor links do not support it", () => {
+      expect(asLink({ kind: "anchor", anchor: "top", target: "_blank" })).toEqual({
+        kind: "anchor",
+        anchor: "top",
+      });
+    });
 
-    it('rejects a missing or empty anchor', () => {
-      expect(asLink({ kind: 'anchor' })).toBeNull()
-      expect(asLink({ kind: 'anchor', anchor: '' })).toBeNull()
-    })
-  })
+    it("rejects a missing or empty anchor", () => {
+      expect(asLink({ kind: "anchor" })).toBeNull();
+      expect(asLink({ kind: "anchor", anchor: "" })).toBeNull();
+    });
+  });
 
-  describe('kind: asset', () => {
-    const validAsset = { key: 'library/pic.png', filename: 'pic.png', alt: '' }
+  describe("kind: asset", () => {
+    const validAsset = { key: "library/pic.png", filename: "pic.png", alt: "" };
 
-    it('round-trips a valid nested asset', () => {
-      expect(asLink({ kind: 'asset', asset: validAsset })).toEqual({
-        kind: 'asset',
+    it("round-trips a valid nested asset", () => {
+      expect(asLink({ kind: "asset", asset: validAsset })).toEqual({
+        kind: "asset",
         asset: {
-          key: 'library/pic.png',
-          filename: 'pic.png',
-          contentType: '',
+          key: "library/pic.png",
+          filename: "pic.png",
+          contentType: "",
           size: 0,
-          alt: '',
+          alt: "",
         },
-      })
-    })
+      });
+    });
 
-    it('carries a _blank target when present', () => {
-      expect(asLink({ kind: 'asset', asset: validAsset, target: '_blank' })).toMatchObject({
-        target: '_blank',
-      })
-    })
+    it("carries a _blank target when present", () => {
+      expect(asLink({ kind: "asset", asset: validAsset, target: "_blank" })).toMatchObject({
+        target: "_blank",
+      });
+    });
 
-    it('rejects when the nested asset cannot be read', () => {
-      expect(asLink({ kind: 'asset', asset: { filename: 'x.png' } })).toBeNull()
-      expect(asLink({ kind: 'asset', asset: null })).toBeNull()
-      expect(asLink({ kind: 'asset' })).toBeNull()
-    })
-  })
-})
+    it("rejects when the nested asset cannot be read", () => {
+      expect(asLink({ kind: "asset", asset: { filename: "x.png" } })).toBeNull();
+      expect(asLink({ kind: "asset", asset: null })).toBeNull();
+      expect(asLink({ kind: "asset" })).toBeNull();
+    });
+  });
+});
 
-describe('isLinkEmpty', () => {
-  it('mirrors asLink returning null', () => {
-    expect(isLinkEmpty(null)).toBe(true)
-    expect(isLinkEmpty({ kind: 'anchor', anchor: '' })).toBe(true)
-    expect(isLinkEmpty({ kind: 'anchor', anchor: 'top' })).toBe(false)
-  })
-})
+describe("isLinkEmpty", () => {
+  it("mirrors asLink returning null", () => {
+    expect(isLinkEmpty(null)).toBe(true);
+    expect(isLinkEmpty({ kind: "anchor", anchor: "" })).toBe(true);
+    expect(isLinkEmpty({ kind: "anchor", anchor: "top" })).toBe(false);
+  });
+});
 
-describe('asAsset', () => {
-  describe('legacy string form', () => {
-    it('turns a bare URL string into an AssetValue', () => {
-      expect(asAsset('https://cdn.example.com/folder/photo.png?w=200')).toEqual({
-        url: 'https://cdn.example.com/folder/photo.png?w=200',
-        filename: 'photo.png',
-        contentType: 'image/png',
+describe("asAsset", () => {
+  describe("legacy string form", () => {
+    it("turns a bare URL string into an AssetValue", () => {
+      expect(asAsset("https://cdn.example.com/folder/photo.png?w=200")).toEqual({
+        url: "https://cdn.example.com/folder/photo.png?w=200",
+        filename: "photo.png",
+        contentType: "image/png",
         size: 0,
-        alt: '',
-      })
-    })
+        alt: "",
+      });
+    });
 
-    it('rejects an empty string', () => {
-      expect(asAsset('')).toBeNull()
-    })
+    it("rejects an empty string", () => {
+      expect(asAsset("")).toBeNull();
+    });
 
     it('falls back to "image" when the path has no filename segment', () => {
-      expect(asAsset('https://example.com/')).toMatchObject({ filename: 'image' })
-    })
+      expect(asAsset("https://example.com/")).toMatchObject({ filename: "image" });
+    });
 
-    it('guesses content type from the extension, blank for unknown extensions', () => {
-      expect(asAsset('a.jpg')).toMatchObject({ contentType: 'image/jpeg' })
-      expect(asAsset('a.jpeg')).toMatchObject({ contentType: 'image/jpeg' })
-      expect(asAsset('a.svg')).toMatchObject({ contentType: 'image/svg+xml' })
-      expect(asAsset('a.webp')).toMatchObject({ contentType: 'image/webp' })
-      expect(asAsset('a.pdf')).toMatchObject({ contentType: '' })
-    })
-  })
+    it("guesses content type from the extension, blank for unknown extensions", () => {
+      expect(asAsset("a.jpg")).toMatchObject({ contentType: "image/jpeg" });
+      expect(asAsset("a.jpeg")).toMatchObject({ contentType: "image/jpeg" });
+      expect(asAsset("a.svg")).toMatchObject({ contentType: "image/svg+xml" });
+      expect(asAsset("a.webp")).toMatchObject({ contentType: "image/webp" });
+      expect(asAsset("a.pdf")).toMatchObject({ contentType: "" });
+    });
+  });
 
-  describe('junk objects', () => {
-    it('rejects null, undefined, numbers, and arrays', () => {
-      expect(asAsset(null)).toBeNull()
-      expect(asAsset(undefined)).toBeNull()
-      expect(asAsset(42)).toBeNull()
-      expect(asAsset([])).toBeNull()
-    })
+  describe("junk objects", () => {
+    it("rejects null, undefined, numbers, and arrays", () => {
+      expect(asAsset(null)).toBeNull();
+      expect(asAsset(undefined)).toBeNull();
+      expect(asAsset(42)).toBeNull();
+      expect(asAsset([])).toBeNull();
+    });
 
-    it('rejects an object with neither key nor url, however many other fields it has', () => {
-      expect(asAsset({})).toBeNull()
-      expect(asAsset({ filename: 'a.png', alt: 'hi', size: 10 })).toBeNull()
-    })
+    it("rejects an object with neither key nor url, however many other fields it has", () => {
+      expect(asAsset({})).toBeNull();
+      expect(asAsset({ filename: "a.png", alt: "hi", size: 10 })).toBeNull();
+    });
 
-    it('rejects an object where key and url are both blank strings', () => {
-      expect(asAsset({ key: '', url: '' })).toBeNull()
-    })
+    it("rejects an object where key and url are both blank strings", () => {
+      expect(asAsset({ key: "", url: "" })).toBeNull();
+    });
 
-    it('refuses a url the href allow-list rejects, in either stored form', () => {
+    it("refuses a url the href allow-list rejects, in either stored form", () => {
       // An asset `url` reaches an `href` through an asset link and a `src` through
       // resolveAsset, so it goes through the one allow-list like any other href.
-      expect(asAsset('javascript:alert(1)')).toBeNull()
-      expect(asAsset({ url: 'javascript:alert(1)' })).toBeNull()
-      expect(asAsset({ url: 'data:text/html,<script>alert(1)</script>' })).toBeNull()
-    })
+      expect(asAsset("javascript:alert(1)")).toBeNull();
+      expect(asAsset({ url: "javascript:alert(1)" })).toBeNull();
+      expect(asAsset({ url: "data:text/html,<script>alert(1)</script>" })).toBeNull();
+    });
 
-    it('keeps a key-only asset when the accompanying url is refused', () => {
+    it("keeps a key-only asset when the accompanying url is refused", () => {
       // The key is where the src comes from, so the asset is still renderable.
-      const asset = asAsset({ key: 'library/pic.png', url: 'javascript:alert(1)' })
-      expect(asset).toMatchObject({ key: 'library/pic.png' })
-      expect(asset).not.toHaveProperty('url')
-    })
-  })
+      const asset = asAsset({ key: "library/pic.png", url: "javascript:alert(1)" });
+      expect(asset).toMatchObject({ key: "library/pic.png" });
+      expect(asset).not.toHaveProperty("url");
+    });
+  });
 
-  describe('requires key||url, and derives partial fields', () => {
-    it('accepts key alone and derives filename from it', () => {
-      expect(asAsset({ key: 'library/sub/pic.png' })).toEqual({
-        key: 'library/sub/pic.png',
-        filename: 'pic.png',
-        contentType: '',
+  describe("requires key||url, and derives partial fields", () => {
+    it("accepts key alone and derives filename from it", () => {
+      expect(asAsset({ key: "library/sub/pic.png" })).toEqual({
+        key: "library/sub/pic.png",
+        filename: "pic.png",
+        contentType: "",
         size: 0,
-        alt: '',
-      })
-    })
+        alt: "",
+      });
+    });
 
-    it('accepts url alone and derives filename from it', () => {
-      expect(asAsset({ url: 'https://cdn.example.com/pic.jpg' })).toEqual({
-        url: 'https://cdn.example.com/pic.jpg',
-        filename: 'pic.jpg',
-        contentType: '',
+    it("accepts url alone and derives filename from it", () => {
+      expect(asAsset({ url: "https://cdn.example.com/pic.jpg" })).toEqual({
+        url: "https://cdn.example.com/pic.jpg",
+        filename: "pic.jpg",
+        contentType: "",
         size: 0,
-        alt: '',
-      })
-    })
+        alt: "",
+      });
+    });
 
-    it('carries both key and url when both are present', () => {
-      expect(asAsset({ key: 'k.png', url: 'https://cdn.example.com/k.png' })).toMatchObject({
-        key: 'k.png',
-        url: 'https://cdn.example.com/k.png',
-      })
-    })
+    it("carries both key and url when both are present", () => {
+      expect(asAsset({ key: "k.png", url: "https://cdn.example.com/k.png" })).toMatchObject({
+        key: "k.png",
+        url: "https://cdn.example.com/k.png",
+      });
+    });
 
-    it('prefers an explicit filename over the derived one', () => {
-      expect(asAsset({ key: 'a/b/c.png', filename: 'custom.png' })).toMatchObject({
-        filename: 'custom.png',
-      })
-    })
+    it("prefers an explicit filename over the derived one", () => {
+      expect(asAsset({ key: "a/b/c.png", filename: "custom.png" })).toMatchObject({
+        filename: "custom.png",
+      });
+    });
 
-    it('defaults contentType, size, and alt when absent', () => {
-      expect(asAsset({ key: 'x' })).toMatchObject({ contentType: '', size: 0, alt: '' })
-    })
+    it("defaults contentType, size, and alt when absent", () => {
+      expect(asAsset({ key: "x" })).toMatchObject({ contentType: "", size: 0, alt: "" });
+    });
 
-    it('only carries width/height when they are numbers', () => {
-      expect(asAsset({ key: 'x', width: 100, height: '200' })).toMatchObject({ width: 100 })
-      expect(asAsset({ key: 'x', width: 100, height: '200' })).not.toHaveProperty('height')
-      expect(asAsset({ key: 'x', width: 100, height: 200 })).toMatchObject({
+    it("only carries width/height when they are numbers", () => {
+      expect(asAsset({ key: "x", width: 100, height: "200" })).toMatchObject({ width: 100 });
+      expect(asAsset({ key: "x", width: 100, height: "200" })).not.toHaveProperty("height");
+      expect(asAsset({ key: "x", width: 100, height: 200 })).toMatchObject({
         width: 100,
         height: 200,
-      })
-    })
-  })
+      });
+    });
+  });
 
-  describe('focal, clamped to [0,1]', () => {
-    it('clamps a negative coordinate up to 0', () => {
-      expect(asAsset({ key: 'x', focal: { x: -5, y: 0.5 } })).toMatchObject({
+  describe("focal, clamped to [0,1]", () => {
+    it("clamps a negative coordinate up to 0", () => {
+      expect(asAsset({ key: "x", focal: { x: -5, y: 0.5 } })).toMatchObject({
         focal: { x: 0, y: 0.5 },
-      })
-    })
+      });
+    });
 
-    it('clamps a coordinate above 1 down to 1', () => {
-      expect(asAsset({ key: 'x', focal: { x: 0.5, y: 5 } })).toMatchObject({
+    it("clamps a coordinate above 1 down to 1", () => {
+      expect(asAsset({ key: "x", focal: { x: 0.5, y: 5 } })).toMatchObject({
         focal: { x: 0.5, y: 1 },
-      })
-    })
+      });
+    });
 
-    it('passes through in-range coordinates unchanged, including the 0 and 1 edges', () => {
-      expect(asAsset({ key: 'x', focal: { x: 0, y: 1 } })).toMatchObject({ focal: { x: 0, y: 1 } })
-    })
+    it("passes through in-range coordinates unchanged, including the 0 and 1 edges", () => {
+      expect(asAsset({ key: "x", focal: { x: 0, y: 1 } })).toMatchObject({ focal: { x: 0, y: 1 } });
+    });
 
-    it('drops focal entirely when x or y is not a number', () => {
-      const withBadFocal = asAsset({ key: 'x', focal: { x: 'a', y: 0.5 } })
-      expect(withBadFocal).not.toHaveProperty('focal')
-    })
+    it("drops focal entirely when x or y is not a number", () => {
+      const withBadFocal = asAsset({ key: "x", focal: { x: "a", y: 0.5 } });
+      expect(withBadFocal).not.toHaveProperty("focal");
+    });
 
-    it('drops focal entirely when it is not an object', () => {
-      expect(asAsset({ key: 'x', focal: null })).not.toHaveProperty('focal')
-      expect(asAsset({ key: 'x', focal: 'x' })).not.toHaveProperty('focal')
-    })
-  })
-})
+    it("drops focal entirely when it is not an object", () => {
+      expect(asAsset({ key: "x", focal: null })).not.toHaveProperty("focal");
+      expect(asAsset({ key: "x", focal: "x" })).not.toHaveProperty("focal");
+    });
+  });
+});
 
-describe('asAssets', () => {
-  it('maps a multiasset array, dropping anything unreadable', () => {
-    expect(asAssets([{ key: 'a' }, {}, { key: 'b' }, null])).toEqual([
-      expect.objectContaining({ key: 'a' }),
-      expect.objectContaining({ key: 'b' }),
-    ])
-  })
+describe("asAssets", () => {
+  it("maps a multiasset array, dropping anything unreadable", () => {
+    expect(asAssets([{ key: "a" }, {}, { key: "b" }, null])).toEqual([
+      expect.objectContaining({ key: "a" }),
+      expect.objectContaining({ key: "b" }),
+    ]);
+  });
 
-  it('wraps a single value that is not an array', () => {
-    expect(asAssets({ key: 'a' })).toEqual([expect.objectContaining({ key: 'a' })])
-  })
+  it("wraps a single value that is not an array", () => {
+    expect(asAssets({ key: "a" })).toEqual([expect.objectContaining({ key: "a" })]);
+  });
 
-  it('returns an empty array for a single unreadable value', () => {
-    expect(asAssets({})).toEqual([])
-    expect(asAssets(null)).toEqual([])
-  })
-})
+  it("returns an empty array for a single unreadable value", () => {
+    expect(asAssets({})).toEqual([]);
+    expect(asAssets(null)).toEqual([]);
+  });
+});
 
-describe('isImageAsset', () => {
-  it('is true when contentType starts with image/', () => {
-    expect(isImageAsset({ filename: 'doc', contentType: 'image/png', size: 0, alt: '' })).toBe(true)
-  })
+describe("isImageAsset", () => {
+  it("is true when contentType starts with image/", () => {
+    expect(isImageAsset({ filename: "doc", contentType: "image/png", size: 0, alt: "" })).toBe(
+      true,
+    );
+  });
 
-  it('is true when the filename has an image extension, case-insensitively', () => {
-    expect(isImageAsset({ filename: 'photo.PNG', contentType: '', size: 0, alt: '' })).toBe(true)
-  })
+  it("is true when the filename has an image extension, case-insensitively", () => {
+    expect(isImageAsset({ filename: "photo.PNG", contentType: "", size: 0, alt: "" })).toBe(true);
+  });
 
-  it('is false for a non-image contentType and non-image extension', () => {
+  it("is false for a non-image contentType and non-image extension", () => {
     expect(
-      isImageAsset({ filename: 'report.pdf', contentType: 'application/pdf', size: 0, alt: '' }),
-    ).toBe(false)
-  })
-})
+      isImageAsset({ filename: "report.pdf", contentType: "application/pdf", size: 0, alt: "" }),
+    ).toBe(false);
+  });
+});
 
-describe('asRichtext', () => {
-  it('turns a plain string into a doc with one paragraph per blank-line-separated block', () => {
-    expect(asRichtext('Hello world')).toEqual({
-      type: 'doc',
-      content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Hello world' }] }],
-    })
-  })
+describe("asRichtext", () => {
+  it("turns a plain string into a doc with one paragraph per blank-line-separated block", () => {
+    expect(asRichtext("Hello world")).toEqual({
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Hello world" }] }],
+    });
+  });
 
-  it('splits on blank lines into multiple paragraphs', () => {
-    expect(asRichtext('First\n\nSecond')).toEqual({
-      type: 'doc',
+  it("splits on blank lines into multiple paragraphs", () => {
+    expect(asRichtext("First\n\nSecond")).toEqual({
+      type: "doc",
       content: [
-        { type: 'paragraph', content: [{ type: 'text', text: 'First' }] },
-        { type: 'paragraph', content: [{ type: 'text', text: 'Second' }] },
+        { type: "paragraph", content: [{ type: "text", text: "First" }] },
+        { type: "paragraph", content: [{ type: "text", text: "Second" }] },
       ],
-    })
-  })
+    });
+  });
 
-  it('treats an empty or whitespace-only string as no content', () => {
-    expect(asRichtext('')).toBeNull()
-    expect(asRichtext('   \n\n  ')).toBeNull()
-  })
+  it("treats an empty or whitespace-only string as no content", () => {
+    expect(asRichtext("")).toBeNull();
+    expect(asRichtext("   \n\n  ")).toBeNull();
+  });
 
-  it('accepts a doc-shaped object with content', () => {
-    const doc = { type: 'doc', content: [{ type: 'paragraph' }] }
-    expect(asRichtext(doc)).toEqual(doc)
-  })
+  it("accepts a doc-shaped object with content", () => {
+    const doc = { type: "doc", content: [{ type: "paragraph" }] };
+    expect(asRichtext(doc)).toEqual(doc);
+  });
 
-  it('rejects a doc-shaped object with no content, or empty content', () => {
-    expect(asRichtext({ type: 'doc' })).toBeNull()
-    expect(asRichtext({ type: 'doc', content: [] })).toBeNull()
-  })
+  it("rejects a doc-shaped object with no content, or empty content", () => {
+    expect(asRichtext({ type: "doc" })).toBeNull();
+    expect(asRichtext({ type: "doc", content: [] })).toBeNull();
+  });
 
-  it('rejects junk objects, arrays, null, and undefined', () => {
-    expect(asRichtext({ type: 'paragraph' })).toBeNull()
-    expect(asRichtext([])).toBeNull()
-    expect(asRichtext(null)).toBeNull()
-    expect(asRichtext(undefined)).toBeNull()
-  })
-})
+  it("rejects junk objects, arrays, null, and undefined", () => {
+    expect(asRichtext({ type: "paragraph" })).toBeNull();
+    expect(asRichtext([])).toBeNull();
+    expect(asRichtext(null)).toBeNull();
+    expect(asRichtext(undefined)).toBeNull();
+  });
+});
 
-describe('defaultValue', () => {
-  it('is 0 for number', () => {
-    expect(defaultValue(number())).toBe(0)
-  })
+describe("defaultValue", () => {
+  it("is 0 for number", () => {
+    expect(defaultValue(number())).toBe(0);
+  });
 
-  it('is false for boolean', () => {
-    expect(defaultValue(boolean())).toBe(false)
-  })
+  it("is false for boolean", () => {
+    expect(defaultValue(boolean())).toBe(false);
+  });
 
-  it('is the first option value for select', () => {
-    expect(defaultValue(select({ options: [{ label: 'A', value: 'a' }] }))).toBe('a')
-  })
+  it("is the first option value for select", () => {
+    expect(defaultValue(select({ options: [{ label: "A", value: "a" }] }))).toBe("a");
+  });
 
-  it('is an empty string for select with no options', () => {
-    expect(defaultValue(select({ options: [] }))).toBe('')
-  })
+  it("is an empty string for select with no options", () => {
+    expect(defaultValue(select({ options: [] }))).toBe("");
+  });
 
-  it('is null for blocks, since children are separate bloks', () => {
-    expect(defaultValue(blocks({ allow: ['x'] }))).toBeNull()
-  })
+  it("is null for blocks, since children are separate bloks", () => {
+    expect(defaultValue(blocks({ allow: ["x"] }))).toBeNull();
+  });
 
-  it('is null for multilink, asset, richtext, reference, and form', () => {
-    expect(defaultValue(multilink())).toBeNull()
-    expect(defaultValue(asset())).toBeNull()
-    expect(defaultValue(richtextField())).toBeNull()
-    expect(defaultValue(reference())).toBeNull()
+  it("is null for multilink, asset, richtext, reference, and form", () => {
+    expect(defaultValue(multilink())).toBeNull();
+    expect(defaultValue(asset())).toBeNull();
+    expect(defaultValue(richtextField())).toBeNull();
+    expect(defaultValue(reference())).toBeNull();
     // A `form` field's stored value is the picked form's id, the same
     // indirection `reference` uses — so a fresh block has picked none yet.
-    expect(defaultValue(form())).toBeNull()
-  })
+    expect(defaultValue(form())).toBeNull();
+  });
 
-  it('form() takes no options today, matching collection() before it grew any', () => {
+  it("form() takes no options today, matching collection() before it grew any", () => {
     // `Opts<'form'>` is `Common` alone (`fields.ts`'s `Field` union) — no
     // `Indexable`, no `Searchable`. The builder still takes an options object
     // for every other common key (`label`, `help`, `required`, `showIf`,
     // `hidden`, `default`, `translatable`), matching `collection()`'s shape.
-    expect(form()).toEqual({ kind: 'form' })
-    expect(form({ label: 'Contact form' })).toEqual({ kind: 'form', label: 'Contact form' })
-  })
+    expect(form()).toEqual({ kind: "form" });
+    expect(form({ label: "Contact form" })).toEqual({ kind: "form", label: "Contact form" });
+  });
 
-  it('is an empty array for multiasset', () => {
-    expect(defaultValue(multiasset())).toEqual([])
-  })
+  it("is an empty array for multiasset", () => {
+    expect(defaultValue(multiasset())).toEqual([]);
+  });
 
-  it('is an empty string for text and textarea', () => {
-    expect(defaultValue(text())).toBe('')
-    expect(defaultValue(textarea())).toBe('')
-  })
-})
+  it("is an empty string for text and textarea", () => {
+    expect(defaultValue(text())).toBe("");
+    expect(defaultValue(textarea())).toBe("");
+  });
+});

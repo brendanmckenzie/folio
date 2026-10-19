@@ -1,6 +1,6 @@
-import type { Blok, Doc } from './doc'
-import type { Mutation } from './mutations'
-import type { Resolution } from './resolve'
+import type { Blok, Doc } from "./doc";
+import type { Mutation } from "./mutations";
+import type { Resolution } from "./resolve";
 
 /**
  * Wire format version, carried by every frame in both directions. Persisted logs
@@ -42,7 +42,7 @@ import type { Resolution } from './resolve'
  *       drop the delta, leaving its copy of a layered global showing a value the
  *       server has deleted. |
  */
-export const PROTOCOL_VERSION = 5
+export const PROTOCOL_VERSION = 5;
 
 /**
  * Where a peer's caret is: which blok, and which field inside it (v4,
@@ -56,16 +56,16 @@ export const PROTOCOL_VERSION = 5
  * parse rather than the guard.
  */
 export interface PresenceSelection {
-  uid: string
+  uid: string;
   /** The focused field on `uid`, or null for the blok as a whole. */
-  field: string | null
+  field: string | null;
 }
 
 export interface Presence {
-  actor: string
-  name: string
-  colour: string
-  selection: PresenceSelection | null
+  actor: string;
+  name: string;
+  colour: string;
+  selection: PresenceSelection | null;
   /**
    * Which locale this peer is editing in, or null on the source locale and on a
    * site with no locales at all.
@@ -78,7 +78,7 @@ export interface Presence {
    * being cross-referenced from the space channel so that the label is right
    * even for a host that never declared the space binding.
    */
-  locale: string | null
+  locale: string | null;
 }
 
 /**
@@ -97,62 +97,62 @@ export interface Presence {
  * always-present fields that are believed only sometimes.
  */
 export interface HelloIdentity {
-  actor: string
-  name: string
-  colour: string
+  actor: string;
+  name: string;
+  colour: string;
 }
 
 export type ClientMsg =
-  | { type: 'hello'; lastSyncId: number; identity?: HelloIdentity }
-  | { type: 'tx'; txId: string; mutations: Mutation[] }
-  | { type: 'presence'; selection: PresenceSelection | null; locale?: string | null }
+  | { type: "hello"; lastSyncId: number; identity?: HelloIdentity }
+  | { type: "tx"; txId: string; mutations: Mutation[] }
+  | { type: "presence"; selection: PresenceSelection | null; locale?: string | null };
 
 export type ServerMsg =
   /** Full state. Sent when the client has no watermark or has fallen too far behind. */
-  | { type: 'bootstrap'; doc: Doc; syncId: number; peers: Presence[] }
+  | { type: "bootstrap"; doc: Doc; syncId: number; peers: Presence[] }
   /** Everything the client missed, replayed from the log. */
-  | { type: 'catchup'; deltas: Delta[]; syncId: number; peers: Presence[] }
+  | { type: "catchup"; deltas: Delta[]; syncId: number; peers: Presence[] }
   /**
    * One logged transaction. `replay` marks the idempotent ack for a resend: it
    * carries the syncId that tx already had, so a client whose watermark has
    * moved past it must drop the frame rather than apply the mutations again.
    */
-  | ({ type: 'delta'; replay?: true } & Delta)
-  | { type: 'presence'; peer: Presence; gone?: boolean }
+  | ({ type: "delta"; replay?: true } & Delta)
+  | { type: "presence"; peer: Presence; gone?: boolean }
   /**
    * A transaction refused at the door: nothing was logged, nothing broadcast,
    * and the sender must drop it from `pending` rather than wait for a delta.
    */
-  | { type: 'reject'; txId: string; reason: string }
+  | { type: "reject"; txId: string; reason: string }
   /** A frame the peer could not read, or a handshake it refused. */
-  | { type: 'error'; reason: string }
+  | { type: "error"; reason: string };
 
 /** A message body as it crosses the socket. */
-export type Framed<T> = T & { v: number }
+export type Framed<T> = T & { v: number };
 
-export type ServerFrame = Framed<ServerMsg>
+export type ServerFrame = Framed<ServerMsg>;
 
 /**
  * An inbound frame: a structurally valid body plus the version it claims. The
  * version is deliberately not checked by the shape guards, so a mismatch is
  * reported as itself instead of as an unreadable frame.
  */
-export type ClientFrame = ClientMsg & { v?: number }
+export type ClientFrame = ClientMsg & { v?: number };
 
 export interface Delta {
-  syncId: number
-  txId: string
-  actor: string
-  mutations: Mutation[]
+  syncId: number;
+  txId: string;
+  actor: string;
+  mutations: Mutation[];
 }
 
 /** One logged transaction, for the activity trail. */
 export interface ActivityEntry {
-  syncId: number
-  actor: string
-  actorName: string | null
-  at: number
-  mutations: Mutation[]
+  syncId: number;
+  actor: string;
+  actorName: string | null;
+  at: number;
+  mutations: Mutation[];
 }
 
 /*
@@ -164,27 +164,27 @@ export interface ActivityEntry {
  */
 
 /** A `hello` identity's name longer than this is truncated, not rejected. */
-export const MAX_NAME_LEN = 64
+export const MAX_NAME_LEN = 64;
 
 /** Same cap for `actor`: both ride on every presence broadcast for the life of the socket. */
-export const MAX_ACTOR_LEN = 64
+export const MAX_ACTOR_LEN = 64;
 
 /**
  * A presence `selection` is a uid reference; generous headroom over the
  * 16-hex-char uids in use. Applied to **each part** of the pair at v4: a field
  * name is a schema key, so the same bound is the right one for it.
  */
-export const MAX_SELECTION_LEN = 64
+export const MAX_SELECTION_LEN = 64;
 
 /** Same cap for a presence `locale`: a locale code is a BCP 47 tag, not prose. */
-export const MAX_LOCALE_LEN = 32
+export const MAX_LOCALE_LEN = 32;
 
 /**
  * Beyond this many mutations, one tx is refused at the door rather than admitted:
  * the per-mutation validation in `mutationError` walks the whole document once per
  * mutation, so an unbounded array is an unbounded amount of work per message.
  */
-export const MAX_TX_MUTATIONS = 200
+export const MAX_TX_MUTATIONS = 200;
 
 /**
  * Raw frame ceiling, checked in the DO before `JSON.parse`. A cheap stand-in for
@@ -192,7 +192,7 @@ export const MAX_TX_MUTATIONS = 200
  * has already produced an oversized frame, so bounding the frame bounds the value
  * without a walk over `mutations` on every message.
  */
-export const MAX_FRAME_BYTES = 256 * 1024
+export const MAX_FRAME_BYTES = 256 * 1024;
 
 /**
  * Ceiling on the whole document, in bloks. Per-frame caps (`MAX_TX_MUTATIONS`,
@@ -203,17 +203,17 @@ export const MAX_FRAME_BYTES = 256 * 1024
  * after a tx's mutations are applied, so it refuses growth the same way an
  * invalid mutation is refused: atomically, at the door, nothing logged.
  */
-export const MAX_DOC_BLOKS = 20_000
+export const MAX_DOC_BLOKS = 20_000;
 
 /** Ceiling on the serialised document, in UTF-8 bytes. Same rationale as `MAX_DOC_BLOKS`. */
-export const MAX_DOC_BYTES = 8 * 1024 * 1024
+export const MAX_DOC_BYTES = 8 * 1024 * 1024;
 
 /**
  * UTF-8 length of `s`, never `.length`: a string's `.length` counts UTF-16 code
  * units, so prose in a non-Latin script reads well under a cap it is already
  * over. Every byte ceiling in the system is measured through here.
  */
-export const utf8Bytes = (s: string): number => new TextEncoder().encode(s).byteLength
+export const utf8Bytes = (s: string): number => new TextEncoder().encode(s).byteLength;
 
 /**
  * The serialised size of `doc`, in UTF-8 bytes — **the** measurement
@@ -226,7 +226,7 @@ export const utf8Bytes = (s: string): number => new TextEncoder().encode(s).byte
  * persistence: this re-measures it rather than stringifying twice.
  */
 export function docBytes(doc: Doc, json?: string): number {
-  return utf8Bytes(json ?? JSON.stringify(doc))
+  return utf8Bytes(json ?? JSON.stringify(doc));
 }
 
 /**
@@ -236,21 +236,21 @@ export function docBytes(doc: Doc, json?: string): number {
  * stringifying the document twice.
  */
 export function docCapError(doc: Doc, json?: string): string | null {
-  const count = Object.keys(doc.bloks).length
+  const count = Object.keys(doc.bloks).length;
   if (count > MAX_DOC_BLOKS) {
-    return `document too large: ${count} bloks exceeds the ${MAX_DOC_BLOKS} cap`
+    return `document too large: ${count} bloks exceeds the ${MAX_DOC_BLOKS} cap`;
   }
-  const bytes = docBytes(doc, json)
+  const bytes = docBytes(doc, json);
   if (bytes > MAX_DOC_BYTES) {
-    return `document too large: ${bytes} bytes exceeds the ${MAX_DOC_BYTES} byte cap`
+    return `document too large: ${bytes} bytes exceeds the ${MAX_DOC_BYTES} byte cap`;
   }
-  return null
+  return null;
 }
 
-const COLOUR_RE = /^#[0-9a-fA-F]{6}$/
+const COLOUR_RE = /^#[0-9a-fA-F]{6}$/;
 
 /** True for the C0 and DEL control characters a display name has no business carrying. */
-const isControlChar = (code: number): boolean => code <= 0x1f || code === 0x7f
+const isControlChar = (code: number): boolean => code <= 0x1f || code === 0x7f;
 
 /**
  * True for the bidi overrides and isolates (U+202A-202E, U+2066-2069): the same
@@ -260,7 +260,7 @@ const isControlChar = (code: number): boolean => code <= 0x1f || code === 0x7f
  * as its own character to test.
  */
 const isBidiControl = (code: number): boolean =>
-  (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069)
+  (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069);
 
 /**
  * Drops control characters and bidi overrides instead of a regex: biome flags
@@ -269,12 +269,12 @@ const isBidiControl = (code: number): boolean =>
  * for as long as the connection lives, same as every CMS string on the HTTP side.
  */
 function stripControlChars(s: string): string {
-  let out = ''
+  let out = "";
   for (const ch of s) {
-    const code = ch.codePointAt(0) ?? 0
-    if (!isControlChar(code) && !isBidiControl(code)) out += ch
+    const code = ch.codePointAt(0) ?? 0;
+    if (!isControlChar(code) && !isBidiControl(code)) out += ch;
   }
-  return out
+  return out;
 }
 
 /**
@@ -283,11 +283,11 @@ function stripControlChars(s: string): string {
  * same value, and stable across reconnects since `actor` does not change.
  */
 export function fallbackColour(actor: string): string {
-  let hash = 0
+  let hash = 0;
   for (let i = 0; i < actor.length; i++) {
-    hash = (Math.imul(hash, 31) + actor.charCodeAt(i)) | 0
+    hash = (Math.imul(hash, 31) + actor.charCodeAt(i)) | 0;
   }
-  return `#${(hash >>> 0).toString(16).padStart(6, '0').slice(0, 6)}`
+  return `#${(hash >>> 0).toString(16).padStart(6, "0").slice(0, 6)}`;
 }
 
 /**
@@ -301,19 +301,19 @@ export function fallbackColour(actor: string): string {
  * `validate.ts`'s `PRINTABLE` applies on the HTTP side.
  */
 function normalizeIdentity(identity: HelloIdentity | undefined): HelloIdentity | undefined {
-  if (!identity) return undefined
-  const actor = stripControlChars(identity.actor).slice(0, MAX_ACTOR_LEN)
-  const trimmed = stripControlChars(identity.name).trim().slice(0, MAX_NAME_LEN)
+  if (!identity) return undefined;
+  const actor = stripControlChars(identity.actor).slice(0, MAX_ACTOR_LEN);
+  const trimmed = stripControlChars(identity.name).trim().slice(0, MAX_NAME_LEN);
   return {
     actor,
-    name: trimmed.length > 0 ? trimmed : 'Anonymous',
+    name: trimmed.length > 0 ? trimmed : "Anonymous",
     colour: COLOUR_RE.test(identity.colour) ? identity.colour : fallbackColour(actor),
-  }
+  };
 }
 
 /** Shape guard for `hello.identity`; absent is valid, malformed is not. */
 function isHelloIdentity(x: unknown): x is HelloIdentity {
-  return isRecord(x) && isString(x.actor) && isString(x.name) && isString(x.colour)
+  return isRecord(x) && isString(x.actor) && isString(x.name) && isString(x.colour);
 }
 
 /**
@@ -325,24 +325,24 @@ function isHelloIdentity(x: unknown): x is HelloIdentity {
  * reach a broadcast.
  */
 function normalizeSelection(selection: PresenceSelection | null): PresenceSelection | null {
-  if (selection === null) return null
+  if (selection === null) return null;
   return {
     uid: selection.uid.slice(0, MAX_SELECTION_LEN),
     field: selection.field === null ? null : selection.field.slice(0, MAX_SELECTION_LEN),
-  }
+  };
 }
 
 /** Shape guard for a presence selection; `null` is handled by the caller. */
 function isPresenceSelection(x: unknown): x is PresenceSelection {
-  return isRecord(x) && isString(x.uid) && (x.field === null || isString(x.field))
+  return isRecord(x) && isString(x.uid) && (x.field === null || isString(x.field));
 }
 
 /** Bounds a presence locale. An absent one and an explicit null both mean "the
  * source locale", and both normalise to null so a reader has one case. */
 function normalizeLocale(locale: string | null | undefined): string | null {
-  if (locale === null || locale === undefined) return null
-  const trimmed = stripControlChars(locale).trim().slice(0, MAX_LOCALE_LEN)
-  return trimmed.length > 0 ? trimmed : null
+  if (locale === null || locale === undefined) return null;
+  const trimmed = stripControlChars(locale).trim().slice(0, MAX_LOCALE_LEN);
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 /**
@@ -355,15 +355,15 @@ function normalizeLocale(locale: string | null | undefined): string | null {
 export function txCapError(mutations: Mutation[]): string | null {
   return mutations.length > MAX_TX_MUTATIONS
     ? `too many mutations: ${mutations.length} exceeds the ${MAX_TX_MUTATIONS} cap`
-    : null
+    : null;
 }
 
 const isRecord = (x: unknown): x is Record<string, unknown> =>
-  typeof x === 'object' && x !== null && !Array.isArray(x)
+  typeof x === "object" && x !== null && !Array.isArray(x);
 
-const isString = (x: unknown): x is string => typeof x === 'string'
+const isString = (x: unknown): x is string => typeof x === "string";
 
-const isNumber = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x)
+const isNumber = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
 
 export function isBlok(x: unknown): x is Blok {
   return (
@@ -379,18 +379,18 @@ export function isBlok(x: unknown): x is Blok {
     // whatever JSON.parse produced, which is `Json` by construction — the same
     // reason `data` itself needs no walk.
     (x.i18n === undefined || isLocaleMap(x.i18n))
-  )
+  );
 }
 
 /** `Record<string, Record<string, Json>>`, shallowly. */
 function isLocaleMap(x: unknown): boolean {
-  return isRecord(x) && Object.values(x).every(isRecord)
+  return isRecord(x) && Object.values(x).every(isRecord);
 }
 
 export function isMutation(x: unknown): x is Mutation {
-  if (!isRecord(x)) return false
+  if (!isRecord(x)) return false;
   switch (x.t) {
-    case 'set':
+    case "set":
       // An explicit null is a value; an absent key is a malformed mutation.
       // An absent `locale` is a source-locale write and always legal — that is
       // the property every log entry written before v3 depends on. A `locale`
@@ -400,40 +400,40 @@ export function isMutation(x: unknown): x is Mutation {
       return (
         isString(x.uid) &&
         isString(x.field) &&
-        'value' in x &&
+        "value" in x &&
         (x.locale === undefined || isString(x.locale))
-      )
-    case 'unset':
+      );
+    case "unset":
       // No `value`: the key is deleted, not written. `locale` as for `set`.
-      return isString(x.uid) && isString(x.field) && (x.locale === undefined || isString(x.locale))
-    case 'insert':
-      return isBlok(x.blok)
-    case 'move':
-      return isString(x.uid) && isString(x.parent) && isString(x.slot) && isString(x.order)
-    case 'remove':
-      return isString(x.uid)
-    case 'retype':
-      return isString(x.uid) && isString(x.type)
+      return isString(x.uid) && isString(x.field) && (x.locale === undefined || isString(x.locale));
+    case "insert":
+      return isBlok(x.blok);
+    case "move":
+      return isString(x.uid) && isString(x.parent) && isString(x.slot) && isString(x.order);
+    case "remove":
+      return isString(x.uid);
+    case "retype":
+      return isString(x.uid) && isString(x.type);
     default:
-      return false
+      return false;
   }
 }
 
 export function isClientMsg(x: unknown): x is ClientFrame {
-  if (!isRecord(x)) return false
-  if (x.v !== undefined && !isNumber(x.v)) return false
+  if (!isRecord(x)) return false;
+  if (x.v !== undefined && !isNumber(x.v)) return false;
   switch (x.type) {
-    case 'hello':
-      return isNumber(x.lastSyncId) && (x.identity === undefined || isHelloIdentity(x.identity))
-    case 'tx':
-      return isString(x.txId) && Array.isArray(x.mutations) && x.mutations.every(isMutation)
-    case 'presence':
+    case "hello":
+      return isNumber(x.lastSyncId) && (x.identity === undefined || isHelloIdentity(x.identity));
+    case "tx":
+      return isString(x.txId) && Array.isArray(x.mutations) && x.mutations.every(isMutation);
+    case "presence":
       return (
         (x.selection === null || isPresenceSelection(x.selection)) &&
         (x.locale === undefined || x.locale === null || isString(x.locale))
-      )
+      );
     default:
-      return false
+      return false;
   }
 }
 
@@ -448,34 +448,34 @@ export function isClientMsg(x: unknown): x is ClientFrame {
  * presence list for as long as the socket is open.
  */
 export function parseClientFrame(raw: string | ArrayBuffer): ClientFrame | null {
-  if (typeof raw !== 'string') return null
-  let value: unknown
+  if (typeof raw !== "string") return null;
+  let value: unknown;
   try {
-    value = JSON.parse(raw)
+    value = JSON.parse(raw);
   } catch {
-    return null
+    return null;
   }
-  if (!isClientMsg(value)) return null
-  const version = value.v !== undefined ? { v: value.v } : {}
+  if (!isClientMsg(value)) return null;
+  const version = value.v !== undefined ? { v: value.v } : {};
   switch (value.type) {
-    case 'hello': {
-      const identity = normalizeIdentity(value.identity)
+    case "hello": {
+      const identity = normalizeIdentity(value.identity);
       return {
-        type: 'hello',
+        type: "hello",
         lastSyncId: value.lastSyncId,
         ...(identity ? { identity } : {}),
         ...version,
-      }
+      };
     }
-    case 'tx':
-      return { type: 'tx', txId: value.txId, mutations: value.mutations, ...version }
-    case 'presence':
+    case "tx":
+      return { type: "tx", txId: value.txId, mutations: value.mutations, ...version };
+    case "presence":
       return {
-        type: 'presence',
+        type: "presence",
         selection: normalizeSelection(value.selection),
         locale: normalizeLocale(value.locale),
         ...version,
-      }
+      };
   }
 }
 
@@ -502,7 +502,7 @@ export function parseClientFrame(raw: string | ArrayBuffer): ClientFrame | null 
  */
 
 /** A document title rides on space presence; long enough for a real page name. */
-export const MAX_TITLE_LEN = 200
+export const MAX_TITLE_LEN = 200;
 
 /**
  * One editor, as the rest of the site sees them.
@@ -512,22 +512,22 @@ export const MAX_TITLE_LEN = 200
  * the tree is present and worth showing.
  */
 export interface SpacePresence {
-  actor: string
-  name: string
-  colour: string
+  actor: string;
+  name: string;
+  colour: string;
   /**
    * The `Role` name (`server/auth/roles.ts`), or null under `auth: 'open'`.
    * Typed as a string because this wire lives in core and core does not import
    * the server; the object writes it from the verified identity, never from a
    * client's claim.
    */
-  role: string | null
+  role: string | null;
   /** Story id currently open, or null while the admin is on a list screen. */
-  storyId: string | null
-  storyTitle: string | null
-  locale: string | null
+  storyId: string | null;
+  storyTitle: string | null;
+  locale: string | null;
   /** Mirrors the story-level selection, so follow-mode can land on a block. */
-  selection: PresenceSelection | null
+  selection: PresenceSelection | null;
 }
 
 /**
@@ -540,9 +540,9 @@ export interface SpacePresence {
  * beat one object trying to be both.
  */
 export type SpaceClientMsg =
-  | { type: 'hello'; identity?: HelloIdentity }
-  | { type: 'where'; storyId: string | null; storyTitle: string | null; locale: string | null }
-  | { type: 'selection'; selection: PresenceSelection | null }
+  | { type: "hello"; identity?: HelloIdentity }
+  | { type: "where"; storyId: string | null; storyTitle: string | null; locale: string | null }
+  | { type: "selection"; selection: PresenceSelection | null };
 
 /**
  * A structural change to the site, broadcast from the Worker after the D1 write
@@ -567,62 +567,62 @@ export type SpaceEvent = SpaceEventBody & {
    * up in the peer list this same channel already carries, so no display name has
    * to ride on the event itself.
    */
-  actor: string | null
-}
+  actor: string | null;
+};
 
 type SpaceEventBody =
-  | { kind: 'story.created'; id: string; parentId: string | null; title: string; type: string }
+  | { kind: "story.created"; id: string; parentId: string | null; title: string; type: string }
   /** Paths moved: a rename, or a move to another parent. One entry per row whose
    * path changed, which for a move includes every descendant. */
-  | { kind: 'story.updated'; changes: readonly { id: string; from: string; to: string }[] }
-  | { kind: 'story.deleted'; ids: readonly string[] }
-  | { kind: 'story.published'; id: string; title: string; at: number; versionId: string }
+  | { kind: "story.updated"; changes: readonly { id: string; from: string; to: string }[] }
+  | { kind: "story.deleted"; ids: readonly string[] }
+  | { kind: "story.published"; id: string; title: string; at: number; versionId: string }
   /** A configured global's published content moved, so anything rendering it is
    * stale (`content-model/globals.md`'s deferred gap). */
-  | { kind: 'global.changed'; name: string; storyId: string }
+  | { kind: "global.changed"; name: string; storyId: string };
 
 export type SpaceServerMsg =
   /** The full peer list, sent once in answer to `hello`. */
-  | { type: 'peers'; peers: SpacePresence[] }
-  | { type: 'presence'; peer: SpacePresence; gone?: true }
-  | { type: 'event'; event: SpaceEvent }
+  | { type: "peers"; peers: SpacePresence[] }
+  | { type: "presence"; peer: SpacePresence; gone?: true }
+  | { type: "event"; event: SpaceEvent }
   /** A frame the object could not read, or a handshake it refused. */
-  | { type: 'error'; reason: string }
+  | { type: "error"; reason: string };
 
-export type SpaceServerFrame = Framed<SpaceServerMsg>
+export type SpaceServerFrame = Framed<SpaceServerMsg>;
 
 /** An inbound space frame: a valid body plus the version it claims. Same split
  * as `ClientFrame` — the version is reported as itself, not as bad shape. */
-export type SpaceFrame = SpaceClientMsg & { v?: number }
+export type SpaceFrame = SpaceClientMsg & { v?: number };
 
 /** Bounds a story id on the space wire. Ids are `sty_<16 hex>` or `sng_<name>`. */
 const normalizeStoryId = (id: string | null): string | null =>
-  id === null ? null : id.slice(0, MAX_SELECTION_LEN)
+  id === null ? null : id.slice(0, MAX_SELECTION_LEN);
 
 /** Bounds a document title. Same control-character screening as a display name:
  * it is shown on every other editor's screen, in a tree row and an avatar. */
 function normalizeTitle(title: string | null): string | null {
-  if (title === null) return null
-  const trimmed = stripControlChars(title).trim().slice(0, MAX_TITLE_LEN)
-  return trimmed.length > 0 ? trimmed : null
+  if (title === null) return null;
+  const trimmed = stripControlChars(title).trim().slice(0, MAX_TITLE_LEN);
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 export function isSpaceMsg(x: unknown): x is SpaceFrame {
-  if (!isRecord(x)) return false
-  if (x.v !== undefined && !isNumber(x.v)) return false
+  if (!isRecord(x)) return false;
+  if (x.v !== undefined && !isNumber(x.v)) return false;
   switch (x.type) {
-    case 'hello':
-      return x.identity === undefined || isHelloIdentity(x.identity)
-    case 'where':
+    case "hello":
+      return x.identity === undefined || isHelloIdentity(x.identity);
+    case "where":
       return (
         (x.storyId === null || isString(x.storyId)) &&
         (x.storyTitle === null || isString(x.storyTitle)) &&
         (x.locale === null || isString(x.locale))
-      )
-    case 'selection':
-      return x.selection === null || isPresenceSelection(x.selection)
+      );
+    case "selection":
+      return x.selection === null || isPresenceSelection(x.selection);
     default:
-      return false
+      return false;
   }
 }
 
@@ -634,30 +634,30 @@ export function isSpaceMsg(x: unknown): x is SpaceFrame {
  * riding along inside it would reach a broadcast.
  */
 export function parseSpaceFrame(raw: string | ArrayBuffer): SpaceFrame | null {
-  if (typeof raw !== 'string') return null
-  let value: unknown
+  if (typeof raw !== "string") return null;
+  let value: unknown;
   try {
-    value = JSON.parse(raw)
+    value = JSON.parse(raw);
   } catch {
-    return null
+    return null;
   }
-  if (!isSpaceMsg(value)) return null
-  const version = value.v !== undefined ? { v: value.v } : {}
+  if (!isSpaceMsg(value)) return null;
+  const version = value.v !== undefined ? { v: value.v } : {};
   switch (value.type) {
-    case 'hello': {
-      const identity = normalizeIdentity(value.identity)
-      return { type: 'hello', ...(identity ? { identity } : {}), ...version }
+    case "hello": {
+      const identity = normalizeIdentity(value.identity);
+      return { type: "hello", ...(identity ? { identity } : {}), ...version };
     }
-    case 'where':
+    case "where":
       return {
-        type: 'where',
+        type: "where",
         storyId: normalizeStoryId(value.storyId),
         storyTitle: normalizeTitle(value.storyTitle),
         locale: normalizeLocale(value.locale),
         ...version,
-      }
-    case 'selection':
-      return { type: 'selection', selection: normalizeSelection(value.selection), ...version }
+      };
+    case "selection":
+      return { type: "selection", selection: normalizeSelection(value.selection), ...version };
   }
 }
 
@@ -683,25 +683,25 @@ export function parseSpaceFrame(raw: string | ArrayBuffer): SpaceFrame | null {
 
 /** What the admin pushes into the preview: document state and where it stands. */
 export type AdminToPreviewMsg =
-  | { type: 'apply'; mutations: Mutation[] }
-  | { type: 'replace'; doc: Doc }
-  | { type: 'resolve'; resolution: Resolution }
-  | { type: 'select'; uid: string | null }
+  | { type: "apply"; mutations: Mutation[] }
+  | { type: "replace"; doc: Doc }
+  | { type: "resolve"; resolution: Resolution }
+  | { type: "select"; uid: string | null };
 
 /** What the preview reports back: handshake, picks, and add-block requests. */
 export type PreviewToAdminMsg =
-  | { type: 'ready' }
-  | { type: 'select'; uid: string }
-  | { type: 'add'; parent: string; slot: string }
+  | { type: "ready" }
+  | { type: "select"; uid: string }
+  | { type: "add"; parent: string; slot: string };
 
 /** Every shape that can cross the iframe boundary, in either direction. */
-export type PreviewMsg = AdminToPreviewMsg | PreviewToAdminMsg
+export type PreviewMsg = AdminToPreviewMsg | PreviewToAdminMsg;
 
 /** Tag on every frame identifying which side of the iframe sent it. */
-export type PreviewMsgSource = 'folio-admin' | 'folio-preview'
+export type PreviewMsgSource = "folio-admin" | "folio-preview";
 
 /** A postMessage frame as it actually crosses the iframe boundary. */
-export type PreviewFrame = Framed<PreviewMsg> & { source: PreviewMsgSource }
+export type PreviewFrame = Framed<PreviewMsg> & { source: PreviewMsgSource };
 
 /**
  * Total over `unknown`, same discipline as `isClientMsg`: `event.data` on a
@@ -709,25 +709,25 @@ export type PreviewFrame = Framed<PreviewMsg> & { source: PreviewMsgSource }
  * not JSON, so nothing here throws on a shape neither end would ever send.
  */
 export function isPreviewMsg(x: unknown): x is PreviewMsg {
-  if (!isRecord(x)) return false
-  if (x.v !== undefined && !isNumber(x.v)) return false
+  if (!isRecord(x)) return false;
+  if (x.v !== undefined && !isNumber(x.v)) return false;
   switch (x.type) {
-    case 'apply':
-      return Array.isArray(x.mutations) && x.mutations.every(isMutation)
-    case 'replace':
-      return isRecord(x.doc)
-    case 'resolve':
-      return isRecord(x.resolution)
-    case 'select':
+    case "apply":
+      return Array.isArray(x.mutations) && x.mutations.every(isMutation);
+    case "replace":
+      return isRecord(x.doc);
+    case "resolve":
+      return isRecord(x.resolution);
+    case "select":
       // Admin-to-preview select may clear the selection; preview-to-admin
       // select always names a clicked block. One guard covers both: the
       // narrower requirement (a real uid) is enforced by direction, not shape.
-      return x.uid === null || isString(x.uid)
-    case 'ready':
-      return true
-    case 'add':
-      return isString(x.parent) && isString(x.slot)
+      return x.uid === null || isString(x.uid);
+    case "ready":
+      return true;
+    case "add":
+      return isString(x.parent) && isString(x.slot);
     default:
-      return false
+      return false;
   }
 }

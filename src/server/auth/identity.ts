@@ -8,24 +8,24 @@
  * is the whole security argument and the one line that must never be softened
  * into a conditional set.
  */
-import type { Role } from './roles'
+import type { Role } from "./roles";
 
 /** Not a stable public name: only `routes/editor.ts` writes it and only
  * `story-do.ts` reads it, and a client's own value is discarded. */
-export const IDENTITY_HEADER = 'x-folio-identity'
+export const IDENTITY_HEADER = "x-folio-identity";
 
 export interface SocketIdentity {
   /** `users.id`. What the mutation log records and presence broadcasts. */
-  actor: string
-  name: string
+  actor: string;
+  name: string;
   /** Already resolved: the row's colour, or `fallbackColour(id)`. The object
    * never has to derive one, so a peer's colour cannot differ by code path. */
-  colour: string
-  role: Role
+  colour: string;
+  role: Role;
   /** `sessions.id`, for the object's periodic revocation re-check. */
-  session: string
+  session: string;
   /** Session expiry, epoch ms. Checked on every frame (checkpoint 5). */
-  expiresAt: number
+  expiresAt: number;
 }
 
 /**
@@ -35,35 +35,35 @@ export interface SocketIdentity {
  * some users' names and not others.
  */
 export function encodeIdentity(identity: SocketIdentity): string {
-  const bytes = new TextEncoder().encode(JSON.stringify(identity))
-  let binary = ''
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const bytes = new TextEncoder().encode(JSON.stringify(identity));
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 /** Total over its input: an unreadable header means "no verified identity",
  * which is exactly what a socket opened under `auth: 'open'` has. */
 export function decodeIdentity(raw: string | null | undefined): SocketIdentity | null {
-  if (!raw) return null
+  if (!raw) return null;
   try {
-    const padded = raw.replace(/-/g, '+').replace(/_/g, '/')
-    const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4))
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<SocketIdentity>
+    const padded = raw.replace(/-/g, "+").replace(/_/g, "/");
+    const binary = atob(padded + "=".repeat((4 - (padded.length % 4)) % 4));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<SocketIdentity>;
     if (
-      typeof parsed.actor !== 'string' ||
-      typeof parsed.name !== 'string' ||
-      typeof parsed.colour !== 'string' ||
-      typeof parsed.role !== 'string' ||
-      typeof parsed.session !== 'string' ||
-      typeof parsed.expiresAt !== 'number'
+      typeof parsed.actor !== "string" ||
+      typeof parsed.name !== "string" ||
+      typeof parsed.colour !== "string" ||
+      typeof parsed.role !== "string" ||
+      typeof parsed.session !== "string" ||
+      typeof parsed.expiresAt !== "number"
     ) {
-      return null
+      return null;
     }
-    return parsed as SocketIdentity
+    return parsed as SocketIdentity;
   } catch {
-    return null
+    return null;
   }
 }
 
@@ -77,10 +77,10 @@ export function decodeIdentity(raw: string | null | undefined): SocketIdentity |
  * — assert whatever identity it liked simply by sending this header itself.
  */
 export function withIdentity(req: Request, identity: SocketIdentity | null): Request {
-  const headers = new Headers(req.headers)
-  if (identity) headers.set(IDENTITY_HEADER, encodeIdentity(identity))
-  else headers.delete(IDENTITY_HEADER)
+  const headers = new Headers(req.headers);
+  if (identity) headers.set(IDENTITY_HEADER, encodeIdentity(identity));
+  else headers.delete(IDENTITY_HEADER);
   // Rebuilt from the URL rather than cloned: this is a GET upgrade with no body,
   // and the object reads nothing off the request but `Upgrade` and this header.
-  return new Request(req.url, { method: req.method, headers })
+  return new Request(req.url, { method: req.method, headers });
 }

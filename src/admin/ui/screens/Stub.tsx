@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import css from './Stub.module.css'
+import type { ReactNode } from "react";
+import css from "./Stub.module.css";
 
 /**
  * A screen that exists as a URL and says what it will be.
@@ -27,5 +27,5 @@ export function Stub({ children, needs }: { children: ReactNode; needs?: ReactNo
         </section>
       ) : null}
     </div>
-  )
+  );
 }

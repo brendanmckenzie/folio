@@ -10,56 +10,56 @@
 // Deliberately uses the raw `fetch` throughout rather than scripts/lib/auth.mjs's
 // global wrapper: the whole point here is which requests carry a credential and
 // which do not, so every header is explicit.
-import { DEMO_ADMIN, DEMO_EDITOR, DEMO_VIEWER, sessionCookieFrom } from './lib/auth.mjs'
+import { DEMO_ADMIN, DEMO_EDITOR, DEMO_VIEWER, sessionCookieFrom } from "./lib/auth.mjs";
 
-const { PROTOCOL_VERSION } = await import(new URL('../src/core/protocol.ts', import.meta.url))
+const { PROTOCOL_VERSION } = await import(new URL("../src/core/protocol.ts", import.meta.url));
 
-const HTTP = 'http://localhost:5199'
-const BASE = `${HTTP}/folio`
-const API = `${BASE}/api`
-const STORY = 'sty_home'
+const HTTP = "http://localhost:5199";
+const BASE = `${HTTP}/folio`;
+const API = `${BASE}/api`;
+const STORY = "sty_home";
 
-const results = []
-const check = (label, ok, detail = '') => {
-  results.push({ label, ok, detail })
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? `  (${detail})` : ''}`)
-}
+const results = [];
+const check = (label, ok, detail = "") => {
+  results.push({ label, ok, detail });
+  console.log(`${ok ? "PASS" : "FAIL"}  ${label}${detail ? `  (${detail})` : ""}`);
+};
 
-const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* --- the closed door ---------------------------------------------------- */
 
-const editorPage = await fetch(`${BASE}/edit/${STORY}`, { redirect: 'manual' })
+const editorPage = await fetch(`${BASE}/edit/${STORY}`, { redirect: "manual" });
 check(
-  'the editor redirects when signed out',
+  "the editor redirects when signed out",
   editorPage.status === 302,
   `status=${editorPage.status}`,
-)
+);
 check(
-  'and it points at the login page, remembering where you were going',
-  (editorPage.headers.get('location') ?? '').startsWith('/folio/login?next='),
-  editorPage.headers.get('location') ?? '',
-)
+  "and it points at the login page, remembering where you were going",
+  (editorPage.headers.get("location") ?? "").startsWith("/folio/login?next="),
+  editorPage.headers.get("location") ?? "",
+);
 
-const listSignedOut = await fetch(`${API}/stories`)
+const listSignedOut = await fetch(`${API}/stories`);
 check(
-  'the API answers 401 when signed out',
+  "the API answers 401 when signed out",
   listSignedOut.status === 401,
   `status=${listSignedOut.status}`,
-)
-const envelope = await listSignedOut.json()
+);
+const envelope = await listSignedOut.json();
 check(
-  'with the one error envelope',
-  envelope?.error?.code === 'unauthorized',
+  "with the one error envelope",
+  envelope?.error?.code === "unauthorized",
   JSON.stringify(envelope),
-)
+);
 
-const schema = await fetch(`${API}/schema`)
-check('the manifest stays public', schema.status === 200, `status=${schema.status}`)
+const schema = await fetch(`${API}/schema`);
+check("the manifest stays public", schema.status === 200, `status=${schema.status}`);
 
-const loginPage = await fetch(`${BASE}/login`)
-const loginHtml = await loginPage.text()
-check('the login page renders', loginPage.status === 200 && loginHtml.includes('name="email"'))
+const loginPage = await fetch(`${BASE}/login`);
+const loginHtml = await loginPage.text();
+check("the login page renders", loginPage.status === 200 && loginHtml.includes('name="email"'));
 
 /**
  * `foundation/passkeys.md` decision 4 changed the shape of this assertion
@@ -73,27 +73,27 @@ check('the login page renders', loginPage.status === 200 && loginHtml.includes('
  * config with no passkey provider is cheap to build); this script only ever
  * runs against the demo, which does.
  */
-const loginScriptTags = [...loginHtml.matchAll(/<script\b[^>]*>/g)].map((m) => m[0])
+const loginScriptTags = [...loginHtml.matchAll(/<script\b[^>]*>/g)].map((m) => m[0]);
 check(
-  'and ships no external script',
-  loginScriptTags.every((tag) => !tag.includes(' src=')),
-  loginScriptTags.join(' | '),
-)
+  "and ships no external script",
+  loginScriptTags.every((tag) => !tag.includes(" src=")),
+  loginScriptTags.join(" | "),
+);
 check(
-  'and ships exactly one inline script, now that the demo lists passkeys()',
+  "and ships exactly one inline script, now that the demo lists passkeys()",
   loginScriptTags.length === 1,
   `count=${loginScriptTags.length}`,
-)
+);
 
 /* --- an unauthenticated socket is refused terminally -------------------- */
 
 function socket(headers = {}) {
-  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/${STORY}/socket`, { headers })
-  const inbox = []
-  const closes = []
-  ws.addEventListener('message', (e) => inbox.push(JSON.parse(e.data)))
-  ws.addEventListener('close', (e) => closes.push({ code: e.code, reason: e.reason }))
-  ws.addEventListener('error', () => {})
+  const ws = new WebSocket(`ws://localhost:5199/folio/api/story/${STORY}/socket`, { headers });
+  const inbox = [];
+  const closes = [];
+  ws.addEventListener("message", (e) => inbox.push(JSON.parse(e.data)));
+  ws.addEventListener("close", (e) => closes.push({ code: e.code, reason: e.reason }));
+  ws.addEventListener("error", () => {});
   return {
     ws,
     inbox,
@@ -102,135 +102,135 @@ function socket(headers = {}) {
      * refusal here is an upgrade-then-close, so "open" happens either way. */
     ready: () =>
       new Promise((resolve) => {
-        if (ws.readyState === 1) return resolve()
-        ws.addEventListener('open', resolve, { once: true })
-        ws.addEventListener('close', resolve, { once: true })
+        if (ws.readyState === 1) return resolve();
+        ws.addEventListener("open", resolve, { once: true });
+        ws.addEventListener("close", resolve, { once: true });
       }),
     send: (m) => ws.send(JSON.stringify({ ...m, v: PROTOCOL_VERSION })),
     async closedWith(ms = 3000) {
-      const until = Date.now() + ms
-      while (Date.now() < until && closes.length === 0) await wait(20)
-      return closes[0]?.code ?? null
+      const until = Date.now() + ms;
+      while (Date.now() < until && closes.length === 0) await wait(20);
+      return closes[0]?.code ?? null;
     },
     async expect(match, ms = 3000) {
-      const until = Date.now() + ms
+      const until = Date.now() + ms;
       while (Date.now() < until) {
-        const hit = inbox.find(match)
-        if (hit) return hit
-        await wait(20)
+        const hit = inbox.find(match);
+        if (hit) return hit;
+        await wait(20);
       }
-      throw new Error(`timeout waiting for a frame; saw ${inbox.map((f) => f.type).join(',')}`)
+      throw new Error(`timeout waiting for a frame; saw ${inbox.map((f) => f.type).join(",")}`);
     },
-  }
+  };
 }
 
-const anonymous = socket()
+const anonymous = socket();
 check(
-  'an unauthenticated socket upgrades and then closes 4003',
+  "an unauthenticated socket upgrades and then closes 4003",
   (await anonymous.closedWith()) === 4003,
   JSON.stringify(anonymous.closes),
-)
+);
 
 /* --- email addresses are not enumerable -------------------------------- */
 
 async function requestLink(email) {
   const res = await fetch(`${BASE}/login/email`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', accept: 'application/json' },
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify({ email }),
-  })
-  return { status: res.status, body: await res.text() }
+  });
+  return { status: res.status, body: await res.text() };
 }
 
-const known = await requestLink(DEMO_ADMIN)
-const linkUrl = (await (await fetch(`${HTTP}/dev/last-signin`)).json()).url
-const unknown = await requestLink('nobody-at-all@example.com')
-const afterUnknown = (await (await fetch(`${HTTP}/dev/last-signin`)).json()).url
+const known = await requestLink(DEMO_ADMIN);
+const linkUrl = (await (await fetch(`${HTTP}/dev/last-signin`)).json()).url;
+const unknown = await requestLink("nobody-at-all@example.com");
+const afterUnknown = (await (await fetch(`${HTTP}/dev/last-signin`)).json()).url;
 
 check(
-  'an unknown address is answered byte-identically',
+  "an unknown address is answered byte-identically",
   known.status === unknown.status && known.body === unknown.body,
   `${known.status}/${unknown.status}`,
-)
-check('and no link is sent for it', afterUnknown === linkUrl)
+);
+check("and no link is sent for it", afterUnknown === linkUrl);
 
 /* --- signing in --------------------------------------------------------- */
 
-const verified = await fetch(linkUrl, { redirect: 'manual' })
-const cookie = sessionCookieFrom(verified)
-check('the link signs the browser in', Boolean(cookie), `status=${verified.status}`)
-check('and redirects into the editor', verified.headers.get('location') === '/folio/edit')
+const verified = await fetch(linkUrl, { redirect: "manual" });
+const cookie = sessionCookieFrom(verified);
+check("the link signs the browser in", Boolean(cookie), `status=${verified.status}`);
+check("and redirects into the editor", verified.headers.get("location") === "/folio/edit");
 
-const reused = await fetch(linkUrl, { redirect: 'manual' })
+const reused = await fetch(linkUrl, { redirect: "manual" });
 check(
-  'a sign-in link is single use',
-  (reused.headers.get('location') ?? '').includes('error=link'),
-  reused.headers.get('location') ?? '',
-)
+  "a sign-in link is single use",
+  (reused.headers.get("location") ?? "").includes("error=link"),
+  reused.headers.get("location") ?? "",
+);
 
-const me = await (await fetch(`${API}/me`, { headers: { cookie } })).json()
+const me = await (await fetch(`${API}/me`, { headers: { cookie } })).json();
 check(
-  '/folio/api/me names the signed-in admin',
-  me?.actor?.name === 'Demo Admin' && me?.actor?.role === 'admin',
+  "/folio/api/me names the signed-in admin",
+  me?.actor?.name === "Demo Admin" && me?.actor?.role === "admin",
   JSON.stringify(me?.actor),
-)
+);
 
-const editorSignedIn = await fetch(`${BASE}/edit/${STORY}`, { headers: { cookie } })
-check('the editor serves once signed in', editorSignedIn.status === 200)
+const editorSignedIn = await fetch(`${BASE}/edit/${STORY}`, { headers: { cookie } });
+check("the editor serves once signed in", editorSignedIn.status === 200);
 
 /* --- editing and publishing as that session ---------------------------- */
 
-const live = socket({ cookie })
-await live.ready()
+const live = socket({ cookie });
+await live.ready();
 live.send({
-  type: 'hello',
+  type: "hello",
   lastSyncId: 0,
-  identity: { actor: 'not-me', name: 'Not Me', colour: '#000000' },
-})
-const boot = await live.expect((f) => f.type === 'bootstrap')
-check('a signed-in socket bootstraps', Boolean(boot.doc?.root))
+  identity: { actor: "not-me", name: "Not Me", colour: "#000000" },
+});
+const boot = await live.expect((f) => f.type === "bootstrap");
+check("a signed-in socket bootstraps", Boolean(boot.doc?.root));
 
-const title = `Auth test ${Date.now()}`
+const title = `Auth test ${Date.now()}`;
 live.send({
-  type: 'tx',
+  type: "tx",
   txId: `auth-${Date.now()}`,
-  mutations: [{ t: 'set', uid: boot.doc.root, field: 'title', value: title }],
-})
-const delta = await live.expect((f) => f.type === 'delta')
+  mutations: [{ t: "set", uid: boot.doc.root, field: "title", value: title }],
+});
+const delta = await live.expect((f) => f.type === "delta");
 check(
-  'the transaction is attributed to the session, not to what hello claimed',
-  delta.actor === 'usr_demoadmin1',
+  "the transaction is attributed to the session, not to what hello claimed",
+  delta.actor === "usr_demoadmin1",
   delta.actor,
-)
+);
 
 const published = await fetch(`${API}/story/${STORY}/publish`, {
-  method: 'POST',
-  headers: { cookie, 'x-folio-actor': 'somebody-else' },
-})
-check('publishing works for an admin', published.status === 200, `status=${published.status}`)
+  method: "POST",
+  headers: { cookie, "x-folio-actor": "somebody-else" },
+});
+check("publishing works for an admin", published.status === 200, `status=${published.status}`);
 const versions = await (
   await fetch(`${API}/story/${STORY}/versions`, { headers: { cookie } })
-).json()
+).json();
 check(
-  'the version records the signed-in user, ignoring the old actor header',
-  versions.rows[0]?.actor === 'usr_demoadmin1',
+  "the version records the signed-in user, ignoring the old actor header",
+  versions.rows[0]?.actor === "usr_demoadmin1",
   versions.rows[0]?.actor,
-)
+);
 
 /* --- roles ------------------------------------------------------------- */
 
 async function signInAs(email) {
-  await requestLink(email)
-  const url = (await (await fetch(`${HTTP}/dev/last-signin`)).json()).url
-  return sessionCookieFrom(await fetch(url, { redirect: 'manual' }))
+  await requestLink(email);
+  const url = (await (await fetch(`${HTTP}/dev/last-signin`)).json()).url;
+  return sessionCookieFrom(await fetch(url, { redirect: "manual" }));
 }
 
-const editorCookie = await signInAs(DEMO_EDITOR)
+const editorCookie = await signInAs(DEMO_EDITOR);
 const editorPublish = await fetch(`${API}/story/${STORY}/publish`, {
-  method: 'POST',
+  method: "POST",
   headers: { cookie: editorCookie },
-})
-check('an editor may not publish', editorPublish.status === 403, `status=${editorPublish.status}`)
+});
+check("an editor may not publish", editorPublish.status === 403, `status=${editorPublish.status}`);
 
 /**
  * An editor **may** create. This assertion used to be its opposite, and it went
@@ -244,136 +244,136 @@ check('an editor may not publish', editorPublish.status === 403, `status=${edito
  * nothing. Changing or removing an existing URL is what stays `publisher`.
  */
 const editorCreate = await fetch(`${API}/stories`, {
-  method: 'POST',
-  headers: { cookie: editorCookie, 'content-type': 'application/json' },
-  body: JSON.stringify({ title: 'Editor created this' }),
-})
-check('but may create a page', editorCreate.status === 200, `status=${editorCreate.status}`)
+  method: "POST",
+  headers: { cookie: editorCookie, "content-type": "application/json" },
+  body: JSON.stringify({ title: "Editor created this" }),
+});
+check("but may create a page", editorCreate.status === 200, `status=${editorCreate.status}`);
 
 // Deleting is the other half of the split, and it stays `publisher`. Asserted here
 // so "an editor may create" cannot quietly widen into "an editor may do anything".
-const created = editorCreate.status === 200 ? (await editorCreate.json()).id : null
+const created = editorCreate.status === 200 ? (await editorCreate.json()).id : null;
 if (created) {
   const editorDelete = await fetch(`${API}/stories/${created}`, {
-    method: 'DELETE',
+    method: "DELETE",
     headers: { cookie: editorCookie },
-  })
+  });
   check(
-    'and may not delete what they created',
+    "and may not delete what they created",
     editorDelete.status === 403,
     `status=${editorDelete.status}`,
-  )
+  );
 }
 
 check(
-  'and may read the tree',
+  "and may read the tree",
   (await fetch(`${API}/stories`, { headers: { cookie: editorCookie } })).status === 200,
-)
+);
 
-const viewerCookie = await signInAs(DEMO_VIEWER)
+const viewerCookie = await signInAs(DEMO_VIEWER);
 check(
-  'a viewer may read',
+  "a viewer may read",
   (await fetch(`${API}/stories`, { headers: { cookie: viewerCookie } })).status === 200,
-)
+);
 const viewerCreate = await fetch(`${API}/stories`, {
-  method: 'POST',
-  headers: { cookie: viewerCookie, 'content-type': 'application/json' },
-  body: JSON.stringify({ title: 'Viewer tried to create this' }),
-})
+  method: "POST",
+  headers: { cookie: viewerCookie, "content-type": "application/json" },
+  body: JSON.stringify({ title: "Viewer tried to create this" }),
+});
 check(
-  'but may not create — which is the line `CREATE` actually draws',
+  "but may not create — which is the line `CREATE` actually draws",
   viewerCreate.status === 403,
   `status=${viewerCreate.status}`,
-)
-const viewerSocket = socket({ cookie: viewerCookie })
-await viewerSocket.ready()
+);
+const viewerSocket = socket({ cookie: viewerCookie });
+await viewerSocket.ready();
 viewerSocket.send({
-  type: 'hello',
+  type: "hello",
   lastSyncId: 0,
-  identity: { actor: 'v', name: 'V', colour: '#111111' },
-})
-const viewerBoot = await viewerSocket.expect((f) => f.type === 'bootstrap')
-check('and gets a socket, read-only (the spec’s open question)', Boolean(viewerBoot.doc?.root))
+  identity: { actor: "v", name: "V", colour: "#111111" },
+});
+const viewerBoot = await viewerSocket.expect((f) => f.type === "bootstrap");
+check("and gets a socket, read-only (the spec’s open question)", Boolean(viewerBoot.doc?.root));
 viewerSocket.send({
-  type: 'tx',
+  type: "tx",
   txId: `viewer-${Date.now()}`,
-  mutations: [{ t: 'set', uid: viewerBoot.doc.root, field: 'title', value: 'Nope' }],
-})
-const rejected = await viewerSocket.expect((f) => f.type === 'reject')
+  mutations: [{ t: "set", uid: viewerBoot.doc.root, field: "title", value: "Nope" }],
+});
+const rejected = await viewerSocket.expect((f) => f.type === "reject");
 check(
-  'whose transactions are refused with a reason, not a disconnect',
-  rejected.reason === 'read-only: your role may not edit',
+  "whose transactions are refused with a reason, not a disconnect",
+  rejected.reason === "read-only: your role may not edit",
   rejected.reason,
-)
-viewerSocket.ws.close()
+);
+viewerSocket.ws.close();
 
 /* --- the access surface ------------------------------------------------ */
 
-const usersAsEditor = await fetch(`${API}/users`, { headers: { cookie: editorCookie } })
+const usersAsEditor = await fetch(`${API}/users`, { headers: { cookie: editorCookie } });
 check(
-  'managing editors is admin-only',
+  "managing editors is admin-only",
   usersAsEditor.status === 403,
   `status=${usersAsEditor.status}`,
-)
-const users = await (await fetch(`${API}/users`, { headers: { cookie } })).json()
-check('an admin can list editors', users?.users?.length === 3, `n=${users?.users?.length}`)
+);
+const users = await (await fetch(`${API}/users`, { headers: { cookie } })).json();
+check("an admin can list editors", users?.users?.length === 3, `n=${users?.users?.length}`);
 
 const minted = await fetch(`${API}/tokens`, {
-  method: 'POST',
-  headers: { cookie, 'content-type': 'application/json' },
-  body: JSON.stringify({ name: 'e2e-reader', scopes: ['content:read'] }),
-})
-const token = (await minted.json()).token
-check('an admin can mint a token', /^folio_[0-9a-f]{64}$/.test(token ?? ''), String(token))
+  method: "POST",
+  headers: { cookie, "content-type": "application/json" },
+  body: JSON.stringify({ name: "e2e-reader", scopes: ["content:read"] }),
+});
+const token = (await minted.json()).token;
+check("an admin can mint a token", /^folio_[0-9a-f]{64}$/.test(token ?? ""), String(token));
 check(
-  'the token reads',
+  "the token reads",
   (await fetch(`${API}/stories`, { headers: { authorization: `Bearer ${token}` } })).status === 200,
-)
+);
 const tokenWrite = await fetch(`${API}/stories`, {
-  method: 'POST',
-  headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
-  body: JSON.stringify({ title: 'From a read-only token' }),
-})
-check('and is refused a write', tokenWrite.status === 403, `status=${tokenWrite.status}`)
-const tokenSocket = socket({ authorization: `Bearer ${token}` })
+  method: "POST",
+  headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+  body: JSON.stringify({ title: "From a read-only token" }),
+});
+check("and is refused a write", tokenWrite.status === 403, `status=${tokenWrite.status}`);
+const tokenSocket = socket({ authorization: `Bearer ${token}` });
 check(
-  'a token cannot hold an editing session',
+  "a token cannot hold an editing session",
   (await tokenSocket.closedWith()) === 4004,
   JSON.stringify(tokenSocket.closes),
-)
+);
 
 /* --- origin checking --------------------------------------------------- */
 
 const crossOrigin = await fetch(`${API}/story/${STORY}/publish`, {
-  method: 'POST',
-  headers: { cookie, origin: 'https://evil.example' },
-})
+  method: "POST",
+  headers: { cookie, origin: "https://evil.example" },
+});
 check(
-  'a cookie-authenticated mutation from another origin is refused',
+  "a cookie-authenticated mutation from another origin is refused",
   crossOrigin.status === 403,
   `status=${crossOrigin.status}`,
-)
+);
 
 /* --- a published page serves to anyone --------------------------------- */
 
-const publicPage = await fetch(`${HTTP}/`)
-const publicHtml = await publicPage.text()
-check('the published page serves with no credential', publicPage.status === 200)
-check('and shows what was just published', publicHtml.includes(title))
+const publicPage = await fetch(`${HTTP}/`);
+const publicHtml = await publicPage.text();
+check("the published page serves with no credential", publicPage.status === 200);
+check("and shows what was just published", publicHtml.includes(title));
 check(
-  'a preview request from a stranger falls through to the published page',
-  !(await (await fetch(`${HTTP}/?_folio=preview`)).text()).includes('folio-editing'),
-)
+  "a preview request from a stranger falls through to the published page",
+  !(await (await fetch(`${HTTP}/?_folio=preview`)).text()).includes("folio-editing"),
+);
 
-const assets = await (await fetch(`${API}/assets`, { headers: { cookie } })).json()
-const firstAsset = (Array.isArray(assets) ? assets : assets?.assets)?.[0]
+const assets = await (await fetch(`${API}/assets`, { headers: { cookie } })).json();
+const firstAsset = (Array.isArray(assets) ? assets : assets?.assets)?.[0];
 if (firstAsset?.key) {
-  const asset = await fetch(`${BASE}/asset/${firstAsset.key}`)
-  check('an asset serves with no credential', asset.status === 200, `status=${asset.status}`)
+  const asset = await fetch(`${BASE}/asset/${firstAsset.key}`);
+  check("an asset serves with no credential", asset.status === 200, `status=${asset.status}`);
 } else {
   // Nothing uploaded in this database; the route's public-ness is pinned in
   // test/workers/auth-http.test.ts regardless.
-  check('an asset serves with no credential (skipped: no assets seeded)', true)
+  check("an asset serves with no credential (skipped: no assets seeded)", true);
 }
 
 /* --- the provider stamp ------------------------------------------------- */
@@ -384,13 +384,13 @@ if (firstAsset?.key) {
 // screen's "Signs in with" column true rather than decorative. Asserted on the
 // editor, who signed in by link above and is not touched by the trusted block
 // below.
-const stamped = (await (await fetch(`${API}/users`, { headers: { cookie } })).json()).users ?? []
-const editorRow = stamped.find((u) => u.email === DEMO_EDITOR)
+const stamped = (await (await fetch(`${API}/users`, { headers: { cookie } })).json()).users ?? [];
+const editorRow = stamped.find((u) => u.email === DEMO_EDITOR);
 check(
-  'a magic-link sign-in stamps users.provider',
-  editorRow?.provider === 'magic',
+  "a magic-link sign-in stamps users.provider",
+  editorRow?.provider === "magic",
   JSON.stringify(editorRow?.provider),
-)
+);
 
 /* --- trusted identity --------------------------------------------------- */
 
@@ -398,44 +398,44 @@ check(
 // `x-folio-dev-identity` header (checkpoint 5). It is the only way to drive this
 // kind against a real server with no identity provider to stand up — and it is a
 // footgun with the safety taped down; see the comment on it in the demo.
-const DEV_ID = { 'x-folio-dev-identity': DEMO_ADMIN }
+const DEV_ID = { "x-folio-dev-identity": DEMO_ADMIN };
 
 const implicit = await fetch(`${BASE}/login?next=%2Ffolio%2Fedit`, {
   headers: DEV_ID,
-  redirect: 'manual',
-})
-const trustedCookie = sessionCookieFrom(implicit)
+  redirect: "manual",
+});
+const trustedCookie = sessionCookieFrom(implicit);
 check(
-  'a trusted header signs in on GET /login',
+  "a trusted header signs in on GET /login",
   implicit.status === 302 && Boolean(trustedCookie),
   `status=${implicit.status}`,
-)
-check('and lands where it was going', implicit.headers.get('location') === '/folio/edit')
+);
+check("and lands where it was going", implicit.headers.get("location") === "/folio/edit");
 
-const trustedMe = await (await fetch(`${API}/me`, { headers: { cookie: trustedCookie } })).json()
+const trustedMe = await (await fetch(`${API}/me`, { headers: { cookie: trustedCookie } })).json();
 check(
-  'the session records the provider that minted it',
-  trustedMe?.session?.provider === 'dev-header',
+  "the session records the provider that minted it",
+  trustedMe?.session?.provider === "dev-header",
   JSON.stringify(trustedMe?.session),
-)
+);
 
-const plainLogin = await fetch(`${BASE}/login`, { redirect: 'manual' })
+const plainLogin = await fetch(`${BASE}/login`, { redirect: "manual" });
 check(
-  'the same page with no header is still the ordinary login page',
+  "the same page with no header is still the ordinary login page",
   plainLogin.status === 200 && (await plainLogin.text()).includes('name="email"'),
   `status=${plainLogin.status}`,
-)
+);
 
 const trustedOut = await fetch(`${API}/logout`, {
-  method: 'POST',
+  method: "POST",
   headers: { cookie: trustedCookie },
-})
-const trustedOutBody = await trustedOut.json()
+});
+const trustedOutBody = await trustedOut.json();
 check(
-  'signing out of a trusted session points at the signed-out page',
-  trustedOutBody?.next === '/folio/login?signedout=1',
+  "signing out of a trusted session points at the signed-out page",
+  trustedOutBody?.next === "/folio/login?signedout=1",
   JSON.stringify(trustedOutBody),
-)
+);
 
 // The whole reason that page exists: this deployment's "upstream session" is a
 // request header Folio cannot un-set, so the next request still carries the
@@ -443,87 +443,87 @@ check(
 // signing out look broken.
 const signedOutPage = await fetch(`${HTTP}${trustedOutBody.next}`, {
   headers: DEV_ID,
-  redirect: 'manual',
-})
-const signedOutHtml = await signedOutPage.text()
+  redirect: "manual",
+});
+const signedOutHtml = await signedOutPage.text();
 check(
-  'which sets no cookie even with the identity still present',
+  "which sets no cookie even with the identity still present",
   signedOutPage.status === 200 && (signedOutPage.headers.getSetCookie?.() ?? []).length === 0,
   `status=${signedOutPage.status}`,
-)
-check('and says so', signedOutHtml.includes('You have signed out'))
+);
+check("and says so", signedOutHtml.includes("You have signed out"));
 check(
-  'and offers one button per trusted provider',
+  "and offers one button per trusted provider",
   signedOutHtml.includes('href="/folio/login/dev-header?next='),
-)
+);
 // Same page, same passkey provider (decision 4 does not gate the button on
 // `signedOut`, unlike the trusted buttons above), so the same two-part claim
 // as the ordinary login page holds here too.
-const signedOutScriptTags = [...signedOutHtml.matchAll(/<script\b[^>]*>/g)].map((m) => m[0])
+const signedOutScriptTags = [...signedOutHtml.matchAll(/<script\b[^>]*>/g)].map((m) => m[0]);
 check(
-  'and still ships no external script',
-  signedOutScriptTags.every((tag) => !tag.includes(' src=')),
-  signedOutScriptTags.join(' | '),
-)
+  "and still ships no external script",
+  signedOutScriptTags.every((tag) => !tag.includes(" src=")),
+  signedOutScriptTags.join(" | "),
+);
 check(
-  'and still ships exactly one inline script',
+  "and still ships exactly one inline script",
   signedOutScriptTags.length === 1,
   `count=${signedOutScriptTags.length}`,
-)
+);
 
 const explicit = await fetch(`${BASE}/login/dev-header?next=%2Ffolio%2Fedit`, {
   headers: DEV_ID,
-  redirect: 'manual',
-})
+  redirect: "manual",
+});
 check(
-  'following that button signs in again',
+  "following that button signs in again",
   explicit.status === 302 && Boolean(sessionCookieFrom(explicit)),
   `status=${explicit.status}`,
-)
+);
 
-const noIdentity = await fetch(`${BASE}/login/dev-header`, { redirect: 'manual' })
+const noIdentity = await fetch(`${BASE}/login/dev-header`, { redirect: "manual" });
 check(
-  'and the same button with no identity lands somewhere that will not loop',
-  (noIdentity.headers.get('location') ?? '').includes('error=refused'),
-  noIdentity.headers.get('location') ?? '',
-)
+  "and the same button with no identity lands somewhere that will not loop",
+  (noIdentity.headers.get("location") ?? "").includes("error=refused"),
+  noIdentity.headers.get("location") ?? "",
+);
 
 /* --- signing out ------------------------------------------------------- */
 
-const loggedOut = await fetch(`${API}/logout`, { method: 'POST', headers: { cookie } })
-check('signing out succeeds', loggedOut.status === 200)
-const cleared = loggedOut.headers.getSetCookie?.() ?? []
+const loggedOut = await fetch(`${API}/logout`, { method: "POST", headers: { cookie } });
+check("signing out succeeds", loggedOut.status === 200);
+const cleared = loggedOut.headers.getSetCookie?.() ?? [];
 check(
-  'and clears the cookie under both names',
-  cleared.some((c) => c.startsWith('folio_session=;')),
-  cleared.join(' | '),
-)
+  "and clears the cookie under both names",
+  cleared.some((c) => c.startsWith("folio_session=;")),
+  cleared.join(" | "),
+);
 
-const afterLogout = await fetch(`${API}/stories`, { headers: { cookie } })
-check('the API refuses the old cookie', afterLogout.status === 401, `status=${afterLogout.status}`)
+const afterLogout = await fetch(`${API}/stories`, { headers: { cookie } });
+check("the API refuses the old cookie", afterLogout.status === 401, `status=${afterLogout.status}`);
 const editorAfterLogout = await fetch(`${BASE}/edit/${STORY}`, {
   headers: { cookie },
-  redirect: 'manual',
-})
-check('the editor redirects again', editorAfterLogout.status === 302)
+  redirect: "manual",
+});
+check("the editor redirects again", editorAfterLogout.status === 302);
 
-const socketAfterLogout = socket({ cookie })
+const socketAfterLogout = socket({ cookie });
 check(
-  'and a socket on the old cookie closes 4003',
+  "and a socket on the old cookie closes 4003",
   (await socketAfterLogout.closedWith()) === 4003,
   JSON.stringify(socketAfterLogout.closes),
-)
+);
 
-const stillPublic = await fetch(`${HTTP}/`)
-check('the published page still serves', stillPublic.status === 200)
+const stillPublic = await fetch(`${HTTP}/`);
+check("the published page still serves", stillPublic.status === 200);
 
-live.ws.close()
+live.ws.close();
 
 /* --- report ------------------------------------------------------------ */
 
-const failed = results.filter((r) => !r.ok)
-console.log(`\n${results.length - failed.length}/${results.length} passed`)
+const failed = results.filter((r) => !r.ok);
+console.log(`\n${results.length - failed.length}/${results.length} passed`);
 if (failed.length) {
-  for (const f of failed) console.log(`  FAILED: ${f.label} ${f.detail}`)
-  process.exitCode = 1
+  for (const f of failed) console.log(`  FAILED: ${f.label} ${f.detail}`);
+  process.exitCode = 1;
 }

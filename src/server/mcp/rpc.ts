@@ -25,12 +25,12 @@
  * permitted but the shape the protocol assumes: sessions and the GET stream were
  * removed from the transport outright.
  */
-import type { FolioErrorCode } from '../errors'
-import { FolioError } from '../errors'
-import type { FolioLogger } from '../types'
+import type { FolioErrorCode } from "../errors";
+import { FolioError } from "../errors";
+import type { FolioLogger } from "../types";
 
 /** The only version of JSON-RPC there is, and the only one MCP uses. */
-export const JSONRPC_VERSION = '2.0'
+export const JSONRPC_VERSION = "2.0";
 
 /* --------------------------------------------------------------- revisions --- */
 
@@ -49,20 +49,20 @@ export const JSONRPC_VERSION = '2.0'
  * SHOULD for a modern-only server and the signal that makes a *dual-era* client
  * retry as modern rather than fall back to a handshake nothing will answer.
  */
-export const MCP_PROTOCOL_VERSION = '2026-07-28'
+export const MCP_PROTOCOL_VERSION = "2026-07-28";
 
 /** Every revision this server will accept, newest first. */
-export const SUPPORTED_VERSIONS: readonly string[] = [MCP_PROTOCOL_VERSION]
+export const SUPPORTED_VERSIONS: readonly string[] = [MCP_PROTOCOL_VERSION];
 
 /* ------------------------------------------------------------------ codes --- */
 
 /** Invalid JSON. The only error answered before an `id` could be read. */
-export const PARSE_ERROR = -32700
+export const PARSE_ERROR = -32700;
 /** Well-formed JSON that is not a JSON-RPC request — including a batch. */
-export const INVALID_REQUEST = -32600
-export const METHOD_NOT_FOUND = -32601
-export const INVALID_PARAMS = -32602
-export const INTERNAL_ERROR = -32603
+export const INVALID_REQUEST = -32600;
+export const METHOD_NOT_FOUND = -32601;
+export const INVALID_PARAMS = -32602;
+export const INTERNAL_ERROR = -32603;
 
 /**
  * MCP's own reserved sub-range, from `2026-07-28`. Both are answered with
@@ -70,8 +70,8 @@ export const INTERNAL_ERROR = -32603
  * a dual-era client it is talking to a modern server and should retry rather than
  * fall back to `initialize`.
  */
-export const HEADER_MISMATCH = -32020
-export const UNSUPPORTED_PROTOCOL_VERSION = -32022
+export const HEADER_MISMATCH = -32020;
+export const UNSUPPORTED_PROTOCOL_VERSION = -32022;
 
 /**
  * The HTTP status a JSON-RPC error is carried on.
@@ -88,16 +88,16 @@ export const UNSUPPORTED_PROTOCOL_VERSION = -32022
  * `params` or an internal fault is a 200 with an `error`, exactly as before.
  */
 export function httpStatusFor(code: number): number {
-  if (code === METHOD_NOT_FOUND) return 404
+  if (code === METHOD_NOT_FOUND) return 404;
   if (
     code === HEADER_MISMATCH ||
     code === UNSUPPORTED_PROTOCOL_VERSION ||
     code === PARSE_ERROR ||
     code === INVALID_REQUEST
   ) {
-    return 400
+    return 400;
   }
-  return 200
+  return 200;
 }
 
 /**
@@ -115,30 +115,30 @@ export function httpStatusFor(code: number): number {
  * what a script already gets.
  */
 export function rpcCodeFor(code: FolioErrorCode | string | undefined): number {
-  return code === 'bad_request' ? INVALID_PARAMS : INTERNAL_ERROR
+  return code === "bad_request" ? INVALID_PARAMS : INTERNAL_ERROR;
 }
 
 /* ------------------------------------------------------------------ shape --- */
 
 /** JSON-RPC ids are a string or a number. `null` is a response-only value. */
-export type RpcId = string | number
+export type RpcId = string | number;
 
 export interface RpcError {
-  code: number
-  message: string
+  code: number;
+  message: string;
   /**
    * Structured detail. Only `UnsupportedProtocolVersionError` uses it, and it has
    * to: the client's whole recovery is reading `supported` and retrying.
    */
-  data?: unknown
+  data?: unknown;
 }
 
 export interface RpcResponse {
-  jsonrpc: typeof JSONRPC_VERSION
+  jsonrpc: typeof JSONRPC_VERSION;
   /** `null` only when the request was too malformed to carry one. */
-  id: RpcId | null
-  result?: unknown
-  error?: RpcError
+  id: RpcId | null;
+  result?: unknown;
+  error?: RpcError;
 }
 
 /**
@@ -147,14 +147,14 @@ export interface RpcResponse {
  * not an object. Thrown by a method and caught by `handleRpc`.
  */
 export class RpcFault extends Error {
-  readonly code: number
-  readonly data?: unknown
+  readonly code: number;
+  readonly data?: unknown;
 
   constructor(code: number, message: string, data?: unknown) {
-    super(message)
-    this.name = 'RpcFault'
-    this.code = code
-    this.data = data
+    super(message);
+    this.name = "RpcFault";
+    this.code = code;
+    this.data = data;
   }
 }
 
@@ -165,10 +165,10 @@ export class RpcFault extends Error {
  * `-32601`: it is the only route a client has back to a working request.
  */
 export function unsupportedVersion(requested: string | undefined): RpcFault {
-  return new RpcFault(UNSUPPORTED_PROTOCOL_VERSION, 'Unsupported protocol version', {
+  return new RpcFault(UNSUPPORTED_PROTOCOL_VERSION, "Unsupported protocol version", {
     supported: SUPPORTED_VERSIONS,
     requested: requested ?? null,
-  })
+  });
 }
 
 /** One method's implementation. `params` is always an object, possibly empty. */
@@ -177,40 +177,40 @@ export function unsupportedVersion(requested: string | undefined): RpcFault {
  * `resultType` on it. `void` is for a method only ever sent as a notification,
  * whose answer goes nowhere.
  */
-export type RpcResult = Record<string, unknown>
+export type RpcResult = Record<string, unknown>;
 
 export type RpcMethod = (
   params: Record<string, unknown>,
-) => Promise<RpcResult | undefined> | RpcResult | undefined
+) => Promise<RpcResult | undefined> | RpcResult | undefined;
 
-export type RpcMethods = Readonly<Record<string, RpcMethod>>
+export type RpcMethods = Readonly<Record<string, RpcMethod>>;
 
 /* ----------------------------------------------------------------- parsing --- */
 
 const isRecord = (x: unknown): x is Record<string, unknown> =>
-  typeof x === 'object' && x !== null && !Array.isArray(x)
+  typeof x === "object" && x !== null && !Array.isArray(x);
 
 const fail = (id: RpcId | null, code: number, message: string, data?: unknown): RpcResponse => ({
   jsonrpc: JSONRPC_VERSION,
   id,
   error: data === undefined ? { code, message } : { code, message, data },
-})
+});
 
 /**
  * A parsed message: a request (answer it), a notification (do not), or a
  * refusal that is already a response.
  */
 type Parsed =
-  | { kind: 'request'; id: RpcId; method: string; params: Record<string, unknown> }
-  | { kind: 'notification'; method: string; params: Record<string, unknown> }
-  | { kind: 'refused'; response: RpcResponse }
+  | { kind: "request"; id: RpcId; method: string; params: Record<string, unknown> }
+  | { kind: "notification"; method: string; params: Record<string, unknown> }
+  | { kind: "refused"; response: RpcResponse };
 
 function parse(text: string): Parsed {
-  let body: unknown
+  let body: unknown;
   try {
-    body = JSON.parse(text)
+    body = JSON.parse(text);
   } catch {
-    return { kind: 'refused', response: fail(null, PARSE_ERROR, 'That body is not valid JSON.') }
+    return { kind: "refused", response: fail(null, PARSE_ERROR, "That body is not valid JSON.") };
   }
 
   /**
@@ -222,36 +222,36 @@ function parse(text: string): Parsed {
    */
   if (Array.isArray(body)) {
     return {
-      kind: 'refused',
+      kind: "refused",
       response: fail(
         null,
         INVALID_REQUEST,
-        'This server does not accept batched requests: send one JSON-RPC message per POST.',
+        "This server does not accept batched requests: send one JSON-RPC message per POST.",
       ),
-    }
+    };
   }
 
   if (!isRecord(body)) {
     return {
-      kind: 'refused',
-      response: fail(null, INVALID_REQUEST, 'A JSON-RPC message must be a JSON object.'),
-    }
+      kind: "refused",
+      response: fail(null, INVALID_REQUEST, "A JSON-RPC message must be a JSON object."),
+    };
   }
 
   if (body.jsonrpc !== JSONRPC_VERSION) {
     return {
-      kind: 'refused',
+      kind: "refused",
       response: fail(null, INVALID_REQUEST, `Expected "jsonrpc": "${JSONRPC_VERSION}".`),
-    }
+    };
   }
 
-  if (typeof body.method !== 'string' || body.method === '') {
+  if (typeof body.method !== "string" || body.method === "") {
     return {
-      kind: 'refused',
+      kind: "refused",
       response: fail(null, INVALID_REQUEST, '"method" must be a non-empty string.'),
-    }
+    };
   }
-  const method = body.method
+  const method = body.method;
 
   /**
    * **A notification is a message with no `id`, and it gets no response at
@@ -261,40 +261,40 @@ function parse(text: string): Parsed {
    * message carrying one is malformed and is told so rather than silently
    * dropped, which is the failure mode that looks like a hang.
    */
-  const id = body.id
+  const id = body.id;
   if (id === undefined) {
-    return { kind: 'notification', method, params: paramsOf(body) ?? {} }
+    return { kind: "notification", method, params: paramsOf(body) ?? {} };
   }
-  if (typeof id !== 'string' && typeof id !== 'number') {
+  if (typeof id !== "string" && typeof id !== "number") {
     return {
-      kind: 'refused',
+      kind: "refused",
       response: fail(null, INVALID_REQUEST, '"id" must be a string or a number.'),
-    }
+    };
   }
 
-  const params = paramsOf(body)
+  const params = paramsOf(body);
   if (params === null) {
     return {
-      kind: 'refused',
+      kind: "refused",
       response: fail(id, INVALID_PARAMS, '"params" must be a JSON object.'),
-    }
+    };
   }
-  return { kind: 'request', id, method, params }
+  return { kind: "request", id, method, params };
 }
 
 /** `params` as an object, `{}` when absent, `null` when it is neither. */
 function paramsOf(body: Record<string, unknown>): Record<string, unknown> | null {
-  if (body.params === undefined || body.params === null) return {}
-  return isRecord(body.params) ? body.params : null
+  if (body.params === undefined || body.params === null) return {};
+  return isRecord(body.params) ? body.params : null;
 }
 
 /* ------------------------------------------------------- request metadata --- */
 
 /** The `_meta` key a modern request carries its revision in. */
-const META_VERSION = 'io.modelcontextprotocol/protocolVersion'
+const META_VERSION = "io.modelcontextprotocol/protocolVersion";
 
 /** A case-insensitive header lookup. Hono's `c.req.header` satisfies it exactly. */
-export type HeaderLookup = (name: string) => string | undefined
+export type HeaderLookup = (name: string) => string | undefined;
 
 /**
  * Streamable HTTP mirrors selected body fields into headers so that load
@@ -330,56 +330,56 @@ export function checkRequestMetadata(
   method: string,
   params: Record<string, unknown>,
 ): void {
-  const declared = header('mcp-protocol-version')
+  const declared = header("mcp-protocol-version");
   if (!declared) {
     throw new RpcFault(
       HEADER_MISMATCH,
-      'Missing required header: MCP-Protocol-Version. Every POST to this endpoint must declare its protocol revision.',
-    )
+      "Missing required header: MCP-Protocol-Version. Every POST to this endpoint must declare its protocol revision.",
+    );
   }
 
-  const inBody = metaVersion(params)
+  const inBody = metaVersion(params);
   if (inBody !== undefined && inBody !== declared) {
     throw new RpcFault(
       HEADER_MISMATCH,
       `Header mismatch: MCP-Protocol-Version header value '${declared}' does not match the '${META_VERSION}' in params._meta ('${inBody}').`,
-    )
+    );
   }
 
-  if (!SUPPORTED_VERSIONS.includes(declared)) throw unsupportedVersion(declared)
+  if (!SUPPORTED_VERSIONS.includes(declared)) throw unsupportedVersion(declared);
 
-  const headerMethod = header('mcp-method')
+  const headerMethod = header("mcp-method");
   if (!headerMethod) {
-    throw new RpcFault(HEADER_MISMATCH, 'Missing required header: Mcp-Method.')
+    throw new RpcFault(HEADER_MISMATCH, "Missing required header: Mcp-Method.");
   }
   if (headerMethod !== method) {
     throw new RpcFault(
       HEADER_MISMATCH,
       `Header mismatch: Mcp-Method header value '${headerMethod}' does not match body method '${method}'.`,
-    )
+    );
   }
 
-  if (method !== 'tools/call') return
+  if (method !== "tools/call") return;
 
-  const name = params.name
-  if (typeof name !== 'string') return // `tools/call` itself reports a missing name.
-  const headerName = header('mcp-name')
+  const name = params.name;
+  if (typeof name !== "string") return; // `tools/call` itself reports a missing name.
+  const headerName = header("mcp-name");
   if (headerName === undefined) {
-    throw new RpcFault(HEADER_MISMATCH, 'Missing required header: Mcp-Name.')
+    throw new RpcFault(HEADER_MISMATCH, "Missing required header: Mcp-Name.");
   }
   if (decodeSentinel(headerName) !== name) {
     throw new RpcFault(
       HEADER_MISMATCH,
       `Header mismatch: Mcp-Name header value '${headerName}' does not match body params.name ('${name}').`,
-    )
+    );
   }
 }
 
 function metaVersion(params: Record<string, unknown>): string | undefined {
-  const meta = params._meta
-  if (!isRecord(meta)) return undefined
-  const version = meta[META_VERSION]
-  return typeof version === 'string' ? version : undefined
+  const meta = params._meta;
+  if (!isRecord(meta)) return undefined;
+  const version = meta[META_VERSION];
+  return typeof version === "string" ? version : undefined;
 }
 
 /**
@@ -392,12 +392,12 @@ function metaVersion(params: Record<string, unknown>): string | undefined {
  * sentinel is a malformed header either way.
  */
 function decodeSentinel(value: string): string {
-  if (!value.startsWith('=?base64?') || !value.endsWith('?=')) return value
-  const encoded = value.slice('=?base64?'.length, -'?='.length)
+  if (!value.startsWith("=?base64?") || !value.endsWith("?=")) return value;
+  const encoded = value.slice("=?base64?".length, -"?=".length);
   try {
-    return new TextDecoder().decode(Uint8Array.from(atob(encoded), (ch) => ch.charCodeAt(0)))
+    return new TextDecoder().decode(Uint8Array.from(atob(encoded), (ch) => ch.charCodeAt(0)));
   } catch {
-    return value
+    return value;
   }
 }
 
@@ -405,17 +405,17 @@ function decodeSentinel(value: string): string {
 
 /** What one POST is answered with. `response: null` means "send no body". */
 export interface RpcOutcome {
-  status: number
-  response: RpcResponse | null
+  status: number;
+  response: RpcResponse | null;
 }
 
 /** A notification: accepted, nothing to say. */
-const ACCEPTED: RpcOutcome = { status: 202, response: null }
+const ACCEPTED: RpcOutcome = { status: 202, response: null };
 
 const refuse = (id: RpcId | null, code: number, message: string, data?: unknown): RpcOutcome => ({
   status: httpStatusFor(code),
   response: fail(id, code, message, data),
-})
+});
 
 /**
  * Answers one POST body.
@@ -436,26 +436,26 @@ export async function handleRpc(
   header: HeaderLookup,
   logger: FolioLogger = console,
 ): Promise<RpcOutcome> {
-  const message = parse(text)
-  if (message.kind === 'refused') {
-    const code = message.response.error?.code ?? INVALID_REQUEST
-    return { status: httpStatusFor(code), response: message.response }
+  const message = parse(text);
+  if (message.kind === "refused") {
+    const code = message.response.error?.code ?? INVALID_REQUEST;
+    return { status: httpStatusFor(code), response: message.response };
   }
 
-  if (message.kind === 'notification') {
+  if (message.kind === "notification") {
     // An unknown notification is dropped, not refused: there is nowhere to send
     // the refusal, and a client is allowed to send notifications a server does
     // not know about. The transport does not define header rules for a
     // notification POST, so `checkRequestMetadata` deliberately never sees one.
-    const method = methods[message.method]
+    const method = methods[message.method];
     if (method) {
       try {
-        await method(message.params)
+        await method(message.params);
       } catch (err) {
-        logger.error(`folio: mcp notification ${message.method} failed`, err)
+        logger.error(`folio: mcp notification ${message.method} failed`, err);
       }
     }
-    return ACCEPTED
+    return ACCEPTED;
   }
 
   /**
@@ -475,22 +475,22 @@ export async function handleRpc(
    * since a recognised modern error tells it to retry as modern rather than fall
    * back to a handshake nothing here will ever answer.
    */
-  if (message.method === 'initialize') {
-    const requested = message.params.protocolVersion
-    const fault = unsupportedVersion(typeof requested === 'string' ? requested : undefined)
+  if (message.method === "initialize") {
+    const requested = message.params.protocolVersion;
+    const fault = unsupportedVersion(typeof requested === "string" ? requested : undefined);
     return refuse(
       message.id,
       fault.code,
-      'This server implements MCP revision 2026-07-28 and does not accept the `initialize` handshake. Send requests directly, declaring the revision in the MCP-Protocol-Version header.',
+      "This server implements MCP revision 2026-07-28 and does not accept the `initialize` handshake. Send requests directly, declaring the revision in the MCP-Protocol-Version header.",
       fault.data,
-    )
+    );
   }
 
   try {
-    checkRequestMetadata(header, message.method, message.params)
+    checkRequestMetadata(header, message.method, message.params);
   } catch (err) {
-    if (err instanceof RpcFault) return refuse(message.id, err.code, err.message, err.data)
-    throw err
+    if (err instanceof RpcFault) return refuse(message.id, err.code, err.message, err.data);
+    throw err;
   }
 
   /**
@@ -499,9 +499,9 @@ export async function handleRpc(
    * method" from a `404` produced by a server that hosts no MCP endpoint at all,
    * which is a distinction a dual-era client's fallback logic depends on.
    */
-  const method = methods[message.method]
+  const method = methods[message.method];
   if (!method) {
-    return refuse(message.id, METHOD_NOT_FOUND, `No such method: '${message.method}'.`)
+    return refuse(message.id, METHOD_NOT_FOUND, `No such method: '${message.method}'.`);
   }
 
   /**
@@ -513,19 +513,19 @@ export async function handleRpc(
    * `tools/list`.
    */
   try {
-    const result = await method(message.params)
+    const result = await method(message.params);
     return {
       status: 200,
       response: {
         jsonrpc: JSONRPC_VERSION,
         id: message.id,
-        result: { ...(result ?? {}), resultType: 'complete' },
+        result: { ...(result ?? {}), resultType: "complete" },
       },
-    }
+    };
   } catch (err) {
-    if (err instanceof RpcFault) return refuse(message.id, err.code, err.message, err.data)
-    if (err instanceof FolioError) return refuse(message.id, rpcCodeFor(err.code), err.message)
-    logger.error(`folio: unhandled error in mcp ${message.method}`, err)
-    return refuse(message.id, INTERNAL_ERROR, 'Something went wrong.')
+    if (err instanceof RpcFault) return refuse(message.id, err.code, err.message, err.data);
+    if (err instanceof FolioError) return refuse(message.id, rpcCodeFor(err.code), err.message);
+    logger.error(`folio: unhandled error in mcp ${message.method}`, err);
+    return refuse(message.id, INTERNAL_ERROR, "Something went wrong.");
   }
 }

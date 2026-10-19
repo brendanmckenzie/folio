@@ -24,7 +24,7 @@
  * Nothing runs on boot. `POST /folio/api/migrate` (admin), or `folio.migrate(env)`
  * from a deploy step.
  */
-import { defineMigration, field } from 'folio/engine'
+import { defineMigration, field } from "folio/engine";
 
 /**
  * `pullquote.attribution` → `pullquote.credit`.
@@ -40,10 +40,10 @@ import { defineMigration, field } from 'folio/engine'
  * nothing.
  */
 export const pullquoteCredit = defineMigration({
-  id: '0001-pullquote-attribution-to-credit',
-  description: 'Pull quote: attribution → credit',
-  up: (_doc, ctx) => ctx.each('pullquote', (blok) => field.rename(blok, 'attribution', 'credit')),
-})
+  id: "0001-pullquote-attribution-to-credit",
+  description: "Pull quote: attribution → credit",
+  up: (_doc, ctx) => ctx.each("pullquote", (blok) => field.rename(blok, "attribution", "credit")),
+});
 
 /**
  * A retroactive default for `pullquote.tone`, added to the block after documents
@@ -59,10 +59,10 @@ export const pullquoteCredit = defineMigration({
  * `loud` is left alone, and so is one they cleared.
  */
 export const pullquoteTone = defineMigration({
-  id: '0002-pullquote-tone-default',
-  description: 'Pull quote: tone defaults to quiet',
-  up: (_doc, ctx) => ctx.each('pullquote', (blok) => field.default(blok, 'tone', 'quiet')),
-})
+  id: "0002-pullquote-tone-default",
+  description: "Pull quote: tone defaults to quiet",
+  up: (_doc, ctx) => ctx.each("pullquote", (blok) => field.default(blok, "tone", "quiet")),
+});
 
 /**
  * Kept as a worked example rather than run: this project has no block pair to
@@ -81,4 +81,4 @@ export const pullquoteTone = defineMigration({
  */
 
 /** In run order. `createFolio` refuses a set whose declared order and sort order disagree. */
-export const migrations = [pullquoteCredit, pullquoteTone]
+export const migrations = [pullquoteCredit, pullquoteTone];

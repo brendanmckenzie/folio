@@ -10,20 +10,20 @@
  * bottom needs: a third copy of "decode base64url" in this tree is a third place
  * for the padding rule to be got wrong.
  */
-import { base64url, fromBase64url } from './jwt'
+import { base64url, fromBase64url } from "./jwt";
 
 /** The name on HTTPS. `__Host-` binds the cookie to this exact host, forbids a
  * `Domain` attribute and requires `Secure` + `Path=/`, so a sibling subdomain
  * cannot set or overwrite it. */
-export const SECURE_COOKIE = '__Host-folio_session'
+export const SECURE_COOKIE = "__Host-folio_session";
 
 /** The name everywhere else. `http://localhost` under `wrangler dev` is not
  * HTTPS, and a `__Host-` cookie there is refused by the browser outright. */
-export const PLAIN_COOKIE = 'folio_session'
+export const PLAIN_COOKIE = "folio_session";
 
 /** The short-lived cookie carrying OIDC's `state`, `nonce` and PKCE verifier. */
-export const SECURE_OIDC_COOKIE = '__Host-folio_oidc'
-export const PLAIN_OIDC_COOKIE = 'folio_oidc'
+export const SECURE_OIDC_COOKIE = "__Host-folio_oidc";
+export const PLAIN_OIDC_COOKIE = "folio_oidc";
 
 /**
  * Draft preview links (`../../../docs/specs/platform/draft-sharing.md`).
@@ -34,8 +34,8 @@ export const PLAIN_OIDC_COOKIE = 'folio_oidc'
  * the server" a property of the cookie's name rather than of a check somebody
  * remembered to write.
  */
-export const SECURE_SHARE_COOKIE = '__Host-folio_share'
-export const PLAIN_SHARE_COOKIE = 'folio_share'
+export const SECURE_SHARE_COOKIE = "__Host-folio_share";
+export const PLAIN_SHARE_COOKIE = "folio_share";
 
 /**
  * Draft mode (`../../../docs/specs/platform/draft-mode.md` decision 2).
@@ -49,8 +49,8 @@ export const PLAIN_SHARE_COOKIE = 'folio_share'
  * A fourth name, so `readSessionCookie` and `shareCookieTokens` both continue to
  * see exactly the names they were written for.
  */
-export const SECURE_DRAFT_COOKIE = '__Host-folio_draft'
-export const PLAIN_DRAFT_COOKIE = 'folio_draft'
+export const SECURE_DRAFT_COOKIE = "__Host-folio_draft";
+export const PLAIN_DRAFT_COOKIE = "folio_draft";
 
 /**
  * A preview grant on a site's preview origin
@@ -65,8 +65,8 @@ export const PLAIN_DRAFT_COOKIE = 'folio_draft'
  * one. CHIPS keys it by the top-level site too, so the pane's grant is visible only
  * inside the admin.
  */
-export const SECURE_GRANT_COOKIE = '__Host-folio_grant'
-export const PLAIN_GRANT_COOKIE = 'folio_grant'
+export const SECURE_GRANT_COOKIE = "__Host-folio_grant";
+export const PLAIN_GRANT_COOKIE = "folio_grant";
 
 /**
  * The name to *write* for this request: prefixed on HTTPS, plain otherwise. Both
@@ -75,23 +75,23 @@ export const PLAIN_GRANT_COOKIE = 'folio_grant'
  * accept.
  */
 export function cookieName(url: URL | string): string {
-  return isSecure(url) ? SECURE_COOKIE : PLAIN_COOKIE
+  return isSecure(url) ? SECURE_COOKIE : PLAIN_COOKIE;
 }
 
 export function oidcCookieName(url: URL | string): string {
-  return isSecure(url) ? SECURE_OIDC_COOKIE : PLAIN_OIDC_COOKIE
+  return isSecure(url) ? SECURE_OIDC_COOKIE : PLAIN_OIDC_COOKIE;
 }
 
 export function shareCookieName(url: URL | string): string {
-  return isSecure(url) ? SECURE_SHARE_COOKIE : PLAIN_SHARE_COOKIE
+  return isSecure(url) ? SECURE_SHARE_COOKIE : PLAIN_SHARE_COOKIE;
 }
 
 export function draftCookieName(url: URL | string): string {
-  return isSecure(url) ? SECURE_DRAFT_COOKIE : PLAIN_DRAFT_COOKIE
+  return isSecure(url) ? SECURE_DRAFT_COOKIE : PLAIN_DRAFT_COOKIE;
 }
 
 export function grantCookieName(url: URL | string): string {
-  return isSecure(url) ? SECURE_GRANT_COOKIE : PLAIN_GRANT_COOKIE
+  return isSecure(url) ? SECURE_GRANT_COOKIE : PLAIN_GRANT_COOKIE;
 }
 
 /**
@@ -100,7 +100,7 @@ export function grantCookieName(url: URL | string): string {
  * exactly how a cookie ends up prefixed on one surface and plain on another.
  */
 export function isSecure(url: URL | string): boolean {
-  return (typeof url === 'string' ? new URL(url) : url).protocol === 'https:'
+  return (typeof url === "string" ? new URL(url) : url).protocol === "https:";
 }
 
 /**
@@ -111,14 +111,14 @@ export function isSecure(url: URL | string): boolean {
  * contain `=`, so splitting on the first one is exact.
  */
 export function readCookie(header: string | null | undefined, name: string): string | null {
-  if (!header) return null
-  for (const part of header.split(';')) {
-    const eq = part.indexOf('=')
-    if (eq === -1) continue
-    if (part.slice(0, eq).trim() !== name) continue
-    return part.slice(eq + 1).trim() || null
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() !== name) continue;
+    return part.slice(eq + 1).trim() || null;
   }
-  return null
+  return null;
 }
 
 /**
@@ -129,15 +129,15 @@ export function readCookie(header: string | null | undefined, name: string): str
  * trustworthy of the two whenever a stale plain one is also lying around.
  */
 export function readSessionCookie(header: string | null | undefined): string | null {
-  return readCookie(header, SECURE_COOKIE) ?? readCookie(header, PLAIN_COOKIE)
+  return readCookie(header, SECURE_COOKIE) ?? readCookie(header, PLAIN_COOKIE);
 }
 
 export function readOidcCookie(header: string | null | undefined): string | null {
-  return readCookie(header, SECURE_OIDC_COOKIE) ?? readCookie(header, PLAIN_OIDC_COOKIE)
+  return readCookie(header, SECURE_OIDC_COOKIE) ?? readCookie(header, PLAIN_OIDC_COOKIE);
 }
 
 /** A grant token, as `mintSecret()` produces it. */
-const GRANT_TOKEN = /^[0-9a-f]{64}$/
+const GRANT_TOKEN = /^[0-9a-f]{64}$/;
 
 /**
  * The preview grant this request presents, under either name, screened to
@@ -145,8 +145,8 @@ const GRANT_TOKEN = /^[0-9a-f]{64}$/
  * all this says; `readGrant` is what it is worth.
  */
 export function readGrantCookie(header: string | null | undefined): string | null {
-  const raw = readCookie(header, SECURE_GRANT_COOKIE) ?? readCookie(header, PLAIN_GRANT_COOKIE)
-  return raw && GRANT_TOKEN.test(raw) ? raw : null
+  const raw = readCookie(header, SECURE_GRANT_COOKIE) ?? readCookie(header, PLAIN_GRANT_COOKIE);
+  return raw && GRANT_TOKEN.test(raw) ? raw : null;
 }
 
 /**
@@ -161,13 +161,13 @@ export function readGrantCookie(header: string | null | undefined): string | nul
 export function serialiseGrantCookie(url: URL | string, value: string, maxAge: number): string {
   return [
     `${grantCookieName(url)}=${value}`,
-    'Path=/',
-    'HttpOnly',
-    'SameSite=None',
-    'Secure',
-    'Partitioned',
+    "Path=/",
+    "HttpOnly",
+    "SameSite=None",
+    "Secure",
+    "Partitioned",
     `Max-Age=${Math.max(0, Math.floor(maxAge))}`,
-  ].join('; ')
+  ].join("; ");
 }
 
 /**
@@ -186,15 +186,15 @@ export function serialiseGrantCookie(url: URL | string, value: string, maxAge: n
  * Newest wins on overflow (`withShareToken`), because the link just clicked is the
  * one being looked at.
  */
-export const MAX_SHARE_COOKIE_TOKENS = 5
+export const MAX_SHARE_COOKIE_TOKENS = 5;
 
 /** The separator inside the share cookie. Any non-hex byte would do — the tokens
  * are `mintSecret()`'s lowercase hex — and `.` is the one a reader recognises as
  * "a list of opaque parts". */
-const SHARE_SEPARATOR = '.'
+const SHARE_SEPARATOR = ".";
 
 /** A minted share token, as a cookie part: exactly what `mintSecret()` produces. */
-const SHARE_TOKEN = /^[0-9a-f]{64}$/
+const SHARE_TOKEN = /^[0-9a-f]{64}$/;
 
 /**
  * The share tokens this request presents: screened, de-duplicated and capped.
@@ -207,15 +207,15 @@ const SHARE_TOKEN = /^[0-9a-f]{64}$/
  * still good.
  */
 export function shareCookieTokens(header: string | null | undefined): string[] {
-  const raw = readCookie(header, SECURE_SHARE_COOKIE) ?? readCookie(header, PLAIN_SHARE_COOKIE)
-  if (!raw) return []
-  const out: string[] = []
+  const raw = readCookie(header, SECURE_SHARE_COOKIE) ?? readCookie(header, PLAIN_SHARE_COOKIE);
+  if (!raw) return [];
+  const out: string[] = [];
   for (const part of raw.split(SHARE_SEPARATOR)) {
-    if (!SHARE_TOKEN.test(part) || out.includes(part)) continue
-    out.push(part)
-    if (out.length === MAX_SHARE_COOKIE_TOKENS) break
+    if (!SHARE_TOKEN.test(part) || out.includes(part)) continue;
+    out.push(part);
+    if (out.length === MAX_SHARE_COOKIE_TOKENS) break;
   }
-  return out
+  return out;
 }
 
 /**
@@ -225,15 +225,15 @@ export function shareCookieTokens(header: string | null | undefined): string[] {
  * Newest first so the cap evicts the oldest link rather than the one just clicked.
  */
 export function withShareToken(header: string | null | undefined, token: string): string {
-  const rest = shareCookieTokens(header).filter((t) => t !== token)
-  return [token, ...rest].slice(0, MAX_SHARE_COOKIE_TOKENS).join(SHARE_SEPARATOR)
+  const rest = shareCookieTokens(header).filter((t) => t !== token);
+  return [token, ...rest].slice(0, MAX_SHARE_COOKIE_TOKENS).join(SHARE_SEPARATOR);
 }
 
 export interface CookieOptions {
   /** Seconds. Omitted for a session cookie that should die with the browser. */
-  maxAge?: number
+  maxAge?: number;
   /** Defaults to `Lax`, which is the CSRF half of architecture decision 4. */
-  sameSite?: 'Lax' | 'Strict'
+  sameSite?: "Lax" | "Strict";
 }
 
 /**
@@ -252,10 +252,10 @@ export function serialiseCookie(
   value: string,
   opts: CookieOptions = {},
 ): string {
-  const parts = [`${name}=${value}`, 'Path=/', 'HttpOnly', `SameSite=${opts.sameSite ?? 'Lax'}`]
-  if (isSecure(url)) parts.push('Secure')
-  if (opts.maxAge !== undefined) parts.push(`Max-Age=${Math.max(0, Math.floor(opts.maxAge))}`)
-  return parts.join('; ')
+  const parts = [`${name}=${value}`, "Path=/", "HttpOnly", `SameSite=${opts.sameSite ?? "Lax"}`];
+  if (isSecure(url)) parts.push("Secure");
+  if (opts.maxAge !== undefined) parts.push(`Max-Age=${Math.max(0, Math.floor(opts.maxAge))}`);
+  return parts.join("; ");
 }
 
 /**
@@ -266,25 +266,25 @@ export function serialiseCookie(
  * out, and the server reads both on the way in.
  */
 export function clearCookies(url: URL | string, secure: string, plain: string): string[] {
-  const expire = (name: string) => `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+  const expire = (name: string) => `${name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
   // The prefixed name must carry `Secure` or the browser ignores the deletion.
-  return isSecure(url) ? [`${expire(secure)}; Secure`, expire(plain)] : [expire(plain)]
+  return isSecure(url) ? [`${expire(secure)}; Secure`, expire(plain)] : [expire(plain)];
 }
 
 export function clearSessionCookies(url: URL | string): string[] {
-  return clearCookies(url, SECURE_COOKIE, PLAIN_COOKIE)
+  return clearCookies(url, SECURE_COOKIE, PLAIN_COOKIE);
 }
 
 export function clearOidcCookies(url: URL | string): string[] {
-  return clearCookies(url, SECURE_OIDC_COOKIE, PLAIN_OIDC_COOKIE)
+  return clearCookies(url, SECURE_OIDC_COOKIE, PLAIN_OIDC_COOKIE);
 }
 
 export function clearShareCookies(url: URL | string): string[] {
-  return clearCookies(url, SECURE_SHARE_COOKIE, PLAIN_SHARE_COOKIE)
+  return clearCookies(url, SECURE_SHARE_COOKIE, PLAIN_SHARE_COOKIE);
 }
 
 export function clearDraftCookies(url: URL | string): string[] {
-  return clearCookies(url, SECURE_DRAFT_COOKIE, PLAIN_DRAFT_COOKIE)
+  return clearCookies(url, SECURE_DRAFT_COOKIE, PLAIN_DRAFT_COOKIE);
 }
 
 /**
@@ -301,7 +301,7 @@ export function hasDraftCookie(header: string | null | undefined): boolean {
   return (
     readCookie(header, SECURE_DRAFT_COOKIE) !== null ||
     readCookie(header, PLAIN_DRAFT_COOKIE) !== null
-  )
+  );
 }
 
 /* ------------------------------------------------- webauthn challenges --- */
@@ -322,8 +322,8 @@ export function hasDraftCookie(header: string | null | undefined): boolean {
  * cross-site POST to the verify route carry no challenge at all, which is why
  * that route can refuse before it reads D1.
  */
-export const SECURE_WEBAUTHN_COOKIE = '__Host-folio_webauthn'
-export const PLAIN_WEBAUTHN_COOKIE = 'folio_webauthn'
+export const SECURE_WEBAUTHN_COOKIE = "__Host-folio_webauthn";
+export const PLAIN_WEBAUTHN_COOKIE = "folio_webauthn";
 
 /**
  * Ten minutes, deliberately longer than the 300s `timeout` the options hand the
@@ -331,18 +331,18 @@ export const PLAIN_WEBAUTHN_COOKIE = 'folio_webauthn'
  * half that expires first, or an assertion the browser was still willing to
  * produce fails on a race with our own clock.
  */
-export const WEBAUTHN_COOKIE_TTL_S = 600
+export const WEBAUTHN_COOKIE_TTL_S = 600;
 
 export function webauthnCookieName(url: URL | string): string {
-  return isSecure(url) ? SECURE_WEBAUTHN_COOKIE : PLAIN_WEBAUTHN_COOKIE
+  return isSecure(url) ? SECURE_WEBAUTHN_COOKIE : PLAIN_WEBAUTHN_COOKIE;
 }
 
 export function readWebauthnCookie(header: string | null | undefined): string | null {
-  return readCookie(header, SECURE_WEBAUTHN_COOKIE) ?? readCookie(header, PLAIN_WEBAUTHN_COOKIE)
+  return readCookie(header, SECURE_WEBAUTHN_COOKIE) ?? readCookie(header, PLAIN_WEBAUTHN_COOKIE);
 }
 
 export function clearWebauthnCookies(url: URL | string): string[] {
-  return clearCookies(url, SECURE_WEBAUTHN_COOKIE, PLAIN_WEBAUTHN_COOKIE)
+  return clearCookies(url, SECURE_WEBAUTHN_COOKIE, PLAIN_WEBAUTHN_COOKIE);
 }
 
 /**
@@ -357,16 +357,16 @@ export function clearWebauthnCookies(url: URL | string): string[] {
 export interface ChallengeCookie {
   /** The challenge itself: `mintSecret()`'s 64 lowercase hex characters, which
    * is the same 32 bytes of entropy every other credential here is minted from. */
-  c: string
+  c: string;
   /** Which ceremony minted it. A `create` cookie presented to the assertion
    * route (or the reverse) is refused: the two are different gates. */
-  k: 'create' | 'get'
+  k: "create" | "get";
   /** `users.id`, on a `create` challenge. */
-  u?: string
+  u?: string;
 }
 
 /** 64 lowercase hex characters and nothing else — `mintSecret()`'s exact shape. */
-const CHALLENGE_HEX = /^[0-9a-f]{64}$/
+const CHALLENGE_HEX = /^[0-9a-f]{64}$/;
 
 /**
  * Base64url over UTF-8, for the reason `routes/auth.ts`'s state envelope gives:
@@ -374,7 +374,7 @@ const CHALLENGE_HEX = /^[0-9a-f]{64}$/
  * that survive some proxies and not others.
  */
 export function encodeChallenge(payload: ChallengeCookie): string {
-  return base64url(new TextEncoder().encode(JSON.stringify(payload)))
+  return base64url(new TextEncoder().encode(JSON.stringify(payload)));
 }
 
 /**
@@ -383,19 +383,19 @@ export function encodeChallenge(payload: ChallengeCookie): string {
  * every caller turns into the same refusal an absent cookie gets.
  */
 export function decodeChallenge(value: string | null | undefined): ChallengeCookie | null {
-  if (!value) return null
-  let parsed: unknown
+  if (!value) return null;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(new TextDecoder().decode(fromBase64url(value)))
+    parsed = JSON.parse(new TextDecoder().decode(fromBase64url(value)));
   } catch {
-    return null
+    return null;
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null
-  const bag = parsed as Partial<ChallengeCookie>
-  if (typeof bag.c !== 'string' || !CHALLENGE_HEX.test(bag.c)) return null
-  if (bag.k !== 'create' && bag.k !== 'get') return null
-  if (bag.u !== undefined && (typeof bag.u !== 'string' || bag.u === '')) return null
-  return bag.u === undefined ? { c: bag.c, k: bag.k } : { c: bag.c, k: bag.k, u: bag.u }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  const bag = parsed as Partial<ChallengeCookie>;
+  if (typeof bag.c !== "string" || !CHALLENGE_HEX.test(bag.c)) return null;
+  if (bag.k !== "create" && bag.k !== "get") return null;
+  if (bag.u !== undefined && (typeof bag.u !== "string" || bag.u === "")) return null;
+  return bag.u === undefined ? { c: bag.c, k: bag.k } : { c: bag.c, k: bag.k, u: bag.u };
 }
 
 /**
@@ -409,7 +409,7 @@ export function decodeChallenge(value: string | null | undefined): ChallengeCook
  * base64url string of the right length.
  */
 export function challengeBytes(hex: string): Uint8Array<ArrayBuffer> {
-  const out = new Uint8Array(new ArrayBuffer(hex.length / 2))
-  for (let i = 0; i < out.length; i++) out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16)
-  return out
+  const out = new Uint8Array(new ArrayBuffer(hex.length / 2));
+  for (let i = 0; i < out.length; i++) out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
 }

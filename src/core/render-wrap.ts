@@ -1,4 +1,4 @@
-import { createElement, type ReactNode } from 'react'
+import { createElement, type ReactNode } from "react";
 
 /**
  * A host-supplied wrapper around a previewed document.
@@ -11,7 +11,7 @@ import { createElement, type ReactNode } from 'react'
  * A plain function of `{ children }` rather than a `ComponentType`, so a host
  * can write either an arrow or a component and neither needs `React.FC`.
  */
-export type PreviewWrap = (props: { children: ReactNode }) => ReactNode
+export type PreviewWrap = (props: { children: ReactNode }) => ReactNode;
 
 /**
  * Applies a wrapper, or does not. The one place the optionality is handled.
@@ -33,5 +33,5 @@ export type PreviewWrap = (props: { children: ReactNode }) => ReactNode
  * wrong was treating the type signature as an instruction for how to invoke it.
  */
 export function wrapPreview(wrap: PreviewWrap | undefined, tree: ReactNode): ReactNode {
-  return wrap ? createElement(wrap, null, tree) : tree
+  return wrap ? createElement(wrap, null, tree) : tree;
 }

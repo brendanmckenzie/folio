@@ -52,20 +52,20 @@
 // of polling from here will change it. If a stale page is ever reported from
 // another region, that is the assumption to re-test, not this script.
 
-import { parseArgs } from 'node:util'
+import { parseArgs } from "node:util";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
-    path: { type: 'string', default: '/' },
-    token: { type: 'string' },
-    admin: { type: 'string' },
-    site: { type: 'string' },
-    preview: { type: 'string' },
-    timeout: { type: 'string', default: '15000' },
-    help: { type: 'boolean', short: 'h' },
+    path: { type: "string", default: "/" },
+    token: { type: "string" },
+    admin: { type: "string" },
+    site: { type: "string" },
+    preview: { type: "string" },
+    timeout: { type: "string", default: "15000" },
+    help: { type: "boolean", short: "h" },
   },
-})
+});
 
 const USAGE = `usage: node scripts/cache-probe.mjs <deployment-url> [--path /] [--token <api token>] [--timeout ms]
                                      [--admin <origin> --site <id>] [--preview <origin>]
@@ -80,88 +80,88 @@ Multi-site (docs/specs/foundation/multi-site.md):
   --site <id>        the site the writes are made under; required with --admin, and the other way round
   --preview <origin> the site's preview origin: the same path is probed there, must be a separate
                      cache entry from the live host's, and (with --admin) is checked to be purged by
-                     the same publish`
+                     the same publish`;
 
-const base = positionals[0]?.replace(/\/+$/, '')
+const base = positionals[0]?.replace(/\/+$/, "");
 if (!base || values.help) {
-  console.error(USAGE)
-  process.exit(values.help ? 0 : 2)
+  console.error(USAGE);
+  process.exit(values.help ? 0 : 2);
 }
 if (Boolean(values.admin) !== Boolean(values.site)) {
   console.error(
-    `--admin and --site go together: ${values.admin ? '--admin needs --site' : '--site needs --admin'}\n`,
-  )
-  console.error(USAGE)
-  process.exit(2)
+    `--admin and --site go together: ${values.admin ? "--admin needs --site" : "--site needs --admin"}\n`,
+  );
+  console.error(USAGE);
+  process.exit(2);
 }
 
 const originOf = (flag, raw) => {
   try {
-    return new URL(raw).origin
+    return new URL(raw).origin;
   } catch {
-    console.error(`${flag} must be an absolute URL, like https://cms.example\n`)
-    console.error(USAGE)
-    process.exit(2)
+    console.error(`${flag} must be an absolute URL, like https://cms.example\n`);
+    console.error(USAGE);
+    process.exit(2);
   }
-}
+};
 
-const PATH = values.path.startsWith('/') ? values.path : `/${values.path}`
-const TARGET = `${base}${PATH}`
+const PATH = values.path.startsWith("/") ? values.path : `/${values.path}`;
+const TARGET = `${base}${PATH}`;
 // The writes: on the admin origin under the site's segment on a multi-site
 // deployment, on the host itself otherwise.
-const MULTI = Boolean(values.admin)
+const MULTI = Boolean(values.admin);
 const API = MULTI
-  ? `${originOf('--admin', values.admin)}/folio/~${encodeURIComponent(values.site)}/api/v1`
-  : `${base}/folio/api/v1`
+  ? `${originOf("--admin", values.admin)}/folio/~${encodeURIComponent(values.site)}/api/v1`
+  : `${base}/folio/api/v1`;
 // The same path on the preview origin, when one was named.
-const PREVIEW = values.preview ? `${originOf('--preview', values.preview)}${PATH}` : null
-const TIMEOUT = Number(values.timeout)
-const POLL_MS = 50
+const PREVIEW = values.preview ? `${originOf("--preview", values.preview)}${PATH}` : null;
+const TIMEOUT = Number(values.timeout);
+const POLL_MS = 50;
 
-const auth = values.token ? { authorization: `Bearer ${values.token}` } : undefined
+const auth = values.token ? { authorization: `Bearer ${values.token}` } : undefined;
 
-const wait = (ms) => new Promise((r) => setTimeout(r, ms))
-const rows = []
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const rows = [];
 const record = (step, ok, detail) => {
-  rows.push({ step, ok, detail })
+  rows.push({ step, ok, detail });
   console.log(
-    `${ok === null ? 'SKIP' : ok ? 'PASS' : 'FAIL'}  ${step}${detail ? `  ${detail}` : ''}`,
-  )
-}
+    `${ok === null ? "SKIP" : ok ? "PASS" : "FAIL"}  ${step}${detail ? `  ${detail}` : ""}`,
+  );
+};
 
 /** One plain GET of the target, as a browser navigation would make it. */
 async function probe(headers = {}, url = TARGET) {
-  const started = Date.now()
-  const res = await fetch(url, { redirect: 'manual', headers })
-  await res.arrayBuffer() // drain, so the connection is reusable
+  const started = Date.now();
+  const res = await fetch(url, { redirect: "manual", headers });
+  await res.arrayBuffer(); // drain, so the connection is reusable
   return {
     status: res.status,
     ms: Date.now() - started,
     // Cloudflare's own verdict. Absent entirely when the Worker has no cache
     // enabled — which is the first thing worth telling the operator.
-    cacheStatus: res.headers.get('cf-cache-status'),
-    cacheControl: res.headers.get('cache-control'),
-    cacheTag: res.headers.get('cache-tag'),
-    setCookie: res.headers.get('set-cookie'),
-    vary: res.headers.get('vary'),
-  }
+    cacheStatus: res.headers.get("cf-cache-status"),
+    cacheControl: res.headers.get("cache-control"),
+    cacheTag: res.headers.get("cache-tag"),
+    setCookie: res.headers.get("set-cookie"),
+    vary: res.headers.get("vary"),
+  };
 }
 
 async function api(path, init = {}) {
-  if (!auth) throw new Error('no token')
+  if (!auth) throw new Error("no token");
   const res = await fetch(`${API}${path}`, {
     ...init,
     headers: {
       ...auth,
-      ...(init.body ? { 'content-type': 'application/json' } : {}),
+      ...(init.body ? { "content-type": "application/json" } : {}),
       ...init.headers,
     },
-  })
-  const body = await res.json().catch(() => null)
+  });
+  const body = await res.json().catch(() => null);
   if (!res.ok) {
-    throw new Error(`${init.method ?? 'GET'} ${path} → ${res.status} ${JSON.stringify(body)}`)
+    throw new Error(`${init.method ?? "GET"} ${path} → ${res.status} ${JSON.stringify(body)}`);
   }
-  return body
+  return body;
 }
 
 /**
@@ -173,62 +173,62 @@ async function api(path, init = {}) {
  * so "the HTML differs" is not a signal that exists for every prefix. A MISS is.
  */
 async function timeToFresh(url = TARGET) {
-  const started = Date.now()
+  const started = Date.now();
   while (Date.now() - started < TIMEOUT) {
-    const seen = await probe({}, url)
-    if (seen.cacheStatus !== 'HIT') {
-      const ms = Date.now() - started
+    const seen = await probe({}, url);
+    if (seen.cacheStatus !== "HIT") {
+      const ms = Date.now() - started;
       // Warm it again, so the next measurement starts from a HIT like this one did.
-      await probe({}, url)
-      return { ms, status: seen.cacheStatus }
+      await probe({}, url);
+      return { ms, status: seen.cacheStatus };
     }
-    await wait(POLL_MS)
+    await wait(POLL_MS);
   }
-  return { ms: null, status: 'HIT' }
+  return { ms: null, status: "HIT" };
 }
 
 /** Requests until `url` answers from cache, at most three: a HIT is what a purge check starts from. */
 async function warm(url) {
   for (let i = 0; i < 3; i++) {
-    if ((await probe({}, url)).cacheStatus === 'HIT') return true
-    await wait(POLL_MS)
+    if ((await probe({}, url)).cacheStatus === "HIT") return true;
+    await wait(POLL_MS);
   }
-  return false
+  return false;
 }
 
 /** The tag set the response carries, grouped by prefix. */
 function tagsOf(header) {
-  const tags = (header ?? '')
-    .split(',')
+  const tags = (header ?? "")
+    .split(",")
     .map((t) => t.trim())
-    .filter(Boolean)
-  const byPrefix = new Map()
+    .filter(Boolean);
+  const byPrefix = new Map();
   for (const tag of tags) {
-    const prefix = tag.includes(':') ? `${tag.split(':')[0]}:` : tag
-    byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), tag])
+    const prefix = tag.includes(":") ? `${tag.split(":")[0]}:` : tag;
+    byPrefix.set(prefix, [...(byPrefix.get(prefix) ?? []), tag]);
   }
-  return { tags, byPrefix }
+  return { tags, byPrefix };
 }
 
-console.log(`\ncache-probe → ${TARGET}`)
-if (PREVIEW) console.log(`preview     → ${PREVIEW}`)
-if (MULTI) console.log(`writes      → ${API}`)
-console.log('')
+console.log(`\ncache-probe → ${TARGET}`);
+if (PREVIEW) console.log(`preview     → ${PREVIEW}`);
+if (MULTI) console.log(`writes      → ${API}`);
+console.log("");
 
 /* ------------------------------------------------- phase 1: is it cached --- */
 
-const first = await probe()
+const first = await probe();
 if (first.status >= 400) {
-  record('the target answers', false, `${first.status} — nothing to probe`)
-  process.exit(1)
+  record("the target answers", false, `${first.status} — nothing to probe`);
+  process.exit(1);
 }
-record('the target answers', true, `${first.status} in ${first.ms}ms`)
+record("the target answers", true, `${first.status} in ${first.ms}ms`);
 
 record(
-  'the host sets Cache-Control',
+  "the host sets Cache-Control",
   Boolean(first.cacheControl),
-  first.cacheControl ?? 'absent — the host has not applied folio.cacheHeaders()',
-)
+  first.cacheControl ?? "absent — the host has not applied folio.cacheHeaders()",
+);
 /**
  * The asymmetry decision 2 is built on: both headers or neither. One without the
  * other is a page cached for its full TTL with no purge path.
@@ -245,64 +245,64 @@ record(
  * its own, so an unauthenticated probe still gets the published page.
  */
 if (first.cacheStatus) {
-  const bypassed = await probe({ cookie: 'folio_draft=1' })
+  const bypassed = await probe({ cookie: "folio_draft=1" });
   record(
-    'the host sets Cache-Tag',
+    "the host sets Cache-Tag",
     Boolean(bypassed.cacheTag),
     bypassed.cacheTag
       ? `${tagsOf(bypassed.cacheTag).tags.length} tags (read off a bypassed request; Cloudflare strips the header from a cached one)`
-      : 'absent — nothing can be purged',
-  )
-  first.cacheTag = bypassed.cacheTag
+      : "absent — nothing can be purged",
+  );
+  first.cacheTag = bypassed.cacheTag;
 } else {
   record(
-    'the host sets Cache-Tag',
+    "the host sets Cache-Tag",
     Boolean(first.cacheTag),
     first.cacheTag
       ? `${tagsOf(first.cacheTag).tags.length} tags`
-      : 'absent — nothing can be purged',
-  )
+      : "absent — nothing can be purged",
+  );
 }
 if (first.cacheControl && !/max-age=0/.test(first.cacheControl)) {
   record(
-    'max-age is 0',
+    "max-age is 0",
     false,
-    'a purge reaches the edge and cannot reach a browser cache — see decision 9',
-  )
+    "a purge reaches the edge and cannot reach a browser cache — see decision 9",
+  );
 } else if (first.cacheControl) {
-  record('max-age is 0', true, 'no browser holds a copy a purge cannot reach')
+  record("max-age is 0", true, "no browser holds a copy a purge cannot reach");
 }
 
 // The trap that silently disables caching entirely: Workers Cache never stores a
 // response carrying Set-Cookie. A host that rolls a session on a published page
 // gets zero caching and no error at all.
 record(
-  'no Set-Cookie on the published response',
+  "no Set-Cookie on the published response",
   !first.setCookie,
-  first.setCookie ? 'set — Workers Cache will never store this response' : '',
-)
-if (first.vary) record('Vary', null, `${first.vary} — a cache variant; confirm it is intended`)
+  first.setCookie ? "set — Workers Cache will never store this response" : "",
+);
+if (first.vary) record("Vary", null, `${first.vary} — a cache variant; confirm it is intended`);
 
 if (first.cacheStatus === null) {
   record(
-    'the deployment has caching enabled',
+    "the deployment has caching enabled",
     false,
     'no cf-cache-status header at all — add "cache": { "enabled": true } to wrangler.jsonc',
-  )
-  process.exit(1)
+  );
+  process.exit(1);
 }
 
-const second = await probe()
+const second = await probe();
 record(
-  'MISS then HIT',
-  second.cacheStatus === 'HIT',
+  "MISS then HIT",
+  second.cacheStatus === "HIT",
   `${first.cacheStatus} → ${second.cacheStatus}`,
-)
+);
 
-const { byPrefix } = tagsOf(first.cacheTag ?? second.cacheTag)
+const { byPrefix } = tagsOf(first.cacheTag ?? second.cacheTag);
 console.log(
-  `\ntags on this response: ${[...byPrefix].map(([p, t]) => `${p}×${t.length}`).join('  ') || 'none'}\n`,
-)
+  `\ntags on this response: ${[...byPrefix].map(([p, t]) => `${p}×${t.length}`).join("  ") || "none"}\n`,
+);
 
 /* ------------------------- phase 1b: is the preview origin its own entry --- */
 
@@ -314,44 +314,48 @@ console.log(
  * MISS here means the preview origin did not share it.
  */
 if (PREVIEW) {
-  const live = await probe()
-  const seen = await probe({}, PREVIEW)
+  const live = await probe();
+  const seen = await probe({}, PREVIEW);
   if (seen.status >= 400) {
     record(
-      'the preview origin answers',
+      "the preview origin answers",
       false,
       `${seen.status} — a draft site serves nobody on its preview origin without a grant`,
-    )
+    );
   } else {
-    record('the preview origin answers', true, `${seen.status} in ${seen.ms}ms`)
-    if (live.cacheStatus !== 'HIT') {
-      record('preview is a separate entry', null, `the live entry was ${live.cacheStatus}, not HIT`)
-    } else if (seen.cacheStatus === 'MISS') {
+    record("the preview origin answers", true, `${seen.status} in ${seen.ms}ms`);
+    if (live.cacheStatus !== "HIT") {
       record(
-        'preview is a separate entry',
+        "preview is a separate entry",
+        null,
+        `the live entry was ${live.cacheStatus}, not HIT`,
+      );
+    } else if (seen.cacheStatus === "MISS") {
+      record(
+        "preview is a separate entry",
         true,
         `live ${live.cacheStatus}, preview ${seen.cacheStatus}`,
-      )
-    } else if (seen.cacheStatus === 'HIT') {
+      );
+    } else if (seen.cacheStatus === "HIT") {
       record(
-        'preview is a separate entry',
+        "preview is a separate entry",
         null,
-        'the preview entry was already warm from an earlier request; run again after a publish',
-      )
+        "the preview entry was already warm from an earlier request; run again after a publish",
+      );
     } else {
       record(
-        'preview is a separate entry',
+        "preview is a separate entry",
         false,
-        `preview ${seen.cacheStatus ?? 'has no cf-cache-status'} — the preview origin is not cached`,
-      )
+        `preview ${seen.cacheStatus ?? "has no cf-cache-status"} — the preview origin is not cached`,
+      );
     }
-    const again = await probe({}, PREVIEW)
+    const again = await probe({}, PREVIEW);
     if (seen.cacheStatus !== null) {
       record(
-        'preview MISS then HIT',
-        again.cacheStatus === 'HIT',
+        "preview MISS then HIT",
+        again.cacheStatus === "HIT",
         `${seen.cacheStatus} → ${again.cacheStatus}`,
-      )
+      );
     }
   }
 }
@@ -359,8 +363,8 @@ if (PREVIEW) {
 /* ------------------------------------------- phase 2: does a purge land --- */
 
 if (!auth) {
-  record('purge by tag', null, 'no --token, so no write can be made to trigger one')
-  summarise()
+  record("purge by tag", null, "no --token, so no write can be made to trigger one");
+  summarise();
 }
 
 /**
@@ -371,61 +375,61 @@ if (!auth) {
  * "0 failed". A probe that quietly does nothing is the failure this script was
  * written to catch, so the miss is now recorded rather than stepped over.
  */
-const meta = await api(`/documents/by-path/${values.path.replace(/^\/+/, '')}`).catch((err) => {
-  record('find the document behind the path', false, String(err))
-  return null
-})
+const meta = await api(`/documents/by-path/${values.path.replace(/^\/+/, "")}`).catch((err) => {
+  record("find the document behind the path", false, String(err));
+  return null;
+});
 
 if (meta && !meta.id) {
   record(
-    'find the document behind the path',
+    "find the document behind the path",
     false,
     `no id in ${JSON.stringify(meta).slice(0, 120)}`,
-  )
+  );
 }
 
 // On a multi-site deployment the page may be inherited: owned by `shared` or a group,
 // and served here by the walk up the chain. A write under `~<site>` cannot reach it,
 // and the token may hold no role on the owner, so none is attempted.
-const owned = !MULTI || !meta?.site || meta.site === values.site
+const owned = !MULTI || !meta?.site || meta.site === values.site;
 
 if (meta?.id && !owned) {
   record(
-    'story: purge lands',
+    "story: purge lands",
     null,
     `the page belongs to ${meta.site}, not ${values.site}; point --path at a page the site owns`,
-  )
-  record('publish purges both entries', null, 'nothing is written to a page the site does not own')
+  );
+  record("publish purges both entries", null, "nothing is written to a page the site does not own");
 }
 
 if (meta?.id && owned) {
-  record('find the document behind the path', true, `${meta.id} (${meta.type})`)
+  record("find the document behind the path", true, `${meta.id} (${meta.type})`);
 
   // --- story: --------------------------------------------------------------
   // A title patch fires `updated`, which purges `story:<id>` and nothing else —
   // the only trigger in the whole vocabulary that is precisely one prefix. It is
   // also the write that used to fire no event at all, which is why the `updated`
   // event exists.
-  if (byPrefix.has('story:')) {
-    const original = meta.title
+  if (byPrefix.has("story:")) {
+    const original = meta.title;
     await api(`/documents/${meta.id}`, {
-      method: 'PATCH',
+      method: "PATCH",
       body: JSON.stringify({ title: `${original} (cache-probe)` }),
-    })
-    const fresh = await timeToFresh()
+    });
+    const fresh = await timeToFresh();
     record(
-      'story: purge lands',
+      "story: purge lands",
       fresh.ms !== null,
       fresh.ms !== null ? `${fresh.ms}ms → ${fresh.status}` : `still HIT after ${TIMEOUT}ms`,
-    )
+    );
     // Reverted whatever happened above, so the probe leaves the title as it
     // found it. This purges the same tag a second time, harmlessly.
     await api(`/documents/${meta.id}`, {
-      method: 'PATCH',
+      method: "PATCH",
       body: JSON.stringify({ title: original }),
-    })
+    });
   } else {
-    record('story: purge lands', null, 'the response carries no story: tag')
+    record("story: purge lands", null, "the response carries no story: tag");
   }
 
   if (MULTI) {
@@ -433,8 +437,8 @@ if (meta?.id && owned) {
     // `global:<name>@<scope>`, `type:<name>@<scope>`), so the two lookups below, which
     // read a bare name off the tag, would publish the wrong document. What a multi-site
     // deployment adds is one publish that reaches both surfaces, which is checked here.
-    record('global: purge lands', null, 'not probed with --admin: layer ids carry the scope')
-    record('type: purge lands', null, 'not probed with --admin: type tags carry the scope')
+    record("global: purge lands", null, "not probed with --admin: layer ids carry the scope");
+    record("type: purge lands", null, "not probed with --admin: type tags carry the scope");
 
     // --- one publish, both entries: ---------------------------------------------
     // A tag purge reaches every props variant, so the live host's entry and the preview
@@ -442,33 +446,33 @@ if (meta?.id && owned) {
     // `live` with no newer draft is republished: `changed` would publish someone's
     // unfinished edits.
     if (!PREVIEW) {
-      record('publish purges both entries', null, 'no --preview, so there is only one entry')
-    } else if (meta.state !== 'live') {
+      record("publish purges both entries", null, "no --preview, so there is only one entry");
+    } else if (meta.state !== "live") {
       record(
-        'publish purges both entries',
+        "publish purges both entries",
         null,
         `the page is ${meta.state}; publishing it would change what visitors see`,
-      )
+      );
     } else if (!(await warm(TARGET)) || !(await warm(PREVIEW))) {
-      record('publish purges both entries', null, 'could not get both entries to HIT first')
+      record("publish purges both entries", null, "could not get both entries to HIT first");
     } else {
       try {
-        await api(`/documents/${meta.id}/publish`, { method: 'POST' })
-        const [live, preview] = await Promise.all([timeToFresh(TARGET), timeToFresh(PREVIEW)])
+        await api(`/documents/${meta.id}/publish`, { method: "POST" });
+        const [live, preview] = await Promise.all([timeToFresh(TARGET), timeToFresh(PREVIEW)]);
         record(
-          'publish purges the live entry',
+          "publish purges the live entry",
           live.ms !== null,
           live.ms !== null ? `${live.ms}ms → ${live.status}` : `still HIT after ${TIMEOUT}ms`,
-        )
+        );
         record(
-          'publish purges the preview entry',
+          "publish purges the preview entry",
           preview.ms !== null,
           preview.ms !== null
             ? `${preview.ms}ms → ${preview.status}`
             : `still HIT after ${TIMEOUT}ms`,
-        )
+        );
       } catch (err) {
-        record('publish purges both entries', false, String(err))
+        record("publish purges both entries", false, String(err));
       }
     }
   } else {
@@ -476,67 +480,67 @@ if (meta?.id && owned) {
     // Publishing a global purges `global:<name>` on every page that *rendered* it,
     // which is the case no reverse index could ever have answered: a global comes
     // from config and writes no `content_refs` edge at all.
-    const globals = (byPrefix.get('global:') ?? []).map((t) => decodeURIComponent(t.slice(7)))
+    const globals = (byPrefix.get("global:") ?? []).map((t) => decodeURIComponent(t.slice(7)));
     if (globals.length > 0) {
-      const name = globals[0]
+      const name = globals[0];
       try {
-        await api(`/documents/sng_${name}/publish`, { method: 'POST' })
-        const fresh = await timeToFresh()
+        await api(`/documents/sng_${name}/publish`, { method: "POST" });
+        const fresh = await timeToFresh();
         record(
           `global:${name} purge lands`,
           fresh.ms !== null,
           fresh.ms !== null ? `${fresh.ms}ms → ${fresh.status}` : `still HIT after ${TIMEOUT}ms`,
-        )
+        );
       } catch (err) {
-        record(`global:${name} purge lands`, false, String(err))
+        record(`global:${name} purge lands`, false, String(err));
       }
     } else {
-      record('global: purge lands', null, 'the response carries no global: tag')
+      record("global: purge lands", null, "the response carries no global: tag");
     }
 
     // --- type: ---------------------------------------------------------------
     // Publishing any document of the type purges every index page listing it,
     // with nothing anywhere recording which pages those are. The document itself
     // is chosen from the same query the page's own collection would run.
-    const types = (byPrefix.get('type:') ?? [])
+    const types = (byPrefix.get("type:") ?? [])
       .map((t) => decodeURIComponent(t.slice(5)))
-      .filter((t) => t !== '*')
+      .filter((t) => t !== "*");
     if (types.length > 0) {
-      const type = types[0]
+      const type = types[0];
       try {
-        const page = await api(`/documents?type=${encodeURIComponent(type)}&perPage=1`)
-        const item = page.items?.[0]
+        const page = await api(`/documents?type=${encodeURIComponent(type)}&perPage=1`);
+        const item = page.items?.[0];
         if (!item) {
-          record(`type:${type} purge lands`, null, 'no published document of that type to publish')
+          record(`type:${type} purge lands`, null, "no published document of that type to publish");
         } else {
-          await api(`/documents/${item.id}/publish`, { method: 'POST' })
-          const fresh = await timeToFresh()
+          await api(`/documents/${item.id}/publish`, { method: "POST" });
+          const fresh = await timeToFresh();
           record(
             `type:${type} purge lands`,
             fresh.ms !== null,
             fresh.ms !== null
               ? `${fresh.ms}ms → ${fresh.status} (via publishing ${item.id})`
               : `still HIT after ${TIMEOUT}ms`,
-          )
+          );
         }
       } catch (err) {
-        record(`type:${type} purge lands`, false, String(err))
+        record(`type:${type} purge lands`, false, String(err));
       }
     } else {
-      record('type: purge lands', null, 'the response carries no type: tag')
+      record("type: purge lands", null, "the response carries no type: tag");
     }
   }
 }
 
-summarise()
+summarise();
 
 function summarise() {
-  const failed = rows.filter((r) => r.ok === false).length
-  const skipped = rows.filter((r) => r.ok === null).length
-  const passed = rows.filter((r) => r.ok === true).length
-  console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped`)
+  const failed = rows.filter((r) => r.ok === false).length;
+  const skipped = rows.filter((r) => r.ok === null).length;
+  const passed = rows.filter((r) => r.ok === true).length;
+  console.log(`\n${passed} passed, ${failed} failed, ${skipped} skipped`);
   console.log(
-    'Measured at one colo only. Global propagation is not observable from a single client.\n',
-  )
-  process.exit(failed > 0 ? 1 : 0)
+    "Measured at one colo only. Global propagation is not observable from a single client.\n",
+  );
+  process.exit(failed > 0 ? 1 : 0);
 }

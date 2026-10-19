@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { Page } from '../../../core/pagination'
-import type { TokenRow } from '../../../server/auth/tokens'
-import type { AccessUser } from './access-model'
-import { messageOf } from './useContent'
+import { useCallback, useEffect, useState } from "react";
+import type { Page } from "../../../core/pagination";
+import type { TokenRow } from "../../../server/auth/tokens";
+import type { AccessUser } from "./access-model";
+import { messageOf } from "./useContent";
 
 /**
  * The Access screen's data: one page of editors and one page of tokens.
@@ -23,16 +23,16 @@ import { messageOf } from './useContent'
 /** Rows per request, matching `useDocuments`. The routes default to 50 and clamp
  * at 200. Fifty is roughly two screens, which makes paging the exception rather
  * than the rhythm — and on this screen it means most sites never page at all. */
-const PAGE = 50
+const PAGE = 50;
 
 export interface PagedList<T> {
-  page: Page<T> & { loading: boolean; error?: string }
+  page: Page<T> & { loading: boolean; error?: string };
   /** Cursors already visited, so *previous* is a pop rather than a reverse query. */
-  canGoBack: boolean
-  nextPage: () => void
-  prevPage: () => void
+  canGoBack: boolean;
+  nextPage: () => void;
+  prevPage: () => void;
   /** Re-read the current page, after a write. */
-  reload: () => void
+  reload: () => void;
 }
 
 /**
@@ -44,15 +44,15 @@ export interface PagedList<T> {
  * reloads tokens.
  */
 export interface AccessData {
-  users: PagedList<AccessUser>
-  tokens: PagedList<TokenRow>
+  users: PagedList<AccessUser>;
+  tokens: PagedList<TokenRow>;
 }
 
 export function useAccess(apiBase: string, enabled: boolean): AccessData {
   return {
-    users: usePaged<AccessUser>(apiBase, '/users', 'users', enabled),
-    tokens: usePaged<TokenRow>(apiBase, '/tokens', 'tokens', enabled),
-  }
+    users: usePaged<AccessUser>(apiBase, "/users", "users", enabled),
+    tokens: usePaged<TokenRow>(apiBase, "/tokens", "tokens", enabled),
+  };
 }
 
 /**
@@ -73,66 +73,66 @@ export function useAccess(apiBase: string, enabled: boolean): AccessData {
 export function usePaged<T>(
   apiBase: string,
   path: string,
-  key: 'users' | 'tokens' | 'shares',
+  key: "users" | "tokens" | "shares",
   enabled: boolean,
   /** Extra query parameters, for a list the route filters (`/shares?story=…`). */
   filter: Readonly<Record<string, string>> = {},
 ): PagedList<T> {
-  const [page, setPage] = useState<PagedList<T>['page']>({
+  const [page, setPage] = useState<PagedList<T>["page"]>({
     rows: [],
     cursor: null,
     loading: enabled,
-  })
-  const [cursor, setCursor] = useState<string | null>(null)
-  const [history, setHistory] = useState<readonly (string | null)[]>([])
+  });
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [history, setHistory] = useState<readonly (string | null)[]>([]);
 
-  const params = new URLSearchParams({ limit: String(PAGE), count: '1' })
-  for (const [name, value] of Object.entries(filter)) params.set(name, value)
-  if (cursor) params.set('cursor', cursor)
-  const query = params.toString()
+  const params = new URLSearchParams({ limit: String(PAGE), count: "1" });
+  for (const [name, value] of Object.entries(filter)) params.set(name, value);
+  if (cursor) params.set("cursor", cursor);
+  const query = params.toString();
 
   const fetchPage = useCallback(async () => {
     if (!enabled) {
-      setPage({ rows: [], cursor: null, loading: false })
-      return
+      setPage({ rows: [], cursor: null, loading: false });
+      return;
     }
-    setPage((prev) => ({ ...prev, loading: true }))
+    setPage((prev) => ({ ...prev, loading: true }));
     try {
-      const res = await fetch(`${apiBase}${path}?${query}`)
-      if (!res.ok) throw new Error(await messageOf(res))
+      const res = await fetch(`${apiBase}${path}?${query}`);
+      if (!res.ok) throw new Error(await messageOf(res));
       // `{ [key]: rows, cursor, total }` → `Page<T>`.
       const body = (await res.json()) as Record<string, unknown> & {
-        cursor: string | null
-        total?: number
-      }
+        cursor: string | null;
+        total?: number;
+      };
       setPage({
         rows: (body[key] as T[]) ?? [],
         cursor: body.cursor,
         ...(body.total === undefined ? {} : { total: body.total }),
         loading: false,
-      })
+      });
     } catch (e) {
-      setPage({ rows: [], cursor: null, loading: false, error: (e as Error).message })
+      setPage({ rows: [], cursor: null, loading: false, error: (e as Error).message });
     }
-  }, [apiBase, path, key, query, enabled])
+  }, [apiBase, path, key, query, enabled]);
 
   useEffect(() => {
-    void fetchPage()
-  }, [fetchPage])
+    void fetchPage();
+  }, [fetchPage]);
 
   const nextPage = useCallback(() => {
-    if (!page.cursor) return
-    setHistory((prev) => [...prev, cursor])
-    setCursor(page.cursor)
-  }, [page.cursor, cursor])
+    if (!page.cursor) return;
+    setHistory((prev) => [...prev, cursor]);
+    setCursor(page.cursor);
+  }, [page.cursor, cursor]);
 
   const prevPage = useCallback(() => {
     setHistory((prev) => {
-      if (prev.length === 0) return prev
-      setCursor(prev[prev.length - 1] ?? null)
-      return prev.slice(0, -1)
-    })
-  }, [])
+      if (prev.length === 0) return prev;
+      setCursor(prev[prev.length - 1] ?? null);
+      return prev.slice(0, -1);
+    });
+  }, []);
 
   /**
    * A write reloads the page you are looking at, cursor and all.
@@ -142,5 +142,5 @@ export function usePaged<T>(
    * annoys; the cursor names a position in `(created_at, id)`, and neither of those
    * changes when a row above is deleted, so resuming from it is still correct.
    */
-  return { page, canGoBack: history.length > 0, nextPage, prevPage, reload: fetchPage }
+  return { page, canGoBack: history.length > 0, nextPage, prevPage, reload: fetchPage };
 }

@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest'
-import { FILE_ACCEPT, type FormField } from '../../../src/core/forms'
-import type { LocaleContext } from '../../../src/core/locales'
-import { compileForm, type Form, LOCALE_INPUT, PAGE_INPUT } from '../../../src/server/forms'
+import { describe, expect, it } from "vitest";
+import { FILE_ACCEPT, type FormField } from "../../../src/core/forms";
+import type { LocaleContext } from "../../../src/core/locales";
+import { compileForm, type Form, LOCALE_INPUT, PAGE_INPUT } from "../../../src/server/forms";
 
 /**
  * `compileForm` — the descriptor a host's `render` is handed
@@ -24,227 +24,227 @@ import { compileForm, type Form, LOCALE_INPUT, PAGE_INPUT } from '../../../src/s
  *    the whole week-long TTL the moment somebody renamed a form (decision 3).
  */
 
-const BASE = '/folio'
+const BASE = "/folio";
 
-const NAME: FormField = { name: 'full_name', kind: 'text', label: 'Your name' }
-const EMAIL: FormField = { name: 'email', kind: 'email', label: 'Email', required: true }
+const NAME: FormField = { name: "full_name", kind: "text", label: "Your name" };
+const EMAIL: FormField = { name: "email", kind: "email", label: "Email", required: true };
 
 function makeForm(over: Partial<Form> = {}): Form {
   return {
-    id: 'frm_0123456789ab',
-    name: 'contact',
-    label: 'Contact us',
+    id: "frm_0123456789ab",
+    name: "contact",
+    label: "Contact us",
     fields: [NAME, EMAIL],
     version: 3,
     open: true,
     closesAt: null,
-    closedMessage: 'This form has closed.',
-    successMessage: 'Thanks, we will be in touch.',
-    submitLabel: 'Send',
+    closedMessage: "This form has closed.",
+    successMessage: "Thanks, we will be in touch.",
+    submitLabel: "Send",
     redirectTo: null,
     createdAt: 1_000,
     updatedAt: 2_000,
     ...over,
-  }
+  };
 }
 
-describe('compileForm', () => {
-  it('builds the action from the base path and the id, never the slug', () => {
-    const form = makeForm()
-    expect(compileForm(form, { base: BASE }).action).toBe(`${BASE}/f/${form.id}`)
+describe("compileForm", () => {
+  it("builds the action from the base path and the id, never the slug", () => {
+    const form = makeForm();
+    expect(compileForm(form, { base: BASE }).action).toBe(`${BASE}/f/${form.id}`);
 
     // A rename moves `name` and nothing else: every page cached with the old
     // markup still posts to a form that exists.
-    const renamed = compileForm(makeForm({ name: 'contact-us' }), { base: BASE })
-    expect(renamed.action).toBe(`${BASE}/f/${form.id}`)
-    expect(renamed.name).toBe('contact-us')
+    const renamed = compileForm(makeForm({ name: "contact-us" }), { base: BASE });
+    expect(renamed.action).toBe(`${BASE}/f/${form.id}`);
+    expect(renamed.name).toBe("contact-us");
 
     // Mounted elsewhere, and nothing stored had to change.
-    expect(compileForm(form, { base: '/cms' }).action).toBe(`/cms/f/${form.id}`)
-  })
+    expect(compileForm(form, { base: "/cms" }).action).toBe(`/cms/f/${form.id}`);
+  });
 
-  it('answers open from the switch and the clock together, not from the switch alone', () => {
-    const now = 1_700_000_000_000
+  it("answers open from the switch and the clock together, not from the switch alone", () => {
+    const now = 1_700_000_000_000;
 
-    expect(compileForm(makeForm(), { base: BASE, now }).open).toBe(true)
-    expect(compileForm(makeForm({ open: false }), { base: BASE, now }).open).toBe(false)
+    expect(compileForm(makeForm(), { base: BASE, now }).open).toBe(true);
+    expect(compileForm(makeForm({ open: false }), { base: BASE, now }).open).toBe(false);
 
     // The case the switch alone gets wrong: still on, and past its closing time.
-    const lapsed = makeForm({ open: true, closesAt: now - 1 })
-    expect(compileForm(lapsed, { base: BASE, now }).open).toBe(false)
+    const lapsed = makeForm({ open: true, closesAt: now - 1 });
+    expect(compileForm(lapsed, { base: BASE, now }).open).toBe(false);
 
-    const pending = makeForm({ open: true, closesAt: now + 60_000 })
-    expect(compileForm(pending, { base: BASE, now }).open).toBe(true)
+    const pending = makeForm({ open: true, closesAt: now + 60_000 });
+    expect(compileForm(pending, { base: BASE, now }).open).toBe(true);
 
     // A closed form still compiles its questions: `open` is what a host branches
     // on, and `closedMessage` is what it shows instead.
-    const closed = compileForm(lapsed, { base: BASE, now })
-    expect(closed.fields).toHaveLength(2)
-    expect(closed.closedMessage).toBe('This form has closed.')
-  })
+    const closed = compileForm(lapsed, { base: BASE, now });
+    expect(closed.fields).toHaveLength(2);
+    expect(closed.closedMessage).toBe("This form has closed.");
+  });
 
-  it('is multipart only when a question takes a file', () => {
+  it("is multipart only when a question takes a file", () => {
     expect(compileForm(makeForm(), { base: BASE }).enctype).toBe(
-      'application/x-www-form-urlencoded',
-    )
+      "application/x-www-form-urlencoded",
+    );
 
     // Getting this wrong submits the string `[object File]` and raises no error
     // anywhere, which is why it is on the descriptor rather than left to a host.
     const withFile = makeForm({
-      fields: [NAME, { name: 'cv', kind: 'file', label: 'CV', accept: 'documents' }],
-    })
-    expect(compileForm(withFile, { base: BASE }).enctype).toBe('multipart/form-data')
-  })
+      fields: [NAME, { name: "cv", kind: "file", label: "CV", accept: "documents" }],
+    });
+    expect(compileForm(withFile, { base: BASE }).enctype).toBe("multipart/form-data");
+  });
 
-  it('carries `_folio_page` only when the render knows its page', () => {
-    expect(compileForm(makeForm(), { base: BASE }).hidden).toEqual([])
-    expect(compileForm(makeForm(), { base: BASE, page: '/about/contact' }).hidden).toEqual([
-      { name: PAGE_INPUT, value: '/about/contact' },
-    ])
-  })
+  it("carries `_folio_page` only when the render knows its page", () => {
+    expect(compileForm(makeForm(), { base: BASE }).hidden).toEqual([]);
+    expect(compileForm(makeForm(), { base: BASE, page: "/about/contact" }).hidden).toEqual([
+      { name: PAGE_INPUT, value: "/about/contact" },
+    ]);
+  });
 
-  it('carries `_folio_locale` only for a non-source render', () => {
+  it("carries `_folio_locale` only for a non-source render", () => {
     // A single-locale site's descriptor is byte-identical to the one it had
     // before this input existed — `localeContext` answers undefined for the
     // source locale, so there is nothing to emit and nothing to submit.
-    expect(compileForm(makeForm(), { base: BASE, page: '/contact' }).hidden).toEqual([
-      { name: PAGE_INPUT, value: '/contact' },
-    ])
+    expect(compileForm(makeForm(), { base: BASE, page: "/contact" }).hidden).toEqual([
+      { name: PAGE_INPUT, value: "/contact" },
+    ]);
 
     // Without it `form_responses.locale` could only ever be `''`, and decision 12
     // says a response records which language it was submitted in.
-    const locale: LocaleContext = { code: 'fr-CA', fallbacks: ['fr'] }
-    expect(compileForm(makeForm(), { base: BASE, page: '/contact', locale }).hidden).toEqual([
-      { name: PAGE_INPUT, value: '/contact' },
-      { name: LOCALE_INPUT, value: 'fr-CA' },
-    ])
-  })
+    const locale: LocaleContext = { code: "fr-CA", fallbacks: ["fr"] };
+    expect(compileForm(makeForm(), { base: BASE, page: "/contact", locale }).hidden).toEqual([
+      { name: PAGE_INPUT, value: "/contact" },
+      { name: LOCALE_INPUT, value: "fr-CA" },
+    ]);
+  });
 
-  it('names a honeypot that is stable per form and avoids its own field slugs', () => {
-    const form = makeForm()
-    const first = compileForm(form, { base: BASE }).honeypot
+  it("names a honeypot that is stable per form and avoids its own field slugs", () => {
+    const form = makeForm();
+    const first = compileForm(form, { base: BASE }).honeypot;
     // Stable: a page cached for a week and the live route must agree on which
     // input is the decoy.
-    expect(compileForm(form, { base: BASE, now: 1 }).honeypot).toBe(first)
-    expect(form.fields.map((f) => f.name)).not.toContain(first)
+    expect(compileForm(form, { base: BASE, now: 1 }).honeypot).toBe(first);
+    expect(form.fields.map((f) => f.name)).not.toContain(first);
 
     const clashing = makeForm({
-      fields: [{ name: first, kind: 'text', label: 'Deliberately the decoy' }],
-    })
-    expect(compileForm(clashing, { base: BASE }).honeypot).not.toBe(first)
-  })
+      fields: [{ name: first, kind: "text", label: "Deliberately the decoy" }],
+    });
+    expect(compileForm(clashing, { base: BASE }).honeypot).not.toBe(first);
+  });
 
-  it('resolves every visitor-facing string through the locale chain', () => {
+  it("resolves every visitor-facing string through the locale chain", () => {
     const field: FormField = {
-      name: 'reason',
-      kind: 'select',
-      label: 'Reason',
-      help: 'Pick one',
-      placeholder: 'Choose…',
+      name: "reason",
+      kind: "select",
+      label: "Reason",
+      help: "Pick one",
+      placeholder: "Choose…",
       options: [
-        { value: 'sales', label: 'Sales' },
-        { value: 'support', label: 'Support' },
+        { value: "sales", label: "Sales" },
+        { value: "support", label: "Support" },
       ],
       i18n: {
         fr: {
-          label: 'Motif',
-          help: 'Choisissez-en un',
-          options: { sales: 'Ventes' },
+          label: "Motif",
+          help: "Choisissez-en un",
+          options: { sales: "Ventes" },
         },
-        'fr-CA': { placeholder: 'Choisissez…' },
+        "fr-CA": { placeholder: "Choisissez…" },
       },
-    }
-    const locale: LocaleContext = { code: 'fr-CA', fallbacks: ['fr'] }
-    const [compiled] = compileForm(makeForm({ fields: [field] }), { base: BASE, locale }).fields
+    };
+    const locale: LocaleContext = { code: "fr-CA", fallbacks: ["fr"] };
+    const [compiled] = compileForm(makeForm({ fields: [field] }), { base: BASE, locale }).fields;
 
     // The active locale wins, then its fallback, then the source — `fieldValue`'s
     // rule, so an untranslated string is a fallback rather than a hole.
-    expect(compiled?.placeholder).toBe('Choisissez…')
-    expect(compiled?.label).toBe('Motif')
-    expect(compiled?.help).toBe('Choisissez-en un')
+    expect(compiled?.placeholder).toBe("Choisissez…");
+    expect(compiled?.label).toBe("Motif");
+    expect(compiled?.help).toBe("Choisissez-en un");
     expect(compiled?.options).toEqual([
-      { value: 'sales', label: 'Ventes' },
-      { value: 'support', label: 'Support' },
-    ])
+      { value: "sales", label: "Ventes" },
+      { value: "support", label: "Support" },
+    ]);
 
     // No locale at all is the source locale, byte for byte.
-    const source = compileForm(makeForm({ fields: [field] }), { base: BASE }).fields[0]
-    expect(source?.label).toBe('Reason')
-    expect(source?.options?.[0]).toEqual({ value: 'sales', label: 'Sales' })
-  })
+    const source = compileForm(makeForm({ fields: [field] }), { base: BASE }).fields[0];
+    expect(source?.label).toBe("Reason");
+    expect(source?.options?.[0]).toEqual({ value: "sales", label: "Sales" });
+  });
 
-  it('expands a file question into the content types its accept stands for', () => {
+  it("expands a file question into the content types its accept stands for", () => {
     const form = makeForm({
-      fields: [{ name: 'cv', kind: 'file', label: 'CV', accept: 'images', maxBytes: 1024 }],
-    })
-    const [compiled] = compileForm(form, { base: BASE }).fields
+      fields: [{ name: "cv", kind: "file", label: "CV", accept: "images", maxBytes: 1024 }],
+    });
+    const [compiled] = compileForm(form, { base: BASE }).fields;
     // The stored token is an editor's vocabulary; a host puts this on `accept`.
-    expect(compiled?.accept).toEqual(FILE_ACCEPT.images)
-    expect(compiled?.maxBytes).toBe(1024)
-  })
+    expect(compiled?.accept).toEqual(FILE_ACCEPT.images);
+    expect(compiled?.maxBytes).toBe(1024);
+  });
 
-  it('computes `row` from `rowsOf` and defaults `grow` to 1, once per field', () => {
+  it("computes `row` from `rowsOf` and defaults `grow` to 1, once per field", () => {
     // Name: [First][Middle][Last] — a whole row, joined by `beside`.
     const form = makeForm({
       fields: [
-        { name: 'first', kind: 'text', label: 'First' },
-        { name: 'middle', kind: 'text', label: 'Middle', beside: true },
-        { name: 'last', kind: 'text', label: 'Last', beside: true, grow: 2 },
+        { name: "first", kind: "text", label: "First" },
+        { name: "middle", kind: "text", label: "Middle", beside: true },
+        { name: "last", kind: "text", label: "Last", beside: true, grow: 2 },
       ],
-    })
-    const { fields } = compileForm(form, { base: BASE })
-    expect(fields.map((f) => f.row)).toEqual([0, 0, 0])
-    expect(fields.map((f) => f.grow)).toEqual([1, 1, 2])
-  })
+    });
+    const { fields } = compileForm(form, { base: BASE });
+    expect(fields.map((f) => f.row)).toEqual([0, 0, 0]);
+    expect(fields.map((f) => f.grow)).toEqual([1, 1, 2]);
+  });
 
-  it('carries nothing a visitor should not see', () => {
+  it("carries nothing a visitor should not see", () => {
     const form = makeForm({
       fields: [
-        { ...NAME, i18n: { fr: { label: 'Votre nom' } } },
-        { name: 'source', kind: 'hidden', label: 'Source', value: 'newsletter' },
+        { ...NAME, i18n: { fr: { label: "Votre nom" } } },
+        { name: "source", kind: "hidden", label: "Source", value: "newsletter" },
       ],
       closesAt: Date.now() + 60_000,
-    })
-    const descriptor = compileForm(form, { base: BASE, page: '/contact' })
+    });
+    const descriptor = compileForm(form, { base: BASE, page: "/contact" });
 
     // The exact set. A `{ ...form }` spread — the tidy-up this test exists to
     // catch — would put `updatedAt`, `closesAt` and `createdAt` on a page.
     expect(Object.keys(descriptor).sort()).toEqual([
-      'action',
-      'closedMessage',
-      'enctype',
-      'fields',
-      'hidden',
-      'honeypot',
-      'id',
-      'method',
-      'name',
-      'open',
-      'redirectTo',
-      'submitLabel',
-      'successMessage',
-      'version',
-    ])
+      "action",
+      "closedMessage",
+      "enctype",
+      "fields",
+      "hidden",
+      "honeypot",
+      "id",
+      "method",
+      "name",
+      "open",
+      "redirectTo",
+      "submitLabel",
+      "successMessage",
+      "version",
+    ]);
 
     // And per question: the authoring `i18n` map is resolved away, not shipped,
     // and `row`/`grow` are always present — layout, on every question, whether
     // or not it ever sets `beside` or `grow` itself.
     expect(Object.keys(descriptor.fields[0] ?? {}).sort()).toEqual([
-      'grow',
-      'kind',
-      'label',
-      'name',
-      'required',
-      'row',
-    ])
+      "grow",
+      "kind",
+      "label",
+      "name",
+      "required",
+      "row",
+    ]);
     expect(descriptor.fields[1]).toEqual({
-      name: 'source',
-      kind: 'hidden',
-      label: 'Source',
+      name: "source",
+      kind: "hidden",
+      label: "Source",
       required: false,
       row: 0,
       grow: 1,
-      value: 'newsletter',
-    })
-  })
-})
+      value: "newsletter",
+    });
+  });
+});

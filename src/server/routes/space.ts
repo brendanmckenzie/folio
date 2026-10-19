@@ -7,12 +7,12 @@
  * indistinguishable on the wire from a dropped upgrade and leaves the client
  * reconnecting on a backoff forever.
  */
-import { Hono } from 'hono'
-import { type SocketIdentity, withIdentity } from '../auth/identity'
-import { requestScope } from '../middleware'
-import { CLOSE_FORBIDDEN, CLOSE_UNAUTHENTICATED } from '../sockets'
-import type { FolioRuntime } from '../runtime'
-import type { FolioEnv } from '../types'
+import { Hono } from "hono";
+import { type SocketIdentity, withIdentity } from "../auth/identity";
+import { requestScope } from "../middleware";
+import { CLOSE_FORBIDDEN, CLOSE_UNAUTHENTICATED } from "../sockets";
+import type { FolioRuntime } from "../runtime";
+import type { FolioEnv } from "../types";
 
 /**
  * Accepts the upgrade and immediately closes with an application code. The same
@@ -21,14 +21,14 @@ import type { FolioEnv } from '../types'
  * refusals it is about.
  */
 function refuseSocket(code: number, reason: string): Response {
-  const pair = new WebSocketPair()
-  pair[1]!.accept()
-  pair[1]!.close(code, reason)
-  return new Response(null, { status: 101, webSocket: pair[0] })
+  const pair = new WebSocketPair();
+  pair[1]!.accept();
+  pair[1]!.close(code, reason);
+  return new Response(null, { status: 101, webSocket: pair[0] });
 }
 
 export function spaceRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * Any role, including `viewer`: seeing who else is in the site is not an
@@ -44,21 +44,21 @@ export function spaceRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * here without the binding means something hand-made, and a status code is the
    * honest answer to it.
    */
-  app.get('/space/socket', async (c) => {
-    if (c.req.header('Upgrade') !== 'websocket') return c.text('Expected websocket', 426)
-    const bindings = c.var.bindings()
+  app.get("/space/socket", async (c) => {
+    if (c.req.header("Upgrade") !== "websocket") return c.text("Expected websocket", 426);
+    const bindings = c.var.bindings();
     // The request's own scope's channel (`multi-site.md` decision 19): `withActor`
     // has already refused a caller with no role on it, so what joins is somebody
     // who may see this scope's editors, and hears nothing from any other.
-    const space = rt.space(bindings, requestScope(c, rt))
-    if (!space) return c.text('The space channel is not configured', 426)
+    const space = rt.space(bindings, requestScope(c, rt));
+    if (!space) return c.text("The space channel is not configured", 426);
 
-    let identity: SocketIdentity | null = null
-    if (rt.auth.mode === 'session') {
-      const actor = c.var.actor
-      if (!actor) return refuseSocket(CLOSE_UNAUTHENTICATED, 'not signed in')
-      if (actor.kind !== 'user') {
-        return refuseSocket(CLOSE_FORBIDDEN, 'an API token cannot appear in presence')
+    let identity: SocketIdentity | null = null;
+    if (rt.auth.mode === "session") {
+      const actor = c.var.actor;
+      if (!actor) return refuseSocket(CLOSE_UNAUTHENTICATED, "not signed in");
+      if (actor.kind !== "user") {
+        return refuseSocket(CLOSE_FORBIDDEN, "an API token cannot appear in presence");
       }
       identity = {
         actor: actor.id,
@@ -67,15 +67,15 @@ export function spaceRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         role: actor.role,
         session: actor.session,
         expiresAt: actor.expiresAt,
-      }
+      };
     }
 
     // `withIdentity` always sets or deletes the header, never leaves it: this
     // forwards the client's own request, so a conditional set would let a client
     // assert an identity by sending the header itself — which on this channel
     // would put a chosen name on every screen in the site.
-    return space.fetch(withIdentity(c.req.raw, identity))
-  })
+    return space.fetch(withIdentity(c.req.raw, identity));
+  });
 
-  return app
+  return app;
 }

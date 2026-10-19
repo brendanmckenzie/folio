@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it } from "vitest";
 import {
   challengeBytes,
   clearSessionCookies,
@@ -25,11 +25,11 @@ import {
   webauthnCookieName,
   WEBAUTHN_COOKIE_TTL_S,
   withShareToken,
-} from '../../../src/server/auth/cookie'
-import type { AuthProvider } from '../../../src/server/auth/config'
-import { authPolicy, resolveAuth, screenScopes } from '../../../src/server/auth/config'
-import { magicLink } from '../../../src/server/auth/magic-link'
-import { passkeys } from '../../../src/server/auth/passkeys-provider'
+} from "../../../src/server/auth/cookie";
+import type { AuthProvider } from "../../../src/server/auth/config";
+import { authPolicy, resolveAuth, screenScopes } from "../../../src/server/auth/config";
+import { magicLink } from "../../../src/server/auth/magic-link";
+import { passkeys } from "../../../src/server/auth/passkeys-provider";
 import {
   actorString,
   ADMIN,
@@ -48,12 +48,12 @@ import {
   ROLES,
   type Actor,
   type Role,
-} from '../../../src/server/auth/roles'
-import { roleFromClaim, roleSetByReason } from '../../../src/server/auth/roles-from'
-import { DEFAULT_SHARE_DAYS, MAX_SHARE_DAYS, shareExpiry } from '../../../src/server/auth/shares'
-import { domainOf } from '../../../src/server/auth/sign-in'
-import { bearerToken } from '../../../src/server/auth/tokens'
-import { safeNext } from '../../../src/server/validate'
+} from "../../../src/server/auth/roles";
+import { roleFromClaim, roleSetByReason } from "../../../src/server/auth/roles-from";
+import { DEFAULT_SHARE_DAYS, MAX_SHARE_DAYS, shareExpiry } from "../../../src/server/auth/shares";
+import { domainOf } from "../../../src/server/auth/sign-in";
+import { bearerToken } from "../../../src/server/auth/tokens";
+import { safeNext } from "../../../src/server/validate";
 
 /**
  * The pure half of identity and access: the cookie-name rule, the role and scope
@@ -67,182 +67,182 @@ import { safeNext } from '../../../src/server/validate'
  */
 
 const user = (role: Role): Actor => ({
-  kind: 'user',
-  id: 'usr_abc',
-  name: 'Ann',
-  colour: '#123456',
+  kind: "user",
+  id: "usr_abc",
+  name: "Ann",
+  colour: "#123456",
   role,
-  session: 'sha',
+  session: "sha",
   expiresAt: 0,
-})
+});
 
-describe('the session cookie name', () => {
-  it('is __Host- prefixed on https and plain otherwise', () => {
-    expect(cookieName('https://example.com/folio/edit')).toBe(SECURE_COOKIE)
+describe("the session cookie name", () => {
+  it("is __Host- prefixed on https and plain otherwise", () => {
+    expect(cookieName("https://example.com/folio/edit")).toBe(SECURE_COOKIE);
     // `wrangler dev` serves http://localhost, where a __Host- cookie is refused
     // by the browser outright — so a single hard-coded name would mean auth that
     // can never be exercised locally.
-    expect(cookieName('http://localhost:5199/folio/edit')).toBe(PLAIN_COOKIE)
-  })
+    expect(cookieName("http://localhost:5199/folio/edit")).toBe(PLAIN_COOKIE);
+  });
 
-  it('reads either name on the way in, preferring the prefixed one', () => {
-    expect(readSessionCookie(`${PLAIN_COOKIE}=plain`)).toBe('plain')
-    expect(readSessionCookie(`${SECURE_COOKIE}=secure`)).toBe('secure')
+  it("reads either name on the way in, preferring the prefixed one", () => {
+    expect(readSessionCookie(`${PLAIN_COOKIE}=plain`)).toBe("plain");
+    expect(readSessionCookie(`${SECURE_COOKIE}=secure`)).toBe("secure");
     // A developer who moved from localhost to a preview URL can be holding
     // both. The __Host- one can only have been set by this exact host over
     // HTTPS, so it wins.
-    expect(readSessionCookie(`${PLAIN_COOKIE}=plain; ${SECURE_COOKIE}=secure`)).toBe('secure')
-  })
+    expect(readSessionCookie(`${PLAIN_COOKIE}=plain; ${SECURE_COOKIE}=secure`)).toBe("secure");
+  });
 
-  it('returns null for an absent, empty or unrelated cookie', () => {
-    expect(readSessionCookie(undefined)).toBeNull()
-    expect(readSessionCookie('')).toBeNull()
-    expect(readSessionCookie('other=1; another=2')).toBeNull()
-    expect(readSessionCookie(`${PLAIN_COOKIE}=`)).toBeNull()
-  })
+  it("returns null for an absent, empty or unrelated cookie", () => {
+    expect(readSessionCookie(undefined)).toBeNull();
+    expect(readSessionCookie("")).toBeNull();
+    expect(readSessionCookie("other=1; another=2")).toBeNull();
+    expect(readSessionCookie(`${PLAIN_COOKIE}=`)).toBeNull();
+  });
 
-  it('does not confuse a cookie whose name merely ends with ours', () => {
-    expect(readCookie(`not_${PLAIN_COOKIE}=nope`, PLAIN_COOKIE)).toBeNull()
-  })
-})
+  it("does not confuse a cookie whose name merely ends with ours", () => {
+    expect(readCookie(`not_${PLAIN_COOKIE}=nope`, PLAIN_COOKIE)).toBeNull();
+  });
+});
 
-describe('serialising the cookie', () => {
-  it('is HttpOnly, SameSite=Lax and Path=/, with Secure only on https', () => {
-    const secure = serialiseCookie('https://example.com', SECURE_COOKIE, 'abc', { maxAge: 60 })
-    expect(secure).toContain('HttpOnly')
-    expect(secure).toContain('SameSite=Lax')
-    expect(secure).toContain('Path=/')
-    expect(secure).toContain('Secure')
-    expect(secure).toContain('Max-Age=60')
+describe("serialising the cookie", () => {
+  it("is HttpOnly, SameSite=Lax and Path=/, with Secure only on https", () => {
+    const secure = serialiseCookie("https://example.com", SECURE_COOKIE, "abc", { maxAge: 60 });
+    expect(secure).toContain("HttpOnly");
+    expect(secure).toContain("SameSite=Lax");
+    expect(secure).toContain("Path=/");
+    expect(secure).toContain("Secure");
+    expect(secure).toContain("Max-Age=60");
 
     // A `Secure` cookie on http://localhost would simply never be stored.
-    expect(serialiseCookie('http://localhost:5199', PLAIN_COOKIE, 'abc')).not.toContain('Secure')
-  })
+    expect(serialiseCookie("http://localhost:5199", PLAIN_COOKIE, "abc")).not.toContain("Secure");
+  });
 
-  it('clears both names on https, so a stale plain cookie cannot outlive a sign-out', () => {
-    const https = clearSessionCookies('https://example.com')
-    expect(https).toHaveLength(2)
-    expect(https[0]).toContain(SECURE_COOKIE)
-    expect(https[0]).toContain('Secure')
-    expect(https[1]).toContain(PLAIN_COOKIE)
-    expect(https.every((c) => c.includes('Max-Age=0'))).toBe(true)
+  it("clears both names on https, so a stale plain cookie cannot outlive a sign-out", () => {
+    const https = clearSessionCookies("https://example.com");
+    expect(https).toHaveLength(2);
+    expect(https[0]).toContain(SECURE_COOKIE);
+    expect(https[0]).toContain("Secure");
+    expect(https[1]).toContain(PLAIN_COOKIE);
+    expect(https.every((c) => c.includes("Max-Age=0"))).toBe(true);
 
     // On http there is no prefixed cookie to have been set in the first place.
-    expect(clearSessionCookies('http://localhost:5199')).toHaveLength(1)
-  })
-})
+    expect(clearSessionCookies("http://localhost:5199")).toHaveLength(1);
+  });
+});
 
-describe('roles', () => {
-  it('is a total order, so a route can declare one minimum', () => {
-    expect(ROLES).toEqual(['viewer', 'editor', 'publisher', 'admin'])
-    expect(atLeast('admin', 'viewer')).toBe(true)
-    expect(atLeast('publisher', 'publisher')).toBe(true)
-    expect(atLeast('editor', 'publisher')).toBe(false)
-    expect(atLeast('viewer', 'editor')).toBe(false)
-  })
+describe("roles", () => {
+  it("is a total order, so a route can declare one minimum", () => {
+    expect(ROLES).toEqual(["viewer", "editor", "publisher", "admin"]);
+    expect(atLeast("admin", "viewer")).toBe(true);
+    expect(atLeast("publisher", "publisher")).toBe(true);
+    expect(atLeast("editor", "publisher")).toBe(false);
+    expect(atLeast("viewer", "editor")).toBe(false);
+  });
 
-  it('screens an unknown role', () => {
-    expect(isRole('editor')).toBe(true)
-    expect(isRole('owner')).toBe(false)
-    expect(isRole(undefined)).toBe(false)
-  })
-})
+  it("screens an unknown role", () => {
+    expect(isRole("editor")).toBe(true);
+    expect(isRole("owner")).toBe(false);
+    expect(isRole(undefined)).toBe(false);
+  });
+});
 
-describe('scopes', () => {
-  it('grants what a scope implies, not only the scope itself', () => {
-    expect(hasScope(['content:write'], 'content:read')).toBe(true)
-    expect(hasScope(['content:write'], 'content:read:draft')).toBe(true)
+describe("scopes", () => {
+  it("grants what a scope implies, not only the scope itself", () => {
+    expect(hasScope(["content:write"], "content:read")).toBe(true);
+    expect(hasScope(["content:write"], "content:read:draft")).toBe(true);
     // Publishing means reading the draft it is about to publish, but says
     // nothing about writing one.
-    expect(hasScope(['publish'], 'content:read:draft')).toBe(true)
-    expect(hasScope(['publish'], 'content:write')).toBe(false)
-    expect(hasScope(['admin'], 'assets:write')).toBe(true)
+    expect(hasScope(["publish"], "content:read:draft")).toBe(true);
+    expect(hasScope(["publish"], "content:write")).toBe(false);
+    expect(hasScope(["admin"], "assets:write")).toBe(true);
     // And nothing implies assets:write except admin.
-    expect(hasScope(['content:write'], 'assets:write')).toBe(false)
-    expect(hasScope([], 'content:read')).toBe(false)
-  })
+    expect(hasScope(["content:write"], "assets:write")).toBe(false);
+    expect(hasScope([], "content:read")).toBe(false);
+  });
 
-  it('drops a stored scope this build no longer declares rather than throwing', () => {
-    expect(parseScopes('["content:read","legacy:everything"]')).toEqual(['content:read'])
-    expect(parseScopes('not json')).toEqual([])
-    expect(parseScopes('{"scopes":[]}')).toEqual([])
-    expect(isScope('content:read')).toBe(true)
-    expect(isScope('content:destroy')).toBe(false)
-    expect(screenScopes(['publish', 3, 'nope'])).toEqual(['publish'])
-    expect(screenScopes('publish')).toEqual([])
-  })
-})
+  it("drops a stored scope this build no longer declares rather than throwing", () => {
+    expect(parseScopes('["content:read","legacy:everything"]')).toEqual(["content:read"]);
+    expect(parseScopes("not json")).toEqual([]);
+    expect(parseScopes('{"scopes":[]}')).toEqual([]);
+    expect(isScope("content:read")).toBe(true);
+    expect(isScope("content:destroy")).toBe(false);
+    expect(screenScopes(["publish", 3, "nope"])).toEqual(["publish"]);
+    expect(screenScopes("publish")).toEqual([]);
+  });
+});
 
-describe('allows', () => {
-  it('refuses a null actor outright', () => {
+describe("allows", () => {
+  it("refuses a null actor outright", () => {
     // The `auth: 'open'` bypass lives in the middleware, deliberately, so this
     // file can never be the reason an unauthenticated request got through.
-    expect(allows(null, READ)).toBe(false)
-  })
+    expect(allows(null, READ)).toBe(false);
+  });
 
-  it('gates a person on their role and a token on its scopes', () => {
-    expect(allows(user('viewer'), READ_DRAFT)).toBe(true)
-    expect(allows(user('viewer'), EDIT)).toBe(false)
-    expect(allows(user('editor'), EDIT)).toBe(true)
+  it("gates a person on their role and a token on its scopes", () => {
+    expect(allows(user("viewer"), READ_DRAFT)).toBe(true);
+    expect(allows(user("viewer"), EDIT)).toBe(false);
+    expect(allows(user("editor"), EDIT)).toBe(true);
     // create / delete / move is a publisher act, per the role table.
-    expect(allows(user('editor'), MANAGE)).toBe(false)
-    expect(allows(user('publisher'), PUBLISH)).toBe(true)
-    expect(allows(user('publisher'), ADMIN)).toBe(false)
-    expect(allows(user('admin'), ADMIN)).toBe(true)
+    expect(allows(user("editor"), MANAGE)).toBe(false);
+    expect(allows(user("publisher"), PUBLISH)).toBe(true);
+    expect(allows(user("publisher"), ADMIN)).toBe(false);
+    expect(allows(user("admin"), ADMIN)).toBe(true);
 
-    const token: Actor = { kind: 'token', id: 'sha', name: 'import', scopes: ['content:read'] }
-    expect(allows(token, READ)).toBe(true)
-    expect(allows(token, EDIT)).toBe(false)
-  })
+    const token: Actor = { kind: "token", id: "sha", name: "import", scopes: ["content:read"] };
+    expect(allows(token, READ)).toBe(true);
+    expect(allows(token, EDIT)).toBe(false);
+  });
 
-  it('names the missing scope for a token and the required role for a person', () => {
-    const token: Actor = { kind: 'token', id: 'sha', name: 'import', scopes: ['content:read'] }
-    expect(refusalOf(token, EDIT)).toContain("'content:write'")
-    expect(refusalOf(user('editor'), PUBLISH)).toContain('publisher')
-  })
-})
+  it("names the missing scope for a token and the required role for a person", () => {
+    const token: Actor = { kind: "token", id: "sha", name: "import", scopes: ["content:read"] };
+    expect(refusalOf(token, EDIT)).toContain("'content:write'");
+    expect(refusalOf(user("editor"), PUBLISH)).toContain("publisher");
+  });
+});
 
-describe('the actor string history records', () => {
-  it('is the user id for a person and token:<name> for a token', () => {
-    expect(actorString(user('editor'))).toBe('usr_abc')
+describe("the actor string history records", () => {
+  it("is the user id for a person and token:<name> for a token", () => {
+    expect(actorString(user("editor"))).toBe("usr_abc");
     // Never a person who was not there.
-    expect(actorString({ kind: 'token', id: 'sha', name: 'import-script', scopes: [] })).toBe(
-      'token:import-script',
-    )
-    expect(actorString(null)).toBeNull()
-  })
-})
+    expect(actorString({ kind: "token", id: "sha", name: "import-script", scopes: [] })).toBe(
+      "token:import-script",
+    );
+    expect(actorString(null)).toBeNull();
+  });
+});
 
-describe('bearer parsing', () => {
-  it('accepts any case of the scheme and nothing else', () => {
-    expect(bearerToken('Bearer folio_abc')).toBe('folio_abc')
-    expect(bearerToken('bearer folio_abc')).toBe('folio_abc')
-    expect(bearerToken('BEARER   folio_abc')).toBe('folio_abc')
-    expect(bearerToken('Basic folio_abc')).toBeNull()
-    expect(bearerToken('folio_abc')).toBeNull()
-    expect(bearerToken(null)).toBeNull()
-  })
-})
+describe("bearer parsing", () => {
+  it("accepts any case of the scheme and nothing else", () => {
+    expect(bearerToken("Bearer folio_abc")).toBe("folio_abc");
+    expect(bearerToken("bearer folio_abc")).toBe("folio_abc");
+    expect(bearerToken("BEARER   folio_abc")).toBe("folio_abc");
+    expect(bearerToken("Basic folio_abc")).toBeNull();
+    expect(bearerToken("folio_abc")).toBeNull();
+    expect(bearerToken(null)).toBeNull();
+  });
+});
 
-describe('safeNext: the login page cannot be turned into an open redirect', () => {
-  const FALLBACK = '/folio/edit'
+describe("safeNext: the login page cannot be turned into an open redirect", () => {
+  const FALLBACK = "/folio/edit";
 
-  it('keeps a same-origin path', () => {
-    expect(safeNext('/folio/edit/sty_home', FALLBACK)).toBe('/folio/edit/sty_home')
-    expect(safeNext('/folio/edit?rail=history', FALLBACK)).toBe('/folio/edit?rail=history')
-  })
+  it("keeps a same-origin path", () => {
+    expect(safeNext("/folio/edit/sty_home", FALLBACK)).toBe("/folio/edit/sty_home");
+    expect(safeNext("/folio/edit?rail=history", FALLBACK)).toBe("/folio/edit?rail=history");
+  });
 
-  it('refuses anything that could leave the site', () => {
+  it("refuses anything that could leave the site", () => {
     // The case a bare startsWith('/') check waves through: browsers read this as
     // a protocol-relative URL to another host.
-    expect(safeNext('//evil.example/steal', FALLBACK)).toBe(FALLBACK)
-    expect(safeNext('https://evil.example', FALLBACK)).toBe(FALLBACK)
+    expect(safeNext("//evil.example/steal", FALLBACK)).toBe(FALLBACK);
+    expect(safeNext("https://evil.example", FALLBACK)).toBe(FALLBACK);
     // Some browsers normalise a backslash to a slash, so this is the same trick
     // wearing a different character.
-    expect(safeNext('/\\evil.example', FALLBACK)).toBe(FALLBACK)
-    expect(safeNext('folio/edit', FALLBACK)).toBe(FALLBACK)
-    expect(safeNext('javascript:alert(1)', FALLBACK)).toBe(FALLBACK)
-  })
+    expect(safeNext("/\\evil.example", FALLBACK)).toBe(FALLBACK);
+    expect(safeNext("folio/edit", FALLBACK)).toBe(FALLBACK);
+    expect(safeNext("javascript:alert(1)", FALLBACK)).toBe(FALLBACK);
+  });
 
   /**
    * The forms a browser normalises into `//host` (the phase 5 review): the WHATWG
@@ -251,51 +251,51 @@ describe('safeNext: the login page cannot be turned into an open redirect', () =
    * host once it is a `Location`. Percent-encoded forms that decode to one are
    * refused too.
    */
-  it('refuses every form a browser normalises into another host', () => {
+  it("refuses every form a browser normalises into another host", () => {
     for (const raw of [
-      '/\t/evil.example',
-      '/\n/evil.example',
-      '/\r/evil.example',
-      '/\t\t/evil.example/x',
-      '/\\evil.example',
-      '/\\\\evil.example',
-      '/x\\..\\..\\evil',
-      '/\u0000/evil.example',
-      '/\u007f/evil.example',
-      ' /evil.example',
-      '\t//evil.example',
-      '\n/folio/edit',
-      '/%09/evil.example',
-      '/%0A/evil.example',
-      '/%0d/evil.example',
-      '/%5Cevil.example',
-      '/%5c%5cevil.example',
-      '/%2F/evil.example',
-      '/%2f%2fevil.example',
-      '/%E0%A4%A',
+      "/\t/evil.example",
+      "/\n/evil.example",
+      "/\r/evil.example",
+      "/\t\t/evil.example/x",
+      "/\\evil.example",
+      "/\\\\evil.example",
+      "/x\\..\\..\\evil",
+      "/\u0000/evil.example",
+      "/\u007f/evil.example",
+      " /evil.example",
+      "\t//evil.example",
+      "\n/folio/edit",
+      "/%09/evil.example",
+      "/%0A/evil.example",
+      "/%0d/evil.example",
+      "/%5Cevil.example",
+      "/%5c%5cevil.example",
+      "/%2F/evil.example",
+      "/%2f%2fevil.example",
+      "/%E0%A4%A",
     ]) {
-      expect(safeNext(raw, FALLBACK), JSON.stringify(raw)).toBe(FALLBACK)
+      expect(safeNext(raw, FALLBACK), JSON.stringify(raw)).toBe(FALLBACK);
     }
     // Every one of them, had it been let through, would leave the site.
-    expect(new URL('/\t/evil.example', 'https://site.example').origin).toBe('https://evil.example')
-  })
+    expect(new URL("/\t/evil.example", "https://site.example").origin).toBe("https://evil.example");
+  });
 
-  it('keeps a path carrying an encoded query value', () => {
-    expect(safeNext('/folio/draft/enter?next=%2Fwelcome', FALLBACK)).toBe(
-      '/folio/draft/enter?next=%2Fwelcome',
-    )
-    expect(safeNext('/about?_folio=preview&_folio_id=sty_x', FALLBACK)).toBe(
-      '/about?_folio=preview&_folio_id=sty_x',
-    )
-  })
+  it("keeps a path carrying an encoded query value", () => {
+    expect(safeNext("/folio/draft/enter?next=%2Fwelcome", FALLBACK)).toBe(
+      "/folio/draft/enter?next=%2Fwelcome",
+    );
+    expect(safeNext("/about?_folio=preview&_folio_id=sty_x", FALLBACK)).toBe(
+      "/about?_folio=preview&_folio_id=sty_x",
+    );
+  });
 
-  it('falls back for absent, empty and absurdly long values', () => {
-    expect(safeNext(undefined, FALLBACK)).toBe(FALLBACK)
-    expect(safeNext(null, FALLBACK)).toBe(FALLBACK)
-    expect(safeNext('', FALLBACK)).toBe(FALLBACK)
-    expect(safeNext(`/${'x'.repeat(600)}`, FALLBACK)).toBe(FALLBACK)
-  })
-})
+  it("falls back for absent, empty and absurdly long values", () => {
+    expect(safeNext(undefined, FALLBACK)).toBe(FALLBACK);
+    expect(safeNext(null, FALLBACK)).toBe(FALLBACK);
+    expect(safeNext("", FALLBACK)).toBe(FALLBACK);
+    expect(safeNext(`/${"x".repeat(600)}`, FALLBACK)).toBe(FALLBACK);
+  });
+});
 
 /**
  * Construction refuses **by kind** (`auth-providers.md` decision 1).
@@ -307,190 +307,190 @@ describe('safeNext: the login page cannot be turned into an open redirect', () =
  * **every refusal names the provider** — the one thing a host reading a
  * construction throw needs is which of their four entries is wrong.
  */
-describe('resolveAuth: construction refuses ambiguity', () => {
+describe("resolveAuth: construction refuses ambiguity", () => {
   const mailer = (over: Record<string, unknown> = {}) =>
-    ({ kind: 'mail', id: 'magic', label: 'Email', send: () => {}, ...over }) as AuthProvider
+    ({ kind: "mail", id: "magic", label: "Email", send: () => {}, ...over }) as AuthProvider;
 
   const redirecter = (over: Record<string, unknown> = {}) =>
     ({
-      kind: 'redirect',
-      id: 'oidc',
-      label: 'Work account',
-      start: async () => ({ url: 'https://idp.test/authorize', state: {} }),
-      callback: async () => ({ email: 'a@b.c' }),
+      kind: "redirect",
+      id: "oidc",
+      label: "Work account",
+      start: async () => ({ url: "https://idp.test/authorize", state: {} }),
+      callback: async () => ({ email: "a@b.c" }),
       ...over,
-    }) as AuthProvider
+    }) as AuthProvider;
 
-  it('throws when `auth` is absent, naming the deliberate escape hatch', () => {
-    expect(() => resolveAuth(undefined)).toThrow(/auth. must be configured/)
-    expect(() => resolveAuth(undefined)).toThrow(/auth: 'open'/)
-  })
+  it("throws when `auth` is absent, naming the deliberate escape hatch", () => {
+    expect(() => resolveAuth(undefined)).toThrow(/auth. must be configured/);
+    expect(() => resolveAuth(undefined)).toThrow(/auth: 'open'/);
+  });
 
   it("accepts 'open' as the deliberate, written-out choice", () => {
-    expect(resolveAuth('open')).toEqual({ mode: 'open' })
-  })
+    expect(resolveAuth("open")).toEqual({ mode: "open" });
+  });
 
-  it('refuses an empty provider list', () => {
-    expect(() => resolveAuth({ providers: [] })).toThrow(/at least one provider/)
-  })
+  it("refuses an empty provider list", () => {
+    expect(() => resolveAuth({ providers: [] })).toThrow(/at least one provider/);
+  });
 
-  it('refuses two providers sharing an id', () => {
-    expect(() => resolveAuth({ providers: [mailer(), mailer()] })).toThrow(/share the id 'magic'/)
-  })
+  it("refuses two providers sharing an id", () => {
+    expect(() => resolveAuth({ providers: [mailer(), mailer()] })).toThrow(/share the id 'magic'/);
+  });
 
-  it('refuses a provider with no `kind`, and one with a kind nobody declares', () => {
+  it("refuses a provider with no `kind`, and one with a kind nobody declares", () => {
     expect(() => resolveAuth({ providers: [mailer({ kind: undefined })] })).toThrow(
       /unknown `kind`/,
-    )
-    expect(() => resolveAuth({ providers: [mailer({ kind: 'sms' })] })).toThrow(
+    );
+    expect(() => resolveAuth({ providers: [mailer({ kind: "sms" })] })).toThrow(
       /'magic' has an unknown `kind` 'sms'/,
-    )
-  })
+    );
+  });
 
-  it('refuses a provider with no label', () => {
-    expect(() => resolveAuth({ providers: [mailer({ label: '' })] })).toThrow(
+  it("refuses a provider with no label", () => {
+    expect(() => resolveAuth({ providers: [mailer({ label: "" })] })).toThrow(
       /'magic' needs a `label`/,
-    )
-  })
+    );
+  });
 
-  it('refuses a mail provider with no way to send anything', () => {
+  it("refuses a mail provider with no way to send anything", () => {
     expect(() => resolveAuth({ providers: [mailer({ send: undefined })] })).toThrow(
       /'magic' is a mail flow but has no `send`/,
-    )
-  })
+    );
+  });
 
-  it('refuses two mail providers, because the login page has one address field', () => {
+  it("refuses two mail providers, because the login page has one address field", () => {
     // Unrepresentable rather than merely unwise: the page ships no JavaScript and
     // has a single `<input name="email">`, so the second provider is unreachable.
     expect(() =>
-      resolveAuth({ providers: [mailer(), mailer({ id: 'other', label: 'Other mail' })] }),
-    ).toThrow(/'magic' and 'other' are both mail flows/)
-  })
+      resolveAuth({ providers: [mailer(), mailer({ id: "other", label: "Other mail" })] }),
+    ).toThrow(/'magic' and 'other' are both mail flows/);
+  });
 
-  it('refuses a redirect provider with no `start`, and one with no `callback`', () => {
+  it("refuses a redirect provider with no `start`, and one with no `callback`", () => {
     expect(() => resolveAuth({ providers: [redirecter({ start: undefined })] })).toThrow(
       /'oidc' is a redirect flow but has no `start`/,
-    )
+    );
     // The refusal that did not exist before the kinds: `start` alone passed
     // construction, and the failure surfaced on the callback instead.
     expect(() => resolveAuth({ providers: [redirecter({ callback: undefined })] })).toThrow(
       /'oidc' is a redirect flow but has no `callback`/,
-    )
-  })
+    );
+  });
 
-  it('refuses a trusted provider with no `resolve`', () => {
+  it("refuses a trusted provider with no `resolve`", () => {
     expect(() =>
-      resolveAuth({ providers: [{ kind: 'trusted', id: 't', label: 'T' } as AuthProvider] }),
-    ).toThrow(/'t' is a trusted flow but has no `resolve`/)
-  })
+      resolveAuth({ providers: [{ kind: "trusted", id: "t", label: "T" } as AuthProvider] }),
+    ).toThrow(/'t' is a trusted flow but has no `resolve`/);
+  });
 
-  it('refuses `provision` and `roleFrom` on the kinds that verify no identity', () => {
+  it("refuses `provision` and `roleFrom` on the kinds that verify no identity", () => {
     // A link proves an address and a passkey proves a device; neither is an
     // identity provider's assertion about a person, so neither may place a role.
     expect(() => resolveAuth({ providers: [mailer({ provision: { create: true } })] })).toThrow(
       /'magic' is a mail flow and cannot carry `provision`/,
-    )
-    expect(() => resolveAuth({ providers: [mailer({ roleFrom: () => 'admin' })] })).toThrow(
+    );
+    expect(() => resolveAuth({ providers: [mailer({ roleFrom: () => "admin" })] })).toThrow(
       /'magic' is a mail flow and cannot carry `roleFrom`/,
-    )
-  })
+    );
+  });
 
-  it('refuses `domains` on a mail or passkey provider', () => {
-    expect(() => resolveAuth({ providers: [mailer({ domains: ['client.com'] })] })).toThrow(
+  it("refuses `domains` on a mail or passkey provider", () => {
+    expect(() => resolveAuth({ providers: [mailer({ domains: ["client.com"] })] })).toThrow(
       /'magic' is a mail flow and cannot carry `domains`/,
-    )
-  })
+    );
+  });
 
-  it('refuses a provision role no build declares', () => {
+  it("refuses a provision role no build declares", () => {
     expect(() =>
-      resolveAuth({ providers: [redirecter({ provision: { create: true, role: 'owner' } })] }),
-    ).toThrow(/'oidc' provisions with an unknown role 'owner'/)
-  })
+      resolveAuth({ providers: [redirecter({ provision: { create: true, role: "owner" } })] }),
+    ).toThrow(/'oidc' provisions with an unknown role 'owner'/);
+  });
 
-  it('refuses a `roleFrom` that is not a function', () => {
-    expect(() => resolveAuth({ providers: [redirecter({ roleFrom: 'groups' })] })).toThrow(
+  it("refuses a `roleFrom` that is not a function", () => {
+    expect(() => resolveAuth({ providers: [redirecter({ roleFrom: "groups" })] })).toThrow(
       /'oidc's `roleFrom` must be a function/,
-    )
-  })
+    );
+  });
 
-  it('compiles every provider’s domains into one map, lowercased', () => {
+  it("compiles every provider’s domains into one map, lowercased", () => {
     const resolved = resolveAuth({
-      providers: [mailer(), redirecter({ id: 'okta', domains: ['Client.COM', 'agency.example.'] })],
-    })
-    expect(resolved.mode).toBe('session')
-    if (resolved.mode !== 'session') return
+      providers: [mailer(), redirecter({ id: "okta", domains: ["Client.COM", "agency.example."] })],
+    });
+    expect(resolved.mode).toBe("session");
+    if (resolved.mode !== "session") return;
     expect([...resolved.domains]).toEqual([
-      ['client.com', 'okta'],
-      ['agency.example', 'okta'],
-    ])
-  })
+      ["client.com", "okta"],
+      ["agency.example", "okta"],
+    ]);
+  });
 
-  it('refuses a domain claimed by two providers, naming both and it', () => {
+  it("refuses a domain claimed by two providers, naming both and it", () => {
     expect(() =>
       resolveAuth({
         providers: [
-          redirecter({ id: 'a', domains: ['client.com'] }),
-          redirecter({ id: 'b', domains: ['client.com'] }),
+          redirecter({ id: "a", domains: ["client.com"] }),
+          redirecter({ id: "b", domains: ["client.com"] }),
         ],
       }),
-    ).toThrow(/'a' and 'b' both claim the domain 'client.com'/)
-  })
+    ).toThrow(/'a' and 'b' both claim the domain 'client.com'/);
+  });
 
-  it('refuses something that is not a domain at all', () => {
-    expect(() => resolveAuth({ providers: [redirecter({ domains: ['@client.com'] })] })).toThrow(
+  it("refuses something that is not a domain at all", () => {
+    expect(() => resolveAuth({ providers: [redirecter({ domains: ["@client.com"] })] })).toThrow(
       /claims '@client.com', which is not a domain/,
-    )
-    expect(() => resolveAuth({ providers: [redirecter({ domains: ['*.client.com'] })] })).toThrow(
+    );
+    expect(() => resolveAuth({ providers: [redirecter({ domains: ["*.client.com"] })] })).toThrow(
       /which is not a domain/,
-    )
-  })
+    );
+  });
 
-  it('refuses a passkey provider that is the only door', () => {
+  it("refuses a passkey provider that is the only door", () => {
     // Nobody could ever enrol a first passkey: enrolment needs a session, and a
     // session needs a sign-in through something else (`foundation/passkeys.md`).
-    const passkey = { kind: 'passkey', id: 'passkey', label: 'Passkey' } as AuthProvider
-    expect(() => resolveAuth({ providers: [passkey] })).toThrow(/cannot be the only one/)
-    expect(() => resolveAuth({ providers: [mailer(), passkey] })).not.toThrow()
-  })
+    const passkey = { kind: "passkey", id: "passkey", label: "Passkey" } as AuthProvider;
+    expect(() => resolveAuth({ providers: [passkey] })).toThrow(/cannot be the only one/);
+    expect(() => resolveAuth({ providers: [mailer(), passkey] })).not.toThrow();
+  });
 
   it("refuses a passkey provider whose id is not 'passkey'", () => {
     expect(() =>
       resolveAuth({
         providers: [
           mailer(),
-          { kind: 'passkey', id: 'webauthn', label: 'P' } as unknown as AuthProvider,
+          { kind: "passkey", id: "webauthn", label: "P" } as unknown as AuthProvider,
         ],
       }),
-    ).toThrow(/whose id must be 'passkey'/)
-  })
+    ).toThrow(/whose id must be 'passkey'/);
+  });
 
-  it('partitions the providers by kind, so no reader has to sniff', () => {
-    const mail = mailer()
-    const redirect = redirecter()
-    const resolved = resolveAuth({ providers: [mail, redirect] })
+  it("partitions the providers by kind, so no reader has to sniff", () => {
+    const mail = mailer();
+    const redirect = redirecter();
+    const resolved = resolveAuth({ providers: [mail, redirect] });
     expect(resolved).toMatchObject({
-      mode: 'session',
+      mode: "session",
       mail,
       passkey: null,
       redirects: [redirect],
       trusted: [],
-    })
-  })
+    });
+  });
 
-  it('defaults the session length and the link rate limit', () => {
+  it("defaults the session length and the link rate limit", () => {
     expect(resolveAuth({ providers: [mailer()] })).toMatchObject({
-      mode: 'session',
+      mode: "session",
       sessionDays: 30,
       linksPerHour: 5,
-    })
-  })
+    });
+  });
 
-  it('refuses a nonsensical session length', () => {
+  it("refuses a nonsensical session length", () => {
     expect(() => resolveAuth({ providers: [mailer()], sessionDays: 0 })).toThrow(
       /positive number of days/,
-    )
-  })
-})
+    );
+  });
+});
 
 /**
  * Roles that come from the directory rather than from a person clicking
@@ -503,71 +503,71 @@ describe('resolveAuth: construction refuses ambiguity', () => {
  * rather than an array, a nested path, and a value that is not a group name at
  * all.
  */
-describe('roleFromClaim', () => {
-  const groups = (values: unknown) => ({ email: 'ann@example.com', claims: { groups: values } })
+describe("roleFromClaim", () => {
+  const groups = (values: unknown) => ({ email: "ann@example.com", claims: { groups: values } });
   const mapper = roleFromClaim({
-    claim: 'groups',
-    map: { 'cms-admins': 'admin', 'cms-editors': 'editor', 'cms-readers': 'viewer' },
-  })
+    claim: "groups",
+    map: { "cms-admins": "admin", "cms-editors": "editor", "cms-readers": "viewer" },
+  });
 
-  it('reads a flat list of group names', () => {
-    expect(mapper(groups(['cms-editors']))).toBe('editor')
-  })
+  it("reads a flat list of group names", () => {
+    expect(mapper(groups(["cms-editors"]))).toBe("editor");
+  });
 
-  it('lets the highest-ranking match win, whatever order the directory sent', () => {
+  it("lets the highest-ranking match win, whatever order the directory sent", () => {
     // The alternative is that somebody's access depends on how their IdP
     // happened to serialise two groups, which is not a rule anybody could act on.
-    expect(mapper(groups(['cms-editors', 'cms-admins']))).toBe('admin')
-    expect(mapper(groups(['cms-admins', 'cms-editors']))).toBe('admin')
-  })
+    expect(mapper(groups(["cms-editors", "cms-admins"]))).toBe("admin");
+    expect(mapper(groups(["cms-admins", "cms-editors"]))).toBe("admin");
+  });
 
-  it('reads a claim that is one string rather than a list', () => {
+  it("reads a claim that is one string rather than a list", () => {
     // An app-`roles` claim is often a bare string; a mapper that only understood
     // arrays would silently place no role for half the identity providers there are.
-    expect(mapper(groups('cms-admins'))).toBe('admin')
-  })
+    expect(mapper(groups("cms-admins"))).toBe("admin");
+  });
 
-  it('walks a dotted path into a nested claim', () => {
-    const nested = roleFromClaim({ claim: 'custom.groups', map: { staff: 'editor' } })
-    expect(nested({ email: 'a@b.c', claims: { custom: { groups: ['staff'] } } })).toBe('editor')
+  it("walks a dotted path into a nested claim", () => {
+    const nested = roleFromClaim({ claim: "custom.groups", map: { staff: "editor" } });
+    expect(nested({ email: "a@b.c", claims: { custom: { groups: ["staff"] } } })).toBe("editor");
     // A path that runs into something that is not an object stops there, which
     // is the same answer as absent rather than a throw.
-    expect(nested({ email: 'a@b.c', claims: { custom: 'staff' } })).toBeNull()
-  })
+    expect(nested({ email: "a@b.c", claims: { custom: "staff" } })).toBeNull();
+  });
 
-  it('answers null for an absent claim, absent claims, and an unmapped value', () => {
-    expect(mapper(groups(undefined))).toBeNull()
-    expect(mapper({ email: 'ann@example.com' })).toBeNull()
-    expect(mapper(groups(['some-other-group']))).toBeNull()
-  })
+  it("answers null for an absent claim, absent claims, and an unmapped value", () => {
+    expect(mapper(groups(undefined))).toBeNull();
+    expect(mapper({ email: "ann@example.com" })).toBeNull();
+    expect(mapper(groups(["some-other-group"]))).toBeNull();
+  });
 
-  it('ignores a claim value that is not a string, rather than throwing on it', () => {
+  it("ignores a claim value that is not a string, rather than throwing on it", () => {
     // A directory may put anything in a claim. A number beside a group name is
     // not an error, it is just not a group name.
-    expect(mapper(groups([42, null, { nested: true }, 'cms-editors']))).toBe('editor')
-  })
+    expect(mapper(groups([42, null, { nested: true }, "cms-editors"]))).toBe("editor");
+  });
 
-  it('falls back to the default when nothing matched, and only then', () => {
+  it("falls back to the default when nothing matched, and only then", () => {
     const withDefault = roleFromClaim({
-      claim: 'groups',
-      map: { 'cms-admins': 'admin' },
-      default: 'viewer',
-    })
-    expect(withDefault(groups(['nobody-mapped']))).toBe('viewer')
-    expect(withDefault(groups(undefined))).toBe('viewer')
-    expect(withDefault(groups(['cms-admins']))).toBe('admin')
-  })
+      claim: "groups",
+      map: { "cms-admins": "admin" },
+      default: "viewer",
+    });
+    expect(withDefault(groups(["nobody-mapped"]))).toBe("viewer");
+    expect(withDefault(groups(undefined))).toBe("viewer");
+    expect(withDefault(groups(["cms-admins"]))).toBe("admin");
+  });
 
-  it('refuses a map naming a role no build declares, at construction', () => {
+  it("refuses a map naming a role no build declares, at construction", () => {
     // The same discipline `resolveAuth` keeps. The alternative is a mapper that
     // answers a non-role at sign-in time, which `completeSignIn` refuses as
     // `error=provider` — months later, to whoever was in that group first.
-    expect(() => roleFromClaim({ claim: 'groups', map: { staff: 'owner' as Role } })).toThrow(
+    expect(() => roleFromClaim({ claim: "groups", map: { staff: "owner" as Role } })).toThrow(
       /maps 'staff' to 'owner', which is not a role/,
-    )
-    expect(() => roleFromClaim({ claim: '', map: {} })).toThrow(/must name a claim/)
-  })
-})
+    );
+    expect(() => roleFromClaim({ claim: "", map: {} })).toThrow(/must name a claim/);
+  });
+});
 
 /**
  * The enforced-domain map's key, and the sentence the refusal to edit a
@@ -576,26 +576,26 @@ describe('roleFromClaim', () => {
  * `domainOf` is exact-match only by decision 6: a wildcard is a policy language,
  * and the agency case the feature exists for names its domains.
  */
-describe('one domain, one door', () => {
-  it('takes the domain of an address, lowercased and trimmed', () => {
-    expect(domainOf('  Ann@Client.COM ')).toBe('client.com')
+describe("one domain, one door", () => {
+  it("takes the domain of an address, lowercased and trimmed", () => {
+    expect(domainOf("  Ann@Client.COM ")).toBe("client.com");
     // The last `@` wins: a local part may legally contain one, and the domain is
     // what follows the final separator.
-    expect(domainOf('"a@b"@client.com')).toBe('client.com')
-  })
+    expect(domainOf('"a@b"@client.com')).toBe("client.com");
+  });
 
-  it('answers the empty string for something that is not an address', () => {
+  it("answers the empty string for something that is not an address", () => {
     // Which matches no key in the map, so an unparseable address enforces
     // nothing rather than enforcing everything.
-    expect(domainOf('not-an-address')).toBe('')
-  })
+    expect(domainOf("not-an-address")).toBe("");
+  });
 
-  it('says why a role cannot be edited here, naming the provider', () => {
+  it("says why a role cannot be edited here, naming the provider", () => {
     // One sentence in one place: `PATCH /users/:id` answers it as a 409 and the
     // Access screen puts it on the disabled control, and they cannot drift.
-    expect(roleSetByReason('okta')).toBe('Their role is set by okta. Change it there.')
-  })
-})
+    expect(roleSetByReason("okta")).toBe("Their role is set by okta. Change it there.");
+  });
+});
 
 /**
  * The redirect-state cookie's payload is an **envelope**: `next` is Folio's and
@@ -605,57 +605,57 @@ describe('one domain, one door', () => {
  * what crosses a boundary is named field by field, never spread. A provider's
  * object is where a host's `clientSecret` lives; a cookie is attacker-supplied.
  */
-describe('the provider projection names every field it carries', () => {
-  it('carries the eight facts and never a function', () => {
+describe("the provider projection names every field it carries", () => {
+  it("carries the eight facts and never a function", () => {
     const policy = authPolicy(
       resolveAuth({
         providers: [
           {
-            kind: 'redirect',
-            id: 'okta',
-            label: 'Okta',
-            domains: ['Client.com'],
-            signOutUrl: 'https://okta.test/logout',
-            roleFrom: () => 'admin',
-            provision: { create: true, role: 'editor' },
-            start: async () => ({ url: 'https://okta.test', state: {} }),
-            callback: async () => ({ email: 'a@b.c' }),
+            kind: "redirect",
+            id: "okta",
+            label: "Okta",
+            domains: ["Client.com"],
+            signOutUrl: "https://okta.test/logout",
+            roleFrom: () => "admin",
+            provision: { create: true, role: "editor" },
+            start: async () => ({ url: "https://okta.test", state: {} }),
+            callback: async () => ({ email: "a@b.c" }),
             // The key a spread would carry, and the whole reason for the rule.
-            ...({ clientSecret: 'sk-live-nope' } as Record<string, unknown>),
+            ...({ clientSecret: "sk-live-nope" } as Record<string, unknown>),
           } as AuthProvider,
         ],
       }),
-    )
+    );
     expect(Object.keys(policy!.providers[0]!).sort()).toEqual([
-      'domains',
-      'id',
-      'kind',
-      'label',
-      'provision',
-      'provisionRole',
-      'rolesFromProvider',
-      'signOut',
-    ])
+      "domains",
+      "id",
+      "kind",
+      "label",
+      "provision",
+      "provisionRole",
+      "rolesFromProvider",
+      "signOut",
+    ]);
     expect(policy!.providers[0]).toMatchObject({
-      kind: 'redirect',
+      kind: "redirect",
       rolesFromProvider: true,
       signOut: true,
-      domains: ['client.com'],
-    })
-    expect(JSON.stringify(policy)).not.toContain('sk-live-nope')
-  })
+      domains: ["client.com"],
+    });
+    expect(JSON.stringify(policy)).not.toContain("sk-live-nope");
+  });
 
-  it('reports the absences as absences, not as omissions', () => {
-    const policy = authPolicy(resolveAuth({ providers: [magicLink({ send: () => {} })] }))
+  it("reports the absences as absences, not as omissions", () => {
+    const policy = authPolicy(resolveAuth({ providers: [magicLink({ send: () => {} })] }));
     expect(policy!.providers[0]).toMatchObject({
-      kind: 'mail',
-      provision: 'refuse',
+      kind: "mail",
+      provision: "refuse",
       rolesFromProvider: false,
       signOut: false,
       domains: [],
-    })
-  })
-})
+    });
+  });
+});
 
 /**
  * Draft preview sharing's pure half (`../../../docs/specs/platform/draft-sharing.md`):
@@ -667,7 +667,7 @@ describe('the provider projection names every field it carries', () => {
  * `hashToken` and a D1 bind — everything it emits is 64 lowercase hex characters, and
  * a regression there is not visible from any route's behaviour.
  */
-describe('the draft flag is a flag, not a credential', () => {
+describe("the draft flag is a flag, not a credential", () => {
   /**
    * `hasDraftCookie` is the short-circuit that keeps a visitor with no cookies off
    * D1 entirely (`../../../docs/specs/platform/draft-mode.md` decision 2), so it
@@ -677,114 +677,114 @@ describe('the draft flag is a flag, not a credential', () => {
    * browser that grants nothing at all — the session cookie and its role are what
    * `draftAt` actually consults, and this is only whether the editor asked.
    */
-  it('sees either name, and nothing else', () => {
-    expect(hasDraftCookie(`${SECURE_DRAFT_COOKIE}=1`)).toBe(true)
-    expect(hasDraftCookie(`${PLAIN_DRAFT_COOKIE}=1`)).toBe(true)
+  it("sees either name, and nothing else", () => {
+    expect(hasDraftCookie(`${SECURE_DRAFT_COOKIE}=1`)).toBe(true);
+    expect(hasDraftCookie(`${PLAIN_DRAFT_COOKIE}=1`)).toBe(true);
     // Alongside other cookies, in any position.
-    expect(hasDraftCookie(`a=b; ${PLAIN_DRAFT_COOKIE}=1; c=d`)).toBe(true)
-  })
+    expect(hasDraftCookie(`a=b; ${PLAIN_DRAFT_COOKIE}=1; c=d`)).toBe(true);
+  });
 
-  it('is false for no header, an empty one, and every other Folio cookie', () => {
-    expect(hasDraftCookie(null)).toBe(false)
-    expect(hasDraftCookie(undefined)).toBe(false)
-    expect(hasDraftCookie('')).toBe(false)
-    expect(hasDraftCookie(`${SECURE_COOKIE}=abc`)).toBe(false)
-    expect(hasDraftCookie(`${SECURE_SHARE_COOKIE}=abc`)).toBe(false)
-  })
+  it("is false for no header, an empty one, and every other Folio cookie", () => {
+    expect(hasDraftCookie(null)).toBe(false);
+    expect(hasDraftCookie(undefined)).toBe(false);
+    expect(hasDraftCookie("")).toBe(false);
+    expect(hasDraftCookie(`${SECURE_COOKIE}=abc`)).toBe(false);
+    expect(hasDraftCookie(`${SECURE_SHARE_COOKIE}=abc`)).toBe(false);
+  });
 
   /**
    * A name that merely *contains* the cookie's name is not the cookie. Worth
    * pinning because the cheap implementation of a presence test is
    * `header.includes(name)`, which this would pass.
    */
-  it('is false for a cookie whose name only looks like it', () => {
-    expect(hasDraftCookie('not_folio_draft=1')).toBe(false)
-    expect(hasDraftCookie('folio_draft_other=1')).toBe(false)
-  })
-})
+  it("is false for a cookie whose name only looks like it", () => {
+    expect(hasDraftCookie("not_folio_draft=1")).toBe(false);
+    expect(hasDraftCookie("folio_draft_other=1")).toBe(false);
+  });
+});
 
-describe('the share cookie carries a list', () => {
-  const NAME = SECURE_SHARE_COOKIE
-  const a = 'a'.repeat(64)
-  const b = 'b'.repeat(64)
-  const c = 'c'.repeat(64)
+describe("the share cookie carries a list", () => {
+  const NAME = SECURE_SHARE_COOKIE;
+  const a = "a".repeat(64);
+  const b = "b".repeat(64);
+  const c = "c".repeat(64);
 
-  it('reads under either name, preferring the prefixed one', () => {
-    expect(shareCookieName('https://x.test')).toBe(SECURE_SHARE_COOKIE)
-    expect(shareCookieName('http://localhost:5199')).toBe(PLAIN_SHARE_COOKIE)
-    expect(shareCookieTokens(`${PLAIN_SHARE_COOKIE}=${a}`)).toEqual([a])
-    expect(shareCookieTokens(`${PLAIN_SHARE_COOKIE}=${b}; ${NAME}=${a}`)).toEqual([a])
-  })
+  it("reads under either name, preferring the prefixed one", () => {
+    expect(shareCookieName("https://x.test")).toBe(SECURE_SHARE_COOKIE);
+    expect(shareCookieName("http://localhost:5199")).toBe(PLAIN_SHARE_COOKIE);
+    expect(shareCookieTokens(`${PLAIN_SHARE_COOKIE}=${a}`)).toEqual([a]);
+    expect(shareCookieTokens(`${PLAIN_SHARE_COOKIE}=${b}; ${NAME}=${a}`)).toEqual([a]);
+  });
 
-  it('is not the session cookie, which is the whole reason a share reaches nothing', () => {
+  it("is not the session cookie, which is the whole reason a share reaches nothing", () => {
     // `readSessionCookie` looks for exactly two names and neither is this one, so a
     // browser holding only a share cookie resolves to no actor at all.
-    expect(readSessionCookie(`${NAME}=${a}`)).toBeNull()
-    expect(readSessionCookie(`${PLAIN_SHARE_COOKIE}=${a}`)).toBeNull()
-  })
+    expect(readSessionCookie(`${NAME}=${a}`)).toBeNull();
+    expect(readSessionCookie(`${PLAIN_SHARE_COOKIE}=${a}`)).toBeNull();
+  });
 
-  it('screens every part, so nothing unbounded reaches a hash or a bind', () => {
-    expect(shareCookieTokens(`${NAME}=`)).toEqual([])
-    expect(shareCookieTokens(null)).toEqual([])
+  it("screens every part, so nothing unbounded reaches a hash or a bind", () => {
+    expect(shareCookieTokens(`${NAME}=`)).toEqual([]);
+    expect(shareCookieTokens(null)).toEqual([]);
     // Uppercase is not what `mintSecret()` produces; neither is 63 or 65 characters.
-    expect(shareCookieTokens(`${NAME}=${'A'.repeat(64)}`)).toEqual([])
-    expect(shareCookieTokens(`${NAME}=${'a'.repeat(63)}`)).toEqual([])
-    expect(shareCookieTokens(`${NAME}=${'a'.repeat(65)}`)).toEqual([])
+    expect(shareCookieTokens(`${NAME}=${"A".repeat(64)}`)).toEqual([]);
+    expect(shareCookieTokens(`${NAME}=${"a".repeat(63)}`)).toEqual([]);
+    expect(shareCookieTokens(`${NAME}=${"a".repeat(65)}`)).toEqual([]);
     // A malformed part is dropped rather than failing the cookie: a stale value from
     // an older deploy must not lock a reviewer out of a link that is still good.
-    expect(shareCookieTokens(`${NAME}=junk.${a}.${'!'.repeat(64)}`)).toEqual([a])
-  })
+    expect(shareCookieTokens(`${NAME}=junk.${a}.${"!".repeat(64)}`)).toEqual([a]);
+  });
 
-  it('caps and de-duplicates, newest first', () => {
-    const many = Array.from({ length: 9 }, (_, i) => String(i).repeat(64))
-    expect(shareCookieTokens(`${NAME}=${many.join('.')}`)).toHaveLength(MAX_SHARE_COOKIE_TOKENS)
-    expect(shareCookieTokens(`${NAME}=${a}.${a}.${b}`)).toEqual([a, b])
-  })
+  it("caps and de-duplicates, newest first", () => {
+    const many = Array.from({ length: 9 }, (_, i) => String(i).repeat(64));
+    expect(shareCookieTokens(`${NAME}=${many.join(".")}`)).toHaveLength(MAX_SHARE_COOKIE_TOKENS);
+    expect(shareCookieTokens(`${NAME}=${a}.${a}.${b}`)).toEqual([a, b]);
+  });
 
-  it('appends rather than replaces, so a second link does not unseat the first', () => {
+  it("appends rather than replaces, so a second link does not unseat the first", () => {
     // The behaviour the whole list exists for: without it, clicking a second link
     // would silently stop the first one working in that browser.
-    expect(withShareToken(`${NAME}=${b}`, a)).toBe(`${a}.${b}`)
-    expect(withShareToken(null, a)).toBe(a)
+    expect(withShareToken(`${NAME}=${b}`, a)).toBe(`${a}.${b}`);
+    expect(withShareToken(null, a)).toBe(a);
     // Re-clicking a link it already holds moves it to the front rather than doubling it.
-    expect(withShareToken(`${NAME}=${b}.${a}`, a)).toBe(`${a}.${b}`)
+    expect(withShareToken(`${NAME}=${b}.${a}`, a)).toBe(`${a}.${b}`);
     // Overflow evicts the oldest, never the one just clicked.
-    const full = [b, c, '1'.repeat(64), '2'.repeat(64), '3'.repeat(64)]
-    const written = withShareToken(`${NAME}=${full.join('.')}`, a)
-    expect(written.split('.')).toHaveLength(MAX_SHARE_COOKIE_TOKENS)
-    expect(written.startsWith(a)).toBe(true)
-    expect(written).not.toContain('3'.repeat(64))
-  })
-})
+    const full = [b, c, "1".repeat(64), "2".repeat(64), "3".repeat(64)];
+    const written = withShareToken(`${NAME}=${full.join(".")}`, a);
+    expect(written.split(".")).toHaveLength(MAX_SHARE_COOKIE_TOKENS);
+    expect(written.startsWith(a)).toBe(true);
+    expect(written).not.toContain("3".repeat(64));
+  });
+});
 
-describe('how long a preview link may last', () => {
-  const NOW = 1_800_000_000_000
-  const DAY = 24 * 60 * 60 * 1000
+describe("how long a preview link may last", () => {
+  const NOW = 1_800_000_000_000;
+  const DAY = 24 * 60 * 60 * 1000;
 
-  it('defaults to a week and honours a shorter ask', () => {
-    expect(shareExpiry(undefined, NOW)).toBe(NOW + DEFAULT_SHARE_DAYS * DAY)
-    expect(DEFAULT_SHARE_DAYS).toBe(7)
-    expect(shareExpiry(1, NOW)).toBe(NOW + DAY)
-    expect(shareExpiry(MAX_SHARE_DAYS, NOW)).toBe(NOW + MAX_SHARE_DAYS * DAY)
-  })
+  it("defaults to a week and honours a shorter ask", () => {
+    expect(shareExpiry(undefined, NOW)).toBe(NOW + DEFAULT_SHARE_DAYS * DAY);
+    expect(DEFAULT_SHARE_DAYS).toBe(7);
+    expect(shareExpiry(1, NOW)).toBe(NOW + DAY);
+    expect(shareExpiry(MAX_SHARE_DAYS, NOW)).toBe(NOW + MAX_SHARE_DAYS * DAY);
+  });
 
-  it('refuses rather than clamps, so a UI can never promise longer than it gets', () => {
+  it("refuses rather than clamps, so a UI can never promise longer than it gets", () => {
     // `checkScheduleTime`'s rule: silently giving somebody ninety days while their
     // screen says two years is the worst of both answers.
-    expect(() => shareExpiry(MAX_SHARE_DAYS + 1, NOW)).toThrow(/more than 90 days/)
-    expect(() => shareExpiry(0, NOW)).toThrow(/at least a day/)
-    expect(() => shareExpiry(-5, NOW)).toThrow(/at least a day/)
-    expect(() => shareExpiry(Number.NaN, NOW)).toThrow(/at least a day/)
-  })
+    expect(() => shareExpiry(MAX_SHARE_DAYS + 1, NOW)).toThrow(/more than 90 days/);
+    expect(() => shareExpiry(0, NOW)).toThrow(/at least a day/);
+    expect(() => shareExpiry(-5, NOW)).toThrow(/at least a day/);
+    expect(() => shareExpiry(Number.NaN, NOW)).toThrow(/at least a day/);
+  });
 
   it('has no "never expires", unlike an API token', () => {
     // A token with no expiry is a legitimate shape; a preview link with none is a
     // permanent public URL for unpublished content. The type says so — there is no
     // value of the argument that produces null — and the column says so too
     // (`expires_at not null`, pinned in migrations.test.ts).
-    expect(Number.isFinite(shareExpiry(undefined, NOW))).toBe(true)
-  })
-})
+    expect(Number.isFinite(shareExpiry(undefined, NOW))).toBe(true);
+  });
+});
 
 /**
  * The WebAuthn challenge cookie (`docs/specs/foundation/passkeys.md`
@@ -796,36 +796,36 @@ describe('how long a preview link may last', () => {
  * works locally", and getting the *decoder* wrong is a value an attacker
  * chooses reaching a comparison that was written assuming this host wrote it.
  */
-describe('the webauthn challenge cookie', () => {
-  const CHALLENGE = 'a'.repeat(64)
+describe("the webauthn challenge cookie", () => {
+  const CHALLENGE = "a".repeat(64);
 
-  it('is a fifth name, prefixed on https and plain everywhere else', () => {
-    expect(webauthnCookieName('https://example.com')).toBe(SECURE_WEBAUTHN_COOKIE)
-    expect(webauthnCookieName('http://localhost:5199')).toBe(PLAIN_WEBAUTHN_COOKIE)
+  it("is a fifth name, prefixed on https and plain everywhere else", () => {
+    expect(webauthnCookieName("https://example.com")).toBe(SECURE_WEBAUTHN_COOKIE);
+    expect(webauthnCookieName("http://localhost:5199")).toBe(PLAIN_WEBAUTHN_COOKIE);
     // Neither name is the session's, the share's or the draft's: a browser
     // holding only this one resolves to no actor at all.
-    expect(readSessionCookie(`${SECURE_WEBAUTHN_COOKIE}=x`)).toBeNull()
-    expect(hasDraftCookie(`${PLAIN_WEBAUTHN_COOKIE}=x`)).toBe(false)
-  })
+    expect(readSessionCookie(`${SECURE_WEBAUTHN_COOKIE}=x`)).toBeNull();
+    expect(hasDraftCookie(`${PLAIN_WEBAUTHN_COOKIE}=x`)).toBe(false);
+  });
 
-  it('reads either name, preferring the prefixed one', () => {
-    expect(readWebauthnCookie(`${PLAIN_WEBAUTHN_COOKIE}=plain`)).toBe('plain')
+  it("reads either name, preferring the prefixed one", () => {
+    expect(readWebauthnCookie(`${PLAIN_WEBAUTHN_COOKIE}=plain`)).toBe("plain");
     expect(
       readWebauthnCookie(`${PLAIN_WEBAUTHN_COOKIE}=plain; ${SECURE_WEBAUTHN_COOKIE}=host`),
-    ).toBe('host')
-    expect(readWebauthnCookie(null)).toBeNull()
-    expect(readWebauthnCookie(`${SECURE_COOKIE}=session`)).toBeNull()
-  })
+    ).toBe("host");
+    expect(readWebauthnCookie(null)).toBeNull();
+    expect(readWebauthnCookie(`${SECURE_COOKIE}=session`)).toBeNull();
+  });
 
-  it('clears both names, the way a sign-out does', () => {
-    const https = clearWebauthnCookies('https://example.com')
-    expect(https).toHaveLength(2)
-    expect(https[0]).toContain(SECURE_WEBAUTHN_COOKIE)
-    expect(https[0]).toContain('Secure')
-    expect(https[1]).toContain(PLAIN_WEBAUTHN_COOKIE)
-    expect(https.every((c) => c.includes('Max-Age=0'))).toBe(true)
-    expect(clearWebauthnCookies('http://localhost:5199')).toHaveLength(1)
-  })
+  it("clears both names, the way a sign-out does", () => {
+    const https = clearWebauthnCookies("https://example.com");
+    expect(https).toHaveLength(2);
+    expect(https[0]).toContain(SECURE_WEBAUTHN_COOKIE);
+    expect(https[0]).toContain("Secure");
+    expect(https[1]).toContain(PLAIN_WEBAUTHN_COOKIE);
+    expect(https.every((c) => c.includes("Max-Age=0"))).toBe(true);
+    expect(clearWebauthnCookies("http://localhost:5199")).toHaveLength(1);
+  });
 
   /**
    * 600 seconds, and the number matters in one direction only: it has to be
@@ -833,96 +833,96 @@ describe('the webauthn challenge cookie', () => {
    * is never the half that expires first. An assertion a browser was still
    * willing to produce must not fail on a race with our own clock.
    */
-  it('lives ten minutes, deliberately outliving the ceremony timeout', () => {
-    expect(WEBAUTHN_COOKIE_TTL_S).toBe(600)
-    const cookie = serialiseCookie('https://example.com', SECURE_WEBAUTHN_COOKIE, 'v', {
+  it("lives ten minutes, deliberately outliving the ceremony timeout", () => {
+    expect(WEBAUTHN_COOKIE_TTL_S).toBe(600);
+    const cookie = serialiseCookie("https://example.com", SECURE_WEBAUTHN_COOKIE, "v", {
       maxAge: WEBAUTHN_COOKIE_TTL_S,
-    })
-    expect(cookie).toContain('Max-Age=600')
+    });
+    expect(cookie).toContain("Max-Age=600");
     // `SameSite=Lax` is the whole of the cross-site defence: a POST from
     // another site carries no challenge, so the verify route refuses before it
     // reads D1.
-    expect(cookie).toContain('SameSite=Lax')
-    expect(cookie).toContain('HttpOnly')
-  })
+    expect(cookie).toContain("SameSite=Lax");
+    expect(cookie).toContain("HttpOnly");
+  });
 
-  it('round-trips the ceremony and the user it was minted for', () => {
-    expect(decodeChallenge(encodeChallenge({ c: CHALLENGE, k: 'get' }))).toEqual({
+  it("round-trips the ceremony and the user it was minted for", () => {
+    expect(decodeChallenge(encodeChallenge({ c: CHALLENGE, k: "get" }))).toEqual({
       c: CHALLENGE,
-      k: 'get',
-    })
-    expect(decodeChallenge(encodeChallenge({ c: CHALLENGE, k: 'create', u: 'usr_1' }))).toEqual({
+      k: "get",
+    });
+    expect(decodeChallenge(encodeChallenge({ c: CHALLENGE, k: "create", u: "usr_1" }))).toEqual({
       c: CHALLENGE,
-      k: 'create',
-      u: 'usr_1',
-    })
-  })
+      k: "create",
+      u: "usr_1",
+    });
+  });
 
   /**
    * The payload is base64url, so it can carry neither a `;` nor a comma — the
    * two characters a `Set-Cookie` value may not contain, and the reason the
    * codec exists at all rather than `JSON.stringify` straight into the header.
    */
-  it('encodes to something a cookie value may actually hold', () => {
-    const value = encodeChallenge({ c: CHALLENGE, k: 'create', u: 'usr_1' })
-    expect(value).toMatch(/^[A-Za-z0-9_-]+$/)
-  })
+  it("encodes to something a cookie value may actually hold", () => {
+    const value = encodeChallenge({ c: CHALLENGE, k: "create", u: "usr_1" });
+    expect(value).toMatch(/^[A-Za-z0-9_-]+$/);
+  });
 
-  it('answers null for anything that is not exactly the payload', () => {
+  it("answers null for anything that is not exactly the payload", () => {
     const cases: Record<string, string | null | undefined> = {
       absent: null,
-      empty: '',
-      'not base64url at all': '!!!!',
-      'valid base64url, not JSON': 'bm90LWpzb24',
-      'JSON that is an array': encodeAsCookie('[]'),
-      'JSON that is a string': encodeAsCookie('"nope"'),
-      'no challenge': encodeAsCookie(JSON.stringify({ k: 'get' })),
+      empty: "",
+      "not base64url at all": "!!!!",
+      "valid base64url, not JSON": "bm90LWpzb24",
+      "JSON that is an array": encodeAsCookie("[]"),
+      "JSON that is a string": encodeAsCookie('"nope"'),
+      "no challenge": encodeAsCookie(JSON.stringify({ k: "get" })),
       // Not 64 hex: the screen is `mintSecret()`'s exact alphabet, which is a
       // narrower thing to admit than "some base64url of the right length".
-      'a short challenge': encodeAsCookie(JSON.stringify({ c: 'abc', k: 'get' })),
-      'an uppercase challenge': encodeAsCookie(JSON.stringify({ c: 'A'.repeat(64), k: 'get' })),
-      'a challenge with a non-hex character': encodeAsCookie(
-        JSON.stringify({ c: `${'a'.repeat(63)}z`, k: 'get' }),
+      "a short challenge": encodeAsCookie(JSON.stringify({ c: "abc", k: "get" })),
+      "an uppercase challenge": encodeAsCookie(JSON.stringify({ c: "A".repeat(64), k: "get" })),
+      "a challenge with a non-hex character": encodeAsCookie(
+        JSON.stringify({ c: `${"a".repeat(63)}z`, k: "get" }),
       ),
-      'an unknown ceremony': encodeAsCookie(JSON.stringify({ c: CHALLENGE, k: 'sign' })),
-      'no ceremony': encodeAsCookie(JSON.stringify({ c: CHALLENGE })),
-      'a non-string user': encodeAsCookie(JSON.stringify({ c: CHALLENGE, k: 'create', u: 7 })),
-      'an empty user': encodeAsCookie(JSON.stringify({ c: CHALLENGE, k: 'create', u: '' })),
-    }
+      "an unknown ceremony": encodeAsCookie(JSON.stringify({ c: CHALLENGE, k: "sign" })),
+      "no ceremony": encodeAsCookie(JSON.stringify({ c: CHALLENGE })),
+      "a non-string user": encodeAsCookie(JSON.stringify({ c: CHALLENGE, k: "create", u: 7 })),
+      "an empty user": encodeAsCookie(JSON.stringify({ c: CHALLENGE, k: "create", u: "" })),
+    };
     for (const [name, value] of Object.entries(cases)) {
-      expect(decodeChallenge(value), name).toBeNull()
+      expect(decodeChallenge(value), name).toBeNull();
     }
-  })
+  });
 
   /**
    * Nothing else survives the decode. A cookie carrying extra keys is one an
    * older deploy or an attacker wrote, and the caller must not be able to read
    * anything out of it that this build did not put there.
    */
-  it('drops keys it does not know about', () => {
+  it("drops keys it does not know about", () => {
     const value = encodeAsCookie(
-      JSON.stringify({ c: CHALLENGE, k: 'get', u: 'usr_1', role: 'admin' }),
-    )
-    expect(decodeChallenge(value)).toEqual({ c: CHALLENGE, k: 'get', u: 'usr_1' })
-  })
+      JSON.stringify({ c: CHALLENGE, k: "get", u: "usr_1", role: "admin" }),
+    );
+    expect(decodeChallenge(value)).toEqual({ c: CHALLENGE, k: "get", u: "usr_1" });
+  });
 
   /** The hex in the cookie and the bytes the options are built from are the same
    * 32 bytes, which is what makes `clientDataJSON.challenge` a string compare. */
-  it('turns the stored hex back into the 32 bytes the browser signs over', () => {
-    const bytes = challengeBytes('00ff10'.padEnd(64, '0'))
-    expect(bytes).toHaveLength(32)
-    expect([...bytes.slice(0, 3)]).toEqual([0, 255, 16])
-  })
-})
+  it("turns the stored hex back into the 32 bytes the browser signs over", () => {
+    const bytes = challengeBytes("00ff10".padEnd(64, "0"));
+    expect(bytes).toHaveLength(32);
+    expect([...bytes.slice(0, 3)]).toEqual([0, 255, 16]);
+  });
+});
 
 /** base64url of a UTF-8 string, the way `encodeChallenge` writes one — so the
  * malformed cases above are malformed in their *payload* rather than in their
  * encoding. */
 function encodeAsCookie(json: string): string {
-  const bytes = new TextEncoder().encode(json)
-  let binary = ''
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 /**
@@ -931,24 +931,24 @@ function encodeAsCookie(json: string): string {
  * because `sessions.provider` stores it, and `rpName` is absent unless a host
  * named one so the route's `?? host` default is reachable.
  */
-describe('passkeys()', () => {
-  it('is a provider of kind passkey with a fixed id', () => {
+describe("passkeys()", () => {
+  it("is a provider of kind passkey with a fixed id", () => {
     expect(passkeys()).toEqual({
-      kind: 'passkey',
-      id: 'passkey',
-      label: 'Sign in with a passkey',
-    })
-  })
+      kind: "passkey",
+      id: "passkey",
+      label: "Sign in with a passkey",
+    });
+  });
 
-  it('takes a label and an rpName, and omits rpName when it was not given', () => {
-    expect(passkeys({ label: 'Use Touch ID', rpName: 'Acme CMS' })).toEqual({
-      kind: 'passkey',
-      id: 'passkey',
-      label: 'Use Touch ID',
-      rpName: 'Acme CMS',
-    })
-    expect('rpName' in passkeys()).toBe(false)
-  })
+  it("takes a label and an rpName, and omits rpName when it was not given", () => {
+    expect(passkeys({ label: "Use Touch ID", rpName: "Acme CMS" })).toEqual({
+      kind: "passkey",
+      id: "passkey",
+      label: "Use Touch ID",
+      rpName: "Acme CMS",
+    });
+    expect("rpName" in passkeys()).toBe(false);
+  });
 
   /**
    * The rule that makes the opt-in safe to offer: enrolment needs a session and
@@ -956,26 +956,26 @@ describe('passkeys()', () => {
    * one is a deployment nobody could ever enrol on. Refused at construction
    * rather than discovered at the login page.
    */
-  it('cannot be the only door', () => {
-    expect(() => resolveAuth({ providers: [passkeys()] })).toThrow(/cannot be the only one/)
-    const resolved = resolveAuth({ providers: [magicLink({ send: () => {} }), passkeys()] })
-    expect(resolved).toMatchObject({ mode: 'session', passkey: { id: 'passkey' } })
-  })
+  it("cannot be the only door", () => {
+    expect(() => resolveAuth({ providers: [passkeys()] })).toThrow(/cannot be the only one/);
+    const resolved = resolveAuth({ providers: [magicLink({ send: () => {} }), passkeys()] });
+    expect(resolved).toMatchObject({ mode: "session", passkey: { id: "passkey" } });
+  });
 
   /** It has no secret and no provisioning to describe, so the projection carries
    * the same fields every other kind's does and nothing extra. */
-  it('projects onto the policy as a kind, with nothing to hide', () => {
+  it("projects onto the policy as a kind, with nothing to hide", () => {
     const policy = authPolicy(
       resolveAuth({ providers: [magicLink({ send: () => {} }), passkeys()] }),
-    )
-    expect(policy?.providers.find((p) => p.id === 'passkey')).toEqual({
-      id: 'passkey',
-      label: 'Sign in with a passkey',
-      kind: 'passkey',
-      provision: 'refuse',
+    );
+    expect(policy?.providers.find((p) => p.id === "passkey")).toEqual({
+      id: "passkey",
+      label: "Sign in with a passkey",
+      kind: "passkey",
+      provision: "refuse",
       rolesFromProvider: false,
       domains: [],
       signOut: false,
-    })
-  })
-})
+    });
+  });
+});

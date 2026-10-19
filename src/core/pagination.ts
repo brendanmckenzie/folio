@@ -22,11 +22,11 @@
  * drags along behind it.
  */
 export interface Page<T> {
-  rows: T[]
+  rows: T[];
   /** Pass back as `?cursor=`. Null on the last page. */
-  cursor: string | null
+  cursor: string | null;
   /** Only present when the caller asked. Counts the whole filter, not the page. */
-  total?: number
+  total?: number;
 }
 
 /**
@@ -38,7 +38,7 @@ export interface Page<T> {
  * one has to `coalesce` it in both the `order by` and the key. `stories_edited`
  * exists for exactly that reason — see `migrations/0001_init.sql`.
  */
-export type CursorPart = string | number
+export type CursorPart = string | number;
 
 /**
  * Packs a sort key into one opaque string.
@@ -55,14 +55,14 @@ export type CursorPart = string | number
  * only shows up on the one page whose cursor happens to contain the wrong byte.
  */
 export function encodeCursor(parts: readonly CursorPart[]): string {
-  const json = JSON.stringify(parts)
-  const bytes = new TextEncoder().encode(json)
-  let binary = ''
+  const json = JSON.stringify(parts);
+  const bytes = new TextEncoder().encode(json);
+  let binary = "";
   // A loop rather than `String.fromCharCode(...bytes)`: spreading a large array
   // overflows the argument limit. Cursors are tiny, but the failure would be
   // data-dependent and therefore invisible until it was not.
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '')
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
 /**
@@ -76,22 +76,22 @@ export function encodeCursor(parts: readonly CursorPart[]): string {
  */
 export function decodeCursor(raw: string): CursorPart[] | null {
   try {
-    const padded = raw.replaceAll('-', '+').replaceAll('_', '/')
-    const binary = atob(padded)
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes))
-    if (!Array.isArray(parsed) || parsed.length === 0) return null
+    const padded = raw.replaceAll("-", "+").replaceAll("_", "/");
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(bytes));
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
     // Every element checked, not just the array-ness: a cursor is attacker-supplied
     // input that goes straight into a bound parameter, and `{}` or `null` in a
     // comparison silently matches nothing rather than erroring.
     for (const part of parsed) {
-      if (typeof part !== 'string' && typeof part !== 'number') return null
-      if (typeof part === 'number' && !Number.isFinite(part)) return null
+      if (typeof part !== "string" && typeof part !== "number") return null;
+      if (typeof part === "number" && !Number.isFinite(part)) return null;
     }
-    return parsed as CursorPart[]
+    return parsed as CursorPart[];
   } catch {
-    return null
+    return null;
   }
 }
 
@@ -102,8 +102,8 @@ export function decodeCursor(raw: string): CursorPart[] | null {
  * there is a next page without a second query. It is dropped, never shown.
  */
 export function windowOf<T>(fetched: readonly T[], limit: number): { rows: T[]; hasMore: boolean } {
-  const hasMore = fetched.length > limit
-  return { rows: hasMore ? fetched.slice(0, limit) : [...fetched], hasMore }
+  const hasMore = fetched.length > limit;
+  return { rows: hasMore ? fetched.slice(0, limit) : [...fetched], hasMore };
 }
 
 /**
@@ -122,12 +122,12 @@ export function paginate<T>(
   limit: number,
   keyOf: (row: T) => readonly CursorPart[],
 ): Page<T> {
-  const { rows, hasMore } = windowOf(fetched, limit)
-  const last = rows.at(-1)
+  const { rows, hasMore } = windowOf(fetched, limit);
+  const last = rows.at(-1);
   return {
     rows,
     cursor: hasMore && last !== undefined ? encodeCursor(keyOf(last)) : null,
-  }
+  };
 }
 
 /**
@@ -136,6 +136,6 @@ export function paginate<T>(
  * a reader called directly (`folio.stories(env, …)`, a test, a script).
  */
 export function clampLimit(limit: number | undefined, fallback: number, max: number): number {
-  if (limit === undefined || !Number.isFinite(limit)) return fallback
-  return Math.max(1, Math.min(Math.trunc(limit), max))
+  if (limit === undefined || !Number.isFinite(limit)) return fallback;
+  return Math.max(1, Math.min(Math.trunc(limit), max));
 }

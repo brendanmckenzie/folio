@@ -16,19 +16,19 @@
  * row `GET /stories` already returns to a viewer, and knowing that a draft is due
  * to go live discloses nothing the state chip beside it does not.
  */
-import { type Context, Hono } from 'hono'
-import { actorString, PUBLISH, READ } from '../auth/roles'
-import { fenceStory, hookCtx, loadStory, requestScope, requireAccess } from '../middleware'
-import type { FolioRuntime } from '../runtime'
+import { type Context, Hono } from "hono";
+import { actorString, PUBLISH, READ } from "../auth/roles";
+import { fenceStory, hookCtx, loadStory, requestScope, requireAccess } from "../middleware";
+import type { FolioRuntime } from "../runtime";
 import {
   checkScheduleTime,
   clearSchedule,
   listSchedules,
   setScheduleStatements,
-} from '../schedules'
-import { runSchedules, scheduleDeps } from '../scheduler'
-import type { FolioEnv } from '../types'
-import { brandOf, sweepOf } from './stories'
+} from "../schedules";
+import { runSchedules, scheduleDeps } from "../scheduler";
+import type { FolioEnv } from "../types";
+import { brandOf, sweepOf } from "./stories";
 import {
   idParam,
   limitParam,
@@ -40,10 +40,10 @@ import {
   scheduleActionFilter,
   scheduleActionQuery,
   scheduleStatusQuery,
-} from '../validate'
+} from "../validate";
 
 export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * The run route's deps. With `brands`, the request brand's own `publishDeps`,
@@ -51,11 +51,11 @@ export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * Without, `scheduleDeps`, the cron's.
    */
   const routeScheduleDeps = async (c: Context<FolioEnv<Env>>) => {
-    const bindings = c.var.bindings()
-    const sweep = await sweepOf(c, rt)
-    if (!sweep) return scheduleDeps(rt, bindings, hookCtx(c))
-    return { ...brandOf(c).publishDeps(bindings, hookCtx(c)), scopes: sweep.scopes }
-  }
+    const bindings = c.var.bindings();
+    const sweep = await sweepOf(c, rt);
+    if (!sweep) return scheduleDeps(rt, bindings, hookCtx(c));
+    return { ...brandOf(c).publishDeps(bindings, hookCtx(c)), scopes: sweep.scopes };
+  };
 
   /**
    * What is scheduled: soonest first, paged, filterable by document, status and
@@ -73,12 +73,12 @@ export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * for them. A screen drawing a schedule is drawing a document it can already
    * name. See `core/story.ts`'s `Schedule`.
    */
-  app.get('/schedules', requireAccess<Env>(rt, READ), async (c) => {
-    const cursor = c.req.query('cursor')
-    requireCursor(cursor)
-    const story = c.req.query('story')
-    const status = scheduleStatusQuery(c.req.query('status'))
-    const action = scheduleActionFilter(c.req.query('action'))
+  app.get("/schedules", requireAccess<Env>(rt, READ), async (c) => {
+    const cursor = c.req.query("cursor");
+    requireCursor(cursor);
+    const story = c.req.query("story");
+    const status = scheduleStatusQuery(c.req.query("status"));
+    const action = scheduleActionFilter(c.req.query("action"));
     // Spread rather than assigned, so an absent filter is an absent key rather
     // than `undefined` — `listSchedules` reads presence, and the same discipline
     // `storyFilterQuery` follows.
@@ -87,16 +87,16 @@ export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         // The scope's own documents' schedules: a schedule is the scope of its story,
         // and another site's queue is not this one's to read. Only with `sites` —
         // with none every schedule is `default`'s and the statement is what it was.
-        ...(rt.sites ? { scope: requestScope(c, rt) ?? '' } : {}),
-        limit: limitParam(c.req.query('limit'), 50, 200),
+        ...(rt.sites ? { scope: requestScope(c, rt) ?? "" } : {}),
+        limit: limitParam(c.req.query("limit"), 50, 200),
         cursor,
-        ...(story ? { storyId: idParam('story', story) } : {}),
+        ...(story ? { storyId: idParam("story", story) } : {}),
         ...(status ? { status } : {}),
         ...(action ? { action } : {}),
-        count: c.req.query('count') === '1',
+        count: c.req.query("count") === "1",
       }),
-    )
-  })
+    );
+  });
 
   /**
    * Schedule a publish or an unpublish, replacing whatever was pending for the
@@ -114,15 +114,15 @@ export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * make between now and Tuesday".
    */
   app.post(
-    '/story/:id/schedule',
+    "/story/:id/schedule",
     requireAccess<Env>(rt, PUBLISH),
-    loadStory<Env>(rt, 'write'),
+    loadStory<Env>(rt, "write"),
     async (c) => {
-      const body = await parseBody(c.req, ScheduleBody)
-      const bindings = c.var.bindings()
+      const body = await parseBody(c.req, ScheduleBody);
+      const bindings = c.var.bindings();
       // Checked before the write and before the row is built: the past/horizon rule
       // needs the current time, which a valibot schema does not have.
-      checkScheduleTime(body.at, Date.now())
+      checkScheduleTime(body.at, Date.now());
 
       const { schedule, statements } = setScheduleStatements(bindings.db, {
         storyId: c.var.story.id,
@@ -132,15 +132,15 @@ export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         // `publish(deps, story, actor)`, so the version row and the `published`
         // hook name the person who asked rather than the cron that ran.
         actor: actorString(c.var.actor),
-      })
+      });
       // One batch: the delete and the insert must land together, or a crash between
       // them leaves the document with no schedule where it had one — a silent
       // cancellation, which is the failure this feature cannot have.
-      await bindings.db.batch(statements)
+      await bindings.db.batch(statements);
 
-      return c.json(schedule, 201)
+      return c.json(schedule, 201);
     },
-  )
+  );
 
   /**
    * Cancel a document's schedule for one action.
@@ -156,17 +156,17 @@ export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * the way to doing nothing.
    */
   app.delete(
-    '/story/:id/schedule',
+    "/story/:id/schedule",
     requireAccess<Env>(rt, PUBLISH),
     // A story outside the request's scope is refused; one that is gone still is
     // not, for the reason above.
-    fenceStory<Env>(rt, 'write', { absent: 'pass' }),
+    fenceStory<Env>(rt, "write", { absent: "pass" }),
     async (c) => {
-      const id = idParam('id', c.req.param('id'))
-      const action = scheduleActionQuery(c.req.query('action'))
-      return c.json({ deleted: await clearSchedule(c.var.bindings().db, id, action) })
+      const id = idParam("id", c.req.param("id"));
+      const action = scheduleActionQuery(c.req.query("action"));
+      return c.json({ deleted: await clearSchedule(c.var.bindings().db, id, action) });
     },
-  )
+  );
 
   /**
    * Fire one batch of whatever is due, and answer a report with a `continueFrom`
@@ -186,9 +186,9 @@ export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * forward — `ScheduleRunOptions.now` is not readable off the body, which
    * `RunSchedulesBody` says why.
    */
-  app.post('/schedules/run', requireAccess<Env>(rt, PUBLISH), async (c) => {
-    const body = await parseOptionalBody(c.req, RunSchedulesBody)
-    requireCursor(body.continueFrom ?? undefined)
+  app.post("/schedules/run", requireAccess<Env>(rt, PUBLISH), async (c) => {
+    const body = await parseOptionalBody(c.req, RunSchedulesBody);
+    requireCursor(body.continueFrom ?? undefined);
     return c.json(
       // `batch` is bounded twice and neither is redundant: `RunSchedulesBody`
       // bounds what reaches the D1 `limit`, and `runSchedules` clamps what one
@@ -203,8 +203,8 @@ export function scheduleRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         continueFrom: body.continueFrom,
         batch: body.batch,
       }),
-    )
-  })
+    );
+  });
 
-  return app
+  return app;
 }

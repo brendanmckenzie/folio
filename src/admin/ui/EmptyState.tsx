@@ -1,11 +1,11 @@
-import type { ReactNode } from 'react'
-import css from './EmptyState.module.css'
+import type { ReactNode } from "react";
+import css from "./EmptyState.module.css";
 
 interface Props {
-  title: ReactNode
+  title: ReactNode;
   /** What to do about it. An empty state with no next step is an error message. */
-  body?: ReactNode
-  action?: ReactNode
+  body?: ReactNode;
+  action?: ReactNode;
 }
 
 /**
@@ -20,5 +20,5 @@ export function EmptyState({ title, body, action }: Props) {
       {body ? <p className={css.body}>{body}</p> : null}
       {action ? <div className={css.action}>{action}</div> : null}
     </div>
-  )
+  );
 }

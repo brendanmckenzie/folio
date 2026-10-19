@@ -17,17 +17,17 @@
  * screen, which is what keeps this to *one* request rather than a default-sized fetch
  * followed by a corrected one.
  */
-import { type RefObject, useCallback, useEffect, useLayoutEffect, useState } from 'react'
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useState } from "react";
 
 export interface Fit {
   /** Selects one measurable cell inside the box. */
-  cells: string
+  cells: string;
   /** The page size when nothing can be measured — an empty result, a box that never
    * mounted, a browser mid-layout. Pick the number that was hard-coded before. */
-  fallback: number
+  fallback: number;
   /** The route's own clamp. Asking past it is not an error, it is silently ignored,
    * which would make the pager's arithmetic disagree with the server's. */
-  max: number
+  max: number;
 }
 
 /**
@@ -40,15 +40,15 @@ export interface Fit {
  * mounted — so nothing is waiting on a round trip.
  */
 export function useFittedPage(box: RefObject<HTMLElement | null>, fit: Fit): number | null {
-  const [size, setSize] = useState<number | null>(null)
-  const { cells, fallback, max } = fit
+  const [size, setSize] = useState<number | null>(null);
+  const { cells, fallback, max } = fit;
 
   const measure = useCallback(() => {
-    const el = box.current
-    setSize(el ? fittedPage(el, { cells, fallback, max }) : fallback)
-  }, [box, cells, fallback, max])
+    const el = box.current;
+    setSize(el ? fittedPage(el, { cells, fallback, max }) : fallback);
+  }, [box, cells, fallback, max]);
 
-  useLayoutEffect(measure, [measure])
+  useLayoutEffect(measure, [measure]);
 
   /**
    * Width comes from the box and height from the window, so both need watching.
@@ -64,26 +64,26 @@ export function useFittedPage(box: RefObject<HTMLElement | null>, fit: Fit): num
    * height by a row, grows the page, which grows the box, which grows the page.
    */
   useEffect(() => {
-    const el = box.current
-    window.addEventListener('resize', measure)
-    const observer = el ? new ResizeObserver(measure) : null
-    observer?.observe(el as Element)
+    const el = box.current;
+    window.addEventListener("resize", measure);
+    const observer = el ? new ResizeObserver(measure) : null;
+    observer?.observe(el as Element);
     return () => {
-      window.removeEventListener('resize', measure)
-      observer?.disconnect()
-    }
-  }, [box, measure])
+      window.removeEventListener("resize", measure);
+      observer?.disconnect();
+    };
+  }, [box, measure]);
 
-  return size
+  return size;
 }
 
 /** What a laid-out box comes to, in the three numbers the arithmetic needs. */
 export interface Measured {
-  columns: number
+  columns: number;
   /** Distance from one row's top to the next, gap included. */
-  pitch: number
+  pitch: number;
   /** The height a screenful is, from the top of the box down. */
-  available: number
+  available: number;
 }
 
 /**
@@ -108,21 +108,21 @@ export interface Measured {
  * behind a scrollbar.
  */
 export function pageSizeFor(measured: Measured, fit: Fit): number {
-  const { columns, pitch, available } = measured
-  if (columns < 1 || pitch <= 0 || available <= 0) return fit.fallback
-  const rows = Math.max(1, Math.floor(available / pitch))
-  return Math.min(fit.max, columns * rows)
+  const { columns, pitch, available } = measured;
+  if (columns < 1 || pitch <= 0 || available <= 0) return fit.fallback;
+  const rows = Math.max(1, Math.floor(available / pitch));
+  return Math.min(fit.max, columns * rows);
 }
 
 /** The same, given a laid-out box to measure it from. */
 export function fittedPage(box: HTMLElement, fit: Fit): number {
-  const cells = [...box.querySelectorAll<HTMLElement>(fit.cells)]
-  if (cells.length === 0) return fit.fallback
-  const columns = columnsOf(cells)
+  const cells = [...box.querySelectorAll<HTMLElement>(fit.cells)];
+  if (cells.length === 0) return fit.fallback;
+  const columns = columnsOf(cells);
   return pageSizeFor(
     { columns, pitch: rowPitch(cells, columns), available: availableHeight(box) },
     fit,
-  )
+  );
 }
 
 /**
@@ -148,8 +148,8 @@ export function fittedPage(box: HTMLElement, fit: Fit): number {
  * above the window and a raw subtraction would ask for more than a screen.
  */
 function availableHeight(box: HTMLElement): number {
-  const top = Math.max(0, box.getBoundingClientRect().top)
-  return Math.max(0, window.innerHeight - top - furnitureBelow(box))
+  const top = Math.max(0, box.getBoundingClientRect().top);
+  return Math.max(0, window.innerHeight - top - furnitureBelow(box));
 }
 
 /**
@@ -170,31 +170,31 @@ function availableHeight(box: HTMLElement): number {
  *   avoid; the top does not.
  */
 function furnitureBelow(box: HTMLElement): number {
-  let total = 0
-  let el: HTMLElement = box
-  const from = box.getBoundingClientRect().top
+  let total = 0;
+  let el: HTMLElement = box;
+  const from = box.getBoundingClientRect().top;
   while (el.parentElement && el !== document.body) {
-    const parent = el.parentElement
-    const style = getComputedStyle(parent)
-    const stacked = !style.display.includes('flex') || !style.flexDirection.startsWith('row')
+    const parent = el.parentElement;
+    const style = getComputedStyle(parent);
+    const stacked = !style.display.includes("flex") || !style.flexDirection.startsWith("row");
     if (stacked) {
-      const gap = px(style.rowGap)
+      const gap = px(style.rowGap);
       for (const sibling of parent.children) {
-        if (sibling === el) continue
-        const rect = sibling.getBoundingClientRect()
-        if (rect.top >= from + 1) total += rect.height + gap
+        if (sibling === el) continue;
+        const rect = sibling.getBoundingClientRect();
+        if (rect.top >= from + 1) total += rect.height + gap;
       }
     }
-    total += px(style.paddingBottom) + px(style.borderBottomWidth)
-    el = parent
+    total += px(style.paddingBottom) + px(style.borderBottomWidth);
+    el = parent;
   }
-  return total
+  return total;
 }
 
 /** A computed length in pixels. `normal` (a `row-gap` nobody set) is zero. */
 function px(value: string): number {
-  const n = Number.parseFloat(value)
-  return Number.isFinite(n) ? n : 0
+  const n = Number.parseFloat(value);
+  return Number.isFinite(n) ? n : 0;
 }
 
 /**
@@ -207,11 +207,11 @@ function px(value: string): number {
  * result that is one row long.
  */
 function rowPitch(cells: readonly HTMLElement[], columns: number): number {
-  const first = cells[0]
-  if (!first) return 0
-  const below = cells[columns]
-  if (below) return below.offsetTop - first.offsetTop
-  return first.getBoundingClientRect().height
+  const first = cells[0];
+  if (!first) return 0;
+  const below = cells[columns];
+  if (below) return below.offsetTop - first.offsetTop;
+  return first.getBoundingClientRect().height;
 }
 
 /**
@@ -226,12 +226,12 @@ function rowPitch(cells: readonly HTMLElement[], columns: number): number {
  * A stacked list — a table's rows — answers 1, correctly and for the same reason.
  */
 export function columnsOf(cells: readonly HTMLElement[]): number {
-  const top = cells[0]?.offsetTop
-  if (top === undefined) return 1
-  let n = 0
+  const top = cells[0]?.offsetTop;
+  if (top === undefined) return 1;
+  let n = 0;
   for (const cell of cells) {
-    if (cell.offsetTop !== top) break
-    n += 1
+    if (cell.offsetTop !== top) break;
+    n += 1;
   }
-  return Math.max(1, n)
+  return Math.max(1, n);
 }

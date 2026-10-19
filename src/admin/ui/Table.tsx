@@ -1,13 +1,13 @@
-import type { ReactNode } from 'react'
-import css from './Table.module.css'
+import type { ReactNode } from "react";
+import css from "./Table.module.css";
 
 export interface Column<T> {
-  key: string
-  label: string
+  key: string;
+  label: string;
   /** Right-aligned and tabular. Counts, sizes, dates. */
-  numeric?: boolean
+  numeric?: boolean;
   /** Absent means the column cannot be sorted, which is the default. */
-  sortable?: boolean
+  sortable?: boolean;
   /**
    * A declared width — a percentage, normally. Declaring one on **any** column
    * switches the whole table to `table-layout: fixed` and emits a `<colgroup>`,
@@ -27,24 +27,24 @@ export interface Column<T> {
    * keeps the old behaviour, which is right when the rows nearly fill the width
    * they are given.
    */
-  width?: string
-  cell: (row: T) => ReactNode
+  width?: string;
+  cell: (row: T) => ReactNode;
 }
 
 export interface Sort {
-  key: string
-  dir: 'asc' | 'desc'
+  key: string;
+  dir: "asc" | "desc";
 }
 
 interface Props<T> {
-  label: string
-  columns: readonly Column<T>[]
-  rows: readonly T[]
-  rowKey: (row: T) => string
-  currentKey?: string | null
-  sort?: Sort
-  onSort?: (key: string) => void
-  onOpen?: (row: T) => void
+  label: string;
+  columns: readonly Column<T>[];
+  rows: readonly T[];
+  rowKey: (row: T) => string;
+  currentKey?: string | null;
+  sort?: Sort;
+  onSort?: (key: string) => void;
+  onOpen?: (row: T) => void;
   /**
    * Right-aligned trailing cell, revealed on row hover or focus.
    *
@@ -66,7 +66,7 @@ interface Props<T> {
    * dense list readable — the constraint is real and worth stating rather than
    * designing around.
    */
-  actions?: (row: T) => ReactNode
+  actions?: (row: T) => ReactNode;
   /**
    * A leading selection cell, **outside** the first column and therefore outside
    * the `onOpen` button that wraps it.
@@ -82,8 +82,8 @@ interface Props<T> {
    * where a caller has one. Give it an accessible name; the cell has no visible
    * label to inherit.
    */
-  select?: { head?: ReactNode; cell: (row: T) => ReactNode }
-  empty?: ReactNode
+  select?: { head?: ReactNode; cell: (row: T) => ReactNode };
+  empty?: ReactNode;
 }
 
 /**
@@ -108,7 +108,7 @@ export function Table<T>({
   select,
   empty,
 }: Props<T>) {
-  if (rows.length === 0 && empty) return <>{empty}</>
+  if (rows.length === 0 && empty) return <>{empty}</>;
 
   /*
    * One declared width is enough to switch the table over, because a partly
@@ -121,11 +121,11 @@ export function Table<T>({
    * props) and a colgroup that skipped them would shift every width one cell to
    * the left.
    */
-  const fixed = columns.some((column) => column.width !== undefined)
+  const fixed = columns.some((column) => column.width !== undefined);
 
   return (
     <div className={css.scroll}>
-      <table className={`${css.table} ${fixed ? css.fixed : ''}`} aria-label={label}>
+      <table className={`${css.table} ${fixed ? css.fixed : ""}`} aria-label={label}>
         {fixed ? (
           <colgroup>
             {select ? <col className={css.select} /> : null}
@@ -152,10 +152,10 @@ export function Table<T>({
                 aria-sort={
                   column.sortable && onSort
                     ? sort?.key === column.key
-                      ? sort.dir === 'asc'
-                        ? 'ascending'
-                        : 'descending'
-                      : 'none'
+                      ? sort.dir === "asc"
+                        ? "ascending"
+                        : "descending"
+                      : "none"
                     : undefined
                 }
               >
@@ -163,7 +163,7 @@ export function Table<T>({
                   <button type="button" className={css.sort} onClick={() => onSort(column.key)}>
                     {column.label}
                     <span className={css.arrow} aria-hidden="true">
-                      {sort?.key === column.key ? (sort.dir === 'asc' ? '↑' : '↓') : ''}
+                      {sort?.key === column.key ? (sort.dir === "asc" ? "↑" : "↓") : ""}
                     </span>
                   </button>
                 ) : (
@@ -187,7 +187,7 @@ export function Table<T>({
         </thead>
         <tbody>
           {rows.map((row) => {
-            const key = rowKey(row)
+            const key = rowKey(row);
             return (
               // `data-fit` marks a body row as measurable — `ui/fit.ts` reads one
               // to work out how many fit on a screen. Header rows deliberately do
@@ -207,10 +207,10 @@ export function Table<T>({
                 ))}
                 {actions ? <td className={css.actions}>{actions(row)}</td> : null}
               </tr>
-            )
+            );
           })}
         </tbody>
       </table>
     </div>
-  )
+  );
 }

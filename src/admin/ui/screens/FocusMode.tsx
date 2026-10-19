@@ -1,23 +1,23 @@
-import type { CSSProperties, ReactNode } from 'react'
-import { useId, useRef } from 'react'
-import { createPortal } from 'react-dom'
-import { useFocusTrap } from '../../hooks/useFocusTrap'
-import { Button } from '../Button'
-import { scoped } from '../scope'
-import css from './FocusMode.module.css'
-import { FOCUS_MEASURE_CH } from './inspector-model'
+import type { CSSProperties, ReactNode } from "react";
+import { useId, useRef } from "react";
+import { createPortal } from "react-dom";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
+import { Button } from "../Button";
+import { scoped } from "../scope";
+import css from "./FocusMode.module.css";
+import { FOCUS_MEASURE_CH } from "./inspector-model";
 
 interface Props {
   /** The field's own label. This overlay is one field, so it is the whole heading. */
-  title: string
+  title: string;
   /** The locale note, repeated: somebody who opened focus mode from a translation
    * column has to still be able to see which language they are writing. */
-  note?: ReactNode
+  note?: ReactNode;
   /** The read-only source-locale column, at the same measure, below the prose. */
-  source?: ReactNode
+  source?: ReactNode;
   /** The toolbar and the prose surface. See `RichTextField`. */
-  children: ReactNode
-  onClose: () => void
+  children: ReactNode;
+  onClose: () => void;
 }
 
 /**
@@ -44,15 +44,15 @@ interface Props {
  * re-parented out from under it.
  */
 export function FocusMode({ title, note, source, children, onClose }: Props) {
-  const panel = useRef<HTMLDivElement>(null)
-  const titleId = useId()
-  useFocusTrap(panel, onClose)
+  const panel = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useFocusTrap(panel, onClose);
 
   return createPortal(
     // See `scope.ts`: a portal leaves the shell, so it carries the scope itself.
     <div
       className={scoped(css.wrap)}
-      style={{ '--measure': `${FOCUS_MEASURE_CH}ch` } as CSSProperties}
+      style={{ "--measure": `${FOCUS_MEASURE_CH}ch` } as CSSProperties}
     >
       <button
         type="button"
@@ -92,5 +92,5 @@ export function FocusMode({ title, note, source, children, onClose }: Props) {
       </div>
     </div>,
     document.body,
-  )
+  );
 }

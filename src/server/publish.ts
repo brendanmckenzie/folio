@@ -7,23 +7,23 @@
  * draft alone. The HTTP routes are a translation layer over these two functions
  * and hold nothing but input validation and the response shape.
  */
-import type { Doc } from '../core/doc'
-import { draftState, type StoryMeta } from '../core/story'
-import { clearIndexStatements, type ContentProjection, indexStatements } from './content-index'
-import { FolioError } from './errors'
-import type { HookRunner } from './hooks'
-import { publishStoryStatement, storyById, unpublishStoryStatement } from './stories'
-import { buildVersionWrite, type VersionMeta, writeVersion } from './versions'
-import type { FolioDb } from './db'
+import type { Doc } from "../core/doc";
+import { draftState, type StoryMeta } from "../core/story";
+import { clearIndexStatements, type ContentProjection, indexStatements } from "./content-index";
+import { FolioError } from "./errors";
+import type { HookRunner } from "./hooks";
+import { publishStoryStatement, storyById, unpublishStoryStatement } from "./stories";
+import { buildVersionWrite, type VersionMeta, writeVersion } from "./versions";
+import type { FolioDb } from "./db";
 
 export interface PublishDeps<Env = unknown> {
-  db: FolioDb
+  db: FolioDb;
   /**
    * The story's live draft, created from its row on first touch. Passed in rather
    * than reached for: the draft lives in a Durable Object, and which object that
    * is only the caller's bindings can say.
    */
-  draft: (story: StoryMeta) => Promise<Doc>
+  draft: (story: StoryMeta) => Promise<Doc>;
   /**
    * The draft plus the Durable Object's log position it was read at, together —
    * `publish()`'s own read. Two separate calls (`draft`, then a `head()`) are not
@@ -33,7 +33,7 @@ export interface PublishDeps<Env = unknown> {
    * acceptance criterion; see `story-do.ts`'s `getOrInitWithSyncId`).
    * `checkpoint` has no need of the position, so it keeps using `draft` alone.
    */
-  draftWithSyncId: (story: StoryMeta) => Promise<{ doc: Doc; syncId: number }>
+  draftWithSyncId: (story: StoryMeta) => Promise<{ doc: Doc; syncId: number }>;
   /**
    * The document's display title, per its own document type's `titleField`
    * (`document-types.md` architecture decision 3). Injected rather than computed
@@ -42,7 +42,7 @@ export interface PublishDeps<Env = unknown> {
    * default, because a silently-wrong cached title is exactly the bug this
    * replaced.
    */
-  titleFor: (story: StoryMeta, doc: Doc) => string
+  titleFor: (story: StoryMeta, doc: Doc) => string;
   /**
    * The same title per declared non-source locale, for `stories.title_i18n`
    * (`localisation.md` architecture decision 7). Optional, unlike `titleFor`: a
@@ -50,7 +50,7 @@ export interface PublishDeps<Env = unknown> {
    * `undefined` is what tells `publishStoryStatement` to leave the column alone
    * rather than clear a cache it knows nothing about.
    */
-  titlesFor?: (story: StoryMeta, doc: Doc) => Record<string, string> | undefined
+  titlesFor?: (story: StoryMeta, doc: Doc) => Record<string, string> | undefined;
   /**
    * The document's `content_index` / `content_refs` rows
    * (`../../docs/specs/content-model/collections.md` architecture decision 3). Injected for the
@@ -64,20 +64,20 @@ export interface PublishDeps<Env = unknown> {
    * is a stale index rather than lost content — the reason this could be optional
    * where a wrong cached title could not.
    */
-  projection?: (story: StoryMeta, doc: Doc) => ContentProjection
+  projection?: (story: StoryMeta, doc: Doc) => ContentProjection;
   /**
    * Fires the after-commit lifecycle hooks (`publish-hooks.md`). Absent only in
    * tests that exercise a workflow directly with no `createRuntime` behind it —
    * every real caller gets one from `FolioRuntime.publishDeps`.
    */
-  hooks?: HookRunner<Env>
+  hooks?: HookRunner<Env>;
 }
 
 export interface PublishResult {
-  publishedAt: number
+  publishedAt: number;
   /** The Durable Object log position that was actually snapshotted; see `draftWithSyncId`. */
-  publishedSyncId: number
-  version: VersionMeta
+  publishedSyncId: number;
+  version: VersionMeta;
 }
 
 /**
@@ -89,13 +89,13 @@ export interface PublishResult {
  * the request body included — has to have looked it up already, and passing the
  * row it found is what keeps that from being a second query for the same row.
  */
-export type StorySelector = string | StoryMeta
+export type StorySelector = string | StoryMeta;
 
 async function requireStory(db: FolioDb, ref: StorySelector): Promise<StoryMeta> {
-  if (typeof ref !== 'string') return ref
-  const meta = await storyById(db, ref)
-  if (!meta) throw new FolioError('not_found', 'Unknown story')
-  return meta
+  if (typeof ref !== "string") return ref;
+  const meta = await storyById(db, ref);
+  if (!meta) throw new FolioError("not_found", "Unknown story");
+  return meta;
 }
 
 export async function publish(
@@ -103,17 +103,17 @@ export async function publish(
   story: StorySelector,
   actor: string | null,
 ): Promise<PublishResult> {
-  const meta = await requireStory(deps.db, story)
-  const storyId = meta.id
+  const meta = await requireStory(deps.db, story);
+  const storyId = meta.id;
 
   // `doc` and `syncId` come from one atomic read: see `draftWithSyncId`'s own
   // doc for why two separate calls would race.
-  const { doc, syncId } = await deps.draftWithSyncId(meta)
+  const { doc, syncId } = await deps.draftWithSyncId(meta);
   // Resolved once and used for both writes, so the cached tree title and the
   // retained version's title can never disagree about what the document is
   // called (`document-types.md`'s acceptance criterion "Titles come from the
   // type").
-  const resolvedTitle = deps.titleFor(meta, doc)
+  const resolvedTitle = deps.titleFor(meta, doc);
   // Every publish is a retained version, so "restore what was live before" is
   // always possible. The version row and the stories.published_doc update
   // land in one batch: run separately, a failure between the two could leave
@@ -121,7 +121,7 @@ export async function publish(
   // restore it from — the two are no longer allowed to disagree.
   const { meta: version, statement: versionStatement } = buildVersionWrite(deps.db, {
     storyId,
-    kind: 'publish',
+    kind: "publish",
     doc,
     actor,
     title: resolvedTitle,
@@ -131,7 +131,7 @@ export async function publish(
     // otherwise `getVersion` would hand it back unmigrated while claiming it was
     // current, and a restore from it would reintroduce pre-migration keys.
     schemaId: meta.schemaId ?? null,
-  })
+  });
   const {
     publishedAt,
     title,
@@ -146,24 +146,24 @@ export async function publish(
     resolvedTitle,
     syncId,
     deps.titlesFor?.(meta, doc),
-  )
+  );
   // The query index joins the same batch (`collections.md` decision 3), so it
   // cannot describe a document that is not published and a failed publish leaves
   // neither. Delete-then-insert, because the row set shrinks when a field is
   // cleared or a locale is dropped.
-  const projection = deps.projection?.(meta, doc)
+  const projection = deps.projection?.(meta, doc);
   await deps.db.batch([
     versionStatement,
     publishStatement,
     ...(projection ? indexStatements(deps.db, storyId, projection) : []),
-  ])
+  ]);
 
   // Built from `meta` plus the writes just committed, rather than re-read: the
   // batch above is the only truth this function needs, and re-querying D1
   // for a row this function just wrote would be a second read of the same
   // fact for no reason (`publish-hooks.md`'s after-commit hook is the only
   // consumer, and waitUntil already keeps it off the response's critical path).
-  const state = draftState(publishedAt, null, meta.draftSyncId, syncId)
+  const state = draftState(publishedAt, null, meta.draftSyncId, syncId);
   const publishedMeta: StoryMeta = {
     ...meta,
     title,
@@ -172,11 +172,11 @@ export async function publish(
     publishedSyncId: syncId,
     updatedAt: publishedAt,
     state,
-    hasUnpublishedChanges: state === 'changed',
-  }
-  await deps.hooks?.run('published', { story: publishedMeta, doc, version, publishedAt, actor })
+    hasUnpublishedChanges: state === "changed",
+  };
+  await deps.hooks?.run("published", { story: publishedMeta, doc, version, publishedAt, actor });
 
-  return { publishedAt, publishedSyncId: syncId, version }
+  return { publishedAt, publishedSyncId: syncId, version };
 }
 
 /**
@@ -195,12 +195,12 @@ export async function unpublish(
   story: StorySelector,
   actor: string | null,
 ): Promise<{ unpublishedAt: number }> {
-  const meta = await requireStory(deps.db, story)
+  const meta = await requireStory(deps.db, story);
 
   // Idempotent, and deliberately silent about it: nothing was written, so
   // there is no commit for an after-commit hook to fire about either.
   if (meta.publishedAt === null && meta.unpublishedAt !== null) {
-    return { unpublishedAt: meta.unpublishedAt }
+    return { unpublishedAt: meta.unpublishedAt };
   }
 
   // The index rows go with it, in one batch: an unpublished page must leave every
@@ -208,20 +208,20 @@ export async function unpublish(
   // with no document behind it. This is the batching `unpublishStoryStatement`'s
   // own doc comment anticipated — before collections it was the one workflow with
   // nothing to batch against.
-  const { unpublishedAt, statement } = unpublishStoryStatement(deps.db, meta.id, actor)
-  await deps.db.batch([statement, ...clearIndexStatements(deps.db, [meta.id])])
+  const { unpublishedAt, statement } = unpublishStoryStatement(deps.db, meta.id, actor);
+  await deps.db.batch([statement, ...clearIndexStatements(deps.db, [meta.id])]);
 
   const updated: StoryMeta = {
     ...meta,
     publishedAt: null,
     unpublishedAt,
     updatedAt: unpublishedAt,
-    state: 'unpublished',
+    state: "unpublished",
     hasUnpublishedChanges: false,
-  }
-  await deps.hooks?.run('unpublished', { story: updated, actor })
+  };
+  await deps.hooks?.run("unpublished", { story: updated, actor });
 
-  return { unpublishedAt }
+  return { unpublishedAt };
 }
 
 /**
@@ -234,13 +234,13 @@ export async function checkpoint(
   story: StorySelector,
   input: { label?: string | null; actor?: string | null },
 ): Promise<VersionMeta> {
-  const meta = await requireStory(deps.db, story)
-  const actor = input.actor ?? null
-  const doc = await deps.draft(meta)
+  const meta = await requireStory(deps.db, story);
+  const actor = input.actor ?? null;
+  const doc = await deps.draft(meta);
 
   const version = await writeVersion(deps.db, {
     storyId: meta.id,
-    kind: 'checkpoint',
+    kind: "checkpoint",
     doc,
     label: input.label ?? null,
     actor,
@@ -248,8 +248,8 @@ export async function checkpoint(
     // Same as publish: the shape of the document this row holds, not the shape
     // the code currently wants.
     schemaId: meta.schemaId ?? null,
-  })
-  await deps.hooks?.run('checkpointed', { story: meta, version, actor })
+  });
+  await deps.hooks?.run("checkpointed", { story: meta, version, actor });
 
-  return version
+  return version;
 }

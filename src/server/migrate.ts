@@ -21,85 +21,85 @@
  * client re-calls until it is null. A stream would have to hold a response open
  * across exactly the CPU limit this design exists to stay under.
  */
-import type { Doc } from '../core/doc'
-import { migrateDoc, type Migration, pendingFor } from '../core/migrate'
-import { applyAll, type Mutation } from '../core/mutations'
-import { MAX_TX_MUTATIONS } from '../core/protocol'
-import type { SchemaIndex } from '../core/schema'
-import type { StoryMeta } from '../core/story'
-import { type ContentProjection, indexStatements } from './content-index'
-import type { HookRunner } from './hooks'
-import type { BrandRuntime } from './runtime'
-import { countBehind, stampSchemaStatement, storiesBehind } from './stories'
-import type { StoryStub } from './types'
-import type { FolioDb } from './db'
+import type { Doc } from "../core/doc";
+import { migrateDoc, type Migration, pendingFor } from "../core/migrate";
+import { applyAll, type Mutation } from "../core/mutations";
+import { MAX_TX_MUTATIONS } from "../core/protocol";
+import type { SchemaIndex } from "../core/schema";
+import type { StoryMeta } from "../core/story";
+import { type ContentProjection, indexStatements } from "./content-index";
+import type { HookRunner } from "./hooks";
+import type { BrandRuntime } from "./runtime";
+import { countBehind, stampSchemaStatement, storiesBehind } from "./stories";
+import type { StoryStub } from "./types";
+import type { FolioDb } from "./db";
 
 /** How many documents one call sweeps before handing back a cursor. */
-export const DEFAULT_MIGRATE_BATCH = 25
+export const DEFAULT_MIGRATE_BATCH = 25;
 
 /** Ceiling on `batch`, so a caller cannot ask for a run that outlives the request. */
-export const MAX_MIGRATE_BATCH = 200
+export const MAX_MIGRATE_BATCH = 200;
 
 export interface MigrateOptions {
   /** Compute everything, write nothing. Answers the same report shape. */
-  dryRun?: boolean
+  dryRun?: boolean;
   /** Resume after this story id — the `continueFrom` of the previous call. */
-  continueFrom?: string | null
-  batch?: number
+  continueFrom?: string | null;
+  batch?: number;
   /** Recorded on the ledger row and on every transaction the run commits. */
-  actor?: string | null
+  actor?: string | null;
 }
 
 export interface MigrateFailure {
-  storyId: string
-  reason: string
+  storyId: string;
+  reason: string;
 }
 
 export interface MigrateOversized {
-  storyId: string
+  storyId: string;
   /** Mutations the migrations produced for this document's draft. */
-  mutations: number
+  mutations: number;
   /** Transactions it was split into, each within `MAX_TX_MUTATIONS`. */
-  transactions: number
+  transactions: number;
 }
 
 export interface MigrateReport {
   /** Migration ids not yet recorded in `schema_migrations`, in run order. */
-  pending: string[]
+  pending: string[];
   /** Documents examined in this call. */
-  stories: number
+  stories: number;
   /** Documents that produced at least one mutation. */
-  changed: number
+  changed: number;
   /**
    * Documents already in the target shape — zero mutations. The number that
    * makes "did this work" answerable by running it again (checkpoint 2): a
    * second run reports every document here.
    */
-  unchanged: number
+  unchanged: number;
   /** Mutations committed to drafts (or, on a dry run, that would be). */
-  mutations: number
+  mutations: number;
   /**
    * Mutations applied to published snapshots. Counted separately because they
    * are computed *independently*: a snapshot taken before an earlier edit is a
    * different document from the draft, so it needs its own answer, not the
    * draft's mutations replayed at it.
    */
-  publishedMutations: number
+  publishedMutations: number;
   /** Transactions committed. Higher than `changed` when a document was chunked. */
-  transactions: number
+  transactions: number;
   /** Documents over `MAX_TX_MUTATIONS`, named so chunking is never a surprise. */
-  oversized: MigrateOversized[]
-  failed: MigrateFailure[]
-  dryRun: boolean
+  oversized: MigrateOversized[];
+  failed: MigrateFailure[];
+  dryRun: boolean;
   /**
    * The story id to resume after, or null when the sweep reached the end. The
    * client re-calls with `{ continueFrom }`.
    */
-  continueFrom: string | null
+  continueFrom: string | null;
   /** Documents still behind the configured migrations after this call. */
-  behind: number
+  behind: number;
   /** True when nothing is behind: every document has had every migration. */
-  complete: boolean
+  complete: boolean;
   /**
    * On a deployment with `brands` (`multi-brand.md` decision 16): the brand this
    * call's batch migrated. Absent with no `brands`. What `pending`, `behind` and
@@ -113,7 +113,7 @@ export interface MigrateReport {
    *   deployment's, so a loop that stops at a null cursor reads "every brand is
    *   done", not "the last brand is".
    */
-  brand?: string
+  brand?: string;
 }
 
 const EMPTY = (dryRun: boolean): MigrateReport => ({
@@ -130,22 +130,22 @@ const EMPTY = (dryRun: boolean): MigrateReport => ({
   continueFrom: null,
   behind: 0,
   complete: true,
-})
+});
 
 /** `ms` split into transactions no larger than the wire's per-tx cap. */
 export function chunk(ms: readonly Mutation[], size = MAX_TX_MUTATIONS): Mutation[][] {
-  if (ms.length === 0) return []
-  const out: Mutation[][] = []
-  for (let i = 0; i < ms.length; i += size) out.push(ms.slice(i, i + size))
-  return out
+  if (ms.length === 0) return [];
+  const out: Mutation[][] = [];
+  for (let i = 0; i < ms.length; i += size) out.push(ms.slice(i, i + size));
+  return out;
 }
 
 /** The migration ids `schema_migrations` already records, newest last. */
 export async function appliedMigrations(db: FolioDb): Promise<string[]> {
   const { results } = await db
-    .prepare('select id from schema_migrations order by id')
-    .all<{ id: string }>()
-  return results.map((r) => r.id)
+    .prepare("select id from schema_migrations order by id")
+    .all<{ id: string }>();
+  return results.map((r) => r.id);
 }
 
 /**
@@ -161,15 +161,15 @@ export function outOfOrderMigration(
   migrations: readonly Migration[],
   applied: readonly string[],
 ): string | null {
-  const highest = applied.length > 0 ? applied[applied.length - 1]! : null
-  if (highest === null) return null
-  const appliedSet = new Set(applied)
+  const highest = applied.length > 0 ? applied[applied.length - 1]! : null;
+  if (highest === null) return null;
+  const appliedSet = new Set(applied);
   for (const m of migrations) {
     if (!appliedSet.has(m.id) && m.id < highest) {
-      return `migration '${m.id}' sorts before '${highest}', which has already been applied — a migration cannot be inserted into the past`
+      return `migration '${m.id}' sorts before '${highest}', which has already been applied — a migration cannot be inserted into the past`;
     }
   }
-  return null
+  return null;
 }
 
 /**
@@ -178,14 +178,14 @@ export function outOfOrderMigration(
  * deploy script and a route must be able to reach this identically.
  */
 export interface MigrateDeps {
-  db: FolioDb
-  schema: SchemaIndex
-  migrations: readonly Migration[]
-  typeOf: BrandRuntime['typeOf']
+  db: FolioDb;
+  schema: SchemaIndex;
+  migrations: readonly Migration[];
+  typeOf: BrandRuntime["typeOf"];
   /** The story's live draft, created from its row on first touch. */
-  draft: (story: StoryMeta) => Promise<Doc>
+  draft: (story: StoryMeta) => Promise<Doc>;
   /** The story's Durable Object, for `commit`. */
-  stub: (id: string) => StoryStub
+  stub: (id: string) => StoryStub;
   /**
    * The document's `content_index` / `content_refs` / `content_text` rows, the
    * same function `PublishDeps.projection` is — and here for the same reason: a
@@ -206,7 +206,7 @@ export interface MigrateDeps {
    * as it was, which is what every caller did before, and the index is
    * rebuildable from `published_doc` at any time.
    */
-  projection?: (story: StoryMeta, doc: Doc) => ContentProjection
+  projection?: (story: StoryMeta, doc: Doc) => ContentProjection;
   /**
    * Fires `migrated` once per batch (`../../docs/specs/platform/caching.md`). Optional, like
    * `PublishDeps.hooks`, and absent is the behaviour every caller had before
@@ -214,7 +214,7 @@ export interface MigrateDeps {
    * `stampSchemaStatement` and used to tell nobody, so a cached page could
    * outlive the schema change that rewrote it.
    */
-  hooks?: HookRunner<unknown>
+  hooks?: HookRunner<unknown>;
   /**
    * One brand's sweep (`multi-brand.md` decision 16): its id and every scope it
    * owns. The batch, the behind count and the ledger's "already applied" read are
@@ -222,7 +222,7 @@ export interface MigrateDeps {
    * carry their brand, so another brand's newest id must not make this brand's
    * look inserted into the past. Absent is every scope and every id, as before.
    */
-  brand?: { id: string; scopes: readonly string[] }
+  brand?: { id: string; scopes: readonly string[] };
 }
 
 /**
@@ -233,24 +233,24 @@ export async function runMigrations(
   deps: MigrateDeps,
   opts: MigrateOptions = {},
 ): Promise<MigrateReport> {
-  const { db, schema, migrations } = deps
-  const dryRun = opts.dryRun === true
-  if (migrations.length === 0) return EMPTY(dryRun)
+  const { db, schema, migrations } = deps;
+  const dryRun = opts.dryRun === true;
+  if (migrations.length === 0) return EMPTY(dryRun);
 
-  const latestId = migrations[migrations.length - 1]!.id
-  const applied = ownMigrations(await appliedMigrations(db), deps.brand?.id)
-  const outOfOrder = outOfOrderMigration(migrations, applied)
-  if (outOfOrder) throw new Error(`folio: ${outOfOrder}`)
+  const latestId = migrations[migrations.length - 1]!.id;
+  const applied = ownMigrations(await appliedMigrations(db), deps.brand?.id);
+  const outOfOrder = outOfOrderMigration(migrations, applied);
+  if (outOfOrder) throw new Error(`folio: ${outOfOrder}`);
 
-  const appliedSet = new Set(applied)
-  const pending = migrations.filter((m) => !appliedSet.has(m.id)).map((m) => m.id)
+  const appliedSet = new Set(applied);
+  const pending = migrations.filter((m) => !appliedSet.has(m.id)).map((m) => m.id);
 
-  const size = Math.min(Math.max(opts.batch ?? DEFAULT_MIGRATE_BATCH, 1), MAX_MIGRATE_BATCH)
-  const scopes = deps.brand?.scopes
-  const rows = await storiesBehind(db, latestId, opts.continueFrom ?? null, size, scopes)
+  const size = Math.min(Math.max(opts.batch ?? DEFAULT_MIGRATE_BATCH, 1), MAX_MIGRATE_BATCH);
+  const scopes = deps.brand?.scopes;
+  const rows = await storiesBehind(db, latestId, opts.continueFrom ?? null, size, scopes);
 
-  const report: MigrateReport = { ...EMPTY(dryRun), pending, stories: rows.length }
-  const actor = { id: opts.actor ?? `migration:${latestId}`, name: `Migration ${latestId}` }
+  const report: MigrateReport = { ...EMPTY(dryRun), pending, stories: rows.length };
+  const actor = { id: opts.actor ?? `migration:${latestId}`, name: `Migration ${latestId}` };
   /**
    * Stories whose **published** snapshot this batch rewrote, for the `migrated`
    * hook. The published half rather than `report.changed`, deliberately: a
@@ -259,11 +259,11 @@ export async function runMigrations(
    * is *complete* — `story:X` is tagged on every page that loaded X, not only
    * on X's own page, so purging these also catches everything referencing them.
    */
-  const republished: string[] = []
+  const republished: string[] = [];
 
   for (const { story, publishedDoc } of rows) {
-    const due = pendingFor(story.schemaId ?? null, migrations)
-    const type = deps.typeOf(story.type)
+    const due = pendingFor(story.schemaId ?? null, migrations);
+    const type = deps.typeOf(story.type);
     if (!type) {
       // A row whose type was removed from the code has no `MigrationContext.type`
       // to hand a migration. Recorded rather than skipped: the document genuinely
@@ -272,19 +272,19 @@ export async function runMigrations(
       report.failed.push({
         storyId: story.id,
         reason: `unknown document type '${story.type}' — nothing declares it any more`,
-      })
-      continue
+      });
+      continue;
     }
 
-    let draftMutations: Mutation[]
+    let draftMutations: Mutation[];
     try {
-      const draft = await deps.draft(story)
-      draftMutations = migrateDoc(draft, due, schema, type).mutations
+      const draft = await deps.draft(story);
+      draftMutations = migrateDoc(draft, due, schema, type).mutations;
     } catch (err) {
       // A transiently unreachable Durable Object. Recorded, ledger not
       // completed, re-run picks it up (the spec's own edge case).
-      report.failed.push({ storyId: story.id, reason: reasonOf(err) })
-      continue
+      report.failed.push({ storyId: story.id, reason: reasonOf(err) });
+      continue;
     }
 
     // Computed independently of the draft, deliberately. A published snapshot was
@@ -294,36 +294,36 @@ export async function runMigrations(
     // function of a document; there are two documents here.
     const publishedResult = publishedDoc
       ? migrateDoc(publishedDoc, due, schema, type)
-      : { mutations: [] as Mutation[], doc: publishedDoc }
+      : { mutations: [] as Mutation[], doc: publishedDoc };
 
-    const chunks = chunk(draftMutations)
-    report.mutations += draftMutations.length
-    report.publishedMutations += publishedResult.mutations.length
+    const chunks = chunk(draftMutations);
+    report.mutations += draftMutations.length;
+    report.publishedMutations += publishedResult.mutations.length;
 
     if (draftMutations.length === 0 && publishedResult.mutations.length === 0) {
-      report.unchanged++
+      report.unchanged++;
     } else {
-      report.changed++
+      report.changed++;
     }
     if (draftMutations.length > MAX_TX_MUTATIONS) {
       report.oversized.push({
         storyId: story.id,
         mutations: draftMutations.length,
         transactions: chunks.length,
-      })
+      });
     }
 
     if (dryRun) {
-      report.transactions += chunks.length
-      continue
+      report.transactions += chunks.length;
+      continue;
     }
 
     // Chunking splits a large migration into several transactions, which means
     // several undo steps rather than one. That is the honest trade: the
     // alternative is refusing to migrate documents over a size, and a CMS that
     // cannot migrate its biggest pages is not much use.
-    let rejected: string | null = null
-    let committed = 0
+    let rejected: string | null = null;
+    let committed = 0;
     for (const [i, part] of chunks.entries()) {
       // A fresh txId per chunk, deliberately *not* derived from the migration
       // id. A deterministic id would let two concurrent runs collide: run B
@@ -332,22 +332,22 @@ export async function runMigrations(
       // its own (different) mutations had landed. Value-idempotence is the real
       // protection here (checkpoint 2), so the same `set` applied twice is
       // simply the same `set`. Dedupe stays what it is for: a resend.
-      const result = await deps.stub(story.id).commit(part, actor)
-      if ('rejected' in result) {
-        rejected = `chunk ${i + 1}/${chunks.length}: ${result.rejected}`
-        break
+      const result = await deps.stub(story.id).commit(part, actor);
+      if ("rejected" in result) {
+        rejected = `chunk ${i + 1}/${chunks.length}: ${result.rejected}`;
+        break;
       }
-      committed++
+      committed++;
     }
-    report.transactions += committed
+    report.transactions += committed;
 
     if (rejected !== null) {
       // Nothing partial landed *within* a chunk — `commit` is atomic — but an
       // earlier chunk of the same document may have. The watermark is
       // deliberately not stamped, so the next run recomputes from wherever this
       // one got to and finishes the job.
-      report.failed.push({ storyId: story.id, reason: rejected })
-      continue
+      report.failed.push({ storyId: story.id, reason: rejected });
+      continue;
     }
 
     // The migrated snapshot and the watermark that claims it are one statement,
@@ -358,32 +358,32 @@ export async function runMigrations(
     const migratedDoc =
       publishedResult.mutations.length > 0
         ? applyAll(publishedDoc!, publishedResult.mutations)
-        : undefined
-    const stamp = stampSchemaStatement(db, story.id, latestId, migratedDoc)
-    const projection = migratedDoc ? deps.projection?.(story, migratedDoc) : undefined
+        : undefined;
+    const stamp = stampSchemaStatement(db, story.id, latestId, migratedDoc);
+    const projection = migratedDoc ? deps.projection?.(story, migratedDoc) : undefined;
     if (projection) {
-      await db.batch([stamp, ...indexStatements(db, story.id, projection)])
+      await db.batch([stamp, ...indexStatements(db, story.id, projection)]);
     } else {
       // Nothing to re-project: either the snapshot is unchanged (a draft-only
       // migration), or the caller supplied no projection and gets what every
       // caller got before this existed — a stale index until the next reindex.
-      await stamp.run()
+      await stamp.run();
     }
-    if (migratedDoc) republished.push(story.id)
+    if (migratedDoc) republished.push(story.id);
   }
 
   // A short batch means the sweep reached the end of the table.
-  report.continueFrom = rows.length === size ? (rows[rows.length - 1]?.story.id ?? null) : null
+  report.continueFrom = rows.length === size ? (rows[rows.length - 1]?.story.id ?? null) : null;
   // Asked directly rather than accumulated: right however many calls this run
   // took, and right across two runs that overlapped.
-  report.behind = await countBehind(db, latestId, scopes)
-  report.complete = report.behind === 0
+  report.behind = await countBehind(db, latestId, scopes);
+  report.complete = report.behind === 0;
 
   // The ledger is written when the sweep is done and nothing is behind, not
   // per batch: a row here means "this migration has reached every document",
   // which is the only claim worth recording. A dry run writes nothing at all.
   if (!dryRun && report.continueFrom === null && report.complete && pending.length > 0) {
-    await writeLedger(db, pending, report, opts.actor ?? null)
+    await writeLedger(db, pending, report, opts.actor ?? null);
   }
 
   // After every write this batch makes, like every other lifecycle hook. A dry
@@ -391,16 +391,16 @@ export async function runMigrations(
   // document has an empty set and fires nothing either, rather than an event
   // whose only honest reading is "nothing happened".
   if (!dryRun && republished.length > 0) {
-    await deps.hooks?.run('migrated', {
+    await deps.hooks?.run("migrated", {
       ids: republished,
       migrations: pending,
       actor: opts.actor ?? null,
       // Every scope's documents are migrated together (`HookBase.site`).
       site: null,
-    })
+    });
   }
 
-  return report
+  return report;
 }
 
 /**
@@ -409,7 +409,7 @@ export async function runMigrations(
  * filter cannot disturb.
  */
 export function ownMigrations(applied: readonly string[], brand: string | undefined): string[] {
-  return brand === undefined ? [...applied] : applied.filter((id) => id.startsWith(`${brand}/`))
+  return brand === undefined ? [...applied] : applied.filter((id) => id.startsWith(`${brand}/`));
 }
 
 /** `insert or replace`, so a re-run refreshes the counts and clears `failed`. */
@@ -419,8 +419,8 @@ async function writeLedger(
   report: MigrateReport,
   actor: string | null,
 ): Promise<void> {
-  const at = Date.now()
-  const failed = report.failed.length > 0 ? JSON.stringify(report.failed) : null
+  const at = Date.now();
+  const failed = report.failed.length > 0 ? JSON.stringify(report.failed) : null;
   await db.batch(
     ids.map((id) =>
       db
@@ -435,21 +435,21 @@ async function writeLedger(
         )
         .bind(id, at, actor, report.stories, report.changed, report.mutations, failed),
     ),
-  )
+  );
 }
 
 function reasonOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
+  return err instanceof Error ? err.message : String(err);
 }
 
 /** What `GET {base}/migrations` answers. */
 export interface MigrationStatus {
   /** Every configured migration, in run order, with whether it has been applied. */
-  migrations: { id: string; description: string; applied: boolean }[]
+  migrations: { id: string; description: string; applied: boolean }[];
   /** Ids not yet recorded in `schema_migrations`, in run order. */
-  pending: string[]
+  pending: string[];
   /** Documents whose own `schema_id` is behind the last configured migration. */
-  behind: number
+  behind: number;
   /**
    * The story `?story=` named, when it was given: whether *that* document is
    * behind, and which migrations it is missing. This is what the editor's banner
@@ -457,11 +457,11 @@ export interface MigrationStatus {
    * and would say "nothing pending" while this one page was still behind.
    */
   story?: {
-    id: string
-    schemaId: string | null
-    behind: boolean
-    pending: { id: string; description: string }[]
-  }
+    id: string;
+    schemaId: string | null;
+    behind: boolean;
+    pending: { id: string; description: string }[];
+  };
 }
 
 export async function migrationStatus(
@@ -471,8 +471,8 @@ export async function migrationStatus(
   /** One brand's scopes (`MigrateDeps.brand`), for its `behind`. Absent: every scope. */
   scopes?: readonly string[],
 ): Promise<MigrationStatus> {
-  const applied = new Set(await appliedMigrations(db))
-  const latestId = migrations.length > 0 ? migrations[migrations.length - 1]!.id : null
+  const applied = new Set(await appliedMigrations(db));
+  const latestId = migrations.length > 0 ? migrations[migrations.length - 1]!.id : null;
 
   const status: MigrationStatus = {
     migrations: migrations.map((m) => ({
@@ -482,25 +482,25 @@ export async function migrationStatus(
     })),
     pending: migrations.filter((m) => !applied.has(m.id)).map((m) => m.id),
     behind: latestId === null ? 0 : await countBehind(db, latestId, scopes),
-  }
+  };
 
   if (storyId !== undefined) {
     const row = await db
-      .prepare('select schema_id as schemaId from stories where id = ?')
+      .prepare("select schema_id as schemaId from stories where id = ?")
       .bind(storyId)
-      .first<{ schemaId: string | null }>()
+      .first<{ schemaId: string | null }>();
     // A story that does not exist is reported as up to date rather than 404: the
     // banner is an explanation, and refusing the whole request over an id the
     // editor is closing anyway would surface as an error toast.
-    const schemaId = row?.schemaId ?? null
-    const due = row ? pendingFor(schemaId, migrations) : []
+    const schemaId = row?.schemaId ?? null;
+    const due = row ? pendingFor(schemaId, migrations) : [];
     status.story = {
       id: storyId,
       schemaId,
       behind: due.length > 0,
       pending: due.map((m) => ({ id: m.id, description: m.description })),
-    }
+    };
   }
 
-  return status
+  return status;
 }

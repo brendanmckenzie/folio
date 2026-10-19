@@ -7,18 +7,18 @@
  * report rather than a side effect of the run — an audit that happens as part of
  * a write is an audit nobody reads.
  */
-import { Hono } from 'hono'
-import { actorString, ADMIN, READ_DRAFT } from '../auth/roles'
-import { audit, DEFAULT_AUDIT_BATCH, MAX_AUDIT_BATCH } from '../audit'
-import { migrationStatus, runMigrations } from '../migrate'
-import { brandIdOf, hookCtx, requireAccess } from '../middleware'
-import type { FolioRuntime } from '../runtime'
-import type { FolioEnv } from '../types'
-import { idParam, limitParam, MigrateBody, parseOptionalBody } from '../validate'
-import { brandOf, draftOf, sweepOf } from './stories'
+import { Hono } from "hono";
+import { actorString, ADMIN, READ_DRAFT } from "../auth/roles";
+import { audit, DEFAULT_AUDIT_BATCH, MAX_AUDIT_BATCH } from "../audit";
+import { migrationStatus, runMigrations } from "../migrate";
+import { brandIdOf, hookCtx, requireAccess } from "../middleware";
+import type { FolioRuntime } from "../runtime";
+import type { FolioEnv } from "../types";
+import { idParam, limitParam, MigrateBody, parseOptionalBody } from "../validate";
+import { brandOf, draftOf, sweepOf } from "./stories";
 
 export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * What is configured, what has run, how many documents are behind — and, with
@@ -33,17 +33,17 @@ export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * What it discloses is migration ids and descriptions — code metadata, on a
    * deployment whose `/schema` manifest is ungated entirely.
    */
-  app.get('/migrations', requireAccess<Env>(rt, READ_DRAFT), async (c) => {
-    const raw = c.req.query('story')
+  app.get("/migrations", requireAccess<Env>(rt, READ_DRAFT), async (c) => {
+    const raw = c.req.query("story");
     return c.json(
       await migrationStatus(
         c.var.bindings().db,
         brandOf(c).migrations,
-        raw === undefined ? undefined : idParam('story', raw),
+        raw === undefined ? undefined : idParam("story", raw),
         (await sweepOf(c, rt))?.scopes,
       ),
-    )
-  })
+    );
+  });
 
   /**
    * Runs the pending migrations over one batch of documents and answers a report
@@ -55,11 +55,11 @@ export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * would run inside a request whose CPU limit it can exceed, on a cold Worker,
    * with nobody watching (checkpoint 5).
    */
-  app.post('/migrate', requireAccess<Env>(rt, ADMIN), async (c) => {
-    const body = await parseOptionalBody(c.req, MigrateBody)
-    const bindings = c.var.bindings()
-    const brand = brandOf(c)
-    const sweep = await sweepOf(c, rt)
+  app.post("/migrate", requireAccess<Env>(rt, ADMIN), async (c) => {
+    const body = await parseOptionalBody(c.req, MigrateBody);
+    const bindings = c.var.bindings();
+    const brand = brandOf(c);
+    const sweep = await sweepOf(c, rt);
     const report = await runMigrations(
       {
         db: bindings.db,
@@ -83,11 +83,11 @@ export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         // anybody should be able to type into.
         actor: actorString(c.var.actor),
       },
-    )
+    );
     // On a deployment with `brands` the report names the brand it migrated, and
     // every count in it — `complete` included — is that brand's (`MigrateReport.brand`).
-    return c.json(sweep ? { ...report, brand: sweep.id } : report)
-  })
+    return c.json(sweep ? { ...report, brand: sweep.id } : report);
+  });
 
   /**
    * The drift report. Read-only; no document is modified.
@@ -109,23 +109,23 @@ export function migrationRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * clamps rather than refusing, per `limitParam`: an out-of-range limit is a
    * stale bookmark with an obvious right answer.
    */
-  app.get('/audit', requireAccess<Env>(rt, ADMIN), async (c) => {
-    const raw = c.req.query('continueFrom')
-    const brand = brandOf(c)
-    const sweep = await sweepOf(c, rt)
+  app.get("/audit", requireAccess<Env>(rt, ADMIN), async (c) => {
+    const raw = c.req.query("continueFrom");
+    const brand = brandOf(c);
+    const sweep = await sweepOf(c, rt);
     return c.json(
       await audit(
         c.var.bindings().db,
         brand.schema,
         await brand.auditContext(c.env),
         {
-          continueFrom: raw === undefined ? null : idParam('continueFrom', raw),
-          batch: limitParam(c.req.query('batch'), DEFAULT_AUDIT_BATCH, MAX_AUDIT_BATCH),
+          continueFrom: raw === undefined ? null : idParam("continueFrom", raw),
+          batch: limitParam(c.req.query("batch"), DEFAULT_AUDIT_BATCH, MAX_AUDIT_BATCH),
         },
         sweep,
       ),
-    )
-  })
+    );
+  });
 
-  return app
+  return app;
 }

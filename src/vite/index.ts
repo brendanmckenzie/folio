@@ -1,9 +1,9 @@
-import { createRequire } from 'node:module'
-import path from 'node:path'
-import type { Plugin, UserConfig } from 'vite'
+import { createRequire } from "node:module";
+import path from "node:path";
+import type { Plugin, UserConfig } from "vite";
 
-const VIRTUAL_PREVIEW = 'virtual:folio/preview'
-const RESOLVED_PREVIEW = `\0${VIRTUAL_PREVIEW}`
+const VIRTUAL_PREVIEW = "virtual:folio/preview";
+const RESOLVED_PREVIEW = `\0${VIRTUAL_PREVIEW}`;
 
 /**
  * Where the single stylesheet goes when a host has turned CSS code splitting off.
@@ -12,7 +12,7 @@ const RESOLVED_PREVIEW = `\0${VIRTUAL_PREVIEW}`
  * already are: the Worker links it from `__FOLIO_ASSETS__`, which is a
  * compile-time constant, so the name cannot carry a content hash.
  */
-const SINGLE_CSS_BUNDLE = 'folio-client.css'
+const SINGLE_CSS_BUNDLE = "folio-client.css";
 
 /**
  * The two client entries this plugin adds, each paired with the one stylesheet
@@ -23,9 +23,9 @@ const SINGLE_CSS_BUNDLE = 'folio-client.css'
  * repair. See it for what breaks without it.
  */
 const ENTRY_STYLESHEETS: ReadonlyArray<readonly [entry: string, stylesheet: string]> = [
-  ['folio-admin.js', 'folio-admin.css'],
-  ['folio-preview.js', 'folio-preview.css'],
-]
+  ["folio-admin.js", "folio-admin.css"],
+  ["folio-preview.js", "folio-preview.css"],
+];
 
 /**
  * The entries and stylesheets for the record form: the admin, then one preview per
@@ -34,16 +34,16 @@ const ENTRY_STYLESHEETS: ReadonlyArray<readonly [entry: string, stylesheet: stri
  */
 function brandEntryStylesheets(brands: readonly string[]): typeof ENTRY_STYLESHEETS {
   return [
-    ['folio-admin.js', 'folio-admin.css'],
+    ["folio-admin.js", "folio-admin.css"],
     ...brands.map((b): readonly [string, string] => [
       `folio-preview-${b}.js`,
       `folio-preview-${b}.css`,
     ]),
-  ]
+  ];
 }
 
 /** The same rule a site id follows, which is what a brand id is (`multi-brand.md` decision 3). */
-const BRAND_ID = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/
+const BRAND_ID = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
 
 export interface FolioPluginOptions {
   /**
@@ -56,9 +56,9 @@ export interface FolioPluginOptions {
    * It cannot be combined with `build.cssCodeSplit: false`: one stylesheet would
    * carry every brand's CSS into every brand's preview.
    */
-  blocks: string | Readonly<Record<string, string>>
+  blocks: string | Readonly<Record<string, string>>;
   /** Must match `basePath` passed to `createFolio`. Default `/folio`. */
-  basePath?: string
+  basePath?: string;
 }
 
 /**
@@ -69,53 +69,53 @@ export interface FolioPluginOptions {
  * compiled, so a project's block code never enters that bundle.
  */
 export function folio(options: FolioPluginOptions): Plugin[] {
-  const base = options.basePath ?? '/folio'
-  let root = process.cwd()
+  const base = options.basePath ?? "/folio";
+  let root = process.cwd();
   /** Set in `config()`, read again in `configResolved`. See `cssBundledIntoOne`. */
-  let noSplit = false
+  let noSplit = false;
 
-  const brandBlocks = typeof options.blocks === 'string' ? null : options.blocks
-  const brandIds = brandBlocks ? Object.keys(brandBlocks) : []
+  const brandBlocks = typeof options.blocks === "string" ? null : options.blocks;
+  const brandIds = brandBlocks ? Object.keys(brandBlocks) : [];
   if (brandBlocks) {
-    if (brandIds.length === 0) throw new Error('folio: `blocks` names no brands')
+    if (brandIds.length === 0) throw new Error("folio: `blocks` names no brands");
     for (const id of brandIds) {
       if (!BRAND_ID.test(id)) {
         throw new Error(
           `folio: '${id}' is not a brand id: lowercase letters, digits and hyphens, at most 32 characters`,
-        )
+        );
       }
     }
   }
-  const entryPairs = brandBlocks ? brandEntryStylesheets(brandIds) : ENTRY_STYLESHEETS
+  const entryPairs = brandBlocks ? brandEntryStylesheets(brandIds) : ENTRY_STYLESHEETS;
 
   const resolveModule = (blocks: string) =>
-    blocks.startsWith('.') ? path.resolve(root, blocks) : blocks
+    blocks.startsWith(".") ? path.resolve(root, blocks) : blocks;
 
   const main: Plugin = {
-    name: 'folio',
+    name: "folio",
 
     config(userConfig, { command }) {
-      const isDev = command === 'serve'
+      const isDev = command === "serve";
       // In dev these are served by Vite's module graph, not as built files.
-      const admin = isDev ? `/@fs${adminEntry()}` : '/folio-admin.js'
-      const preview = isDev ? `/@id/__x00__${VIRTUAL_PREVIEW}` : '/folio-preview.js'
-      noSplit = cssBundledIntoOne(userConfig)
+      const admin = isDev ? `/@fs${adminEntry()}` : "/folio-admin.js";
+      const preview = isDev ? `/@id/__x00__${VIRTUAL_PREVIEW}` : "/folio-preview.js";
+      noSplit = cssBundledIntoOne(userConfig);
       if (brandBlocks && noSplit) {
         throw new Error(
-          'folio: `blocks` is a record of brands, which cannot be built with `cssCodeSplit: false`: ' +
+          "folio: `blocks` is a record of brands, which cannot be built with `cssCodeSplit: false`: " +
             "one stylesheet would carry every brand's CSS into every brand's preview. " +
-            'Remove `build.cssCodeSplit: false` (or `environments.client.build.cssCodeSplit: false`), ' +
-            'or pass one `blocks` module for a single brand.',
-        )
+            "Remove `build.cssCodeSplit: false` (or `environments.client.build.cssCodeSplit: false`), " +
+            "or pass one `blocks` module for a single brand.",
+        );
       }
       const previewInputs: Record<string, string> = brandBlocks
         ? Object.fromEntries(brandIds.map((b) => [`folio-preview-${b}`, `${VIRTUAL_PREVIEW}/${b}`]))
-        : { 'folio-preview': VIRTUAL_PREVIEW }
+        : { "folio-preview": VIRTUAL_PREVIEW };
       const assets = brandBlocks
         ? {
             admin,
-            devClient: isDev ? '/@vite/client' : undefined,
-            adminCss: isDev ? [] : ['/folio-admin.css'],
+            devClient: isDev ? "/@vite/client" : undefined,
+            adminCss: isDev ? [] : ["/folio-admin.css"],
             brands: Object.fromEntries(
               brandIds.map((b) => [
                 b,
@@ -129,10 +129,10 @@ export function folio(options: FolioPluginOptions): Plugin[] {
         : {
             admin,
             preview,
-            devClient: isDev ? '/@vite/client' : undefined,
-            adminCss: isDev ? [] : [noSplit ? `/${SINGLE_CSS_BUNDLE}` : '/folio-admin.css'],
-            previewCss: isDev ? [] : [noSplit ? `/${SINGLE_CSS_BUNDLE}` : '/folio-preview.css'],
-          }
+            devClient: isDev ? "/@vite/client" : undefined,
+            adminCss: isDev ? [] : [noSplit ? `/${SINGLE_CSS_BUNDLE}` : "/folio-admin.css"],
+            previewCss: isDev ? [] : [noSplit ? `/${SINGLE_CSS_BUNDLE}` : "/folio-preview.css"],
+          };
       return {
         environments: {
           /**
@@ -160,7 +160,7 @@ export function folio(options: FolioPluginOptions): Plugin[] {
            */
           ssr: {
             optimizeDeps: {
-              include: ['react-dom/server.edge'],
+              include: ["react-dom/server.edge"],
             },
           },
           client: {
@@ -211,11 +211,11 @@ export function folio(options: FolioPluginOptions): Plugin[] {
              */
             optimizeDeps: {
               include: [
-                '@tiptap/react',
-                '@tiptap/core',
-                '@tiptap/starter-kit',
-                '@tiptap/extension-subscript',
-                '@tiptap/extension-superscript',
+                "@tiptap/react",
+                "@tiptap/core",
+                "@tiptap/starter-kit",
+                "@tiptap/extension-subscript",
+                "@tiptap/extension-superscript",
               ],
             },
             /**
@@ -226,26 +226,26 @@ export function folio(options: FolioPluginOptions): Plugin[] {
              */
             resolve: {
               dedupe: [
-                '@tiptap/core',
-                '@tiptap/pm',
-                'prosemirror-state',
-                'prosemirror-view',
-                'prosemirror-model',
+                "@tiptap/core",
+                "@tiptap/pm",
+                "prosemirror-state",
+                "prosemirror-view",
+                "prosemirror-model",
               ],
             },
             build: {
               rollupOptions: {
                 input: {
-                  ...(typeof userConfig.build?.rollupOptions?.input === 'object' &&
+                  ...(typeof userConfig.build?.rollupOptions?.input === "object" &&
                   !Array.isArray(userConfig.build?.rollupOptions?.input)
                     ? userConfig.build.rollupOptions.input
                     : {}),
                   ...previewInputs,
-                  'folio-admin': adminEntry(),
+                  "folio-admin": adminEntry(),
                 },
                 output: {
                   entryFileNames: (chunk: { name: string }) =>
-                    chunk.name.startsWith('folio-') ? '[name].js' : 'assets/[name]-[hash].js',
+                    chunk.name.startsWith("folio-") ? "[name].js" : "assets/[name]-[hash].js",
                   assetFileNames: (asset: { names?: string[] }) => {
                     /**
                      * With `cssCodeSplit: false` there is exactly **one**
@@ -261,12 +261,12 @@ export function folio(options: FolioPluginOptions): Plugin[] {
                      * flag rather than of this branch, and it is why the fixed
                      * name says `client` and not `admin`.
                      */
-                    if (noSplit && asset.names?.some((n) => n.endsWith('.css'))) {
-                      return SINGLE_CSS_BUNDLE
+                    if (noSplit && asset.names?.some((n) => n.endsWith(".css"))) {
+                      return SINGLE_CSS_BUNDLE;
                     }
-                    return asset.names?.some((n) => n.startsWith('folio-'))
-                      ? '[name][extname]'
-                      : 'assets/[name]-[hash][extname]'
+                    return asset.names?.some((n) => n.startsWith("folio-"))
+                      ? "[name][extname]"
+                      : "assets/[name]-[hash][extname]";
                   },
                 },
               },
@@ -279,13 +279,13 @@ export function folio(options: FolioPluginOptions): Plugin[] {
           __FOLIO_ASSETS__: JSON.stringify(assets),
           __FOLIO_BASE__: JSON.stringify(base),
         },
-      }
+      };
     },
 
     configResolved(resolved) {
-      root = resolved.root
-      foldClientEntries(resolved)
-      assertCssStrategyWasVisible(resolved, noSplit)
+      root = resolved.root;
+      foldClientEntries(resolved);
+      assertCssStrategyWasVisible(resolved, noSplit);
     },
 
     /**
@@ -299,25 +299,25 @@ export function folio(options: FolioPluginOptions): Plugin[] {
      * then, both entries already link it, and it holds everything by construction.
      */
     generateBundle: {
-      order: 'post',
+      order: "post",
       handler(_options, bundle) {
-        if (noSplit) return
+        if (noSplit) return;
         for (const [entry, stylesheet] of entryPairs) {
-          importHoistedCss(this, bundle as unknown as Bundle, entry, stylesheet)
+          importHoistedCss(this, bundle as unknown as Bundle, entry, stylesheet);
         }
       },
     },
 
     resolveId(id) {
-      if (id === VIRTUAL_PREVIEW || id.startsWith(`${VIRTUAL_PREVIEW}/`)) return `\0${id}`
-      return null
+      if (id === VIRTUAL_PREVIEW || id.startsWith(`${VIRTUAL_PREVIEW}/`)) return `\0${id}`;
+      return null;
     },
 
     load(id) {
-      if (id !== RESOLVED_PREVIEW && !id.startsWith(`${RESOLVED_PREVIEW}/`)) return null
-      const brand = id === RESOLVED_PREVIEW ? null : id.slice(RESOLVED_PREVIEW.length + 1)
-      const blocks = brand === null ? options.blocks : brandBlocks?.[brand]
-      if (typeof blocks !== 'string') return null
+      if (id !== RESOLVED_PREVIEW && !id.startsWith(`${RESOLVED_PREVIEW}/`)) return null;
+      const brand = id === RESOLVED_PREVIEW ? null : id.slice(RESOLVED_PREVIEW.length + 1);
+      const blocks = brand === null ? options.blocks : brandBlocks?.[brand];
+      if (typeof blocks !== "string") return null;
       // Generated so the preview bundle contains the project's own components
       // while the entry itself stays owned by the library.
       //
@@ -330,11 +330,11 @@ export function folio(options: FolioPluginOptions): Plugin[] {
         `import { mountPreview } from 'folio/preview'`,
         `import * as m from ${JSON.stringify(resolveModule(blocks))}`,
         `mountPreview(m.blocks, { wrap: m.wrap })`,
-      ].join('\n')
+      ].join("\n");
     },
-  }
+  };
 
-  return [main]
+  return [main];
 }
 
 /**
@@ -358,7 +358,7 @@ function cssBundledIntoOne(userConfig: UserConfig): boolean {
   return (
     userConfig.build?.cssCodeSplit === false ||
     userConfig.environments?.client?.build?.cssCodeSplit === false
-  )
+  );
 }
 
 /**
@@ -381,14 +381,14 @@ function assertCssStrategyWasVisible(
   resolved: { environments?: Record<string, { build?: { cssCodeSplit?: boolean } }> },
   noSplit: boolean,
 ): void {
-  if (noSplit) return
-  if (resolved.environments?.client?.build?.cssCodeSplit !== false) return
+  if (noSplit) return;
+  if (resolved.environments?.client?.build?.cssCodeSplit !== false) return;
   throw new Error(
     "folio: the client build resolved to `cssCodeSplit: false`, but that was not set in this project's own Vite config — " +
-      'so the admin and preview stylesheet paths were already baked as if CSS were split per entry, and they will 404 in production. ' +
-      'Set `build.cssCodeSplit: false` (or `environments.client.build.cssCodeSplit: false`) in vite.config.ts so the plugin can see it, ' +
-      'or find the plugin that is setting it and let it be configured instead.',
-  )
+      "so the admin and preview stylesheet paths were already baked as if CSS were split per entry, and they will 404 in production. " +
+      "Set `build.cssCodeSplit: false` (or `environments.client.build.cssCodeSplit: false`) in vite.config.ts so the plugin can see it, " +
+      "or find the plugin that is setting it and let it be configured instead.",
+  );
 }
 
 /**
@@ -400,17 +400,17 @@ function assertCssStrategyWasVisible(
 interface Bundle {
   [fileName: string]:
     | {
-        type: 'chunk'
-        imports?: string[]
-        viteMetadata?: { importedCss?: Set<string> }
-        source?: undefined
+        type: "chunk";
+        imports?: string[];
+        viteMetadata?: { importedCss?: Set<string> };
+        source?: undefined;
       }
-    | { type: 'asset'; imports?: undefined; viteMetadata?: undefined; source: string | Uint8Array }
+    | { type: "asset"; imports?: undefined; viteMetadata?: undefined; source: string | Uint8Array };
 }
 
 /** The one thing `importHoistedCss` needs from the plugin context. */
 interface EmitsAssets {
-  emitFile(file: { type: 'asset'; fileName: string; source: string }): string
+  emitFile(file: { type: "asset"; fileName: string; source: string }): string;
 }
 
 /**
@@ -426,24 +426,24 @@ interface EmitsAssets {
  * linking it up front would load stylesheets for code that may never execute.
  */
 function cssReachableFrom(bundle: Bundle, entryFileName: string): string[] {
-  const seenChunks = new Set<string>()
-  const seenCss = new Set<string>()
-  const files: string[] = []
+  const seenChunks = new Set<string>();
+  const seenCss = new Set<string>();
+  const files: string[] = [];
 
   const walk = (fileName: string): void => {
-    const chunk = bundle[fileName]
-    if (chunk?.type !== 'chunk' || seenChunks.has(fileName)) return
-    seenChunks.add(fileName)
-    for (const imported of chunk.imports ?? []) walk(imported)
+    const chunk = bundle[fileName];
+    if (chunk?.type !== "chunk" || seenChunks.has(fileName)) return;
+    seenChunks.add(fileName);
+    for (const imported of chunk.imports ?? []) walk(imported);
     for (const css of chunk.viteMetadata?.importedCss ?? []) {
-      if (seenCss.has(css)) continue
-      seenCss.add(css)
-      files.push(css)
+      if (seenCss.has(css)) continue;
+      seenCss.add(css);
+      files.push(css);
     }
-  }
+  };
 
-  walk(entryFileName)
-  return files
+  walk(entryFileName);
+  return files;
 }
 
 /**
@@ -484,31 +484,31 @@ function importHoistedCss(
   stylesheet: string,
 ): void {
   // The entry's own CSS is `stylesheet` itself; everything else was hoisted.
-  const hoisted = cssReachableFrom(bundle, entryFileName).filter((file) => file !== stylesheet)
-  if (hoisted.length === 0) return
+  const hoisted = cssReachableFrom(bundle, entryFileName).filter((file) => file !== stylesheet);
+  if (hoisted.length === 0) return;
 
-  const rules = hoisted.map((file) => `@import url("/${file}");`).join('\n')
-  const own = bundle[stylesheet]
+  const rules = hoisted.map((file) => `@import url("/${file}");`).join("\n");
+  const own = bundle[stylesheet];
 
   // An entry can reach hoisted CSS while importing none of its own, in which case
   // Vite emits no file at this name and the baked link is already a 404. Writing
   // it here fixes that case too.
-  if (own?.type !== 'asset') {
-    ctx.emitFile({ type: 'asset', fileName: stylesheet, source: `${rules}\n` })
-    return
+  if (own?.type !== "asset") {
+    ctx.emitFile({ type: "asset", fileName: stylesheet, source: `${rules}\n` });
+    return;
   }
 
-  const source = typeof own.source === 'string' ? own.source : new TextDecoder().decode(own.source)
+  const source = typeof own.source === "string" ? own.source : new TextDecoder().decode(own.source);
   /**
    * `@charset` has to be the first thing in a stylesheet and `@import` has to
    * precede every rule that is not one, so the two orders conflict unless the
    * charset stays put. Vite writes one whenever the file holds a non-ASCII byte,
    * which a block's content very often does.
    */
-  const charset = /^@charset\s+"[^"]*";/.exec(source)
+  const charset = /^@charset\s+"[^"]*";/.exec(source);
   own.source = charset
     ? `${charset[0]}\n${rules}\n${source.slice(charset[0].length)}`
-    : `${rules}\n${source}`
+    : `${rules}\n${source}`;
 }
 
 /**
@@ -538,36 +538,36 @@ function importHoistedCss(
  * the name is cosmetic for everything but ours.
  */
 function foldClientEntries(resolved: {
-  environments?: Record<string, { build?: { rollupOptions?: { input?: unknown } } }>
+  environments?: Record<string, { build?: { rollupOptions?: { input?: unknown } } }>;
 }): void {
-  const build = resolved.environments?.client?.build
-  const input = build?.rollupOptions?.input
-  if (!build?.rollupOptions || !Array.isArray(input)) return
+  const build = resolved.environments?.client?.build;
+  const input = build?.rollupOptions?.input;
+  if (!build?.rollupOptions || !Array.isArray(input)) return;
 
-  const named: Record<string, string> = {}
-  const ids: string[] = []
+  const named: Record<string, string> = {};
+  const ids: string[] = [];
   for (const entry of input) {
-    if (entry && typeof entry === 'object') Object.assign(named, entry)
-    else if (typeof entry === 'string') ids.push(entry)
+    if (entry && typeof entry === "object") Object.assign(named, entry);
+    else if (typeof entry === "string") ids.push(entry);
   }
   // Nothing of ours in there: some other plugin's array, left alone.
-  if (Object.keys(named).length === 0) return
+  if (Object.keys(named).length === 0) return;
 
-  const folded: Record<string, string> = {}
+  const folded: Record<string, string> = {};
   for (const id of ids) {
-    let name = entryName(id)
+    let name = entryName(id);
     // Two ids that reduce to the same name would silently drop one.
-    for (let n = 2; name in folded; n++) name = `${entryName(id)}${n}`
-    folded[name] = id
+    for (let n = 2; name in folded; n++) name = `${entryName(id)}${n}`;
+    folded[name] = id;
   }
-  build.rollupOptions.input = { ...folded, ...named }
+  build.rollupOptions.input = { ...folded, ...named };
 }
 
 /** An id as Rollup would name its chunk: basename, no query, no extension. */
 function entryName(id: string): string {
-  const base = path.basename(id.split('?')[0] ?? id)
-  const ext = path.extname(base)
-  return ext ? base.slice(0, -ext.length) : base
+  const base = path.basename(id.split("?")[0] ?? id);
+  const ext = path.extname(base);
+  return ext ? base.slice(0, -ext.length) : base;
 }
 
 /**
@@ -578,16 +578,16 @@ function entryName(id: string): string {
  * reaching this plugin has Vite by construction.
  */
 function adminEntry(): string {
-  const require = createRequire(import.meta.url)
+  const require = createRequire(import.meta.url);
   try {
     // Package self-reference. Works from `src/vite/index.ts` and from the built
     // `dist/vite.js`, since both sit inside the package whose `exports` names the
     // subpath, and `./admin-entry` is unconditional in that map.
-    return require.resolve('folio/admin-entry')
+    return require.resolve("folio/admin-entry");
   } catch {
     // A resolver with no self-reference support. `dist/vite.js` is one directory
     // below the package root; `src/vite/index.ts` is two.
-    const dir = import.meta.dirname
-    return path.resolve(dir, path.basename(dir) === 'vite' ? '../..' : '..', 'src/admin/main.tsx')
+    const dir = import.meta.dirname;
+    return path.resolve(dir, path.basename(dir) === "vite" ? "../.." : "..", "src/admin/main.tsx");
   }
 }

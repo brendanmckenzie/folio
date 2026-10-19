@@ -1,6 +1,6 @@
-import type { SpaceAvatar } from '../spaceStore'
-import css from './SpaceAvatars.module.css'
-import { avatarLabel, initialsOf } from './space-mount'
+import type { SpaceAvatar } from "../spaceStore";
+import css from "./SpaceAvatars.module.css";
+import { avatarLabel, initialsOf } from "./space-mount";
 
 /**
  * Who else is in this site, in the top bar's `presence` slot
@@ -29,11 +29,11 @@ import { avatarLabel, initialsOf } from './space-mount'
  * will say so.
  */
 export function SpaceAvatars({ avatars }: { avatars: readonly SpaceAvatar[] }) {
-  if (avatars.length === 0) return null
+  if (avatars.length === 0) return null;
   return (
     <span className={css.avatars}>
       {avatars.map((avatar) => {
-        const label = avatarLabel(avatar)
+        const label = avatarLabel(avatar);
         return (
           <span
             key={avatar.actor}
@@ -55,8 +55,8 @@ export function SpaceAvatars({ avatars }: { avatars: readonly SpaceAvatar[] }) {
           >
             {initialsOf(avatar.name)}
           </span>
-        )
+        );
       })}
     </span>
-  )
+  );
 }

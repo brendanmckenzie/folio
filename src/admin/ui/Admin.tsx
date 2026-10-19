@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import './tokens.css'
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import "./tokens.css";
 import {
   type DocumentType,
   indexManifest,
   type Manifest,
   type SchemaIndex,
-} from '../../core/schema'
-import { DEFAULT_FLAT_SORT, type FlatSort, type StoryMeta } from '../../core/story'
-import { onUnauthorized, send, signInUrl } from '../api'
-import type { SpaceEvent, SpacePresence } from '../../core/protocol'
-import { spaceEventEffect, useSpace } from '../hooks/useSpace'
+} from "../../core/schema";
+import { DEFAULT_FLAT_SORT, type FlatSort, type StoryMeta } from "../../core/story";
+import { onUnauthorized, send, signInUrl } from "../api";
+import type { SpaceEvent, SpacePresence } from "../../core/protocol";
+import { spaceEventEffect, useSpace } from "../hooks/useSpace";
 import {
   actorLabel,
   atScope,
@@ -21,11 +21,11 @@ import {
   scopeChoices,
   scopeName,
   showsScopeSwitcher,
-} from '../me'
-import type { MenuItem } from './Menu'
-import { messageOf } from './screens/useContent'
-import { activeItem, nav, scopeOptionGroups } from './nav'
-import { Palette, type PaletteAction } from './Palette'
+} from "../me";
+import type { MenuItem } from "./Menu";
+import { messageOf } from "./screens/useContent";
+import { activeItem, nav, scopeOptionGroups } from "./nav";
+import { Palette, type PaletteAction } from "./Palette";
 import {
   type Crumb,
   type CrumbContext,
@@ -37,42 +37,42 @@ import {
   scopedMount,
   splitScope,
   switchScopeUrl,
-} from './route'
-import { useRemembered, useRememberedString } from './remembered'
-import { applySpaceEffect, spaceIdentity, spaceWhere } from './space-mount'
-import { SpaceAvatars } from './SpaceAvatars'
-import { Access } from './screens/Access'
-import { Account } from './screens/Account'
+} from "./route";
+import { useRemembered, useRememberedString } from "./remembered";
+import { applySpaceEffect, spaceIdentity, spaceWhere } from "./space-mount";
+import { SpaceAvatars } from "./SpaceAvatars";
+import { Access } from "./screens/Access";
+import { Account } from "./screens/Account";
 // `ASSET_VIEW_KEY` and not a string literal: the picker is mounted by an asset
 // *field* and reads the remembered view itself, so the two mounts of one grid have to
 // agree on the key or they remember different views. `AssetPicker` itself is not
 // mounted here — it belongs to a field, and the field is port phase 7's.
-import { ASSET_VIEW_KEY } from './screens/AssetPicker'
-import { Assets } from './screens/Assets'
-import { Content } from './screens/Content'
-import { Documents } from './screens/Documents'
-import { FormBuilder } from './screens/FormBuilder'
-import { Forms } from './screens/Forms'
-import { Model } from './screens/Model'
-import { Redirects } from './screens/Redirects'
-import { Responses } from './screens/Responses'
-import { Schedules } from './screens/Schedules'
-import { Settings } from './screens/Settings'
-import { Sites } from './screens/Sites'
-import type { ViewMode } from './screens/content-model'
-import { EditorShell } from './screens/EditorShell'
-import { BlockPicker } from './screens/BlockPicker'
-import { HistoryPanel } from './screens/HistoryPanel'
-import { Home } from './screens/Home'
-import { Inspector } from './screens/Inspector'
-import { Keys } from './screens/Keys'
-import { Stub } from './screens/Stub'
-import { Shell } from './Shell'
-import { type Bindings, SAVE_NOTICE, useShortcuts } from './shortcuts'
-import { Toast } from './Toast'
-import { useRouter } from './useRouter'
-import { useSearch } from './useSearch'
-import { globalPreviewUrl, usePreviewHost, useStory } from './useStory'
+import { ASSET_VIEW_KEY } from "./screens/AssetPicker";
+import { Assets } from "./screens/Assets";
+import { Content } from "./screens/Content";
+import { Documents } from "./screens/Documents";
+import { FormBuilder } from "./screens/FormBuilder";
+import { Forms } from "./screens/Forms";
+import { Model } from "./screens/Model";
+import { Redirects } from "./screens/Redirects";
+import { Responses } from "./screens/Responses";
+import { Schedules } from "./screens/Schedules";
+import { Settings } from "./screens/Settings";
+import { Sites } from "./screens/Sites";
+import type { ViewMode } from "./screens/content-model";
+import { EditorShell } from "./screens/EditorShell";
+import { BlockPicker } from "./screens/BlockPicker";
+import { HistoryPanel } from "./screens/HistoryPanel";
+import { Home } from "./screens/Home";
+import { Inspector } from "./screens/Inspector";
+import { Keys } from "./screens/Keys";
+import { Stub } from "./screens/Stub";
+import { Shell } from "./Shell";
+import { type Bindings, SAVE_NOTICE, useShortcuts } from "./shortcuts";
+import { Toast } from "./Toast";
+import { useRouter } from "./useRouter";
+import { useSearch } from "./useSearch";
+import { globalPreviewUrl, usePreviewHost, useStory } from "./useStory";
 
 /**
  * The two strings the server-rendered shell hands the client, and nothing else.
@@ -97,9 +97,9 @@ export interface AdminBoot {
    * Where Folio is mounted, and therefore where every screen lives: the router is
    * relative to it, which is what made the prefix move free on the client.
    */
-  base: string
+  base: string;
   /** Where the admin's internal JSON lives — `${base}/api`. */
-  apiBase: string
+  apiBase: string;
 }
 
 /**
@@ -132,23 +132,23 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    * Read once: changing scope is a page load (`switchScopeUrl`), so a scope's lists,
    * its open document and its socket never outlive it.
    */
-  const [inScope] = useState(() => splitScope(window.location.pathname, bare.base))
-  const scope = inScope.scope
+  const [inScope] = useState(() => splitScope(window.location.pathname, bare.base));
+  const scope = inScope.scope;
   const boot = useMemo<AdminBoot>(
     () => ({ base: inScope.mount, apiBase: scopedApiBase(bare.apiBase, bare.base, scope) }),
     [inScope.mount, bare.apiBase, bare.base, scope],
-  )
-  const { route, go, replace } = useRouter(boot.base, bare.base)
-  const [manifest, setManifest] = useState<Manifest | null>(null)
+  );
+  const { route, go, replace } = useRouter(boot.base, bare.base);
+  const [manifest, setManifest] = useState<Manifest | null>(null);
   // What the server said, and `me` below is that seen from `scope`: on a deployment
   // with `sites` every permission predicate reads the role on the scope being shown.
-  const [rawMe, setMe] = useState<Me>(OPEN)
-  const me = useMemo(() => atScope(rawMe, scope), [rawMe, scope])
-  const [globals, setGlobals] = useState<readonly StoryMeta[]>([])
-  const [loading, setLoading] = useState(true)
-  const [notice, setNotice] = useState<string | null>(null)
-  const [palette, setPalette] = useState(false)
-  const [keys, setKeys] = useState(false)
+  const [rawMe, setMe] = useState<Me>(OPEN);
+  const me = useMemo(() => atScope(rawMe, scope), [rawMe, scope]);
+  const [globals, setGlobals] = useState<readonly StoryMeta[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [palette, setPalette] = useState(false);
+  const [keys, setKeys] = useState(false);
   /**
    * The history slide-over, opened by `⌘H`.
    *
@@ -157,7 +157,7 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    * `historyOpen` and not `history`, because `history` is a DOM global and shadowing
    * it inside the component that owns the router is asking for the wrong one.
    */
-  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false);
   /**
    * The open form's own label, for the breadcrumb and the tab title on the
    * builder and (once phase 7 lands) the responses screen — `route.ts`'s
@@ -168,10 +168,10 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    * screen currently open is simpler than clearing this on every route change,
    * and it is what `formLabel` below relies on.
    */
-  const [formTitle, setFormTitle] = useState<{ id: string; label: string } | null>(null)
+  const [formTitle, setFormTitle] = useState<{ id: string; label: string } | null>(null);
 
   useEffect(() => {
-    let live = true
+    let live = true;
     Promise.all([
       // The manifest is asked **at the scope's own base** once a scope is chosen, so on
       // a deployment with `brands` it is that scope's brand's, and every type list below
@@ -182,8 +182,8 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
       fetch(`${boot.apiBase}/schema`).then(async (r) => {
         // A scope taken away between the shell page and this fetch answers an error
         // envelope, which is not a manifest (`indexManifest` would throw on it).
-        if (!r.ok) throw new Error(await messageOf(r))
-        return (await r.json()) as Manifest
+        if (!r.ok) throw new Error(await messageOf(r));
+        return (await r.json()) as Manifest;
       }),
       // `/me` is unscoped and answers the same under any scope, so it is asked at the
       // bare base.
@@ -213,27 +213,27 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
       // cheaper than waiting on `/me` to know whether to ask — that would serialise
       // the boot of every single-site admin to spare one page a refused request.
       fetch(`${boot.apiBase}/documents?kind=singleton`, {
-        headers: { accept: 'application/json' },
+        headers: { accept: "application/json" },
       })
         .then((r) => (r.ok ? (r.json() as Promise<{ rows: StoryMeta[] }>) : { rows: [] }))
         .then((body) => body.rows),
     ])
       .then(([m, who, singletons]) => {
-        if (!live) return
-        setManifest(m)
-        setMe(who)
-        setGlobals(singletons)
-        setLoading(false)
+        if (!live) return;
+        setManifest(m);
+        setMe(who);
+        setGlobals(singletons);
+        setLoading(false);
       })
       .catch((e: Error) => {
-        if (!live) return
-        setNotice(e.message)
-        setLoading(false)
-      })
+        if (!live) return;
+        setNotice(e.message);
+        setLoading(false);
+      });
     return () => {
-      live = false
-    }
-  }, [boot.apiBase, bare.apiBase, bare.base])
+      live = false;
+    };
+  }, [boot.apiBase, bare.apiBase, bare.base]);
 
   /**
    * A 401 is a navigation, not a toast (`admin/api.ts`). Registered here rather than
@@ -244,20 +244,20 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    */
   useEffect(() => {
     onUnauthorized(
-      me.mode === 'session'
+      me.mode === "session"
         ? () => {
-            const here = window.location.pathname + window.location.search
-            window.location.assign(signInUrl(me.loginUrl, here))
+            const here = window.location.pathname + window.location.search;
+            window.location.assign(signInUrl(me.loginUrl, here));
           }
         : null,
-    )
-    return () => onUnauthorized(null)
-  }, [me])
+    );
+    return () => onUnauthorized(null);
+  }, [me]);
 
-  const types = manifest?.types ?? []
-  const schema = useMemo(() => (manifest ? indexManifest(manifest) : {}), [manifest])
-  const pageTypes = useMemo(() => types.filter((t) => t.kind === 'page'), [types])
-  const screen = route.screen
+  const types = manifest?.types ?? [];
+  const schema = useMemo(() => (manifest ? indexManifest(manifest) : {}), [manifest]);
+  const pageTypes = useMemo(() => types.filter((t) => t.kind === "page"), [types]);
+  const screen = route.screen;
 
   /**
    * The open document, resolved by id rather than looked up in a tree the shell no
@@ -265,9 +265,9 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    * request — which matters because that list is also what brought the singleton
    * into existence. Everything else, records included, is one `?ids=` fetch.
    */
-  const local = screen.name === 'edit' ? globals.find((n) => n.id === screen.id) : undefined
-  const fetched = useStory(boot.apiBase, screen.name === 'edit' && !local ? screen.id : undefined)
-  const open = local ?? fetched.story
+  const local = screen.name === "edit" ? globals.find((n) => n.id === screen.id) : undefined;
+  const fetched = useStory(boot.apiBase, screen.name === "edit" && !local ? screen.id : undefined);
+  const open = local ?? fetched.story;
 
   /**
    * The open row again, after a write moved it — `useEditor`'s `onStoryChanged`.
@@ -282,16 +282,16 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    * stayed enabled beside a status line reading "Up to date".
    */
   const reloadGlobals = useCallback(() => {
-    fetch(`${boot.apiBase}/documents?kind=singleton`, { headers: { accept: 'application/json' } })
+    fetch(`${boot.apiBase}/documents?kind=singleton`, { headers: { accept: "application/json" } })
       .then((r) => (r.ok ? (r.json() as Promise<{ rows: StoryMeta[] }>) : { rows: [] }))
       .then((body) => setGlobals(body.rows))
       .catch(() => {
         // A failed refresh leaves the row it already has. The publish itself
         // succeeded; re-reporting a stale badge as an error would be a lie about
         // which write failed.
-      })
-  }, [boot.apiBase])
-  const onStoryChanged = local ? reloadGlobals : fetched.reload
+      });
+  }, [boot.apiBase]);
+  const onStoryChanged = local ? reloadGlobals : fetched.reload;
 
   /* ------------------------------------------------- the space channel --- */
 
@@ -321,17 +321,17 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    * shell — the same reason `useSpace` keeps its `onEvent` in one. Null on every
    * screen that has no list, where a reload is correctly nothing at all.
    */
-  const listReload = useRef<(() => void) | null>(null)
+  const listReload = useRef<(() => void) | null>(null);
   const registerReload = useCallback((reload: (() => void) | null) => {
-    listReload.current = reload
-  }, [])
+    listReload.current = reload;
+  }, []);
 
   /**
    * The advisory identity, made **once**. `useSpace` holds it in a ref precisely
    * because a new object per render would rebuild the socket, so this must not be
    * an expression in the component body.
    */
-  const [identity] = useState(spaceIdentity)
+  const [identity] = useState(spaceIdentity);
 
   /**
    * The peer list, for naming the actor an event came from.
@@ -341,13 +341,13 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    * during render, which is what `useSpace` does with its handler and
    * `useContent` with its levels.
    */
-  const peers = useRef<readonly SpacePresence[]>([])
+  const peers = useRef<readonly SpacePresence[]>([]);
 
   const onSpaceEvent = useCallback(
     (event: SpaceEvent) => {
       applySpaceEffect(
         spaceEventEffect(event, {
-          openStoryId: screen.name === 'edit' ? screen.id : '',
+          openStoryId: screen.name === "edit" ? screen.id : "",
           // Null under `auth: 'open'`, where there is no verified actor to
           // compare against — and where the events carry a null actor anyway,
           // since a write with no identity behind it has none to report.
@@ -358,7 +358,7 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
           // null actor, so the own-echo guard in `spaceEventEffect` cannot fire
           // and this labels your *own* publish — "somebody else published this
           // page" would be a claim the null-actor case cannot support.
-          nameOf: (actor) => peers.current.find((p) => p.actor === actor)?.name ?? 'Someone',
+          nameOf: (actor) => peers.current.find((p) => p.actor === actor)?.name ?? "Someone",
         }),
         {
           /**
@@ -381,18 +381,18 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
            * screen is already showing.
            */
           reload: () => {
-            listReload.current?.()
-            if (screen.name === 'edit') onStoryChanged()
+            listReload.current?.();
+            if (screen.name === "edit") onStoryChanged();
           },
           globals: reloadGlobals,
           notice: setNotice,
         },
-      )
+      );
     },
     [screen, me, reloadGlobals, onStoryChanged],
-  )
+  );
 
-  const where = spaceWhere(screen, open)
+  const where = spaceWhere(screen, open);
   const space = useSpace({
     apiBase: boot.apiBase,
     // `/api/me`'s flag, which is the host having declared the binding. False and
@@ -418,8 +418,8 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
     // avatar row is not where it would be shown.
     selection: null,
     onEvent: onSpaceEvent,
-  })
-  peers.current = space.peers
+  });
+  peers.current = space.peers;
 
   /**
    * The channel's own notices — a protocol mismatch, a session that ended, an
@@ -433,13 +433,13 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    * stale tab is told rather than quietly losing presence.
    */
   useEffect(() => {
-    if (space.notice) setNotice(space.notice)
-  }, [space.notice])
+    if (space.notice) setNotice(space.notice);
+  }, [space.notice]);
 
   const groups = useMemo(
     () => nav({ types, globals: manifest?.globals ?? [], me, scope }),
     [types, manifest?.globals, me, scope],
-  )
+  );
 
   /**
    * The scope switcher, which exists only where `/me` carried `sites`
@@ -457,7 +457,7 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
           }
         : undefined,
     [me, scope, bare.base, route.screen],
-  )
+  );
 
   /**
    * `{base}` on a deployment with `sites` is nobody's scope, so it goes to the
@@ -465,14 +465,14 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    * scope"). Client-side, because the shell is one static page at every path and
    * only `/me` knows who is asking.
    */
-  const bareRoot = !loading && isMultiSite(me) && scope === null && route.screen.name === 'home'
-  const first = bareRoot ? firstScope(me) : null
+  const bareRoot = !loading && isMultiSite(me) && scope === null && route.screen.name === "home";
+  const first = bareRoot ? firstScope(me) : null;
   useEffect(() => {
-    if (first !== null) window.location.replace(scopedMount(bare.base, first))
-  }, [first, bare.base])
+    if (first !== null) window.location.replace(scopedMount(bare.base, first));
+  }, [first, bare.base]);
 
-  const label = (name: string) => types.find((t) => t.name === name)?.label
-  const siteName = isMultiSite(me) && scope !== null ? scopeName(me, scope) : undefined
+  const label = (name: string) => types.find((t) => t.name === name)?.label;
+  const siteName = isMultiSite(me) && scope !== null ? scopeName(me, scope) : undefined;
   const crumbContext = useMemo(
     (): CrumbContext => ({
       ...(siteName !== undefined ? { site: siteName } : {}),
@@ -495,15 +495,19 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
         : {}),
     }),
     [siteName, types, open, local, fetched.chain, formTitle],
-  )
-  const trail = crumbs(route, crumbContext)
+  );
+  const trail = crumbs(route, crumbContext);
 
-  const editing = route.screen.name === 'edit'
-  const sidebar = useRemembered(`folio.sidebar.${editing ? 'editor' : 'platform'}`, editing)
-  const blockRail = useRemembered('folio.editor.rail', false)
-  const inspector = useRemembered('folio.editor.inspector', false)
-  const contentView = useRememberedString<ViewMode>('folio.content.view', 'tree', isViewMode)
-  const contentSort = useRememberedString<FlatSort>('folio.content.sort', DEFAULT_FLAT_SORT, isSort)
+  const editing = route.screen.name === "edit";
+  const sidebar = useRemembered(`folio.sidebar.${editing ? "editor" : "platform"}`, editing);
+  const blockRail = useRemembered("folio.editor.rail", false);
+  const inspector = useRemembered("folio.editor.inspector", false);
+  const contentView = useRememberedString<ViewMode>("folio.content.view", "tree", isViewMode);
+  const contentSort = useRememberedString<FlatSort>(
+    "folio.content.sort",
+    DEFAULT_FLAT_SORT,
+    isSort,
+  );
   /**
    * The Assets screen's grid/table choice, on **the key the picker reads for
    * itself** (`ASSET_VIEW_KEY`) rather than one spelled out here.
@@ -513,11 +517,11 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    * remembering two different views is the bug that key exists to prevent, and
    * importing the constant is what stops the two drifting apart in a rename.
    */
-  const assetView = useRememberedString<AssetView>(ASSET_VIEW_KEY, 'grid', isAssetView)
+  const assetView = useRememberedString<AssetView>(ASSET_VIEW_KEY, "grid", isAssetView);
 
   useEffect(() => {
-    document.title = documentTitle(route, crumbContext)
-  }, [route, crumbContext])
+    document.title = documentTitle(route, crumbContext);
+  }, [route, crumbContext]);
 
   /**
    * `g` then a letter, from `ui-architecture.md`'s keyboard map.
@@ -534,59 +538,59 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    * chord is absent rather than pointing at `/documents/undefined`.
    */
   const goTo = useMemo((): Bindings => {
-    const reachable = new Set(groups.flatMap((group) => group.items.map((i) => i.screen.name)))
-    const firstRecord = types.find((t) => t.kind === 'record')
+    const reachable = new Set(groups.flatMap((group) => group.items.map((i) => i.screen.name)));
+    const firstRecord = types.find((t) => t.kind === "record");
     const table: [string, Screen][] = [
-      ['h', { name: 'home' }],
-      ['c', { name: 'content' }],
-      ['a', { name: 'assets' }],
-      ['m', { name: 'model' }],
-      ['r', { name: 'redirects' }],
-      ['x', { name: 'access' }],
-      ['s', { name: 'settings' }],
+      ["h", { name: "home" }],
+      ["c", { name: "content" }],
+      ["a", { name: "assets" }],
+      ["m", { name: "model" }],
+      ["r", { name: "redirects" }],
+      ["x", { name: "access" }],
+      ["s", { name: "settings" }],
       ...(firstRecord
-        ? ([['d', { name: 'documents', type: firstRecord.name }]] as [string, Screen][])
+        ? ([["d", { name: "documents", type: firstRecord.name }]] as [string, Screen][])
         : []),
-    ]
+    ];
     return Object.fromEntries(
       table
-        .filter(([, screen]) => screen.name === 'home' || reachable.has(screen.name))
+        .filter(([, screen]) => screen.name === "home" || reachable.has(screen.name))
         .map(([letter, screen]) => [`g ${letter}`, () => go(screen)]),
-    )
-  }, [groups, types, go])
+    );
+  }, [groups, types, go]);
 
   useShortcuts({
     ...goTo,
-    'mod+k': () => setPalette(true),
+    "mod+k": () => setPalette(true),
     // `?` and not `shift+/`: `chord()` names shift only when it is not already
     // encoded in the character, and a question mark arrives as `?`.
-    '?': () => setKeys(true),
+    "?": () => setKeys(true),
     // One chord, one meaning: hide the left column. In the editor that is the
     // block rail — the sidebar is already a 48px strip there by default — and on a
     // platform screen it is the sidebar itself. `ui-architecture.md` calls both
     // "the rail", which is an ambiguity worth resolving by context rather than by
     // inventing a second chord.
-    'mod+\\': () => (editing ? blockRail.toggle() : sidebar.toggle()),
-    'mod+.': () => inspector.toggle(),
+    "mod+\\": () => (editing ? blockRail.toggle() : sidebar.toggle()),
+    "mod+.": () => inspector.toggle(),
     // Only where there is a document to have a history. Bound unconditionally and
     // guarded here rather than added to the map conditionally, so the binding map is
     // one literal and `?`'s row for it is always true.
-    'mod+h': () => {
-      if (editing) setHistoryOpen((open) => !open)
+    "mod+h": () => {
+      if (editing) setHistoryOpen((open) => !open);
     },
     // The owner's call: ⌘S saves nothing because nothing needs saving, and says
     // so rather than being swallowed silently.
-    'mod+s': () => setNotice(SAVE_NOTICE),
-  })
+    "mod+s": () => setNotice(SAVE_NOTICE),
+  });
 
   useEffect(() => {
-    if (!notice) return
-    const t = setTimeout(() => setNotice(null), 4000)
-    return () => clearTimeout(t)
-  }, [notice])
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
-  const search = useSearch(boot.apiBase, palette)
-  const actions = usePaletteActions({ groups, found: search.rows, mount: boot.base, go, label })
+  const search = useSearch(boot.apiBase, palette);
+  const actions = usePaletteActions({ groups, found: search.rows, mount: boot.base, go, label });
 
   /**
    * The user menu. Two items again, as it was before this admin had only one
@@ -618,36 +622,37 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
    */
   const user: MenuItem[] = [
     {
-      id: 'account',
-      label: 'Your account',
-      run: () => go({ name: 'account' }),
+      id: "account",
+      label: "Your account",
+      run: () => go({ name: "account" }),
     },
     {
-      id: 'signout',
-      label: 'Sign out',
+      id: "signout",
+      label: "Sign out",
       danger: true,
       run: () => {
         void (async () => {
-          let next = me.loginUrl
+          let next = me.loginUrl;
           try {
-            const res = await send(`${boot.apiBase}/logout`, 'POST')
-            const body = (await res.json()) as { next?: unknown }
-            if (typeof body.next === 'string' && body.next !== '') next = body.next
+            const res = await send(`${boot.apiBase}/logout`, "POST");
+            const body = (await res.json()) as { next?: unknown };
+            if (typeof body.next === "string" && body.next !== "") next = body.next;
           } catch {
             // Navigate anyway: the cookie may already be gone, and staying in a
             // dead admin is the one outcome with nothing to recommend it.
           }
-          window.location.assign(next)
-        })()
+          window.location.assign(next);
+        })();
       },
     },
-  ]
+  ];
 
-  const previewType = open && !open.previewUrl ? types.find((t) => t.name === open.type) : undefined
+  const previewType =
+    open && !open.previewUrl ? types.find((t) => t.name === open.type) : undefined;
   const previewHost = usePreviewHost(
     boot.apiBase,
-    previewType?.kind === 'singleton' ? previewType.previewPath : undefined,
-  )
+    previewType?.kind === "singleton" ? previewType.previewPath : undefined,
+  );
 
   return (
     <>
@@ -707,71 +712,71 @@ export function Admin({ boot: bare }: { boot: AdminBoot }) {
       {keys ? <Keys onClose={() => setKeys(false)} /> : null}
       <Toast message={notice} />
     </>
-  )
+  );
 }
 
-type AssetView = 'grid' | 'table'
-const isAssetView = (raw: string): raw is AssetView => raw === 'grid' || raw === 'table'
-const isViewMode = (raw: string): raw is ViewMode => raw === 'tree' || raw === 'flat'
+type AssetView = "grid" | "table";
+const isAssetView = (raw: string): raw is AssetView => raw === "grid" || raw === "table";
+const isViewMode = (raw: string): raw is ViewMode => raw === "tree" || raw === "flat";
 const isSort = (raw: string): raw is FlatSort =>
-  raw === 'edited' || raw === 'title' || raw === 'path'
+  raw === "edited" || raw === "title" || raw === "path";
 
 /* ------------------------------------------------------------------ routing --- */
 
 interface ScreenArgs {
-  route: ReturnType<typeof useRouter>['route']
-  boot: AdminBoot
+  route: ReturnType<typeof useRouter>["route"];
+  boot: AdminBoot;
   /** The scope in the URL, or null; `boot` is already scoped to it. */
-  scope: string | null
+  scope: string | null;
   /** The mount with no scope, for links into another scope. */
-  bareBase: string
-  loading: boolean
+  bareBase: string;
+  loading: boolean;
   /** The open document's own fetch is in flight (`useStory`). Distinct from
    * `loading`, which is the shell's boot: only the editor cares about the
    * difference, and it cares because "no such document" must not flash. */
-  openLoading: boolean
+  openLoading: boolean;
   /** `FolioConfig.globals` — a subset of the declared singleton types, so Home can
    * draw a card per global without a second request. Off the manifest, which the
    * shell already holds. */
-  globals: readonly string[]
+  globals: readonly string[];
   /** The whole manifest, for the one screen that mirrors it. Passed rather than
    * re-fetched: the shell already holds it, and a second fetch of the same thing is
    * how two views of one declaration start disagreeing. Null while the boot is in
    * flight, which is the screen's cue to draw skeletons. */
-  manifest: Manifest | null
+  manifest: Manifest | null;
   /** Who is signed in, and the auth mode. Screens that gate on a role read it;
    * `admin/me.ts`'s `OPEN` is the optimistic default until `/me` answers, which is
    * why `loading` travels beside it. */
-  me: Me
-  types: Manifest['types']
+  me: Me;
+  types: Manifest["types"];
   /** The block schema, indexed by name. Documents needs it to read a type's
    * `indexed` fields and their labels; nothing else does yet. */
-  schema: SchemaIndex
-  pageTypes: readonly DocumentType[]
-  open: StoryMeta | undefined
+  schema: SchemaIndex;
+  pageTypes: readonly DocumentType[];
+  open: StoryMeta | undefined;
   /** Re-read `open` because a write moved it — see `reloadGlobals` for why the
    * shell owns this rather than `useStory`. */
-  onStoryChanged: () => void
-  label: (name: string) => string | undefined
-  go: ReturnType<typeof useRouter>['go']
-  replace: ReturnType<typeof useRouter>['replace']
-  blockRail: ReturnType<typeof useRemembered>
-  inspector: ReturnType<typeof useRemembered>
-  notify: (message: string) => void
-  contentView: ReturnType<typeof useRememberedString<ViewMode>>
-  contentSort: ReturnType<typeof useRememberedString<FlatSort>>
-  assetView: ReturnType<typeof useRememberedString<AssetView>>
+  onStoryChanged: () => void;
+  label: (name: string) => string | undefined;
+  go: ReturnType<typeof useRouter>["go"];
+  replace: ReturnType<typeof useRouter>["replace"];
+  blockRail: ReturnType<typeof useRemembered>;
+  inspector: ReturnType<typeof useRemembered>;
+  notify: (message: string) => void;
+  contentView: ReturnType<typeof useRememberedString<ViewMode>>;
+  contentSort: ReturnType<typeof useRememberedString<FlatSort>>;
+  assetView: ReturnType<typeof useRememberedString<AssetView>>;
   /** The history slide-over's open state and its setter. Not `useRemembered`: a
    * reference surface you consult and dismiss should not be open because it was open
    * last week. */
-  historyOpen: boolean
-  setHistoryOpen: (open: boolean) => void
+  historyOpen: boolean;
+  setHistoryOpen: (open: boolean) => void;
   /** The open document's iframe src. See `EditorShell`'s `preview`. */
-  preview: string | undefined
+  preview: string | undefined;
   /** Reports the open form's own label, for `crumbContext.formLabel` — the
    * builder's job is to call this once its fetch answers, not to hold the
    * breadcrumb itself. */
-  onFormLabel: (id: string, label: string) => void
+  onFormLabel: (id: string, label: string) => void;
   /**
    * How a list screen hands its own `reload` to the shell, so the space channel
    * can re-read the list when somebody else moves, publishes or deletes a page.
@@ -779,7 +784,7 @@ interface ScreenArgs {
    * A screen with no list never calls it, and a reload on such a screen is
    * correctly nothing. See `listReload` above for the two shapes this beat.
    */
-  registerReload: (reload: (() => void) | null) => void
+  registerReload: (reload: (() => void) | null) => void;
 }
 
 /**
@@ -789,30 +794,30 @@ interface ScreenArgs {
  * data it does not use.
  */
 function screenFor(a: ScreenArgs) {
-  const { route, boot } = a
+  const { route, boot } = a;
   // Multi-site: a page with no scope has one screen, and a scope the caller does not
   // reach has none. Both are said rather than left to a wall of 403s.
   if (!a.loading && isMultiSite(a.me)) {
     // `account` is about the person, not a scope's content: its routes are unscoped.
-    if (a.scope === null && route.screen.name !== 'sites' && route.screen.name !== 'account') {
+    if (a.scope === null && route.screen.name !== "sites" && route.screen.name !== "account") {
       return (
         <Stub>
           {firstScope(a.me) === null
-            ? 'You have no role on any site here. Ask an administrator for access.'
-            : 'Choose a site.'}
+            ? "You have no role on any site here. Ask an administrator for access."
+            : "Choose a site."}
         </Stub>
-      )
+      );
     }
     if (a.scope !== null && !scopeChoices(a.me).some((choice) => choice.id === a.scope)) {
       return (
         <Stub>
           You have no role on <code>{a.scope}</code>.
         </Stub>
-      )
+      );
     }
   }
   switch (route.screen.name) {
-    case 'home':
+    case "home":
       return (
         <Home
           apiBase={boot.apiBase}
@@ -823,16 +828,16 @@ function screenFor(a: ScreenArgs) {
           onOpen={a.go}
           onNotice={a.notify}
         />
-      )
+      );
 
-    case 'content':
+    case "content":
       return (
         <Content
           mount={boot.base}
           apiBase={boot.apiBase}
           me={a.me}
           query={route.query}
-          onQuery={(next) => a.replace({ name: 'content' }, { ...route.query, ...next })}
+          onQuery={(next) => a.replace({ name: "content" }, { ...route.query, ...next })}
           onOpen={a.go}
           onNotice={a.notify}
           {...(a.open ? { selected: a.open.id } : {})}
@@ -847,13 +852,13 @@ function screenFor(a: ScreenArgs) {
           registerReload={a.registerReload}
           remembered={{ view: a.contentView.value, sort: a.contentSort.value }}
           onRemember={(next) => {
-            a.contentView.set(next.view)
-            a.contentSort.set(next.sort)
+            a.contentView.set(next.view);
+            a.contentSort.set(next.sort);
           }}
         />
-      )
+      );
 
-    case 'edit':
+    case "edit":
       return (
         <EditorShell
           story={a.open}
@@ -874,7 +879,7 @@ function screenFor(a: ScreenArgs) {
           // down. Without this the badge and — because `publishStatus` reads
           // `story.state` as `isLive` — the Publish button both go stale.
           onStoryChanged={a.onStoryChanged}
-          onOpenDocument={(id) => a.go({ name: 'edit', id })}
+          onOpenDocument={(id) => a.go({ name: "edit", id })}
           railCollapsed={a.blockRail.value}
           onToggleRail={a.blockRail.toggle}
           inspectorCollapsed={a.inspector.value}
@@ -920,7 +925,7 @@ function screenFor(a: ScreenArgs) {
             slot.adding ? (
               <BlockPicker
                 schema={slot.schema}
-                parentType={slot.doc?.bloks[slot.adding.parent]?.type ?? ''}
+                parentType={slot.doc?.bloks[slot.adding.parent]?.type ?? ""}
                 slot={slot.adding.slot}
                 filled={slot.adding.filled}
                 onClose={slot.onCloseAdd}
@@ -929,11 +934,11 @@ function screenFor(a: ScreenArgs) {
             ) : null
           }
         />
-      )
+      );
 
-    case 'documents': {
-      const wanted = route.screen.type
-      const type = a.types.find((t) => t.name === wanted)
+    case "documents": {
+      const wanted = route.screen.type;
+      const type = a.types.find((t) => t.name === wanted);
       // A type the manifest does not declare. Not a `missing` route — the path is
       // perfectly well formed and the shell knows what it *was* — so it says which
       // type, which is the only useful thing it can say. An orphaned document of
@@ -945,7 +950,7 @@ function screenFor(a: ScreenArgs) {
             No document type named <code>{wanted}</code> is declared. It was renamed or removed in
             code; documents still carrying it are listed by <code>GET {boot.apiBase}/audit</code>.
           </Stub>
-        )
+        );
       }
       return (
         <Documents
@@ -955,40 +960,40 @@ function screenFor(a: ScreenArgs) {
           me={a.me}
           query={route.query}
           onQuery={(next) =>
-            a.replace({ name: 'documents', type: type.name }, { ...route.query, ...next })
+            a.replace({ name: "documents", type: type.name }, { ...route.query, ...next })
           }
           onOpen={a.go}
           onNotice={a.notify}
           registerReload={a.registerReload}
           {...(a.open ? { selected: a.open.id } : {})}
         />
-      )
+      );
     }
 
-    case 'assets':
+    case "assets":
       return (
         <Assets
           apiBase={boot.apiBase}
           mount={boot.base}
           me={a.me}
           query={route.query}
-          onQuery={(next) => a.replace({ name: 'assets' }, { ...route.query, ...next })}
+          onQuery={(next) => a.replace({ name: "assets" }, { ...route.query, ...next })}
           onNotice={a.notify}
           remembered={{ view: a.assetView.value }}
           onRemember={(next) => a.assetView.set(next.view)}
         />
-      )
+      );
 
-    case 'forms':
-      return <Forms apiBase={boot.apiBase} me={a.me} onOpen={a.go} onNotice={a.notify} />
+    case "forms":
+      return <Forms apiBase={boot.apiBase} me={a.me} onOpen={a.go} onNotice={a.notify} />;
 
-    case 'form': {
+    case "form": {
       // Extracted before any closure touches it: narrowing a discriminated
       // union through a property access (`route.screen.id`) does not survive
       // into a nested function body the way it does in straight-line code —
       // `case 'documents'` above hits the same rule and takes the same way
       // out (`const wanted = route.screen.type`).
-      const formId = route.screen.id
+      const formId = route.screen.id;
       return (
         // Keyed by id so navigating from one form's builder straight to
         // another's (the palette, or an edited URL) remounts rather than
@@ -1003,17 +1008,17 @@ function screenFor(a: ScreenArgs) {
           {...(a.manifest?.locales ? { locales: a.manifest.locales } : {})}
           onNotice={a.notify}
           onLabel={(label) => a.onFormLabel(formId, label)}
-          onOpenResponses={(id) => a.go({ name: 'responses', id })}
-          onDeleted={() => a.go({ name: 'forms' })}
+          onOpenResponses={(id) => a.go({ name: "responses", id })}
+          onDeleted={() => a.go({ name: "forms" })}
         />
-      )
+      );
     }
 
-    case 'responses': {
+    case "responses": {
       // Extracted before any closure touches it, for `case 'form'`'s reason:
       // narrowing a discriminated union through a property access does not
       // survive into a nested function body.
-      const formId = route.screen.id
+      const formId = route.screen.id;
       return (
         // Keyed by id, like the builder: navigating from one form's responses
         // straight to another's must not carry over a selection or an open
@@ -1025,16 +1030,16 @@ function screenFor(a: ScreenArgs) {
           me={a.me}
           query={route.query}
           onQuery={(next) =>
-            a.replace({ name: 'responses', id: formId }, { ...route.query, ...next })
+            a.replace({ name: "responses", id: formId }, { ...route.query, ...next })
           }
           onNotice={a.notify}
           onLabel={(formLabel) => a.onFormLabel(formId, formLabel)}
-          onOpenBuilder={() => a.go({ name: 'form', id: formId })}
+          onOpenBuilder={() => a.go({ name: "form", id: formId })}
         />
-      )
+      );
     }
 
-    case 'access':
+    case "access":
       return (
         <Access
           apiBase={boot.apiBase}
@@ -1046,52 +1051,52 @@ function screenFor(a: ScreenArgs) {
           // screen draws skeletons instead.
           loading={a.loading}
           query={route.query}
-          onQuery={(next) => a.replace({ name: 'access' }, { ...route.query, ...next })}
+          onQuery={(next) => a.replace({ name: "access" }, { ...route.query, ...next })}
           onNotice={a.notify}
         />
-      )
+      );
 
-    case 'model':
-      return <Model apiBase={boot.apiBase} mount={boot.base} me={a.me} onNotice={a.notify} />
+    case "model":
+      return <Model apiBase={boot.apiBase} mount={boot.base} me={a.me} onNotice={a.notify} />;
 
-    case 'redirects':
+    case "redirects":
       return (
         <Redirects
           apiBase={boot.apiBase}
           me={a.me}
           query={route.query}
-          onQuery={(next) => a.replace({ name: 'redirects' }, { ...route.query, ...next })}
+          onQuery={(next) => a.replace({ name: "redirects" }, { ...route.query, ...next })}
           onNotice={a.notify}
         />
-      )
+      );
 
-    case 'schedules':
+    case "schedules":
       return (
         <Schedules
           apiBase={boot.apiBase}
           me={a.me}
           query={route.query}
-          onQuery={(next) => a.replace({ name: 'schedules' }, { ...route.query, ...next })}
+          onQuery={(next) => a.replace({ name: "schedules" }, { ...route.query, ...next })}
           onNotice={a.notify}
-          onOpen={(id) => a.go({ name: 'edit', id })}
+          onOpen={(id) => a.go({ name: "edit", id })}
         />
-      )
+      );
 
-    case 'settings':
+    case "settings":
       return (
         <Settings
           manifest={a.manifest}
           me={a.me}
           mount={boot.base}
           query={route.query}
-          onQuery={(next) => a.replace({ name: 'settings' }, { ...route.query, ...next })}
+          onQuery={(next) => a.replace({ name: "settings" }, { ...route.query, ...next })}
         />
-      )
+      );
 
-    case 'account':
-      return <Account apiBase={boot.apiBase} me={a.me} loading={a.loading} onNotice={a.notify} />
+    case "account":
+      return <Account apiBase={boot.apiBase} me={a.me} loading={a.loading} onNotice={a.notify} />;
 
-    case 'sites':
+    case "sites":
       return (
         <Sites
           apiBase={boot.apiBase}
@@ -1101,17 +1106,17 @@ function screenFor(a: ScreenArgs) {
           settings={a.me.sites?.settings ?? a.manifest?.settings ?? null}
           settingsBrand={a.manifest?.brand?.id ?? null}
           query={route.query}
-          onQuery={(next) => a.replace({ name: 'sites' }, { ...route.query, ...next })}
+          onQuery={(next) => a.replace({ name: "sites" }, { ...route.query, ...next })}
           onNotice={a.notify}
         />
-      )
+      );
 
-    case 'missing':
+    case "missing":
       return (
         <Stub>
           Nothing is routed at <code>{route.screen.path}</code>.
         </Stub>
-      )
+      );
   }
 }
 
@@ -1138,39 +1143,39 @@ function usePaletteActions({
   go,
   label,
 }: {
-  groups: ReturnType<typeof nav>
+  groups: ReturnType<typeof nav>;
   /** Documents matching what has been typed, from `useSearch`. */
-  found: readonly StoryMeta[]
-  mount: string
-  go: ReturnType<typeof useRouter>['go']
-  label: (name: string) => string | undefined
+  found: readonly StoryMeta[];
+  mount: string;
+  go: ReturnType<typeof useRouter>["go"];
+  label: (name: string) => string | undefined;
 }): PaletteAction[] {
   return useMemo(() => {
     const screens: PaletteAction[] = groups.flatMap((group) =>
       group.items.map((item) => ({
         id: `nav:${href(item.screen, mount)}`,
         label: item.label,
-        group: group.label ?? 'Go to',
+        group: group.label ?? "Go to",
         hint: href(item.screen, mount),
         run: () => go(item.screen),
       })),
-    )
+    );
     const documents: PaletteAction[] = found.map((node) => {
       // The path, because that is the thing that tells two pages with the same
       // title apart — and `design-system.md`'s third commitment says an identifier
       // is a typographic citizen rather than something to hide. It is also a
       // `keyword`, so typing a path finds the page whose title does not contain it.
-      const where = node.path === null ? label(node.type) : node.path === '' ? '/' : node.path
+      const where = node.path === null ? label(node.type) : node.path === "" ? "/" : node.path;
       return {
         id: `doc:${node.id}`,
         label: node.title || node.slug || node.id,
-        group: 'Documents',
+        group: "Documents",
         ...(where ? { hint: where, keywords: where } : {}),
-        run: () => go({ name: 'edit', id: node.id }),
-      }
-    })
-    return [...screens, ...documents]
-  }, [groups, found, mount, go, label])
+        run: () => go({ name: "edit", id: node.id }),
+      };
+    });
+    return [...screens, ...documents];
+  }, [groups, found, mount, go, label]);
 }
 
 /* ------------------------------------------------------------------ preview --- */
@@ -1205,11 +1210,11 @@ function previewFor(
    */
   multi = false,
 ): string | undefined {
-  if (!story) return undefined
-  if (story.previewUrl) return story.previewUrl
-  if (type?.kind !== 'singleton') return undefined
-  if (multi && !host?.previewUrl) return undefined
-  return globalPreviewUrl(type, host ? [host] : [], base)
+  if (!story) return undefined;
+  if (story.previewUrl) return story.previewUrl;
+  if (type?.kind !== "singleton") return undefined;
+  if (multi && !host?.previewUrl) return undefined;
+  return globalPreviewUrl(type, host ? [host] : [], base);
 }
 
 /* -------------------------------------------------------------- breadcrumbs --- */
@@ -1227,9 +1232,9 @@ function previewFor(
  *   inventing a screen.
  */
 function rootCrumbFor(type: DocumentType | undefined): Crumb | null {
-  if (type?.kind === 'singleton') return null
-  if (type?.kind === 'record') {
-    return { text: type.label, screen: { name: 'documents', type: type.name } }
+  if (type?.kind === "singleton") return null;
+  if (type?.kind === "record") {
+    return { text: type.label, screen: { name: "documents", type: type.name } };
   }
-  return { text: 'Content', screen: { name: 'content' } }
+  return { text: "Content", screen: { name: "content" } };
 }

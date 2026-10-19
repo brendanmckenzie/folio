@@ -1,22 +1,22 @@
-import { useEffect, useState } from 'react'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import css from './Forms.module.css'
-import { messageOf } from './useContent'
+import { useEffect, useState } from "react";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import css from "./Forms.module.css";
+import { messageOf } from "./useContent";
 
 /** What `GET {base}/api/forms/:id/usage` answers — a superset of the asset and
  *  document usage shapes (`server/forms.ts`'s `formUsage` says why). */
 interface FormUsage {
-  published: { id: string; title: string; path: string | null }[]
-  total: number
-  responses: number
-  files: number
+  published: { id: string; title: string; path: string | null }[];
+  total: number;
+  responses: number;
+  files: number;
 }
 
 /** Enough to recognise the problem, few enough that the dialog does not scroll
  *  into a list — the same rule `AssetDeleteDialog.tsx` and `DeleteDialog.tsx`
  *  follow. */
-const USAGE_SHOWN = 5
+const USAGE_SHOWN = 5;
 
 /**
  * The confirmation before deleting a form — decision 17's "warn on both counts
@@ -42,36 +42,36 @@ export function FormDeleteDialog({
   onClose,
   onConfirm,
 }: {
-  apiBase: string
-  id: string
-  label: string
-  onClose: () => void
-  onConfirm: () => void
+  apiBase: string;
+  id: string;
+  label: string;
+  onClose: () => void;
+  onConfirm: () => void;
 }) {
-  const [usage, setUsage] = useState<FormUsage | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [usage, setUsage] = useState<FormUsage | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let live = true
+    let live = true;
     fetch(`${apiBase}/forms/${encodeURIComponent(id)}/usage`)
       .then(async (res) => {
-        if (!res.ok) throw new Error(await messageOf(res))
-        return (await res.json()) as FormUsage
+        if (!res.ok) throw new Error(await messageOf(res));
+        return (await res.json()) as FormUsage;
       })
       .then((body) => {
-        if (live) setUsage(body)
+        if (live) setUsage(body);
       })
       .catch((e: Error) => {
-        if (live) setError(e.message)
-      })
+        if (live) setError(e.message);
+      });
     return () => {
-      live = false
-    }
-  }, [apiBase, id])
+      live = false;
+    };
+  }, [apiBase, id]);
 
   return (
     <Dialog
-      title={`Delete "${label || 'Untitled form'}"?`}
+      title={`Delete "${label || "Untitled form"}"?`}
       description="This cannot be undone."
       danger
       onClose={onClose}
@@ -92,8 +92,8 @@ export function FormDeleteDialog({
       ) : (
         <>
           <p className={css.dialogNote}>
-            <b>{usage.responses}</b> {usage.responses === 1 ? 'response' : 'responses'} and{' '}
-            <b>{usage.files}</b> uploaded {usage.files === 1 ? 'file' : 'files'} will be destroyed
+            <b>{usage.responses}</b> {usage.responses === 1 ? "response" : "responses"} and{" "}
+            <b>{usage.files}</b> uploaded {usage.files === 1 ? "file" : "files"} will be destroyed
             with it.
           </p>
           {usage.total === 0 ? (
@@ -101,15 +101,15 @@ export function FormDeleteDialog({
           ) : (
             <>
               <p className={css.dialogNote}>
-                Rendered on <b>{usage.total}</b> published {usage.total === 1 ? 'page' : 'pages'},
+                Rendered on <b>{usage.total}</b> published {usage.total === 1 ? "page" : "pages"},
                 which will show nothing where it was:
               </p>
               <ul className={css.usage}>
                 {usage.published.slice(0, USAGE_SHOWN).map((ref) => (
                   <li key={ref.id}>
-                    <span className={css.usageTitle}>{ref.title || 'Untitled'}</span>
+                    <span className={css.usageTitle}>{ref.title || "Untitled"}</span>
                     <code className={css.usagePath}>
-                      {ref.path === null ? 'not routed' : ref.path === '' ? '/' : `/${ref.path}`}
+                      {ref.path === null ? "not routed" : ref.path === "" ? "/" : `/${ref.path}`}
                     </code>
                   </li>
                 ))}
@@ -122,5 +122,5 @@ export function FormDeleteDialog({
         </>
       )}
     </Dialog>
-  )
+  );
 }

@@ -1,6 +1,6 @@
-import { button, hero } from './hero'
-import { page } from './page'
-import { prose } from './prose'
+import { button, hero } from "./hero";
+import { page } from "./page";
+import { prose } from "./prose";
 
 /**
  * The only thing this project hands to Folio.
@@ -22,4 +22,4 @@ export const blocks = [
   hero,
   prose,
   button,
-]
+];

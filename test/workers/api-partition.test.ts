@@ -1,11 +1,11 @@
-import { SELF } from 'cloudflare:test'
-import { describe, expect, it } from 'vitest'
-import { defineBlock, text } from '../../src/core'
-import type { FolioBindings, FolioConfig } from '../../src/server'
-import { magicLink } from '../../src/server'
-import { createApp } from '../../src/server/app'
-import { MCP_PROTOCOL_VERSION } from '../../src/server/mcp/rpc'
-import { createRuntime } from '../../src/server/runtime'
+import { SELF } from "cloudflare:test";
+import { describe, expect, it } from "vitest";
+import { defineBlock, text } from "../../src/core";
+import type { FolioBindings, FolioConfig } from "../../src/server";
+import { magicLink } from "../../src/server";
+import { createApp } from "../../src/server/app";
+import { MCP_PROTOCOL_VERSION } from "../../src/server/mcp/rpc";
+import { createRuntime } from "../../src/server/runtime";
 
 /**
  * The one rule that lets a contract and an unstable internal surface share the
@@ -26,36 +26,36 @@ import { createRuntime } from '../../src/server/runtime'
  * what `app.ts` looks like, so it keeps working if the mounting is refactored.
  */
 
-const ORIGIN = 'https://partition.test'
-const BASE = `${ORIGIN}/folio`
+const ORIGIN = "https://partition.test";
+const BASE = `${ORIGIN}/folio`;
 
 /** Answered by *something* — anything but a 404 means the path is routed. */
 const routed = async (path: string): Promise<boolean> => {
-  const res = await SELF.fetch(`${ORIGIN}${path}`)
-  return res.status !== 404
-}
+  const res = await SELF.fetch(`${ORIGIN}${path}`);
+  return res.status !== 404;
+};
 
-describe('the /api partition', () => {
+describe("the /api partition", () => {
   /**
    * Every internal route this spec moved. If one of these 404s, it was missed by
    * the prefix move; if its bare twin answers, the move was not a move.
    */
   const INTERNAL = [
-    '/folio/api/schema',
-    '/folio/api/me',
-    '/folio/api/stories',
-    '/folio/api/documents',
-    '/folio/api/search',
-    '/folio/api/assets',
-    '/folio/api/redirects',
+    "/folio/api/schema",
+    "/folio/api/me",
+    "/folio/api/stories",
+    "/folio/api/documents",
+    "/folio/api/search",
+    "/folio/api/assets",
+    "/folio/api/redirects",
     // `scheduled-publishing.md`. Internal, so it may change shape in any commit —
     // and deliberately *not* `{base}/api/v1/schedules`, which would be a promise to
     // somebody's script about a surface nothing outside the admin reads yet.
-    '/folio/api/schedules',
-    '/folio/api/content',
-    '/folio/api/migrations',
-    '/folio/api/audit',
-  ]
+    "/folio/api/schedules",
+    "/folio/api/content",
+    "/folio/api/migrations",
+    "/folio/api/audit",
+  ];
 
   /**
    * `users` and `tokens` are internal too, and are **not** in the list above: this
@@ -65,23 +65,23 @@ describe('the /api partition', () => {
    * either one is ever left behind on the bare mount.
    */
 
-  it('answers every internal route under /api', async () => {
+  it("answers every internal route under /api", async () => {
     for (const path of INTERNAL) {
-      expect([path, await routed(path)]).toEqual([path, true])
+      expect([path, await routed(path)]).toEqual([path, true]);
     }
-  })
+  });
 
-  it('no longer answers any of them on the bare mount', async () => {
+  it("no longer answers any of them on the bare mount", async () => {
     // The whole point of the move: these paths belong to screens now, and a screen
     // is served by the shell's wildcard as HTML. So "not JSON any more" is the
     // assertion, not "404" — see the shell test below.
     for (const path of INTERNAL) {
-      const bare = path.replace('/folio/api/', '/folio/')
-      const res = await SELF.fetch(`${ORIGIN}${bare}`)
-      const type = res.headers.get('content-type') ?? ''
-      expect([bare, type.includes('application/json')]).toEqual([bare, false])
+      const bare = path.replace("/folio/api/", "/folio/");
+      const res = await SELF.fetch(`${ORIGIN}${bare}`);
+      const type = res.headers.get("content-type") ?? "";
+      expect([bare, type.includes("application/json")]).toEqual([bare, false]);
     }
-  })
+  });
 
   /**
    * Stated as an **allow-list over the versioned surface**, which is the only form
@@ -99,18 +99,18 @@ describe('the /api partition', () => {
    * exactly this list**. A new internal route cannot leak into it, because anything
    * not named here has to 404 under `/api/v1`.
    */
-  const V1_SEGMENTS = ['schema', 'documents', 'assets', 'search']
+  const V1_SEGMENTS = ["schema", "documents", "assets", "search"];
 
-  it('keeps the v1 surface to exactly its documented segments', async () => {
+  it("keeps the v1 surface to exactly its documented segments", async () => {
     for (const path of INTERNAL) {
-      const name = path.slice('/folio/api/'.length)
-      if (V1_SEGMENTS.includes(name)) continue
-      for (const version of ['v1', 'v2']) {
-        const versioned = `/folio/api/${version}/${name}`
-        expect([versioned, await routed(versioned)]).toEqual([versioned, false])
+      const name = path.slice("/folio/api/".length);
+      if (V1_SEGMENTS.includes(name)) continue;
+      for (const version of ["v1", "v2"]) {
+        const versioned = `/folio/api/${version}/${name}`;
+        expect([versioned, await routed(versioned)]).toEqual([versioned, false]);
       }
     }
-  })
+  });
 
   /**
    * The internal routes that only answer `POST`, so `routed()` above cannot see
@@ -122,48 +122,48 @@ describe('the /api partition', () => {
    * `{base}/api/v1/bulk/publish` by reflex has to fail CI.
    */
   const INTERNAL_POST = [
-    '/folio/api/migrate',
-    '/folio/api/schedules/run',
+    "/folio/api/migrate",
+    "/folio/api/schedules/run",
     // `bulk-writes.md`. Five paths rather than one `/bulk/:action`, because each
     // carries its single-document twin's gate.
-    '/folio/api/bulk/publish',
-    '/folio/api/bulk/unpublish',
-    '/folio/api/bulk/duplicate',
-    '/folio/api/bulk/move',
-    '/folio/api/bulk/delete',
-  ]
+    "/folio/api/bulk/publish",
+    "/folio/api/bulk/unpublish",
+    "/folio/api/bulk/duplicate",
+    "/folio/api/bulk/move",
+    "/folio/api/bulk/delete",
+  ];
 
   const posted = async (path: string): Promise<number> =>
-    (await SELF.fetch(`${ORIGIN}${path}`, { method: 'POST' })).status
+    (await SELF.fetch(`${ORIGIN}${path}`, { method: "POST" })).status;
 
-  it('answers every internal POST route, and answers none of them to a GET', async () => {
+  it("answers every internal POST route, and answers none of them to a GET", async () => {
     for (const path of INTERNAL_POST) {
       // Anything but 404 means routed: a bulk route with no body is a 400.
-      expect([path, await posted(path)]).not.toEqual([path, 404])
-      expect([path, await routed(path)]).toEqual([path, false])
+      expect([path, await posted(path)]).not.toEqual([path, 404]);
+      expect([path, await routed(path)]).toEqual([path, false]);
     }
-  })
+  });
 
-  it('keeps the internal POST routes off the versioned surface', async () => {
+  it("keeps the internal POST routes off the versioned surface", async () => {
     for (const path of INTERNAL_POST) {
-      const name = path.slice('/folio/api/'.length)
-      for (const version of ['v1', 'v2']) {
-        const versioned = `/folio/api/${version}/${name}`
-        expect([versioned, await posted(versioned)]).toEqual([versioned, 404])
+      const name = path.slice("/folio/api/".length);
+      for (const version of ["v1", "v2"]) {
+        const versioned = `/folio/api/${version}/${name}`;
+        expect([versioned, await posted(versioned)]).toEqual([versioned, 404]);
       }
     }
-  })
+  });
 
-  it('has no v2 at all, so a promise has not been made twice', async () => {
+  it("has no v2 at all, so a promise has not been made twice", async () => {
     for (const name of V1_SEGMENTS) {
-      const path = `/folio/api/v2/${name}`
-      expect([path, await routed(path)]).toEqual([path, false])
+      const path = `/folio/api/v2/${name}`;
+      expect([path, await routed(path)]).toEqual([path, false]);
     }
-  })
+  });
 
-  it('answers the v1 contract, which is the surface that does not move', async () => {
-    expect(await routed('/folio/api/v1/documents')).toBe(true)
-  })
+  it("answers the v1 contract, which is the surface that does not move", async () => {
+    expect(await routed("/folio/api/v1/documents")).toBe(true);
+  });
 
   /**
    * `mcp` is **not** an `/api` segment at all, and that is decision 8 of
@@ -177,84 +177,84 @@ describe('the /api partition', () => {
    * request and tools are discovered rather than compiled against, so a version
    * segment here would be a second ledger tracking a protocol that already has one.
    */
-  it('keeps {base}/mcp off the /api partition, versioned or not', async () => {
-    for (const path of ['/folio/api/mcp', '/folio/api/v1/mcp', '/folio/api/v2/mcp']) {
-      expect([path, await posted(path)]).toEqual([path, 404])
-      expect([path, await routed(path)]).toEqual([path, false])
+  it("keeps {base}/mcp off the /api partition, versioned or not", async () => {
+    for (const path of ["/folio/api/mcp", "/folio/api/v1/mcp", "/folio/api/v2/mcp"]) {
+      expect([path, await posted(path)]).toEqual([path, 404]);
+      expect([path, await routed(path)]).toEqual([path, false]);
     }
-  })
+  });
 
-  it('answers POST {base}/mcp on the bare mount', async () => {
+  it("answers POST {base}/mcp on the bare mount", async () => {
     const res = await SELF.fetch(`${BASE}/mcp`, {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'content-type': 'application/json',
-        'mcp-protocol-version': MCP_PROTOCOL_VERSION,
-        'mcp-method': 'server/discover',
+        "content-type": "application/json",
+        "mcp-protocol-version": MCP_PROTOCOL_VERSION,
+        "mcp-method": "server/discover",
       },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'server/discover', params: {} }),
-    })
-    expect(res.status).toBe(200)
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "server/discover", params: {} }),
+    });
+    expect(res.status).toBe(200);
     const body = await res.json<{
-      jsonrpc: string
-      result: { _meta: Record<string, { name: string }> }
-    }>()
-    expect(body.jsonrpc).toBe('2.0')
-    expect(body.result._meta['io.modelcontextprotocol/serverInfo']?.name).toBe('folio')
-  })
+      jsonrpc: string;
+      result: { _meta: Record<string, { name: string }> };
+    }>();
+    expect(body.jsonrpc).toBe("2.0");
+    expect(body.result._meta["io.modelcontextprotocol/serverInfo"]?.name).toBe("folio");
+  });
 
-  it('answers a GET on it with 405 and Allow: POST, not the shell’s HTML', async () => {
-    const res = await SELF.fetch(`${BASE}/mcp`)
-    expect(res.status).toBe(405)
-    expect(res.headers.get('allow')).toBe('POST')
-  })
+  it("answers a GET on it with 405 and Allow: POST, not the shell’s HTML", async () => {
+    const res = await SELF.fetch(`${BASE}/mcp`);
+    expect(res.status).toBe(405);
+    expect(res.headers.get("allow")).toBe("POST");
+  });
 
-  it('answers an unmatched /api path with a JSON 404, not the shell’s HTML', async () => {
+  it("answers an unmatched /api path with a JSON 404, not the shell’s HTML", async () => {
     // The bug this file found. The shell's wildcard covers every unmatched bare
     // path; without an explicit `/api/*` terminator it covered unmatched *API*
     // paths too, so a typo'd fetch got 200 and an HTML body, and failed inside
     // `res.json()` with a syntax error about `<!doctype`.
-    for (const path of ['/folio/api/nope', '/folio/api/v1/nope', '/folio/api/v1/document']) {
-      const res = await SELF.fetch(`${ORIGIN}${path}`)
-      expect([path, res.status]).toEqual([path, 404])
-      expect(res.headers.get('content-type')).toContain('application/json')
-      const body = await res.json<{ error: { code: string } }>()
-      expect(body.error.code).toBe('not_found')
+    for (const path of ["/folio/api/nope", "/folio/api/v1/nope", "/folio/api/v1/document"]) {
+      const res = await SELF.fetch(`${ORIGIN}${path}`);
+      expect([path, res.status]).toEqual([path, 404]);
+      expect(res.headers.get("content-type")).toContain("application/json");
+      const body = await res.json<{ error: { code: string } }>();
+      expect(body.error.code).toBe("not_found");
     }
-  })
-})
+  });
+});
 
-describe('the bare mount', () => {
+describe("the bare mount", () => {
   // The sign-in flow is asserted bare in `auth-login.test.ts` and
   // `auth-http.test.ts`, which build their own session fixtures — this worker runs
   // `auth: 'open'`, where `/login` 404s on purpose because there is nothing to sign
   // in to. Both of those suites address it off a bare `BASE`, so they fail if it
   // ever moves under `/api`.
 
-  it('serves an asset’s bytes, whose URL is baked into published HTML', async () => {
+  it("serves an asset’s bytes, whose URL is baked into published HTML", async () => {
     // Not asserting a hit — no asset is seeded here. Asserting it is *routed*: a
     // 404 would mean the path moved, and `Resolution.assetBase` points at it from
     // inside every rendered page.
-    const res = await SELF.fetch(`${BASE}/asset/ast_missing`)
-    expect(res.status).not.toBe(404)
-  })
+    const res = await SELF.fetch(`${BASE}/asset/ast_missing`);
+    expect(res.status).not.toBe(404);
+  });
 
-  it('serves the shell at the root and at an unknown path', async () => {
-    for (const path of ['/folio', '/folio/content', '/folio/nope/at/all']) {
-      const res = await SELF.fetch(`${ORIGIN}${path}`)
-      expect([path, res.status]).toEqual([path, 200])
-      expect(res.headers.get('content-type')).toContain('text/html')
+  it("serves the shell at the root and at an unknown path", async () => {
+    for (const path of ["/folio", "/folio/content", "/folio/nope/at/all"]) {
+      const res = await SELF.fetch(`${ORIGIN}${path}`);
+      expect([path, res.status]).toEqual([path, 200]);
+      expect(res.headers.get("content-type")).toContain("text/html");
     }
-  })
+  });
 
-  it('gives the shell the two boot values it needs, and nothing more', async () => {
-    const html = await (await SELF.fetch(`${BASE}/content`)).text()
+  it("gives the shell the two boot values it needs, and nothing more", async () => {
+    const html = await (await SELF.fetch(`${BASE}/content`)).text();
     // `base` for screens and public bytes, `apiBase` for JSON. They were one field
     // until the move, and four of that field's uses turned out not to be JSON.
-    expect(html).toContain('"base":"/folio"')
-    expect(html).toContain('"apiBase":"/folio/api"')
-  })
-})
+    expect(html).toContain('"base":"/folio"');
+    expect(html).toContain('"apiBase":"/folio/api"');
+  });
+});
 
 /**
  * **The v1 surface, as a list.** Spec 23's phase 7 added three routes to it — `GET
@@ -270,95 +270,95 @@ describe('the bare mount', () => {
  * deployment's v1 surface is what it has always been — no `sites/resolve`, no
  * `pages` — because a host with one site reads pages in its own Worker.
  */
-describe('the v1 route list', () => {
+describe("the v1 route list", () => {
   const block = defineBlock({
-    name: 'apPage',
-    label: 'Page',
-    fields: { title: text({ label: 'Title' }) },
+    name: "apPage",
+    label: "Page",
+    fields: { title: text({ label: "Title" }) },
     render: () => null,
-  })
+  });
   const config = (multi: boolean): FolioConfig<Cloudflare.Env> => ({
     blocks: [block],
-    root: 'apPage',
+    root: "apPage",
     bindings: (e): FolioBindings => ({
       db: e.DB,
       story: e.STORY,
       media: e.MEDIA,
       images: e.IMAGES,
     }),
-    basePath: '/folio',
+    basePath: "/folio",
     auth: { providers: [magicLink<Cloudflare.Env>({ send: () => {} })] },
     ...(multi
       ? {
-          sites: { admin: 'https://cms.example' },
+          sites: { admin: "https://cms.example" },
           route: (p: string, _l: string | undefined, site?: { id: string }) =>
             site ? `https://${site.id}.invalid/${p}` : `/${p}`,
         }
       : {}),
-  })
+  });
   const v1 = (multi: boolean) => {
-    const c = config(multi)
-    const app = createApp(c, createRuntime(c))
+    const c = config(multi);
+    const app = createApp(c, createRuntime(c));
     return [
       ...new Set(
         app.routes
-          .filter((r) => r.method !== 'ALL' && r.path.startsWith('/folio/api/v1/'))
-          .map((r) => `${r.method} ${r.path.slice('/folio/api/v1'.length)}`),
+          .filter((r) => r.method !== "ALL" && r.path.startsWith("/folio/api/v1/"))
+          .map((r) => `${r.method} ${r.path.slice("/folio/api/v1".length)}`),
       ),
-    ].sort()
-  }
+    ].sort();
+  };
 
   const SINGLE = [
-    'DELETE /documents/:id',
-    'GET /assets',
-    'GET /documents',
-    'GET /documents/:id',
-    'GET /documents/:id/versions',
-    'GET /documents/by-path',
-    'GET /documents/by-path/:path{.*}',
-    'GET /schema',
-    'GET /search',
-    'PATCH /documents/:id',
-    'PATCH /documents/:id/fields',
-    'POST /assets',
-    'POST /documents',
-    'POST /documents/:id/duplicate',
-    'POST /documents/:id/publish',
-    'POST /documents/:id/restore',
-    'POST /documents/:id/unpublish',
-    'POST /documents/:id/versions',
-    'PUT /documents/:id/content',
-  ]
+    "DELETE /documents/:id",
+    "GET /assets",
+    "GET /documents",
+    "GET /documents/:id",
+    "GET /documents/:id/versions",
+    "GET /documents/by-path",
+    "GET /documents/by-path/:path{.*}",
+    "GET /schema",
+    "GET /search",
+    "PATCH /documents/:id",
+    "PATCH /documents/:id/fields",
+    "POST /assets",
+    "POST /documents",
+    "POST /documents/:id/duplicate",
+    "POST /documents/:id/publish",
+    "POST /documents/:id/restore",
+    "POST /documents/:id/unpublish",
+    "POST /documents/:id/versions",
+    "PUT /documents/:id/content",
+  ];
 
-  it('is what it has always been on a deployment with one site', () => {
-    expect(v1(false)).toEqual(SINGLE)
-  })
+  it("is what it has always been on a deployment with one site", () => {
+    expect(v1(false)).toEqual(SINGLE);
+  });
 
-  it('gains exactly sites/resolve, sites and pages on a deployment with sites', () => {
+  it("gains exactly sites/resolve, sites and pages on a deployment with sites", () => {
     expect(v1(true)).toEqual(
-      [...SINGLE, 'GET /pages', 'GET /pages/:path{.*}', 'GET /sites', 'GET /sites/resolve'].sort(),
-    )
-  })
+      [...SINGLE, "GET /pages", "GET /pages/:path{.*}", "GET /sites", "GET /sites/resolve"].sort(),
+    );
+  });
 
-  it('answers none of the three on a single-site deployment, whose host has the reader', async () => {
+  it("answers none of the three on a single-site deployment, whose host has the reader", async () => {
     for (const path of [
-      '/folio/api/v1/sites',
-      '/folio/api/v1/sites/resolve?host=x',
-      '/folio/api/v1/pages/about',
+      "/folio/api/v1/sites",
+      "/folio/api/v1/sites/resolve?host=x",
+      "/folio/api/v1/pages/about",
     ]) {
-      const res = await SELF.fetch(`${ORIGIN}${path}`)
-      expect([path, res.status]).toEqual([path, 404])
-      expect((await res.json<{ error: { code: string } }>()).error.code).toBe('not_found')
+      const res = await SELF.fetch(`${ORIGIN}${path}`);
+      expect([path, res.status]).toEqual([path, 404]);
+      expect((await res.json<{ error: { code: string } }>()).error.code).toBe("not_found");
     }
-  })
+  });
 
-  it('keeps the new v1 names off the internal surface', () => {
-    const c = config(true)
+  it("keeps the new v1 names off the internal surface", () => {
+    const c = config(true);
     const internal = createApp(c, createRuntime(c))
       .routes.filter(
-        (r) => r.method !== 'ALL' && /^\/folio\/api\/(sites\/resolve|pages)(\/|$)/.test(r.path),
+        (r) => r.method !== "ALL" && /^\/folio\/api\/(sites\/resolve|pages)(\/|$)/.test(r.path),
       )
-      .map((r) => r.path)
-    expect(internal).toEqual([])
-  })
-})
+      .map((r) => r.path);
+    expect(internal).toEqual([]);
+  });
+});

@@ -30,17 +30,17 @@ import type {
   StoryFilter,
   StoryMeta,
   StoryState,
-} from '../../../core/story'
-import type { BulkFailure, BulkRefusal, BulkReport } from '../../../core/bulk'
-import { canCreateContent, canManageContent, canPublish, type Me } from '../../me'
+} from "../../../core/story";
+import type { BulkFailure, BulkRefusal, BulkReport } from "../../../core/bulk";
+import { canCreateContent, canManageContent, canPublish, type Me } from "../../me";
 
 /* ------------------------------------------------------------------- modes --- */
 
-export type ViewMode = 'tree' | 'flat'
+export type ViewMode = "tree" | "flat";
 
 /** The state filter's "no filter" value. A chip needs a value for "All", and
  * `undefined` cannot be one. */
-export type StateFilter = 'all' | StoryState
+export type StateFilter = "all" | StoryState;
 
 /* ------------------------------------------------------------------ levels --- */
 
@@ -52,7 +52,7 @@ export type StateFilter = 'all' | StoryState
  * `[A-Za-z0-9_.:-]+` server-side (`validate.ts`'s `ID`), so a leading `#` is
  * unreachable.
  */
-export const ROOT = '#root'
+export const ROOT = "#root";
 
 /**
  * Whether a string is shaped like a story id.
@@ -67,14 +67,14 @@ export const ROOT = '#root'
  * a value that was never an id at all, which would otherwise be spliced into a URL.
  */
 export function isStoryId(raw: string): boolean {
-  return /^[A-Za-z0-9_.:-]+$/.test(raw)
+  return /^[A-Za-z0-9_.:-]+$/.test(raw);
 }
 
 /** A story row as the level route answers it: `StoryMeta` plus how many children
  * it has, which is what tells the screen whether to draw a twisty without
  * fetching the level below to find out. */
 export interface LevelRow extends StoryMeta {
-  childCount: number
+  childCount: number;
 }
 
 /**
@@ -102,38 +102,38 @@ export interface LevelRow extends StoryMeta {
  * anyway.
  */
 export interface Level {
-  rows: readonly LevelRow[]
+  rows: readonly LevelRow[];
   /** Null when the level is fully loaded. */
-  cursor: string | null
+  cursor: string | null;
   /** Only present on the first page, from `?count=1`. */
-  total?: number
-  loading: boolean
+  total?: number;
+  loading: boolean;
   /** A failed fetch, so the row can say so instead of looking empty. */
-  error?: string
+  error?: string;
 }
 
-export type Levels = Readonly<Record<string, Level>>
+export type Levels = Readonly<Record<string, Level>>;
 
 /** An empty level, before anything has been asked for. */
-export const PENDING: Level = { rows: [], cursor: null, loading: true }
+export const PENDING: Level = { rows: [], cursor: null, loading: true };
 
 /* -------------------------------------------------------------------- rows --- */
 
 /** One visible row of the tree, with the depth its indent comes from. */
 export interface TreeRow {
-  row: LevelRow
-  depth: number
+  row: LevelRow;
+  depth: number;
   /** The parent's level key, so a reorder knows which sibling list this row is
    * counted into without re-deriving it from `parentId`. */
-  parent: string
+  parent: string;
   /** Its index among the siblings currently loaded at this level. */
-  index: number
+  index: number;
   /** How many siblings are loaded at this level. Not the level's `total`: a
    * gesture can only be judged against rows that exist on the client. */
-  siblings: number
+  siblings: number;
   /** True when a twisty belongs here — the row has children, loaded or not. */
-  expandable: boolean
-  expanded: boolean
+  expandable: boolean;
+  expanded: boolean;
 }
 
 /**
@@ -143,17 +143,17 @@ export interface TreeRow {
  * reads as a control over the whole screen.
  */
 export interface MoreRow {
-  kind: 'more'
-  parent: string
-  depth: number
+  kind: "more";
+  parent: string;
+  depth: number;
   /** How many are loaded so far — the honest half of the label, since a level's
    * `total` is only known when the count was asked for. */
-  loaded: number
-  total?: number
-  loading: boolean
+  loaded: number;
+  total?: number;
+  loading: boolean;
 }
 
-export type VisibleRow = ({ kind: 'story' } & TreeRow) | MoreRow
+export type VisibleRow = ({ kind: "story" } & TreeRow) | MoreRow;
 
 /**
  * The visible rows of a partly-loaded tree, in order, with depths.
@@ -174,13 +174,13 @@ export function visibleRows(
   depth = 0,
   parent: string = ROOT,
 ): VisibleRow[] {
-  const level = levels[parent]
-  if (!level) return []
-  const out: VisibleRow[] = []
+  const level = levels[parent];
+  if (!level) return [];
+  const out: VisibleRow[] = [];
   level.rows.forEach((row, index) => {
-    const isOpen = expanded.has(row.id)
+    const isOpen = expanded.has(row.id);
     out.push({
-      kind: 'story',
+      kind: "story",
       row,
       depth,
       parent,
@@ -188,9 +188,9 @@ export function visibleRows(
       siblings: level.rows.length,
       expandable: row.childCount > 0,
       expanded: isOpen,
-    })
-    if (isOpen) out.push(...visibleRows(levels, expanded, depth + 1, row.id))
-  })
+    });
+    if (isOpen) out.push(...visibleRows(levels, expanded, depth + 1, row.id));
+  });
   // Either there is more to fetch, or a fetch for this level is in flight. The
   // second half is what keeps an expanded-but-not-yet-loaded node from reading as
   // an empty page rather than a slow one. The screen's *initial* load is the one
@@ -199,21 +199,21 @@ export function visibleRows(
   // because it is about the shape of the screen rather than the shape of a level.
   if (level.cursor !== null || level.loading) {
     out.push({
-      kind: 'more',
+      kind: "more",
       parent,
       depth,
       loaded: level.rows.length,
       ...(level.total === undefined ? {} : { total: level.total }),
       loading: level.loading,
-    })
+    });
   }
-  return out
+  return out;
 }
 
 /** The story rows of a visible list, which is what a keyboard gesture and a
  * select-all-shown act on. */
 export function storyRowsOf(rows: readonly VisibleRow[]): TreeRow[] {
-  return rows.filter((r): r is { kind: 'story' } & TreeRow => r.kind === 'story')
+  return rows.filter((r): r is { kind: "story" } & TreeRow => r.kind === "story");
 }
 
 /* ---------------------------------------------------------------- keyboard --- */
@@ -228,18 +228,18 @@ export function storyRowsOf(rows: readonly VisibleRow[]): TreeRow[] {
  * 'between these two siblings' never has to be expressed".
  */
 export interface Move {
-  id: string
-  parentId: string | null
+  id: string;
+  parentId: string | null;
   /** Counted into the sibling list **excluding the row being moved**, which is
    * what `orderAt(rows, group, index, ignore)` compares against. Getting this
    * wrong is an off-by-one that only shows on a downward move. */
-  index: number
+  index: number;
 }
 
 /** Why a gesture cannot happen, for the notice. Null when it can. */
-export type Refusal = string | null
+export type Refusal = string | null;
 
-export type Gesture = 'up' | 'down' | 'out' | 'in'
+export type Gesture = "up" | "down" | "out" | "in";
 
 /**
  * The `Move` a gesture produces, or a refusal.
@@ -268,48 +268,48 @@ export function gestureMove(
   rows: readonly VisibleRow[],
   levels: Levels,
 ): { move: Move } | { refusal: string } {
-  if (at.row.path === '') {
-    return { refusal: 'The home page owns / and cannot be moved' }
+  if (at.row.path === "") {
+    return { refusal: "The home page owns / and cannot be moved" };
   }
 
-  if (gesture === 'up' || gesture === 'down') {
-    const last = at.siblings - 1
-    if (gesture === 'up' && at.index === 0) return { refusal: 'Already first among its siblings' }
-    if (gesture === 'down' && at.index >= last) {
+  if (gesture === "up" || gesture === "down") {
+    const last = at.siblings - 1;
+    if (gesture === "up" && at.index === 0) return { refusal: "Already first among its siblings" };
+    if (gesture === "down" && at.index >= last) {
       // "Loaded" rather than "all": a level with a cursor has siblings the client
       // has not seen, and saying so is better than refusing as though it were the
       // end of the list.
-      const more = levels[at.parent]?.cursor !== null
+      const more = levels[at.parent]?.cursor !== null;
       return {
         refusal: more
-          ? 'Already last of the siblings loaded — show more of this level first'
-          : 'Already last among its siblings',
-      }
+          ? "Already last of the siblings loaded — show more of this level first"
+          : "Already last among its siblings",
+      };
     }
     return {
       move: {
         id: at.row.id,
         parentId: at.row.parentId,
-        index: gesture === 'up' ? at.index - 1 : at.index + 1,
+        index: gesture === "up" ? at.index - 1 : at.index + 1,
       },
-    }
+    };
   }
 
-  if (gesture === 'in') {
-    const above = storyRowsOf(rows).find((r) => r.parent === at.parent && r.index === at.index - 1)
-    if (!above) return { refusal: 'Nothing above it to nest under' }
+  if (gesture === "in") {
+    const above = storyRowsOf(rows).find((r) => r.parent === at.parent && r.index === at.index - 1);
+    if (!above) return { refusal: "Nothing above it to nest under" };
     // The end of the new parent's children — and `keyAtIndex` clamps an
     // out-of-range index, so an unloaded level's count being unknown is not a
     // problem: a number past the end appends, which is what "nest under" means.
-    const known = levels[above.row.id]
-    const index = known && known.cursor === null ? known.rows.length : above.row.childCount
-    return { move: { id: at.row.id, parentId: above.row.id, index } }
+    const known = levels[above.row.id];
+    const index = known && known.cursor === null ? known.rows.length : above.row.childCount;
+    return { move: { id: at.row.id, parentId: above.row.id, index } };
   }
 
   // `out`: a sibling of the parent, immediately after it.
-  if (at.parent === ROOT) return { refusal: 'Already at the top level' }
-  const parentRow = storyRowsOf(rows).find((r) => r.row.id === at.parent)
-  if (!parentRow) return { refusal: 'Its parent is not loaded' }
+  if (at.parent === ROOT) return { refusal: "Already at the top level" };
+  const parentRow = storyRowsOf(rows).find((r) => r.row.id === at.parent);
+  if (!parentRow) return { refusal: "Its parent is not loaded" };
   return {
     move: {
       id: at.row.id,
@@ -319,7 +319,7 @@ export function gestureMove(
       // adjustment of the kind `up`/`down` need.
       index: parentRow.index + 1,
     },
-  }
+  };
 }
 
 /* --------------------------------------------------------------- selection --- */
@@ -333,8 +333,8 @@ export function gestureMove(
  */
 export type Matchable = Pick<
   StoryMeta,
-  'id' | 'type' | 'state' | 'title' | 'slug' | 'path' | 'parentId'
->
+  "id" | "type" | "state" | "title" | "slug" | "path" | "parentId"
+>;
 
 /**
  * Every document matching a filter, as it stood when *select all* was pressed —
@@ -347,13 +347,13 @@ export type Matchable = Pick<
  * question of a ceiling never arises on this side of the wire either.
  */
 export interface AllMatching {
-  all: true
+  all: true;
   /** A snapshot, never a live read of whatever the chips currently say. */
-  filter: StoryFilter
+  filter: StoryFilter;
   /** `total` from the `?count=1` header the person was reading. */
-  expected: number
+  expected: number;
   /** Rows ticked *off* afterwards. Bounded by what a person can see. */
-  exclude: ReadonlySet<string>
+  exclude: ReadonlySet<string>;
 }
 
 /**
@@ -379,14 +379,14 @@ export interface AllMatching {
  * have moved on. That evaluation is for the tick and the split only — the server
  * re-runs the filter in SQL and is the authority on what gets written.
  */
-export type Selection = ReadonlySet<string> | AllMatching
+export type Selection = ReadonlySet<string> | AllMatching;
 
 /** Nothing selected. A named constant because the empty case is written in five
  * places and `new Set()` in a component body is a fresh object every render. */
-export const NOTHING: Selection = new Set<string>()
+export const NOTHING: Selection = new Set<string>();
 
 export function isAll(selection: Selection): selection is AllMatching {
-  return 'all' in selection
+  return "all" in selection;
 }
 
 /**
@@ -401,14 +401,14 @@ export function isAll(selection: Selection): selection is AllMatching {
  * the server's side).
  */
 export function selectAllMatching(filter: StoryFilter, expected: number): AllMatching {
-  return { all: true, filter: { ...filter, routed: true }, expected, exclude: new Set() }
+  return { all: true, filter: { ...filter, routed: true }, expected, exclude: new Set() };
 }
 
 /** How many documents the selection means. */
 export function selectionSize(selection: Selection): number {
   return isAll(selection)
     ? Math.max(selection.expected - selection.exclude.size, 0)
-    : selection.size
+    : selection.size;
 }
 
 /**
@@ -420,8 +420,8 @@ export function selectionSize(selection: Selection): number {
  * does not include it.
  */
 export function isSelected(selection: Selection, row: Matchable): boolean {
-  if (!isAll(selection)) return selection.has(row.id)
-  return !selection.exclude.has(row.id) && matchesFilter(row, selection.filter)
+  if (!isAll(selection)) return selection.has(row.id);
+  return !selection.exclude.has(row.id) && matchesFilter(row, selection.filter);
 }
 
 /**
@@ -439,17 +439,17 @@ export function isSelected(selection: Selection, row: Matchable): boolean {
  * two costs a checkbox, never a write.
  */
 export function matchesFilter(row: Matchable, filter: StoryFilter): boolean {
-  if (filter.state !== undefined && row.state !== filter.state) return false
-  if (filter.type !== undefined && row.type !== filter.type) return false
-  if (filter.routed === true && row.path === null) return false
-  if (filter.routed === false && row.path !== null) return false
-  if (filter.parentId !== undefined && row.parentId !== filter.parentId) return false
-  if (filter.q !== undefined && filter.q !== '') {
-    const needle = filter.q.toLowerCase()
-    const haystack = [row.title, row.slug, row.path ?? '']
-    if (!haystack.some((field) => field.toLowerCase().includes(needle))) return false
+  if (filter.state !== undefined && row.state !== filter.state) return false;
+  if (filter.type !== undefined && row.type !== filter.type) return false;
+  if (filter.routed === true && row.path === null) return false;
+  if (filter.routed === false && row.path !== null) return false;
+  if (filter.parentId !== undefined && row.parentId !== filter.parentId) return false;
+  if (filter.q !== undefined && filter.q !== "") {
+    const needle = filter.q.toLowerCase();
+    const haystack = [row.title, row.slug, row.path ?? ""];
+    if (!haystack.some((field) => field.toLowerCase().includes(needle))) return false;
   }
-  return true
+  return true;
 }
 
 /**
@@ -473,21 +473,21 @@ export function toggleSelected(
   row: Matchable,
 ): { selection: Selection } | { refusal: string } {
   if (!isAll(selection)) {
-    const next = new Set(selection)
-    if (!next.delete(row.id)) next.add(row.id)
-    return { selection: next }
+    const next = new Set(selection);
+    if (!next.delete(row.id)) next.add(row.id);
+    return { selection: next };
   }
-  const exclude = new Set(selection.exclude)
+  const exclude = new Set(selection.exclude);
   if (!exclude.delete(row.id)) {
     if (!matchesFilter(row, selection.filter)) {
       return {
         refusal:
-          'This page is not in the selection — a select-all covers the conditions it captured. Clear the selection to tick pages one at a time.',
-      }
+          "This page is not in the selection — a select-all covers the conditions it captured. Clear the selection to tick pages one at a time.",
+      };
     }
-    exclude.add(row.id)
+    exclude.add(row.id);
   }
-  return { selection: { ...selection, exclude } }
+  return { selection: { ...selection, exclude } };
 }
 
 /**
@@ -501,27 +501,27 @@ export function toggleSelected(
  */
 export function toggleAllShown(selection: Selection, shown: readonly Matchable[]): Selection {
   if (!isAll(selection)) {
-    const next = new Set(selection)
+    const next = new Set(selection);
     if (shown.every((row) => next.has(row.id))) {
-      for (const row of shown) next.delete(row.id)
+      for (const row of shown) next.delete(row.id);
     } else {
-      for (const row of shown) next.add(row.id)
+      for (const row of shown) next.add(row.id);
     }
-    return next
+    return next;
   }
-  const inSet = shown.filter((row) => matchesFilter(row, selection.filter))
-  const exclude = new Set(selection.exclude)
+  const inSet = shown.filter((row) => matchesFilter(row, selection.filter));
+  const exclude = new Set(selection.exclude);
   if (inSet.every((row) => !exclude.has(row.id))) {
-    for (const row of inSet) exclude.add(row.id)
+    for (const row of inSet) exclude.add(row.id);
   } else {
-    for (const row of inSet) exclude.delete(row.id)
+    for (const row of inSet) exclude.delete(row.id);
   }
-  return { ...selection, exclude }
+  return { ...selection, exclude };
 }
 
 /** Whether the footer's control would clear rather than select. */
 export function allShownSelected(selection: Selection, shown: readonly Matchable[]): boolean {
-  return shown.length > 0 && shown.every((row) => isSelected(selection, row))
+  return shown.length > 0 && shown.every((row) => isSelected(selection, row));
 }
 
 /**
@@ -540,13 +540,13 @@ export function allShownSelected(selection: Selection, shown: readonly Matchable
  */
 export interface SelectionSummary {
   /** How many documents the selection means. */
-  count: number
+  count: number;
   /** How many of them are on screen. */
-  shown: number
-  hidden: number
+  shown: number;
+  hidden: number;
   /** The mode, for the actions the bar may offer and the recovery it may offer. */
-  all: boolean
-  text: string
+  all: boolean;
+  text: string;
 }
 
 export function summarise(
@@ -555,31 +555,31 @@ export function summarise(
   /** Type name → label, so the conditions read as the chips do. */
   labels: Readonly<Record<string, string>> = {},
 ): SelectionSummary {
-  const count = selectionSize(selection)
-  const shown = visible.filter((row) => isSelected(selection, row)).length
-  const hidden = Math.max(count - shown, 0)
-  const all = isAll(selection)
+  const count = selectionSize(selection);
+  const shown = visible.filter((row) => isSelected(selection, row)).length;
+  const hidden = Math.max(count - shown, 0);
+  const all = isAll(selection);
   // Nothing to add when the whole selection is on screen: "3 pages selected · 3
   // shown here" says one thing twice.
   const split =
-    hidden === 0 ? '' : shown === 0 ? ', none shown by this filter' : ` · ${shown} shown here`
+    hidden === 0 ? "" : shown === 0 ? ", none shown by this filter" : ` · ${shown} shown here`;
   if (!all) {
     return {
       count,
       shown,
       hidden,
       all,
-      text: count === 0 ? 'Nothing selected' : `${pages(count)} selected${split}`,
-    }
+      text: count === 0 ? "Nothing selected" : `${pages(count)} selected${split}`,
+    };
   }
-  const conditions = conditionsOf(selection.filter, labels)
-  const ticked = selection.exclude.size
+  const conditions = conditionsOf(selection.filter, labels);
+  const ticked = selection.exclude.size;
   // "All 51,420 matching state is draft" is a lie once two rows have been ticked
   // off, and the number the actions will act on is the one after the subtraction —
   // so both appear, and only when there is a difference to explain.
-  const head = `All ${num(selection.expected)}${conditions ? ` matching ${conditions}` : ' pages'}`
-  const less = ticked === 0 ? '' : `, except the ${num(ticked)} you ticked off`
-  return { count, shown, hidden, all, text: `${head}${less}${split}` }
+  const head = `All ${num(selection.expected)}${conditions ? ` matching ${conditions}` : " pages"}`;
+  const less = ticked === 0 ? "" : `, except the ${num(ticked)} you ticked off`;
+  return { count, shown, hidden, all, text: `${head}${less}${split}` };
 }
 
 /**
@@ -594,16 +594,16 @@ export function conditionsOf(
   filter: StoryFilter,
   labels: Readonly<Record<string, string>> = {},
 ): string {
-  const parts: string[] = []
-  if (filter.state) parts.push(`state is ${filter.state}`)
-  if (filter.type) parts.push(`type is ${labels[filter.type] ?? filter.type}`)
-  if (filter.q) parts.push(`search is “${filter.q}”`)
-  return parts.join(' and ')
+  const parts: string[] = [];
+  if (filter.state) parts.push(`state is ${filter.state}`);
+  if (filter.type) parts.push(`type is ${labels[filter.type] ?? filter.type}`);
+  if (filter.q) parts.push(`search is “${filter.q}”`);
+  return parts.join(" and ");
 }
 
 /** The footer's select-all-matching control, which names the number it captures. */
 export function selectAllLabel(total: number): string {
-  return `Select all ${num(total)} matching`
+  return `Select all ${num(total)} matching`;
 }
 
 /**
@@ -621,12 +621,12 @@ export function selectAllLabel(total: number): string {
  * vocabulary rather than two lists that agree today.
  */
 export const BULK_ACTIONS: readonly StoryBulkAction[] = [
-  'publish',
-  'unpublish',
-  'duplicate',
-  'move',
-  'delete',
-]
+  "publish",
+  "unpublish",
+  "duplicate",
+  "move",
+  "delete",
+];
 
 /**
  * The actions a selection may be given, which is not always all five.
@@ -653,10 +653,10 @@ export const BULK_ACTIONS: readonly StoryBulkAction[] = [
  */
 export function actionsFor(selection: Selection, me: Me): readonly StoryBulkAction[] {
   return BULK_ACTIONS.filter((action) => {
-    if (action === 'duplicate') return !isAll(selection) && canCreateContent(me)
-    if (action === 'publish' || action === 'unpublish') return canPublish(me)
-    return canManageContent(me)
-  })
+    if (action === "duplicate") return !isAll(selection) && canCreateContent(me);
+    if (action === "publish" || action === "unpublish") return canPublish(me);
+    return canManageContent(me);
+  });
 }
 
 /**
@@ -678,10 +678,10 @@ export function actionsFor(selection: Selection, me: Me): readonly StoryBulkActi
  * matters when it is 51,420 pages instead.
  */
 export interface Confirmation {
-  title: string
+  title: string;
   /** One line under the title, in `Dialog`'s `description` slot. */
-  body: string
-  danger: boolean
+  body: string;
+  danger: boolean;
 }
 
 export function confirmOf(
@@ -690,33 +690,33 @@ export function confirmOf(
   filter?: StoryFilter,
   labels: Readonly<Record<string, string>> = {},
 ): Confirmation | null {
-  if (summary.count === 0) return null
-  if (!summary.all && summary.hidden === 0 && action !== 'delete') return null
+  if (summary.count === 0) return null;
+  if (!summary.all && summary.hidden === 0 && action !== "delete") return null;
   const invisible =
     summary.hidden === 0
-      ? ''
+      ? ""
       : summary.shown === 0
-        ? 'None of them are shown by the current filter.'
-        : `${num(summary.hidden)} ${summary.hidden === 1 ? 'is' : 'are'} not shown by the current filter.`
-  const captured = summary.all && filter ? whatWasCaptured(conditionsOf(filter, labels)) : ''
+        ? "None of them are shown by the current filter."
+        : `${num(summary.hidden)} ${summary.hidden === 1 ? "is" : "are"} not shown by the current filter.`;
+  const captured = summary.all && filter ? whatWasCaptured(conditionsOf(filter, labels)) : "";
   return {
     title: `${VERB[action]} ${pages(summary.count)}?`,
-    body: [captured, invisible, action === 'delete' ? DELETE_NOTE : ''].filter(Boolean).join(' '),
-    danger: action === 'delete',
-  }
+    body: [captured, invisible, action === "delete" ? DELETE_NOTE : ""].filter(Boolean).join(" "),
+    danger: action === "delete",
+  };
 }
 
 function whatWasCaptured(conditions: string): string {
   return conditions
     ? `Everything matching ${conditions}, as it stood when you chose it.`
-    : 'Every page, as it stood when you chose it.'
+    : "Every page, as it stood when you chose it.";
 }
 
 /** The same sentence `DeleteDialog` and `AssetDeleteDialog` use, plus what a bulk
  * delete leaves behind — a redirect per vacated path, exactly as deleting them
  * one at a time would (`redirects.md` decision 4). */
 const DELETE_NOTE =
-  'Each page, its subtree, its history and its index rows all go, and each vacated path gets a redirect to its parent. This cannot be undone.'
+  "Each page, its subtree, its history and its index rows all go, and each vacated path gets a redirect to its parent. This cannot be undone.";
 
 /**
  * What the guard said when it refused, and it is **a door rather than a wall**:
@@ -728,17 +728,17 @@ const DELETE_NOTE =
  * a bulk publish quietly including nine pages nobody looked at.
  */
 export function refusalOf(action: StoryBulkAction, refusal: BulkRefusal): Confirmation {
-  const verb = refusal.actual === 1 ? 'matches' : 'match'
+  const verb = refusal.actual === 1 ? "matches" : "match";
   return {
     title: `${pages(refusal.actual)} ${verb} now, not ${num(refusal.expected)}`,
     body: `Somebody else changed what matches while you were reading the number. ${VERB[action]} the ${num(refusal.actual)} that ${verb} now?`,
-    danger: action === 'delete',
-  }
+    danger: action === "delete",
+  };
 }
 
 /** The affirmative button beside `refusalOf`'s question. */
 export function retryLabel(action: StoryBulkAction, refusal: BulkRefusal): string {
-  return `${VERB[action]} ${pages(refusal.actual)}`
+  return `${VERB[action]} ${pages(refusal.actual)}`;
 }
 
 /**
@@ -759,49 +759,49 @@ export function reportOf(
   done: number,
   failures: readonly { title: string; message: string }[],
 ): string {
-  const verb = PAST_TENSE[action]
-  if (failures.length === 0) return `${verb} ${done} ${done === 1 ? 'page' : 'pages'}`
+  const verb = PAST_TENSE[action];
+  if (failures.length === 0) return `${verb} ${done} ${done === 1 ? "page" : "pages"}`;
   const named = failures
     .slice(0, 2)
-    .map((f) => `${f.title || 'Untitled'} (${f.message})`)
-    .join(', ')
-  const rest = failures.length > 2 ? `, and ${failures.length - 2} more` : ''
+    .map((f) => `${f.title || "Untitled"} (${f.message})`)
+    .join(", ");
+  const rest = failures.length > 2 ? `, and ${failures.length - 2} more` : "";
   return done === 0
-    ? `Could not ${action} ${failures.length === 1 ? 'it' : 'any of them'}: ${named}${rest}`
-    : `${verb} ${done}, ${failures.length} refused: ${named}${rest}`
+    ? `Could not ${action} ${failures.length === 1 ? "it" : "any of them"}: ${named}${rest}`
+    : `${verb} ${done}, ${failures.length} refused: ${named}${rest}`;
 }
 
 /** Progress across a run that takes several calls. `seen` and `total` are the
  * report's own numbers — the job's, not this call's — so there is no arithmetic
  * here to get wrong. */
 export function progressOf(seen: number, total: number): string {
-  return `Working… ${num(seen)} of ${num(total)}`
+  return `Working… ${num(seen)} of ${num(total)}`;
 }
 
 const PAST_TENSE: Record<StoryBulkAction, string> = {
-  publish: 'Published',
-  unpublish: 'Unpublished',
-  duplicate: 'Duplicated',
-  move: 'Moved',
-  delete: 'Deleted',
-}
+  publish: "Published",
+  unpublish: "Unpublished",
+  duplicate: "Duplicated",
+  move: "Moved",
+  delete: "Deleted",
+};
 
 const VERB: Record<StoryBulkAction, string> = {
-  publish: 'Publish',
-  unpublish: 'Unpublish',
-  duplicate: 'Duplicate',
-  move: 'Move',
-  delete: 'Delete',
-}
+  publish: "Publish",
+  unpublish: "Unpublish",
+  duplicate: "Duplicate",
+  move: "Move",
+  delete: "Delete",
+};
 
 /** The imperative, for a confirmation's affirmative button. One table for the
  * question and the button, so "Publish 12 pages?" cannot be answered by *Apply*. */
 export function verbOf(action: StoryBulkAction): string {
-  return VERB[action]
+  return VERB[action];
 }
 
 function pages(n: number): string {
-  return `${num(n)} ${n === 1 ? 'page' : 'pages'}`
+  return `${num(n)} ${n === 1 ? "page" : "pages"}`;
 }
 
 /**
@@ -814,7 +814,7 @@ function pages(n: number): string {
  * depending on the machine running the test.
  */
 function num(n: number): string {
-  return n.toLocaleString('en-US')
+  return n.toLocaleString("en-US");
 }
 
 /* ------------------------------------------------------------- bulk writes --- */
@@ -830,19 +830,19 @@ function num(n: number): string {
 export interface BulkRequest {
   selection:
     | { ids: string[] }
-    | { all: true; filter: StoryFilter; expected: number; exclude?: string[] }
+    | { all: true; filter: StoryFilter; expected: number; exclude?: string[] };
   /** The previous call's cursor. Absent on the first call of a job. */
-  continueFrom?: string
+  continueFrom?: string;
   /** `move` only, and required for it. `null` is the top level. */
-  parentId?: string | null
+  parentId?: string | null;
   /** `move` only: where the **first** document lands among its new siblings. */
-  index?: number
+  index?: number;
 }
 
 /** Where a bulk move is going. */
 export interface Destination {
-  parentId: string | null
-  index?: number
+  parentId: string | null;
+  index?: number;
 }
 
 /**
@@ -864,7 +864,7 @@ export function bulkBody(
   selection: Selection,
   opts: { continueFrom?: string | null; destination?: Destination } = {},
 ): BulkRequest {
-  const exclude = isAll(selection) ? [...selection.exclude] : []
+  const exclude = isAll(selection) ? [...selection.exclude] : [];
   return {
     selection: isAll(selection)
       ? {
@@ -883,18 +883,18 @@ export function bulkBody(
           ...(opts.destination.index === undefined ? {} : { index: opts.destination.index }),
         }
       : {}),
-  }
+  };
 }
 
 /** What a bulk route answers: the report, or the 409's refusal. */
-export type BulkAnswer = BulkReport<StoryBulkAction> | BulkRefusal
+export type BulkAnswer = BulkReport<StoryBulkAction> | BulkRefusal;
 
 export function wasRefused(answer: BulkAnswer): answer is BulkRefusal {
-  return 'refused' in answer
+  return "refused" in answer;
 }
 
 /** A finished job, or the refusal that stopped it before anything was written. */
-export type BulkResult = { done: number; failed: BulkFailure[] } | { refused: BulkRefusal }
+export type BulkResult = { done: number; failed: BulkFailure[] } | { refused: BulkRefusal };
 
 /**
  * A whole bulk job: post, read the report, post again with its cursor.
@@ -915,30 +915,30 @@ export async function runBulkJob(
   selection: Selection,
   opts: { destination?: Destination; onProgress?: (seen: number, total: number) => void } = {},
 ): Promise<BulkResult> {
-  let continueFrom: string | null = null
-  let done = 0
-  const failed: BulkFailure[] = []
+  let continueFrom: string | null = null;
+  let done = 0;
+  const failed: BulkFailure[] = [];
   for (;;) {
     const answer = await send(
       bulkBody(selection, {
         ...(continueFrom === null ? {} : { continueFrom }),
         ...(opts.destination ? { destination: opts.destination } : {}),
       }),
-    )
+    );
     // The guard runs once, at the start of a job, so a refusal can only arrive on
     // the first call — and it arrives before anything is written.
-    if (wasRefused(answer)) return { refused: answer }
-    done += answer.done
-    failed.push(...answer.failed)
-    opts.onProgress?.(answer.seen, answer.total)
+    if (wasRefused(answer)) return { refused: answer };
+    done += answer.done;
+    failed.push(...answer.failed);
+    opts.onProgress?.(answer.seen, answer.total);
     // A cursor that has not moved is a server that will answer the same thing
     // forever, and this loop would post until the tab was closed. Named because
     // decision 11's "loop on `continueFrom`" is right about the condition and
     // silent about a cursor that stands still.
     if (answer.continueFrom === null || answer.continueFrom === continueFrom) {
-      return { done, failed }
+      return { done, failed };
     }
-    continueFrom = answer.continueFrom
+    continueFrom = answer.continueFrom;
   }
 }
 
@@ -957,11 +957,11 @@ export async function runBulkJob(
  *   the page, not to a particular shape of tree.
  */
 export interface ContentUrl {
-  view: ViewMode
-  sort: FlatSort
-  state: StateFilter
-  type: string | undefined
-  q: string
+  view: ViewMode;
+  sort: FlatSort;
+  state: StateFilter;
+  type: string | undefined;
+  q: string;
 }
 
 export function parseContentUrl(
@@ -970,12 +970,12 @@ export function parseContentUrl(
   defaults: { view: ViewMode; sort: FlatSort },
 ): ContentUrl {
   return {
-    view: query.view === 'flat' ? 'flat' : query.view === 'tree' ? 'tree' : defaults.view,
+    view: query.view === "flat" ? "flat" : query.view === "tree" ? "tree" : defaults.view,
     sort: isFlatSort(query.sort) ? query.sort : defaults.sort,
-    state: isStateFilter(query.state) ? query.state : 'all',
+    state: isStateFilter(query.state) ? query.state : "all",
     type: query.type || undefined,
-    q: query.q ?? '',
-  }
+    q: query.q ?? "",
+  };
 }
 
 /**
@@ -989,22 +989,22 @@ export function parseContentUrl(
  */
 export function contentQuery(url: ContentUrl): Record<string, string | undefined> {
   return {
-    view: url.view === 'tree' ? undefined : url.view,
-    sort: url.view === 'flat' && url.sort !== 'edited' ? url.sort : undefined,
-    state: url.state === 'all' ? undefined : url.state,
+    view: url.view === "tree" ? undefined : url.view,
+    sort: url.view === "flat" && url.sort !== "edited" ? url.sort : undefined,
+    state: url.state === "all" ? undefined : url.state,
     type: url.type,
     q: url.q || undefined,
-  }
+  };
 }
 
 function isFlatSort(raw: string | undefined): raw is FlatSort {
-  return raw === 'edited' || raw === 'title' || raw === 'path'
+  return raw === "edited" || raw === "title" || raw === "path";
 }
 
 function isStateFilter(raw: string | undefined): raw is StateFilter {
   return (
-    raw === 'all' || raw === 'draft' || raw === 'live' || raw === 'changed' || raw === 'unpublished'
-  )
+    raw === "all" || raw === "draft" || raw === "live" || raw === "changed" || raw === "unpublished"
+  );
 }
 
 /**
@@ -1018,10 +1018,10 @@ function isStateFilter(raw: string | undefined): raw is StateFilter {
  */
 export function filterOf(url: ContentUrl): StoryFilter {
   return {
-    ...(url.state === 'all' ? {} : { state: url.state }),
+    ...(url.state === "all" ? {} : { state: url.state }),
     ...(url.type ? { type: url.type } : {}),
     ...(url.q.trim() ? { q: url.q.trim() } : {}),
-  }
+  };
 }
 
 /** A `StoryFilter` as query parameters, for the fetch. One function so the URL
@@ -1032,7 +1032,7 @@ export function filterParams(filter: StoryFilter): Record<string, string> {
     ...(filter.type ? { type: filter.type } : {}),
     ...(filter.q ? { q: filter.q } : {}),
     ...(filter.locale ? { locale: filter.locale } : {}),
-  }
+  };
 }
 
 /**
@@ -1043,7 +1043,7 @@ export function filterParams(filter: StoryFilter): Record<string, string> {
  * clear nothing — and `narrowingForcesFlat` below.
  */
 export function isNarrowed(filter: StoryFilter): boolean {
-  return Boolean(filter.state || filter.type || filter.q)
+  return Boolean(filter.state || filter.type || filter.q);
 }
 
 /**
@@ -1083,8 +1083,8 @@ export function isNarrowed(filter: StoryFilter): boolean {
  * "unpublished changes" block in their new home (`ui-architecture.md`, Home).
  */
 export function withFilter(url: ContentUrl, patch: Partial<ContentUrl>): ContentUrl {
-  const next = { ...url, ...patch }
-  return isNarrowed(filterOf(next)) ? { ...next, view: 'flat' } : next
+  const next = { ...url, ...patch };
+  return isNarrowed(filterOf(next)) ? { ...next, view: "flat" } : next;
 }
 
 /**
@@ -1099,8 +1099,8 @@ export function withFilter(url: ContentUrl, patch: Partial<ContentUrl>): Content
  * `flat` keeps everything: it can express every filter the chips offer.
  */
 export function withView(url: ContentUrl, view: ViewMode): ContentUrl {
-  if (view === 'flat') return { ...url, view }
-  return { ...url, view, state: 'all', type: undefined, q: '' }
+  if (view === "flat") return { ...url, view };
+  return { ...url, view, state: "all", type: undefined, q: "" };
 }
 
 /**
@@ -1128,9 +1128,9 @@ export function withView(url: ContentUrl, view: ViewMode): ContentUrl {
 export function urlOfCaptured(url: ContentUrl, selection: AllMatching): ContentUrl {
   return {
     ...url,
-    view: 'flat',
-    state: selection.filter.state ?? 'all',
+    view: "flat",
+    state: selection.filter.state ?? "all",
     type: selection.filter.type,
-    q: selection.filter.q ?? '',
-  }
+    q: selection.filter.q ?? "",
+  };
 }

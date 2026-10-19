@@ -1,5 +1,5 @@
-import { createContext, Fragment, useContext } from 'react'
-import type { CSSProperties } from 'react'
+import { createContext, Fragment, useContext } from "react";
+import type { CSSProperties } from "react";
 import {
   defineBlock,
   form,
@@ -7,7 +7,7 @@ import {
   text,
   type ResolvedForm,
   type ResolvedFormField,
-} from 'folio/core'
+} from "folio/core";
 
 /**
  * What the host read off its own URL after a submission
@@ -27,15 +27,15 @@ import {
  */
 export interface SubmissionState {
   /** `folio_status`: `ok` | `invalid` | `closed` | `rate` | `verify` | `error`. */
-  status: string
+  status: string;
   /** `folio_form`: the form's slug, so a page carrying two forms can tell which
    *  one answered. Never the id — the id is in the action and nowhere else. */
-  form: string
+  form: string;
   /** `folio_invalid`: the field names the server refused. */
-  invalid: readonly string[]
+  invalid: readonly string[];
 }
 
-export const SubmissionStatus = createContext<SubmissionState | null>(null)
+export const SubmissionStatus = createContext<SubmissionState | null>(null);
 
 /**
  * The banner above the form. A component rather than a branch inside `render`,
@@ -43,44 +43,44 @@ export const SubmissionStatus = createContext<SubmissionState | null>(null)
  * and a hook belongs in something React itself calls.
  */
 function Notice({ form: descriptor }: { form: ResolvedForm }) {
-  const state = useContext(SubmissionStatus)
+  const state = useContext(SubmissionStatus);
   // `folio_form` is what makes two forms on one page distinguishable; without
   // this test both would announce every submission.
-  if (!state || state.form !== descriptor.name) return null
+  if (!state || state.form !== descriptor.name) return null;
 
-  if (state.status === 'ok') {
+  if (state.status === "ok") {
     return (
       <p className="form__notice form__notice--ok">
-        {descriptor.successMessage || 'Thanks — we have that.'}
+        {descriptor.successMessage || "Thanks — we have that."}
       </p>
-    )
+    );
   }
-  if (state.status === 'closed') {
-    return <p className="form__notice">{descriptor.closedMessage || 'This form is closed.'}</p>
+  if (state.status === "closed") {
+    return <p className="form__notice">{descriptor.closedMessage || "This form is closed."}</p>;
   }
   return (
     <p className="form__notice form__notice--bad">
-      {state.status === 'rate'
-        ? 'That was a lot of submissions. Try again shortly.'
-        : state.status === 'verify'
-          ? 'We could not verify that submission.'
-          : 'Please check the highlighted answers.'}
+      {state.status === "rate"
+        ? "That was a lot of submissions. Try again shortly."
+        : state.status === "verify"
+          ? "We could not verify that submission."
+          : "Please check the highlighted answers."}
     </p>
-  )
+  );
 }
 
 /** One question, drawn by the host. The descriptor is already localised and
  *  already carries `required`, `pattern`, `min`/`max` and the option labels, so
  *  there is no locale code and no fallback logic anywhere in here. */
 function Question({ field, invalid }: { field: ResolvedFormField; invalid: boolean }) {
-  const id = `f-${field.name}`
-  const bad = invalid || undefined
+  const id = `f-${field.name}`;
+  const bad = invalid || undefined;
 
   // Prose between questions: no input, nothing stored. `formLayout` still
   // gives a `statement` a row of its own — it is never `hidden`, so it is
   // never routed to `FormBody`'s `view.inputs` instead.
-  if (field.kind === 'statement') {
-    return <p className="form__statement">{field.text}</p>
+  if (field.kind === "statement") {
+    return <p className="form__statement">{field.text}</p>;
   }
   // `hidden` never reaches here: `formLayout` pulls it out into
   // `view.inputs`, position-free, before this component ever sees `field`.
@@ -92,7 +92,7 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
         {field.required ? <abbr title="required"> *</abbr> : null}
       </label>
 
-      {field.kind === 'textarea' ? (
+      {field.kind === "textarea" ? (
         <textarea
           id={id}
           className="form__input"
@@ -103,7 +103,7 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
           maxLength={field.max}
           aria-invalid={bad}
         />
-      ) : field.kind === 'select' ? (
+      ) : field.kind === "select" ? (
         <select
           id={id}
           className="form__input"
@@ -118,21 +118,21 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
             </option>
           ))}
         </select>
-      ) : field.kind === 'radio' || field.kind === 'checkboxes' ? (
+      ) : field.kind === "radio" || field.kind === "checkboxes" ? (
         <fieldset className="form__group" aria-invalid={bad}>
           {field.options?.map((option) => (
             <label key={option.value} className="form__choice">
               <input
-                type={field.kind === 'radio' ? 'radio' : 'checkbox'}
+                type={field.kind === "radio" ? "radio" : "checkbox"}
                 name={field.name}
                 value={option.value}
-                required={field.kind === 'radio' && field.required}
+                required={field.kind === "radio" && field.required}
               />
               {option.label}
             </label>
           ))}
         </fieldset>
-      ) : field.kind === 'checkbox' ? (
+      ) : field.kind === "checkbox" ? (
         <input
           id={id}
           type="checkbox"
@@ -141,7 +141,7 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
           required={field.required}
           aria-invalid={bad}
         />
-      ) : field.kind === 'file' ? (
+      ) : field.kind === "file" ? (
         // `accept` is the exact content-type list the server will re-check
         // against the *bytes*, so the picker and the route cannot disagree —
         // and the route's refusal is the one that counts.
@@ -151,7 +151,7 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
           className="form__input"
           name={field.name}
           required={field.required}
-          accept={field.accept?.join(',')}
+          accept={field.accept?.join(",")}
           aria-invalid={bad}
         />
       ) : (
@@ -164,7 +164,7 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
           placeholder={field.placeholder}
           pattern={field.pattern}
           aria-invalid={bad}
-          {...(field.kind === 'number'
+          {...(field.kind === "number"
             ? { min: field.min, max: field.max }
             : { maxLength: field.max })}
         />
@@ -172,7 +172,7 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
 
       {field.help ? <p className="form__help">{field.help}</p> : null}
     </div>
-  )
+  );
 }
 
 /**
@@ -192,20 +192,20 @@ function Question({ field, invalid }: { field: ResolvedFormField; invalid: boole
  * transport is a native POST and the answer is a 303 (decision 5).
  */
 export const contactForm = defineBlock({
-  name: 'contactForm',
-  label: 'Form',
-  summary: 'heading',
+  name: "contactForm",
+  label: "Form",
+  summary: "heading",
   fields: {
-    heading: text({ label: 'Heading', translatable: true }),
+    heading: text({ label: "Heading", translatable: true }),
     // The stored value is the form's id; the inspector draws a picker over the
     // Forms screen's own rows for it, so nothing here has to explain where to
     // find one.
-    form: form({ label: 'Form' }),
+    form: form({ label: "Form" }),
   },
   render: ({ heading, form: descriptor }) => {
     // Deleted since the page was published: the same posture a `reference` to a
     // deleted document takes, and the delete dialog warned about it first.
-    if (!descriptor) return null
+    if (!descriptor) return null;
 
     return (
       <section className="form">
@@ -218,25 +218,25 @@ export const contactForm = defineBlock({
           // Advertised in the descriptor *and* enforced at the route
           // (decision 14): a page cached for a week keeps serving the old
           // markup, so the route is the enforcement and this is the courtesy.
-          <p className="form__closed">{descriptor.closedMessage || 'This form is closed.'}</p>
+          <p className="form__closed">{descriptor.closedMessage || "This form is closed."}</p>
         )}
       </section>
-    )
+    );
   },
-})
+});
 
 /** The `<form>` itself. Split out so `Notice`'s hook and this one's
  *  `useContext` sit in components rather than in `render`. */
 function FormBody({ descriptor }: { descriptor: ResolvedForm }) {
-  const state = useContext(SubmissionStatus)
-  const invalid = new Set(state?.form === descriptor.name ? state.invalid : [])
+  const state = useContext(SubmissionStatus);
+  const invalid = new Set(state?.form === descriptor.name ? state.invalid : []);
   // `formLayout` (`folio/core`) is the one function that groups a compiled
   // form's flat `fields` into rows and sections, so this host never
   // reimplements the grouping `beside`/`grow` already describe. Called with no
   // `answers` (this is a server render with no submission to react to yet), so
   // every cell comes back `shown: true` — the whole of what that argument does
   // until conditional visibility lands.
-  const view = formLayout(descriptor)
+  const view = formLayout(descriptor);
 
   return (
     <form method={descriptor.method} action={descriptor.action} encType={descriptor.enctype}>
@@ -264,7 +264,7 @@ function FormBody({ descriptor }: { descriptor: ResolvedForm }) {
       {/* `hidden`-kind questions: layout-transparent, so `formLayout` carries
           them separately from every row — they render anywhere in the form. */}
       {view.inputs.map((field) => (
-        <input key={field.name} type="hidden" name={field.name} value={field.value ?? ''} />
+        <input key={field.name} type="hidden" name={field.name} value={field.value ?? ""} />
       ))}
 
       {view.sections.map(({ section, rows }, i) => {
@@ -273,7 +273,7 @@ function FormBody({ descriptor }: { descriptor: ResolvedForm }) {
             key={row.key}
             className="form__row"
             style={
-              { '--form-row-cols': row.cells.map((c) => `${c.grow}fr`).join(' ') } as CSSProperties
+              { "--form-row-cols": row.cells.map((c) => `${c.grow}fr`).join(" ") } as CSSProperties
             }
           >
             {row.cells.map((cell) =>
@@ -292,7 +292,7 @@ function FormBody({ descriptor }: { descriptor: ResolvedForm }) {
               ),
             )}
           </div>
-        ))
+        ));
         // No section this slice — `formLayout` always answers the one
         // `section: null` group — but a host writing against this shape now
         // needs no changes once sections are real.
@@ -305,12 +305,12 @@ function FormBody({ descriptor }: { descriptor: ResolvedForm }) {
         ) : (
           // biome-ignore lint/suspicious/noArrayIndexKey: one section, ever, this slice.
           <Fragment key={i}>{body}</Fragment>
-        )
+        );
       })}
 
       <button className="btn btn--primary" type="submit">
         {descriptor.submitLabel}
       </button>
     </form>
-  )
+  );
 }

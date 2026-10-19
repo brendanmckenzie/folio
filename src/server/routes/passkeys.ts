@@ -22,9 +22,9 @@
  * what a route is for: reading the request, choosing the gate, and turning an
  * answer into a `Response`.
  */
-import { Hono } from 'hono'
-import type { Context } from 'hono'
-import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import { Hono } from "hono";
+import type { Context } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import {
   challengeBytes,
   clearWebauthnCookies,
@@ -34,9 +34,9 @@ import {
   serialiseCookie,
   WEBAUTHN_COOKIE_TTL_S,
   webauthnCookieName,
-} from '../auth/cookie'
-import { recordEventStatement } from '../auth/events'
-import { base64url } from '../auth/jwt'
+} from "../auth/cookie";
+import { recordEventStatement } from "../auth/events";
+import { base64url } from "../auth/jwt";
 import {
   createPasskey,
   deletePasskey,
@@ -45,18 +45,18 @@ import {
   MAX_PASSKEYS_PER_USER,
   type PasskeyRow,
   renamePasskey,
-} from '../auth/passkeys'
-import { ADMIN, type UserActor } from '../auth/roles'
-import { mintSecret } from '../auth/secrets'
-import { listUserSessions, revokeOtherSessions } from '../auth/session'
-import { domainOf, type SessionAuth } from '../auth/sign-in'
-import { userById } from '../auth/users'
-import { creationOptions, verifyRegistration } from '../auth/webauthn'
-import { envelope, FolioError } from '../errors'
-import { requireAccess, requireAuthConfigured, requirePasskeys } from '../middleware'
-import type { FolioRuntime } from '../runtime'
-import type { FolioEnv } from '../types'
-import { idParam, parseBody, PasskeyPatchBody, PasskeyRegisterBody } from '../validate'
+} from "../auth/passkeys";
+import { ADMIN, type UserActor } from "../auth/roles";
+import { mintSecret } from "../auth/secrets";
+import { listUserSessions, revokeOtherSessions } from "../auth/session";
+import { domainOf, type SessionAuth } from "../auth/sign-in";
+import { userById } from "../auth/users";
+import { creationOptions, verifyRegistration } from "../auth/webauthn";
+import { envelope, FolioError } from "../errors";
+import { requireAccess, requireAuthConfigured, requirePasskeys } from "../middleware";
+import type { FolioRuntime } from "../runtime";
+import type { FolioEnv } from "../types";
+import { idParam, parseBody, PasskeyPatchBody, PasskeyRegisterBody } from "../validate";
 
 /**
  * The one message every refusal of `POST {base}/login/passkey` carries, and the
@@ -69,12 +69,12 @@ import { idParam, parseBody, PasskeyPatchBody, PasskeyRegisterBody } from '../va
  * able to tell "no such credential" from "wrong signature" from "that account is
  * behind SSO", because each of those is a fact about somebody's account.
  */
-export const PASSKEY_REFUSED = 'That passkey was not accepted.'
+export const PASSKEY_REFUSED = "That passkey was not accepted.";
 
 /** The refusal body, built through `envelope` so its shape and key order cannot
  * drift from every other error this server answers with. */
 export function passkeyRefusalBody(): ReturnType<typeof envelope> {
-  return envelope(new FolioError('unauthorized', PASSKEY_REFUSED))
+  return envelope(new FolioError("unauthorized", PASSKEY_REFUSED));
 }
 
 /**
@@ -84,7 +84,7 @@ export function passkeyRefusalBody(): ReturnType<typeof envelope> {
  * misconfigure and no way to enrol a credential that silently does not work.
  */
 export function rpIdOf(url: URL): string {
-  return url.hostname
+  return url.hostname;
 }
 
 /**
@@ -97,13 +97,13 @@ export function rpIdOf(url: URL): string {
  */
 export function mintChallenge(
   url: URL,
-  ceremony: 'create' | 'get',
+  ceremony: "create" | "get",
   userId?: string,
 ): { challenge: Uint8Array<ArrayBuffer>; expected: string; cookie: string } {
-  const hex = mintSecret()
-  const bytes = challengeBytes(hex)
+  const hex = mintSecret();
+  const bytes = challengeBytes(hex);
   const payload =
-    userId === undefined ? { c: hex, k: ceremony } : { c: hex, k: ceremony, u: userId }
+    userId === undefined ? { c: hex, k: ceremony } : { c: hex, k: ceremony, u: userId };
   return {
     challenge: bytes,
     // What `clientDataJSON.challenge` has to equal: the browser base64urls the
@@ -113,7 +113,7 @@ export function mintChallenge(
     cookie: serialiseCookie(url, webauthnCookieName(url), encodeChallenge(payload), {
       maxAge: WEBAUTHN_COOKIE_TTL_S,
     }),
-  }
+  };
 }
 
 /**
@@ -130,10 +130,10 @@ export function mintChallenge(
  * `passkeys` block so the screen and the route cannot disagree about the reason.
  */
 export function passkeyEnrolmentRefusal(auth: SessionAuth, email: string): string | null {
-  const domain = domainOf(email)
-  const enforced = auth.domains.get(domain)
-  if (enforced === undefined || enforced === 'passkey') return null
-  return `Signing in for ${domain} goes through ${enforced}, so a passkey cannot be a second door.`
+  const domain = domainOf(email);
+  const enforced = auth.domains.get(domain);
+  if (enforced === undefined || enforced === "passkey") return null;
+  return `Signing in for ${domain} goes through ${enforced}, so a passkey cannot be a second door.`;
 }
 
 /** A `PasskeyRow` as every route answers it. Named field by field rather than
@@ -149,7 +149,7 @@ function toJson(row: PasskeyRow) {
     backedUp: row.backedUp,
     createdAt: row.createdAt,
     lastUsedAt: row.lastUsedAt,
-  }
+  };
 }
 
 /**
@@ -161,17 +161,17 @@ function toJson(row: PasskeyRow) {
  * the cookie — but the smallest thing that does the job is the one that cannot
  * become a problem later.
  */
-const SESSION_ID_CHARS = 12
+const SESSION_ID_CHARS = 12;
 
 export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /** The session arm, for the domain map and the provider. Every route below is
    * behind `requireAuthConfigured`, so this branch is unreachable. */
   const sessionAuth = (): SessionAuth => {
-    if (rt.auth.mode !== 'session') throw new FolioError('not_found', 'Auth is not configured')
-    return rt.auth
-  }
+    if (rt.auth.mode !== "session") throw new FolioError("not_found", "Auth is not configured");
+    return rt.auth;
+  };
 
   /**
    * The actor, refused for a token.
@@ -183,11 +183,11 @@ export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * browser sessions to list either.
    */
   const person = (c: Context<FolioEnv<Env>>, noun: string): UserActor => {
-    const actor = c.var.actor
-    if (!actor) throw new FolioError('unauthorized', 'Sign in to continue.')
-    if (actor.kind !== 'user') throw new FolioError('forbidden', `A token has no ${noun}.`)
-    return actor
-  }
+    const actor = c.var.actor;
+    if (!actor) throw new FolioError("unauthorized", "Sign in to continue.");
+    if (actor.kind !== "user") throw new FolioError("forbidden", `A token has no ${noun}.`);
+    return actor;
+  };
 
   /**
    * A response that also clears the challenge cookie, under both names.
@@ -201,21 +201,21 @@ export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     new Response(JSON.stringify(body), {
       status,
       headers: [
-        ['content-type', 'application/json'],
-        ...clearWebauthnCookies(url).map((value) => ['set-cookie', value] as [string, string]),
+        ["content-type", "application/json"],
+        ...clearWebauthnCookies(url).map((value) => ["set-cookie", value] as [string, string]),
       ],
-    })
+    });
 
   // Auth configured, the provider listed, and a person rather than a token. The
   // order matters for the same reason `access.ts` states: "there is no such
   // thing here" comes before "you may not".
-  app.use('/me/passkeys', requireAuthConfigured<Env>(rt), requirePasskeys<Env>(rt))
-  app.use('/me/passkeys/*', requireAuthConfigured<Env>(rt), requirePasskeys<Env>(rt))
+  app.use("/me/passkeys", requireAuthConfigured<Env>(rt), requirePasskeys<Env>(rt));
+  app.use("/me/passkeys/*", requireAuthConfigured<Env>(rt), requirePasskeys<Env>(rt));
   // Sessions are **not** behind `requirePasskeys`: knowing which browsers you are
   // signed in on is worth having on a deployment with no passkeys at all, and the
   // account screen would otherwise be blank for most hosts.
-  app.use('/me/sessions', requireAuthConfigured<Env>(rt))
-  app.use('/me/sessions/*', requireAuthConfigured<Env>(rt))
+  app.use("/me/sessions", requireAuthConfigured<Env>(rt));
+  app.use("/me/sessions/*", requireAuthConfigured<Env>(rt));
 
   /* --------------------------------------------------------- enrolment --- */
 
@@ -233,28 +233,28 @@ export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * means they cannot enrol another — in each case a challenge would be a value
    * the browser carries around for ten minutes for nothing.
    */
-  app.post('/me/passkeys/options', async (c) => {
-    const auth = sessionAuth()
-    const actor = person(c, 'passkeys')
-    const db = c.var.bindings().db
-    const user = await userById(db, actor.id)
+  app.post("/me/passkeys/options", async (c) => {
+    const auth = sessionAuth();
+    const actor = person(c, "passkeys");
+    const db = c.var.bindings().db;
+    const user = await userById(db, actor.id);
     // The session resolved a moment ago, so the row is there; a removal between
     // the two is the 401 the *next* request gets, not a 500 for this one.
-    if (!user) throw new FolioError('unauthorized', 'Sign in to continue.')
+    if (!user) throw new FolioError("unauthorized", "Sign in to continue.");
 
-    const refusal = passkeyEnrolmentRefusal(auth, user.email)
-    if (refusal) throw new FolioError('forbidden', refusal)
+    const refusal = passkeyEnrolmentRefusal(auth, user.email);
+    if (refusal) throw new FolioError("forbidden", refusal);
 
-    const existing = await listPasskeys(db, user.id)
+    const existing = await listPasskeys(db, user.id);
     if (existing.length >= MAX_PASSKEYS_PER_USER) {
       throw new FolioError(
-        'conflict',
+        "conflict",
         `That account already has ${MAX_PASSKEYS_PER_USER} passkeys. Remove one before adding another.`,
-      )
+      );
     }
 
-    const url = new URL(c.req.url)
-    const minted = mintChallenge(url, 'create', user.id)
+    const url = new URL(c.req.url);
+    const minted = mintChallenge(url, "create", user.id);
     const options = creationOptions({
       rpId: rpIdOf(url),
       // The host, unless the deployment named itself. This is the string the
@@ -267,15 +267,15 @@ export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       // shows its own message, so a duplicate is usually caught before the server
       // sees it. `createPasskey`'s 409 is what covers the browsers that do not.
       exclude: existing.map((p) => ({ id: p.id, transports: p.transports })),
-    })
+    });
     return new Response(JSON.stringify({ publicKey: options }), {
       status: 200,
       headers: [
-        ['content-type', 'application/json'],
-        ['set-cookie', minted.cookie],
+        ["content-type", "application/json"],
+        ["set-cookie", minted.cookie],
       ],
-    })
-  })
+    });
+  });
 
   /**
    * The credential, verified and stored.
@@ -289,21 +289,21 @@ export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * The `409` is the exception, because it *is* actionable: that credential is
    * already enrolled, here or on somebody else's account.
    */
-  app.post('/me/passkeys', async (c) => {
-    const url = new URL(c.req.url)
+  app.post("/me/passkeys", async (c) => {
+    const url = new URL(c.req.url);
     try {
-      const actor = person(c, 'passkeys')
-      const db = c.var.bindings().db
+      const actor = person(c, "passkeys");
+      const db = c.var.bindings().db;
 
-      const challenge = decodeChallenge(readWebauthnCookie(c.req.header('cookie')))
+      const challenge = decodeChallenge(readWebauthnCookie(c.req.header("cookie")));
       // `k` and `u` together: a `get` challenge is the login ceremony's and a
       // challenge minted for somebody else is the attack `u` exists to stop.
-      if (challenge?.k !== 'create' || challenge.u !== actor.id) {
-        throw new FolioError('bad_request', 'That passkey could not be added. Try again.')
+      if (challenge?.k !== "create" || challenge.u !== actor.id) {
+        throw new FolioError("bad_request", "That passkey could not be added. Try again.");
       }
 
-      const body = await parseBody(c.req, PasskeyRegisterBody)
-      let registered: Awaited<ReturnType<typeof verifyRegistration>>
+      const body = await parseBody(c.req, PasskeyRegisterBody);
+      let registered: Awaited<ReturnType<typeof verifyRegistration>>;
       try {
         registered = await verifyRegistration({
           credential: body.credential,
@@ -312,63 +312,63 @@ export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
             origin: url.origin,
             rpId: rpIdOf(url),
           },
-        })
+        });
       } catch {
-        throw new FolioError('bad_request', 'That passkey could not be added. Try again.')
+        throw new FolioError("bad_request", "That passkey could not be added. Try again.");
       }
 
       // `Passkey · <host>` by default, so a row enrolled on a preview says so —
       // which is the only hint anybody gets when a credential made on one host
       // silently does not work on another (decision 5's own edge case).
-      const name = body.name?.trim() || `Passkey · ${rpIdOf(url)}`
-      const row = await createPasskey(db, actor.id, registered, name)
+      const name = body.name?.trim() || `Passkey · ${rpIdOf(url)}`;
+      const row = await createPasskey(db, actor.id, registered, name);
       if (!row) {
-        throw new FolioError('conflict', 'That passkey is already enrolled.')
+        throw new FolioError("conflict", "That passkey is already enrolled.");
       }
-      return cleared(url, { passkey: toJson(row) }, 201)
+      return cleared(url, { passkey: toJson(row) }, 201);
     } catch (err) {
       // Cleared on the way out too: see `cleared`.
-      if (err instanceof FolioError) return cleared(url, envelope(err), err.status)
-      throw err
+      if (err instanceof FolioError) return cleared(url, envelope(err), err.status);
+      throw err;
     }
-  })
+  });
 
-  app.get('/me/passkeys', async (c) => {
-    const actor = person(c, 'passkeys')
-    const rows = await listPasskeys(c.var.bindings().db, actor.id)
-    return c.json({ passkeys: rows.map(toJson) })
-  })
+  app.get("/me/passkeys", async (c) => {
+    const actor = person(c, "passkeys");
+    const rows = await listPasskeys(c.var.bindings().db, actor.id);
+    return c.json({ passkeys: rows.map(toJson) });
+  });
 
   /** Renaming is the only edit. `user_id` is in the `where`, so another
    * person's id is a 404 rather than a 403: an id that is not yours must be
    * indistinguishable from one that does not exist. */
-  app.patch('/me/passkeys/:id', async (c) => {
-    const actor = person(c, 'passkeys')
-    const id = idParam('id', c.req.param('id'))
-    const body = await parseBody(c.req, PasskeyPatchBody)
-    const row = await renamePasskey(c.var.bindings().db, actor.id, id, body.name)
-    if (!row) throw new FolioError('not_found', 'Unknown passkey')
-    return c.json({ passkey: toJson(row) })
-  })
+  app.patch("/me/passkeys/:id", async (c) => {
+    const actor = person(c, "passkeys");
+    const id = idParam("id", c.req.param("id"));
+    const body = await parseBody(c.req, PasskeyPatchBody);
+    const row = await renamePasskey(c.var.bindings().db, actor.id, id, body.name);
+    if (!row) throw new FolioError("not_found", "Unknown passkey");
+    return c.json({ passkey: toJson(row) });
+  });
 
-  app.delete('/me/passkeys/:id', async (c) => {
-    const actor = person(c, 'passkeys')
-    const id = idParam('id', c.req.param('id'))
-    const db = c.var.bindings().db
+  app.delete("/me/passkeys/:id", async (c) => {
+    const actor = person(c, "passkeys");
+    const id = idParam("id", c.req.param("id"));
+    const db = c.var.bindings().db;
     if (!(await deletePasskey(db, actor.id, id))) {
-      throw new FolioError('not_found', 'Unknown passkey')
+      throw new FolioError("not_found", "Unknown passkey");
     }
     await db.batch([
       recordEventStatement(db, {
-        kind: 'passkey_removed',
+        kind: "passkey_removed",
         userId: actor.id,
         actor: actor.id,
-        provider: 'passkey',
+        provider: "passkey",
         detail: { passkey: id },
       }),
-    ])
-    return c.json({ deleted: true })
-  })
+    ]);
+    return c.json({ deleted: true });
+  });
 
   /* ---------------------------------------------------------- sessions --- */
 
@@ -384,9 +384,9 @@ export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * `users.last_seen_at` is per person, not per session, so the honest per-browser
    * answer is "signed in at" and "expires".
    */
-  app.get('/me/sessions', async (c) => {
-    const actor = person(c, 'sessions')
-    const rows = await listUserSessions(c.var.bindings().db, actor.id)
+  app.get("/me/sessions", async (c) => {
+    const actor = person(c, "sessions");
+    const rows = await listUserSessions(c.var.bindings().db, actor.id);
     return c.json({
       sessions: rows.map((row) => ({
         id: row.id.slice(0, SESSION_ID_CHARS),
@@ -396,8 +396,8 @@ export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         expiresAt: row.expiresAt,
         userAgent: row.userAgent,
       })),
-    })
-  })
+    });
+  });
 
   /**
    * Signs out everything except the browser asking.
@@ -406,25 +406,25 @@ export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * signed out by their own click, which is the difference between "a device I
    * lent is not still me" and "I have locked myself out".
    */
-  app.delete('/me/sessions/others', async (c) => {
-    const actor = person(c, 'sessions')
-    const db = c.var.bindings().db
-    const revoked = await revokeOtherSessions(db, actor.id, actor.session)
+  app.delete("/me/sessions/others", async (c) => {
+    const actor = person(c, "sessions");
+    const db = c.var.bindings().db;
+    const revoked = await revokeOtherSessions(db, actor.id, actor.session);
     // Only when something happened. A no-op is not an event, which is the rule
     // `completeSignIn` states for the two rows of its interaction table that
     // write nothing.
     if (revoked > 0) {
       await db.batch([
         recordEventStatement(db, {
-          kind: 'sessions_revoked',
+          kind: "sessions_revoked",
           userId: actor.id,
           actor: actor.id,
           detail: { revoked },
         }),
-      ])
+      ]);
     }
-    return c.json({ revoked })
-  })
+    return c.json({ revoked });
+  });
 
   /* ------------------------------------------------------- the admin's --- */
 
@@ -440,31 +440,31 @@ export function passkeyRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * out can still clear what it left behind.
    */
   app.delete(
-    '/users/:id/passkeys',
+    "/users/:id/passkeys",
     requireAuthConfigured<Env>(rt),
     requireAccess<Env>(rt, ADMIN),
     async (c) => {
-      const id = idParam('id', c.req.param('id'))
-      const db = c.var.bindings().db
-      const target = await userById(db, id)
-      if (!target) throw new FolioError('not_found', 'Unknown user')
-      const removed = await deleteUserPasskeys(db, id)
-      const self = c.var.actor
+      const id = idParam("id", c.req.param("id"));
+      const db = c.var.bindings().db;
+      const target = await userById(db, id);
+      if (!target) throw new FolioError("not_found", "Unknown user");
+      const removed = await deleteUserPasskeys(db, id);
+      const self = c.var.actor;
       await db.batch([
         recordEventStatement(db, {
-          kind: 'passkeys_removed',
+          kind: "passkeys_removed",
           userId: id,
           // The admin, not the subject: this is the one passkey event somebody
           // else caused, and "who did this to my account" is the question the
           // table exists to answer.
-          actor: self?.kind === 'user' ? self.id : self ? `token:${self.name}` : null,
-          provider: 'passkey',
+          actor: self?.kind === "user" ? self.id : self ? `token:${self.name}` : null,
+          provider: "passkey",
           detail: { removed },
         }),
-      ])
-      return c.json({ removed })
+      ]);
+      return c.json({ removed });
     },
-  )
+  );
 
-  return app
+  return app;
 }

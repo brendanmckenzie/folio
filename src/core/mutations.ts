@@ -1,4 +1,4 @@
-import { ancestorsOf, type Blok, type Doc, type Json, subtree } from './doc'
+import { ancestorsOf, type Blok, type Doc, type Json, subtree } from "./doc";
 
 /**
  * Every edit in the system is one of these. Nothing writes to a document
@@ -18,7 +18,7 @@ export type Mutation =
    * `{ locale, value: null }` — and `fieldValue` reads null as untranslated while
    * `''` stays deliberately empty.
    */
-  | { t: 'set'; uid: string; field: string; value: Json; locale?: string }
+  | { t: "set"; uid: string; field: string; value: Json; locale?: string }
   /**
    * Deletes one key, so the field reads as **absent** rather than as `null`
    * (`multi-site.md` decision 8). Only a layered global can tell the two apart:
@@ -29,10 +29,10 @@ export type Mutation =
    * Beat a sentinel such as `{ $inherit: true }`, which is data every reader
    * would have to know is not data. A missing key or uid is a no-op.
    */
-  | { t: 'unset'; uid: string; field: string; locale?: string }
-  | { t: 'insert'; blok: Blok }
-  | { t: 'move'; uid: string; parent: string; slot: string; order: string }
-  | { t: 'remove'; uid: string }
+  | { t: "unset"; uid: string; field: string; locale?: string }
+  | { t: "insert"; blok: Blok }
+  | { t: "move"; uid: string; parent: string; slot: string; order: string }
+  | { t: "remove"; uid: string }
   /**
    * Changes a blok's *type*, keeping its uid, its position and its children
    * (`schema-migrations.md` architecture decision 3). The only edit the
@@ -44,7 +44,7 @@ export type Mutation =
    * dropped emits `set` mutations alongside it, which is why `block.retype`
    * (core/migrate.ts) returns several mutations rather than one.
    */
-  | { t: 'retype'; uid: string; type: string }
+  | { t: "retype"; uid: string; type: string };
 
 /**
  * Why `m` cannot be applied to `doc`, or null when it can. Naming the violation
@@ -60,34 +60,34 @@ export type Mutation =
  */
 export function mutationError(doc: Doc, m: Mutation): string | null {
   switch (m.t) {
-    case 'set':
-    case 'unset':
-      return null
-    case 'insert':
-      return doc.bloks[m.blok.uid] ? `duplicate uid: ${m.blok.uid} already exists` : null
-    case 'move': {
-      if (!doc.bloks[m.uid]) return null
-      if (m.uid === doc.root) return 'root move: the root cannot be given a parent'
-      if (m.uid === m.parent) return 'self-parent: a blok cannot be its own parent'
-      if (!doc.bloks[m.parent]) return `missing parent: ${m.parent} does not exist`
+    case "set":
+    case "unset":
+      return null;
+    case "insert":
+      return doc.bloks[m.blok.uid] ? `duplicate uid: ${m.blok.uid} already exists` : null;
+    case "move": {
+      if (!doc.bloks[m.uid]) return null;
+      if (m.uid === doc.root) return "root move: the root cannot be given a parent";
+      if (m.uid === m.parent) return "self-parent: a blok cannot be its own parent";
+      if (!doc.bloks[m.parent]) return `missing parent: ${m.parent} does not exist`;
       if (ancestorsOf(doc, m.parent).includes(m.uid)) {
-        return `cycle: ${m.parent} is a descendant of ${m.uid}`
+        return `cycle: ${m.parent} is a descendant of ${m.uid}`;
       }
-      return null
+      return null;
     }
-    case 'remove':
-      return m.uid === doc.root ? 'root remove: the root cannot be removed' : null
-    case 'retype':
+    case "remove":
+      return m.uid === doc.root ? "root remove: the root cannot be removed" : null;
+    case "retype":
       // A missing uid is a no-op, exactly as for set/move/remove. Retyping the
       // *root* is refused: a document's root type is its document type, and
       // changing that is a `document-types.md` concern (a `stories.type` update
       // in the same breath), not a block edit.
-      if (!doc.bloks[m.uid]) return null
+      if (!doc.bloks[m.uid]) return null;
       return m.uid === doc.root
-        ? 'root retype: the root type is the document type, not a block edit'
-        : null
+        ? "root retype: the root type is the document type, not a block edit"
+        : null;
     default:
-      return `unknown kind: ${(m as { t: string }).t}`
+      return `unknown kind: ${(m as { t: string }).t}`;
   }
 }
 
@@ -95,47 +95,47 @@ export function apply(doc: Doc, m: Mutation): Doc {
   // Applying an invalid mutation is a structural no-op, independently of the
   // server's validation: client and server replay the same log through here, and
   // logs written before these guards existed must still land on a sane document.
-  if (mutationError(doc, m)) return doc
+  if (mutationError(doc, m)) return doc;
 
   switch (m.t) {
-    case 'set': {
-      const b = doc.bloks[m.uid]
-      if (!b) return doc
-      return { ...doc, bloks: { ...doc.bloks, [m.uid]: written(b, m.field, m.value, m.locale) } }
+    case "set": {
+      const b = doc.bloks[m.uid];
+      if (!b) return doc;
+      return { ...doc, bloks: { ...doc.bloks, [m.uid]: written(b, m.field, m.value, m.locale) } };
     }
-    case 'unset': {
-      const b = doc.bloks[m.uid]
-      if (!b) return doc
-      const next = cleared(b, m.field, m.locale)
-      return next === b ? doc : { ...doc, bloks: { ...doc.bloks, [m.uid]: next } }
+    case "unset": {
+      const b = doc.bloks[m.uid];
+      if (!b) return doc;
+      const next = cleared(b, m.field, m.locale);
+      return next === b ? doc : { ...doc, bloks: { ...doc.bloks, [m.uid]: next } };
     }
-    case 'insert': {
-      return { ...doc, bloks: { ...doc.bloks, [m.blok.uid]: m.blok } }
+    case "insert": {
+      return { ...doc, bloks: { ...doc.bloks, [m.blok.uid]: m.blok } };
     }
-    case 'move': {
-      const b = doc.bloks[m.uid]
-      if (!b) return doc
+    case "move": {
+      const b = doc.bloks[m.uid];
+      if (!b) return doc;
       return {
         ...doc,
         bloks: { ...doc.bloks, [m.uid]: { ...b, parent: m.parent, slot: m.slot, order: m.order } },
-      }
+      };
     }
-    case 'remove': {
-      if (!doc.bloks[m.uid] || m.uid === doc.root) return doc
-      const doomed = new Set(subtree(doc, m.uid))
-      const bloks: Record<string, Blok> = {}
+    case "remove": {
+      if (!doc.bloks[m.uid] || m.uid === doc.root) return doc;
+      const doomed = new Set(subtree(doc, m.uid));
+      const bloks: Record<string, Blok> = {};
       for (const [uid, b] of Object.entries(doc.bloks)) {
-        if (!doomed.has(uid)) bloks[uid] = b
+        if (!doomed.has(uid)) bloks[uid] = b;
       }
-      return { ...doc, bloks }
+      return { ...doc, bloks };
     }
-    case 'retype': {
-      const b = doc.bloks[m.uid]
-      if (!b) return doc
+    case "retype": {
+      const b = doc.bloks[m.uid];
+      if (!b) return doc;
       // Type only. Position, children and every field value survive, which is
       // what makes "consolidate two blocks" a migration rather than an editor
       // re-creating content by hand.
-      return { ...doc, bloks: { ...doc.bloks, [m.uid]: { ...b, type: m.type } } }
+      return { ...doc, bloks: { ...doc.bloks, [m.uid]: { ...b, type: m.type } } };
     }
   }
 }
@@ -151,14 +151,14 @@ export function apply(doc: Doc, m: Mutation): Doc {
  * write different keys of the same blok and cannot overwrite each other.
  */
 function written(blok: Blok, field: string, value: Json, locale?: string): Blok {
-  if (locale === undefined) return { ...blok, data: { ...blok.data, [field]: value } }
+  if (locale === undefined) return { ...blok, data: { ...blok.data, [field]: value } };
   return {
     ...blok,
     i18n: {
       ...blok.i18n,
       [locale]: { ...blok.i18n?.[locale], [field]: value },
     },
-  }
+  };
 }
 
 /**
@@ -171,17 +171,17 @@ function written(blok: Blok, field: string, value: Json, locale?: string): Blok 
  */
 function cleared(blok: Blok, field: string, locale?: string): Blok {
   if (locale === undefined) {
-    if (!(field in blok.data)) return blok
-    const { [field]: _gone, ...data } = blok.data
-    return { ...blok, data }
+    if (!(field in blok.data)) return blok;
+    const { [field]: _gone, ...data } = blok.data;
+    return { ...blok, data };
   }
-  const map = blok.i18n?.[locale]
-  if (!map || !(field in map)) return blok
-  const { [field]: _gone, ...rest } = map
-  const { [locale]: _map, ...others } = blok.i18n!
-  const i18n = Object.keys(rest).length > 0 ? { ...others, [locale]: rest } : others
-  const { i18n: _i18n, ...bare } = blok
-  return Object.keys(i18n).length > 0 ? { ...bare, i18n } : bare
+  const map = blok.i18n?.[locale];
+  if (!map || !(field in map)) return blok;
+  const { [field]: _gone, ...rest } = map;
+  const { [locale]: _map, ...others } = blok.i18n!;
+  const i18n = Object.keys(rest).length > 0 ? { ...others, [locale]: rest } : others;
+  const { i18n: _i18n, ...bare } = blok;
+  return Object.keys(i18n).length > 0 ? { ...bare, i18n } : bare;
 }
 
 /**
@@ -192,17 +192,17 @@ function cleared(blok: Blok, field: string, locale?: string): Blok {
  */
 function setMutation(uid: string, field: string, value: Json, locale?: string): Mutation {
   return locale === undefined
-    ? { t: 'set', uid, field, value }
-    : { t: 'set', uid, field, value, locale }
+    ? { t: "set", uid, field, value }
+    : { t: "set", uid, field, value, locale };
 }
 
 /** `unset`'s counterpart to `setMutation`: the locale key is omitted when there is none. */
 function unsetMutation(uid: string, field: string, locale?: string): Mutation {
-  return locale === undefined ? { t: 'unset', uid, field } : { t: 'unset', uid, field, locale }
+  return locale === undefined ? { t: "unset", uid, field } : { t: "unset", uid, field, locale };
 }
 
 export function applyAll(doc: Doc, ms: readonly Mutation[]): Doc {
-  return ms.reduce(apply, doc)
+  return ms.reduce(apply, doc);
 }
 
 /**
@@ -212,58 +212,58 @@ export function applyAll(doc: Doc, ms: readonly Mutation[]): Doc {
 export function invert(doc: Doc, m: Mutation): Mutation[] {
   // A refused mutation changed nothing, so it undoes to nothing. The server
   // never logs one, but an undo stack built over an older log can still see it.
-  if (mutationError(doc, m)) return []
+  if (mutationError(doc, m)) return [];
 
   switch (m.t) {
-    case 'set': {
-      const b = doc.bloks[m.uid]
-      if (!b) return []
+    case "set": {
+      const b = doc.bloks[m.uid];
+      if (!b) return [];
       // Read the prior value from wherever this `set` is about to write, so a
       // translator's Cmd+Z reverts their own language and nobody else's.
-      const prior = m.locale === undefined ? b.data[m.field] : b.i18n?.[m.locale]?.[m.field]
+      const prior = m.locale === undefined ? b.data[m.field] : b.i18n?.[m.locale]?.[m.field];
       // A key that was not there is put back by deleting it, not by writing
       // `null`: in a layered global the two differ (inherited versus removed).
-      if (prior === undefined) return [unsetMutation(m.uid, m.field, m.locale)]
-      return [setMutation(m.uid, m.field, prior, m.locale)]
+      if (prior === undefined) return [unsetMutation(m.uid, m.field, m.locale)];
+      return [setMutation(m.uid, m.field, prior, m.locale)];
     }
-    case 'unset': {
-      const b = doc.bloks[m.uid]
-      if (!b) return []
-      const prior = m.locale === undefined ? b.data[m.field] : b.i18n?.[m.locale]?.[m.field]
+    case "unset": {
+      const b = doc.bloks[m.uid];
+      if (!b) return [];
+      const prior = m.locale === undefined ? b.data[m.field] : b.i18n?.[m.locale]?.[m.field];
       // Deleting an absent key changed nothing, so it undoes to nothing.
-      return prior === undefined ? [] : [setMutation(m.uid, m.field, prior, m.locale)]
+      return prior === undefined ? [] : [setMutation(m.uid, m.field, prior, m.locale)];
     }
-    case 'insert':
-      return [{ t: 'remove', uid: m.blok.uid }]
-    case 'move': {
-      const b = doc.bloks[m.uid]
-      if (!b || b.parent === null || b.slot === null) return []
-      return [{ t: 'move', uid: m.uid, parent: b.parent, slot: b.slot, order: b.order }]
+    case "insert":
+      return [{ t: "remove", uid: m.blok.uid }];
+    case "move": {
+      const b = doc.bloks[m.uid];
+      if (!b || b.parent === null || b.slot === null) return [];
+      return [{ t: "move", uid: m.uid, parent: b.parent, slot: b.slot, order: b.order }];
     }
-    case 'remove': {
-      const b = doc.bloks[m.uid]
-      if (!b) return []
+    case "remove": {
+      const b = doc.bloks[m.uid];
+      if (!b) return [];
       // Re-insert the whole subtree, parents first so children always land on
       // an existing parent.
-      return subtree(doc, m.uid).map((uid) => ({ t: 'insert', blok: doc.bloks[uid]! }))
+      return subtree(doc, m.uid).map((uid) => ({ t: "insert", blok: doc.bloks[uid]! }));
     }
-    case 'retype': {
-      const b = doc.bloks[m.uid]
-      if (!b) return []
+    case "retype": {
+      const b = doc.bloks[m.uid];
+      if (!b) return [];
       // So a migration is undoable like every other transaction, which is the
       // point of routing one through the log at all.
-      return [{ t: 'retype', uid: m.uid, type: b.type }]
+      return [{ t: "retype", uid: m.uid, type: b.type }];
     }
   }
 }
 
 /** Inverse of a transaction: invert each mutation against the state it saw, then reverse. */
 export function invertAll(doc: Doc, ms: readonly Mutation[]): Mutation[] {
-  const inverses: Mutation[][] = []
-  let cursor = doc
+  const inverses: Mutation[][] = [];
+  let cursor = doc;
   for (const m of ms) {
-    inverses.push(invert(cursor, m))
-    cursor = apply(cursor, m)
+    inverses.push(invert(cursor, m));
+    cursor = apply(cursor, m);
   }
-  return inverses.reverse().flat()
+  return inverses.reverse().flat();
 }

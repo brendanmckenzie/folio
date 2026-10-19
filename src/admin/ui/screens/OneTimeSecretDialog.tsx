@@ -1,7 +1,7 @@
-import { useState } from 'react'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import css from './Access.module.css'
+import { useState } from "react";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import css from "./Access.module.css";
 
 /**
  * A credential shown in the clear, exactly once, with a Copy button.
@@ -18,18 +18,18 @@ import css from './Access.module.css'
  */
 export function OneTimeSecretDialog({
   title,
-  description = 'This is the only time it is shown.',
+  description = "This is the only time it is shown.",
   secret,
   onClose,
   children,
 }: {
-  title: string
-  description?: string
-  secret: string
-  onClose: () => void
-  children?: React.ReactNode
+  title: string;
+  description?: string;
+  secret: string;
+  onClose: () => void;
+  children?: React.ReactNode;
 }) {
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState(false);
 
   const copy = () => {
     // Guarded: `navigator.clipboard` is absent over plain HTTP on anything but
@@ -38,8 +38,8 @@ export function OneTimeSecretDialog({
     navigator.clipboard
       ?.writeText(secret)
       .then(() => setCopied(true))
-      .catch(() => setCopied(false))
-  }
+      .catch(() => setCopied(false));
+  };
 
   return (
     <Dialog
@@ -49,7 +49,7 @@ export function OneTimeSecretDialog({
       onClose={onClose}
       actions={
         <>
-          <Button onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button>
+          <Button onClick={copy}>{copied ? "Copied" : "Copy"}</Button>
           <Button variant="primary" onClick={onClose}>
             Done
           </Button>
@@ -62,5 +62,5 @@ export function OneTimeSecretDialog({
           truncated to one line cannot be selected in full. */}
       <code className={css.secret}>{secret}</code>
     </Dialog>
-  )
+  );
 }

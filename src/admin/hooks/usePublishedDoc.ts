@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { diff, summariseDiff } from '../../core/diff'
-import type { Doc } from '../../core/doc'
-import type { VersionMeta } from '../../server/versions'
+import { useEffect, useMemo, useRef, useState } from "react";
+import { diff, summariseDiff } from "../../core/diff";
+import type { Doc } from "../../core/doc";
+import type { VersionMeta } from "../../server/versions";
 
 /**
  * "Published" is the newest `publish` version, not a second read of
@@ -13,10 +13,10 @@ import type { VersionMeta } from '../../server/versions'
 export interface PublishedDoc {
   /** The newest `kind === 'publish'` version, or null if this story has never
    * been published. */
-  version: VersionMeta | null
+  version: VersionMeta | null;
   /** That version's document, fetched once and cached by version id. Null
    * until it has loaded, or if there is no published version at all. */
-  published: Doc | null
+  published: Doc | null;
   /**
    * `summariseDiff(diff(published, liveDoc))` — architecture decision 2: the
    * diff is the authority on "how do these differ", not a flag kept on write,
@@ -24,16 +24,16 @@ export interface PublishedDoc {
    * while there is nothing to compare against yet (never published, or the
    * published doc / live doc has not loaded).
    */
-  delta: ReturnType<typeof summariseDiff> | null
+  delta: ReturnType<typeof summariseDiff> | null;
 }
 
 interface Options {
-  apiBase: string
+  apiBase: string;
   /** The version list the caller already loads (`useVersionsList`), newest
    * first, so the first `kind === 'publish'` entry is the one currently live. */
-  versions: VersionMeta[]
+  versions: VersionMeta[];
   /** The live draft, for the delta against the published version. */
-  liveDoc: Doc | null
+  liveDoc: Doc | null;
 }
 
 /**
@@ -48,11 +48,11 @@ export function publishedDelta(
   published: Doc | null,
   liveDoc: Doc | null,
 ): ReturnType<typeof summariseDiff> | null {
-  if (!published || !liveDoc) return null
+  if (!published || !liveDoc) return null;
   try {
-    return summariseDiff(diff(published, liveDoc))
+    return summariseDiff(diff(published, liveDoc));
   } catch {
-    return null
+    return null;
   }
 }
 
@@ -63,35 +63,35 @@ export function publishedDelta(
  * `Editor.tsx` and both hooks read it from there.
  */
 export function usePublishedDoc({ apiBase, versions, liveDoc }: Options): PublishedDoc {
-  const version = useMemo(() => versions.find((v) => v.kind === 'publish') ?? null, [versions])
-  const [loaded, setLoaded] = useState<{ id: string; doc: Doc } | null>(null)
+  const version = useMemo(() => versions.find((v) => v.kind === "publish") ?? null, [versions]);
+  const [loaded, setLoaded] = useState<{ id: string; doc: Doc } | null>(null);
   // Keyed by version id rather than invalidated on publish: a new publish
   // produces a new version id, so the cache simply never has an entry for it
   // yet and fetches once, same as any other version this story has ever had.
-  const cache = useRef(new Map<string, Doc>())
+  const cache = useRef(new Map<string, Doc>());
 
   useEffect(() => {
-    if (!version) return
-    const cached = cache.current.get(version.id)
+    if (!version) return;
+    const cached = cache.current.get(version.id);
     if (cached) {
-      setLoaded({ id: version.id, doc: cached })
-      return
+      setLoaded({ id: version.id, doc: cached });
+      return;
     }
-    let cancelled = false
+    let cancelled = false;
     void (async () => {
-      const res = await fetch(`${apiBase}/versions/${encodeURIComponent(version.id)}`)
-      if (!res.ok || cancelled) return
-      const { doc } = (await res.json()) as { doc: Doc }
-      cache.current.set(version.id, doc)
-      if (!cancelled) setLoaded({ id: version.id, doc })
-    })()
+      const res = await fetch(`${apiBase}/versions/${encodeURIComponent(version.id)}`);
+      if (!res.ok || cancelled) return;
+      const { doc } = (await res.json()) as { doc: Doc };
+      cache.current.set(version.id, doc);
+      if (!cancelled) setLoaded({ id: version.id, doc });
+    })();
     return () => {
-      cancelled = true
-    }
-  }, [apiBase, version])
+      cancelled = true;
+    };
+  }, [apiBase, version]);
 
-  const published = version && loaded?.id === version.id ? loaded.doc : null
-  const delta = useMemo(() => publishedDelta(published, liveDoc), [liveDoc, published])
+  const published = version && loaded?.id === version.id ? loaded.doc : null;
+  const delta = useMemo(() => publishedDelta(published, liveDoc), [liveDoc, published]);
 
-  return { version, published, delta }
+  return { version, published, delta };
 }

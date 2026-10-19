@@ -16,9 +16,9 @@
  * (`humanSize`, the thumbnail URL shape, and `keyAssets` at the foot of the file —
  * the last of which is a *field's* concern rather than this screen's, and says so).
  */
-import type { AssetFilter, AssetFolder, AssetSort, AssetTag } from '../../../core/assets'
-import type { AssetValue } from '../../../core/values'
-import type { AssetRow as ServerAssetRow } from '../../../server/assets'
+import type { AssetFilter, AssetFolder, AssetSort, AssetTag } from "../../../core/assets";
+import type { AssetValue } from "../../../core/values";
+import type { AssetRow as ServerAssetRow } from "../../../server/assets";
 
 /**
  * A library row, as every unversioned asset route answers it: `server/assets.ts`'s
@@ -29,7 +29,7 @@ import type { AssetRow as ServerAssetRow } from '../../../server/assets'
  * every caller re-declaring the extension for itself.
  */
 export interface AssetRow extends ServerAssetRow {
-  tags: AssetTag[]
+  tags: AssetTag[];
 }
 
 /* ------------------------------------------------------------------- kinds --- */
@@ -51,16 +51,16 @@ export interface AssetRow extends ServerAssetRow {
  * control that cannot produce a result is the same fault as a disabled one with no
  * explanation, and this screen has no way to explain it.
  */
-export type KindFilter = 'all' | 'image' | 'application'
+export type KindFilter = "all" | "image" | "application";
 
 export const KINDS: readonly { value: KindFilter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'image', label: 'Images' },
+  { value: "all", label: "All" },
+  { value: "image", label: "Images" },
   // "Files" rather than "Other" or "Documents": an upload that is not one of the
   // five raster types lands here whatever it is, and the honest name for that set
   // is the generic one.
-  { value: 'application', label: 'Files' },
-]
+  { value: "application", label: "Files" },
+];
 
 /**
  * The kind a field's `accept` implies, or `undefined` when it implies none.
@@ -76,20 +76,20 @@ export const KINDS: readonly { value: KindFilter; label: string }[] = [
  * picker shows the chips.
  */
 export function kindForAccept(accept: string | undefined): KindFilter | undefined {
-  const parts = (accept ?? '')
-    .split(',')
+  const parts = (accept ?? "")
+    .split(",")
     .map((part) => part.trim().toLowerCase())
-    .filter(Boolean)
-  if (parts.length === 0) return undefined
-  const prefixes = new Set(parts.map((part) => part.split('/')[0] ?? ''))
-  if (prefixes.size !== 1) return undefined
-  const only = [...prefixes][0]
-  return only === 'image' || only === 'application' ? only : undefined
+    .filter(Boolean);
+  if (parts.length === 0) return undefined;
+  const prefixes = new Set(parts.map((part) => part.split("/")[0] ?? ""));
+  if (prefixes.size !== 1) return undefined;
+  const only = [...prefixes][0];
+  return only === "image" || only === "application" ? only : undefined;
 }
 
 /* -------------------------------------------------------------------- view --- */
 
-export type AssetView = 'grid' | 'table'
+export type AssetView = "grid" | "table";
 
 /**
  * The default when neither the URL nor the browser's memory says anything. A grid,
@@ -97,22 +97,22 @@ export type AssetView = 'grid' | 'table'
  * filename answers that worse than a picture does; the table is for the second
  * question, which is about bytes and dates.
  */
-export const DEFAULT_ASSET_VIEW: AssetView = 'grid'
+export const DEFAULT_ASSET_VIEW: AssetView = "grid";
 
 export function isAssetView(raw: string): raw is AssetView {
-  return raw === 'grid' || raw === 'table'
+  return raw === "grid" || raw === "table";
 }
 
 /* --------------------------------------------------------------------- URL --- */
 
 export interface AssetsUrl {
-  view: AssetView
-  sort: AssetSort
+  view: AssetView;
+  sort: AssetSort;
   /** Absent means the sort's own natural direction — see `naturalDir`. Only
    * present once somebody has reversed it. */
-  dir: 'asc' | 'desc' | undefined
-  kind: KindFilter
-  q: string
+  dir: "asc" | "desc" | undefined;
+  kind: KindFilter;
+  q: string;
   /**
    * A folder's `path`, including its descendants (decision 3, checkpoint 10).
    * **Mutually exclusive with `unfiled`** — both narrow the same axis, and
@@ -120,16 +120,16 @@ export interface AssetsUrl {
    * refuses instead (`routes/assets.ts`'s `assetFolderFilter`). `withFilter` is
    * what keeps this screen from ever writing both at once.
    */
-  folder: string | undefined
+  folder: string | undefined;
   /** `folder_id is null` — every file nothing has filed yet. Mutually exclusive
    * with `folder`, for the reason above. */
-  unfiled: boolean
+  unfiled: boolean;
   /** Tag slugs, ANDed (decision 4), capped at `MAX_TAG_FILTER`. Mutually
    * exclusive with `untagged`. */
-  tags: readonly string[]
+  tags: readonly string[];
   /** No tagging rows — the retro-organise starting point (decision 4's user
    * story). Mutually exclusive with `tags`. */
-  untagged: boolean
+  untagged: boolean;
   /**
    * `described_at is null` — every file the enrichment has never been asked
    * about (decision 9). The **backlog view**, and the one filter here that is
@@ -142,7 +142,7 @@ export interface AssetsUrl {
    * no `describe` configured never sees the control, but a hand-written URL
    * still filters, because the column exists either way.
    */
-  undescribed: boolean
+  undescribed: boolean;
   /**
    * `describe_error is not null` — every file the enrichment attempted and
    * could not describe. The other half of the backlog split, and exclusive
@@ -152,7 +152,7 @@ export interface AssetsUrl {
    * `describe` configured never sees the control, but a hand-written URL
    * still filters, because the column exists either way.
    */
-  failed: boolean
+  failed: boolean;
   /**
    * The asset whose detail panel is open.
    *
@@ -162,7 +162,7 @@ export interface AssetsUrl {
    * this screen's state that names a *record* rather than a view — which is why it
    * survives a filter change (see `withFilter`).
    */
-  asset: string | undefined
+  asset: string | undefined;
 }
 
 export function parseAssetsUrl(
@@ -170,30 +170,30 @@ export function parseAssetsUrl(
   /** What to use when the URL says nothing — the last choice, remembered. */
   defaults: { view: AssetView },
 ): AssetsUrl {
-  const folder = query.folder || undefined
+  const folder = query.folder || undefined;
   // Deduplicated and capped defensively, the way `tagsQuery` (`server/validate.ts`)
   // is on the route's side of the same string — a hand-edited URL is the one place
   // this screen's own `withFilter` cannot have kept it inside `MAX_TAG_FILTER`.
   const tags = query.tags
-    ? [...new Set(query.tags.split(',').filter(Boolean))].slice(0, MAX_TAG_FILTER)
-    : []
+    ? [...new Set(query.tags.split(",").filter(Boolean))].slice(0, MAX_TAG_FILTER)
+    : [];
   return {
     view: query.view !== undefined && isAssetView(query.view) ? query.view : defaults.view,
-    sort: isAssetSort(query.sort) ? query.sort : 'created',
-    dir: query.dir === 'asc' || query.dir === 'desc' ? query.dir : undefined,
-    kind: isKindFilter(query.kind) ? query.kind : 'all',
-    q: query.q ?? '',
+    sort: isAssetSort(query.sort) ? query.sort : "created",
+    dir: query.dir === "asc" || query.dir === "desc" ? query.dir : undefined,
+    kind: isKindFilter(query.kind) ? query.kind : "all",
+    q: query.q ?? "",
     folder,
     // A folder wins over `unfiled` when a hand-edited URL names both, rather than
     // sending the route the pair it refuses with a 400 — the one case `withFilter`
     // cannot prevent, because nothing here wrote this particular URL.
-    unfiled: folder === undefined && query.unfiled === '1',
+    unfiled: folder === undefined && query.unfiled === "1",
     tags,
-    untagged: tags.length === 0 && query.untagged === '1',
-    undescribed: query.undescribed === '1',
-    failed: query.failed === '1',
+    untagged: tags.length === 0 && query.untagged === "1",
+    undescribed: query.undescribed === "1",
+    failed: query.failed === "1",
     asset: query.asset || undefined,
-  }
+  };
 }
 
 /**
@@ -211,23 +211,23 @@ export function parseAssetsUrl(
 export function assetsQuery(url: AssetsUrl): Record<string, string | undefined> {
   return {
     view: url.view === DEFAULT_ASSET_VIEW ? undefined : url.view,
-    sort: url.sort === 'created' ? undefined : url.sort,
+    sort: url.sort === "created" ? undefined : url.sort,
     dir: url.dir === naturalDir(url.sort) ? undefined : url.dir,
-    kind: url.kind === 'all' ? undefined : url.kind,
+    kind: url.kind === "all" ? undefined : url.kind,
     q: url.q || undefined,
     folder: url.folder,
-    unfiled: url.unfiled ? '1' : undefined,
+    unfiled: url.unfiled ? "1" : undefined,
     // Comma-joined, matching `useEditor.ts`'s `wanted`: this screen's own address
     // bar is a `Record<string, string>` (`route.ts`'s `parseQuery` keeps only the
     // last of two repeated keys), so a multi-valued filter has to ride in one
     // parameter here even though `assetsParams` sends it to the route repeated —
     // see that function's own note.
-    tags: url.tags.length > 0 ? url.tags.join(',') : undefined,
-    untagged: url.untagged ? '1' : undefined,
-    undescribed: url.undescribed ? '1' : undefined,
-    failed: url.failed ? '1' : undefined,
+    tags: url.tags.length > 0 ? url.tags.join(",") : undefined,
+    untagged: url.untagged ? "1" : undefined,
+    undescribed: url.undescribed ? "1" : undefined,
+    failed: url.failed ? "1" : undefined,
     asset: url.asset,
-  }
+  };
 }
 
 /**
@@ -239,13 +239,13 @@ export function assetsQuery(url: AssetsUrl): Record<string, string | undefined> 
  * nobody sorts a media library looking for the smallest file; they sort it because
  * the bucket is bigger than expected and they are hunting the 8MB PNG.
  */
-export function naturalDir(sort: AssetSort): 'asc' | 'desc' {
-  return sort === 'filename' ? 'asc' : 'desc'
+export function naturalDir(sort: AssetSort): "asc" | "desc" {
+  return sort === "filename" ? "asc" : "desc";
 }
 
 /** The direction in force, resolving the absent case. */
-export function dirOf(url: AssetsUrl): 'asc' | 'desc' {
-  return url.dir ?? naturalDir(url.sort)
+export function dirOf(url: AssetsUrl): "asc" | "desc" {
+  return url.dir ?? naturalDir(url.sort);
 }
 
 /**
@@ -259,8 +259,8 @@ export function dirOf(url: AssetsUrl): 'asc' | 'desc' {
  * nobody asked for and which reads as a bug rather than a preserved preference.
  */
 export function withSort(url: AssetsUrl, sort: AssetSort): AssetsUrl {
-  if (url.sort !== sort) return { ...url, sort, dir: naturalDir(sort) }
-  return { ...url, dir: dirOf(url) === 'asc' ? 'desc' : 'asc' }
+  if (url.sort !== sort) return { ...url, sort, dir: naturalDir(sort) };
+  return { ...url, dir: dirOf(url) === "asc" ? "desc" : "asc" };
 }
 
 /**
@@ -275,7 +275,7 @@ export function withSort(url: AssetsUrl, sort: AssetSort): AssetsUrl {
  * it would be destroying state for a cosmetic change.
  */
 export function withView(url: AssetsUrl, view: AssetView): AssetsUrl {
-  return { ...url, view }
+  return { ...url, view };
 }
 
 /**
@@ -291,22 +291,22 @@ export function withFilter(
   patch: Partial<
     Pick<
       AssetsUrl,
-      'kind' | 'q' | 'folder' | 'unfiled' | 'tags' | 'untagged' | 'undescribed' | 'failed'
+      "kind" | "q" | "folder" | "unfiled" | "tags" | "untagged" | "undescribed" | "failed"
     >
   >,
 ): AssetsUrl {
-  const next = { ...url, ...patch }
+  const next = { ...url, ...patch };
   // The two pairs the route refuses together (`assetFolderFilter`, `assetTagFilter`
   // in `routes/assets.ts`): whichever side of a pair this patch is *turning on*
   // wins outright, rather than composing into a filter that can only ever answer
   // nothing. `folder` is checked against `undefined` rather than truthiness — an
   // empty string is not a legal path — and the two booleans against truthiness,
   // because turning one *off* has nothing to clear on the other side.
-  if (patch.folder !== undefined) next.unfiled = false
-  if (patch.unfiled) next.folder = undefined
-  if (patch.tags !== undefined) next.untagged = false
-  if (patch.untagged) next.tags = []
-  return next
+  if (patch.folder !== undefined) next.unfiled = false;
+  if (patch.unfiled) next.folder = undefined;
+  if (patch.tags !== undefined) next.untagged = false;
+  if (patch.untagged) next.tags = [];
+  return next;
 }
 
 /**
@@ -323,15 +323,15 @@ export function withFilter(
  * URL was narrowed by.
  */
 export const NO_FILTERS = {
-  kind: 'all',
-  q: '',
+  kind: "all",
+  q: "",
   folder: undefined,
   unfiled: false,
   tags: [],
   untagged: false,
   undescribed: false,
   failed: false,
-} as const satisfies Parameters<typeof withFilter>[1]
+} as const satisfies Parameters<typeof withFilter>[1];
 
 /**
  * Telling "nothing uploaded yet" from "nothing matches", which are different empty
@@ -339,15 +339,15 @@ export const NO_FILTERS = {
  */
 export function isNarrowed(url: AssetsUrl): boolean {
   return (
-    url.kind !== 'all' ||
-    url.q.trim() !== '' ||
+    url.kind !== "all" ||
+    url.q.trim() !== "" ||
     url.folder !== undefined ||
     url.unfiled ||
     url.tags.length > 0 ||
     url.untagged ||
     url.undescribed ||
     url.failed
-  )
+  );
 }
 
 /**
@@ -369,33 +369,33 @@ export function assetsParams(
     sort: url.sort,
     dir: dirOf(url),
     limit: String(opts.limit),
-  })
-  if (url.kind !== 'all') params.set('kind', url.kind)
-  const q = url.q.trim()
-  if (q) params.set('q', q)
-  if (url.folder !== undefined) params.set('folder', url.folder)
-  if (url.unfiled) params.set('unfiled', '1')
+  });
+  if (url.kind !== "all") params.set("kind", url.kind);
+  const q = url.q.trim();
+  if (q) params.set("q", q);
+  if (url.folder !== undefined) params.set("folder", url.folder);
+  if (url.unfiled) params.set("unfiled", "1");
   // Repeated, not comma-joined: this is the fetch query the route parses with
   // `c.req.queries('tags')` (`validate.ts`'s `tagsQuery`), not the screen's own
   // address bar — see `assetsQuery`'s note on why those two differ.
-  for (const tag of url.tags) params.append('tags', tag)
-  if (url.untagged) params.set('untagged', '1')
-  if (url.undescribed) params.set('undescribed', '1')
-  if (url.failed) params.set('failed', '1')
-  if (opts.count) params.set('count', '1')
-  if (opts.cursor) params.set('cursor', opts.cursor)
+  for (const tag of url.tags) params.append("tags", tag);
+  if (url.untagged) params.set("untagged", "1");
+  if (url.undescribed) params.set("undescribed", "1");
+  if (url.failed) params.set("failed", "1");
+  if (opts.count) params.set("count", "1");
+  if (opts.cursor) params.set("cursor", opts.cursor);
   // A picker reads everything the scope may use — its own library and the chain's —
   // where the Assets screen manages the scope's own (`multi-site.md`'s route table).
-  if (opts.chain) params.set('chain', '1')
-  return params
+  if (opts.chain) params.set("chain", "1");
+  return params;
 }
 
 function isAssetSort(raw: string | undefined): raw is AssetSort {
-  return raw === 'created' || raw === 'filename' || raw === 'size'
+  return raw === "created" || raw === "filename" || raw === "size";
 }
 
 function isKindFilter(raw: string | undefined): raw is KindFilter {
-  return raw === 'all' || raw === 'image' || raw === 'application'
+  return raw === "all" || raw === "image" || raw === "application";
 }
 
 /* -------------------------------------------------------------- organisation --- */
@@ -409,7 +409,7 @@ function isKindFilter(raw: string | undefined): raw is KindFilter {
  * importing it here to reuse one number is the wrong trade. The unit test asserts
  * the two agree.
  */
-export const MAX_TAG_FILTER = 8
+export const MAX_TAG_FILTER = 8;
 
 /**
  * Adds or removes one tag slug from the filter, capped at `MAX_TAG_FILTER`. A click
@@ -417,9 +417,9 @@ export const MAX_TAG_FILTER = 8
  * 400 naming a limit the click gave no reason for.
  */
 export function toggleTagFilter(tags: readonly string[], slug: string): readonly string[] {
-  if (tags.includes(slug)) return tags.filter((value) => value !== slug)
-  if (tags.length >= MAX_TAG_FILTER) return tags
-  return [...tags, slug]
+  if (tags.includes(slug)) return tags.filter((value) => value !== slug);
+  if (tags.length >= MAX_TAG_FILTER) return tags;
+  return [...tags, slug];
 }
 
 /**
@@ -428,8 +428,8 @@ export function toggleTagFilter(tags: readonly string[], slug: string): readonly
  * `ListTagsOptions`), so a sidebar chip gets a count and a bare autocomplete option
  * does not; this reads either without needing to know which it was given.
  */
-export function tagChipLabel(tag: Pick<AssetTag, 'name' | 'count'>): string {
-  return tag.count === undefined ? tag.name : `${tag.name} (${tag.count})`
+export function tagChipLabel(tag: Pick<AssetTag, "name" | "count">): string {
+  return tag.count === undefined ? tag.name : `${tag.name} (${tag.count})`;
 }
 
 /**
@@ -439,8 +439,8 @@ export function tagChipLabel(tag: Pick<AssetTag, 'name' | 'count'>): string {
  * list into something that reads as a tree, without reconstructing the nesting in
  * JavaScript.
  */
-export function folderDepth(folder: Pick<AssetFolder, 'path'>): number {
-  return folder.path.split('/').length - 1
+export function folderDepth(folder: Pick<AssetFolder, "path">): number {
+  return folder.path.split("/").length - 1;
 }
 
 /**
@@ -466,14 +466,14 @@ export function folderDepth(folder: Pick<AssetFolder, 'path'>): number {
  */
 export function folderNameFor(
   folderId: string | null,
-  folders: { folders: readonly Pick<AssetFolder, 'id' | 'name'>[]; loading: boolean },
+  folders: { folders: readonly Pick<AssetFolder, "id" | "name">[]; loading: boolean },
 ): string {
-  if (folderId === null) return 'Unfiled'
-  const folder = folders.folders.find((f) => f.id === folderId)
-  if (folder) return folder.name
+  if (folderId === null) return "Unfiled";
+  const folder = folders.folders.find((f) => f.id === folderId);
+  if (folder) return folder.name;
   // An ellipsis while it is still coming, and then the em dash every other absent
   // cell on this screen uses.
-  return folders.loading ? '…' : '—'
+  return folders.loading ? "…" : "—";
 }
 
 /**
@@ -482,23 +482,23 @@ export function folderNameFor(
  * the sidebar tree can. Two non-breaking spaces per level of depth: a regular space
  * collapses in option text the same way it does everywhere else in HTML.
  */
-export function indentedFolderName(folder: Pick<AssetFolder, 'path' | 'name'>): string {
-  return `${'  '.repeat(folderDepth(folder))}${folder.name}`
+export function indentedFolderName(folder: Pick<AssetFolder, "path" | "name">): string {
+  return `${"  ".repeat(folderDepth(folder))}${folder.name}`;
 }
 
 /* ----------------------------------------------------------------- columns --- */
 
-export type AssetColumnKind = 'filename' | 'type' | 'dimensions' | 'size' | 'created'
+export type AssetColumnKind = "filename" | "type" | "dimensions" | "size" | "created";
 
 export interface AssetColumn {
-  key: string
-  label: string
-  kind: AssetColumnKind
+  key: string;
+  label: string;
+  kind: AssetColumnKind;
   /** Right-aligned and tabular. */
-  numeric?: boolean
+  numeric?: boolean;
   /** The ordering this header asks the route for, or absent when the column
    * cannot be sorted. */
-  sort?: AssetSort
+  sort?: AssetSort;
 }
 
 /**
@@ -516,17 +516,17 @@ export interface AssetColumn {
  * question behind it.
  */
 export const ASSET_COLUMNS: readonly AssetColumn[] = [
-  { key: 'filename', label: 'File', kind: 'filename', sort: 'filename' },
-  { key: 'type', label: 'Type', kind: 'type' },
-  { key: 'dimensions', label: 'Dimensions', kind: 'dimensions', numeric: true },
-  { key: 'size', label: 'Size', kind: 'size', numeric: true, sort: 'size' },
-  { key: 'created', label: 'Added', kind: 'created', numeric: true, sort: 'created' },
-]
+  { key: "filename", label: "File", kind: "filename", sort: "filename" },
+  { key: "type", label: "Type", kind: "type" },
+  { key: "dimensions", label: "Dimensions", kind: "dimensions", numeric: true },
+  { key: "size", label: "Size", kind: "size", numeric: true, sort: "size" },
+  { key: "created", label: "Added", kind: "created", numeric: true, sort: "created" },
+];
 
 /** Which column the current sort belongs to, for `Table`'s `aria-sort`. Derived
  * rather than hard-coded, so a column that gains a sort needs no edit here. */
 export function sortColumnKey(url: AssetsUrl): string {
-  return ASSET_COLUMNS.find((column) => column.sort === url.sort)?.key ?? ''
+  return ASSET_COLUMNS.find((column) => column.sort === url.sort)?.key ?? "";
 }
 
 /* ------------------------------------------------------------------- cells --- */
@@ -542,15 +542,15 @@ export function sortColumnKey(url: AssetsUrl): string {
  * that size the exact number is shorter than the rounded one.
  */
 export function humanSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`
-  return `${Math.max(1, Math.round(bytes / 1024))} kB`
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} kB`;
 }
 
 /** `1200×800`, or `''` for a file whose header `imageSize` could not read — which
  * is every non-image and any image format it does not parse. */
-export function dimensionsOf(row: Pick<AssetRow, 'width' | 'height'>): string {
-  return row.width && row.height ? `${row.width}×${row.height}` : ''
+export function dimensionsOf(row: Pick<AssetRow, "width" | "height">): string {
+  return row.width && row.height ? `${row.width}×${row.height}` : "";
 }
 
 /**
@@ -563,17 +563,17 @@ export function dimensionsOf(row: Pick<AssetRow, 'width' | 'height'>): string {
  * a person is scanning the column for. Falls back to the content type's subtype
  * when a filename has no extension at all.
  */
-export function typeLabel(row: Pick<AssetRow, 'filename' | 'contentType'>): string {
-  const ext = extensionOf(row.filename)
-  if (ext) return ext.toUpperCase()
-  return row.contentType.split('/')[1] ?? row.contentType
+export function typeLabel(row: Pick<AssetRow, "filename" | "contentType">): string {
+  const ext = extensionOf(row.filename);
+  if (ext) return ext.toUpperCase();
+  return row.contentType.split("/")[1] ?? row.contentType;
 }
 
 /** The extension without its dot, lowercase, or `''`. A leading-dot filename
  * (`.gitignore`) has none — `split` would otherwise call the whole name one. */
 export function extensionOf(filename: string): string {
-  const at = filename.lastIndexOf('.')
-  return at > 0 ? filename.slice(at + 1).toLowerCase() : ''
+  const at = filename.lastIndexOf(".");
+  return at > 0 ? filename.slice(at + 1).toLowerCase() : "";
 }
 
 /**
@@ -595,8 +595,8 @@ export function extensionOf(filename: string): string {
  * test rather than becoming a set membership check against `SERVED_CONTENT_TYPES`
  * when SVG was added.
  */
-export function isRenderableImage(row: Pick<AssetRow, 'contentType'>): boolean {
-  return row.contentType.startsWith('image/')
+export function isRenderableImage(row: Pick<AssetRow, "contentType">): boolean {
+  return row.contentType.startsWith("image/");
 }
 
 /**
@@ -616,14 +616,14 @@ export function isRenderableImage(row: Pick<AssetRow, 'contentType'>): boolean {
  * every image in the library for a crop `object-fit: cover` does for free in the
  * browser. Widths are therefore a small fixed set — see the callers.
  */
-export function thumbUrl(mount: string, row: Pick<AssetRow, 'key'>, width: number): string {
-  return `${mount}/asset/${encodeURIComponent(row.key)}?w=${width}&f=webp`
+export function thumbUrl(mount: string, row: Pick<AssetRow, "key">, width: number): string {
+  return `${mount}/asset/${encodeURIComponent(row.key)}?w=${width}&f=webp`;
 }
 
 /** The original bytes, untransformed — for a download link and for a file the
  * transform route will not touch. */
-export function originalUrl(mount: string, row: Pick<AssetRow, 'key'>): string {
-  return `${mount}/asset/${encodeURIComponent(row.key)}`
+export function originalUrl(mount: string, row: Pick<AssetRow, "key">): string {
+  return `${mount}/asset/${encodeURIComponent(row.key)}`;
 }
 
 /**
@@ -654,7 +654,7 @@ export function assetValue(row: AssetRow): AssetValue {
     ...(row.width ? { width: row.width } : {}),
     ...(row.height ? { height: row.height } : {}),
     alt: row.alt || row.altAuto,
-  }
+  };
 }
 
 /* ------------------------------------------------------------------- panel --- */
@@ -664,17 +664,17 @@ export function assetValue(row: AssetRow): AssetValue {
  * are five answers and four of them need saying out loud.
  */
 export type PanelSubject =
-  | { state: 'none' }
-  | { state: 'row'; row: AssetRow }
+  | { state: "none" }
+  | { state: "row"; row: AssetRow }
   /** Being fetched. Skeleton, not a spinner: the panel's shape is known. */
-  | { state: 'loading' }
+  | { state: "loading" }
   /** The route answered 404. A genuinely stale link — the file has been deleted. */
-  | { state: 'gone' }
+  | { state: "gone" }
   /** Something else went wrong. **Not the same as `gone`**, and conflating them is
    * the failure this type exists to prevent: telling somebody their file was deleted
    * because their laptop lost wifi is a lie that would send them looking for a
    * backup. */
-  | { state: 'error'; message: string }
+  | { state: "error"; message: string };
 
 /**
  * Which of the five the panel is in, and the precedence between them.
@@ -697,15 +697,15 @@ export function panelSubject(
   inHand: AssetRow | null,
   lookup: { row: AssetRow | null; gone: boolean; error: string | null; loading: boolean },
 ): PanelSubject {
-  if (!asset) return { state: 'none' }
-  if (inHand && inHand.id === asset) return { state: 'row', row: inHand }
-  if (lookup.row && lookup.row.id === asset) return { state: 'row', row: lookup.row }
-  if (lookup.gone) return { state: 'gone' }
-  if (lookup.error) return { state: 'error', message: lookup.error }
+  if (!asset) return { state: "none" };
+  if (inHand && inHand.id === asset) return { state: "row", row: inHand };
+  if (lookup.row && lookup.row.id === asset) return { state: "row", row: lookup.row };
+  if (lookup.gone) return { state: "gone" };
+  if (lookup.error) return { state: "error", message: lookup.error };
   // Loading last among the failures but before `none`: an id with nothing resolved
   // and nothing refused yet is a request in flight, including the first render before
   // the effect has run.
-  return { state: 'loading' }
+  return { state: "loading" };
 }
 
 /* ------------------------------------------------------------------- dates --- */
@@ -723,27 +723,27 @@ export function panelSubject(
  * thing in this file a test could not pin.
  */
 export function addedAgo(at: number, now: number = Date.now()): string {
-  const seconds = Math.round((now - at) / 1000)
-  if (seconds < 60) return 'just now'
-  const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.round(hours / 24)
-  if (days < 30) return `${days}d ago`
-  return new Date(at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  const seconds = Math.round((now - at) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }
 
 /** The absolute stamp, for the detail panel — where the exact date is the point
  * and "412d ago" is not. */
 export function addedOn(at: number): string {
   return new Date(at).toLocaleString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 /* ---------------------------------------------------------------- keyboard --- */
@@ -771,59 +771,59 @@ export function gridStep(
   count: number,
   columns: number,
 ): number | null {
-  if (count === 0) return null
-  const cols = Math.max(1, columns)
+  if (count === 0) return null;
+  const cols = Math.max(1, columns);
   // -1 is "focus is on the container, nothing active yet" — every direction lands
   // on the first tile from there rather than computing an offset from nowhere.
-  const from = current < 0 ? 0 : current
-  const clamp = (n: number) => Math.min(count - 1, Math.max(0, n))
+  const from = current < 0 ? 0 : current;
+  const clamp = (n: number) => Math.min(count - 1, Math.max(0, n));
   switch (key) {
-    case 'ArrowRight':
-      return current < 0 ? 0 : clamp(from + 1)
-    case 'ArrowLeft':
-      return current < 0 ? 0 : clamp(from - 1)
-    case 'ArrowDown':
-      return current < 0 ? 0 : clamp(from + cols)
-    case 'ArrowUp':
-      return current < 0 ? 0 : clamp(from - cols)
-    case 'Home':
-      return 0
-    case 'End':
-      return count - 1
+    case "ArrowRight":
+      return current < 0 ? 0 : clamp(from + 1);
+    case "ArrowLeft":
+      return current < 0 ? 0 : clamp(from - 1);
+    case "ArrowDown":
+      return current < 0 ? 0 : clamp(from + cols);
+    case "ArrowUp":
+      return current < 0 ? 0 : clamp(from - cols);
+    case "Home":
+      return 0;
+    case "End":
+      return count - 1;
     // Three rows, which is roughly a screen of tiles at the sizes this grid uses.
     // `nextIndex` pages by a flat 10 rows; in a grid the same gesture has to be
     // expressed in tiles, and 10 tiles at six columns is not a page of anything.
-    case 'PageDown':
-      return clamp(from + cols * 3)
-    case 'PageUp':
-      return clamp(from - cols * 3)
+    case "PageDown":
+      return clamp(from + cols * 3);
+    case "PageUp":
+      return clamp(from - cols * 3);
     default:
-      return null
+      return null;
   }
 }
 
 /* ----------------------------------------------------------------- uploads --- */
 
-export type UploadStatus = 'uploading' | 'done' | 'failed'
+export type UploadStatus = "uploading" | "done" | "failed";
 
 /** One file in the batch currently being uploaded, or the one that just was. */
 export interface UploadEntry {
   /** Minted, never stored: a React key and nothing else. Two files with the same
    * name in one batch are two entries. */
-  id: string
-  filename: string
-  status: UploadStatus
+  id: string;
+  filename: string;
+  status: UploadStatus;
   /** Set for `failed` only, and it is the server's own message — the byte cap and
    * the empty-body refusal both say something specific and useful. */
-  error?: string
+  error?: string;
 }
 
 export interface UploadSummary {
-  busy: boolean
-  done: number
-  failed: number
+  busy: boolean;
+  done: number;
+  failed: number;
   /** The line above the per-file list. */
-  text: string
+  text: string;
 }
 
 /**
@@ -836,23 +836,23 @@ export interface UploadSummary {
  * (`9 uploaded · 1 failed`) rather than rounding it to "some files failed".
  */
 export function uploadSummary(entries: readonly UploadEntry[]): UploadSummary {
-  const done = entries.filter((e) => e.status === 'done').length
-  const failed = entries.filter((e) => e.status === 'failed').length
-  const busy = entries.some((e) => e.status === 'uploading')
+  const done = entries.filter((e) => e.status === "done").length;
+  const failed = entries.filter((e) => e.status === "failed").length;
+  const busy = entries.some((e) => e.status === "uploading");
   if (busy) {
     // The count of what has settled, out of the batch — so a long upload shows
     // movement without needing a byte-level progress event (`fetch` has none).
-    return { busy, done, failed, text: `Uploading ${done + failed + 1} of ${entries.length}…` }
+    return { busy, done, failed, text: `Uploading ${done + failed + 1} of ${entries.length}…` };
   }
   if (failed === 0) {
-    return { busy, done, failed, text: `Uploaded ${done} ${done === 1 ? 'file' : 'files'}` }
+    return { busy, done, failed, text: `Uploaded ${done} ${done === 1 ? "file" : "files"}` };
   }
   return {
     busy,
     done,
     failed,
     text: done === 0 ? `${failed} failed` : `${done} uploaded · ${failed} failed`,
-  }
+  };
 }
 
 /* ------------------------------------------------------------- field cards --- */
@@ -877,14 +877,14 @@ export function uploadSummary(entries: readonly UploadEntry[]): UploadSummary {
  */
 export interface KeyedAsset {
   /** Minted, not stored. Only ever a React key. */
-  id: string
-  asset: AssetValue
+  id: string;
+  asset: AssetValue;
 }
 
 /** The R2 key, or the absolute URL for an asset hosted elsewhere. Not unique —
  * the same file may legitimately appear twice in one list, which is exactly why
  * the index was being used as a key in the first place. */
-const mediaOf = (a: AssetValue) => a.key ?? a.url ?? ''
+const mediaOf = (a: AssetValue) => a.key ?? a.url ?? "";
 
 /** Whole-value equality: the card is showing precisely this, alt and focal
  * point included. */
@@ -898,7 +898,7 @@ const sameAsset = (a: AssetValue, b: AssetValue) =>
   a.height === b.height &&
   a.alt === b.alt &&
   a.focal?.x === b.focal?.x &&
-  a.focal?.y === b.focal?.y
+  a.focal?.y === b.focal?.y;
 
 /**
  * Carry the previous render's card ids onto this render's assets, minting one
@@ -926,27 +926,27 @@ export function keyAssets(
   assets: readonly AssetValue[],
   mint: () => string,
 ): KeyedAsset[] {
-  const spare: (KeyedAsset | undefined)[] = [...previous]
-  const out: (KeyedAsset | undefined)[] = assets.map(() => undefined)
+  const spare: (KeyedAsset | undefined)[] = [...previous];
+  const out: (KeyedAsset | undefined)[] = assets.map(() => undefined);
 
   const claim = (at: number, asset: AssetValue): KeyedAsset => {
-    const taken = spare[at]!
-    spare[at] = undefined
-    return { id: taken.id, asset }
-  }
+    const taken = spare[at]!;
+    spare[at] = undefined;
+    return { id: taken.id, asset };
+  };
 
   assets.forEach((asset, i) => {
-    const at = spare.findIndex((e) => e !== undefined && sameAsset(e.asset, asset))
-    if (at !== -1) out[i] = claim(at, asset)
-  })
+    const at = spare.findIndex((e) => e !== undefined && sameAsset(e.asset, asset));
+    if (at !== -1) out[i] = claim(at, asset);
+  });
 
   assets.forEach((asset, i) => {
-    if (out[i]) return
-    const at = spare.findIndex((e) => e !== undefined && mediaOf(e.asset) === mediaOf(asset))
-    out[i] = at === -1 ? { id: mint(), asset } : claim(at, asset)
-  })
+    if (out[i]) return;
+    const at = spare.findIndex((e) => e !== undefined && mediaOf(e.asset) === mediaOf(asset));
+    out[i] = at === -1 ? { id: mint(), asset } : claim(at, asset);
+  });
 
-  return out as KeyedAsset[]
+  return out as KeyedAsset[];
 }
 
 /* --------------------------------------------------------------- selection --- */
@@ -975,18 +975,18 @@ export function keyAssets(
  */
 export type Ticked =
   | { all: false; ids: ReadonlySet<string> }
-  | { all: true; filter: AssetFilter; expected: number; exclude: ReadonlySet<string> }
+  | { all: true; filter: AssetFilter; expected: number; exclude: ReadonlySet<string> };
 
-export const NOTHING: Ticked = { all: false, ids: new Set() }
+export const NOTHING: Ticked = { all: false, ids: new Set() };
 
 export function isTicked(ticked: Ticked, id: string): boolean {
-  return ticked.all ? !ticked.exclude.has(id) : ticked.ids.has(id)
+  return ticked.all ? !ticked.exclude.has(id) : ticked.ids.has(id);
 }
 
 /** How many files the selection means. Never below zero: `exclude` can outgrow
  * `expected` if the set shrank under a person who kept ticking. */
 export function tickCount(ticked: Ticked): number {
-  return ticked.all ? Math.max(ticked.expected - ticked.exclude.size, 0) : ticked.ids.size
+  return ticked.all ? Math.max(ticked.expected - ticked.exclude.size, 0) : ticked.ids.size;
 }
 
 /** Ticking a row off a select-all **adds to `exclude`** rather than collapsing
@@ -994,31 +994,31 @@ export function tickCount(ticked: Ticked): number {
  * small JSON fields instead of 4,810 of them. */
 export function toggleTick(ticked: Ticked, id: string): Ticked {
   if (ticked.all) {
-    const exclude = new Set(ticked.exclude)
-    if (!exclude.delete(id)) exclude.add(id)
-    return { ...ticked, exclude }
+    const exclude = new Set(ticked.exclude);
+    if (!exclude.delete(id)) exclude.add(id);
+    return { ...ticked, exclude };
   }
-  const ids = new Set(ticked.ids)
-  if (!ids.delete(id)) ids.add(id)
-  return { all: false, ids }
+  const ids = new Set(ticked.ids);
+  if (!ids.delete(id)) ids.add(id);
+  return { all: false, ids };
 }
 
 export function tickAllShown(ticked: Ticked, rows: readonly AssetRow[]): Ticked {
-  const on = rows.length > 0 && rows.every((row) => isTicked(ticked, row.id))
+  const on = rows.length > 0 && rows.every((row) => isTicked(ticked, row.id));
   if (ticked.all) {
-    const exclude = new Set(ticked.exclude)
+    const exclude = new Set(ticked.exclude);
     for (const row of rows) {
-      if (on) exclude.add(row.id)
-      else exclude.delete(row.id)
+      if (on) exclude.add(row.id);
+      else exclude.delete(row.id);
     }
-    return { ...ticked, exclude }
+    return { ...ticked, exclude };
   }
-  const ids = new Set(ticked.ids)
+  const ids = new Set(ticked.ids);
   for (const row of rows) {
-    if (on) ids.delete(row.id)
-    else ids.add(row.id)
+    if (on) ids.delete(row.id);
+    else ids.add(row.id);
   }
-  return { all: false, ids }
+  return { all: false, ids };
 }
 
 /**
@@ -1031,30 +1031,30 @@ export function tickAllShown(ticked: Ticked, rows: readonly AssetRow[]): Ticked 
  * filter key that means nothing and looks like it means something.
  */
 export function capturedFilter(url: AssetsUrl): AssetFilter {
-  const q = url.q.trim()
+  const q = url.q.trim();
   return {
     ...(q ? { q } : {}),
-    ...(url.kind === 'all' ? {} : { kind: url.kind }),
+    ...(url.kind === "all" ? {} : { kind: url.kind }),
     ...(url.folder === undefined ? {} : { folder: url.folder }),
     ...(url.unfiled ? { unfiled: true } : {}),
     ...(url.tags.length === 0 ? {} : { tags: [...url.tags] }),
     ...(url.untagged ? { untagged: true } : {}),
     ...(url.undescribed ? { undescribed: true } : {}),
     ...(url.failed ? { failed: true } : {}),
-  }
+  };
 }
 
 /** The `selection` field of a bulk body. `exclude` is omitted when empty rather
  * than sent as `[]`: the route's two options are `v.strictObject`, so every key
  * in the body is one it reads. */
 export function selectionBody(ticked: Ticked): Record<string, unknown> {
-  if (!ticked.all) return { ids: [...ticked.ids] }
+  if (!ticked.all) return { ids: [...ticked.ids] };
   return {
     all: true,
     filter: ticked.filter,
     expected: ticked.expected,
     ...(ticked.exclude.size === 0 ? {} : { exclude: [...ticked.exclude] }),
-  }
+  };
 }
 
 /**
@@ -1080,9 +1080,9 @@ export function describeBody(
   opts: {
     /** The narrowed selection to use instead, when a captured *select all* is
      * being run over the backlog. Built by the caller because it needs a count. */
-    backlog?: Record<string, unknown>
-    dryRun?: boolean
-    continueFrom?: string | null
+    backlog?: Record<string, unknown>;
+    dryRun?: boolean;
+    continueFrom?: string | null;
   } = {},
 ): Record<string, unknown> {
   return {
@@ -1091,7 +1091,7 @@ export function describeBody(
     ...(opts.continueFrom === undefined || opts.continueFrom === null
       ? {}
       : { continueFrom: opts.continueFrom }),
-  }
+  };
 }
 
 /**
@@ -1112,5 +1112,5 @@ export function backlogSelection(
     filter: { ...ticked.filter, undescribed: true } satisfies AssetFilter,
     expected,
     ...(ticked.exclude.size === 0 ? {} : { exclude: [...ticked.exclude] }),
-  }
+  };
 }

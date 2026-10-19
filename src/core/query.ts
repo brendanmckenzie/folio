@@ -15,29 +15,29 @@
  * are `references()` in `data-documents.md`, which is the honest answer for the
  * case where a query is the wrong tool.
  */
-import type { Doc, Json } from './doc'
-import type { Field } from './fields'
-import { fieldValue, type LocaleContext } from './locales'
-import type { ReferenceTarget } from './resolve'
-import type { SchemaIndex } from './schema'
-import type { SnippetPart } from './search-projection'
+import type { Doc, Json } from "./doc";
+import type { Field } from "./fields";
+import { fieldValue, type LocaleContext } from "./locales";
+import type { ReferenceTarget } from "./resolve";
+import type { SchemaIndex } from "./schema";
+import type { SnippetPart } from "./search-projection";
 
 /** Operators over a `content_index` row's `text_value`. */
-export type TextOp = 'eq' | 'ne' | 'in' | 'contains' | 'startsWith'
+export type TextOp = "eq" | "ne" | "in" | "contains" | "startsWith";
 /** Operators over `num_value`, or `text_value` when the bound is a string. */
-export type RangeOp = 'gt' | 'gte' | 'lt' | 'lte'
+export type RangeOp = "gt" | "gte" | "lt" | "lte";
 
 export type ContentWhere =
   | { field: string; op: TextOp; value: string | readonly string[] }
-  | { field: string; op: RangeOp; value: number | string }
+  | { field: string; op: RangeOp; value: number | string };
 
-const TEXT_OPS: readonly string[] = ['eq', 'ne', 'in', 'contains', 'startsWith']
-const RANGE_OPS: readonly string[] = ['gt', 'gte', 'lt', 'lte']
+const TEXT_OPS: readonly string[] = ["eq", "ne", "in", "contains", "startsWith"];
+const RANGE_OPS: readonly string[] = ["gt", "gte", "lt", "lte"];
 
-export const WHERE_OPS: readonly string[] = [...TEXT_OPS, ...RANGE_OPS]
+export const WHERE_OPS: readonly string[] = [...TEXT_OPS, ...RANGE_OPS];
 
-export const isTextOp = (op: string): op is TextOp => TEXT_OPS.includes(op)
-export const isRangeOp = (op: string): op is RangeOp => RANGE_OPS.includes(op)
+export const isTextOp = (op: string): op is TextOp => TEXT_OPS.includes(op);
+export const isRangeOp = (op: string): op is RangeOp => RANGE_OPS.includes(op);
 
 /**
  * Sort keys that are columns of `stories` rather than index rows, so they work
@@ -46,22 +46,22 @@ export const isRangeOp = (op: string): op is RangeOp => RANGE_OPS.includes(op)
  * Each carries the direction it means when named bare: newest first for a date,
  * tree order and alphabetical for the other two.
  */
-export const BUILT_IN_ORDERS: Readonly<Record<string, 'asc' | 'desc'>> = {
-  publishedAt: 'desc',
-  ord: 'asc',
-  title: 'asc',
+export const BUILT_IN_ORDERS: Readonly<Record<string, "asc" | "desc">> = {
+  publishedAt: "desc",
+  ord: "asc",
+  title: "asc",
   // Not a column of `stories` at all but of the full-text join
   // (`../../docs/specs/content-model/full-text-search.md` decision 2): bm25 is
   // negated in the SQL so a bigger score is a better match, which lets
   // `relevance` mean `desc` like every other "best first" order. `contentSql`
   // refuses it without a `search` term rather than sorting by a column that is
   // not in the statement.
-  relevance: 'desc',
-}
+  relevance: "desc",
+};
 
 export interface ContentOrderSpec {
-  field: string
-  dir: 'asc' | 'desc'
+  field: string;
+  dir: "asc" | "desc";
 }
 
 /**
@@ -70,17 +70,17 @@ export interface ContentOrderSpec {
  * would have to be threaded through the canonical form, the query string and the
  * SQL for a case nothing has yet asked for.
  */
-export type ContentOrder = ContentOrderSpec | 'publishedAt' | 'ord' | 'title' | 'relevance'
+export type ContentOrder = ContentOrderSpec | "publishedAt" | "ord" | "title" | "relevance";
 
 export interface ContentQuery {
   /** One type or several. Absent queries every type, records included. */
-  type?: string | readonly string[]
+  type?: string | readonly string[];
   /** Direct children only. `null` means the top level; absent means anywhere. */
-  parent?: string | null
+  parent?: string | null;
   /** Filters and sorts against this locale's index rows. Absent is the source. */
-  locale?: string
-  where?: readonly ContentWhere[]
-  order?: ContentOrder
+  locale?: string;
+  where?: readonly ContentWhere[];
+  order?: ContentOrder;
   /**
    * Full-text term (`../../docs/specs/content-model/full-text-search.md`
    * decision 4). Trimmed, whitespace-collapsed and capped at
@@ -91,18 +91,18 @@ export interface ContentQuery {
    * before it reaches FTS5, so a stray quote or a bare `NOT` is a term rather
    * than syntax, and a string with no token at all answers an empty page.
    */
-  search?: string
+  search?: string;
   /** 1-based. */
-  page?: number
+  page?: number;
   /** Default 20, capped at 100. */
-  perPage?: number
+  perPage?: number;
   /**
    * Published only, which is the only value there is
    * (the spec's *Out of scope*). Draft-status queries are deliberately not this
    * route's job: the index is published-only by construction, and the admin's
    * list views read `stories` directly — a document, not a query over content.
    */
-  status?: 'published'
+  status?: "published";
   /**
    * Ask for each item's whole document, not just its root block's `data`.
    *
@@ -124,7 +124,7 @@ export interface ContentQuery {
    * in renders `item.doc` itself. That asymmetry is why this is opt-in rather
    * than a second resolved field: nothing in the library consumes it.
    */
-  withDoc?: boolean
+  withDoc?: boolean;
 }
 
 /**
@@ -135,7 +135,7 @@ export interface ContentQuery {
  * Both are present **only** when the query carried `search`, so a block that
  * renders a plain collection sees exactly what it saw before.
  */
-export interface ContentItem extends Omit<ReferenceTarget, 'doc'> {
+export interface ContentItem extends Omit<ReferenceTarget, "doc"> {
   /**
    * Present only for a query that asked (`ContentQuery.withDoc`), which is what
    * a `reference` differs on: a reference resolves *one* document a block named,
@@ -146,22 +146,22 @@ export interface ContentItem extends Omit<ReferenceTarget, 'doc'> {
    * the difference — an item is a reference target whose document is optional,
    * and spelling that as two interfaces would invite them to drift.
    */
-  doc?: Doc
+  doc?: Doc;
   /**
    * The matched extract, already split into parts (decision 6) — never a
    * `<mark>…</mark>` string a host would have to trust as HTML or escape.
    */
-  snippet?: SnippetPart[]
+  snippet?: SnippetPart[];
   /** bm25, negated: bigger is a better match. */
-  score?: number
+  score?: number;
 }
 
 export interface ContentPage {
-  items: ContentItem[]
-  total: number
-  page: number
-  perPage: number
-  pages: number
+  items: ContentItem[];
+  total: number;
+  page: number;
+  perPage: number;
+  pages: number;
 }
 
 /** What a `collection` field hands to `render`. */
@@ -171,28 +171,28 @@ export interface ResolvedCollection extends ContentPage {
    * looking at a draft (decision 3). A block can say "this list shows published
    * items"; a live page never sees it.
    */
-  stale?: boolean
+  stale?: boolean;
 }
 
-export const DEFAULT_PER_PAGE = 20
-export const MAX_PER_PAGE = 100
+export const DEFAULT_PER_PAGE = 20;
+export const MAX_PER_PAGE = 100;
 /** How much of a search box reaches the index. The same bound `?q=` carries. */
-export const MAX_SEARCH_LENGTH = 200
+export const MAX_SEARCH_LENGTH = 200;
 
 /** The zero value: what a block gets for a query nothing ran. */
 export function emptyContentPage(page = 1, perPage = DEFAULT_PER_PAGE): ContentPage {
-  return { items: [], total: 0, page, perPage, pages: 0 }
+  return { items: [], total: 0, page, perPage, pages: 0 };
 }
 
 const clampPage = (n: unknown): number => {
-  const v = typeof n === 'number' && Number.isFinite(n) ? Math.trunc(n) : 1
-  return v < 1 ? 1 : v
-}
+  const v = typeof n === "number" && Number.isFinite(n) ? Math.trunc(n) : 1;
+  return v < 1 ? 1 : v;
+};
 
 const clampPerPage = (n: unknown, max = MAX_PER_PAGE): number => {
-  const v = typeof n === 'number' && Number.isFinite(n) ? Math.trunc(n) : DEFAULT_PER_PAGE
-  return Math.min(Math.max(v, 1), Math.min(max, MAX_PER_PAGE))
-}
+  const v = typeof n === "number" && Number.isFinite(n) ? Math.trunc(n) : DEFAULT_PER_PAGE;
+  return Math.min(Math.max(v, 1), Math.min(max, MAX_PER_PAGE));
+};
 
 /**
  * A search box's contents, canonicalised: whitespace collapsed so two spellings
@@ -205,10 +205,10 @@ const clampPerPage = (n: unknown, max = MAX_PER_PAGE): number => {
  * of whatever survives, so the cap decides nothing a visitor would notice.
  */
 const clampSearch = (raw: unknown): string | undefined => {
-  if (typeof raw !== 'string') return undefined
-  const collapsed = raw.replace(/\s+/g, ' ').trim()
-  return collapsed ? collapsed.slice(0, MAX_SEARCH_LENGTH) : undefined
-}
+  if (typeof raw !== "string") return undefined;
+  const collapsed = raw.replace(/\s+/g, " ").trim();
+  return collapsed ? collapsed.slice(0, MAX_SEARCH_LENGTH) : undefined;
+};
 
 /**
  * The canonical form of a query: defaults applied, `type` a sorted array, `where`
@@ -221,47 +221,47 @@ const clampSearch = (raw: unknown): string | undefined => {
 export function normaliseQuery(
   q: ContentQuery,
   perPageMax = MAX_PER_PAGE,
-): Required<Pick<ContentQuery, 'page' | 'perPage'>> & {
-  type: readonly string[]
-  parent?: string | null
-  locale?: string
-  search?: string
-  where: readonly ContentWhere[]
-  order: ContentOrderSpec
-  withDoc: boolean
+): Required<Pick<ContentQuery, "page" | "perPage">> & {
+  type: readonly string[];
+  parent?: string | null;
+  locale?: string;
+  search?: string;
+  where: readonly ContentWhere[];
+  order: ContentOrderSpec;
+  withDoc: boolean;
 } {
-  const type = q.type === undefined ? [] : typeof q.type === 'string' ? [q.type] : [...q.type]
-  const search = clampSearch(q.search)
+  const type = q.type === undefined ? [] : typeof q.type === "string" ? [q.type] : [...q.type];
+  const search = clampSearch(q.search);
   const where = [...(q.where ?? [])]
-    .filter((w) => w && typeof w.field === 'string' && WHERE_OPS.includes(w.op))
+    .filter((w) => w && typeof w.field === "string" && WHERE_OPS.includes(w.op))
     .map((w) => ({
       field: w.field,
       op: w.op,
       // An `in` of one value and an `eq` are different queries, so the array is
       // not collapsed — only sorted, so the same set spells the same key.
       value: Array.isArray(w.value) ? [...w.value].sort() : w.value,
-    })) as ContentWhere[]
+    })) as ContentWhere[];
   where.sort(
     (a, b) =>
       a.field.localeCompare(b.field) ||
       a.op.localeCompare(b.op) ||
       String(a.value).localeCompare(String(b.value)),
-  )
+  );
 
   const order: ContentOrderSpec =
-    typeof q.order === 'string'
-      ? { field: q.order, dir: BUILT_IN_ORDERS[q.order] ?? 'asc' }
-      : q.order && typeof q.order.field === 'string'
-        ? { field: q.order.field, dir: q.order.dir === 'asc' ? 'asc' : 'desc' }
+    typeof q.order === "string"
+      ? { field: q.order, dir: BUILT_IN_ORDERS[q.order] ?? "asc" }
+      : q.order && typeof q.order.field === "string"
+        ? { field: q.order.field, dir: q.order.dir === "asc" ? "asc" : "desc" }
         : search !== undefined
           ? // Best match first, which is the only thing a search result page
             // could mean by default (decision 4). A caller who wants a search
             // sorted by date says so and still gets a `score` on every item.
-            { field: 'relevance', dir: 'desc' }
+            { field: "relevance", dir: "desc" }
           : // Newest first: what a CMS list means when it says nothing. Deterministic
             // either way — `server/query.ts` always appends `s.id` as the tiebreak,
             // without which offset pagination could show one row on two pages.
-            { field: 'publishedAt', dir: 'desc' }
+            { field: "publishedAt", dir: "desc" };
 
   return {
     type: type.slice().sort(),
@@ -273,7 +273,7 @@ export function normaliseQuery(
     page: clampPage(q.page),
     perPage: clampPerPage(q.perPage, perPageMax),
     withDoc: q.withDoc === true,
-  }
+  };
 }
 
 /**
@@ -287,7 +287,7 @@ export function normaliseQuery(
  * collections, so the bytes are not worth the risk.
  */
 export function queryKey(q: ContentQuery, perPageMax = MAX_PER_PAGE): string {
-  const n = normaliseQuery(q, perPageMax)
+  const n = normaliseQuery(q, perPageMax);
   // Explicit key order rather than JSON.stringify over the object, so the key is
   // stable against a future field being added in the middle of the interface.
   // `search` is the eighth element for exactly that reason: appended, never
@@ -295,12 +295,12 @@ export function queryKey(q: ContentQuery, perPageMax = MAX_PER_PAGE): string {
   return JSON.stringify([
     n.type,
     n.parent ?? null,
-    n.locale ?? '',
+    n.locale ?? "",
     n.where.map((w) => [w.field, w.op, w.value]),
     [n.order.field, n.order.dir],
     n.page,
     n.perPage,
-    n.search ?? '',
+    n.search ?? "",
     // Appended **only when true**, so every key a document already computes is
     // byte for byte what it was: the flag is off for every collection field that
     // does not name it, and a ninth element on the ordinary key would change all
@@ -308,7 +308,7 @@ export function queryKey(q: ContentQuery, perPageMax = MAX_PER_PAGE): string {
     // a query and differ here — without it one answer serves both and whichever
     // asked for documents silently renders without them.
     ...(n.withDoc ? [1] : []),
-  ])
+  ]);
 }
 
 /**
@@ -320,35 +320,35 @@ export function queryKey(q: ContentQuery, perPageMax = MAX_PER_PAGE): string {
  * the other's tests is how they stay agreed.
  */
 export function queryToParams(q: ContentQuery, perPageMax = MAX_PER_PAGE): URLSearchParams {
-  const n = normaliseQuery(q, perPageMax)
-  const params = new URLSearchParams()
-  if (n.type.length > 0) params.set('type', n.type.join(','))
+  const n = normaliseQuery(q, perPageMax);
+  const params = new URLSearchParams();
+  if (n.type.length > 0) params.set("type", n.type.join(","));
   // Present-and-empty means the top level, which is a real filter; omitted means
   // anywhere. `undefined` and `null` are different queries, so both are spellable.
-  if (n.parent !== undefined) params.set('parent', n.parent ?? '')
-  if (n.locale) params.set('locale', n.locale)
-  if (n.search) params.set('search', n.search)
+  if (n.parent !== undefined) params.set("parent", n.parent ?? "");
+  if (n.locale) params.set("locale", n.locale);
+  if (n.search) params.set("search", n.search);
   for (const w of n.where) {
     params.append(
-      'where',
-      `${w.field}:${w.op}:${Array.isArray(w.value) ? w.value.join(',') : w.value}`,
-    )
+      "where",
+      `${w.field}:${w.op}:${Array.isArray(w.value) ? w.value.join(",") : w.value}`,
+    );
   }
-  params.set('order', `${n.order.field}:${n.order.dir}`)
-  params.set('page', String(n.page))
-  params.set('perPage', String(n.perPage))
+  params.set("order", `${n.order.field}:${n.order.dir}`);
+  params.set("page", String(n.page));
+  params.set("perPage", String(n.perPage));
   // Only when asked, so the admin's ordinary collection fetch is the URL it
   // always was. This is what keeps a preview render honest: a field that opts in
   // must pull the bodies over HTTP too, or the editor's preview and the live
   // page render from different data.
-  if (n.withDoc) params.set('doc', '1')
-  return params
+  if (n.withDoc) params.set("doc", "1");
+  return params;
 }
 
 /* ------------------------------------------------- the collection field --- */
 
 /** The `collection` field's own declaration, narrowed off `Field`. */
-export type CollectionField = Extract<Field, { kind: 'collection' }>
+export type CollectionField = Extract<Field, { kind: "collection" }>;
 
 /**
  * What the editor's choices are stored as. Plain JSON in `Blok.data`, so it
@@ -356,57 +356,57 @@ export type CollectionField = Extract<Field, { kind: 'collection' }>
  * undo, versioning and atomic publish with no new mechanism.
  */
 export interface CollectionValue {
-  where?: readonly ContentWhere[]
-  order?: ContentOrderSpec
-  perPage?: number
-  page?: number
+  where?: readonly ContentWhere[];
+  order?: ContentOrderSpec;
+  perPage?: number;
+  page?: number;
   /**
    * An editor-typed full-text term (`../../docs/specs/content-model/
    * full-text-search.md` architecture decision 10). Only ever reaches a query
    * when the field itself declares `searchable: true` — `collectionQuery` drops
    * it otherwise, the same double enforcement `filterable` already has.
    */
-  search?: string
+  search?: string;
 }
 
 export function asCollectionValue(value: Json | undefined): CollectionValue {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  const v = value as Record<string, Json>
-  const out: CollectionValue = {}
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const v = value as Record<string, Json>;
+  const out: CollectionValue = {};
   if (Array.isArray(v.where)) {
-    const where: ContentWhere[] = []
+    const where: ContentWhere[] = [];
     for (const raw of v.where) {
-      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
-      const entry = raw as Record<string, Json>
-      const field = entry.field
-      const op = entry.op
-      if (typeof field !== 'string' || !field) continue
-      if (typeof op !== 'string' || !WHERE_OPS.includes(op)) continue
-      const value = entry.value
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+      const entry = raw as Record<string, Json>;
+      const field = entry.field;
+      const op = entry.op;
+      if (typeof field !== "string" || !field) continue;
+      if (typeof op !== "string" || !WHERE_OPS.includes(op)) continue;
+      const value = entry.value;
       if (isRangeOp(op)) {
-        if (typeof value !== 'string' && typeof value !== 'number') continue
-        where.push({ field, op, value })
-        continue
+        if (typeof value !== "string" && typeof value !== "number") continue;
+        where.push({ field, op, value });
+        continue;
       }
-      if (typeof value === 'string') where.push({ field, op: op as TextOp, value })
-      else if (Array.isArray(value) && value.every((x) => typeof x === 'string')) {
-        where.push({ field, op: op as TextOp, value: value as string[] })
+      if (typeof value === "string") where.push({ field, op: op as TextOp, value });
+      else if (Array.isArray(value) && value.every((x) => typeof x === "string")) {
+        where.push({ field, op: op as TextOp, value: value as string[] });
       }
     }
-    out.where = where
+    out.where = where;
   }
-  const order = v.order
-  if (order && typeof order === 'object' && !Array.isArray(order)) {
-    const field = (order as Record<string, Json>).field
-    const dir = (order as Record<string, Json>).dir
-    if (typeof field === 'string' && field) {
-      out.order = { field, dir: dir === 'asc' ? 'asc' : 'desc' }
+  const order = v.order;
+  if (order && typeof order === "object" && !Array.isArray(order)) {
+    const field = (order as Record<string, Json>).field;
+    const dir = (order as Record<string, Json>).dir;
+    if (typeof field === "string" && field) {
+      out.order = { field, dir: dir === "asc" ? "asc" : "desc" };
     }
   }
-  if (typeof v.perPage === 'number') out.perPage = v.perPage
-  if (typeof v.page === 'number') out.page = v.page
-  if (typeof v.search === 'string') out.search = v.search
-  return out
+  if (typeof v.perPage === "number") out.perPage = v.perPage;
+  if (typeof v.page === "number") out.page = v.page;
+  if (typeof v.search === "string") out.search = v.search;
+  return out;
 }
 
 /**
@@ -433,8 +433,8 @@ export function collectionQuery(
   page?: number,
   search?: string,
 ): ContentQuery {
-  const stored = asCollectionValue(value)
-  const filterable = new Set(field.filterable ?? [])
+  const stored = asCollectionValue(value);
+  const filterable = new Set(field.filterable ?? []);
   // `relevance` is orderable only when the field itself accepts a search term
   // (full-text-search.md decision 10): `contentSql` refuses `relevance` without
   // one, so offering (or keeping) it on a field that can never carry `search`
@@ -443,16 +443,16 @@ export function collectionQuery(
   // every key of `BUILT_IN_ORDERS`.
   const orderable = new Set([
     ...filterable,
-    ...Object.keys(BUILT_IN_ORDERS).filter((k) => k !== 'relevance' || field.searchable),
-  ])
+    ...Object.keys(BUILT_IN_ORDERS).filter((k) => k !== "relevance" || field.searchable),
+  ]);
 
   const preOrder =
-    stored.order && orderable.has(stored.order.field) ? stored.order : field.defaultOrder
+    stored.order && orderable.has(stored.order.field) ? stored.order : field.defaultOrder;
 
   // Without `searchable: true`, both the stored and the render-time term are
   // dropped here — the same double enforcement `filterable` has, because a
   // value can also arrive from an importer or over the content API.
-  const term = field.searchable ? (search ?? stored.search) : undefined
+  const term = field.searchable ? (search ?? stored.search) : undefined;
 
   // `relevance` ranks by a term that can be gone the moment a visitor or an
   // editor clears the search box while the sort is still stored as `relevance`
@@ -460,7 +460,7 @@ export function collectionQuery(
   // (decision 4's `bad_request`), so a resolve must never hand it that
   // combination. Dropped exactly as an order naming an unfilterable field
   // already is, so `normaliseQuery` picks the ordinary default instead.
-  const order = preOrder?.field === 'relevance' && !term ? undefined : preOrder
+  const order = preOrder?.field === "relevance" && !term ? undefined : preOrder;
 
   return {
     ...(field.type !== undefined ? { type: field.type } : {}),
@@ -473,12 +473,12 @@ export function collectionQuery(
     ...(field.withDoc ? { withDoc: true } : {}),
     page: page ?? stored.page ?? 1,
     perPage: Math.min(stored.perPage ?? field.maxPerPage ?? DEFAULT_PER_PAGE, maxPerPageOf(field)),
-    status: 'published',
-  }
+    status: "published",
+  };
 }
 
 export const maxPerPageOf = (field: CollectionField): number =>
-  Math.min(field.maxPerPage ?? MAX_PER_PAGE, MAX_PER_PAGE)
+  Math.min(field.maxPerPage ?? MAX_PER_PAGE, MAX_PER_PAGE);
 
 /**
  * The distinct queries a document contains, keyed exactly as the `Resolution`
@@ -506,16 +506,16 @@ export function collectionQueries(
    * is, and dropped by `collectionQuery` for a field that is not `searchable`. */
   search?: string,
 ): Map<string, ContentQuery> {
-  const out = new Map<string, ContentQuery>()
+  const out = new Map<string, ContentQuery>();
   for (const blok of Object.values(doc.bloks)) {
-    const fields: Record<string, Field> | undefined = schema[blok.type]?.fields
-    if (!fields) continue
+    const fields: Record<string, Field> | undefined = schema[blok.type]?.fields;
+    if (!fields) continue;
     for (const [name, field] of Object.entries(fields)) {
-      if (field.kind !== 'collection') continue
-      const q = collectionQuery(field, fieldValue(blok, name, locale), page, search)
-      const key = queryKey(q, maxPerPageOf(field))
-      if (!out.has(key)) out.set(key, q)
+      if (field.kind !== "collection") continue;
+      const q = collectionQuery(field, fieldValue(blok, name, locale), page, search);
+      const key = queryKey(q, maxPerPageOf(field));
+      if (!out.has(key)) out.set(key, q);
     }
   }
-  return out
+  return out;
 }

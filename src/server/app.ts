@@ -2,33 +2,33 @@
  * The mounted app: one error envelope, one bindings middleware, and a sub-app per
  * resource. Everything under `basePath` is answered from here.
  */
-import { Hono } from 'hono'
-import { envelope, FolioError, INTERNAL } from './errors'
-import { withActor, withBindings, withScope } from './middleware'
-import { accessRoutes } from './routes/access'
-import { API_VERSION, apiRoutes } from './routes/api'
-import { assetFileRoutes, assetRoutes } from './routes/assets'
-import { authRoutes, sessionRoutes } from './routes/auth'
-import { bulkRoutes } from './routes/bulk'
-import { contentRoutes } from './routes/content'
-import { editorPageRoutes, editorRoutes } from './routes/editor'
-import { formRoutes, formSubmitRoutes } from './routes/forms'
-import { handoffRoutes } from './routes/handoff'
-import { historyRoutes } from './routes/history'
-import { mcpRoutes } from './routes/mcp'
-import { migrationRoutes } from './routes/migrations'
-import { passkeyRoutes } from './routes/passkeys'
-import { draftRoutes } from './routes/draft'
-import { shareRoutes, sharePageRoutes } from './routes/preview'
-import { redirectRoutes } from './routes/redirects'
-import { scheduleRoutes } from './routes/schedules'
-import { shellRoutes } from './routes/shell'
-import { siteRoutes } from './routes/sites'
-import { spaceRoutes } from './routes/space'
-import { storyRoutes } from './routes/stories'
-import type { Manifest } from '../core/schema'
-import type { FolioRuntime } from './runtime'
-import type { FolioConfig, FolioEnv, GatedReaderFactory } from './types'
+import { Hono } from "hono";
+import { envelope, FolioError, INTERNAL } from "./errors";
+import { withActor, withBindings, withScope } from "./middleware";
+import { accessRoutes } from "./routes/access";
+import { API_VERSION, apiRoutes } from "./routes/api";
+import { assetFileRoutes, assetRoutes } from "./routes/assets";
+import { authRoutes, sessionRoutes } from "./routes/auth";
+import { bulkRoutes } from "./routes/bulk";
+import { contentRoutes } from "./routes/content";
+import { editorPageRoutes, editorRoutes } from "./routes/editor";
+import { formRoutes, formSubmitRoutes } from "./routes/forms";
+import { handoffRoutes } from "./routes/handoff";
+import { historyRoutes } from "./routes/history";
+import { mcpRoutes } from "./routes/mcp";
+import { migrationRoutes } from "./routes/migrations";
+import { passkeyRoutes } from "./routes/passkeys";
+import { draftRoutes } from "./routes/draft";
+import { shareRoutes, sharePageRoutes } from "./routes/preview";
+import { redirectRoutes } from "./routes/redirects";
+import { scheduleRoutes } from "./routes/schedules";
+import { shellRoutes } from "./routes/shell";
+import { siteRoutes } from "./routes/sites";
+import { spaceRoutes } from "./routes/space";
+import { storyRoutes } from "./routes/stories";
+import type { Manifest } from "../core/schema";
+import type { FolioRuntime } from "./runtime";
+import type { FolioConfig, FolioEnv, GatedReaderFactory } from "./types";
 
 /**
  * What `GET {base}/api/schema` answers on a deployment with `brands` when the request
@@ -38,15 +38,15 @@ import type { FolioConfig, FolioEnv, GatedReaderFactory } from './types'
  * from the first brand's manifest only to read those two.
  */
 export function neutralManifest(rt: FolioRuntime): Manifest {
-  const { locales, hooks } = [...rt.brands.values()][0]?.manifest ?? {}
+  const { locales, hooks } = [...rt.brands.values()][0]?.manifest ?? {};
   return {
     types: [],
     blocks: [],
-    root: '',
+    root: "",
     globals: [],
     ...(locales ? { locales } : {}),
     ...(hooks ? { hooks } : {}),
-  }
+  };
 }
 
 export function createApp<Env>(
@@ -55,7 +55,7 @@ export function createApp<Env>(
   /** Builds a reader for a route that gated the site itself (`routes/api/pages.ts`). */
   readerFor?: GatedReaderFactory<Env>,
 ): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>().basePath(rt.base)
+  const app = new Hono<FolioEnv<Env>>().basePath(rt.base);
 
   /**
    * Every failed request answers `{ error: { code, message } }`.
@@ -70,23 +70,23 @@ export function createApp<Env>(
    * which is the point — one envelope, in one place, for every route below.
    */
   app.onError((err, c) => {
-    if (err instanceof FolioError) return c.json(envelope(err), err.status)
-    rt.logger.error(`folio: unhandled error in ${c.req.method} ${c.req.path}`, err)
-    return c.json(INTERNAL, 500)
-  })
+    if (err instanceof FolioError) return c.json(envelope(err), err.status);
+    rt.logger.error(`folio: unhandled error in ${c.req.method} ${c.req.path}`, err);
+    return c.json(INTERNAL, 500);
+  });
 
   // Ahead of every route, because Hono runs middleware in registration order and
   // a handler registered first would never see it. All it installs is a thunk, so
   // running in front of a route that never asks for the bindings costs that route
   // nothing and — the part that matters — makes it depend on nothing new. See
   // middleware.ts.
-  app.use('*', withBindings(config))
+  app.use("*", withBindings(config));
 
   // The scope and the gated site `handle()` passed in its internal headers
   // (`../../docs/specs/foundation/multi-site.md` decision 11), ahead of the actor,
   // which will need the scope to know which role applies. Reads nothing on a
   // deployment with no `sites`.
-  app.use('*', withScope(rt))
+  app.use("*", withScope(rt));
 
   // Straight after the bindings, because it needs them (behind their thunk) and
   // because every route below reads `c.var.actor`. It resolves an identity; it
@@ -94,7 +94,7 @@ export function createApp<Env>(
   // mount with `requireAccess`, so the gate is visible where the handler is
   // rather than in a table of paths somewhere else
   // (identity-and-access.md architecture decision 5).
-  app.use('*', withActor(rt))
+  app.use("*", withActor(rt));
 
   /*
    * ## Where a route goes, and why
@@ -121,7 +121,7 @@ export function createApp<Env>(
   // (1) `/api/v1` first, so `/api/v1/documents/:id` is never read as one of the
   // internal routes' `:id` patterns. Mounted *after* `withActor`, like everything
   // else, so a token and a session cookie are resolved by the same middleware.
-  app.route(`/api/${API_VERSION}`, apiRoutes<Env>(rt, readerFor))
+  app.route(`/api/${API_VERSION}`, apiRoutes<Env>(rt, readerFor));
 
   /**
    * The manifest is derived from the config alone: no bindings, no I/O, no way for
@@ -151,14 +151,14 @@ export function createApp<Env>(
   // The scope's brand's manifest. A branded deployment asked with no scope has no
   // brand to answer for, and answers the neutral manifest the bare shell needs before
   // it redirects to the caller's first scope (`multi-brand.md` decision 12).
-  app.get('/api/schema', (c) => c.json(c.var.brand?.manifest ?? neutralManifest(rt)))
+  app.get("/api/schema", (c) => c.json(c.var.brand?.manifest ?? neutralManifest(rt)));
 
   // (2) Inside `/api`, `/login/verify` has no counterpart to be confused with, but
   // `/story/:id/...` patterns are still shadow-prone, so the specific ones go
   // first. Nothing in `sessionRoutes` needs a credential to *reach*, which is what
   // makes it safe ahead of any gate.
-  app.route('/api', sessionRoutes<Env>(rt))
-  app.route('/api', accessRoutes<Env>(rt))
+  app.route("/api", sessionRoutes<Env>(rt));
+  app.route("/api", accessRoutes<Env>(rt));
   /**
    * `{base}/api/me/passkeys*`, `{base}/api/me/sessions*` and the admin's
    * `{base}/api/users/:id/passkeys` (`../../docs/specs/foundation/passkeys.md`).
@@ -175,37 +175,37 @@ export function createApp<Env>(
    * own server, and a version segment is a promise to somebody's script
    * (`../../docs/specs/foundation/pagination.md` decision 3).
    */
-  app.route('/api', passkeyRoutes<Env>(rt))
-  app.route('/api', storyRoutes<Env>(rt))
+  app.route("/api", passkeyRoutes<Env>(rt));
+  app.route("/api", storyRoutes<Env>(rt));
   // After `storyRoutes`, which owns `/story/:id/publish` and `/unpublish`. Order is
   // not load-bearing here — `/story/:id/schedule` is a distinct literal segment,
   // not a `:param` either one could swallow — and it reads next to its siblings.
-  app.route('/api', scheduleRoutes<Env>(rt))
+  app.route("/api", scheduleRoutes<Env>(rt));
   // Also after `storyRoutes`, and order is not load-bearing here either: `/bulk/*`
   // shares no prefix with anything else on this mount. It reads next to the routes
   // whose per-document twins it performs in a loop.
-  app.route('/api', bulkRoutes<Env>(rt))
+  app.route("/api", bulkRoutes<Env>(rt));
   // After `storyRoutes` for the same reason `scheduleRoutes` is: `/story/:id/share`
   // is a distinct literal segment that no `:param` here can swallow, so the order
   // is for reading rather than for correctness. `/shares` and `/shares/:id` share no
   // prefix with anything on this mount.
-  app.route('/api', shareRoutes<Env>(rt))
-  app.route('/api', historyRoutes<Env>(rt))
-  app.route('/api', assetRoutes<Env>(rt))
-  app.route('/api', editorRoutes<Env>(rt))
-  app.route('/api', redirectRoutes<Env>(rt))
+  app.route("/api", shareRoutes<Env>(rt));
+  app.route("/api", historyRoutes<Env>(rt));
+  app.route("/api", assetRoutes<Env>(rt));
+  app.route("/api", editorRoutes<Env>(rt));
+  app.route("/api", redirectRoutes<Env>(rt));
   // `/forms` and `/forms/:id/...`, sharing no prefix with anything on this mount,
   // so the order is for reading rather than for correctness. The *public* submit
   // route is not here: it is on the bare mount, because a browser navigates to it
   // and its URL is baked into published HTML
   // (`../../docs/specs/content-model/forms.md` architecture decision 3).
-  app.route('/api', formRoutes<Env>(rt))
-  app.route('/api', migrationRoutes<Env>(rt))
-  app.route('/api', contentRoutes<Env>(rt))
-  app.route('/api', spaceRoutes<Env>(rt))
+  app.route("/api", formRoutes<Env>(rt));
+  app.route("/api", migrationRoutes<Env>(rt));
+  app.route("/api", contentRoutes<Env>(rt));
+  app.route("/api", spaceRoutes<Env>(rt));
   // `/sites*`, the registry (`multi-site.md` decision 1). Unscoped and platform
   // tier; mounts nothing on a deployment with no `sites`.
-  app.route('/api', siteRoutes<Env>(rt))
+  app.route("/api", siteRoutes<Env>(rt));
 
   /**
    * `{base}/mcp` — the MCP endpoint (`../../docs/specs/platform/mcp-server.md`
@@ -232,7 +232,7 @@ export function createApp<Env>(
    * at request time, so handing over a reference that is still being registered
    * on is safe.
    */
-  if (config.mcp !== false) app.route('/', mcpRoutes<Env>(rt, app))
+  if (config.mcp !== false) app.route("/", mcpRoutes<Env>(rt, app));
 
   /**
    * An unmatched path under `/api` is a **JSON 404**, and this line is what makes
@@ -247,17 +247,17 @@ export function createApp<Env>(
    * `app.all`, not `app.get`: a POST to a path that no longer exists deserves the
    * same answer as a GET to one.
    */
-  app.all('/api/*', () => {
-    throw new FolioError('not_found', 'No such API route')
-  })
+  app.all("/api/*", () => {
+    throw new FolioError("not_found", "No such API route");
+  });
 
   // The bare mount: pages and public bytes. All of these are navigated to or
   // embedded in HTML, so none of them may move under `/api`.
   //
   // `authRoutes` stays ahead of the rest for its original reason: `/login/verify`
   // must not be read as `/login/:provider`.
-  app.route('/', authRoutes<Env>(rt))
-  app.route('/', assetFileRoutes<Env>(rt))
+  app.route("/", authRoutes<Env>(rt));
+  app.route("/", assetFileRoutes<Env>(rt));
   /**
    * `{base}/f/:id` — the public form submit
    * (`../../docs/specs/content-model/forms.md` architecture decision 3).
@@ -272,7 +272,7 @@ export function createApp<Env>(
    * bypasses every non-GET, and its rule 6 bypasses a GET to the same path for
    * being under `{base}` and not `{base}/asset/`.
    */
-  app.route('/', formSubmitRoutes<Env>(rt))
+  app.route("/", formSubmitRoutes<Env>(rt));
   /**
    * `{base}/share?t=…` — the one route in the server a stranger holding a credential
    * may reach (`../../docs/specs/platform/draft-sharing.md`). It has to be here,
@@ -280,17 +280,17 @@ export function createApp<Env>(
    * a sign-in page they can never complete. It answers 404 entirely under
    * `auth: 'open'`, where the whole mechanism would be ceremony around an open door.
    */
-  app.route('/', sharePageRoutes<Env>(rt))
+  app.route("/", sharePageRoutes<Env>(rt));
   // Browser navigations that set and clear the draft flag, so they sit with the
   // other HTML routes rather than under `/api`.
-  app.route('/', draftRoutes<Env>(rt))
+  app.route("/", draftRoutes<Env>(rt));
   /**
    * `{base}/~<site>/site/start` and `{base}/site/enter` — the preview handoff
    * (`../../docs/specs/foundation/multi-site.md` decision 13). Browser navigations,
    * so on the bare mount, and ahead of `shellRoutes`' wildcard, which would answer
    * both with the admin shell. Mounts nothing on a deployment with no `sites`.
    */
-  app.route('/', handoffRoutes<Env>(rt))
+  app.route("/", handoffRoutes<Env>(rt));
 
   // (3) `shellRoutes`' wildcard covers every bare path, and it now covers
   // `{base}/edit/:id` too — **port phase 7 landed, so the rebuilt editor owns the
@@ -310,8 +310,8 @@ export function createApp<Env>(
   // deleting the files — there turned out to be **ten**, the ninth being a *hook*,
   // which a list assembled by reasoning about pure functions could not see. All ten
   // moved to the file that uses them.
-  app.route('/', editorPageRoutes<Env>(rt))
-  app.route('/', shellRoutes<Env>(rt))
+  app.route("/", editorPageRoutes<Env>(rt));
+  app.route("/", shellRoutes<Env>(rt));
 
-  return app
+  return app;
 }

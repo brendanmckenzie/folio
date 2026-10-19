@@ -1,11 +1,11 @@
-import { useState } from 'react'
-import type { StoryMeta } from '../../../core/story'
-import type { ShareRow } from '../../../server/auth/shares'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { Field, Input } from '../Field'
-import { OneTimeSecretDialog } from './OneTimeSecretDialog'
-import css from './SharePreview.module.css'
+import { useState } from "react";
+import type { StoryMeta } from "../../../core/story";
+import type { ShareRow } from "../../../server/auth/shares";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { Field, Input } from "../Field";
+import { OneTimeSecretDialog } from "./OneTimeSecretDialog";
+import css from "./SharePreview.module.css";
 import {
   DEFAULT_SHARE_DAYS,
   expiresPhrase,
@@ -16,9 +16,9 @@ import {
   shareBody,
   shareDays,
   sharedBy,
-} from './share-model'
-import { usePaged } from './useAccess'
-import { messageOf } from './useContent'
+} from "./share-model";
+import { usePaged } from "./useAccess";
+import { messageOf } from "./useContent";
 
 /**
  * "Share a preview": make a link that shows one unpublished page to someone with no
@@ -40,62 +40,62 @@ export function SharePreview({
   onClose,
   onNotice,
 }: {
-  apiBase: string
-  story: Pick<StoryMeta, 'id' | 'title'>
+  apiBase: string;
+  story: Pick<StoryMeta, "id" | "title">;
   /** The caller's own user id, for "You" in the list; null for a token or `open`. */
-  selfId: string | null
-  onClose: () => void
-  onNotice: (message: string) => void
+  selfId: string | null;
+  onClose: () => void;
+  onNotice: (message: string) => void;
 }) {
-  const shares = usePaged<ShareRow>(apiBase, '/shares', 'shares', true, {
+  const shares = usePaged<ShareRow>(apiBase, "/shares", "shares", true, {
     story: story.id,
-    state: 'live',
-  })
-  const [url, setUrl] = useState<string | null>(null)
-  const [note, setNote] = useState('')
-  const [days, setDays] = useState(String(DEFAULT_SHARE_DAYS))
-  const [pending, setPending] = useState(false)
+    state: "live",
+  });
+  const [url, setUrl] = useState<string | null>(null);
+  const [note, setNote] = useState("");
+  const [days, setDays] = useState(String(DEFAULT_SHARE_DAYS));
+  const [pending, setPending] = useState(false);
   // Revoked in this session, hidden at once: the reload below confirms it, and until
   // then a Revoke button that is still clickable would 404 on its second press.
-  const [revoked, setRevoked] = useState<ReadonlySet<string>>(new Set())
+  const [revoked, setRevoked] = useState<ReadonlySet<string>>(new Set());
 
-  const parsed = shareDays(days)
-  const rows = shares.page.rows.filter((row) => !revoked.has(row.id))
+  const parsed = shareDays(days);
+  const rows = shares.page.rows.filter((row) => !revoked.has(row.id));
 
   const create = async () => {
-    if (!parsed.ok) return
-    setPending(true)
+    if (!parsed.ok) return;
+    setPending(true);
     try {
       const res = await fetch(`${apiBase}/story/${encodeURIComponent(story.id)}/share`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        method: "POST",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify(shareBody(note, parsed.days)),
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
-      setUrl(((await res.json()) as { url: string }).url)
-      setNote('')
-      shares.reload()
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      setUrl(((await res.json()) as { url: string }).url);
+      setNote("");
+      shares.reload();
     } catch (e) {
       // The form stays standing: a refusal must not throw away the note.
-      onNotice((e as Error).message)
+      onNotice((e as Error).message);
     } finally {
-      setPending(false)
+      setPending(false);
     }
-  }
+  };
 
   const revoke = async (share: ShareRow) => {
     try {
       const res = await fetch(`${apiBase}/shares/${encodeURIComponent(share.id)}`, {
-        method: 'DELETE',
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
-      setRevoked((prev) => new Set(prev).add(share.id))
-      onNotice('That preview link no longer works.')
-      shares.reload()
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      setRevoked((prev) => new Set(prev).add(share.id));
+      onNotice("That preview link no longer works.");
+      shares.reload();
     } catch (e) {
-      onNotice((e as Error).message)
+      onNotice((e as Error).message);
     }
-  }
+  };
 
   if (url !== null) {
     return (
@@ -106,12 +106,12 @@ export function SharePreview({
         onClose={() => setUrl(null)}
       >
         <p className={css.meta}>
-          Anyone with this link sees the draft of <b>{story.title || 'this page'}</b> at its real
+          Anyone with this link sees the draft of <b>{story.title || "this page"}</b> at its real
           address, with no sign-in. It cannot be shown again, so copy it before closing; make a new
           one if it is lost.
         </p>
       </OneTimeSecretDialog>
-    )
+    );
   }
 
   return (
@@ -126,7 +126,7 @@ export function SharePreview({
           <Button
             variant="primary"
             disabled={pending || !parsed.ok}
-            reason={pending ? 'Creating…' : parsed.ok ? undefined : parsed.reason}
+            reason={pending ? "Creating…" : parsed.ok ? undefined : parsed.reason}
             onClick={() => void create()}
           >
             Create link
@@ -167,13 +167,13 @@ export function SharePreview({
       {shares.page.error ? (
         <p className={css.empty}>{shares.page.error}</p>
       ) : rows.length === 0 ? (
-        <p className={css.empty}>{shares.page.loading ? 'Loading…' : 'No links for this page.'}</p>
+        <p className={css.empty}>{shares.page.loading ? "Loading…" : "No links for this page."}</p>
       ) : (
         <ul className={css.list}>
           {rows.map((share) => (
             <li key={share.id} className={css.row}>
               <span className={css.what}>
-                <span className={css.note}>{share.note || 'No note'}</span>
+                <span className={css.note}>{share.note || "No note"}</span>
                 <span className={css.meta}>
                   {sharedBy(share, selfId)} · {expiresPhrase(share)} · {openedPhrase(share)}
                 </span>
@@ -186,5 +186,5 @@ export function SharePreview({
         </ul>
       )}
     </Dialog>
-  )
+  );
 }

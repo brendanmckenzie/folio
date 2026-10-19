@@ -1,13 +1,13 @@
-import type { ReactNode } from 'react'
-import type { Field, PropsOf } from './fields'
-import type { LocaleConfig } from './locales'
+import type { ReactNode } from "react";
+import type { Field, PropsOf } from "./fields";
+import type { LocaleConfig } from "./locales";
 import {
   type BlockSchema,
   defaultType,
   type DocumentType,
   type Manifest,
   type SchemaIndex,
-} from './schema'
+} from "./schema";
 
 /**
  * Schema and renderer in one place. The admin form, the TypeScript prop types
@@ -15,9 +15,9 @@ import {
  */
 export interface BlockDef<F extends Record<string, Field> = Record<string, Field>>
   extends BlockSchema {
-  fields: F
+  fields: F;
   /** Field name used to label this block in the editor's tree. */
-  summary?: Extract<keyof F, string>
+  summary?: Extract<keyof F, string>;
   /**
    * **Optional** (`../../docs/specs/content-model/data-documents.md`
    * checkpoint 1). A record root — a person, an office, a partner logo — has no
@@ -35,11 +35,11 @@ export interface BlockDef<F extends Record<string, Field> = Record<string, Field
    * and inventing a marker to enforce it would buy nothing. A content block with
    * no renderer is a mistake, and it is a visible one.
    */
-  render?: (props: PropsOf<F> & { uid: string }) => ReactNode
+  render?: (props: PropsOf<F> & { uid: string }) => ReactNode;
 }
 
 export function defineBlock<const F extends Record<string, Field>>(def: BlockDef<F>): BlockDef<F> {
-  return def
+  return def;
 }
 
 /**
@@ -58,7 +58,7 @@ export function defineBlock<const F extends Record<string, Field>>(def: BlockDef
  * Records without one give `content: null`, and blocks read `person.data`.
  */
 export function defineRecord<const F extends Record<string, Field>>(def: BlockDef<F>): BlockDef<F> {
-  return def
+  return def;
 }
 
 /**
@@ -68,9 +68,9 @@ export function defineRecord<const F extends Record<string, Field>>(def: BlockDe
  * `defineBlock` call site; only the collection type is loose.
  */
 // biome-ignore lint/suspicious/noExplicitAny: see doc comment above
-export type AnyBlockDef = BlockDef<any>
+export type AnyBlockDef = BlockDef<any>;
 
-export type Registry = Record<string, AnyBlockDef>
+export type Registry = Record<string, AnyBlockDef>;
 
 /**
  * Accepts the array form authors naturally write, or a pre-keyed object. A repeated
@@ -81,16 +81,16 @@ export function toRegistry(blocks: readonly AnyBlockDef[] | Registry): Registry 
   if (!Array.isArray(blocks)) {
     for (const [key, def] of Object.entries(blocks as Registry)) {
       if (def.name !== key)
-        throw new Error(`folio: registry key '${key}' names block '${def.name}'`)
+        throw new Error(`folio: registry key '${key}' names block '${def.name}'`);
     }
-    return blocks as Registry
+    return blocks as Registry;
   }
-  const out: Registry = {}
+  const out: Registry = {};
   for (const b of blocks as readonly AnyBlockDef[]) {
-    if (Object.hasOwn(out, b.name)) throw new Error(`folio: duplicate block '${b.name}'`)
-    out[b.name] = b
+    if (Object.hasOwn(out, b.name)) throw new Error(`folio: duplicate block '${b.name}'`);
+    out[b.name] = b;
   }
-  return out
+  return out;
 }
 
 export function toSchemaIndex(registry: Registry): SchemaIndex {
@@ -106,7 +106,7 @@ export function toSchemaIndex(registry: Registry): SchemaIndex {
         presetsOnly: def.presetsOnly,
       } satisfies BlockSchema,
     ]),
-  )
+  );
 }
 
 /**
@@ -134,5 +134,5 @@ export function toManifest(
     root: defaultType(types).root,
     globals: [...globals],
     ...(locales ? { locales } : {}),
-  }
+  };
 }

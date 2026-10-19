@@ -32,32 +32,32 @@
  * against `pnpm dev` this always takes the no-binding shape of the answer,
  * which is exactly `scripts/mcp-test.mjs`'s premise.
  */
-import type { Blok, Doc } from '../../core/doc'
-import type { DocumentKind } from '../../core/schema'
-import { chain, DEFAULT_SITE, type Registry, type SiteRef, sitesUnder } from '../../core/sites'
-import type { StoryMeta } from '../../core/story'
-import { mintGrantCode } from '../auth/grants'
-import type { Actor } from '../auth/roles'
-import { FolioError } from '../errors'
-import { previewPage } from '../pages'
-import type { BrandRuntime, FolioRuntime, SiteRender } from '../runtime'
-import { storyById } from '../stories'
-import type { ReadBindings } from '../types'
+import type { Blok, Doc } from "../../core/doc";
+import type { DocumentKind } from "../../core/schema";
+import { chain, DEFAULT_SITE, type Registry, type SiteRef, sitesUnder } from "../../core/sites";
+import type { StoryMeta } from "../../core/story";
+import { mintGrantCode } from "../auth/grants";
+import type { Actor } from "../auth/roles";
+import { FolioError } from "../errors";
+import { previewPage } from "../pages";
+import type { BrandRuntime, FolioRuntime, SiteRender } from "../runtime";
+import { storyById } from "../stories";
+import type { ReadBindings } from "../types";
 
 /* -------------------------------------------------------------- viewport --- */
 
-export const DEFAULT_VIEWPORT = { width: 1440, height: 900 } as const
+export const DEFAULT_VIEWPORT = { width: 1440, height: 900 } as const;
 
 export interface Viewport {
-  width: number
-  height: number
+  width: number;
+  height: number;
 }
 
 /** A pixel dimension outside this range has an obvious right answer — the
  * nearest one in range — rather than being a caller error, the same reasoning
  * `validate.ts`'s `limitParam` gives for a query-string limit. */
-export const MIN_DIMENSION = 200
-export const MAX_DIMENSION = 4000
+export const MIN_DIMENSION = 200;
+export const MAX_DIMENSION = 4000;
 
 /**
  * Defaulted and clamped. `1440×900` rather than the binding's own `1920×1080`
@@ -70,12 +70,12 @@ export function resolveViewport(input?: { width?: unknown; height?: unknown } | 
   return {
     width: clampDimension(input?.width, DEFAULT_VIEWPORT.width),
     height: clampDimension(input?.height, DEFAULT_VIEWPORT.height),
-  }
+  };
 }
 
 function clampDimension(value: unknown, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback
-  return Math.min(Math.max(Math.round(value), MIN_DIMENSION), MAX_DIMENSION)
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(Math.round(value), MIN_DIMENSION), MAX_DIMENSION);
 }
 
 /* ---------------------------------------------------------------- clip --- */
@@ -95,15 +95,15 @@ function clampDimension(value: unknown, fallback: number): number {
  * already succeeded.
  */
 export function clipSelector(uid: string): string {
-  return `[data-folio-uid="${uid.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"]`
+  return `[data-folio-uid="${uid.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`;
 }
 
 /* -------------------------------------------------------------- target --- */
 
 export type PreviewTarget =
-  | { kind: 'page'; url: string }
-  | { kind: 'global'; url: string }
-  | { kind: 'none' }
+  | { kind: "page"; url: string }
+  | { kind: "global"; url: string }
+  | { kind: "none" };
 
 /**
  * `draftUrl` when the document has one (`withUrls`, decision 5) — a routed
@@ -125,35 +125,35 @@ export function chooseTarget(
   story: { draftUrl?: string | null; type: string },
   kind: DocumentKind | undefined,
 ): PreviewTarget {
-  if (story.draftUrl) return { kind: 'page', url: story.draftUrl }
-  if (kind === 'singleton') {
+  if (story.draftUrl) return { kind: "page", url: story.draftUrl };
+  if (kind === "singleton") {
     return {
-      kind: 'global',
+      kind: "global",
       url: `${base}/preview/global/${encodeURIComponent(story.type)}?mode=draft`,
-    }
+    };
   }
-  return { kind: 'none' }
+  return { kind: "none" };
 }
 
 /** One sentence, honest about what a screenshot of this target actually shows
  * (phase 4 review: "say in the tool result what it photographed"). */
-function captionFor(target: { kind: 'page' | 'global' }): string {
-  return target.kind === 'page'
+function captionFor(target: { kind: "page" | "global" }): string {
+  return target.kind === "page"
     ? "This shows the draft's content rendered on the host's block CSS inside Folio's own preview shell, not the host's real page layout — the document itself is node-for-node what the published page renders, but the chrome around it is Folio's approximation, not the host's."
-    : "This is a bare preview of the global's own draft, alone on Folio's preview shell — a global has no page of its own to show it in context."
+    : "This is a bare preview of the global's own draft, alone on Folio's preview shell — a global has no page of its own to show it in context.";
 }
 
 /* -------------------------------------------------------------- capture --- */
 
 export interface CaptureOptions {
-  url: string
-  viewport: Viewport
-  fullPage: boolean
-  selector?: string
+  url: string;
+  viewport: Viewport;
+  fullPage: boolean;
+  selector?: string;
   /** `authorization`/`cookie`, copied from the caller — nothing else, the same
    * rule `routes/mcp.ts`'s internal dispatch follows for a v1 tool. **Empty on a
    * deployment with `sites`**, where the browser redeems a grant instead. */
-  headers: Readonly<Record<string, string>>
+  headers: Readonly<Record<string, string>>;
 }
 
 /**
@@ -174,29 +174,29 @@ export async function captureScreenshot(
   browser: BrowserRun,
   opts: CaptureOptions,
 ): Promise<Uint8Array> {
-  const res = await browser.quickAction('screenshot', {
+  const res = await browser.quickAction("screenshot", {
     url: opts.url,
     viewport: { width: opts.viewport.width, height: opts.viewport.height },
     selector: opts.selector,
-    gotoOptions: { waitUntil: 'networkidle0' },
+    gotoOptions: { waitUntil: "networkidle0" },
     setExtraHTTPHeaders: opts.headers,
     // A selector is a clip to one element's own box; `fullPage` is a page-level
     // concept and the two together would be a contradiction the binding should
     // not be asked to resolve.
-    screenshotOptions: opts.selector ? { type: 'png' } : { type: 'png', fullPage: opts.fullPage },
-  })
-  if (!res.ok) throw new Error(await browserErrorMessage(res))
-  return new Uint8Array(await res.arrayBuffer())
+    screenshotOptions: opts.selector ? { type: "png" } : { type: "png", fullPage: opts.fullPage },
+  });
+  if (!res.ok) throw new Error(await browserErrorMessage(res));
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 async function browserErrorMessage(res: Response): Promise<string> {
   try {
-    const body = (await res.json()) as { errors?: { message: string }[] }
-    if (body.errors?.[0]?.message) return body.errors[0].message
+    const body = (await res.json()) as { errors?: { message: string }[] };
+    if (body.errors?.[0]?.message) return body.errors[0].message;
   } catch {
     // Not JSON — the status is all there is to report.
   }
-  return `Browser Rendering answered ${res.status}.`
+  return `Browser Rendering answered ${res.status}.`;
 }
 
 /* ------------------------------------------------------------ multi-site --- */
@@ -209,28 +209,28 @@ async function browserErrorMessage(res: Response): Promise<string> {
  * preview origin, since drafts are served nowhere else.
  */
 async function renderSiteFor(
-  on: NonNullable<PreviewDocumentContext['sites']>,
+  on: NonNullable<PreviewDocumentContext["sites"]>,
   story: StoryMeta,
 ): Promise<(SiteRef & { preview: string; chain: readonly string[] }) | string> {
-  const registry = await on.registry()
-  const owner = story.site ?? DEFAULT_SITE
+  const registry = await on.registry();
+  const owner = story.site ?? DEFAULT_SITE;
   const site =
     registry.sites.find((s) => s.id === on.scope && sitesUnder(registry, owner).includes(s.id)) ??
-    registry.sites.find((s) => s.id === owner)
+    registry.sites.find((s) => s.id === owner);
   if (!site) {
-    return `"${story.title}" belongs to '${owner}', which is not a site: call this tool at ${'{base}'}/~<site>/mcp for one of ${sitesUnder(registry, owner).join(', ') || 'no site'} to preview it there.`
+    return `"${story.title}" belongs to '${owner}', which is not a site: call this tool at ${"{base}"}/~<site>/mcp for one of ${sitesUnder(registry, owner).join(", ") || "no site"} to preview it there.`;
   }
   if (!site.preview) {
-    return `${site.name} has no preview origin, so its drafts are not served anywhere and there is nothing to screenshot.`
+    return `${site.name} has no preview origin, so its drafts are not served anywhere and there is nothing to screenshot.`;
   }
-  return { ...site, preview: site.preview, chain: chain(registry, site.id) }
+  return { ...site, preview: site.preview, chain: chain(registry, site.id) };
 }
 
 /** Whose grant a multi-site screenshot rides on: the token's, or the session's. */
 function holderOf(actor: Actor | null): { tokenId: string } | { sessionId: string } | null {
-  if (actor?.kind === 'token') return { tokenId: actor.id }
-  if (actor?.kind === 'user') return { sessionId: actor.session }
-  return null
+  if (actor?.kind === "token") return { tokenId: actor.id };
+  if (actor?.kind === "user") return { sessionId: actor.session };
+  return null;
 }
 
 /* --------------------------------------------------------- orchestration --- */
@@ -239,22 +239,22 @@ export interface PreviewDocumentContext {
   /** The dispatched request's own URL, so a relative preview URL (a host's
    * `route` may return one, and `{base}/preview/global/:name` always is)
    * becomes an absolute one a remote browser — or a person — can reach. */
-  origin: string
-  headers: Readonly<Record<string, string>>
+  origin: string;
+  headers: Readonly<Record<string, string>>;
   /**
    * Whether the request may read this story at all: inside its chain on a
    * deployment with `sites` (`multi-site.md` decision 10), always with none. The
    * one direct loader in MCP — every other tool dispatches to a v1 route that
    * fences — so a story outside it answers exactly as an unknown id.
    */
-  visible: (story: StoryMeta) => Promise<boolean>
+  visible: (story: StoryMeta) => Promise<boolean>;
   /**
    * The request's brand, whose types say what a story renders as, and the story's
    * draft under it (`multi-brand.md` decision 6): never `rt`'s, which has no brand
    * on a deployment with `brands`.
    */
-  brand: BrandRuntime
-  draft: (story: StoryMeta) => Promise<Doc>
+  brand: BrandRuntime;
+  draft: (story: StoryMeta) => Promise<Doc>;
   /**
    * Present on a deployment with `sites` (`multi-site.md` decision 13): the
    * request's scope, its actor and the registry. **Then the browser is handed no
@@ -263,45 +263,45 @@ export interface PreviewDocumentContext {
    * preview origin's `site/enter`, which is the only place drafts are served there.
    */
   sites?: {
-    scope: string | null
-    actor: Actor | null
-    registry: () => Promise<Registry>
-  }
+    scope: string | null;
+    actor: Actor | null;
+    registry: () => Promise<Registry>;
+  };
 }
 
-type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
+type Content = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 
-const text = (value: string): Content => ({ type: 'text', text: value })
+const text = (value: string): Content => ({ type: "text", text: value });
 
 async function renderDraftHtml(
   rt: FolioRuntime,
   bindings: ReadBindings,
   story: StoryMeta,
-  target: PreviewTarget & { kind: 'page' | 'global' },
+  target: PreviewTarget & { kind: "page" | "global" },
   ctx: PreviewDocumentContext,
   site?: SiteRender,
 ): Promise<string> {
   const res = await previewPage(rt, bindings, story, {
-    ...(target.kind === 'global' ? { bare: true } : {}),
-    mode: 'draft',
+    ...(target.kind === "global" ? { bare: true } : {}),
+    mode: "draft",
     // On a deployment with `sites`, resolved on the site it renders for.
     ...(site ? { site } : {}),
     // The request's brand renders it (`multi-brand.md` decision 10), and on a
     // deployment with `brands` a layer's seed needs the registry.
     brand: ctx.brand,
     ...(ctx.brand.brand !== null && ctx.sites ? { registry: await ctx.sites.registry() } : {}),
-  })
-  return res.text()
+  });
+  return res.text();
 }
 
 function base64(bytes: Uint8Array): string {
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  return btoa(binary)
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : 'an unknown error'
+  return err instanceof Error ? err.message : "an unknown error";
 }
 
 /**
@@ -317,19 +317,19 @@ export function previewDocument(
   ctx: PreviewDocumentContext,
   args: Record<string, unknown>,
 ): Promise<{ content: Content[] }> {
-  const id = args.id
-  if (typeof id !== 'string' || id.length === 0) {
-    throw new FolioError('bad_request', 'id is required')
+  const id = args.id;
+  if (typeof id !== "string" || id.length === 0) {
+    throw new FolioError("bad_request", "id is required");
   }
-  const blok = typeof args.blok === 'string' ? args.blok : undefined
+  const blok = typeof args.blok === "string" ? args.blok : undefined;
   const viewport = resolveViewport(
-    typeof args.viewport === 'object' && args.viewport !== null
+    typeof args.viewport === "object" && args.viewport !== null
       ? (args.viewport as Record<string, unknown>)
       : undefined,
-  )
-  const fullPage = args.fullPage === true
+  );
+  const fullPage = args.fullPage === true;
 
-  return run(rt, bindings, ctx, id, { blok, viewport, fullPage })
+  return run(rt, bindings, ctx, id, { blok, viewport, fullPage });
 }
 
 async function run(
@@ -339,26 +339,26 @@ async function run(
   id: string,
   args: { blok?: string; viewport: Viewport; fullPage: boolean },
 ): Promise<{ content: Content[] }> {
-  const story = await storyById(bindings.db, id)
-  if (!story || !(await ctx.visible(story))) throw new FolioError('not_found', 'Unknown document')
+  const story = await storyById(bindings.db, id);
+  if (!story || !(await ctx.visible(story))) throw new FolioError("not_found", "Unknown document");
 
-  const on = ctx.sites ? await renderSiteFor(ctx.sites, story) : null
-  if (typeof on === 'string') return { content: [text(on)] }
-  const decorated = on ? rt.urlsFor(on)(story) : rt.withUrls(story)
-  const target = chooseTarget(rt.base, decorated, ctx.brand.typeOf(story.type)?.kind)
+  const on = ctx.sites ? await renderSiteFor(ctx.sites, story) : null;
+  if (typeof on === "string") return { content: [text(on)] };
+  const decorated = on ? rt.urlsFor(on)(story) : rt.withUrls(story);
+  const target = chooseTarget(rt.base, decorated, ctx.brand.typeOf(story.type)?.kind);
 
-  if (target.kind === 'none') {
+  if (target.kind === "none") {
     return {
       content: [
         text(
           `"${story.title}" is a record with no page of its own — there is nothing to render, so there is nothing to screenshot.`,
         ),
       ],
-    }
+    };
   }
 
-  const url = new URL(target.url, ctx.origin).toString()
-  const caption = captionFor(target)
+  const url = new URL(target.url, ctx.origin).toString();
+  const caption = captionFor(target);
   /**
    * What the browser is sent to, per attempt, and with which headers. Single-site:
    * the draft URL with the caller's own credential, as always. Multi-site: a fresh
@@ -366,31 +366,31 @@ async function run(
    * `site/enter`, and **no header of the caller's**.
    */
   const visit = async (): Promise<{ url: string; headers: Readonly<Record<string, string>> }> => {
-    if (!on || !ctx.sites) return { url, headers: ctx.headers }
-    const next = new URL(url)
-    next.searchParams.set('_folio_id', story.id)
-    const path = `${next.pathname}${next.search}`
-    const holder = holderOf(ctx.sites.actor)
+    if (!on || !ctx.sites) return { url, headers: ctx.headers };
+    const next = new URL(url);
+    next.searchParams.set("_folio_id", story.id);
+    const path = `${next.pathname}${next.search}`;
+    const holder = holderOf(ctx.sites.actor);
     // No holder is `auth: 'open'`, where a preview origin shows drafts to anyone.
-    if (!holder) return { url: next.toString(), headers: {} }
+    if (!holder) return { url: next.toString(), headers: {} };
     // Five minutes whoever calls (decision 13): a session caller's screenshot must
     // not leave a day-long grant behind in a browser nobody owns.
-    const minted = await mintGrantCode(bindings.db, holder, on.id, undefined, { short: true })
-    const enter = new URL(`${on.preview}${rt.base}/site/enter`)
-    enter.searchParams.set('code', minted.code)
-    enter.searchParams.set('next', path)
-    return { url: enter.toString(), headers: {} }
-  }
+    const minted = await mintGrantCode(bindings.db, holder, on.id, undefined, { short: true });
+    const enter = new URL(`${on.preview}${rt.base}/site/enter`);
+    enter.searchParams.set("code", minted.code);
+    enter.searchParams.set("next", path);
+    return { url: enter.toString(), headers: {} };
+  };
 
   // A named uid has to exist in the draft *document* before anything is
   // attempted. Absent-from-the-document and present-but-unclippable (a
   // component-returning block never gets a marker in `draft` mode) look
   // identical from the rendered HTML alone and have opposite fixes (decision
   // 5a, the edge cases) — the `Doc` is what tells them apart.
-  let blokType: string | undefined
+  let blokType: string | undefined;
   if (args.blok !== undefined) {
-    const doc = await ctx.draft(story)
-    const found: Blok | undefined = doc.bloks[args.blok]
+    const doc = await ctx.draft(story);
+    const found: Blok | undefined = doc.bloks[args.blok];
     if (!found) {
       return {
         content: [
@@ -398,9 +398,9 @@ async function run(
             `No block with uid "${args.blok}" exists in this document's draft. Check the uid against get_document's content.`,
           ),
         ],
-      }
+      };
     }
-    blokType = found.type
+    blokType = found.type;
   }
 
   const degrade = async (reason: string): Promise<{ content: Content[] }> => ({
@@ -415,26 +415,26 @@ async function run(
           story,
           target,
           ctx,
-          on ? { site: on, surface: 'preview', chain: on.chain } : undefined,
+          on ? { site: on, surface: "preview", chain: on.chain } : undefined,
         ),
       ),
     ],
-  })
+  });
 
   if (!bindings.browser) {
-    return degrade('No `browser` binding is configured, so no screenshot was taken.')
+    return degrade("No `browser` binding is configured, so no screenshot was taken.");
   }
 
   // A global's bare preview is an admin-origin route behind the caller's session,
   // and on a multi-site deployment the browser carries no credential of theirs.
-  if (on && target.kind === 'global') {
+  if (on && target.kind === "global") {
     return degrade(
-      'On a deployment with sites a global has no preview-origin page to photograph, so no screenshot was taken.',
-    )
+      "On a deployment with sites a global has no preview-origin page to photograph, so no screenshot was taken.",
+    );
   }
 
-  let png: Uint8Array | undefined
-  let note = caption
+  let png: Uint8Array | undefined;
+  let note = caption;
 
   if (args.blok !== undefined) {
     try {
@@ -443,8 +443,8 @@ async function run(
         viewport: args.viewport,
         fullPage: false,
         selector: clipSelector(args.blok),
-      })
-      note += ` Clipped to block "${args.blok}" (${blokType}).`
+      });
+      note += ` Clipped to block "${args.blok}" (${blokType}).`;
     } catch {
       // Falls through to the unclipped attempt below. Either this block has
       // no clip target in `draft` mode, or the browser cannot reach the
@@ -459,18 +459,18 @@ async function run(
         ...(await visit()),
         viewport: args.viewport,
         fullPage: args.fullPage,
-      })
+      });
       if (args.blok !== undefined) {
-        note += ` Block "${args.blok}" (${blokType}) has no clip target in the draft render — it does not render a host element there — so this is the whole viewport instead.`
+        note += ` Block "${args.blok}" (${blokType}) has no clip target in the draft render — it does not render a host element there — so this is the whole viewport instead.`;
       }
     } catch (err) {
       return degrade(
         `No screenshot was taken: the \`browser\` binding could not render this page (${messageOf(err)}).`,
-      )
+      );
     }
   }
 
   return {
-    content: [text(note), { type: 'image', data: base64(png), mimeType: 'image/png' }],
-  }
+    content: [text(note), { type: "image", data: base64(png), mimeType: "image/png" }],
+  };
 }

@@ -19,12 +19,12 @@
  *     own comment: the rule is *parse, do not resolve*, because there is no route
  *     that turns `usr_…` into a name for a caller who is not an admin.
  */
-import type { Doc } from '../../../core/doc'
-import type { Mutation } from '../../../core/mutations'
-import type { ActivityEntry } from '../../../core/protocol'
-import type { BlockSchema, SchemaIndex } from '../../../core/schema'
-import type { VersionKind, VersionMeta } from '../../../server/versions'
-import type { BadgeTone } from '../Badge'
+import type { Doc } from "../../../core/doc";
+import type { Mutation } from "../../../core/mutations";
+import type { ActivityEntry } from "../../../core/protocol";
+import type { BlockSchema, SchemaIndex } from "../../../core/schema";
+import type { VersionKind, VersionMeta } from "../../../server/versions";
+import type { BadgeTone } from "../Badge";
 
 /*
  * Paging is deliberately **not** here. It was, briefly, when the panel held its own
@@ -39,12 +39,12 @@ import type { BadgeTone } from '../Badge'
 /** What an unlabelled version is called. A publish names itself; a checkpoint
  * nobody named is still a checkpoint. */
 export function versionKindLabel(kind: VersionKind): string {
-  return kind === 'publish' ? 'Published' : 'Checkpoint'
+  return kind === "publish" ? "Published" : "Checkpoint";
 }
 
 /** The row's heading: the label somebody typed, or what kind of version it is. */
-export function versionTitle(version: Pick<VersionMeta, 'kind' | 'label'>): string {
-  return version.label?.trim() || versionKindLabel(version.kind)
+export function versionTitle(version: Pick<VersionMeta, "kind" | "label">): string {
+  return version.label?.trim() || versionKindLabel(version.kind);
 }
 
 /**
@@ -55,7 +55,7 @@ export function versionTitle(version: Pick<VersionMeta, 'kind' | 'label'>): stri
  * that appears when the version is opened.
  */
 export function versionTone(kind: VersionKind): BadgeTone {
-  return kind === 'publish' ? 'ok' : 'warn'
+  return kind === "publish" ? "ok" : "warn";
 }
 
 /* ------------------------------------------------------------------- clock --- */
@@ -73,23 +73,23 @@ export function versionTone(kind: VersionKind): BadgeTone {
  * `now` is a parameter so this is pure, the same choice `when` made.
  */
 export function historyWhen(at: number, now: number = Date.now()): string {
-  const seconds = Math.round((now - at) / 1000)
-  if (seconds < 60) return 'just now'
-  const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
+  const seconds = Math.round((now - at) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
   return new Date(at).toLocaleString(undefined, {
-    day: 'numeric',
-    month: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
-  })
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 /** The full timestamp, for the title on a row whose visible form is relative. */
 export function historyExactly(at: number): string {
-  return new Date(at).toLocaleString()
+  return new Date(at).toLocaleString();
 }
 
 /* ------------------------------------------------------------------ actors --- */
@@ -123,30 +123,30 @@ export function historyExactly(at: number): string {
  * name, because that is the only reading of it that is not a lie.
  */
 export type ActorForm =
-  | { kind: 'none' }
-  | { kind: 'token'; label: string }
-  | { kind: 'name'; label: string }
-  | { kind: 'id'; label: string }
+  | { kind: "none" }
+  | { kind: "token"; label: string }
+  | { kind: "name"; label: string }
+  | { kind: "id"; label: string };
 
-const TOKEN_PREFIX = 'token:'
-const USER_PREFIX = 'usr_'
+const TOKEN_PREFIX = "token:";
+const USER_PREFIX = "usr_";
 
 export function actorForm(
   actor: string | null | undefined,
   names: Readonly<Record<string, string>> = {},
 ): ActorForm {
-  const raw = actor?.trim() ?? ''
-  if (raw === '') return { kind: 'none' }
+  const raw = actor?.trim() ?? "";
+  if (raw === "") return { kind: "none" };
   if (raw.startsWith(TOKEN_PREFIX)) {
-    const name = raw.slice(TOKEN_PREFIX.length).trim()
+    const name = raw.slice(TOKEN_PREFIX.length).trim();
     // A token with no name cannot be created (`TokenCreateBody` requires one),
     // but the string is data on the wire and `token:` alone must still render.
-    return { kind: 'token', label: name === '' ? 'an API token' : name }
+    return { kind: "token", label: name === "" ? "an API token" : name };
   }
-  const known = names[raw]?.trim()
-  if (known) return { kind: 'name', label: known }
-  if (raw.startsWith(USER_PREFIX)) return { kind: 'id', label: raw }
-  return { kind: 'name', label: raw }
+  const known = names[raw]?.trim();
+  if (known) return { kind: "name", label: known };
+  if (raw.startsWith(USER_PREFIX)) return { kind: "id", label: raw };
+  return { kind: "name", label: raw };
 }
 
 /**
@@ -168,12 +168,12 @@ export function actorNames(
   activity: readonly ActivityEntry[],
   seed: Readonly<Record<string, string>> = {},
 ): Record<string, string> {
-  const out: Record<string, string> = { ...seed }
+  const out: Record<string, string> = { ...seed };
   for (const entry of activity) {
-    const name = entry.actorName?.trim()
-    if (name) out[entry.actor] = name
+    const name = entry.actorName?.trim();
+    if (name) out[entry.actor] = name;
   }
-  return out
+  return out;
 }
 
 /* -------------------------------------------------------------- activity --- */
@@ -189,7 +189,7 @@ export function actorNames(
  * file whose deletion is the point of the phase after this one.
  */
 export function rootLabel(rootDef: BlockSchema | undefined): string {
-  return rootDef?.label ? `${rootDef.label} settings` : 'Settings'
+  return rootDef?.label ? `${rootDef.label} settings` : "Settings";
 }
 
 /**
@@ -205,50 +205,50 @@ export function describeEdit(
   doc: Doc,
   schema: SchemaIndex,
 ): string {
-  const first = mutations[0]
-  if (!first) return 'No change'
+  const first = mutations[0];
+  if (!first) return "No change";
 
   const labelFor = (uid: string) => {
-    const blok = doc.bloks[uid]
-    if (!blok) return 'a block'
-    if (uid === doc.root) return rootLabel(schema[blok.type])
-    return schema[blok.type]?.label ?? blok.type
-  }
+    const blok = doc.bloks[uid];
+    if (!blok) return "a block";
+    if (uid === doc.root) return rootLabel(schema[blok.type]);
+    return schema[blok.type]?.label ?? blok.type;
+  };
 
-  let phrase: string
+  let phrase: string;
   switch (first.t) {
-    case 'set': {
-      const blok = doc.bloks[first.uid]
-      const field = blok ? schema[blok.type]?.fields[first.field] : undefined
-      phrase = `Changed ${labelFor(first.uid)} · ${field?.label ?? first.field}`
-      break
+    case "set": {
+      const blok = doc.bloks[first.uid];
+      const field = blok ? schema[blok.type]?.fields[first.field] : undefined;
+      phrase = `Changed ${labelFor(first.uid)} · ${field?.label ?? first.field}`;
+      break;
     }
-    case 'unset': {
-      const blok = doc.bloks[first.uid]
-      const field = blok ? schema[blok.type]?.fields[first.field] : undefined
-      phrase = `Reset ${labelFor(first.uid)} · ${field?.label ?? first.field}`
-      break
+    case "unset": {
+      const blok = doc.bloks[first.uid];
+      const field = blok ? schema[blok.type]?.fields[first.field] : undefined;
+      phrase = `Reset ${labelFor(first.uid)} · ${field?.label ?? first.field}`;
+      break;
     }
-    case 'insert':
-      phrase = `Added ${schema[first.blok.type]?.label ?? first.blok.type}`
-      break
-    case 'remove':
-      phrase = `Removed ${labelFor(first.uid)}`
-      break
-    case 'move':
-      phrase = `Moved ${labelFor(first.uid)}`
-      break
-    case 'retype':
+    case "insert":
+      phrase = `Added ${schema[first.blok.type]?.label ?? first.blok.type}`;
+      break;
+    case "remove":
+      phrase = `Removed ${labelFor(first.uid)}`;
+      break;
+    case "move":
+      phrase = `Moved ${labelFor(first.uid)}`;
+      break;
+    case "retype":
       // The *new* type's label comes from the schema rather than from the
       // document: a retype is almost always a content migration, and by the time
       // this renders the document already carries the new type — so `labelFor`
       // would name the destination twice and never the source.
-      phrase = `Changed ${labelFor(first.uid)} to ${schema[first.type]?.label ?? first.type}`
-      break
+      phrase = `Changed ${labelFor(first.uid)} to ${schema[first.type]?.label ?? first.type}`;
+      break;
   }
 
-  const rest = mutations.length - 1
-  return rest > 0 ? `${phrase} +${rest} more` : phrase
+  const rest = mutations.length - 1;
+  return rest > 0 ? `${phrase} +${rest} more` : phrase;
 }
 
 /**
@@ -262,9 +262,9 @@ export function describeEdit(
  * absence of a button.
  */
 export const VERSIONS_NOTE =
-  'Coarse and restorable. Publishing saves one automatically; a checkpoint is one you name. ' +
-  'Restoring applies the difference as a single edit, so it reaches everyone in the document and ⌘Z undoes it.'
+  "Coarse and restorable. Publishing saves one automatically; a checkpoint is one you name. " +
+  "Restoring applies the difference as a single edit, so it reaches everyone in the document and ⌘Z undoes it.";
 
 export const ACTIVITY_NOTE =
-  'Every transaction on this document, from its own log. Fine-grained, and not restorable — ' +
-  'use ⌘Z for the last few, or restore a version above.'
+  "Every transaction on this document, from its own log. Fine-grained, and not restorable — " +
+  "use ⌘Z for the last few, or restore a version above.";

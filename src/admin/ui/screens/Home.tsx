@@ -1,18 +1,18 @@
-import { useId, useRef, useState } from 'react'
-import type { DocumentType } from '../../../core/schema'
-import type { StoryMeta } from '../../../core/story'
-import type { RecentPublish } from '../../../server/versions'
-import { canCreateContent, type Me } from '../../me'
-import type { InheritedRow } from '../../../server/stories'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { EmptyState } from '../EmptyState'
-import { List, ListHeader, Row } from '../List'
-import { type Column, Table } from '../Table'
-import { href, type Screen } from '../route'
-import { type AssetRow, addedAgo, isRenderableImage, thumbUrl, typeLabel } from './assets-model'
-import { stateTone, when } from './content-rows'
-import { count } from './model-model'
+import { useId, useRef, useState } from "react";
+import type { DocumentType } from "../../../core/schema";
+import type { StoryMeta } from "../../../core/story";
+import type { RecentPublish } from "../../../server/versions";
+import { canCreateContent, type Me } from "../../me";
+import type { InheritedRow } from "../../../server/stories";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { EmptyState } from "../EmptyState";
+import { List, ListHeader, Row } from "../List";
+import { type Column, Table } from "../Table";
+import { href, type Screen } from "../route";
+import { type AssetRow, addedAgo, isRenderableImage, thumbUrl, typeLabel } from "./assets-model";
+import { stateTone, when } from "./content-rows";
+import { count } from "./model-model";
 import {
   type ActorDirectory,
   type ActorLabel,
@@ -29,22 +29,22 @@ import {
   quickCards,
   RECENT_LIMIT,
   showsInherited,
-} from './home-model'
-import css from './Home.module.css'
-import { messageOf } from './useContent'
-import { type Block, useHome } from './useHome'
-import { type InheritedData, useInherited } from './useInherited'
+} from "./home-model";
+import css from "./Home.module.css";
+import { messageOf } from "./useContent";
+import { type Block, useHome } from "./useHome";
+import { type InheritedData, useInherited } from "./useInherited";
 
 interface Props {
-  apiBase: string
-  mount: string
+  apiBase: string;
+  mount: string;
   /** Every declared document type, off the manifest. */
-  types: readonly DocumentType[]
+  types: readonly DocumentType[];
   /** `FolioConfig.globals` — a subset of the singleton types. */
-  globals: readonly string[]
-  me: Me
-  onOpen: (screen: Screen) => void
-  onNotice: (message: string) => void
+  globals: readonly string[];
+  me: Me;
+  onOpen: (screen: Screen) => void;
+  onNotice: (message: string) => void;
 }
 
 /**
@@ -57,8 +57,8 @@ interface Props {
  * visibly grows or shrinks the moment it loads, and the whole screen below it moves.
  * Named keys rather than indices, matching Content's and Documents'.
  */
-const SKELETON = Array.from({ length: RECENT_LIMIT }, (_, i) => `s${i}`)
-const TILES = Array.from({ length: MEDIA_LIMIT }, (_, i) => `t${i}`)
+const SKELETON = Array.from({ length: RECENT_LIMIT }, (_, i) => `s${i}`);
+const TILES = Array.from({ length: MEDIA_LIMIT }, (_, i) => `t${i}`);
 
 /**
  * The one width *Latest media* asks the transform route for.
@@ -68,7 +68,7 @@ const TILES = Array.from({ length: MEDIA_LIMIT }, (_, i) => `t${i}`)
  * is the 160px tile at 2× — the same width the Assets grid asks for, so the two
  * screens share cache entries instead of minting a second variant of every file.
  */
-const TILE_WIDTH = 320
+const TILE_WIDTH = 320;
 
 /**
  * **Recency and quick access, which is what every comparable product's home screen
@@ -120,8 +120,8 @@ const TILE_WIDTH = 320
  * `GET /published` are Home's alone.
  */
 export function Home({ apiBase, mount, types, globals, me, onOpen, onNotice }: Props) {
-  const data = useHome(apiBase, me, onNotice)
-  const inherited = useInherited(apiBase, showsInherited(me))
+  const data = useHome(apiBase, me, onNotice);
+  const inherited = useInherited(apiBase, showsInherited(me));
   const cards = quickCards({
     scope: me.sites ? (me.scope ?? null) : null,
     types,
@@ -145,7 +145,7 @@ export function Home({ apiBase, mount, types, globals, me, onOpen, onNotice }: P
     // cheap (an action that disappears, never one that appears late), so this screen
     // does not ask for one.
     mayCreate: canCreateContent(me),
-  })
+  });
 
   return (
     <div className={css.screen}>
@@ -197,7 +197,7 @@ export function Home({ apiBase, mount, types, globals, me, onOpen, onNotice }: P
 
       <Attention attention={data.attention} scope={data.auditScope} mount={mount} onOpen={onOpen} />
     </div>
-  )
+  );
 }
 
 /* -------------------------------------------------------- inherited pages --- */
@@ -215,50 +215,50 @@ function CreateHomeButton({
   onOpen,
   onNotice,
 }: {
-  data: InheritedData
-  me: Me
-  types: readonly DocumentType[]
-  apiBase: string
-  onOpen: (screen: Screen) => void
-  onNotice: (message: string) => void
+  data: InheritedData;
+  me: Me;
+  types: readonly DocumentType[];
+  apiBase: string;
+  onOpen: (screen: Screen) => void;
+  onNotice: (message: string) => void;
 }) {
-  const [pending, setPending] = useState(false)
-  const body = homePageBody(types)
-  if (!data.rootKnown || !body || !canCreateHome(me, data.ownRoot)) return null
+  const [pending, setPending] = useState(false);
+  const body = homePageBody(types);
+  if (!data.rootKnown || !body || !canCreateHome(me, data.ownRoot)) return null;
 
   const create = async () => {
-    setPending(true)
+    setPending(true);
     try {
       const res = await fetch(`${apiBase}/stories`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        method: "POST",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
-      onOpen({ name: 'edit', id: ((await res.json()) as { id: string }).id })
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      onOpen({ name: "edit", id: ((await res.json()) as { id: string }).id });
     } catch (e) {
-      onNotice((e as Error).message)
+      onNotice((e as Error).message);
     } finally {
-      setPending(false)
+      setPending(false);
     }
-  }
+  };
 
   return (
     <Button size="sm" disabled={pending} reason="Creating…" onClick={() => void create()}>
       Create home page
     </Button>
-  )
+  );
 }
 
 /** The button alone, for a scope with nothing inherited to list. */
 function CreateHome(props: Parameters<typeof CreateHomeButton>[0]) {
-  if (!props.data.rootKnown || !canCreateHome(props.me, props.data.ownRoot)) return null
+  if (!props.data.rootKnown || !canCreateHome(props.me, props.data.ownRoot)) return null;
   return (
     <section aria-label="Home page">
       <ListHeader actions={<CreateHomeButton {...props} />}>Home page</ListHeader>
       <p className={css.note}>This scope has no home page of its own yet.</p>
     </section>
-  )
+  );
 }
 
 /**
@@ -280,62 +280,62 @@ function Inherited({
   onOpen,
   onNotice,
 }: {
-  data: InheritedData
-  me: Me
-  types: readonly DocumentType[]
-  apiBase: string
-  mount: string
-  onOpen: (screen: Screen) => void
-  onNotice: (message: string) => void
+  data: InheritedData;
+  me: Me;
+  types: readonly DocumentType[];
+  apiBase: string;
+  mount: string;
+  onOpen: (screen: Screen) => void;
+  onNotice: (message: string) => void;
 }) {
-  const id = useId()
-  const [forking, setForking] = useState<string | null>(null)
-  if (data.failed && data.rows.length === 0) return null
+  const id = useId();
+  const [forking, setForking] = useState<string | null>(null);
+  if (data.failed && data.rows.length === 0) return null;
 
   const fork = async (row: InheritedRow) => {
-    setForking(row.id)
+    setForking(row.id);
     try {
       const res = await fetch(`${apiBase}/stories/${encodeURIComponent(row.id)}/fork`, {
-        method: 'POST',
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
-      const made = (await res.json()) as { story: { id: string } }
-      data.reload()
-      onOpen({ name: 'edit', id: made.story.id })
+        method: "POST",
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      const made = (await res.json()) as { story: { id: string } };
+      data.reload();
+      onOpen({ name: "edit", id: made.story.id });
     } catch (e) {
-      onNotice((e as Error).message)
+      onNotice((e as Error).message);
     } finally {
-      setForking(null)
+      setForking(null);
     }
-  }
+  };
 
   const columns: Column<InheritedRow>[] = [
     {
-      key: 'title',
-      label: 'Page',
+      key: "title",
+      label: "Page",
       cell: (row) => (
-        <a className={css.more} href={href({ name: 'edit', id: row.id }, mount)}>
+        <a className={css.more} href={href({ name: "edit", id: row.id }, mount)}>
           {row.title || <span className={css.untitled}>Untitled</span>}
         </a>
       ),
     },
     {
-      key: 'path',
-      label: 'Path',
-      cell: (row) => <code>{row.path === '' ? '/' : `/${row.path}`}</code>,
+      key: "path",
+      label: "Path",
+      cell: (row) => <code>{row.path === "" ? "/" : `/${row.path}`}</code>,
     },
-    { key: 'owner', label: 'From', cell: (row) => <Badge mono>{ownerLabel(me, row)}</Badge> },
+    { key: "owner", label: "From", cell: (row) => <Badge mono>{ownerLabel(me, row)}</Badge> },
     {
-      key: 'act',
-      label: 'Actions',
+      key: "act",
+      label: "Actions",
       cell: (row) => {
-        const action = inheritedAction(row, data.rows, me)
+        const action = inheritedAction(row, data.rows, me);
         switch (action.kind) {
-          case 'overridden':
+          case "overridden":
             return (
               <span className={css.inheritedActions}>
                 <Badge tone="accent">Overridden here</Badge>
-                <a className={css.more} href={href({ name: 'edit', id: action.id }, mount)}>
+                <a className={css.more} href={href({ name: "edit", id: action.id }, mount)}>
                   Open
                 </a>
                 {action.changed ? (
@@ -344,8 +344,8 @@ function Inherited({
                   </Badge>
                 ) : null}
               </span>
-            )
-          case 'fork':
+            );
+          case "fork":
             return (
               <Button
                 size="sm"
@@ -355,19 +355,19 @@ function Inherited({
               >
                 Fork
               </Button>
-            )
-          case 'blocked':
+            );
+          case "blocked":
             return (
               <Button size="sm" disabled reason={action.reason}>
                 Fork
               </Button>
-            )
-          case 'none':
-            return <span className={css.stamp}>Read-only</span>
+            );
+          case "none":
+            return <span className={css.stamp}>Read-only</span>;
         }
       },
     },
-  ]
+  ];
 
   return (
     <section aria-labelledby={id}>
@@ -411,7 +411,7 @@ function Inherited({
         reach the copy.
       </p>
     </section>
-  )
+  );
 }
 
 /* --------------------------------------------------------------- a heading --- */
@@ -430,9 +430,9 @@ function Head({
   children,
   link,
 }: {
-  id: string
-  children: string
-  link?: { text: string; href: string }
+  id: string;
+  children: string;
+  link?: { text: string; href: string };
 }) {
   return (
     <div className={css.head}>
@@ -445,7 +445,7 @@ function Head({
         </a>
       ) : null}
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------ quick access --- */
@@ -460,16 +460,16 @@ function QuickAccess({
   onFiles,
   onCreated,
 }: {
-  cards: readonly QuickCard[]
-  mount: string
-  apiBase: string
-  busy: boolean
-  onOpen: (screen: Screen) => void
-  onNotice: (message: string) => void
-  onFiles: (files: FileList | null) => void
-  onCreated: () => void
+  cards: readonly QuickCard[];
+  mount: string;
+  apiBase: string;
+  busy: boolean;
+  onOpen: (screen: Screen) => void;
+  onNotice: (message: string) => void;
+  onFiles: (files: FileList | null) => void;
+  onCreated: () => void;
 }) {
-  const id = useId()
+  const id = useId();
   return (
     <section aria-labelledby={id}>
       <Head id={id}>Quick access</Head>
@@ -491,19 +491,19 @@ function QuickAccess({
                 dressed as information) keeps the line, so the notes sit on one
                 baseline across the grid and nothing reflows when `/counts` lands.
               */}
-              <span className={css.cardCount}>{card.count?.toLocaleString() ?? ''}</span>
+              <span className={css.cardCount}>{card.count?.toLocaleString() ?? ""}</span>
               <span className={css.cardNote}>{card.note}</span>
             </a>
             {card.create ? (
               <div className={css.cardAction}>
-                {card.create.kind === 'document' ? (
+                {card.create.kind === "document" ? (
                   <NewDocumentButton
                     apiBase={apiBase}
                     type={card.create.type}
                     label={card.create.label}
                     onCreated={(storyId) => {
-                      onCreated()
-                      onOpen({ name: 'edit', id: storyId })
+                      onCreated();
+                      onOpen({ name: "edit", id: storyId });
                     }}
                     onNotice={onNotice}
                   />
@@ -516,7 +516,7 @@ function QuickAccess({
         ))}
       </div>
     </section>
-  )
+  );
 }
 
 /**
@@ -541,30 +541,30 @@ function NewDocumentButton({
   onCreated,
   onNotice,
 }: {
-  apiBase: string
-  type: string
-  label: string
-  onCreated: (id: string) => void
-  onNotice: (message: string) => void
+  apiBase: string;
+  type: string;
+  label: string;
+  onCreated: (id: string) => void;
+  onNotice: (message: string) => void;
 }) {
-  const [pending, setPending] = useState(false)
+  const [pending, setPending] = useState(false);
 
   const create = async () => {
-    setPending(true)
+    setPending(true);
     try {
       const res = await fetch(`${apiBase}/stories`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: 'Untitled', parentId: null, type }),
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
-      onCreated(((await res.json()) as { id: string }).id)
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ title: "Untitled", parentId: null, type }),
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      onCreated(((await res.json()) as { id: string }).id);
     } catch (e) {
-      onNotice((e as Error).message)
+      onNotice((e as Error).message);
     } finally {
-      setPending(false)
+      setPending(false);
     }
-  }
+  };
 
   return (
     <Button
@@ -576,7 +576,7 @@ function NewDocumentButton({
     >
       {label}
     </Button>
-  )
+  );
 }
 
 /**
@@ -596,11 +596,11 @@ function UploadButton({
   busy,
   onFiles,
 }: {
-  label: string
-  busy: boolean
-  onFiles: (files: FileList | null) => void
+  label: string;
+  busy: boolean;
+  onFiles: (files: FileList | null) => void;
 }) {
-  const input = useRef<HTMLInputElement>(null)
+  const input = useRef<HTMLInputElement>(null);
   return (
     <>
       <Button
@@ -620,13 +620,13 @@ function UploadButton({
         // No `accept`: the library takes whatever the route takes, and a filter here
         // would be a second, staler copy of `SERVED_CONTENT_TYPES`.
         onChange={(e) => {
-          onFiles(e.target.files)
+          onFiles(e.target.files);
           // Cleared, so choosing the same file twice in a row fires `change` twice.
-          e.target.value = ''
+          e.target.value = "";
         }}
       />
     </>
-  )
+  );
 }
 
 /* ---------------------------------------------------------- latest changes --- */
@@ -642,13 +642,13 @@ function Changes({
   mount,
   onOpen,
 }: {
-  block: Block<StoryMeta>
-  types: readonly DocumentType[]
-  mount: string
-  onOpen: (screen: Screen) => void
+  block: Block<StoryMeta>;
+  types: readonly DocumentType[];
+  mount: string;
+  onOpen: (screen: Screen) => void;
 }) {
-  const id = useId()
-  if (block.failed) return null
+  const id = useId();
+  if (block.failed) return null;
 
   return (
     <section aria-labelledby={id}>
@@ -660,7 +660,7 @@ function Changes({
           title="Nothing has been edited yet"
           body="Every document you touch appears here, whether or not it is a page."
           action={
-            <a className={css.more} href={href({ name: 'content' }, mount)}>
+            <a className={css.more} href={href({ name: "content" }, mount)}>
               Go to Content
             </a>
           }
@@ -683,7 +683,7 @@ function Changes({
                   <span className={css.stamp}>{when(row)}</span>
                 </>
               }
-              onOpen={() => onOpen({ name: 'edit', id: row.id })}
+              onOpen={() => onOpen({ name: "edit", id: row.id })}
             >
               {row.title || <span className={css.untitled}>Untitled</span>}
             </Row>
@@ -697,7 +697,7 @@ function Changes({
       */}
       <p className={css.note}>{EDITOR_UNKNOWN_NOTE}</p>
     </section>
-  )
+  );
 }
 
 /* -------------------------------------------------------- latest published --- */
@@ -709,14 +709,14 @@ function Published({
   mount,
   onOpen,
 }: {
-  block: Block<RecentPublish>
-  me: Me
-  directory: ActorDirectory
-  mount: string
-  onOpen: (screen: Screen) => void
+  block: Block<RecentPublish>;
+  me: Me;
+  directory: ActorDirectory;
+  mount: string;
+  onOpen: (screen: Screen) => void;
 }) {
-  const id = useId()
-  if (block.failed) return null
+  const id = useId();
+  if (block.failed) return null;
 
   return (
     <section aria-labelledby={id}>
@@ -728,7 +728,7 @@ function Published({
           title="Nothing has been published yet"
           body="A publish writes a version row, and the version rows are what this list reads — so a checkpoint saved while editing is not counted as a release."
           action={
-            <a className={css.more} href={href({ name: 'content' }, mount)}>
+            <a className={css.more} href={href({ name: "content" }, mount)}>
               Go to Content
             </a>
           }
@@ -763,7 +763,7 @@ function Published({
                   </a>
                 ) : null
               }
-              onOpen={() => onOpen({ name: 'edit', id: story.id })}
+              onOpen={() => onOpen({ name: "edit", id: story.id })}
             >
               {/*
                 The **version's** title, not the story's, and that is why this route
@@ -777,7 +777,7 @@ function Published({
         </List>
       )}
     </section>
-  )
+  );
 }
 
 /**
@@ -789,14 +789,14 @@ function Published({
  * would be the one thing this screen must not do.
  */
 function Actor({ who }: { who: ActorLabel }) {
-  if (who.kind === 'id') {
+  if (who.kind === "id") {
     return (
       <span className={css.actorId} title="No display name is resolvable for this editor here.">
         {who.text}
       </span>
-    )
+    );
   }
-  return <>{who.text}</>
+  return <>{who.text}</>;
 }
 
 /* ------------------------------------------------------------ latest media --- */
@@ -810,17 +810,17 @@ function Media({
   busy,
   onFiles,
 }: {
-  block: Block<AssetRow>
-  mount: string
-  busy: boolean
-  onFiles: (files: FileList | null) => void
+  block: Block<AssetRow>;
+  mount: string;
+  busy: boolean;
+  onFiles: (files: FileList | null) => void;
 }) {
-  const id = useId()
-  if (block.failed) return null
+  const id = useId();
+  if (block.failed) return null;
 
   return (
     <section aria-labelledby={id}>
-      <Head id={id} link={{ text: 'All media', href: href({ name: 'assets' }, mount) }}>
+      <Head id={id} link={{ text: "All media", href: href({ name: "assets" }, mount) }}>
         Latest media
       </Head>
       {block.loading && block.rows.length === 0 ? (
@@ -844,7 +844,7 @@ function Media({
             <a
               className={css.tile}
               key={row.id}
-              href={href({ name: 'assets' }, mount, { asset: row.key })}
+              href={href({ name: "assets" }, mount, { asset: row.key })}
             >
               <span className={css.tileFrame}>
                 {isRenderableImage(row) ? (
@@ -879,7 +879,7 @@ function Media({
         </div>
       )}
     </section>
-  )
+  );
 }
 
 /* --------------------------------------------------------- needs attention --- */
@@ -898,21 +898,21 @@ function Attention({
   mount,
   onOpen,
 }: {
-  attention: AttentionModel
-  scope: string
-  mount: string
-  onOpen: (screen: Screen) => void
+  attention: AttentionModel;
+  scope: string;
+  mount: string;
+  onOpen: (screen: Screen) => void;
 }) {
-  const id = useId()
-  if (attention.quiet) return null
+  const id = useId();
+  if (attention.quiet) return null;
 
-  const footnote = [attention.more > 0 ? `${attention.more} more on Content model.` : '', scope]
+  const footnote = [attention.more > 0 ? `${attention.more} more on Content model.` : "", scope]
     .filter(Boolean)
-    .join(' ')
+    .join(" ");
 
   return (
     <section aria-labelledby={id}>
-      <Head id={id} link={{ text: 'Content model', href: href({ name: 'model' }, mount) }}>
+      <Head id={id} link={{ text: "Content model", href: href({ name: "model" }, mount) }}>
         Needs attention
       </Head>
       {/*
@@ -937,7 +937,7 @@ function Attention({
                         tabular "9" dressed as code reads as an identifier.
                       */
                       <Badge tone={row.tone} mono={row.subject !== undefined}>
-                        {row.subject ?? count(row.count ?? 0, 'finding')}
+                        {row.subject ?? count(row.count ?? 0, "finding")}
                       </Badge>
                     ),
                   }
@@ -953,7 +953,7 @@ function Attention({
       ) : null}
       {footnote ? <p className={css.note}>{footnote}</p> : null}
     </section>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ shared --- */
@@ -965,5 +965,5 @@ function Skeletons() {
         <div className={css.skeleton} key={key} />
       ))}
     </div>
-  )
+  );
 }

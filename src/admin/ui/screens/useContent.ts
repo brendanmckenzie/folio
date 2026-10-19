@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Page } from '../../../core/pagination'
-import type { StoryMeta } from '../../../core/story'
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Page } from "../../../core/pagination";
+import type { StoryMeta } from "../../../core/story";
 import {
   type ContentUrl,
   filterOf,
@@ -10,7 +10,7 @@ import {
   type Levels,
   PENDING,
   ROOT,
-} from './content-model'
+} from "./content-model";
 
 /**
  * The Content screen's data: levels of the tree, or one page of the flat list.
@@ -27,44 +27,44 @@ import {
 /** Rows per request. The route defaults to 50 and clamps at 200; a tree level and
  * a flat page both want enough to fill a screen and not much more, because the
  * next one is a keystroke away. */
-const PAGE = 50
+const PAGE = 50;
 
 export interface ContentData {
   /** Tree mode. Keyed by parent id, with `ROOT` for the top level. */
-  levels: Levels
+  levels: Levels;
   /** Flat mode's current page. */
-  flat: Page<StoryMeta> & { loading: boolean; error?: string }
+  flat: Page<StoryMeta> & { loading: boolean; error?: string };
   /** Cursors already visited in flat mode, so *previous* is a pop rather than a
    * reverse query. Keyset paging only goes forwards; a client-side stack is what
    * makes next / previous work without the route learning a second direction. */
-  canGoBack: boolean
+  canGoBack: boolean;
   /** Ask for a level's first page. Idempotent: a level already loaded or in
    * flight is left alone, which is what makes this safe to call from a render
    * effect on expand. */
-  openLevel: (parent: string) => void
+  openLevel: (parent: string) => void;
   /** Append the next page of a level (the `Show N more` row). */
-  moreOfLevel: (parent: string) => void
-  nextPage: () => void
-  prevPage: () => void
+  moreOfLevel: (parent: string) => void;
+  nextPage: () => void;
+  prevPage: () => void;
   /** Re-read everything currently on screen, after a write. */
-  reload: () => void
+  reload: () => void;
 }
 
 export function useContent(apiBase: string, url: ContentUrl): ContentData {
-  const filter = filterOf(url)
+  const filter = filterOf(url);
   // Serialised, because a fresh object every render would restart every effect
   // below. The string is also exactly what goes on the wire, so there is no
   // second representation to keep in step.
-  const params = new URLSearchParams(filterParams(filter)).toString()
+  const params = new URLSearchParams(filterParams(filter)).toString();
 
-  const [levels, setLevels] = useState<Levels>({})
-  const [flat, setFlat] = useState<ContentData['flat']>({
+  const [levels, setLevels] = useState<Levels>({});
+  const [flat, setFlat] = useState<ContentData["flat"]>({
     rows: [],
     cursor: null,
     loading: true,
-  })
-  const [flatCursor, setFlatCursor] = useState<string | null>(null)
-  const [history, setHistory] = useState<readonly (string | null)[]>([])
+  });
+  const [flatCursor, setFlatCursor] = useState<string | null>(null);
+  const [history, setHistory] = useState<readonly (string | null)[]>([]);
 
   /**
    * Held in a ref and read inside the fetchers rather than named as a dependency.
@@ -74,33 +74,33 @@ export function useContent(apiBase: string, url: ContentUrl): ContentData {
    * writes — which restarts the effect that called it. The ref is the same trick
    * `useShortcuts` uses for its bindings and `useSpace` for its event handler.
    */
-  const current = useRef<Levels>(levels)
-  current.current = levels
+  const current = useRef<Levels>(levels);
+  current.current = levels;
 
   const fetchLevel = useCallback(
-    async (parent: string, mode: 'first' | 'more') => {
-      const existing = current.current[parent]
-      if (mode === 'more' && (!existing || existing.cursor === null)) return
-      const query = new URLSearchParams(params)
-      query.set('limit', String(PAGE))
-      if (parent !== ROOT) query.set('parentId', parent)
+    async (parent: string, mode: "first" | "more") => {
+      const existing = current.current[parent];
+      if (mode === "more" && (!existing || existing.cursor === null)) return;
+      const query = new URLSearchParams(params);
+      query.set("limit", String(PAGE));
+      if (parent !== ROOT) query.set("parentId", parent);
       // Only the first page of a level asks for a count: it counts the whole
       // filter rather than the page, so asking again on page two would run the
       // same aggregate for the same answer (`pagination.md` decision 5).
-      if (mode === 'first') query.set('count', '1')
-      else if (existing?.cursor) query.set('cursor', existing.cursor)
+      if (mode === "first") query.set("count", "1");
+      else if (existing?.cursor) query.set("cursor", existing.cursor);
 
       setLevels((prev) => ({
         ...prev,
         [parent]: { ...(prev[parent] ?? PENDING), loading: true },
-      }))
+      }));
       try {
-        const res = await fetch(`${apiBase}/stories?${query}`)
-        if (!res.ok) throw new Error(await messageOf(res))
-        const page = (await res.json()) as Page<LevelRow>
+        const res = await fetch(`${apiBase}/stories?${query}`);
+        if (!res.ok) throw new Error(await messageOf(res));
+        const page = (await res.json()) as Page<LevelRow>;
         setLevels((prev) => {
-          const before = prev[parent]
-          const kept = mode === 'more' && before ? before.rows : []
+          const before = prev[parent];
+          const kept = mode === "more" && before ? before.rows : [];
           const level: Level = {
             rows: [...kept, ...page.rows],
             cursor: page.cursor,
@@ -110,9 +110,9 @@ export function useContent(apiBase: string, url: ContentUrl): ContentData {
                 : { total: before.total }
               : { total: page.total }),
             loading: false,
-          }
-          return { ...prev, [parent]: level }
-        })
+          };
+          return { ...prev, [parent]: level };
+        });
       } catch (e) {
         setLevels((prev) => ({
           ...prev,
@@ -121,31 +121,31 @@ export function useContent(apiBase: string, url: ContentUrl): ContentData {
             loading: false,
             error: (e as Error).message,
           },
-        }))
+        }));
       }
     },
     [apiBase, params],
-  )
+  );
 
   /** Flat mode's page, as a callback rather than inline in the effect below, so
    * `reload` can re-run exactly the same request after a write. */
   const fetchFlat = useCallback(async () => {
-    const query = new URLSearchParams(params)
-    query.set('flat', '1')
-    query.set('sort', url.sort)
-    query.set('limit', String(PAGE))
-    query.set('count', '1')
-    if (flatCursor) query.set('cursor', flatCursor)
+    const query = new URLSearchParams(params);
+    query.set("flat", "1");
+    query.set("sort", url.sort);
+    query.set("limit", String(PAGE));
+    query.set("count", "1");
+    if (flatCursor) query.set("cursor", flatCursor);
 
-    setFlat((prev) => ({ ...prev, loading: true }))
+    setFlat((prev) => ({ ...prev, loading: true }));
     try {
-      const res = await fetch(`${apiBase}/stories?${query}`)
-      if (!res.ok) throw new Error(await messageOf(res))
-      setFlat({ ...((await res.json()) as Page<StoryMeta>), loading: false })
+      const res = await fetch(`${apiBase}/stories?${query}`);
+      if (!res.ok) throw new Error(await messageOf(res));
+      setFlat({ ...((await res.json()) as Page<StoryMeta>), loading: false });
     } catch (e) {
-      setFlat({ rows: [], cursor: null, loading: false, error: (e as Error).message })
+      setFlat({ rows: [], cursor: null, loading: false, error: (e as Error).message });
     }
-  }, [apiBase, params, url.sort, flatCursor])
+  }, [apiBase, params, url.sort, flatCursor]);
 
   /**
    * The visible view's first read, and **every level is dropped when the filter
@@ -159,13 +159,13 @@ export function useContent(apiBase: string, url: ContentUrl): ContentData {
    * nothing in another.
    */
   useEffect(() => {
-    if (url.view === 'tree') {
-      setLevels({})
-      void fetchLevel(ROOT, 'first')
+    if (url.view === "tree") {
+      setLevels({});
+      void fetchLevel(ROOT, "first");
     } else {
-      void fetchFlat()
+      void fetchFlat();
     }
-  }, [fetchLevel, fetchFlat, url.view])
+  }, [fetchLevel, fetchFlat, url.view]);
 
   /**
    * A filter or sort change invalidates the cursor stack: both are a different
@@ -174,40 +174,43 @@ export function useContent(apiBase: string, url: ContentUrl): ContentData {
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: params and url.sort are the trigger, not values the body reads — it only clears. Naming them is the point; reading them to satisfy the rule would misstate what this depends on
   useEffect(() => {
-    setFlatCursor(null)
-    setHistory([])
-  }, [params, url.sort])
+    setFlatCursor(null);
+    setHistory([]);
+  }, [params, url.sort]);
 
   const openLevel = useCallback(
     (parent: string) => {
-      const existing = current.current[parent]
+      const existing = current.current[parent];
       // Idempotent: in flight, or already answered without error, is left alone.
       // That is what lets the component call this straight from its expand
       // handler without tracking what it has already requested — and a level that
       // answered with no rows is *answered*, so an empty parent is not re-asked
       // every time it is opened.
-      if (existing?.loading) return
-      if (existing && !existing.error) return
-      void fetchLevel(parent, 'first')
+      if (existing?.loading) return;
+      if (existing && !existing.error) return;
+      void fetchLevel(parent, "first");
     },
     [fetchLevel],
-  )
+  );
 
-  const moreOfLevel = useCallback((parent: string) => void fetchLevel(parent, 'more'), [fetchLevel])
+  const moreOfLevel = useCallback(
+    (parent: string) => void fetchLevel(parent, "more"),
+    [fetchLevel],
+  );
 
   const nextPage = useCallback(() => {
-    if (!flat.cursor) return
-    setHistory((prev) => [...prev, flatCursor])
-    setFlatCursor(flat.cursor)
-  }, [flat.cursor, flatCursor])
+    if (!flat.cursor) return;
+    setHistory((prev) => [...prev, flatCursor]);
+    setFlatCursor(flat.cursor);
+  }, [flat.cursor, flatCursor]);
 
   const prevPage = useCallback(() => {
     setHistory((prev) => {
-      if (prev.length === 0) return prev
-      setFlatCursor(prev[prev.length - 1] ?? null)
-      return prev.slice(0, -1)
-    })
-  }, [])
+      if (prev.length === 0) return prev;
+      setFlatCursor(prev[prev.length - 1] ?? null);
+      return prev.slice(0, -1);
+    });
+  }, []);
 
   /**
    * Re-read what is on screen, after a write.
@@ -223,13 +226,13 @@ export function useContent(apiBase: string, url: ContentUrl): ContentData {
    * would be N requests to rebuild a shape the write may have invalidated anyway.
    */
   const reload = useCallback(() => {
-    if (url.view === 'tree') {
-      setLevels({})
-      void fetchLevel(ROOT, 'first')
+    if (url.view === "tree") {
+      setLevels({});
+      void fetchLevel(ROOT, "first");
     } else {
-      void fetchFlat()
+      void fetchFlat();
     }
-  }, [fetchLevel, fetchFlat, url.view])
+  }, [fetchLevel, fetchFlat, url.view]);
 
   return {
     levels,
@@ -240,7 +243,7 @@ export function useContent(apiBase: string, url: ContentUrl): ContentData {
     nextPage,
     prevPage,
     reload,
-  }
+  };
 }
 
 /**
@@ -254,10 +257,10 @@ export function useContent(apiBase: string, url: ContentUrl): ContentData {
  */
 export async function messageOf(res: Response): Promise<string> {
   try {
-    const body = (await res.json()) as { error?: { message?: string } }
-    if (body.error?.message) return body.error.message
+    const body = (await res.json()) as { error?: { message?: string } };
+    if (body.error?.message) return body.error.message;
   } catch {
     // Falls through.
   }
-  return `Request failed (${res.status})`
+  return `Request failed (${res.status})`;
 }

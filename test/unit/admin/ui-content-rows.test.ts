@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { stateTone, when } from '../../../src/admin/ui/screens/content-rows'
+import { describe, expect, it } from "vitest";
+import { stateTone, when } from "../../../src/admin/ui/screens/content-rows";
 
 /**
  * What is left of the Content prototype's arithmetic once the tree was paged.
@@ -13,40 +13,40 @@ import { stateTone, when } from '../../../src/admin/ui/screens/content-rows'
  * matches. See `content-model.ts`'s `withFilter`.
  */
 
-describe('stateTone', () => {
-  it('gives a draft the neutral tone, which is the review’s one palette change', () => {
-    expect(stateTone('draft')).toBe('neutral')
-  })
+describe("stateTone", () => {
+  it("gives a draft the neutral tone, which is the review’s one palette change", () => {
+    expect(stateTone("draft")).toBe("neutral");
+  });
 
-  it('reserves danger for the state that is genuinely a warning', () => {
-    expect(stateTone('unpublished')).toBe('danger')
-    expect(stateTone('live')).toBe('ok')
-    expect(stateTone('changed')).toBe('accent')
-  })
-})
+  it("reserves danger for the state that is genuinely a warning", () => {
+    expect(stateTone("unpublished")).toBe("danger");
+    expect(stateTone("live")).toBe("ok");
+    expect(stateTone("changed")).toBe("accent");
+  });
+});
 
-describe('when', () => {
-  const now = Date.UTC(2026, 6, 30, 12, 0, 0)
+describe("when", () => {
+  const now = Date.UTC(2026, 6, 30, 12, 0, 0);
 
   it('prefers the draft watermark, because that is what an editor means by "edited"', () => {
     // The row was touched an hour ago by a move; the document changed a minute
     // ago. "1m ago" is the true answer to the question the column asks.
-    expect(when({ updatedAt: now - 3_600_000, draftUpdatedAt: now - 60_000 }, now)).toBe('1m ago')
-  })
+    expect(when({ updatedAt: now - 3_600_000, draftUpdatedAt: now - 60_000 }, now)).toBe("1m ago");
+  });
 
-  it('falls back to the row when the document has never been edited', () => {
-    expect(when({ updatedAt: now - 7_200_000, draftUpdatedAt: null }, now)).toBe('2h ago')
-  })
+  it("falls back to the row when the document has never been edited", () => {
+    expect(when({ updatedAt: now - 7_200_000, draftUpdatedAt: null }, now)).toBe("2h ago");
+  });
 
-  it('coarsens as it goes back', () => {
-    expect(when({ updatedAt: now - 5_000, draftUpdatedAt: null }, now)).toBe('just now')
-    expect(when({ updatedAt: now - 120_000, draftUpdatedAt: null }, now)).toBe('2m ago')
-    expect(when({ updatedAt: now - 3 * 86_400_000, draftUpdatedAt: null }, now)).toBe('3d ago')
-  })
+  it("coarsens as it goes back", () => {
+    expect(when({ updatedAt: now - 5_000, draftUpdatedAt: null }, now)).toBe("just now");
+    expect(when({ updatedAt: now - 120_000, draftUpdatedAt: null }, now)).toBe("2m ago");
+    expect(when({ updatedAt: now - 3 * 86_400_000, draftUpdatedAt: null }, now)).toBe("3d ago");
+  });
 
-  it('switches to a date past a month, since nobody counts in 40 days', () => {
-    const stamp = when({ updatedAt: now - 90 * 86_400_000, draftUpdatedAt: null }, now)
-    expect(stamp).not.toMatch(/ago/)
-    expect(stamp).toMatch(/\d/)
-  })
-})
+  it("switches to a date past a month, since nobody counts in 40 days", () => {
+    const stamp = when({ updatedAt: now - 90 * 86_400_000, draftUpdatedAt: null }, now);
+    expect(stamp).not.toMatch(/ago/);
+    expect(stamp).toMatch(/\d/);
+  });
+});

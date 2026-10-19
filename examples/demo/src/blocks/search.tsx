@@ -1,4 +1,4 @@
-import { collection, defineBlock, text } from 'folio/core'
+import { collection, defineBlock, text } from "folio/core";
 
 /**
  * A search results block (`content-model/full-text-search.md` architecture
@@ -14,25 +14,25 @@ import { collection, defineBlock, text } from 'folio/core'
  * so there is no story to seed for a page that has nothing to publish.
  */
 export const searchResults = defineBlock({
-  name: 'searchResults',
-  label: 'Search results',
-  summary: 'heading',
+  name: "searchResults",
+  label: "Search results",
+  summary: "heading",
   fields: {
-    heading: text({ label: 'Heading', translatable: true }),
+    heading: text({ label: "Heading", translatable: true }),
     list: collection({
-      label: 'Results',
+      label: "Results",
       // Fixed by the schema, like `insightList`'s: this block renders insight
       // cards, so an editor narrowing `type` further would make its own render
       // a lie.
-      type: 'insight',
+      type: "insight",
       searchable: true,
       maxPerPage: 10,
-      defaultOrder: { field: 'published', dir: 'desc' },
+      defaultOrder: { field: "published", dir: "desc" },
     }),
   },
   render: ({ heading, list }) => (
     <section className="search-results">
-      <h1 className="search-results__heading">{heading || 'Search'}</h1>
+      <h1 className="search-results__heading">{heading || "Search"}</h1>
 
       {list.items.length === 0 ? (
         <p className="search-results__empty">No matches.</p>
@@ -72,4 +72,4 @@ export const searchResults = defineBlock({
       ) : null}
     </section>
   ),
-})
+});

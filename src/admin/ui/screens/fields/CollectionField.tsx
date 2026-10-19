@@ -1,5 +1,5 @@
-import type { Json } from '../../../../core/doc'
-import type { Field as FieldDef } from '../../../../core/fields'
+import type { Json } from "../../../../core/doc";
+import type { Field as FieldDef } from "../../../../core/fields";
 import {
   asCollectionValue,
   BUILT_IN_ORDERS,
@@ -8,10 +8,10 @@ import {
   type ContentWhere,
   maxPerPageOf,
   type ResolvedCollection,
-} from '../../../../core/query'
-import type { DocumentType, SchemaIndex } from '../../../../core/schema'
-import { Input, Select } from '../../Field'
-import css from './fields.module.css'
+} from "../../../../core/query";
+import type { DocumentType, SchemaIndex } from "../../../../core/schema";
+import { Input, Select } from "../../Field";
+import css from "./fields.module.css";
 
 /**
  * The editor's half of a `collection` field (`collections.md` decision 5).
@@ -46,33 +46,33 @@ import css from './fields.module.css'
  */
 export function filterField(schema: SchemaIndex, name: string): FieldDef | undefined {
   for (const def of Object.values(schema)) {
-    const field = def.fields[name]
-    if (field && (field as { indexed?: unknown }).indexed === true) return field
+    const field = def.fields[name];
+    if (field && (field as { indexed?: unknown }).indexed === true) return field;
   }
-  return undefined
+  return undefined;
 }
 
 /** The stored value with one filter replaced, or removed when the choice is "any". */
 export function withFilter(value: CollectionValue, field: string, chosen: string): CollectionValue {
-  const rest = (value.where ?? []).filter((w) => w.field !== field)
-  const next: ContentWhere[] = chosen === '' ? rest : [...rest, { field, op: 'eq', value: chosen }]
-  return { ...value, where: next }
+  const rest = (value.where ?? []).filter((w) => w.field !== field);
+  const next: ContentWhere[] = chosen === "" ? rest : [...rest, { field, op: "eq", value: chosen }];
+  return { ...value, where: next };
 }
 
 /** The current choice for one filter, or `''` for "any". */
 export function filterValue(value: CollectionValue, field: string): string {
-  const hit = (value.where ?? []).find((w) => w.field === field && w.op === 'eq')
-  if (!hit) return ''
-  return Array.isArray(hit.value) ? (hit.value[0] ?? '') : String(hit.value)
+  const hit = (value.where ?? []).find((w) => w.field === field && w.op === "eq");
+  if (!hit) return "";
+  return Array.isArray(hit.value) ? (hit.value[0] ?? "") : String(hit.value);
 }
 
 /** A sort key's label: a built-in's own name, or the field's declared label. */
 export function sortLabel(schema: SchemaIndex, name: string): string {
-  if (name === 'publishedAt') return 'Publish date'
-  if (name === 'title') return 'Title'
-  if (name === 'ord') return 'Manual order'
-  if (name === 'relevance') return 'Best match'
-  return filterField(schema, name)?.label ?? name
+  if (name === "publishedAt") return "Publish date";
+  if (name === "title") return "Title";
+  if (name === "ord") return "Manual order";
+  if (name === "relevance") return "Best match";
+  return filterField(schema, name)?.label ?? name;
 }
 
 export function CollectionField({
@@ -85,42 +85,42 @@ export function CollectionField({
   editable,
   onChange,
 }: {
-  id: string
-  field: CollectionFieldDef
-  value: Json
+  id: string;
+  field: CollectionFieldDef;
+  value: Json;
   /**
    * What the query currently returns, for the "N of M" line. Absent while the fetch
    * is in flight, which is the honest state — a count of zero would read as "nothing
    * matches" rather than "not asked yet".
    */
-  answer?: ResolvedCollection
-  schema: SchemaIndex
-  types: readonly DocumentType[]
-  editable: boolean
-  onChange: (v: Json) => void
+  answer?: ResolvedCollection;
+  schema: SchemaIndex;
+  types: readonly DocumentType[];
+  editable: boolean;
+  onChange: (v: Json) => void;
 }) {
-  const stored = asCollectionValue(value)
-  const max = maxPerPageOf(field)
-  const perPage = Math.min(stored.perPage ?? field.maxPerPage ?? 20, max)
-  const order = stored.order ?? field.defaultOrder ?? { field: 'publishedAt', dir: 'desc' }
-  const filterable = field.filterable ?? []
+  const stored = asCollectionValue(value);
+  const max = maxPerPageOf(field);
+  const perPage = Math.min(stored.perPage ?? field.maxPerPage ?? 20, max);
+  const order = stored.order ?? field.defaultOrder ?? { field: "publishedAt", dir: "desc" };
+  const filterable = field.filterable ?? [];
 
   const wanted =
-    field.type === undefined ? [] : typeof field.type === 'string' ? [field.type] : [...field.type]
-  const unknown = wanted.filter((name) => !types.some((t) => t.name === name))
+    field.type === undefined ? [] : typeof field.type === "string" ? [field.type] : [...field.type];
+  const unknown = wanted.filter((name) => !types.some((t) => t.name === name));
 
-  const patch = (next: CollectionValue) => onChange(next as unknown as Json)
+  const patch = (next: CollectionValue) => onChange(next as unknown as Json);
   // `relevance` only ever belongs in this list when the field itself declares
   // `searchable: true` (`full-text-search.md` decision 10) — otherwise a
   // collection with no way to carry a search term offered a sort that could
   // never do anything, silently falling back to `defaultOrder` at render.
   const orderable = [
     ...new Set([
-      ...Object.keys(BUILT_IN_ORDERS).filter((name) => name !== 'relevance' || field.searchable),
+      ...Object.keys(BUILT_IN_ORDERS).filter((name) => name !== "relevance" || field.searchable),
       ...filterable,
     ]),
-  ]
-  const labelOf = (name: string) => types.find((t) => t.name === name)?.label ?? name
+  ];
+  const labelOf = (name: string) => types.find((t) => t.name === name)?.label ?? name;
   /*
    * One id per control inside this field, derived from the one the row's `Field`
    * already minted, so two collection fields in one block cannot collide.
@@ -132,8 +132,8 @@ export function CollectionField({
    * you would type into, which is what a label is for. A searchable field puts
    * Search there: it is the control a visitor-facing search page is actually for.
    */
-  const first = field.searchable ? 'search' : (filterable[0] ?? 'perPage')
-  const idFor = (suffix: string) => (suffix === first ? id : `${id}-${suffix}`)
+  const first = field.searchable ? "search" : (filterable[0] ?? "perPage");
+  const idFor = (suffix: string) => (suffix === first ? id : `${id}-${suffix}`);
 
   return (
     <fieldset className={`${css.group} ${css.stack}`} disabled={!editable}>
@@ -143,10 +143,10 @@ export function CollectionField({
       <legend className={css.srOnly}>What this list shows</legend>
 
       <p className={css.what}>
-        {wanted.length === 0 ? 'Every kind of document' : wanted.map(labelOf).join(', ')}
+        {wanted.length === 0 ? "Every kind of document" : wanted.map(labelOf).join(", ")}
         {/* The same posture an unknown block type gets: say so, do not pretend. */}
         {unknown.length > 0 ? (
-          <span className={css.unknown}> — unknown type “{unknown.join(', ')}”</span>
+          <span className={css.unknown}> — unknown type “{unknown.join(", ")}”</span>
         ) : null}
       </p>
 
@@ -155,12 +155,12 @@ export function CollectionField({
           all, because a render-time term would have nowhere to go — dropped by
           `collectionQuery` exactly as an unfilterable `where` already is. */}
       {field.searchable ? (
-        <label className={css.filter} htmlFor={idFor('search')}>
+        <label className={css.filter} htmlFor={idFor("search")}>
           <span>Search</span>
           <Input
-            id={idFor('search')}
+            id={idFor("search")}
             type="search"
-            value={stored.search ?? ''}
+            value={stored.search ?? ""}
             placeholder="Any"
             onChange={(e) => patch({ ...stored, search: e.target.value })}
           />
@@ -168,8 +168,8 @@ export function CollectionField({
       ) : null}
 
       {filterable.map((name) => {
-        const def = filterField(schema, name)
-        const current = filterValue(stored, name)
+        const def = filterField(schema, name);
+        const current = filterValue(stored, name);
         return (
           /*
            * `htmlFor` and a minted id, rather than a label wrapping its control.
@@ -180,7 +180,7 @@ export function CollectionField({
            */
           <label key={name} className={css.filter} htmlFor={idFor(name)}>
             <span>{def?.label ?? name}</span>
-            {def?.kind === 'select' ? (
+            {def?.kind === "select" ? (
               <Select
                 id={idFor(name)}
                 value={current}
@@ -193,7 +193,7 @@ export function CollectionField({
                   </option>
                 ))}
               </Select>
-            ) : def?.kind === 'boolean' ? (
+            ) : def?.kind === "boolean" ? (
               <Select
                 id={idFor(name)}
                 value={current}
@@ -213,35 +213,35 @@ export function CollectionField({
               />
             )}
           </label>
-        )
+        );
       })}
 
-      <label className={css.filter} htmlFor={idFor('perPage')}>
+      <label className={css.filter} htmlFor={idFor("perPage")}>
         <span>How many</span>
         <Input
-          id={idFor('perPage')}
+          id={idFor("perPage")}
           type="number"
           min={1}
           max={max}
           value={perPage}
           onChange={(e) => {
-            const n = e.target.valueAsNumber
+            const n = e.target.valueAsNumber;
             patch({
               ...stored,
               perPage: Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), 1), max) : 1,
-            })
+            });
           }}
         />
       </label>
 
-      <label className={css.filter} htmlFor={idFor('order')}>
+      <label className={css.filter} htmlFor={idFor("order")}>
         <span>Sort by</span>
         <Select
-          id={idFor('order')}
+          id={idFor("order")}
           value={`${order.field}:${order.dir}`}
           onChange={(e) => {
-            const [f, dir] = e.target.value.split(':')
-            patch({ ...stored, order: { field: f!, dir: dir === 'asc' ? 'asc' : 'desc' } })
+            const [f, dir] = e.target.value.split(":");
+            patch({ ...stored, order: { field: f!, dir: dir === "asc" ? "asc" : "desc" } });
           }}
         >
           {orderable.flatMap((name) => [
@@ -260,10 +260,10 @@ export function CollectionField({
       <p className={css.note}>
         {answer
           ? answer.total === 0
-            ? 'Nothing published matches yet.'
+            ? "Nothing published matches yet."
             : `Showing ${answer.items.length} of ${answer.total} published — page ${answer.page} of ${answer.pages}.`
-          : 'Counting…'}
+          : "Counting…"}
       </p>
     </fieldset>
-  )
+  );
 }

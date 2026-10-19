@@ -1,31 +1,31 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { Blok, Doc } from '../../../core/doc'
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Blok, Doc } from "../../../core/doc";
 import {
   type LocaleConfig,
   localeContext,
   translationGaps,
   translationStatus,
-} from '../../../core/locales'
-import { linkedIds, referencedIdsAllLocales } from '../../../core/refs'
-import { buildResolution, type Resolution } from '../../../core/resolve'
-import type { DocumentType, SchemaIndex } from '../../../core/schema'
-import type { StoryMeta } from '../../../core/story'
-import { useBlocks } from '../../hooks/useBlocks'
-import { useClipboardShortcuts } from '../../hooks/useClipboardShortcuts'
-import { useCollections } from '../../hooks/useCollections'
-import { useGlobalDocs } from '../../hooks/useGlobalDocs'
-import { useMigrations } from '../../hooks/useMigrations'
-import { usePreviewBridge } from '../../hooks/usePreviewBridge'
-import { usePublish } from '../../hooks/usePublish'
-import { usePublishedDoc } from '../../hooks/usePublishedDoc'
-import { useReferencedDocs } from '../../hooks/useReferencedDocs'
-import { useResolvedForms } from '../../hooks/useResolvedForms'
-import { useUndoShortcut } from '../../hooks/useUndoShortcut'
-import { useVersions, useVersionsList } from '../../hooks/useVersions'
-import { canEditIn, type Me } from '../../me'
-import { StoryStore, useStoreState } from '../../store'
-import { bareMount } from '../route'
-import { type PaneChoice, paneSource, previewFrame } from './editor-model'
+} from "../../../core/locales";
+import { linkedIds, referencedIdsAllLocales } from "../../../core/refs";
+import { buildResolution, type Resolution } from "../../../core/resolve";
+import type { DocumentType, SchemaIndex } from "../../../core/schema";
+import type { StoryMeta } from "../../../core/story";
+import { useBlocks } from "../../hooks/useBlocks";
+import { useClipboardShortcuts } from "../../hooks/useClipboardShortcuts";
+import { useCollections } from "../../hooks/useCollections";
+import { useGlobalDocs } from "../../hooks/useGlobalDocs";
+import { useMigrations } from "../../hooks/useMigrations";
+import { usePreviewBridge } from "../../hooks/usePreviewBridge";
+import { usePublish } from "../../hooks/usePublish";
+import { usePublishedDoc } from "../../hooks/usePublishedDoc";
+import { useReferencedDocs } from "../../hooks/useReferencedDocs";
+import { useResolvedForms } from "../../hooks/useResolvedForms";
+import { useUndoShortcut } from "../../hooks/useUndoShortcut";
+import { useVersions, useVersionsList } from "../../hooks/useVersions";
+import { canEditIn, type Me } from "../../me";
+import { StoryStore, useStoreState } from "../../store";
+import { bareMount } from "../route";
+import { type PaneChoice, paneSource, previewFrame } from "./editor-model";
 
 /**
  * Everything the editor screen is, assembled from hooks that already existed.
@@ -45,35 +45,35 @@ import { type PaneChoice, paneSource, previewFrame } from './editor-model'
  */
 export interface EditorOptions {
   /** From the URL, so the store exists before the story row has loaded. */
-  storyId: string
+  storyId: string;
   /** The story row, or undefined while it is in flight. */
-  story: StoryMeta | undefined
-  apiBase: string
+  story: StoryMeta | undefined;
+  apiBase: string;
   /** The mount the admin is on, `~scope` included on a multi-site deployment. */
-  base: string
-  schema: SchemaIndex
-  types: readonly DocumentType[]
-  globals: readonly string[]
-  locales: LocaleConfig | undefined
-  me: Me
+  base: string;
+  schema: SchemaIndex;
+  types: readonly DocumentType[];
+  globals: readonly string[];
+  locales: LocaleConfig | undefined;
+  me: Me;
   /**
    * The source-locale iframe src the caller computed — a page's own `previewUrl`,
    * or a global's borrowed one. Undefined for a record. See `previewFrame`, which
    * is what turns it into the URL for the locale being edited.
    */
-  preview: string | undefined
+  preview: string | undefined;
   /**
    * Where the pane loads on a deployment with `sites` (`editor-model.ts`'s
    * `paneChoice`); absent or `none` is a single-site editor, whose pane is exactly
    * `preview`. With a site, the iframe goes through `site/start` on `adminBase` and
    * the bridge is restricted to the site's preview origin.
    */
-  pane?: PaneChoice
+  pane?: PaneChoice;
   /** The mount with no scope: `site/start` is built from it. */
-  adminBase?: string
+  adminBase?: string;
   /** The pane's cookie check found the browser refusing the partitioned grant. */
-  onGrantBlocked?: () => void
-  notify: (message: string) => void
+  onGrantBlocked?: () => void;
+  notify: (message: string) => void;
   /**
    * The story row this screen was handed is out of date — a publish or an
    * unpublish moved its state, and it is the *caller's* row.
@@ -92,42 +92,42 @@ export interface EditorOptions {
    * line reading "Up to date". Pinned by `editor-shell.test.ts`'s
    * "the open row is refreshed after a write".
    */
-  onStoryChanged?: () => void
+  onStoryChanged?: () => void;
   /** True while the history slide-over is open: the activity trail loads with it,
    * exactly as the old History rail's `active` flag did. */
-  historyOpen: boolean
+  historyOpen: boolean;
   /** A block was picked in the preview. The shell reveals the rail if it is
    * collapsed; there are no tabs to bring forward any more. */
-  onPick: () => void
+  onPick: () => void;
 }
 
 export interface EditorApi {
-  store: StoryStore
-  state: ReturnType<typeof useStoreState>
+  store: StoryStore;
+  state: ReturnType<typeof useStoreState>;
   /** The live draft. Null until the store has bootstrapped. */
-  liveDoc: Doc | null
+  liveDoc: Doc | null;
   /**
    * What is **on screen** — the version being viewed, or the live draft. The rail
    * and the inspector both draw this; only a write ever touches `liveDoc`.
    */
-  shownDoc: Doc | null
+  shownDoc: Doc | null;
   /** The selected blok, out of `shownDoc`. */
-  selected: Blok | null
+  selected: Blok | null;
   /** Looking at a past version, or holding a role that may not edit. Deliberately
    * one flag: the inspector already knew how to be read-only for the first. */
-  readOnly: boolean
-  blocks: ReturnType<typeof useBlocks>
-  locale: string
-  isSourceLocale: boolean
-  localeCtx: ReturnType<typeof localeContext>
-  setLocale: (code: string) => void
-  resolution: Resolution
-  translation: ReturnType<typeof translationStatus> | null
+  readOnly: boolean;
+  blocks: ReturnType<typeof useBlocks>;
+  locale: string;
+  isSourceLocale: boolean;
+  localeCtx: ReturnType<typeof localeContext>;
+  setLocale: (code: string) => void;
+  resolution: Resolution;
+  translation: ReturnType<typeof translationStatus> | null;
   /** Locales that are incomplete on the draft as it stands, for the publish
    * warning. Computed from the document the store already holds, so it is right
    * at the instant Publish is clicked rather than as of the last fetch. */
-  gaps: ReturnType<typeof translationGaps>
-  versions: ReturnType<typeof useVersions>
+  gaps: ReturnType<typeof translationGaps>;
+  versions: ReturnType<typeof useVersions>;
   /**
    * The **version** list's paged trail, which `versions` does not carry.
    *
@@ -141,46 +141,46 @@ export interface EditorApi {
    * on every load, unconditionally), so this is the same array under a second name
    * rather than a second read.
    */
-  versionTrail: ReturnType<typeof useVersionsList>['trail']
-  published: ReturnType<typeof usePublishedDoc>
-  publish: ReturnType<typeof usePublish>
-  migrations: ReturnType<typeof useMigrations>
+  versionTrail: ReturnType<typeof useVersionsList>["trail"];
+  published: ReturnType<typeof usePublishedDoc>;
+  publish: ReturnType<typeof usePublish>;
+  migrations: ReturnType<typeof useMigrations>;
   /** The iframe's ref callback. Nothing else in the editor talks to the frame. */
-  frame: (node: HTMLIFrameElement | null) => void
+  frame: (node: HTMLIFrameElement | null) => void;
   /** The src for the frame in the locale being edited. */
-  src: string | undefined
+  src: string | undefined;
   /**
    * A block inside a global was clicked while previewing something else: the name
    * of the global to offer "Edit … →" for, until the next selection or story
    * switch clears it (`globals.md` checkpoint 3).
    */
-  globalHint: string | null
+  globalHint: string | null;
 }
 
 export function useEditor(opts: EditorOptions): EditorApi {
-  const { storyId, story, apiBase, base, schema, types, globals, locales, me, notify } = opts
+  const { storyId, story, apiBase, base, schema, types, globals, locales, me, notify } = opts;
 
   // The active locale, defaulting to the source. Editor state rather than a URL
   // parameter: it is a property of this editing session, and the *preview* URL is
   // what carries it into the iframe (`localisation.md` decision 6).
-  const [locale, setLocale] = useState(locales?.default ?? '')
-  const isSourceLocale = !locales || locale === locales.default
-  const localeCtx = useMemo(() => localeContext(locales, locale), [locales, locale])
+  const [locale, setLocale] = useState(locales?.default ?? "");
+  const isSourceLocale = !locales || locale === locales.default;
+  const localeCtx = useMemo(() => localeContext(locales, locale), [locales, locale]);
 
-  const store = useMemo(() => new StoryStore(storyId, apiBase), [storyId, apiBase])
-  const state = useStoreState(store)
-  const blocks = useBlocks(store, schema, notify, story?.path ?? '')
+  const store = useMemo(() => new StoryStore(storyId, apiBase), [storyId, apiBase]);
+  const state = useStoreState(store);
+  const blocks = useBlocks(store, schema, notify, story?.path ?? "");
 
   // Which language this client is editing in, announced with its presence so a
   // peer ring can say so. Null on the source locale, so a single-locale site
   // announces nothing new at all.
   useEffect(() => {
-    store.setLocale(isSourceLocale ? null : locale)
-  }, [isSourceLocale, locale, store])
+    store.setLocale(isSourceLocale ? null : locale);
+  }, [isSourceLocale, locale, store]);
 
   // Loaded unconditionally, not only while history is open: the publish state
   // needs the newest publish version on every load.
-  const versionsList = useVersionsList(apiBase, storyId)
+  const versionsList = useVersionsList(apiBase, storyId);
   const versions = useVersions({
     store,
     apiBase,
@@ -190,34 +190,34 @@ export function useEditor(opts: EditorOptions): EditorApi {
     active: opts.historyOpen,
     versions: versionsList.versions,
     reloadVersions: versionsList.reload,
-  })
+  });
   const published = usePublishedDoc({
     apiBase,
     versions: versionsList.versions,
     liveDoc: state.doc,
-  })
+  });
 
   // A publish or an unpublish adds a retained version and moves the story's state.
   // Unpublish adds none, but reloading unconditionally costs nothing extra and
   // keeps both writes sharing one afterWrite path.
-  const { onStoryChanged } = opts
+  const { onStoryChanged } = opts;
   const afterPublish = useCallback(async () => {
-    await versions.reload()
-    onStoryChanged?.()
-  }, [versions.reload, onStoryChanged])
-  const publish = usePublish({ apiBase, storyId, notify, onPublished: afterPublish })
+    await versions.reload();
+    onStoryChanged?.();
+  }, [versions.reload, onStoryChanged]);
+  const publish = usePublish({ apiBase, storyId, notify, onPublished: afterPublish });
 
-  const migrations = useMigrations(apiBase, storyId, notify)
+  const migrations = useMigrations(apiBase, storyId, notify);
 
   /* ------------------------------------------------------------ resolution --- */
 
-  const refStories = useRefStories(apiBase, state.doc, schema)
-  const docs = useReferencedDocs(apiBase, state.doc, schema)
+  const refStories = useRefStories(apiBase, state.doc, schema);
+  const docs = useReferencedDocs(apiBase, state.doc, schema);
   // Fetched once per global, not per keystroke: the admin's own copy exists only
   // so a clicked uid can be traced back to the global it belongs to; the preview
   // iframe renders every global server-side, fresh, on its own.
-  const globalDocs = useGlobalDocs(apiBase, types, globals)
-  const collections = useCollections(apiBase, state.doc, schema, localeCtx)
+  const globalDocs = useGlobalDocs(apiBase, types, globals);
+  const collections = useCollections(apiBase, state.doc, schema, localeCtx);
   // The page's own URL, for the `_folio_page` hidden input a form descriptor
   // carries — the same value the server render passes, picked the way
   // `previewFrame` picks the iframe's src, so the preview's markup and the
@@ -226,14 +226,14 @@ export function useEditor(opts: EditorOptions): EditorApi {
     ? isSourceLocale
       ? story.url
       : (story.urls?.[locale] ?? story.url)
-    : undefined
+    : undefined;
   const forms = useResolvedForms(
     apiBase,
     state.doc,
     schema,
     isSourceLocale ? undefined : locale,
     formPage,
-  )
+  );
   const resolution = useMemo<Resolution>(
     () => ({
       // The open story is always in the map, whether or not anything links to it:
@@ -259,13 +259,13 @@ export function useEditor(opts: EditorOptions): EditorApi {
       forms,
     }),
     [story, refStories, base, docs, globalDocs.docs, collections, forms, localeCtx],
-  )
+  );
 
   /* ---------------------------------------------------------------- bridge --- */
 
-  const [globalHint, setGlobalHint] = useState<string | null>(null)
+  const [globalHint, setGlobalHint] = useState<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: storyId and state.selection are deliberate — neither is read in the body, both are what should clear a stale hint
-  useEffect(() => setGlobalHint(null), [storyId, state.selection])
+  useEffect(() => setGlobalHint(null), [storyId, state.selection]);
 
   const frame = usePreviewBridge({
     store,
@@ -276,13 +276,13 @@ export function useEditor(opts: EditorOptions): EditorApi {
     blocks,
     onPick: opts.onPick,
     onGlobalClick: setGlobalHint,
-    ...(opts.pane?.kind === 'site' && opts.pane.origin ? { origin: opts.pane.origin } : {}),
+    ...(opts.pane?.kind === "site" && opts.pane.origin ? { origin: opts.pane.origin } : {}),
     ...(opts.onGrantBlocked ? { onGrantBlocked: opts.onGrantBlocked } : {}),
-  })
+  });
 
-  const live = versions.source.mode === 'live'
-  useUndoShortcut(store, live)
-  useClipboardShortcuts(blocks, state.selection, live)
+  const live = versions.source.mode === "live";
+  useUndoShortcut(store, live);
+  useClipboardShortcuts(blocks, state.selection, live);
 
   /**
    * The object's refusals — a rejected transaction, an unreadable or wrongly
@@ -290,8 +290,8 @@ export function useEditor(opts: EditorOptions): EditorApi {
    * Without this the only sign of a refused edit is the value snapping back.
    */
   useEffect(() => {
-    if (state.notice) notify(state.notice)
-  }, [notify, state.notice])
+    if (state.notice) notify(state.notice);
+  }, [notify, state.notice]);
 
   /**
    * Select the root as soon as the document arrives and nothing else is selected.
@@ -311,25 +311,25 @@ export function useEditor(opts: EditorOptions): EditorApi {
    * block keeps their place.
    */
   useEffect(() => {
-    if (state.doc && !state.selection) store.select(state.doc.root)
-  }, [state.doc, state.selection, store])
+    if (state.doc && !state.selection) store.select(state.doc.root);
+  }, [state.doc, state.selection, store]);
 
   /* ----------------------------------------------------------------- reads --- */
 
-  const shownDoc = versions.viewing?.doc ?? state.doc
-  const selected = state.selection && shownDoc ? (shownDoc.bloks[state.selection] ?? null) : null
+  const shownDoc = versions.viewing?.doc ?? state.doc;
+  const selected = state.selection && shownDoc ? (shownDoc.bloks[state.selection] ?? null) : null;
   // The role on the scope that **owns** the story, not the one being shown: a shared
   // page opened from `~alpha` is read there and written nowhere but `~shared`.
-  const readOnly = !live || !canEditIn(me, story?.site)
+  const readOnly = !live || !canEditIn(me, story?.site);
 
   const gaps = useMemo(
     () => (state.doc ? translationGaps(state.doc, schema, locales) : []),
     [locales, schema, state.doc],
-  )
+  );
   const translation = useMemo(
     () => (state.doc && !isSourceLocale ? translationStatus(state.doc, schema, locale) : null),
     [isSourceLocale, locale, schema, state.doc],
-  )
+  );
 
   return {
     store,
@@ -353,13 +353,13 @@ export function useEditor(opts: EditorOptions): EditorApi {
     migrations,
     frame,
     src: paneSource(
-      opts.pane ?? { kind: 'none' },
+      opts.pane ?? { kind: "none" },
       previewFrame(story, opts.preview, locale, isSourceLocale),
       story,
       opts.adminBase ?? base,
     ),
     globalHint,
-  }
+  };
 }
 
 /* ------------------------------------------------------------ story refs --- */
@@ -378,9 +378,9 @@ export function useEditor(opts: EditorOptions): EditorApi {
  * Pure and exported so the union is tested without a fetch.
  */
 export function wantedStoryIds(doc: Doc | null, schema: SchemaIndex): string {
-  if (!doc) return ''
-  const ids = new Set([...linkedIds(doc, schema), ...referencedIdsAllLocales(doc, schema)])
-  return [...ids].sort().join(',')
+  if (!doc) return "";
+  const ids = new Set([...linkedIds(doc, schema), ...referencedIdsAllLocales(doc, schema)]);
+  return [...ids].sort().join(",");
 }
 
 /** Ids that are wanted and not already settled, either way. `useReferencedDocs`'
@@ -389,17 +389,17 @@ export function storyIdsToFetch(
   wanted: readonly string[],
   known: { rows: Readonly<Record<string, StoryMeta>>; missing: ReadonlySet<string> },
 ): string[] {
-  return wanted.filter((id) => !known.rows[id] && !known.missing.has(id))
+  return wanted.filter((id) => !known.rows[id] && !known.missing.has(id));
 }
 
 interface KnownStories {
-  rows: Readonly<Record<string, StoryMeta>>
+  rows: Readonly<Record<string, StoryMeta>>;
   /** Ids the server answered for with no row: a deleted story. Never asked for
    * again, or a broken link would be re-requested on every keystroke forever. */
-  missing: ReadonlySet<string>
+  missing: ReadonlySet<string>;
 }
 
-const NO_STORIES: KnownStories = { rows: {}, missing: new Set() }
+const NO_STORIES: KnownStories = { rows: {}, missing: new Set() };
 
 /**
  * The story rows the preview's `Resolution` needs, fetched by id.
@@ -414,38 +414,38 @@ const NO_STORIES: KnownStories = { rows: {}, missing: new Set() }
  * links is one request rather than a walk.
  */
 function useRefStories(apiBase: string, doc: Doc | null, schema: SchemaIndex): StoryMeta[] {
-  const [known, setKnown] = useState<KnownStories>(NO_STORIES)
-  const wanted = useMemo(() => wantedStoryIds(doc, schema), [doc, schema])
+  const [known, setKnown] = useState<KnownStories>(NO_STORIES);
+  const wanted = useMemo(() => wantedStoryIds(doc, schema), [doc, schema]);
 
   useEffect(() => {
-    const ids = storyIdsToFetch(wanted ? wanted.split(',') : [], known)
-    if (ids.length === 0) return
-    let alive = true
-    const query = new URLSearchParams({ ids: ids.join(',') })
+    const ids = storyIdsToFetch(wanted ? wanted.split(",") : [], known);
+    if (ids.length === 0) return;
+    let alive = true;
+    const query = new URLSearchParams({ ids: ids.join(",") });
     fetch(`${apiBase}/stories?${query}`)
       .then((res) => (res.ok ? (res.json() as Promise<{ rows: StoryMeta[] }>) : { rows: [] }))
       .then(({ rows }) => {
-        if (!alive) return
+        if (!alive) return;
         setKnown((prev) => {
-          const found = Object.fromEntries(rows.map((row) => [row.id, row]))
-          const missing = ids.filter((id) => !found[id])
+          const found = Object.fromEntries(rows.map((row) => [row.id, row]));
+          const missing = ids.filter((id) => !found[id]);
           // The same object when nothing was settled, which is what stops this
           // effect looping on its own state — `mergeReferencedDocs`' rule.
-          if (rows.length === 0 && missing.length === 0) return prev
+          if (rows.length === 0 && missing.length === 0) return prev;
           return {
             rows: rows.length ? { ...prev.rows, ...found } : prev.rows,
             missing: missing.length ? new Set([...prev.missing, ...missing]) : prev.missing,
-          }
-        })
+          };
+        });
       })
       .catch(() => {
         // A transport failure is not an answer about the story, so it is not
         // remembered as a miss: the next change to the linked set asks again.
-      })
+      });
     return () => {
-      alive = false
-    }
-  }, [apiBase, known, wanted])
+      alive = false;
+    };
+  }, [apiBase, known, wanted]);
 
-  return useMemo(() => Object.values(known.rows), [known.rows])
+  return useMemo(() => Object.values(known.rows), [known.rows]);
 }

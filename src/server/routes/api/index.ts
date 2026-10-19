@@ -13,43 +13,43 @@
  * the admin *could* use these routes), the same services underneath. What it does
  * not share is a single line of shape.
  */
-import { Hono } from 'hono'
-import type { AssetFilter } from '../../../core/assets'
-import { DEFAULT_SITE, SHARED_SCOPE } from '../../../core/sites'
+import { Hono } from "hono";
+import type { AssetFilter } from "../../../core/assets";
+import { DEFAULT_SITE, SHARED_SCOPE } from "../../../core/sites";
 import {
   listAssetsByPage,
   MAX_UPLOAD_BYTES,
   readCappedBody,
   toAssetValue,
   uploadAsset,
-} from '../../assets'
-import { ASSETS, READ } from '../../auth/roles'
-import { describeOnUpload } from '../../describe'
-import { FolioError, rethrow } from '../../errors'
-import { requestScope, requireAccess } from '../../middleware'
-import { brandOf } from '../stories'
-import type { FolioRuntime } from '../../runtime'
-import type { FolioEnv, GatedReaderFactory } from '../../types'
+} from "../../assets";
+import { ASSETS, READ } from "../../auth/roles";
+import { describeOnUpload } from "../../describe";
+import { FolioError, rethrow } from "../../errors";
+import { requestScope, requireAccess } from "../../middleware";
+import { brandOf } from "../stories";
+import type { FolioRuntime } from "../../runtime";
+import type { FolioEnv, GatedReaderFactory } from "../../types";
 import {
   contentLengthHeader,
   filenameQuery,
   folderQuery,
   limitParam,
   tagsQuery,
-} from '../../validate'
-import { documentRoutes } from './documents'
-import { pageRoutes } from './pages'
-import { searchRoutes } from './search'
-import { siteReadRoutes } from './sites'
+} from "../../validate";
+import { documentRoutes } from "./documents";
+import { pageRoutes } from "./pages";
+import { searchRoutes } from "./search";
+import { siteReadRoutes } from "./sites";
 
 /** The one version there is. A `v2` would be a second `Hono` mounted beside this. */
-export const API_VERSION = 'v1'
+export const API_VERSION = "v1";
 
 export function apiRoutes<Env>(
   rt: FolioRuntime,
   readerFor?: GatedReaderFactory<Env>,
 ): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * The manifest: document types, block schemas, locales.
@@ -60,37 +60,37 @@ export function apiRoutes<Env>(
    * `/api/v1` has that constraint, and a schema describes the shape of a private
    * site's content.
    */
-  app.get('/schema', requireAccess<Env>(rt, READ), async (c) => {
+  app.get("/schema", requireAccess<Env>(rt, READ), async (c) => {
     // Refused, not answered neutral, on a deployment with `brands` and no scope: a
     // script or agent that asked without one has to be told which brand it meant
     // (`multi-brand.md` decision 12).
-    const brand = brandOf(c)
-    const scope = c.var.scope
-    if (!rt.sites || scope === null) return c.json(brand.manifest)
+    const brand = brandOf(c);
+    const scope = c.var.scope;
+    if (!rt.sites || scope === null) return c.json(brand.manifest);
     // On a deployment with `sites`, the answer says which scope it is for, and so which
     // brand's registry it describes (decision 19, signal 4).
-    const registry = await rt.sites.registry(c.env)
-    const site = registry.sites.find((s) => s.id === scope)
-    const group = site ? undefined : registry.groups.find((g) => g.id === scope)
-    const row = site ?? group
-    if (!row && scope !== SHARED_SCOPE) return c.json(brand.manifest)
+    const registry = await rt.sites.registry(c.env);
+    const site = registry.sites.find((s) => s.id === scope);
+    const group = site ? undefined : registry.groups.find((g) => g.id === scope);
+    const row = site ?? group;
+    if (!row && scope !== SHARED_SCOPE) return c.json(brand.manifest);
     return c.json({
       ...brand.manifest,
       scope: {
         id: scope,
-        name: row?.name ?? 'Shared',
-        kind: site ? 'site' : group ? 'group' : 'shared',
+        name: row?.name ?? "Shared",
+        kind: site ? "site" : group ? "group" : "shared",
         brand: brand.brand,
       },
-    })
-  })
+    });
+  });
 
-  app.route('/', documentRoutes<Env>(rt))
-  app.route('/', searchRoutes<Env>(rt))
+  app.route("/", documentRoutes<Env>(rt));
+  app.route("/", searchRoutes<Env>(rt));
   // The two below mount nothing on a deployment with no `sites`: their routes do not
   // exist there, and `{base}/api/v1` is exactly what it always was.
-  app.route('/', siteReadRoutes<Env>(rt))
-  app.route('/', pageRoutes<Env>(rt, readerFor))
+  app.route("/", siteReadRoutes<Env>(rt));
+  app.route("/", pageRoutes<Env>(rt, readerFor));
 
   /**
    * The media library and uploads, re-exposed at `assets:write` — a scope that
@@ -117,9 +117,9 @@ export function apiRoutes<Env>(
    * `total` beside it. That is additive: a caller reading `assets` still reads
    * `assets`, which is what `{base}/api/v1` promises.
    */
-  app.get('/assets', requireAccess<Env>(rt, READ), async (c) => {
-    const perPage = limitParam(c.req.query('perPage'), 50, 200)
-    const page = Math.max(1, Math.trunc(Number(c.req.query('page') ?? 1)) || 1)
+  app.get("/assets", requireAccess<Env>(rt, READ), async (c) => {
+    const perPage = limitParam(c.req.query("perPage"), 50, 200);
+    const page = Math.max(1, Math.trunc(Number(c.req.query("page") ?? 1)) || 1);
     const listed = await listAssetsByPage(c.var.bindings().db, {
       page,
       perPage,
@@ -127,9 +127,9 @@ export function apiRoutes<Env>(
       // The scope's own library (`multi-site.md`: `~<scope>/api/v1/*` is "every route
       // as today, scoped"), and `default` with no `sites`.
       chain: [requestScope(c, rt) ?? DEFAULT_SITE],
-    })
-    return c.json({ assets: listed.assets, page, perPage, total: listed.total })
-  })
+    });
+    return c.json({ assets: listed.assets, page, perPage, total: listed.total });
+  });
 
   /**
    * **A file uploaded here is described exactly as one dropped on the admin's
@@ -150,22 +150,22 @@ export function apiRoutes<Env>(
    * all: nothing about the response changes. The body is the row as written,
    * before the model call that has not happened yet, exactly as it is today.
    */
-  app.post('/assets', requireAccess<Env>(rt, ASSETS), async (c) => {
-    const { db, media, images } = c.var.bindings()
-    if (!media) throw new FolioError('unsupported', 'No media bucket is configured')
+  app.post("/assets", requireAccess<Env>(rt, ASSETS), async (c) => {
+    const { db, media, images } = c.var.bindings();
+    if (!media) throw new FolioError("unsupported", "No media bucket is configured");
 
-    const filename = filenameQuery(c.req.query('filename'))
-    contentLengthHeader(c.req.header('content-length'), MAX_UPLOAD_BYTES)
+    const filename = filenameQuery(c.req.query("filename"));
+    contentLengthHeader(c.req.header("content-length"), MAX_UPLOAD_BYTES);
     try {
-      const bytes = await readCappedBody(c.req.raw.body, MAX_UPLOAD_BYTES)
+      const bytes = await readCappedBody(c.req.raw.body, MAX_UPLOAD_BYTES);
       const row = await uploadAsset(db, media, {
         bytes,
         filename,
         site: requestScope(c, rt) ?? DEFAULT_SITE,
-      })
-      const { describe } = brandOf(c)
+      });
+      const { describe } = brandOf(c);
       if (describe?.onUpload) {
-        const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`
+        const assetBase = `${new URL(c.req.url).origin}${rt.base}/asset`;
         c.executionCtx.waitUntil(
           describeOnUpload(
             {
@@ -180,15 +180,15 @@ export function apiRoutes<Env>(
             },
             row,
           ),
-        )
+        );
       }
-      return c.json({ asset: row, value: toAssetValue(row) }, 201)
+      return c.json({ asset: row, value: toAssetValue(row) }, 201);
     } catch (e) {
-      rethrow(e)
+      rethrow(e);
     }
-  })
+  });
 
-  return app
+  return app;
 }
 
 /**
@@ -216,15 +216,15 @@ export function apiRoutes<Env>(
  * promise: adding one later is additive, and unadding one is not.
  */
 function assetFilterQuery(req: {
-  query(name: string): string | undefined
-  queries(name: string): string[] | undefined
+  query(name: string): string | undefined;
+  queries(name: string): string[] | undefined;
 }): AssetFilter {
-  const q = req.query('q')
-  const folder = folderQuery(req.query('folder'))
-  const tags = tagsQuery(req.queries('tags'))
+  const q = req.query("q");
+  const folder = folderQuery(req.query("folder"));
+  const tags = tagsQuery(req.queries("tags"));
   return {
     ...(q ? { q } : {}),
     ...(folder === undefined ? {} : { folder }),
     ...(tags === undefined ? {} : { tags }),
-  }
+  };
 }

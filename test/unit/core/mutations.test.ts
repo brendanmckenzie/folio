@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { type Blok, type Doc, type Json, newUid } from '../../../src/core/doc'
-import { fieldValue } from '../../../src/core/locales'
+import { describe, expect, it } from "vitest";
+import { type Blok, type Doc, type Json, newUid } from "../../../src/core/doc";
+import { fieldValue } from "../../../src/core/locales";
 import {
   type Mutation,
   apply,
@@ -8,7 +8,7 @@ import {
   invert,
   invertAll,
   mutationError,
-} from '../../../src/core/mutations'
+} from "../../../src/core/mutations";
 
 const b = (
   uid: string,
@@ -17,7 +17,7 @@ const b = (
   slot: string | null,
   order: string,
   data: Record<string, Json> = {},
-): Blok => ({ uid, type, parent, slot, order, data })
+): Blok => ({ uid, type, parent, slot, order, data });
 
 /**
  * root (page)
@@ -29,580 +29,592 @@ const b = (
  */
 function makeDoc(): Doc {
   return {
-    root: 'root',
+    root: "root",
     bloks: {
-      root: b('root', 'page', null, null, 'a0', { title: 'Home' }),
-      hero: b('hero', 'hero', 'root', 'body', 'a0', { heading: 'Hello' }),
-      section: b('section', 'section', 'root', 'body', 'a1'),
-      text: b('text', 'text', 'section', 'children', 'a0', { body: 'one' }),
-      col: b('col', 'column', 'section', 'children', 'a1'),
-      img: b('img', 'image', 'col', 'children', 'a0', { src: '/a.png' }),
+      root: b("root", "page", null, null, "a0", { title: "Home" }),
+      hero: b("hero", "hero", "root", "body", "a0", { heading: "Hello" }),
+      section: b("section", "section", "root", "body", "a1"),
+      text: b("text", "text", "section", "children", "a0", { body: "one" }),
+      col: b("col", "column", "section", "children", "a1"),
+      img: b("img", "image", "col", "children", "a0", { src: "/a.png" }),
     },
-  }
+  };
 }
 
 /** Structure-only view, safe to build for a cyclic document (never walks the tree). */
 const parents = (d: Doc): Record<string, string | null> =>
-  Object.fromEntries(Object.values(d.bloks).map((x) => [x.uid, x.parent]))
+  Object.fromEntries(Object.values(d.bloks).map((x) => [x.uid, x.parent]));
 
-const uids = (d: Doc): string[] => Object.keys(d.bloks).sort()
+const uids = (d: Doc): string[] => Object.keys(d.bloks).sort();
 
 const roundTrip = (d: Doc, ms: readonly Mutation[]): Doc =>
-  applyAll(applyAll(d, ms), invertAll(d, ms))
+  applyAll(applyAll(d, ms), invertAll(d, ms));
 
-describe('apply — set', () => {
-  it('writes a new field without touching the rest of the blok', () => {
-    const doc = makeDoc()
-    const out = apply(doc, { t: 'set', uid: 'text', field: 'align', value: 'left' })
-    expect(out.bloks.text!.data).toEqual({ body: 'one', align: 'left' })
-    expect(out.bloks.text!.type).toBe('text')
-    expect(out.bloks.text!.parent).toBe('section')
-    expect(out.bloks.img).toEqual(doc.bloks.img)
-  })
+describe("apply — set", () => {
+  it("writes a new field without touching the rest of the blok", () => {
+    const doc = makeDoc();
+    const out = apply(doc, { t: "set", uid: "text", field: "align", value: "left" });
+    expect(out.bloks.text!.data).toEqual({ body: "one", align: "left" });
+    expect(out.bloks.text!.type).toBe("text");
+    expect(out.bloks.text!.parent).toBe("section");
+    expect(out.bloks.img).toEqual(doc.bloks.img);
+  });
 
-  it('overwrites an existing field value', () => {
-    const out = apply(makeDoc(), { t: 'set', uid: 'text', field: 'body', value: 'two' })
-    expect(out.bloks.text!.data).toEqual({ body: 'two' })
-  })
+  it("overwrites an existing field value", () => {
+    const out = apply(makeDoc(), { t: "set", uid: "text", field: "body", value: "two" });
+    expect(out.bloks.text!.data).toEqual({ body: "two" });
+  });
 
-  it('accepts nested json values', () => {
-    const value: Json = { a: [1, { b: null }] }
-    const out = apply(makeDoc(), { t: 'set', uid: 'section', field: 'cfg', value })
-    expect(out.bloks.section!.data.cfg).toEqual({ a: [1, { b: null }] })
-  })
+  it("accepts nested json values", () => {
+    const value: Json = { a: [1, { b: null }] };
+    const out = apply(makeDoc(), { t: "set", uid: "section", field: "cfg", value });
+    expect(out.bloks.section!.data.cfg).toEqual({ a: [1, { b: null }] });
+  });
 
-  it('is a no-op for an unknown uid', () => {
-    const doc = makeDoc()
-    expect(apply(doc, { t: 'set', uid: 'nope', field: 'x', value: 1 })).toBe(doc)
-  })
+  it("is a no-op for an unknown uid", () => {
+    const doc = makeDoc();
+    expect(apply(doc, { t: "set", uid: "nope", field: "x", value: 1 })).toBe(doc);
+  });
 
-  it('does not mutate the input doc', () => {
-    const doc = makeDoc()
-    apply(doc, { t: 'set', uid: 'text', field: 'body', value: 'two' })
-    expect(doc).toEqual(makeDoc())
-  })
-})
+  it("does not mutate the input doc", () => {
+    const doc = makeDoc();
+    apply(doc, { t: "set", uid: "text", field: "body", value: "two" });
+    expect(doc).toEqual(makeDoc());
+  });
+});
 
-describe('apply — insert', () => {
-  it('adds the blok and leaves every other blok untouched', () => {
-    const doc = makeDoc()
-    const card = b('card', 'card', 'section', 'children', 'a2', { tone: 'dark' })
-    const out = apply(doc, { t: 'insert', blok: card })
-    expect(out.bloks.card).toEqual(card)
-    expect(uids(out)).toEqual(['card', 'col', 'hero', 'img', 'root', 'section', 'text'])
-    expect(out.bloks.section).toEqual(doc.bloks.section)
-  })
+describe("apply — insert", () => {
+  it("adds the blok and leaves every other blok untouched", () => {
+    const doc = makeDoc();
+    const card = b("card", "card", "section", "children", "a2", { tone: "dark" });
+    const out = apply(doc, { t: "insert", blok: card });
+    expect(out.bloks.card).toEqual(card);
+    expect(uids(out)).toEqual(["card", "col", "hero", "img", "root", "section", "text"]);
+    expect(out.bloks.section).toEqual(doc.bloks.section);
+  });
 
-  it('does not mutate the input doc', () => {
-    const doc = makeDoc()
-    apply(doc, { t: 'insert', blok: b('card', 'card', 'section', 'children', 'a2') })
-    expect(doc).toEqual(makeDoc())
-  })
+  it("does not mutate the input doc", () => {
+    const doc = makeDoc();
+    apply(doc, { t: "insert", blok: b("card", "card", "section", "children", "a2") });
+    expect(doc).toEqual(makeDoc());
+  });
 
   // SPEC(insert-collision): inserting a blok whose uid already exists is a no-op — the
   // incoming blok never replaces the one that is already there.
-  it('refuses to insert over an existing uid', () => {
-    const doc = makeDoc()
-    const collide = b('text', 'quote', 'root', 'body', 'a9', { body: 'clobbered' })
-    expect(apply(doc, { t: 'insert', blok: collide })).toEqual(makeDoc())
-  })
-})
+  it("refuses to insert over an existing uid", () => {
+    const doc = makeDoc();
+    const collide = b("text", "quote", "root", "body", "a9", { body: "clobbered" });
+    expect(apply(doc, { t: "insert", blok: collide })).toEqual(makeDoc());
+  });
+});
 
-describe('apply — move', () => {
-  it('reparents with a new slot and order', () => {
+describe("apply — move", () => {
+  it("reparents with a new slot and order", () => {
     const out = apply(makeDoc(), {
-      t: 'move',
-      uid: 'img',
-      parent: 'root',
-      slot: 'body',
-      order: 'a2',
-    })
-    expect(out.bloks.img).toEqual(b('img', 'image', 'root', 'body', 'a2', { src: '/a.png' }))
-  })
+      t: "move",
+      uid: "img",
+      parent: "root",
+      slot: "body",
+      order: "a2",
+    });
+    expect(out.bloks.img).toEqual(b("img", "image", "root", "body", "a2", { src: "/a.png" }));
+  });
 
-  it('reorders within the same parent and slot', () => {
+  it("reorders within the same parent and slot", () => {
     const out = apply(makeDoc(), {
-      t: 'move',
-      uid: 'text',
-      parent: 'section',
-      slot: 'children',
-      order: 'a2',
-    })
-    expect(out.bloks.text!.order).toBe('a2')
-    expect(out.bloks.text!.parent).toBe('section')
-    expect(out.bloks.col!.order).toBe('a1')
-  })
+      t: "move",
+      uid: "text",
+      parent: "section",
+      slot: "children",
+      order: "a2",
+    });
+    expect(out.bloks.text!.order).toBe("a2");
+    expect(out.bloks.text!.parent).toBe("section");
+    expect(out.bloks.col!.order).toBe("a1");
+  });
 
-  it('is a no-op for an unknown uid', () => {
-    const doc = makeDoc()
-    expect(apply(doc, { t: 'move', uid: 'nope', parent: 'root', slot: 'body', order: 'a0' })).toBe(
+  it("is a no-op for an unknown uid", () => {
+    const doc = makeDoc();
+    expect(apply(doc, { t: "move", uid: "nope", parent: "root", slot: "body", order: "a0" })).toBe(
       doc,
-    )
-  })
+    );
+  });
 
   // SPEC(move-self): a move whose parent is the moved uid itself is a no-op.
-  it('refuses to make a blok its own parent', () => {
-    const doc = makeDoc()
+  it("refuses to make a blok its own parent", () => {
+    const doc = makeDoc();
     const m: Mutation = {
-      t: 'move',
-      uid: 'section',
-      parent: 'section',
-      slot: 'children',
-      order: 'a0',
-    }
-    expect(parents(apply(doc, m))).toEqual(parents(doc))
-    expect(apply(doc, m)).toEqual(makeDoc())
-  })
+      t: "move",
+      uid: "section",
+      parent: "section",
+      slot: "children",
+      order: "a0",
+    };
+    expect(parents(apply(doc, m))).toEqual(parents(doc));
+    expect(apply(doc, m)).toEqual(makeDoc());
+  });
 
   // SPEC(move-cycle): moving a node under one of its own descendants is a no-op, so no
   // replay can put a cycle into a document.
-  it('refuses to move a node under its own descendant', () => {
-    const doc = makeDoc()
+  it("refuses to move a node under its own descendant", () => {
+    const doc = makeDoc();
     // Deliberately no subtree()/childrenOf() call in here: once the cycle lands they never
     // terminate, so this test asserts on the parents map only and fails cleanly.
     const cycleMove: Mutation = {
-      t: 'move',
-      uid: 'section',
-      parent: 'img',
-      slot: 'children',
-      order: 'a0',
-    }
-    expect(parents(applyAll(doc, [cycleMove]))).toEqual(parents(doc))
-    expect(applyAll(doc, [cycleMove])).toEqual(makeDoc())
-  })
+      t: "move",
+      uid: "section",
+      parent: "img",
+      slot: "children",
+      order: "a0",
+    };
+    expect(parents(applyAll(doc, [cycleMove]))).toEqual(parents(doc));
+    expect(applyAll(doc, [cycleMove])).toEqual(makeDoc());
+  });
 
   // SPEC(move-root): giving doc.root a parent is a no-op; the tree always stays anchored.
-  it('refuses to give doc.root a parent', () => {
-    const doc = makeDoc()
-    const m: Mutation = { t: 'move', uid: 'root', parent: 'section', slot: 'children', order: 'a0' }
-    expect(parents(apply(doc, m))).toEqual(parents(doc))
-    expect(apply(doc, m)).toEqual(makeDoc())
-  })
+  it("refuses to give doc.root a parent", () => {
+    const doc = makeDoc();
+    const m: Mutation = {
+      t: "move",
+      uid: "root",
+      parent: "section",
+      slot: "children",
+      order: "a0",
+    };
+    expect(parents(apply(doc, m))).toEqual(parents(doc));
+    expect(apply(doc, m)).toEqual(makeDoc());
+  });
 
   // SPEC(move-orphan): moving a blok under a parent uid that does not exist is a no-op, so
   // no blok (or subtree) can leak out of the tree as an orphan.
-  it('refuses to move a blok under a nonexistent parent', () => {
-    const doc = makeDoc()
-    const m: Mutation = { t: 'move', uid: 'text', parent: 'ghost', slot: 'children', order: 'a0' }
-    expect(apply(doc, m)).toEqual(makeDoc())
-  })
-})
+  it("refuses to move a blok under a nonexistent parent", () => {
+    const doc = makeDoc();
+    const m: Mutation = { t: "move", uid: "text", parent: "ghost", slot: "children", order: "a0" };
+    expect(apply(doc, m)).toEqual(makeDoc());
+  });
+});
 
-describe('apply — remove', () => {
-  it('removes a leaf blok', () => {
-    const out = apply(makeDoc(), { t: 'remove', uid: 'img' })
-    expect(uids(out)).toEqual(['col', 'hero', 'root', 'section', 'text'])
-  })
+describe("apply — remove", () => {
+  it("removes a leaf blok", () => {
+    const out = apply(makeDoc(), { t: "remove", uid: "img" });
+    expect(uids(out)).toEqual(["col", "hero", "root", "section", "text"]);
+  });
 
-  it('cascades over the whole subtree', () => {
-    const out = apply(makeDoc(), { t: 'remove', uid: 'section' })
-    expect(uids(out)).toEqual(['hero', 'root'])
-    expect(out.root).toBe('root')
-  })
+  it("cascades over the whole subtree", () => {
+    const out = apply(makeDoc(), { t: "remove", uid: "section" });
+    expect(uids(out)).toEqual(["hero", "root"]);
+    expect(out.root).toBe("root");
+  });
 
-  it('refuses to remove doc.root', () => {
-    const doc = makeDoc()
-    expect(apply(doc, { t: 'remove', uid: 'root' })).toBe(doc)
-  })
+  it("refuses to remove doc.root", () => {
+    const doc = makeDoc();
+    expect(apply(doc, { t: "remove", uid: "root" })).toBe(doc);
+  });
 
-  it('is a no-op for an unknown uid', () => {
-    const doc = makeDoc()
-    expect(apply(doc, { t: 'remove', uid: 'nope' })).toBe(doc)
-  })
+  it("is a no-op for an unknown uid", () => {
+    const doc = makeDoc();
+    expect(apply(doc, { t: "remove", uid: "nope" })).toBe(doc);
+  });
 
-  it('does not mutate the input doc', () => {
-    const doc = makeDoc()
-    apply(doc, { t: 'remove', uid: 'section' })
-    expect(doc).toEqual(makeDoc())
-  })
-})
+  it("does not mutate the input doc", () => {
+    const doc = makeDoc();
+    apply(doc, { t: "remove", uid: "section" });
+    expect(doc).toEqual(makeDoc());
+  });
+});
 
 /**
  * `schema-migrations.md` architecture decision 3. The variant exists because
  * "remove and re-insert with the same uid" is not a transaction that can be
  * written: `insert` refuses a duplicate uid and `remove` cascades.
  */
-describe('apply — retype', () => {
-  it('changes the type and nothing else', () => {
-    const out = apply(makeDoc(), { t: 'retype', uid: 'hero', type: 'quote' })
-    expect(out.bloks.hero).toEqual(b('hero', 'quote', 'root', 'body', 'a0', { heading: 'Hello' }))
-  })
+describe("apply — retype", () => {
+  it("changes the type and nothing else", () => {
+    const out = apply(makeDoc(), { t: "retype", uid: "hero", type: "quote" });
+    expect(out.bloks.hero).toEqual(b("hero", "quote", "root", "body", "a0", { heading: "Hello" }));
+  });
 
-  it('keeps the blok its children, in place and in order', () => {
-    const out = apply(makeDoc(), { t: 'retype', uid: 'section', type: 'container' })
-    expect(out.bloks.section!.type).toBe('container')
-    expect(out.bloks.text).toEqual(makeDoc().bloks.text)
-    expect(out.bloks.col).toEqual(makeDoc().bloks.col)
-    expect(out.bloks.img).toEqual(makeDoc().bloks.img)
-    expect(uids(out)).toEqual(uids(makeDoc()))
-  })
+  it("keeps the blok its children, in place and in order", () => {
+    const out = apply(makeDoc(), { t: "retype", uid: "section", type: "container" });
+    expect(out.bloks.section!.type).toBe("container");
+    expect(out.bloks.text).toEqual(makeDoc().bloks.text);
+    expect(out.bloks.col).toEqual(makeDoc().bloks.col);
+    expect(out.bloks.img).toEqual(makeDoc().bloks.img);
+    expect(uids(out)).toEqual(uids(makeDoc()));
+  });
 
-  it('leaves field data untouched — seeding the new type is a set alongside it', () => {
+  it("leaves field data untouched — seeding the new type is a set alongside it", () => {
     const out = applyAll(makeDoc(), [
-      { t: 'retype', uid: 'hero', type: 'quote' },
-      { t: 'set', uid: 'hero', field: 'size', value: 'large' },
-    ])
-    expect(out.bloks.hero!.data).toEqual({ heading: 'Hello', size: 'large' })
-  })
+      { t: "retype", uid: "hero", type: "quote" },
+      { t: "set", uid: "hero", field: "size", value: "large" },
+    ]);
+    expect(out.bloks.hero!.data).toEqual({ heading: "Hello", size: "large" });
+  });
 
-  it('refuses to retype doc.root', () => {
-    const doc = makeDoc()
-    expect(apply(doc, { t: 'retype', uid: 'root', type: 'insightPage' })).toBe(doc)
-  })
+  it("refuses to retype doc.root", () => {
+    const doc = makeDoc();
+    expect(apply(doc, { t: "retype", uid: "root", type: "insightPage" })).toBe(doc);
+  });
 
-  it('is a no-op for an unknown uid', () => {
-    const doc = makeDoc()
-    expect(apply(doc, { t: 'retype', uid: 'nope', type: 'quote' })).toBe(doc)
-  })
+  it("is a no-op for an unknown uid", () => {
+    const doc = makeDoc();
+    expect(apply(doc, { t: "retype", uid: "nope", type: "quote" })).toBe(doc);
+  });
 
-  it('does not mutate the input doc', () => {
-    const doc = makeDoc()
-    apply(doc, { t: 'retype', uid: 'hero', type: 'quote' })
-    expect(doc).toEqual(makeDoc())
-  })
-})
+  it("does not mutate the input doc", () => {
+    const doc = makeDoc();
+    apply(doc, { t: "retype", uid: "hero", type: "quote" });
+    expect(doc).toEqual(makeDoc());
+  });
+});
 
-describe('applyAll', () => {
-  it('applies mutations in order, last write winning', () => {
+describe("applyAll", () => {
+  it("applies mutations in order, last write winning", () => {
     const out = applyAll(makeDoc(), [
-      { t: 'set', uid: 'text', field: 'body', value: 'two' },
-      { t: 'set', uid: 'text', field: 'body', value: 'three' },
-    ])
-    expect(out.bloks.text!.data.body).toBe('three')
-  })
+      { t: "set", uid: "text", field: "body", value: "two" },
+      { t: "set", uid: "text", field: "body", value: "three" },
+    ]);
+    expect(out.bloks.text!.data.body).toBe("three");
+  });
 
-  it('inserts then moves the same blok within one transaction', () => {
+  it("inserts then moves the same blok within one transaction", () => {
     const out = applyAll(makeDoc(), [
-      { t: 'insert', blok: b('card', 'card', 'section', 'children', 'a2') },
-      { t: 'move', uid: 'card', parent: 'col', slot: 'children', order: 'a1' },
-    ])
-    expect(out.bloks.card).toEqual(b('card', 'card', 'col', 'children', 'a1'))
-  })
+      { t: "insert", blok: b("card", "card", "section", "children", "a2") },
+      { t: "move", uid: "card", parent: "col", slot: "children", order: "a1" },
+    ]);
+    expect(out.bloks.card).toEqual(b("card", "card", "col", "children", "a1"));
+  });
 
-  it('returns the same doc for an empty transaction', () => {
-    const doc = makeDoc()
-    expect(applyAll(doc, [])).toBe(doc)
-  })
-})
+  it("returns the same doc for an empty transaction", () => {
+    const doc = makeDoc();
+    expect(applyAll(doc, [])).toBe(doc);
+  });
+});
 
-describe('invert', () => {
-  it('inverts insert to a remove of the same uid', () => {
-    const doc = makeDoc()
-    const card = b('card', 'card', 'section', 'children', 'a2')
-    expect(invert(doc, { t: 'insert', blok: card })).toEqual([{ t: 'remove', uid: 'card' }])
-  })
+describe("invert", () => {
+  it("inverts insert to a remove of the same uid", () => {
+    const doc = makeDoc();
+    const card = b("card", "card", "section", "children", "a2");
+    expect(invert(doc, { t: "insert", blok: card })).toEqual([{ t: "remove", uid: "card" }]);
+  });
 
-  it('inverts remove into inserts of the whole subtree, parents before children', () => {
-    const doc = makeDoc()
-    const inv = invert(doc, { t: 'remove', uid: 'section' })
-    expect(inv.map((m) => (m.t === 'insert' ? m.blok.uid : m.t))).toEqual([
-      'section',
-      'text',
-      'col',
-      'img',
-    ])
-    expect(inv[0]).toEqual({ t: 'insert', blok: doc.bloks.section })
-  })
+  it("inverts remove into inserts of the whole subtree, parents before children", () => {
+    const doc = makeDoc();
+    const inv = invert(doc, { t: "remove", uid: "section" });
+    expect(inv.map((m) => (m.t === "insert" ? m.blok.uid : m.t))).toEqual([
+      "section",
+      "text",
+      "col",
+      "img",
+    ]);
+    expect(inv[0]).toEqual({ t: "insert", blok: doc.bloks.section });
+  });
 
-  it('inverts remove of an unknown uid to nothing', () => {
-    expect(invert(makeDoc(), { t: 'remove', uid: 'nope' })).toEqual([])
-  })
+  it("inverts remove of an unknown uid to nothing", () => {
+    expect(invert(makeDoc(), { t: "remove", uid: "nope" })).toEqual([]);
+  });
 
-  it('inverts set to a set of the previous value', () => {
-    const doc = makeDoc()
-    expect(invert(doc, { t: 'set', uid: 'text', field: 'body', value: 'two' })).toEqual([
-      { t: 'set', uid: 'text', field: 'body', value: 'one' },
-    ])
-  })
+  it("inverts set to a set of the previous value", () => {
+    const doc = makeDoc();
+    expect(invert(doc, { t: "set", uid: "text", field: "body", value: "two" })).toEqual([
+      { t: "set", uid: "text", field: "body", value: "one" },
+    ]);
+  });
 
   // PIN: a set on a field that was absent inverts to an `unset`, not to a null. Since
   // v5 the vocabulary has a delete-key, and in a layered global absent (inherited) and
   // null (removed) are different answers, so an undo must put back the one that was there.
-  it('inverts a set on an absent field to an unset', () => {
-    const doc = makeDoc()
-    expect(invert(doc, { t: 'set', uid: 'text', field: 'align', value: 'left' })).toEqual([
-      { t: 'unset', uid: 'text', field: 'align' },
-    ])
-  })
+  it("inverts a set on an absent field to an unset", () => {
+    const doc = makeDoc();
+    expect(invert(doc, { t: "set", uid: "text", field: "align", value: "left" })).toEqual([
+      { t: "unset", uid: "text", field: "align" },
+    ]);
+  });
 
-  it('inverts a set on a field that held null to a set of null, not an unset', () => {
-    const doc = apply(makeDoc(), { t: 'set', uid: 'text', field: 'align', value: null })
-    expect(invert(doc, { t: 'set', uid: 'text', field: 'align', value: 'left' })).toEqual([
-      { t: 'set', uid: 'text', field: 'align', value: null },
-    ])
-  })
+  it("inverts a set on a field that held null to a set of null, not an unset", () => {
+    const doc = apply(makeDoc(), { t: "set", uid: "text", field: "align", value: null });
+    expect(invert(doc, { t: "set", uid: "text", field: "align", value: "left" })).toEqual([
+      { t: "set", uid: "text", field: "align", value: null },
+    ]);
+  });
 
-  it('inverts set on an unknown uid to nothing', () => {
-    expect(invert(makeDoc(), { t: 'set', uid: 'nope', field: 'x', value: 1 })).toEqual([])
-  })
+  it("inverts set on an unknown uid to nothing", () => {
+    expect(invert(makeDoc(), { t: "set", uid: "nope", field: "x", value: 1 })).toEqual([]);
+  });
 
-  it('inverts move to a move back to the previous parent, slot and order', () => {
-    const doc = makeDoc()
-    const m: Mutation = { t: 'move', uid: 'img', parent: 'root', slot: 'body', order: 'a2' }
+  it("inverts move to a move back to the previous parent, slot and order", () => {
+    const doc = makeDoc();
+    const m: Mutation = { t: "move", uid: "img", parent: "root", slot: "body", order: "a2" };
     expect(invert(doc, m)).toEqual([
-      { t: 'move', uid: 'img', parent: 'col', slot: 'children', order: 'a0' },
-    ])
-  })
+      { t: "move", uid: "img", parent: "col", slot: "children", order: "a0" },
+    ]);
+  });
 
-  it('inverts move on an unknown uid to nothing', () => {
-    const m: Mutation = { t: 'move', uid: 'nope', parent: 'root', slot: 'body', order: 'a0' }
-    expect(invert(makeDoc(), m)).toEqual([])
-  })
+  it("inverts move on an unknown uid to nothing", () => {
+    const m: Mutation = { t: "move", uid: "nope", parent: "root", slot: "body", order: "a0" };
+    expect(invert(makeDoc(), m)).toEqual([]);
+  });
 
-  it('inverts a move of the root to nothing, since it has no parent or slot to restore', () => {
-    const m: Mutation = { t: 'move', uid: 'root', parent: 'section', slot: 'children', order: 'a0' }
-    expect(invert(makeDoc(), m)).toEqual([])
-  })
+  it("inverts a move of the root to nothing, since it has no parent or slot to restore", () => {
+    const m: Mutation = {
+      t: "move",
+      uid: "root",
+      parent: "section",
+      slot: "children",
+      order: "a0",
+    };
+    expect(invert(makeDoc(), m)).toEqual([]);
+  });
 
-  it('inverts retype to a retype back to the previous type', () => {
-    const doc = makeDoc()
-    expect(invert(doc, { t: 'retype', uid: 'hero', type: 'quote' })).toEqual([
-      { t: 'retype', uid: 'hero', type: 'hero' },
-    ])
-  })
+  it("inverts retype to a retype back to the previous type", () => {
+    const doc = makeDoc();
+    expect(invert(doc, { t: "retype", uid: "hero", type: "quote" })).toEqual([
+      { t: "retype", uid: "hero", type: "hero" },
+    ]);
+  });
 
-  it('inverts retype on an unknown uid to nothing', () => {
-    expect(invert(makeDoc(), { t: 'retype', uid: 'nope', type: 'quote' })).toEqual([])
-  })
+  it("inverts retype on an unknown uid to nothing", () => {
+    expect(invert(makeDoc(), { t: "retype", uid: "nope", type: "quote" })).toEqual([]);
+  });
 
-  it('inverts a retype of the root to nothing, since it is refused', () => {
-    expect(invert(makeDoc(), { t: 'retype', uid: 'root', type: 'insightPage' })).toEqual([])
-  })
+  it("inverts a retype of the root to nothing, since it is refused", () => {
+    expect(invert(makeDoc(), { t: "retype", uid: "root", type: "insightPage" })).toEqual([]);
+  });
 
-  it('returns an empty inverse for an empty transaction', () => {
-    expect(invertAll(makeDoc(), [])).toEqual([])
-  })
+  it("returns an empty inverse for an empty transaction", () => {
+    expect(invertAll(makeDoc(), [])).toEqual([]);
+  });
 
-  it('inverts a transaction in reverse order', () => {
-    const doc = makeDoc()
+  it("inverts a transaction in reverse order", () => {
+    const doc = makeDoc();
     const ms: Mutation[] = [
-      { t: 'set', uid: 'text', field: 'body', value: 'two' },
-      { t: 'insert', blok: b('card', 'card', 'section', 'children', 'a2') },
-    ]
+      { t: "set", uid: "text", field: "body", value: "two" },
+      { t: "insert", blok: b("card", "card", "section", "children", "a2") },
+    ];
     expect(invertAll(doc, ms)).toEqual([
-      { t: 'remove', uid: 'card' },
-      { t: 'set', uid: 'text', field: 'body', value: 'one' },
-    ])
-  })
-})
+      { t: "remove", uid: "card" },
+      { t: "set", uid: "text", field: "body", value: "one" },
+    ]);
+  });
+});
 
-describe('invertAll round trip', () => {
-  it('round trips a transaction of inserts', () => {
-    const doc = makeDoc()
+describe("invertAll round trip", () => {
+  it("round trips a transaction of inserts", () => {
+    const doc = makeDoc();
     const ms: Mutation[] = [
-      { t: 'insert', blok: b('card', 'card', 'section', 'children', 'a2') },
-      { t: 'insert', blok: b('badge', 'badge', 'card', 'children', 'a0', { label: 'new' }) },
-    ]
-    expect(roundTrip(doc, ms)).toEqual(makeDoc())
-  })
+      { t: "insert", blok: b("card", "card", "section", "children", "a2") },
+      { t: "insert", blok: b("badge", "badge", "card", "children", "a0", { label: "new" }) },
+    ];
+    expect(roundTrip(doc, ms)).toEqual(makeDoc());
+  });
 
-  it('round trips a transaction of sets over existing fields', () => {
-    const doc = makeDoc()
+  it("round trips a transaction of sets over existing fields", () => {
+    const doc = makeDoc();
     const ms: Mutation[] = [
-      { t: 'set', uid: 'root', field: 'title', value: 'Away' },
-      { t: 'set', uid: 'text', field: 'body', value: 'two' },
-      { t: 'set', uid: 'hero', field: 'heading', value: 'Goodbye' },
-      { t: 'set', uid: 'text', field: 'body', value: 'three' },
-    ]
-    expect(roundTrip(doc, ms)).toEqual(makeDoc())
-  })
+      { t: "set", uid: "root", field: "title", value: "Away" },
+      { t: "set", uid: "text", field: "body", value: "two" },
+      { t: "set", uid: "hero", field: "heading", value: "Goodbye" },
+      { t: "set", uid: "text", field: "body", value: "three" },
+    ];
+    expect(roundTrip(doc, ms)).toEqual(makeDoc());
+  });
 
-  it('round trips a transaction of moves', () => {
-    const doc = makeDoc()
+  it("round trips a transaction of moves", () => {
+    const doc = makeDoc();
     const ms: Mutation[] = [
-      { t: 'move', uid: 'img', parent: 'root', slot: 'body', order: 'a2' },
-      { t: 'move', uid: 'text', parent: 'col', slot: 'children', order: 'a0' },
-      { t: 'move', uid: 'img', parent: 'section', slot: 'children', order: 'a0V' },
-    ]
-    expect(roundTrip(doc, ms)).toEqual(makeDoc())
-  })
+      { t: "move", uid: "img", parent: "root", slot: "body", order: "a2" },
+      { t: "move", uid: "text", parent: "col", slot: "children", order: "a0" },
+      { t: "move", uid: "img", parent: "section", slot: "children", order: "a0V" },
+    ];
+    expect(roundTrip(doc, ms)).toEqual(makeDoc());
+  });
 
-  it('round trips a remove of a nested subtree', () => {
-    const doc = makeDoc()
-    expect(roundTrip(doc, [{ t: 'remove', uid: 'section' }])).toEqual(makeDoc())
-  })
+  it("round trips a remove of a nested subtree", () => {
+    const doc = makeDoc();
+    expect(roundTrip(doc, [{ t: "remove", uid: "section" }])).toEqual(makeDoc());
+  });
 
-  it('round trips a move followed by a remove of the old parent', () => {
-    const doc = makeDoc()
+  it("round trips a move followed by a remove of the old parent", () => {
+    const doc = makeDoc();
     const ms: Mutation[] = [
-      { t: 'move', uid: 'img', parent: 'root', slot: 'body', order: 'a2' },
-      { t: 'remove', uid: 'col' },
-    ]
-    expect(roundTrip(doc, ms)).toEqual(makeDoc())
-  })
+      { t: "move", uid: "img", parent: "root", slot: "body", order: "a2" },
+      { t: "remove", uid: "col" },
+    ];
+    expect(roundTrip(doc, ms)).toEqual(makeDoc());
+  });
 
-  it('round trips a mixed insert, set, move and remove transaction', () => {
-    const doc = makeDoc()
+  it("round trips a mixed insert, set, move and remove transaction", () => {
+    const doc = makeDoc();
     const ms: Mutation[] = [
-      { t: 'insert', blok: b('quote', 'quote', 'col', 'children', 'a1') },
-      { t: 'set', uid: 'quote', field: 'text', value: 'hi' },
-      { t: 'move', uid: 'hero', parent: 'section', slot: 'children', order: 'a0V' },
-      { t: 'remove', uid: 'text' },
-    ]
-    const applied = applyAll(doc, ms)
-    expect(uids(applied)).toEqual(['col', 'hero', 'img', 'quote', 'root', 'section'])
-    expect(roundTrip(doc, ms)).toEqual(makeDoc())
-  })
+      { t: "insert", blok: b("quote", "quote", "col", "children", "a1") },
+      { t: "set", uid: "quote", field: "text", value: "hi" },
+      { t: "move", uid: "hero", parent: "section", slot: "children", order: "a0V" },
+      { t: "remove", uid: "text" },
+    ];
+    const applied = applyAll(doc, ms);
+    expect(uids(applied)).toEqual(["col", "hero", "img", "quote", "root", "section"]);
+    expect(roundTrip(doc, ms)).toEqual(makeDoc());
+  });
 
   /**
    * The whole point of a migration going through the log: an editor can see it
    * happen and Cmd+Z takes it back (`schema-migrations.md`'s edge case on
    * undoing a migration transaction).
    */
-  it('round trips a retype with the sets that seed the new type', () => {
-    const doc = makeDoc()
+  it("round trips a retype with the sets that seed the new type", () => {
+    const doc = makeDoc();
     const ms: Mutation[] = [
-      { t: 'retype', uid: 'hero', type: 'quote' },
-      { t: 'set', uid: 'hero', field: 'heading', value: null },
-      { t: 'set', uid: 'hero', field: 'quote', value: 'Hello' },
-    ]
-    const applied = applyAll(doc, ms)
-    expect(applied.bloks.hero!.type).toBe('quote')
+      { t: "retype", uid: "hero", type: "quote" },
+      { t: "set", uid: "hero", field: "heading", value: null },
+      { t: "set", uid: "hero", field: "quote", value: "Hello" },
+    ];
+    const applied = applyAll(doc, ms);
+    expect(applied.bloks.hero!.type).toBe("quote");
     // `quote` was absent, so its inverse deletes it: the document is exactly the
     // one it started from, where before v5 it kept a `quote: null` behind.
     expect(roundTrip(doc, ms).bloks.hero).toEqual(
-      b('hero', 'hero', 'root', 'body', 'a0', { heading: 'Hello' }),
-    )
-  })
+      b("hero", "hero", "root", "body", "a0", { heading: "Hello" }),
+    );
+  });
 
-  it('round trips a transaction containing a refused remove of the root', () => {
-    const doc = makeDoc()
+  it("round trips a transaction containing a refused remove of the root", () => {
+    const doc = makeDoc();
     const ms: Mutation[] = [
-      { t: 'remove', uid: 'root' },
-      { t: 'remove', uid: 'hero' },
-      { t: 'set', uid: 'root', field: 'title', value: 'Away' },
-    ]
-    expect(roundTrip(doc, ms)).toEqual(makeDoc())
-  })
+      { t: "remove", uid: "root" },
+      { t: "remove", uid: "hero" },
+      { t: "set", uid: "root", field: "title", value: "Away" },
+    ];
+    expect(roundTrip(doc, ms)).toEqual(makeDoc());
+  });
 
   // The asymmetry the vocabulary used to have is gone: a set that creates a field inverts
   // to an `unset`, so the round trip is exact.
-  it('removes a field it created after a round trip', () => {
-    const doc = makeDoc()
-    const out = roundTrip(doc, [{ t: 'set', uid: 'text', field: 'align', value: 'left' }])
-    expect(out.bloks.text!.data).toEqual({ body: 'one' })
-    expect(out).toEqual(makeDoc())
-  })
-})
+  it("removes a field it created after a round trip", () => {
+    const doc = makeDoc();
+    const out = roundTrip(doc, [{ t: "set", uid: "text", field: "align", value: "left" }]);
+    expect(out.bloks.text!.data).toEqual({ body: "one" });
+    expect(out).toEqual(makeDoc());
+  });
+});
 
 /**
  * The reason strings are the DO's `reject { txId, reason }` payload, so each
  * violation has to be nameable. Matched loosely: the wording is not the contract.
  */
-describe('mutationError', () => {
-  const doc = makeDoc()
+describe("mutationError", () => {
+  const doc = makeDoc();
 
-  it('names each structural violation', () => {
+  it("names each structural violation", () => {
     expect(
-      mutationError(doc, { t: 'insert', blok: b('text', 'quote', 'root', 'body', 'a9') }),
-    ).toMatch(/duplicate uid/)
-    expect(
-      mutationError(doc, {
-        t: 'move',
-        uid: 'root',
-        parent: 'section',
-        slot: 'children',
-        order: 'a0',
-      }),
-    ).toMatch(/root move/)
+      mutationError(doc, { t: "insert", blok: b("text", "quote", "root", "body", "a9") }),
+    ).toMatch(/duplicate uid/);
     expect(
       mutationError(doc, {
-        t: 'move',
-        uid: 'section',
-        parent: 'section',
-        slot: 'children',
-        order: 'a0',
+        t: "move",
+        uid: "root",
+        parent: "section",
+        slot: "children",
+        order: "a0",
       }),
-    ).toMatch(/self-parent/)
+    ).toMatch(/root move/);
     expect(
       mutationError(doc, {
-        t: 'move',
-        uid: 'text',
-        parent: 'ghost',
-        slot: 'children',
-        order: 'a0',
+        t: "move",
+        uid: "section",
+        parent: "section",
+        slot: "children",
+        order: "a0",
       }),
-    ).toMatch(/missing parent/)
+    ).toMatch(/self-parent/);
     expect(
       mutationError(doc, {
-        t: 'move',
-        uid: 'section',
-        parent: 'img',
-        slot: 'children',
-        order: 'a0',
+        t: "move",
+        uid: "text",
+        parent: "ghost",
+        slot: "children",
+        order: "a0",
       }),
-    ).toMatch(/cycle/)
-    expect(mutationError(doc, { t: 'remove', uid: 'root' })).toMatch(/root remove/)
+    ).toMatch(/missing parent/);
+    expect(
+      mutationError(doc, {
+        t: "move",
+        uid: "section",
+        parent: "img",
+        slot: "children",
+        order: "a0",
+      }),
+    ).toMatch(/cycle/);
+    expect(mutationError(doc, { t: "remove", uid: "root" })).toMatch(/root remove/);
     // A document's root type *is* its document type, so changing it is a
     // `stories.type` update in the same breath — out of scope for a block edit.
-    expect(mutationError(doc, { t: 'retype', uid: 'root', type: 'insightPage' })).toMatch(
+    expect(mutationError(doc, { t: "retype", uid: "root", type: "insightPage" })).toMatch(
       /root retype/,
-    )
-    expect(mutationError(doc, { t: 'nonsense' } as unknown as Mutation)).toMatch(/unknown kind/)
-  })
+    );
+    expect(mutationError(doc, { t: "nonsense" } as unknown as Mutation)).toMatch(/unknown kind/);
+  });
 
-  it('accepts every mutation that applies, and every plain no-op', () => {
+  it("accepts every mutation that applies, and every plain no-op", () => {
     const ok: Mutation[] = [
-      { t: 'set', uid: 'text', field: 'body', value: 'two' },
-      { t: 'insert', blok: b('card', 'card', 'section', 'children', 'a2') },
-      { t: 'move', uid: 'img', parent: 'root', slot: 'body', order: 'a2' },
-      { t: 'remove', uid: 'section' },
-      { t: 'retype', uid: 'hero', type: 'quote' },
+      { t: "set", uid: "text", field: "body", value: "two" },
+      { t: "insert", blok: b("card", "card", "section", "children", "a2") },
+      { t: "move", uid: "img", parent: "root", slot: "body", order: "a2" },
+      { t: "remove", uid: "section" },
+      { t: "retype", uid: "hero", type: "quote" },
       // Deliberately not checked against any registry: the Durable Object knows
       // nothing about block schemas, and an unknown type renders as "Unknown
       // block type" and is fixable by another migration. A DO that had to hold
       // the registry and keep it in step is a far worse coupling than a bad
       // type name (`schema-migrations.md` architecture decision 3).
-      { t: 'retype', uid: 'hero', type: 'notInAnyRegistry' },
-    ]
-    for (const m of ok) expect(mutationError(doc, m)).toBeNull()
+      { t: "retype", uid: "hero", type: "notInAnyRegistry" },
+    ];
+    for (const m of ok) expect(mutationError(doc, m)).toBeNull();
 
     // A mutation aimed at a uid this document does not have is an ordinary no-op,
     // not a violation: rejecting a whole tx over one would make a peer's remove
     // start refusing everybody's edits.
     const absent: Mutation[] = [
-      { t: 'set', uid: 'nope', field: 'x', value: 1 },
-      { t: 'move', uid: 'nope', parent: 'root', slot: 'body', order: 'a0' },
-      { t: 'remove', uid: 'nope' },
-      { t: 'retype', uid: 'nope', type: 'quote' },
-    ]
-    for (const m of absent) expect(mutationError(doc, m)).toBeNull()
-  })
-})
+      { t: "set", uid: "nope", field: "x", value: 1 },
+      { t: "move", uid: "nope", parent: "root", slot: "body", order: "a0" },
+      { t: "remove", uid: "nope" },
+      { t: "retype", uid: "nope", type: "quote" },
+    ];
+    for (const m of absent) expect(mutationError(doc, m)).toBeNull();
+  });
+});
 
-describe('newUid', () => {
+describe("newUid", () => {
   // PIN: 16 hex chars (64 bits). 8 chars collided at ~77k ids, which insert-collision turns
   // from a silent overwrite into a refusal; the width is what stops it happening at all.
-  it('returns 16 lowercase hex characters', () => {
+  it("returns 16 lowercase hex characters", () => {
     for (let i = 0; i < 50; i++) {
-      expect(newUid()).toMatch(/^[0-9a-f]{16}$/)
+      expect(newUid()).toMatch(/^[0-9a-f]{16}$/);
     }
-  })
+  });
 
   // Uids written at 8 chars stay valid: nothing parses a uid, everything compares it.
-  it('keeps accepting an 8-char uid everywhere a uid is used', () => {
+  it("keeps accepting an 8-char uid everywhere a uid is used", () => {
     const doc: Doc = {
-      root: 'root',
+      root: "root",
       bloks: {
-        root: b('root', 'page', null, null, 'a0'),
-        deadbeef: b('deadbeef', 'text', 'root', 'body', 'a0'),
+        root: b("root", "page", null, null, "a0"),
+        deadbeef: b("deadbeef", "text", "root", "body", "a0"),
       },
-    }
+    };
     const out = apply(doc, {
-      t: 'move',
-      uid: 'deadbeef',
-      parent: 'root',
-      slot: 'body',
-      order: 'a1',
-    })
-    expect(out.bloks.deadbeef!.order).toBe('a1')
-  })
+      t: "move",
+      uid: "deadbeef",
+      parent: "root",
+      slot: "body",
+      order: "a1",
+    });
+    expect(out.bloks.deadbeef!.order).toBe("a1");
+  });
 
-  it('does not repeat across a small sample', () => {
-    const seen = new Set(Array.from({ length: 200 }, () => newUid()))
-    expect(seen.size).toBe(200)
-  })
-})
+  it("does not repeat across a small sample", () => {
+    const seen = new Set(Array.from({ length: 200 }, () => newUid()));
+    expect(seen.size).toBe(200);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Locale-scoped set (`localisation.md` architecture decision 2)
@@ -615,276 +627,276 @@ describe('newUid', () => {
  * as the present one, including that an inverse of a source write carries no
  * `locale` key at all.
  */
-describe('apply — set with a locale', () => {
-  it('writes into i18n rather than data, creating the maps', () => {
+describe("apply — set with a locale", () => {
+  it("writes into i18n rather than data, creating the maps", () => {
     const out = apply(makeDoc(), {
-      t: 'set',
-      uid: 'hero',
-      field: 'heading',
-      value: 'Bonjour',
-      locale: 'fr',
-    })
-    expect(out.bloks.hero!.data.heading).toBe('Hello')
-    expect(out.bloks.hero!.i18n).toEqual({ fr: { heading: 'Bonjour' } })
-  })
+      t: "set",
+      uid: "hero",
+      field: "heading",
+      value: "Bonjour",
+      locale: "fr",
+    });
+    expect(out.bloks.hero!.data.heading).toBe("Hello");
+    expect(out.bloks.hero!.i18n).toEqual({ fr: { heading: "Bonjour" } });
+  });
 
-  it('leaves the other fields of an existing locale map alone', () => {
+  it("leaves the other fields of an existing locale map alone", () => {
     const doc = apply(makeDoc(), {
-      t: 'set',
-      uid: 'hero',
-      field: 'heading',
-      value: 'Bonjour',
-      locale: 'fr',
-    })
-    const out = apply(doc, { t: 'set', uid: 'hero', field: 'sub', value: 'Salut', locale: 'fr' })
-    expect(out.bloks.hero!.i18n).toEqual({ fr: { heading: 'Bonjour', sub: 'Salut' } })
-  })
+      t: "set",
+      uid: "hero",
+      field: "heading",
+      value: "Bonjour",
+      locale: "fr",
+    });
+    const out = apply(doc, { t: "set", uid: "hero", field: "sub", value: "Salut", locale: "fr" });
+    expect(out.bloks.hero!.i18n).toEqual({ fr: { heading: "Bonjour", sub: "Salut" } });
+  });
 
-  it('leaves other locales alone: two translators never collide', () => {
-    let doc = makeDoc()
-    doc = apply(doc, { t: 'set', uid: 'hero', field: 'heading', value: 'Bonjour', locale: 'fr' })
-    doc = apply(doc, { t: 'set', uid: 'hero', field: 'heading', value: 'Hallo', locale: 'de' })
-    expect(doc.bloks.hero!.i18n).toEqual({ fr: { heading: 'Bonjour' }, de: { heading: 'Hallo' } })
-    expect(doc.bloks.hero!.data.heading).toBe('Hello')
-  })
+  it("leaves other locales alone: two translators never collide", () => {
+    let doc = makeDoc();
+    doc = apply(doc, { t: "set", uid: "hero", field: "heading", value: "Bonjour", locale: "fr" });
+    doc = apply(doc, { t: "set", uid: "hero", field: "heading", value: "Hallo", locale: "de" });
+    expect(doc.bloks.hero!.i18n).toEqual({ fr: { heading: "Bonjour" }, de: { heading: "Hallo" } });
+    expect(doc.bloks.hero!.data.heading).toBe("Hello");
+  });
 
-  it('never touches i18n for a source-locale write', () => {
-    const out = apply(makeDoc(), { t: 'set', uid: 'hero', field: 'heading', value: 'Hi' })
-    expect(out.bloks.hero!.data.heading).toBe('Hi')
-    expect(out.bloks.hero).not.toHaveProperty('i18n')
-  })
+  it("never touches i18n for a source-locale write", () => {
+    const out = apply(makeDoc(), { t: "set", uid: "hero", field: "heading", value: "Hi" });
+    expect(out.bloks.hero!.data.heading).toBe("Hi");
+    expect(out.bloks.hero).not.toHaveProperty("i18n");
+  });
 
   it('stores an explicit null rather than deleting the key: that is how "untranslate" is expressed', () => {
     const doc = apply(makeDoc(), {
-      t: 'set',
-      uid: 'hero',
-      field: 'heading',
-      value: 'Bonjour',
-      locale: 'fr',
-    })
-    const out = apply(doc, { t: 'set', uid: 'hero', field: 'heading', value: null, locale: 'fr' })
-    expect(out.bloks.hero!.i18n).toEqual({ fr: { heading: null } })
-  })
+      t: "set",
+      uid: "hero",
+      field: "heading",
+      value: "Bonjour",
+      locale: "fr",
+    });
+    const out = apply(doc, { t: "set", uid: "hero", field: "heading", value: null, locale: "fr" });
+    expect(out.bloks.hero!.i18n).toEqual({ fr: { heading: null } });
+  });
 
-  it('is a no-op for a uid the document does not have', () => {
-    const doc = makeDoc()
-    expect(apply(doc, { t: 'set', uid: 'gone', field: 'x', value: 'y', locale: 'fr' })).toBe(doc)
-  })
-})
+  it("is a no-op for a uid the document does not have", () => {
+    const doc = makeDoc();
+    expect(apply(doc, { t: "set", uid: "gone", field: "x", value: "y", locale: "fr" })).toBe(doc);
+  });
+});
 
-describe('invert — set with a locale', () => {
-  it('undoes into the same locale, not the source', () => {
+describe("invert — set with a locale", () => {
+  it("undoes into the same locale, not the source", () => {
     const doc = apply(makeDoc(), {
-      t: 'set',
-      uid: 'hero',
-      field: 'heading',
-      value: 'Bonjour',
-      locale: 'fr',
-    })
+      t: "set",
+      uid: "hero",
+      field: "heading",
+      value: "Bonjour",
+      locale: "fr",
+    });
     const back = invert(doc, {
-      t: 'set',
-      uid: 'hero',
-      field: 'heading',
-      value: 'Salut',
-      locale: 'fr',
-    })
+      t: "set",
+      uid: "hero",
+      field: "heading",
+      value: "Salut",
+      locale: "fr",
+    });
     expect(back).toEqual([
-      { t: 'set', uid: 'hero', field: 'heading', value: 'Bonjour', locale: 'fr' },
-    ])
-  })
+      { t: "set", uid: "hero", field: "heading", value: "Bonjour", locale: "fr" },
+    ]);
+  });
 
-  it('undoes a first translation to an unset, which reads as untranslated again', () => {
+  it("undoes a first translation to an unset, which reads as untranslated again", () => {
     const back = invert(makeDoc(), {
-      t: 'set',
-      uid: 'hero',
-      field: 'heading',
-      value: 'Bonjour',
-      locale: 'fr',
-    })
-    expect(back).toEqual([{ t: 'unset', uid: 'hero', field: 'heading', locale: 'fr' }])
-  })
+      t: "set",
+      uid: "hero",
+      field: "heading",
+      value: "Bonjour",
+      locale: "fr",
+    });
+    expect(back).toEqual([{ t: "unset", uid: "hero", field: "heading", locale: "fr" }]);
+  });
 
-  it('omits the locale key entirely when inverting a source-locale write', () => {
-    const back = invert(makeDoc(), { t: 'set', uid: 'hero', field: 'heading', value: 'Hi' })
-    expect(back).toEqual([{ t: 'set', uid: 'hero', field: 'heading', value: 'Hello' }])
-    expect(back[0]).not.toHaveProperty('locale')
-  })
+  it("omits the locale key entirely when inverting a source-locale write", () => {
+    const back = invert(makeDoc(), { t: "set", uid: "hero", field: "heading", value: "Hi" });
+    expect(back).toEqual([{ t: "set", uid: "hero", field: "heading", value: "Hello" }]);
+    expect(back[0]).not.toHaveProperty("locale");
+  });
 
-  it('does not read the source value for a locale write, however tempting', () => {
+  it("does not read the source value for a locale write, however tempting", () => {
     // `heading` has a source value; French has nothing. The inverse must delete the
     // French key, never write 'Hello' — undoing must not smuggle the English into
     // the French map.
     const back = invert(makeDoc(), {
-      t: 'set',
-      uid: 'hero',
-      field: 'heading',
-      value: 'Bonjour',
-      locale: 'fr',
-    })
-    expect(back[0]).toEqual({ t: 'unset', uid: 'hero', field: 'heading', locale: 'fr' })
-  })
+      t: "set",
+      uid: "hero",
+      field: "heading",
+      value: "Bonjour",
+      locale: "fr",
+    });
+    expect(back[0]).toEqual({ t: "unset", uid: "hero", field: "heading", locale: "fr" });
+  });
 
-  it('round-trips a run of interleaved locale and source writes', () => {
-    const doc = makeDoc()
+  it("round-trips a run of interleaved locale and source writes", () => {
+    const doc = makeDoc();
     const ms: Mutation[] = [
-      { t: 'set', uid: 'hero', field: 'heading', value: 'Hi' },
-      { t: 'set', uid: 'hero', field: 'heading', value: 'Bonjour', locale: 'fr' },
-      { t: 'set', uid: 'hero', field: 'heading', value: 'Hallo', locale: 'de' },
-      { t: 'set', uid: 'hero', field: 'heading', value: '', locale: 'fr' },
-      { t: 'set', uid: 'text', field: 'body', value: 'deux', locale: 'fr' },
-    ]
-    const back = applyAll(applyAll(doc, ms), invertAll(doc, ms))
+      { t: "set", uid: "hero", field: "heading", value: "Hi" },
+      { t: "set", uid: "hero", field: "heading", value: "Bonjour", locale: "fr" },
+      { t: "set", uid: "hero", field: "heading", value: "Hallo", locale: "de" },
+      { t: "set", uid: "hero", field: "heading", value: "", locale: "fr" },
+      { t: "set", uid: "text", field: "body", value: "deux", locale: "fr" },
+    ];
+    const back = applyAll(applyAll(doc, ms), invertAll(doc, ms));
 
     // Observational: `fieldValue` reads a null translation and an absent one
     // identically, and `diff` agrees — see diff.test.ts's "a fully undone
     // translation diffs as no change".
     for (const locale of [
       undefined,
-      { code: 'fr', fallbacks: [] },
-      { code: 'de', fallbacks: [] },
+      { code: "fr", fallbacks: [] },
+      { code: "de", fallbacks: [] },
     ]) {
       for (const [uid, field] of [
-        ['hero', 'heading'],
-        ['text', 'body'],
-        ['root', 'title'],
+        ["hero", "heading"],
+        ["text", "body"],
+        ["root", "title"],
       ] as const) {
         expect(fieldValue(back.bloks[uid]!, field, locale)).toEqual(
           fieldValue(doc.bloks[uid]!, field, locale),
-        )
+        );
       }
     }
     // The source maps really are byte-identical again.
     for (const uid of Object.keys(doc.bloks)) {
-      expect(back.bloks[uid]!.data).toEqual(doc.bloks[uid]!.data)
+      expect(back.bloks[uid]!.data).toEqual(doc.bloks[uid]!.data);
     }
-  })
+  });
 
-  it('leaves i18n absent again after undoing the only translation ever written', () => {
+  it("leaves i18n absent again after undoing the only translation ever written", () => {
     // The unset that undoes it drops the locale map it empties, and the `i18n` that
     // has no locale left, so the document is the one it started from.
-    const doc = makeDoc()
-    const m: Mutation = { t: 'set', uid: 'hero', field: 'heading', value: 'Bonjour', locale: 'fr' }
-    const back = applyAll(applyAll(doc, [m]), invertAll(doc, [m]))
-    expect(back).toEqual(doc)
-    expect(back.bloks.hero).not.toHaveProperty('i18n')
-  })
-})
+    const doc = makeDoc();
+    const m: Mutation = { t: "set", uid: "hero", field: "heading", value: "Bonjour", locale: "fr" };
+    const back = applyAll(applyAll(doc, [m]), invertAll(doc, [m]));
+    expect(back).toEqual(doc);
+    expect(back.bloks.hero).not.toHaveProperty("i18n");
+  });
+});
 
 /**
  * The compatibility property stated directly: a log of pre-v3 mutations produces
  * the identical document it always did, byte for byte, with no `i18n` anywhere.
  */
-describe('a pre-v3 log replays unchanged', () => {
-  it('produces a document with no i18n at all', () => {
-    const doc = makeDoc()
+describe("a pre-v3 log replays unchanged", () => {
+  it("produces a document with no i18n at all", () => {
+    const doc = makeDoc();
     const log: Mutation[] = [
-      { t: 'set', uid: 'root', field: 'title', value: 'Home v2' },
-      { t: 'insert', blok: b('new1', 'text', 'root', 'body', 'a2', { body: 'three' }) },
-      { t: 'set', uid: 'new1', field: 'body', value: 'four' },
-      { t: 'move', uid: 'new1', parent: 'section', slot: 'children', order: 'a2' },
-      { t: 'remove', uid: 'img' },
-    ]
-    const out = applyAll(doc, log)
-    for (const blok of Object.values(out.bloks)) expect(blok).not.toHaveProperty('i18n')
-    expect(out.bloks.root!.data.title).toBe('Home v2')
-    expect(out.bloks.new1!.data.body).toBe('four')
-    expect(out.bloks.img).toBeUndefined()
-  })
-})
+      { t: "set", uid: "root", field: "title", value: "Home v2" },
+      { t: "insert", blok: b("new1", "text", "root", "body", "a2", { body: "three" }) },
+      { t: "set", uid: "new1", field: "body", value: "four" },
+      { t: "move", uid: "new1", parent: "section", slot: "children", order: "a2" },
+      { t: "remove", uid: "img" },
+    ];
+    const out = applyAll(doc, log);
+    for (const blok of Object.values(out.bloks)) expect(blok).not.toHaveProperty("i18n");
+    expect(out.bloks.root!.data.title).toBe("Home v2");
+    expect(out.bloks.new1!.data.body).toBe("four");
+    expect(out.bloks.img).toBeUndefined();
+  });
+});
 
 /**
  * `unset` (`multi-site.md` decision 8): a delete-key, the one edit a layered global
  * needs and `set` cannot express. In a site's layer an absent key is *inherited*
  * and `null` is *removed here*, so "reset to inherited" is not a write of anything.
  */
-describe('unset', () => {
-  it('deletes a source key, leaving the rest of the blok alone', () => {
-    const doc = makeDoc()
-    const out = apply(doc, { t: 'unset', uid: 'hero', field: 'heading' })
-    expect(out.bloks.hero!.data).toEqual({})
-    expect(out.bloks.hero).toEqual(b('hero', 'hero', 'root', 'body', 'a0'))
-    expect(out.bloks.text).toBe(doc.bloks.text)
-  })
+describe("unset", () => {
+  it("deletes a source key, leaving the rest of the blok alone", () => {
+    const doc = makeDoc();
+    const out = apply(doc, { t: "unset", uid: "hero", field: "heading" });
+    expect(out.bloks.hero!.data).toEqual({});
+    expect(out.bloks.hero).toEqual(b("hero", "hero", "root", "body", "a0"));
+    expect(out.bloks.text).toBe(doc.bloks.text);
+  });
 
-  it('leaves a key holding null distinguishable from a key that is gone', () => {
-    const nulled = apply(makeDoc(), { t: 'set', uid: 'hero', field: 'heading', value: null })
-    const gone = apply(makeDoc(), { t: 'unset', uid: 'hero', field: 'heading' })
-    expect('heading' in nulled.bloks.hero!.data).toBe(true)
-    expect('heading' in gone.bloks.hero!.data).toBe(false)
-  })
+  it("leaves a key holding null distinguishable from a key that is gone", () => {
+    const nulled = apply(makeDoc(), { t: "set", uid: "hero", field: "heading", value: null });
+    const gone = apply(makeDoc(), { t: "unset", uid: "hero", field: "heading" });
+    expect("heading" in nulled.bloks.hero!.data).toBe(true);
+    expect("heading" in gone.bloks.hero!.data).toBe(false);
+  });
 
-  it('deletes one locale key without touching the source or another locale', () => {
+  it("deletes one locale key without touching the source or another locale", () => {
     const doc = applyAll(makeDoc(), [
-      { t: 'set', uid: 'hero', field: 'heading', value: 'Bonjour', locale: 'fr' },
-      { t: 'set', uid: 'hero', field: 'heading', value: 'Hallo', locale: 'de' },
-    ])
-    const out = apply(doc, { t: 'unset', uid: 'hero', field: 'heading', locale: 'fr' })
-    expect(out.bloks.hero!.i18n).toEqual({ de: { heading: 'Hallo' } })
-    expect(out.bloks.hero!.data).toEqual({ heading: 'Hello' })
-  })
+      { t: "set", uid: "hero", field: "heading", value: "Bonjour", locale: "fr" },
+      { t: "set", uid: "hero", field: "heading", value: "Hallo", locale: "de" },
+    ]);
+    const out = apply(doc, { t: "unset", uid: "hero", field: "heading", locale: "fr" });
+    expect(out.bloks.hero!.i18n).toEqual({ de: { heading: "Hallo" } });
+    expect(out.bloks.hero!.data).toEqual({ heading: "Hello" });
+  });
 
-  it('drops a locale map it empties, and the i18n it leaves without a locale', () => {
+  it("drops a locale map it empties, and the i18n it leaves without a locale", () => {
     const doc = apply(makeDoc(), {
-      t: 'set',
-      uid: 'hero',
-      field: 'heading',
-      value: 'Bonjour',
-      locale: 'fr',
-    })
-    const out = apply(doc, { t: 'unset', uid: 'hero', field: 'heading', locale: 'fr' })
-    expect(out.bloks.hero).not.toHaveProperty('i18n')
-  })
+      t: "set",
+      uid: "hero",
+      field: "heading",
+      value: "Bonjour",
+      locale: "fr",
+    });
+    const out = apply(doc, { t: "unset", uid: "hero", field: "heading", locale: "fr" });
+    expect(out.bloks.hero).not.toHaveProperty("i18n");
+  });
 
-  it('is a no-op, returning the same document, for a key or a uid that is not there', () => {
-    const doc = makeDoc()
-    expect(apply(doc, { t: 'unset', uid: 'hero', field: 'nope' })).toBe(doc)
-    expect(apply(doc, { t: 'unset', uid: 'nope', field: 'heading' })).toBe(doc)
-    expect(apply(doc, { t: 'unset', uid: 'hero', field: 'heading', locale: 'fr' })).toBe(doc)
-    expect(mutationError(doc, { t: 'unset', uid: 'nope', field: 'x' })).toBeNull()
-  })
+  it("is a no-op, returning the same document, for a key or a uid that is not there", () => {
+    const doc = makeDoc();
+    expect(apply(doc, { t: "unset", uid: "hero", field: "nope" })).toBe(doc);
+    expect(apply(doc, { t: "unset", uid: "nope", field: "heading" })).toBe(doc);
+    expect(apply(doc, { t: "unset", uid: "hero", field: "heading", locale: "fr" })).toBe(doc);
+    expect(mutationError(doc, { t: "unset", uid: "nope", field: "x" })).toBeNull();
+  });
 
-  it('inverts to the set it undid, with its locale when it had one', () => {
-    const doc = makeDoc()
-    expect(invert(doc, { t: 'unset', uid: 'hero', field: 'heading' })).toEqual([
-      { t: 'set', uid: 'hero', field: 'heading', value: 'Hello' },
-    ])
+  it("inverts to the set it undid, with its locale when it had one", () => {
+    const doc = makeDoc();
+    expect(invert(doc, { t: "unset", uid: "hero", field: "heading" })).toEqual([
+      { t: "set", uid: "hero", field: "heading", value: "Hello" },
+    ]);
     const fr = apply(doc, {
-      t: 'set',
-      uid: 'hero',
-      field: 'heading',
-      value: 'Bonjour',
-      locale: 'fr',
-    })
-    expect(invert(fr, { t: 'unset', uid: 'hero', field: 'heading', locale: 'fr' })).toEqual([
-      { t: 'set', uid: 'hero', field: 'heading', value: 'Bonjour', locale: 'fr' },
-    ])
-  })
+      t: "set",
+      uid: "hero",
+      field: "heading",
+      value: "Bonjour",
+      locale: "fr",
+    });
+    expect(invert(fr, { t: "unset", uid: "hero", field: "heading", locale: "fr" })).toEqual([
+      { t: "set", uid: "hero", field: "heading", value: "Bonjour", locale: "fr" },
+    ]);
+  });
 
-  it('inverts a null-valued key to a set of null, and an absent key to nothing', () => {
-    const nulled = apply(makeDoc(), { t: 'set', uid: 'hero', field: 'heading', value: null })
-    expect(invert(nulled, { t: 'unset', uid: 'hero', field: 'heading' })).toEqual([
-      { t: 'set', uid: 'hero', field: 'heading', value: null },
-    ])
-    expect(invert(makeDoc(), { t: 'unset', uid: 'hero', field: 'nope' })).toEqual([])
-    expect(invert(makeDoc(), { t: 'unset', uid: 'nope', field: 'heading' })).toEqual([])
-  })
+  it("inverts a null-valued key to a set of null, and an absent key to nothing", () => {
+    const nulled = apply(makeDoc(), { t: "set", uid: "hero", field: "heading", value: null });
+    expect(invert(nulled, { t: "unset", uid: "hero", field: "heading" })).toEqual([
+      { t: "set", uid: "hero", field: "heading", value: null },
+    ]);
+    expect(invert(makeDoc(), { t: "unset", uid: "hero", field: "nope" })).toEqual([]);
+    expect(invert(makeDoc(), { t: "unset", uid: "nope", field: "heading" })).toEqual([]);
+  });
 
-  it('omits the locale key from an inverse when there is none, so it serialises as before', () => {
-    const back = invert(makeDoc(), { t: 'set', uid: 'hero', field: 'align', value: 'left' })
-    expect(back[0]).toEqual({ t: 'unset', uid: 'hero', field: 'align' })
-    expect(back[0]).not.toHaveProperty('locale')
-  })
+  it("omits the locale key from an inverse when there is none, so it serialises as before", () => {
+    const back = invert(makeDoc(), { t: "set", uid: "hero", field: "align", value: "left" });
+    expect(back[0]).toEqual({ t: "unset", uid: "hero", field: "align" });
+    expect(back[0]).not.toHaveProperty("locale");
+  });
 
-  it('round trips a mixed transaction exactly, unset included', () => {
-    const doc = makeDoc()
+  it("round trips a mixed transaction exactly, unset included", () => {
+    const doc = makeDoc();
     const ms: Mutation[] = [
-      { t: 'unset', uid: 'hero', field: 'heading' },
-      { t: 'set', uid: 'hero', field: 'heading', value: 'Back' },
-      { t: 'set', uid: 'hero', field: 'align', value: 'left' },
-      { t: 'unset', uid: 'hero', field: 'align' },
-      { t: 'set', uid: 'text', field: 'body', value: 'fr body', locale: 'fr' },
-      { t: 'unset', uid: 'text', field: 'body', locale: 'fr' },
-    ]
-    expect(applyAll(applyAll(doc, ms), invertAll(doc, ms))).toEqual(doc)
-  })
-})
+      { t: "unset", uid: "hero", field: "heading" },
+      { t: "set", uid: "hero", field: "heading", value: "Back" },
+      { t: "set", uid: "hero", field: "align", value: "left" },
+      { t: "unset", uid: "hero", field: "align" },
+      { t: "set", uid: "text", field: "body", value: "fr body", locale: "fr" },
+      { t: "unset", uid: "text", field: "body", locale: "fr" },
+    ];
+    expect(applyAll(applyAll(doc, ms), invertAll(doc, ms))).toEqual(doc);
+  });
+});

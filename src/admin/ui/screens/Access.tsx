@@ -1,18 +1,18 @@
-import type { CSSProperties, ReactNode } from 'react'
-import { useCallback, useState } from 'react'
-import { fallbackColour } from '../../../core/protocol'
-import type { Grants, Role, Scope } from '../../../server/auth/roles'
-import type { TokenRow } from '../../../server/auth/tokens'
-import { type Me, scopeChoices } from '../../me'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { EmptyState } from '../EmptyState'
-import { Select } from '../Field'
-import { ListHeader } from '../List'
-import { scopeOptionGroups } from '../nav'
-import { type Column, Table } from '../Table'
-import css from './Access.module.css'
+import type { CSSProperties, ReactNode } from "react";
+import { useCallback, useState } from "react";
+import { fallbackColour } from "../../../core/protocol";
+import type { Grants, Role, Scope } from "../../../server/auth/roles";
+import type { TokenRow } from "../../../server/auth/tokens";
+import { type Me, scopeChoices } from "../../me";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { EmptyState } from "../EmptyState";
+import { Select } from "../Field";
+import { ListHeader } from "../List";
+import { scopeOptionGroups } from "../nav";
+import { type Column, Table } from "../Table";
+import css from "./Access.module.css";
 import {
   type AccessGate,
   type AccessUser,
@@ -34,25 +34,25 @@ import {
   since,
   tokenStatus,
   tokenStatusTone,
-} from './access-model'
-import { AccessGrantsDialog } from './AccessGrants'
-import { AccessInviteDialog } from './AccessInviteDialog'
-import { AccessTokenDialog, type Minted, MintedTokenDialog } from './AccessTokenDialog'
-import { type PagedList, useAccess } from './useAccess'
-import { messageOf } from './useContent'
+} from "./access-model";
+import { AccessGrantsDialog } from "./AccessGrants";
+import { AccessInviteDialog } from "./AccessInviteDialog";
+import { AccessTokenDialog, type Minted, MintedTokenDialog } from "./AccessTokenDialog";
+import { type PagedList, useAccess } from "./useAccess";
+import { messageOf } from "./useContent";
 
 interface Props {
   /** The admin's internal JSON base. */
-  apiBase: string
+  apiBase: string;
   /** Who is signed in, and the auth mode. Both matter here: the mode decides
    * whether this screen has a subject at all, and the identity decides which row
    * is yours. */
-  me: Me
-  query: Readonly<Record<string, string>>
+  me: Me;
+  query: Readonly<Record<string, string>>;
   /** `replace`, not `push`: opening a dialog must not put a history entry between
    * a person and the screen behind it. */
-  onQuery: (next: Record<string, string | undefined>) => void
-  onNotice: (message: string) => void
+  onQuery: (next: Record<string, string | undefined>) => void;
+  onNotice: (message: string) => void;
   /**
    * The shell's boot is still in flight, so `me` is a guess rather than an answer.
    *
@@ -75,13 +75,13 @@ interface Props {
    * `auth: 'open'`"), so the discriminator works by accident and would be quietly
    * removed by anybody making the code match its documentation.
    */
-  loading?: boolean
+  loading?: boolean;
 }
 
 /** Four placeholder rows per table. Fewer than a content list's six, because both
  * tables on this screen are short on any real site and a skeleton longer than the
  * data it stands in for reads as a promise of rows that never arrive. */
-const SKELETON = ['s1', 's2', 's3', 's4']
+const SKELETON = ["s1", "s2", "s3", "s4"];
 
 /**
  * Editors and API tokens — `docs/ui-architecture.md`'s port phase 5, and the
@@ -118,20 +118,20 @@ const SKELETON = ['s1', 's2', 's3', 's4']
  *    put it in a named column.
  */
 export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props) {
-  const gate = accessGate(me)
-  const url = parseAccessUrl(query)
-  const data = useAccess(apiBase, !loading && gate.kind === 'ok')
+  const gate = accessGate(me);
+  const url = parseAccessUrl(query);
+  const data = useAccess(apiBase, !loading && gate.kind === "ok");
 
-  const [busy, setBusy] = useState(false)
-  const [minted, setMinted] = useState<Minted | null>(null)
-  const [removing, setRemoving] = useState<AccessUser | null>(null)
-  const [revoking, setRevoking] = useState<TokenRow | null>(null)
-  const [removingPasskeys, setRemovingPasskeys] = useState<AccessUser | null>(null)
+  const [busy, setBusy] = useState(false);
+  const [minted, setMinted] = useState<Minted | null>(null);
+  const [removing, setRemoving] = useState<AccessUser | null>(null);
+  const [revoking, setRevoking] = useState<TokenRow | null>(null);
+  const [removingPasskeys, setRemovingPasskeys] = useState<AccessUser | null>(null);
   // Multi-site: whose grants are open in the editor. Always null with no `sites`.
-  const [editingGrants, setEditingGrants] = useState<AccessUser | null>(null)
-  const many = showsGrants(me)
+  const [editingGrants, setEditingGrants] = useState<AccessUser | null>(null);
+  const many = showsGrants(me);
 
-  const close = useCallback(() => onQuery(accessQuery({ open: null })), [onQuery])
+  const close = useCallback(() => onQuery(accessQuery({ open: null })), [onQuery]);
 
   /**
    * One write: busy, a toast either way, a reload of the list it touched.
@@ -144,70 +144,70 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
    */
   const run = useCallback(
     async (work: () => Promise<string>, reload: () => void) => {
-      setBusy(true)
+      setBusy(true);
       try {
-        onNotice(await work())
-        reload()
-        return true
+        onNotice(await work());
+        reload();
+        return true;
       } catch (e) {
-        onNotice((e as Error).message)
-        return false
+        onNotice((e as Error).message);
+        return false;
       } finally {
-        setBusy(false)
+        setBusy(false);
       }
     },
     [onNotice],
-  )
+  );
 
   const send = useCallback(
-    async (path: string, method: 'POST' | 'PATCH' | 'DELETE', body?: unknown) => {
+    async (path: string, method: "POST" | "PATCH" | "DELETE", body?: unknown) => {
       const res = await fetch(`${apiBase}${path}`, {
         method,
         ...(body === undefined
           ? {}
-          : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
-      return res
+          : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      return res;
     },
     [apiBase],
-  )
+  );
 
   const invite = async (body: { email: string; name?: string; role?: Role; grants?: Grants }) => {
     const ok = await run(async () => {
-      await send('/users', 'POST', body)
+      await send("/users", "POST", body);
       return body.role
         ? `${body.email} can sign in now, as a ${body.role}.`
-        : `${body.email} can sign in now, with the access you set.`
-    }, data.users.reload)
-    if (ok) close()
-  }
+        : `${body.email} can sign in now, with the access you set.`;
+    }, data.users.reload);
+    if (ok) close();
+  };
 
   const changeGrants = async (user: AccessUser, grants: Grants) => {
     const ok = await run(async () => {
-      await send(`/users/${encodeURIComponent(user.id)}`, 'PATCH', { grants })
+      await send(`/users/${encodeURIComponent(user.id)}`, "PATCH", { grants });
       // As a role change: the route drops their sessions so an old grant does not
       // outlive its edit in an open socket, and a preview it admitted ends with them.
-      return `${user.name}’s access is updated. They will need to sign in again.`
-    }, data.users.reload)
-    if (ok) setEditingGrants(null)
-  }
+      return `${user.name}’s access is updated. They will need to sign in again.`;
+    }, data.users.reload);
+    if (ok) setEditingGrants(null);
+  };
 
   const changeRole = (user: AccessUser, role: Role) =>
     void run(async () => {
-      await send(`/users/${encodeURIComponent(user.id)}`, 'PATCH', { role })
+      await send(`/users/${encodeURIComponent(user.id)}`, "PATCH", { role });
       // The sign-out is the route's doing and is deliberate — a demotion that left
       // the old role in every open socket until it expired is not a window worth
       // accepting. Saying so here means it does not look like a bug when it happens
       // to somebody.
-      return `${user.name} is now a ${role}. They will need to sign in again.`
-    }, data.users.reload)
+      return `${user.name} is now a ${role}. They will need to sign in again.`;
+    }, data.users.reload);
 
   const remove = (user: AccessUser) =>
     void run(async () => {
-      await send(`/users/${encodeURIComponent(user.id)}`, 'DELETE')
-      return `${user.name} no longer has access. Their edit history is untouched.`
-    }, data.users.reload)
+      await send(`/users/${encodeURIComponent(user.id)}`, "DELETE");
+      return `${user.name} no longer has access. Their edit history is untouched.`;
+    }, data.users.reload);
 
   /**
    * The one incident this covers: a lost or stolen device.
@@ -218,41 +218,41 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
    */
   const removeAllPasskeys = (user: AccessUser) =>
     void run(async () => {
-      await send(`/users/${encodeURIComponent(user.id)}/passkeys`, 'DELETE')
-      return `Removed every passkey for ${user.name}. Magic link or single sign-on still gets them in.`
-    }, data.users.reload)
+      await send(`/users/${encodeURIComponent(user.id)}/passkeys`, "DELETE");
+      return `Removed every passkey for ${user.name}. Magic link or single sign-on still gets them in.`;
+    }, data.users.reload);
 
   const mint = async (body: {
-    name: string
-    scopes: Scope[]
-    expiresInDays?: number
-    site?: string
+    name: string;
+    scopes: Scope[];
+    expiresInDays?: number;
+    site?: string;
   }) => {
     const ok = await run(async () => {
-      const res = await send('/tokens', 'POST', body)
-      const answer = (await res.json()) as { token: string }
-      setMinted({ name: body.name, token: answer.token })
-      return `Created ${body.name}.`
-    }, data.tokens.reload)
-    if (ok) close()
-  }
+      const res = await send("/tokens", "POST", body);
+      const answer = (await res.json()) as { token: string };
+      setMinted({ name: body.name, token: answer.token });
+      return `Created ${body.name}.`;
+    }, data.tokens.reload);
+    if (ok) close();
+  };
 
   const revoke = (token: TokenRow) =>
     void run(async () => {
-      await send(`/tokens/${encodeURIComponent(token.id)}`, 'DELETE')
-      return `${token.name} is revoked. Anything using it stops working now.`
-    }, data.tokens.reload)
+      await send(`/tokens/${encodeURIComponent(token.id)}`, "DELETE");
+      return `${token.name} is revoked. Anything using it stops working now.`;
+    }, data.tokens.reload);
 
   // Before the gate, because until `/me` answers the gate is guessing — see
   // `loading`. Both branches are after every hook, so the hook order is fixed.
-  if (loading) return <Booting />
-  if (gate.kind !== 'ok') return <Unavailable gate={gate} />
-  const selfId = gate.self.id
+  if (loading) return <Booting />;
+  if (gate.kind !== "ok") return <Unavailable gate={gate} />;
+  const selfId = gate.self.id;
 
   const userColumns: Column<AccessUser>[] = [
     {
-      key: 'name',
-      label: 'Name',
+      key: "name",
+      label: "Name",
       cell: (user) => (
         <span className={css.who}>
           {/* The presence hue, which is otherwise invisible outside a live editing
@@ -262,7 +262,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
               case. */}
           <span
             className={css.dot}
-            style={{ '--dot': user.colour ?? fallbackColour(user.id) } as CSSProperties}
+            style={{ "--dot": user.colour ?? fallbackColour(user.id) } as CSSProperties}
           />
           <span className={css.name}>{user.name}</span>
           {isSelf(user.id, selfId) ? <Badge>you</Badge> : null}
@@ -270,30 +270,30 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
       ),
     },
     {
-      key: 'email',
-      label: 'Email',
+      key: "email",
+      label: "Email",
       // The column this screen exists for. No truncation and no ellipsis: `Table`'s
       // cells are `nowrap`, so a long address widens the table and the table
       // scrolls, which is recoverable in a way `demo@example.…` was not.
       cell: (user) => <span className={css.email}>{user.email}</span>,
     },
     {
-      key: 'role',
-      label: many ? 'Access' : 'Role',
+      key: "role",
+      label: many ? "Access" : "Role",
       cell: (user) => {
-        const self = isSelf(user.id, selfId)
+        const self = isSelf(user.id, selfId);
         if (many) {
           // One role per scope. Ignored grants (a scope since deleted) are listed and
           // said to reach nothing; provider-placed ones are read-only, with the reason
           // where the button would be.
-          const placedBy = grantsReason(user)
+          const placedBy = grantsReason(user);
           return (
             <span className={css.grantBadges}>
               {grantRows(user, me).map((grant) => (
                 <Badge
                   key={grant.scope}
                   mono
-                  tone={grant.ignored ? 'warn' : 'neutral'}
+                  tone={grant.ignored ? "warn" : "neutral"}
                   title={
                     grant.ignored
                       ? `${grant.scope} no longer exists, so this grant reaches nothing`
@@ -301,7 +301,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
                   }
                 >
                   {grant.label}: {grant.role}
-                  {grant.ignored ? ' (ignored)' : ''}
+                  {grant.ignored ? " (ignored)" : ""}
                 </Badge>
               ))}
               {placedBy ? (
@@ -313,21 +313,21 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
                   size="sm"
                   variant="subtle"
                   disabled={busy || self}
-                  reason={self ? SELF_ROLE_REASON : 'A write is in flight'}
+                  reason={self ? SELF_ROLE_REASON : "A write is in flight"}
                   onClick={() => setEditingGrants(user)}
                 >
                   Edit access
                 </Button>
               )}
             </span>
-          )
+          );
         }
         // A role the identity provider's claims placed. Disabled rather than
         // absent, which is the one place this admin departs from "a control you
         // cannot use is not drawn": the reason *is* the message, and the badge
         // beside it names where the role actually comes from. `PATCH` answers
         // the same sentence as a 409, so the click would fail anyway.
-        const fromProvider = roleFromReason(user)
+        const fromProvider = roleFromReason(user);
         return (
           <span className={css.roleCell}>
             <Select
@@ -349,12 +349,12 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
               </Badge>
             ) : null}
           </span>
-        )
+        );
       },
     },
     {
-      key: 'provider',
-      label: 'Signs in with',
+      key: "provider",
+      label: "Signs in with",
       cell: (user) =>
         user.provider ? (
           <Badge mono>{user.provider}</Badge>
@@ -366,13 +366,13 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
         ),
     },
     {
-      key: 'seen',
-      label: 'Last seen',
+      key: "seen",
+      label: "Last seen",
       cell: (user) => <span className={css.stamp}>{since(user.lastSeenAt)}</span>,
     },
     {
-      key: 'passkeys',
-      label: 'Passkeys',
+      key: "passkeys",
+      label: "Passkeys",
       numeric: true,
       cell: (user) =>
         user.passkeys > 0 ? (
@@ -382,17 +382,17 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
         ),
     },
     {
-      key: 'act',
-      label: 'Actions',
+      key: "act",
+      label: "Actions",
       cell: (user) => {
-        const self = isSelf(user.id, selfId)
-        const passkeysRefusal = removePasskeysRefusal(user)
+        const self = isSelf(user.id, selfId);
+        const passkeysRefusal = removePasskeysRefusal(user);
         return (
           <span className={css.rowActions}>
             <Button
               size="sm"
               disabled={busy || passkeysRefusal !== undefined}
-              reason={passkeysRefusal ?? 'A write is in flight'}
+              reason={passkeysRefusal ?? "A write is in flight"}
               onClick={() => setRemovingPasskeys(user)}
             >
               Remove all passkeys
@@ -401,28 +401,28 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
               size="sm"
               variant="danger"
               disabled={busy || self}
-              reason={self ? SELF_REMOVE_REASON : 'A write is in flight'}
+              reason={self ? SELF_REMOVE_REASON : "A write is in flight"}
               onClick={() => setRemoving(user)}
             >
               Remove
             </Button>
           </span>
-        )
+        );
       },
     },
-  ]
+  ];
 
   const tokenColumns: Column<TokenRow>[] = [
     {
-      key: 'name',
-      label: 'Name',
-      width: '26%',
+      key: "name",
+      label: "Name",
+      width: "26%",
       cell: (token) => <span className={css.name}>{token.name}</span>,
     },
     {
-      key: 'scopes',
-      label: 'Permissions',
-      width: '24%',
+      key: "scopes",
+      label: "Permissions",
+      width: "24%",
       cell: (token) => (
         <span className={css.scopeList}>
           {token.scopes.length === 0 ? (
@@ -453,66 +453,66 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
     ...(many
       ? [
           {
-            key: 'site',
-            label: 'Works on',
-            width: '12%',
+            key: "site",
+            label: "Works on",
+            width: "12%",
             cell: (token: TokenRow) => <Badge mono>{bindingLabel(me, token.site)}</Badge>,
           },
         ]
       : []),
     {
-      key: 'status',
-      label: 'Status',
-      width: '10%',
+      key: "status",
+      label: "Status",
+      width: "10%",
       cell: (token) => {
-        const status = tokenStatus(token)
+        const status = tokenStatus(token);
         return (
           <Badge
             tone={tokenStatusTone(status)}
-            {...(status === 'active' && token.expiresAt !== null
+            {...(status === "active" && token.expiresAt !== null
               ? { title: `Expires ${new Date(token.expiresAt).toLocaleDateString()}` }
               : {})}
           >
             {status}
           </Badge>
-        )
+        );
       },
     },
     {
-      key: 'created',
-      label: 'Created',
-      width: '12%',
+      key: "created",
+      label: "Created",
+      width: "12%",
       cell: (token) => <span className={css.stamp}>{since(token.createdAt)}</span>,
     },
     {
-      key: 'used',
-      label: 'Last used',
-      width: '14%',
+      key: "used",
+      label: "Last used",
+      width: "14%",
       // Stamped whether the request succeeded or was refused for a missing scope
       // (`readToken`), because the question this column answers is "is this
       // credential in use", not "did it work".
       cell: (token) => <span className={css.stamp}>{since(token.lastUsedAt)}</span>,
     },
     {
-      key: 'act',
-      label: 'Actions',
-      width: '14%',
+      key: "act",
+      label: "Actions",
+      width: "14%",
       cell: (token) => {
-        const refusal = revokeRefusal(token)
+        const refusal = revokeRefusal(token);
         return (
           <Button
             size="sm"
             variant="danger"
             disabled={busy || refusal !== undefined}
-            reason={refusal ?? 'A write is in flight'}
+            reason={refusal ?? "A write is in flight"}
             onClick={() => setRevoking(token)}
           >
             Revoke
           </Button>
-        )
+        );
       },
     },
-  ]
+  ];
 
   return (
     <div className={css.screen}>
@@ -529,7 +529,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
               size="sm"
               disabled={busy}
               reason="A write is in flight"
-              onClick={() => onQuery(accessQuery({ open: 'user' }))}
+              onClick={() => onQuery(accessQuery({ open: "user" }))}
             >
               Give access
             </Button>
@@ -565,7 +565,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
               size="sm"
               disabled={busy}
               reason="A write is in flight"
-              onClick={() => onQuery(accessQuery({ open: 'token' }))}
+              onClick={() => onQuery(accessQuery({ open: "token" }))}
             >
               New token
             </Button>
@@ -586,7 +586,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
               title="No API tokens"
               body="A token lets a script read or write content without being a person: an import, a preview deployment, a scheduled publish."
               action={
-                <Button size="sm" onClick={() => onQuery(accessQuery({ open: 'token' }))}>
+                <Button size="sm" onClick={() => onQuery(accessQuery({ open: "token" }))}>
                   New token
                 </Button>
               }
@@ -595,7 +595,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
         />
       </section>
 
-      {url.open === 'user' ? (
+      {url.open === "user" ? (
         <AccessInviteDialog onClose={close} onInvite={invite} {...(many ? { me } : {})} />
       ) : null}
 
@@ -618,7 +618,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
         loses focus a frame after gaining it. The secret itself lives in state rather
         than in the URL for the obvious reason, so it survives the clear.
       */}
-      {url.open === 'token' && minted === null ? (
+      {url.open === "token" && minted === null ? (
         <AccessTokenDialog
           onClose={close}
           onMint={mint}
@@ -639,9 +639,9 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
               <Button
                 variant="danger"
                 onClick={() => {
-                  const user = removing
-                  setRemoving(null)
-                  remove(user)
+                  const user = removing;
+                  setRemoving(null);
+                  remove(user);
                 }}
               >
                 Remove
@@ -677,9 +677,9 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
               <Button
                 variant="danger"
                 onClick={() => {
-                  const token = revoking
-                  setRevoking(null)
-                  revoke(token)
+                  const token = revoking;
+                  setRevoking(null);
+                  revoke(token);
                 }}
               >
                 Revoke
@@ -708,9 +708,9 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
               <Button
                 variant="danger"
                 onClick={() => {
-                  const user = removingPasskeys
-                  setRemovingPasskeys(null)
-                  removeAllPasskeys(user)
+                  const user = removingPasskeys;
+                  setRemovingPasskeys(null);
+                  removeAllPasskeys(user);
                 }}
               >
                 Remove all passkeys
@@ -726,7 +726,7 @@ export function Access({ apiBase, me, query, onQuery, onNotice, loading }: Props
         </Dialog>
       ) : null}
     </div>
-  )
+  );
 }
 
 /* -------------------------------------------------------------------- panel --- */
@@ -748,16 +748,16 @@ function Panel<T>({
   empty,
   onRetry,
 }: {
-  list: PagedList<T>
-  label: string
-  columns: readonly Column<T>[]
-  rowKey: (row: T) => string
+  list: PagedList<T>;
+  label: string;
+  columns: readonly Column<T>[];
+  rowKey: (row: T) => string;
   /** Singular. The footer pluralises it. */
-  noun: string
-  empty: ReactNode
-  onRetry: () => void
+  noun: string;
+  empty: ReactNode;
+  onRetry: () => void;
 }) {
-  const { page } = list
+  const { page } = list;
 
   if (page.error && page.rows.length === 0) {
     return (
@@ -770,7 +770,7 @@ function Panel<T>({
           </Button>
         }
       />
-    )
+    );
   }
 
   if (page.loading && page.rows.length === 0) {
@@ -780,7 +780,7 @@ function Panel<T>({
           <div className={css.skeleton} key={key} />
         ))}
       </div>
-    )
+    );
   }
 
   return (
@@ -814,7 +814,7 @@ function Panel<T>({
         </div>
       )}
     </>
-  )
+  );
 }
 
 /* ---------------------------------------------------------------- the gate --- */
@@ -831,7 +831,7 @@ function Panel<T>({
 function Booting() {
   return (
     <div className={css.screen}>
-      {(['Editors', 'API tokens'] as const).map((label) => (
+      {(["Editors", "API tokens"] as const).map((label) => (
         <section className={css.section} key={label} aria-label={label}>
           <ListHeader>{label}</ListHeader>
           <div className={css.skeletons} aria-hidden="true">
@@ -842,7 +842,7 @@ function Booting() {
         </section>
       ))}
     </div>
-  )
+  );
 }
 
 /**
@@ -858,8 +858,8 @@ function Booting() {
  * the next step for a viewer is to ask somebody. Inventing a button for either would
  * be furniture.
  */
-function Unavailable({ gate }: { gate: Exclude<AccessGate, { kind: 'ok' }> }) {
-  if (gate.kind === 'open') {
+function Unavailable({ gate }: { gate: Exclude<AccessGate, { kind: "ok" }> }) {
+  if (gate.kind === "open") {
     return (
       <div className={css.screen}>
         <EmptyState
@@ -875,10 +875,10 @@ function Unavailable({ gate }: { gate: Exclude<AccessGate, { kind: 'ok' }> }) {
           }
         />
       </div>
-    )
+    );
   }
 
-  if (gate.kind === 'anonymous') {
+  if (gate.kind === "anonymous") {
     return (
       <div className={css.screen}>
         <EmptyState
@@ -894,7 +894,7 @@ function Unavailable({ gate }: { gate: Exclude<AccessGate, { kind: 'ok' }> }) {
           }
         />
       </div>
-    )
+    );
   }
 
   return (
@@ -909,5 +909,5 @@ function Unavailable({ gate }: { gate: Exclude<AccessGate, { kind: 'ok' }> }) {
         }
       />
     </div>
-  )
+  );
 }

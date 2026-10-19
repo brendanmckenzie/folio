@@ -1,22 +1,22 @@
-import type { Doc } from '../core/doc'
-import { migrateDoc, type Migration, pendingFor } from '../core/migrate'
-import type { DocumentType, SchemaIndex } from '../core/schema'
-import type { StoryMeta } from '../core/story'
-import { clampLimit, decodeCursor, type Page, paginate } from '../core/pagination'
-import { keysetWhere, NEWEST_FIRST, orderBy, whereOf } from './keyset'
-import { storiesFor } from './stories'
-import { bindChunks, type FolioDb } from './db'
+import type { Doc } from "../core/doc";
+import { migrateDoc, type Migration, pendingFor } from "../core/migrate";
+import type { DocumentType, SchemaIndex } from "../core/schema";
+import type { StoryMeta } from "../core/story";
+import { clampLimit, decodeCursor, type Page, paginate } from "../core/pagination";
+import { keysetWhere, NEWEST_FIRST, orderBy, whereOf } from "./keyset";
+import { storiesFor } from "./stories";
+import { bindChunks, type FolioDb } from "./db";
 
-export type VersionKind = 'publish' | 'checkpoint'
+export type VersionKind = "publish" | "checkpoint";
 
 export interface VersionMeta {
-  id: string
-  storyId: string
-  kind: VersionKind
-  label: string | null
-  title: string
-  actor: string | null
-  createdAt: number
+  id: string;
+  storyId: string;
+  kind: VersionKind;
+  label: string | null;
+  title: string;
+  actor: string | null;
+  createdAt: number;
   /**
    * Which content migration this document was written at
    * (`schema-migrations.md`), or null for "before the first migration" — the
@@ -27,20 +27,20 @@ export interface VersionMeta {
    * restore across a migration diffs two documents in the same shape rather
    * than reintroducing pre-migration keys.
    */
-  schemaId: string | null
+  schemaId: string | null;
 }
 
 const META = `id, story_id as storyId, kind, label, title, actor,
-              created_at as createdAt, schema_id as schemaId`
+              created_at as createdAt, schema_id as schemaId`;
 
 /** `META` qualified. Needed wherever `versions` is not the only table in scope: the
  * query that joins `stories` (`getVersion`), and the one that correlates `versions`
  * with itself (`listRecentPublishes`). */
 const V_META = `v.id, v.story_id as storyId, v.kind, v.label, v.title, v.actor,
-                v.created_at as createdAt, v.schema_id as schemaId`
+                v.created_at as createdAt, v.schema_id as schemaId`;
 
 function newVersionId(): string {
-  return `ver_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`
+  return `ver_${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
 }
 
 /**
@@ -56,15 +56,15 @@ export async function listVersions(
   storyId: string,
   opts: { limit?: number; cursor?: string } = {},
 ): Promise<Page<VersionMeta>> {
-  const limit = clampLimit(opts.limit, 50, 200)
-  const resume = keysetWhere(NEWEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null)
+  const limit = clampLimit(opts.limit, 50, 200);
+  const resume = keysetWhere(NEWEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null);
   const { results } = await db
     .prepare(
-      `select ${META} from versions ${whereOf('story_id = ?', resume.sql)} ${orderBy(NEWEST_FIRST)} limit ?`,
+      `select ${META} from versions ${whereOf("story_id = ?", resume.sql)} ${orderBy(NEWEST_FIRST)} limit ?`,
     )
     .bind(storyId, ...resume.binds, limit + 1)
-    .all<VersionMeta>()
-  return paginate(results, limit, (row) => [row.createdAt, row.id])
+    .all<VersionMeta>();
+  return paginate(results, limit, (row) => [row.createdAt, row.id]);
 }
 
 /**
@@ -75,9 +75,9 @@ export async function listVersions(
  * existing test, gets the stored bytes unchanged.
  */
 export interface VersionMigrations {
-  migrations: readonly Migration[]
-  schema: SchemaIndex
-  typeOf: (name: string | undefined) => DocumentType | undefined
+  migrations: readonly Migration[];
+  schema: SchemaIndex;
+  typeOf: (name: string | undefined) => DocumentType | undefined;
 }
 
 /**
@@ -105,25 +105,25 @@ export async function getVersion(
        where v.id = ?`,
     )
     .bind(id)
-    .first<VersionMeta & { doc: string; storyType: string | null }>()
-  if (!row) return null
-  const { doc: json, storyType, ...meta } = row
-  const stored = JSON.parse(json) as Doc
+    .first<VersionMeta & { doc: string; storyType: string | null }>();
+  if (!row) return null;
+  const { doc: json, storyType, ...meta } = row;
+  const stored = JSON.parse(json) as Doc;
 
-  const due = migrate ? pendingFor(meta.schemaId, migrate.migrations) : []
-  const type = migrate && storyType !== null ? migrate.typeOf(storyType) : undefined
-  if (due.length === 0 || !type || !migrate) return { meta, doc: stored, migrated: [] }
+  const due = migrate ? pendingFor(meta.schemaId, migrate.migrations) : [];
+  const type = migrate && storyType !== null ? migrate.typeOf(storyType) : undefined;
+  if (due.length === 0 || !type || !migrate) return { meta, doc: stored, migrated: [] };
 
-  const { doc } = migrateDoc(stored, due, migrate.schema, type)
-  return { meta, doc, migrated: due.map((m) => m.id) }
+  const { doc } = migrateDoc(stored, due, migrate.schema, type);
+  return { meta, doc, migrated: due.map((m) => m.id) };
 }
 
 export interface WriteVersionInput {
-  storyId: string
-  kind: VersionKind
-  doc: Doc
-  label?: string | null
-  actor?: string | null
+  storyId: string;
+  kind: VersionKind;
+  doc: Doc;
+  label?: string | null;
+  actor?: string | null;
   /**
    * The document's display title, already resolved by the caller. This file used
    * to derive it from `doc.bloks[doc.root].data.title` and fall back — which is
@@ -132,14 +132,14 @@ export interface WriteVersionInput {
    * caller that knows the type resolves it and the version row records exactly
    * what `stories.title` caches.
    */
-  title: string
+  title: string;
   /**
    * The migration this document is written at — `FolioRuntime.schemaId`, the
    * last configured migration. Stamped so `getVersion` knows what this row is
    * *missing*: a version written today needs nothing applied, and one written
    * before the first migration reads null and gets the lot.
    */
-  schemaId?: string | null
+  schemaId?: string | null;
 }
 
 function buildVersionMeta(input: WriteVersionInput): VersionMeta {
@@ -148,11 +148,11 @@ function buildVersionMeta(input: WriteVersionInput): VersionMeta {
     storyId: input.storyId,
     kind: input.kind,
     label: input.label?.trim() || null,
-    title: input.title.trim() || 'Untitled',
+    title: input.title.trim() || "Untitled",
     actor: input.actor ?? null,
     createdAt: Date.now(),
     schemaId: input.schemaId ?? null,
-  }
+  };
 }
 
 /** The insert, unrun: lets a caller batch it alongside another write it must
@@ -173,7 +173,7 @@ function versionStatement(db: FolioDb, meta: VersionMeta, doc: Doc): D1PreparedS
       JSON.stringify(doc),
       meta.createdAt,
       meta.schemaId,
-    )
+    );
 }
 
 /**
@@ -185,14 +185,14 @@ export function buildVersionWrite(
   db: FolioDb,
   input: WriteVersionInput,
 ): { meta: VersionMeta; statement: D1PreparedStatement } {
-  const meta = buildVersionMeta(input)
-  return { meta, statement: versionStatement(db, meta, input.doc) }
+  const meta = buildVersionMeta(input);
+  return { meta, statement: versionStatement(db, meta, input.doc) };
 }
 
 export async function writeVersion(db: FolioDb, input: WriteVersionInput): Promise<VersionMeta> {
-  const { meta, statement } = buildVersionWrite(db, input)
-  await statement.run()
-  return meta
+  const { meta, statement } = buildVersionWrite(db, input);
+  await statement.run();
+  return meta;
 }
 
 /**
@@ -216,9 +216,9 @@ export function deleteVersionsStatement(
   storyIds: readonly string[],
 ): D1PreparedStatement[] {
   return bindChunks(storyIds, 1).map((chunk) => {
-    const placeholders = chunk.map(() => '?').join(', ')
-    return db.prepare(`delete from versions where story_id in (${placeholders})`).bind(...chunk)
-  })
+    const placeholders = chunk.map(() => "?").join(", ");
+    return db.prepare(`delete from versions where story_id in (${placeholders})`).bind(...chunk);
+  });
 }
 
 /**
@@ -227,8 +227,8 @@ export function deleteVersionsStatement(
  * must not land separately.
  */
 export async function deleteVersionsFor(db: FolioDb, storyIds: readonly string[]): Promise<void> {
-  const statements = deleteVersionsStatement(db, storyIds)
-  if (statements.length) await db.batch(statements)
+  const statements = deleteVersionsStatement(db, storyIds);
+  if (statements.length) await db.batch(statements);
 }
 
 /* ---------------------------------------------------------- site-wide reads --- */
@@ -255,8 +255,8 @@ export async function deleteVersionsFor(db: FolioDb, storyIds: readonly string[]
  * stored to answer it.
  */
 export interface RecentPublish {
-  version: VersionMeta
-  story: StoryMeta
+  version: VersionMeta;
+  story: StoryMeta;
 }
 
 /**
@@ -283,7 +283,7 @@ const LATEST_PER_STORY = `not exists (
     and later.kind = 'publish'
     and (later.created_at > v.created_at
          or (later.created_at = v.created_at and later.id > v.id))
-)`
+)`;
 
 /**
  * The most recent publishes, newest first — **one row per story**.
@@ -322,8 +322,8 @@ const LATEST_PER_STORY = `not exists (
 export async function listRecentPublishes(
   db: FolioDb,
   opts: {
-    limit?: number
-    cursor?: string
+    limit?: number;
+    cursor?: string;
     /**
      * The one scope whose stories' publishes to list (`multi-site.md`: `GET
      * /published` is "scope's own rows"). In the statement rather than filtered
@@ -332,15 +332,15 @@ export async function listRecentPublishes(
      * correlated `exists` on `stories`' primary key. Absent lists every scope's,
      * which is a deployment with no `sites`.
      */
-    scope?: string
+    scope?: string;
   } = {},
 ): Promise<Page<RecentPublish>> {
-  const limit = clampLimit(opts.limit, 20, 100)
-  const resume = keysetWhere(NEWEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null)
+  const limit = clampLimit(opts.limit, 20, 100);
+  const resume = keysetWhere(NEWEST_FIRST, opts.cursor ? decodeCursor(opts.cursor) : null);
   const scoped =
     opts.scope === undefined
       ? []
-      : ['exists (select 1 from stories s where s.id = v.story_id and s.site_id = ?)']
+      : ["exists (select 1 from stories s where s.id = v.story_id and s.site_id = ?)"];
   const { results } = await db
     .prepare(
       `select ${V_META} from versions v
@@ -348,17 +348,17 @@ export async function listRecentPublishes(
        ${orderBy(NEWEST_FIRST)} limit ?`,
     )
     .bind(...(opts.scope === undefined ? [] : [opts.scope]), ...resume.binds, limit + 1)
-    .all<VersionMeta>()
+    .all<VersionMeta>();
 
-  const page = paginate(results, limit, (row) => [row.createdAt, row.id])
+  const page = paginate(results, limit, (row) => [row.createdAt, row.id]);
   // Rows the statement has already put in one scope, so the read is by id alone.
-  const stories = await storiesFor(db, [...new Set(page.rows.map((row) => row.storyId))], [], null)
-  const byId = new Map(stories.map((story) => [story.id, story]))
+  const stories = await storiesFor(db, [...new Set(page.rows.map((row) => row.storyId))], [], null);
+  const byId = new Map(stories.map((story) => [story.id, story]));
   return {
     ...page,
     rows: page.rows.flatMap((version) => {
-      const story = byId.get(version.storyId)
-      return story ? [{ version, story }] : []
+      const story = byId.get(version.storyId);
+      return story ? [{ version, story }] : [];
     }),
-  }
+  };
 }

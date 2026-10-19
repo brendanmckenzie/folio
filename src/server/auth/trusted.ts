@@ -35,14 +35,14 @@
  * particular not inside `resolveActor`, which four callers depend on and which
  * must not read D1 for an anonymous request).
  */
-import type { Provisioning, RoleMapper, TrustedProvider, VerifiedIdentity } from './config'
+import type { Provisioning, RoleMapper, TrustedProvider, VerifiedIdentity } from "./config";
 
 export interface TrustedOptions<Env> {
   /** The provider id: the URL segment `{base}/login/<id>`, the `users.provider`
    * stamp, and what `sessions.provider` records. */
-  id: string
+  id: string;
   /** Button label, shown on the page after a sign-out. */
-  label: string
+  label: string;
   /**
    * Who this request is, or `null` for "nobody here". **Throws** for a
    * credential that is present and does not verify.
@@ -50,14 +50,14 @@ export interface TrustedOptions<Env> {
    * May answer synchronously: a header read needs no `await`, and a host that
    * writes one should not have to say `async` to satisfy a signature.
    */
-  resolve: (env: Env, req: Request) => Promise<VerifiedIdentity | null> | VerifiedIdentity | null
+  resolve: (env: Env, req: Request) => Promise<VerifiedIdentity | null> | VerifiedIdentity | null;
   /** What happens to an identity this provider verified that matches no user
    * row. `'refuse'` by default, as everywhere else. */
-  provision?: Provisioning
+  provision?: Provisioning;
   /** Maps the identity's claims to a role. */
-  roleFrom?: RoleMapper
+  roleFrom?: RoleMapper;
   /** Email domains this provider is the only door for. */
-  domains?: readonly string[]
+  domains?: readonly string[];
   /**
    * Where "sign out" sends the browser after Folio's session is revoked.
    *
@@ -66,7 +66,7 @@ export interface TrustedOptions<Env> {
    * *not* resolve and offers a button instead — so the person sees that they
    * signed out rather than being signed straight back in by the next request.
    */
-  signOutUrl?: string
+  signOutUrl?: string;
 }
 
 /**
@@ -79,14 +79,14 @@ export interface TrustedOptions<Env> {
  * failure on this path.
  */
 export function trusted<Env>(options: TrustedOptions<Env>): TrustedProvider<Env> {
-  if (typeof options?.resolve !== 'function') {
-    throw new Error('folio: trusted({ resolve }) needs a `resolve` function')
+  if (typeof options?.resolve !== "function") {
+    throw new Error("folio: trusted({ resolve }) needs a `resolve` function");
   }
-  if (typeof options.id !== 'string' || options.id === '') {
-    throw new Error('folio: trusted({ id }) needs an id — it is the URL segment and the stamp')
+  if (typeof options.id !== "string" || options.id === "") {
+    throw new Error("folio: trusted({ id }) needs an id — it is the URL segment and the stamp");
   }
   return {
-    kind: 'trusted',
+    kind: "trusted",
     id: options.id,
     label: options.label,
     ...(options.provision ? { provision: options.provision } : {}),
@@ -94,7 +94,7 @@ export function trusted<Env>(options: TrustedOptions<Env>): TrustedProvider<Env>
     ...(options.domains ? { domains: options.domains } : {}),
     ...(options.signOutUrl ? { signOutUrl: options.signOutUrl } : {}),
     async resolve(env, req) {
-      return options.resolve(env, req)
+      return options.resolve(env, req);
     },
-  }
+  };
 }

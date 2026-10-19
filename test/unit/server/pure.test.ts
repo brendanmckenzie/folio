@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from 'vitest'
-import { descendantsWhere, subtreeWhere } from '../../../src/server/asset-folders'
+import { describe, expect, it, vi } from "vitest";
+import { descendantsWhere, subtreeWhere } from "../../../src/server/asset-folders";
 import {
   assetFilterSql,
   imageSize,
@@ -9,26 +9,26 @@ import {
   MIN_TRANSFORM_QUALITY,
   parseTransform,
   sniffContentType,
-} from '../../../src/server/assets'
-import { BIND_BUDGET } from '../../../src/server/db'
-import { serializeJson } from '../../../src/server/Document'
+} from "../../../src/server/assets";
+import { BIND_BUDGET } from "../../../src/server/db";
+import { serializeJson } from "../../../src/server/Document";
 import {
   createHookRunner,
   type FolioHooks,
   type HookRunnerCtx,
   validateHooks,
-} from '../../../src/server/hooks'
-import { normalisePath, redirectStatements } from '../../../src/server/redirects'
-import { formIdParam, responseFilterQuery } from '../../../src/server/validate'
-import { alarmHookCtx, validateAssets } from '../../../src/server/runtime'
+} from "../../../src/server/hooks";
+import { normalisePath, redirectStatements } from "../../../src/server/redirects";
+import { formIdParam, responseFilterQuery } from "../../../src/server/validate";
+import { alarmHookCtx, validateAssets } from "../../../src/server/runtime";
 
 // ---------------------------------------------------------------------------
 // imageSize
 // ---------------------------------------------------------------------------
 
-describe('imageSize', () => {
-  describe('PNG', () => {
-    it('parses valid PNG header', () => {
+describe("imageSize", () => {
+  describe("PNG", () => {
+    it("parses valid PNG header", () => {
       // Minimal valid PNG: 8-byte signature + IHDR chunk with width/height
       const png = new Uint8Array([
         // PNG signature
@@ -41,16 +41,16 @@ describe('imageSize', () => {
         0x00, 0x00, 0x00, 0x64,
         // Height: 50 (0x00000032)
         0x00, 0x00, 0x00, 0x32,
-      ])
-      expect(imageSize(png)).toEqual({ width: 100, height: 50 })
-    })
+      ]);
+      expect(imageSize(png)).toEqual({ width: 100, height: 50 });
+    });
 
-    it('rejects PNG too short for header', () => {
-      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
-      expect(imageSize(png)).toBeNull()
-    })
+    it("rejects PNG too short for header", () => {
+      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+      expect(imageSize(png)).toBeNull();
+    });
 
-    it('rejects bytes with PNG signature but no IHDR', () => {
+    it("rejects bytes with PNG signature but no IHDR", () => {
       const png = new Uint8Array([
         0x89,
         0x50,
@@ -68,13 +68,13 @@ describe('imageSize', () => {
         0x4c,
         0x54,
         0x45, // PLTE chunk instead of IHDR
-      ])
-      expect(imageSize(png)).toBeNull()
-    })
-  })
+      ]);
+      expect(imageSize(png)).toBeNull();
+    });
+  });
 
-  describe('JPEG', () => {
-    it('parses valid JPEG with SOF0 marker', () => {
+  describe("JPEG", () => {
+    it("parses valid JPEG with SOF0 marker", () => {
       // Minimal JPEG: SOI + SOF0 + dimensions
       const jpeg = new Uint8Array([
         // SOI marker
@@ -95,11 +95,11 @@ describe('imageSize', () => {
         0x96,
         // Num components
         0x01,
-      ])
-      expect(imageSize(jpeg)).toEqual({ width: 150, height: 200 })
-    })
+      ]);
+      expect(imageSize(jpeg)).toEqual({ width: 150, height: 200 });
+    });
 
-    it('parses JPEG with SOF1 marker', () => {
+    it("parses JPEG with SOF1 marker", () => {
       const jpeg = new Uint8Array([
         0xff,
         0xd8,
@@ -113,11 +113,11 @@ describe('imageSize', () => {
         0x00,
         0x32, // width: 50
         0x01,
-      ])
-      expect(imageSize(jpeg)).toEqual({ width: 50, height: 100 })
-    })
+      ]);
+      expect(imageSize(jpeg)).toEqual({ width: 50, height: 100 });
+    });
 
-    it('skips JPEG table markers (DHT, DQT)', () => {
+    it("skips JPEG table markers (DHT, DQT)", () => {
       const jpeg = new Uint8Array([
         0xff,
         0xd8,
@@ -140,11 +140,11 @@ describe('imageSize', () => {
         0x00,
         0x40, // width: 64
         0x01,
-      ])
-      expect(imageSize(jpeg)).toEqual({ width: 64, height: 128 })
-    })
+      ]);
+      expect(imageSize(jpeg)).toEqual({ width: 64, height: 128 });
+    });
 
-    it('ignores 0xc8 marker (reserved)', () => {
+    it("ignores 0xc8 marker (reserved)", () => {
       const jpeg = new Uint8Array([
         0xff,
         0xd8,
@@ -167,28 +167,28 @@ describe('imageSize', () => {
         0x00,
         0x10, // width: 16
         0x01,
-      ])
-      expect(imageSize(jpeg)).toEqual({ width: 16, height: 32 })
-    })
+      ]);
+      expect(imageSize(jpeg)).toEqual({ width: 16, height: 32 });
+    });
 
-    it('returns null when no SOF marker found', () => {
+    it("returns null when no SOF marker found", () => {
       const jpeg = new Uint8Array([
         0xff,
         0xd8,
         0xff,
         0xd9, // EOI marker, no SOF
-      ])
-      expect(imageSize(jpeg)).toBeNull()
-    })
+      ]);
+      expect(imageSize(jpeg)).toBeNull();
+    });
 
-    it('returns null for truncated JPEG', () => {
-      const jpeg = new Uint8Array([0xff, 0xd8, 0xff])
-      expect(imageSize(jpeg)).toBeNull()
-    })
-  })
+    it("returns null for truncated JPEG", () => {
+      const jpeg = new Uint8Array([0xff, 0xd8, 0xff]);
+      expect(imageSize(jpeg)).toBeNull();
+    });
+  });
 
-  describe('GIF', () => {
-    it('parses GIF87a header', () => {
+  describe("GIF", () => {
+    it("parses GIF87a header", () => {
       const gif = new Uint8Array([
         0x47,
         0x49,
@@ -202,11 +202,11 @@ describe('imageSize', () => {
         // Height: 240 (little-endian: 0x00f0 -> 0xf0, 0x00)
         0xf0,
         0x00,
-      ])
-      expect(imageSize(gif)).toEqual({ width: 320, height: 240 })
-    })
+      ]);
+      expect(imageSize(gif)).toEqual({ width: 320, height: 240 });
+    });
 
-    it('parses GIF89a header', () => {
+    it("parses GIF89a header", () => {
       const gif = new Uint8Array([
         0x47,
         0x49,
@@ -220,18 +220,18 @@ describe('imageSize', () => {
         // Height: 1 (little-endian)
         0x01,
         0x00,
-      ])
-      expect(imageSize(gif)).toEqual({ width: 1, height: 1 })
-    })
+      ]);
+      expect(imageSize(gif)).toEqual({ width: 1, height: 1 });
+    });
 
-    it('rejects GIF header too short', () => {
-      const gif = new Uint8Array([0x47, 0x49, 0x46])
-      expect(imageSize(gif)).toBeNull()
-    })
-  })
+    it("rejects GIF header too short", () => {
+      const gif = new Uint8Array([0x47, 0x49, 0x46]);
+      expect(imageSize(gif)).toBeNull();
+    });
+  });
 
-  describe('WEBP', () => {
-    it('parses WEBP with VP8X chunk', () => {
+  describe("WEBP", () => {
+    it("parses WEBP with VP8X chunk", () => {
       const webp = new Uint8Array([
         // RIFF signature at offset 0
         0x52, 0x49, 0x46, 0x46,
@@ -254,11 +254,11 @@ describe('imageSize', () => {
         // Height-1 at offset 27-29 (24-bit little-endian)
         // height-1 = 79 (0x4f = 80 - 1)
         0x4f, 0x00, 0x00,
-      ])
-      expect(imageSize(webp)).toEqual({ width: 100, height: 80 })
-    })
+      ]);
+      expect(imageSize(webp)).toEqual({ width: 100, height: 80 });
+    });
 
-    it('parses WEBP with VP8 chunk', () => {
+    it("parses WEBP with VP8 chunk", () => {
       const webp = new Uint8Array([
         0x52, 0x49, 0x46, 0x46, 0x20, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
         // VP8 chunk type (lossy)
@@ -269,11 +269,11 @@ describe('imageSize', () => {
         0x00, 0x02,
         // Height at offset 28 (little-endian, masked with 0x3fff): 256 (0x0100)
         0x00, 0x01,
-      ])
-      expect(imageSize(webp)).toEqual({ width: 512, height: 256 })
-    })
+      ]);
+      expect(imageSize(webp)).toEqual({ width: 512, height: 256 });
+    });
 
-    it('parses WEBP with VP8L chunk', () => {
+    it("parses WEBP with VP8L chunk", () => {
       const webp = new Uint8Array([
         // RIFF signature at offset 0
         0x52, 0x49, 0x46, 0x46,
@@ -296,16 +296,16 @@ describe('imageSize', () => {
         0xc7, 0x40, 0x25, 0x00,
         // Padding to reach minimum 30 bytes
         0x00, 0x00, 0x00, 0x00, 0x00,
-      ])
-      expect(imageSize(webp)).toEqual({ width: 200, height: 150 })
-    })
+      ]);
+      expect(imageSize(webp)).toEqual({ width: 200, height: 150 });
+    });
 
-    it('returns null for WEBP too short', () => {
-      const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46])
-      expect(imageSize(webp)).toBeNull()
-    })
+    it("returns null for WEBP too short", () => {
+      const webp = new Uint8Array([0x52, 0x49, 0x46, 0x46]);
+      expect(imageSize(webp)).toBeNull();
+    });
 
-    it('returns null for RIFF without WEBP signature', () => {
+    it("returns null for RIFF without WEBP signature", () => {
       const riff = new Uint8Array([
         0x52,
         0x49,
@@ -319,79 +319,83 @@ describe('imageSize', () => {
         0x56,
         0x49,
         0x20, // AVI signature instead
-      ])
-      expect(imageSize(riff)).toBeNull()
-    })
-  })
+      ]);
+      expect(imageSize(riff)).toBeNull();
+    });
+  });
 
-  it('returns null for unknown format', () => {
-    const unknown = new Uint8Array([0x00, 0x01, 0x02, 0x03])
-    expect(imageSize(unknown)).toBeNull()
-  })
+  it("returns null for unknown format", () => {
+    const unknown = new Uint8Array([0x00, 0x01, 0x02, 0x03]);
+    expect(imageSize(unknown)).toBeNull();
+  });
 
-  it('returns null for empty data', () => {
-    const empty = new Uint8Array([])
-    expect(imageSize(empty)).toBeNull()
-  })
+  it("returns null for empty data", () => {
+    const empty = new Uint8Array([]);
+    expect(imageSize(empty)).toBeNull();
+  });
 
-  it('handles junk bytes gracefully', () => {
-    const junk = new Uint8Array([0xff, 0xff, 0xff, 0xff])
-    expect(imageSize(junk)).toBeNull()
-  })
-})
+  it("handles junk bytes gracefully", () => {
+    const junk = new Uint8Array([0xff, 0xff, 0xff, 0xff]);
+    expect(imageSize(junk)).toBeNull();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // sniffContentType
 // ---------------------------------------------------------------------------
 
-describe('sniffContentType', () => {
-  it('recognises a PNG signature', () => {
-    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
-    expect(sniffContentType(png)).toBe('image/png')
-  })
+describe("sniffContentType", () => {
+  it("recognises a PNG signature", () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    expect(sniffContentType(png)).toBe("image/png");
+  });
 
-  it('recognises a JPEG signature', () => {
-    expect(sniffContentType(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg')
-  })
+  it("recognises a JPEG signature", () => {
+    expect(sniffContentType(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe("image/jpeg");
+  });
 
-  it('recognises a GIF signature, either version', () => {
-    expect(sniffContentType(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x37, 0x61]))).toBe('image/gif')
-    expect(sniffContentType(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]))).toBe('image/gif')
-  })
+  it("recognises a GIF signature, either version", () => {
+    expect(sniffContentType(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x37, 0x61]))).toBe(
+      "image/gif",
+    );
+    expect(sniffContentType(new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]))).toBe(
+      "image/gif",
+    );
+  });
 
-  it('recognises a WEBP signature', () => {
+  it("recognises a WEBP signature", () => {
     const webp = new Uint8Array([
       0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50,
-    ])
-    expect(sniffContentType(webp)).toBe('image/webp')
-  })
+    ]);
+    expect(sniffContentType(webp)).toBe("image/webp");
+  });
 
-  it('does not mistake another RIFF container for WEBP', () => {
+  it("does not mistake another RIFF container for WEBP", () => {
     const avi = new Uint8Array([
       0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x41, 0x56, 0x49, 0x20,
-    ])
-    expect(sniffContentType(avi)).toBeUndefined()
-  })
+    ]);
+    expect(sniffContentType(avi)).toBeUndefined();
+  });
 
-  it('recognises an AVIF ftyp box', () => {
+  it("recognises an AVIF ftyp box", () => {
     const avif = new Uint8Array([
       0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66,
-    ])
-    expect(sniffContentType(avif)).toBe('image/avif')
-  })
+    ]);
+    expect(sniffContentType(avif)).toBe("image/avif");
+  });
 
-  it('does not mistake another ftyp brand for AVIF', () => {
+  it("does not mistake another ftyp brand for AVIF", () => {
     const heic = new Uint8Array([
       0x00, 0x00, 0x00, 0x1c, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63,
-    ])
-    expect(sniffContentType(heic)).toBeUndefined()
-  })
+    ]);
+    expect(sniffContentType(heic)).toBeUndefined();
+  });
 
-  it('returns undefined for bytes matching no known signature, including truncated ones', () => {
-    expect(sniffContentType(new Uint8Array([0x00, 0x01, 0x02, 0x03]))).toBeUndefined()
-    expect(sniffContentType(new Uint8Array([0x89, 0x50]))).toBeUndefined()
-    expect(sniffContentType(new Uint8Array([]))).toBeUndefined()
-  })
+  it("returns undefined for bytes matching no known signature, including truncated ones", () => {
+    expect(sniffContentType(new Uint8Array([0x00, 0x01, 0x02, 0x03]))).toBeUndefined();
+    expect(sniffContentType(new Uint8Array([0x89, 0x50]))).toBeUndefined();
+    expect(sniffContentType(new Uint8Array([]))).toBeUndefined();
+  });
 
   /**
    * SVG is the one type with no magic bytes, so it is recognised by its *root
@@ -400,342 +404,342 @@ describe('sniffContentType', () => {
    * and matching one would store attacker HTML under an image content type on an
    * origin published pages link to.
    */
-  describe('svg', () => {
-    const svg = (text: string) => sniffContentType(new TextEncoder().encode(text))
+  describe("svg", () => {
+    const svg = (text: string) => sniffContentType(new TextEncoder().encode(text));
 
-    it('accepts a bare root element', () => {
-      expect(svg('<svg xmlns="http://www.w3.org/2000/svg"></svg>')).toBe('image/svg+xml')
-      expect(svg('<svg/>')).toBe('image/svg+xml')
-      expect(svg('<svg>')).toBe('image/svg+xml')
-    })
+    it("accepts a bare root element", () => {
+      expect(svg('<svg xmlns="http://www.w3.org/2000/svg"></svg>')).toBe("image/svg+xml");
+      expect(svg("<svg/>")).toBe("image/svg+xml");
+      expect(svg("<svg>")).toBe("image/svg+xml");
+    });
 
-    it('walks a prologue: BOM, xml declaration, doctype, comments, whitespace', () => {
-      expect(svg('\uFEFF<svg xmlns="x"></svg>')).toBe('image/svg+xml')
+    it("walks a prologue: BOM, xml declaration, doctype, comments, whitespace", () => {
+      expect(svg('\uFEFF<svg xmlns="x"></svg>')).toBe("image/svg+xml");
       expect(svg('<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="x"></svg>')).toBe(
-        'image/svg+xml',
-      )
+        "image/svg+xml",
+      );
       expect(svg('<!-- Generator: Illustrator 27.0 -->\n<svg xmlns="x"></svg>')).toBe(
-        'image/svg+xml',
-      )
+        "image/svg+xml",
+      );
       expect(
         svg(
           '<?xml version="1.0"?>\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" ' +
             '"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">\n<svg xmlns="x"></svg>',
         ),
-      ).toBe('image/svg+xml')
-      expect(svg('   \n\t <svg xmlns="x"></svg>')).toBe('image/svg+xml')
-    })
+      ).toBe("image/svg+xml");
+      expect(svg('   \n\t <svg xmlns="x"></svg>')).toBe("image/svg+xml");
+    });
 
-    it('refuses HTML that merely contains an inline <svg>', () => {
-      expect(svg('<html><body><svg xmlns="x"></svg></body></html>')).toBeUndefined()
-      expect(svg('<!DOCTYPE html>\n<html><svg></svg></html>')).toBeUndefined()
-      expect(svg('<div><svg/></div>')).toBeUndefined()
-    })
+    it("refuses HTML that merely contains an inline <svg>", () => {
+      expect(svg('<html><body><svg xmlns="x"></svg></body></html>')).toBeUndefined();
+      expect(svg("<!DOCTYPE html>\n<html><svg></svg></html>")).toBeUndefined();
+      expect(svg("<div><svg/></div>")).toBeUndefined();
+    });
 
-    it('refuses an element merely starting with the same four characters', () => {
-      expect(svg('<svgfoo></svgfoo>')).toBeUndefined()
-      expect(svg('<svg-thing/>')).toBeUndefined()
-    })
+    it("refuses an element merely starting with the same four characters", () => {
+      expect(svg("<svgfoo></svgfoo>")).toBeUndefined();
+      expect(svg("<svg-thing/>")).toBeUndefined();
+    });
 
-    it('refuses a root element hidden past the sniff window', () => {
+    it("refuses a root element hidden past the sniff window", () => {
       // A prologue longer than 4 kB is not an SVG this route will serve. Bounded
       // so this stays a header check rather than a scan of a whole body.
-      expect(svg(`<!--${'x'.repeat(5000)}-->\n<svg xmlns="x"></svg>`)).toBeUndefined()
-    })
+      expect(svg(`<!--${"x".repeat(5000)}-->\n<svg xmlns="x"></svg>`)).toBeUndefined();
+    });
 
-    it('refuses an unterminated prologue rather than reading past it', () => {
-      expect(svg('<!-- never closed <svg xmlns="x"></svg>')).toBeUndefined()
-      expect(svg('<?xml version="1.0"')).toBeUndefined()
-    })
+    it("refuses an unterminated prologue rather than reading past it", () => {
+      expect(svg('<!-- never closed <svg xmlns="x"></svg>')).toBeUndefined();
+      expect(svg('<?xml version="1.0"')).toBeUndefined();
+    });
 
-    it('refuses UTF-16, whose bytes interleave NULs', () => {
+    it("refuses UTF-16, whose bytes interleave NULs", () => {
       // Not a file this route needs to serve inline, and treating it as one would
       // mean a second decoding path over untrusted bytes.
-      const utf16 = new Uint8Array([0xff, 0xfe, 0x3c, 0x00, 0x73, 0x00, 0x76, 0x00, 0x67, 0x00])
-      expect(sniffContentType(utf16)).toBeUndefined()
-    })
-  })
+      const utf16 = new Uint8Array([0xff, 0xfe, 0x3c, 0x00, 0x73, 0x00, 0x76, 0x00, 0x67, 0x00]);
+      expect(sniffContentType(utf16)).toBeUndefined();
+    });
+  });
 
-  it('is not fooled by a claimed type: only the bytes decide', () => {
+  it("is not fooled by a claimed type: only the bytes decide", () => {
     // The scenario uploadAsset relies on: a client-supplied header is never
     // consulted here at all, only the buffer.
-    const html = new TextEncoder().encode('<script>alert(1)</script>')
-    expect(sniffContentType(html)).toBeUndefined()
-  })
-})
+    const html = new TextEncoder().encode("<script>alert(1)</script>");
+    expect(sniffContentType(html)).toBeUndefined();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // parseTransform
 // ---------------------------------------------------------------------------
 
-describe('parseTransform', () => {
-  describe('dimension parsing', () => {
-    it('parses width and height', () => {
-      const params = new URLSearchParams('w=800&h=600')
+describe("parseTransform", () => {
+  describe("dimension parsing", () => {
+    it("parses width and height", () => {
+      const params = new URLSearchParams("w=800&h=600");
       expect(parseTransform(params)).toEqual({
         width: 800,
         height: 600,
-      })
-    })
+      });
+    });
 
-    it('snaps width/height zero or negative up to the minimum, rather than dropping them', () => {
-      const params = new URLSearchParams('w=0&h=-10')
+    it("snaps width/height zero or negative up to the minimum, rather than dropping them", () => {
+      const params = new URLSearchParams("w=0&h=-10");
       expect(parseTransform(params)).toEqual({
         width: MIN_TRANSFORM_DIMENSION,
         height: MIN_TRANSFORM_DIMENSION,
-      })
-    })
+      });
+    });
 
-    it('ignores non-numeric width/height', () => {
-      const params = new URLSearchParams('w=abc&h=def')
-      expect(parseTransform(params)).toEqual({})
-    })
+    it("ignores non-numeric width/height", () => {
+      const params = new URLSearchParams("w=abc&h=def");
+      expect(parseTransform(params)).toEqual({});
+    });
 
-    it('parses only valid dimensions when mixed', () => {
-      const params = new URLSearchParams('w=400&h=invalid')
-      expect(parseTransform(params)).toEqual({ width: 400 })
-    })
+    it("parses only valid dimensions when mixed", () => {
+      const params = new URLSearchParams("w=400&h=invalid");
+      expect(parseTransform(params)).toEqual({ width: 400 });
+    });
 
-    it('ignores width/height that are not finite', () => {
-      const params = new URLSearchParams('w=Infinity&h=NaN')
-      expect(parseTransform(params)).toEqual({})
-    })
+    it("ignores width/height that are not finite", () => {
+      const params = new URLSearchParams("w=Infinity&h=NaN");
+      expect(parseTransform(params)).toEqual({});
+    });
 
-    it('clamps width and height to the largest dimension the route serves', () => {
+    it("clamps width and height to the largest dimension the route serves", () => {
       // The query is public and every distinct value mints its own Images
       // transformation and its own immutable cache entry.
-      const params = new URLSearchParams('w=1000000&h=999999')
+      const params = new URLSearchParams("w=1000000&h=999999");
       expect(parseTransform(params)).toEqual({
         width: MAX_TRANSFORM_DIMENSION,
         height: MAX_TRANSFORM_DIMENSION,
-      })
-    })
+      });
+    });
 
-    it('collapses fractional dimensions onto whole pixels, then clamps', () => {
-      const params = new URLSearchParams('w=800.6&h=0.5')
+    it("collapses fractional dimensions onto whole pixels, then clamps", () => {
+      const params = new URLSearchParams("w=800.6&h=0.5");
       // trunc(0.5) is 0, which then snaps up to the minimum rather than
       // surviving as a 0-pixel image.
-      expect(parseTransform(params)).toEqual({ width: 800, height: MIN_TRANSFORM_DIMENSION })
-    })
-  })
+      expect(parseTransform(params)).toEqual({ width: 800, height: MIN_TRANSFORM_DIMENSION });
+    });
+  });
 
-  describe('quality parsing', () => {
-    it('parses quality parameter', () => {
-      const params = new URLSearchParams('q=80')
-      expect(parseTransform(params)).toEqual({ quality: 80 })
-    })
+  describe("quality parsing", () => {
+    it("parses quality parameter", () => {
+      const params = new URLSearchParams("q=80");
+      expect(parseTransform(params)).toEqual({ quality: 80 });
+    });
 
-    it('snaps quality zero or negative up to the minimum, rather than dropping it', () => {
-      const params = new URLSearchParams('q=0&w=100')
-      expect(parseTransform(params)).toEqual({ width: 100, quality: MIN_TRANSFORM_QUALITY })
-    })
+    it("snaps quality zero or negative up to the minimum, rather than dropping it", () => {
+      const params = new URLSearchParams("q=0&w=100");
+      expect(parseTransform(params)).toEqual({ width: 100, quality: MIN_TRANSFORM_QUALITY });
+    });
 
-    it('clamps quality to the decided ceiling', () => {
-      const params = new URLSearchParams('q=99999')
-      expect(parseTransform(params)).toEqual({ quality: MAX_TRANSFORM_QUALITY })
-    })
-  })
+    it("clamps quality to the decided ceiling", () => {
+      const params = new URLSearchParams("q=99999");
+      expect(parseTransform(params)).toEqual({ quality: MAX_TRANSFORM_QUALITY });
+    });
+  });
 
-  describe('fit parameter', () => {
-    it('accepts fit=cover', () => {
-      const params = new URLSearchParams('fit=cover&w=100')
-      const result = parseTransform(params)
-      expect(result).toHaveProperty('fit', 'cover')
-      expect(result.width).toBe(100)
-    })
+  describe("fit parameter", () => {
+    it("accepts fit=cover", () => {
+      const params = new URLSearchParams("fit=cover&w=100");
+      const result = parseTransform(params);
+      expect(result).toHaveProperty("fit", "cover");
+      expect(result.width).toBe(100);
+    });
 
-    it('accepts fit=contain', () => {
-      const params = new URLSearchParams('fit=contain')
-      expect(parseTransform(params)).toHaveProperty('fit', 'contain')
-    })
+    it("accepts fit=contain", () => {
+      const params = new URLSearchParams("fit=contain");
+      expect(parseTransform(params)).toHaveProperty("fit", "contain");
+    });
 
-    it('accepts fit=scale-down', () => {
-      const params = new URLSearchParams('fit=scale-down')
-      expect(parseTransform(params)).toHaveProperty('fit', 'scale-down')
-    })
+    it("accepts fit=scale-down", () => {
+      const params = new URLSearchParams("fit=scale-down");
+      expect(parseTransform(params)).toHaveProperty("fit", "scale-down");
+    });
 
-    it('rejects invalid fit values', () => {
-      const params = new URLSearchParams('fit=invalid&w=100')
-      const result = parseTransform(params)
-      expect(result).not.toHaveProperty('fit')
-      expect(result.width).toBe(100)
-    })
-  })
+    it("rejects invalid fit values", () => {
+      const params = new URLSearchParams("fit=invalid&w=100");
+      const result = parseTransform(params);
+      expect(result).not.toHaveProperty("fit");
+      expect(result.width).toBe(100);
+    });
+  });
 
-  describe('format parameter', () => {
-    it('accepts webp format', () => {
-      const params = new URLSearchParams('f=webp')
-      expect(parseTransform(params)).toHaveProperty('format', 'webp')
-    })
+  describe("format parameter", () => {
+    it("accepts webp format", () => {
+      const params = new URLSearchParams("f=webp");
+      expect(parseTransform(params)).toHaveProperty("format", "webp");
+    });
 
-    it('accepts avif format', () => {
-      const params = new URLSearchParams('f=avif')
-      expect(parseTransform(params)).toHaveProperty('format', 'avif')
-    })
+    it("accepts avif format", () => {
+      const params = new URLSearchParams("f=avif");
+      expect(parseTransform(params)).toHaveProperty("format", "avif");
+    });
 
-    it('accepts jpeg format', () => {
-      const params = new URLSearchParams('f=jpeg')
-      expect(parseTransform(params)).toHaveProperty('format', 'jpeg')
-    })
+    it("accepts jpeg format", () => {
+      const params = new URLSearchParams("f=jpeg");
+      expect(parseTransform(params)).toHaveProperty("format", "jpeg");
+    });
 
-    it('accepts png format', () => {
-      const params = new URLSearchParams('f=png')
-      expect(parseTransform(params)).toHaveProperty('format', 'png')
-    })
+    it("accepts png format", () => {
+      const params = new URLSearchParams("f=png");
+      expect(parseTransform(params)).toHaveProperty("format", "png");
+    });
 
-    it('rejects invalid format', () => {
-      const params = new URLSearchParams('f=bmp&w=100')
-      const result = parseTransform(params)
-      expect(result).not.toHaveProperty('format')
-      expect(result.width).toBe(100)
-    })
-  })
+    it("rejects invalid format", () => {
+      const params = new URLSearchParams("f=bmp&w=100");
+      const result = parseTransform(params);
+      expect(result).not.toHaveProperty("format");
+      expect(result.width).toBe(100);
+    });
+  });
 
-  describe('focal point parameter', () => {
-    it('parses focal point x,y', () => {
-      const params = new URLSearchParams('fp=0.5,0.75')
-      const result = parseTransform(params)
-      expect(result.focal).toEqual({ x: 0.5, y: 0.75 })
-    })
+  describe("focal point parameter", () => {
+    it("parses focal point x,y", () => {
+      const params = new URLSearchParams("fp=0.5,0.75");
+      const result = parseTransform(params);
+      expect(result.focal).toEqual({ x: 0.5, y: 0.75 });
+    });
 
-    it('ignores focal point if not both x and y', () => {
-      const params = new URLSearchParams('fp=0.5&w=100')
-      const result = parseTransform(params)
-      expect(result.focal).toBeUndefined()
-      expect(result.width).toBe(100)
-    })
+    it("ignores focal point if not both x and y", () => {
+      const params = new URLSearchParams("fp=0.5&w=100");
+      const result = parseTransform(params);
+      expect(result.focal).toBeUndefined();
+      expect(result.width).toBe(100);
+    });
 
-    it('ignores focal point if values are not finite', () => {
-      const params = new URLSearchParams('fp=NaN,0.5&w=100')
-      const result = parseTransform(params)
-      expect(result.focal).toBeUndefined()
-    })
+    it("ignores focal point if values are not finite", () => {
+      const params = new URLSearchParams("fp=NaN,0.5&w=100");
+      const result = parseTransform(params);
+      expect(result.focal).toBeUndefined();
+    });
 
-    it('clamps an out-of-range focal point into [0, 1] rather than passing it through', () => {
+    it("clamps an out-of-range focal point into [0, 1] rather than passing it through", () => {
       // The Images binding's `gravity` expects normalised 0..1 coordinates;
       // handing it 100/200 unclamped throws the transform, which used to fall
       // through to serving the full-size original, repeatably.
-      const params = new URLSearchParams('fp=100,200')
-      expect(parseTransform(params)).toHaveProperty('focal', { x: 1, y: 1 })
-    })
+      const params = new URLSearchParams("fp=100,200");
+      expect(parseTransform(params)).toHaveProperty("focal", { x: 1, y: 1 });
+    });
 
-    it('clamps a negative focal point up to 0', () => {
-      const params = new URLSearchParams('fp=-5,-0.5')
-      expect(parseTransform(params)).toHaveProperty('focal', { x: 0, y: 0 })
-    })
-  })
+    it("clamps a negative focal point up to 0", () => {
+      const params = new URLSearchParams("fp=-5,-0.5");
+      expect(parseTransform(params)).toHaveProperty("focal", { x: 0, y: 0 });
+    });
+  });
 
-  it('combines all parameters', () => {
-    const params = new URLSearchParams('w=1024&h=768&q=75&f=webp&fit=cover&fp=0.5,0.5')
-    const result = parseTransform(params)
+  it("combines all parameters", () => {
+    const params = new URLSearchParams("w=1024&h=768&q=75&f=webp&fit=cover&fp=0.5,0.5");
+    const result = parseTransform(params);
     expect(result).toEqual({
       width: 1024,
       height: 768,
       quality: 75,
-      format: 'webp',
-      fit: 'cover',
+      format: "webp",
+      fit: "cover",
       focal: { x: 0.5, y: 0.5 },
-    })
-  })
+    });
+  });
 
-  it('returns empty object for no parameters', () => {
-    const params = new URLSearchParams()
-    expect(parseTransform(params)).toEqual({})
-  })
-})
+  it("returns empty object for no parameters", () => {
+    const params = new URLSearchParams();
+    expect(parseTransform(params)).toEqual({});
+  });
+});
 
 // ---------------------------------------------------------------------------
 // serializeJson
 // ---------------------------------------------------------------------------
 
-describe('serializeJson', () => {
-  it('serializes simple objects', () => {
-    const result = serializeJson({ a: 1, b: 'hello' })
-    expect(result).toBe('{"a":1,"b":"hello"}')
-  })
+describe("serializeJson", () => {
+  it("serializes simple objects", () => {
+    const result = serializeJson({ a: 1, b: "hello" });
+    expect(result).toBe('{"a":1,"b":"hello"}');
+  });
 
-  it('serializes arrays', () => {
-    const result = serializeJson([1, 2, 3])
-    expect(result).toBe('[1,2,3]')
-  })
+  it("serializes arrays", () => {
+    const result = serializeJson([1, 2, 3]);
+    expect(result).toBe("[1,2,3]");
+  });
 
-  it('escapes < character', () => {
-    const result = serializeJson({ html: '<script>' })
-    expect(result).toBe('{"html":"\\u003cscript>"}')
-    expect(result).not.toContain('<')
-  })
+  it("escapes < character", () => {
+    const result = serializeJson({ html: "<script>" });
+    expect(result).toBe('{"html":"\\u003cscript>"}');
+    expect(result).not.toContain("<");
+  });
 
-  it('escapes multiple < characters', () => {
-    const result = serializeJson('<<>')
-    expect(result).toBe('"\\u003c\\u003c>"')
-  })
+  it("escapes multiple < characters", () => {
+    const result = serializeJson("<<>");
+    expect(result).toBe('"\\u003c\\u003c>"');
+  });
 
-  it('does not escape other special characters', () => {
-    const result = serializeJson({ quote: '"', backslash: '\\' })
-    expect(result).toContain('\\"')
-    expect(result).toContain('\\\\')
-  })
+  it("does not escape other special characters", () => {
+    const result = serializeJson({ quote: '"', backslash: "\\" });
+    expect(result).toContain('\\"');
+    expect(result).toContain("\\\\");
+  });
 
-  it('preserves \\u2028 and \\u2029 in strings', () => {
+  it("preserves \\u2028 and \\u2029 in strings", () => {
     // These are now valid in JS string literals (ES2019+)
-    const result = serializeJson('line\u2028sep\u2029end')
-    expect(result).toContain('\u2028')
-    expect(result).toContain('\u2029')
-  })
+    const result = serializeJson("line\u2028sep\u2029end");
+    expect(result).toContain("\u2028");
+    expect(result).toContain("\u2029");
+  });
 
-  it('round-trips objects through parse', () => {
-    const original = { name: 'John', age: 30, items: [1, 2, 3] }
-    const serialized = serializeJson(original)
-    const parsed = JSON.parse(serialized)
-    expect(parsed).toEqual(original)
-  })
+  it("round-trips objects through parse", () => {
+    const original = { name: "John", age: 30, items: [1, 2, 3] };
+    const serialized = serializeJson(original);
+    const parsed = JSON.parse(serialized);
+    expect(parsed).toEqual(original);
+  });
 
-  it('serializes null', () => {
-    expect(serializeJson(null)).toBe('null')
-  })
+  it("serializes null", () => {
+    expect(serializeJson(null)).toBe("null");
+  });
 
   // SPEC(undefined-crash): serializeJson is total over its input. undefined
   // normalises to JSON null rather than crashing .replace() on the non-string
   // JSON.stringify(undefined) returns.
-  it('serializes undefined as null', () => {
-    expect(serializeJson(undefined)).toBe('null')
-  })
+  it("serializes undefined as null", () => {
+    expect(serializeJson(undefined)).toBe("null");
+  });
 
-  it('serializes boolean values', () => {
-    expect(serializeJson(true)).toBe('true')
-    expect(serializeJson(false)).toBe('false')
-  })
+  it("serializes boolean values", () => {
+    expect(serializeJson(true)).toBe("true");
+    expect(serializeJson(false)).toBe("false");
+  });
 
-  it('serializes numeric values', () => {
-    expect(serializeJson(42)).toBe('42')
-    expect(serializeJson(3.14)).toBe('3.14')
-    expect(serializeJson(0)).toBe('0')
-  })
+  it("serializes numeric values", () => {
+    expect(serializeJson(42)).toBe("42");
+    expect(serializeJson(3.14)).toBe("3.14");
+    expect(serializeJson(0)).toBe("0");
+  });
 
-  it('safely embeds in HTML script tag', () => {
-    const data = { text: '<img src=x onerror=alert(1)>' }
-    const json = serializeJson(data)
-    const html = `<script>var data = ${json}</script>`
+  it("safely embeds in HTML script tag", () => {
+    const data = { text: "<img src=x onerror=alert(1)>" };
+    const json = serializeJson(data);
+    const html = `<script>var data = ${json}</script>`;
     // Should not contain unescaped <
-    expect(html).not.toMatch(/<img/)
-    expect(html).toContain('\\u003c')
-  })
+    expect(html).not.toMatch(/<img/);
+    expect(html).toContain("\\u003c");
+  });
 
-  it('handles deeply nested structures', () => {
+  it("handles deeply nested structures", () => {
     const nested = {
       a: {
         b: {
           c: {
-            d: '<deep>',
+            d: "<deep>",
           },
         },
       },
-    }
-    const result = serializeJson(nested)
-    expect(result).toContain('\\u003c')
-    expect(JSON.parse(result)).toEqual(nested)
-  })
-})
+    };
+    const result = serializeJson(nested);
+    expect(result).toContain("\\u003c");
+    expect(JSON.parse(result)).toEqual(nested);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // normalisePath / redirectStatements (redirects.md)
@@ -747,395 +751,395 @@ describe('serializeJson', () => {
  * two is enough to test the builder without workerd or a real database.
  */
 function fakeDb(): { db: D1Database; calls: { sql: string; args: unknown[] }[] } {
-  const calls: { sql: string; args: unknown[] }[] = []
+  const calls: { sql: string; args: unknown[] }[] = [];
   const db = {
     prepare(sql: string) {
       return {
         bind: (...args: unknown[]) => {
-          calls.push({ sql, args })
-          return { sql, args }
+          calls.push({ sql, args });
+          return { sql, args };
         },
-      }
+      };
     },
-  } as unknown as D1Database
-  return { db, calls }
+  } as unknown as D1Database;
+  return { db, calls };
 }
 
-describe('normalisePath', () => {
-  it('strips a single leading and trailing slash', () => {
-    expect(normalisePath('/about/')).toBe('about')
-  })
+describe("normalisePath", () => {
+  it("strips a single leading and trailing slash", () => {
+    expect(normalisePath("/about/")).toBe("about");
+  });
 
-  it('strips repeated leading and trailing slashes', () => {
-    expect(normalisePath('///about///')).toBe('about')
-  })
+  it("strips repeated leading and trailing slashes", () => {
+    expect(normalisePath("///about///")).toBe("about");
+  });
 
-  it('lowercases the path, so case variants hit the same row', () => {
-    expect(normalisePath('/Summer-Sale')).toBe('summer-sale')
-  })
+  it("lowercases the path, so case variants hit the same row", () => {
+    expect(normalisePath("/Summer-Sale")).toBe("summer-sale");
+  });
 
-  it('strips a query string, which is preserved on the redirect by the host instead', () => {
-    expect(normalisePath('/old?utm_source=x')).toBe('old')
-    expect(normalisePath('old?a=1&b=2')).toBe('old')
-  })
+  it("strips a query string, which is preserved on the redirect by the host instead", () => {
+    expect(normalisePath("/old?utm_source=x")).toBe("old");
+    expect(normalisePath("old?a=1&b=2")).toBe("old");
+  });
 
-  it('is the empty string for the root, with or without a slash', () => {
-    expect(normalisePath('')).toBe('')
-    expect(normalisePath('/')).toBe('')
-  })
+  it("is the empty string for the root, with or without a slash", () => {
+    expect(normalisePath("")).toBe("");
+    expect(normalisePath("/")).toBe("");
+  });
 
-  it('leaves an already-normalised path untouched', () => {
-    expect(normalisePath('about/team')).toBe('about/team')
-  })
-})
+  it("leaves an already-normalised path untouched", () => {
+    expect(normalisePath("about/team")).toBe("about/team");
+  });
+});
 
-describe('redirectStatements', () => {
-  it('builds exactly three statements, in order: delete, collapse, insert', () => {
-    const { db, calls } = fakeDb()
+describe("redirectStatements", () => {
+  it("builds exactly three statements, in order: delete, collapse, insert", () => {
+    const { db, calls } = fakeDb();
     const statements = redirectStatements(db, {
-      site: 'default',
-      from: 'about',
-      to: 'about-us',
-      storyId: 'sty_about',
-    })
+      site: "default",
+      from: "about",
+      to: "about-us",
+      storyId: "sty_about",
+    });
 
-    expect(statements).toHaveLength(3)
+    expect(statements).toHaveLength(3);
     // Every statement binds the scope (`multi-site.md` decision 3): a rename on one
     // site must not delete, collapse or rewrite another site's redirects.
-    expect(calls[0]?.sql).toMatch(/^delete from redirects where site_id = \? and from_path = \?/)
-    expect(calls[0]?.args).toEqual(['default', 'about-us'])
+    expect(calls[0]?.sql).toMatch(/^delete from redirects where site_id = \? and from_path = \?/);
+    expect(calls[0]?.args).toEqual(["default", "about-us"]);
 
     expect(calls[1]?.sql).toMatch(
       /^update redirects set to_path = \? where site_id = \? and to_path = \?/,
-    )
-    expect(calls[1]?.args).toEqual(['about-us', 'default', 'about'])
+    );
+    expect(calls[1]?.args).toEqual(["about-us", "default", "about"]);
 
-    expect(calls[2]?.sql).toMatch(/insert or replace into redirects/)
+    expect(calls[2]?.sql).toMatch(/insert or replace into redirects/);
     expect(calls[2]?.args).toEqual([
-      'about',
-      'about-us',
+      "about",
+      "about-us",
       301,
-      'auto',
-      'sty_about',
+      "auto",
+      "sty_about",
       expect.any(Number),
-      'default',
-    ])
-  })
+      "default",
+    ]);
+  });
 
-  it('normalises both from and to before any statement is built', () => {
-    const { db, calls } = fakeDb()
+  it("normalises both from and to before any statement is built", () => {
+    const { db, calls } = fakeDb();
     redirectStatements(db, {
-      site: 'default',
-      from: '/About/',
-      to: '/About-Us/',
+      site: "default",
+      from: "/About/",
+      to: "/About-Us/",
       storyId: null,
-    })
+    });
 
-    expect(calls[0]?.args).toEqual(['default', 'about-us'])
-    expect(calls[1]?.args).toEqual(['about-us', 'default', 'about'])
-    expect(calls[2]?.args?.slice(0, 2)).toEqual(['about', 'about-us'])
-  })
+    expect(calls[0]?.args).toEqual(["default", "about-us"]);
+    expect(calls[1]?.args).toEqual(["about-us", "default", "about"]);
+    expect(calls[2]?.args?.slice(0, 2)).toEqual(["about", "about-us"]);
+  });
 
-  it('returns no statements when the path did not actually change', () => {
-    const { db, calls } = fakeDb()
+  it("returns no statements when the path did not actually change", () => {
+    const { db, calls } = fakeDb();
     expect(
-      redirectStatements(db, { site: 'default', from: 'about', to: 'about', storyId: 'sty_about' }),
-    ).toEqual([])
-    expect(calls).toHaveLength(0)
-  })
+      redirectStatements(db, { site: "default", from: "about", to: "about", storyId: "sty_about" }),
+    ).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
 
-  it('returns no statements for the root, which never has a path to vacate', () => {
-    const { db, calls } = fakeDb()
+  it("returns no statements for the root, which never has a path to vacate", () => {
+    const { db, calls } = fakeDb();
     expect(
-      redirectStatements(db, { site: 'default', from: '', to: '', storyId: 'sty_home' }),
-    ).toEqual([])
-    expect(calls).toHaveLength(0)
-  })
+      redirectStatements(db, { site: "default", from: "", to: "", storyId: "sty_home" }),
+    ).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
 
-  it('accepts an absolute URL as the target without lowercasing or slash-stripping it', () => {
-    const { db, calls } = fakeDb()
+  it("accepts an absolute URL as the target without lowercasing or slash-stripping it", () => {
+    const { db, calls } = fakeDb();
     redirectStatements(db, {
-      site: 'default',
-      from: 'old-microsite',
-      to: 'https://Example.com/Path/',
+      site: "default",
+      from: "old-microsite",
+      to: "https://Example.com/Path/",
       storyId: null,
-    })
+    });
 
-    expect(calls[2]?.args?.[1]).toBe('https://Example.com/Path/')
-  })
+    expect(calls[2]?.args?.[1]).toBe("https://Example.com/Path/");
+  });
 
-  it('defaults status to 301 and source to auto', () => {
-    const { db, calls } = fakeDb()
-    redirectStatements(db, { site: 'default', from: 'a', to: 'b', storyId: 'sty_a' })
-    expect(calls[2]?.args?.[2]).toBe(301)
-    expect(calls[2]?.args?.[3]).toBe('auto')
-  })
+  it("defaults status to 301 and source to auto", () => {
+    const { db, calls } = fakeDb();
+    redirectStatements(db, { site: "default", from: "a", to: "b", storyId: "sty_a" });
+    expect(calls[2]?.args?.[2]).toBe(301);
+    expect(calls[2]?.args?.[3]).toBe("auto");
+  });
 
-  it('honours an explicit status and source', () => {
-    const { db, calls } = fakeDb()
+  it("honours an explicit status and source", () => {
+    const { db, calls } = fakeDb();
     redirectStatements(db, {
-      site: 'default',
-      from: 'a',
-      to: 'b',
+      site: "default",
+      from: "a",
+      to: "b",
       storyId: null,
       status: 302,
-      source: 'manual',
-    })
-    expect(calls[2]?.args?.[2]).toBe(302)
-    expect(calls[2]?.args?.[3]).toBe('manual')
-  })
-})
+      source: "manual",
+    });
+    expect(calls[2]?.args?.[2]).toBe(302);
+    expect(calls[2]?.args?.[3]).toBe("manual");
+  });
+});
 
 // ---------------------------------------------------------------------------
 // createHookRunner / validateHooks (publish-hooks.md)
 // ---------------------------------------------------------------------------
 
 interface Env {
-  marker: 'env'
+  marker: "env";
 }
 
 const STORY = {
-  id: 'sty_x',
-  type: 'page',
+  id: "sty_x",
+  type: "page",
   parentId: null,
-  slug: 'x',
-  path: 'x',
-  ord: 'a0',
-  title: 'X',
+  slug: "x",
+  path: "x",
+  ord: "a0",
+  title: "X",
   publishedAt: null,
   unpublishedAt: null,
   updatedAt: 0,
   draftSyncId: 0,
   draftUpdatedAt: null,
   publishedSyncId: 0,
-  state: 'draft' as const,
+  state: "draft" as const,
   hasUnpublishedChanges: false,
-}
+};
 
-const DOC = { root: 'blk_x', bloks: {} }
+const DOC = { root: "blk_x", bloks: {} };
 
 const VERSION = {
-  id: 'ver_x',
-  storyId: 'sty_x',
-  kind: 'publish' as const,
+  id: "ver_x",
+  storyId: "sty_x",
+  kind: "publish" as const,
   label: null,
-  title: 'X',
+  title: "X",
   actor: null,
   createdAt: 0,
   schemaId: null,
-}
+};
 
-const PUBLISHED_EXTRA = { story: STORY, doc: DOC, version: VERSION, publishedAt: 1, actor: null }
+const PUBLISHED_EXTRA = { story: STORY, doc: DOC, version: VERSION, publishedAt: 1, actor: null };
 
 /** A `waitUntil` that records every task handed to it instead of running it on
  * a platform timer, so a test can assert both whether the runner called it
  * and, separately, drain the tasks itself. */
 function fakeCtx(): { ctx: HookRunnerCtx<Env>; tasks: Promise<unknown>[] } {
-  const tasks: Promise<unknown>[] = []
+  const tasks: Promise<unknown>[] = [];
   const ctx: HookRunnerCtx<Env> = {
-    env: { marker: 'env' },
+    env: { marker: "env" },
     waitUntil: (p) => {
-      tasks.push(p)
+      tasks.push(p);
     },
-  }
-  return { ctx, tasks }
+  };
+  return { ctx, tasks };
 }
 
-describe('createHookRunner brand', () => {
-  const STORY = { id: 'sty_1', site: 'tog' } as never
+describe("createHookRunner brand", () => {
+  const STORY = { id: "sty_1", site: "tog" } as never;
 
-  it('stamps every payload with the brand the runner was made for, whatever the emitter says', async () => {
-    const seen: (string | null)[] = []
-    const ctx = { env: {}, waitUntil: () => {} }
+  it("stamps every payload with the brand the runner was made for, whatever the emitter says", async () => {
+    const seen: (string | null)[] = [];
+    const ctx = { env: {}, waitUntil: () => {} };
     const runner = createHookRunner(
-      { await: ['created'], created: (e) => void seen.push(e.brand) },
+      { await: ["created"], created: (e) => void seen.push(e.brand) },
       ctx,
       [],
       console,
-      'takeoffgo',
-    )
+      "takeoffgo",
+    );
     // An extra `brand` in the emitter's own object is overwritten, not trusted.
-    await runner.run('created', { story: STORY, actor: null, brand: 'other' } as never)
-    expect(seen).toEqual(['takeoffgo'])
-  })
+    await runner.run("created", { story: STORY, actor: null, brand: "other" } as never);
+    expect(seen).toEqual(["takeoffgo"]);
+  });
 
-  it('is null for a runner made with no brand', async () => {
-    const seen: (string | null)[] = []
+  it("is null for a runner made with no brand", async () => {
+    const seen: (string | null)[] = [];
     const runner = createHookRunner(
-      { await: ['created'], created: (e) => void seen.push(e.brand) },
+      { await: ["created"], created: (e) => void seen.push(e.brand) },
       { env: {}, waitUntil: () => {} },
-    )
-    await runner.run('created', { story: STORY, actor: null })
-    expect(seen).toEqual([null])
-  })
-})
+    );
+    await runner.run("created", { story: STORY, actor: null });
+    expect(seen).toEqual([null]);
+  });
+});
 
-describe('createHookRunner', () => {
-  it('fires the hook exactly once, with env and waitUntil injected alongside the caller-supplied fields', async () => {
-    const calls: unknown[] = []
+describe("createHookRunner", () => {
+  it("fires the hook exactly once, with env and waitUntil injected alongside the caller-supplied fields", async () => {
+    const calls: unknown[] = [];
     const hooks: FolioHooks<Env> = {
       created: (e) => {
-        calls.push(e)
+        calls.push(e);
       },
-    }
-    const { ctx, tasks } = fakeCtx()
-    const runner = createHookRunner(hooks, ctx)
+    };
+    const { ctx, tasks } = fakeCtx();
+    const runner = createHookRunner(hooks, ctx);
 
-    await runner.run('created', { story: STORY, actor: 'alice' })
-    await Promise.all(tasks)
+    await runner.run("created", { story: STORY, actor: "alice" });
+    await Promise.all(tasks);
 
     // `site` is the runner's own (`HookBase.site`): the story's scope, `default` here.
     expect(calls).toEqual([
       {
         story: STORY,
-        actor: 'alice',
+        actor: "alice",
         env: ctx.env,
         waitUntil: ctx.waitUntil,
-        site: 'default',
+        site: "default",
         brand: null,
       },
-    ])
-  })
+    ]);
+  });
 
-  it('rides waitUntil by default: run() does not wait for the hook to finish', async () => {
-    let resolveHook: () => void = () => {}
+  it("rides waitUntil by default: run() does not wait for the hook to finish", async () => {
+    let resolveHook: () => void = () => {};
     const hookDone = new Promise<void>((r) => {
-      resolveHook = r
-    })
-    let hookStarted = false
+      resolveHook = r;
+    });
+    let hookStarted = false;
     const hooks: FolioHooks<Env> = {
       published: async () => {
-        hookStarted = true
-        await hookDone
+        hookStarted = true;
+        await hookDone;
       },
-    }
-    const { ctx, tasks } = fakeCtx()
-    const runner = createHookRunner(hooks, ctx)
+    };
+    const { ctx, tasks } = fakeCtx();
+    const runner = createHookRunner(hooks, ctx);
 
-    await runner.run('published', PUBLISHED_EXTRA)
+    await runner.run("published", PUBLISHED_EXTRA);
 
-    expect(hookStarted).toBe(true)
-    expect(tasks).toHaveLength(1) // handed to waitUntil, not awaited by run() itself
-    resolveHook()
-    await tasks[0]
-  })
+    expect(hookStarted).toBe(true);
+    expect(tasks).toHaveLength(1); // handed to waitUntil, not awaited by run() itself
+    resolveHook();
+    await tasks[0];
+  });
 
   it('await: ["published"] blocks run() until the hook settles, and still swallows a throw', async () => {
-    const order: string[] = []
+    const order: string[] = [];
     const hooks: FolioHooks<Env> = {
-      await: ['published'],
+      await: ["published"],
       published: async () => {
-        order.push('hook-start')
-        await Promise.resolve()
-        order.push('hook-end')
-        throw new Error('boom')
+        order.push("hook-start");
+        await Promise.resolve();
+        order.push("hook-end");
+        throw new Error("boom");
       },
-    }
-    const { ctx, tasks } = fakeCtx()
-    const runner = createHookRunner(hooks, ctx)
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    };
+    const { ctx, tasks } = fakeCtx();
+    const runner = createHookRunner(hooks, ctx);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    order.push('before-run')
-    await runner.run('published', PUBLISHED_EXTRA)
-    order.push('after-run')
+    order.push("before-run");
+    await runner.run("published", PUBLISHED_EXTRA);
+    order.push("after-run");
 
-    expect(order).toEqual(['before-run', 'hook-start', 'hook-end', 'after-run'])
-    expect(tasks).toHaveLength(0) // awaited events never touch waitUntil
-    expect(logged.mock.calls[0]?.[0]).toBe('folio: hook published failed')
-    logged.mockRestore()
-  })
+    expect(order).toEqual(["before-run", "hook-start", "hook-end", "after-run"]);
+    expect(tasks).toHaveLength(0); // awaited events never touch waitUntil
+    expect(logged.mock.calls[0]?.[0]).toBe("folio: hook published failed");
+    logged.mockRestore();
+  });
 
-  it('a throwing, non-awaited hook is caught and logged with the event name; run() never rejects', async () => {
+  it("a throwing, non-awaited hook is caught and logged with the event name; run() never rejects", async () => {
     const hooks: FolioHooks<Env> = {
       deleted: () => {
-        throw new Error('boom')
+        throw new Error("boom");
       },
-    }
-    const { ctx, tasks } = fakeCtx()
-    const runner = createHookRunner(hooks, ctx)
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    };
+    const { ctx, tasks } = fakeCtx();
+    const runner = createHookRunner(hooks, ctx);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
     await expect(
-      runner.run('deleted', { ids: ['sty_a'], paths: ['a'], types: ['page'], actor: null }),
-    ).resolves.toBeUndefined()
-    await Promise.all(tasks)
+      runner.run("deleted", { ids: ["sty_a"], paths: ["a"], types: ["page"], actor: null }),
+    ).resolves.toBeUndefined();
+    await Promise.all(tasks);
 
-    expect(logged.mock.calls[0]?.[0]).toBe('folio: hook deleted failed')
-    logged.mockRestore()
-  })
+    expect(logged.mock.calls[0]?.[0]).toBe("folio: hook deleted failed");
+    logged.mockRestore();
+  });
 
-  it('costs nothing when a hook is configured, but not for this event', async () => {
-    const hooks: FolioHooks<Env> = { published: () => {} }
-    const { ctx, tasks } = fakeCtx()
-    const runner = createHookRunner(hooks, ctx)
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+  it("costs nothing when a hook is configured, but not for this event", async () => {
+    const hooks: FolioHooks<Env> = { published: () => {} };
+    const { ctx, tasks } = fakeCtx();
+    const runner = createHookRunner(hooks, ctx);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await runner.run('deleted', { ids: [], paths: [], types: [], actor: null })
+    await runner.run("deleted", { ids: [], paths: [], types: [], actor: null });
 
-    expect(tasks).toHaveLength(0)
-    expect(logged).not.toHaveBeenCalled()
-    logged.mockRestore()
-  })
+    expect(tasks).toHaveLength(0);
+    expect(logged).not.toHaveBeenCalled();
+    logged.mockRestore();
+  });
 
-  it('costs nothing when hooks is undefined and no internal consumer is registered either', async () => {
-    const { ctx, tasks } = fakeCtx()
-    const runner = createHookRunner(undefined, ctx)
+  it("costs nothing when hooks is undefined and no internal consumer is registered either", async () => {
+    const { ctx, tasks } = fakeCtx();
+    const runner = createHookRunner(undefined, ctx);
 
-    await runner.run('created', { story: STORY, actor: null })
+    await runner.run("created", { story: STORY, actor: null });
 
-    expect(tasks).toHaveLength(0)
-  })
+    expect(tasks).toHaveLength(0);
+  });
 
   // The seam ../editing/live-collaboration.md's space-channel broadcast hangs
   // its own entry off (decision 5): an internal consumer is a plain
   // FolioHooks<Env> literal, pushed onto the same list a host hook is looked
   // up from, and always runs first.
-  describe('internal hooks (the spec 16 seam)', () => {
-    it('run before the host hook for the same event', async () => {
-      const order: string[] = []
+  describe("internal hooks (the spec 16 seam)", () => {
+    it("run before the host hook for the same event", async () => {
+      const order: string[] = [];
       const internal: FolioHooks<Env>[] = [
         {
           published: () => {
-            order.push('internal-1')
+            order.push("internal-1");
           },
         },
         {
           published: () => {
-            order.push('internal-2')
+            order.push("internal-2");
           },
         },
-      ]
+      ];
       const hooks: FolioHooks<Env> = {
-        await: ['published'],
+        await: ["published"],
         published: () => {
-          order.push('host')
+          order.push("host");
         },
-      }
-      const { ctx } = fakeCtx()
-      const runner = createHookRunner(hooks, ctx, internal)
+      };
+      const { ctx } = fakeCtx();
+      const runner = createHookRunner(hooks, ctx, internal);
 
-      await runner.run('published', PUBLISHED_EXTRA)
+      await runner.run("published", PUBLISHED_EXTRA);
 
-      expect(order).toEqual(['internal-1', 'internal-2', 'host'])
-    })
+      expect(order).toEqual(["internal-1", "internal-2", "host"]);
+    });
 
-    it('fire even when the host configures no hook at all for that event', async () => {
-      const calls: string[] = []
+    it("fire even when the host configures no hook at all for that event", async () => {
+      const calls: string[] = [];
       const internal: FolioHooks<Env>[] = [
         {
           deleted: () => {
-            calls.push('internal')
+            calls.push("internal");
           },
         },
-      ]
-      const { ctx, tasks } = fakeCtx()
-      const runner = createHookRunner(undefined, ctx, internal)
+      ];
+      const { ctx, tasks } = fakeCtx();
+      const runner = createHookRunner(undefined, ctx, internal);
 
-      await runner.run('deleted', { ids: [], paths: [], types: [], actor: null })
-      await Promise.all(tasks)
+      await runner.run("deleted", { ids: [], paths: [], types: [], actor: null });
+      await Promise.all(tasks);
 
-      expect(calls).toEqual(['internal'])
-    })
+      expect(calls).toEqual(["internal"]);
+    });
 
     /**
      * Internal hooks are awaited whatever the host's `await` list says
@@ -1143,161 +1147,161 @@ describe('createHookRunner', () => {
      * the response: the editor's very next act after publishing is to reload
      * the page, and `waitUntil` would let that reload race it.
      */
-    it('are awaited even when the host has asked for nothing to be awaited', async () => {
-      const order: string[] = []
-      let release: () => void = () => {}
+    it("are awaited even when the host has asked for nothing to be awaited", async () => {
+      const order: string[] = [];
+      let release: () => void = () => {};
       const blocked = new Promise<void>((r) => {
-        release = r
-      })
+        release = r;
+      });
       const internal: FolioHooks<Env>[] = [
         {
           published: async () => {
-            order.push('internal-start')
-            await blocked
-            order.push('internal-end')
+            order.push("internal-start");
+            await blocked;
+            order.push("internal-end");
           },
         },
-      ]
-      const { ctx, tasks } = fakeCtx()
-      const runner = createHookRunner(undefined, ctx, internal)
+      ];
+      const { ctx, tasks } = fakeCtx();
+      const runner = createHookRunner(undefined, ctx, internal);
 
-      const run = runner.run('published', PUBLISHED_EXTRA)
-      expect(order).toEqual(['internal-start'])
-      release()
-      await run
+      const run = runner.run("published", PUBLISHED_EXTRA);
+      expect(order).toEqual(["internal-start"]);
+      release();
+      await run;
 
-      expect(order).toEqual(['internal-start', 'internal-end'])
+      expect(order).toEqual(["internal-start", "internal-end"]);
       // Never handed to waitUntil: that is the whole point.
-      expect(tasks).toHaveLength(0)
-    })
+      expect(tasks).toHaveLength(0);
+    });
 
-    it('still let a non-awaited host hook ride waitUntil behind them', async () => {
-      const order: string[] = []
+    it("still let a non-awaited host hook ride waitUntil behind them", async () => {
+      const order: string[] = [];
       const internal: FolioHooks<Env>[] = [
         {
           published: () => {
-            order.push('internal')
+            order.push("internal");
           },
         },
-      ]
+      ];
       const hooks: FolioHooks<Env> = {
         published: () => {
-          order.push('host')
+          order.push("host");
         },
-      }
-      const { ctx, tasks } = fakeCtx()
-      const runner = createHookRunner(hooks, ctx, internal)
+      };
+      const { ctx, tasks } = fakeCtx();
+      const runner = createHookRunner(hooks, ctx, internal);
 
-      await runner.run('published', PUBLISHED_EXTRA)
-      await Promise.all(tasks)
+      await runner.run("published", PUBLISHED_EXTRA);
+      await Promise.all(tasks);
 
-      expect(order).toEqual(['internal', 'host'])
-      expect(tasks).toHaveLength(1)
-    })
+      expect(order).toEqual(["internal", "host"]);
+      expect(tasks).toHaveLength(1);
+    });
 
     it("an internal hook's failure does not stop the host hook from running", async () => {
-      const calls: string[] = []
+      const calls: string[] = [];
       const internal: FolioHooks<Env>[] = [
         {
           published: () => {
-            throw new Error('internal boom')
+            throw new Error("internal boom");
           },
         },
-      ]
+      ];
       const hooks: FolioHooks<Env> = {
-        await: ['published'],
+        await: ["published"],
         published: () => {
-          calls.push('host')
+          calls.push("host");
         },
-      }
-      const { ctx } = fakeCtx()
-      const runner = createHookRunner(hooks, ctx, internal)
-      const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+      };
+      const { ctx } = fakeCtx();
+      const runner = createHookRunner(hooks, ctx, internal);
+      const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
-      await runner.run('published', PUBLISHED_EXTRA)
+      await runner.run("published", PUBLISHED_EXTRA);
 
-      expect(calls).toEqual(['host'])
-      expect(logged).toHaveBeenCalledTimes(1)
-      logged.mockRestore()
-    })
-  })
-})
+      expect(calls).toEqual(["host"]);
+      expect(logged).toHaveBeenCalledTimes(1);
+      logged.mockRestore();
+    });
+  });
+});
 
 // A scheduled publish (a Durable Object alarm, "next on the roadmap" per
 // publish.ts's own header) has no ExecutionContext to take a waitUntil from.
 // alarmHookCtx is the fallback publishDeps builds instead (runtime.ts) — the
 // same runner, fired the same way, just with nothing native catching an
 // unawaited hook's rejection for it.
-describe('alarmHookCtx', () => {
-  it('runs a hook exactly like an HTTP call site would, with the same env', async () => {
-    const calls: unknown[] = []
+describe("alarmHookCtx", () => {
+  it("runs a hook exactly like an HTTP call site would, with the same env", async () => {
+    const calls: unknown[] = [];
     const hooks: FolioHooks<Env> = {
       created: (e) => {
-        calls.push(e)
+        calls.push(e);
       },
-    }
-    const ctx = alarmHookCtx<Env>({ marker: 'env' })
-    const runner = createHookRunner(hooks, ctx)
+    };
+    const ctx = alarmHookCtx<Env>({ marker: "env" });
+    const runner = createHookRunner(hooks, ctx);
 
-    await runner.run('created', { story: STORY, actor: null })
+    await runner.run("created", { story: STORY, actor: null });
 
     expect(calls).toEqual([
       {
         story: STORY,
         actor: null,
-        env: { marker: 'env' },
+        env: { marker: "env" },
         waitUntil: ctx.waitUntil,
-        site: 'default',
+        site: "default",
         brand: null,
       },
-    ])
-  })
+    ]);
+  });
 
   it("catches an unawaited hook's rejection itself, so it cannot escape into the alarm handler", async () => {
     const hooks: FolioHooks<Env> = {
       created: () => {
-        throw new Error('boom from an alarm-fired hook')
+        throw new Error("boom from an alarm-fired hook");
       },
-    }
-    const ctx = alarmHookCtx<Env>({ marker: 'env' })
-    const runner = createHookRunner(hooks, ctx)
-    const logged = vi.spyOn(console, 'error').mockImplementation(() => {})
+    };
+    const ctx = alarmHookCtx<Env>({ marker: "env" });
+    const runner = createHookRunner(hooks, ctx);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
 
     // The fallback waitUntil never receives the task here (run() only awaits
     // it when the event is listed), so this proves the whole chain — runner
     // catch, then the fallback's own catch — never surfaces as a rejection.
-    await expect(runner.run('created', { story: STORY, actor: null })).resolves.toBeUndefined()
-    await new Promise((r) => setTimeout(r, 0)) // let the fallback's own catch settle
+    await expect(runner.run("created", { story: STORY, actor: null })).resolves.toBeUndefined();
+    await new Promise((r) => setTimeout(r, 0)); // let the fallback's own catch settle
 
-    expect(logged.mock.calls.some((c) => c[0] === 'folio: hook created failed')).toBe(true)
-    logged.mockRestore()
-  })
+    expect(logged.mock.calls.some((c) => c[0] === "folio: hook created failed")).toBe(true);
+    logged.mockRestore();
+  });
 
-  it('still awaits a listed event under the fallback', async () => {
-    const order: string[] = []
+  it("still awaits a listed event under the fallback", async () => {
+    const order: string[] = [];
     const hooks: FolioHooks<Env> = {
-      await: ['created'],
+      await: ["created"],
       created: async () => {
-        order.push('start')
-        await Promise.resolve()
-        order.push('end')
+        order.push("start");
+        await Promise.resolve();
+        order.push("end");
       },
-    }
-    const ctx = alarmHookCtx<Env>({ marker: 'env' })
-    const runner = createHookRunner(hooks, ctx)
+    };
+    const ctx = alarmHookCtx<Env>({ marker: "env" });
+    const runner = createHookRunner(hooks, ctx);
 
-    order.push('before')
-    await runner.run('created', { story: STORY, actor: null })
-    order.push('after')
+    order.push("before");
+    await runner.run("created", { story: STORY, actor: null });
+    order.push("after");
 
-    expect(order).toEqual(['before', 'start', 'end', 'after'])
-  })
-})
+    expect(order).toEqual(["before", "start", "end", "after"]);
+  });
+});
 
-describe('validateHooks', () => {
-  it('does nothing when hooks is undefined', () => {
-    expect(() => validateHooks(undefined)).not.toThrow()
-  })
+describe("validateHooks", () => {
+  it("does nothing when hooks is undefined", () => {
+    expect(() => validateHooks(undefined)).not.toThrow();
+  });
 
   /**
    * The two lists — `HookEvent` (compile time) and `HOOK_EVENTS` (runtime) —
@@ -1306,7 +1310,7 @@ describe('validateHooks', () => {
    * `FolioHooks` by the compiler and against the array by `validateHooks`, so
    * a name missing from either side fails here.
    */
-  it('accepts every real event, plus await', () => {
+  it("accepts every real event, plus await", () => {
     const hooks: FolioHooks<Env> = {
       published: () => {},
       unpublished: () => {},
@@ -1320,23 +1324,23 @@ describe('validateHooks', () => {
       redirectsChanged: () => {},
       formChanged: () => {},
       submitted: () => {},
-      await: ['published'],
-    }
-    expect(() => validateHooks(hooks)).not.toThrow()
-  })
+      await: ["published"],
+    };
+    expect(() => validateHooks(hooks)).not.toThrow();
+  });
 
-  it('names every valid key in the message it throws, so the list is discoverable', () => {
+  it("names every valid key in the message it throws, so the list is discoverable", () => {
     expect(() => validateHooks({ reindex: () => {} } as unknown as FolioHooks<Env>)).toThrow(
       /valid: await, checkpointed, created, deleted, formChanged, migrated, pathsChanged, published, redirectsChanged, reindexed, siteChanged, submitted, unpublished, updated/,
-    )
-  })
+    );
+  });
 
-  it('throws naming an unknown key and listing the valid ones', () => {
+  it("throws naming an unknown key and listing the valid ones", () => {
     expect(() => validateHooks({ publish: () => {} } as unknown as FolioHooks<Env>)).toThrow(
       /unknown hook "publish"/,
-    )
-  })
-})
+    );
+  });
+});
 
 // ---------------------------------------------------------------------------
 // validateAssets
@@ -1349,32 +1353,32 @@ describe('validateHooks', () => {
  * that only checked "throws" would pass against a message nobody could act on,
  * so these check that the message names the fix.
  */
-describe('validateAssets', () => {
-  const good = { admin: '/folio-admin.js', preview: '/folio-preview.js' }
+describe("validateAssets", () => {
+  const good = { admin: "/folio-admin.js", preview: "/folio-preview.js" };
 
-  it('accepts what the Vite plugin defines', () => {
-    expect(() => validateAssets(good)).not.toThrow()
-    expect(() => validateAssets({ ...good, devClient: '/@vite/client' })).not.toThrow()
-  })
+  it("accepts what the Vite plugin defines", () => {
+    expect(() => validateAssets(good)).not.toThrow();
+    expect(() => validateAssets({ ...good, devClient: "/@vite/client" })).not.toThrow();
+  });
 
-  it('throws when the key is missing, saying what goes wrong and how to fix it', () => {
-    expect(() => validateAssets(undefined)).toThrow(/blank screen/)
-    expect(() => validateAssets(undefined)).toThrow(/assets: __FOLIO_ASSETS__/)
-  })
+  it("throws when the key is missing, saying what goes wrong and how to fix it", () => {
+    expect(() => validateAssets(undefined)).toThrow(/blank screen/);
+    expect(() => validateAssets(undefined)).toThrow(/assets: __FOLIO_ASSETS__/);
+  });
 
-  it('throws on a hand-rolled object missing either entry', () => {
-    expect(() => validateAssets({ preview: '/p.js' } as never)).toThrow(/'assets.admin'/)
-    expect(() => validateAssets({ admin: '/a.js' } as never)).toThrow(/'assets.preview'/)
-  })
+  it("throws on a hand-rolled object missing either entry", () => {
+    expect(() => validateAssets({ preview: "/p.js" } as never)).toThrow(/'assets.admin'/);
+    expect(() => validateAssets({ admin: "/a.js" } as never)).toThrow(/'assets.preview'/);
+  });
 
   /**
    * An empty string is the shape a host lands on by reading a define that was
    * never substituted, which is the exact case this whole guard is about.
    */
-  it('treats an empty string as absent', () => {
-    expect(() => validateAssets({ admin: '', preview: '/p.js' })).toThrow(/'assets.admin'/)
-  })
-})
+  it("treats an empty string as absent", () => {
+    expect(() => validateAssets({ admin: "", preview: "/p.js" })).toThrow(/'assets.admin'/);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // subtreeWhere / descendantsWhere / assetFilterSql
@@ -1391,81 +1395,81 @@ describe('validateAssets', () => {
  *  - every clause binds a **fixed** number of parameters, so no filter can walk
  *    into `D1_BIND_CAP` however deep the tree.
  */
-describe('subtreeWhere / descendantsWhere', () => {
-  it('emits a half-open range whose bounds are the two adjacent ASCII bytes', () => {
-    const range = subtreeWhere('path', 'clients')
-    expect(range.sql).toBe('(path = ? or (path > ? and path < ?))')
-    expect(range.binds).toEqual(['clients', 'clients/', 'clients0'])
+describe("subtreeWhere / descendantsWhere", () => {
+  it("emits a half-open range whose bounds are the two adjacent ASCII bytes", () => {
+    const range = subtreeWhere("path", "clients");
+    expect(range.sql).toBe("(path = ? or (path > ? and path < ?))");
+    expect(range.binds).toEqual(["clients", "clients/", "clients0"]);
     // The whole trick: '/' is 0x2F, '0' is 0x30, and nothing sits between them.
-    expect('clients/'.charCodeAt(7) + 1).toBe('clients0'.charCodeAt(7))
-  })
+    expect("clients/".charCodeAt(7) + 1).toBe("clients0".charCodeAt(7));
+  });
 
-  it('places a prefix sibling outside the range on both sides', () => {
-    const { binds } = subtreeWhere('path', 'shoots')
-    const [, low, high] = binds as [string, string, string]
-    expect('shoots/raw' > low && 'shoots/raw' < high).toBe(true)
+  it("places a prefix sibling outside the range on both sides", () => {
+    const { binds } = subtreeWhere("path", "shoots");
+    const [, low, high] = binds as [string, string, string];
+    expect("shoots/raw" > low && "shoots/raw" < high).toBe(true);
     // '-' (0x2D) sorts below '/', 'x' (0x78) above '0'. A `like 'shoots%'` takes
     // both; the range takes neither.
-    expect('shoots-2024' > low).toBe(false)
-    expect('shootsx' < high).toBe(false)
-  })
+    expect("shoots-2024" > low).toBe(false);
+    expect("shootsx" < high).toBe(false);
+  });
 
-  it('names any column the caller gives it, and never binds it', () => {
-    expect(subtreeWhere('f.path', 'a').sql).toBe('(f.path = ? or (f.path > ? and f.path < ?))')
-  })
+  it("names any column the caller gives it, and never binds it", () => {
+    expect(subtreeWhere("f.path", "a").sql).toBe("(f.path = ? or (f.path > ? and f.path < ?))");
+  });
 
-  it('descendantsWhere is the same range with the folder itself excluded', () => {
-    const range = descendantsWhere('path', 'clients')
-    expect(range.sql).toBe('(path > ? and path < ?)')
-    expect(range.binds).toEqual(['clients/', 'clients0'])
-  })
-})
+  it("descendantsWhere is the same range with the folder itself excluded", () => {
+    const range = descendantsWhere("path", "clients");
+    expect(range.sql).toBe("(path > ? and path < ?)");
+    expect(range.binds).toEqual(["clients/", "clients0"]);
+  });
+});
 
-describe('assetFilterSql', () => {
-  it('emits nothing for an empty filter, so an unfiltered reader is unchanged', () => {
-    expect(assetFilterSql({})).toEqual({ clauses: [], binds: [] })
-  })
+describe("assetFilterSql", () => {
+  it("emits nothing for an empty filter, so an unfiltered reader is unchanged", () => {
+    expect(assetFilterSql({})).toEqual({ clauses: [], binds: [] });
+  });
 
-  it('searches five columns for one term (decision 12)', () => {
-    const { clauses, binds } = assetFilterSql({ q: 'brick' })
-    expect(clauses).toHaveLength(1)
-    for (const column of ['filename', 'alt', 'alt_auto', 'description', 'description_auto']) {
-      expect(clauses[0]).toContain(`${column} like ?`)
+  it("searches five columns for one term (decision 12)", () => {
+    const { clauses, binds } = assetFilterSql({ q: "brick" });
+    expect(clauses).toHaveLength(1);
+    for (const column of ["filename", "alt", "alt_auto", "description", "description_auto"]) {
+      expect(clauses[0]).toContain(`${column} like ?`);
     }
-    expect(binds).toEqual(['%brick%', '%brick%', '%brick%', '%brick%', '%brick%'])
-  })
+    expect(binds).toEqual(["%brick%", "%brick%", "%brick%", "%brick%", "%brick%"]);
+  });
 
-  it('filters a folder by range and not by LIKE', () => {
-    const { clauses, binds } = assetFilterSql({ folder: 'clients' })
+  it("filters a folder by range and not by LIKE", () => {
+    const { clauses, binds } = assetFilterSql({ folder: "clients" });
     expect(clauses[0]).toBe(
-      'folder_id in (select id from asset_folders where (path = ? or (path > ? and path < ?)))',
-    )
-    expect(clauses[0]).not.toMatch(/like/i)
-    expect(binds).toEqual(['clients', 'clients/', 'clients0'])
-  })
+      "folder_id in (select id from asset_folders where (path = ? or (path > ? and path < ?)))",
+    );
+    expect(clauses[0]).not.toMatch(/like/i);
+    expect(binds).toEqual(["clients", "clients/", "clients0"]);
+  });
 
-  it('treats unfiled as a null test, and composes both rather than dropping one', () => {
+  it("treats unfiled as a null test, and composes both rather than dropping one", () => {
     expect(assetFilterSql({ unfiled: true })).toEqual({
-      clauses: ['folder_id is null'],
+      clauses: ["folder_id is null"],
       binds: [],
-    })
+    });
     // The route refuses this combination; the composer stays truthful about it
     // rather than silently choosing a winner.
-    const both = assetFilterSql({ folder: 'clients', unfiled: true })
-    expect(both.clauses).toHaveLength(2)
-  })
+    const both = assetFilterSql({ folder: "clients", unfiled: true });
+    expect(both.clauses).toHaveLength(2);
+  });
 
   /**
    * The bind budget, asserted rather than reasoned about. `D1_BIND_CAP` is 100
    * per statement and this repo has been over it twice; a filter is the shape
    * that grows a bind quietly, so the widest one it can express is worth pinning.
    */
-  it('binds a fixed nine parameters at its very widest', () => {
-    const widest = assetFilterSql({ q: 'x', kind: 'image', folder: 'a/b/c', unfiled: true })
-    expect(widest.binds).toHaveLength(9)
-    expect(widest.binds.length).toBeLessThan(BIND_BUDGET)
-  })
-})
+  it("binds a fixed nine parameters at its very widest", () => {
+    const widest = assetFilterSql({ q: "x", kind: "image", folder: "a/b/c", unfiled: true });
+    expect(widest.binds).toHaveLength(9);
+    expect(widest.binds.length).toBeLessThan(BIND_BUDGET);
+  });
+});
 
 /* ----------------------------------------------------------------- forms --- */
 
@@ -1475,45 +1479,45 @@ describe('assetFilterSql', () => {
  * screen between a query string and a store, so they are tested here rather
  * than only through the routes that will call them.
  */
-describe('formIdParam', () => {
-  it('accepts the mint format and nothing that merely looks like it', () => {
-    expect(formIdParam('frm_0123456789ab')).toBe('frm_0123456789ab')
+describe("formIdParam", () => {
+  it("accepts the mint format and nothing that merely looks like it", () => {
+    expect(formIdParam("frm_0123456789ab")).toBe("frm_0123456789ab");
     // Anchored to the shape, not screened by charset — `{base}/f/:id` is public
     // and unauthenticated, so a charset screen would be a read primitive
     // (architecture decision 3, and `ASSET_KEY`'s own header).
     for (const bad of [
-      'sty_0123456789ab',
-      'frm_0123456789ab-extra',
-      'frm_0123456789AB',
-      'frm_0123456789a',
-      'frm_',
+      "sty_0123456789ab",
+      "frm_0123456789ab-extra",
+      "frm_0123456789AB",
+      "frm_0123456789a",
+      "frm_",
       undefined,
     ]) {
-      expect(() => formIdParam(bad)).toThrow()
+      expect(() => formIdParam(bad)).toThrow();
     }
-  })
-})
+  });
+});
 
-describe('responseFilterQuery', () => {
-  const q = (params: Record<string, string>) => ({ query: (key: string) => params[key] })
+describe("responseFilterQuery", () => {
+  const q = (params: Record<string, string>) => ({ query: (key: string) => params[key] });
 
-  it('is empty for a request that asked for nothing', () => {
-    expect(responseFilterQuery(q({}))).toEqual({})
+  it("is empty for a request that asked for nothing", () => {
+    expect(responseFilterQuery(q({}))).toEqual({});
     // An empty parameter is the same request as an absent one, which is what
     // lets a client build the URL without a conditional.
-    expect(responseFilterQuery(q({ from: '', to: '', q: '' }))).toEqual({})
-  })
+    expect(responseFilterQuery(q({ from: "", to: "", q: "" }))).toEqual({});
+  });
 
-  it('parses the two bounds and the term', () => {
+  it("parses the two bounds and the term", () => {
     expect(
-      responseFilterQuery(q({ from: '1700000000000', to: '1800000000000', q: ' hi ' })),
-    ).toEqual({ from: 1_700_000_000_000, to: 1_800_000_000_000, q: 'hi' })
-  })
+      responseFilterQuery(q({ from: "1700000000000", to: "1800000000000", q: " hi " })),
+    ).toEqual({ from: 1_700_000_000_000, to: 1_800_000_000_000, q: "hi" });
+  });
 
-  it('refuses a bound that is not a number, and truncates a pasted term', () => {
-    expect(() => responseFilterQuery(q({ from: 'yesterday' }))).toThrow()
+  it("refuses a bound that is not a number, and truncates a pasted term", () => {
+    expect(() => responseFilterQuery(q({ from: "yesterday" }))).toThrow();
     // The `limit` side of this file's asymmetry: a 300-character term is a paste
     // accident with an obvious right answer and no state to leave a client in.
-    expect(responseFilterQuery(q({ q: 'x'.repeat(300) })).q).toHaveLength(200)
-  })
-})
+    expect(responseFilterQuery(q({ q: "x".repeat(300) })).q).toHaveLength(200);
+  });
+});

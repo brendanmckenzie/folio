@@ -1,11 +1,11 @@
-import { defineBlock, richtext, select, text } from 'folio/core'
+import { defineBlock, richtext, select, text } from "folio/core";
 
 export const prose = defineBlock({
-  name: 'prose',
-  label: 'Prose',
-  summary: 'heading',
+  name: "prose",
+  label: "Prose",
+  summary: "heading",
   fields: {
-    heading: text({ label: 'Heading' }),
+    heading: text({ label: "Heading" }),
     /**
      * Richtext arrives **already rendered**, so there is no way to reach the
      * page without going through sanitising and link resolution — a document
@@ -16,17 +16,17 @@ export const prose = defineBlock({
      * editor's schema has nowhere to put the rest.
      */
     body: richtext({
-      label: 'Body',
+      label: "Body",
       headingLevels: [2, 3],
-      help: 'Links to other pages follow them when those pages are renamed.',
+      help: "Links to other pages follow them when those pages are renamed.",
     }),
     width: select({
-      label: 'Measure',
+      label: "Measure",
       options: [
-        { label: 'Narrow', value: 'narrow' },
-        { label: 'Wide', value: 'wide' },
+        { label: "Narrow", value: "narrow" },
+        { label: "Wide", value: "wide" },
       ],
-      default: 'narrow',
+      default: "narrow",
     }),
   },
   render: ({ heading, body, width }) => (
@@ -35,4 +35,4 @@ export const prose = defineBlock({
       <div className="prose__body">{body}</div>
     </section>
   ),
-})
+});

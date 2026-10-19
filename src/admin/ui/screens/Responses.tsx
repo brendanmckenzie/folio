@@ -1,16 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { BulkFailure, BulkRefusal, BulkReport } from '../../../core/bulk'
-import type { ResponseRow } from '../../../server/form-responses'
-import { canDeleteForms, type Me } from '../../me'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { EmptyState } from '../EmptyState'
-import { ListHeader } from '../List'
-import { type Column, Table } from '../Table'
-import { ConfirmBulkDialog } from './ConfirmBulkDialog'
-import type { Confirmation } from './content-model'
-import css from './Responses.module.css'
+import { useCallback, useEffect, useState } from "react";
+import type { BulkFailure, BulkRefusal, BulkReport } from "../../../core/bulk";
+import type { ResponseRow } from "../../../server/form-responses";
+import { canDeleteForms, type Me } from "../../me";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { EmptyState } from "../EmptyState";
+import { ListHeader } from "../List";
+import { type Column, Table } from "../Table";
+import { ConfirmBulkDialog } from "./ConfirmBulkDialog";
+import type { Confirmation } from "./content-model";
+import css from "./Responses.module.css";
 import {
   ABSENT,
   type AnswerLine,
@@ -41,27 +41,27 @@ import {
   tickAllShown,
   tickCount,
   toggleTick,
-} from './responses-model'
-import { messageOf } from './useContent'
-import { useResponses } from './useResponses'
+} from "./responses-model";
+import { messageOf } from "./useContent";
+import { useResponses } from "./useResponses";
 
 interface Props {
-  apiBase: string
+  apiBase: string;
   /** The form whose responses these are — `route.screen.id`. */
-  id: string
-  me: Me
-  query: Readonly<Record<string, string>>
+  id: string;
+  me: Me;
+  query: Readonly<Record<string, string>>;
   /** `replace`, not `push`: a filter keystroke must not be a history entry. */
-  onQuery: (next: Record<string, string | undefined>) => void
-  onNotice: (message: string) => void
+  onQuery: (next: Record<string, string | undefined>) => void;
+  onNotice: (message: string) => void;
   /** Reports the form's label for the breadcrumb, exactly as `FormBuilder` does
    *  once its own fetch answers. */
-  onLabel: (label: string) => void
-  onOpenBuilder: () => void
+  onLabel: (label: string) => void;
+  onOpenBuilder: () => void;
 }
 
 /** Six placeholder rows, matching every other list screen's skeleton count. */
-const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
+const SKELETON = ["s1", "s2", "s3", "s4", "s5", "s6"];
 
 /**
  * A form's responses — `docs/specs/content-model/forms.md` phase 7, and the third
@@ -91,58 +91,60 @@ export function Responses({
   onLabel,
   onOpenBuilder,
 }: Props) {
-  const url = parseResponsesUrl(query)
-  const data = useResponses(apiBase, id, url)
-  const go = (next: ResponsesUrl) => onQuery(responsesQuery(next))
+  const url = parseResponsesUrl(query);
+  const data = useResponses(apiBase, id, url);
+  const go = (next: ResponsesUrl) => onQuery(responsesQuery(next));
 
-  const [ticked, setTicked] = useState<Ticked>(NOTHING)
-  const [open, setOpen] = useState<ResponseRow | null>(null)
-  const [deleting, setDeleting] = useState<ResponseRow | null>(null)
-  const [confirm, setConfirm] = useState<{ confirmation: Confirmation; label: string } | null>(null)
-  const [running, setRunning] = useState(false)
+  const [ticked, setTicked] = useState<Ticked>(NOTHING);
+  const [open, setOpen] = useState<ResponseRow | null>(null);
+  const [deleting, setDeleting] = useState<ResponseRow | null>(null);
+  const [confirm, setConfirm] = useState<{ confirmation: Confirmation; label: string } | null>(
+    null,
+  );
+  const [running, setRunning] = useState(false);
 
-  const form = data.form
-  const label = form?.label ?? ''
+  const form = data.form;
+  const label = form?.label ?? "";
   // `onLabel` is a fresh closure on every render of the shell, so naming it here
   // would re-report the label on every one. The label is the trigger.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reporting is keyed on the value, not on the identity of the reporter
   useEffect(() => {
-    if (label) onLabel(label)
-  }, [label])
+    if (label) onLabel(label);
+  }, [label]);
 
-  const rows = data.page.rows
-  const count = tickCount(ticked)
-  const columns = tableColumns(form?.fields ?? [])
-  const hasFiles = columns.some((field) => field.kind === 'file')
-  const mayDelete = canDeleteForms(me)
+  const rows = data.page.rows;
+  const count = tickCount(ticked);
+  const columns = tableColumns(form?.fields ?? []);
+  const hasFiles = columns.some((field) => field.kind === "file");
+  const mayDelete = canDeleteForms(me);
 
   /* ---------------------------------------------------------- one delete --- */
 
   const removeOne = useCallback(
     async (row: ResponseRow) => {
-      setRunning(true)
+      setRunning(true);
       try {
         const res = await fetch(
           `${apiBase}/forms/${encodeURIComponent(id)}/responses/${encodeURIComponent(row.id)}`,
-          { method: 'DELETE' },
-        )
-        if (!res.ok) throw new Error(await messageOf(res))
-        const result = (await res.json()) as { files: number }
+          { method: "DELETE" },
+        );
+        if (!res.ok) throw new Error(await messageOf(res));
+        const result = (await res.json()) as { files: number };
         onNotice(
           result.files > 0
-            ? `Response deleted, with ${result.files} ${result.files === 1 ? 'file' : 'files'}.`
-            : 'Response deleted.',
-        )
-        setTicked(NOTHING)
-        data.reload()
+            ? `Response deleted, with ${result.files} ${result.files === 1 ? "file" : "files"}.`
+            : "Response deleted.",
+        );
+        setTicked(NOTHING);
+        data.reload();
       } catch (e) {
-        onNotice((e as Error).message)
+        onNotice((e as Error).message);
       } finally {
-        setRunning(false)
+        setRunning(false);
       }
     },
     [apiBase, id, data, onNotice],
-  )
+  );
 
   /* --------------------------------------------------------- bulk delete --- */
 
@@ -156,41 +158,41 @@ export function Responses({
    */
   const finished = useCallback(
     (done: number, failed: readonly BulkFailure[]) => {
-      setTicked(NOTHING)
-      setRunning(false)
-      onNotice(runReport(done, failed))
-      data.reload()
+      setTicked(NOTHING);
+      setRunning(false);
+      onNotice(runReport(done, failed));
+      data.reload();
     },
     [data, onNotice],
-  )
+  );
 
   const run = useCallback(
     async (body: Record<string, unknown>) => {
-      setRunning(true)
+      setRunning(true);
       try {
-        const outcome = await runDelete(apiBase, id, body)
-        if ('refused' in outcome) {
-          setRunning(false)
+        const outcome = await runDelete(apiBase, id, body);
+        if ("refused" in outcome) {
+          setRunning(false);
           // Re-confirmed against the *new* count, and the selection is
           // re-captured at it — pressing the same button again would otherwise
           // refuse forever with the number that has already moved.
           setConfirm({
             confirmation: deleteRefusal(outcome.refused),
             label: retryLabel(outcome.refused),
-          })
+          });
           setTicked((prev) =>
             prev.all ? { ...prev, expected: outcome.refused.actual, exclude: new Set() } : prev,
-          )
-          return
+          );
+          return;
         }
-        finished(outcome.done, outcome.failed)
+        finished(outcome.done, outcome.failed);
       } catch (e) {
-        setRunning(false)
-        onNotice((e as Error).message)
+        setRunning(false);
+        onNotice((e as Error).message);
       }
     },
     [apiBase, id, finished, onNotice],
-  )
+  );
 
   /* -------------------------------------------------------------- render --- */
 
@@ -199,7 +201,7 @@ export function Responses({
       <div className={css.screen}>
         <EmptyState title="Could not load this form" body={data.formError} />
       </div>
-    )
+    );
   }
 
   if (data.page.error && rows.length === 0) {
@@ -215,17 +217,17 @@ export function Responses({
           }
         />
       </div>
-    )
+    );
   }
 
-  const firstLoad = (data.page.loading || data.formLoading) && rows.length === 0
-  const narrowed = isNarrowed(url)
-  const note = retentionNote(data.page.oldest)
+  const firstLoad = (data.page.loading || data.formLoading) && rows.length === 0;
+  const narrowed = isNarrowed(url);
+  const note = retentionNote(data.page.oldest);
 
   const tableColumnsFor: Column<ResponseRow>[] = [
     {
-      key: '_submitted',
-      label: 'Submitted',
+      key: "_submitted",
+      label: "Submitted",
       cell: (row) => (
         <span className={css.stamp} title={submittedExact(row.createdAt)}>
           {submittedLabel(row.createdAt)}
@@ -236,15 +238,15 @@ export function Responses({
       key: field.name,
       label: field.label || field.name,
       cell: (row) => {
-        const text = cellText(field, row)
+        const text = cellText(field, row);
         return (
           <span className={text === ABSENT ? css.absent : css.cell} title={text}>
             {text}
           </span>
-        )
+        );
       },
     })),
-  ]
+  ];
 
   return (
     <div className={css.screen}>
@@ -299,7 +301,7 @@ export function Responses({
           </label>
         </fieldset>
         {narrowed ? (
-          <Button size="sm" variant="subtle" onClick={() => go({ from: '', to: '', q: '' })}>
+          <Button size="sm" variant="subtle" onClick={() => go({ from: "", to: "", q: "" })}>
             Clear filters
           </Button>
         ) : null}
@@ -314,8 +316,8 @@ export function Responses({
             onClick={() => setTicked((prev) => tickAllShown(prev, rows))}
           >
             {rows.length > 0 && rows.every((row) => isTicked(ticked, row.id))
-              ? 'Deselect all shown'
-              : 'Select all shown'}
+              ? "Deselect all shown"
+              : "Select all shown"}
           </button>
           {/* Offered only when the list has been asked for a count: `expected`
               has to be the number the person read, or the server's guard is
@@ -326,7 +328,7 @@ export function Responses({
               className={css.selectAll}
               onClick={() => setTicked(selectAll(url, data.page.total ?? 0))}
             >
-              {`Select all ${data.page.total.toLocaleString('en-US')} matching`}
+              {`Select all ${data.page.total.toLocaleString("en-US")} matching`}
             </button>
           ) : null}
           {/* Announced: the count changes without the focus moving, so a screen
@@ -339,10 +341,10 @@ export function Responses({
               size="sm"
               variant="danger"
               disabled={count === 0 || running}
-              reason={running ? 'Working…' : 'Select some responses first'}
+              reason={running ? "Working…" : "Select some responses first"}
               onClick={() => {
-                const confirmation = deleteConfirmation(ticked, rows, hasFiles)
-                if (confirmation) setConfirm({ confirmation, label: `Delete ${count}` })
+                const confirmation = deleteConfirmation(ticked, rows, hasFiles);
+                if (confirmation) setConfirm({ confirmation, label: `Delete ${count}` });
               }}
             >
               Delete
@@ -359,7 +361,7 @@ export function Responses({
         </div>
       ) : (
         <Table
-          label={`Responses to ${label || 'this form'}`}
+          label={`Responses to ${label || "this form"}`}
           columns={tableColumnsFor}
           rows={rows}
           rowKey={(row) => row.id}
@@ -408,15 +410,15 @@ export function Responses({
           )}
           empty={
             <EmptyState
-              title={narrowed ? 'Nothing matches' : 'No responses yet'}
+              title={narrowed ? "Nothing matches" : "No responses yet"}
               body={
                 narrowed
-                  ? 'Try a wider date range, or clear the search.'
-                  : 'When somebody fills this form in, their answers land here. Nothing else has to be wired up.'
+                  ? "Try a wider date range, or clear the search."
+                  : "When somebody fills this form in, their answers land here. Nothing else has to be wired up."
               }
               action={
                 narrowed ? (
-                  <Button size="sm" onClick={() => go({ from: '', to: '', q: '' })}>
+                  <Button size="sm" onClick={() => go({ from: "", to: "", q: "" })}>
                     Clear filters
                   </Button>
                 ) : undefined
@@ -430,8 +432,8 @@ export function Responses({
         <span className={css.count}>
           {data.page.total === undefined
             ? `${rows.length} shown`
-            : `${rows.length} of ${data.page.total.toLocaleString('en-US')} ${
-                data.page.total === 1 ? 'response' : 'responses'
+            : `${rows.length} of ${data.page.total.toLocaleString("en-US")} ${
+                data.page.total === 1 ? "response" : "responses"
               }`}
         </span>
         {note ? <span className={css.retention}>{note}</span> : null}
@@ -471,9 +473,9 @@ export function Responses({
           canDelete={mayDelete}
           onClose={() => setOpen(null)}
           onDelete={() => {
-            const row = open
-            setOpen(null)
-            setDeleting(row)
+            const row = open;
+            setOpen(null);
+            setDeleting(row);
           }}
         />
       ) : null}
@@ -492,9 +494,9 @@ export function Responses({
                 disabled={running}
                 reason="Working…"
                 onClick={() => {
-                  const row = deleting
-                  setDeleting(null)
-                  void removeOne(row)
+                  const row = deleting;
+                  setDeleting(null);
+                  void removeOne(row);
                 }}
               >
                 Delete it
@@ -510,13 +512,13 @@ export function Responses({
           confirmLabel={confirm.label}
           onClose={() => setConfirm(null)}
           onConfirm={() => {
-            setConfirm(null)
-            void run({ selection: selectionBody(ticked) })
+            setConfirm(null);
+            void run({ selection: selectionBody(ticked) });
           }}
         />
       ) : null}
     </div>
-  )
+  );
 }
 
 /* ------------------------------------------------------------- the drawer --- */
@@ -542,13 +544,13 @@ function ResponseDrawer({
   onClose,
   onDelete,
 }: {
-  apiBase: string
-  formId: string
-  response: ResponseRow
-  lines: readonly AnswerLine[]
-  canDelete: boolean
-  onClose: () => void
-  onDelete: () => void
+  apiBase: string;
+  formId: string;
+  response: ResponseRow;
+  lines: readonly AnswerLine[];
+  canDelete: boolean;
+  onClose: () => void;
+  onDelete: () => void;
 }) {
   return (
     <Dialog
@@ -619,7 +621,7 @@ function ResponseDrawer({
         </div>
       </dl>
     </Dialog>
-  )
+  );
 }
 
 /* ------------------------------------------------------------------ the job --- */
@@ -639,25 +641,25 @@ async function runDelete(
   formId: string,
   body: Record<string, unknown>,
 ): Promise<{ done: number; failed: BulkFailure[] } | { refused: BulkRefusal }> {
-  let continueFrom: string | null = null
-  let done = 0
-  const failed: BulkFailure[] = []
+  let continueFrom: string | null = null;
+  let done = 0;
+  const failed: BulkFailure[] = [];
   for (;;) {
     const res = await fetch(`${apiBase}/forms/${encodeURIComponent(formId)}/responses/delete`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...body, ...(continueFrom === null ? {} : { continueFrom }) }),
-    })
+    });
     // The guard runs once, at the start of a job, so a refusal can only arrive on
     // the first call — and it arrives before anything is deleted.
-    if (res.status === 409) return { refused: (await res.json()) as BulkRefusal }
-    if (!res.ok) throw new Error(await messageOf(res))
-    const report = (await res.json()) as BulkReport<'delete'>
-    done += report.done
-    failed.push(...report.failed)
+    if (res.status === 409) return { refused: (await res.json()) as BulkRefusal };
+    if (!res.ok) throw new Error(await messageOf(res));
+    const report = (await res.json()) as BulkReport<"delete">;
+    done += report.done;
+    failed.push(...report.failed);
     if (report.continueFrom === null || report.continueFrom === continueFrom) {
-      return { done, failed }
+      return { done, failed };
     }
-    continueFrom = report.continueFrom
+    continueFrom = report.continueFrom;
   }
 }

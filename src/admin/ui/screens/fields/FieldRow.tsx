@@ -1,11 +1,11 @@
-import type { CSSProperties } from 'react'
-import type { Blok, Json } from '../../../../core/doc'
-import type { Field as FieldDef } from '../../../../core/fields'
-import type { Presence } from '../../../../core/protocol'
-import { asRichtext, sanitiseRichtext } from '../../../../core/richtext'
-import { RichText } from '../../../../preview/RichText'
-import { Button } from '../../Button'
-import { Field } from '../../Field'
+import type { CSSProperties } from "react";
+import type { Blok, Json } from "../../../../core/doc";
+import type { Field as FieldDef } from "../../../../core/fields";
+import type { Presence } from "../../../../core/protocol";
+import { asRichtext, sanitiseRichtext } from "../../../../core/richtext";
+import { RichText } from "../../../../preview/RichText";
+import { Button } from "../../Button";
+import { Field } from "../../Field";
 import {
   boundValue,
   type FieldMode,
@@ -18,27 +18,27 @@ import {
   sourceText,
   watcherLabel,
   writeLocale,
-} from '../inspector-model'
-import { Control, type FieldEnv } from './Control'
-import css from './fields.module.css'
+} from "../inspector-model";
+import { Control, type FieldEnv } from "./Control";
+import css from "./fields.module.css";
 
 interface Props {
-  blok: Blok
-  name: string
-  field: FieldDef
+  blok: Blok;
+  name: string;
+  field: FieldDef;
   /** The source locale is active. Decides `fieldMode` and nothing else. */
-  isSourceLocale: boolean
+  isSourceLocale: boolean;
   /** Which locale this panel writes into. Ignored on the source. */
-  locale: string
+  locale: string;
   /** The label of the source locale, for the read-only column's own heading. */
-  sourceLabel: string
+  sourceLabel: string;
   /** True while a past version is on the stage, or the role may not edit. */
-  readOnly: boolean
-  peers: readonly Presence[]
-  env: FieldEnv
+  readOnly: boolean;
+  peers: readonly Presence[];
+  env: FieldEnv;
   /** Focus mode is open for this field. */
-  expanded: boolean
-  onExpand: (open: boolean) => void
+  expanded: boolean;
+  onExpand: (open: boolean) => void;
   /**
    * Names the block as well as the field. An input can issue its write long after it
    * rendered — an upload finishing is the case — so the target cannot be the
@@ -46,11 +46,11 @@ interface Props {
    * input writes through one door, and which language it writes into is a property of
    * the editor's state rather than of the input (`localisation.md` phase 3).
    */
-  onChange: (uid: string, field: string, value: Json, locale?: string) => void
+  onChange: (uid: string, field: string, value: Json, locale?: string) => void;
   /** Focus is presence, not selection. See the handlers below. */
-  onFocusField: (field: string | null) => void
+  onFocusField: (field: string | null) => void;
   /** What the store currently records as focused, so blur does not race itself. */
-  focusedField: string | null
+  focusedField: string | null;
   /**
    * This field's standing against the layers below it, on a global's layer of a
    * deployment with `sites` (`multi-site.md` decision 8); absent everywhere else, and
@@ -58,7 +58,7 @@ interface Props {
    * (`inherited`, `removed`) its control shows the inherited value and cannot be
    * typed into: *Override* is what makes it this layer's to edit.
    */
-  layer?: FieldLayerInput | undefined
+  layer?: FieldLayerInput | undefined;
 }
 
 /**
@@ -71,24 +71,24 @@ interface Props {
  * data table's search box ended up as a bare browser default.
  */
 export function FieldRow(props: Props) {
-  const { blok, name, field, isSourceLocale, locale, readOnly, peers, env } = props
+  const { blok, name, field, isSourceLocale, locale, readOnly, peers, env } = props;
 
-  const { layer } = props
-  const mode = fieldMode(field, isSourceLocale)
+  const { layer } = props;
+  const mode = fieldMode(field, isSourceLocale);
   // A field the layer has not overridden shows what it inherits, and is read-only
   // until *Override* writes it here.
-  const notOwn = layer !== undefined && layer.state !== 'overridden'
-  const value = notOwn ? layer.value : boundValue(blok, name, mode, locale)
-  const editable = isEditable(mode, readOnly) && !notOwn
-  const watchers = fieldWatchers(peers, blok.uid, name)
-  const warning = fieldWarning(field, value)
-  const label = field.label ?? name
+  const notOwn = layer !== undefined && layer.state !== "overridden";
+  const value = notOwn ? layer.value : boundValue(blok, name, mode, locale);
+  const editable = isEditable(mode, readOnly) && !notOwn;
+  const watchers = fieldWatchers(peers, blok.uid, name);
+  const warning = fieldWarning(field, value);
+  const label = field.label ?? name;
 
-  const source = mode === 'translate' ? (blok.data[name] ?? null) : null
+  const source = mode === "translate" ? (blok.data[name] ?? null) : null;
   const sourceColumn =
-    mode === 'translate' ? (
+    mode === "translate" ? (
       <SourceValue field={field} value={source} from={props.sourceLabel} env={env} />
-    ) : null
+    ) : null;
 
   const note = (
     <>
@@ -97,7 +97,7 @@ export function FieldRow(props: Props) {
       {layer ? <span data-layer={layer.state}>{layer.label}</span> : null}
       {/* Says why the input below cannot be typed into, at the input rather than in a
           note somewhere else. */}
-      {mode === 'shared' ? <span>shared across all languages</span> : null}
+      {mode === "shared" ? <span>shared across all languages</span> : null}
       {/* Advisory, never a lock (`live-collaboration.md` checkpoint 2): both may type,
           and this says somebody else is here so the last-write-wins model is visible. */}
       {watchers.map((p) => (
@@ -111,7 +111,7 @@ export function FieldRow(props: Props) {
         </span>
       ))}
     </>
-  )
+  );
 
   return (
     /*
@@ -140,17 +140,17 @@ export function FieldRow(props: Props) {
       // The ring's colour is the first watcher's, so two people in one field read as
       // one ring plus two names rather than as a stripe.
       className={watchers.length ? css.watched : undefined}
-      style={watchers[0] ? ({ '--peer': watchers[0].colour } as CSSProperties) : undefined}
+      style={watchers[0] ? ({ "--peer": watchers[0].colour } as CSSProperties) : undefined}
       onFocus={() => props.onFocusField(name)}
       onBlur={() => {
-        if (props.focusedField === name) props.onFocusField(null)
+        if (props.focusedField === name) props.onFocusField(null);
       }}
     >
       <Field
         label={label}
         {...(field.required ? { required: true } : {})}
         {...(field.help ? { help: field.help } : {})}
-        {...(mode === 'shared' || watchers.length || layer ? { note } : {})}
+        {...(mode === "shared" || watchers.length || layer ? { note } : {})}
         // The same predicate that lays this row out *across* rather than down also
         // asks `Field` to put the label beside the box, because for a boolean those
         // are one decision: a 16px checkbox with 300px of empty column to its right
@@ -178,7 +178,7 @@ export function FieldRow(props: Props) {
                 env={env}
                 chrome={{
                   label,
-                  ...(mode === 'source' ? {} : { note: shortNote(mode, props.sourceLabel) }),
+                  ...(mode === "source" ? {} : { note: shortNote(mode, props.sourceLabel) }),
                   ...(sourceColumn ? { source: sourceColumn } : {}),
                 }}
                 expanded={props.expanded}
@@ -195,7 +195,7 @@ export function FieldRow(props: Props) {
                   <Button
                     key={action}
                     size="sm"
-                    variant={action === 'remove' ? 'danger' : 'subtle'}
+                    variant={action === "remove" ? "danger" : "subtle"}
                     onClick={() => layer.onAction(action)}
                   >
                     {text}
@@ -226,13 +226,13 @@ export function FieldRow(props: Props) {
         )}
       </Field>
     </div>
-  )
+  );
 }
 
 /** The locale note focus mode repeats, in as few words as an overlay heading can
  * carry: which language this field is writing, or that it writes all of them. */
 function shortNote(mode: FieldMode, sourceLabel: string): string {
-  return mode === 'shared' ? 'shared across all languages' : `translating from ${sourceLabel}`
+  return mode === "shared" ? "shared across all languages" : `translating from ${sourceLabel}`;
 }
 
 /**
@@ -254,22 +254,22 @@ function SourceValue({
   from,
   env,
 }: {
-  field: FieldDef
-  value: Json
-  from: string
-  env: FieldEnv
+  field: FieldDef;
+  value: Json;
+  from: string;
+  env: FieldEnv;
 }) {
   const body =
-    field.kind === 'richtext' ? (
+    field.kind === "richtext" ? (
       <RichText doc={sanitiseRichtext(asRichtext(value), field)} resolution={env.resolution} />
     ) : (
       sourceText(field, value)
-    )
+    );
 
   return (
     <div className={css.source}>
       <span className={css.sourceLabel}>{from}</span>
       <div className={css.sourceBody}>{body || <em>empty</em>}</div>
     </div>
-  )
+  );
 }

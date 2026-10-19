@@ -24,18 +24,18 @@
  * `railRootRow`'s label and `history-model.ts`'s `historyWhen` had already restated
  * both with a `now` parameter and their own tests.
  */
-import type { summariseDiff } from '../../../core/diff'
-import { childrenOf, type Doc } from '../../../core/doc'
-import type { LocaleContext } from '../../../core/locales'
-import { type SchemaIndex, slotsOf, summarise } from '../../../core/schema'
-import type { StoryMeta } from '../../../core/story'
-import type { MigrationStatus } from '../../../server/migrate'
-import { paneSrc } from '../../hooks/usePreviewBridge'
-import { canCreateContent, type Me, type MePreview, previewChoices, scopeName } from '../../me'
-import { href, type Screen } from '../route'
+import type { summariseDiff } from "../../../core/diff";
+import { childrenOf, type Doc } from "../../../core/doc";
+import type { LocaleContext } from "../../../core/locales";
+import { type SchemaIndex, slotsOf, summarise } from "../../../core/schema";
+import type { StoryMeta } from "../../../core/story";
+import type { MigrationStatus } from "../../../server/migrate";
+import { paneSrc } from "../../hooks/usePreviewBridge";
+import { canCreateContent, type Me, type MePreview, previewChoices, scopeName } from "../../me";
+import { href, type Screen } from "../route";
 
 /** What `summariseDiff` answers: how a draft and a version differ, in counts. */
-type Delta = ReturnType<typeof summariseDiff>
+type Delta = ReturnType<typeof summariseDiff>;
 
 /* ----------------------------------------------------------------- the rail --- */
 
@@ -45,36 +45,36 @@ type Delta = ReturnType<typeof summariseDiff>
  * sync, undo and versioning instead of needing a separate save path.
  */
 export interface RailRootRow {
-  kind: 'root'
-  uid: string
+  kind: "root";
+  uid: string;
   /** "Page settings", "Person settings" — the *type's* label, not "Page". */
-  label: string
-  summary: string
-  depth: 0
+  label: string;
+  summary: string;
+  depth: 0;
 }
 
 /** One block. */
 export interface RailBlokRow {
-  kind: 'blok'
-  uid: string
-  type: string
-  label: string
-  summary: string
-  depth: number
-  parent: string
-  slot: string
+  kind: "blok";
+  uid: string;
+  type: string;
+  label: string;
+  summary: string;
+  depth: number;
+  parent: string;
+  slot: string;
   /** Position among the siblings **including itself**, which is the counting
    * `blockGesture` documents and adjusts for. */
-  index: number
-  siblings: number
+  index: number;
+  siblings: number;
   /** A twisty belongs here: this block has at least one child. */
-  expandable: boolean
-  expanded: boolean
+  expandable: boolean;
+  expanded: boolean;
   /** The containing slot's cap, when it declares one. */
-  max?: number
+  max?: number;
   /** The containing slot is at its cap, so duplicate is refused here for the same
    * reason the add row is absent (`useBlocks`'s `fullSlotMessage`). */
-  full: boolean
+  full: boolean;
 }
 
 /**
@@ -83,9 +83,9 @@ export interface RailBlokRow {
  * one roving-tabindex `List` with one keyboard model.
  */
 export interface RailAddRow {
-  kind: 'add'
-  parent: string
-  slot: string
+  kind: "add";
+  parent: string;
+  slot: string;
   /**
    * The slot's own label, and only when its parent has more than one slot.
    *
@@ -94,14 +94,14 @@ export interface RailAddRow {
    * apart was to click one. Naming them costs nothing and is a real fix; naming
    * the *only* slot would be noise, which is why this is conditional.
    */
-  slotLabel?: string
-  depth: number
+  slotLabel?: string;
+  depth: number;
   /** Where a new block lands: the end of the slot. */
-  index: number
-  allow: readonly string[]
+  index: number;
+  allow: readonly string[];
 }
 
-export type RailRow = RailRootRow | RailBlokRow | RailAddRow
+export type RailRow = RailRootRow | RailBlokRow | RailAddRow;
 
 /**
  * What the root row is called: "Page settings", "Person settings", and plain
@@ -110,7 +110,7 @@ export type RailRow = RailRootRow | RailBlokRow | RailAddRow
  * rather than "Page", because a person record's root block is not page settings.
  */
 function rootLabel(label: string | undefined): string {
-  return label ? `${label} settings` : 'Settings'
+  return label ? `${label} settings` : "Settings";
 }
 
 /**
@@ -134,30 +134,30 @@ export function railRows(
   collapsed: ReadonlySet<string>,
   localeCtx?: LocaleContext,
 ): RailRow[] {
-  const root = doc.bloks[doc.root]
-  const rootDef = schema[root?.type ?? '']
+  const root = doc.bloks[doc.root];
+  const rootDef = schema[root?.type ?? ""];
   const out: RailRow[] = [
     {
-      kind: 'root',
+      kind: "root",
       uid: doc.root,
       label: rootLabel(rootDef?.label),
-      summary: rootDef ? summarise(rootDef, root, localeCtx) : '',
+      summary: rootDef ? summarise(rootDef, root, localeCtx) : "",
       depth: 0,
     },
-  ]
+  ];
 
   const walk = (parent: string, depth: number): void => {
-    const slots = slotsOf(schema[doc.bloks[parent]?.type ?? ''])
+    const slots = slotsOf(schema[doc.bloks[parent]?.type ?? ""]);
     for (const [slot, field] of slots) {
-      const kids = childrenOf(doc, parent, slot)
-      const full = field.max !== undefined && kids.length >= field.max
+      const kids = childrenOf(doc, parent, slot);
+      const full = field.max !== undefined && kids.length >= field.max;
       kids.forEach((blok, index) => {
-        const def = schema[blok.type]
+        const def = schema[blok.type];
         const expandable = slotsOf(def).some(
           ([childSlot]) => childrenOf(doc, blok.uid, childSlot).length > 0,
-        )
+        );
         out.push({
-          kind: 'blok',
+          kind: "blok",
           uid: blok.uid,
           type: blok.type,
           label: def?.label ?? blok.type,
@@ -171,26 +171,26 @@ export function railRows(
           expanded: expandable && !collapsed.has(blok.uid),
           ...(field.max === undefined ? {} : { max: field.max }),
           full,
-        })
-        if (expandable && !collapsed.has(blok.uid)) walk(blok.uid, depth + 1)
-      })
+        });
+        if (expandable && !collapsed.has(blok.uid)) walk(blok.uid, depth + 1);
+      });
       // A slot with nothing allowed in it, or already at its cap, offers no row —
       // the same rule the old add menu applied by hiding itself.
       if (field.allow.length > 0 && !full) {
         out.push({
-          kind: 'add',
+          kind: "add",
           parent,
           slot,
           ...(slots.length > 1 ? { slotLabel: field.label ?? slot } : {}),
           depth,
           index: kids.length,
           allow: field.allow,
-        })
+        });
       }
     }
-  }
-  walk(doc.root, 1)
-  return out
+  };
+  walk(doc.root, 1);
+  return out;
 }
 
 /**
@@ -203,24 +203,24 @@ export function railRows(
  * lands, and the rail needs none of the picker.
  */
 export interface AddTarget {
-  parent: string
+  parent: string;
   /** The parent block's type, which is what a slot's `allow` hangs off. */
-  parentType: string
-  slot: string
+  parentType: string;
+  slot: string;
   /** Its declared label, or the slot's own name. Never empty, so a title can use
    * it without a fallback of its own. */
-  slotLabel: string
+  slotLabel: string;
   /** How many blocks the slot already holds, so a full slot can refuse rather than
    * offering a list every entry of which would be rejected. */
-  filled: number
+  filled: number;
   /** Where the new block lands: the end of the slot. */
-  index: number
+  index: number;
 }
 
 export function addTargetOf(row: RailAddRow, doc: Doc): AddTarget {
   return {
     parent: row.parent,
-    parentType: doc.bloks[row.parent]?.type ?? '',
+    parentType: doc.bloks[row.parent]?.type ?? "",
     slot: row.slot,
     slotLabel: row.slotLabel ?? row.slot,
     // `railRows` puts the add row at the end of the slot, so its index *is* how
@@ -228,21 +228,21 @@ export function addTargetOf(row: RailAddRow, doc: Doc): AddTarget {
     // disagreeing would append in the wrong place.
     filled: row.index,
     index: row.index,
-  }
+  };
 }
 
 /** The blok rows of a rail, which is what a keyboard gesture acts on and what
  * `List`'s row indices count. */
 export function blokRowsOf(rows: readonly RailRow[]): RailBlokRow[] {
-  return rows.filter((row): row is RailBlokRow => row.kind === 'blok')
+  return rows.filter((row): row is RailBlokRow => row.kind === "blok");
 }
 
 export interface MenuGroup {
-  type: string
-  label: string
+  type: string;
+  label: string;
   /** False for a `presetsOnly` block: no bare version to offer. */
-  bare: boolean
-  presets: { name: string; label: string }[]
+  bare: boolean;
+  presets: { name: string; label: string }[];
 }
 
 /**
@@ -261,30 +261,30 @@ export interface MenuGroup {
  */
 export function menuGroups(schema: SchemaIndex, allow: readonly string[]): MenuGroup[] {
   return allow.map((type) => {
-    const def = schema[type]
+    const def = schema[type];
     return {
       type,
       label: def?.label ?? type,
       bare: !def?.presetsOnly,
       presets: (def?.presets ?? []).map((p) => ({ name: p.name, label: p.label })),
-    }
-  })
+    };
+  });
 }
 
 /** Whether this document has anything under its root at all — the one fact form
  * mode needs about it. See `editorLayout`. */
 export function hasNestedBloks(doc: Doc | null): boolean {
-  if (!doc) return false
-  return Object.values(doc.bloks).some((blok) => blok.uid !== doc.root)
+  if (!doc) return false;
+  return Object.values(doc.bloks).some((blok) => blok.uid !== doc.root);
 }
 
 /* ------------------------------------------------------------- the keyboard --- */
 
 /** What a gesture asks `useBlocks`' `move` to do. */
 export interface BlockMove {
-  uid: string
-  parent: string
-  slot: string
+  uid: string;
+  parent: string;
+  slot: string;
   /**
    * Counted into the sibling list **excluding the block being moved**, which is
    * what `useBlocks`' `keyAt(parent, slot, index, ignore)` compares against.
@@ -292,10 +292,10 @@ export interface BlockMove {
    * identical trap `content-model.ts`'s `Move` documents, because it is the
    * identical arithmetic.
    */
-  index: number
+  index: number;
 }
 
-export type BlockGesture = 'up' | 'down' | 'out' | 'in'
+export type BlockGesture = "up" | "down" | "out" | "in";
 
 /**
  * The `BlockMove` a gesture produces, or a refusal.
@@ -330,47 +330,47 @@ export function blockGesture(
   doc: Doc,
   schema: SchemaIndex,
 ): { move: BlockMove } | { refusal: string } {
-  if (gesture === 'up' || gesture === 'down') {
-    if (gesture === 'up' && at.index === 0) return { refusal: 'Already first in this slot' }
-    if (gesture === 'down' && at.index >= at.siblings - 1) {
-      return { refusal: 'Already last in this slot' }
+  if (gesture === "up" || gesture === "down") {
+    if (gesture === "up" && at.index === 0) return { refusal: "Already first in this slot" };
+    if (gesture === "down" && at.index >= at.siblings - 1) {
+      return { refusal: "Already last in this slot" };
     }
     return {
       move: {
         uid: at.uid,
         parent: at.parent,
         slot: at.slot,
-        index: gesture === 'up' ? at.index - 1 : at.index + 1,
+        index: gesture === "up" ? at.index - 1 : at.index + 1,
       },
-    }
+    };
   }
 
-  if (gesture === 'in') {
+  if (gesture === "in") {
     const above = blokRowsOf(rows).find(
       (row) => row.parent === at.parent && row.slot === at.slot && row.index === at.index - 1,
-    )
-    if (!above) return { refusal: 'Nothing above it to nest under' }
-    const target = accepting(doc, schema, above.uid, at.type)
-    if ('refusal' in target) {
-      return { refusal: `A ${above.label} has no slot that accepts a ${at.label}` }
+    );
+    if (!above) return { refusal: "Nothing above it to nest under" };
+    const target = accepting(doc, schema, above.uid, at.type);
+    if ("refusal" in target) {
+      return { refusal: `A ${above.label} has no slot that accepts a ${at.label}` };
     }
-    return { move: { uid: at.uid, parent: above.uid, slot: target.slot, index: target.count } }
+    return { move: { uid: at.uid, parent: above.uid, slot: target.slot, index: target.count } };
   }
 
   // `out`: a sibling of the parent, immediately after it.
-  const parentRow = blokRowsOf(rows).find((row) => row.uid === at.parent)
-  if (!parentRow) return { refusal: 'Already at the top level of this document' }
-  const field = slotsOf(schema[doc.bloks[parentRow.parent]?.type ?? '']).find(
+  const parentRow = blokRowsOf(rows).find((row) => row.uid === at.parent);
+  if (!parentRow) return { refusal: "Already at the top level of this document" };
+  const field = slotsOf(schema[doc.bloks[parentRow.parent]?.type ?? ""]).find(
     ([slot]) => slot === parentRow.slot,
-  )?.[1]
+  )?.[1];
   if (!field?.allow.includes(at.type)) {
-    return { refusal: `A ${at.label} is not allowed beside a ${parentRow.label}` }
+    return { refusal: `A ${at.label} is not allowed beside a ${parentRow.label}` };
   }
   if (
     field.max !== undefined &&
     childrenOf(doc, parentRow.parent, parentRow.slot).length >= field.max
   ) {
-    return { refusal: `That slot holds at most ${field.max}` }
+    return { refusal: `That slot holds at most ${field.max}` };
   }
   return {
     move: {
@@ -379,7 +379,7 @@ export function blockGesture(
       slot: parentRow.slot,
       index: parentRow.index + 1,
     },
-  }
+  };
 }
 
 /** The first slot on `parent` that accepts `type` and has room, with how many
@@ -390,13 +390,13 @@ function accepting(
   parent: string,
   type: string,
 ): { slot: string; count: number } | { refusal: true } {
-  for (const [slot, field] of slotsOf(schema[doc.bloks[parent]?.type ?? ''])) {
-    if (!field.allow.includes(type)) continue
-    const count = childrenOf(doc, parent, slot).length
-    if (field.max !== undefined && count >= field.max) continue
-    return { slot, count }
+  for (const [slot, field] of slotsOf(schema[doc.bloks[parent]?.type ?? ""])) {
+    if (!field.allow.includes(type)) continue;
+    const count = childrenOf(doc, parent, slot).length;
+    if (field.max !== undefined && count >= field.max) continue;
+    return { slot, count };
   }
-  return { refusal: true }
+  return { refusal: true };
 }
 
 /* ---------------------------------------------------------------- the stage --- */
@@ -405,12 +405,12 @@ function accepting(
  * Stage widths. The value is the CSS width the frame is given, not a breakpoint —
  * carried over from the old top bar, which had the same three and the same note.
  */
-export const VIEWPORTS = { Desktop: '100%', Tablet: '834px', Phone: '390px' } as const
-export type Viewport = keyof typeof VIEWPORTS
+export const VIEWPORTS = { Desktop: "100%", Tablet: "834px", Phone: "390px" } as const;
+export type Viewport = keyof typeof VIEWPORTS;
 
 /** In declaration order, stated rather than taken from `Object.keys` so the order
  * on screen is not a property of how the object above happens to be written. */
-export const VIEWPORT_NAMES: readonly Viewport[] = ['Desktop', 'Tablet', 'Phone']
+export const VIEWPORT_NAMES: readonly Viewport[] = ["Desktop", "Tablet", "Phone"];
 
 /**
  * Whether the stage centres the frame with `--bg-app` either side, which is what
@@ -418,7 +418,7 @@ export const VIEWPORT_NAMES: readonly Viewport[] = ['Desktop', 'Tablet', 'Phone'
  * fill its column (`ui-architecture.md`, the editor).
  */
 export function isNarrowedViewport(viewport: Viewport): boolean {
-  return viewport !== 'Desktop'
+  return viewport !== "Desktop";
 }
 
 /**
@@ -442,9 +442,9 @@ export function previewFrame(
   locale: string,
   isSourceLocale: boolean,
 ): string | undefined {
-  if (!story) return undefined
-  if (!isSourceLocale) return story.previewUrls?.[locale] ?? preview
-  return preview
+  if (!story) return undefined;
+  if (!isSourceLocale) return story.previewUrls?.[locale] ?? preview;
+  return preview;
 }
 
 /* ---------------------------------------------------------------- the pane --- */
@@ -460,18 +460,18 @@ export function previewFrame(
  * (re)load.
  */
 export type PaneChoice =
-  | { kind: 'none' }
+  | { kind: "none" }
   /** No site can show this page: the caller may preview none whose chain reads from
    * the page's scope. */
-  | { kind: 'unavailable'; reason: string }
+  | { kind: "unavailable"; reason: string }
   | {
-      kind: 'site'
-      site: MePreview
+      kind: "site";
+      site: MePreview;
       /** The site's preview origin, or null — and then the page cannot be shown. */
-      origin: string | null
+      origin: string | null;
       /** Every site this page can be previewed in, for the picker. */
-      choices: readonly MePreview[]
-    }
+      choices: readonly MePreview[];
+    };
 
 /**
  * Which site the pane previews `story` in.
@@ -487,29 +487,29 @@ export function paneChoice(
   story: StoryMeta | undefined,
   chosen: string | null,
 ): PaneChoice {
-  if (!me.sites || !story) return { kind: 'none' }
-  const choices = previewChoices(me, story.site ?? me.scope ?? '')
+  if (!me.sites || !story) return { kind: "none" };
+  const choices = previewChoices(me, story.site ?? me.scope ?? "");
   if (choices.length === 0) {
     return {
-      kind: 'unavailable',
-      reason: 'You cannot preview this page: none of the sites that show it are yours to preview.',
-    }
+      kind: "unavailable",
+      reason: "You cannot preview this page: none of the sites that show it are yours to preview.",
+    };
   }
   const site =
     choices.find((candidate) => candidate.id === chosen) ??
     choices.find((candidate) => candidate.id === me.scope) ??
-    choices[0]!
-  return { kind: 'site', site, origin: site.preview, choices }
+    choices[0]!;
+  return { kind: "site", site, origin: site.preview, choices };
 }
 
 /** What the bar says about the pane, or null on a single-site deployment. */
 export function paneLabel(pane: PaneChoice): string | null {
-  if (pane.kind === 'site') {
+  if (pane.kind === "site") {
     return pane.origin === null
       ? `${pane.site.name} has no preview origin, so this page cannot be previewed there.`
-      : `Previewing in ${pane.site.name}`
+      : `Previewing in ${pane.site.name}`;
   }
-  return pane.kind === 'unavailable' ? pane.reason : null
+  return pane.kind === "unavailable" ? pane.reason : null;
 }
 
 /**
@@ -518,9 +518,9 @@ export function paneLabel(pane: PaneChoice): string | null {
  * (`multi-site.md`'s edge cases). Null when the pane can load.
  */
 export function paneUnavailable(pane: PaneChoice): string | null {
-  if (pane.kind === 'unavailable') return pane.reason
-  if (pane.kind === 'site' && pane.origin === null) return paneLabel(pane)
-  return null
+  if (pane.kind === "unavailable") return pane.reason;
+  if (pane.kind === "site" && pane.origin === null) return paneLabel(pane);
+  return null;
 }
 
 /**
@@ -539,11 +539,11 @@ export function paneSource(
   story: StoryMeta | undefined,
   adminBase: string,
 ): string | undefined {
-  if (pane.kind === 'none') return frame
-  if (pane.kind !== 'site' || pane.origin === null || !frame || !story) return undefined
-  const named = new URL(frame, 'https://preview.invalid')
-  if (story.path !== null) named.searchParams.set('_folio_id', story.id)
-  return paneSrc(adminBase, pane.site.id, `${named.pathname}${named.search}`)
+  if (pane.kind === "none") return frame;
+  if (pane.kind !== "site" || pane.origin === null || !frame || !story) return undefined;
+  const named = new URL(frame, "https://preview.invalid");
+  if (story.path !== null) named.searchParams.set("_folio_id", story.id);
+  return paneSrc(adminBase, pane.site.id, `${named.pathname}${named.search}`);
 }
 
 /* ----------------------------------------------------------- inheritance --- */
@@ -555,15 +555,15 @@ export function paneSource(
  */
 export type InheritNotice =
   /** A page owned higher in the chain, opened from a scope that only reads it. */
-  | { kind: 'readonly'; owner: string; canFork: boolean }
+  | { kind: "readonly"; owner: string; canFork: boolean }
   /** The scope has its own page at this path, which is what its visitors get. */
-  | { kind: 'overridden'; scope: string; id: string }
+  | { kind: "overridden"; scope: string; id: string }
   /** This page is a fork and its original has been published since. */
-  | { kind: 'forkChanged'; source: string; id: string }
+  | { kind: "forkChanged"; source: string; id: string };
 
 /** Whether the open page is another scope's (`story.site` differs from the one shown). */
-export function isInherited(me: Me, story: Pick<StoryMeta, 'site'>): boolean {
-  return me.sites !== undefined && story.site !== undefined && story.site !== me.scope
+export function isInherited(me: Me, story: Pick<StoryMeta, "site">): boolean {
+  return me.sites !== undefined && story.site !== undefined && story.site !== me.scope;
 }
 
 /**
@@ -575,41 +575,41 @@ export function inheritNotices(
   me: Me,
   story: StoryMeta,
   known: {
-    override: Pick<StoryMeta, 'id'> | undefined
-    fork: { source: Pick<StoryMeta, 'id' | 'site'> | null; changed: boolean } | null | undefined
+    override: Pick<StoryMeta, "id"> | undefined;
+    fork: { source: Pick<StoryMeta, "id" | "site"> | null; changed: boolean } | null | undefined;
   },
 ): InheritNotice[] {
-  if (!me.sites) return []
-  const out: InheritNotice[] = []
+  if (!me.sites) return [];
+  const out: InheritNotice[] = [];
   if (isInherited(me, story)) {
     out.push({
-      kind: 'readonly',
-      owner: scopeName(me, story.site ?? ''),
+      kind: "readonly",
+      owner: scopeName(me, story.site ?? ""),
       canFork: story.path !== null && canCreateContent(me),
-    })
+    });
     if (known.override && me.scope) {
-      out.push({ kind: 'overridden', scope: scopeName(me, me.scope), id: known.override.id })
+      out.push({ kind: "overridden", scope: scopeName(me, me.scope), id: known.override.id });
     }
   }
   if (known.fork?.changed && known.fork.source) {
     out.push({
-      kind: 'forkChanged',
-      source: scopeName(me, known.fork.source.site ?? ''),
+      kind: "forkChanged",
+      source: scopeName(me, known.fork.source.site ?? ""),
       id: known.fork.source.id,
-    })
+    });
   }
-  return out
+  return out;
 }
 
 /** A notice's sentence. */
 export function noticeText(notice: InheritNotice): string {
   switch (notice.kind) {
-    case 'readonly':
-      return `This page belongs to ${notice.owner}, so it is read-only here.`
-    case 'overridden':
-      return `${notice.scope} overrides this page.`
-    case 'forkChanged':
-      return `The ${notice.source} version has changed since you forked it.`
+    case "readonly":
+      return `This page belongs to ${notice.owner}, so it is read-only here.`;
+    case "overridden":
+      return `${notice.scope} overrides this page.`;
+    case "forkChanged":
+      return `The ${notice.source} version has changed since you forked it.`;
   }
 }
 
@@ -618,14 +618,14 @@ export function noticeLink(
   notice: InheritNotice,
   mount: string,
 ): { text: string; href: string } | null {
-  const open = (id: string): string => href({ name: 'edit', id } satisfies Screen, mount)
+  const open = (id: string): string => href({ name: "edit", id } satisfies Screen, mount);
   switch (notice.kind) {
-    case 'readonly':
-      return null
-    case 'overridden':
-      return { text: `Open ${notice.scope}’s version`, href: open(notice.id) }
-    case 'forkChanged':
-      return { text: `View the ${notice.source} version`, href: open(notice.id) }
+    case "readonly":
+      return null;
+    case "overridden":
+      return { text: `Open ${notice.scope}’s version`, href: open(notice.id) };
+    case "forkChanged":
+      return { text: `View the ${notice.source} version`, href: open(notice.id) };
   }
 }
 
@@ -637,13 +637,13 @@ export interface EditorLayout {
    * *are* the screen — one centred form at a readable measure
    * (`data-documents.md` checkpoint 3, restated by `ui-architecture.md`).
    */
-  form: boolean
+  form: boolean;
   /** The block rail is on screen. */
-  rail: boolean
+  rail: boolean;
   /** The inspector is on screen. In form mode it *is* the screen, so it cannot
    * be collapsed away — a collapse that empties the surface is a broken screen,
    * and `⌘.`'s control is hidden there rather than disabled. */
-  inspector: boolean
+  inspector: boolean;
 }
 
 /**
@@ -663,21 +663,21 @@ export interface EditorLayout {
  */
 export function editorLayout(opts: {
   /** `story.path !== null`: a page has a URL, a record and a singleton do not. */
-  routed: boolean
+  routed: boolean;
   /** What `previewFrame` answered. A global is unrouted *and* previewable, which
    * is why this is the input rather than `routed` alone. */
-  preview: string | undefined
+  preview: string | undefined;
   /** Does the document have anything under its root? See `hasNestedBloks`. */
-  nested: boolean
-  railCollapsed: boolean
-  inspectorCollapsed: boolean
+  nested: boolean;
+  railCollapsed: boolean;
+  inspectorCollapsed: boolean;
 }): EditorLayout {
-  const form = !opts.routed && opts.preview === undefined
+  const form = !opts.routed && opts.preview === undefined;
   return {
     form,
     rail: opts.railCollapsed ? false : form ? opts.nested : true,
     inspector: form ? true : !opts.inspectorCollapsed,
-  }
+  };
 }
 
 /**
@@ -688,14 +688,14 @@ export function editorLayout(opts: {
  * are the honest ones: below `MIN` the field labels wrap, above `MAX` the stage
  * stops being the hero on a laptop.
  */
-export const DEFAULT_INSPECTOR = 340
-export const MIN_INSPECTOR = 260
-export const MAX_INSPECTOR = 640
+export const DEFAULT_INSPECTOR = 340;
+export const MIN_INSPECTOR = 260;
+export const MAX_INSPECTOR = 640;
 
 /** The width a drag or an arrow key lands on, clamped. Pure so the clamping is
  * tested without a pointer. */
 export function clampInspector(width: number): number {
-  return Math.min(MAX_INSPECTOR, Math.max(MIN_INSPECTOR, Math.round(width)))
+  return Math.min(MAX_INSPECTOR, Math.max(MIN_INSPECTOR, Math.round(width)));
 }
 
 /* ---------------------------------------------------------------- the state --- */
@@ -712,13 +712,13 @@ export function clampInspector(width: number): number {
  */
 
 export interface PublishStatus {
-  label: string
+  label: string;
   /** Only the "N unpublished changes" state is; it is the door into the
    * comparison view. */
-  clickable: boolean
+  clickable: boolean;
   /** Publish is pointless when true (owner decision 2): the story is
    * currently live and identical to what was published. */
-  nothingToPublish: boolean
+  nothingToPublish: boolean;
 }
 
 /**
@@ -741,19 +741,19 @@ export function publishStatus(
   isLive: boolean,
   delta: Delta | null,
 ): PublishStatus {
-  if (!connected) return { label: 'Connecting…', clickable: false, nothingToPublish: false }
-  if (inflight > 0) return { label: 'Saving…', clickable: false, nothingToPublish: false }
+  if (!connected) return { label: "Connecting…", clickable: false, nothingToPublish: false };
+  if (inflight > 0) return { label: "Saving…", clickable: false, nothingToPublish: false };
   if (!everPublished) {
-    return { label: 'Not published yet', clickable: false, nothingToPublish: false }
+    return { label: "Not published yet", clickable: false, nothingToPublish: false };
   }
   if (!delta || delta.total === 0) {
-    return { label: 'Up to date', clickable: false, nothingToPublish: isLive }
+    return { label: "Up to date", clickable: false, nothingToPublish: isLive };
   }
   return {
-    label: `${delta.total} unpublished change${delta.total === 1 ? '' : 's'}`,
+    label: `${delta.total} unpublished change${delta.total === 1 ? "" : "s"}`,
     clickable: true,
     nothingToPublish: false,
-  }
+  };
 }
 
 /**
@@ -770,12 +770,12 @@ export function publishStatus(
  * wrapper around nothing.
  */
 export function behindNotice(status: MigrationStatus | null): string | null {
-  const pending = status?.story?.pending ?? []
-  if (!status?.story?.behind || pending.length === 0) return null
-  const what = pending.map((m) => m.description).join('; ')
+  const pending = status?.story?.pending ?? [];
+  if (!status?.story?.behind || pending.length === 0) return null;
+  const what = pending.map((m) => m.description).join("; ");
   return pending.length === 1
     ? `This page has not been updated for the latest content model: ${what}`
-    : `This page has not been updated for the latest content model (${pending.length} changes): ${what}`
+    : `This page has not been updated for the latest content model (${pending.length} changes): ${what}`;
 }
 
 /**
@@ -789,7 +789,7 @@ export function behindNotice(status: MigrationStatus | null): string | null {
  * is left alone.
  */
 export const SETTLED_TITLE =
-  'This page already matches the published version. It is flagged as changed because edits landed after the last publish and cancelled each other out; publishing again clears the flag.'
+  "This page already matches the published version. It is flagged as changed because edits landed after the last publish and cancelled each other out; publishing again clears the flag.";
 
 /**
  * Phrased from the viewer's standpoint: they are looking at the version, so
@@ -800,12 +800,12 @@ export const SETTLED_TITLE =
  * gained afterwards.
  */
 export function describeAgainstDraft(d: Delta | null): string {
-  if (!d || d.total === 0) return 'identical to the current draft'
+  if (!d || d.total === 0) return "identical to the current draft";
   const parts = [
-    d.edited && `${d.edited} block${d.edited === 1 ? '' : 's'} changed since`,
-    d.added && `${d.added} block${d.added === 1 ? '' : 's'} later deleted`,
-    d.removed && `${d.removed} block${d.removed === 1 ? '' : 's'} added since`,
+    d.edited && `${d.edited} block${d.edited === 1 ? "" : "s"} changed since`,
+    d.added && `${d.added} block${d.added === 1 ? "" : "s"} later deleted`,
+    d.removed && `${d.removed} block${d.removed === 1 ? "" : "s"} added since`,
     d.moved && `${d.moved} moved`,
-  ].filter(Boolean)
-  return parts.join(', ')
+  ].filter(Boolean);
+  return parts.join(", ");
 }

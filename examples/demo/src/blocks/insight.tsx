@@ -8,7 +8,7 @@ import {
   select,
   text,
   textarea,
-} from 'folio/core'
+} from "folio/core";
 
 /**
  * Topics an insight can carry. A closed list because it is what an index page
@@ -16,10 +16,10 @@ import {
  * tagged policy" depend on nobody having typed "Policy".
  */
 export const INSIGHT_TOPICS = [
-  { label: 'Policy', value: 'policy' },
-  { label: 'Technology', value: 'technology' },
-  { label: 'Practice', value: 'practice' },
-]
+  { label: "Policy", value: "policy" },
+  { label: "Technology", value: "technology" },
+  { label: "Practice", value: "practice" },
+];
 
 /**
  * Root block for the `insight` document type — a **second routable page type**.
@@ -36,9 +36,9 @@ export const INSIGHT_TOPICS = [
  * for: a standfirst and an author, the latter pointing at a `person` record.
  */
 export const insightPage = defineBlock({
-  name: 'insightPage',
-  label: 'Insight',
-  summary: 'title',
+  name: "insightPage",
+  label: "Insight",
+  summary: "title",
   fields: {
     // `indexed: true` is what makes this queryable, and it is only ever declared on
     // a root block (`content-model/collections.md` decision 2): the index is a
@@ -47,23 +47,23 @@ export const insightPage = defineBlock({
     //
     // Translatable *and* indexed: a French index page filtering a French title
     // matches, because the projection writes a row per locale.
-    title: text({ label: 'Title', required: true, translatable: true, indexed: true }),
+    title: text({ label: "Title", required: true, translatable: true, indexed: true }),
     // Not translatable, deliberately: a topic is a token an index page filters on,
     // and translating the token rather than its label would fork the filter.
     topic: select({
-      label: 'Topic',
+      label: "Topic",
       options: INSIGHT_TOPICS,
       indexed: true,
-      help: 'What an index page can filter this insight by.',
+      help: "What an index page can filter this insight by.",
     }),
     // A date as an ISO 8601 string, which is the escape hatch decision 2 names for
     // "sort by something": the projection stores it in both index columns, so it
     // sorts correctly as text *and* takes numeric range filters.
     published: text({
-      label: 'Publish date',
-      placeholder: '2026-03-14',
+      label: "Publish date",
+      placeholder: "2026-03-14",
       indexed: true,
-      help: 'YYYY-MM-DD. What an index page sorts by.',
+      help: "YYYY-MM-DD. What an index page sorts by.",
     }),
     // The same `gate` field `blocks/page.tsx` declares
     // (`docs/specs/platform/visitor-access.md` phase 4): an insight can be
@@ -73,71 +73,71 @@ export const insightPage = defineBlock({
     // the same reason as `page.tsx`: `defaultValue(select)` seeds the first
     // option, so every insight publishes public unless an editor changes it.
     access: select({
-      label: 'Access',
+      label: "Access",
       options: [
-        { label: 'Everyone', value: 'public' },
-        { label: 'Members', value: 'members' },
+        { label: "Everyone", value: "public" },
+        { label: "Members", value: "members" },
       ],
       indexed: true,
-      help: 'Members-only insights show a paywall to anyone not signed in to membership.',
+      help: "Members-only insights show a paywall to anyone not signed in to membership.",
     }),
     standfirst: textarea({
-      label: 'Standfirst',
+      label: "Standfirst",
       rows: 2,
-      help: 'The opening line, shown above the body.',
+      help: "The opening line, shown above the body.",
       translatable: true,
     }),
     author: reference({
-      label: 'Author',
-      types: ['person'],
-      help: 'A Person record. Pages are not offered.',
+      label: "Author",
+      types: ["person"],
+      help: "A Person record. Pages are not offered.",
     }),
-    description: textarea({ label: 'Meta description', rows: 3, translatable: true }),
-    socialImage: asset({ label: 'Social share image', accept: 'image/*' }),
-    noindex: boolean({ label: 'Hide from search engines' }),
+    description: textarea({ label: "Meta description", rows: 3, translatable: true }),
+    socialImage: asset({ label: "Social share image", accept: "image/*" }),
+    noindex: boolean({ label: "Hide from search engines" }),
     body: blocks({
-      label: 'Body',
+      label: "Body",
       allow: [
-        'hero',
-        'prose',
-        'pullquote',
-        'image',
-        'gallery',
-        'cta',
-        'personCard',
+        "hero",
+        "prose",
+        "pullquote",
+        "image",
+        "gallery",
+        "cta",
+        "personCard",
         // "Related insights" at the end of an article. Permitted deliberately even
         // though a list on an insight can include the insight it sits on: that is
         // allowed and does not recurse (`content-model/collections.md`'s edge case
         // "a collection pointing at its own page"), because items are
         // `ReferenceTarget`s and `RenderBlok` empties `docs` one level down.
-        'insightList',
+        "insightList",
       ],
     }),
   },
   render: ({ title, topic, published, standfirst, author, body }) => (
     <article className="insight">
       <header className="insight__head">
-        <h1 className="insight__title">{title || 'Untitled'}</h1>
+        <h1 className="insight__title">{title || "Untitled"}</h1>
         {standfirst ? <p className="insight__standfirst">{standfirst}</p> : null}
         <p className="insight__meta">
           {topicLabel(topic)}
-          {published ? ` · ${published}` : ''}
+          {published ? ` · ${published}` : ""}
         </p>
         {/* A reference to a record: read its own fields straight off `data`
             rather than inlining the whole thing. */}
         {author ? (
           <p className="insight__author">
-            By {String(author.data.fullName ?? 'Unknown')}
-            {author.data.role ? `, ${String(author.data.role)}` : ''}
+            By {String(author.data.fullName ?? "Unknown")}
+            {author.data.role ? `, ${String(author.data.role)}` : ""}
           </p>
         ) : null}
       </header>
       {body}
     </article>
   ),
-})
+});
 
-const topicLabel = (value: string) => INSIGHT_TOPICS.find((t) => t.value === value)?.label ?? value
+const topicLabel = (value: string) => INSIGHT_TOPICS.find((t) => t.value === value)?.label ?? value;
 
 /**
  * An index page's list of insights — the block `content-model/collections.md`
@@ -154,23 +154,23 @@ const topicLabel = (value: string) => INSIGHT_TOPICS.find((t) => t.value === val
  * `?page=` into the offset (see src/index.tsx).
  */
 export const insightList = defineBlock({
-  name: 'insightList',
-  label: 'Insight list',
-  summary: 'heading',
+  name: "insightList",
+  label: "Insight list",
+  summary: "heading",
   fields: {
-    heading: text({ label: 'Heading', translatable: true }),
+    heading: text({ label: "Heading", translatable: true }),
     list: collection({
-      label: 'Which insights',
+      label: "Which insights",
       // Fixed by the schema, not by the editor: this block renders insight cards,
       // so offering to point it at pages would make its own render a lie.
-      type: 'insight',
+      type: "insight",
       // What the editor may narrow by. Each must be `indexed` on a root block, and
       // is enforced twice — the input only offers these, and `collectionQuery`
       // drops anything else on the way out, because a value can also arrive from an
       // importer or over the content API.
-      filterable: ['topic'],
+      filterable: ["topic"],
       maxPerPage: 12,
-      defaultOrder: { field: 'published', dir: 'desc' },
+      defaultOrder: { field: "published", dir: "desc" },
     }),
   },
   render: ({ heading, list }) => (
@@ -217,4 +217,4 @@ export const insightList = defineBlock({
       ) : null}
     </section>
   ),
-})
+});

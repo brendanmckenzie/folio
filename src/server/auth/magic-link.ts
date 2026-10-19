@@ -13,7 +13,7 @@
  * server — a `console.log`, which is what makes this provider exercisable with
  * no external credentials at all.
  */
-import type { MagicLinkMail, MailProvider } from './config'
+import type { MagicLinkMail, MailProvider } from "./config";
 
 export interface MagicLinkOptions<Env> {
   /**
@@ -22,22 +22,22 @@ export interface MagicLinkOptions<Env> {
    * generic answer a success gets, since a difference there is an enumeration
    * oracle for whether the address is known.
    */
-  send: (env: Env, mail: MagicLinkMail) => unknown
+  send: (env: Env, mail: MagicLinkMail) => unknown;
   /** Button label on the login page. */
-  label?: string
+  label?: string;
 }
 
 /** The provider id, used in `users.provider` and nowhere in a URL. */
-export const MAGIC_LINK_ID = 'magic'
+export const MAGIC_LINK_ID = "magic";
 
 export function magicLink<Env>(options: MagicLinkOptions<Env>): MailProvider<Env> {
-  if (typeof options?.send !== 'function') {
-    throw new Error('folio: magicLink({ send }) needs a `send` function — only the host can mail')
+  if (typeof options?.send !== "function") {
+    throw new Error("folio: magicLink({ send }) needs a `send` function — only the host can mail");
   }
   return {
-    kind: 'mail',
+    kind: "mail",
     id: MAGIC_LINK_ID,
-    label: options.label ?? 'Email me a sign-in link',
+    label: options.label ?? "Email me a sign-in link",
     send: options.send,
-  }
+  };
 }

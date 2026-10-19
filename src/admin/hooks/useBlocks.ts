@@ -1,7 +1,7 @@
-import { useCallback, useMemo } from 'react'
-import type { ClipboardPayload } from '../../core/clipboard'
-import { parseClipboard } from '../../core/clipboard'
-import { cloneSubtree } from '../../core/clone'
+import { useCallback, useMemo } from "react";
+import type { ClipboardPayload } from "../../core/clipboard";
+import { parseClipboard } from "../../core/clipboard";
+import { cloneSubtree } from "../../core/clone";
 import {
   ancestorsOf,
   type Blok,
@@ -10,11 +10,11 @@ import {
   type Json,
   keyAtIndex,
   subtree,
-} from '../../core/doc'
-import type { Mutation } from '../../core/mutations'
-import { blankSubtree, type SchemaIndex, slotsOf } from '../../core/schema'
-import type { StoryStore } from '../store'
-import type { Notify } from './useNotice'
+} from "../../core/doc";
+import type { Mutation } from "../../core/mutations";
+import { blankSubtree, type SchemaIndex, slotsOf } from "../../core/schema";
+import type { StoryStore } from "../store";
+import type { Notify } from "./useNotice";
 
 /**
  * What one `add` call issues: every blok a type (or its preset's whole
@@ -33,11 +33,11 @@ export function subtreeInsert(
   order: string,
   preset?: string,
 ): { mutations: Mutation[]; selected: string } {
-  const bloks = blankSubtree(schema, type, parent, slot, order, preset)
+  const bloks = blankSubtree(schema, type, parent, slot, order, preset);
   return {
-    mutations: bloks.map((blok) => ({ t: 'insert', blok })),
+    mutations: bloks.map((blok) => ({ t: "insert", blok })),
     selected: bloks[0]!.uid,
-  }
+  };
 }
 
 /** "this slot holds one block" / "this slot holds at most N blocks" — the
@@ -45,7 +45,7 @@ export function subtreeInsert(
  * generalised for any other cap. Shared by `duplicateInsert` and
  * `pasteInsert` so the two refusals read identically. */
 export function fullSlotMessage(max: number): string {
-  return max === 1 ? 'this slot holds one block' : `this slot holds at most ${max} blocks`
+  return max === 1 ? "this slot holds one block" : `this slot holds at most ${max} blocks`;
 }
 
 /**
@@ -63,23 +63,23 @@ export function duplicateInsert(
   schema: SchemaIndex,
   uid: string,
 ): { mutations: Mutation[]; selected: string } | { error: string } {
-  if (uid === doc.root) return { error: 'The page itself cannot be duplicated.' }
-  const blok = doc.bloks[uid]
-  if (!blok || blok.parent === null || blok.slot === null) return { error: 'Unknown block.' }
+  if (uid === doc.root) return { error: "The page itself cannot be duplicated." };
+  const blok = doc.bloks[uid];
+  if (!blok || blok.parent === null || blok.slot === null) return { error: "Unknown block." };
 
-  const siblings = childrenOf(doc, blok.parent, blok.slot)
-  const field = schema[doc.bloks[blok.parent]?.type ?? '']?.fields[blok.slot]
-  if (field?.kind === 'blocks' && field.max !== undefined && siblings.length >= field.max) {
-    return { error: fullSlotMessage(field.max) }
+  const siblings = childrenOf(doc, blok.parent, blok.slot);
+  const field = schema[doc.bloks[blok.parent]?.type ?? ""]?.fields[blok.slot];
+  if (field?.kind === "blocks" && field.max !== undefined && siblings.length >= field.max) {
+    return { error: fullSlotMessage(field.max) };
   }
 
-  const index = siblings.findIndex((b) => b.uid === uid) + 1
+  const index = siblings.findIndex((b) => b.uid === uid) + 1;
   const order = keyAtIndex(
     siblings.map((b) => b.order),
     index,
-  )
-  const bloks = cloneSubtree(doc, uid, { parent: blok.parent, slot: blok.slot, order })
-  return { mutations: bloks.map((b) => ({ t: 'insert', blok: b })), selected: bloks[0]!.uid }
+  );
+  const bloks = cloneSubtree(doc, uid, { parent: blok.parent, slot: blok.slot, order });
+  return { mutations: bloks.map((b) => ({ t: "insert", blok: b })), selected: bloks[0]!.uid };
 }
 
 /**
@@ -99,48 +99,48 @@ export function pasteInsert(
   selection: string | null,
   bloks: readonly Blok[],
 ): { mutations: Mutation[]; selected: string } | { error: string } {
-  const NOTHING_SELECTED = 'Select a block to paste after.'
-  if (!selection) return { error: NOTHING_SELECTED }
-  const target = doc.bloks[selection]
-  if (!target) return { error: NOTHING_SELECTED }
+  const NOTHING_SELECTED = "Select a block to paste after.";
+  if (!selection) return { error: NOTHING_SELECTED };
+  const target = doc.bloks[selection];
+  if (!target) return { error: NOTHING_SELECTED };
 
-  const top = bloks[0]!
-  let parent: string
-  let slot: string
+  const top = bloks[0]!;
+  let parent: string;
+  let slot: string;
   if (selection === doc.root) {
-    const found = slotsOf(schema[target.type]).find(([, f]) => f.allow.includes(top.type))
-    if (!found) return { error: `No slot on this page accepts a '${top.type}'.` }
-    parent = doc.root
-    slot = found[0]
+    const found = slotsOf(schema[target.type]).find(([, f]) => f.allow.includes(top.type));
+    if (!found) return { error: `No slot on this page accepts a '${top.type}'.` };
+    parent = doc.root;
+    slot = found[0];
   } else {
-    if (target.parent === null || target.slot === null) return { error: NOTHING_SELECTED }
-    parent = target.parent
-    slot = target.slot
+    if (target.parent === null || target.slot === null) return { error: NOTHING_SELECTED };
+    parent = target.parent;
+    slot = target.slot;
   }
 
-  const field = schema[doc.bloks[parent]?.type ?? '']?.fields[slot]
-  if (field?.kind !== 'blocks' || !field.allow.includes(top.type)) {
-    return { error: `'${top.type}' is not allowed in this slot ('${slot}').` }
+  const field = schema[doc.bloks[parent]?.type ?? ""]?.fields[slot];
+  if (field?.kind !== "blocks" || !field.allow.includes(top.type)) {
+    return { error: `'${top.type}' is not allowed in this slot ('${slot}').` };
   }
-  const siblings = childrenOf(doc, parent, slot)
+  const siblings = childrenOf(doc, parent, slot);
   if (field.max !== undefined && siblings.length >= field.max) {
-    return { error: fullSlotMessage(field.max) }
+    return { error: fullSlotMessage(field.max) };
   }
 
   const index =
-    selection === doc.root ? siblings.length : siblings.findIndex((b) => b.uid === selection) + 1
+    selection === doc.root ? siblings.length : siblings.findIndex((b) => b.uid === selection) + 1;
   const order = keyAtIndex(
     siblings.map((b) => b.order),
     index,
-  )
+  );
 
   // The clipboard's own bloks, wired into a throwaway `Doc` so `cloneSubtree`
   // can re-allocate their uids exactly as it would for a subtree already
   // living in the real document: paste is a duplicate whose source is the
   // clipboard instead of `doc`.
-  const scratch: Doc = { root: top.uid, bloks: Object.fromEntries(bloks.map((b) => [b.uid, b])) }
-  const fresh = cloneSubtree(scratch, top.uid, { parent, slot, order })
-  return { mutations: fresh.map((b) => ({ t: 'insert', blok: b })), selected: fresh[0]!.uid }
+  const scratch: Doc = { root: top.uid, bloks: Object.fromEntries(bloks.map((b) => [b.uid, b])) };
+  const fresh = cloneSubtree(scratch, top.uid, { parent, slot, order });
+  return { mutations: fresh.map((b) => ({ t: "insert", blok: b })), selected: fresh[0]!.uid };
 }
 
 export interface Blocks {
@@ -149,15 +149,15 @@ export interface Blocks {
    * field-defaults-and-presets.md) as one transaction: one undo step, one
    * delta, one activity entry, however many bloks it produces.
    */
-  add: (parent: string, slot: string, type: string, index: number, preset?: string) => void
+  add: (parent: string, slot: string, type: string, index: number, preset?: string) => void;
   /**
    * Adds the first type the slot allows, for the preview's own add button —
    * that type's own `'default'` preset if it declares one, a bare block
    * otherwise.
    */
-  addFirst: (parent: string, slot: string) => void
-  move: (uid: string, parent: string, slot: string, index: number) => void
-  remove: (uid: string) => void
+  addFirst: (parent: string, slot: string) => void;
+  move: (uid: string, parent: string, slot: string, index: number) => void;
+  remove: (uid: string) => void;
   /**
    * Writes a field on `uid`. The block is named by the caller and never read
    * from the selection: a write can be started and land much later.
@@ -168,17 +168,17 @@ export interface Blocks {
    * on each input is what makes every field kind — text, richtext, asset, link —
    * translatable with no per-input work.
    */
-  setField: (uid: string, field: string, value: Json, locale?: string) => void
+  setField: (uid: string, field: string, value: Json, locale?: string) => void;
   /** Clones `uid`'s whole subtree with fresh uids, immediately after the
    * original in the same slot, as one transaction (duplicate-and-paste.md). */
-  duplicate: (uid: string) => void
+  duplicate: (uid: string) => void;
   /** Serialises `uid`'s whole subtree to the system clipboard, self-describing
    * so a later paste — on this page or another — can validate it first. */
-  copy: (uid: string) => Promise<void>
+  copy: (uid: string) => Promise<void>;
   /** Parses `text` (from the browser's own `paste` event) as a Folio clipboard
    * payload and, if it validates against the current selection's slot, inserts
    * it as one transaction immediately after the selection. */
-  paste: (text: string) => void
+  paste: (text: string) => void;
 }
 
 /**
@@ -194,16 +194,16 @@ export function useBlocks(
 ): Blocks {
   const keyAt = useCallback(
     (parent: string, slot: string, index: number, ignore?: string) => {
-      const doc = store.getSnapshot().doc
-      if (!doc) return keyAtIndex([], 0)
-      const sibs = childrenOf(doc, parent, slot).filter((b) => b.uid !== ignore)
+      const doc = store.getSnapshot().doc;
+      if (!doc) return keyAtIndex([], 0);
+      const sibs = childrenOf(doc, parent, slot).filter((b) => b.uid !== ignore);
       return keyAtIndex(
         sibs.map((b) => b.order),
         index,
-      )
+      );
     },
     [store],
-  )
+  );
 
   const add = useCallback(
     (parent: string, slot: string, type: string, index: number, preset?: string) => {
@@ -214,47 +214,47 @@ export function useBlocks(
         slot,
         keyAt(parent, slot, index),
         preset,
-      )
-      store.tx(mutations)
-      store.select(selected)
+      );
+      store.tx(mutations);
+      store.select(selected);
     },
     [keyAt, schema, store],
-  )
+  );
 
   const addFirst = useCallback(
     (parent: string, slot: string) => {
-      const field = schema[store.getSnapshot().doc?.bloks[parent]?.type ?? '']?.fields[slot]
-      const first = field?.kind === 'blocks' ? field.allow[0] : undefined
-      if (!first) return
-      const preset = schema[first]?.presets?.some((p) => p.name === 'default')
-        ? 'default'
-        : undefined
-      add(parent, slot, first, 0, preset)
+      const field = schema[store.getSnapshot().doc?.bloks[parent]?.type ?? ""]?.fields[slot];
+      const first = field?.kind === "blocks" ? field.allow[0] : undefined;
+      if (!first) return;
+      const preset = schema[first]?.presets?.some((p) => p.name === "default")
+        ? "default"
+        : undefined;
+      add(parent, slot, first, 0, preset);
     },
     [add, schema, store],
-  )
+  );
 
   const move = useCallback(
     (uid: string, parent: string, slot: string, index: number) => {
-      const doc = store.getSnapshot().doc
-      if (!doc) return
+      const doc = store.getSnapshot().doc;
+      if (!doc) return;
       // Same rule and the same primitive the server-side guard uses: `ancestorsOf`
       // terminates on a cyclic document, a hand-rolled walk up `parent` does not.
-      if (parent === uid || ancestorsOf(doc, parent).includes(uid)) return
-      const field = schema[doc.bloks[parent]?.type ?? '']?.fields[slot]
-      if (field?.kind !== 'blocks' || !field.allow.includes(doc.bloks[uid]?.type ?? '')) return
-      store.tx([{ t: 'move', uid, parent, slot, order: keyAt(parent, slot, index, uid) }])
+      if (parent === uid || ancestorsOf(doc, parent).includes(uid)) return;
+      const field = schema[doc.bloks[parent]?.type ?? ""]?.fields[slot];
+      if (field?.kind !== "blocks" || !field.allow.includes(doc.bloks[uid]?.type ?? "")) return;
+      store.tx([{ t: "move", uid, parent, slot, order: keyAt(parent, slot, index, uid) }]);
     },
     [keyAt, schema, store],
-  )
+  );
 
   const remove = useCallback(
     (uid: string) => {
-      store.tx([{ t: 'remove', uid }])
-      store.select(null)
+      store.tx([{ t: "remove", uid }]);
+      store.select(null);
     },
     [store],
-  )
+  );
 
   /**
    * The target is a parameter, not `store.getSnapshot().selection`, because an
@@ -271,67 +271,67 @@ export function useBlocks(
       // write, so the frame on the wire is byte-identical to a pre-v3 one.
       store.tx([
         locale === undefined
-          ? { t: 'set', uid, field, value }
-          : { t: 'set', uid, field, value, locale },
-      ])
+          ? { t: "set", uid, field, value }
+          : { t: "set", uid, field, value, locale },
+      ]);
     },
     [store],
-  )
+  );
 
   const duplicate = useCallback(
     (uid: string) => {
-      const doc = store.getSnapshot().doc
-      if (!doc) return
-      const result = duplicateInsert(doc, schema, uid)
-      if ('error' in result) {
-        notify(result.error)
-        return
+      const doc = store.getSnapshot().doc;
+      if (!doc) return;
+      const result = duplicateInsert(doc, schema, uid);
+      if ("error" in result) {
+        notify(result.error);
+        return;
       }
-      if (store.tx(result.mutations)) store.select(result.selected)
+      if (store.tx(result.mutations)) store.select(result.selected);
     },
     [notify, schema, store],
-  )
+  );
 
   const copy = useCallback(
     async (uid: string) => {
-      const doc = store.getSnapshot().doc
-      if (!doc) return
-      const bloks = subtree(doc, uid).map((id) => doc.bloks[id]!)
+      const doc = store.getSnapshot().doc;
+      if (!doc) return;
+      const bloks = subtree(doc, uid).map((id) => doc.bloks[id]!);
       const payload: ClipboardPayload = {
         folio: 1,
         bloks,
         from: { storyId: store.storyId, path: storyPath },
-      }
+      };
       try {
-        await navigator.clipboard.writeText(JSON.stringify(payload))
+        await navigator.clipboard.writeText(JSON.stringify(payload));
       } catch {
-        notify('Could not write to the clipboard.')
+        notify("Could not write to the clipboard.");
       }
     },
     [notify, store, storyPath],
-  )
+  );
 
   const paste = useCallback(
     (text: string) => {
-      const doc = store.getSnapshot().doc
-      if (!doc) return
-      const parsed = parseClipboard(text, schema)
-      if ('error' in parsed) {
-        notify(parsed.error)
-        return
+      const doc = store.getSnapshot().doc;
+      if (!doc) return;
+      const parsed = parseClipboard(text, schema);
+      if ("error" in parsed) {
+        notify(parsed.error);
+        return;
       }
-      const result = pasteInsert(doc, schema, store.getSnapshot().selection, parsed.bloks)
-      if ('error' in result) {
-        notify(result.error)
-        return
+      const result = pasteInsert(doc, schema, store.getSnapshot().selection, parsed.bloks);
+      if ("error" in result) {
+        notify(result.error);
+        return;
       }
-      if (store.tx(result.mutations)) store.select(result.selected)
+      if (store.tx(result.mutations)) store.select(result.selected);
     },
     [notify, schema, store],
-  )
+  );
 
   return useMemo(
     () => ({ add, addFirst, move, remove, setField, duplicate, copy, paste }),
     [add, addFirst, move, remove, setField, duplicate, copy, paste],
-  )
+  );
 }

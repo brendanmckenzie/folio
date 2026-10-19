@@ -1,17 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { DocumentType, SchemaIndex } from '../../../core/schema'
-import { canCreateContent, canManageContent, type Me } from '../../me'
-import { Badge } from '../Badge'
-import { Button } from '../Button'
-import { EmptyState } from '../EmptyState'
-import { ListHeader } from '../List'
-import { type Column, Table } from '../Table'
-import type { Screen } from '../route'
-import { stateTone, when } from './content-rows'
-import { CreateDialog } from './CreateDialog'
-import type { CreateBody } from './create-model'
-import css from './Documents.module.css'
-import { DeleteDialog } from './DeleteDialog'
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { DocumentType, SchemaIndex } from "../../../core/schema";
+import { canCreateContent, canManageContent, type Me } from "../../me";
+import { Badge } from "../Badge";
+import { Button } from "../Button";
+import { EmptyState } from "../EmptyState";
+import { ListHeader } from "../List";
+import { type Column, Table } from "../Table";
+import type { Screen } from "../route";
+import { stateTone, when } from "./content-rows";
+import { CreateDialog } from "./CreateDialog";
+import type { CreateBody } from "./create-model";
+import css from "./Documents.module.css";
+import { DeleteDialog } from "./DeleteDialog";
 import {
   cellText,
   type DocumentColumn,
@@ -25,15 +25,15 @@ import {
   isStale,
   parseDocumentsUrl,
   withSort,
-} from './documents-model'
-import { useDocuments } from './useDocuments'
-import { messageOf } from './useContent'
+} from "./documents-model";
+import { useDocuments } from "./useDocuments";
+import { messageOf } from "./useContent";
 
 interface Props {
   /** The declared type this screen is a list of. */
-  type: DocumentType
-  schema: SchemaIndex
-  apiBase: string
+  type: DocumentType;
+  schema: SchemaIndex;
+  apiBase: string;
   /**
    * Who is signed in, for the role gates below.
    *
@@ -43,14 +43,14 @@ interface Props {
    * `## Cross-cutting`, and the defect issue #7 names by name: a viewer was
    * offered Delete here and told about it by the server.
    */
-  me: Me
-  query: Readonly<Record<string, string>>
+  me: Me;
+  query: Readonly<Record<string, string>>;
   /** `replace`, not `push`: a filter keystroke must not be a history entry. */
-  onQuery: (next: Record<string, string | undefined>) => void
-  onOpen: (screen: Screen) => void
-  onNotice: (message: string) => void
+  onQuery: (next: Record<string, string | undefined>) => void;
+  onOpen: (screen: Screen) => void;
+  onNotice: (message: string) => void;
   /** The open document, if the editor was reached from here. */
-  selected?: string
+  selected?: string;
   /**
    * Hands this screen's `reload` to the shell, which calls it when the space
    * channel reports that somebody *else* created, published or deleted a
@@ -58,19 +58,19 @@ interface Props {
    * unregistered on unmount, so the shell never holds a stale closure over a
    * screen that is gone.
    */
-  registerReload: (reload: (() => void) | null) => void
+  registerReload: (reload: (() => void) | null) => void;
 }
 
 const STATES = [
-  { value: 'all', label: 'All' },
-  { value: 'draft', label: 'Draft' },
-  { value: 'changed', label: 'Changed' },
-  { value: 'live', label: 'Live' },
-  { value: 'unpublished', label: 'Unpublished' },
-] as const
+  { value: "all", label: "All" },
+  { value: "draft", label: "Draft" },
+  { value: "changed", label: "Changed" },
+  { value: "live", label: "Live" },
+  { value: "unpublished", label: "Unpublished" },
+] as const;
 
 /** Six placeholder rows. Named rather than indexed, matching Content's. */
-const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
+const SKELETON = ["s1", "s2", "s3", "s4", "s5", "s6"];
 
 /**
  * One type's records as a table — `docs/ui-architecture.md`'s port phase 3, and
@@ -100,28 +100,28 @@ const SKELETON = ['s1', 's2', 's3', 's4', 's5', 's6']
  *    record list is the title, which is a real `stories` column.
  */
 export function Documents(props: Props) {
-  const { type, schema, apiBase, onQuery, onNotice, onOpen } = props
-  const mayCreate = canCreateContent(props.me)
-  const mayManage = canManageContent(props.me)
-  const url = parseDocumentsUrl(props.query)
-  const filter = filterOf(url)
-  const data = useDocuments(apiBase, type.name, url)
+  const { type, schema, apiBase, onQuery, onNotice, onOpen } = props;
+  const mayCreate = canCreateContent(props.me);
+  const mayManage = canManageContent(props.me);
+  const url = parseDocumentsUrl(props.query);
+  const filter = filterOf(url);
+  const data = useDocuments(apiBase, type.name, url);
 
-  const [deleting, setDeleting] = useState<DocumentRow | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [deleting, setDeleting] = useState<DocumentRow | null>(null);
+  const [busy, setBusy] = useState(false);
 
-  const go = useCallback((next: DocumentsUrl) => onQuery(documentsQuery(next)), [onQuery])
+  const go = useCallback((next: DocumentsUrl) => onQuery(documentsQuery(next)), [onQuery]);
 
   /**
    * The shell's handle on this screen's page. A registration rather than a
    * counter prop, for the reason on `Admin.tsx`'s `listReload`: both
    * dependencies here are values the body reads.
    */
-  const { registerReload } = props
+  const { registerReload } = props;
   useEffect(() => {
-    registerReload(data.reload)
-    return () => registerReload(null)
-  }, [registerReload, data.reload])
+    registerReload(data.reload);
+    return () => registerReload(null);
+  }, [registerReload, data.reload]);
 
   const columns = useMemo(
     () =>
@@ -131,7 +131,7 @@ export function Documents(props: Props) {
         (field, fallback) => schema[type.root]?.fields[field]?.label ?? fallback,
       ),
     [schema, type],
-  )
+  );
 
   /**
    * A singleton has exactly one document, so a list of it is a list of one — and
@@ -147,47 +147,47 @@ export function Documents(props: Props) {
    * navigating while React is rendering is the version of this that works until it
    * is called twice.
    */
-  const only = type.kind === 'singleton' ? data.page.rows[0] : undefined
+  const only = type.kind === "singleton" ? data.page.rows[0] : undefined;
   useEffect(() => {
-    if (only) onOpen({ name: 'edit', id: only.id })
-  }, [only, onOpen])
+    if (only) onOpen({ name: "edit", id: only.id });
+  }, [only, onOpen]);
 
   const write = useCallback(
-    async (row: DocumentRow, action: 'duplicate' | 'delete') => {
-      setBusy(true)
+    async (row: DocumentRow, action: "duplicate" | "delete") => {
+      setBusy(true);
       try {
         const path =
-          action === 'duplicate'
+          action === "duplicate"
             ? `/stories/${encodeURIComponent(row.id)}/duplicate`
-            : `/stories/${encodeURIComponent(row.id)}`
+            : `/stories/${encodeURIComponent(row.id)}`;
         const res = await fetch(`${apiBase}${path}`, {
-          method: action === 'duplicate' ? 'POST' : 'DELETE',
-          ...(action === 'duplicate'
-            ? { headers: { 'content-type': 'application/json' }, body: '{}' }
+          method: action === "duplicate" ? "POST" : "DELETE",
+          ...(action === "duplicate"
+            ? { headers: { "content-type": "application/json" }, body: "{}" }
             : {}),
-        })
-        if (!res.ok) throw new Error(await messageOf(res))
+        });
+        if (!res.ok) throw new Error(await messageOf(res));
         onNotice(
-          action === 'duplicate'
-            ? `Duplicated ${row.title || 'the document'}`
-            : `Deleted ${row.title || 'the document'}`,
-        )
-        data.reload()
+          action === "duplicate"
+            ? `Duplicated ${row.title || "the document"}`
+            : `Deleted ${row.title || "the document"}`,
+        );
+        data.reload();
       } catch (e) {
-        onNotice((e as Error).message)
+        onNotice((e as Error).message);
       } finally {
-        setBusy(false)
+        setBusy(false);
       }
     },
     [apiBase, data, onNotice],
-  )
+  );
 
   const tableColumns: Column<DocumentRow>[] = columns.map((column) => ({
     key: column.key,
     label: column.label,
     ...(column.sort ? { sortable: true } : {}),
     cell: (row) => <Cell row={row} column={column} />,
-  }))
+  }));
 
   if (data.page.error && data.page.rows.length === 0) {
     return (
@@ -202,10 +202,10 @@ export function Documents(props: Props) {
           }
         />
       </div>
-    )
+    );
   }
 
-  const firstLoad = data.page.loading && data.page.rows.length === 0
+  const firstLoad = data.page.loading && data.page.rows.length === 0;
 
   return (
     <div className={css.screen}>
@@ -225,7 +225,7 @@ export function Documents(props: Props) {
                 type={type}
                 schema={schema}
                 apiBase={apiBase}
-                onCreated={(id) => onOpen({ name: 'edit', id })}
+                onCreated={(id) => onOpen({ name: "edit", id })}
                 onNotice={onNotice}
               />
             ) : null}
@@ -240,7 +240,7 @@ export function Documents(props: Props) {
             <button
               key={state.value}
               type="button"
-              className={`${css.chip} ${url.state === state.value ? css.chipOn : ''}`}
+              className={`${css.chip} ${url.state === state.value ? css.chipOn : ""}`}
               aria-pressed={url.state === state.value}
               onClick={() => go({ ...url, state: state.value })}
             >
@@ -265,10 +265,10 @@ export function Documents(props: Props) {
           currentKey={props.selected ?? null}
           sort={{ key: sortColumnKey(columns, url), dir: dirOf(url) }}
           onSort={(key) => {
-            const sort = columns.find((c) => c.key === key)?.sort
-            if (sort) go(withSort(url, sort))
+            const sort = columns.find((c) => c.key === key)?.sort;
+            if (sort) go(withSort(url, sort));
           }}
-          onOpen={(row) => onOpen({ name: 'edit', id: row.id })}
+          onOpen={(row) => onOpen({ name: "edit", id: row.id })}
           /*
             Both row actions are role-gated, and the *whole column* goes with
             them: `Table`'s `actions` is optional and it draws no header cell and
@@ -286,8 +286,8 @@ export function Documents(props: Props) {
                         size="sm"
                         variant="subtle"
                         disabled={busy}
-                        title={`Duplicate ${row.title || 'this document'}`}
-                        onClick={() => void write(row, 'duplicate')}
+                        title={`Duplicate ${row.title || "this document"}`}
+                        onClick={() => void write(row, "duplicate")}
                       >
                         Duplicate
                       </Button>
@@ -297,7 +297,7 @@ export function Documents(props: Props) {
                         size="sm"
                         variant="subtle"
                         disabled={busy}
-                        title={`Delete ${row.title || 'this document'}`}
+                        title={`Delete ${row.title || "this document"}`}
                         onClick={() => setDeleting(row)}
                       >
                         Delete
@@ -309,15 +309,15 @@ export function Documents(props: Props) {
             : {})}
           empty={
             <EmptyState
-              title={isNarrowed(filter) ? 'Nothing matches' : `No ${type.label.toLowerCase()} yet`}
+              title={isNarrowed(filter) ? "Nothing matches" : `No ${type.label.toLowerCase()} yet`}
               body={
                 isNarrowed(filter)
-                  ? 'Try a different state, or clear the search.'
+                  ? "Try a different state, or clear the search."
                   : `A ${type.label.toLowerCase()} is a document with no URL of its own. It is edited as a form and reached from here.`
               }
               action={
                 isNarrowed(filter) ? (
-                  <Button size="sm" onClick={() => go({ ...url, state: 'all', q: '' })}>
+                  <Button size="sm" onClick={() => go({ ...url, state: "all", q: "" })}>
                     Clear filters
                   </Button>
                 ) : null
@@ -337,7 +337,7 @@ export function Documents(props: Props) {
         <span className={css.count}>
           {data.page.total === undefined
             ? `${data.page.rows.length} shown`
-            : `${data.page.rows.length} of ${data.page.total} ${data.page.total === 1 ? 'document' : 'documents'}`}
+            : `${data.page.rows.length} of ${data.page.total} ${data.page.total === 1 ? "document" : "documents"}`}
         </span>
         <span className={css.pager}>
           <Button
@@ -365,14 +365,14 @@ export function Documents(props: Props) {
           row={deleting}
           onClose={() => setDeleting(null)}
           onConfirm={() => {
-            const row = deleting
-            setDeleting(null)
-            void write(row, 'delete')
+            const row = deleting;
+            setDeleting(null);
+            void write(row, "delete");
           }}
         />
       ) : null}
     </div>
-  )
+  );
 }
 
 /**
@@ -384,13 +384,13 @@ export function Documents(props: Props) {
  * here.
  */
 function sortColumnKey(columns: readonly DocumentColumn[], url: DocumentsUrl): string {
-  return columns.find((c) => c.sort === url.sort)?.key ?? ''
+  return columns.find((c) => c.sort === url.sort)?.key ?? "";
 }
 
 /* ------------------------------------------------------------------- a cell --- */
 
 function Cell({ row, column }: { row: DocumentRow; column: DocumentColumn }) {
-  if (column.kind === 'state') {
+  if (column.kind === "state") {
     return (
       <Badge
         tone={stateTone(row.state)}
@@ -401,25 +401,25 @@ function Cell({ row, column }: { row: DocumentRow; column: DocumentColumn }) {
               // something to publish". Here the cells beside it are the published
               // values, so it also means "what you are reading is not what this
               // document currently says".
-              title: 'The cells here are published values. This document has unpublished changes.',
+              title: "The cells here are published values. This document has unpublished changes.",
             }
           : {})}
       >
         {row.state}
       </Badge>
-    )
+    );
   }
-  if (column.kind === 'updated') return <span className={css.stamp}>{when(row)}</span>
+  if (column.kind === "updated") return <span className={css.stamp}>{when(row)}</span>;
 
-  const text = cellText(row, column)
+  const text = cellText(row, column);
   // Returned bare rather than wrapped in a fragment: a component may return a
   // string in React 19, and `<>{text}</>` is a `noUselessFragments` error.
-  if (text) return text
-  if (column.kind === 'title') return <span className={css.untitled}>Untitled</span>
+  if (text) return text;
+  if (column.kind === "title") return <span className={css.untitled}>Untitled</span>;
   // A blank cell is a value nobody has published, not an empty field — and the
   // row's own badge is what says which. A dash rather than nothing, so an empty
   // cell reads as deliberate.
-  return <span className={css.blank}>—</span>
+  return <span className={css.blank}>—</span>;
 }
 
 /* ------------------------------------------------------------------ create --- */
@@ -455,36 +455,36 @@ function NewDocumentButton({
   onCreated,
   onNotice,
 }: {
-  type: DocumentType
+  type: DocumentType;
   /** For the dialog's one label: the title field's own, so a `person` is asked for
    * a "Full name". */
-  schema: SchemaIndex
-  apiBase: string
-  onCreated: (id: string) => void
-  onNotice: (message: string) => void
+  schema: SchemaIndex;
+  apiBase: string;
+  onCreated: (id: string) => void;
+  onNotice: (message: string) => void;
 }) {
-  const [pending, setPending] = useState(false)
-  const [creating, setCreating] = useState(false)
+  const [pending, setPending] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   /** Closes on success only: a failed POST leaves the dialog open with the typed
    * name still in it, and the message in the toast above it. */
   const create = async (body: CreateBody) => {
-    setPending(true)
+    setPending(true);
     try {
       const res = await fetch(`${apiBase}/stories`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        method: "POST",
+        headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
-      })
-      if (!res.ok) throw new Error(await messageOf(res))
-      setCreating(false)
-      onCreated(((await res.json()) as { id: string }).id)
+      });
+      if (!res.ok) throw new Error(await messageOf(res));
+      setCreating(false);
+      onCreated(((await res.json()) as { id: string }).id);
     } catch (e) {
-      onNotice((e as Error).message)
+      onNotice((e as Error).message);
     } finally {
-      setPending(false)
+      setPending(false);
     }
-  }
+  };
 
   return (
     <>
@@ -501,5 +501,5 @@ function NewDocumentButton({
         />
       ) : null}
     </>
-  )
+  );
 }

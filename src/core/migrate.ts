@@ -21,10 +21,10 @@
  * No I/O, no clock, no `env`. A migration that depends on either is not
  * re-runnable, and re-runnability is the whole mechanism.
  */
-import { deepEqual } from './diff'
-import { type Blok, type Doc, type Json, newUid } from './doc'
-import { applyAll, type Mutation } from './mutations'
-import type { DocumentType, SchemaIndex } from './schema'
+import { deepEqual } from "./diff";
+import { type Blok, type Doc, type Json, newUid } from "./doc";
+import { applyAll, type Mutation } from "./mutations";
+import type { DocumentType, SchemaIndex } from "./schema";
 
 /**
  * What a migration is handed alongside the document: the schema it is migrating
@@ -34,16 +34,16 @@ import type { DocumentType, SchemaIndex } from './schema'
  */
 export interface MigrationContext {
   /** The block schemas as the code declares them now — the target shape. */
-  schema: SchemaIndex
+  schema: SchemaIndex;
   /** The document type this document belongs to (`document-types.md`). */
-  type: DocumentType
+  type: DocumentType;
   /**
    * Every blok of one block type, in uid order, with whatever `fn` returns
    * flattened. The escape hatch is `fn` itself: anything the helpers below do
    * not cover is written by hand against `Blok` and `Mutation`, which is exactly
    * what `folio/engine` exists for.
    */
-  each: (blockType: string, fn: (blok: Blok) => Mutation[]) => Mutation[]
+  each: (blockType: string, fn: (blok: Blok) => Mutation[]) => Mutation[];
 }
 
 export interface Migration {
@@ -52,10 +52,10 @@ export interface Migration {
    * `validateMigrations` checks that rather than assuming it. Also what
    * `stories.schema_id` and `schema_migrations.id` store.
    */
-  id: string
+  id: string;
   /** Shown to an editor in the "this page is behind" banner. Write it for them. */
-  description: string
-  up: (doc: Doc, ctx: MigrationContext) => Mutation[]
+  description: string;
+  up: (doc: Doc, ctx: MigrationContext) => Mutation[];
 }
 
 /**
@@ -63,7 +63,7 @@ export interface Migration {
  * and gets `up`'s parameters inferred rather than annotating them.
  */
 export function defineMigration(m: Migration): Migration {
-  return m
+  return m;
 }
 
 /** The `MigrationContext` for one document. */
@@ -83,7 +83,7 @@ export function migrationContext(
         // order would make the two reports disagree for no reason.
         .sort((a, b) => (a.uid < b.uid ? -1 : a.uid > b.uid ? 1 : 0))
         .flatMap(fn),
-  }
+  };
 }
 
 /**
@@ -100,15 +100,15 @@ export function migrateDoc(
   schema: SchemaIndex,
   type: DocumentType,
 ): { mutations: Mutation[]; doc: Doc } {
-  let cursor = doc
-  const mutations: Mutation[] = []
+  let cursor = doc;
+  const mutations: Mutation[] = [];
   for (const m of migrations) {
-    const produced = m.up(cursor, migrationContext(cursor, schema, type))
-    if (produced.length === 0) continue
-    mutations.push(...produced)
-    cursor = applyAll(cursor, produced)
+    const produced = m.up(cursor, migrationContext(cursor, schema, type));
+    if (produced.length === 0) continue;
+    mutations.push(...produced);
+    cursor = applyAll(cursor, produced);
   }
-  return { mutations, doc: cursor }
+  return { mutations, doc: cursor };
 }
 
 /**
@@ -123,13 +123,13 @@ export function pendingFor(
   schemaId: string | null | undefined,
   migrations: readonly Migration[],
 ): Migration[] {
-  if (schemaId === null || schemaId === undefined) return [...migrations]
-  return migrations.filter((m) => m.id > schemaId)
+  if (schemaId === null || schemaId === undefined) return [...migrations];
+  return migrations.filter((m) => m.id > schemaId);
 }
 
 /** The id a fully-migrated document carries, or null when there are none. */
 export function latestMigrationId(migrations: readonly Migration[]): string | null {
-  return migrations.length > 0 ? migrations[migrations.length - 1]!.id : null
+  return migrations.length > 0 ? migrations[migrations.length - 1]!.id : null;
 }
 
 /**
@@ -143,27 +143,27 @@ export function latestMigrationId(migrations: readonly Migration[]): string | nu
  * comparison happened to be used. Checked, not assumed.
  */
 export function validateMigrations(migrations: readonly Migration[] | undefined): void {
-  const seen = new Set<string>()
-  let previous: string | null = null
-  const widths = new Set<number>()
+  const seen = new Set<string>();
+  let previous: string | null = null;
+  const widths = new Set<number>();
 
   for (const m of migrations ?? []) {
     if (!m.id || m.id !== m.id.trim()) {
-      throw new Error(`folio: migration id '${m.id}' must be non-empty and untrimmed of spaces`)
+      throw new Error(`folio: migration id '${m.id}' must be non-empty and untrimmed of spaces`);
     }
     if (!m.description) {
-      throw new Error(`folio: migration '${m.id}' has no description — an editor reads it`)
+      throw new Error(`folio: migration '${m.id}' has no description — an editor reads it`);
     }
-    if (seen.has(m.id)) throw new Error(`folio: duplicate migration id '${m.id}'`)
-    seen.add(m.id)
+    if (seen.has(m.id)) throw new Error(`folio: duplicate migration id '${m.id}'`);
+    seen.add(m.id);
     if (previous !== null && m.id <= previous) {
       throw new Error(
         `folio: migration '${m.id}' is declared after '${previous}' but sorts before it — ` +
-          'ids must be in lexicographic order, which is the run order',
-      )
+          "ids must be in lexicographic order, which is the run order",
+      );
     }
-    previous = m.id
-    widths.add(/^\d*/.exec(m.id)![0].length)
+    previous = m.id;
+    widths.add(/^\d*/.exec(m.id)![0].length);
   }
 
   // Either every id carries a numeric run number of the same width, or none
@@ -172,9 +172,9 @@ export function validateMigrations(migrations: readonly Migration[] | undefined)
   // before" message above, which only describes the symptom.
   if (widths.size > 1) {
     throw new Error(
-      'folio: migration ids must all carry a numeric prefix of the same width ' +
-        `(zero-padded), or none at all; saw prefixes of ${[...widths].sort((a, b) => a - b).join(' and ')} digits`,
-    )
+      "folio: migration ids must all carry a numeric prefix of the same width " +
+        `(zero-padded), or none at all; saw prefixes of ${[...widths].sort((a, b) => a - b).join(" and ")} digits`,
+    );
   }
 }
 
@@ -190,7 +190,7 @@ export function validateMigrations(migrations: readonly Migration[] | undefined)
  * cleared field is `null`, "already migrated" means `null`, and that is what
  * makes `rename` and `remove` produce nothing on a second run.
  */
-const isSet = (value: Json | undefined): boolean => value !== undefined && value !== null
+const isSet = (value: Json | undefined): boolean => value !== undefined && value !== null;
 
 /**
  * Field-level migrations. Every one returns `[]` when the document is already in
@@ -207,18 +207,18 @@ export const field = {
    * new input first.
    */
   rename(blok: Blok, from: string, to: string): Mutation[] {
-    if (from === to) return []
-    if (!isSet(blok.data[from])) return []
+    if (from === to) return [];
+    if (!isSet(blok.data[from])) return [];
     return [
-      { t: 'set', uid: blok.uid, field: to, value: blok.data[from]! },
-      { t: 'set', uid: blok.uid, field: from, value: null },
-    ]
+      { t: "set", uid: blok.uid, field: to, value: blok.data[from]! },
+      { t: "set", uid: blok.uid, field: from, value: null },
+    ];
   },
 
   /** Clears a field the schema no longer declares. */
   remove(blok: Blok, name: string): Mutation[] {
-    if (!isSet(blok.data[name])) return []
-    return [{ t: 'set', uid: blok.uid, field: name, value: null }]
+    if (!isSet(blok.data[name])) return [];
+    return [{ t: "set", uid: blok.uid, field: name, value: null }];
   },
 
   /**
@@ -234,8 +234,8 @@ export const field = {
    * no-op on every document created since it existed.
    */
   default(blok: Blok, name: string, value: Json): Mutation[] {
-    if (blok.data[name] !== undefined) return []
-    return [{ t: 'set', uid: blok.uid, field: name, value }]
+    if (blok.data[name] !== undefined) return [];
+    return [{ t: "set", uid: blok.uid, field: name, value }];
   },
 
   /**
@@ -248,11 +248,11 @@ export const field = {
    * honest constraint rather than a hidden one.
    */
   map(blok: Blok, name: string, fn: (value: Json) => Json): Mutation[] {
-    const current = blok.data[name]
-    if (!isSet(current)) return []
-    const next = fn(current!)
-    if (deepEqual(next, current!)) return []
-    return [{ t: 'set', uid: blok.uid, field: name, value: next }]
+    const current = blok.data[name];
+    if (!isSet(current)) return [];
+    const next = fn(current!);
+    if (deepEqual(next, current!)) return [];
+    return [{ t: "set", uid: blok.uid, field: name, value: next }];
   },
 
   /**
@@ -264,21 +264,21 @@ export const field = {
    * transaction, so a refused chunk loses neither.
    */
   split(blok: Blok, name: string, parts: Record<string, (value: Json) => Json>): Mutation[] {
-    const current = blok.data[name]
-    if (!isSet(current)) return []
+    const current = blok.data[name];
+    if (!isSet(current)) return [];
     const out: Mutation[] = Object.entries(parts).map(([to, fn]) => ({
-      t: 'set' as const,
+      t: "set" as const,
       uid: blok.uid,
       field: to,
       value: fn(current!),
-    }))
+    }));
     // A `split` with no parts would clear the source and lose the value: that is
     // `field.remove`, said badly, so it is refused rather than performed.
-    if (out.length === 0) return []
-    out.push({ t: 'set', uid: blok.uid, field: name, value: null })
-    return out
+    if (out.length === 0) return [];
+    out.push({ t: "set", uid: blok.uid, field: name, value: null });
+    return out;
   },
-}
+};
 
 /** Block-level migrations: the shapes that need `retype`, or a new blok. */
 export const block = {
@@ -301,12 +301,12 @@ export const block = {
    * is out of this spec's scope.
    */
   retype(blok: Blok, type: string, data?: Record<string, Json>): Mutation[] {
-    const out: Mutation[] = []
-    if (blok.type !== type) out.push({ t: 'retype', uid: blok.uid, type })
+    const out: Mutation[] = [];
+    if (blok.type !== type) out.push({ t: "retype", uid: blok.uid, type });
     for (const [name, value] of Object.entries(data ?? {})) {
-      if (blok.data[name] === undefined) out.push({ t: 'set', uid: blok.uid, field: name, value })
+      if (blok.data[name] === undefined) out.push({ t: "set", uid: blok.uid, field: name, value });
     }
-    return out
+    return out;
   },
 
   /**
@@ -331,8 +331,8 @@ export const block = {
     slot: string,
     data: Record<string, Json> = {},
   ): Mutation[] {
-    if (blok.uid === doc.root || blok.parent === null || blok.slot === null) return []
-    if (doc.bloks[blok.parent]?.type === type) return []
+    if (blok.uid === doc.root || blok.parent === null || blok.slot === null) return [];
+    if (doc.bloks[blok.parent]?.type === type) return [];
     const wrapper: Blok = {
       uid: newUid(),
       type,
@@ -340,10 +340,10 @@ export const block = {
       slot: blok.slot,
       order: blok.order,
       data,
-    }
+    };
     return [
-      { t: 'insert', blok: wrapper },
-      { t: 'move', uid: blok.uid, parent: wrapper.uid, slot, order: 'a0' },
-    ]
+      { t: "insert", blok: wrapper },
+      { t: "move", uid: blok.uid, parent: wrapper.uid, slot, order: "a0" },
+    ];
   },
-}
+};

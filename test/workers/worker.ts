@@ -12,12 +12,12 @@
  * rather than src/server/story-do.ts directly: that is the import path real
  * users have, so it also pins that the barrel stays loadable inside workerd.
  */
-import { createElement } from 'react'
-import { renderToReadableStream } from 'react-dom/server.edge'
-import { blocks, defineBlock, multilink, text } from '../../src/core'
-import { createFolio, Shell } from '../../src/server'
+import { createElement } from "react";
+import { renderToReadableStream } from "react-dom/server.edge";
+import { blocks, defineBlock, multilink, text } from "../../src/core";
+import { createFolio, Shell } from "../../src/server";
 
-export { SpaceDO, StoryDO } from '../../src/server'
+export { SpaceDO, StoryDO } from "../../src/server";
 
 /**
  * Smallest registry that exercises test/workers/http.test.ts's load-bearing
@@ -32,41 +32,41 @@ export { SpaceDO, StoryDO } from '../../src/server'
  * instead of JSX for that reason.
  */
 const page = defineBlock({
-  name: 'page',
-  label: 'Page',
-  summary: 'title',
+  name: "page",
+  label: "Page",
+  summary: "title",
   fields: {
-    title: text({ label: 'Title', required: true }),
-    body: blocks({ label: 'Body', allow: ['link'] }),
+    title: text({ label: "Title", required: true }),
+    body: blocks({ label: "Body", allow: ["link"] }),
   },
   render: ({ title, body }) =>
     createElement(
-      'div',
-      { className: 'page' },
-      createElement('h1', null, title),
-      createElement('div', { className: 'page__body' }, body),
+      "div",
+      { className: "page" },
+      createElement("h1", null, title),
+      createElement("div", { className: "page__body" }, body),
     ),
-})
+});
 
 const link = defineBlock({
-  name: 'link',
-  label: 'Link',
-  summary: 'label',
+  name: "link",
+  label: "Link",
+  summary: "label",
   fields: {
-    label: text({ label: 'Label', required: true }),
-    href: multilink({ label: 'Target' }),
+    label: text({ label: "Label", required: true }),
+    href: multilink({ label: "Target" }),
   },
   render: ({ label, href }) =>
     createElement(
-      'a',
-      { href: href?.href ?? '#', 'data-broken': href?.broken ? 'true' : undefined },
+      "a",
+      { href: href?.href ?? "#", "data-broken": href?.broken ? "true" : undefined },
       label,
     ),
-})
+});
 
 const folio = createFolio<Cloudflare.Env>({
   blocks: [page, link],
-  root: 'page',
+  root: "page",
   bindings: (env) => ({
     db: env.DB,
     story: env.STORY,
@@ -74,7 +74,7 @@ const folio = createFolio<Cloudflare.Env>({
     media: env.MEDIA,
     images: env.IMAGES,
   }),
-  basePath: '/folio',
+  basePath: "/folio",
   // Required, for the same reason `auth` is: absent, the admin page serves a
   // mount point and no script tag, which is a blank screen behind a 200 rather
   // than an error. A real host passes the `__FOLIO_ASSETS__` global its Vite
@@ -83,15 +83,15 @@ const folio = createFolio<Cloudflare.Env>({
   // The URLs are what the plugin emits for a production build, and no test
   // fetches them — what the suites assert about is that the admin page *links*
   // something, which is precisely the thing that used to be silently absent.
-  assets: { admin: '/folio-admin.js', preview: '/folio-preview.js' },
+  assets: { admin: "/folio-admin.js", preview: "/folio-preview.js" },
   // identity-and-access.md checkpoint 2: `auth` is required, so a test host
   // declares it too. 'open' keeps this fixture's own scenarios about routing
   // and content rather than about credentials; the auth suites build their own
   // `createFolio` with providers configured.
-  auth: 'open',
+  auth: "open",
   // '' is the root story, which serves '/', matching examples/demo.
-  route: (path) => (path ? `/${path}` : '/'),
-})
+  route: (path) => (path ? `/${path}` : "/"),
+});
 
 /**
  * A real host `fetch`, close enough to examples/demo/src/index.tsx that
@@ -104,32 +104,32 @@ const folio = createFolio<Cloudflare.Env>({
  */
 export default {
   async fetch(req, env, ctx) {
-    const handled = await folio.handle(req, env, ctx)
-    if (handled) return handled
+    const handled = await folio.handle(req, env, ctx);
+    if (handled) return handled;
 
-    const url = new URL(req.url)
-    const path = url.pathname.replace(/^\/+|\/+$/g, '')
-    const doc = await folio.published(env, path)
+    const url = new URL(req.url);
+    const path = url.pathname.replace(/^\/+|\/+$/g, "");
+    const doc = await folio.published(env, path);
     if (!doc) {
       // redirects.md's architecture decision 2: only reached once folio.published
       // has already said null, so a live story always wins over a redirect —
       // and creating one at a redirected path deletes the row anyway.
-      const hit = await folio.redirect(env, path)
+      const hit = await folio.redirect(env, path);
       if (hit) {
-        const location = new URL(hit.to, url.origin)
-        location.search = url.search
-        return Response.redirect(location.toString(), hit.status)
+        const location = new URL(hit.to, url.origin);
+        location.search = url.search;
+        return Response.redirect(location.toString(), hit.status);
       }
-      return new Response('host: not found', { status: 404 })
+      return new Response("host: not found", { status: 404 });
     }
 
-    const resolution = await folio.resolve(env, doc)
+    const resolution = await folio.resolve(env, doc);
     const shell = Shell({
-      title: 'Published',
-      children: createElement('div', { id: 'folio-root' }, folio.render(doc, { resolution })),
-    })
+      title: "Published",
+      children: createElement("div", { id: "folio-root" }, folio.render(doc, { resolution })),
+    });
     return new Response(await renderToReadableStream(shell), {
-      headers: { 'content-type': 'text/html; charset=utf-8' },
-    })
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
   },
-} satisfies ExportedHandler<Cloudflare.Env>
+} satisfies ExportedHandler<Cloudflare.Env>;

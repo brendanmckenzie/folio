@@ -1,9 +1,9 @@
-import { env } from 'cloudflare:test'
-import { beforeAll, describe, expect, it } from 'vitest'
-import type { Doc } from '../../src/core/doc'
-import type { Page } from '../../src/core/pagination'
-import type { ActivityEntry } from '../../src/core/protocol'
-import { applySeedFixture } from './seed-fixture'
+import { env } from "cloudflare:test";
+import { beforeAll, describe, expect, it } from "vitest";
+import type { Doc } from "../../src/core/doc";
+import type { Page } from "../../src/core/pagination";
+import type { ActivityEntry } from "../../src/core/protocol";
+import { applySeedFixture } from "./seed-fixture";
 
 /**
  * Migrations (migrations/**) are structure only — no seed rows
@@ -17,30 +17,30 @@ import { applySeedFixture } from './seed-fixture'
  * `setupFiles`), so every test below still starts from this exact tree.
  */
 beforeAll(async () => {
-  await applySeedFixture(env.DB)
-})
+  await applySeedFixture(env.DB);
+});
 
 const seed: Doc = {
-  root: 'root0000',
+  root: "root0000",
   bloks: {
     root0000: {
-      uid: 'root0000',
-      type: 'page',
+      uid: "root0000",
+      type: "page",
       parent: null,
       slot: null,
-      order: 'a0',
-      data: { title: 'Home' },
+      order: "a0",
+      data: { title: "Home" },
     },
   },
-}
+};
 
 async function storyCount(): Promise<number> {
-  const row = await env.DB.prepare('select count(*) as n from stories').first<{ n: number }>()
-  return row?.n ?? -1
+  const row = await env.DB.prepare("select count(*) as n from stories").first<{ n: number }>();
+  return row?.n ?? -1;
 }
 
-describe('workers harness: D1', () => {
-  it('applies the migrations, tables and all', async () => {
+describe("workers harness: D1", () => {
+  it("applies the migrations, tables and all", async () => {
     // Miniflare keeps its own `_cf_METADATA` table in the same database.
     // `d1_migrations` is `applyD1Migrations`'s own bookkeeping table (see
     // apply-schema.ts), the same one a real `wrangler d1 migrations apply` run
@@ -58,78 +58,78 @@ describe('workers harness: D1', () => {
       `select name from sqlite_master
        where type = 'table' and name not like 'sqlite_%' and name not like '_cf_%'
        order by name`,
-    ).all<{ name: string }>()
+    ).all<{ name: string }>();
 
     expect(results.map((r) => r.name)).toEqual([
-      'api_tokens',
+      "api_tokens",
       // 0008: the media library's organisation (content-model/media-library.md).
       // A folder is metadata and never part of an R2 key, so these three tables
       // are the whole of it — filing a file writes one column and touches no
       // object. Shapes are asserted in migrations.test.ts; this list only says
       // they exist.
-      'asset_folders',
-      'asset_taggings',
-      'asset_tags',
-      'assets',
-      'auth_events',
-      'content_fts',
-      'content_fts_config',
-      'content_fts_data',
-      'content_fts_docsize',
-      'content_fts_idx',
-      'content_index',
-      'content_refs',
-      'content_text',
-      'd1_migrations',
+      "asset_folders",
+      "asset_taggings",
+      "asset_tags",
+      "assets",
+      "auth_events",
+      "content_fts",
+      "content_fts_config",
+      "content_fts_data",
+      "content_fts_docsize",
+      "content_fts_idx",
+      "content_index",
+      "content_refs",
+      "content_text",
+      "d1_migrations",
       // 0010: forms and their responses (content-model/forms.md). Two tables,
       // no foreign keys. Shapes are asserted in migrations.test.ts; this list
       // only says they exist.
-      'form_responses',
-      'forms',
-      'login_challenges',
+      "form_responses",
+      "forms",
+      "login_challenges",
       // 0007: one WebAuthn credential per row (foundation/passkeys.md). Its
       // shape is asserted in migrations.test.ts; this list only says it exists.
-      'passkeys',
-      'redirects',
-      'schedules',
-      'schema_migrations',
-      'sessions',
-      'shares',
-      'site_grants',
-      'site_hosts',
-      'site_roles',
-      'sites',
-      'stories',
-      'users',
-      'versions',
-    ])
-  })
+      "passkeys",
+      "redirects",
+      "schedules",
+      "schema_migrations",
+      "sessions",
+      "shares",
+      "site_grants",
+      "site_hosts",
+      "site_roles",
+      "sites",
+      "stories",
+      "users",
+      "versions",
+    ]);
+  });
 
-  it('has the seed stories from examples/demo/seed.sql, including the root story serving /', async () => {
+  it("has the seed stories from examples/demo/seed.sql, including the root story serving /", async () => {
     const { results } = await env.DB.prepare(
-      'select id, parent_id, slug, path, ord, title from stories order by path',
+      "select id, parent_id, slug, path, ord, title from stories order by path",
     ).all<{
-      id: string
-      parent_id: string | null
-      slug: string
-      path: string
-      ord: string
-      title: string
-    }>()
+      id: string;
+      parent_id: string | null;
+      slug: string;
+      path: string;
+      ord: string;
+      title: string;
+    }>();
 
     expect(results).toEqual([
-      { id: 'sty_home', parent_id: null, slug: '', path: '', ord: 'a0', title: 'Home' },
-      { id: 'sty_about', parent_id: null, slug: 'about', path: 'about', ord: 'a1', title: 'About' },
+      { id: "sty_home", parent_id: null, slug: "", path: "", ord: "a0", title: "Home" },
+      { id: "sty_about", parent_id: null, slug: "about", path: "about", ord: "a1", title: "About" },
       {
-        id: 'sty_team',
-        parent_id: 'sty_about',
-        slug: 'team',
-        path: 'about/team',
-        ord: 'a0',
-        title: 'Our team',
+        id: "sty_team",
+        parent_id: "sty_about",
+        slug: "team",
+        path: "about/team",
+        ord: "a0",
+        title: "Our team",
       },
-    ])
-  })
+    ]);
+  });
 
   // This test and the next one are a pair, in order. Together they pin the
   // storage contract every server test in this tree inherits: each test *file*
@@ -138,23 +138,23 @@ describe('workers harness: D1', () => {
   // tests within a file. Pool 0.18 dropped the `isolatedStorage` option and the
   // per-test stack that went with it, so a test that mutates the seed data has
   // to put it back itself.
-  it('lets a test write to D1', async () => {
-    await env.DB.prepare('delete from stories where id = ?').bind('sty_team').run()
+  it("lets a test write to D1", async () => {
+    await env.DB.prepare("delete from stories where id = ?").bind("sty_team").run();
 
-    expect(await storyCount()).toBe(2)
-  })
+    expect(await storyCount()).toBe(2);
+  });
 
-  it('keeps that write for the next test in the same file', async () => {
-    expect(await storyCount()).toBe(2)
+  it("keeps that write for the next test in the same file", async () => {
+    expect(await storyCount()).toBe(2);
 
     await env.DB.prepare(
       `insert into stories (id, parent_id, slug, path, ord, title)
        values ('sty_team', 'sty_about', 'team', 'about/team', 'a0', 'Our team')`,
-    ).run()
+    ).run();
 
-    expect(await storyCount()).toBe(3)
-  })
-})
+    expect(await storyCount()).toBe(3);
+  });
+});
 
 /**
  * Calling `getOrInit` straight off a `DurableObjectStub<StoryDO>` fails to
@@ -166,46 +166,46 @@ describe('workers harness: D1', () => {
  * anything here. Keep this in step with the pick over there.
  */
 interface StoryStub {
-  getOrInit(seed: Doc): Promise<Doc>
-  recent(limit?: number, cursor?: string): Promise<Page<ActivityEntry>>
+  getOrInit(seed: Doc): Promise<Doc>;
+  recent(limit?: number, cursor?: string): Promise<Page<ActivityEntry>>;
 }
 
-const storyStub = (id: string) => env.STORY.get(env.STORY.idFromName(id)) as unknown as StoryStub
+const storyStub = (id: string) => env.STORY.get(env.STORY.idFromName(id)) as unknown as StoryStub;
 
-describe('workers harness: StoryDO', () => {
-  it('reaches the Durable Object over RPC and gets a document back', async () => {
-    const stub = storyStub('sty_home')
-    const doc = await stub.getOrInit(seed)
+describe("workers harness: StoryDO", () => {
+  it("reaches the Durable Object over RPC and gets a document back", async () => {
+    const stub = storyStub("sty_home");
+    const doc = await stub.getOrInit(seed);
 
-    expect(doc.root).toBe('root0000')
-    expect(doc.bloks.root0000?.data.title).toBe('Home')
+    expect(doc.root).toBe("root0000");
+    expect(doc.bloks.root0000?.data.title).toBe("Home");
     // Nothing has been transacted, so the activity log is empty.
-    expect((await stub.recent()).rows).toEqual([])
-  })
+    expect((await stub.recent()).rows).toEqual([]);
+  });
 
-  it('keeps the draft it created, so a later seed is ignored', async () => {
-    const stub = storyStub('sty_about')
-    await stub.getOrInit(seed)
+  it("keeps the draft it created, so a later seed is ignored", async () => {
+    const stub = storyStub("sty_about");
+    await stub.getOrInit(seed);
 
-    const again = await stub.getOrInit({ root: 'other000', bloks: {} })
+    const again = await stub.getOrInit({ root: "other000", bloks: {} });
 
-    expect(again).toEqual(seed)
-  })
+    expect(again).toEqual(seed);
+  });
 
-  it('names objects by story id, matching how src/server derives the stub', async () => {
-    const byName = env.STORY.idFromName('sty_home')
+  it("names objects by story id, matching how src/server derives the stub", async () => {
+    const byName = env.STORY.idFromName("sty_home");
 
-    expect(byName.toString()).toBe(env.STORY.idFromName('sty_home').toString())
-    expect(byName.toString()).not.toBe(env.STORY.idFromName('sty_about').toString())
-  })
-})
+    expect(byName.toString()).toBe(env.STORY.idFromName("sty_home").toString());
+    expect(byName.toString()).not.toBe(env.STORY.idFromName("sty_about").toString());
+  });
+});
 
-describe('workers harness: bindings', () => {
-  it('binds MEDIA but not IMAGES, the fallback configuration', async () => {
-    await env.MEDIA.put('smoke.txt', 'hello')
+describe("workers harness: bindings", () => {
+  it("binds MEDIA but not IMAGES, the fallback configuration", async () => {
+    await env.MEDIA.put("smoke.txt", "hello");
 
-    expect(await env.MEDIA.get('smoke.txt').then((o) => o?.text())).toBe('hello')
+    expect(await env.MEDIA.get("smoke.txt").then((o) => o?.text())).toBe("hello");
     // src/server/assets.ts serves originals when there is no Images binding.
-    expect(env.IMAGES).toBeUndefined()
-  })
-})
+    expect(env.IMAGES).toBeUndefined();
+  });
+});

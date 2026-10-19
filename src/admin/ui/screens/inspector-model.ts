@@ -23,17 +23,17 @@
  * gathers the `required`/`min`/`max` warnings that were scattered across three
  * inputs; the last two belong to focus mode, which is new.
  */
-import { matches } from '../../../core/conditions'
-import type { Blok, Doc, Json } from '../../../core/doc'
-import type { Field } from '../../../core/fields'
-import { type LayerState, layerStates, mergeLayers } from '../../../core/layers'
-import { isTranslatable } from '../../../core/locales'
-import type { Mutation } from '../../../core/mutations'
-import type { Presence } from '../../../core/protocol'
-import { asRichtext, isRichtextEmpty, richtextToText } from '../../../core/richtext'
-import type { SchemaIndex } from '../../../core/schema'
-import { asAsset, asAssets, asStoryIds } from '../../../core/values'
-import { singletonTypeOf } from '../../../core/sites'
+import { matches } from "../../../core/conditions";
+import type { Blok, Doc, Json } from "../../../core/doc";
+import type { Field } from "../../../core/fields";
+import { type LayerState, layerStates, mergeLayers } from "../../../core/layers";
+import { isTranslatable } from "../../../core/locales";
+import type { Mutation } from "../../../core/mutations";
+import type { Presence } from "../../../core/protocol";
+import { asRichtext, isRichtextEmpty, richtextToText } from "../../../core/richtext";
+import type { SchemaIndex } from "../../../core/schema";
+import { asAsset, asAssets, asStoryIds } from "../../../core/values";
+import { singletonTypeOf } from "../../../core/sites";
 
 /* ------------------------------------------------------------ which fields --- */
 
@@ -55,8 +55,8 @@ export function visibleEntries(
   data: Record<string, Json>,
 ): [string, Field][] {
   return Object.entries(fields).filter(
-    ([, f]) => f.kind !== 'blocks' && !f.hidden && (!f.showIf || matches(f.showIf, data)),
-  )
+    ([, f]) => f.kind !== "blocks" && !f.hidden && (!f.showIf || matches(f.showIf, data)),
+  );
 }
 
 /* ------------------------------------------------------------------ locales --- */
@@ -79,11 +79,11 @@ export function visibleEntries(
  *     Nothing writes a locale-scoped `set` from here, which is the editor half of
  *     decision 4's asymmetry: the renderer *would* honour one.
  */
-export type FieldMode = 'source' | 'translate' | 'shared'
+export type FieldMode = "source" | "translate" | "shared";
 
 export function fieldMode(field: Field, isSourceLocale: boolean): FieldMode {
-  if (isSourceLocale) return 'source'
-  return isTranslatable(field) ? 'translate' : 'shared'
+  if (isSourceLocale) return "source";
+  return isTranslatable(field) ? "translate" : "shared";
 }
 
 /**
@@ -92,8 +92,8 @@ export function fieldMode(field: Field, isSourceLocale: boolean): FieldMode {
  * locale map, so an untranslated field is *empty*, and never the fallback.
  */
 export function boundValue(blok: Blok, name: string, mode: FieldMode, locale: string): Json | null {
-  if (mode === 'translate') return blok.i18n?.[locale]?.[name] ?? null
-  return blok.data[name] ?? null
+  if (mode === "translate") return blok.i18n?.[locale]?.[name] ?? null;
+  return blok.data[name] ?? null;
 }
 
 /**
@@ -112,7 +112,7 @@ export function boundValue(blok: Blok, name: string, mode: FieldMode, locale: st
  * every prose field typeable, and the keystroke was then refused by the store.
  */
 export function isEditable(mode: FieldMode, readOnly: boolean): boolean {
-  return !readOnly && mode !== 'shared'
+  return !readOnly && mode !== "shared";
 }
 
 /**
@@ -124,7 +124,7 @@ export function isEditable(mode: FieldMode, readOnly: boolean): boolean {
  * locale is what makes that safe rather than merely unlikely.
  */
 export function writeLocale(mode: FieldMode, locale: string): string | undefined {
-  return mode === 'translate' ? locale : undefined
+  return mode === "translate" ? locale : undefined;
 }
 
 /* ----------------------------------------------------------------- presence --- */
@@ -137,7 +137,7 @@ export function writeLocale(mode: FieldMode, locale: string): string | undefined
  * is not holding this field — the block tree's dot already says where they are.
  */
 export function fieldWatchers(peers: readonly Presence[], uid: string, field: string): Presence[] {
-  return peers.filter((p) => p.selection?.uid === uid && p.selection.field === field)
+  return peers.filter((p) => p.selection?.uid === uid && p.selection.field === field);
 }
 
 /**
@@ -148,11 +148,11 @@ export function fieldWatchers(peers: readonly Presence[], uid: string, field: st
  * clash that does not exist.
  */
 export function watcherLabel(peer: Presence, locale: string | null): string {
-  const theirs = peer.locale ?? null
-  const mine = locale ?? null
+  const theirs = peer.locale ?? null;
+  const mine = locale ?? null;
   return theirs === mine
     ? `${peer.name} is in this field`
-    : `${peer.name} is here in ${theirs ?? 'the source language'}`
+    : `${peer.name} is here in ${theirs ?? "the source language"}`;
 }
 
 /* ----------------------------------------------------------------- controls --- */
@@ -178,47 +178,47 @@ export function watcherLabel(peer: Presence, locale: string | null): string {
  * a row is built, because children are tree slots rather than a value.
  */
 export type ControlKind =
-  | 'text'
-  | 'textarea'
-  | 'number'
-  | 'checkbox'
-  | 'select'
-  | 'asset'
-  | 'multiasset'
-  | 'link'
-  | 'richtext'
-  | 'reference'
-  | 'references'
-  | 'collection'
-  | 'form'
-  | 'none'
+  | "text"
+  | "textarea"
+  | "number"
+  | "checkbox"
+  | "select"
+  | "asset"
+  | "multiasset"
+  | "link"
+  | "richtext"
+  | "reference"
+  | "references"
+  | "collection"
+  | "form"
+  | "none";
 
 /** A record keyed by every declared kind rather than a switch, so a new kind in
  * `core/fields.ts` is a type error here instead of a silent fallthrough. */
-const CONTROLS: { readonly [K in Field['kind']]: ControlKind } = {
-  text: 'text',
-  textarea: 'textarea',
-  number: 'number',
-  boolean: 'checkbox',
-  select: 'select',
-  asset: 'asset',
-  multiasset: 'multiasset',
-  multilink: 'link',
-  richtext: 'richtext',
-  reference: 'reference',
-  references: 'references',
-  collection: 'collection',
-  blocks: 'none',
+const CONTROLS: { readonly [K in Field["kind"]]: ControlKind } = {
+  text: "text",
+  textarea: "textarea",
+  number: "number",
+  boolean: "checkbox",
+  select: "select",
+  asset: "asset",
+  multiasset: "multiasset",
+  multilink: "link",
+  richtext: "richtext",
+  reference: "reference",
+  references: "references",
+  collection: "collection",
+  blocks: "none",
   // A picker over the Forms screen's own rows (`fields/FormField.tsx`). It was
   // `'text'` for a day — spec 33 shipped the field kind with no control, so the
   // `default` branch in `Control.tsx` drew a box wanting a `frm_…` id pasted
   // into it — and the composite it is now is why this line has to agree with
   // that switch rather than merely compile.
-  form: 'form',
-}
+  form: "form",
+};
 
-export function controlFor(kind: Field['kind']): ControlKind {
-  return CONTROLS[kind]
+export function controlFor(kind: Field["kind"]): ControlKind {
+  return CONTROLS[kind];
 }
 
 /**
@@ -244,8 +244,8 @@ export function controlFor(kind: Field['kind']): ControlKind {
  * rendering a label. Teaching the one primitive a second arrangement is the opposite
  * of that, and it is why the prop is on `Field` rather than in this file.
  */
-export function isInlineControl(kind: Field['kind']): boolean {
-  return controlFor(kind) === 'checkbox'
+export function isInlineControl(kind: Field["kind"]): boolean {
+  return controlFor(kind) === "checkbox";
 }
 
 /* --------------------------------------------------------------- validation --- */
@@ -269,22 +269,22 @@ export function isInlineControl(kind: Field['kind']): boolean {
  * answer anywhere.
  */
 export function fieldWarning(field: Field, value: Json): string | null {
-  if (field.kind === 'references') {
-    const n = asStoryIds(value).length
+  if (field.kind === "references") {
+    const n = asStoryIds(value).length;
     if (field.min !== undefined && n < field.min) {
-      return `Pick at least ${field.min} — ${n} chosen.`
+      return `Pick at least ${field.min} — ${n} chosen.`;
     }
   }
-  if (field.kind === 'multiasset' && field.max !== undefined) {
-    const n = asAssets(value).length
-    if (n >= field.max) return `Limit of ${field.max} reached.`
+  if (field.kind === "multiasset" && field.max !== undefined) {
+    const n = asAssets(value).length;
+    if (n >= field.max) return `Limit of ${field.max} reached.`;
   }
-  if (field.kind === 'number' && typeof value === 'number') {
-    if (field.min !== undefined && value < field.min) return `Must be at least ${field.min}.`
-    if (field.max !== undefined && value > field.max) return `Must be at most ${field.max}.`
+  if (field.kind === "number" && typeof value === "number") {
+    if (field.min !== undefined && value < field.min) return `Must be at least ${field.min}.`;
+    if (field.max !== undefined && value > field.max) return `Must be at most ${field.max}.`;
   }
-  if (field.required && isBlank(field, value)) return 'Required — this is still empty.'
-  return null
+  if (field.required && isBlank(field, value)) return "Required — this is still empty.";
+  return null;
 }
 
 /**
@@ -294,13 +294,13 @@ export function fieldWarning(field: Field, value: Json): string | null {
  * work a translator owes, and stated the same way for the same reason.
  */
 export function isBlank(field: Field, value: Json): boolean {
-  if (value === null || value === undefined) return true
-  if (field.kind === 'richtext') return isRichtextEmpty(asRichtext(value))
-  if (field.kind === 'boolean' || field.kind === 'number') return false
-  if (typeof value === 'string') return value.trim() === ''
-  if (Array.isArray(value)) return value.length === 0
-  if (field.kind === 'asset') return asAsset(value) === null
-  return false
+  if (value === null || value === undefined) return true;
+  if (field.kind === "richtext") return isRichtextEmpty(asRichtext(value));
+  if (field.kind === "boolean" || field.kind === "number") return false;
+  if (typeof value === "string") return value.trim() === "";
+  if (Array.isArray(value)) return value.length === 0;
+  if (field.kind === "asset") return asAsset(value) === null;
+  return false;
 }
 
 /* --------------------------------------------------------------- focus mode --- */
@@ -319,12 +319,12 @@ export function isBlank(field: Field, value: Json): boolean {
  * 68 characters if `--text-lg` changes or a host's font stack resolves differently.
  * A `560px` panel is 68 characters in one font and 84 in another.
  */
-export const FOCUS_MEASURE_CH = 68
+export const FOCUS_MEASURE_CH = 68;
 
 /** The band above, as a predicate, so a later edit to `FOCUS_MEASURE_CH` fails a
  * Node test rather than quietly making prose unreadable. */
 export function isReadableMeasure(ch: number): boolean {
-  return ch >= 60 && ch <= 75
+  return ch >= 60 && ch <= 75;
 }
 
 /**
@@ -341,8 +341,8 @@ export function canFocus(
   blok: Blok | null,
   field: string | null,
 ): field is string {
-  if (!blok || !field) return false
-  return schema[blok.type]?.fields[field]?.kind === 'richtext'
+  if (!blok || !field) return false;
+  return schema[blok.type]?.fields[field]?.kind === "richtext";
 }
 
 /* ------------------------------------------------------- the source column --- */
@@ -356,28 +356,28 @@ export function canFocus(
  * otherwise read "[object Object]".
  */
 export function sourceText(field: Field, value: Json): string {
-  if (value === null || value === undefined) return ''
+  if (value === null || value === undefined) return "";
   switch (field.kind) {
-    case 'richtext':
-      return richtextToText(asRichtext(value))
-    case 'asset':
-      return asAsset(value)?.filename ?? ''
-    case 'multiasset':
-      return Array.isArray(value) ? `${value.length} file${value.length === 1 ? '' : 's'}` : ''
-    case 'references': {
+    case "richtext":
+      return richtextToText(asRichtext(value));
+    case "asset":
+      return asAsset(value)?.filename ?? "";
+    case "multiasset":
+      return Array.isArray(value) ? `${value.length} file${value.length === 1 ? "" : "s"}` : "";
+    case "references": {
       // A count, not the ids: raw `sty_…` strings beside a translation input tell
       // a translator nothing they can act on.
-      const n = asStoryIds(value).length
-      return `${n} document${n === 1 ? '' : 's'}`
+      const n = asStoryIds(value).length;
+      return `${n} document${n === 1 ? "" : "s"}`;
     }
-    case 'boolean':
-      return value ? 'yes' : 'no'
-    case 'select': {
-      const option = field.options.find((o) => o.value === value)
-      return option?.label ?? String(value)
+    case "boolean":
+      return value ? "yes" : "no";
+    case "select": {
+      const option = field.options.find((o) => o.value === value);
+      return option?.label ?? String(value);
     }
     default:
-      return typeof value === 'object' ? JSON.stringify(value) : String(value)
+      return typeof value === "object" ? JSON.stringify(value) : String(value);
   }
 }
 
@@ -391,12 +391,12 @@ export function sourceText(field: Field, value: Json): string {
 export interface LayerInfo {
   /** `layerStates` for the layer being edited, keyed by field name (`slot.field`
    * for a `max: 1` child that merges into the inherited one). */
-  states: Readonly<Record<string, LayerState>>
+  states: Readonly<Record<string, LayerState>>;
   /** The layers below merged into one document: where *Override* copies from and
    * what an inherited field shows. Undefined when nothing below says anything. */
-  below: Doc | undefined
+  below: Doc | undefined;
   /** A scope's display name, for "Inherited from Shared". */
-  nameOf: (scope: string) => string
+  nameOf: (scope: string) => string;
 }
 
 /**
@@ -414,12 +414,12 @@ export interface LayerInfo {
  * there is nothing to label.
  */
 export function isLayerDocument(id: string, ownChain: readonly string[] | undefined): boolean {
-  return singletonTypeOf(id) !== null && ownChain !== undefined && ownChain.length > 1
+  return singletonTypeOf(id) !== null && ownChain !== undefined && ownChain.length > 1;
 }
 
 /** A layer's type name and own scope, or null for anything that is not one. */
 export function layerOf(id: string): { type: string; scope: string } | null {
-  return singletonTypeOf(id)
+  return singletonTypeOf(id);
 }
 
 /**
@@ -427,7 +427,7 @@ export function layerOf(id: string): { type: string; scope: string } | null {
  * and `mergeLayers` take. `chain` is nearest first and begins with `own`.
  */
 export function scopesBelow(chain: readonly string[], own: string): string[] {
-  return chain.filter((scope) => scope !== own).reverse()
+  return chain.filter((scope) => scope !== own).reverse();
 }
 
 /**
@@ -435,19 +435,19 @@ export function scopesBelow(chain: readonly string[], own: string): string[] {
  * `undefined` for a scope that has none), `doc` the open one.
  */
 export function layerInfo(input: {
-  doc: Doc
-  docs: readonly (Doc | undefined)[]
-  below: readonly string[]
-  own: string
-  schema: SchemaIndex
-  nameOf: (scope: string) => string
+  doc: Doc;
+  docs: readonly (Doc | undefined)[];
+  below: readonly string[];
+  own: string;
+  schema: SchemaIndex;
+  nameOf: (scope: string) => string;
 }): LayerInfo {
-  const { doc, docs, below, own, schema, nameOf } = input
+  const { doc, docs, below, own, schema, nameOf } = input;
   return {
     states: layerStates([...docs, doc], [...below, own], schema),
     below: mergeLayers(docs, schema),
     nameOf,
-  }
+  };
 }
 
 /**
@@ -457,56 +457,56 @@ export function layerInfo(input: {
  * or in a many-blocks slot (those are replaced whole, not merged field by field).
  */
 export function layerPrefix(doc: Doc, schema: SchemaIndex, blok: Blok): string | null {
-  if (blok.uid === doc.root) return ''
-  if (blok.parent !== doc.root || blok.slot === null) return null
-  const root = doc.bloks[doc.root]
-  const field = root ? schema[root.type]?.fields[blok.slot] : undefined
-  return field?.kind === 'blocks' && field.max === 1 ? `${blok.slot}.` : null
+  if (blok.uid === doc.root) return "";
+  if (blok.parent !== doc.root || blok.slot === null) return null;
+  const root = doc.bloks[doc.root];
+  const field = root ? schema[root.type]?.fields[blok.slot] : undefined;
+  return field?.kind === "blocks" && field.max === 1 ? `${blok.slot}.` : null;
 }
 
 /** The blok in the merged-below document that `blok` continues, or undefined. */
 export function belowBlok(doc: Doc, below: Doc | undefined, blok: Blok): Blok | undefined {
-  if (!below) return undefined
-  if (blok.uid === doc.root) return below.bloks[below.root]
+  if (!below) return undefined;
+  if (blok.uid === doc.root) return below.bloks[below.root];
   return Object.values(below.bloks).find(
     (candidate) => candidate.parent === below.root && candidate.slot === blok.slot,
-  )
+  );
 }
 
 /** "Inherited from Shared", "Overridden here", "Removed here". */
 export function layerLabel(state: LayerState, nameOf: (scope: string) => string): string {
   switch (state.state) {
-    case 'overridden':
-      return 'Overridden here'
-    case 'removed':
-      return 'Removed here'
-    case 'inherited':
-      return state.from === null ? 'Inherited' : `Inherited from ${nameOf(state.from)}`
+    case "overridden":
+      return "Overridden here";
+    case "removed":
+      return "Removed here";
+    case "inherited":
+      return state.from === null ? "Inherited" : `Inherited from ${nameOf(state.from)}`;
   }
 }
 
-export type LayerAction = 'override' | 'reset' | 'remove'
+export type LayerAction = "override" | "reset" | "remove";
 
 export const LAYER_ACTION_LABEL: Record<LayerAction, string> = {
-  override: 'Override',
-  reset: 'Reset to inherited',
-  remove: 'Remove',
-}
+  override: "Override",
+  reset: "Reset to inherited",
+  remove: "Remove",
+};
 
 /**
  * The actions a state offers: an inherited field can be overridden (its value is
  * copied here) or removed; an overridden one can be reset or removed; a removed one
  * can only be reset. **Absent, not disabled**, when the document is read-only.
  */
-export function layerActions(state: LayerState['state'], readOnly: boolean): LayerAction[] {
-  if (readOnly) return []
+export function layerActions(state: LayerState["state"], readOnly: boolean): LayerAction[] {
+  if (readOnly) return [];
   switch (state) {
-    case 'inherited':
-      return ['override', 'remove']
-    case 'overridden':
-      return ['reset', 'remove']
-    case 'removed':
-      return ['reset']
+    case "inherited":
+      return ["override", "remove"];
+    case "overridden":
+      return ["reset", "remove"];
+    case "removed":
+      return ["reset"];
   }
 }
 
@@ -529,32 +529,32 @@ export function layerMutations(
   inherited: Blok | undefined,
 ): Mutation[] {
   switch (action) {
-    case 'remove':
-      return [{ t: 'set', uid: blok.uid, field: name, value: null }]
-    case 'reset': {
+    case "remove":
+      return [{ t: "set", uid: blok.uid, field: name, value: null }];
+    case "reset": {
       const locales = Object.entries(blok.i18n ?? {})
         .filter(([, fields]) => name in fields)
-        .map(([locale]) => locale)
+        .map(([locale]) => locale);
       return [
-        { t: 'unset', uid: blok.uid, field: name },
-        ...locales.map((locale): Mutation => ({ t: 'unset', uid: blok.uid, field: name, locale })),
-      ]
+        { t: "unset", uid: blok.uid, field: name },
+        ...locales.map((locale): Mutation => ({ t: "unset", uid: blok.uid, field: name, locale })),
+      ];
     }
-    case 'override': {
-      if (!inherited || !(name in inherited.data)) return []
-      const source = inherited.data[name] as Json
+    case "override": {
+      if (!inherited || !(name in inherited.data)) return [];
+      const source = inherited.data[name] as Json;
       const translations = Object.entries(inherited.i18n ?? {})
         .filter(([, fields]) => name in fields)
         .map(
           ([locale, fields]): Mutation => ({
-            t: 'set',
+            t: "set",
             uid: blok.uid,
             field: name,
             value: fields[name] as Json,
             locale,
           }),
-        )
-      return [{ t: 'set', uid: blok.uid, field: name, value: source }, ...translations]
+        );
+      return [{ t: "set", uid: blok.uid, field: name, value: source }, ...translations];
     }
   }
 }
@@ -565,20 +565,20 @@ export function layerMutations(
  * control is enabled only once *Override* has written it here.
  */
 export function inheritedValue(
-  state: LayerState['state'],
+  state: LayerState["state"],
   inherited: Blok | undefined,
   name: string,
 ): Json {
-  if (state !== 'inherited') return null
-  return (inherited?.data[name] ?? null) as Json
+  if (state !== "inherited") return null;
+  return (inherited?.data[name] ?? null) as Json;
 }
 
 /** What a `FieldRow` is handed for a labelled field: the words, the buttons, the
  * value to show while the field is not this layer's own, and what a button does. */
 export interface FieldLayerInput {
-  state: LayerState['state']
-  label: string
-  actions: { action: LayerAction; label: string }[]
-  value: Json
-  onAction: (action: LayerAction) => void
+  state: LayerState["state"];
+  label: string;
+  actions: { action: LayerAction; label: string }[];
+  value: Json;
+  onAction: (action: LayerAction) => void;
 }

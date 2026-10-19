@@ -1,4 +1,4 @@
-import { blocks, defineBlock, reference, select, text } from 'folio/core'
+import { blocks, defineBlock, reference, select, text } from "folio/core";
 
 /**
  * Mirrors the reference project's `Form Selection.form`: pick another story and
@@ -9,31 +9,31 @@ import { blocks, defineBlock, reference, select, text } from 'folio/core'
  * per-call configuration to forget.
  */
 export const embed = defineBlock({
-  name: 'embed',
-  label: 'Embedded page',
-  summary: 'heading',
+  name: "embed",
+  label: "Embedded page",
+  summary: "heading",
   fields: {
-    heading: text({ label: 'Heading', translatable: true }),
-    source: reference({ label: 'Page to embed', help: 'Its content is pulled in at render time.' }),
+    heading: text({ label: "Heading", translatable: true }),
+    source: reference({ label: "Page to embed", help: "Its content is pulled in at render time." }),
     mode: select({
-      label: 'Show',
+      label: "Show",
       options: [
-        { label: 'Its content', value: 'content' },
-        { label: 'Just a summary', value: 'summary' },
+        { label: "Its content", value: "content" },
+        { label: "Just a summary", value: "summary" },
       ],
     }),
   },
   render: ({ heading, source, mode }) => {
     if (!source) {
-      return <section className="embed embed--empty">Nothing selected to embed.</section>
+      return <section className="embed embed--empty">Nothing selected to embed.</section>;
     }
     return (
       <section className="embed">
         <h2 className="embed__heading">{heading || source.title}</h2>
-        {mode === 'summary' ? (
+        {mode === "summary" ? (
           <p className="embed__summary">
             {/* Reading the referenced document's own fields directly. */}
-            {String(source.data.description ?? '')} <a href={source.url}>{source.title}</a>
+            {String(source.data.description ?? "")} <a href={source.url}>{source.title}</a>
           </p>
         ) : (
           // Inlining it wholesale. Rendered without edit markers, because this
@@ -41,21 +41,21 @@ export const embed = defineBlock({
           <div className="embed__content">{source.content}</div>
         )}
       </section>
-    )
+    );
   },
-})
+});
 
 /**
  * A container that exists only to prove references nest inside ordinary blocks
  * without special handling.
  */
 export const section = defineBlock({
-  name: 'section',
-  label: 'Section',
-  summary: 'heading',
+  name: "section",
+  label: "Section",
+  summary: "heading",
   fields: {
-    heading: text({ label: 'Heading', translatable: true }),
-    body: blocks({ label: 'Body', allow: ['embed', 'prose', 'image'] }),
+    heading: text({ label: "Heading", translatable: true }),
+    body: blocks({ label: "Body", allow: ["embed", "prose", "image"] }),
   },
   render: ({ heading, body }) => (
     <section className="section">
@@ -63,4 +63,4 @@ export const section = defineBlock({
       {body}
     </section>
   ),
-})
+});

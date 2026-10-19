@@ -29,64 +29,64 @@
  * Mounted only on a deployment with `sites`. A single-site host calls the reader in
  * its own Worker, and its `/api/v1` surface is what it always was.
  */
-import type { Context } from 'hono'
-import { Hono } from 'hono'
-import { READ } from '../../auth/roles'
-import { FolioError } from '../../errors'
-import { requestSite, requireAccess } from '../../middleware'
-import type { FolioRuntime } from '../../runtime'
-import type { FolioEnv, GatedReaderFactory } from '../../types'
-import { localeQuery, storyPathParam } from '../../validate'
-import { servedSite } from './served'
+import type { Context } from "hono";
+import { Hono } from "hono";
+import { READ } from "../../auth/roles";
+import { FolioError } from "../../errors";
+import { requestSite, requireAccess } from "../../middleware";
+import type { FolioRuntime } from "../../runtime";
+import type { FolioEnv, GatedReaderFactory } from "../../types";
+import { localeQuery, storyPathParam } from "../../validate";
+import { servedSite } from "./served";
 
 export function pageRoutes<Env>(
   rt: FolioRuntime,
   readerFor: GatedReaderFactory<Env> | undefined,
 ): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
-  if (!rt.sites) return app
+  const app = new Hono<FolioEnv<Env>>();
+  if (!rt.sites) return app;
 
   const handler = async (c: Context<FolioEnv<Env>>) => {
     // Only a `createApp` built without `createFolio` (a test walking the mounted routes)
     // has no reader to hand; the route is mounted all the same, so such a walk sees it.
-    if (!readerFor) throw new FolioError('unsupported', 'This app was built without a reader')
+    if (!readerFor) throw new FolioError("unsupported", "This app was built without a reader");
     // Site first: a group, `shared` or a site the surface would not serve is not a page
     // anybody reads here, and says so before it says anything about the path.
-    const served = await servedSite(c, rt)
-    if (!served) throw new FolioError('not_found', 'Pages are read on a site')
+    const served = await servedSite(c, rt);
+    if (!served) throw new FolioError("not_found", "Pages are read on a site");
 
-    const wantDraft = c.req.query('status') === 'draft'
+    const wantDraft = c.req.query("status") === "draft";
     if (wantDraft && !served.drafts) {
       throw new FolioError(
-        'forbidden',
-        'Reading a draft needs content:read:draft on this site, or a preview grant for it.',
-      )
+        "forbidden",
+        "Reading a draft needs content:read:draft on this site, or a preview grant for it.",
+      );
     }
 
-    const raw = c.req.query('locale')
-    const locale = raw === undefined ? undefined : localeQuery(raw)
+    const raw = c.req.query("locale");
+    const locale = raw === undefined ? undefined : localeQuery(raw);
     if (locale !== undefined && !rt.locales?.available.some((l) => l.code === locale)) {
-      throw new FolioError('unsupported', `Unknown locale: ${locale}`)
+      throw new FolioError("unsupported", `Unknown locale: ${locale}`);
     }
 
-    const path = storyPathParam(c.req.param('path'))
+    const path = storyPathParam(c.req.param("path"));
     const reader = readerFor(c.env, {
       gated: served.site,
       // A draft is a preview render whatever surface the caller said it serves.
-      surface: wantDraft ? 'preview' : served.surface,
+      surface: wantDraft ? "preview" : served.surface,
       request: c.req.raw,
       draft: wantDraft,
-    })
-    const page = await reader.page(path, locale === undefined ? undefined : { locale })
+    });
+    const page = await reader.page(path, locale === undefined ? undefined : { locale });
     // A miss says what it was (`multi-brand.md` decision 13): a client that treats any
     // 404 as a miss is unchanged, and one that reads `error.miss` can answer a redirect
     // or a 410 without a second request.
     if (!page) {
-      throw new FolioError('not_found', 'No page at that path', await reader.miss(path))
+      throw new FolioError("not_found", "No page at that path", await reader.miss(path));
     }
 
-    const site = await requestSite(c, rt)
-    const tags = page.headers['cache-tag']
+    const site = await requestSite(c, rt);
+    const tags = page.headers["cache-tag"];
     return c.json(
       {
         story: rt.urlsFor(site)(page.story),
@@ -99,13 +99,13 @@ export function pageRoutes<Env>(
       {
         // This response is an API answer on the admin origin and is never cached; the
         // entry the front end caches is its own, under these tags.
-        'cache-control': 'no-store',
-        ...(tags ? { 'folio-cache-tags': tags } : {}),
+        "cache-control": "no-store",
+        ...(tags ? { "folio-cache-tags": tags } : {}),
       },
-    )
-  }
-  app.get('/pages', requireAccess<Env>(rt, READ), handler)
-  app.get('/pages/:path{.*}', requireAccess<Env>(rt, READ), handler)
+    );
+  };
+  app.get("/pages", requireAccess<Env>(rt, READ), handler);
+  app.get("/pages/:path{.*}", requireAccess<Env>(rt, READ), handler);
 
-  return app
+  return app;
 }

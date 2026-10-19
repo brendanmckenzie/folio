@@ -1,6 +1,6 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import { Admin, type AdminBoot } from './ui/Admin'
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { Admin, type AdminBoot } from "./ui/Admin";
 
 /**
  * The bundle's entry, and nothing else. **One application, since port phase 8.**
@@ -33,17 +33,17 @@ import { Admin, type AdminBoot } from './ui/Admin'
 
 declare global {
   interface Window {
-    __FOLIO_SHELL__?: AdminBoot
+    __FOLIO_SHELL__?: AdminBoot;
   }
 }
 
-const el = document.getElementById('folio-admin')
-const shell = window.__FOLIO_SHELL__
+const el = document.getElementById("folio-admin");
+const shell = window.__FOLIO_SHELL__;
 
 if (el && shell) {
   createRoot(el).render(
     <StrictMode>
       <Admin boot={shell} />
     </StrictMode>,
-  )
+  );
 }

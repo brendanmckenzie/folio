@@ -14,9 +14,9 @@
  * None of those fail loudly — they produce a list that is quietly missing
  * something. Eight routes writing it eight times is eight chances at that.
  */
-import type { CursorPart } from '../core/pagination'
+import type { CursorPart } from "../core/pagination";
 
-export type Direction = 'asc' | 'desc'
+export type Direction = "asc" | "desc";
 
 export interface Keyset {
   /**
@@ -35,8 +35,8 @@ export interface Keyset {
    * through one shape. Uniformity is worth a redundant clause there and is not
    * worth a fictional column here.
    */
-  columns: [string, string] | [string]
-  direction: Direction
+  columns: [string, string] | [string];
+  direction: Direction;
 }
 
 /**
@@ -44,8 +44,8 @@ export interface Keyset {
  * which is the property that makes the cursor a total order.
  */
 export function orderBy(keyset: Keyset): string {
-  const dir = keyset.direction === 'desc' ? 'desc' : 'asc'
-  return `order by ${keyset.columns.map((column) => `${column} ${dir}`).join(', ')}`
+  const dir = keyset.direction === "desc" ? "desc" : "asc";
+  return `order by ${keyset.columns.map((column) => `${column} ${dir}`).join(", ")}`;
 }
 
 /**
@@ -66,17 +66,17 @@ export function keysetWhere(
   keyset: Keyset,
   cursor: readonly CursorPart[] | null,
 ): { sql: string; binds: CursorPart[] } {
-  if (!cursor || cursor.length !== keyset.columns.length) return { sql: '', binds: [] }
-  const cmp = keyset.direction === 'desc' ? '<' : '>'
-  const [primary, tiebreak] = keyset.columns
-  const [at, after] = cursor as [CursorPart, CursorPart?]
+  if (!cursor || cursor.length !== keyset.columns.length) return { sql: "", binds: [] };
+  const cmp = keyset.direction === "desc" ? "<" : ">";
+  const [primary, tiebreak] = keyset.columns;
+  const [at, after] = cursor as [CursorPart, CursorPart?];
   if (tiebreak === undefined || after === undefined) {
-    return { sql: `${primary} ${cmp} ?`, binds: [at] }
+    return { sql: `${primary} ${cmp} ?`, binds: [at] };
   }
   return {
     sql: `(${primary} ${cmp} ? or (${primary} = ? and ${tiebreak} ${cmp} ?))`,
     binds: [at, at, after],
-  }
+  };
 }
 
 /**
@@ -88,18 +88,18 @@ export function keysetWhere(
  * that forgets to filter empties produces `where  and x = ?`.
  */
 export function whereOf(...fragments: (string | undefined | null | false)[]): string {
-  const kept = fragments.filter((f): f is string => typeof f === 'string' && f.length > 0)
-  return kept.length > 0 ? `where ${kept.join(' and ')}` : ''
+  const kept = fragments.filter((f): f is string => typeof f === "string" && f.length > 0);
+  return kept.length > 0 ? `where ${kept.join(" and ")}` : "";
 }
 
 /** The `(created_at, id)` keyset, newest first — assets, versions and tokens all
  * page this way, and all three have a text primary key to break the tie. */
-export const NEWEST_FIRST: Keyset = { columns: ['created_at', 'id'], direction: 'desc' }
+export const NEWEST_FIRST: Keyset = { columns: ["created_at", "id"], direction: "desc" };
 
 /** The same pair, oldest first: `users` is listed in the order people joined. */
-export const OLDEST_FIRST: Keyset = { columns: ['created_at', 'id'], direction: 'asc' }
+export const OLDEST_FIRST: Keyset = { columns: ["created_at", "id"], direction: "asc" };
 
 /** Sibling order within a parent, or within a type for an unrouted document.
  * `(ord, id)` is exactly what `core/doc.ts`'s `compareSiblings` compares, and
  * exactly what the `stories_parent_ord` and `stories_type` indexes cover. */
-export const SIBLING_ORDER: Keyset = { columns: ['ord', 'id'], direction: 'asc' }
+export const SIBLING_ORDER: Keyset = { columns: ["ord", "id"], direction: "asc" };

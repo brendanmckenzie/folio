@@ -1,15 +1,15 @@
-import { useEffect, useState } from 'react'
-import type { Json } from '../../../../core/doc'
-import type { Page } from '../../../../core/pagination'
-import { Badge } from '../../Badge'
-import { Button } from '../../Button'
-import { Dialog } from '../../Dialog'
-import { EmptyState } from '../../EmptyState'
-import { Field, Input } from '../../Field'
-import { scopeOfApiBase } from '../../route'
-import css from './fields.module.css'
-import { type FormRow, formStatus, matchesForm, questionsLabel, statusHint } from '../forms-model'
-import { messageOf } from '../useContent'
+import { useEffect, useState } from "react";
+import type { Json } from "../../../../core/doc";
+import type { Page } from "../../../../core/pagination";
+import { Badge } from "../../Badge";
+import { Button } from "../../Button";
+import { Dialog } from "../../Dialog";
+import { EmptyState } from "../../EmptyState";
+import { Field, Input } from "../../Field";
+import { scopeOfApiBase } from "../../route";
+import css from "./fields.module.css";
+import { type FormRow, formStatus, matchesForm, questionsLabel, statusHint } from "../forms-model";
+import { messageOf } from "../useContent";
 
 /**
  * A `form` field: one form off the Forms screen, chosen rather than typed.
@@ -40,15 +40,15 @@ import { messageOf } from '../useContent'
 
 /** One page of rows is the offer. The route clamps at 200 and a person who has
  *  built more forms than that has a Forms screen to find them on. */
-const LIMIT = 200
+const LIMIT = 200;
 
 interface FormList {
-  rows: readonly FormRow[]
+  rows: readonly FormRow[];
   /** True when the table has more rows than one page holds, so the filter below
    *  is honest about what it is filtering. */
-  more: boolean
-  loading: boolean
-  error?: string
+  more: boolean;
+  loading: boolean;
+  error?: string;
 }
 
 /**
@@ -59,46 +59,46 @@ interface FormList {
  * be named without a second request.
  */
 export function useFormList(apiBase: string): FormList {
-  const [list, setList] = useState<FormList>({ rows: [], more: false, loading: true })
+  const [list, setList] = useState<FormList>({ rows: [], more: false, loading: true });
 
   useEffect(() => {
-    let live = true
+    let live = true;
     void (async () => {
       try {
         // A form embeds by chain on a deployment with `sites` (an `apiBase` under
         // `~<scope>`): the scope's own and every form above it, never a sibling's.
-        const chain = scopeOfApiBase(apiBase) !== null ? '&chain=1' : ''
-        const res = await fetch(`${apiBase}/forms?limit=${LIMIT}${chain}`)
-        if (!res.ok) throw new Error(await messageOf(res))
-        const page = (await res.json()) as Page<FormRow>
-        if (live) setList({ rows: page.rows, more: page.cursor !== null, loading: false })
+        const chain = scopeOfApiBase(apiBase) !== null ? "&chain=1" : "";
+        const res = await fetch(`${apiBase}/forms?limit=${LIMIT}${chain}`);
+        if (!res.ok) throw new Error(await messageOf(res));
+        const page = (await res.json()) as Page<FormRow>;
+        if (live) setList({ rows: page.rows, more: page.cursor !== null, loading: false });
       } catch (e) {
-        if (live) setList({ rows: [], more: false, loading: false, error: (e as Error).message })
+        if (live) setList({ rows: [], more: false, loading: false, error: (e as Error).message });
       }
-    })()
+    })();
     return () => {
-      live = false
-    }
-  }, [apiBase])
+      live = false;
+    };
+  }, [apiBase]);
 
-  return list
+  return list;
 }
 
 interface Props {
-  id: string
+  id: string;
   /** The field's label, for the picker's own title. */
-  label: string
-  value: Json
-  apiBase: string
-  editable: boolean
-  onChange: (value: Json) => void
+  label: string;
+  value: Json;
+  apiBase: string;
+  editable: boolean;
+  onChange: (value: Json) => void;
 }
 
 export function FormField({ id, label, value, apiBase, editable, onChange }: Props) {
-  const [picking, setPicking] = useState(false)
-  const list = useFormList(apiBase)
-  const chosen = typeof value === 'string' && value ? value : null
-  const row = chosen ? list.rows.find((form) => form.id === chosen) : undefined
+  const [picking, setPicking] = useState(false);
+  const list = useFormList(apiBase);
+  const chosen = typeof value === "string" && value ? value : null;
+  const row = chosen ? list.rows.find((form) => form.id === chosen) : undefined;
 
   return (
     <div className={css.stack}>
@@ -107,7 +107,7 @@ export function FormField({ id, label, value, apiBase, editable, onChange }: Pro
         {/* `id` lands on whatever opens the picker, the rule every composite
             control here follows: the label has to name something focusable. */}
         <Button id={id} size="sm" disabled={!editable} onClick={() => setPicking(true)}>
-          {chosen ? 'Change…' : 'Choose a form…'}
+          {chosen ? "Change…" : "Choose a form…"}
         </Button>
         {chosen ? (
           <Button size="sm" variant="subtle" disabled={!editable} onClick={() => onChange(null)}>
@@ -122,14 +122,14 @@ export function FormField({ id, label, value, apiBase, editable, onChange }: Pro
           list={list}
           chosen={chosen}
           onPick={(picked) => {
-            onChange(picked)
-            setPicking(false)
+            onChange(picked);
+            setPicking(false);
           }}
           onClose={() => setPicking(false)}
         />
       ) : null}
     </div>
-  )
+  );
 }
 
 /**
@@ -144,16 +144,16 @@ export function FormField({ id, label, value, apiBase, editable, onChange }: Pro
 function Picked({ id, row, loading }: { id: string; row: FormRow | undefined; loading: boolean }) {
   if (!row) {
     return (
-      <div className={`${css.picked} ${loading ? '' : css.missing}`}>
-        <span className={css.pickedTitle}>{loading ? 'Loading…' : 'Not found'}</span>
+      <div className={`${css.picked} ${loading ? "" : css.missing}`}>
+        <span className={css.pickedTitle}>{loading ? "Loading…" : "Not found"}</span>
         <span className={css.pickedWhere}>{id}</span>
       </div>
-    )
+    );
   }
-  const status = formStatus(row)
+  const status = formStatus(row);
   return (
     <div className={css.picked}>
-      <span className={css.pickedTitle}>{row.label || 'Untitled form'}</span>
+      <span className={css.pickedTitle}>{row.label || "Untitled form"}</span>
       {/* The slug and nothing else. The question count is on the picker's own
           rows, where there is width for it: the inspector is 320px and three
           facts plus a badge truncate the third to `3…`, which is worse than
@@ -161,11 +161,11 @@ function Picked({ id, row, loading }: { id: string; row: FormRow | undefined; lo
       <span className={css.pickedWhere} title={questionsLabel(row)}>
         {row.name}
       </span>
-      <Badge tone={status === 'open' ? 'ok' : 'neutral'} title={statusHint(row)}>
-        {status === 'open' ? 'Open' : 'Closed'}
+      <Badge tone={status === "open" ? "ok" : "neutral"} title={statusHint(row)}>
+        {status === "open" ? "Open" : "Closed"}
       </Badge>
     </div>
-  )
+  );
 }
 
 /**
@@ -184,14 +184,14 @@ function FormPicker({
   onPick,
   onClose,
 }: {
-  label: string
-  list: FormList
-  chosen: string | null
-  onPick: (id: string) => void
-  onClose: () => void
+  label: string;
+  list: FormList;
+  chosen: string | null;
+  onPick: (id: string) => void;
+  onClose: () => void;
 }) {
-  const [q, setQ] = useState('')
-  const rows = list.rows.filter((row) => matchesForm(row, q))
+  const [q, setQ] = useState("");
+  const rows = list.rows.filter((row) => matchesForm(row, q));
 
   return (
     <Dialog
@@ -220,37 +220,37 @@ function FormPicker({
         <EmptyState title="Could not list forms" body={list.error} />
       ) : rows.length === 0 ? (
         <EmptyState
-          title={list.loading ? 'Loading…' : q ? 'Nothing matches' : 'No forms yet'}
+          title={list.loading ? "Loading…" : q ? "Nothing matches" : "No forms yet"}
           body={
             list.loading
-              ? 'Asking the server.'
+              ? "Asking the server."
               : q
-                ? 'Try a shorter filter.'
-                : 'Build one on the Forms screen, then come back and pick it.'
+                ? "Try a shorter filter."
+                : "Build one on the Forms screen, then come back and pick it."
           }
         />
       ) : (
         <>
           <ul className={css.pickerRows}>
             {rows.map((row) => {
-              const status = formStatus(row)
+              const status = formStatus(row);
               return (
                 <li key={row.id}>
                   <button
                     type="button"
-                    className={`${css.pickerRow} ${row.id === chosen ? css.pickerRowOn : ''}`}
+                    className={`${css.pickerRow} ${row.id === chosen ? css.pickerRowOn : ""}`}
                     onClick={() => onPick(row.id)}
                   >
-                    <span className={css.pickedTitle}>{row.label || 'Untitled form'}</span>
+                    <span className={css.pickedTitle}>{row.label || "Untitled form"}</span>
                     <span className={css.pickedWhere}>
                       {row.name} · {questionsLabel(row)}
                     </span>
-                    <Badge tone={status === 'open' ? 'ok' : 'neutral'} title={statusHint(row)}>
-                      {status === 'open' ? 'Open' : 'Closed'}
+                    <Badge tone={status === "open" ? "ok" : "neutral"} title={statusHint(row)}>
+                      {status === "open" ? "Open" : "Closed"}
                     </Badge>
                   </button>
                 </li>
-              )
+              );
             })}
           </ul>
           {list.more ? (
@@ -261,5 +261,5 @@ function FormPicker({
         </>
       )}
     </Dialog>
-  )
+  );
 }

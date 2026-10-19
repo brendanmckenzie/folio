@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { EventRow, PasskeyRow, SessionRow } from './account-model'
-import { messageOf } from './useContent'
+import { useCallback, useEffect, useState } from "react";
+import type { EventRow, PasskeyRow, SessionRow } from "./account-model";
+import { messageOf } from "./useContent";
 
 /**
  * The Your account screen's data: three independent, unpaged lists.
@@ -17,19 +17,19 @@ import { messageOf } from './useContent'
  */
 
 interface Fetched<T> {
-  rows: readonly T[]
-  loading: boolean
-  error?: string
+  rows: readonly T[];
+  loading: boolean;
+  error?: string;
 }
 
 export interface FetchedList<T> extends Fetched<T> {
-  reload: () => void
+  reload: () => void;
 }
 
 export interface AccountData {
-  passkeys: FetchedList<PasskeyRow>
-  sessions: FetchedList<SessionRow>
-  events: FetchedList<EventRow>
+  passkeys: FetchedList<PasskeyRow>;
+  sessions: FetchedList<SessionRow>;
+  events: FetchedList<EventRow>;
 }
 
 /**
@@ -42,39 +42,39 @@ export interface AccountData {
  */
 export function useAccount(apiBase: string, passkeysEnabled: boolean): AccountData {
   return {
-    passkeys: useList<PasskeyRow>(apiBase, '/me/passkeys', 'passkeys', passkeysEnabled),
-    sessions: useList<SessionRow>(apiBase, '/me/sessions', 'sessions', true),
-    events: useList<EventRow>(apiBase, '/me/events', 'events', true),
-  }
+    passkeys: useList<PasskeyRow>(apiBase, "/me/passkeys", "passkeys", passkeysEnabled),
+    sessions: useList<SessionRow>(apiBase, "/me/sessions", "sessions", true),
+    events: useList<EventRow>(apiBase, "/me/events", "events", true),
+  };
 }
 
 function useList<T>(
   apiBase: string,
   path: string,
-  key: 'passkeys' | 'sessions' | 'events',
+  key: "passkeys" | "sessions" | "events",
   enabled: boolean,
 ): FetchedList<T> {
-  const [state, setState] = useState<Fetched<T>>({ rows: [], loading: enabled })
+  const [state, setState] = useState<Fetched<T>>({ rows: [], loading: enabled });
 
   const load = useCallback(async () => {
     if (!enabled) {
-      setState({ rows: [], loading: false })
-      return
+      setState({ rows: [], loading: false });
+      return;
     }
-    setState((prev) => ({ ...prev, loading: true }))
+    setState((prev) => ({ ...prev, loading: true }));
     try {
-      const res = await fetch(`${apiBase}${path}`)
-      if (!res.ok) throw new Error(await messageOf(res))
-      const body = (await res.json()) as Record<string, unknown>
-      setState({ rows: (body[key] as T[]) ?? [], loading: false })
+      const res = await fetch(`${apiBase}${path}`);
+      if (!res.ok) throw new Error(await messageOf(res));
+      const body = (await res.json()) as Record<string, unknown>;
+      setState({ rows: (body[key] as T[]) ?? [], loading: false });
     } catch (e) {
-      setState({ rows: [], loading: false, error: (e as Error).message })
+      setState({ rows: [], loading: false, error: (e as Error).message });
     }
-  }, [apiBase, path, key, enabled])
+  }, [apiBase, path, key, enabled]);
 
   useEffect(() => {
-    void load()
-  }, [load])
+    void load();
+  }, [load]);
 
-  return { ...state, reload: load }
+  return { ...state, reload: load };
 }

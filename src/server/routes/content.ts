@@ -8,21 +8,21 @@
  * `folio.query(env, q)` returns, so a host reading one and a client reading the
  * other are reading the same thing.
  */
-import { Hono } from 'hono'
-import type { ContentQuery, ContentWhere, TextOp } from '../../core/query'
-import { isRangeOp, isTextOp, MAX_PER_PAGE, WHERE_OPS } from '../../core/query'
-import { actorString, ADMIN, READ } from '../auth/roles'
-import { FolioError } from '../errors'
-import { brandIdOf, hookCtx, requestChain, requestSite, requireAccess } from '../middleware'
-import { reindex } from '../reindex'
-import type { FolioRuntime } from '../runtime'
-import type { FolioEnv } from '../types'
-import { brandOf, sweepOf } from './stories'
-import { parseOptionalBody, ReindexBody, typeNameQuery } from '../validate'
+import { Hono } from "hono";
+import type { ContentQuery, ContentWhere, TextOp } from "../../core/query";
+import { isRangeOp, isTextOp, MAX_PER_PAGE, WHERE_OPS } from "../../core/query";
+import { actorString, ADMIN, READ } from "../auth/roles";
+import { FolioError } from "../errors";
+import { brandIdOf, hookCtx, requestChain, requestSite, requireAccess } from "../middleware";
+import { reindex } from "../reindex";
+import type { FolioRuntime } from "../runtime";
+import type { FolioEnv } from "../types";
+import { brandOf, sweepOf } from "./stories";
+import { parseOptionalBody, ReindexBody, typeNameQuery } from "../validate";
 
 /** How many `where=` clauses one request may carry. Each is an index seek; a
  * hundred of them is not a query anybody meant to write. */
-const MAX_WHERE = 8
+const MAX_WHERE = 8;
 
 /**
  * `field:op:value`, the one spelling of a filter.
@@ -32,29 +32,29 @@ const MAX_WHERE = 8
  * comma-separated list, which is why a comma is not available as a separator here.
  */
 function parseWhere(raw: string): ContentWhere {
-  const first = raw.indexOf(':')
-  const second = raw.indexOf(':', first + 1)
+  const first = raw.indexOf(":");
+  const second = raw.indexOf(":", first + 1);
   if (first <= 0 || second <= first) {
-    throw new FolioError('bad_request', `where must be 'field:op:value', not '${clip(raw)}'`)
+    throw new FolioError("bad_request", `where must be 'field:op:value', not '${clip(raw)}'`);
   }
-  const field = raw.slice(0, first)
-  const op = raw.slice(first + 1, second)
-  const value = raw.slice(second + 1)
+  const field = raw.slice(0, first);
+  const op = raw.slice(first + 1, second);
+  const value = raw.slice(second + 1);
   if (!WHERE_OPS.includes(op)) {
-    throw new FolioError('bad_request', `where op must be one of ${WHERE_OPS.join(', ')}`)
+    throw new FolioError("bad_request", `where op must be one of ${WHERE_OPS.join(", ")}`);
   }
   if (isRangeOp(op)) {
     // A bound that is a plain number compares `num_value`; anything else (an ISO
     // date, a string) compares `text_value`. Deciding it here rather than in SQL
     // keeps `contentSql` free of parsing.
-    const numeric = Number(value)
-    return { field, op, value: value !== '' && Number.isFinite(numeric) ? numeric : value }
+    const numeric = Number(value);
+    return { field, op, value: value !== "" && Number.isFinite(numeric) ? numeric : value };
   }
-  if (op === 'in') return { field, op, value: value.split(',').filter(Boolean) }
-  return { field, op: op as TextOp, value }
+  if (op === "in") return { field, op, value: value.split(",").filter(Boolean) };
+  return { field, op: op as TextOp, value };
 }
 
-const clip = (s: string) => (s.length > 60 ? `${s.slice(0, 60)}…` : s)
+const clip = (s: string) => (s.length > 60 ? `${s.slice(0, 60)}…` : s);
 
 /**
  * `published:desc`, or a bare built-in like `publishedAt`.
@@ -65,24 +65,24 @@ const clip = (s: string) => (s.length > 60 ? `${s.slice(0, 60)}…` : s)
  * without one, naming it, which is a check that has to sit next to the query it
  * checks rather than next to the string it was spelled with.
  */
-function parseOrder(raw: string): ContentQuery['order'] {
-  const [field, dir] = raw.split(':')
-  if (!field) throw new FolioError('bad_request', "order must be 'field' or 'field:asc|desc'")
-  if (dir === undefined) return field as 'publishedAt' | 'ord' | 'title' | 'relevance'
-  if (dir !== 'asc' && dir !== 'desc') {
-    throw new FolioError('bad_request', "order direction must be 'asc' or 'desc'")
+function parseOrder(raw: string): ContentQuery["order"] {
+  const [field, dir] = raw.split(":");
+  if (!field) throw new FolioError("bad_request", "order must be 'field' or 'field:asc|desc'");
+  if (dir === undefined) return field as "publishedAt" | "ord" | "title" | "relevance";
+  if (dir !== "asc" && dir !== "desc") {
+    throw new FolioError("bad_request", "order direction must be 'asc' or 'desc'");
   }
-  return { field, dir }
+  return { field, dir };
 }
 
 const positive = (raw: string | undefined, label: string): number | undefined => {
-  if (raw === undefined) return undefined
-  const n = Number(raw)
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
   if (!Number.isFinite(n) || n < 1) {
-    throw new FolioError('bad_request', `${label} must be a positive whole number`)
+    throw new FolioError("bad_request", `${label} must be a positive whole number`);
   }
-  return Math.trunc(n)
-}
+  return Math.trunc(n);
+};
 
 /**
  * A `ContentQuery` off the query string.
@@ -92,29 +92,29 @@ const positive = (raw: string | undefined, label: string): number | undefined =>
  * checks against. This function's job is shape and bounds.
  */
 export function queryFromParams(params: URLSearchParams): ContentQuery {
-  const where = params.getAll('where').map(parseWhere)
+  const where = params.getAll("where").map(parseWhere);
   if (where.length > MAX_WHERE) {
-    throw new FolioError('bad_request', `at most ${MAX_WHERE} where clauses`)
+    throw new FolioError("bad_request", `at most ${MAX_WHERE} where clauses`);
   }
   for (const w of where) {
     if (isTextOp(w.op) && Array.isArray(w.value) && w.value.length > MAX_PER_PAGE) {
-      throw new FolioError('bad_request', `an 'in' filter takes at most ${MAX_PER_PAGE} values`)
+      throw new FolioError("bad_request", `an 'in' filter takes at most ${MAX_PER_PAGE} values`);
     }
   }
 
-  const type = params.getAll('type').flatMap((raw) => raw.split(',').filter(Boolean))
-  const order = params.get('order')
+  const type = params.getAll("type").flatMap((raw) => raw.split(",").filter(Boolean));
+  const order = params.get("order");
   // `parent` present-and-empty means the top level (`parent_id is null`), which
   // is a real filter and cannot be spelled by omitting the parameter — omitting
   // it means "anywhere".
-  const parent = params.get('parent')
-  const locale = params.get('locale')
+  const parent = params.get("parent");
+  const locale = params.get("locale");
   // Passed through as the visitor typed it. `normaliseQuery` trims it, collapses
   // its whitespace and caps it at `MAX_SEARCH_LENGTH`, and `ftsQuery` tokenises
   // what is left — so there is no spelling of this parameter that is a 400, and
   // deliberately so: a stray quote in a search box is the commonest input there
   // is, and refusing it teaches a visitor nothing they can act on.
-  const search = params.get('search')
+  const search = params.get("search");
 
   /**
    * `doc=1` asks for each item's whole document (`core/query.ts`'s
@@ -126,28 +126,28 @@ export function queryFromParams(params: URLSearchParams): ContentQuery {
    * — `queryToParams` sets it for a field declaring `withDoc` — and a preview
    * that could not would render from different data than the live page.
    */
-  const withDoc = params.get('doc') === '1'
+  const withDoc = params.get("doc") === "1";
 
   return {
     ...(type.length > 0 ? { type: type.map(typeNameQuery) } : {}),
-    ...(parent !== null ? { parent: parent === '' ? null : parent } : {}),
+    ...(parent !== null ? { parent: parent === "" ? null : parent } : {}),
     ...(locale ? { locale } : {}),
     ...(search ? { search } : {}),
     ...(where.length > 0 ? { where } : {}),
     ...(order ? { order: parseOrder(order) } : {}),
-    ...(positive(params.get('page') ?? undefined, 'page') !== undefined
-      ? { page: positive(params.get('page') ?? undefined, 'page') }
+    ...(positive(params.get("page") ?? undefined, "page") !== undefined
+      ? { page: positive(params.get("page") ?? undefined, "page") }
       : {}),
-    ...(positive(params.get('perPage') ?? undefined, 'perPage') !== undefined
-      ? { perPage: positive(params.get('perPage') ?? undefined, 'perPage') }
+    ...(positive(params.get("perPage") ?? undefined, "perPage") !== undefined
+      ? { perPage: positive(params.get("perPage") ?? undefined, "perPage") }
       : {}),
     ...(withDoc ? { withDoc: true } : {}),
-    status: 'published',
-  }
+    status: "published",
+  };
 }
 
 export function contentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * `READ`, and `../../../docs/specs/platform/content-api.md` — which owns this route's auth —
@@ -171,9 +171,9 @@ export function contentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * wants an open read surface writes one, the way the demo's `/archive` route
    * already does over `folio.query`.
    */
-  app.get('/content', requireAccess<Env>(rt, READ), async (c) => {
-    const url = new URL(c.req.url)
-    const q = queryFromParams(url.searchParams)
+  app.get("/content", requireAccess<Env>(rt, READ), async (c) => {
+    const url = new URL(c.req.url);
+    const q = queryFromParams(url.searchParams);
     // Over the request's chain, deduped by decision 6's walk, with the site's own
     // URLs (`multi-site.md`'s route table: `GET /content` is "chain, deduped").
     return c.json(
@@ -183,8 +183,8 @@ export function contentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         await requestChain(c, rt),
         await requestSite(c, rt),
       ),
-    )
-  })
+    );
+  });
 
   /**
    * Rebuild both tables from `published_doc`.
@@ -196,10 +196,10 @@ export function contentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    *
    * `ADMIN`: it rewrites a derived table across the whole site.
    */
-  app.post('/reindex', requireAccess<Env>(rt, ADMIN), async (c) => {
-    const body = await parseOptionalBody(c.req, ReindexBody)
-    const brand = brandOf(c)
-    const sweep = await sweepOf(c, rt)
+  app.post("/reindex", requireAccess<Env>(rt, ADMIN), async (c) => {
+    const body = await parseOptionalBody(c.req, ReindexBody);
+    const brand = brandOf(c);
+    const sweep = await sweepOf(c, rt);
     const report = await reindex(
       {
         db: c.var.bindings().db,
@@ -213,10 +213,10 @@ export function contentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       // `actor` off the session, never the body, exactly as `POST /migrate`
       // takes it: the `reindexed` hook records who asked.
       { ...body, actor: actorString(c.var.actor) },
-    )
+    );
     // On a deployment with `brands`, the brand whose scopes this rebuilt.
-    return c.json(sweep ? { ...report, brand: sweep.id } : report)
-  })
+    return c.json(sweep ? { ...report, brand: sweep.id } : report);
+  });
 
-  return app
+  return app;
 }

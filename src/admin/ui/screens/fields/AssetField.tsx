@@ -1,25 +1,25 @@
-import { useRef, useState } from 'react'
-import type { Json } from '../../../../core/doc'
-import { asAsset, asAssets, type AssetValue, isImageAsset } from '../../../../core/values'
-import { useUpload } from '../../../hooks/useUpload'
-import { Button } from '../../Button'
-import { Field, Input } from '../../Field'
-import { AssetPicker } from '../AssetPicker'
-import { humanSize, keyAssets, type KeyedAsset } from '../assets-model'
-import css from './fields.module.css'
+import { useRef, useState } from "react";
+import type { Json } from "../../../../core/doc";
+import { asAsset, asAssets, type AssetValue, isImageAsset } from "../../../../core/values";
+import { useUpload } from "../../../hooks/useUpload";
+import { Button } from "../../Button";
+import { Field, Input } from "../../Field";
+import { AssetPicker } from "../AssetPicker";
+import { humanSize, keyAssets, type KeyedAsset } from "../assets-model";
+import css from "./fields.module.css";
 
 interface Props {
-  id: string
-  value: Json
-  accept?: string
+  id: string;
+  value: Json;
+  accept?: string;
   /** `{base}/api`, for uploads and for the picker's listing. */
-  apiBase: string
+  apiBase: string;
   /** The bare mount. `/asset/:key` serves bytes into an `<img>` and stays there,
    * because its URL is also baked into published HTML through
    * `Resolution.assetBase` (`server/routes/assets.ts` says so at the mount). */
-  mount: string
-  editable: boolean
-  onChange: (value: Json) => void
+  mount: string;
+  editable: boolean;
+  onChange: (value: Json) => void;
 }
 
 /**
@@ -31,22 +31,22 @@ interface Props {
  * widened signature on the shared helper.
  */
 function thumbFor(mount: string, asset: AssetValue, width = 320): string {
-  if (!asset.key) return asset.url!
-  return `${mount}/asset/${encodeURIComponent(asset.key)}?w=${width}&f=webp`
+  if (!asset.key) return asset.url!;
+  return `${mount}/asset/${encodeURIComponent(asset.key)}?w=${width}&f=webp`;
 }
 
 /* ------------------------------------------------------------------ single --- */
 
 export function AssetField({ id, value, accept, apiBase, mount, editable, onChange }: Props) {
-  const asset = asAsset(value)
-  const upload = useUpload(apiBase)
-  const [picking, setPicking] = useState(false)
-  const file = useRef<HTMLInputElement>(null)
+  const asset = asAsset(value);
+  const upload = useUpload(apiBase);
+  const [picking, setPicking] = useState(false);
+  const file = useRef<HTMLInputElement>(null);
 
   const take = async (chosen: File | undefined) => {
-    const next = await upload.one(chosen)
-    if (next) onChange(next as unknown as Json)
-  }
+    const next = await upload.one(chosen);
+    if (next) onChange(next as unknown as Json);
+  };
 
   return (
     <div className={css.stack}>
@@ -58,8 +58,8 @@ export function AssetField({ id, value, accept, apiBase, mount, editable, onChan
         hidden
         disabled={!editable}
         onChange={(e) => {
-          void take(e.target.files?.[0])
-          e.target.value = ''
+          void take(e.target.files?.[0]);
+          e.target.value = "";
         }}
       />
 
@@ -77,10 +77,10 @@ export function AssetField({ id, value, accept, apiBase, mount, editable, onChan
         <Button
           size="sm"
           disabled={!editable || upload.busy}
-          reason={upload.busy ? 'Uploading…' : undefined}
+          reason={upload.busy ? "Uploading…" : undefined}
           onClick={() => file.current?.click()}
         >
-          {asset ? 'Replace' : 'Upload'}
+          {asset ? "Replace" : "Upload"}
         </Button>
         <Button size="sm" variant="subtle" disabled={!editable} onClick={() => setPicking(true)}>
           Library
@@ -95,14 +95,14 @@ export function AssetField({ id, value, accept, apiBase, mount, editable, onChan
           mount={mount}
           {...(accept ? { accept } : {})}
           onPick={(picked) => {
-            onChange(picked as unknown as Json)
-            setPicking(false)
+            onChange(picked as unknown as Json);
+            setPicking(false);
           }}
           onClose={() => setPicking(false)}
         />
       ) : null}
     </div>
-  )
+  );
 }
 
 /* -------------------------------------------------------------------- many --- */
@@ -122,14 +122,14 @@ export function AssetField({ id, value, accept, apiBase, mount, editable, onChan
  * one character — and it stays pinned by `test/unit/admin/asset-keys.test.ts`.
  */
 function useAssetKeys(assets: readonly AssetValue[]): KeyedAsset[] {
-  const previous = useRef<KeyedAsset[]>([])
-  const seq = useRef(0)
+  const previous = useRef<KeyedAsset[]>([]);
+  const seq = useRef(0);
   const keyed = keyAssets(previous.current, assets, () => {
-    seq.current += 1
-    return `asset-${seq.current}`
-  })
-  previous.current = keyed
-  return keyed
+    seq.current += 1;
+    return `asset-${seq.current}`;
+  });
+  previous.current = keyed;
+  return keyed;
 }
 
 export function MultiAssetField({
@@ -142,27 +142,27 @@ export function MultiAssetField({
   max,
   onChange,
 }: Props & { max?: number }) {
-  const assets = asAssets(value)
-  const cards = useAssetKeys(assets)
-  const upload = useUpload(apiBase)
-  const [picking, setPicking] = useState(false)
-  const file = useRef<HTMLInputElement>(null)
-  const full = max !== undefined && assets.length >= max
+  const assets = asAssets(value);
+  const cards = useAssetKeys(assets);
+  const upload = useUpload(apiBase);
+  const [picking, setPicking] = useState(false);
+  const file = useRef<HTMLInputElement>(null);
+  const full = max !== undefined && assets.length >= max;
 
-  const write = (next: AssetValue[]) => onChange(next as unknown as Json)
+  const write = (next: AssetValue[]) => onChange(next as unknown as Json);
 
   const add = async (chosen: FileList | null) => {
-    const room = max === undefined ? (chosen?.length ?? 0) : Math.max(0, max - assets.length)
-    const uploaded = await upload.many(chosen, room)
-    if (uploaded) write([...assets, ...uploaded])
-  }
+    const room = max === undefined ? (chosen?.length ?? 0) : Math.max(0, max - assets.length);
+    const uploaded = await upload.many(chosen, room);
+    if (uploaded) write([...assets, ...uploaded]);
+  };
 
   const swap = (from: number, to: number) => {
-    if (to < 0 || to >= assets.length) return
-    const next = [...assets]
-    ;[next[from], next[to]] = [next[to]!, next[from]!]
-    write(next)
-  }
+    if (to < 0 || to >= assets.length) return;
+    const next = [...assets];
+    [next[from], next[to]] = [next[to]!, next[from]!];
+    write(next);
+  };
 
   return (
     <div className={css.stack}>
@@ -175,8 +175,8 @@ export function MultiAssetField({
         hidden
         disabled={!editable}
         onChange={(e) => {
-          void add(e.target.files)
-          e.target.value = ''
+          void add(e.target.files);
+          e.target.value = "";
         }}
       />
 
@@ -197,7 +197,7 @@ export function MultiAssetField({
         <Button
           size="sm"
           disabled={!editable || upload.busy || full}
-          reason={upload.busy ? 'Uploading…' : `Limit of ${max} reached`}
+          reason={upload.busy ? "Uploading…" : `Limit of ${max} reached`}
           onClick={() => file.current?.click()}
         >
           Upload
@@ -221,14 +221,14 @@ export function MultiAssetField({
           mount={mount}
           {...(accept ? { accept } : {})}
           onPick={(picked) => {
-            write([...assets, picked])
-            setPicking(false)
+            write([...assets, picked]);
+            setPicking(false);
           }}
           onClose={() => setPicking(false)}
         />
       ) : null}
     </div>
-  )
+  );
 }
 
 /* -------------------------------------------------------------------- card --- */
@@ -242,29 +242,29 @@ function AssetCard({
   onRemove,
   onMove,
 }: {
-  mount: string
-  asset: AssetValue
-  editable: boolean
-  position?: { index: number; total: number }
-  onChange: (next: AssetValue) => void
-  onRemove: () => void
-  onMove?: (to: number) => void
+  mount: string;
+  asset: AssetValue;
+  editable: boolean;
+  position?: { index: number; total: number };
+  onChange: (next: AssetValue) => void;
+  onRemove: () => void;
+  onMove?: (to: number) => void;
 }) {
-  const image = isImageAsset(asset)
-  const focal = asset.focal
+  const image = isImageAsset(asset);
+  const focal = asset.focal;
 
   // Clicking the image is the whole focal-point UI: pick the spot that must stay in
   // frame when this gets cropped to some other aspect ratio.
   const setFocal = (e: React.MouseEvent<HTMLElement>) => {
-    const box = e.currentTarget.getBoundingClientRect()
+    const box = e.currentTarget.getBoundingClientRect();
     onChange({
       ...asset,
       focal: {
         x: Math.min(1, Math.max(0, (e.clientX - box.left) / box.width)),
         y: Math.min(1, Math.max(0, (e.clientY - box.top) / box.height)),
       },
-    })
-  }
+    });
+  };
 
   return (
     <div className={css.card}>
@@ -290,7 +290,7 @@ function AssetCard({
           ) : null}
         </button>
       ) : (
-        <div className={css.file}>{asset.filename.split('.').pop()?.toUpperCase() ?? 'FILE'}</div>
+        <div className={css.file}>{asset.filename.split(".").pop()?.toUpperCase() ?? "FILE"}</div>
       )}
 
       <div className={css.meta}>
@@ -298,8 +298,8 @@ function AssetCard({
           {asset.filename}
         </span>
         <span className={css.dims}>
-          {asset.width && asset.height ? `${asset.width}×${asset.height} · ` : ''}
-          {asset.size ? humanSize(asset.size) : 'external'}
+          {asset.width && asset.height ? `${asset.width}×${asset.height} · ` : ""}
+          {asset.size ? humanSize(asset.size) : "external"}
         </span>
 
         {/* A real `<label>`, where the old card had a `placeholder="Alt text"` and
@@ -326,8 +326,8 @@ function AssetCard({
               variant="subtle"
               disabled={!editable}
               onClick={() => {
-                const { focal: _drop, ...rest } = asset
-                onChange(rest)
+                const { focal: _drop, ...rest } = asset;
+                onChange(rest);
               }}
             >
               Centre focal point
@@ -369,5 +369,5 @@ function AssetCard({
         </div>
       </div>
     </div>
-  )
+  );
 }

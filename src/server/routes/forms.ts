@@ -17,15 +17,15 @@
  * own scope, never the platform tier (`multi-site.md` decision 10) — may destroy
  * one, because a form's delete takes every response with it.
  */
-import { Hono } from 'hono'
-import type { Context } from 'hono'
-import { wasRefused } from '../../core/bulk'
-import { NO_STORE } from '../../core/cache-tags'
-import { honeypotName } from '../../core/forms'
-import { chain as chainOf, DEFAULT_SITE, sitesUnder } from '../../core/sites'
-import { actorString, EDIT, FORMS, READ, SCOPE_ADMIN } from '../auth/roles'
-import { purgeFormLayout } from '../cache-purge'
-import { FolioError } from '../errors'
+import { Hono } from "hono";
+import type { Context } from "hono";
+import { wasRefused } from "../../core/bulk";
+import { NO_STORE } from "../../core/cache-tags";
+import { honeypotName } from "../../core/forms";
+import { chain as chainOf, DEFAULT_SITE, sitesUnder } from "../../core/sites";
+import { actorString, EDIT, FORMS, READ, SCOPE_ADMIN } from "../auth/roles";
+import { purgeFormLayout } from "../cache-purge";
+import { FolioError } from "../errors";
 import {
   type AnswerRefusal,
   bodyHash,
@@ -53,7 +53,7 @@ import {
   type SubmissionBody,
   throttleHashes,
   validateSubmission,
-} from '../form-responses'
+} from "../form-responses";
 import {
   compileForm,
   createForm,
@@ -71,7 +71,7 @@ import {
   LOCALE_INPUT,
   PAGE_INPUT,
   updateForm,
-} from '../forms'
+} from "../forms";
 import {
   brandIdOf,
   hookCtx,
@@ -82,11 +82,11 @@ import {
   requestScope,
   requestUrls,
   requireAccess,
-} from '../middleware'
-import type { BrandRuntime, FolioRuntime } from '../runtime'
-import type { FolioEnv, FolioLogger } from '../types'
-import { brandOf } from './stories'
-import type { MiddlewareHandler } from 'hono'
+} from "../middleware";
+import type { BrandRuntime, FolioRuntime } from "../runtime";
+import type { FolioEnv, FolioLogger } from "../types";
+import { brandOf } from "./stories";
+import type { MiddlewareHandler } from "hono";
 import {
   DOWNLOAD_CONTENT_TYPE,
   fieldNameParam,
@@ -103,7 +103,7 @@ import {
   responseIdParam,
   safeNext,
   wantsJson,
-} from '../validate'
+} from "../validate";
 
 /**
  * The refusal a host with no `media` binding gets for anything file-shaped
@@ -116,11 +116,14 @@ import {
  * form that refuses every CV needs to be told which of the three it is.
  */
 function noMedia(): FolioError {
-  return new FolioError('unsupported', 'No media bucket is configured, so a form cannot take files')
+  return new FolioError(
+    "unsupported",
+    "No media bucket is configured, so a form cannot take files",
+  );
 }
 
 export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   /**
    * **The form fence** (`../../../docs/specs/foundation/multi-site.md` decision
@@ -136,17 +139,17 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     (reach: Reach): MiddlewareHandler<FolioEnv<Env>> =>
     async (c, next) => {
       if (rt.sites) {
-        const site = await formSiteOf(c.var.bindings().db, c.req.param('id') ?? '')
+        const site = await formSiteOf(c.var.bindings().db, c.req.param("id") ?? "");
         if (site !== null && !(await inFence(c, rt, { site }, reach))) {
-          throw new FolioError('not_found', 'Unknown form')
+          throw new FolioError("not_found", "Unknown form");
         }
       }
-      await next()
-    }
+      await next();
+    };
 
   /** The scope a form is created in and the builder's own list shows, and `default`
    * on a deployment with no `sites`. */
-  const scopeOf = (c: Context<FolioEnv<Env>>): string => requestScope(c, rt) ?? DEFAULT_SITE
+  const scopeOf = (c: Context<FolioEnv<Env>>): string => requestScope(c, rt) ?? DEFAULT_SITE;
 
   /**
    * **Which submitting sites' responses this request may see** for form `id`
@@ -160,12 +163,12 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     c: Context<FolioEnv<Env>>,
     id: string,
   ): Promise<readonly string[] | undefined> => {
-    if (!rt.sites) return undefined
-    const owner = await formSiteOf(c.var.bindings().db, id)
-    const scope = c.var.scope
-    if (owner === null || scope === null || owner === scope) return undefined
-    return sitesUnder(await rt.sites.registry(c.env), scope)
-  }
+    if (!rt.sites) return undefined;
+    const owner = await formSiteOf(c.var.bindings().db, id);
+    const scope = c.var.scope;
+    if (owner === null || scope === null || owner === scope) return undefined;
+    return sitesUnder(await rt.sites.registry(c.env), scope);
+  };
 
   /**
    * Most recently changed first, keyset-paged
@@ -177,38 +180,38 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * unbounded and grows for as long as the site is up. The list screen asks for
    * both; a client walking the cursor should ask for neither.
    */
-  app.get('/forms', requireAccess<Env>(rt, READ), async (c) => {
-    const db = c.var.bindings().db
-    const cursor = c.req.query('cursor')
-    requireCursor(cursor)
+  app.get("/forms", requireAccess<Env>(rt, READ), async (c) => {
+    const db = c.var.bindings().db;
+    const cursor = c.req.query("cursor");
+    requireCursor(cursor);
     // The scope's own forms, or — for a picker, with `?chain=1` — everything the scope
     // may embed: its own and those of the scopes above it. Responses counted are the
     // ones the scope's own sites received (`sitesOf`).
-    const picker = c.req.query('chain') === '1'
+    const picker = c.req.query("chain") === "1";
     return c.json(
       await listForms(db, {
         chain: picker ? await requestChain(c, rt) : [scopeOf(c)],
         ...(picker && rt.sites && c.var.scope !== null
           ? { sites: sitesUnder(await rt.sites.registry(c.env), c.var.scope) }
           : {}),
-        limit: limitParam(c.req.query('limit'), 50, 200),
+        limit: limitParam(c.req.query("limit"), 50, 200),
         cursor,
-        count: c.req.query('count') === '1',
-        counts: c.req.query('counts') === '1',
+        count: c.req.query("count") === "1",
+        counts: c.req.query("counts") === "1",
       }),
-    )
-  })
+    );
+  });
 
   /**
    * A new, empty form. `EDIT`, not `MANAGE`: a form with no questions is
    * reachable from nothing and breaks nothing, the same reading that put
    * `CREATE` at editor for documents.
    */
-  app.post('/forms', requireAccess<Env>(rt, EDIT), async (c) => {
-    const body = await parseBody(c.req, FormCreateBody)
-    const form = await createForm(c.var.bindings().db, body, scopeOf(c))
-    return c.json(form, 201)
-  })
+  app.post("/forms", requireAccess<Env>(rt, EDIT), async (c) => {
+    const body = await parseBody(c.req, FormCreateBody);
+    const form = await createForm(c.var.bindings().db, body, scopeOf(c));
+    return c.json(form, 201);
+  });
 
   /**
    * The **compiled descriptors** for a set of form ids: `Resolution['forms']`,
@@ -237,28 +240,28 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * and the render's answer for one is `null`, so the map simply does not carry
    * it. Missing and never-existed are the same fact to a caller here.
    */
-  app.get('/forms/resolved', requireAccess<Env>(rt, READ), async (c) => {
-    const ids = formIdListQuery(c.req.query('ids'))
-    if (ids.length === 0) return c.json({})
+  app.get("/forms/resolved", requireAccess<Env>(rt, READ), async (c) => {
+    const ids = formIdListQuery(c.req.query("ids"));
+    if (ids.length === 0) return c.json({});
 
     // Within the request's chain: a form outside it is absent from the answer, exactly
     // as a deleted one is (`multi-site.md` decision 3).
-    const forms = await formsByIds(c.var.bindings().db, ids, rt.logger, await requestChain(c, rt))
-    const locale = rt.localeOf(c.req.query('locale'))
-    const page = c.req.query('page')
+    const forms = await formsByIds(c.var.bindings().db, ids, rt.logger, await requestChain(c, rt));
+    const locale = rt.localeOf(c.req.query("locale"));
+    const page = c.req.query("page");
     const ctx = {
       base: rt.base,
       ...(locale ? { locale } : {}),
       ...(page ? { page: formPageQuery(page) } : {}),
-    }
-    return c.json(Object.fromEntries(forms.map((form) => [form.id, compileForm(form, ctx)])))
-  })
+    };
+    return c.json(Object.fromEntries(forms.map((form) => [form.id, compileForm(form, ctx)])));
+  });
 
-  app.get('/forms/:id', requireAccess<Env>(rt, READ), fenceForm('read'), async (c) => {
-    const form = await formById(c.var.bindings().db, formIdParam(c.req.param('id')), rt.logger)
-    if (!form) throw new FolioError('not_found', 'Unknown form')
-    return c.json(form)
-  })
+  app.get("/forms/:id", requireAccess<Env>(rt, READ), fenceForm("read"), async (c) => {
+    const form = await formById(c.var.bindings().db, formIdParam(c.req.param("id")), rt.logger);
+    if (!form) throw new FolioError("not_found", "Unknown form");
+    return c.json(form);
+  });
 
   /**
    * A builder save.
@@ -276,36 +279,36 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * The 409 for a stale `expectedUpdatedAt` comes out of `updateForm`, where the
    * guard is part of the `update` rather than a read in front of it.
    */
-  app.patch('/forms/:id', requireAccess<Env>(rt, EDIT), fenceForm('write'), async (c) => {
-    const id = formIdParam(c.req.param('id'))
-    const body = await parseBody(c.req, FormPatchBody)
-    const { db, media } = c.var.bindings()
+  app.patch("/forms/:id", requireAccess<Env>(rt, EDIT), fenceForm("write"), async (c) => {
+    const id = formIdParam(c.req.param("id"));
+    const body = await parseBody(c.req, FormPatchBody);
+    const { db, media } = c.var.bindings();
 
     // The builder half of decision 15's refusal. Checked on the *incoming*
     // fields rather than the stored ones, so this refuses adding the question
     // rather than refusing to save a form that already has one — and it is the
     // reason `deleteForm` can treat "files with no bucket" as unreachable.
-    if (!media && body.fields?.some((field) => field.kind === 'file')) throw noMedia()
+    if (!media && body.fields?.some((field) => field.kind === "file")) throw noMedia();
 
-    const result = await updateForm(db, id, body, scopeOf(c))
-    if (!result) throw new FolioError('not_found', 'Unknown form')
+    const result = await updateForm(db, id, body, scopeOf(c));
+    if (!result) throw new FolioError("not_found", "Unknown form");
 
     if (result.structural) {
-      await rt.hookRunner(hookCtx(c), brandIdOf(c)).run('formChanged', {
+      await rt.hookRunner(hookCtx(c), brandIdOf(c)).run("formChanged", {
         form: formMeta(result.form),
         version: result.form.version,
         actor: actorString(c.var.actor),
         site: scopeOf(c),
-      })
+      });
     } else if (result.descriptorChanged) {
       // `rt.formPurgeCapability` is `undefined` for every real host — the
       // same default `purgeFormLayout` would pick on its own — and set only
       // by a workers test that needs to observe this call at all
       // (`FolioRuntime.formPurgeCapability`'s own comment).
-      await purgeFormLayout(id, rt.formPurgeCapability, rt.logger)
+      await purgeFormLayout(id, rt.formPurgeCapability, rt.logger);
     }
-    return c.json(result.form)
-  })
+    return c.json(result.form);
+  });
 
   /**
    * The form, its responses and their files — all of it, and the counts of what
@@ -317,16 +320,16 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * that it is never a surprise: `GET /forms/:id/usage` answers all three
    * numbers the dialog names, in one call, before anything is destroyed.
    */
-  app.delete('/forms/:id', requireAccess<Env>(rt, SCOPE_ADMIN), fenceForm('write'), async (c) => {
-    const id = formIdParam(c.req.param('id'))
-    const { db, media } = c.var.bindings()
+  app.delete("/forms/:id", requireAccess<Env>(rt, SCOPE_ADMIN), fenceForm("write"), async (c) => {
+    const id = formIdParam(c.req.param("id"));
+    const { db, media } = c.var.bindings();
     // The bucket, so the objects go with the rows. `deleteForm` throws rather
     // than silently orphaning them if it is absent and there is anything to
     // delete, which is why this is passed unconditionally instead of guarded.
-    const result = await deleteForm(db, id, media, scopeOf(c))
-    if (!result.deleted) throw new FolioError('not_found', 'Unknown form')
-    return c.json(result)
-  })
+    const result = await deleteForm(db, id, media, scopeOf(c));
+    if (!result.deleted) throw new FolioError("not_found", "Unknown form");
+    return c.json(result);
+  });
 
   /**
    * What a delete would break and what it would destroy: the published documents
@@ -341,14 +344,14 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * asset route's reason: the row has to be read to answer at all, and "no such
    * form" is a more useful answer than "used by nobody" for a stale link.
    */
-  app.get('/forms/:id/usage', requireAccess<Env>(rt, EDIT), fenceForm('read'), async (c) => {
-    const db = c.var.bindings().db
-    const id = formIdParam(c.req.param('id'))
-    const form = await formById(db, id, rt.logger)
-    if (!form) throw new FolioError('not_found', 'Unknown form')
+  app.get("/forms/:id/usage", requireAccess<Env>(rt, EDIT), fenceForm("read"), async (c) => {
+    const db = c.var.bindings().db;
+    const id = formIdParam(c.req.param("id"));
+    const form = await formById(db, id, rt.logger);
+    if (!form) throw new FolioError("not_found", "Unknown form");
 
-    const usage = await formUsage(db, id, await readableScopes(c, rt), await sitesOf(c, id))
-    const urls = await requestUrls(c, rt)
+    const usage = await formUsage(db, id, await readableScopes(c, rt), await sitesOf(c, id));
+    const urls = await requestUrls(c, rt);
     return c.json({
       published: usage.published.map((story) => ({
         id: story.id,
@@ -356,7 +359,7 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         path: story.path,
         // `''` rather than absent for an unrouted document, matching both other
         // usage routes: a record embedding a form has no URL to offer.
-        url: urls(story).url ?? '',
+        url: urls(story).url ?? "",
       })),
       total: usage.total,
       // Uses in scopes the caller cannot read: counted, never named. Every scope they can
@@ -364,8 +367,8 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       ...(rt.sites ? { elsewhere: usage.elsewhere } : {}),
       responses: usage.responses,
       files: usage.files,
-    })
-  })
+    });
+  });
 
   /* ---------------------------------------------------------- responses --- */
 
@@ -391,22 +394,22 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * response, which is what makes manual retention visible on the surface that
    * would show the symptom (decision 17). `oldest` ignores the filter on purpose.
    */
-  app.get('/forms/:id/responses', requireAccess<Env>(rt, FORMS), fenceForm('read'), async (c) => {
-    const db = c.var.bindings().db
-    const cursor = c.req.query('cursor')
-    requireCursor(cursor)
-    const id = formIdParam(c.req.param('id'))
-    const sites = await sitesOf(c, id)
+  app.get("/forms/:id/responses", requireAccess<Env>(rt, FORMS), fenceForm("read"), async (c) => {
+    const db = c.var.bindings().db;
+    const cursor = c.req.query("cursor");
+    requireCursor(cursor);
+    const id = formIdParam(c.req.param("id"));
+    const sites = await sitesOf(c, id);
     return c.json(
       await listResponses(db, id, {
         ...(sites === undefined ? {} : { sites }),
-        limit: limitParam(c.req.query('limit'), 50, 200),
+        limit: limitParam(c.req.query("limit"), 50, 200),
         cursor,
         filter: responseFilterQuery({ query: (key) => c.req.query(key) }),
-        count: c.req.query('count') === '1',
+        count: c.req.query("count") === "1",
       }),
-    )
-  })
+    );
+  });
 
   /**
    * The CSV, streamed and filtered exactly as the table is
@@ -426,32 +429,32 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * *does* 404 a stale link, without spending a query to do it.
    */
   app.get(
-    '/forms/:id/responses.csv',
+    "/forms/:id/responses.csv",
     requireAccess<Env>(rt, SCOPE_ADMIN),
-    fenceForm('read'),
+    fenceForm("read"),
     async (c) => {
-      const db = c.var.bindings().db
-      const form = await formById(db, formIdParam(c.req.param('id')), rt.logger)
-      if (!form) throw new FolioError('not_found', 'Unknown form')
+      const db = c.var.bindings().db;
+      const form = await formById(db, formIdParam(c.req.param("id")), rt.logger);
+      if (!form) throw new FolioError("not_found", "Unknown form");
 
       const { filename, body } = await responseCsv(
         db,
         form,
         responseFilterQuery({ query: (key) => c.req.query(key) }),
         await sitesOf(c, form.id),
-      )
+      );
       return new Response(body, {
         headers: {
-          'content-type': 'text/csv; charset=utf-8',
+          "content-type": "text/csv; charset=utf-8",
           // `filename` is `safeFilename`'s output — lowercase ASCII, no quote, no
           // newline, no path separator — so the header cannot be split by it.
-          'content-disposition': `attachment; filename="${filename}"`,
-          'cache-control': NO_STORE,
-          'x-content-type-options': 'nosniff',
+          "content-disposition": `attachment; filename="${filename}"`,
+          "cache-control": NO_STORE,
+          "x-content-type-options": "nosniff",
         },
-      })
+      });
     },
-  )
+  );
 
   /**
    * One response, every key it holds.
@@ -462,21 +465,21 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * so a response cannot be read through another form's URL.
    */
   app.get(
-    '/forms/:id/responses/:rid',
+    "/forms/:id/responses/:rid",
     requireAccess<Env>(rt, FORMS),
-    fenceForm('read'),
+    fenceForm("read"),
     async (c) => {
-      const id = formIdParam(c.req.param('id'))
+      const id = formIdParam(c.req.param("id"));
       const response = await responseById(
         c.var.bindings().db,
         id,
-        responseIdParam(c.req.param('rid')),
+        responseIdParam(c.req.param("rid")),
         await sitesOf(c, id),
-      )
-      if (!response) throw new FolioError('not_found', 'Unknown response')
-      return c.json(response)
+      );
+      if (!response) throw new FolioError("not_found", "Unknown response");
+      return c.json(response);
     },
-  )
+  );
 
   /**
    * One response and its uploads. **`SCOPE_ADMIN`** (checkpoint 8).
@@ -488,24 +491,24 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * `deleteForm`'s, which is argued where each of them lives).
    */
   app.delete(
-    '/forms/:id/responses/:rid',
+    "/forms/:id/responses/:rid",
     requireAccess<Env>(rt, SCOPE_ADMIN),
-    fenceForm('read'),
+    fenceForm("read"),
     async (c) => {
-      const { db, media } = c.var.bindings()
-      const id = formIdParam(c.req.param('id'))
+      const { db, media } = c.var.bindings();
+      const id = formIdParam(c.req.param("id"));
       const result = await deleteResponse(
         db,
         id,
-        responseIdParam(c.req.param('rid')),
+        responseIdParam(c.req.param("rid")),
         media,
         rt.logger,
         await sitesOf(c, id),
-      )
-      if (!result.deleted) throw new FolioError('not_found', 'Unknown response')
-      return c.json(result)
+      );
+      if (!result.deleted) throw new FolioError("not_found", "Unknown response");
+      return c.json(result);
     },
-  )
+  );
 
   /**
    * A bulk delete over a selection — the ids somebody ticked, or a captured
@@ -518,27 +521,27 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * of investigated.
    */
   app.post(
-    '/forms/:id/responses/delete',
+    "/forms/:id/responses/delete",
     requireAccess<Env>(rt, SCOPE_ADMIN),
-    fenceForm('read'),
+    fenceForm("read"),
     async (c) => {
-      const { db, media } = c.var.bindings()
-      const id = formIdParam(c.req.param('id'))
-      const body = await parseBody(c.req, ResponseBulkBody)
-      requireCursor(body.continueFrom ?? undefined)
+      const { db, media } = c.var.bindings();
+      const id = formIdParam(c.req.param("id"));
+      const body = await parseBody(c.req, ResponseBulkBody);
+      requireCursor(body.continueFrom ?? undefined);
 
-      const sites = await sitesOf(c, id)
+      const sites = await sitesOf(c, id);
       const outcome = await deleteResponses({ db, media, logger: rt.logger }, id, body.selection, {
         ...(sites === undefined ? {} : { sites }),
         ...(body.dryRun === undefined ? {} : { dryRun: body.dryRun }),
         ...(body.continueFrom === undefined ? {} : { continueFrom: body.continueFrom }),
         ...(body.batch === undefined ? {} : { batch: body.batch }),
-      })
-      if (!wasRefused(outcome)) return c.json(outcome)
+      });
+      if (!wasRefused(outcome)) return c.json(outcome);
       return c.json(
         {
           error: {
-            code: 'conflict',
+            code: "conflict",
             message: `${outcome.expected} responses matched when you chose them and ${outcome.actual} match now. Check the number and try again.`,
           },
           refused: outcome.refused,
@@ -546,9 +549,9 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           actual: outcome.actual,
         },
         409,
-      )
+      );
     },
-  )
+  );
 
   /**
    * One response's uploaded file, streamed from R2
@@ -582,41 +585,41 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * cannot be walked in through a different form's URL.
    */
   app.get(
-    '/forms/:id/responses/:rid/file/:name',
+    "/forms/:id/responses/:rid/file/:name",
     requireAccess<Env>(rt, FORMS),
-    fenceForm('read'),
+    fenceForm("read"),
     async (c) => {
-      const { db, media } = c.var.bindings()
-      if (!media) throw noMedia()
+      const { db, media } = c.var.bindings();
+      if (!media) throw noMedia();
 
-      const id = formIdParam(c.req.param('id'))
+      const id = formIdParam(c.req.param("id"));
       const file = await responseFileOf(
         db,
         id,
-        responseIdParam(c.req.param('rid')),
-        fieldNameParam(c.req.param('name')),
+        responseIdParam(c.req.param("rid")),
+        fieldNameParam(c.req.param("name")),
         await sitesOf(c, id),
-      )
-      if (!file) throw new FolioError('not_found', 'No such file')
+      );
+      if (!file) throw new FolioError("not_found", "No such file");
 
-      const object = await media.get(file.key)
-      if (!object) throw new FolioError('not_found', 'No such file')
+      const object = await media.get(file.key);
+      if (!object) throw new FolioError("not_found", "No such file");
 
       return new Response(object.body, {
         headers: {
-          'content-type': DOWNLOAD_CONTENT_TYPE,
+          "content-type": DOWNLOAD_CONTENT_TYPE,
           // `filename` is `safeFilename`'s output, so it holds no quote, no
           // newline and no path separator — the header cannot be split by it.
-          'content-disposition': `attachment; filename="${file.filename}"`,
-          'cache-control': NO_STORE,
-          'x-content-type-options': 'nosniff',
-          'content-security-policy': "default-src 'none'; sandbox",
+          "content-disposition": `attachment; filename="${file.filename}"`,
+          "cache-control": NO_STORE,
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "default-src 'none'; sandbox",
         },
-      })
+      });
     },
-  )
+  );
 
-  return app
+  return app;
 }
 
 /* ------------------------------------------------------ the public route --- */
@@ -631,28 +634,28 @@ export function formRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
  * visitor behind a shared NAT that their message was "invalid" is the one wrong
  * answer available.
  */
-type SubmitStatus = 'ok' | 'invalid' | 'closed' | 'rate' | 'verify' | 'error'
+type SubmitStatus = "ok" | "invalid" | "closed" | "rate" | "verify" | "error";
 
 interface Reply {
-  json: boolean
-  status: SubmitStatus
+  json: boolean;
+  status: SubmitStatus;
   /** Where a native POST lands. Already same-origin, or the form's own
    *  `redirectTo`. */
-  target: string
+  target: string;
   /** The request's URL, for resolving `target` when it is a path. */
-  from: string
+  from: string;
   /** Present once the form is known: the slug rides back as `folio_form` so a
    *  page carrying two forms can tell which one answered. */
-  form?: Form
+  form?: Form;
   /** Success only. Minted even for a submission that was not stored, so a bot
    *  cannot tell the honeypot and a duplicate apart from a real one. */
-  responseId?: string
+  responseId?: string;
   /** `invalid` only: the field names, and never their values. */
-  invalid?: readonly string[]
-  fields?: Record<string, AnswerRefusal>
-  code?: string
-  message?: string
-  httpStatus?: number
+  invalid?: readonly string[];
+  fields?: Record<string, AnswerRefusal>;
+  code?: string;
+  message?: string;
+  httpStatus?: number;
 }
 
 /**
@@ -666,11 +669,11 @@ interface Reply {
  * is served it as a hit.
  */
 function locationFor(reply: Reply): string {
-  const url = new URL(reply.target, reply.from)
-  url.searchParams.set('folio_status', reply.status)
-  if (reply.form) url.searchParams.set('folio_form', reply.form.name)
-  if (reply.invalid?.length) url.searchParams.set('folio_invalid', reply.invalid.join(','))
-  return url.toString()
+  const url = new URL(reply.target, reply.from);
+  url.searchParams.set("folio_status", reply.status);
+  if (reply.form) url.searchParams.set("folio_form", reply.form.name);
+  if (reply.invalid?.length) url.searchParams.set("folio_invalid", reply.invalid.join(","));
+  return url.toString();
 }
 
 /**
@@ -687,22 +690,22 @@ function locationFor(reply: Reply): string {
  */
 function replyTo(reply: Reply): Response {
   if (!reply.json) {
-    return new Response(null, { status: 303, headers: { location: locationFor(reply) } })
+    return new Response(null, { status: 303, headers: { location: locationFor(reply) } });
   }
 
   const body =
-    reply.status === 'ok'
+    reply.status === "ok"
       ? { ok: true, status: reply.status, id: reply.responseId }
       : {
-          error: { code: reply.code ?? reply.status, message: reply.message ?? 'Refused' },
+          error: { code: reply.code ?? reply.status, message: reply.message ?? "Refused" },
           status: reply.status,
           ...(reply.fields ? { fields: reply.fields } : {}),
-        }
+        };
 
   return new Response(JSON.stringify(body), {
-    status: reply.httpStatus ?? (reply.status === 'ok' ? 200 : 400),
-    headers: { 'content-type': 'application/json; charset=UTF-8' },
-  })
+    status: reply.httpStatus ?? (reply.status === "ok" ? 200 : 400),
+    headers: { "content-type": "application/json; charset=UTF-8" },
+  });
 }
 
 /**
@@ -715,14 +718,14 @@ function replyTo(reply: Reply): Response {
  * endpoint would be the most-scanned URL on the site.
  */
 function refererPath(req: Request): string {
-  const raw = req.headers.get('referer')
-  if (!raw) return '/'
+  const raw = req.headers.get("referer");
+  if (!raw) return "/";
   try {
-    const url = new URL(raw)
-    if (url.origin !== new URL(req.url).origin) return '/'
-    return safeNext(`${url.pathname}${url.search}`, '/')
+    const url = new URL(raw);
+    if (url.origin !== new URL(req.url).origin) return "/";
+    return safeNext(`${url.pathname}${url.search}`, "/");
   } catch {
-    return '/'
+    return "/";
   }
 }
 
@@ -770,46 +773,46 @@ function refererPath(req: Request): string {
  * and it is one property rather than two.
  */
 export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
-  app.post('/f/:id', async (c) => {
-    const req = c.req.raw
-    const json = wantsJson(req)
-    const from = c.req.url
-    const now = Date.now()
+  app.post("/f/:id", async (c) => {
+    const req = c.req.raw;
+    const json = wantsJson(req);
+    const from = c.req.url;
+    const now = Date.now();
 
-    const id = formIdParam(c.req.param('id'))
-    const { db, media } = c.var.bindings()
+    const id = formIdParam(c.req.param("id"));
+    const { db, media } = c.var.bindings();
     // **The site that received this submission** (`multi-site.md` decision 3): the live
     // host `handle()` gated the request to, and the only place a form in a site's chain
     // may be posted from. A request on the admin origin, a preview origin or any host
     // that is no site's live one has no site to have received it, so every form there
     // is an unknown one. Recorded on the response, so a shared form's answers can be
     // read by the site they came from.
-    let submitting = DEFAULT_SITE
-    let form: Form | null
+    let submitting = DEFAULT_SITE;
+    let form: Form | null;
     if (rt.sites) {
-      const received = c.var.site
-      form = null
-      if (received?.surface === 'live') {
-        submitting = received.id
-        const owner = await formSiteOf(db, id)
-        const within = chainOf(await rt.sites.registry(c.env), received.id)
-        if (owner !== null && within.includes(owner)) form = await formById(db, id, rt.logger)
+      const received = c.var.site;
+      form = null;
+      if (received?.surface === "live") {
+        submitting = received.id;
+        const owner = await formSiteOf(db, id);
+        const within = chainOf(await rt.sites.registry(c.env), received.id);
+        if (owner !== null && within.includes(owner)) form = await formById(db, id, rt.logger);
       }
     } else {
-      form = await formById(db, id, rt.logger)
+      form = await formById(db, id, rt.logger);
     }
     if (!form) {
       return replyTo({
         json,
-        status: 'error',
+        status: "error",
         target: refererPath(req),
         from,
-        code: 'not_found',
-        message: 'Unknown form',
+        code: "not_found",
+        message: "Unknown form",
         httpStatus: 404,
-      })
+      });
     }
 
     // Before the body is read, not after: a form that has nowhere to put a CV
@@ -819,34 +822,34 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     if (!media && hasFileQuestion(form.fields)) {
       return replyTo({
         json,
-        status: 'error',
+        status: "error",
         target: refererPath(req),
         from,
         form,
-        code: 'unsupported',
+        code: "unsupported",
         message: noMedia().message,
         httpStatus: 501,
-      })
+      });
     }
 
-    const { body, files: parts } = await readSubmission(req, capFor(form))
+    const { body, files: parts } = await readSubmission(req, capFor(form));
 
     // The host's own hidden input, through `safeNext` — which already exists to
     // stop a redirect parameter becoming an open redirect, and which bounds this
     // at 500 characters as a side effect. `''` is a legitimate answer: a form can
     // be posted from a client that sets neither this nor a `Referer`.
-    const page = safeNext(body.get(PAGE_INPUT)?.[0], '')
-    const target = page || refererPath(req)
-    const reply: Reply = { json, status: 'ok', target, from, form }
+    const page = safeNext(body.get(PAGE_INPUT)?.[0], "");
+    const target = page || refererPath(req);
+    const reply: Reply = { json, status: "ok", target, from, form };
 
     if (!isOpen(form, now)) {
       return replyTo({
         ...reply,
-        status: 'closed',
-        code: 'closed',
-        message: form.closedMessage || 'This form is closed.',
+        status: "closed",
+        code: "closed",
+        message: form.closedMessage || "This form is closed.",
         httpStatus: 409,
-      })
+      });
     }
 
     // Named from the form id out of a fixed pool, exactly as the descriptor named
@@ -855,43 +858,43 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const decoy = honeypotName(
       form.id,
       form.fields.map((f) => f.name),
-    )
-    if ((body.get(decoy)?.[0] ?? '').trim() !== '') {
+    );
+    if ((body.get(decoy)?.[0] ?? "").trim() !== "") {
       // Success-shaped, storing nothing and firing nothing. A refusal here tells
       // whoever is writing the bot which field to leave alone next time.
-      return replyTo({ ...reply, responseId: newResponseId(), ...successTarget(form, target) })
+      return replyTo({ ...reply, responseId: newResponseId(), ...successTarget(form, target) });
     }
 
     // The brand of the site that received it: a form's chain lies inside one brand, so
     // its `verify` and rate limit are that brand's, never another's.
-    const brand = brandOf(c)
+    const brand = brandOf(c);
     if (!(await verified(rt, brand.forms, c.env, req, form, body))) {
       return replyTo({
         ...reply,
-        status: 'verify',
-        code: 'verify',
-        message: 'We could not verify that submission.',
+        status: "verify",
+        code: "verify",
+        message: "We could not verify that submission.",
         httpStatus: 403,
-      })
+      });
     }
 
-    const rate = brand.forms?.ratePerHour ?? DEFAULT_RATE_PER_HOUR
-    const ip = clientIp(req)
-    let hash: string | null = null
+    const rate = brand.forms?.ratePerHour ?? DEFAULT_RATE_PER_HOUR;
+    const ip = clientIp(req);
+    let hash: string | null = null;
     if (ip && rate > 0) {
-      const hashes = await throttleHashes(ip, form.id, now)
-      hash = hashes[0]
+      const hashes = await throttleHashes(ip, form.id, now);
+      hash = hashes[0];
       if ((await recentSubmissionCount(db, hashes, now)) >= rate) {
         return replyTo({
           ...reply,
-          status: 'rate',
-          code: 'rate',
-          message: 'Too many submissions from this address. Try again later.',
+          status: "rate",
+          code: "rate",
+          message: "Too many submissions from this address. Try again later.",
           httpStatus: 429,
-        })
+        });
       }
     } else if (ip) {
-      hash = await ipHash(ip, form.id, now)
+      hash = await ipHash(ip, form.id, now);
     }
 
     // The uploads: bounded per question, sniffed, hashed and keyed — and
@@ -899,31 +902,31 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     // `required` check for a `file` question is the answer to "did a file
     // arrive", and behind every abuse control because buffering an attachment
     // for a bot is the one cost the honeypot exists to avoid.
-    const uploads = await prepareUploads(form.fields, parts)
+    const uploads = await prepareUploads(form.fields, parts);
     const { values, errors } = validateSubmission(
       form.fields,
       body,
       new Set(uploads.files.map((file) => file.field)),
-    )
+    );
     // The file's own refusal wins: a required question whose CV was too large
     // should say `too_long`, not `required`.
-    const refusals = { ...errors, ...uploads.errors }
-    const invalid = Object.keys(refusals)
+    const refusals = { ...errors, ...uploads.errors };
+    const invalid = Object.keys(refusals);
     if (invalid.length > 0) {
       return replyTo({
         ...reply,
-        status: 'invalid',
+        status: "invalid",
         invalid,
         fields: refusals,
-        code: 'invalid',
-        message: 'Some answers need another look.',
+        code: "invalid",
+        message: "Some answers need another look.",
         httpStatus: 422,
-      })
+      });
     }
 
     // Over the answers **and** each file's bytes, which is what lets the
     // duplicate check below run before the put (decision 14).
-    const hashed = await bodyHash(values, filePartsOf(uploads.files))
+    const hashed = await bodyHash(values, filePartsOf(uploads.files));
 
     // A double-click on a 5MB application: knowably a duplicate, so nothing is
     // written. The single-statement collapse inside `insertResponse` is still the
@@ -932,16 +935,16 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       uploads.files.length > 0 &&
       (await isDuplicateSubmission(db, form.id, hashed, now, submitting))
     ) {
-      return replyTo({ ...reply, responseId: newResponseId(), ...successTarget(form, target) })
+      return replyTo({ ...reply, responseId: newResponseId(), ...successTarget(form, target) });
     }
 
     // R2 first, then the row: a row naming an object that never landed is a
     // download button that 404s for a publisher with no way to explain it, while
     // an object with no row is closed by the compensating delete below.
     // `uploadAsset`'s order, and its reasoning.
-    if (media && uploads.files.length > 0) await putUploads(media, uploads.files)
+    if (media && uploads.files.length > 0) await putUploads(media, uploads.files);
 
-    let inserted: Awaited<ReturnType<typeof insertResponse>>
+    let inserted: Awaited<ReturnType<typeof insertResponse>>;
     try {
       inserted = await insertResponse(db, {
         form,
@@ -950,27 +953,27 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         // runtime's own locale resolution: an undeclared code — or one a submitter
         // invented — is stored as `''`, the source-locale convention `content_index`
         // already uses.
-        locale: rt.localeOf(body.get(LOCALE_INPUT)?.[0])?.code ?? '',
+        locale: rt.localeOf(body.get(LOCALE_INPUT)?.[0])?.code ?? "",
         page,
         ipHash: hash,
         bodyHash: hashed,
         files: storedFilesOf(uploads.files),
         now,
         site: submitting,
-      })
+      });
     } catch (err) {
-      await compensate(media, uploads.files, rt.logger)
-      throw err
+      await compensate(media, uploads.files, rt.logger);
+      throw err;
     }
 
     // The narrow race the pre-check cannot close: two clicks that both got past
     // it, one of which lost the `not exists`. Its objects have no row and never
     // will, so they go now (decision 15: *"a compensating `bucket.delete` if the
     // insert throws **or the duplicate guard fires**"*).
-    if (!inserted.stored) await compensate(media, uploads.files, rt.logger)
+    if (!inserted.stored) await compensate(media, uploads.files, rt.logger);
 
     if (inserted.stored) {
-      await rt.hookRunner(hookCtx(c), brandIdOf(c)).run('submitted', {
+      await rt.hookRunner(hookCtx(c), brandIdOf(c)).run("submitted", {
         form: formMeta(form),
         response: inserted.response,
         files: storedFilesOf(uploads.files),
@@ -981,17 +984,17 @@ export function formSubmitRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         // The site that received it, which is not always the form's owner: a shared
         // form is submitted from every site that embeds it.
         site: submitting,
-      })
+      });
     }
 
     return replyTo({
       ...reply,
       responseId: inserted.response.id,
       ...successTarget(form, target),
-    })
-  })
+    });
+  });
 
-  return app
+  return app;
 }
 
 /**
@@ -1010,14 +1013,14 @@ async function compensate(
   files: readonly PreparedUpload[],
   logger: FolioLogger = console,
 ): Promise<void> {
-  if (!bucket || files.length === 0) return
+  if (!bucket || files.length === 0) return;
   try {
     await deleteUploads(
       bucket,
       files.map((file) => file.key),
-    )
+    );
   } catch (err) {
-    logger.error('folio: form upload cleanup failed', err)
+    logger.error("folio: form upload cleanup failed", err);
   }
 }
 
@@ -1026,7 +1029,7 @@ async function compensate(
  *  somebody to a thank-you page for a message that was not accepted is worse than
  *  saying nothing. */
 function successTarget(form: Form, target: string): { target: string } {
-  return { target: form.redirectTo || target }
+  return { target: form.redirectTo || target };
 }
 
 /**
@@ -1041,18 +1044,18 @@ function successTarget(form: Form, target: string): { target: string } {
  */
 async function verified<Env>(
   rt: FolioRuntime,
-  forms: BrandRuntime['forms'],
+  forms: BrandRuntime["forms"],
   env: Env,
   req: Request,
   form: Form,
   body: SubmissionBody,
 ): Promise<boolean> {
-  const verify = forms?.config.verify
-  if (!verify) return true
+  const verify = forms?.config.verify;
+  if (!verify) return true;
   try {
-    return (await verify({ req, body: rawBodyOf(body), form: formMeta(form) }, env)) === true
+    return (await verify({ req, body: rawBodyOf(body), form: formMeta(form) }, env)) === true;
   } catch (err) {
-    rt.logger.error('folio: form verify failed', err)
-    return false
+    rt.logger.error("folio: form verify failed", err);
+    return false;
   }
 }

@@ -1,9 +1,9 @@
-import { useCallback, useRef, useState } from 'react'
-import type { AssetValue } from '../../../core/values'
-import { Button } from '../Button'
-import { Dialog } from '../Dialog'
-import { scopeOfApiBase } from '../route'
-import { useRememberedString } from '../remembered'
+import { useCallback, useRef, useState } from "react";
+import type { AssetValue } from "../../../core/values";
+import { Button } from "../Button";
+import { Dialog } from "../Dialog";
+import { scopeOfApiBase } from "../route";
+import { useRememberedString } from "../remembered";
 import {
   type AssetRow,
   type AssetsUrl,
@@ -12,11 +12,11 @@ import {
   DEFAULT_ASSET_VIEW,
   isAssetView,
   kindForAccept,
-} from './assets-model'
-import { AssetBrowser } from './AssetBrowser'
-import css from './Assets.module.css'
-import { useFittedPage } from '../fit'
-import { ASSETS_FIT, useAsset, useAssets, useDropTarget, useUploads } from './useAssets'
+} from "./assets-model";
+import { AssetBrowser } from "./AssetBrowser";
+import css from "./Assets.module.css";
+import { useFittedPage } from "../fit";
+import { ASSETS_FIT, useAsset, useAssets, useDropTarget, useUploads } from "./useAssets";
 
 /**
  * The remembered view, shared with the screen.
@@ -28,21 +28,21 @@ import { ASSETS_FIT, useAsset, useAssets, useDropTarget, useUploads } from './us
  * `localStorage` access for every screen — while the picker is mounted by an asset
  * *field*, which has nothing above it to wire, so it reads the same key itself.
  */
-export const ASSET_VIEW_KEY = 'folio.assets.view'
+export const ASSET_VIEW_KEY = "folio.assets.view";
 
 export interface AssetPickerProps {
   /** The admin's internal JSON base — `{base}/api`. */
-  apiBase: string
+  apiBase: string;
   /** Where Folio is mounted — `{base}`. Thumbnails come off `/asset/:key`, which is
    * not part of the internal API and stays on the bare mount. */
-  mount: string
+  mount: string;
   /** The field's `accept`. Narrows the file input, and — when every entry shares one
    * prefix — narrows the listing server-side through `?kind=`. */
-  accept?: string
+  accept?: string;
   /** What an asset field stores: `toAssetValue`'s output, which `assetValue` mirrors
    * client-side. */
-  onPick: (value: AssetValue) => void
-  onClose: () => void
+  onPick: (value: AssetValue) => void;
+  onClose: () => void;
   /**
    * Whether the person may upload from inside the picker — `ASSETS` on the
    * server. Forwarded to `AssetBrowser`, and **optional, defaulting to true,
@@ -60,7 +60,7 @@ export interface AssetPickerProps {
    * not a field — and it now covers the drop target as well as the button, which
    * it did not at first.
    */
-  mayWrite?: boolean
+  mayWrite?: boolean;
 }
 
 /**
@@ -102,7 +102,11 @@ export function AssetPicker({
   onClose,
   mayWrite = true,
 }: AssetPickerProps) {
-  const remembered = useRememberedString<AssetView>(ASSET_VIEW_KEY, DEFAULT_ASSET_VIEW, isAssetView)
+  const remembered = useRememberedString<AssetView>(
+    ASSET_VIEW_KEY,
+    DEFAULT_ASSET_VIEW,
+    isAssetView,
+  );
 
   /**
    * The kind the field imposes, if any. `image/*` means only an image may be stored,
@@ -115,14 +119,14 @@ export function AssetPicker({
    * would filter *the page* and not the library, which is the exact mistake
    * `docs/specs/foundation/pagination.md` exists to prevent.
    */
-  const imposed = kindForAccept(accept)
+  const imposed = kindForAccept(accept);
 
   const [url, setUrl] = useState<AssetsUrl>(() => ({
     view: remembered.value,
-    sort: 'created',
+    sort: "created",
     dir: undefined,
-    kind: imposed ?? 'all',
-    q: '',
+    kind: imposed ?? "all",
+    q: "",
     folder: undefined,
     unfiled: false,
     tags: [],
@@ -130,8 +134,8 @@ export function AssetPicker({
     undescribed: false,
     failed: false,
     asset: undefined,
-  }))
-  const [selected, setSelected] = useState<string | undefined>(undefined)
+  }));
+  const [selected, setSelected] = useState<string | undefined>(undefined);
 
   /**
    * The page size, fitted to the viewport rather than fixed.
@@ -141,31 +145,31 @@ export function AssetPicker({
    * skeletons `AssetBrowser` has already put in the box, so opening this screen is
    * still exactly one request.
    */
-  const results = useRef<HTMLDivElement>(null)
-  const pageSize = useFittedPage(results, ASSETS_FIT)
+  const results = useRef<HTMLDivElement>(null);
+  const pageSize = useFittedPage(results, ASSETS_FIT);
   // On a deployment with `sites` (an `apiBase` under `~<scope>`) a picker offers the
   // chain's library — shared assets included — and nothing outside it, which is the
   // server's fence; the Assets screen manages only the scope's own.
-  const data = useAssets(apiBase, url, pageSize, scopeOfApiBase(apiBase) !== null)
+  const data = useAssets(apiBase, url, pageSize, scopeOfApiBase(apiBase) !== null);
 
   // Selected, not chosen. The file somebody just dropped in is almost certainly the
   // one they want, but committing on their behalf would close the dialog and write a
   // field value out of a drag gesture.
   const onUploaded = useCallback(
     (done: readonly AssetRow[]) => {
-      if (done.length === 0) return
-      data.reload()
-      setSelected(done[done.length - 1]!.id)
+      if (done.length === 0) return;
+      data.reload();
+      setSelected(done[done.length - 1]!.id);
     },
     [data],
-  )
-  const upload = useUploads(apiBase, onUploaded)
+  );
+  const upload = useUploads(apiBase, onUploaded);
 
-  const onFiles = useCallback((files: FileList | null) => upload.add(files), [upload])
+  const onFiles = useCallback((files: FileList | null) => upload.add(files), [upload]);
   // `mayWrite` gates the gesture the same way it gates the button, and through the
   // hook rather than by withholding the handlers — see `useDropTarget`'s header for
   // why an unattached drop target is worse than a swallowed one.
-  const drop = useDropTarget(onFiles, mayWrite)
+  const drop = useDropTarget(onFiles, mayWrite);
 
   /**
    * The selected row, resolved by id when the page does not hold it.
@@ -176,9 +180,9 @@ export function AssetPicker({
    * selected is the bug that produces. The same `useAsset` the screen resolves a cold
    * link with, asking for nothing in the ordinary case where the row is right there.
    */
-  const inPage = data.page.rows.find((row) => row.id === selected)
-  const lookup = useAsset(apiBase, inPage ? undefined : selected)
-  const chosen = inPage ?? (lookup.row?.id === selected ? lookup.row : undefined)
+  const inPage = data.page.rows.find((row) => row.id === selected);
+  const lookup = useAsset(apiBase, inPage ? undefined : selected);
+  const chosen = inPage ?? (lookup.row?.id === selected ? lookup.row : undefined);
 
   return (
     <Dialog
@@ -196,7 +200,7 @@ export function AssetPicker({
             disabled={!chosen}
             reason="Select a file first"
             onClick={() => {
-              if (chosen) onPick(assetValue(chosen))
+              if (chosen) onPick(assetValue(chosen));
             }}
           >
             Use this file
@@ -216,8 +220,8 @@ export function AssetPicker({
           mount={mount}
           url={url}
           onUrl={(next) => {
-            setUrl(next)
-            remembered.set(next.view)
+            setUrl(next);
+            remembered.set(next.view);
           }}
           data={data}
           upload={upload}
@@ -236,5 +240,5 @@ export function AssetPicker({
         ) : null}
       </div>
     </Dialog>
-  )
+  );
 }

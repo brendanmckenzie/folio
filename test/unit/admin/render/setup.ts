@@ -19,8 +19,8 @@
  * after would still not have been caught: it is a *rendered* fact, and the tree
  * containing it renders perfectly happily.
  */
-import { cleanup } from '@testing-library/react'
-import { afterEach, beforeEach, expect } from 'vitest'
+import { cleanup } from "@testing-library/react";
+import { afterEach, beforeEach, expect } from "vitest";
 
 /**
  * React's own switch for `act`.
@@ -30,41 +30,41 @@ import { afterEach, beforeEach, expect } from 'vitest'
  * failure, so this is not optional decoration. Testing Library sets it itself
  * when it detects a global `jest`; there is no `jest` here.
  */
-;(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** What React logged, and what rejected, during the test currently running. */
-let logged: string[] = []
-let rejected: string[] = []
+let logged: string[] = [];
+let rejected: string[] = [];
 
-const realConsoleError = console.error
+const realConsoleError = console.error;
 
 function onRejection(reason: unknown) {
-  rejected.push(reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason))
+  rejected.push(reason instanceof Error ? `${reason.message}\n${reason.stack}` : String(reason));
 }
 
 beforeEach(() => {
-  logged = []
-  rejected = []
+  logged = [];
+  rejected = [];
   console.error = (...args: unknown[]) => {
-    logged.push(args.map((a) => (a instanceof Error ? a.message : String(a))).join(' '))
-  }
-  process.on('unhandledRejection', onRejection)
-})
+    logged.push(args.map((a) => (a instanceof Error ? a.message : String(a))).join(" "));
+  };
+  process.on("unhandledRejection", onRejection);
+});
 
 afterEach(() => {
   // Unmount before the assertions below, so a teardown-time error — an effect
   // cleanup that throws, a `setState` after unmount — is attributed to the test
   // that caused it rather than to whichever one runs next.
-  cleanup()
-  console.error = realConsoleError
-  process.off('unhandledRejection', onRejection)
+  cleanup();
+  console.error = realConsoleError;
+  process.off("unhandledRejection", onRejection);
 
   const problems = [
     ...logged.map((m) => `console.error: ${m}`),
     ...rejected.map((m) => `unhandled rejection: ${m}`),
-  ]
-  expect(problems, problems.join('\n\n')).toEqual([])
-})
+  ];
+  expect(problems, problems.join("\n\n")).toEqual([]);
+});
 
 /**
  * **No real sockets.** Mounting `{base}/edit/:id` constructs a `StoryStore`,
@@ -78,23 +78,23 @@ afterEach(() => {
  * would be asserting the environment's socket implementation and nothing else.
  */
 class SilentSocket {
-  static readonly CONNECTING = 0
-  static readonly OPEN = 1
-  static readonly CLOSING = 2
-  static readonly CLOSED = 3
-  readyState = SilentSocket.CONNECTING
-  onopen: unknown = null
-  onclose: unknown = null
-  onerror: unknown = null
-  onmessage: unknown = null
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  readyState = SilentSocket.CONNECTING;
+  onopen: unknown = null;
+  onclose: unknown = null;
+  onerror: unknown = null;
+  onmessage: unknown = null;
   send() {}
   close() {
-    this.readyState = SilentSocket.CLOSED
+    this.readyState = SilentSocket.CLOSED;
   }
   addEventListener() {}
   removeEventListener() {}
 }
-;(globalThis as { WebSocket?: unknown }).WebSocket = SilentSocket
+(globalThis as { WebSocket?: unknown }).WebSocket = SilentSocket;
 
 /**
  * `ui/fit.ts` constructs one on mount. happy-dom ships it, so this is a
@@ -102,6 +102,6 @@ class SilentSocket {
  * asserted rather than assumed, because a missing constructor here would fail as
  * "the Assets screen does not render".
  */
-if (typeof ResizeObserver !== 'function') {
-  throw new Error('the render project needs a DOM with ResizeObserver; check vitest.config.ts')
+if (typeof ResizeObserver !== "function") {
+  throw new Error("the render project needs a DOM with ResizeObserver; check vitest.config.ts");
 }

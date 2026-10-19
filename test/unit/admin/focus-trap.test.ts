@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest'
-import { isTabbable } from '../../../src/admin/hooks/useFocusTrap'
+import { describe, expect, it } from "vitest";
+import { isTabbable } from "../../../src/admin/hooks/useFocusTrap";
 
 /**
  * `useFocusTrap` cycles Tab through the controls inside a dialog panel. Which
@@ -15,36 +15,36 @@ import { isTabbable } from '../../../src/admin/hooks/useFocusTrap'
  * Each case below is a control that really exists in one of the six dialogs.
  */
 
-describe('isTabbable', () => {
-  it('takes an ordinary button, like Cancel', () => {
-    expect(isTabbable({ tabIndex: 0 })).toBe(true)
-  })
+describe("isTabbable", () => {
+  it("takes an ordinary button, like Cancel", () => {
+    expect(isTabbable({ tabIndex: 0 })).toBe(true);
+  });
 
-  it('takes a text input, like the title box in the duplicate dialog', () => {
-    expect(isTabbable({ tabIndex: 0, disabled: false })).toBe(true)
-  })
+  it("takes a text input, like the title box in the duplicate dialog", () => {
+    expect(isTabbable({ tabIndex: 0, disabled: false })).toBe(true);
+  });
 
-  it('skips a disabled control — Upload, for the length of an upload', () => {
-    expect(isTabbable({ tabIndex: 0, disabled: true })).toBe(false)
-  })
+  it("skips a disabled control — Upload, for the length of an upload", () => {
+    expect(isTabbable({ tabIndex: 0, disabled: true })).toBe(false);
+  });
 
-  it('skips a hidden control — the file input behind Upload', () => {
-    expect(isTabbable({ tabIndex: 0, hidden: true })).toBe(false)
-  })
+  it("skips a hidden control — the file input behind Upload", () => {
+    expect(isTabbable({ tabIndex: 0, hidden: true })).toBe(false);
+  });
 
-  it('skips anything held out of the order — the scrim, and the panel itself', () => {
-    expect(isTabbable({ tabIndex: -1 })).toBe(false)
-  })
+  it("skips anything held out of the order — the scrim, and the panel itself", () => {
+    expect(isTabbable({ tabIndex: -1 })).toBe(false);
+  });
 
-  it('takes an element made tabbable on purpose', () => {
-    expect(isTabbable({ tabIndex: 2 })).toBe(true)
-  })
+  it("takes an element made tabbable on purpose", () => {
+    expect(isTabbable({ tabIndex: 2 })).toBe(true);
+  });
 
-  it('treats a missing tabIndex as in the order: a link carries no tabindex', () => {
-    expect(isTabbable({})).toBe(true)
-  })
+  it("treats a missing tabIndex as in the order: a link carries no tabindex", () => {
+    expect(isTabbable({})).toBe(true);
+  });
 
-  it('skips a disabled control even when it is otherwise in the order', () => {
-    expect(isTabbable({ tabIndex: 0, hidden: false, disabled: true })).toBe(false)
-  })
-})
+  it("skips a disabled control even when it is otherwise in the order", () => {
+    expect(isTabbable({ tabIndex: 0, hidden: false, disabled: true })).toBe(false);
+  });
+});

@@ -7,12 +7,12 @@
  * pair, so two clicks on the same link race each other into the database rather
  * than into a JavaScript branch.
  */
-import { hashToken, mintSecret } from './secrets'
-import { normaliseEmail } from './users'
-import type { FolioDb } from '../db'
+import { hashToken, mintSecret } from "./secrets";
+import { normaliseEmail } from "./users";
+import type { FolioDb } from "../db";
 
 /** How long a sign-in link works for. */
-export const CHALLENGE_TTL_MS = 15 * 60 * 1000
+export const CHALLENGE_TTL_MS = 15 * 60 * 1000;
 
 /**
  * Slack on every expiry comparison in this feature, including the OIDC
@@ -20,15 +20,15 @@ export const CHALLENGE_TTL_MS = 15 * 60 * 1000
  * mail server, a browser and an edge location, and short enough that it is not
  * a meaningful extension of a 15-minute link.
  */
-export const CLOCK_LEEWAY_MS = 60 * 1000
+export const CLOCK_LEEWAY_MS = 60 * 1000;
 
 /** The window the per-address rate limit counts over. */
-const RATE_WINDOW_MS = 60 * 60 * 1000
+const RATE_WINDOW_MS = 60 * 60 * 1000;
 
 export interface NewChallenge {
   /** Goes in the emailed URL. Not stored. */
-  token: string
-  expiresAt: number
+  token: string;
+  expiresAt: number;
 }
 
 export async function createChallenge(
@@ -36,13 +36,13 @@ export async function createChallenge(
   email: string,
   now = Date.now(),
 ): Promise<NewChallenge> {
-  const token = mintSecret()
-  const expiresAt = now + CHALLENGE_TTL_MS
+  const token = mintSecret();
+  const expiresAt = now + CHALLENGE_TTL_MS;
   await db
     .prepare(`insert into login_challenges (id, email, created_at, expires_at) values (?, ?, ?, ?)`)
     .bind(await hashToken(token), normaliseEmail(email), now, expiresAt)
-    .run()
-  return { token, expiresAt }
+    .run();
+  return { token, expiresAt };
 }
 
 /**
@@ -60,7 +60,7 @@ export async function consumeChallenge(
   token: string,
   now = Date.now(),
 ): Promise<string | null> {
-  const id = await hashToken(token)
+  const id = await hashToken(token);
   const [claim, read] = await db.batch<{ email: string }>([
     db
       .prepare(
@@ -68,10 +68,10 @@ export async function consumeChallenge(
           where id = ? and consumed_at is null and expires_at > ?`,
       )
       .bind(now, id, now - CLOCK_LEEWAY_MS),
-    db.prepare('select email from login_challenges where id = ?').bind(id),
-  ])
-  if ((claim?.meta.changes ?? 0) === 0) return null
-  return read?.results?.[0]?.email ?? null
+    db.prepare("select email from login_challenges where id = ?").bind(id),
+  ]);
+  if ((claim?.meta.changes ?? 0) === 0) return null;
+  return read?.results?.[0]?.email ?? null;
 }
 
 /**
@@ -89,17 +89,17 @@ export async function recentChallengeCount(
   now = Date.now(),
 ): Promise<number> {
   const row = await db
-    .prepare('select count(*) as n from login_challenges where email = ? and created_at > ?')
+    .prepare("select count(*) as n from login_challenges where email = ? and created_at > ?")
     .bind(normaliseEmail(email), now - RATE_WINDOW_MS)
-    .first<{ n: number }>()
-  return row?.n ?? 0
+    .first<{ n: number }>();
+  return row?.n ?? 0;
 }
 
 /** Housekeeping. Consumed and expired challenges are dead weight, not history. */
 export async function deleteStaleChallenges(db: FolioDb, now = Date.now()): Promise<number> {
   const result = await db
-    .prepare('delete from login_challenges where expires_at <= ? or consumed_at is not null')
+    .prepare("delete from login_challenges where expires_at <= ? or consumed_at is not null")
     .bind(now)
-    .run()
-  return result.meta.changes ?? 0
+    .run();
+  return result.meta.changes ?? 0;
 }

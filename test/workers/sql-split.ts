@@ -16,82 +16,82 @@
  * stays inside one statement instead of splitting it in two.
  */
 export function splitSqlStatements(sql: string): string[] {
-  const statements: string[] = []
-  let current = ''
-  let beginDepth = 0
-  let i = 0
-  const n = sql.length
+  const statements: string[] = [];
+  let current = "";
+  let beginDepth = 0;
+  let i = 0;
+  const n = sql.length;
 
-  const isWordChar = (ch: string) => /[A-Za-z0-9_]/.test(ch)
+  const isWordChar = (ch: string) => /[A-Za-z0-9_]/.test(ch);
   // A comment-only chunk (or nothing at all) between two ';'s is not a
   // statement — executing it would hand the driver an empty prepare().
   const hasContent = (chunk: string) =>
     chunk
-      .replace(/--[^\n]*/g, '')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .trim().length > 0
+      .replace(/--[^\n]*/g, "")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .trim().length > 0;
 
   while (i < n) {
-    const ch = sql[i] as string
+    const ch = sql[i] as string;
 
-    if (ch === '-' && sql[i + 1] === '-') {
-      const end = sql.indexOf('\n', i)
-      const stop = end === -1 ? n : end
-      current += sql.slice(i, stop)
-      i = stop
-      continue
+    if (ch === "-" && sql[i + 1] === "-") {
+      const end = sql.indexOf("\n", i);
+      const stop = end === -1 ? n : end;
+      current += sql.slice(i, stop);
+      i = stop;
+      continue;
     }
-    if (ch === '/' && sql[i + 1] === '*') {
-      const end = sql.indexOf('*/', i + 2)
-      const stop = end === -1 ? n : end + 2
-      current += sql.slice(i, stop)
-      i = stop
-      continue
+    if (ch === "/" && sql[i + 1] === "*") {
+      const end = sql.indexOf("*/", i + 2);
+      const stop = end === -1 ? n : end + 2;
+      current += sql.slice(i, stop);
+      i = stop;
+      continue;
     }
     // String and identifier literals: copied verbatim, doubled-quote escapes
     // (`''` inside a `'...'`) included, so nothing inside one is mistaken for
     // the statement terminator or a comment starting mid-literal.
-    if (ch === "'" || ch === '"' || ch === '`') {
-      const quote = ch
-      let j = i + 1
+    if (ch === "'" || ch === '"' || ch === "`") {
+      const quote = ch;
+      let j = i + 1;
       while (j < n) {
         if (sql[j] === quote) {
           if (sql[j + 1] === quote) {
-            j += 2
-            continue
+            j += 2;
+            continue;
           }
-          j++
-          break
+          j++;
+          break;
         }
-        j++
+        j++;
       }
-      current += sql.slice(i, j)
-      i = j
-      continue
+      current += sql.slice(i, j);
+      i = j;
+      continue;
     }
     if (isWordChar(ch)) {
-      let j = i
-      while (j < n && isWordChar(sql[j] as string)) j++
-      const word = sql.slice(i, j)
-      const lower = word.toLowerCase()
-      if (lower === 'begin') beginDepth++
-      else if (lower === 'end' && beginDepth > 0) beginDepth--
-      current += word
-      i = j
-      continue
+      let j = i;
+      while (j < n && isWordChar(sql[j] as string)) j++;
+      const word = sql.slice(i, j);
+      const lower = word.toLowerCase();
+      if (lower === "begin") beginDepth++;
+      else if (lower === "end" && beginDepth > 0) beginDepth--;
+      current += word;
+      i = j;
+      continue;
     }
-    if (ch === ';' && beginDepth === 0) {
-      if (hasContent(current)) statements.push(current.trim())
-      current = ''
-      i++
-      continue
+    if (ch === ";" && beginDepth === 0) {
+      if (hasContent(current)) statements.push(current.trim());
+      current = "";
+      i++;
+      continue;
     }
-    current += ch
-    i++
+    current += ch;
+    i++;
   }
 
-  if (hasContent(current)) statements.push(current.trim())
-  return statements
+  if (hasContent(current)) statements.push(current.trim());
+  return statements;
 }
 
 /**
@@ -105,10 +105,10 @@ export function splitSqlStatements(sql: string): string[] {
  */
 export function compareMigrationFilenames(a: string, b: string): number {
   const numberOf = (name: string) => {
-    const match = /^(\d+)_/.exec(name)
-    return match ? Number.parseInt(match[1] as string, 10) : Number.POSITIVE_INFINITY
-  }
-  const diff = numberOf(a) - numberOf(b)
-  if (diff !== 0) return diff
-  return a < b ? -1 : a > b ? 1 : 0
+    const match = /^(\d+)_/.exec(name);
+    return match ? Number.parseInt(match[1] as string, 10) : Number.POSITIVE_INFINITY;
+  };
+  const diff = numberOf(a) - numberOf(b);
+  if (diff !== 0) return diff;
+  return a < b ? -1 : a > b ? 1 : 0;
 }

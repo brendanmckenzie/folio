@@ -13,8 +13,8 @@
  * tree, which is also why they stayed here rather than moving next door: nothing
  * in them knows that a tree exists.
  */
-import type { StoryNode, StoryState } from '../../../core/story'
-import type { BadgeTone } from '../Badge'
+import type { StoryNode, StoryState } from "../../../core/story";
+import type { BadgeTone } from "../Badge";
 
 /**
  * One tone per state, from `docs/design-system.md`'s table. `draft` is
@@ -24,14 +24,14 @@ import type { BadgeTone } from '../Badge'
  */
 export function stateTone(state: StoryState): BadgeTone {
   switch (state) {
-    case 'live':
-      return 'ok'
-    case 'changed':
-      return 'accent'
-    case 'unpublished':
-      return 'danger'
-    case 'draft':
-      return 'neutral'
+    case "live":
+      return "ok";
+    case "changed":
+      return "accent";
+    case "unpublished":
+      return "danger";
+    case "draft":
+      return "neutral";
   }
 }
 
@@ -53,18 +53,18 @@ export function stateTone(state: StoryState): BadgeTone {
  * test could not pin.
  */
 export function when(
-  node: Pick<StoryNode, 'updatedAt' | 'draftUpdatedAt'>,
+  node: Pick<StoryNode, "updatedAt" | "draftUpdatedAt">,
   now: number = Date.now(),
 ): string {
-  const at = node.draftUpdatedAt ?? node.updatedAt
-  const seconds = Math.round((now - at) / 1000)
-  if (seconds < 60) return 'just now'
-  const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.round(hours / 24)
-  if (days < 30) return `${days}d ago`
+  const at = node.draftUpdatedAt ?? node.updatedAt;
+  const seconds = Math.round((now - at) / 1000);
+  if (seconds < 60) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days}d ago`;
   // Past a month, a date is more use than a number of days nobody counts in.
-  return new Date(at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" });
 }

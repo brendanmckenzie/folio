@@ -17,11 +17,11 @@
  * without these functions the whole mount would be unobservable to every tier of
  * the test suite.
  */
-import { fallbackColour } from '../../core/protocol'
-import type { StoryMeta } from '../../core/story'
-import type { SpaceEffect } from '../hooks/useSpace'
-import type { SpaceAvatar } from '../spaceStore'
-import type { Screen } from './route'
+import { fallbackColour } from "../../core/protocol";
+import type { StoryMeta } from "../../core/story";
+import type { SpaceEffect } from "../hooks/useSpace";
+import type { SpaceAvatar } from "../spaceStore";
+import type { Screen } from "./route";
 
 /**
  * The advisory identity this client asserts, and the reason it is not
@@ -50,9 +50,9 @@ import type { Screen } from './route'
  * calling this in a component body is a bug that no test would show.
  */
 export function spaceIdentity(actor: string = crypto.randomUUID().slice(0, 8)): {
-  actor: string
-  name: string
-  colour: string
+  actor: string;
+  name: string;
+  colour: string;
 } {
   return {
     actor,
@@ -60,7 +60,7 @@ export function spaceIdentity(actor: string = crypto.randomUUID().slice(0, 8)): 
     // is nobody to name, and a label that looks like a name would be a claim.
     name: `Editor ${actor.slice(0, 3)}`,
     colour: fallbackColour(actor),
-  }
+  };
 }
 
 /**
@@ -80,16 +80,16 @@ export function spaceIdentity(actor: string = crypto.randomUUID().slice(0, 8)): 
  * story's title.
  */
 export interface SpaceWhere {
-  storyId: string | null
-  storyTitle: string | null
+  storyId: string | null;
+  storyTitle: string | null;
 }
 
 export function spaceWhere(screen: Screen, open: StoryMeta | undefined): SpaceWhere {
-  if (screen.name !== 'edit') return { storyId: null, storyTitle: null }
+  if (screen.name !== "edit") return { storyId: null, storyTitle: null };
   return {
     storyId: screen.id,
     storyTitle: open?.id === screen.id ? open.title : null,
-  }
+  };
 }
 
 /**
@@ -103,17 +103,17 @@ export function spaceWhere(screen: Screen, open: StoryMeta | undefined): SpaceWh
  */
 export interface SpaceHandlers {
   /** Re-read the list on screen: the page tree, or one type's records. */
-  reload: () => void
+  reload: () => void;
   /** Re-read the configured globals' rows. */
-  globals: () => void
+  globals: () => void;
   /** Tell the person looking at the open story. */
-  notice: (message: string) => void
+  notice: (message: string) => void;
 }
 
 export function applySpaceEffect(effect: SpaceEffect, handlers: SpaceHandlers): void {
-  if (effect.reload) handlers.reload()
-  if (effect.globals) handlers.globals()
-  if (effect.notice !== null) handlers.notice(effect.notice)
+  if (effect.reload) handlers.reload();
+  if (effect.globals) handlers.globals();
+  if (effect.notice !== null) handlers.notice(effect.notice);
 }
 
 /**
@@ -125,11 +125,11 @@ export function applySpaceEffect(effect: SpaceEffect, handlers: SpaceHandlers): 
  * somebody who might publish the page you are editing.
  */
 export function avatarLabel(avatar: SpaceAvatar): string {
-  const tabs = avatar.tabs > 1 ? ` (${avatar.tabs} tabs)` : ''
-  if (avatar.storyId === null) return `${avatar.name} is elsewhere in the CMS${tabs}`
-  const where = avatar.storyTitle ?? 'a document'
-  const locale = avatar.locale ? ` in ${avatar.locale}` : ''
-  return `${avatar.name} is editing ${where}${locale}${tabs}`
+  const tabs = avatar.tabs > 1 ? ` (${avatar.tabs} tabs)` : "";
+  if (avatar.storyId === null) return `${avatar.name} is elsewhere in the CMS${tabs}`;
+  const where = avatar.storyTitle ?? "a document";
+  const locale = avatar.locale ? ` in ${avatar.locale}` : "";
+  return `${avatar.name} is editing ${where}${locale}${tabs}`;
 }
 
 /**
@@ -142,8 +142,8 @@ export function avatarLabel(avatar: SpaceAvatar): string {
  * on the wire but which this must not throw on.
  */
 export function initialsOf(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean)
-  if (words.length === 0) return '?'
-  if (words.length === 1) return (words[0] ?? '').slice(0, 2).toUpperCase()
-  return `${words[0]?.[0] ?? ''}${words[1]?.[0] ?? ''}`.toUpperCase()
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  if (words.length === 1) return (words[0] ?? "").slice(0, 2).toUpperCase();
+  return `${words[0]?.[0] ?? ""}${words[1]?.[0] ?? ""}`.toUpperCase();
 }

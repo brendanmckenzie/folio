@@ -3,28 +3,28 @@ import type {
   ReactNode,
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
-} from 'react'
-import { useId } from 'react'
-import css from './Field.module.css'
+} from "react";
+import { useId } from "react";
+import css from "./Field.module.css";
 
 interface FieldProps {
-  label: ReactNode
+  label: ReactNode;
   /** Below the control. Explanation, not error. */
-  help?: ReactNode
+  help?: ReactNode;
   /** Below the control, and takes the place of `help` while set. */
-  error?: ReactNode
-  required?: boolean
+  error?: ReactNode;
+  required?: boolean;
   /** Right of the label. A locale note, a peer's name, "shared". */
-  note?: ReactNode
+  note?: ReactNode;
   /**
    * The control sits **beside** the label rather than under it, with the help text
    * under the label. For a boolean and nothing else: every other control fills the
    * column, and a 16px checkbox under its own label reads as a field whose value has
    * gone missing. `Field.module.css`'s `.inline` argues the layout.
    */
-  inline?: boolean
+  inline?: boolean;
   /** Receives the generated id, so the label points at the real control. */
-  children: (id: string) => ReactNode
+  children: (id: string) => ReactNode;
 }
 
 /**
@@ -38,7 +38,7 @@ interface FieldProps {
  * describe to a translator.
  */
 export function Field({ label, help, error, required, note, inline, children }: FieldProps) {
-  const id = useId()
+  const id = useId();
   return (
     <div className={inline ? `${css.field} ${css.inline}` : css.field}>
       <label className={css.label} htmlFor={id}>
@@ -57,17 +57,17 @@ export function Field({ label, help, error, required, note, inline, children }: 
         <p className={css.help}>{help}</p>
       ) : null}
     </div>
-  )
+  );
 }
 
-export function Input(props: Omit<InputHTMLAttributes<HTMLInputElement>, 'className'>) {
-  return <input {...props} className={css.control} />
+export function Input(props: Omit<InputHTMLAttributes<HTMLInputElement>, "className">) {
+  return <input {...props} className={css.control} />;
 }
 
-export function Textarea(props: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'className'>) {
-  return <textarea {...props} className={`${css.control} ${css.textarea}`} />
+export function Textarea(props: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "className">) {
+  return <textarea {...props} className={`${css.control} ${css.textarea}`} />;
 }
 
-export function Select(props: Omit<SelectHTMLAttributes<HTMLSelectElement>, 'className'>) {
-  return <select {...props} className={css.control} />
+export function Select(props: Omit<SelectHTMLAttributes<HTMLSelectElement>, "className">) {
+  return <select {...props} className={css.control} />;
 }

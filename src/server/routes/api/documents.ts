@@ -15,17 +15,17 @@
  * (`core/nested.ts`), the `ContentPage` a query answers, and the one error
  * envelope `errors.ts` produces. Nothing here invents a shape of its own.
  */
-import type { Context } from 'hono'
-import { Hono } from 'hono'
-import { deepEqual } from '../../../core/diff'
-import type { Doc, Json } from '../../../core/doc'
-import { isBareLayer } from '../../../core/layers'
-import { isKnownLocale } from '../../../core/locales'
-import type { Mutation } from '../../../core/mutations'
-import { fieldShapeError, fromNested, type NestedDoc, toNested } from '../../../core/nested'
-import { type DocumentType, SINGLETON_PREFIX, typeByName } from '../../../core/schema'
-import { DEFAULT_SITE, layerSeed, singletonTypeOf } from '../../../core/sites'
-import type { StoryMeta, StoryState } from '../../../core/story'
+import type { Context } from "hono";
+import { Hono } from "hono";
+import { deepEqual } from "../../../core/diff";
+import type { Doc, Json } from "../../../core/doc";
+import { isBareLayer } from "../../../core/layers";
+import { isKnownLocale } from "../../../core/locales";
+import type { Mutation } from "../../../core/mutations";
+import { fieldShapeError, fromNested, type NestedDoc, toNested } from "../../../core/nested";
+import { type DocumentType, SINGLETON_PREFIX, typeByName } from "../../../core/schema";
+import { DEFAULT_SITE, layerSeed, singletonTypeOf } from "../../../core/sites";
+import type { StoryMeta, StoryState } from "../../../core/story";
 import {
   actorName,
   actorString,
@@ -35,9 +35,14 @@ import {
   PUBLISH,
   READ,
   READ_DRAFT,
-} from '../../auth/roles'
-import { deleteDocument, type DocumentDeps, duplicateDocument, moveDocument } from '../../documents'
-import { answerMiss, FolioError, rethrow } from '../../errors'
+} from "../../auth/roles";
+import {
+  deleteDocument,
+  type DocumentDeps,
+  duplicateDocument,
+  moveDocument,
+} from "../../documents";
+import { answerMiss, FolioError, rethrow } from "../../errors";
 import {
   chainResolver,
   ensureAccess,
@@ -52,9 +57,9 @@ import {
   requestSite,
   requestUrls,
   requireAccess,
-} from '../../middleware'
-import { checkpoint, publish, unpublish } from '../../publish'
-import type { FolioRuntime } from '../../runtime'
+} from "../../middleware";
+import { checkpoint, publish, unpublish } from "../../publish";
+import type { FolioRuntime } from "../../runtime";
 import {
   createStory,
   ensureSingleton,
@@ -62,8 +67,8 @@ import {
   publishedDocsByIds,
   storyByPath,
   storyById,
-} from '../../stories'
-import type { ReadBindings, FolioEnv } from '../../types'
+} from "../../stories";
+import type { ReadBindings, FolioEnv } from "../../types";
 import {
   CheckpointBody,
   ContentPutBody,
@@ -79,49 +84,49 @@ import {
   StoryDuplicateBody,
   StoryPatchBody,
   storyPathParam,
-} from '../../validate'
-import { getVersion, listVersions } from '../../versions'
-import { commitAll, writeDocument, type WriteActor } from '../../write'
-import { queryFromParams } from '../content'
-import { brandOf, draftOf } from '../stories'
-import { servedSite } from './served'
+} from "../../validate";
+import { getVersion, listVersions } from "../../versions";
+import { commitAll, writeDocument, type WriteActor } from "../../write";
+import { queryFromParams } from "../content";
+import { brandOf, draftOf } from "../stories";
+import { servedSite } from "./served";
 
 /** A document's row, as the API reports it. Every field is stable surface. */
 export interface ApiDocumentMeta {
-  id: string
+  id: string;
   /** Document type name, not the root block's name. */
-  type: string
-  title: string
+  type: string;
+  title: string;
   /** `null` for an unrouted document — a record or a singleton has no URL. */
-  path: string | null
-  url: string | null
+  path: string | null;
+  url: string | null;
   /** The editing render: `folio-editing`, uid markers, the postMessage bridge. */
-  previewUrl: string | null
+  previewUrl: string | null;
   /** The same document rendered as the site would serve it (`mcp-server.md` decision 5). */
-  draftUrl: string | null
+  draftUrl: string | null;
   /** Lifecycle: never published, live, taken down, or live with newer draft. */
-  state: StoryState
-  publishedAt: number | null
-  updatedAt: number
+  state: StoryState;
+  publishedAt: number | null;
+  updatedAt: number;
   /**
    * The scope that owns the document — a site, a group or `shared`
    * (`multi-site.md` decision 3). **Present on a multi-site deployment only**, so a
    * single-site deployment's payload is byte-for-byte what it was: a script written
    * before `sites` never sees the key.
    */
-  site?: string
+  site?: string;
 }
 
 export interface ApiDocument extends ApiDocumentMeta {
   /** Which snapshot `content` is: the published one, or the live draft. */
-  source: 'published' | 'draft'
+  source: "published" | "draft";
   /**
    * Present only on a locale-resolved read, where `content.fields` hold that
    * locale's values and `i18n` is gone. Its presence is the flag that says this
    * payload is for reading and must not be written back.
    */
-  locale?: string
-  content: NestedDoc
+  locale?: string;
+  content: NestedDoc;
 }
 
 /**
@@ -135,9 +140,9 @@ export function toApiDocumentMeta(
   story: StoryMeta,
   /** `rt.withUrls`, or the request's site's (`requestUrls`): a multi-site row's URLs
    * are the host's `route()` answer for a site. */
-  urls: FolioRuntime['withUrls'] = rt.withUrls,
+  urls: FolioRuntime["withUrls"] = rt.withUrls,
 ): ApiDocumentMeta {
-  const decorated = urls(story)
+  const decorated = urls(story);
   return {
     id: story.id,
     type: story.type,
@@ -150,15 +155,15 @@ export function toApiDocumentMeta(
     publishedAt: story.publishedAt,
     updatedAt: story.updatedAt,
     ...(rt.sites ? { site: story.site ?? DEFAULT_SITE } : {}),
-  }
+  };
 }
 
 /** The token's own name, or the person's id. Never anything a client sent. */
 function writeActor<Env>(c: Context<FolioEnv<Env>>): WriteActor {
   return {
-    id: actorString(c.var.actor) ?? 'api',
-    name: actorName(c.var.actor) ?? 'API',
-  }
+    id: actorString(c.var.actor) ?? "api",
+    name: actorName(c.var.actor) ?? "API",
+  };
 }
 
 /**
@@ -174,24 +179,24 @@ async function layerOption<Env>(
   c: Context<FolioEnv<Env>>,
   rt: FolioRuntime,
   story: StoryMeta,
-): Promise<{ layer?: 'bare' }> {
-  if (!rt.sites) return {}
-  if (brandOf(c).brand === null) return isBareLayer(story.id) ? { layer: 'bare' } : {}
-  const layer = singletonTypeOf(story.id)
-  if (!layer) return {}
-  return layerSeed(await rt.sites.registry(c.env), layer.scope) === 'bare' ? { layer: 'bare' } : {}
+): Promise<{ layer?: "bare" }> {
+  if (!rt.sites) return {};
+  if (brandOf(c).brand === null) return isBareLayer(story.id) ? { layer: "bare" } : {};
+  const layer = singletonTypeOf(story.id);
+  if (!layer) return {};
+  return layerSeed(await rt.sites.registry(c.env), layer.scope) === "bare" ? { layer: "bare" } : {};
 }
 
 export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
-  const app = new Hono<FolioEnv<Env>>()
+  const app = new Hono<FolioEnv<Env>>();
 
   const requireType = (c: Context<FolioEnv<Env>>, name: string | undefined): DocumentType => {
-    const brand = brandOf(c)
-    if (name === undefined) return brand.defaultType
-    const type = brand.typeOf(name)
-    if (!type) throw new FolioError('unsupported', `Unknown document type: ${name}`)
-    return type
-  }
+    const brand = brandOf(c);
+    if (name === undefined) return brand.defaultType;
+    const type = brand.typeOf(name);
+    if (!type) throw new FolioError("unsupported", `Unknown document type: ${name}`);
+    return type;
+  };
 
   /**
    * The row behind an id, or 404.
@@ -208,12 +213,12 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * write creates a layer**; a read of one nobody has written is a 404.
    */
   const load = async (c: Context<FolioEnv<Env>>, id: string, reach: Reach): Promise<StoryMeta> => {
-    const bindings = c.var.bindings()
-    const brand = brandOf(c)
+    const bindings = c.var.bindings();
+    const brand = brandOf(c);
     if (id.startsWith(SINGLETON_PREFIX)) {
       if (!rt.sites) {
-        const type = typeByName(brand.types, id.slice(SINGLETON_PREFIX.length))
-        if (type?.kind === 'singleton') return ensureSingleton(bindings.db, type, brand.schemaId)
+        const type = typeByName(brand.types, id.slice(SINGLETON_PREFIX.length));
+        if (type?.kind === "singleton") return ensureSingleton(bindings.db, type, brand.schemaId);
       } else {
         /**
          * **The layer's scope is checked before `ensureSingleton`** (`multi-site.md`
@@ -221,31 +226,31 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
          * never a row created in somebody else's scope. In the chain for a read, the
          * request's own scope for a write, exactly as for any other row.
          */
-        const layer = singletonTypeOf(id)
-        const type = layer ? typeByName(brand.types, layer.type) : undefined
+        const layer = singletonTypeOf(id);
+        const type = layer ? typeByName(brand.types, layer.type) : undefined;
         // **A read never creates a layer** (`multi-site.md` decision 8, "a preview
         // never writes"): a layer row is made by an editor's first write, so a read
         // of one nobody has written is the 404 below, exactly as the reader treats
         // it as absent. A row created here would land in the scope's owned content
         // and make a site that was only previewed undeletable and unrebrandable.
-        if (layer && type?.kind === 'singleton' && reach === 'write') {
+        if (layer && type?.kind === "singleton" && reach === "write") {
           if (!(await inFence(c, rt, { site: layer.scope }, reach))) {
-            throw new FolioError('not_found', 'Unknown document')
+            throw new FolioError("not_found", "Unknown document");
           }
-          return ensureSingleton(bindings.db, type, brand.schemaId, layer.scope)
+          return ensureSingleton(bindings.db, type, brand.schemaId, layer.scope);
         }
       }
     }
-    const story = await storyById(bindings.db, id)
+    const story = await storyById(bindings.db, id);
     // Outside the fence is exactly absent: a 404, never a 403 that confirms the id.
     if (!story || !(await inFence(c, rt, story, reach))) {
-      throw new FolioError('not_found', 'Unknown document')
+      throw new FolioError("not_found", "Unknown document");
     }
-    return story
-  }
+    return story;
+  };
 
-  const meta = (urls: FolioRuntime['withUrls'], story: StoryMeta): ApiDocumentMeta =>
-    toApiDocumentMeta(rt, story, urls)
+  const meta = (urls: FolioRuntime["withUrls"], story: StoryMeta): ApiDocumentMeta =>
+    toApiDocumentMeta(rt, story, urls);
 
   /**
    * One document, in the nested shape.
@@ -257,10 +262,10 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    */
   const payload = async (
     c: Context<FolioEnv<Env>>,
-    urls: FolioRuntime['withUrls'],
+    urls: FolioRuntime["withUrls"],
     story: StoryMeta,
     doc: Doc,
-    source: 'published' | 'draft',
+    source: "published" | "draft",
     locale: string | undefined,
   ): Promise<ApiDocument> => ({
     ...meta(urls, story),
@@ -270,23 +275,23 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       locale: rt.localeOf(locale),
       ...(await layerOption(c, rt, story)),
     }),
-  })
+  });
 
   /** `?locale=`, screened and checked against the declared set. */
   const askedLocale = (c: Context<FolioEnv<Env>>): string | undefined => {
-    const raw = c.req.query('locale')
-    if (raw === undefined) return undefined
-    const code = localeQuery(raw)
+    const raw = c.req.query("locale");
+    if (raw === undefined) return undefined;
+    const code = localeQuery(raw);
     if (!isKnownLocale(rt.locales, code)) {
-      throw new FolioError('unsupported', `Unknown locale: ${code}`)
+      throw new FolioError("unsupported", `Unknown locale: ${code}`);
     }
-    return code
-  }
+    return code;
+  };
 
   const deps = (c: Context<FolioEnv<Env>>, bindings: ReadBindings, story: StoryMeta) => ({
     draft: () => draftOf(c, rt)(story),
     stub: rt.stub(bindings, story.id),
-  })
+  });
 
   /**
    * What `documents.ts`' three workflows need, off this request — the same object
@@ -300,7 +305,7 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * the admin's answers `{ deleted: [] }`.
    */
   const documentDeps = (c: Context<FolioEnv<Env>>): DocumentDeps<unknown> => {
-    const bindings = c.var.bindings()
+    const bindings = c.var.bindings();
     return {
       db: bindings.db,
       types: brandOf(c).types,
@@ -308,8 +313,8 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       draft: draftOf(c, rt),
       hooks: rt.hookRunner(hookCtx(c), brandIdOf(c)),
       chainOf: chainResolver(c, rt),
-    }
-  }
+    };
+  };
 
   /* ------------------------------------------------------------- reading --- */
 
@@ -324,14 +329,14 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * the parameter would silently hand back published content for a request that
    * asked for drafts, which is the worst of the three options.
    */
-  app.get('/documents', requireAccess<Env>(rt, READ), async (c) => {
-    const url = new URL(c.req.url)
-    const status = url.searchParams.get('status')
-    if (status !== null && status !== 'published') {
+  app.get("/documents", requireAccess<Env>(rt, READ), async (c) => {
+    const url = new URL(c.req.url);
+    const status = url.searchParams.get("status");
+    if (status !== null && status !== "published") {
       throw new FolioError(
-        'unsupported',
-        'This route queries published content only. A draft lives in its own Durable Object, so it is read one document at a time: GET /documents/:id?status=draft.',
-      )
+        "unsupported",
+        "This route queries published content only. A draft lives in its own Durable Object, so it is read one document at a time: GET /documents/:id?status=draft.",
+      );
     }
     // The request's chain, deduped by decision 6's walk, with its site's URLs — the
     // same call `GET /content` makes, so the two cannot answer differently.
@@ -342,27 +347,27 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         await requestChain(c, rt),
         await requestSite(c, rt),
       ),
-    )
-  })
+    );
+  });
 
   /**
    * One document. `?status=draft` needs `content:read:draft`, checked here rather
    * than at the mount because which access this route needs is decided by what the
    * request asked for.
    */
-  app.get('/documents/:id', requireAccess<Env>(rt, READ), async (c) => {
-    const story = await load(c, idParam('id', c.req.param('id')), 'read')
-    const locale = askedLocale(c)
-    const wantDraft = c.req.query('status') === 'draft'
-    const urls = await requestUrls(c, rt)
+  app.get("/documents/:id", requireAccess<Env>(rt, READ), async (c) => {
+    const story = await load(c, idParam("id", c.req.param("id")), "read");
+    const locale = askedLocale(c);
+    const wantDraft = c.req.query("status") === "draft";
+    const urls = await requestUrls(c, rt);
 
     if (wantDraft) {
-      ensureAccess(rt, c.var.actor, READ_DRAFT)
-      return c.json(await payload(c, urls, story, await draftOf(c, rt)(story), 'draft', locale))
+      ensureAccess(rt, c.var.actor, READ_DRAFT);
+      return c.json(await payload(c, urls, story, await draftOf(c, rt)(story), "draft", locale));
     }
-    const published = await publishedFor(c, story)
-    return c.json(await payload(c, urls, story, published, 'published', locale))
-  })
+    const published = await publishedFor(c, story);
+    return c.json(await payload(c, urls, story, published, "published", locale));
+  });
 
   /**
    * The same document, addressed by its public path. `''` (a bare
@@ -375,36 +380,36 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * accident of semantics.
    */
   const byPath = async (c: Context<FolioEnv<Env>>) => {
-    const bindings = c.var.bindings()
-    const path = storyPathParam(c.req.param('path'))
+    const bindings = c.var.bindings();
+    const path = storyPathParam(c.req.param("path"));
     // The status gate (`multi-site.md` decision 16), on the page-shaped reads only:
     // `/pages/{path}` and this one. A site the caller's surface would not serve is a 404
     // here as it is there. It is deliberately not on `/documents`, `/documents/:id` or
     // search: a credentialed caller reads those by id or query on any scope it holds
     // `content:read` on (decision 4), and the gate is about which host serves a page.
-    await servedSite(c, rt)
-    const within = await requestChain(c, rt)
-    const story = within.length > 0 ? await storyByPath(bindings.db, within, path) : null
+    await servedSite(c, rt);
+    const within = await requestChain(c, rt);
+    const story = within.length > 0 ? await storyByPath(bindings.db, within, path) : null;
     if (!story || story.path === null) {
       // The reader's `miss()` for the same site, without a reader: `pathMiss` over the
       // request's chain, headers from `answerMiss`, so this and `/pages/{path}` agree.
       const miss = answerMiss(
-        within.length > 0 ? await pathMiss(bindings.db, within, path) : { kind: 'not-found' },
+        within.length > 0 ? await pathMiss(bindings.db, within, path) : { kind: "not-found" },
         rt.sites ? c.var.scope : null,
         path,
-      )
-      throw new FolioError('not_found', 'No document at that path', miss)
+      );
+      throw new FolioError("not_found", "No document at that path", miss);
     }
-    const locale = askedLocale(c)
-    const urls = await requestUrls(c, rt)
-    if (c.req.query('status') === 'draft') {
-      ensureAccess(rt, c.var.actor, READ_DRAFT)
-      return c.json(await payload(c, urls, story, await draftOf(c, rt)(story), 'draft', locale))
+    const locale = askedLocale(c);
+    const urls = await requestUrls(c, rt);
+    if (c.req.query("status") === "draft") {
+      ensureAccess(rt, c.var.actor, READ_DRAFT);
+      return c.json(await payload(c, urls, story, await draftOf(c, rt)(story), "draft", locale));
     }
-    return c.json(await payload(c, urls, story, await publishedFor(c, story), 'published', locale))
-  }
-  app.get('/documents/by-path', requireAccess<Env>(rt, READ), byPath)
-  app.get('/documents/by-path/:path{.*}', requireAccess<Env>(rt, READ), byPath)
+    return c.json(await payload(c, urls, story, await publishedFor(c, story), "published", locale));
+  };
+  app.get("/documents/by-path", requireAccess<Env>(rt, READ), byPath);
+  app.get("/documents/by-path/:path{.*}", requireAccess<Env>(rt, READ), byPath);
 
   const publishedFor = async (c: Context<FolioEnv<Env>>, story: StoryMeta): Promise<Doc> => {
     // Within the request's chain, though `story` has already been fenced: the row's
@@ -413,33 +418,33 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
       c.var.bindings().db,
       [story.id],
       await requestChain(c, rt),
-    )
-    const doc = docs[story.id]
+    );
+    const doc = docs[story.id];
     if (!doc) {
       throw new FolioError(
-        'not_found',
-        'That document has nothing published. Add ?status=draft to read the draft.',
-      )
+        "not_found",
+        "That document has nothing published. Add ?status=draft to read the draft.",
+      );
     }
-    return doc
-  }
+    return doc;
+  };
 
   app.get(
-    '/documents/:id/versions',
+    "/documents/:id/versions",
     requireAccess<Env>(rt, READ),
-    fenceStory<Env>(rt, 'read', { absent: 'pass' }),
+    fenceStory<Env>(rt, "read", { absent: "pass" }),
     async (c) =>
       c.json({
         // `.rows` rather than the envelope: this route's contract is a `versions`
         // array, and v1 does not change shape. Paging it with numbers is its own
         // change, and nobody has asked for a hundredth version of a document.
         versions: (
-          await listVersions(c.var.bindings().db, idParam('id', c.req.param('id')), {
-            limit: limitParam(c.req.query('perPage'), 50, 200),
+          await listVersions(c.var.bindings().db, idParam("id", c.req.param("id")), {
+            limit: limitParam(c.req.query("perPage"), 50, 200),
           })
         ).rows,
       }),
-  )
+  );
 
   /* ------------------------------------------------------------- writing --- */
 
@@ -458,30 +463,30 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * nothing at all, and a created document's content arrives with it rather than
    * as a follow-up transaction there is nobody yet to broadcast to.
    */
-  app.post('/documents', requireAccess<Env>(rt, CREATE), async (c) => {
-    const body = await parseBody(c.req, DocumentCreateBody)
-    await fenceParent(c, rt, body.parentId)
-    const bindings = c.var.bindings()
-    const type = requireType(c, body.type)
-    if (type.kind === 'singleton') {
+  app.post("/documents", requireAccess<Env>(rt, CREATE), async (c) => {
+    const body = await parseBody(c.req, DocumentCreateBody);
+    await fenceParent(c, rt, body.parentId);
+    const bindings = c.var.bindings();
+    const type = requireType(c, body.type);
+    if (type.kind === "singleton") {
       throw new FolioError(
-        'conflict',
+        "conflict",
         `'${type.name}' is a singleton and already exists; write to '${SINGLETON_PREFIX}${type.name}' instead of creating one`,
-      )
+      );
     }
 
     // Before any write, so a payload the schema refuses costs nothing.
-    const brand = brandOf(c)
-    let seeded = brand.seed(type, body.title)
+    const brand = brandOf(c);
+    let seeded = brand.seed(type, body.title);
     if (body.content !== undefined) {
       try {
-        seeded = fromNested(body.content, brand.schema, seeded, { mode: 'merge' })
+        seeded = fromNested(body.content, brand.schema, seeded, { mode: "merge" });
       } catch (e) {
-        rethrow(e)
+        rethrow(e);
       }
     }
 
-    let story: StoryMeta
+    let story: StoryMeta;
     try {
       // In the request's scope — the `~<scope>` segment or the token's binding
       // (`multi-site.md` decision 14) — and `default` with no `sites`.
@@ -489,32 +494,32 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
         bindings.db,
         { ...body, type, schemaId: brand.schemaId, site: requestScope(c, rt) ?? undefined },
         brand.types,
-      )
+      );
     } catch (e) {
-      rethrow(e)
+      rethrow(e);
     }
 
-    const actor = actorString(c.var.actor)
-    await brand.publishDeps(bindings, hookCtx(c)).hooks?.run('created', { story, actor })
+    const actor = actorString(c.var.actor);
+    await brand.publishDeps(bindings, hookCtx(c)).hooks?.run("created", { story, actor });
 
     try {
-      await rt.stub(bindings, story.id).getOrInit(seeded)
+      await rt.stub(bindings, story.id).getOrInit(seeded);
     } catch {
       // The row is already committed, so success would be a lie and a 500 would
       // blame this server for a request that half-worked. Names the id, because
       // what the caller does next — retry the content, or delete the row —
       // depends on knowing it exists.
       throw new FolioError(
-        'incomplete',
+        "incomplete",
         `Document '${story.id}' was created, but its content could not be written. Retry with PUT /documents/${story.id}/content.`,
-      )
+      );
     }
 
     return c.json(
-      await payload(c, await requestUrls(c, rt), story, seeded, 'draft', undefined),
+      await payload(c, await requestUrls(c, rt), story, seeded, "draft", undefined),
       201,
-    )
-  })
+    );
+  });
 
   /**
    * Replace, or (by default) merge, a document's content.
@@ -529,15 +534,15 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * locale problem go away. `mode: 'replace'` is opt-in and is the only mode that
    * can discard content it was not told about — see `fromNested`.
    */
-  app.put('/documents/:id/content', requireAccess<Env>(rt, EDIT), putContent)
+  app.put("/documents/:id/content", requireAccess<Env>(rt, EDIT), putContent);
 
   async function putContent(c: Context<FolioEnv<Env>>) {
-    const body = await parseBody(c.req, ContentPutBody)
-    const key = idempotencyKeyHeader(c.req.header('idempotency-key'))
-    const bindings = c.var.bindings()
-    const story = await load(c, idParam('id', c.req.param('id')), 'write')
-    const schema = brandOf(c).schema
-    const layer = await layerOption(c, rt, story)
+    const body = await parseBody(c.req, ContentPutBody);
+    const key = idempotencyKeyHeader(c.req.header("idempotency-key"));
+    const bindings = c.var.bindings();
+    const story = await load(c, idParam("id", c.req.param("id")), "write");
+    const schema = brandOf(c).schema;
+    const layer = await layerOption(c, rt, story);
 
     try {
       return c.json(
@@ -545,16 +550,16 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
           deps(c, bindings, story),
           (current) =>
             fromNested(body.content, schema, current, {
-              mode: body.mode ?? 'merge',
+              mode: body.mode ?? "merge",
               ...layer,
             }),
           writeActor(c),
           key,
           layer.layer,
         ),
-      )
+      );
     } catch (e) {
-      rethrow(e)
+      rethrow(e);
     }
   }
 
@@ -574,55 +579,55 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * log nothing, or every no-op sync would leave the story reporting unpublished
    * changes.
    */
-  app.patch('/documents/:id/fields', requireAccess<Env>(rt, EDIT), async (c) => {
-    const body = await parseBody(c.req, FieldsPatchBody)
-    const key = idempotencyKeyHeader(c.req.header('idempotency-key'))
-    const bindings = c.var.bindings()
-    const story = await load(c, idParam('id', c.req.param('id')), 'write')
+  app.patch("/documents/:id/fields", requireAccess<Env>(rt, EDIT), async (c) => {
+    const body = await parseBody(c.req, FieldsPatchBody);
+    const key = idempotencyKeyHeader(c.req.header("idempotency-key"));
+    const bindings = c.var.bindings();
+    const story = await load(c, idParam("id", c.req.param("id")), "write");
 
-    const locale = body.locale
+    const locale = body.locale;
     if (locale !== undefined && !isKnownLocale(rt.locales, locale)) {
-      throw new FolioError('unsupported', `Unknown locale: ${locale}`)
+      throw new FolioError("unsupported", `Unknown locale: ${locale}`);
     }
 
-    const draft = await draftOf(c, rt)(story)
-    const schema = brandOf(c).schema
-    const mutations: Mutation[] = []
+    const draft = await draftOf(c, rt)(story);
+    const schema = brandOf(c).schema;
+    const mutations: Mutation[] = [];
     const setsFor = (uid: string, fields: Record<string, unknown>, where: string) => {
-      const blok = draft.bloks[uid]
-      if (!blok) return
-      const def = schema[blok.type]
+      const blok = draft.bloks[uid];
+      if (!blok) return;
+      const def = schema[blok.type];
       for (const [name, value] of Object.entries(fields)) {
-        const field = def?.fields[name]
+        const field = def?.fields[name];
         if (!field) {
-          throw new FolioError('bad_request', `${where}.${name} is not a field of '${blok.type}'`)
+          throw new FolioError("bad_request", `${where}.${name} is not a field of '${blok.type}'`);
         }
-        if (field.kind === 'blocks') {
+        if (field.kind === "blocks") {
           throw new FolioError(
-            'bad_request',
+            "bad_request",
             `${where}.${name} holds blocks, not a value — use PUT /content to change structure`,
-          )
+          );
         }
-        const shape = fieldShapeError(field, value)
-        if (shape) throw new FolioError('bad_request', `${where}.${name} ${shape}`)
+        const shape = fieldShapeError(field, value);
+        if (shape) throw new FolioError("bad_request", `${where}.${name} ${shape}`);
 
-        const current = locale === undefined ? blok.data[name] : blok.i18n?.[locale]?.[name]
-        if (deepEqual(current ?? null, (value ?? null) as Json)) continue
+        const current = locale === undefined ? blok.data[name] : blok.i18n?.[locale]?.[name];
+        if (deepEqual(current ?? null, (value ?? null) as Json)) continue;
         mutations.push(
           locale === undefined
-            ? { t: 'set', uid, field: name, value: value as Json }
-            : { t: 'set', uid, field: name, value: value as Json, locale },
-        )
+            ? { t: "set", uid, field: name, value: value as Json }
+            : { t: "set", uid, field: name, value: value as Json, locale },
+        );
       }
-    }
+    };
 
-    setsFor(draft.root, body.fields ?? {}, 'fields')
+    setsFor(draft.root, body.fields ?? {}, "fields");
     for (const [i, entry] of (body.bloks ?? []).entries()) {
-      setsFor(entry.uid, entry.fields, `bloks[${i}].fields`)
+      setsFor(entry.uid, entry.fields, `bloks[${i}].fields`);
     }
 
-    return c.json(await commitAll(deps(c, bindings, story).stub, mutations, writeActor(c), key))
-  })
+    return c.json(await commitAll(deps(c, bindings, story).stub, mutations, writeActor(c), key));
+  });
 
   /**
    * Row metadata: title, slug, parent, position. Deliberately not content — a
@@ -634,26 +639,26 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * a publishing act even when nothing is published in the same breath.
    */
   app.patch(
-    '/documents/:id',
+    "/documents/:id",
     requireAccess<Env>(rt, MANAGE),
-    fenceStory<Env>(rt, 'write'),
+    fenceStory<Env>(rt, "write"),
     async (c) => {
-      const id = idParam('id', c.req.param('id'))
-      const body = await parseBody(c.req, StoryPatchBody)
-      await fenceParent(c, rt, body.parentId)
+      const id = idParam("id", c.req.param("id"));
+      const body = await parseBody(c.req, StoryPatchBody);
+      await fenceParent(c, rt, body.parentId);
 
-      let next: StoryMeta
+      let next: StoryMeta;
       try {
         // `moveDocument` fires both hooks the admin's own PATCH fires, which is what
         // keeps a host hook from being able to tell which door a write came through.
-        next = (await moveDocument(documentDeps(c), id, body, actorString(c.var.actor))).next
+        next = (await moveDocument(documentDeps(c), id, body, actorString(c.var.actor))).next;
       } catch (e) {
-        rethrow(e)
+        rethrow(e);
       }
 
-      return c.json(meta(await requestUrls(c, rt), next))
+      return c.json(meta(await requestUrls(c, rt), next));
     },
-  )
+  );
 
   /**
    * Delete a document, its descendants, their versions and their index rows.
@@ -663,44 +668,44 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * either would mean two orderings to keep right.
    */
   app.delete(
-    '/documents/:id',
+    "/documents/:id",
     requireAccess<Env>(rt, MANAGE),
-    fenceStory<Env>(rt, 'write'),
+    fenceStory<Env>(rt, "write"),
     async (c) => {
-      const target = idParam('id', c.req.param('id'))
-      const redirect = c.req.query('redirect') !== 'false'
+      const target = idParam("id", c.req.param("id"));
+      const redirect = c.req.query("redirect") !== "false";
 
-      let found: Awaited<ReturnType<typeof deleteDocument>>
+      let found: Awaited<ReturnType<typeof deleteDocument>>;
       try {
         found = await deleteDocument(
           documentDeps(c),
           target,
           { redirect },
           actorString(c.var.actor),
-        )
+        );
       } catch (e) {
-        rethrow(e)
+        rethrow(e);
       }
       // A 404 where the admin's route answers `{ deleted: [] }`, and the difference is
       // deliberate: this is a contract with a script, and a script deleting an id that
       // is not there has a bug worth surfacing.
-      if (!found) throw new FolioError('not_found', 'Unknown document')
+      if (!found) throw new FolioError("not_found", "Unknown document");
 
-      return c.json({ deleted: found.deleted })
+      return c.json({ deleted: found.deleted });
     },
-  )
+  );
 
   /** Publish the draft. `publish()` does the work; this only translates. */
-  app.post('/documents/:id/publish', requireAccess<Env>(rt, PUBLISH), async (c) => {
-    const bindings = c.var.bindings()
-    const story = await load(c, idParam('id', c.req.param('id')), 'write')
+  app.post("/documents/:id/publish", requireAccess<Env>(rt, PUBLISH), async (c) => {
+    const bindings = c.var.bindings();
+    const story = await load(c, idParam("id", c.req.param("id")), "write");
     const result = await publish(
       brandOf(c).publishDeps(bindings, hookCtx(c)),
       story,
       actorString(c.var.actor),
-    )
-    return c.json(result)
-  })
+    );
+    return c.json(result);
+  });
 
   /**
    * A named checkpoint of the draft.
@@ -712,18 +717,18 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * the editor is a hole rather than a feature. A token that needs to snapshot
    * before an import asks for `publish`, which it almost certainly wants anyway.
    */
-  app.post('/documents/:id/versions', requireAccess<Env>(rt, PUBLISH), async (c) => {
-    const bindings = c.var.bindings()
-    const story = await load(c, idParam('id', c.req.param('id')), 'write')
-    const body = await parseOptionalBody(c.req, CheckpointBody)
+  app.post("/documents/:id/versions", requireAccess<Env>(rt, PUBLISH), async (c) => {
+    const bindings = c.var.bindings();
+    const story = await load(c, idParam("id", c.req.param("id")), "write");
+    const body = await parseOptionalBody(c.req, CheckpointBody);
     return c.json(
       await checkpoint(brandOf(c).publishDeps(bindings, hookCtx(c)), story, {
         label: body.label,
         actor: actorString(c.var.actor),
       }),
       201,
-    )
-  })
+    );
+  });
 
   /**
    * Take the document down. `unpublish()` (`../../publish.ts`) is idempotent —
@@ -735,13 +740,13 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * re-loads it: cheaper than re-deriving the state transition `unpublish()`
    * already computed and threw away.
    */
-  app.post('/documents/:id/unpublish', requireAccess<Env>(rt, PUBLISH), async (c) => {
-    const bindings = c.var.bindings()
-    const id = idParam('id', c.req.param('id'))
-    const story = await load(c, id, 'write')
-    await unpublish(brandOf(c).publishDeps(bindings, hookCtx(c)), story, actorString(c.var.actor))
-    return c.json({ story: meta(await requestUrls(c, rt), await load(c, id, 'write')) })
-  })
+  app.post("/documents/:id/unpublish", requireAccess<Env>(rt, PUBLISH), async (c) => {
+    const bindings = c.var.bindings();
+    const id = idParam("id", c.req.param("id"));
+    const story = await load(c, id, "write");
+    await unpublish(brandOf(c).publishDeps(bindings, hookCtx(c)), story, actorString(c.var.actor));
+    return c.json({ story: meta(await requestUrls(c, rt), await load(c, id, "write")) });
+  });
 
   /**
    * Copy a document (mirrors `routes/stories.ts:439`'s `/stories/:id/duplicate`).
@@ -752,27 +757,27 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * wanting a specific position already has `PATCH /documents/:id` for a second
    * call — two requests, which is also what dragging a duplicated row is.
    */
-  app.post('/documents/:id/duplicate', requireAccess<Env>(rt, CREATE), async (c) => {
+  app.post("/documents/:id/duplicate", requireAccess<Env>(rt, CREATE), async (c) => {
     // The source may be anywhere in the chain and the copy lands in the request's scope
     // ("source in chain, copy in scope"): see `routes/stories.ts`.
-    const story = await load(c, idParam('id', c.req.param('id')), 'read')
-    const body = await parseOptionalBody(c.req, StoryDuplicateBody)
-    await fenceParent(c, rt, body.parentId)
+    const story = await load(c, idParam("id", c.req.param("id")), "read");
+    const body = await parseOptionalBody(c.req, StoryDuplicateBody);
+    await fenceParent(c, rt, body.parentId);
 
-    let created: StoryMeta
+    let created: StoryMeta;
     try {
       created = await duplicateDocument(
         documentDeps(c),
         story,
         { ...body, site: requestScope(c, rt) ?? DEFAULT_SITE },
         actorString(c.var.actor),
-      )
+      );
     } catch (e) {
-      rethrow(e)
+      rethrow(e);
     }
 
-    return c.json({ document: meta(await requestUrls(c, rt), created) }, 201)
-  })
+    return c.json({ document: meta(await requestUrls(c, rt), created) }, 201);
+  });
 
   /**
    * Restore a version: read-diff-commit, with the version's document as the
@@ -790,32 +795,32 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
    * would rewrite this document from a stranger's history — a caller error,
    * not a missing thing.
    */
-  app.post('/documents/:id/restore', requireAccess<Env>(rt, EDIT), async (c) => {
-    const id = idParam('id', c.req.param('id'))
-    const body = await parseBody(c.req, RestoreBody)
-    const key = idempotencyKeyHeader(c.req.header('idempotency-key'))
-    const bindings = c.var.bindings()
-    const story = await load(c, id, 'write')
+  app.post("/documents/:id/restore", requireAccess<Env>(rt, EDIT), async (c) => {
+    const id = idParam("id", c.req.param("id"));
+    const body = await parseBody(c.req, RestoreBody);
+    const key = idempotencyKeyHeader(c.req.header("idempotency-key"));
+    const bindings = c.var.bindings();
+    const story = await load(c, id, "write");
 
-    const brand = brandOf(c)
+    const brand = brandOf(c);
     const found = await getVersion(bindings.db, body.versionId, {
       migrations: brand.migrations,
       schema: brand.schema,
       typeOf: brand.typeOf,
-    })
-    if (!found) throw new FolioError('not_found', 'Unknown version')
+    });
+    if (!found) throw new FolioError("not_found", "Unknown version");
     if (found.meta.storyId !== id) {
-      throw new FolioError('bad_request', 'That version belongs to a different document')
+      throw new FolioError("bad_request", "That version belongs to a different document");
     }
 
     try {
       return c.json(
         await writeDocument(deps(c, bindings, story), () => found.doc, writeActor(c), key),
-      )
+      );
     } catch (e) {
-      rethrow(e)
+      rethrow(e);
     }
-  })
+  });
 
-  return app
+  return app;
 }
