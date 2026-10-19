@@ -315,7 +315,7 @@ implicit site called `default`, and nothing about any request, URL, cache tag or
 role changes. Its presence turns multi-site on. The sites and groups themselves are
 rows a platform admin creates in the admin, not config, so this says only what has
 to exist before the first row. **Turning it on is the point of no return**; read
-[`UPGRADING.md`](../UPGRADING.md#0011-roles-move-to-site_roles-2026-09-29) first, and
+[`UPGRADING.md`](../UPGRADING.md#0011-roles-move-to-site_roles-2026-09-29-v100) first, and
 [the handbook chapter](handbook.md#many-sites-in-one-deployment) for what it does.
 
 ```ts
@@ -361,7 +361,7 @@ forms policy, describer and content migrations) that a site belongs to. It needs
 one sign-in serve every brand; what makes a brand look and behave like itself is looked
 up through the brand of the scope a request is for. Read
 [the handbook chapter](handbook.md#many-brands-in-one-deployment) for what that means,
-and [`UPGRADING.md`](../UPGRADING.md#0013-and-turning-brands-on-2026-09-30) before you
+and [`UPGRADING.md`](../UPGRADING.md#0013-and-turning-brands-on-2026-09-30-v100) before you
 turn it on.
 
 ```ts

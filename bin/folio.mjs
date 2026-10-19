@@ -12,12 +12,11 @@
  * `init` copies `examples/starter` — a real workspace package that
  * `pnpm typecheck` gates on every commit, which is the only reason to believe
  * the thing it writes compiles — and rewrites four things: the project name,
- * the `folio` dependency (a workspace link becomes a pinned SHA), the seeded
+ * the `folio` dependency (a workspace link becomes this release's tag), the seeded
  * admin's address, and the migrations path.
  */
 
-import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { cp, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -26,6 +25,10 @@ import { fileURLToPath } from "node:url";
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const REPO = "https://github.com/brendanmckenzie/folio";
 const SPEC = "github:brendanmckenzie/folio";
+/** The release this copy of the CLI belongs to. `npx github:...#v1.0.0` runs
+ *  the CLI from that tag's checkout, so its own version is the tag to scaffold. */
+const VERSION = JSON.parse(readFileSync(path.join(PKG_ROOT, "package.json"), "utf8")).version;
+const TAG = `v${VERSION}`;
 const DEFAULT_EMAIL = "you@example.com";
 
 /** Copied verbatim into the new project; the starter has no .gitignore of its
@@ -48,7 +51,6 @@ folio — a Cloudflare-native block CMS
 
 Options for init:
   --email <address>       Address seeded as the first admin (default ${DEFAULT_EMAIL})
-  --sha <sha>             Pin this commit instead of the current main
   --force                 Write into a directory that is not empty
 
   ${REPO}
@@ -68,7 +70,7 @@ async function main() {
     return;
   }
   if (command === "-v" || command === "--version" || command === "version") {
-    console.log(await selfSha());
+    console.log(`folio ${VERSION}`);
     return;
   }
   if (command === "init") return init(argv.slice(1));
@@ -102,7 +104,6 @@ async function init(argv) {
   }
 
   const email = flags.email ?? (await askEmail());
-  const sha = flags.sha ?? (await resolveSha());
 
   console.log(`\n  Scaffolding ${name} into ${target}`);
 
@@ -122,7 +123,7 @@ async function init(argv) {
   await rewrite(path.join(target, "package.json"), (s) =>
     s
       .replace('"name": "folio-starter"', `"name": ${JSON.stringify(name)}`)
-      .replace('"folio": "workspace:*"', `"folio": "${SPEC}#${sha}"`),
+      .replace('"folio": "workspace:*"', `"folio": "${SPEC}#${TAG}"`),
   );
   await rewrite(path.join(target, "wrangler.jsonc"), (s) =>
     s.replace('"name": "folio-starter"', `"name": ${JSON.stringify(name)}`),
@@ -138,7 +139,7 @@ async function init(argv) {
   const rel = path.relative(process.cwd(), target);
   const where = !rel ? "." : rel.startsWith("..") ? target : rel;
   console.log(`
-  Pinned folio at ${sha === "main" ? "main (unpinned — see below)" : sha}
+  Pinned folio at ${TAG}
   Seeded ${email} as the first admin
 
   Next:
@@ -149,17 +150,7 @@ async function init(argv) {
 
   Then open http://localhost:5173/folio/login and sign in as ${email}.
   There is no mail binding, so the link is logged to your terminal.
-${
-  sha === "main"
-    ? `
-  WARNING: could not resolve a commit SHA, so package.json pins the branch
-  "main". A branch resolves differently later — replace it with a full
-  40-character SHA before you commit:
-
-      git ls-remote ${REPO} main
-`
-    : ""
-}`);
+`);
 }
 
 /** Prompt only where there is a terminal to prompt at; npx usually has one. */
@@ -172,43 +163,6 @@ async function askEmail() {
   } finally {
     rl.close();
   }
-}
-
-/**
- * The commit to pin, most trustworthy source first.
- *
- * A pinned SHA is Folio's version number, so getting this wrong is not
- * cosmetic: a branch resolves differently later, and a consumer who pinned one
- * gets a different library on their next clean install with nothing to say so.
- *
- * The remote is asked *before* a local checkout's HEAD, deliberately. An npx
- * install keeps no record of what it resolved, so the remote is the only answer
- * available there — and where both exist, a local HEAD may be a commit nobody
- * has pushed, which `npm install` could not fetch. Local HEAD is the offline
- * fallback and says so.
- */
-async function resolveSha() {
-  if (process.env.FOLIO_SHA) return process.env.FOLIO_SHA;
-
-  const remote = git(["ls-remote", REPO, "main"]);
-  const head = remote?.split(/\s+/)[0];
-  if (head && /^[0-9a-f]{40}$/.test(head)) return head;
-
-  const local = git(["rev-parse", "HEAD"], PKG_ROOT);
-  if (local && /^[0-9a-f]{40}$/.test(local)) {
-    console.warn(
-      `\n  folio: could not reach ${REPO}; pinning this checkout's HEAD instead.\n` +
-        "  Check that it has been pushed, or pass --sha.",
-    );
-    return local;
-  }
-
-  return "main";
-}
-
-async function selfSha() {
-  const sha = await resolveSha();
-  return sha === "main" ? "folio (unknown commit)" : `folio ${sha}`;
 }
 
 // --- agents ---------------------------------------------------------------
@@ -279,12 +233,10 @@ function parseArgs(argv) {
     const arg = argv[i];
     if (arg === "--force") flags.force = true;
     else if (arg === "--email") flags.email = argv[++i];
-    else if (arg === "--sha") flags.sha = argv[++i];
     else if (arg.startsWith("--")) throw new Error(`unknown option "${arg}"`);
     else positional.push(arg);
   }
   if (flags.email !== undefined && !flags.email) throw new Error("--email needs an address");
-  if (flags.sha !== undefined && !flags.sha) throw new Error("--sha needs a commit");
   return { flags, positional };
 }
 
@@ -310,17 +262,4 @@ function firstExisting(names) {
     if (existsSync(full) && statSync(full).isFile()) return full;
   }
   return null;
-}
-
-function git(args, cwd) {
-  try {
-    return execFileSync("git", args, {
-      cwd: cwd ?? process.cwd(),
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 15_000,
-    }).trim();
-  } catch {
-    return null;
-  }
 }

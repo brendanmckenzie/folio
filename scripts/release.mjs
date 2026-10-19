@@ -15,6 +15,9 @@
  *   node scripts/release.mjs --tag     # …and add the end-to-end sweep
  *   node scripts/release.mjs --tag --ci  # the release.yml run: verify a pushed tag, publish nothing
  *
+ * Tags are created by hand (CLAUDE.md "Releasing"), never by this script. What it
+ * does about them is refuse to bless a tag that has moved: see `assertTagNotMoved`.
+ *
  * What it does NOT do is push by default. Publishing is an explicit act, and the
  * printed command is one paste.
  */
@@ -46,10 +49,65 @@ const tag = args.has("--tag");
  * tag (named by `RELEASE_TAG`, else `GITHUB_REF_NAME`). The tag *is* the publication (main already holds the commits), so this mode
  * publishes nothing: it checks the tag names this commit and this `package.json`,
  * runs every gate and the consumer smoke test, and stops.
+ *
+ * With `--tag` and no `--ci` it is the pre-flight: if `v<package.json version>` is
+ * already on the remote it must name this commit, or nothing is printed.
  */
 const ci = args.has("--ci");
 
 const git = (...a) => execFileSync("git", a, { encoding: "utf8" }).trim();
+
+/**
+ * Refuses a tag whose remote copy points at a different commit than `sha`.
+ *
+ * A moved tag is the one way a tag-pinned scheme can hand two machines different
+ * code from the same version, and by the time `release.yml` runs the tag has
+ * already been pushed, so this cannot stop the push. The repository's tag ruleset
+ * (no update or delete of `v*`) does that. What this adds is the check at the
+ * point of trust: it reads the remote's *current* answer, so a tag force-moved after
+ * a run was triggered (the workflow checks out the SHA the event named) fails here
+ * and no Release is created for it. An annotated tag is peeled to its commit.
+ *
+ * `required` is true on the runner, where the tag must exist; locally a tag that is
+ * not pushed yet is the normal case and passes.
+ */
+function assertTagNotMoved(tagName, sha, { required }) {
+  const ref = `refs/tags/${tagName}`;
+  const token = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN;
+  // The runner's checkout does not persist credentials, so authenticate this one
+  // read the way actions/checkout does.
+  const auth = token
+    ? [
+        "-c",
+        `http.https://github.com/.extraheader=AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString("base64")}`,
+      ]
+    : [];
+  const result = spawnSync("git", [...auth, "ls-remote", REMOTE, ref, `${ref}^{}`], {
+    encoding: "utf8",
+  });
+  if (result.status !== 0) {
+    if (required) die(`could not read ${tagName} from ${REMOTE}: ${result.stderr.trim()}`);
+    console.log(`· could not reach ${REMOTE}; the remote ${tagName} was not checked.`);
+    return;
+  }
+  const lines = result.stdout.trim().split("\n").filter(Boolean);
+  const peeled = lines.find((l) => l.endsWith(`${ref}^{}`));
+  const direct = lines.find((l) => l.endsWith(ref));
+  const remote = (peeled ?? direct)?.split(/\s+/)[0];
+  if (!remote) {
+    if (required) die(`${tagName} does not exist on ${REMOTE}.`);
+    console.log(`· ${tagName} is not on ${REMOTE} yet.`);
+    return;
+  }
+  if (remote !== sha) {
+    die(
+      `${tagName} on ${REMOTE} points at ${remote.slice(0, 7)}, not ${sha.slice(0, 7)}.\n` +
+        "  A tag is never moved: a consumer who pinned it would get different code with\n" +
+        "  nothing to say so. Bump the version and tag a new release instead.",
+    );
+  }
+  console.log(`· ${tagName} on ${REMOTE} is ${sha.slice(0, 7)}`);
+}
 
 function die(message) {
   console.error(`✗ ${message}`);
@@ -103,6 +161,17 @@ if (git("status", "--porcelain")) {
 }
 
 const head = git("rev-parse", "HEAD");
+
+if (ci) {
+  assertTagNotMoved(process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME, head, {
+    // A workflow_dispatch rehearsal names a tag that is deliberately not pushed.
+    required: process.env.GITHUB_REF_TYPE === "tag",
+  });
+} else if (tag) {
+  assertTagNotMoved(`v${JSON.parse(readFileSync("package.json", "utf8")).version}`, head, {
+    required: false,
+  });
+}
 
 // ── gates ────────────────────────────────────────────────────────────────────
 
@@ -181,6 +250,56 @@ function smokeTest(sha) {
       die(`${missing.length} export target(s) absent from the built package.`);
     }
     console.log(`ok (${Object.keys(map ?? {}).length} subpaths)`);
+
+    process.stdout.write("· exported names … ");
+    /**
+     * The check above sees files, not names: it would pass a barrel that had
+     * dropped everything inside it. This reads the final `export { ... }` of each
+     * built entry (the server entry cannot be imported under Node, it needs
+     * `cloudflare:workers`, so the text is what is read for all four) and requires
+     * the names below, which are the ones a host cannot do without. Add to a list
+     * when a name becomes part of the contract; a name vanishing from it is a major.
+     */
+    const anchors = {
+      "dist/core.js": [
+        "defineBlock",
+        "toRegistry",
+        "fieldValue",
+        "dataOf",
+        "cacheControl",
+        "ANY_TYPE_TAG",
+        "SITE_TAG",
+        "asAsset",
+      ],
+      "dist/engine.js": ["newUid", "apply", "defineMigration", "fieldValue"],
+      "dist/server.js": ["createFolio", "StoryDO", "SITE_TAG", "ANY_TYPE_TAG", "typeTag"],
+      "dist/vite.js": ["folio"],
+    };
+    const absent = [];
+    for (const [file, names] of Object.entries(anchors)) {
+      const text = readFileSync(join(root, file), "utf8");
+      const blocks = [...text.matchAll(/^export\s*\{([^}]*)\}/gm)];
+      const have = new Set(
+        blocks.flatMap((b) =>
+          b[1]
+            .split(",")
+            .map((n) =>
+              n
+                .trim()
+                .split(/\s+as\s+/)
+                .pop(),
+            )
+            .filter(Boolean),
+        ),
+      );
+      for (const n of names) if (!have.has(n)) absent.push(`${file}: ${n}`);
+    }
+    if (absent.length) {
+      console.log("FAILED");
+      for (const a of absent) console.error(`    missing export: ${a}`);
+      die(`${absent.length} expected export(s) absent from the built package.`);
+    }
+    console.log(`ok (${Object.values(anchors).flat().length} names)`);
 
     process.stdout.write("· docs ship … ");
     /**

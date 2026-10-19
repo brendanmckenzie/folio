@@ -79,4 +79,4 @@ Folio's own docs are in `node_modules/folio`:
 | `docs/configuration.md` | Every `createFolio()` key, with its default and its failure mode. |
 | `AGENTS.md` | The integration shape, and the traps that read as library bugs. |
 | `docs/handbook.md` | Every feature in depth. |
-| `UPGRADING.md` | Bumping the pinned SHA. |
+| `UPGRADING.md` | Bumping the pinned tag. |
