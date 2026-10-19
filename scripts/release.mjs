@@ -13,6 +13,7 @@
  *   node scripts/release.mjs --push    # …and push it
  *   node scripts/release.mjs --no-gate # skip the gates (they were just run)
  *   node scripts/release.mjs --tag     # …and add the end-to-end sweep
+ *   node scripts/release.mjs --tag --ci  # the release.yml run: verify a pushed tag, publish nothing
  *
  * What it does NOT do is push by default. Publishing is an explicit act, and the
  * printed command is one paste.
@@ -40,6 +41,13 @@ const force = args.has("--force");
  * tagged, so a failure costs time and nothing else.
  */
 const tag = args.has("--tag");
+/**
+ * `release.yml` runs this on a runner that has just checked out a pushed `vX.Y.Z`
+ * tag (named by `RELEASE_TAG`, else `GITHUB_REF_NAME`). The tag *is* the publication (main already holds the commits), so this mode
+ * publishes nothing: it checks the tag names this commit and this `package.json`,
+ * runs every gate and the consumer smoke test, and stops.
+ */
+const ci = args.has("--ci");
 
 const git = (...a) => execFileSync("git", a, { encoding: "utf8" }).trim();
 
@@ -69,9 +77,26 @@ function runGate(label, command, commandArgs, { stream = false } = {}) {
 
 // ── preconditions ────────────────────────────────────────────────────────────
 
-const branch = git("rev-parse", "--abbrev-ref", "HEAD");
-if (branch !== REMOTE_BRANCH) {
-  die(`on "${branch}", not ${REMOTE_BRANCH}. Release from there.`);
+if (ci) {
+  const refName = process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME ?? "";
+  const { version } = JSON.parse(readFileSync("package.json", "utf8"));
+  if (!/^v\d+\.\d+\.\d+$/.test(refName)) die(`"${refName}" is not a vX.Y.Z tag.`);
+  if (refName !== `v${version}`) {
+    die(
+      `tag ${refName} does not match package.json version ${version}. Bump it in a PR, then tag.`,
+    );
+  }
+  if (
+    spawnSync("git", ["merge-base", "--is-ancestor", "HEAD", `${REMOTE}/${REMOTE_BRANCH}`])
+      .status !== 0
+  ) {
+    die(`${refName} is not on ${REMOTE_BRANCH}. Tag a commit that has merged.`);
+  }
+} else {
+  const branch = git("rev-parse", "--abbrev-ref", "HEAD");
+  if (branch !== REMOTE_BRANCH) {
+    die(`on "${branch}", not ${REMOTE_BRANCH}. Release from there.`);
+  }
 }
 if (git("status", "--porcelain")) {
   die("working tree is dirty. A push ships commits, so uncommitted work would ship as nothing.");
@@ -190,6 +215,16 @@ function smokeTest(sha) {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+if (ci) {
+  if (!gate) die("--ci runs the gates; it cannot be combined with --no-gate.");
+  console.log("\nSmoke test (what a consumer actually runs):");
+  smokeTest(head);
+  console.log(
+    `\n✓ ${process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME} (${head.slice(0, 7)}) is releasable.`,
+  );
+  process.exit(0);
 }
 
 // ── compare with what is published ───────────────────────────────────────────

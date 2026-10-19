@@ -18,7 +18,7 @@ registry, types, globals, forms, migrations and preview bundle — in one deploy
 Read `docs/specs/foundation/multi-brand.md`'s Implementation notes before touching
 anything that reads a registry; `docs/multi-brand-plan.md` is the build and rollout plan.
 
-**Multi-site (spec 23) is built** (2026-09-29, branch `multi-site`): read
+**Multi-site (spec 23) is built** (2026-09-29, merged to `main`): read
 `foundation/multi-site.md`'s Implementation notes before touching anything with a
 scope, a chain, a grant or a preview origin — every phase records where the spec was
 wrong. `docs/multi-site-plan.md` is the build and staging-rollout plan that produced it.
@@ -60,7 +60,15 @@ pnpm build:demo         # demo vite build
   group matters: `noImportantStyles` is `lint/complexity/`, not `lint/style/`.
 
 `scripts/release.mjs` runs the first three before it will publish, then smoke-tests
-the split. There is no GitHub Actions workflow — see "Releasing" below for why.
+the split. `.github/workflows/ci.yml` runs the same gates (`biome ci`, typecheck,
+build, test) on every pull request, and `gate` is the status the `main` ruleset
+requires. See "Releasing" below.
+
+Setup: Node 24.18.0 (`.nvmrc`), pnpm from `package.json` `packageManager`
+(`corepack enable`). On a fresh clone run `pnpm --filter demo cf-typegen` once: the
+demo's `worker-configuration.d.ts` is gitignored and `pnpm typecheck` needs it. `pnpm install` also installs the git hooks (lefthook):
+Biome and gitleaks on commit, commitlint on the message, and a refusal to push
+`main`.
 
 ## End-to-end scripts
 
@@ -454,18 +462,33 @@ paying for the subdirectory. The subdirectory is gone.
 
 What survives from it, because it was never about the split:
 
-- **The gates are local by design.** There is no GitHub Actions workflow.
-  `release.mjs` is the gate and it refuses to publish if any of the three fails.
+- **The gates run twice.** `ci.yml` runs them on every pull request and `gate` is
+  required to merge; `release.mjs` runs them again, locally, before it publishes
+  and again in `release.yml` for a tag. It refuses to publish if any fails.
 - **A pinned SHA keeps resolving** as long as it stays reachable from a pushed
   ref, so a release is additive for everyone who has not bumped. Consumers pin a
   full 40-character SHA; today that is two private sites.
 - **A non-fast-forward push is refused**, because it would orphan those pins.
 
-Release with:
+Changes reach `main` only through a squash-merged pull request that passed `gate`.
+A release is a tag on a commit that has merged:
+
+1. Bump `package.json` `version` to `X.Y.Z` in a PR and merge it.
+2. `git tag vX.Y.Z <sha-on-main> && git push origin vX.Y.Z`.
+3. `release.yml` runs `node scripts/release.mjs --tag --ci` (tag matches
+   `package.json` and sits on `main`, the gates, the end-to-end sweep, the
+   consumer smoke test), then creates the GitHub Release. Its notes are the
+   `UPGRADING.md` `###` entries whose heading names the tag (for example
+   `### Roles move (v1.0.0)`), then the generated commit list.
+
+Dry run first with Actions > release > Run workflow, giving the tag; it runs the
+same gates and creates nothing.
+
+The local script still exists for a pre-flight:
 
 ```
 node scripts/release.mjs           # gate, smoke-test, print the push command
-node scripts/release.mjs --push    # …and push
+node scripts/release.mjs --tag     # …and the end-to-end sweep
 ```
 
 It refuses a dirty tree or a branch other than `main`, runs the three gates by
@@ -504,8 +527,8 @@ deferred. Read the notes, not just the plan: several specs' Ground truth was acc
 when written and stale by the time it was built.
 
 **Specs 1–22 and 24–34 are done** — 34 (`foundation/multi-brand.md`) since the owner's
-browser pass on staging, 2026-10-01. **23 (`foundation/multi-site.md`, XL) is built** on
-the branch `multi-site` (2026-09-29) and stamped `review` until its staging
+browser pass on staging, 2026-10-01. **23 (`foundation/multi-site.md`, XL) is built** and
+merged to `main` (2026-09-29) and stamped `review` until its staging
 verification is recorded; its plan is `docs/multi-site-plan.md`. (This said "two are `draft`" until 2026-09-29, with 33
 among them, long after 33 landed as `0010_forms.sql`.) 28, 29, 30, 31 and 32 were all
 built on the branch `specs-31-30-28-29` on 2026-09-05/06 and merged to `main`; each
@@ -576,11 +599,28 @@ Deferred work is in `ROADMAP.md`, under `## Next`, `## Uncovered from the refere
 project` and `## Known smaller issues`. `docs/feedback.md` records what the owner
 asked for, in their words — **do not edit it**, and never write in the owner's voice.
 
-## Commit messages
+## Commit messages and pull requests
 
-The subject is a statement of what is now true, not a changelog line: *"Real D1
-migrations; the drop-and-reseed schema is gone"*, *"Unpublish clears the liveness
-switch; three tree states are real now"*. No `feat:`/`fix:` prefixes, no trailing
-period. The body argues the decision and names the alternative it beat, and says
-plainly when there is a sanctioned behaviour change. Prose and em-dashes are welcome —
-this is internal output. Read `git log` before writing one.
+**Conventional Commits:** `type(scope): subject`, imperative, lowercase subject, no
+trailing period, under about 72 characters. Types: `feat`, `fix`, `docs`, `style`,
+`refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`; mark a breaking change
+with `!` and a `BREAKING CHANGE:` footer. The scope is optional here (one package);
+use the area when it helps, for example `fix(sync): ...`. lefthook's `commit-msg`
+hook and the `pr-title` job both run commitlint (`commitlint.config.mjs`).
+
+Work happens on a `type/short-description` branch and merges through a pull request.
+Merging squashes, and **the squash commit subject is the PR title**, so the title is
+the commit message that `git log` and a consumer's `git log <pin>..<new>` will show.
+Write it as a Conventional Commit. The PR body links the issue with `Fixes #N`,
+because merging to `main` is what releases to consumers who pin a SHA.
+
+The body argues the decision and names the alternative it beat, and says plainly when
+there is a sanctioned behaviour change. Prose and em-dashes are welcome in commit
+bodies; this is internal output. Commits before the switch (October 2026) are plain
+sentences describing what is now true; read `git log` for the reasoning, not the format.
+
+`style: reformat to biome baseline` is a mass reformat; list its SHA in
+`.git-blame-ignore-revs` and run `git config blame.ignoreRevsFile .git-blame-ignore-revs`.
+
+Issues are the tracker: labels are defined in `scripts/github/labels.mjs`
+(`node scripts/github/labels.mjs --dry-run` shows drift).

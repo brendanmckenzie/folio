@@ -1,0 +1,21 @@
+name: Change
+description: An improvement, new capability or piece of maintenance
+labels: ["type:change", "source:github"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        To park this, add the label `deferred` and a line `Revisit: YYYY-MM-DD`
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What should be different when this is done?
+      description: Describe the outcome rather than the steps.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why does it matter?
+    validations:
+      required: false

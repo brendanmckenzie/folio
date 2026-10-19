@@ -2,6 +2,11 @@ packages:
   - .
   - examples/*
 
+# Refuse any release younger than three days (minutes), matching Renovate's
+# minimumReleaseAge. A compromised release is usually caught within that window.
+minimumReleaseAge: 4320
+
 allowBuilds:
   esbuild: true
+  lefthook: true
   workerd: true
