@@ -1666,15 +1666,10 @@ Five, in the order somebody would meet them.
    next, and the translation belongs at the edge rather than in `core/`, which
    has no business importing `errors.ts`.
 
-2. **A form embedded in a *global*, or in a referenced document, resolves to
-   `null`.** `resolve()` collects form ids from the document being rendered, and a
-   global's own bloks are not loaded until the pass after that — so a form on the
-   site header compiles no descriptor and the block renders nothing, silently and
-   without an error anywhere. Named by phase 3, and the fix is cheap and unbuilt:
-   a third-pass read for ids discovered in pass two, costing one round trip only
-   for the documents that actually have one. Nothing has needed it yet, and a form
-   in a global is a plausible thing to want (a newsletter sign-up in a footer), so
-   this is the first thing to build if anybody reports "my form does not appear".
+2. **A form embedded in a *global*, or in a referenced document, resolved to
+   `null`.** Fixed (issue #34): see "Fixed: a form inside a global or a referenced
+   document" below. `resolve()` now reads the ids discovered in pass two in a further
+   read, only when there are any.
 
 3. **`deleteForm` deleted D1 rows only.** Until phase 5 the cascade removed the
    form and its responses and left **every file anybody had ever attached** in the
@@ -1965,20 +1960,15 @@ carries `form:<id>`, and the purge phase 2 wired now reaches something.
    form and a compiled field, the posture `presenceOf` takes toward a socket
    attachment.
 
-### Known gap: a form inside a global or a referenced document
+### Fixed: a form inside a global or a referenced document
 
-`resolve()` collects form ids from **the document being rendered only**
-(`formIds(doc, schema)`). A `form` field inside a *global* — a newsletter signup
-in a site footer is the obvious case — or inside a document pulled in by a
-`reference` resolves to `null`, because its id is not known until pass two has
-come back, and reading it then would cost exactly the round trip decision 4 exists
-to avoid.
-
-This is a real limitation rather than an oversight, and the spec does not cover
-it. The cheap fix, when something needs it, is a second forms read in pass three
-beside the nested story lookup — that pass already exists, already costs a round
-trip when it runs at all, and is skipped in the ordinary case. Whoever builds
-phase 8's demo should know a footer form will not work until then.
+`resolve()` used to collect form ids from the rendered document only, so a `form`
+field inside a *global* (a footer newsletter sign-up) or inside a `reference`d
+document resolved to `null`. It now reads those too: after pass two returns, the
+form ids of every pulled-in document that the first read did not already cover are
+fetched in one further `formsByIds` call, on the same session and chain. The call is
+issued only when such ids exist, so a render with no nested form costs what it did
+before, and a render with one pays one extra round trip.
 
 ### Also missing, and not this phase's to add
 
