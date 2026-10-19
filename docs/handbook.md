@@ -1617,15 +1617,23 @@ goes read-only, and Publish is disabled. The banner reports how the version
 differs from the current draft. Restore is only reachable from that banner, so a
 version is always seen before it is applied.
 
-**Restore does not overwrite the document.** It diffs the live document against
-the version and applies the result as one ordinary transaction:
+**Restore does not overwrite the document.** The admin asks the server, which diffs
+the draft against the version (migrated on read) and commits the result through the
+mutation log as one ordinary transaction:
 
 ```
-diff(live, target) -> Mutation[]  -> store.tx(mutations)
+POST {base}/api/story/:id/restore { versionId } -> diff(draft, target) -> commit
 ```
 
-So a restore reaches other editors, lands in the activity trail, and Cmd+Z undoes
-it. Reverting a title change plus one added block produces exactly two mutations.
+It is the same implementation (`restoreVersion`, `server/write.ts`) as
+`POST /api/v1/documents/:id/restore`; the admin calls the unversioned twin so it
+does not depend on the public contract. A restore reaches other editors through the
+socket and lands in the activity trail, but because the server commits it, it is
+not in the restorer's own undo stack: Cmd+Z does not undo it. Instead, before
+applying, it saves the current draft as a `checkpoint` labelled "before restore"
+(skipped when the draft already equals the newest version), so restoring that row
+is the undo. Reverting a title change plus one added block
+produces exactly two mutations.
 
 ## Draft mode
 

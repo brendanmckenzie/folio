@@ -85,8 +85,8 @@ import {
   StoryPatchBody,
   storyPathParam,
 } from "../../validate";
-import { getVersion, listVersions } from "../../versions";
-import { commitAll, writeDocument, type WriteActor } from "../../write";
+import { listVersions } from "../../versions";
+import { commitAll, restoreVersion, writeDocument, type WriteActor } from "../../write";
 import { queryFromParams } from "../content";
 import { brandOf, draftOf } from "../stories";
 import { servedSite } from "./served";
@@ -803,19 +803,23 @@ export function documentRoutes<Env>(rt: FolioRuntime): Hono<FolioEnv<Env>> {
     const story = await load(c, id, "write");
 
     const brand = brandOf(c);
-    const found = await getVersion(bindings.db, body.versionId, {
-      migrations: brand.migrations,
-      schema: brand.schema,
-      typeOf: brand.typeOf,
-    });
-    if (!found) throw new FolioError("not_found", "Unknown version");
-    if (found.meta.storyId !== id) {
-      throw new FolioError("bad_request", "That version belongs to a different document");
-    }
 
     try {
       return c.json(
-        await writeDocument(deps(c, bindings, story), () => found.doc, writeActor(c), key),
+        await restoreVersion(
+          deps(c, bindings, story),
+          bindings.db,
+          id,
+          body.versionId,
+          { migrations: brand.migrations, schema: brand.schema, typeOf: brand.typeOf },
+          writeActor(c),
+          () =>
+            checkpoint(brandOf(c).publishDeps(bindings, hookCtx(c)), story, {
+              label: "before restore",
+              actor: actorString(c.var.actor),
+            }),
+          key,
+        ),
       );
     } catch (e) {
       rethrow(e);

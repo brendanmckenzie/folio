@@ -785,6 +785,7 @@ describe("every id loader is a fence", () => {
     ["POST", "/api/story/:id/publish", "write", "story"],
     ["POST", "/api/story/:id/unpublish", "write", "story"],
     ["POST", "/api/story/:id/versions", "write", "story"],
+    ["POST", "/api/story/:id/restore", "write", "story"],
     ["POST", "/api/story/:id/schedule", "write", "story"],
     ["DELETE", "/api/story/:id/schedule?action=publish", "write", "story"],
     ["POST", "/api/story/:id/share", "write", "story"],
@@ -833,6 +834,7 @@ describe("every id loader is a fence", () => {
   const BODIES: Record<string, unknown> = {
     "/api/v1/documents/:id/content": { content: {} },
     "/api/v1/documents/:id/restore": { versionId: "ver_nothing" },
+    "/api/story/:id/restore": { versionId: "ver_nothing" },
     "/api/story/:id/schedule": { action: "publish", at: Date.now() + 3_600_000 },
     "/api/forms/:id": { label: "Changed" },
     "/api/forms/:id/responses/delete": { ids: [RESPONSES.bravo] },

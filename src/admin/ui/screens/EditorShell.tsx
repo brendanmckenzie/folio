@@ -802,7 +802,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                 size="sm"
                 disabled={editor.versions.busy || editor.versions.delta?.total === 0}
                 reason="This version is identical to the draft"
-                onClick={() => void editor.versions.restore(viewing.version, viewing.doc)}
+                onClick={() => void editor.versions.restore(viewing.version)}
               >
                 Restore this version
               </Button>
@@ -966,9 +966,7 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
                 disabled={editor.versions.busy}
                 reason="Discarding…"
                 onClick={() => {
-                  void editor.versions
-                    .restore(viewing.version, viewing.doc)
-                    .then(() => setConfirm(null));
+                  void editor.versions.restore(viewing.version).then(() => setConfirm(null));
                 }}
               >
                 Discard
@@ -976,10 +974,10 @@ function EditorBody({ story, ...props }: Props & { story: StoryMeta }) {
             </>
           }
         >
-          {/* Not destructive in the sense a delete is, and saying so is the
-              honest reassurance: a restore is a transaction like any other. */}
+          {/* The server commits it, so it is not in this editor's undo stack. */}
           <p className={css.note}>
-            This lands as one edit, so <kbd>⌘Z</kbd> undoes it.
+            This lands as one edit for everyone in the document. <kbd>⌘Z</kbd> does not undo it, but
+            the previous draft is saved to history.
           </p>
         </Dialog>
       ) : null}

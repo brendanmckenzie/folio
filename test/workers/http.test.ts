@@ -8,7 +8,6 @@ import {
 } from "cloudflare:test";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { defineBlock, text } from "../../src/core";
-import { diff } from "../../src/core/diff";
 import type { Doc } from "../../src/core/doc";
 import type { Mutation } from "../../src/core/mutations";
 import {
@@ -655,7 +654,7 @@ describe("versions and restore", () => {
     conn.close();
   });
 
-  it("restoring an old version replays it as mutations, and the activity trail reflects it", async () => {
+  it("restoring an old version is committed by the server, and the open editor receives it", async () => {
     const story = await createStory("Restorable Story");
     const conn = await connect(story.id);
     const doc = await conn.hello("alice");
@@ -669,18 +668,17 @@ describe("versions and restore", () => {
 
     await conn.tx("r2", [{ t: "set", uid: root, field: "title", value: "Second" }]);
 
-    const { doc: target } = await getJson<{ doc: Doc }>(`/folio/api/versions/${checkpoint.id}`);
-    const probe = await connect(story.id);
-    const current = await probe.hello("bob");
-    probe.close();
-
-    // Restoring is diffed against the live draft rather than overwriting it,
-    // so a restore is itself an ordinary, undoable transaction — the same
-    // thing admin/store.ts does when a user clicks "restore".
-    const mutations = diff(current, target);
-    expect(mutations).toEqual([{ t: "set", uid: root, field: "title", value: "First" }]);
-
-    await conn.tx("r3", mutations);
+    // The admin's route: the server diffs the draft against the version, so the
+    // browser sends nothing but the version id.
+    const restore = (storyId: string, versionId: string) =>
+      SELF.fetch(`http://example.com/folio/api/story/${storyId}/restore`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ versionId }),
+      });
+    const res = await restore(story.id, checkpoint.id);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ changed: 1, transactions: 1 });
 
     const after = await connect(story.id);
     const restored = await after.hello("probe");
@@ -690,13 +688,63 @@ describe("versions and restore", () => {
     const { rows: activity } = await getJson<Page<ActivityEntry>>(
       `/folio/api/story/${story.id}/activity`,
     );
-    expect(activity[0]!.syncId).toBeGreaterThan(activity.at(-1)!.syncId);
     expect(
-      activity.some((e) =>
-        e.mutations.some((m) => m.t === "set" && m.field === "title" && m.value === "First"),
+      activity[0]!.mutations.some(
+        (m) => m.t === "set" && m.field === "title" && m.value === "First",
       ),
     ).toBe(true);
 
+    // The draft it replaced ("Second") was saved first, so the restore is recoverable.
+    const saved = await getJson<Page<VersionMeta>>(`/folio/api/story/${story.id}/versions`);
+    const snapshots = saved.rows.filter((v) => v.label === "before restore");
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]!.kind).toBe("checkpoint");
+    const { doc: replaced } = await getJson<{ doc: Doc }>(
+      `/folio/api/versions/${snapshots[0]!.id}`,
+    );
+    expect(replaced.bloks[root]?.data.title).toBe("Second");
+
+    // Restoring what the draft already is writes nothing, and saves nothing.
+    const again = await restore(story.id, checkpoint.id);
+    expect(await again.json()).toMatchObject({ changed: 0 });
+    const afterAgain = await getJson<Page<VersionMeta>>(`/folio/api/story/${story.id}/versions`);
+    expect(afterAgain.rows).toHaveLength(saved.rows.length);
+
+    // Another story's version is the caller's mistake, an unknown one is missing.
+    const other = await createStory("Restore stranger");
+    const theirs = await postJson<VersionMeta>(`/folio/api/story/${other.id}/versions`, {});
+    expect((await restore(story.id, theirs.id)).status).toBe(400);
+    expect((await restore(story.id, "ver_nope")).status).toBe(404);
+
+    conn.close();
+  });
+});
+
+describe("restore saves the draft only when it is not already a version", () => {
+  it("writes no 'before restore' checkpoint when the draft equals the newest version", async () => {
+    const story = await createStory("Already saved");
+    const conn = await connect(story.id);
+    const doc = await conn.hello("alice");
+    const root = doc.root;
+
+    await conn.tx("s1", [{ t: "set", uid: root, field: "title", value: "First" }]);
+    const first = await postJson<VersionMeta>(`/folio/api/story/${story.id}/versions`, {});
+    await wait(5);
+    await conn.tx("s2", [{ t: "set", uid: root, field: "title", value: "Second" }]);
+    // The newest version is exactly the draft now.
+    await postJson<VersionMeta>(`/folio/api/story/${story.id}/versions`, {});
+    const before = await getJson<Page<VersionMeta>>(`/folio/api/story/${story.id}/versions`);
+
+    const res = await SELF.fetch(`http://example.com/folio/api/story/${story.id}/restore`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ versionId: first.id }),
+    });
+    expect(await res.json()).toMatchObject({ changed: 1 });
+
+    const after = await getJson<Page<VersionMeta>>(`/folio/api/story/${story.id}/versions`);
+    expect(after.rows).toHaveLength(before.rows.length);
+    expect(after.rows.some((v) => v.label === "before restore")).toBe(false);
     conn.close();
   });
 });
